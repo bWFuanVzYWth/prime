@@ -37,26 +37,42 @@ final class TwoSidedQuadReducer {
 
     static List<ResolvedQuad> resolve(
             List<CapturedSectionGeometry.Quad> quads) {
+        ClusterTranslationWork work = new ClusterTranslationWork(
+                ClusterTranslationControl.UNINTERRUPTIBLE);
         java.util.IdentityHashMap<CapturedSectionGeometry.Quad, TransmissiveTopology> topology =
                 new java.util.IdentityHashMap<>();
         for (CapturedSectionGeometry.Quad quad : quads) {
+            work.step();
             topology.put(
                     quad,
                     ClusterSceneTranslator.isTransmissive(quad.surface())
                             ? TransmissiveTopology.SOLID
                             : TransmissiveTopology.NONE);
         }
-        return resolve(quads, topology);
+        return resolve(quads, topology, work);
     }
 
     static List<ResolvedQuad> resolve(
             List<CapturedSectionGeometry.Quad> quads,
             java.util.IdentityHashMap<CapturedSectionGeometry.Quad, TransmissiveTopology> topology) {
+        return resolve(
+                quads,
+                topology,
+                new ClusterTranslationWork(ClusterTranslationControl.UNINTERRUPTIBLE));
+    }
+
+    static List<ResolvedQuad> resolve(
+            List<CapturedSectionGeometry.Quad> quads,
+            java.util.IdentityHashMap<CapturedSectionGeometry.Quad, TransmissiveTopology> topology,
+            ClusterTranslationWork work) {
         Objects.requireNonNull(quads, "quads");
         Objects.requireNonNull(topology, "topology");
+        Objects.requireNonNull(work, "work");
+        work.checkpoint();
         boolean[] removed = new boolean[quads.size()];
         Map<PositionSet, ArrayList<Integer>> pending = new HashMap<>();
         for (int index = 0; index < quads.size(); index++) {
+            work.step();
             CapturedSectionGeometry.Quad quad =
                     Objects.requireNonNull(quads.get(index), "quad");
             if (topology.get(quad) == null) {
@@ -72,6 +88,7 @@ final class TwoSidedQuadReducer {
             for (int candidate = candidates.size() - 1;
                     candidate >= 0;
                     candidate--) {
+                work.step();
                 if (formsRasterPair(quads.get(candidates.get(candidate)), quad)) {
                     match = candidate;
                     break;
@@ -90,6 +107,7 @@ final class TwoSidedQuadReducer {
         Arrays.fill(bilateralPeer, -1);
         pending.clear();
         for (int index = 0; index < quads.size(); index++) {
+            work.step();
             if (removed[index]) {
                 continue;
             }
@@ -107,6 +125,7 @@ final class TwoSidedQuadReducer {
             for (int candidate = candidates.size() - 1;
                     candidate >= 0;
                     candidate--) {
+                work.step();
                 if (formsDirectionalPair(
                         quads.get(candidates.get(candidate)), quad)) {
                     match = candidate;
@@ -127,6 +146,7 @@ final class TwoSidedQuadReducer {
         ArrayList<ResolvedQuad> result =
                 new ArrayList<>(quads.size());
         for (int index = 0; index < quads.size(); index++) {
+            work.step();
             if (!removed[index]) {
                 CapturedSectionGeometry.Quad quad = quads.get(index);
                 TransmissiveTopology primaryTopology = topology.get(quad);
@@ -147,6 +167,7 @@ final class TwoSidedQuadReducer {
                 result.add(new ResolvedQuad(quad, definition));
             }
         }
+        work.checkpoint();
         return List.copyOf(result);
     }
 

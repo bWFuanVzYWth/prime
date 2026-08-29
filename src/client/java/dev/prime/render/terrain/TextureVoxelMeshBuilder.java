@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -18,18 +19,30 @@ final class TextureVoxelMeshBuilder {
 
     private final boolean buildOpacityMicromap;
     private final float maximumHeight;
+    private final ClusterTranslationWork work;
     private final Map<Key, Integer> meshIndices = new HashMap<>();
     private final Set<Key> rejected = new HashSet<>();
     private final ArrayList<CpuVoxelMesh> meshes = new ArrayList<>();
     private final CpuVoxelInstances.Builder instances = new CpuVoxelInstances.Builder();
 
     TextureVoxelMeshBuilder(boolean buildOpacityMicromap, float maximumHeight) {
+        this(
+                buildOpacityMicromap,
+                maximumHeight,
+                new ClusterTranslationWork(ClusterTranslationControl.UNINTERRUPTIBLE));
+    }
+
+    TextureVoxelMeshBuilder(
+            boolean buildOpacityMicromap,
+            float maximumHeight,
+            ClusterTranslationWork work) {
         if (!Float.isFinite(maximumHeight) || maximumHeight < 0.0F) {
             throw new IllegalArgumentException(
                     "Voxel-surface maximum height must be finite and nonnegative");
         }
         this.buildOpacityMicromap = buildOpacityMicromap;
         this.maximumHeight = maximumHeight;
+        this.work = Objects.requireNonNull(work, "work");
     }
 
     boolean add(MergeFace face) {
@@ -136,6 +149,7 @@ final class TextureVoxelMeshBuilder {
             LabPbrMaterialMap overlayMaterialMap,
             Key key,
             int packedTintFlags) {
+        this.work.step();
         if (this.rejected.contains(key)) {
             return false;
         }
@@ -147,7 +161,8 @@ final class TextureVoxelMeshBuilder {
                     materialMap,
                     overlayMaterialMap,
                     this.maximumHeight,
-                    this.buildOpacityMicromap);
+                    this.buildOpacityMicromap,
+                    this.work);
             if (mesh == null) {
                 this.rejected.add(key);
                 return false;
@@ -187,6 +202,7 @@ final class TextureVoxelMeshBuilder {
     }
 
     ListResult build() {
+        this.work.checkpoint();
         return new ListResult(List.copyOf(this.meshes), this.instances.build());
     }
 
@@ -208,7 +224,9 @@ final class TextureVoxelMeshBuilder {
             LabPbrMaterialMap labPbrMaterialMap,
             LabPbrMaterialMap overlayLabPbrMaterialMap,
             float maximumHeight,
-            boolean buildOpacityMicromap) {
+            boolean buildOpacityMicromap,
+            ClusterTranslationWork work) {
+        work.checkpoint();
         SpritePixels reliefPixels = SpritePixels.create(key.reliefSprite);
         if (reliefPixels == null) {
             return null;
@@ -259,6 +277,7 @@ final class TextureVoxelMeshBuilder {
                         overlay.uv2V);
         for (int y = 0; y < size; y++) {
             for (int x = 0; x < size; x++) {
+                work.step();
                 int index = x + y * size;
                 float u = (x + 0.5F) / size;
                 float v = (y + 0.5F) / size;
@@ -327,7 +346,8 @@ final class TextureVoxelMeshBuilder {
                 size,
                 heights,
                 materials,
-                buildOpacityMicromap);
+                buildOpacityMicromap,
+                work);
     }
 
     private static boolean canBakeMaterial(CapturedSprite sprite, int flags) {
@@ -461,7 +481,8 @@ final class TextureVoxelMeshBuilder {
                 size,
                 heights,
                 materials,
-                false);
+                false,
+                new ClusterTranslationWork(ClusterTranslationControl.UNINTERRUPTIBLE));
     }
 
     static float borderReferenceHeight(float[] heights, int size) {
@@ -500,10 +521,12 @@ final class TextureVoxelMeshBuilder {
             int size,
             float[] heights,
             MaterialSample[] materials,
-            boolean buildOpacityMicromap) {
+            boolean buildOpacityMicromap,
+            ClusterTranslationWork work) {
         Mesh mesh = new Mesh(key, buildOpacityMicromap);
         for (int y = 0; y < size; y++) {
             for (int x = 0; x < size; x++) {
+                work.step();
                 int index = x + y * size;
                 float minimumU = x / (float) size;
                 float maximumU = (x + 1) / (float) size;
@@ -563,6 +586,7 @@ final class TextureVoxelMeshBuilder {
                 }
             }
         }
+        work.checkpoint();
         return mesh.build();
     }
 

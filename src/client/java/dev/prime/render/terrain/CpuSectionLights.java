@@ -237,6 +237,15 @@ public final class CpuSectionLights {
         private final Emitters emitters = new Emitters(16);
         private final Map<EmissionDistribution.Key, Integer> distributionIndices = new HashMap<>();
         private final List<EmissionDistribution> distributions = new ArrayList<>();
+        private final Map<EmissionDistribution.Key, EmissionDistribution> buildCache;
+
+        Builder() {
+            this(new HashMap<>());
+        }
+
+        Builder(Map<EmissionDistribution.Key, EmissionDistribution> buildCache) {
+            this.buildCache = Objects.requireNonNull(buildCache, "buildCache");
+        }
 
         int addTriangle(
                 float cornerX,
@@ -357,7 +366,8 @@ public final class CpuSectionLights {
                 distributionIndex = cachedDistribution;
             } else {
                 distributionIndex = this.distributions.size();
-                this.distributions.add(EmissionDistribution.build(key));
+                this.distributions.add(this.buildCache.computeIfAbsent(
+                        key, EmissionDistribution::build));
                 this.distributionIndices.put(key, distributionIndex);
             }
             EmissionDistribution distribution = this.distributions.get(distributionIndex);

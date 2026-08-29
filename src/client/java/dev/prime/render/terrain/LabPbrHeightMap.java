@@ -70,6 +70,38 @@ public final class LabPbrHeightMap {
         return (encodedHeight - minimum) / 255.0F;
     }
 
+    byte[] replayEncoded() {
+        return Arrays.copyOf(this.encoded, this.encoded.length);
+    }
+
+    SpriteSheetLayout replayLayout() {
+        return this.layout;
+    }
+
+    static LabPbrHeightMap replay(byte[] encoded, SpriteSheetLayout layout) {
+        if (encoded.length != Math.multiplyExact(layout.imageWidth(), layout.imageHeight())) {
+            throw new IllegalArgumentException("Height replay pixels do not match their layout");
+        }
+        byte[] copy = Arrays.copyOf(encoded, encoded.length);
+        byte[] frameMinimum = new byte[layout.frameCount()];
+        Arrays.fill(frameMinimum, (byte) 0xff);
+        for (int frame = 0; frame < layout.frameCount(); frame++) {
+            int minimum = 255;
+            int frameX = layout.frameOriginX(frame);
+            int frameY = layout.frameOriginY(frame);
+            for (int y = 0; y < layout.frameHeight(); y++) {
+                for (int x = 0; x < layout.frameWidth(); x++) {
+                    minimum = Math.min(
+                            minimum,
+                            Byte.toUnsignedInt(copy[
+                                    (frameY + y) * layout.imageWidth() + frameX + x]));
+                }
+            }
+            frameMinimum[frame] = (byte) minimum;
+        }
+        return new LabPbrHeightMap(copy, layout, frameMinimum);
+    }
+
     @Override
     public boolean equals(Object other) {
         if (this == other) {

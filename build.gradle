@@ -49,6 +49,12 @@ loom {
 	}
 }
 
+// Loom stores the runClient JVM argument file under build/, which clean removes.
+// Reusing that launch configuration otherwise leaves Java pointing at a stale path.
+tasks.named('runClient') {
+	notCompatibleWithConfigurationCache('Fabric Loom launch argument files are cleanable outputs')
+}
+
 apply plugin: 'prime.shader-abi-conventions'
 apply plugin: 'prime.native-packaging-conventions'
 

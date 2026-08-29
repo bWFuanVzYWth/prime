@@ -3,6 +3,8 @@ package dev.prime.render.scene.vanilla;
 import dev.prime.render.scene.CapturedSectionGeometry;
 import dev.prime.render.terrain.CapturedCluster;
 import dev.prime.render.terrain.ClusterSceneTranslator;
+import dev.prime.render.terrain.ClusterTranslationInput;
+import dev.prime.render.terrain.ClusterTranslationReplay;
 import dev.prime.render.terrain.ClusterTranslationSettings;
 import dev.prime.render.terrain.CpuClusterMesh;
 import dev.prime.render.terrain.LabPbrMaterialSet;
@@ -28,6 +30,15 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
 /** Captures and compiles one terrain cluster without exposing Minecraft assets to runtime. */
 public final class VanillaClusterCompiler implements AutoCloseable {
     private final VanillaSceneInterpreter interpreter = new VanillaSceneInterpreter();
+    private final TranslationReplayRecorder replayRecorder;
+
+    public VanillaClusterCompiler() {
+        this(TranslationReplayRecorder.fromSystemProperties());
+    }
+
+    VanillaClusterCompiler(TranslationReplayRecorder replayRecorder) {
+        this.replayRecorder = Objects.requireNonNull(replayRecorder, "replayRecorder");
+    }
 
     public CaptureSession beginCapture(Minecraft minecraft, ClientLevel level) {
         BlockStateModelSet blockModels = minecraft.getModelManager().getBlockStateModelSet();
@@ -127,15 +138,49 @@ public final class VanillaClusterCompiler implements AutoCloseable {
                         spriteResolver);
                 captured.add(sectionX, sectionY, sectionZ, section);
             }
-            throwIfCancelled(cancelled);
             stage = Stage.CLUSTER_TRANSLATION;
-            return ClusterSceneTranslator.translate(captured.build(), materials, settings);
+            return this.translate(
+                    new ClusterTranslationInput(captured.build(), materials, settings),
+                    cancelled);
         } catch (CompilationCancelledException exception) {
             throw exception;
         } catch (Throwable throwable) {
             throw new CompilationException(
                     throwable, stage, sectionX, sectionY, sectionZ);
         }
+    }
+
+    private CpuClusterMesh translate(
+            ClusterTranslationInput input, BooleanSupplier cancelled) {
+        long started = System.nanoTime();
+        try {
+            CpuClusterMesh result = ClusterSceneTranslator.translate(
+                    input, () -> throwIfCancelled(cancelled));
+            this.replayRecorder.record(
+                    input,
+                    ClusterTranslationReplay.Metadata.success(elapsedNanos(started)));
+            return result;
+        } catch (CompilationCancelledException exception) {
+            this.replayRecorder.record(
+                    input,
+                    ClusterTranslationReplay.Metadata.failure(
+                            ClusterTranslationReplay.Outcome.CANCELLED,
+                            elapsedNanos(started),
+                            exception));
+            throw exception;
+        } catch (Throwable throwable) {
+            this.replayRecorder.record(
+                    input,
+                    ClusterTranslationReplay.Metadata.failure(
+                            ClusterTranslationReplay.Outcome.FAILED,
+                            elapsedNanos(started),
+                            throwable));
+            throw throwable;
+        }
+    }
+
+    private static long elapsedNanos(long started) {
+        return Math.max(System.nanoTime() - started, 0L);
     }
 
     private static void throwIfCancelled(BooleanSupplier cancelled) {

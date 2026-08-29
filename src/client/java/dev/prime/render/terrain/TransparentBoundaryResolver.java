@@ -20,8 +20,21 @@ final class TransparentBoundaryResolver {
     static Result resolve(
             CapturedCluster cluster,
             boolean resolveStaticOverlays) {
+        return resolve(
+                cluster,
+                resolveStaticOverlays,
+                new ClusterTranslationWork(ClusterTranslationControl.UNINTERRUPTIBLE));
+    }
+
+    static Result resolve(
+            CapturedCluster cluster,
+            boolean resolveStaticOverlays,
+            ClusterTranslationWork work) {
+        Objects.requireNonNull(cluster, "cluster");
+        Objects.requireNonNull(work, "work");
+        work.checkpoint();
         TransmissiveTopologyResolver.Result topologies =
-                TransmissiveTopologyResolver.resolve(cluster);
+                TransmissiveTopologyResolver.resolve(cluster, work);
         @SuppressWarnings("unchecked")
         ArrayList<ResolvedQuad>[] sections =
                 (ArrayList<ResolvedQuad>[]) new ArrayList<?>[SectionCluster.SECTION_COUNT];
@@ -32,6 +45,7 @@ final class TransparentBoundaryResolver {
         for (int localIndex = 0;
                 localIndex < SectionCluster.SECTION_COUNT;
                 localIndex++) {
+            work.checkpoint();
             CapturedSectionGeometry section = cluster.section(localIndex);
             if (section == null) {
                 continue;
@@ -41,11 +55,13 @@ final class TransparentBoundaryResolver {
             int originY = CapturedCluster.sectionY(localIndex) * 16;
             int originZ = CapturedCluster.sectionZ(localIndex) * 16;
             List<TwoSidedQuadReducer.ResolvedQuad> reduced =
-                    TwoSidedQuadReducer.resolve(section.quads(), topologies.topology());
+                    TwoSidedQuadReducer.resolve(
+                            section.quads(), topologies.topology(), work);
             if (resolveStaticOverlays) {
-                reduced = resolveExactOverlays(reduced);
+                reduced = resolveExactOverlays(reduced, work);
             }
             for (TwoSidedQuadReducer.ResolvedQuad resolved : reduced) {
+                work.step();
                 Candidate candidate = Candidate.tryCreate(
                         localIndex,
                         originX,
@@ -68,7 +84,8 @@ final class TransparentBoundaryResolver {
             }
         }
         for (BoundaryGroup group : groups.values()) {
-            group.resolve(sections);
+            work.checkpoint();
+            group.resolve(sections, work);
         }
         @SuppressWarnings("unchecked")
         List<ResolvedQuad>[] immutable =
@@ -76,17 +93,21 @@ final class TransparentBoundaryResolver {
         for (int index = 0; index < sections.length; index++) {
             immutable[index] = sections[index] == null
                     ? List.of()
-                    : coalesce(sections[index]);
+                    : coalesce(sections[index], work);
         }
+        work.checkpoint();
         return new Result(immutable, topologies.issues());
     }
 
     private static List<TwoSidedQuadReducer.ResolvedQuad> resolveExactOverlays(
-            List<TwoSidedQuadReducer.ResolvedQuad> quads) {
+            List<TwoSidedQuadReducer.ResolvedQuad> quads,
+            ClusterTranslationWork work) {
         boolean[] removed = new boolean[quads.size()];
+        OverlaySpatialIndex index = new OverlaySpatialIndex(quads, work);
         ArrayList<TwoSidedQuadReducer.ResolvedQuad> result =
                 new ArrayList<>(quads.size());
         for (int first = 0; first < quads.size(); first++) {
+            work.step();
             if (removed[first]) {
                 continue;
             }
@@ -96,37 +117,138 @@ final class TransparentBoundaryResolver {
                 result.add(a);
                 continue;
             }
-            int match = -1;
-            SurfaceDefinition.MaterialBinding overlay = null;
-            SurfaceDefinition.MaterialBinding substrate = null;
-            CapturedSectionGeometry.Quad geometry = null;
-            for (int second = first + 1; second < quads.size(); second++) {
-                if (removed[second]) {
-                    continue;
-                }
-                TwoSidedQuadReducer.ResolvedQuad b = quads.get(second);
-                SurfaceDefinition.MaterialBinding[] pair = exactOverlayPair(a, b);
-                if (pair != null) {
-                    match = second;
-                    overlay = pair[0];
-                    substrate = pair[1];
-                    geometry = a.quad().surface().rasterOverlay()
-                            ? b.quad()
-                            : a.quad();
-                    break;
-                }
-            }
-            if (match < 0) {
+            OverlayMatch match = index.firstMatch(first, a, removed, work);
+            if (match == null) {
                 result.add(a);
                 continue;
             }
-            removed[match] = true;
+            removed[match.index] = true;
             result.add(new TwoSidedQuadReducer.ResolvedQuad(
-                    geometry,
+                    match.geometry,
                     SurfaceDefinition.overlay(
-                            overlay, substrate, false)));
+                            match.overlay, match.substrate, false)));
         }
         return List.copyOf(result);
+    }
+
+    /**
+     * Coarse three-dimensional bins are only a rejection index; exact epsilon and material
+     * predicates remain authoritative. Corresponding quad bounds differ by at most the position
+     * epsilon, so a two-epsilon cell and its 26 neighbors contain every legal match.
+     */
+    private static final class OverlaySpatialIndex {
+        private static final double CELL_SIZE = 2.0 * POSITION_EPSILON;
+
+        private final List<TwoSidedQuadReducer.ResolvedQuad> quads;
+        private final Map<OverlayBin, ArrayList<Integer>> bins = new HashMap<>();
+
+        OverlaySpatialIndex(
+                List<TwoSidedQuadReducer.ResolvedQuad> quads,
+                ClusterTranslationWork work) {
+            this.quads = quads;
+            for (int index = 0; index < quads.size(); index++) {
+                work.step();
+                this.bins.computeIfAbsent(
+                                OverlayBin.of(quads.get(index).quad()),
+                                ignored -> new ArrayList<>())
+                        .add(index);
+            }
+        }
+
+        OverlayMatch firstMatch(
+                int first,
+                TwoSidedQuadReducer.ResolvedQuad source,
+                boolean[] removed,
+                ClusterTranslationWork work) {
+            OverlayBin center = OverlayBin.of(source.quad());
+            OverlayMatch best = null;
+            for (int deltaX = -1; deltaX <= 1; deltaX++) {
+                for (int deltaY = -1; deltaY <= 1; deltaY++) {
+                    for (int deltaZ = -1; deltaZ <= 1; deltaZ++) {
+                        ArrayList<Integer> candidates = this.bins.get(center.offset(
+                                deltaX, deltaY, deltaZ));
+                        if (candidates == null) {
+                            continue;
+                        }
+                        for (int second : candidates) {
+                            if (second <= first) {
+                                continue;
+                            }
+                            if (best != null && second >= best.index) {
+                                break;
+                            }
+                            work.step();
+                            if (removed[second]) {
+                                continue;
+                            }
+                            TwoSidedQuadReducer.ResolvedQuad target = this.quads.get(second);
+                            SurfaceDefinition.MaterialBinding[] pair =
+                                    exactOverlayPair(source, target);
+                            if (pair != null) {
+                                best = new OverlayMatch(
+                                        second,
+                                        pair[0],
+                                        pair[1],
+                                        source.quad().surface().rasterOverlay()
+                                                ? target.quad()
+                                                : source.quad());
+                            }
+                        }
+                    }
+                }
+            }
+            return best;
+        }
+
+        private static long bin(float value) {
+            double coordinate = Math.floor(value / CELL_SIZE);
+            if (coordinate <= Long.MIN_VALUE) {
+                return Long.MIN_VALUE;
+            }
+            if (coordinate >= Long.MAX_VALUE) {
+                return Long.MAX_VALUE;
+            }
+            return (long) coordinate;
+        }
+    }
+
+    private record OverlayBin(long x, long y, long z) {
+        static OverlayBin of(CapturedSectionGeometry.Quad quad) {
+            float minimumX = Float.POSITIVE_INFINITY;
+            float minimumY = Float.POSITIVE_INFINITY;
+            float minimumZ = Float.POSITIVE_INFINITY;
+            for (int vertex = 0; vertex < 4; vertex++) {
+                minimumX = Math.min(minimumX, quad.x(vertex));
+                minimumY = Math.min(minimumY, quad.y(vertex));
+                minimumZ = Math.min(minimumZ, quad.z(vertex));
+            }
+            return new OverlayBin(
+                    OverlaySpatialIndex.bin(minimumX),
+                    OverlaySpatialIndex.bin(minimumY),
+                    OverlaySpatialIndex.bin(minimumZ));
+        }
+
+        OverlayBin offset(int deltaX, int deltaY, int deltaZ) {
+            return new OverlayBin(
+                    offset(this.x, deltaX),
+                    offset(this.y, deltaY),
+                    offset(this.z, deltaZ));
+        }
+
+        private static long offset(long value, int delta) {
+            if (delta < 0 && value == Long.MIN_VALUE
+                    || delta > 0 && value == Long.MAX_VALUE) {
+                return value;
+            }
+            return value + delta;
+        }
+    }
+
+    private record OverlayMatch(
+            int index,
+            SurfaceDefinition.MaterialBinding overlay,
+            SurfaceDefinition.MaterialBinding substrate,
+            CapturedSectionGeometry.Quad geometry) {
     }
 
     private static SurfaceDefinition.MaterialBinding[] exactOverlayPair(
@@ -198,22 +320,62 @@ final class TransparentBoundaryResolver {
         return null;
     }
 
-    private static List<ResolvedQuad> coalesce(List<ResolvedQuad> source) {
-        ArrayList<ResolvedQuad> result = new ArrayList<>(source);
+    private static List<ResolvedQuad> coalesce(
+            List<ResolvedQuad> source, ClusterTranslationWork work) {
+        ResolvedQuad[] output = new ResolvedQuad[source.size()];
+        // merge() requires both identities to match. Those groups are independent, and retaining
+        // each survivor's first source index preserves the original greedy result and output order.
+        java.util.IdentityHashMap<
+                        Candidate,
+                        java.util.IdentityHashMap<
+                                SurfaceDefinition, ArrayList<IndexedResolvedQuad>>>
+                groups = new java.util.IdentityHashMap<>();
+        for (int index = 0; index < source.size(); index++) {
+            work.step();
+            ResolvedQuad quad = source.get(index);
+            if (quad.candidate == null) {
+                output[index] = quad;
+                continue;
+            }
+            groups.computeIfAbsent(
+                            quad.candidate, ignored -> new java.util.IdentityHashMap<>())
+                    .computeIfAbsent(quad.definition, ignored -> new ArrayList<>())
+                    .add(new IndexedResolvedQuad(index, quad));
+        }
+        for (java.util.IdentityHashMap<SurfaceDefinition, ArrayList<IndexedResolvedQuad>>
+                definitions : groups.values()) {
+            for (ArrayList<IndexedResolvedQuad> group : definitions.values()) {
+                coalesceGroup(group, work);
+                for (IndexedResolvedQuad quad : group) {
+                    output[quad.index] = quad.quad;
+                }
+            }
+        }
+        ArrayList<ResolvedQuad> result = new ArrayList<>(source.size());
+        for (ResolvedQuad quad : output) {
+            if (quad != null) {
+                result.add(quad);
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static void coalesceGroup(
+            ArrayList<IndexedResolvedQuad> result,
+            ClusterTranslationWork work) {
         boolean changed;
         do {
             changed = false;
             outer:
             for (int first = 0; first < result.size(); first++) {
-                ResolvedQuad a = result.get(first);
-                if (a.candidate == null) {
-                    continue;
-                }
+                work.step();
+                IndexedResolvedQuad a = result.get(first);
                 for (int second = first + 1; second < result.size(); second++) {
-                    ResolvedQuad b = result.get(second);
-                    ResolvedQuad merged = a.merge(b);
+                    work.step();
+                    IndexedResolvedQuad b = result.get(second);
+                    ResolvedQuad merged = a.quad.merge(b.quad);
                     if (merged != null) {
-                        result.set(first, merged);
+                        result.set(first, new IndexedResolvedQuad(a.index, merged));
                         result.remove(second);
                         changed = true;
                         break outer;
@@ -221,7 +383,9 @@ final class TransparentBoundaryResolver {
                 }
             }
         } while (changed);
-        return List.copyOf(result);
+    }
+
+    private record IndexedResolvedQuad(int index, ResolvedQuad quad) {
     }
 
     record Result(
@@ -349,7 +513,9 @@ final class TransparentBoundaryResolver {
             (candidate.normalSign > 0 ? this.negative : this.positive).add(candidate);
         }
 
-        void resolve(ArrayList<ResolvedQuad>[] output) {
+        void resolve(
+                ArrayList<ResolvedQuad>[] output,
+                ClusterTranslationWork work) {
             if (this.negative.isEmpty() || this.positive.isEmpty()) {
                 this.emitWholeActual(this.negative, output);
                 this.emitWholeActual(this.positive, output);
@@ -360,6 +526,7 @@ final class TransparentBoundaryResolver {
             ArrayList<Candidate> negativeCover = new ArrayList<>();
             ArrayList<Candidate> positiveCover = new ArrayList<>();
             for (int v = 0; v + 1 < vEdges.length; v++) {
+                work.step();
                 float minimumV = vEdges[v];
                 float maximumV = vEdges[v + 1];
                 if (!(maximumV - minimumV > POSITION_EPSILON)) {
@@ -367,14 +534,15 @@ final class TransparentBoundaryResolver {
                 }
                 float centerV = 0.5F * (minimumV + maximumV);
                 for (int u = 0; u + 1 < uEdges.length; u++) {
+                    work.step();
                     float minimumU = uEdges[u];
                     float maximumU = uEdges[u + 1];
                     if (!(maximumU - minimumU > POSITION_EPSILON)) {
                         continue;
                     }
                     float centerU = 0.5F * (minimumU + maximumU);
-                    covering(this.negative, centerU, centerV, negativeCover);
-                    covering(this.positive, centerU, centerV, positiveCover);
+                    covering(this.negative, centerU, centerV, negativeCover, work);
+                    covering(this.positive, centerU, centerV, positiveCover, work);
                     this.emitCell(
                             negativeCover,
                             positiveCover,
@@ -717,9 +885,11 @@ final class TransparentBoundaryResolver {
                 List<Candidate> candidates,
                 float u,
                 float v,
-                ArrayList<Candidate> result) {
+                ArrayList<Candidate> result,
+                ClusterTranslationWork work) {
             result.clear();
             for (Candidate candidate : candidates) {
+                work.step();
                 if (u > candidate.minimumU - POSITION_EPSILON
                         && u < candidate.maximumU + POSITION_EPSILON
                         && v > candidate.minimumV - POSITION_EPSILON

@@ -18,9 +18,24 @@ public final class ClusterSceneTranslator {
             CapturedCluster captured,
             LabPbrMaterialSet materials,
             ClusterTranslationSettings settings) {
-        Objects.requireNonNull(captured, "captured");
-        Objects.requireNonNull(materials, "materials");
-        Objects.requireNonNull(settings, "settings");
+        return translate(
+                new ClusterTranslationInput(captured, materials, settings),
+                ClusterTranslationControl.UNINTERRUPTIBLE);
+    }
+
+    public static CpuClusterMesh translate(ClusterTranslationInput input) {
+        return translate(input, ClusterTranslationControl.UNINTERRUPTIBLE);
+    }
+
+    public static CpuClusterMesh translate(
+            ClusterTranslationInput input,
+            ClusterTranslationControl control) {
+        Objects.requireNonNull(input, "input");
+        ClusterTranslationWork work = new ClusterTranslationWork(control);
+        work.checkpoint();
+        CapturedCluster captured = input.captured();
+        LabPbrMaterialSet materials = input.materials();
+        ClusterTranslationSettings settings = input.settings();
 
         SectionClusterMeshBuilder cluster = new SectionClusterMeshBuilder(
                 captured.clusterX(),
@@ -30,13 +45,19 @@ public final class ClusterSceneTranslator {
                 settings.maxOpacity2StateSubdivisionLevel(),
                 settings.maxOpacity4StateSubdivisionLevel(),
                 settings.voxelSurfacesEnabled(),
-                settings.voxelSurfaceMaximumHeight());
+                settings.voxelSurfaceMaximumHeight(),
+                work);
         TransparentBoundaryResolver.Result boundaries =
                 TransparentBoundaryResolver.resolve(
-                        captured, !settings.voxelSurfacesEnabled());
+                        captured, !settings.voxelSurfacesEnabled(), work);
+        // One translation owns this cache. Section-local light tables retain their original index
+        // order while identical source distributions avoid repeating texture sampling work.
+        java.util.Map<EmissionDistribution.Key, EmissionDistribution> emissionBuildCache =
+                new java.util.HashMap<>();
         for (int localIndex = 0;
                 localIndex < SectionCluster.SECTION_COUNT;
                 localIndex++) {
+            work.checkpoint();
             CapturedSectionGeometry section = captured.section(localIndex);
             if (section == null) {
                 continue;
@@ -51,31 +72,40 @@ public final class ClusterSceneTranslator {
                     translateSection(
                             boundaries.section(localIndex),
                             materials,
-                            settings));
+                            settings,
+                            emissionBuildCache,
+                            work));
         }
+        work.checkpoint();
         return cluster.build().withCompatibilityIssues(boundaries.issues());
     }
 
     private static CpuSectionGeometry translateSection(
             java.util.List<TransparentBoundaryResolver.ResolvedQuad> resolvedQuads,
             LabPbrMaterialSet materials,
-            ClusterTranslationSettings settings) {
+            ClusterTranslationSettings settings,
+            java.util.Map<EmissionDistribution.Key, EmissionDistribution> emissionBuildCache,
+            ClusterTranslationWork work) {
         SectionMeshAccumulator accumulator = new SectionMeshAccumulator(
                 materials,
                 settings.buildOpacityMicromap(),
                 settings.segmentTriangleTarget(),
                 settings.maxOpacity2StateSubdivisionLevel(),
-                settings.maxOpacity4StateSubdivisionLevel());
+                settings.maxOpacity4StateSubdivisionLevel(),
+                emissionBuildCache);
         SectionMeshAccumulator.Quad quad = new SectionMeshAccumulator.Quad();
         SectionMeshAccumulator.Surface surface = new SectionMeshAccumulator.Surface();
         for (TransparentBoundaryResolver.ResolvedQuad resolved : resolvedQuads) {
+            work.step();
             resolved.write(quad);
             SurfaceDefinition definition = resolved.definition();
             CapturedSectionGeometry.Surface capturedSurface =
                     definition.primary().surface();
-            if (capturedSurface.fluid() != null
-                    && !translateFluidQuad(
-                            quad, capturedSurface.fluid(), settings)) {
+            if (capturedSurface.fluid() != null) {
+                if (!translateFluidQuad(quad, capturedSurface.fluid(), settings)) {
+                    continue;
+                }
+            } else if (!hasArea(quad)) {
                 continue;
             }
             boolean cutout = isCutout(capturedSurface);
@@ -100,6 +130,55 @@ public final class ClusterSceneTranslator {
             accumulator.addQuad(quad, surface);
         }
         return accumulator.build();
+    }
+
+    private static boolean hasArea(SectionMeshAccumulator.Quad quad) {
+        return triangleHasArea(quad, 0, 1, 2)
+                || triangleHasArea(quad, 0, 2, 3);
+    }
+
+    static void requireValidAttributes(CapturedSectionGeometry.Quad quad) {
+        boolean finite = Float.isFinite(quad.normalX())
+                && Float.isFinite(quad.normalY())
+                && Float.isFinite(quad.normalZ());
+        boolean normalizedUv = true;
+        for (int vertex = 0; vertex < 4; vertex++) {
+            finite &= Float.isFinite(quad.x(vertex))
+                    && Float.isFinite(quad.y(vertex))
+                    && Float.isFinite(quad.z(vertex))
+                    && Float.isFinite(quad.u(vertex))
+                    && Float.isFinite(quad.v(vertex));
+            normalizedUv &= quad.u(vertex) >= 0.0F
+                    && quad.u(vertex) <= 1.0F
+                    && quad.v(vertex) >= 0.0F
+                    && quad.v(vertex) <= 1.0F;
+        }
+        if (!finite) {
+            throw new IllegalArgumentException(
+                    "Captured Section quad contains a non-finite vertex attribute");
+        }
+        if (!normalizedUv) {
+            throw new IllegalArgumentException(
+                    "Captured Section quad contains a non-normalized local texture UV");
+        }
+    }
+
+    private static boolean triangleHasArea(
+            SectionMeshAccumulator.Quad quad,
+            int first,
+            int second,
+            int third) {
+        float abX = quad.x[second] - quad.x[first];
+        float abY = quad.y[second] - quad.y[first];
+        float abZ = quad.z[second] - quad.z[first];
+        float acX = quad.x[third] - quad.x[first];
+        float acY = quad.y[third] - quad.y[first];
+        float acZ = quad.z[third] - quad.z[first];
+        float crossX = abY * acZ - abZ * acY;
+        float crossY = abZ * acX - abX * acZ;
+        float crossZ = abX * acY - abY * acX;
+        // Exact zero is omitted only after the raw captured attributes have been validated.
+        return crossX != 0.0F || crossY != 0.0F || crossZ != 0.0F;
     }
 
     static boolean isCutout(CapturedSectionGeometry.Surface surface) {

@@ -55,6 +55,32 @@ public final class LabPbrEmissionMap {
                 this.layout.index(requestedFrame, localU, localV)]));
     }
 
+    byte[] replayEncoded() {
+        return Arrays.copyOf(this.encoded, this.encoded.length);
+    }
+
+    SpriteSheetLayout replayLayout() {
+        return this.layout;
+    }
+
+    static LabPbrEmissionMap replay(byte[] encoded, SpriteSheetLayout layout) {
+        if (encoded.length != Math.multiplyExact(layout.imageWidth(), layout.imageHeight())) {
+            throw new IllegalArgumentException("Emission replay pixels do not match their layout");
+        }
+        byte[] copy = Arrays.copyOf(encoded, encoded.length);
+        boolean authored = false;
+        boolean positive = false;
+        for (byte value : copy) {
+            int decoded = Byte.toUnsignedInt(value);
+            authored |= decoded < 255;
+            positive |= decoded > 0 && decoded < 255;
+        }
+        if (!authored) {
+            throw new IllegalArgumentException("Emission replay contains no authored texel");
+        }
+        return new LabPbrEmissionMap(copy, layout, positive);
+    }
+
     static float decode(int encoded) {
         if (encoded < 0 || encoded > 255) {
             throw new IllegalArgumentException("LabPBR emission must be an unsigned byte");

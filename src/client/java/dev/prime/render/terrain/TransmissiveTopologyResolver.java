@@ -17,11 +17,19 @@ final class TransmissiveTopologyResolver {
     }
 
     static Result resolve(CapturedCluster cluster) {
+        return resolve(
+                cluster,
+                new ClusterTranslationWork(ClusterTranslationControl.UNINTERRUPTIBLE));
+    }
+
+    static Result resolve(CapturedCluster cluster, ClusterTranslationWork work) {
+        work.checkpoint();
         IdentityHashMap<CapturedSectionGeometry.Quad, TransmissiveTopology> topology =
                 new IdentityHashMap<>();
         Map<CapturedSectionGeometry.BlockFacts, ArrayList<Face>> pending = new HashMap<>();
         Set<StaticCompatibilityIssue> issues = new HashSet<>();
         for (int localIndex = 0; localIndex < SectionCluster.SECTION_COUNT; localIndex++) {
+            work.checkpoint();
             CapturedSectionGeometry section = cluster.section(localIndex);
             if (section == null) {
                 continue;
@@ -30,6 +38,8 @@ final class TransmissiveTopologyResolver {
             int originY = CapturedCluster.sectionY(localIndex) * 16;
             int originZ = CapturedCluster.sectionZ(localIndex) * 16;
             for (CapturedSectionGeometry.Quad quad : section.quads()) {
+                work.step();
+                ClusterSceneTranslator.requireValidAttributes(quad);
                 CapturedSectionGeometry.Surface surface = quad.surface();
                 if (!ClusterSceneTranslator.isTransmissive(surface)) {
                     topology.put(quad, TransmissiveTopology.NONE);
@@ -49,18 +59,22 @@ final class TransmissiveTopologyResolver {
             }
         }
         for (List<Face> faces : pending.values()) {
-            classifyComponents(faces, topology, issues);
+            work.checkpoint();
+            classifyComponents(faces, topology, issues, work);
         }
+        work.checkpoint();
         return new Result(topology, Set.copyOf(issues));
     }
 
     private static void classifyComponents(
             List<Face> faces,
             IdentityHashMap<CapturedSectionGeometry.Quad, TransmissiveTopology> topology,
-            Set<StaticCompatibilityIssue> issues) {
+            Set<StaticCompatibilityIssue> issues,
+            ClusterTranslationWork work) {
         Map<Edge, ArrayList<Integer>> incidence = new HashMap<>();
         for (int face = 0; face < faces.size(); face++) {
             for (int edge = 0; edge < 4; edge++) {
+                work.step();
                 incidence.computeIfAbsent(
                                 Edge.of(
                                         faces.get(face).positions[edge],
@@ -71,6 +85,7 @@ final class TransmissiveTopologyResolver {
         }
         boolean[] visited = new boolean[faces.size()];
         for (int start = 0; start < faces.size(); start++) {
+            work.step();
             if (visited[start]) {
                 continue;
             }
@@ -79,12 +94,14 @@ final class TransmissiveTopologyResolver {
             visited[start] = true;
             queue.add(start);
             while (!queue.isEmpty()) {
+                work.step();
                 int faceIndex = queue.removeFirst();
                 Face face = faces.get(faceIndex);
                 component.add(face);
                 for (int edge = 0; edge < 4; edge++) {
                     for (int neighbor : incidence.get(Edge.of(
                             face.positions[edge], face.positions[(edge + 1) & 3]))) {
+                        work.step();
                         if (!visited[neighbor]) {
                             visited[neighbor] = true;
                             queue.addLast(neighbor);
@@ -92,13 +109,14 @@ final class TransmissiveTopologyResolver {
                     }
                 }
             }
-            TransmissiveTopology resolved = exactReverseSheet(component)
-                    && coplanar(component)
+            TransmissiveTopology resolved = exactReverseSheet(component, work)
+                    && coplanar(component, work)
                     ? TransmissiveTopology.THIN_SHEET
-                    : closedOrientedManifold(component) && !coplanar(component)
+                    : closedOrientedManifold(component, work) && !coplanar(component, work)
                             ? TransmissiveTopology.SOLID
                             : null;
             for (Face face : component) {
+                work.step();
                 if (resolved == null) {
                     reject(face.quad, issues);
                 } else {
@@ -108,17 +126,20 @@ final class TransmissiveTopologyResolver {
         }
     }
 
-    private static boolean exactReverseSheet(List<Face> faces) {
+    private static boolean exactReverseSheet(
+            List<Face> faces, ClusterTranslationWork work) {
         if (faces.isEmpty() || (faces.size() & 1) != 0) {
             return false;
         }
         boolean[] paired = new boolean[faces.size()];
         for (int first = 0; first < faces.size(); first++) {
+            work.step();
             if (paired[first]) {
                 continue;
             }
             int peer = -1;
             for (int second = first + 1; second < faces.size(); second++) {
+                work.step();
                 if (!paired[second]
                         && reverseOffset(faces.get(first), faces.get(second)) >= 0) {
                     peer = second;
@@ -151,10 +172,12 @@ final class TransmissiveTopologyResolver {
         return -1;
     }
 
-    private static boolean closedOrientedManifold(List<Face> faces) {
+    private static boolean closedOrientedManifold(
+            List<Face> faces, ClusterTranslationWork work) {
         Map<Edge, ArrayList<DirectedEdge>> edges = new HashMap<>();
         for (Face face : faces) {
             for (int index = 0; index < 4; index++) {
+                work.step();
                 Position from = face.positions[index];
                 Position to = face.positions[(index + 1) & 3];
                 if (from.equals(to)) {
@@ -165,6 +188,7 @@ final class TransmissiveTopologyResolver {
             }
         }
         for (List<DirectedEdge> pair : edges.values()) {
+            work.step();
             if (pair.size() != 2
                     || !pair.get(0).from.equals(pair.get(1).to)
                     || !pair.get(0).to.equals(pair.get(1).from)) {
@@ -174,10 +198,12 @@ final class TransmissiveTopologyResolver {
         return true;
     }
 
-    private static boolean coplanar(List<Face> faces) {
+    private static boolean coplanar(
+            List<Face> faces, ClusterTranslationWork work) {
         ArrayList<ExactPosition> points = new ArrayList<>(faces.size() * 4);
         for (Face face : faces) {
             for (Position position : face.positions) {
+                work.step();
                 points.add(ExactPosition.of(position));
             }
         }
@@ -188,8 +214,10 @@ final class TransmissiveTopologyResolver {
         ExactPosition normal = ExactPosition.ZERO;
         boolean foundPlane = false;
         for (int first = 1; first < points.size() && !foundPlane; first++) {
+            work.step();
             ExactPosition a = points.get(first).subtract(origin);
             for (int second = first + 1; second < points.size(); second++) {
+                work.step();
                 normal = a.cross(points.get(second).subtract(origin));
                 foundPlane = !normal.zero();
                 if (foundPlane) {
@@ -201,6 +229,7 @@ final class TransmissiveTopologyResolver {
             return true;
         }
         for (ExactPosition point : points) {
+            work.step();
             if (normal.dot(point.subtract(origin)).signum() != 0) {
                 return false;
             }

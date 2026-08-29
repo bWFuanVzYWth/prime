@@ -18,11 +18,11 @@ Prime 接下来会建立 Java 与 Vulkan benchmark，但 benchmark 只回答“�
 ## 清单与基线
 
 改造前基线为 147 个测试源文件、573 个 JUnit 测试：529 个 JVM 测试和 44 个 Vulkan Shader
-测试。当前仓库有 167 个测试/测试设施 Java 源文件和 597 个 JUnit 测试方法。除三个 JetCheck
+测试。当前仓库有 174 个测试/测试设施 Java 源文件和 622 个 JUnit 测试方法。除四个 JetCheck
 性质测试和翻译入口错误边界外，P0/P1 补强增加了真实 RT 生命周期、提交事务、纹理/terrain
 generation、Renderer 生命周期、动态捕获会话和确定性并发测试。原有行为断言全部保留，其中
 8 个不需要 GPU 的 ZSobol 映射/分层测试从 Shader 层移入 JVM 层。错误边界测试有三个参数化
-case，因此所有分层任务合计执行 599 个 invocation。
+case，因此所有分层任务合计执行 630 个 invocation。
 
 `src/test/slang/programs.json` 是测试 Shader 的权威清单：
 
@@ -40,7 +40,7 @@ case，因此所有分层任务合计执行 599 个 invocation。
 
 | 任务 | 观察对象 | 环境契约 | 是否属于默认门禁 |
 | --- | --- | --- | --- |
-| `test` | 548 个纯 Java 行为、数学性质和状态机测试 | 不编译 Shader、不加载原生库、不需要 Vulkan；排除 `artifact`、`native`、`gpu-shader`、`gpu-ray-tracing` 标签 | 是 |
+| `test` | 579 个纯 Java 行为、数学性质和状态机测试 | 不编译 Shader、不加载原生库、不需要 Vulkan；排除 `artifact`、`native`、`gpu-shader`、`gpu-ray-tracing` 标签 | 是 |
 | `artifactTest` | 11 个生产 SPIR-V、manifest、descriptor/payload ABI、资源和桥接 DLL 打包测试 | 允许编译生产 Shader；无运行环境跳过 | 是，由 `check` 调用 |
 | `nativeTest` | 3 个 NRD、FSR、DLSS Windows x64 原生桥执行测试 | 只支持 Windows x64；显式运行于其他平台会直接失败 | 否，由 Windows CI 显式调用 |
 | `shaderTest` | 36 个 Vulkan compute/Shader 行为、数学性质和资源生命周期测试 | 必须有 Vulkan 1.2 compute device 和 `VK_LAYER_KHRONOS_validation`；缺失时直接失败 | 否，由 Linux GPU/Lavapipe CI 显式调用 |
@@ -82,13 +82,15 @@ JUnit 负责发现测试、生命周期、标签、参数化测试、断言和 X
 - 失败信息包含重放参数，JetCheck 的缩减结果保留为 cause；
 - 确认的最小反例应固化为普通回归测试。
 
-当前试点只有三个高价值纯 Java 目标：
+当前试点只有四个高价值纯 Java 目标：
 
 - `RectangleDecomposition64`：合法 64×64 标签层的坐标合法、无重叠、无遗漏、标签保持和确定性；
 - `TexturePageLayout`：随机 sprite catalog 的排列无关性、mip 对齐、页内边界、无重叠、
   descriptor 页数上限和缺失通道；
 - `BoundedDirtyClusters`：add/range/invalidate/drain/clear 命令序列与简单参考状态机逐步一致，
   包含负坐标、容量溢出和 drain 后复用。
+- cluster translation cell semantics：每个 case 含 1–24 个边界矩形并执行四种排列；测试侧独立
+  原子 cell model 比较覆盖、owner、介质、关系、拓扑、纹理、颜色和裁剪后的四角 UV。
 
 不采用 jqwik。当前 jqwik 发布线与项目 JUnit Platform/代理工作流不匹配。若 JetCheck 试点造成
 不稳定或维护负担，回退到项目内确定性生成器，不改变四层任务边界。
@@ -165,6 +167,72 @@ terrain fixture 继续放在被测 package 内访问 package-private API。`Comp
 - `RendererLifecycle` 固定单次初始化、disabled/unavailable/failure/shutdown 边界；
 - `DynamicSceneCapture` 固定新帧丢弃未完成 session、element scope 顺序、错误嵌套、空帧 origin 和
   compatibility witness。
+
+### 翻译层 P0 回放与语义门禁
+
+`ClusterTranslationInput` 是一次翻译的不可变输入边界，统一携带 fixed-slot `CapturedCluster`、
+资源 epoch 内的 `LabPbrMaterialSet` 和全部 `ClusterTranslationSettings`。原有三参数入口保留；
+新入口接受 `ClusterTranslationControl`。取消检查位于阶段边界、每个 section/group 和 hot loop，
+连续处理不超过 1024 个 work item 就会再次检查。取消异常不包装、不返回部分 mesh，调用方可以
+立即用同一 input 重试；overlay pairing、boundary cell、coalesce 和 mesh build 分别有中止与
+重放测试。
+
+`ClusterTranslationReplay` v1 是诊断格式，不是长期生产序列化 API。它使用 GZIP 二进制，带固定
+magic、version 和 translation ABI ID，保存 64 个 section slot、quad/peer/surface/block/fluid
+facts、去重 sprite 与可用像素、实际引用的 LabPBR 子集以及所有 settings。解码后的数据硬限制为
+256 MiB；错误 magic、旧版本、截断、非法枚举、越界计数和尾随解码数据都会明确失败。仓库内的
+最小 v1 固定资源保证兼容读取，codec round-trip 还要求输入行为和重新编码一致。
+
+现场 recorder 默认完全关闭。只有 JVM 参数 `-Dprime.translation.replay=true` 才启用；关闭时不会
+查询 game directory，也不会访问文件系统。启用后的设置为：
+
+```powershell
+$env:JAVA_TOOL_OPTIONS = "-Dprime.translation.replay=true -Dprime.translation.replay.minMillis=250 -Dprime.translation.replay.maxFiles=32"
+.\gradlew.bat runClient
+```
+
+`minMillis` 只筛选成功翻译；失败和取消不受慢例阈值影响。`maxFiles` 每次 compiler 生命周期最多
+保留 8 个，允许调整但硬上限为 32。上面的现场采样命令显式使用 32；采样结束后可用
+`Remove-Item Env:JAVA_TOOL_OPTIONS` 清除当前 PowerShell 会话中的设置。文件写入
+`${gameDir}/prime-translation-replays/`，先完成临时 GZIP，再原子发布为
+`<outcome>-<sequence>-<sha256>.ptr.gz`；文件名不含 cluster 坐标。导出错误只警告一次，不改变
+渲染结果。
+
+名额不再由所有结果先到先得，而是按结果隔离并在各自范围内循环替换。`maxFiles=32` 时保留最近
+20 个慢成功、4 个取消和 8 个失败；普通慢例不会占用失败名额，后遇到的异常也不会因启动阶段
+已经写满而丢失。默认 `maxFiles=8` 时对应 5/1/2。很小的自定义上限优先保留失败：上限 1 只
+记录失败，上限 2 记录一个慢成功和一个失败。文件序号表示结果类别内的循环槽位，不表示全局
+发生顺序。
+
+自动 recorder 只能识别抛出的失败、取消和耗时异常，无法自行判断“画面看起来不对”。遇到视觉
+错误时，应尽量停在问题附近，将 `minMillis` 临时改为 `0` 后重新启动并短距离复现；看到问题后
+及时退出客户端并复制整个 replay 目录，避免继续跑图让同类别的新输入轮换掉现场。一般性能采样
+仍使用 250 ms，避免初始化附近的大量普通输入淹没有价值的样本。
+
+Replay 内容包含真实场景几何、block 坐标、sprite resource ID、纹理像素和使用到的材质通道，
+可能暴露服务器建筑、资源包或私有资源信息。提交 issue 或加入仓库前必须由用户检查、按需裁剪
+或取得分享授权；“文件名不含坐标”不等于内容匿名。
+
+导入经人工确认的用户 replay 时：
+
+1. 将原始 `.ptr.gz` 放入 `src/test/resources/replays/`，保留格式版本和来源说明，但不要把用户身份、
+   服务器地址或绝对路径写入文件名；
+2. 用 `ClusterTranslationReplay.read` 解码，先重现原失败，再为期望行为增加普通 JUnit 回归断言；
+3. 能由独立 cell oracle 表达的场景同时加入语义比较；最小化后的反例优先保留，原始大文件只在
+   它证明额外风险时保留；
+4. 验证同一 input 重复翻译字节一致，并运行完整 `test`。
+
+P0 本身未改变 `resolveExactOverlays`、boundary partition、`coalesce` 或 mesh builder 算法。完成上述
+门禁后，首轮 P1 使用一次性的 32 个默认世界 replay 定位并改造了常见 CPU 热点：overlay 先按
+边长为两倍 epsilon 的三轴空间格筛选、最终仍执行原精确谓词并保留最早输入匹配；`coalesce` 只比较
+candidate/definition 身份相同的独立组；64×64 merge grid 用行 bitset 跳过空 cell；发光纹理分布在
+单次 cluster 翻译内复用。所有状态仍为 invocation-local，primitive、surface relation、TextureId、
+payload 和 SPIR-V ABI 均未改变。
+
+同一 JVM 预热后的临时 corpus 测量中，32 个输入的累计翻译时间由约 4.88 s 降至 1.75 s，单输入
+中位数由 135 ms 降至 53 ms，p95 由 348 ms 降至 89 ms，最慢输入由 526 ms 降至 92 ms。该数据
+只证明本次优化方向，既不是 JMH 结果也不是回归阈值；现场 replay 不纳入仓库，可随时用新采样
+替换。保留优化仍以独立语义 canonicalizer、epsilon 边界、取消检查和完整 mesh 确定性为门禁。
 
 ## 测试编写与维护规则
 

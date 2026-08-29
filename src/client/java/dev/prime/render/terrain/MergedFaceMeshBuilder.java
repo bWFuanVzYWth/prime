@@ -28,6 +28,7 @@ final class MergedFaceMeshBuilder {
     private final int maxOpacity4StateSubdivisionLevel;
     private final boolean voxelSurfacesEnabled;
     private final float voxelSurfaceMaximumHeight;
+    private final ClusterTranslationWork work;
     private final ArrayList<CpuSectionMesh> segments = new ArrayList<>();
     private Segment segment;
     private OptimalCover optimalCover;
@@ -62,27 +63,47 @@ final class MergedFaceMeshBuilder {
             int maxOpacity4StateSubdivisionLevel,
             boolean voxelSurfacesEnabled,
             float voxelSurfaceMaximumHeight) {
+        this(
+                segmentTriangleTarget,
+                maxOpacity2StateSubdivisionLevel,
+                maxOpacity4StateSubdivisionLevel,
+                voxelSurfacesEnabled,
+                voxelSurfaceMaximumHeight,
+                new ClusterTranslationWork(ClusterTranslationControl.UNINTERRUPTIBLE));
+    }
+
+    MergedFaceMeshBuilder(
+            int segmentTriangleTarget,
+            int maxOpacity2StateSubdivisionLevel,
+            int maxOpacity4StateSubdivisionLevel,
+            boolean voxelSurfacesEnabled,
+            float voxelSurfaceMaximumHeight,
+            ClusterTranslationWork work) {
         this.segmentTriangleTarget = segmentTriangleTarget;
         this.maxOpacity2StateSubdivisionLevel = maxOpacity2StateSubdivisionLevel;
         this.maxOpacity4StateSubdivisionLevel = maxOpacity4StateSubdivisionLevel;
         this.voxelSurfacesEnabled = voxelSurfacesEnabled;
         this.voxelSurfaceMaximumHeight = voxelSurfaceMaximumHeight;
+        this.work = java.util.Objects.requireNonNull(work, "work");
         this.segment = new Segment(
                 maxOpacity2StateSubdivisionLevel,
                 maxOpacity4StateSubdivisionLevel);
     }
 
     List<CpuSectionMesh> build(List<MergeFace> faces) {
+        this.work.checkpoint();
         TextureVoxelMeshBuilder detailBuilder = this.voxelSurfacesEnabled
                 ? new TextureVoxelMeshBuilder(
                         faces.stream().anyMatch(MergeFace::buildOpacityMicromap),
-                        this.voxelSurfaceMaximumHeight)
+                        this.voxelSurfaceMaximumHeight,
+                        this.work)
                 : null;
         Set<MergeFace> composited = Collections.newSetFromMap(new IdentityHashMap<>());
         Map<FaceLocation, MergeFace> opaqueFaces = new HashMap<>();
         Map<FaceLocation, MergeFace> cutoutFaces = new HashMap<>();
         Set<FaceLocation> ambiguous = new HashSet<>();
         for (MergeFace face : faces) {
+            this.work.step();
             requireInGrid(face);
             if (usesVoxelSurface(face) && !face.cutout() && !face.transmissive()) {
                 putUnique(opaqueFaces, ambiguous, face);
@@ -94,6 +115,7 @@ final class MergedFaceMeshBuilder {
             }
         }
         for (Map.Entry<FaceLocation, MergeFace> entry : opaqueFaces.entrySet()) {
+            this.work.step();
             if (ambiguous.contains(entry.getKey())) {
                 continue;
             }
@@ -112,6 +134,7 @@ final class MergedFaceMeshBuilder {
         ArrayList<MergeFace> ordinaryFaces = new ArrayList<>(faces.size());
         ArrayList<MergeFace> unmergedFallbacks = new ArrayList<>();
         for (MergeFace face : faces) {
+            this.work.step();
             if (composited.contains(face)) {
                 continue;
             }
@@ -125,12 +148,15 @@ final class MergedFaceMeshBuilder {
         }
         Map<GroupKey, ArrayList<MergeFace>> groups = new LinkedHashMap<>();
         for (MergeFace face : ordinaryFaces) {
+            this.work.step();
             groups.computeIfAbsent(new GroupKey(face), ignored -> new ArrayList<>())
                     .add(face);
         }
         for (ArrayList<MergeFace> group : groups.values()) {
+            this.work.checkpoint();
             FaceGrid grid = new FaceGrid();
             for (MergeFace face : group) {
+                this.work.step();
                 grid.add(face);
             }
             MergeFace first = grid.first();
@@ -140,18 +166,22 @@ final class MergedFaceMeshBuilder {
                 this.coverOpaque(grid);
             }
             for (MergeFace duplicate : grid.duplicates) {
+                this.work.step();
                 this.emit(duplicate, duplicate.cellU(), duplicate.cellV(), 1, 1);
             }
         }
         for (MergeFace fallback : unmergedFallbacks) {
+            this.work.step();
             this.emit(fallback, fallback.cellU(), fallback.cellV(), 1, 1);
         }
         this.finishSegment();
         if (detailBuilder != null) {
+            this.work.checkpoint();
             TextureVoxelMeshBuilder.ListResult result = detailBuilder.build();
             this.voxelMeshes = result.meshes();
             this.voxelInstances = result.instances();
         }
+        this.work.checkpoint();
         return List.copyOf(this.segments);
     }
 
@@ -211,15 +241,18 @@ final class MergedFaceMeshBuilder {
         OptimalCover cover = this.optimalCover();
         cover.layer.clear();
         for (int v = 0; v < GRID_SIZE; v++) {
-            for (int u = 0; u < GRID_SIZE; u++) {
-                if (grid.get(u, v) != null) {
-                    cover.layer.pushSquare(u, v, 0, 1);
-                }
+            long occupied = grid.occupied(v);
+            while (occupied != 0L) {
+                int u = Long.numberOfTrailingZeros(occupied);
+                occupied &= occupied - 1L;
+                this.work.step();
+                cover.layer.pushSquare(u, v, 0, 1);
             }
         }
         RectangleDecomposition64.Result rectangles =
                 cover.layer.finish(cover.scratch);
         for (int index = 0; index < rectangles.size(); index++) {
+            this.work.step();
             if (rectangles.value(index) != 1) {
                 throw new IllegalStateException(
                         "Merged-face decomposition changed the occupancy label");
@@ -262,8 +295,13 @@ final class MergedFaceMeshBuilder {
             if (size > maximumSize) {
                 continue;
             }
+            long validStarts = lowBits(GRID_SIZE - size + 1);
             for (int v = 0; v <= GRID_SIZE - size; v++) {
-                for (int u = 0; u <= GRID_SIZE - size; u++) {
+                long candidates = grid.occupied(v) & validStarts;
+                while (candidates != 0L) {
+                    int u = Long.numberOfTrailingZeros(candidates);
+                    candidates &= candidates - 1L;
+                    this.work.step();
                     MergeFace face = grid.get(u, v);
                     if (face == null || !grid.full(u, v, size)) {
                         continue;
@@ -273,6 +311,10 @@ final class MergedFaceMeshBuilder {
                 }
             }
         }
+    }
+
+    private static long lowBits(int count) {
+        return count == Long.SIZE ? -1L : (1L << count) - 1L;
     }
 
     private void emit(MergeFace face, int u, int v, int width, int height) {
@@ -456,6 +498,7 @@ final class MergedFaceMeshBuilder {
 
     private static final class FaceGrid {
         private final MergeFace[] faces = new MergeFace[GRID_SIZE * GRID_SIZE];
+        private final long[] occupied = new long[GRID_SIZE];
         private final ArrayList<MergeFace> duplicates = new ArrayList<>();
         private MergeFace first;
 
@@ -466,6 +509,7 @@ final class MergedFaceMeshBuilder {
             int index = face.cellU() + face.cellV() * GRID_SIZE;
             if (this.faces[index] == null) {
                 this.faces[index] = face;
+                this.occupied[face.cellV()] |= 1L << face.cellU();
             } else {
                 this.duplicates.add(face);
             }
@@ -479,24 +523,29 @@ final class MergedFaceMeshBuilder {
             return this.faces[u + v * GRID_SIZE];
         }
 
+        long occupied(int v) {
+            return this.occupied[v];
+        }
+
         boolean full(int u, int v, int size) {
+            long mask = lowBits(size) << u;
             for (int y = 0; y < size; y++) {
-                for (int x = 0; x < size; x++) {
-                    if (this.get(u + x, v + y) == null) {
-                        return false;
-                    }
+                if ((this.occupied[v + y] & mask) != mask) {
+                    return false;
                 }
             }
             return true;
         }
 
         void clear(int u, int v, int width, int height) {
+            long mask = lowBits(width) << u;
             for (int y = 0; y < height; y++) {
                 Arrays.fill(
                         this.faces,
                         u + (v + y) * GRID_SIZE,
                         u + width + (v + y) * GRID_SIZE,
                         null);
+                this.occupied[v + y] &= ~mask;
             }
         }
     }

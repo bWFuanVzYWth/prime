@@ -51,6 +51,14 @@ public record LabPbrMaterialMap(Pixels normal, Pixels specular) {
             return this.argb[this.layout.index(requestedFrame, localU, localV)];
         }
 
+        int[] replayArgb() {
+            return Arrays.copyOf(this.argb, this.argb.length);
+        }
+
+        SpriteSheetLayout replayLayout() {
+            return this.layout;
+        }
+
         @Override
         public boolean equals(Object other) {
             return this == other

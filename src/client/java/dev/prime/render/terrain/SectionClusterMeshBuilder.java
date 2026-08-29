@@ -18,6 +18,7 @@ final class SectionClusterMeshBuilder {
     private final int maxOpacity4StateSubdivisionLevel;
     private final boolean voxelSurfacesEnabled;
     private final float voxelSurfaceMaximumHeight;
+    private final ClusterTranslationWork work;
     private final List<Entry> entries = new ArrayList<>(SectionCluster.SECTION_COUNT);
     private final ArrayList<MergeFace> mergeFaces = new ArrayList<>();
     private final ArrayList<CpuSectionMesh> segments = new ArrayList<>();
@@ -100,6 +101,28 @@ final class SectionClusterMeshBuilder {
             int maxOpacity4StateSubdivisionLevel,
             boolean voxelSurfacesEnabled,
             float voxelSurfaceMaximumHeight) {
+        this(
+                clusterX,
+                clusterY,
+                clusterZ,
+                segmentTriangleTarget,
+                maxOpacity2StateSubdivisionLevel,
+                maxOpacity4StateSubdivisionLevel,
+                voxelSurfacesEnabled,
+                voxelSurfaceMaximumHeight,
+                new ClusterTranslationWork(ClusterTranslationControl.UNINTERRUPTIBLE));
+    }
+
+    SectionClusterMeshBuilder(
+            int clusterX,
+            int clusterY,
+            int clusterZ,
+            int segmentTriangleTarget,
+            int maxOpacity2StateSubdivisionLevel,
+            int maxOpacity4StateSubdivisionLevel,
+            boolean voxelSurfacesEnabled,
+            float voxelSurfaceMaximumHeight,
+            ClusterTranslationWork work) {
         if (SectionCluster.origin(clusterX) != clusterX
                 || SectionCluster.origin(clusterY) != clusterY
                 || SectionCluster.origin(clusterZ) != clusterZ) {
@@ -121,6 +144,7 @@ final class SectionClusterMeshBuilder {
                     "Voxel-surface maximum height must be finite and nonnegative");
         }
         this.voxelSurfaceMaximumHeight = voxelSurfaceMaximumHeight;
+        this.work = Objects.requireNonNull(work, "work");
     }
 
     void add(int sectionX, int sectionY, int sectionZ, List<CpuSectionMesh> meshes) {
@@ -157,9 +181,11 @@ final class SectionClusterMeshBuilder {
         int translateY = (sectionY - this.clusterY) * 16;
         int translateZ = (sectionZ - this.clusterZ) * 16;
         for (MergeFace face : geometry.mergeFaces()) {
+            this.work.step();
             this.mergeFaces.add(face.translated(translateX, translateY, translateZ));
         }
         for (CpuSectionMesh mesh : geometry.meshes()) {
+            this.work.step();
             if (!mesh.isEmpty()) {
                 this.addPart(sectionX, sectionY, sectionZ, mesh);
             }
@@ -216,13 +242,16 @@ final class SectionClusterMeshBuilder {
         if (this.built) {
             throw new IllegalStateException("Cluster mesh was already built");
         }
+        this.work.checkpoint();
         MergedFaceMeshBuilder mergedFaces = new MergedFaceMeshBuilder(
                         this.segmentTriangleTarget,
                         this.maxOpacity2StateSubdivisionLevel,
                         this.maxOpacity4StateSubdivisionLevel,
                         this.voxelSurfacesEnabled,
-                        this.voxelSurfaceMaximumHeight);
+                        this.voxelSurfaceMaximumHeight,
+                        this.work);
         for (CpuSectionMesh mesh : mergedFaces.build(this.mergeFaces)) {
+            this.work.step();
             this.addPart(this.clusterX, this.clusterY, this.clusterZ, mesh);
         }
         this.built = true;
@@ -235,6 +264,7 @@ final class SectionClusterMeshBuilder {
             throw new IllegalStateException(
                     "Merged cluster light indices disagree with its light tree");
         }
+        this.work.checkpoint();
         return result;
     }
 
@@ -291,6 +321,7 @@ final class SectionClusterMeshBuilder {
         OpacityMicromapData.Builder opacityMicromap = new OpacityMicromapData.Builder();
 
         for (Entry entry : this.entries) {
+            this.work.step();
             CpuSectionMesh mesh = entry.mesh;
             float translateX = (entry.sectionX - this.clusterX) * 16.0F;
             float translateY = (entry.sectionY - this.clusterY) * 16.0F;
@@ -316,7 +347,8 @@ final class SectionClusterMeshBuilder {
                     opaquePositionWords,
                     translateX,
                     translateY,
-                    translateZ);
+                    translateZ,
+                    this.work);
             copyTranslatedPositions(
                     mesh.positions(),
                     opaquePositionWords,
@@ -325,21 +357,24 @@ final class SectionClusterMeshBuilder {
                     cutoutPositionWords,
                     translateX,
                     translateY,
-                    translateZ);
+                    translateZ,
+                    this.work);
             copyPrimitives(
                     mesh.primitiveRecords(),
                     0,
                     primitives,
                     opaquePrimitiveCursor,
                     opaquePrimitiveWords,
-                    entry.lightOffset);
+                    entry.lightOffset,
+                    this.work);
             copyPrimitives(
                     mesh.primitiveRecords(),
                     opaquePrimitiveWords,
                     primitives,
                     cutoutPrimitiveCursor,
                     cutoutPrimitiveWords,
-                    entry.lightOffset);
+                    entry.lightOffset,
+                    this.work);
             copyTranslatedPositions(
                     mesh.positions(),
                     opaquePositionWords + cutoutPositionWords,
@@ -348,14 +383,16 @@ final class SectionClusterMeshBuilder {
                     transmissivePositionWords,
                     translateX,
                     translateY,
-                    translateZ);
+                    translateZ,
+                    this.work);
             copyPrimitives(
                     mesh.primitiveRecords(),
                     opaquePrimitiveWords + cutoutPrimitiveWords,
                     primitives,
                     transmissivePrimitiveCursor,
                     transmissivePrimitiveWords,
-                    entry.lightOffset);
+                    entry.lightOffset,
+                    this.work);
             int sourcePrimitiveCount = mesh.primitiveCount();
             SurfaceRelationTable.appendRange(
                     opaqueRelations,
@@ -430,9 +467,11 @@ final class SectionClusterMeshBuilder {
             int wordCount,
             float translateX,
             float translateY,
-            float translateZ) {
+            float translateZ,
+            ClusterTranslationWork work) {
         int sourceEnd = sourceOffset + wordCount;
         while (sourceOffset < sourceEnd) {
+            work.step();
             destination[destinationOffset++] = source[sourceOffset++] + translateX;
             destination[destinationOffset++] = source[sourceOffset++] + translateY;
             destination[destinationOffset++] = source[sourceOffset++] + translateZ;
@@ -445,11 +484,13 @@ final class SectionClusterMeshBuilder {
             int[] destination,
             int destinationOffset,
             int wordCount,
-            int lightOffset) {
+            int lightOffset,
+            ClusterTranslationWork work) {
         System.arraycopy(source, sourceOffset, destination, destinationOffset, wordCount);
         int destinationEnd = destinationOffset + wordCount;
         for (int record = destinationOffset; record < destinationEnd;
                 record += PRIMITIVE_WORDS_PER_TRIANGLE) {
+            work.step();
             int packed = destination[record + FLAGS_EMITTER_WORD];
             int emitterIndex = PrimitivePacking.unpackEmitterIndex(packed);
             if (emitterIndex != PrimitivePacking.NO_EMITTER_INDEX) {

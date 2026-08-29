@@ -5,6 +5,8 @@ import dev.prime.render.scene.CapturedSectionGeometry;
 import dev.prime.render.material.BuiltinMaterialClass;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -23,6 +25,7 @@ public final class SectionMeshAccumulator {
     private final int segmentTriangleTarget;
     private final int maxOpacity2StateSubdivisionLevel;
     private final int maxOpacity4StateSubdivisionLevel;
+    private final Map<EmissionDistribution.Key, EmissionDistribution> emissionBuildCache;
     private final ArrayList<CpuSectionMesh> segments = new ArrayList<>();
     private final ArrayList<MergeFace> mergeFaces = new ArrayList<>();
     private MeshBuilder opaque;
@@ -71,6 +74,22 @@ public final class SectionMeshAccumulator {
             int segmentTriangleTarget,
             int maxOpacity2StateSubdivisionLevel,
             int maxOpacity4StateSubdivisionLevel) {
+        this(
+                labPbrMaterialSet,
+                buildOpacityMicromap,
+                segmentTriangleTarget,
+                maxOpacity2StateSubdivisionLevel,
+                maxOpacity4StateSubdivisionLevel,
+                new HashMap<>());
+    }
+
+    SectionMeshAccumulator(
+            LabPbrMaterialSet labPbrMaterialSet,
+            boolean buildOpacityMicromap,
+            int segmentTriangleTarget,
+            int maxOpacity2StateSubdivisionLevel,
+            int maxOpacity4StateSubdivisionLevel,
+            Map<EmissionDistribution.Key, EmissionDistribution> emissionBuildCache) {
         if (segmentTriangleTarget < 2 || (segmentTriangleTarget & 1) != 0) {
             throw new IllegalArgumentException(
                     "Section mesh segment capacity must contain whole quads");
@@ -86,6 +105,8 @@ public final class SectionMeshAccumulator {
         }
         this.maxOpacity2StateSubdivisionLevel = maxOpacity2StateSubdivisionLevel;
         this.maxOpacity4StateSubdivisionLevel = maxOpacity4StateSubdivisionLevel;
+        this.emissionBuildCache = Objects.requireNonNull(
+                emissionBuildCache, "emissionBuildCache");
         this.beginSegment();
     }
 
@@ -156,7 +177,7 @@ public final class SectionMeshAccumulator {
                         this.maxOpacity2StateSubdivisionLevel,
                         this.maxOpacity4StateSubdivisionLevel)
                 : null;
-        this.lights = new CpuSectionLights.Builder();
+        this.lights = new CpuSectionLights.Builder(this.emissionBuildCache);
         this.triangleCount = 0;
     }
 
