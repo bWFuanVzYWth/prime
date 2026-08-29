@@ -94,9 +94,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
         return;
     }
     PrimeSurfaceRelation relation = primeSurfaceRelation(section);
-    float3 authoredNormal = primeUnpackOctahedralNormal(primitive.normal);
-    PrimeHitTriangle hit = primeHitTriangle(
-            section, barycentrics, authoredNormal);
+    PrimeHitTriangle hit = primeHitTriangle(section, barycentrics);
     float3 outwardNormal = hit.geometricNormal;
     primitive = primeResolveSurfacePrimitive(
             section,

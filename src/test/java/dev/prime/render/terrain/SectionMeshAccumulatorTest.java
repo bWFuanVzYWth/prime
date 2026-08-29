@@ -50,6 +50,7 @@ final class SectionMeshAccumulatorTest {
             CpuSectionGeometry geometry = accumulator.build();
 
             assertEquals(1, geometry.mergeFaces().size());
+            assertEquals(0, geometry.mergeFaces().getFirst().primitive()[4]);
             assertEquals(1, geometry.meshes().size());
             assertEquals(4, geometry.meshes().getFirst().opaqueTriangleCount());
             assertTrue(Float.intBitsToFloat(
@@ -156,6 +157,35 @@ final class SectionMeshAccumulatorTest {
             accumulator.addQuad(
                     horizontalQuad(0.0F, 0.0F, 0.0F, 1.0F), surface);
             assertEquals(1, accumulator.build().mergeFaces().size());
+        }
+    }
+
+    @Test
+    void loweringRepairsSourceWindingAndDoesNotPublishASecondNormal() {
+        try (TestSprite sprite = new TestSprite("reversed_source_winding")) {
+            SectionMeshAccumulator accumulator = new SectionMeshAccumulator(
+                    LabPbrMaterialSet.EMPTY, false);
+            SectionMeshAccumulator.Quad quad = horizontalQuad(
+                    0.0F, 0.0F, 0.0F, 0.5F);
+            quad.normalZ = -1.0F;
+            SectionMeshAccumulator.Surface surface = new SectionMeshAccumulator.Surface().set(
+                    -1, false, false, false, false, false, false, false, 0, sprite.sprite());
+
+            accumulator.addQuad(quad, surface);
+            CpuSectionMesh mesh = accumulator.build().meshes().getFirst();
+
+            assertEquals(2, mesh.opaqueTriangleCount());
+            for (int triangle = 0; triangle < mesh.triangleCount(); triangle++) {
+                int position = triangle * 9;
+                float[] positions = mesh.positions();
+                float edgeOneX = positions[position + 3] - positions[position];
+                float edgeOneY = positions[position + 4] - positions[position + 1];
+                float edgeTwoX = positions[position + 6] - positions[position];
+                float edgeTwoY = positions[position + 7] - positions[position + 1];
+                assertTrue(edgeOneX * edgeTwoY - edgeOneY * edgeTwoX < 0.0F);
+                assertEquals(0, mesh.primitiveRecords()[
+                        triangle * CpuSectionMesh.PRIMITIVE_WORDS + 4]);
+            }
         }
     }
 

@@ -178,16 +178,6 @@ public final class MergeFace {
         float deltaV1 = quad.v[corner10] - quad.v[corner00];
         float deltaU2 = quad.u[corner01] - quad.u[corner00];
         float deltaV2 = quad.v[corner01] - quad.v[corner00];
-        int packedNormal = PrimitivePacking.packTriangleNormal(
-                edgeUX,
-                edgeUY,
-                edgeUZ,
-                edgeVX,
-                edgeVY,
-                edgeVZ,
-                quad.normalX,
-                quad.normalY,
-                quad.normalZ);
         long packedTangent = PrimitivePacking.packTriangleTangent(
                 edgeUX,
                 edgeUY,
@@ -199,7 +189,9 @@ public final class MergeFace {
                 deltaV1,
                 deltaU2,
                 deltaV2,
-                packedNormal);
+                quad.normalX,
+                quad.normalY,
+                quad.normalZ);
         int flags = PrimitivePacking.encode(MaterialRecipeResolver.resolve(
                 surface.sprite(),
                 surface.builtinMaterialClass(),
@@ -231,7 +223,7 @@ public final class MergeFace {
             packedUv1,
             packedUv2,
             PrimitivePacking.packTintControl(PrimitivePacking.packTint(surface.tint()), flags),
-            packedNormal,
+            0,
             PrimitivePacking.packControlTexture(flags, surface.sprite().textureId()),
             density | Integer.MIN_VALUE,
             (int) packedTangent

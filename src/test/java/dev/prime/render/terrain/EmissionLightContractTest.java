@@ -137,9 +137,6 @@ final class EmissionLightContractTest {
                     index,
                     1.0F,
                     0.0F,
-                    0.0F,
-                    0.0F,
-                    1.0F,
                     0,
                     0,
                     0,
@@ -164,7 +161,7 @@ final class EmissionLightContractTest {
     }
 
     @Test
-    void emitterNormalFollowsTheAuthoredOutwardHemisphere() {
+    void emitterNormalFollowsTriangleWinding() {
         CpuSectionLights.Builder builder = new CpuSectionLights.Builder();
         builder.addTriangle(
                 0.0F,
@@ -176,9 +173,6 @@ final class EmissionLightContractTest {
                 1.0F,
                 0.0F,
                 0.0F,
-                0.0F,
-                0.0F,
-                1.0F,
                 0,
                 0,
                 0,
@@ -195,7 +189,7 @@ final class EmissionLightContractTest {
 
         assertEquals(0.0F, Float.intBitsToFloat(packed[emitterStart + 12]), 0.0F);
         assertEquals(0.0F, Float.intBitsToFloat(packed[emitterStart + 13]), 0.0F);
-        assertEquals(1.0F, Float.intBitsToFloat(packed[emitterStart + 14]), 0.0F);
+        assertEquals(-1.0F, Float.intBitsToFloat(packed[emitterStart + 14]), 0.0F);
     }
 
     @Test

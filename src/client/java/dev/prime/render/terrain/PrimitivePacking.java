@@ -23,7 +23,7 @@ public final class PrimitivePacking {
     public static final int CONTROL_NORMAL_TEXTURE = 1 << 5;
     public static final int CONTROL_OPTICAL_TEXTURE = 1 << 6;
     public static final int CONTROL_TANGENT_NEGATIVE = 1 << 7;
-    /** Accept only the authored winding's front side during any-hit traversal. */
+    /** Accept only the canonical BLAS winding's front side during any-hit traversal. */
     public static final int CONTROL_FRONT_FACE_ONLY = 1 << 8;
     /** Retired static-control bit. Dynamic payloads use the corresponding physical bit. */
     private static final int CONTROL_STATIC_RESERVED = 1 << 9;
@@ -375,9 +375,8 @@ public final class PrimitivePacking {
 
     /**
      * Packs the UV tangent into the low 32 bits and reports negative bitangent handedness in bit
-     * 32 of the returned value.
-     * The geometric normal remains a separate field so normal mapping cannot perturb traversal
-     * offsets, medium entry/exit tests, or ray-cone incidence.
+     * 32 of the returned value. The supplied normal is the exact triangle cross product used by
+     * the BLAS; it is never recovered from a packed shading attribute.
      */
     public static long packTriangleTangent(
             float edgeOneX,
@@ -390,21 +389,20 @@ public final class PrimitivePacking {
             float deltaV1,
             float deltaU2,
             float deltaV2,
-            int packedNormal) {
+            float normalX,
+            float normalY,
+            float normalZ) {
         float determinant = deltaU1 * deltaV2 - deltaU2 * deltaV1;
-        float normalX = unpackOctahedralComponent(packedNormal, true);
-        float normalY = unpackOctahedralComponent(packedNormal, false);
-        float normalZ = 1.0F - Math.abs(normalX) - Math.abs(normalY);
-        if (normalZ < 0.0F) {
-            float oldX = normalX;
-            normalX = (1.0F - Math.abs(normalY)) * Math.copySign(1.0F, oldX);
-            normalY = (1.0F - Math.abs(oldX)) * Math.copySign(1.0F, normalY);
+        double normalLength = Math.sqrt(
+                (double) normalX * normalX
+                        + (double) normalY * normalY
+                        + (double) normalZ * normalZ);
+        if (!(normalLength > 0.0) || !Double.isFinite(normalLength)) {
+            throw new IllegalArgumentException("Triangle tangent requires a finite face normal");
         }
-        float inverseNormalLength = 1.0F / (float) Math.sqrt(Math.max(
-                normalX * normalX + normalY * normalY + normalZ * normalZ, 1.0e-20F));
-        normalX *= inverseNormalLength;
-        normalY *= inverseNormalLength;
-        normalZ *= inverseNormalLength;
+        normalX = (float) (normalX / normalLength);
+        normalY = (float) (normalY / normalLength);
+        normalZ = (float) (normalZ / normalLength);
         float tangentX;
         float tangentY;
         float tangentZ;
@@ -456,11 +454,6 @@ public final class PrimitivePacking {
                 | (negative ? 0x1_0000_0000L : 0L);
     }
 
-    private static float unpackOctahedralComponent(int packed, boolean low) {
-        short value = (short) (low ? packed : packed >>> 16);
-        return Math.max(-1.0F, value / 32767.0F);
-    }
-
     public static int packOctahedralNormal(float x, float y, float z) {
         float inverseLength = 1.0F / Math.max(1.0e-20F, Math.abs(x) + Math.abs(y) + Math.abs(z));
         x *= inverseLength;
@@ -474,48 +467,6 @@ public final class PrimitivePacking {
         int packedX = packSnorm16(x);
         int packedY = packSnorm16(y);
         return packedX & 0xffff | packedY << 16;
-    }
-
-    /**
-     * Packs the true triangle normal, falling back to the baked cardinal direction only for a
-     * degenerate primitive.
-     *
-     * <p>Minecraft's {@code BakedQuad.direction()} is restricted to the six block directions.
-     * Treating it as a geometric normal snaps rotated models such as crossed grass and flowers to
-     * an axis. Besides incorrect shading, that makes ray-cone incidence select excessively coarse
-     * alpha mips and can turn covered cutout texels into light leaks.
-     */
-    public static int packTriangleNormal(
-            float edgeOneX,
-            float edgeOneY,
-            float edgeOneZ,
-            float edgeTwoX,
-            float edgeTwoY,
-            float edgeTwoZ,
-            float fallbackX,
-            float fallbackY,
-            float fallbackZ) {
-        float normalX = edgeOneY * edgeTwoZ - edgeOneZ * edgeTwoY;
-        float normalY = edgeOneZ * edgeTwoX - edgeOneX * edgeTwoZ;
-        float normalZ = edgeOneX * edgeTwoY - edgeOneY * edgeTwoX;
-        float lengthSquared = normalX * normalX + normalY * normalY + normalZ * normalZ;
-        if (!(lengthSquared > 1.0e-20F) || !Float.isFinite(lengthSquared)) {
-            normalX = fallbackX;
-            normalY = fallbackY;
-            normalZ = fallbackZ;
-            lengthSquared = normalX * normalX + normalY * normalY + normalZ * normalZ;
-        } else if (normalX * fallbackX + normalY * fallbackY + normalZ * fallbackZ < 0.0F) {
-            // Vertex winding is normally authoritative, but resource-provided baked quads may
-            // disagree. Preserve the model's outward hemisphere without snapping its direction.
-            normalX = -normalX;
-            normalY = -normalY;
-            normalZ = -normalZ;
-        }
-        float inverseLength = 1.0F / (float) Math.sqrt(Math.max(lengthSquared, 1.0e-20F));
-        return packOctahedralNormal(
-                normalX * inverseLength,
-                normalY * inverseLength,
-                normalZ * inverseLength);
     }
 
     /**

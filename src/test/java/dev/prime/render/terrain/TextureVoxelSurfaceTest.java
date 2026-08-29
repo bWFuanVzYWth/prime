@@ -283,6 +283,7 @@ final class TextureVoxelSurfaceTest {
             assertEquals(16 * 16 * 2, mesh.opaqueTriangleCount());
             assertEquals(0, mesh.cutoutTriangleCount());
             int[] primitives = mesh.primitiveRecords();
+            assertEquals(0, primitives[4]);
             assertBakedMaterial(
                     primitives,
                     0,

@@ -46,9 +46,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     if (primaryTransmissive && relation.control == 0u) {
         return;
     }
-    float3 authoredNormal = primeUnpackOctahedralNormal(primitive.normal);
-    PrimeHitTriangle hit = primeHitTriangle(
-            section, barycentrics, authoredNormal);
+    PrimeHitTriangle hit = primeHitTriangle(section, barycentrics);
     float3 normal = hit.geometricNormal;
     primitive = primeResolveSurfacePrimitive(
             section,

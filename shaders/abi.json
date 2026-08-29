@@ -7,7 +7,7 @@
         { "name": "uv1", "type": "uint", "offset": 4 },
         { "name": "uv2", "type": "uint", "offset": 8 },
         { "name": "tint", "type": "uint", "offset": 12 },
-        { "name": "normal", "type": "uint", "offset": 16 },
+        { "name": "unused", "type": "uint", "offset": 16 },
         { "name": "flagsEmitter", "type": "uint", "offset": 20 },
         { "name": "uvDensity", "type": "uint", "offset": 24 },
         { "name": "tangent", "type": "uint", "offset": 28 }

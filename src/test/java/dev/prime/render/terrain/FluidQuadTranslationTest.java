@@ -55,7 +55,7 @@ final class FluidQuadTranslationTest {
             assertEquals(2L, cluster.transmissiveTriangleCount());
             assertEquals(0L, cluster.opaqueTriangleCount());
             assertEquals(0, cluster.lights().emitterCount());
-            assertAllPrimitiveNormalsHaveYSign(cluster, 1.0F);
+            assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
             assertEquals(0L, suppressed.transmissiveTriangleCount());
         }
     }
@@ -72,7 +72,7 @@ final class FluidQuadTranslationTest {
             CpuClusterMesh cluster = translate(section.build(), false);
 
             assertEquals(2L, cluster.transmissiveTriangleCount());
-            assertAllPrimitiveNormalsHaveYSign(cluster, 1.0F);
+            assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
         }
     }
 
@@ -95,7 +95,7 @@ final class FluidQuadTranslationTest {
             assertEquals(2L, cluster.opaqueTriangleCount());
             assertEquals(0L, cluster.transmissiveTriangleCount());
             assertEquals(2, cluster.lights().emitterCount());
-            assertAllPrimitiveNormalsHaveYSign(cluster, 1.0F);
+            assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
             assertAllPrimitivesReferenceEmitters(cluster);
             assertAllEmitterNormalsHaveYSign(cluster.lights(), 1.0F);
         }
@@ -113,7 +113,7 @@ final class FluidQuadTranslationTest {
             CpuClusterMesh cluster = translate(section.build(), false);
 
             assertEquals(2L, cluster.transmissiveTriangleCount());
-            assertAllPrimitiveNormalsHaveYSign(cluster, -1.0F);
+            assertAllTriangleNormalsHaveYSign(cluster, -1.0F);
         }
     }
 
@@ -268,14 +268,18 @@ final class FluidQuadTranslationTest {
                         suppressFluidFace));
     }
 
-    private static void assertAllPrimitiveNormalsHaveYSign(
+    private static void assertAllTriangleNormalsHaveYSign(
             CpuClusterMesh cluster, float expectedSign) {
         for (CpuClusterMesh.Segment segment : cluster.segments()) {
-            int[] primitives = segment.primitiveRecords();
+            float[] positions = segment.positions();
             for (int triangle = 0; triangle < segment.triangleCount(); triangle++) {
-                int packedNormal =
-                        primitives[triangle * CpuSectionMesh.PRIMITIVE_WORDS + 4];
-                assertTrue(expectedSign * unpackNormalY(packedNormal) > 0.5F);
+                int offset = triangle * 9;
+                float edgeOneX = positions[offset + 3] - positions[offset];
+                float edgeOneZ = positions[offset + 5] - positions[offset + 2];
+                float edgeTwoX = positions[offset + 6] - positions[offset];
+                float edgeTwoZ = positions[offset + 8] - positions[offset + 2];
+                float normalY = edgeOneZ * edgeTwoX - edgeOneX * edgeTwoZ;
+                assertTrue(expectedSign * normalY > 0.0F);
             }
         }
     }
@@ -306,15 +310,4 @@ final class FluidQuadTranslationTest {
         }
     }
 
-    private static float unpackNormalY(int packedNormal) {
-        float x = Math.max(-1.0F, (short) packedNormal / 32767.0F);
-        float y = Math.max(-1.0F, (short) (packedNormal >>> 16) / 32767.0F);
-        float z = 1.0F - Math.abs(x) - Math.abs(y);
-        if (z < 0.0F) {
-            float oldX = x;
-            x = (1.0F - Math.abs(y)) * Math.copySign(1.0F, oldX);
-            y = (1.0F - Math.abs(oldX)) * Math.copySign(1.0F, y);
-        }
-        return y / (float) Math.sqrt(x * x + y * y + z * z);
-    }
 }

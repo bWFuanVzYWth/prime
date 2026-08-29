@@ -171,9 +171,41 @@ final class DynamicMeshBuilder {
         float crossX = edgeOneY * edgeTwoZ - edgeOneZ * edgeTwoY;
         float crossY = edgeOneZ * edgeTwoX - edgeOneX * edgeTwoZ;
         float crossZ = edgeOneX * edgeTwoY - edgeOneY * edgeTwoX;
-        float areaSquared = crossX * crossX + crossY * crossY + crossZ * crossZ;
-        if (!(areaSquared > 1.0e-20F) || !Float.isFinite(areaSquared)) {
+        double twiceArea = Math.sqrt(
+                (double) crossX * crossX
+                        + (double) crossY * crossY
+                        + (double) crossZ * crossZ);
+        if (!(twiceArea > 0.0) || !Double.isFinite(twiceArea)) {
             return;
+        }
+        float authoredX = first.normalX + second.normalX + third.normalX;
+        float authoredY = first.normalY + second.normalY + third.normalY;
+        float authoredZ = first.normalZ + second.normalZ + third.normalZ;
+        double orientation = (double) crossX * authoredX
+                + (double) crossY * authoredY
+                + (double) crossZ * authoredZ;
+        if (orientation < 0.0) {
+            Vertex swapVertex = second;
+            second = third;
+            third = swapVertex;
+            float swap = secondX;
+            secondX = thirdX;
+            thirdX = swap;
+            swap = secondY;
+            secondY = thirdY;
+            thirdY = swap;
+            swap = secondZ;
+            secondZ = thirdZ;
+            thirdZ = swap;
+            edgeOneX = secondX - firstX;
+            edgeOneY = secondY - firstY;
+            edgeOneZ = secondZ - firstZ;
+            edgeTwoX = thirdX - firstX;
+            edgeTwoY = thirdY - firstY;
+            edgeTwoZ = thirdZ - firstZ;
+            crossX = -crossX;
+            crossY = -crossY;
+            crossZ = -crossZ;
         }
 
         this.positions.add(firstX, firstY, firstZ);
@@ -189,19 +221,6 @@ final class DynamicMeshBuilder {
                 ? PrimitivePacking.CONSTANT_UV_OWN_TINT
                         | PrimitivePacking.CONSTANT_UV_BAKED_MATERIAL
                 : PrimitivePacking.packUv(third.u, third.v);
-        float fallbackX = first.normalX + second.normalX + third.normalX;
-        float fallbackY = first.normalY + second.normalY + third.normalY;
-        float fallbackZ = first.normalZ + second.normalZ + third.normalZ;
-        int normal = PrimitivePacking.packTriangleNormal(
-                edgeOneX,
-                edgeOneY,
-                edgeOneZ,
-                edgeTwoX,
-                edgeTwoY,
-                edgeTwoZ,
-                fallbackX,
-                fallbackY,
-                fallbackZ);
         long tangent = PrimitivePacking.packTriangleTangent(
                 edgeOneX,
                 edgeOneY,
@@ -213,7 +232,9 @@ final class DynamicMeshBuilder {
                 second.v - first.v,
                 third.u - first.u,
                 third.v - first.v,
-                normal);
+                crossX,
+                crossY,
+                crossZ);
         int flags = PrimitivePacking.encodeLegacySemantics(
                 true, false, false, false, false, false);
         int tint = PrimitivePacking.packTintControl(
@@ -223,7 +244,7 @@ final class DynamicMeshBuilder {
                 && fullBright(third.light);
         this.primitives.add(uv0, uv1, uv2, tint);
         this.primitives.add(
-                normal,
+                0,
                 PrimitivePacking.packDynamicControl(
                         flags, textureIndex, visibleEmission, redAlpha),
                 bakedMaterial

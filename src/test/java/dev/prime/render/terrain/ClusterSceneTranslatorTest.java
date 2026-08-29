@@ -212,10 +212,15 @@ final class ClusterSceneTranslatorTest {
                     PrimitivePacking.packUv(
                             firstPlane.u[2], firstPlane.v[2]),
                     primitives[2]);
-            assertEquals(
-                    PrimitivePacking.packOctahedralNormal(
-                            -0.70710677F, 0.0F, 0.70710677F),
-                    primitives[4]);
+            assertEquals(0, primitives[4]);
+            float[] positions = cluster.segments().getFirst().positions();
+            float edgeOneX = positions[3] - positions[0];
+            float edgeOneZ = positions[5] - positions[2];
+            float edgeTwoY = positions[7] - positions[1];
+            float edgeTwoZ = positions[8] - positions[2];
+            float normalX = -edgeOneZ * edgeTwoY;
+            float normalZ = edgeOneX * edgeTwoY;
+            assertTrue(normalX < 0.0F && normalZ > 0.0F);
             assertTwoSided(cluster);
         }
     }
@@ -271,6 +276,7 @@ final class ClusterSceneTranslatorTest {
                 assertEquals(
                         CpuSectionMesh.SURFACE_RELATION_OVERLAY,
                         relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
+                assertEquals(0, relation[5]);
                 assertTrue((relation[0] >> 8
                         & PrimitivePacking.CONTROL_ALPHA_CUTOUT) != 0);
             }
@@ -495,6 +501,7 @@ final class ClusterSceneTranslatorTest {
             assertEquals(
                     CpuSectionMesh.SURFACE_RELATION_BILATERAL,
                     relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
+            assertEquals(0, relation[5]);
         }
     }
 

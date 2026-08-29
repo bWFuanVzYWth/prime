@@ -14,8 +14,8 @@ import java.util.Objects;
  * <p>Minecraft's cross models and fluid renderer author coincident reverse faces because
  * rasterization culls back faces. Equal material mappings collapse to one physical two-sided
  * sheet. Distinct front/back mappings, such as a sunflower disc, become one bilateral surface
- * definition with independent material mappings. In both cases authored winding remains the
- * normal authority.
+ * definition with independent material mappings. In both cases the retained face's authored
+ * outward direction is lowered into canonical BLAS winding before publication.
  */
 final class TwoSidedQuadReducer {
     private TwoSidedQuadReducer() {

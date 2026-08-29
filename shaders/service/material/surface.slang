@@ -32,7 +32,8 @@ public PrimeMaterialSample primeEvaluateMaterial(
         uint textureId,
         float2 uv,
         float textureLodValue,
-        uint instanceTint) {
+        uint instanceTint,
+        float3 geometricNormal) {
     PrimeMaterialSample result;
     bool bakedMaterial = primeUsesBakedMaterial(primitive);
     // The Vulkan sRGB view decodes texture RGB before filtering; packed vertex/instance tint is
@@ -156,7 +157,6 @@ public PrimeMaterialSample primeEvaluateMaterial(
         materialControl |= PRIME_MATERIAL_THIN_WALLED;
     }
     result.materialControl = materialControl;
-    float3 geometricNormal = primeUnpackOctahedralNormal(primitive.normal);
     if (usesNormalMap) {
         float3 tangent = primeUnpackOctahedralNormal(primitive.tangent);
         tangent = normalize(tangent - geometricNormal * dot(tangent, geometricNormal));
@@ -183,12 +183,13 @@ public PrimeMaterialSample primeEvaluateMaterialReference(
     uint referenceControl = recipeControl & ~PRIME_RECIPE_NORMAL_TEXTURE;
     primitive.tint = (packedTint & 0x00ffffffu)
             | ((referenceControl & 0xffu) << 24u);
-    primitive.normal = 0u;
+    primitive.unused = 0u;
     primitive.flagsEmitter = ((referenceControl >> 8u) & 7u)
             | ((referenceControl & PRIME_RECIPE_BUILTIN_MASK) << 16u);
     primitive.uvDensity = PRIME_CONSTANT_UV_DENSITY;
     primitive.tangent = 0u;
-    return primeEvaluateMaterial(primitive, textureId, uv, 0.0, 0u);
+    return primeEvaluateMaterial(
+            primitive, textureId, uv, 0.0, 0u, float3(0.0, 0.0, 1.0));
 }
 
 public float3 primeEvaluateEmitterRadiance(

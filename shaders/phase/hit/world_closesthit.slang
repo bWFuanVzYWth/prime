@@ -21,9 +21,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     SectionRecord section = primeSection();
     PrimitiveRecord primitive = primePrimitive(section);
     PrimeSurfaceRelation relation = primeSurfaceRelation(section);
-    float3 authoredNormal = primeUnpackOctahedralNormal(primitive.normal);
-    PrimeHitTriangle hit = primeHitTriangle(
-            section, barycentrics, authoredNormal);
+    PrimeHitTriangle hit = primeHitTriangle(section, barycentrics);
     float3 normal = hit.geometricNormal;
     bool dynamic = (primitive.flagsEmitter & PRIME_DYNAMIC_TEXTURE_FLAG) != 0u
             && section.lightAddress != uint64_t(0);
@@ -46,15 +44,20 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
             : primeInterpolateUv(
                     section, primitive, barycentrics, hit.localPosition, normal);
     PrimeMaterialSample material = primeEvaluateMaterial(
-            primitive, textureId, materialUv, textureLodValue, section.instanceTint);
+            primitive,
+            textureId,
+            materialUv,
+            textureLodValue,
+            section.instanceTint,
+            normal);
     material.shadingNormal = primeNormalMappedShadingNormalForView(
             material.opticalControl,
             normal,
             -WorldRayDirection(),
             material.shadingNormal);
     primePayload.t = RayTCurrent();
-    // Keep the authored outward normal. Opaque shading orients it at the integrator boundary,
-    // while transparent reflection and the water stack require its authored outward sign.
+    // Translation makes BLAS winding authoritative. Opaque shading orients this outward face
+    // normal at the integrator boundary; transparent transport keeps its winding-defined sign.
     primePayload.geometricNormal = normal;
     primePayload.position = hit.position;
     primePayload.positionReserved = primePackSurfaceMotion(

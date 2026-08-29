@@ -448,6 +448,10 @@ final class CompiledClusterCodec {
         for (int primitiveIndex = 0; primitiveIndex < primitiveCount; primitiveIndex++) {
             int record = Math.multiplyExact(
                     primitiveIndex, CpuSectionMesh.PRIMITIVE_WORDS);
+            if (records[record + 4] != 0) {
+                throw new IllegalArgumentException(
+                        "Compiled-cluster primitive has nonzero reserved data");
+            }
             int flags = PrimitivePacking.unpackControl(
                     records[record + 3], records[record + 5]);
             PrimitivePacking.requireValidControl(flags);

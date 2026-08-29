@@ -77,7 +77,7 @@ final class CompiledClusterCodecTest {
                     PrimitivePacking.packUv(0.0F, 1.0F),
                     PrimitivePacking.packTintControl(
                             PrimitivePacking.packTint(-1), flags),
-                    PrimitivePacking.packOctahedralNormal(0.0F, 0.0F, 1.0F),
+                    0,
                     PrimitivePacking.packControlTexture(flags, 1),
                     Float.floatToRawIntBits(1.0F),
                     PrimitivePacking.packOctahedralNormal(1.0F, 0.0F, 0.0F)
@@ -142,7 +142,7 @@ final class CompiledClusterCodecTest {
                     PrimitivePacking.packUv(0.0F, 1.0F),
                     PrimitivePacking.packTintControl(
                             PrimitivePacking.packTint(-1), 0),
-                    PrimitivePacking.packOctahedralNormal(0.0F, 0.0F, 1.0F),
+                    0,
                     PrimitivePacking.packControlTexture(0, 1),
                     Float.floatToRawIntBits(1.0F),
                     PrimitivePacking.packOctahedralNormal(1.0F, 0.0F, 0.0F)
@@ -168,6 +168,12 @@ final class CompiledClusterCodecTest {
                 PrimitivePacking.packControlEmitter(0, 0));
         assertThrows(IllegalArgumentException.class,
                 () -> CompiledClusterCodec.decode(invalidEmitter));
+
+        byte[] nonzeroReserved = valid.clone();
+        littleEndian(nonzeroReserved).putInt(
+                offsets.primitives() + 4 * Integer.BYTES, 1);
+        assertThrows(IllegalArgumentException.class,
+                () -> CompiledClusterCodec.decode(nonzeroReserved));
 
         byte[] wrongCategory = valid.clone();
         int transmissive = PrimitivePacking.encodeLegacySemantics(

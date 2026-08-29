@@ -802,15 +802,14 @@ final class TextureVoxelMeshBuilder {
                 corners[1] = corners[3];
                 corners[3] = swap;
             }
-            this.addTriangle(corners[0], corners[1], corners[2], outward, material);
-            this.addTriangle(corners[0], corners[2], corners[3], outward, material);
+            this.addTriangle(corners[0], corners[1], corners[2], material);
+            this.addTriangle(corners[0], corners[2], corners[3], material);
         }
 
         private void addTriangle(
                 float[] first,
                 float[] second,
                 float[] third,
-                float[] outward,
                 MaterialSample material) {
             this.positions.add(first);
             this.positions.add(second);
@@ -823,16 +822,7 @@ final class TextureVoxelMeshBuilder {
                     : PrimitivePacking.packConstantUv(material.localV);
             float[] edgeOne = subtract(second, first);
             float[] edgeTwo = subtract(third, first);
-            int packedNormal = PrimitivePacking.packTriangleNormal(
-                    edgeOne[0],
-                    edgeOne[1],
-                    edgeOne[2],
-                    edgeTwo[0],
-                    edgeTwo[1],
-                    edgeTwo[2],
-                    outward[0],
-                    outward[1],
-                    outward[2]);
+            float[] normal = cross(edgeOne, edgeTwo);
             long tangent = PrimitivePacking.packTriangleTangent(
                     edgeOne[0],
                     edgeOne[1],
@@ -844,7 +834,9 @@ final class TextureVoxelMeshBuilder {
                     0.0F,
                     0.0F,
                     0.0F,
-                    packedNormal);
+                    normal[0],
+                    normal[1],
+                    normal[2]);
             int flags = material.flags;
             if ((tangent & 0x1_0000_0000L) != 0L
                     && (flags & PrimitivePacking.CONTROL_NORMAL_TEXTURE) != 0) {
@@ -855,7 +847,7 @@ final class TextureVoxelMeshBuilder {
             this.primitives.add(material.constantMode);
             this.primitives.add(
                     PrimitivePacking.packTintControl(material.packedTint, flags));
-            this.primitives.add(packedNormal);
+            this.primitives.add(0);
             this.primitives.add(PrimitivePacking.packControlTexture(
                     flags, material.textureId));
             this.primitives.add(PrimitivePacking.CONSTANT_UV_DENSITY);

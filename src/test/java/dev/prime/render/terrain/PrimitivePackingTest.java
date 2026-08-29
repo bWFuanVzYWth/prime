@@ -200,13 +200,12 @@ final class PrimitivePackingTest {
                 flags);
         assertEquals(0, PrimitivePacking.withMaterialDetails(0, false, false, true));
 
-        int normal = PrimitivePacking.packOctahedralNormal(0.0F, 0.0F, 1.0F);
         long positive = PrimitivePacking.packTriangleTangent(
                 1.0F, 0.0F, 0.0F,
                 0.0F, 1.0F, 0.0F,
                 1.0F, 0.0F,
                 0.0F, 1.0F,
-                normal);
+                0.0F, 0.0F, 1.0F);
         assertPackedNormalDirection((int) positive, 1.0F, 0.0F, 0.0F);
         assertFalse((positive & 0x1_0000_0000L) != 0L);
 
@@ -215,29 +214,18 @@ final class PrimitivePackingTest {
                 0.0F, 1.0F, 0.0F,
                 1.0F, 0.0F,
                 0.0F, -1.0F,
-                normal);
+                0.0F, 0.0F, 1.0F);
         assertTrue((negative & 0x1_0000_0000L) != 0L);
     }
 
     @Test
-    void triangleNormalPreservesRotatedCutoutGeometryInsteadOfCardinalFallback() {
-        int packed = PrimitivePacking.packTriangleNormal(
-                1.0F, 0.0F, 1.0F,
-                0.0F, 1.0F, 0.0F,
-                0.0F, 0.0F, 1.0F);
-        assertPackedNormalDirection(packed, -1.0F, 0.0F, 1.0F);
-
-        int reversedWinding = PrimitivePacking.packTriangleNormal(
-                0.0F, 1.0F, 0.0F,
-                1.0F, 0.0F, 1.0F,
-                0.0F, 0.0F, 1.0F);
-        assertPackedNormalDirection(reversedWinding, -1.0F, 0.0F, 1.0F);
-
-        int degenerate = PrimitivePacking.packTriangleNormal(
+    void triangleTangentRejectsMissingFaceNormal() {
+        assertThrows(IllegalArgumentException.class, () -> PrimitivePacking.packTriangleTangent(
                 1.0F, 0.0F, 0.0F,
-                2.0F, 0.0F, 0.0F,
-                0.0F, -1.0F, 0.0F);
-        assertPackedNormalDirection(degenerate, 0.0F, -1.0F, 0.0F);
+                0.0F, 1.0F, 0.0F,
+                1.0F, 0.0F,
+                0.0F, 1.0F,
+                0.0F, 0.0F, 0.0F));
     }
 
     @Test

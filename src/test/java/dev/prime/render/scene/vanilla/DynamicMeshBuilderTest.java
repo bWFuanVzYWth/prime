@@ -45,6 +45,7 @@ final class DynamicMeshBuilderTest {
         assertEquals(30.0F, segment.positions()[2]);
         int[] records = segment.primitiveRecords();
         for (int triangle = 0; triangle < 2; triangle++) {
+            assertEquals(0, records[triangle * 8 + 4]);
             int flagsTexture = records[triangle * 8 + 5];
             assertEquals(7, PrimitivePacking.unpackDynamicTextureIndex(flagsTexture));
             assertTrue(PrimitivePacking.hasVisibleEmission(flagsTexture));
@@ -52,6 +53,33 @@ final class DynamicMeshBuilderTest {
                     PrimitivePacking.NO_EMITTER_INDEX,
                     PrimitivePacking.unpackEmitterIndex(flagsTexture));
         }
+    }
+
+    @Test
+    void sourceNormalsRepairDynamicTriangleWindingBeforeBlasSubmission() {
+        DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
+        DynamicMeshBuilder.VertexSink sink = builder.open(
+                VanillaSceneBoundary.Element.ENTITY,
+                PrimitiveTopology.TRIANGLES,
+                1,
+                0);
+        vertexNormal(sink, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, -1.0F);
+        vertexNormal(sink, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, -1.0F);
+        vertexNormal(sink, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, -1.0F);
+        sink.finish();
+
+        CpuClusterMesh.Segment segment = builder.build(0, 0, 0, List.of())
+                .mesh()
+                .segments()
+                .getFirst();
+        float[] positions = segment.positions();
+        float edgeOneX = positions[3] - positions[0];
+        float edgeOneY = positions[4] - positions[1];
+        float edgeTwoX = positions[6] - positions[0];
+        float edgeTwoY = positions[7] - positions[1];
+
+        assertTrue(edgeOneX * edgeTwoY - edgeOneY * edgeTwoX < 0.0F);
+        assertEquals(0, segment.primitiveRecords()[4]);
     }
 
     @Test

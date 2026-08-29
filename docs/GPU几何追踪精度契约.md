@@ -12,9 +12,10 @@ CPU 在 BLAS 建立前为修复 Minecraft 原始模型的重叠面、装饰层�
 
 该翻译完成后，提交给 BLAS 的 f32 顶点流就是 GPU 追踪的权威几何。closest-hit 和 any-hit
 必须从同一顶点流、硬件重心坐标和 `ObjectToWorld3x4` 重建命中位置；不得以
-`rayOrigin + rayDirection * RayTCurrent()` 代替。几何法线由同一三角形的两条边计算，并按
-authored outward normal 定向。只有叉积长度平方精确等于零的退化三角形才能回退 authored
-normal，不得用非零阈值吞掉面积很小但有效的几何。
+`rayOrigin + rayDirection * RayTCurrent()` 代替。场景翻译必须在发布前依据捕获的表面语义
+修正顶点顺序，使 BLAS winding 从 negative side 指向 positive side；退化三角形不得提交给
+BLAS。命中后的几何法线只由同一 f32 三角形的两条边计算，不再读取、解码或按独立 authored
+normal 重新定向。不得用非零阈值吞掉面积很小但有效的几何。
 
 `RayTCurrent()` 仍表示沿追踪射线的参数距离，可用于路径长度、ray cone 和光学段长；它不再
 充当权威世界空间命中点。

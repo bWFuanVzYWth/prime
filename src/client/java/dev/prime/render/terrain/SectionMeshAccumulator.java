@@ -18,7 +18,9 @@ import java.util.Objects;
  */
 public final class SectionMeshAccumulator {
     private static final int[] FIRST_TRIANGLE = new int[] {0, 1, 2};
+    private static final int[] REVERSED_FIRST_TRIANGLE = new int[] {0, 2, 1};
     private static final int[] SECOND_TRIANGLE = new int[] {0, 2, 3};
+    private static final int[] REVERSED_SECOND_TRIANGLE = new int[] {0, 3, 2};
 
     private final boolean buildOpacityMicromap;
     private final LabPbrMaterialSet labPbrMaterials;
@@ -128,9 +130,10 @@ public final class SectionMeshAccumulator {
         MeshBuilder destination = surface.geometryTransmissive()
                 ? this.transmissive
                 : (surface.geometryCutout() ? this.cutout : this.opaque);
-        this.emitTriangle(destination, quad, FIRST_TRIANGLE, surface);
-        this.emitTriangle(destination, quad, SECOND_TRIANGLE, surface);
-        this.triangleCount += 2;
+        int[] first = orientTriangle(quad, FIRST_TRIANGLE, REVERSED_FIRST_TRIANGLE);
+        int[] second = orientTriangle(quad, SECOND_TRIANGLE, REVERSED_SECOND_TRIANGLE);
+        this.triangleCount += this.emitTriangle(destination, quad, first, surface) ? 1 : 0;
+        this.triangleCount += this.emitTriangle(destination, quad, second, surface) ? 1 : 0;
     }
 
     private static void requireValidAttributes(Quad quad) {
@@ -212,7 +215,29 @@ public final class SectionMeshAccumulator {
         }
     }
 
-    private void emitTriangle(MeshBuilder destination, Quad quad, int[] indices, Surface surface) {
+    private static int[] orientTriangle(Quad quad, int[] forward, int[] reversed) {
+        int first = forward[0];
+        int second = forward[1];
+        int third = forward[2];
+        float edgeOneX = quad.x[second] - quad.x[first];
+        float edgeOneY = quad.y[second] - quad.y[first];
+        float edgeOneZ = quad.z[second] - quad.z[first];
+        float edgeTwoX = quad.x[third] - quad.x[first];
+        float edgeTwoY = quad.y[third] - quad.y[first];
+        float edgeTwoZ = quad.z[third] - quad.z[first];
+        float normalX = edgeOneY * edgeTwoZ - edgeOneZ * edgeTwoY;
+        float normalY = edgeOneZ * edgeTwoX - edgeOneX * edgeTwoZ;
+        float normalZ = edgeOneX * edgeTwoY - edgeOneY * edgeTwoX;
+        double orientation = (double) normalX * quad.normalX
+                + (double) normalY * quad.normalY
+                + (double) normalZ * quad.normalZ;
+        return orientation < 0.0
+                ? reversed
+                : forward;
+    }
+
+    private boolean emitTriangle(
+            MeshBuilder destination, Quad quad, int[] indices, Surface surface) {
         int firstIndex = indices[0];
         int secondIndex = indices[1];
         int thirdIndex = indices[2];
@@ -225,6 +250,25 @@ public final class SectionMeshAccumulator {
         float thirdX = quad.x[thirdIndex];
         float thirdY = quad.y[thirdIndex];
         float thirdZ = quad.z[thirdIndex];
+        float edge1X = secondX - firstX;
+        float edge1Y = secondY - firstY;
+        float edge1Z = secondZ - firstZ;
+        float edge2X = thirdX - firstX;
+        float edge2Y = thirdY - firstY;
+        float edge2Z = thirdZ - firstZ;
+        float normalX = edge1Y * edge2Z - edge1Z * edge2Y;
+        float normalY = edge1Z * edge2X - edge1X * edge2Z;
+        float normalZ = edge1X * edge2Y - edge1Y * edge2X;
+        double normalLength = Math.sqrt(
+                (double) normalX * normalX
+                        + (double) normalY * normalY
+                        + (double) normalZ * normalZ);
+        if (!(normalLength > 0.0) || !Double.isFinite(normalLength)) {
+            return false;
+        }
+        float unitNormalX = (float) (normalX / normalLength);
+        float unitNormalY = (float) (normalY / normalLength);
+        float unitNormalZ = (float) (normalZ / normalLength);
         destination.positions.add(firstX);
         destination.positions.add(firstY);
         destination.positions.add(firstZ);
@@ -259,12 +303,6 @@ public final class SectionMeshAccumulator {
         destination.primitives.add(packedUv1);
         destination.primitives.add(packedUv2);
 
-        float edge1X = secondX - firstX;
-        float edge1Y = secondY - firstY;
-        float edge1Z = secondZ - firstZ;
-        float edge2X = thirdX - firstX;
-        float edge2Y = thirdY - firstY;
-        float edge2Z = thirdZ - firstZ;
         int packedUvDensity = PrimitivePacking.packUvDensity(
                 edge1X,
                 edge1Y,
@@ -276,16 +314,6 @@ public final class SectionMeshAccumulator {
                 uv1V - uv0V,
                 uv2U - uv0U,
                 uv2V - uv0V);
-        int packedNormal = PrimitivePacking.packTriangleNormal(
-                edge1X,
-                edge1Y,
-                edge1Z,
-                edge2X,
-                edge2Y,
-                edge2Z,
-                quad.normalX,
-                quad.normalY,
-                quad.normalZ);
         long packedTangent = PrimitivePacking.packTriangleTangent(
                 edge1X,
                 edge1Y,
@@ -297,7 +325,9 @@ public final class SectionMeshAccumulator {
                 uv1V - uv0V,
                 uv2U - uv0U,
                 uv2V - uv0V,
-                packedNormal);
+                unitNormalX,
+                unitNormalY,
+                unitNormalZ);
         int flags = PrimitivePacking.encode(MaterialRecipeResolver.resolve(
                 surface.sprite(),
                 surface.builtinMaterialClass(),
@@ -321,9 +351,6 @@ public final class SectionMeshAccumulator {
                 thirdX,
                 thirdY,
                 thirdZ,
-                quad.normalX,
-                quad.normalY,
-                quad.normalZ,
                 packedUv0,
                 packedUv1,
                 packedUv2,
@@ -335,7 +362,7 @@ public final class SectionMeshAccumulator {
                 surface.sprite(),
                 this.labPbrMaterials.emissionMap(surface.sprite().id()));
         destination.primitives.add(packedTint);
-        destination.primitives.add(packedNormal);
+        destination.primitives.add(0);
         destination.primitives.add(encodedEmitterIndex == 0
                 ? PrimitivePacking.packControlTexture(flags, surface.sprite().textureId())
                 : PrimitivePacking.packControlEmitter(flags, encodedEmitterIndex - 1));
@@ -349,6 +376,7 @@ public final class SectionMeshAccumulator {
                         ? flags | PrimitivePacking.CONTROL_ALPHA_CUTOUT
                         : flags));
         destination.triangleCount++;
+        return true;
     }
 
     private int[] surfaceRelationRecord(
@@ -431,16 +459,15 @@ public final class SectionMeshAccumulator {
         float uv1V = uv.v(secondIndex);
         float uv2U = uv.u(thirdIndex);
         float uv2V = uv.v(thirdIndex);
-        int packedNormal = PrimitivePacking.packTriangleNormal(
-                edge1X, edge1Y, edge1Z,
-                edge2X, edge2Y, edge2Z,
-                quad.normalX, quad.normalY, quad.normalZ);
+        float normalX = edge1Y * edge2Z - edge1Z * edge2Y;
+        float normalY = edge1Z * edge2X - edge1X * edge2Z;
+        float normalZ = edge1X * edge2Y - edge1Y * edge2X;
         long packedTangent = PrimitivePacking.packTriangleTangent(
                 edge1X, edge1Y, edge1Z,
                 edge2X, edge2Y, edge2Z,
                 uv1U - uv0U, uv1V - uv0V,
                 uv2U - uv0U, uv2V - uv0V,
-                packedNormal);
+                normalX, normalY, normalZ);
         CapturedSectionGeometry.Surface captured = binding.surface();
         int flags = PrimitivePacking.encode(MaterialRecipeResolver.resolve(
                 captured,
@@ -460,7 +487,7 @@ public final class SectionMeshAccumulator {
             PrimitivePacking.packUv(uv1U, uv1V),
             PrimitivePacking.packUv(uv2U, uv2V),
             packedTint,
-            packedNormal,
+            0,
             PrimitivePacking.packControlTexture(flags, captured.sprite().textureId()),
             PrimitivePacking.packUvDensity(
                     edge1X, edge1Y, edge1Z,

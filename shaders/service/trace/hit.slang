@@ -103,8 +103,7 @@ public struct PrimeHitTriangle {
 
 public PrimeHitTriangle primeHitTriangle(
         SectionRecord section,
-        float2 barycentrics,
-        float3 authoredNormal) {
+        float2 barycentrics) {
     PrimeHitTriangle result;
     result.triangleIndex = primeGlobalTriangleIndex(section);
     float* positions = (float*)section.positionAddress;
@@ -128,16 +127,11 @@ public PrimeHitTriangle primeHitTriangle(
     result.position = mul(
             ObjectToWorld3x4(), float4(result.localPosition, 1.0));
     float3 normal = cross(edgeOne, edgeTwo);
-    float normalLengthSquared = dot(normal, normal);
-    if (normalLengthSquared > 0.0) {
-        normal *= rsqrt(normalLengthSquared);
-        if (dot(normal, authoredNormal) < 0.0) {
-            normal = -normal;
-        }
-        result.geometricNormal = normal;
-    } else {
-        result.geometricNormal = authoredNormal;
-    }
+    // Translation omits exact degenerates. Scaling by the nonzero maximum avoids squared-length
+    // underflow without introducing an area threshold that would erase valid small triangles.
+    float normalScale = max(abs(normal.x), max(abs(normal.y), abs(normal.z)));
+    normal /= normalScale;
+    result.geometricNormal = normalize(normal);
     return result;
 }
 
@@ -181,7 +175,7 @@ public PrimeSurfaceRelation primeSurfaceRelation(SectionRecord section) {
     result.material.uv1 = 0u;
     result.material.uv2 = 0u;
     result.material.tint = 0u;
-    result.material.normal = 0u;
+    result.material.unused = 0u;
     result.material.flagsEmitter = 0u;
     result.material.uvDensity = 0u;
     result.material.tangent = 0u;
@@ -204,7 +198,7 @@ public PrimeSurfaceRelation primeSurfaceRelation(SectionRecord section) {
         result.material.uv1 = relations[offset + 2u];
         result.material.uv2 = relations[offset + 3u];
         result.material.tint = relations[offset + 4u];
-        result.material.normal = relations[offset + 5u];
+        result.material.unused = 0u;
         result.material.flagsEmitter = relations[offset + 6u];
         result.material.uvDensity = relations[offset + 7u];
         result.material.tangent = relations[offset + 8u];
