@@ -6,33 +6,22 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Path;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 @Tag("gpu-shader")
+@ExtendWith(ShaderComputeExtension.class)
 final class AtmosphereAerialPrefixGpuTest {
     private static final int GROUP_COUNT = 2;
     private static final int VALUE_COUNT = 4;
     private static final int CHANNEL_COUNT = 4;
     private static final int VOXEL_BYTES =
             VALUE_COUNT * CHANNEL_COUNT * Float.BYTES;
+    private static ShaderComputeRunner runner;
 
     @Test
     void parallelPrefixMatchesOrderedAerialComposition() throws IOException {
-        ShaderComputeRunner opened;
-        try {
-            opened = ShaderComputeRunner.open();
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests", exception);
-            }
-            Assumptions.assumeTrue(
-                    false, "Vulkan shader tests unavailable: " + exception.getMessage());
-            return;
-        }
-
         int depth = ShaderAbi.ATMOSPHERE_AERIAL_DEPTH;
         ByteBuffer input = ByteBuffer.allocateDirect(depth * VOXEL_BYTES)
                 .order(ByteOrder.LITTLE_ENDIAN);
@@ -58,46 +47,44 @@ final class AtmosphereAerialPrefixGpuTest {
         Path shader = Path.of(
                 System.getProperty("prime.test.slangShaderDirectory"),
                 "atmosphere_aerial_prefix.comp.spv");
-        try (ShaderComputeRunner runner = opened) {
-            ByteBuffer output = runner.dispatch(
-                    shader,
-                    input,
-                    depth * VOXEL_BYTES,
-                    new ShaderComputeRunner.Workgroups(1, 1, 1),
-                    null);
-            double[][] cumulativeRadiance = new double[GROUP_COUNT][CHANNEL_COUNT];
-            double[][] cumulativeTransmittance = new double[GROUP_COUNT][CHANNEL_COUNT];
+        ByteBuffer output = runner.dispatch(
+                shader,
+                input,
+                depth * VOXEL_BYTES,
+                new ShaderComputeRunner.Workgroups(1, 1, 1),
+                null);
+        double[][] cumulativeRadiance = new double[GROUP_COUNT][CHANNEL_COUNT];
+        double[][] cumulativeTransmittance = new double[GROUP_COUNT][CHANNEL_COUNT];
+        for (int group = 0; group < GROUP_COUNT; group++) {
+            for (int channel = 0; channel < CHANNEL_COUNT; channel++) {
+                cumulativeTransmittance[group][channel] = 1.0;
+            }
+        }
+        for (int slice = 0; slice < depth; slice++) {
             for (int group = 0; group < GROUP_COUNT; group++) {
                 for (int channel = 0; channel < CHANNEL_COUNT; channel++) {
-                    cumulativeTransmittance[group][channel] = 1.0;
-                }
-            }
-            for (int slice = 0; slice < depth; slice++) {
-                for (int group = 0; group < GROUP_COUNT; group++) {
-                    for (int channel = 0; channel < CHANNEL_COUNT; channel++) {
-                        cumulativeRadiance[group][channel] +=
-                                cumulativeTransmittance[group][channel]
-                                        * radiance[group][slice][channel];
-                        cumulativeTransmittance[group][channel] *=
-                                transmittance[group][slice][channel];
-                        int value = slice * VALUE_COUNT + group * 2;
-                        int radianceOffset =
-                                (value * CHANNEL_COUNT + channel) * Float.BYTES;
-                        int transmittanceOffset =
-                                ((value + 1) * CHANNEL_COUNT + channel) * Float.BYTES;
-                        assertEquals(
-                                cumulativeRadiance[group][channel],
-                                output.getFloat(radianceOffset),
-                                2.0e-5,
-                                "radiance group " + group + ", slice " + slice
-                                        + ", channel " + channel);
-                        assertEquals(
-                                cumulativeTransmittance[group][channel],
-                                output.getFloat(transmittanceOffset),
-                                2.0e-5,
-                                "transmittance group " + group + ", slice " + slice
-                                        + ", channel " + channel);
-                    }
+                    cumulativeRadiance[group][channel] +=
+                            cumulativeTransmittance[group][channel]
+                                    * radiance[group][slice][channel];
+                    cumulativeTransmittance[group][channel] *=
+                            transmittance[group][slice][channel];
+                    int value = slice * VALUE_COUNT + group * 2;
+                    int radianceOffset =
+                            (value * CHANNEL_COUNT + channel) * Float.BYTES;
+                    int transmittanceOffset =
+                            ((value + 1) * CHANNEL_COUNT + channel) * Float.BYTES;
+                    assertEquals(
+                            cumulativeRadiance[group][channel],
+                            output.getFloat(radianceOffset),
+                            2.0e-5,
+                            "radiance group " + group + ", slice " + slice
+                                    + ", channel " + channel);
+                    assertEquals(
+                            cumulativeTransmittance[group][channel],
+                            output.getFloat(transmittanceOffset),
+                            2.0e-5,
+                            "transmittance group " + group + ", slice " + slice
+                                    + ", channel " + channel);
                 }
             }
         }

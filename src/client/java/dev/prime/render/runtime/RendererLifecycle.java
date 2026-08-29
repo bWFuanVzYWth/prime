@@ -26,6 +26,10 @@ public final class RendererLifecycle {
     private ClientLevel world;
 
     public void initialize(RendererSettings settings) {
+        java.util.Objects.requireNonNull(settings, "settings");
+        if (this.initialized) {
+            throw new IllegalStateException("Prime renderer lifecycle is already initialized");
+        }
         this.initialized = true;
         if (!settings.pathTracingEnabled()) {
             this.states.disabled();

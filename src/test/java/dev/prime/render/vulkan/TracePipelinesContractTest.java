@@ -195,8 +195,7 @@ final class TracePipelinesContractTest {
                 offline.moduleResource(5));
     }
 
-    @Test
-    void realtimeTailAdmissionSeesOnlyCompactPathAndQueueStorage() throws IOException {
+    static void realtimeTailAdmissionSeesOnlyCompactPathAndQueueStorage() throws IOException {
         Set<Integer> expected = Set.of(
                 ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
                 ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE);
@@ -219,8 +218,7 @@ final class TracePipelinesContractTest {
         assertThrows(IllegalArgumentException.class, () -> RaygenSchedule.single("", 0));
     }
 
-    @Test
-    void imageDiagnosticsUseOneIsolatedSourceAndTargetLayout() throws IOException {
+    static void imageDiagnosticsUseOneIsolatedSourceAndTargetLayout() throws IOException {
         assertEquals(
                 Set.of(0, 1),
                 descriptorBindings(List.of("image_diagnostic_rgba8.comp.spv"), 0));
@@ -229,8 +227,7 @@ final class TracePipelinesContractTest {
                 descriptorBindings(List.of("image_diagnostic_rgba16.comp.spv"), 0));
     }
 
-    @Test
-    void setOneAbiDoesNotCrossRendererBoundary() throws IOException {
+    static void setOneAbiDoesNotCrossRendererBoundary() throws IOException {
         for (String suffix : List.of("", "_ser")) {
             Set<Integer> realtime = descriptorBindings(
                     List.of(
@@ -277,8 +274,7 @@ final class TracePipelinesContractTest {
         }
     }
 
-    @Test
-    void realtimeStbnDoesNotEnterTheOfflineShaderClosure() throws IOException {
+    static void realtimeStbnDoesNotEnterTheOfflineShaderClosure() throws IOException {
         for (String suffix : List.of("", "_ser")) {
             Set<Integer> realtime = descriptorBindings(
                     List.of(wavefrontShader("realtime", "fixed_direct", suffix)),
@@ -300,8 +296,7 @@ final class TracePipelinesContractTest {
         }
     }
 
-    @Test
-    void optimizedModulesPreservePayloadAbi() throws IOException {
+    static void optimizedModulesPreservePayloadAbi() throws IOException {
         String tracePayload = "struct(vec3(f32),f32,vec3(f32),"
                 + "u32,u32,u32,f32,f32,u32,f32,u32,u32,vec3(f32),u32,vec3(f32),u32)";
         String shadowPayload = "struct(vec4(f32),vec4(f32),vec4(f32),vec4(f32),"
@@ -413,8 +408,7 @@ final class TracePipelinesContractTest {
         }
     }
 
-    @Test
-    void serReorderedPublishersDoNotReuseProducerSubgroups() throws IOException {
+    static void serReorderedPublishersDoNotReuseProducerSubgroups() throws IOException {
         Set<Integer> cameraTrace = parse(
                 wavefrontShader("realtime", "camera_trace", "_ser")).opcodes;
         assertFalse(cameraTrace.contains(OP_GROUP_NON_UNIFORM_ELECT));
@@ -430,8 +424,7 @@ final class TracePipelinesContractTest {
         assertTrue(primary.contains(OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT));
     }
 
-    @Test
-    void fixedStagesCompactOnlyAtLandingAndScatter()
+    static void fixedStagesCompactOnlyAtLandingAndScatter()
             throws IOException {
         Set<Integer> landing = parse(wavefrontShader(
                 "realtime", "landing_scatter", "_ser")).opcodes;
@@ -461,8 +454,7 @@ final class TracePipelinesContractTest {
         }
     }
 
-    @Test
-    void offlineStagesCompactOnlyAtScatter() throws IOException {
+    static void offlineStagesCompactOnlyAtScatter() throws IOException {
         Set<Integer> scatter = parse(
                 wavefrontShader("offline", "scatter", "_ser")).opcodes;
         assertTrue(scatter.contains(OP_GROUP_NON_UNIFORM_ELECT));
@@ -523,8 +515,7 @@ final class TracePipelinesContractTest {
         assertEquals(1, TraceProgram.deferredWorkerCount(8, 0));
     }
 
-    @Test
-    void compiledPathRecordsUseIndependentStrides() throws IOException {
+    static void compiledPathRecordsUseIndependentStrides() throws IOException {
         for (String suffix : List.of("", "_ser")) {
             assertRecordStride(
                     wavefrontShader("realtime", "delta_walk", suffix),

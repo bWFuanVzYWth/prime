@@ -6,13 +6,13 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.SplittableRandom;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 @Tag("gpu-shader")
+@ExtendWith(ShaderComputeExtension.class)
 final class PrimeBsdfGpuTest {
     private static final long SEED = 0xA11D_4A7A_26B5_DF31L;
     private static final int INPUT_WORDS = 7;
@@ -50,25 +50,8 @@ final class PrimeBsdfGpuTest {
     private static ShaderComputeRunner runner;
 
     @BeforeAll
-    static void openRunner() throws IOException, ShaderComputeRunner.UnavailableException {
-        try {
-            runner = RoboCuteTestResources.openRunnerWithTransmissionGgxEnergy(
-                    RoboCuteTestResources.transmissionGgxEnergy());
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests", exception);
-            }
-            Assumptions.assumeTrue(
-                    false, "Vulkan shader tests unavailable: " + exception.getMessage());
-        }
-    }
-
-    @AfterAll
-    static void closeRunner() {
-        if (runner != null) {
-            runner.close();
-        }
+    static void bindTransmissionGgxEnergy() throws IOException {
+        RoboCuteTestResources.bindTransmissionGgxEnergy(runner);
     }
 
     @Test

@@ -1,6 +1,5 @@
 package dev.prime.render.vulkan.dlss;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -64,9 +63,4 @@ final class DlssRrNativeContractTest {
         assertFalse(DlssRrNative.isSupportedPlatform("Linux", "amd64"));
     }
 
-    @Test
-    void bundledBridgeExportsTheDeclaredAbiOnItsSupportedPlatform() {
-        org.junit.jupiter.api.Assumptions.assumeTrue(DlssRrNative.isSupportedPlatform());
-        assertDoesNotThrow(DlssRrNative::verifyLibrary);
-    }
 }

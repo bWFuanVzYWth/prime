@@ -7,13 +7,13 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 @Tag("gpu-shader")
+@ExtendWith(ShaderComputeExtension.class)
 final class OpenPbrDistributionGpuTest {
     private static final int SAMPLE_COUNT = 262_144;
     private static final int GRID_Z = 256;
@@ -70,30 +70,13 @@ final class OpenPbrDistributionGpuTest {
     private static Path[] shaders;
 
     @BeforeAll
-    static void openRunner() throws IOException, ShaderComputeRunner.UnavailableException {
-        try {
-            ByteBuffer lut = RoboCuteTestResources.transmissionGgxEnergy();
-            runner = RoboCuteTestResources.openRunnerWithTransmissionGgxEnergy(lut);
-            shaders = new Path[] {
-                Path.of(
-                        System.getProperty("prime.test.slangShaderDirectory"),
-                        "openpbr_distribution_statistics.comp.spv")
-            };
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests", exception);
-            }
-            Assumptions.assumeTrue(
-                    false, "Vulkan shader tests unavailable: " + exception.getMessage());
-        }
-    }
-
-    @AfterAll
-    static void closeRunner() {
-        if (runner != null) {
-            runner.close();
-        }
+    static void prepareResources() throws IOException {
+        RoboCuteTestResources.bindTransmissionGgxEnergy(runner);
+        shaders = new Path[] {
+            Path.of(
+                    System.getProperty("prime.test.slangShaderDirectory"),
+                    "openpbr_distribution_statistics.comp.spv")
+        };
     }
 
     @Test

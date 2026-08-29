@@ -7,29 +7,19 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Path;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 @Tag("gpu-shader")
+@ExtendWith(ShaderComputeExtension.class)
 final class AtmosphereSegmentIntegralGpuTest {
     private static final int COMPONENTS = 4;
+    private static ShaderComputeRunner runner;
 
     @Test
     void homogeneousSegmentIntegralMatchesDoubleOracleAcrossItsNumericalBranches()
             throws IOException {
-        ShaderComputeRunner opened;
-        try {
-            opened = ShaderComputeRunner.open();
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests", exception);
-            }
-            Assumptions.assumeTrue(
-                    false, "Vulkan shader tests unavailable: " + exception.getMessage());
-            return;
-        }
         float[][] cases = {
             {0.0F, 1.0e-12F, 1.0e-6F, 37.0F},
             {1.0e-12F, 1.0e-8F, 1.0e-4F, 1.0F},
@@ -53,38 +43,36 @@ final class AtmosphereSegmentIntegralGpuTest {
                 System.getProperty("prime.test.slangShaderDirectory"),
                 "atmosphere_segment_integral.comp.spv");
 
-        try (ShaderComputeRunner runner = opened) {
-            ByteBuffer output = runner.dispatch(
-                    shader,
-                    input,
-                    cases.length * COMPONENTS * Float.BYTES,
-                    new ShaderComputeRunner.Workgroups(1, 1, 1),
-                    push);
-            for (int caseIndex = 0; caseIndex < cases.length; caseIndex++) {
-                float previous = Float.POSITIVE_INFINITY;
-                for (int component = 0; component < 3; component++) {
-                    float actual = output.getFloat(
-                            (caseIndex * COMPONENTS + component) * Float.BYTES);
-                    double expected = oracle(cases[caseIndex][component], cases[caseIndex][3]);
-                    assertTrue(Float.isFinite(actual) && actual >= 0.0F);
-                    assertEquals(
-                            expected,
-                            actual,
-                            Math.max(2.0e-6, Math.abs(expected) * 3.0e-6),
-                            "case " + caseIndex + " component " + component);
-                    assertTrue(actual <= previous + 2.0e-6F);
-                    previous = actual;
-                }
+        ByteBuffer output = runner.dispatch(
+                shader,
+                input,
+                cases.length * COMPONENTS * Float.BYTES,
+                new ShaderComputeRunner.Workgroups(1, 1, 1),
+                push);
+        for (int caseIndex = 0; caseIndex < cases.length; caseIndex++) {
+            float previous = Float.POSITIVE_INFINITY;
+            for (int component = 0; component < 3; component++) {
+                float actual = output.getFloat(
+                        (caseIndex * COMPONENTS + component) * Float.BYTES);
+                double expected = oracle(cases[caseIndex][component], cases[caseIndex][3]);
+                assertTrue(Float.isFinite(actual) && actual >= 0.0F);
                 assertEquals(
-                        output.getFloat(caseIndex * COMPONENTS * Float.BYTES),
-                        output.getFloat((caseIndex * COMPONENTS + 3) * Float.BYTES),
-                        0.0F);
+                        expected,
+                        actual,
+                        Math.max(2.0e-6, Math.abs(expected) * 3.0e-6),
+                        "case " + caseIndex + " component " + component);
+                assertTrue(actual <= previous + 2.0e-6F);
+                previous = actual;
             }
-            int thresholdOffset = 2 * COMPONENTS * Float.BYTES;
-            float below = output.getFloat(thresholdOffset);
-            float above = output.getFloat(thresholdOffset + 2 * Float.BYTES);
-            assertTrue(Math.abs(below - above) < 3.0e-6F);
+            assertEquals(
+                    output.getFloat(caseIndex * COMPONENTS * Float.BYTES),
+                    output.getFloat((caseIndex * COMPONENTS + 3) * Float.BYTES),
+                    0.0F);
         }
+        int thresholdOffset = 2 * COMPONENTS * Float.BYTES;
+        float below = output.getFloat(thresholdOffset);
+        float above = output.getFloat(thresholdOffset + 2 * Float.BYTES);
+        assertTrue(Math.abs(below - above) < 3.0e-6F);
     }
 
     private static double oracle(double extinction, double length) {

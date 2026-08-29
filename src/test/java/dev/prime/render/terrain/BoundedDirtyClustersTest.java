@@ -5,6 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import net.minecraft.core.SectionPos;
 import org.junit.jupiter.api.Test;
 
@@ -83,5 +89,43 @@ final class BoundedDirtyClustersTest {
         BoundedDirtyClusters.Batch batch = dirty.drain();
         assertTrue(batch.fullInvalidation());
         assertArrayEquals(new long[0], batch.keys());
+    }
+
+    @Test
+    void concurrentProducersPreserveEveryAcceptedKeyBelowCapacity() throws Exception {
+        int producerCount = 8;
+        int keysPerProducer = 128;
+        BoundedDirtyClusters dirty =
+                new BoundedDirtyClusters(producerCount * keysPerProducer);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<?>> producers = new ArrayList<>();
+        try (ExecutorService executor = Executors.newFixedThreadPool(producerCount)) {
+            for (int producer = 0; producer < producerCount; producer++) {
+                int owner = producer;
+                producers.add(executor.submit(() -> {
+                    start.await();
+                    for (int key = 0; key < keysPerProducer; key++) {
+                        dirty.addCluster(SectionPos.asLong(
+                                owner * keysPerProducer + key, 0, 0));
+                    }
+                    return null;
+                }));
+            }
+            start.countDown();
+            for (Future<?> producer : producers) {
+                producer.get();
+            }
+        }
+
+        BoundedDirtyClusters.Batch batch = dirty.drain();
+        assertFalse(batch.fullInvalidation());
+        long[] actual = batch.keys();
+        Arrays.sort(actual);
+        long[] expected = new long[producerCount * keysPerProducer];
+        for (int index = 0; index < expected.length; index++) {
+            expected[index] = SectionPos.asLong(index, 0, 0);
+        }
+        Arrays.sort(expected);
+        assertArrayEquals(expected, actual);
     }
 }

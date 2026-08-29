@@ -19,9 +19,7 @@ final class TerrainUpdateTransaction implements AutoCloseable {
     private final List<GpuCluster> replacements;
     private @Nullable TopLevelAccelerationStructure tlas;
     private @Nullable VulkanBuffer worldLights;
-    private boolean submitted;
-    private boolean published;
-    private boolean closed;
+    private State state = State.OPEN;
 
     TerrainUpdateTransaction(
             VulkanContext context,
@@ -39,10 +37,12 @@ final class TerrainUpdateTransaction implements AutoCloseable {
     }
 
     List<GpuCluster> replacements() {
+        requireOpen("access replacement clusters");
         return this.replacements;
     }
 
     void worldLights(VulkanBuffer worldLights) {
+        requireOpen("attach world lights");
         if (this.worldLights != null) {
             throw new IllegalStateException("Terrain transaction already owns world lights");
         }
@@ -50,7 +50,8 @@ final class TerrainUpdateTransaction implements AutoCloseable {
     }
 
     void submitted() {
-        this.submitted = true;
+        requireOpen("submit terrain resources");
+        this.state = State.SUBMITTED;
         RuntimeException failure = null;
         if (this.clusterStaging != null) {
             failure = ResourceCleanup.run(this.clusterStaging::submitted, failure);
@@ -62,18 +63,22 @@ final class TerrainUpdateTransaction implements AutoCloseable {
     }
 
     void published() {
-        this.published = true;
+        if (this.state != State.OPEN && this.state != State.SUBMITTED) {
+            throw new IllegalStateException(
+                    "Cannot publish terrain resources after " + stateName());
+        }
+        this.state = State.PUBLISHED;
         this.tlas = null;
         this.worldLights = null;
     }
 
     RuntimeException abort(RuntimeException failure) {
-        if (this.closed) {
+        if (this.state == State.CLOSED) {
             return failure;
         }
-        if (!this.published) {
+        if (this.state != State.PUBLISHED) {
             for (GpuCluster replacement : this.replacements) {
-                if (this.submitted) {
+                if (this.state == State.SUBMITTED) {
                     failure = ResourceCleanup.run(
                             () -> {
                                 Destroyable cleanup = replacement.prepareRetirement(
@@ -89,7 +94,7 @@ final class TerrainUpdateTransaction implements AutoCloseable {
             }
             if (this.tlas != null) {
                 TopLevelAccelerationStructure failedTlas = this.tlas;
-                failure = this.submitted
+                failure = this.state == State.SUBMITTED
                         ? ResourceCleanup.run(
                                 () -> this.context.defer(failedTlas::release), failure)
                         : ResourceCleanup.run(failedTlas::release, failure);
@@ -97,7 +102,7 @@ final class TerrainUpdateTransaction implements AutoCloseable {
             }
             if (this.worldLights != null) {
                 VulkanBuffer failedWorldLights = this.worldLights;
-                failure = this.submitted
+                failure = this.state == State.SUBMITTED
                         ? ResourceCleanup.run(
                                 () -> this.context.defer(failedWorldLights), failure)
                         : ResourceCleanup.destroy(failedWorldLights, failure);
@@ -106,19 +111,37 @@ final class TerrainUpdateTransaction implements AutoCloseable {
         }
         failure = ResourceCleanup.close(this.clusterStaging, failure);
         failure = ResourceCleanup.close(this.worldStaging, failure);
-        this.closed = true;
+        this.state = State.CLOSED;
         return failure;
     }
 
     @Override
     public void close() {
-        if (this.closed) {
+        if (this.state == State.CLOSED) {
             return;
         }
         RuntimeException failure = null;
         failure = ResourceCleanup.close(this.clusterStaging, failure);
         failure = ResourceCleanup.close(this.worldStaging, failure);
-        this.closed = true;
+        this.state = State.CLOSED;
         ResourceCleanup.throwIfFailed(failure);
+    }
+
+    private void requireOpen(String operation) {
+        if (this.state != State.OPEN) {
+            throw new IllegalStateException(
+                    "Cannot " + operation + " after " + stateName());
+        }
+    }
+
+    private String stateName() {
+        return this.state.name().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private enum State {
+        OPEN,
+        SUBMITTED,
+        PUBLISHED,
+        CLOSED
     }
 }

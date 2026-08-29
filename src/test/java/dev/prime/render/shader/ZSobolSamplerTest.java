@@ -10,12 +10,12 @@ import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.SplittableRandom;
-import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
-@Tag("gpu-shader")
-final class ZSobolSamplerGpuTest {
+final class ZSobolSamplerTest {
     private static final int CASE_COUNT = 4_096;
     private static final int INPUT_WORDS = 2;
     private static final int OUTPUT_WORDS = 2;
@@ -39,21 +39,14 @@ final class ZSobolSamplerGpuTest {
         0x8888_0000, 0xcccc_0000, 0xaaaa_0000, 0xffff_0000,
         0x8000_8000, 0xc000_c000, 0xa000_a000, 0xf000_f000
     };
-    @Test
-    void shaderMatchesPrimeZOrderFastOwenReference() throws IOException {
-        ShaderComputeRunner opened;
-        try {
-            opened = ShaderComputeRunner.open();
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests", exception);
-            }
-            Assumptions.assumeTrue(
-                    false, "Vulkan shader tests unavailable: " + exception.getMessage());
-            return;
-        }
-        try (ShaderComputeRunner runner = opened) {
+    @Nested
+    @Tag("gpu-shader")
+    @ExtendWith(ShaderComputeExtension.class)
+    final class Parity {
+        private static ShaderComputeRunner runner;
+
+        @Test
+        void shaderMatchesPrimeZOrderFastOwenReference() throws IOException {
             ByteBuffer input = cases();
             ByteBuffer output = runner.dispatch(
                     shader("prime_zsobol_parity.comp.spv"),
@@ -338,27 +331,20 @@ final class ZSobolSamplerGpuTest {
         }
     }
 
-    @Test
-    void shaderFloatTemporalPrefixesStayWithinOneBoundaryRoundingEvent()
-            throws IOException {
-        ShaderComputeRunner opened;
-        try {
-            opened = ShaderComputeRunner.open();
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests", exception);
-            }
-            Assumptions.assumeTrue(
-                    false, "Vulkan shader tests unavailable: " + exception.getMessage());
-            return;
-        }
-        // The raw u32 test above proves exact elementary intervals. The production
-        // f32 conversion may move a boundary-adjacent value to a neighboring bin,
-        // so test its material distribution error instead of demanding bit exactness.
-        int logSampleCount = 16;
-        int sampleCount = 1 << logSampleCount;
-        try (ShaderComputeRunner runner = opened) {
+    @Nested
+    @Tag("gpu-shader")
+    @ExtendWith(ShaderComputeExtension.class)
+    final class Distribution {
+        private static ShaderComputeRunner runner;
+
+        @Test
+        void shaderFloatTemporalPrefixesStayWithinOneBoundaryRoundingEvent()
+                throws IOException {
+            // The raw u32 test above proves exact elementary intervals. The production
+            // f32 conversion may move a boundary-adjacent value to a neighboring bin,
+            // so test its material distribution error instead of demanding bit exactness.
+            int logSampleCount = 16;
+            int sampleCount = 1 << logSampleCount;
             ByteBuffer output = runner.dispatch(
                     shader("prime_zsobol_parity.comp.spv"),
                     temporalCases(sampleCount),
@@ -379,30 +365,16 @@ final class ZSobolSamplerGpuTest {
                 }
             }
         }
-    }
 
-    @Test
-    void screenSpaceErrorSpectrumAvoidsConcentratedPatterns() throws IOException {
-        ShaderComputeRunner opened;
-        try {
-            opened = ShaderComputeRunner.open();
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests", exception);
-            }
-            Assumptions.assumeTrue(
-                    false, "Vulkan shader tests unavailable: " + exception.getMessage());
-            return;
-        }
-        int[][] frames = {
-            {0, 0},
-            {1, 0},
-            {17, 0},
-            {255, 17},
-            {65_535, 12_345}
-        };
-        try (ShaderComputeRunner runner = opened) {
+        @Test
+        void screenSpaceErrorSpectrumAvoidsConcentratedPatterns() throws IOException {
+            int[][] frames = {
+                {0, 0},
+                {1, 0},
+                {17, 0},
+                {255, 17},
+                {65_535, 12_345}
+            };
             for (int[] frame : frames) {
                 ByteBuffer output = runner.dispatch(
                         shader("prime_zsobol_parity.comp.spv"),

@@ -6,33 +6,19 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Path;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 @Tag("gpu-shader")
+@ExtendWith(ShaderComputeExtension.class)
 final class AtmosphereScaleGpuTest {
     private static final int CASE_FLOATS = 4;
+    private static ShaderComputeRunner runner;
 
     @Test
     void coordinateScalePreservesAtmosphereAndMultipliesWorldOpticalDepth()
             throws IOException {
-        ShaderComputeRunner opened;
-        try {
-            opened = ShaderComputeRunner.open();
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests",
-                        exception);
-            }
-            Assumptions.assumeTrue(
-                    false,
-                    "Vulkan shader tests unavailable: "
-                            + exception.getMessage());
-            return;
-        }
-
         float altitude = 10.0F;
         float horizonRadius = 6_360.0F + altitude - 0.01F;
         float tangent = (float) -Math.sqrt(
@@ -65,28 +51,26 @@ final class AtmosphereScaleGpuTest {
                 System.getProperty("prime.test.slangShaderDirectory"),
                 "atmosphere_scale_properties.comp.spv");
 
-        try (ShaderComputeRunner runner = opened) {
-            ByteBuffer output = runner.dispatch(
-                    shader,
-                    input,
-                    cases.length * CASE_FLOATS * Float.BYTES,
-                    new ShaderComputeRunner.Workgroups(1, 1, 1),
-                    push);
-            for (int caseIndex = 0;
-                    caseIndex < cases.length;
-                    ++caseIndex) {
-                int base = caseIndex * CASE_FLOATS * Float.BYTES;
-                for (int component = 0;
-                        component < CASE_FLOATS;
-                        ++component) {
-                    float error = output.getFloat(
-                            base + component * Float.BYTES);
-                    assertTrue(
-                            error <= 5.0e-4F,
-                            "coordinate-scale case " + caseIndex
-                                    + " component " + component
-                                    + ": " + error);
-                }
+        ByteBuffer output = runner.dispatch(
+                shader,
+                input,
+                cases.length * CASE_FLOATS * Float.BYTES,
+                new ShaderComputeRunner.Workgroups(1, 1, 1),
+                push);
+        for (int caseIndex = 0;
+                caseIndex < cases.length;
+                ++caseIndex) {
+            int base = caseIndex * CASE_FLOATS * Float.BYTES;
+            for (int component = 0;
+                    component < CASE_FLOATS;
+                    ++component) {
+                float error = output.getFloat(
+                        base + component * Float.BYTES);
+                assertTrue(
+                        error <= 5.0e-4F,
+                        "coordinate-scale case " + caseIndex
+                                + " component " + component
+                                + ": " + error);
             }
         }
     }

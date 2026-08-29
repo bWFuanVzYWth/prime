@@ -86,6 +86,7 @@ def shaderIncludeReport = layout.buildDirectory.file(
 		'reports/prime-shaders/include-graph.txt')
 def shaderSourceRoot = file('shaders')
 def shaderTestIncludeRoot = file('src/test/slang')
+def shaderTestProgramManifest = file('src/test/slang/programs.json')
 def removedShaderReferencePaths = [
 		file('shaders/bsdf/core'),
 		file('shaders/bsdf/adapter/prime_bsdf_specializations.slang')
@@ -223,9 +224,80 @@ def slangCompilerProcesses = providers.gradleProperty('primeSlangCompilerWorkers
 		}
 		.orElse(defaultSlangCompilerProcesses)
 
+def shaderTestManifestReport = layout.buildDirectory.file(
+		'reports/prime-shaders/test-programs.txt')
+def shaderTestEntryFiles = fileTree('src/test/slang/entries') {
+	include '*.slang'
+}
+def verifyShaderTestManifest = tasks.register('verifyShaderTestManifest') {
+	group = 'verification'
+	description = 'Verifies that every test Slang entry has one declared runtime or compile-only artifact.'
+	inputs.file(shaderTestProgramManifest)
+	inputs.files(shaderTestEntryFiles)
+	outputs.file(shaderTestManifestReport)
+	doLast {
+		def manifest = new groovy.json.JsonSlurper().parse(shaderTestProgramManifest)
+		if (!(manifest.programs instanceof List)) {
+			throw new GradleException('Shader test manifest must contain a programs array')
+		}
+		def entries = manifest.programs.collect { program -> program.entry?.toString() }
+		def artifacts = manifest.programs.collect { program -> program.artifact?.toString() }
+		def modes = manifest.programs.collect { program -> program.mode?.toString() }
+		if (entries.any { it == null } || artifacts.any { it == null } || modes.any { it == null }) {
+			throw new GradleException('Every Shader test program requires entry, artifact, and mode')
+		}
+		if (entries.size() != entries.toSet().size()) {
+			throw new GradleException('Shader test manifest contains duplicate entries')
+		}
+		if (artifacts.size() != artifacts.toSet().size()) {
+			throw new GradleException('Shader test manifest contains duplicate artifacts')
+		}
+		def invalidModes = modes.findAll { !(it in ['runtime', 'compile-only']) }
+		if (!invalidModes.empty) {
+			throw new GradleException("Shader test manifest contains invalid modes: ${invalidModes}")
+		}
+		manifest.programs.each { program ->
+			def expectedArtifact
+			if (program.entry.endsWith('.compute.slang')) {
+				expectedArtifact = program.entry.replace('.compute.slang', '.comp.spv')
+			} else if (program.entry.endsWith('.raygeneration.slang')) {
+				expectedArtifact = program.entry.replace('.raygeneration.slang', '.rgen.spv')
+			} else if (program.entry.endsWith('.miss.slang')) {
+				expectedArtifact = program.entry.replace('.miss.slang', '.rmiss.spv')
+			} else if (program.entry.endsWith('.closesthit.slang')) {
+				expectedArtifact = program.entry.replace('.closesthit.slang', '.rchit.spv')
+			} else if (program.entry.endsWith('.anyhit.slang')) {
+				expectedArtifact = program.entry.replace('.anyhit.slang', '.rahit.spv')
+			} else {
+				throw new GradleException("Unsupported Shader test entry stage: ${program.entry}")
+			}
+			if (program.artifact != expectedArtifact) {
+				throw new GradleException(
+						"Shader test artifact mismatch for ${program.entry}: expected ${expectedArtifact}, found ${program.artifact}")
+			}
+		}
+		def actualEntries = shaderTestEntryFiles.files.collect { it.name }.sort()
+		def declaredEntries = entries.sort()
+		if (actualEntries != declaredEntries) {
+			throw new GradleException(
+					"Shader test manifest entries differ: declared=${declaredEntries}, actual=${actualEntries}")
+		}
+		def runtimeCount = modes.count { it == 'runtime' }
+		def compileOnlyCount = modes.count { it == 'compile-only' }
+		def report = shaderTestManifestReport.get().asFile
+		report.parentFile.mkdirs()
+		report.setText(
+				"runtime=${runtimeCount}${System.lineSeparator()}compile-only=${compileOnlyCount}${System.lineSeparator()}" +
+						manifest.programs.collect { "${it.mode} ${it.entry} -> ${it.artifact}" }.join(System.lineSeparator()) +
+						System.lineSeparator(),
+				'UTF-8')
+	}
+}
+
 def compileSlangTestShaders = tasks.register(
 		'compileSlangTestShaders', primeShaderTaskTypes.compileSlang) {
-	dependsOn generateShaderAbi, verifyRoboCuteReference, verifyShaderIncludeGraph, 'verifySlangToolchain'
+	dependsOn generateShaderAbi, verifyRoboCuteReference, verifyShaderIncludeGraph,
+			'verifyShaderTestManifest', 'verifySlangToolchain'
 	sourceDirectory = file('src/test/slang/entries')
 	includeDirectories.from(
 			file('src/test/slang'),
@@ -238,6 +310,33 @@ def compileSlangTestShaders = tasks.register(
 	slangCompiler = providers.gradleProperty('primeSlangCompiler')
 			.orElse(resolveVulkanTool('slangc'))
 	spirvValidator = resolveVulkanTool('spirv-val')
+}
+
+def compiledShaderTestManifestReport = layout.buildDirectory.file(
+		'reports/prime-shaders/test-program-artifacts.txt')
+def verifyCompiledShaderTestManifest = tasks.register('verifyCompiledShaderTestManifest') {
+	group = 'verification'
+	description = 'Verifies that compiled test SPIR-V exactly matches the declared test program manifest.'
+	dependsOn compileSlangTestShaders
+	inputs.file(shaderTestProgramManifest)
+	inputs.dir(compiledSlangTestShaderRoot)
+	outputs.file(compiledShaderTestManifestReport)
+	doLast {
+		def manifest = new groovy.json.JsonSlurper().parse(shaderTestProgramManifest)
+		def declared = manifest.programs.collect { it.artifact.toString() }.sort()
+		def artifactDirectory = new File(compiledSlangTestShaderRoot.get().asFile, 'prime/shaders')
+		def actual = artifactDirectory.listFiles()
+				.findAll { it.name.endsWith('.spv') }
+				.collect { it.name }
+				.sort()
+		if (actual != declared) {
+			throw new GradleException(
+					"Compiled Shader test artifacts differ: declared=${declared}, actual=${actual}")
+		}
+		def report = compiledShaderTestManifestReport.get().asFile
+		report.parentFile.mkdirs()
+		report.setText(actual.join(System.lineSeparator()) + System.lineSeparator(), 'UTF-8')
+	}
 }
 
 def productionShaderIncludes = [
@@ -375,8 +474,26 @@ def verifyGeneratedSlangAbi = tasks.register(
 sourceSets.client.java.srcDir(files(shaderAbiJavaRoot).builtBy(generateShaderAbi))
 sourceSets.client.java.srcDir(files(shaderProgramJavaRoot).builtBy(generateShaderPrograms))
 sourceSets.client.resources.srcDir(files(compiledSlangShaderRoot).builtBy(compileSlangShaders))
-sourceSets.test.compileClasspath += sourceSets.client.output
-sourceSets.test.runtimeClasspath += sourceSets.client.output
+// Loom associates the test source set with the complete client output. Replace that dependency
+// with compileClientJava below so the default JVM suite does not inherit processClientResources.
+def clientOutputFiles = sourceSets.client.output.files
+configurations.testImplementation.dependencies.removeAll { dependency ->
+	dependency instanceof org.gradle.api.artifacts.FileCollectionDependency
+			&& dependency.files.files == clientOutputFiles
+}
+def clientJavaClasses = files(tasks.named('compileClientJava').flatMap { it.destinationDirectory })
+// Tests consume checked-in resources directly. Using client.output here also carries the generated
+// production Shader resource directory and makes an ordinary JVM test compile every Shader.
+sourceSets.test.compileClasspath = files(
+		sourceSets.main.output,
+		configurations.testCompileClasspath,
+		clientJavaClasses)
+sourceSets.test.runtimeClasspath = files(
+		sourceSets.test.output,
+		sourceSets.main.output,
+		configurations.testRuntimeClasspath,
+		clientJavaClasses,
+		'src/client/resources')
 
 tasks.withType(Test).configureEach {
 	useJUnitPlatform()
@@ -389,7 +506,7 @@ tasks.withType(Test).configureEach {
 
 tasks.named('test') {
 	useJUnitPlatform {
-		excludeTags 'gpu-shader'
+		excludeTags 'artifact', 'native', 'gpu-shader', 'gpu-ray-tracing'
 	}
 }
 
@@ -397,13 +514,45 @@ tasks.named('check') {
 	dependsOn verifySlangToolchain,
 			verifyGeneratedSlangAbi,
 			compileSlangShaders,
-			verifySlangRayPayloadAbi
+			verifySlangRayPayloadAbi,
+			'artifactTest',
+			'verifyShaderTestManifest'
+}
+
+tasks.register('artifactTest', Test) {
+	group = 'verification'
+	description = 'Runs deterministic tests over compiled Shader and packaged runtime artifacts.'
+	dependsOn compileSlangShaders
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath + files(compiledSlangShaderRoot)
+	useJUnitPlatform {
+		includeTags 'artifact'
+	}
+}
+
+tasks.register('nativeTest', Test) {
+	group = 'verification'
+	description = 'Runs the required Windows x64 native bridge execution tests.'
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform {
+		includeTags 'native'
+	}
+	systemProperty 'prime.nativeTests.required', 'true'
+	outputs.upToDateWhen { false }
+	doFirst {
+		def os = System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT)
+		def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
+		if (!os.contains('windows') || !(arch == 'amd64' || arch == 'x86_64')) {
+			throw new GradleException('nativeTest requires Windows x64')
+		}
+	}
 }
 
 tasks.register('shaderTest', Test) {
 	group = 'verification'
 	description = 'Runs GPU shader property tests and requires a usable Vulkan compute device.'
-	dependsOn compileSlangTestShaders
+	dependsOn 'verifyCompiledShaderTestManifest'
 	inputs.dir(compiledSlangTestShaderRoot)
 	testClassesDirs = sourceSets.test.output.classesDirs
 	classpath = sourceSets.test.runtimeClasspath
@@ -411,6 +560,30 @@ tasks.register('shaderTest', Test) {
 		includeTags 'gpu-shader'
 	}
 	systemProperty 'prime.shaderTests.required', 'true'
+	systemProperty 'prime.shaderValidation.required', 'true'
+	systemProperty 'prime.vulkanValidationReportDirectory',
+			layout.buildDirectory.dir('reports/vulkan-validation').get().asFile.absolutePath
+	outputs.upToDateWhen { false }
+	doFirst {
+		systemProperty 'prime.test.slangShaderDirectory',
+				new File(compiledSlangTestShaderRoot.get().asFile, 'prime/shaders').absolutePath
+	}
+}
+
+tasks.register('rayTracingTest', Test) {
+	group = 'verification'
+	description = 'Runs validated BLAS/TLAS and ray-pipeline lifecycle tests on a ray-tracing device.'
+	dependsOn 'verifyCompiledShaderTestManifest'
+	inputs.dir(compiledSlangTestShaderRoot)
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform {
+		includeTags 'gpu-ray-tracing'
+	}
+	systemProperty 'prime.rayTracingTests.required', 'true'
+	systemProperty 'prime.shaderValidation.required', 'true'
+	systemProperty 'prime.vulkanValidationReportDirectory',
+			layout.buildDirectory.dir('reports/vulkan-validation').get().asFile.absolutePath
 	outputs.upToDateWhen { false }
 	doFirst {
 		systemProperty 'prime.test.slangShaderDirectory',

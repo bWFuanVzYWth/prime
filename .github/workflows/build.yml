@@ -40,20 +40,23 @@ jobs:
       - name: Set up headless Vulkan compute
         run: |
           sudo apt-get update
-          sudo apt-get install --yes mesa-vulkan-drivers vulkan-tools
+          sudo apt-get install --yes mesa-vulkan-drivers vulkan-tools vulkan-validationlayers
           lvp_icd="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
           test -n "$lvp_icd"
           echo "VK_DRIVER_FILES=$lvp_icd" >> "$GITHUB_ENV"
           VK_DRIVER_FILES="$lvp_icd" vulkaninfo --summary
       - name: Build and test
-        run: ./gradlew --no-daemon --stacktrace clean build shaderTest
-      - name: Capture test reports on failure
-        if: failure()
+        run: ./gradlew --no-daemon --stacktrace clean check shaderTest jacocoTestReport
+      - name: Capture verification reports
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: prime-test-reports-${{ github.sha }}
           path: |
             build/reports/tests/
+            build/reports/jacoco/
+            build/reports/prime-shaders/
+            build/reports/vulkan-validation/
             build/test-results/
           if-no-files-found: ignore
       - name: Capture build artifacts
@@ -62,3 +65,31 @@ jobs:
           path: build/libs/*.jar
           if-no-files-found: error
           archive: false
+
+  native:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: microsoft
+          java-version: '25'
+          cache: gradle
+      - name: Run native bridge tests
+        run: ./gradlew --no-daemon --stacktrace nativeTest
+      - name: Capture native test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: prime-native-test-reports-${{ github.sha }}
+          path: |
+            build/reports/tests/nativeTest/
+            build/test-results/nativeTest/
+          if-no-files-found: ignore

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.lwjgl.vulkan.VK10;
 
@@ -39,6 +40,7 @@ final class VulkanPipelineCacheTest {
     }
 
     @Test
+    @Tag("artifact")
     void shaderManifestProvidesAStableSha256Identity() {
         assertTrue(VulkanShaderModules.fingerprint().matches("[0-9a-f]{64}"));
     }

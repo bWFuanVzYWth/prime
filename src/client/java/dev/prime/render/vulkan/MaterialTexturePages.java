@@ -37,7 +37,7 @@ public final class MaterialTexturePages implements AutoCloseable {
     private final ArrayList<Copy> animationCopies = new ArrayList<>();
     private List<LabPbrAtlasFrame.AnimationSample> animationSamples = List.of();
     private Resources resources;
-    private FrameToken pending;
+    private final PendingSubmission<FrameToken> pending = new PendingSubmission<>();
     private boolean closed;
 
     public MaterialTexturePages(VulkanContext context, StagingArena stagingArena) {
@@ -57,7 +57,7 @@ public final class MaterialTexturePages implements AutoCloseable {
                 && this.resources.vanillaAtlasView == vanillaAtlasView) {
             return this.resources.materials;
         }
-        if (this.pending != null) {
+        if (this.pending.active()) {
             throw new IllegalStateException(
                     "Cannot replace material texture pages with an outstanding upload");
         }
@@ -111,7 +111,7 @@ public final class MaterialTexturePages implements AutoCloseable {
     }
 
     private FrameToken prepare(VkCommandBuffer commandBuffer, boolean initialUpload) {
-        if (this.pending != null) {
+        if (this.pending.active()) {
             throw new IllegalStateException(
                     "Previous LabPBR upload has not been submitted or abandoned");
         }
@@ -209,13 +209,11 @@ public final class MaterialTexturePages implements AutoCloseable {
         if (token == null) {
             return;
         }
-        if (token.pages != this
-                || token != this.pending
-                || token.finished) {
+        if (token.pages != this) {
             throw new IllegalArgumentException("LabPBR frame token does not belong to this submission");
         }
-        token.finished = true;
-        this.pending = null;
+        this.pending.complete(
+                token, "LabPBR frame token does not belong to this submission");
         if (token.initialUpload) {
             token.owner.prepared = true;
             token.owner.markImagesInitialized();
@@ -241,14 +239,12 @@ public final class MaterialTexturePages implements AutoCloseable {
         if (token == null) {
             return;
         }
-        if (token.pages != this
-                || token != this.pending
-                || token.finished) {
+        if (token.pages != this) {
             throw new IllegalArgumentException(
                     "Material frame token does not belong to these texture pages");
         }
-        token.finished = true;
-        this.pending = null;
+        this.pending.complete(
+                token, "Material frame token does not belong to these texture pages");
         ResourceCleanup.throwIfFailed(ResourceCleanup.close(token.batch, null));
     }
 
@@ -257,10 +253,8 @@ public final class MaterialTexturePages implements AutoCloseable {
         if (!this.closed) {
             this.closed = true;
             RuntimeException failure = null;
-            if (this.pending != null) {
-                FrameToken abandoned = this.pending;
-                this.pending = null;
-                abandoned.finished = true;
+            FrameToken abandoned = this.pending.clear();
+            if (abandoned != null) {
                 failure = ResourceCleanup.close(abandoned.batch, failure);
             }
             if (this.resources != null) {
@@ -288,7 +282,7 @@ public final class MaterialTexturePages implements AutoCloseable {
                 owner,
                 initialUpload,
                 animationUpdateCount);
-        this.pending = token;
+        this.pending.begin(token);
         return token;
     }
 
@@ -811,7 +805,6 @@ public final class MaterialTexturePages implements AutoCloseable {
         private final Resources owner;
         private final boolean initialUpload;
         private final int animationUpdateCount;
-        private boolean finished;
 
         private FrameToken(
                 MaterialTexturePages pages,

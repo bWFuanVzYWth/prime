@@ -6,29 +6,18 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Path;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 @Tag("gpu-shader")
+@ExtendWith(ShaderComputeExtension.class)
 final class SunShadowHierarchyGpuTest {
     private static final int CASE_FLOATS = 6;
+    private static ShaderComputeRunner runner;
 
     @Test
     void leafIntegrationResolvesBlockerCrossingsAnalytically() throws IOException {
-        ShaderComputeRunner opened;
-        try {
-            opened = ShaderComputeRunner.open();
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests", exception);
-            }
-            Assumptions.assumeTrue(
-                    false, "Vulkan shader tests unavailable: " + exception.getMessage());
-            return;
-        }
-
         float[][] cases = {
             {10.0F, 0.0F, 0.0F, 4.0F, 5.0F, 0.02F},
             {0.0F, 0.0F, 0.0F, 4.0F, 5.0F, 0.02F},
@@ -53,23 +42,21 @@ final class SunShadowHierarchyGpuTest {
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(cases.length)
                 .flip();
-        try (ShaderComputeRunner runner = opened) {
-            Path shader = Path.of(
-                    System.getProperty("prime.test.slangShaderDirectory"),
-                    "sun_shadow_hierarchy_properties.comp.spv");
-            ByteBuffer output = runner.dispatch(
-                    shader,
-                    input,
-                    cases.length * Float.BYTES,
-                    new ShaderComputeRunner.Workgroups(1, 1, 1),
-                    push);
-            for (int index = 0; index < cases.length; index++) {
-                assertEquals(
-                        expected[index],
-                        output.getFloat(index * Float.BYTES),
-                        1.0e-5F,
-                        shader.getFileName() + " case " + index);
-            }
+        Path shader = Path.of(
+                System.getProperty("prime.test.slangShaderDirectory"),
+                "sun_shadow_hierarchy_properties.comp.spv");
+        ByteBuffer output = runner.dispatch(
+                shader,
+                input,
+                cases.length * Float.BYTES,
+                new ShaderComputeRunner.Workgroups(1, 1, 1),
+                push);
+        for (int index = 0; index < cases.length; index++) {
+            assertEquals(
+                    expected[index],
+                    output.getFloat(index * Float.BYTES),
+                    1.0e-5F,
+                    shader.getFileName() + " case " + index);
         }
     }
 }

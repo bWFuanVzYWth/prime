@@ -1,6 +1,7 @@
 plugins {
 	id 'net.fabricmc.fabric-loom' version "${loom_version}"
 	id 'maven-publish'
+	id 'jacoco'
 	id 'prime.shader-abi-conventions' apply false
 	id 'prime.native-packaging-conventions' apply false
 	id 'prime.architecture-conventions'
@@ -66,7 +67,31 @@ dependencies {
 
 	testImplementation platform('org.junit:junit-bom:6.1.3')
 	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testImplementation 'org.jetbrains:jetCheck:0.3.0'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+jacoco {
+	toolVersion = '0.8.15'
+}
+
+tasks.named('jacocoTestReport', JacocoReport) {
+	dependsOn tasks.named('test'), tasks.named('artifactTest')
+	executionData.setFrom(files(
+			layout.buildDirectory.file('jacoco/test.exec'),
+			layout.buildDirectory.file('jacoco/artifactTest.exec')))
+	sourceDirectories.setFrom(files('src/client/java'))
+	classDirectories.setFrom(sourceSets.client.output.classesDirs.collect { directory ->
+		fileTree(directory) {
+			exclude 'dev/prime/render/shader/ShaderAbi*.class'
+			exclude 'dev/prime/render/vulkan/GeneratedShaderPrograms*.class'
+		}
+	})
+	reports {
+		xml.required = true
+		html.required = true
+		csv.required = false
+	}
 }
 
 

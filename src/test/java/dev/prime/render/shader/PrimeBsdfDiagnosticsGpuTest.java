@@ -3,13 +3,12 @@ package dev.prime.render.shader;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 @Tag("gpu-shader")
+@ExtendWith(ShaderComputeExtension.class)
 final class PrimeBsdfDiagnosticsGpuTest {
     private static final long SEED = 0x4253_4446_4449_4147L;
     private static final int INPUT_WORDS = 1;
@@ -18,25 +17,6 @@ final class PrimeBsdfDiagnosticsGpuTest {
     private static final int DIRECTION_FIELD = 5;
 
     private static ShaderComputeRunner runner;
-
-    @BeforeAll
-    static void openRunner() throws ShaderComputeRunner.UnavailableException {
-        try {
-            runner = ShaderComputeRunner.open();
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests", exception);
-            }
-            Assumptions.assumeTrue(
-                    false, "Vulkan shader tests unavailable: " + exception.getMessage());
-        }
-    }
-
-    @AfterAll
-    static void closeRunner() {
-        if (runner != null) runner.close();
-    }
 
     @Test
     void rejectedAdapterSamplesPreserveTheirFirstRawDiagnostic() throws IOException {

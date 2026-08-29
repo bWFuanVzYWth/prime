@@ -60,6 +60,9 @@ public final class OfflineFrameExecutor {
         MaterialTexturePages.FrameToken materialFrame = null;
         VulkanFrameSubmission submission =
                 new VulkanFrameSubmission(this.imageInitialization);
+        FrameCompletion completion = new FrameCompletion();
+        completion.onCommit(0, submission::submitted);
+        completion.onAbandon(0, submission::abandon);
         try {
             submission.begin();
             this.context.device().instance().debug().beginDebugGroup(
@@ -74,6 +77,10 @@ public final class OfflineFrameExecutor {
             VulkanImageTransitions.prepareSceneTexturesForTrace(
                     commandBuffer, sceneTextures);
             materialFrame = materialTextures.prepareAnimations(commandBuffer);
+            MaterialTexturePages.FrameToken trackedMaterialFrame = materialFrame;
+            completion.onCommit(2, () -> materialTextures.submitted(trackedMaterialFrame));
+            completion.onAbandon(2, failure -> ResourceCleanup.run(
+                    () -> materialTextures.abandon(trackedMaterialFrame), failure));
             // The sun-cache raygen borrows the shared scene descriptor set prepared above.
             atmosphereFrame = atmosphere.prepare(
                     commandBuffer,
@@ -81,6 +88,10 @@ public final class OfflineFrameExecutor {
                     plan.integrator(),
                     scene,
                     true);
+            long trackedAtmosphereFrame = atmosphereFrame;
+            completion.onCommit(1, () -> atmosphere.submitted(trackedAtmosphereFrame));
+            completion.onAbandon(1, failure -> ResourceCleanup.run(
+                    () -> atmosphere.abandon(trackedAtmosphereFrame), failure));
             pipeline.trace(
                     commandBuffer, plan.integrator(), scene);
             VulkanImageTransitions.prepareOfflineDisplay(
@@ -103,34 +114,12 @@ public final class OfflineFrameExecutor {
                     encoder,
                     commandBuffer,
                     "end Prime offline accumulation command buffer");
+            completion.acceptedBySubmission();
             HdrPresentation.publish(this.context, display.hdrOutput(), displayOutput);
             // Prime histories advance only after Minecraft's open host submission accepts it.
-            submission.submitted();
-            RuntimeException commitFailure = null;
-            long submittedAtmosphereFrame = atmosphereFrame;
-            commitFailure = ResourceCleanup.run(
-                    () -> atmosphere.submitted(submittedAtmosphereFrame),
-                    commitFailure);
-            MaterialTexturePages.FrameToken submittedMaterialFrame =
-                    materialFrame;
-            commitFailure = ResourceCleanup.run(
-                    () -> materialTextures.submitted(submittedMaterialFrame),
-                    commitFailure);
-            ResourceCleanup.throwIfFailed(commitFailure);
+            completion.commit();
         } catch (RuntimeException exception) {
-            if (!submission.wasAcceptedByMinecraftHostSubmission()) {
-                RuntimeException failure = submission.abandon(exception);
-                long abandonedAtmosphereFrame = atmosphereFrame;
-                failure = ResourceCleanup.run(
-                        () -> atmosphere.abandon(abandonedAtmosphereFrame),
-                        failure);
-                MaterialTexturePages.FrameToken abandonedMaterialFrame =
-                        materialFrame;
-                throw ResourceCleanup.run(
-                        () -> materialTextures.abandon(abandonedMaterialFrame),
-                        failure);
-            }
-            throw exception;
+            throw completion.abandon(exception);
         }
     }
 

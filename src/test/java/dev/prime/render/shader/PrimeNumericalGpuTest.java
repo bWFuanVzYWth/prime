@@ -5,13 +5,12 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 @Tag("gpu-shader")
+@ExtendWith(ShaderComputeExtension.class)
 final class PrimeNumericalGpuTest {
     private static final long SEED = 0x4E55_4D45_5249_4301L;
     private static final int INPUT_WORDS = 2;
@@ -62,27 +61,6 @@ final class PrimeNumericalGpuTest {
     };
 
     private static ShaderComputeRunner runner;
-
-    @BeforeAll
-    static void openRunner() throws ShaderComputeRunner.UnavailableException {
-        try {
-            runner = ShaderComputeRunner.open();
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests", exception);
-            }
-            Assumptions.assumeTrue(
-                    false, "Vulkan shader tests unavailable: " + exception.getMessage());
-        }
-    }
-
-    @AfterAll
-    static void closeRunner() {
-        if (runner != null) {
-            runner.close();
-        }
-    }
 
     @Test
     void productionClassifiersRecognizeEveryNonFiniteSignAndNumericDomain()

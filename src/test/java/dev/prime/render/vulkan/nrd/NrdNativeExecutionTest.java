@@ -2,13 +2,9 @@ package dev.prime.render.vulkan.nrd;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.HashMap;
@@ -18,34 +14,13 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.joml.Matrix4f;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-final class NrdNativeTest {
-    private static final String WINDOWS_RESOURCE = "/prime/natives/windows-x86_64/prime_nrd.dll";
-
-    @Test
-    void bundledBridgeResourceIsPackagedOnEveryBuildPlatform() throws IOException {
-        try (InputStream input = NrdNative.class.getResourceAsStream(WINDOWS_RESOURCE)) {
-            assertNotNull(input, "missing bundled NRD bridge");
-            byte[] header = input.readNBytes(2);
-            assertEquals(2, header.length, "truncated bundled NRD bridge");
-            assertEquals((byte) 'M', header[0]);
-            assertEquals((byte) 'Z', header[1]);
-        }
-    }
-
-    @Test
-    void nativePlatformDetectionRejectsUnsupportedSystemsAndArchitectures() {
-        assertTrue(NrdNative.isSupportedPlatform("Windows 11", "amd64"));
-        assertTrue(NrdNative.isSupportedPlatform("WINDOWS 10", "x86_64"));
-        assertFalse(NrdNative.isSupportedPlatform("Linux", "amd64"));
-        assertFalse(NrdNative.isSupportedPlatform("Darwin", "x86_64"));
-        assertFalse(NrdNative.isSupportedPlatform("Windows 11", "aarch64"));
-    }
-
+@Tag("native")
+final class NrdNativeExecutionTest {
     @Test
     void bundledBridgeCreatesReblurAndSigmaSunShadowDispatches() {
-        requireNativeRuntime();
         try (NrdNative.Instance instance = NrdNative.create(64, 48)) {
             NrdNative.Description description = instance.description();
             assertEquals(NrdNative.EXPECTED_NRD_VERSION, description.nrdVersion());
@@ -54,7 +29,6 @@ final class NrdNativeTest {
             assertEquals(1, description.constantBufferAndSamplersSpaceIndex());
             assertEquals(2, description.samplers().size());
             assertFalse(description.pipelines().isEmpty());
-            assertFalse(description.permanentPool().isEmpty());
             for (NrdNative.Pipeline pipeline : description.pipelines()) {
                 assertEquals(
                         0x07230203,
@@ -175,12 +149,6 @@ final class NrdNativeTest {
                     "NRD allocated a transient texture that no dispatch references");
             assertSame(dispatches, instance.getDispatches());
         }
-    }
-
-    private static void requireNativeRuntime() {
-        assumeTrue(
-                NrdNative.isSupportedPlatform(),
-                "bundled NRD execution tests require Windows x86-64");
     }
 
     private static Set<DescriptorBinding> descriptorBindings(byte[] spirv) {

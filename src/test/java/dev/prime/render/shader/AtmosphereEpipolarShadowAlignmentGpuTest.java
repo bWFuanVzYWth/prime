@@ -9,33 +9,19 @@ import java.nio.ByteOrder;
 import java.nio.file.Path;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 @Tag("gpu-shader")
+@ExtendWith(ShaderComputeExtension.class)
 final class AtmosphereEpipolarShadowAlignmentGpuTest {
     private static final int CASE_BYTES = 96;
+    private static ShaderComputeRunner runner;
 
     @Test
     void cachedShadowDirectionMustOwnTheEpipolarGrid()
             throws IOException {
-        ShaderComputeRunner opened;
-        try {
-            opened = ShaderComputeRunner.open();
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests",
-                        exception);
-            }
-            Assumptions.assumeTrue(
-                    false,
-                    "Vulkan shader tests unavailable: "
-                            + exception.getMessage());
-            return;
-        }
-
         Matrix4f inverseViewProjection = new Matrix4f()
                 .perspective(
                         (float) (Math.PI * 0.5),
@@ -89,26 +75,24 @@ final class AtmosphereEpipolarShadowAlignmentGpuTest {
                 System.getProperty("prime.test.slangShaderDirectory"),
                 "atmosphere_epipolar_shadow_alignment.comp.spv");
 
-        try (ShaderComputeRunner runner = opened) {
-            ByteBuffer output = runner.dispatch(
-                    shader,
-                    input,
-                    cases.length * Integer.BYTES,
-                    new ShaderComputeRunner.Workgroups(
-                            1,
-                            256,
-                            cases.length),
-                    push);
-            for (int caseIndex = 0; caseIndex < 4; caseIndex++) {
-                assertEquals(
-                        0,
-                        output.getInt(caseIndex * Integer.BYTES),
-                        "aligned cache direction case " + caseIndex);
-            }
-            assertTrue(
-                    output.getInt(4 * Integer.BYTES) > 0,
-                    "a lagged cache direction must reproduce the rejected rays");
+        ByteBuffer output = runner.dispatch(
+                shader,
+                input,
+                cases.length * Integer.BYTES,
+                new ShaderComputeRunner.Workgroups(
+                        1,
+                        256,
+                        cases.length),
+                push);
+        for (int caseIndex = 0; caseIndex < 4; caseIndex++) {
+            assertEquals(
+                    0,
+                    output.getInt(caseIndex * Integer.BYTES),
+                    "aligned cache direction case " + caseIndex);
         }
+        assertTrue(
+                output.getInt(4 * Integer.BYTES) > 0,
+                "a lagged cache direction must reproduce the rejected rays");
     }
 
     private static void putDirection(

@@ -14,13 +14,11 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VK12;
-import org.lwjgl.vulkan.VkApplicationInfo;
 import org.lwjgl.vulkan.VkBufferCreateInfo;
 import org.lwjgl.vulkan.VkBufferImageCopy;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkCommandBufferAllocateInfo;
 import org.lwjgl.vulkan.VkCommandBufferBeginInfo;
-import org.lwjgl.vulkan.VkCommandPoolCreateInfo;
 import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorBufferInfo;
 import org.lwjgl.vulkan.VkDescriptorImageInfo;
@@ -30,42 +28,37 @@ import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
 import org.lwjgl.vulkan.VkDevice;
-import org.lwjgl.vulkan.VkDeviceCreateInfo;
-import org.lwjgl.vulkan.VkDeviceQueueCreateInfo;
 import org.lwjgl.vulkan.VkImageCreateInfo;
 import org.lwjgl.vulkan.VkImageMemoryBarrier;
 import org.lwjgl.vulkan.VkImageViewCreateInfo;
-import org.lwjgl.vulkan.VkInstance;
-import org.lwjgl.vulkan.VkInstanceCreateInfo;
 import org.lwjgl.vulkan.VkMemoryAllocateInfo;
 import org.lwjgl.vulkan.VkMemoryBarrier;
 import org.lwjgl.vulkan.VkMemoryRequirements;
 import org.lwjgl.vulkan.VkPhysicalDevice;
 import org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties;
-import org.lwjgl.vulkan.VkPhysicalDeviceProperties;
 import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
 import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
 import org.lwjgl.vulkan.VkQueue;
-import org.lwjgl.vulkan.VkQueueFamilyProperties;
 import org.lwjgl.vulkan.VkSamplerCreateInfo;
 import org.lwjgl.vulkan.VkShaderModuleCreateInfo;
 import org.lwjgl.vulkan.VkSubmitInfo;
 import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /**
- * Minimal headless Vulkan owner for compute shader tests.
+ * Minimal headless Vulkan dispatch harness for compute shader tests.
  *
- * <p>The runner deliberately does not reuse Minecraft's renderer: a test owns exactly one instance,
- * device, queue and command pool. Dispatches own their pipeline, descriptors and mapped buffers;
- * optional immutable sampled resources remain owned by the runner for its complete lifetime. This
- * keeps shader behavior tests independent of client initialization and render state.
+ * <p>The harness deliberately does not reuse Minecraft's renderer. {@link VulkanTestDevice} owns
+ * the instance, device, queue and command pool; dispatches own their pipeline, descriptors and
+ * mapped buffers. Optional immutable sampled resources remain owned by this harness for its
+ * complete lifetime. This keeps Shader behavior tests independent of client initialization and
+ * render state.
  */
 final class ShaderComputeRunner implements AutoCloseable {
     private static final int LOCAL_SIZE = 64;
     private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
 
-    private final VkInstance instance;
+    private final VulkanTestDevice testDevice;
     private final VkPhysicalDevice physicalDevice;
     private final VkDevice device;
     private final VkQueue queue;
@@ -73,102 +66,17 @@ final class ShaderComputeRunner implements AutoCloseable {
     private final List<ImageBinding> images = new ArrayList<>();
     private boolean closed;
 
-    private ShaderComputeRunner(
-            VkInstance instance,
-            VkPhysicalDevice physicalDevice,
-            VkDevice device,
-            VkQueue queue,
-            long commandPool) {
-        this.instance = instance;
-        this.physicalDevice = physicalDevice;
-        this.device = device;
-        this.queue = queue;
-        this.commandPool = commandPool;
+    private ShaderComputeRunner(VulkanTestDevice testDevice) {
+        this.testDevice = testDevice;
+        this.physicalDevice = testDevice.physicalDevice();
+        this.device = testDevice.device();
+        this.queue = testDevice.queue();
+        this.commandPool = testDevice.commandPool();
     }
 
     static ShaderComputeRunner open() throws UnavailableException {
-        VkInstance instance = null;
-        VkDevice device = null;
-        long commandPool = 0L;
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkApplicationInfo applicationInfo = VkApplicationInfo.calloc(stack)
-                    .sType$Default()
-                    .pApplicationName(stack.UTF8("Prime shader tests"))
-                    .applicationVersion(1)
-                    .pEngineName(stack.UTF8("Prime"))
-                    .engineVersion(1)
-                    .apiVersion(VK12.VK_API_VERSION_1_2);
-            VkInstanceCreateInfo instanceInfo = VkInstanceCreateInfo.calloc(stack)
-                    .sType$Default()
-                    .pApplicationInfo(applicationInfo);
-            PointerBuffer pointer = stack.mallocPointer(1);
-            int result = VK12.vkCreateInstance(
-                    instanceInfo,
-                    null,
-                    pointer);
-            if (result != VK12.VK_SUCCESS) {
-                throw new UnavailableException("vkCreateInstance returned " + result);
-            }
-            instance = new VkInstance(pointer.get(0), instanceInfo);
-
-            SelectedDevice selected = selectDevice(instance, stack);
-            VkDeviceQueueCreateInfo.Buffer queueInfo = VkDeviceQueueCreateInfo.calloc(1, stack);
-            queueInfo.get(0)
-                    .sType$Default()
-                    .queueFamilyIndex(selected.queueFamily())
-                    .pQueuePriorities(stack.floats(1.0F));
-            VkDeviceCreateInfo deviceInfo = VkDeviceCreateInfo.calloc(stack)
-                    .sType$Default()
-                    .pQueueCreateInfos(queueInfo);
-            pointer.clear();
-            result = VK12.vkCreateDevice(selected.physicalDevice(), deviceInfo, null, pointer);
-            if (result != VK12.VK_SUCCESS) {
-                throw new UnavailableException("vkCreateDevice returned " + result);
-            }
-            device = new VkDevice(pointer.get(0), selected.physicalDevice(), deviceInfo);
-
-            pointer.clear();
-            VK12.vkGetDeviceQueue(device, selected.queueFamily(), 0, pointer);
-            VkQueue queue = new VkQueue(pointer.get(0), device);
-            LongBuffer handle = stack.mallocLong(1);
-            check(
-                    VK12.vkCreateCommandPool(
-                            device,
-                            VkCommandPoolCreateInfo.calloc(stack)
-                                    .sType$Default()
-                                    .flags(VK12.VK_COMMAND_POOL_CREATE_TRANSIENT_BIT)
-                                    .queueFamilyIndex(selected.queueFamily()),
-                            null,
-                            handle),
-                    "create shader-test command pool");
-            commandPool = handle.get(0);
-            return new ShaderComputeRunner(
-                    instance, selected.physicalDevice(), device, queue, commandPool);
-        } catch (UnavailableException exception) {
-            if (commandPool != 0L && device != null) {
-                VK12.vkDestroyCommandPool(device, commandPool, null);
-            }
-            if (device != null) {
-                VK12.vkDestroyDevice(device, null);
-            }
-            if (instance != null) {
-                VK12.vkDestroyInstance(instance, null);
-            }
-            throw exception;
-        } catch (RuntimeException | LinkageError exception) {
-            if (commandPool != 0L && device != null) {
-                VK12.vkDestroyCommandPool(device, commandPool, null);
-            }
-            if (device != null) {
-                VK12.vkDestroyDevice(device, null);
-            }
-            if (instance != null) {
-                VK12.vkDestroyInstance(instance, null);
-            }
-            throw exception;
-        }
+        return new ShaderComputeRunner(VulkanTestDevice.open());
     }
-
     ByteBuffer dispatch(
             Path shaderPath, ByteBuffer input, int outputBytes, int invocationCount)
             throws IOException {
@@ -947,44 +855,6 @@ final class ShaderComputeRunner implements AutoCloseable {
         }
     }
 
-    private static SelectedDevice selectDevice(VkInstance instance, MemoryStack stack)
-            throws UnavailableException {
-        IntBuffer count = stack.ints(0);
-        int result = VK12.vkEnumeratePhysicalDevices(instance, count, null);
-        if (result != VK12.VK_SUCCESS || count.get(0) == 0) {
-            throw new UnavailableException("No Vulkan physical device is available");
-        }
-        PointerBuffer devices = stack.mallocPointer(count.get(0));
-        check(VK12.vkEnumeratePhysicalDevices(instance, count, devices),
-                "enumerate shader-test devices");
-        for (int deviceIndex = 0; deviceIndex < devices.remaining(); deviceIndex++) {
-            VkPhysicalDevice physicalDevice =
-                    new VkPhysicalDevice(devices.get(deviceIndex), instance);
-            VkPhysicalDeviceProperties deviceProperties =
-                    VkPhysicalDeviceProperties.calloc(stack);
-            VK12.vkGetPhysicalDeviceProperties(physicalDevice, deviceProperties);
-            if (Integer.compareUnsigned(
-                            deviceProperties.apiVersion(), VK12.VK_API_VERSION_1_2)
-                    < 0) {
-                continue;
-            }
-            count.put(0, 0);
-            VK12.vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, count, null);
-            VkQueueFamilyProperties.Buffer queueProperties =
-                    VkQueueFamilyProperties.calloc(count.get(0), stack);
-            VK12.vkGetPhysicalDeviceQueueFamilyProperties(
-                    physicalDevice, count, queueProperties);
-            for (int queueFamily = 0; queueFamily < queueProperties.remaining(); queueFamily++) {
-                if (queueProperties.get(queueFamily).queueCount() > 0
-                        && (queueProperties.get(queueFamily).queueFlags()
-                        & VK12.VK_QUEUE_COMPUTE_BIT) != 0) {
-                    return new SelectedDevice(physicalDevice, queueFamily);
-                }
-            }
-        }
-        throw new UnavailableException("No Vulkan 1.2 compute queue is available");
-    }
-
     private static void zero(ByteBuffer buffer) {
         ByteBuffer target = buffer.duplicate();
         target.clear();
@@ -1014,14 +884,39 @@ final class ShaderComputeRunner implements AutoCloseable {
             return;
         }
         this.closed = true;
-        VK12.vkDeviceWaitIdle(this.device);
+        Throwable failure = null;
+        try {
+            this.testDevice.waitIdle();
+        } catch (RuntimeException | Error exception) {
+            failure = exception;
+        }
         for (ImageBinding image : this.images) {
-            image.resource().close();
+            try {
+                image.resource().close();
+            } catch (RuntimeException | Error exception) {
+                if (failure == null) {
+                    failure = exception;
+                } else {
+                    failure.addSuppressed(exception);
+                }
+            }
         }
         this.images.clear();
-        VK12.vkDestroyCommandPool(this.device, this.commandPool, null);
-        VK12.vkDestroyDevice(this.device, null);
-        VK12.vkDestroyInstance(this.instance, null);
+        try {
+            this.testDevice.close();
+        } catch (RuntimeException | Error exception) {
+            if (failure == null) {
+                failure = exception;
+            } else {
+                failure.addSuppressed(exception);
+            }
+        }
+        if (failure instanceof RuntimeException runtimeException) {
+            throw runtimeException;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
     }
 
     static final class UnavailableException extends Exception {
@@ -1030,9 +925,6 @@ final class ShaderComputeRunner implements AutoCloseable {
         UnavailableException(String message) {
             super(message);
         }
-    }
-
-    private record SelectedDevice(VkPhysicalDevice physicalDevice, int queueFamily) {
     }
 
     record Workgroups(int x, int y, int z) {

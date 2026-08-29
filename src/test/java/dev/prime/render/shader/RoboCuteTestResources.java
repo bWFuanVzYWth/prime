@@ -39,22 +39,13 @@ final class RoboCuteTestResources {
         return result.put(bytes).flip();
     }
 
-    static ShaderComputeRunner openRunnerWithTransmissionGgxEnergy(ByteBuffer lut)
-            throws ShaderComputeRunner.UnavailableException {
-        ShaderComputeRunner runner = ShaderComputeRunner.open();
-        boolean loaded = false;
-        try {
-            runner.loadTransmissionGgxEnergy(
-                    lut,
-                    GGX_LUT_WIDTH,
-                    GGX_LUT_HEIGHT,
-                    GGX_LUT_DEPTH);
-            loaded = true;
-            return runner;
-        } finally {
-            if (!loaded) {
-                runner.close();
-            }
-        }
+    static ByteBuffer bindTransmissionGgxEnergy(ShaderComputeRunner runner) throws IOException {
+        ByteBuffer lut = transmissionGgxEnergy();
+        runner.loadTransmissionGgxEnergy(
+                lut,
+                GGX_LUT_WIDTH,
+                GGX_LUT_HEIGHT,
+                GGX_LUT_DEPTH);
+        return lut;
     }
 }

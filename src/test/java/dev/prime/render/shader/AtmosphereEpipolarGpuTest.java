@@ -6,33 +6,20 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Path;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 @Tag("gpu-shader")
+@ExtendWith(ShaderComputeExtension.class)
 final class AtmosphereEpipolarGpuTest {
     private static final int CASE_FLOATS = 4;
     private static final int OUTPUT_FLOATS = 4;
+    private static ShaderComputeRunner runner;
 
     @Test
     void screenPointsRoundTripForVisibleAndOffscreenEpipoles()
             throws IOException {
-        ShaderComputeRunner opened;
-        try {
-            opened = ShaderComputeRunner.open();
-        } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
-            if (Boolean.getBoolean("prime.shaderTests.required")) {
-                throw new AssertionError(
-                        "A Vulkan compute device is required for shader tests",
-                        exception);
-            }
-            Assumptions.assumeTrue(
-                    false,
-                    "Vulkan shader tests unavailable: " + exception.getMessage());
-            return;
-        }
-
         float[][] cases = {
             {0.0F, 0.0F, 0.75F, 0.25F},
             {0.2F, -0.4F, -0.8F, 0.9F},
@@ -59,36 +46,34 @@ final class AtmosphereEpipolarGpuTest {
                 System.getProperty("prime.test.slangShaderDirectory"),
                 "atmosphere_epipolar_properties.comp.spv");
 
-        try (ShaderComputeRunner runner = opened) {
-            ByteBuffer output = runner.dispatch(
-                    shader,
-                    input,
-                    cases.length * OUTPUT_FLOATS * Float.BYTES,
-                    new ShaderComputeRunner.Workgroups(1, 1, 1),
-                    push);
-            for (int index = 0; index < cases.length; index++) {
-                int offset = index * OUTPUT_FLOATS * Float.BYTES;
-                assertEquals(
-                        cases[index][2],
-                        output.getFloat(offset),
-                        2.0e-3F,
-                        "x case " + index);
-                assertEquals(
-                        cases[index][3],
-                        output.getFloat(offset + Float.BYTES),
-                        2.0e-3F,
-                        "y case " + index);
-                assertEquals(
-                        0.0F,
-                        output.getFloat(offset + 2 * Float.BYTES),
-                        2.0e-4F,
-                        "boundary case " + index);
-                assertEquals(
-                        1.0F,
-                        output.getFloat(offset + 3 * Float.BYTES),
-                        0.0F,
-                        "valid case " + index);
-            }
+        ByteBuffer output = runner.dispatch(
+                shader,
+                input,
+                cases.length * OUTPUT_FLOATS * Float.BYTES,
+                new ShaderComputeRunner.Workgroups(1, 1, 1),
+                push);
+        for (int index = 0; index < cases.length; index++) {
+            int offset = index * OUTPUT_FLOATS * Float.BYTES;
+            assertEquals(
+                    cases[index][2],
+                    output.getFloat(offset),
+                    2.0e-3F,
+                    "x case " + index);
+            assertEquals(
+                    cases[index][3],
+                    output.getFloat(offset + Float.BYTES),
+                    2.0e-3F,
+                    "y case " + index);
+            assertEquals(
+                    0.0F,
+                    output.getFloat(offset + 2 * Float.BYTES),
+                    2.0e-4F,
+                    "boundary case " + index);
+            assertEquals(
+                    1.0F,
+                    output.getFloat(offset + 3 * Float.BYTES),
+                    0.0F,
+                    "valid case " + index);
         }
     }
 }

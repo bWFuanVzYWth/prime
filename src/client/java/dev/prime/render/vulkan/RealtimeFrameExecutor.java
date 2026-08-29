@@ -52,6 +52,12 @@ public final class RealtimeFrameExecutor {
         DisplayExposureDiagnostics.Capture exposureCapture = null;
         VulkanFrameSubmission submission =
                 new VulkanFrameSubmission(this.imageInitialization);
+        FrameCompletion completion = new FrameCompletion();
+        completion.onCommit(0, submission::submitted);
+        completion.onAbandon(0, submission::abandon);
+        completion.onCommit(3, () -> processor.submitted(processorFrame));
+        completion.onAbandon(3, failure -> ResourceCleanup.run(
+                () -> processor.abandon(processorFrame), failure));
         try {
             Objects.requireNonNull(debugLabel, "debugLabel");
             Objects.requireNonNull(pipeline, "pipeline");
@@ -88,6 +94,10 @@ public final class RealtimeFrameExecutor {
             VulkanImageTransitions.prepareSceneTexturesForTrace(
                     commandBuffer, sceneTextures);
             materialFrame = materialTextures.prepareAnimations(commandBuffer);
+            MaterialTexturePages.FrameToken trackedMaterialFrame = materialFrame;
+            completion.onCommit(4, () -> materialTextures.submitted(trackedMaterialFrame));
+            completion.onAbandon(2, failure -> ResourceCleanup.run(
+                    () -> materialTextures.abandon(trackedMaterialFrame), failure));
             // Atmosphere preparation traces the sun cache through the shared RT descriptor set.
             // Every image named by that set must have its declared layout before this call.
             atmosphereFrame = atmosphere.prepare(
@@ -96,6 +106,10 @@ public final class RealtimeFrameExecutor {
                     plan.integrator(),
                     scene,
                     false);
+            long trackedAtmosphereFrame = atmosphereFrame;
+            completion.onCommit(2, () -> atmosphere.submitted(trackedAtmosphereFrame));
+            completion.onAbandon(1, failure -> ResourceCleanup.run(
+                    () -> atmosphere.abandon(trackedAtmosphereFrame), failure));
             pipeline.trace(commandBuffer, plan.integrator(), scene);
             processor.captureRendererDiagnostic(
                     commandBuffer, this.imageInitialization, diagnostics.renderer());
@@ -107,6 +121,11 @@ public final class RealtimeFrameExecutor {
             processor.presentRendererDiagnostic(commandBuffer, diagnostics.renderer());
             exposureCapture = exposureDiagnostics.record(
                     commandBuffer, processor.displayExposureStateBuffer());
+            DisplayExposureDiagnostics.Capture trackedExposureCapture = exposureCapture;
+            completion.onCommit(1, () -> exposureDiagnostics.submitted(
+                    trackedExposureCapture));
+            completion.onAbandon(4, failure -> ResourceCleanup.run(
+                    () -> exposureDiagnostics.abandon(trackedExposureCapture), failure));
             VulkanImageTransitions.finishAtlasRead(
                     commandBuffer, atlasView.texture());
             VulkanImageTransitions.finishSceneTextureReads(
@@ -123,50 +142,12 @@ public final class RealtimeFrameExecutor {
                     encoder,
                     commandBuffer,
                     "end Prime realtime command buffer");
+            completion.acceptedBySubmission();
             HdrPresentation.publish(this.context, processor.hdrDisplayOutput(), output);
             // A normal return transfers command/resource ownership and advances Prime histories.
-            submission.submitted();
-            exposureDiagnostics.submitted(exposureCapture);
-            RuntimeException commitFailure = null;
-            long submittedAtmosphereFrame = atmosphereFrame;
-            commitFailure = ResourceCleanup.run(
-                    () -> atmosphere.submitted(submittedAtmosphereFrame),
-                    commitFailure);
-            commitFailure = ResourceCleanup.run(
-                    () -> processor.submitted(processorFrame), commitFailure);
-            MaterialTexturePages.FrameToken submittedMaterialFrame =
-                    materialFrame;
-            commitFailure = ResourceCleanup.run(
-                    () -> materialTextures.submitted(submittedMaterialFrame),
-                    commitFailure);
-            ResourceCleanup.throwIfFailed(commitFailure);
+            completion.commit();
         } catch (RuntimeException exception) {
-            if (!submission.wasAcceptedByMinecraftHostSubmission()) {
-                RuntimeException failure = submission.abandon(exception);
-                if (atmosphereFrame != 0L) {
-                    long abandonedAtmosphereFrame = atmosphereFrame;
-                    failure = ResourceCleanup.run(
-                            () -> atmosphere.abandon(abandonedAtmosphereFrame),
-                            failure);
-                }
-                if (materialFrame != null) {
-                    MaterialTexturePages.FrameToken abandonedMaterialFrame =
-                            materialFrame;
-                    failure = ResourceCleanup.run(
-                            () -> materialTextures.abandon(abandonedMaterialFrame),
-                            failure);
-                }
-                failure = ResourceCleanup.run(
-                        () -> processor.abandon(processorFrame),
-                        failure);
-                DisplayExposureDiagnostics.Capture abandonedExposureCapture =
-                        exposureCapture;
-                failure = ResourceCleanup.run(
-                        () -> exposureDiagnostics.abandon(abandonedExposureCapture),
-                        failure);
-                throw failure;
-            }
-            throw exception;
+            throw completion.abandon(exception);
         }
     }
 
