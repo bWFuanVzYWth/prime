@@ -4,7 +4,6 @@ import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.prime.PrimeClient;
 import dev.prime.mixin.MinecraftAccessor;
-import dev.prime.config.PrimeConfig;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.RendererSettings;
 import dev.prime.render.diagnostic.NrdInputView;
@@ -172,8 +171,7 @@ public final class PrimeRuntime {
             return;
         }
         try {
-            activeRenderer.clearUiAlpha(
-                    mainTarget, PrimeConfig.dlssFrameGenerationUiRecomposition());
+            activeRenderer.clearUiAlpha(mainTarget);
         } catch (RuntimeException exception) {
             this.fail(exception);
         }
@@ -187,8 +185,7 @@ public final class PrimeRuntime {
             return;
         }
         try {
-            activeRenderer.captureUiAlpha(
-                    mainTarget, PrimeConfig.dlssFrameGenerationUiRecomposition());
+            activeRenderer.captureUiAlpha(mainTarget);
         } catch (RuntimeException exception) {
             this.fail(exception);
         }

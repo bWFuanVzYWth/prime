@@ -148,6 +148,7 @@ final class PrimeConfigTest {
         PrimeConfig.setTerrainWorkerPercentage(TerrainWorkerSettings.MAXIMUM_PERCENTAGE);
         PrimeConfig.setHdrEnabled(true);
         PrimeConfig.setReferenceWhiteNits(400);
+        PrimeConfig.setDlssFrameGenerationUiRecomposition(false);
 
         PrimeConfig.restoreDefaults();
 
@@ -175,6 +176,7 @@ final class PrimeConfigTest {
         assertFalse(HdrOutput.requested());
         assertEquals(0, PrimeConfig.referenceWhiteNits());
         assertEquals(0, HdrOutput.referenceWhiteNits());
+        assertTrue(PrimeConfig.dlssFrameGenerationUiRecomposition());
     }
 
     @Test
@@ -410,6 +412,9 @@ final class PrimeConfigTest {
         assertTrue(serialized.contains("material.seamless_glass=true\n"));
         assertTrue(serialized.contains("material.air_gap=true\n"));
         assertTrue(serialized.contains("material.vanilla_pbr_presets=true\n"));
+        assertTrue(serialized.contains(
+                "streamline.dlss_frame_generation_ui_recomposition=true\n"));
+        assertTrue(PrimeConfigData.defaults().dlssFrameGenerationUiRecomposition());
         assertTrue(PrimeSettings.defaults().seamlessGlass());
         assertTrue(PrimeSettings.defaults().airGap());
         assertTrue(PrimeSettings.defaults().vanillaPbrPresets());

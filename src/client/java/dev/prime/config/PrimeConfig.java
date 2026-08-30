@@ -35,7 +35,7 @@ public final class PrimeConfig {
     private static ReflexMode reflexMode = ReflexMode.OFF;
     private static boolean dlssFrameGenerationEnabled;
     private static int dlssFrameGenerationMultiplier = 2;
-    private static boolean dlssFrameGenerationUiRecomposition;
+    private static boolean dlssFrameGenerationUiRecomposition = true;
     private static long rendererRevision;
     private static boolean dirty;
 
@@ -313,7 +313,7 @@ public final class PrimeConfig {
         setReflexMode(ReflexMode.OFF);
         setDlssFrameGenerationEnabled(false);
         setDlssFrameGenerationMultiplier(2);
-        setDlssFrameGenerationUiRecomposition(false);
+        setDlssFrameGenerationUiRecomposition(true);
     }
 
     static PrimeSettings restoredDefaults(PrimeSettings current) {

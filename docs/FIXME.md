@@ -60,6 +60,22 @@ in-flight 上限和 64 MiB 上传/compaction 背压；仍需实机测量稳态�
 后续优化不得丢弃 geometry、放宽无界队列、在热路径调用 `System.gc()`，也不得用增加 TLAS
 instance 换取较低上传峰值。
 
+## 平台集成
+
+### NVIDIA DLSS Frame Generation 可能触发不可恢复的 Vulkan device lost
+
+Windows Vulkan 下启用 Streamline DLSS-G 后已稳定观察到 fake swapchain image layout 不一致，
+随后 `vkAcquireNextImageKHR` 或 `vkQueuePresentKHR` 以 `VK_ERROR_DEVICE_LOST` 失败并使客户端崩溃。
+错误涉及 NVIDIA 内部的 `nv.sl.dlss_g.tex2d.fake-swapchain-buffer` 与
+`nv.sl.dlss_g.clone.dlfg-output_*`；Prime 不拥有这些内部 transition，不能通过吞掉 Vulkan 返回
+值恢复设备。相关上游记录为 Streamline
+[#84](https://github.com/NVIDIA-RTX/Streamline/issues/84) 与
+[#112](https://github.com/NVIDIA-RTX/Streamline/issues/112)。
+
+因此 DLSS-G 只显示在“高风险实验功能”栏，选项明确警告可能立即崩溃；Prime 保留并报告真实
+Vulkan 错误。NVIDIA 给出可验证修复前，不把该功能移动到常规设置，也不以关闭 validation、
+忽略 acquire/present 失败或猜测内部 image layout 的方式伪装修复。
+
 ## 明确接受的限制
 
 - NRD-FSR 无法可靠降噪彩色玻璃后的传输信号，可能保留明显噪点或时间性不稳定。当前接受该

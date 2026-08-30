@@ -2,6 +2,7 @@ package dev.prime.render.vulkan;
 
 import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
 import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
+import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.render.RealtimeFramePlan;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.ImageDiagnosticSelection;
@@ -20,10 +21,12 @@ import org.lwjgl.vulkan.VkCommandBuffer;
  * binds captured asset/scene residency, records Vulkan work, submits it and commits backend-owned
  * GPU histories.
  */
-public final class RealtimeFrameExecutor {
+public final class RealtimeFrameExecutor implements Destroyable {
     private final VulkanContext context;
     private final VulkanImageInitializationBatch imageInitialization =
             new VulkanImageInitializationBatch();
+    private StreamlineInputFlipPass streamlineInputs;
+    private boolean destroyed;
 
     public RealtimeFrameExecutor(VulkanContext context) {
         this.context = Objects.requireNonNull(context, "context");
@@ -47,6 +50,7 @@ public final class RealtimeFrameExecutor {
             List<TraceBackend.SceneTexture> sceneTextures,
             long textureRevision,
             VulkanGpuTexture mainColor) {
+        requireOpen();
         Objects.requireNonNull(processor, "processor");
         Objects.requireNonNull(processorFrame, "processorFrame");
         long atmosphereFrame = 0L;
@@ -138,25 +142,32 @@ public final class RealtimeFrameExecutor {
                     mainColor,
                     processor.displayWidth(),
                     processor.displayHeight());
-            StreamlineFrameGeneration.publish(
+            boolean prepareFrameGeneration = StreamlineFrameGeneration.publish(
                     StreamlineReflex.currentFrameIndex(),
                     plan.integrator().camera(),
+                    plan.jitter(),
+                    plan.reconstructionReset(),
                     processor.rawFrame(),
                     output,
                     processor.displayWidth(),
                     processor.displayHeight(),
                     output.format(),
                     0);
-            StreamlineInputFlipPass streamlineInputs = StreamlineInputFlipPass.create(
-                    this.context,
-                    processor.rawFrame().viewZ(),
-                    processor.rawFrame().transportMetadata(),
-                    output);
-            completion.onCommit(5, () -> this.context.defer(streamlineInputs));
-            completion.onAbandon(4, failure -> ResourceCleanup.destroy(
-                    streamlineInputs, failure));
-            streamlineInputs.record(commandBuffer);
-            StreamlineFrameGeneration.prepare(commandBuffer, streamlineInputs);
+            if (prepareFrameGeneration) {
+                StreamlineInputFlipPass streamlineInputs = this.ensureStreamlineInputs(
+                        processor.rawFrame().viewZ(),
+                        processor.rawFrame().transportMetadata(),
+                        output);
+                streamlineInputs.record(commandBuffer);
+                if (StreamlineFrameGeneration.prepare(commandBuffer, streamlineInputs)) {
+                    int frameGenerationIndex = StreamlineReflex.currentFrameIndex();
+                    completion.onCommit(5, () -> StreamlineFrameGeneration.submitted(
+                            frameGenerationIndex));
+                    completion.onAbandon(4, failure -> ResourceCleanup.run(
+                            () -> StreamlineFrameGeneration.abandon(frameGenerationIndex),
+                            failure));
+                }
+            }
             this.context.device().instance().debug().endDebugGroup(
                     commandBuffer);
             submission.submit(
@@ -170,6 +181,36 @@ public final class RealtimeFrameExecutor {
         } catch (RuntimeException exception) {
             throw completion.abandon(exception);
         }
+    }
+
+    private StreamlineInputFlipPass ensureStreamlineInputs(
+            VulkanImage depth, VulkanImage motion, VulkanImage color) {
+        StreamlineInputFlipPass current = this.streamlineInputs;
+        if (current != null && current.matches(depth, motion, color)) {
+            return current;
+        }
+        StreamlineInputFlipPass replacement =
+                StreamlineInputFlipPass.create(this.context, depth, motion, color);
+        this.streamlineInputs = replacement;
+        if (current != null) {
+            this.context.defer(current);
+        }
+        return replacement;
+    }
+
+    private void requireOpen() {
+        if (this.destroyed) {
+            throw new IllegalStateException("Realtime frame executor is destroyed");
+        }
+    }
+
+    @Override
+    public void destroy() {
+        if (this.destroyed) return;
+        StreamlineInputFlipPass current = this.streamlineInputs;
+        this.streamlineInputs = null;
+        this.destroyed = true;
+        if (current != null) current.destroy();
     }
 
     private static void validateExtents(

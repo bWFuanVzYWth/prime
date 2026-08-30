@@ -85,6 +85,10 @@
       "maxFiles": 6,
       "maxBytes": 24904
     },
+    "entry/post/streamline_input.compute.slang": {
+      "maxFiles": 7,
+      "maxBytes": 20500
+    },
     "entry/post/hdr_present.compute.slang": {
       "maxFiles": 2,
       "maxBytes": 2448

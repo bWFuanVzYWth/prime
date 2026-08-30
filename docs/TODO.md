@@ -36,7 +36,9 @@
 - 雾和局部体积光的通用体积渲染；
 - 将实体及动态发光几何纳入灯光采样，并定义 emitter 捕获、增量 light tree、生命周期和
   前后向 PDF；
-- 评估 NVIDIA Streamline 的能力探测、资源标记和生命周期，保留不支持时的明确回退。
+- NVIDIA Streamline Reflex 保持可选能力并继续补充实机兼容性验证。DLSS Frame Generation 只有
+  在 [FIXME](FIXME.md) 记录的上游崩溃得到可验证修复，并重新通过现有 constants、真实 depth、
+  resize、运行时状态和持久资源门禁后，才可从“高风险实验功能”移回常规设置区。
 
 ## 兼容性与产品体验
 

@@ -1,7 +1,10 @@
 package dev.prime.mixin;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.prime.PrimeClient;
 import dev.prime.client.PrimeRuntime;
+import dev.prime.infrastructure.ResourceCleanup;
+import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.streamline.StreamlineReflex;
 import dev.prime.streamline.StreamlineFrameGeneration;
 import net.minecraft.client.Minecraft;
@@ -27,8 +30,15 @@ public abstract class MinecraftMixin {
 
     @Inject(method = "close()V", at = @At("HEAD"))
     private void prime$shutdown(CallbackInfo ci) {
-        StreamlineReflex.shutdown();
-        StreamlineFrameGeneration.shutdown();
-        PrimeRuntime.instance().shutdown();
+        RuntimeException failure = null;
+        failure = ResourceCleanup.run(StreamlineFrameGeneration::shutdown, failure);
+        failure = ResourceCleanup.run(StreamlineReflex::shutdown, failure);
+        failure = ResourceCleanup.run(PrimeClient::shutdownStreamline, failure);
+        failure = ResourceCleanup.run(PrimeRuntime.instance()::shutdown, failure);
+        if (failure != null) {
+            PrimeInfo.LOGGER.warn(
+                    "Prime shutdown was incomplete; Minecraft teardown will continue",
+                    failure);
+        }
     }
 }

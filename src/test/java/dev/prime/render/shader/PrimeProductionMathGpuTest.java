@@ -221,7 +221,7 @@ final class PrimeProductionMathGpuTest {
     }
 
     private static void assertFsrDepthAndMotion(ShaderComputeRunner runner) throws IOException {
-        int kinds = 4;
+        int kinds = 5;
         int inputWords = 3;
         ByteBuffer input = fsrGuideCases(kinds, inputWords);
         ShaderPropertyBatch.assertProperties(
@@ -1465,12 +1465,22 @@ final class PrimeProductionMathGpuTest {
                             forward[1],
                             forward[2],
                             0.0F);
-                } else {
+                } else if (kind == 3) {
                     int bits = local < SPECIAL_FLOAT_BITS.length
                             ? SPECIAL_FLOAT_BITS[local]
                             : Float.floatToRawIntBits(
                                     random.nextFloat() * 4.0F - 1.5F);
                     putInt(input, index, words, 1, 0, bits);
+                } else {
+                    putVec4(
+                            input,
+                            index,
+                            words,
+                            1,
+                            random.nextFloat() * 2.0F - 1.0F,
+                            random.nextFloat() * 2.0F - 1.0F,
+                            0.0F,
+                            0.0F);
                 }
             }
         }

@@ -48,6 +48,6 @@ record PrimeConfigData(
                 ReflexMode.OFF,
                 false,
                 2,
-                false);
+                true);
     }
 }

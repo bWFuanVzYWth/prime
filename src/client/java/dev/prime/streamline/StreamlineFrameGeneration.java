@@ -2,7 +2,6 @@ package dev.prime.streamline;
 
 import dev.prime.binding.streamline.BufferType;
 import dev.prime.binding.streamline.Constants;
-import dev.prime.binding.streamline.DlssgFlag;
 import dev.prime.binding.streamline.DlssgMode;
 import dev.prime.binding.streamline.DlssgOptions;
 import dev.prime.binding.streamline.DlssgQueueParallelismMode;
@@ -18,6 +17,7 @@ import dev.prime.binding.streamline.ViewportHandle;
 import dev.prime.config.PrimeConfig;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.FrameCamera;
+import dev.prime.render.post.SubpixelJitter;
 import dev.prime.render.vulkan.RawWavefrontFrame;
 import dev.prime.render.vulkan.StreamlineInputFlipPass;
 import dev.prime.render.vulkan.VulkanImage;
@@ -36,15 +36,17 @@ public final class StreamlineFrameGeneration {
     private static Streamline streamline;
     private static FrameGeneration frameGeneration;
     private static Arena arena;
-    private static MemorySegment tokenOut;
     private static MemorySegment frameIndex;
-    private static int maximumGeneratedFrameCount;
-    private static int minimumWidthOrHeight;
+    private static StreamlineFrameGenerationSupport support =
+            StreamlineFrameGenerationSupport.unavailable();
     private static int swapchainFormat;
     private static int swapchainBackBufferCount;
     private static OptionsKey lastOptions;
     private static MemorySegment currentToken = MemorySegment.NULL;
     private static Frame frame;
+    private static SubmittedFrame lastSubmittedFrame;
+    private static int preparedFrameIndex = -1;
+    private static boolean featureResourcesMayExist;
 
     private StreamlineFrameGeneration() {
     }
@@ -54,26 +56,32 @@ public final class StreamlineFrameGeneration {
         if (instance == null) {
             return;
         }
+        Arena shared = null;
         try {
-            Arena shared = Arena.ofShared();
+            shared = Arena.ofShared();
             FrameGeneration loaded = FrameGeneration.load(instance, FrameGeneration.FEATURE_ID);
-            tokenOut = shared.allocate(java.lang.foreign.ValueLayout.ADDRESS);
-            frameIndex = shared.allocate(java.lang.foreign.ValueLayout.JAVA_INT);
+            MemorySegment loadedFrameIndex =
+                    shared.allocate(java.lang.foreign.ValueLayout.JAVA_INT);
             streamline = instance;
             frameGeneration = loaded;
             arena = shared;
+            frameIndex = loadedFrameIndex;
             refreshSupport();
         } catch (Throwable failure) {
+            if (shared != null && arena != shared) {
+                shared.close();
+            }
             report("initialize", "Streamline DLSS-G initialization failed", failure);
             shutdown();
         }
     }
 
     public static synchronized boolean available() {
-        return streamline != null && frameGeneration != null && maximumGeneratedFrameCount > 0;
+        return streamline != null && frameGeneration != null && support.featureAvailable();
     }
 
     public static synchronized int maximumMultiplier() {
+        int maximumGeneratedFrameCount = support.maximumGeneratedFrameCount();
         return maximumGeneratedFrameCount == Integer.MAX_VALUE
                 ? Integer.MAX_VALUE
                 : Math.max(2, maximumGeneratedFrameCount + 1);
@@ -89,16 +97,34 @@ public final class StreamlineFrameGeneration {
         swapchainFormat = format;
         swapchainBackBufferCount = backBufferCount;
         lastOptions = null;
+        lastSubmittedFrame = null;
+        preparedFrameIndex = -1;
+    }
+
+    /** Releases every Streamline swapchain dependency before Minecraft destroys that swapchain. */
+    public static synchronized void beforeSwapchainReconfigure() {
+        disableInternal(true);
+        lastSubmittedFrame = null;
     }
 
     public static synchronized boolean beginFrame(int logicalFrameIndex) {
         frame = null;
+        preparedFrameIndex = -1;
+        boolean requested = PrimeConfig.dlssFrameGenerationEnabled()
+                && PrimeConfig.reflexMode() != dev.prime.binding.streamline.ReflexMode.OFF;
+        if (!requested) {
+            if (active()) disableInternal(false);
+            currentToken = MemorySegment.NULL;
+            return false;
+        }
+        if (!refreshSupport() || !support.runtimeCanRetry()) {
+            if (active()) disableInternal(false);
+            currentToken = MemorySegment.NULL;
+            return false;
+        }
         currentToken = StreamlineReflex.currentToken();
-        if (!available()
-                || currentToken.equals(MemorySegment.NULL)
-                || logicalFrameIndex != StreamlineReflex.currentFrameIndex()
-                || !PrimeConfig.dlssFrameGenerationEnabled()
-                || PrimeConfig.reflexMode() == dev.prime.binding.streamline.ReflexMode.OFF) {
+        if (currentToken.equals(MemorySegment.NULL)
+                || logicalFrameIndex != StreamlineReflex.currentFrameIndex()) {
             currentToken = MemorySegment.NULL;
             return false;
         }
@@ -110,29 +136,51 @@ public final class StreamlineFrameGeneration {
         return currentToken;
     }
 
-    public static synchronized void publish(
+    /** True only while the current Minecraft frame can actually feed DLSS-G. */
+    public static synchronized boolean uiRecompositionActive() {
+        return PrimeConfig.dlssFrameGenerationUiRecomposition()
+                && !currentToken.equals(MemorySegment.NULL);
+    }
+
+    public static synchronized boolean publish(
             int logicalFrameIndex,
             FrameCamera camera,
+            SubpixelJitter jitter,
+            boolean reconstructionReset,
             RawWavefrontFrame rawFrame,
             VulkanImage color,
             int colorWidth,
             int colorHeight,
             int colorFormat,
             int backBufferCount) {
-        if (!currentToken.equals(MemorySegment.NULL)
-                && camera != null
-                && rawFrame != null
-                && color != null) {
-            frame = new Frame(
-                    logicalFrameIndex,
-                    camera,
-                    rawFrame,
-                    color,
-                    colorWidth,
-                    colorHeight,
-                    swapchainFormat != 0 ? swapchainFormat : colorFormat,
-                    swapchainBackBufferCount > 0 ? swapchainBackBufferCount : backBufferCount);
+        if (currentToken.equals(MemorySegment.NULL)
+                || camera == null
+                || jitter == null
+                || rawFrame == null
+                || color == null
+                || logicalFrameIndex != currentFrameIndex()) {
+            return false;
         }
+        if (!support.supportsFrame(
+                rawFrame.viewZ().width(),
+                rawFrame.viewZ().height(),
+                rawFrame.transportMetadata().width(),
+                rawFrame.transportMetadata().height(),
+                colorWidth,
+                colorHeight)) {
+            if (active()) disableInternal(false);
+            return false;
+        }
+        frame = new Frame(
+                logicalFrameIndex,
+                camera,
+                jitter,
+                reconstructionReset,
+                colorWidth,
+                colorHeight,
+                swapchainFormat != 0 ? swapchainFormat : colorFormat,
+                swapchainBackBufferCount > 0 ? swapchainBackBufferCount : backBufferCount);
+        return true;
     }
 
     public static synchronized boolean prepare(
@@ -146,7 +194,19 @@ public final class StreamlineFrameGeneration {
         try (Arena callArena = Arena.ofConfined()) {
             ViewportHandle viewport = ViewportHandle.allocate(callArena).value(VIEWPORT);
             Constants constants = Constants.allocate(callArena);
-            fillConstants(constants, current.camera, current.logicalFrameIndex);
+            SubmittedFrame history = lastSubmittedFrame;
+            boolean reset = current.reconstructionReset
+                    || history == null
+                    || current.logicalFrameIndex != history.logicalFrameIndex + 1;
+            FrameCamera previous = reset ? current.camera : history.camera;
+            StreamlineFrameConstants.create(
+                            current.camera,
+                            previous,
+                            current.jitter,
+                            reset,
+                            flippedInputs.motion().width(),
+                            flippedInputs.motion().height())
+                    .write(constants);
             if (streamline.setConstants(
                     constants, currentToken, viewport)
                     != Streamline.RESULT_OK) {
@@ -187,7 +247,7 @@ public final class StreamlineFrameGeneration {
                 DlssgOptions options = DlssgOptions.allocate(callArena)
                         .mode(DlssgMode.ON)
                         .numFramesToGenerate(desired.generatedFrameCount)
-                        .flags(DlssgFlag.RETAIN_RESOURCES_WHEN_OFF.mask)
+                        .flags(0)
                         .numBackBuffers(desired.backBufferCount)
                         .mvecDepthWidth(motion.width())
                         .mvecDepthHeight(motion.height())
@@ -204,13 +264,27 @@ public final class StreamlineFrameGeneration {
                         .dynamicResWidth(0)
                         .dynamicResHeight(0)
                         .dynamicTargetFrameRate(0.0f);
-                if (frameGeneration.setOptions(
-                        viewport, options)
-                        != Streamline.RESULT_OK) {
+                featureResourcesMayExist = true;
+                if (frameGeneration.setOptions(viewport, options) != Streamline.RESULT_OK) {
                     return fail("set-options", "slDLSSGSetOptions failed", null);
                 }
                 lastOptions = desired;
             }
+            if (!refreshSupport()
+                    || !support.supportsFrame(
+                            depth.width(),
+                            depth.height(),
+                            motion.width(),
+                            motion.height(),
+                            color.width(),
+                            color.height())) {
+                return fail(
+                        "runtime-state-" + support.status(),
+                        "DLSS-G runtime rejected the current frame (status 0x"
+                                + Integer.toHexString(support.status()) + ")",
+                        null);
+            }
+            preparedFrameIndex = current.logicalFrameIndex;
             return true;
         } catch (Throwable failure) {
             return fail("prepare", "DLSS-G frame preparation failed", failure);
@@ -249,23 +323,73 @@ public final class StreamlineFrameGeneration {
     }
 
     public static synchronized void disable() {
-        lastOptions = null;
+        disableInternal(false);
+    }
+
+    public static synchronized void submitted(int logicalFrameIndex) {
+        if (frame == null
+                || preparedFrameIndex != logicalFrameIndex
+                || frame.logicalFrameIndex != logicalFrameIndex) {
+            return;
+        }
+        lastSubmittedFrame = new SubmittedFrame(logicalFrameIndex, frame.camera);
+        preparedFrameIndex = -1;
+    }
+
+    public static synchronized void abandon(int logicalFrameIndex) {
+        if (frame != null && frame.logicalFrameIndex == logicalFrameIndex) {
+            finishFrame();
+        }
+    }
+
+    private static void finishFrame() {
         frame = null;
         currentToken = MemorySegment.NULL;
+        preparedFrameIndex = -1;
+    }
+
+    private static void disableInternal(boolean strict) {
+        boolean enabled = active();
+        lastOptions = null;
+        finishFrame();
         if (streamline == null || frameGeneration == null || arena == null) {
             return;
         }
+        RuntimeException failure = null;
         try (Arena callArena = Arena.ofConfined()) {
-            DlssgOptions options = DlssgOptions.allocate(callArena)
-                    .mode(DlssgMode.OFF)
-                    .numFramesToGenerate(1)
-                    .flags(DlssgFlag.RETAIN_RESOURCES_WHEN_OFF.mask)
-                    .queueParallelismMode(DlssgQueueParallelismMode.BLOCK_PRESENTING_CLIENT_QUEUE)
-                    .enableUserInterfaceRecomposition(SlBoolean.FALSE);
             ViewportHandle viewport = ViewportHandle.allocate(callArena).value(VIEWPORT);
-            frameGeneration.setOptions(
-                    viewport, options);
-        } catch (Throwable failure) {
+            if (enabled) {
+                DlssgOptions options = DlssgOptions.allocate(callArena)
+                        .mode(DlssgMode.OFF)
+                        .numFramesToGenerate(1)
+                        .flags(0)
+                        .queueParallelismMode(
+                                DlssgQueueParallelismMode.BLOCK_PRESENTING_CLIENT_QUEUE)
+                        .enableUserInterfaceRecomposition(SlBoolean.FALSE);
+                int result = frameGeneration.setOptions(viewport, options);
+                if (result != Streamline.RESULT_OK) {
+                    failure = new IllegalStateException(
+                            "slDLSSGSetOptions(OFF) failed with result " + result);
+                }
+                int freeResult = streamline.freeResources(
+                        FrameGeneration.FEATURE_ID, viewport);
+                if (freeResult != Streamline.RESULT_OK) {
+                    IllegalStateException freeFailure = new IllegalStateException(
+                            "slFreeResources(DLSS-G) failed with result " + freeResult);
+                    if (failure == null) failure = freeFailure;
+                    else failure.addSuppressed(freeFailure);
+                }
+                if (result == Streamline.RESULT_OK
+                        && freeResult == Streamline.RESULT_OK) {
+                    featureResourcesMayExist = false;
+                }
+            }
+        } catch (Throwable throwable) {
+            if (failure == null) failure = new RuntimeException(throwable);
+            else failure.addSuppressed(throwable);
+        }
+        if (failure != null) {
+            if (strict) throw failure;
             report("disable", "Failed to disable Streamline DLSS-G", failure);
         }
     }
@@ -274,9 +398,9 @@ public final class StreamlineFrameGeneration {
         disable();
         streamline = null;
         frameGeneration = null;
-        maximumGeneratedFrameCount = 0;
-        minimumWidthOrHeight = 0;
-        tokenOut = null;
+        support = StreamlineFrameGenerationSupport.unavailable();
+        lastSubmittedFrame = null;
+        featureResourcesMayExist = false;
         frameIndex = null;
         Arena shared = arena;
         arena = null;
@@ -285,9 +409,10 @@ public final class StreamlineFrameGeneration {
         }
     }
 
-    private static void refreshSupport() {
+    private static boolean refreshSupport() {
         if (streamline == null || frameGeneration == null || arena == null) {
-            return;
+            support = StreamlineFrameGenerationSupport.unavailable();
+            return false;
         }
         try (Arena callArena = Arena.ofConfined()) {
             DlssgState state = DlssgState.allocate(callArena);
@@ -296,46 +421,23 @@ public final class StreamlineFrameGeneration {
                     viewport, state, null);
             if (result != Streamline.RESULT_OK) {
                 report("support-" + result, "slDLSSGGetState support query failed", null);
-                return;
+                support = StreamlineFrameGenerationSupport.unavailable();
+                return false;
             }
-            maximumGeneratedFrameCount = Math.max(0, state.numFramesToGenerateMax());
-            minimumWidthOrHeight = Math.max(0, state.minWidthOrHeight());
+            support = new StreamlineFrameGenerationSupport(
+                    state.status(),
+                    state.numFramesToGenerateMax(),
+                    state.minWidthOrHeight());
+            return true;
         } catch (Throwable failure) {
             report("support", "Failed to query Streamline DLSS-G support", failure);
+            support = StreamlineFrameGenerationSupport.unavailable();
+            return false;
         }
     }
 
     private static int currentFrameIndex() {
         return frameIndex == null ? -1 : frameIndex.get(ValueLayout.JAVA_INT, 0);
-    }
-
-    private static void fillConstants(Constants constants, FrameCamera camera, int logicalFrameIndex) {
-        float[] projection = camera.projection().get(new float[16]);
-        float[] inverse = new org.joml.Matrix4f(camera.projection()).invert().get(new float[16]);
-        constants.cameraViewToClip(projection)
-                .clipToCameraView(inverse)
-                .clipToLensClip(new org.joml.Matrix4f().get(new float[16]))
-                .clipToPrevClip(new org.joml.Matrix4f().get(new float[16]))
-                .prevClipToClip(new org.joml.Matrix4f().get(new float[16]))
-                .jitterOffset(0.0f, 0.0f)
-                .mvecScale(1.0f, 1.0f)
-                .cameraPinholeOffset(
-                        (float) (camera.renderX() - camera.x()),
-                        (float) (camera.renderY() - camera.y()))
-                .cameraPos((float) camera.x(), (float) camera.y(), (float) camera.z())
-                .cameraNear(0.1f)
-                .cameraFar(1.0e7f)
-                .cameraFOV((float) (2.0 * Math.atan(1.0 / Math.abs(camera.projection().m11()))))
-                .cameraAspectRatio(Math.abs(camera.projection().m11() / camera.projection().m00()))
-                .motionVectorsInvalidValue(0.0f)
-                .depthInverted(SlBoolean.TRUE)
-                .cameraMotionIncluded(SlBoolean.TRUE)
-                .motionVectors3D(SlBoolean.FALSE)
-                .reset(SlBoolean.FALSE)
-                .orthographicProjection(SlBoolean.FALSE)
-                .motionVectorsDilated(SlBoolean.FALSE)
-                .motionVectorsJittered(SlBoolean.FALSE)
-                .minRelativeLinearDepthObjectSeparation(40.0f);
     }
 
     private static void tag(
@@ -378,12 +480,19 @@ public final class StreamlineFrameGeneration {
     private record Frame(
             int logicalFrameIndex,
             FrameCamera camera,
-            RawWavefrontFrame rawFrame,
-            VulkanImage color,
+            SubpixelJitter jitter,
+            boolean reconstructionReset,
             int colorWidth,
             int colorHeight,
             int colorFormat,
             int backBufferCount) {
+    }
+
+    private static boolean active() {
+        return lastOptions != null || featureResourcesMayExist;
+    }
+
+    private record SubmittedFrame(int logicalFrameIndex, FrameCamera camera) {
     }
 
     private record OptionsKey(

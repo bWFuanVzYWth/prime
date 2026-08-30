@@ -15,7 +15,17 @@ final class NativeBridgeArtifactsTest {
     @Test
     void everyBundledWindowsRuntimeIsAPeImage() throws IOException {
         for (String name : new String[] {
-            "prime_nrd.dll", "amd_fidelityfx_vk.dll", "prime_dlss_rr.dll", "nvngx_dlssd.dll"
+            "prime_nrd.dll",
+            "amd_fidelityfx_vk.dll",
+            "prime_dlss_rr.dll",
+            "nvngx_dlssd.dll",
+            "nvngx_dlssg.dll",
+            "sl.common.dll",
+            "sl.interposer.dll",
+            "sl.pcl.dll",
+            "sl.reflex.dll",
+            "sl.dlss_g.dll",
+            "NvLowLatencyVk.dll"
         }) {
             try (InputStream input = NativeBridgeArtifactsTest.class.getResourceAsStream(ROOT + name)) {
                 assertNotNull(input, "missing bundled native runtime " + name);

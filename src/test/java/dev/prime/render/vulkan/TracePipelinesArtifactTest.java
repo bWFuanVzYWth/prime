@@ -18,6 +18,11 @@ final class TracePipelinesArtifactTest {
     }
 
     @Test
+    void streamlineInputPreparationHasOneNarrowDescriptorLayout() throws IOException {
+        TracePipelinesContractTest.streamlineInputPreparationHasOneNarrowDescriptorLayout();
+    }
+
+    @Test
     void setOneAbiDoesNotCrossRendererBoundary() throws IOException {
         TracePipelinesContractTest.setOneAbiDoesNotCrossRendererBoundary();
     }

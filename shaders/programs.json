@@ -112,6 +112,11 @@
       "stage": "compute",
       "resource": "fsr_display.comp.spv"
     },
+    "streamline_input": {
+      "source": "shaders/entry/post/streamline_input.compute.slang",
+      "stage": "compute",
+      "resource": "streamline_input.comp.spv"
+    },
     "hdr_present": {
       "source": "shaders/entry/post/hdr_present.compute.slang",
       "stage": "compute",

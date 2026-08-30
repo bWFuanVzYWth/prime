@@ -706,8 +706,8 @@ public final class VulkanRenderer implements AutoCloseable {
         return reload.terrainReload;
     }
 
-    public void clearUiAlpha(RenderTarget mainTarget, boolean uiRecompositionEnabled) {
-        if (!uiRecompositionEnabled
+    public void clearUiAlpha(RenderTarget mainTarget) {
+        if (!StreamlineFrameGeneration.uiRecompositionActive()
                 || !(mainTarget.getColorTexture() instanceof VulkanGpuTexture mainColor)
                 || !(mainTarget.getColorTextureView() instanceof VulkanGpuTextureView mainColorView)) {
             return;
@@ -726,8 +726,8 @@ public final class VulkanRenderer implements AutoCloseable {
         encoder.execute(commandBuffer);
     }
 
-    public void captureUiAlpha(RenderTarget mainTarget, boolean uiRecompositionEnabled) {
-        if (!uiRecompositionEnabled
+    public void captureUiAlpha(RenderTarget mainTarget) {
+        if (!StreamlineFrameGeneration.uiRecompositionActive()
                 || !(mainTarget.getColorTexture() instanceof VulkanGpuTexture mainColor)
                 || !(mainTarget.getColorTextureView() instanceof VulkanGpuTextureView mainColorView)) {
             return;

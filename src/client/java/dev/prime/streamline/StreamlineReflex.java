@@ -42,18 +42,29 @@ public final class StreamlineReflex {
     }
 
     public static void initialize(Streamline instance) {
+        shutdown();
+        if (instance == null) {
+            return;
+        }
+        Arena sharedArena = null;
         try {
             Reflex loadedReflex = Reflex.load(instance, Reflex.FEATURE_ID);
             Pcl loadedPcl = Pcl.load(instance, Pcl.FEATURE_ID);
-            Arena sharedArena = Arena.ofShared();
+            sharedArena = Arena.ofShared();
+            MemorySegment loadedTokenOut = sharedArena.allocate(ADDRESS);
+            MemorySegment loadedFrameIndex = sharedArena.allocate(JAVA_INT);
+            ReflexOptions loadedOptions = ReflexOptions.allocate(sharedArena);
             streamline = instance;
             reflex = loadedReflex;
             pcl = loadedPcl;
             arena = sharedArena;
-            tokenOut = sharedArena.allocate(ADDRESS);
-            frameIndexSegment = sharedArena.allocate(JAVA_INT);
-            options = ReflexOptions.allocate(sharedArena);
+            tokenOut = loadedTokenOut;
+            frameIndexSegment = loadedFrameIndex;
+            options = loadedOptions;
         } catch (Throwable failure) {
+            if (sharedArena != null) {
+                sharedArena.close();
+            }
             PrimeInfo.LOGGER.warn(
                     "Streamline Reflex/PCL feature functions unavailable; low latency disabled",
                     failure);

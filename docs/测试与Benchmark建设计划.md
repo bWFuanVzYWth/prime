@@ -18,11 +18,14 @@ Prime 接下来会建立 Java 与 Vulkan benchmark，但 benchmark 只回答“�
 ## 清单与基线
 
 改造前基线为 147 个测试源文件、573 个 JUnit 测试：529 个 JVM 测试和 44 个 Vulkan Shader
-测试。当前仓库有 174 个测试/测试设施 Java 源文件和 622 个 JUnit 测试方法。除四个 JetCheck
+测试。当前仓库有 177 个测试/测试设施 Java 源文件；五个分层任务合计执行 662 个 invocation：
+610 个 JVM、12 个 artifact、3 个 Windows native、36 个 Vulkan compute 和 1 个 Vulkan RT。
+除四个 JetCheck
 性质测试和翻译入口错误边界外，P0/P1 补强增加了真实 RT 生命周期、提交事务、纹理/terrain
 generation、Renderer 生命周期、动态捕获会话和确定性并发测试。原有行为断言全部保留，其中
 8 个不需要 GPU 的 ZSobol 映射/分层测试从 Shader 层移入 JVM 层。错误边界测试有三个参数化
-case，因此所有分层任务合计执行 630 个 invocation。
+case。最近的 Streamline 补强增加 common constants、运行时门禁、native 发布、发行资源和
+生产 Shader 输入转换测试；各任务仍为零跳过。
 
 `src/test/slang/programs.json` 是测试 Shader 的权威清单：
 
@@ -40,8 +43,8 @@ case，因此所有分层任务合计执行 630 个 invocation。
 
 | 任务 | 观察对象 | 环境契约 | 是否属于默认门禁 |
 | --- | --- | --- | --- |
-| `test` | 579 个纯 Java 行为、数学性质和状态机测试 | 不编译 Shader、不加载原生库、不需要 Vulkan；排除 `artifact`、`native`、`gpu-shader`、`gpu-ray-tracing` 标签 | 是 |
-| `artifactTest` | 11 个生产 SPIR-V、manifest、descriptor/payload ABI、资源和桥接 DLL 打包测试 | 允许编译生产 Shader；无运行环境跳过 | 是，由 `check` 调用 |
+| `test` | 610 个纯 Java 行为、数学性质和状态机测试 | 不编译 Shader、不加载原生库、不需要 Vulkan；排除 `artifact`、`native`、`gpu-shader`、`gpu-ray-tracing` 标签 | 是 |
+| `artifactTest` | 12 个生产 SPIR-V、manifest、descriptor/payload ABI、资源和桥接 DLL 打包测试 | 允许编译生产 Shader；无运行环境跳过 | 是，由 `check` 调用 |
 | `nativeTest` | 3 个 NRD、FSR、DLSS Windows x64 原生桥执行测试 | 只支持 Windows x64；显式运行于其他平台会直接失败 | 否，由 Windows CI 显式调用 |
 | `shaderTest` | 36 个 Vulkan compute/Shader 行为、数学性质和资源生命周期测试 | 必须有 Vulkan 1.2 compute device 和 `VK_LAYER_KHRONOS_validation`；缺失时直接失败 | 否，由 Linux GPU/Lavapipe CI 显式调用 |
 | `rayTracingTest` | 1 个真实 BLAS/TLAS、SBT、raygen/miss/any-hit/closest-hit、readback 和释放测试 | 必须有 Vulkan 1.2 RT device、acceleration structure/ray tracing pipeline 扩展和 validation layer；缺失时直接失败 | 否，由 RT 硬件环境显式调用 |
@@ -139,6 +142,7 @@ Lavapipe 门禁上 assumption skip。
 | GPU 数学与采样 | `shaderTest` | compact OpenPBR、transport、BSDF、材质/天体、重建/曝光、ZSobol parity 与统计 |
 | Vulkan host 生命周期 | `shaderTest` | validated instance/device、buffer/image、descriptor、dispatch、readback、幂等释放 |
 | Vulkan RT 生命周期 | `rayTracingTest` | BLAS/TLAS、host→AS→trace→readback barrier、SBT、hit/miss/any-hit/closest-hit、硬件重心与幂等释放 |
+| Streamline / DLSS-G 边界 | `test` + `artifactTest` + `shaderTest` | row-major common constants、相机历史重投影、运行时 status/min-size、真实 reversed depth、top-left motion、窄 descriptor 闭包与发行 DLL；NVIDIA fake-swapchain device-lost 仍按高风险上游缺陷隔离 |
 | 发行和架构 | `check` | Shader ABI、ray payload、依赖闭包、资源和发行 JAR |
 
 NRD、FSR 和 DLSS 测试已按 JVM contract、artifact packaging、native execution 分层。

@@ -23,6 +23,7 @@ final class VulkanSharedPrograms implements AutoCloseable {
     private SharedComputeProgram autoExposure;
     private SharedComputeProgram uiAlphaClear;
     private SharedComputeProgram uiAlphaExtract;
+    private SharedComputeProgram streamlineInput;
     private boolean closed;
 
     VulkanSharedPrograms(VulkanContext context) {
@@ -99,6 +100,19 @@ final class VulkanSharedPrograms implements AutoCloseable {
         return this.uiAlphaExtract.retain();
     }
 
+    SharedComputeProgram acquireStreamlineInput() {
+        requireOpen();
+        if (this.streamlineInput == null) {
+            this.streamlineInput = SharedComputeProgram.create(
+                    this.context,
+                    "Streamline input preparation",
+                    8,
+                    new int[] {SAMPLED_IMAGE, SAMPLED_IMAGE, STORAGE_IMAGE, STORAGE_IMAGE},
+                    new String[] {GeneratedShaderPrograms.resource("streamline_input")});
+        }
+        return this.streamlineInput.retain();
+    }
+
     void invalidate() {
         requireOpen();
         if (this.displayTransform != null) {
@@ -120,6 +134,10 @@ final class VulkanSharedPrograms implements AutoCloseable {
         if (this.uiAlphaExtract != null) {
             this.uiAlphaExtract.release();
             this.uiAlphaExtract = null;
+        }
+        if (this.streamlineInput != null) {
+            this.streamlineInput.release();
+            this.streamlineInput = null;
         }
     }
 

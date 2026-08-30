@@ -452,6 +452,7 @@ final class RealtimeRenderer implements Destroyable {
             return;
         }
         RuntimeException failure = null;
+        failure = ResourceCleanup.destroy(this.executor, failure);
         failure = ResourceCleanup.destroy(this.exposureDiagnostics, failure);
         failure = ResourceCleanup.destroy(this.resources, failure);
         failure = ResourceCleanup.destroy(this.pipeline, failure);

@@ -15,7 +15,14 @@ other countries.
 Prime releases also include its own `prime_dlss_rr.dll` C ABI bridge and NVIDIA's
 release `nvngx_dlssd.dll` for DLSS Ray Reconstruction. The SDK and redistributable
 remain subject to `DLSS-SDK-LICENSE.txt`; Prime does not ship the DLSS development
-DLL, standalone DLSS Super Resolution, or Frame Generation libraries.
+DLL or standalone DLSS Super Resolution.
+
+Windows releases also include NVIDIA Streamline and its Reflex/PCL plugins under the
+Streamline MIT license in `STREAMLINE-LICENSE.txt`. The DLSS Frame Generation plugin,
+`nvngx_dlssg.dll`, and `NvLowLatencyVk.dll` remain subject to the NVIDIA RTX SDK terms
+in `DLSS-SDK-LICENSE.txt`. DLSS Frame Generation is exposed only as a high-risk
+experiment because unresolved NVIDIA Vulkan synchronization defects can cause an
+unrecoverable device-lost crash.
 
 NVIDIA, DLSS, GeForce RTX, and their associated logos are trademarks and/or
 registered trademarks of NVIDIA Corporation in the United States and other countries.

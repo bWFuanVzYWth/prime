@@ -23,6 +23,7 @@ import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.terrain.TerrainWorkerSettings;
 import dev.prime.render.terrain.VoxelSurfaceSettings;
+import dev.prime.streamline.StreamlineFrameGeneration;
 import dev.prime.streamline.StreamlineReflex;
 import java.net.URI;
 import net.minecraft.client.OptionInstance;
@@ -56,6 +57,8 @@ public abstract class VideoSettingsScreenMixin {
             Component.translatable("prime.options.header.material");
     private static final Component PRIME$STREAMLINE_HEADER =
             Component.translatable("prime.options.header.streamline");
+    private static final Component PRIME$HIGH_RISK_HEADER =
+            Component.translatable("prime.options.header.high_risk");
     private static final Component PRIME$DIAGNOSTICS_HEADER =
             Component.translatable("prime.options.header.diagnostics");
     @Unique private PrimeVideoOptions.OptionSet prime$options;
@@ -109,29 +112,11 @@ public abstract class VideoSettingsScreenMixin {
             list.addSmall(this.prime$options.material().airGap(), this.prime$options.material().vanillaPbrPresets());
             list.addHeader(PRIME$STREAMLINE_HEADER);
             list.addBig(this.prime$options.streamline().reflexMode());
-            AbstractWidget reflexWidget =
-                    list.findOption(this.prime$options.streamline().reflexMode());
-            if (reflexWidget != null) {
-                reflexWidget.active = StreamlineReflex.available();
-            }
+            list.addHeader(PRIME$HIGH_RISK_HEADER);
             list.addBig(this.prime$options.streamline().dlssFrameGenerationEnabled());
             list.addBig(this.prime$options.streamline().dlssFrameGenerationMultiplier());
             list.addBig(this.prime$options.streamline().dlssFrameGenerationUiRecomposition());
-            AbstractWidget dlssFrameGenerationWidget =
-                    list.findOption(this.prime$options.streamline().dlssFrameGenerationEnabled());
-            AbstractWidget dlssFrameGenerationMultiplierWidget =
-                    list.findOption(this.prime$options.streamline().dlssFrameGenerationMultiplier());
-            AbstractWidget dlssFrameGenerationUiRecompositionWidget =
-                    list.findOption(this.prime$options.streamline().dlssFrameGenerationUiRecomposition());
-            if (dlssFrameGenerationWidget != null) {
-                dlssFrameGenerationWidget.active = StreamlineReflex.available();
-            }
-            if (dlssFrameGenerationMultiplierWidget != null) {
-                dlssFrameGenerationMultiplierWidget.active = StreamlineReflex.available();
-            }
-            if (dlssFrameGenerationUiRecompositionWidget != null) {
-                dlssFrameGenerationUiRecompositionWidget.active = StreamlineReflex.available();
-            }
+            this.prime$refreshStreamlineAvailability(list);
             list.addHeader(PRIME$DIAGNOSTICS_HEADER);
             list.addBig(this.prime$options.diagnostics().rendererDiagnostics());
             list.addBig(this.prime$options.diagnostics().rawOutput());
@@ -249,26 +234,35 @@ public abstract class VideoSettingsScreenMixin {
         this.prime$refresh(
                 this.prime$options.streamline().dlssFrameGenerationMultiplier(), 2);
         this.prime$refresh(
-                this.prime$options.streamline().dlssFrameGenerationUiRecomposition(), false);
+                this.prime$options.streamline().dlssFrameGenerationUiRecomposition(), true);
+        this.prime$refreshStreamlineAvailability(list);
+    }
+
+    @Unique
+    private void prime$refreshStreamlineAvailability(OptionsList list) {
         AbstractWidget reflexWidget =
                 list.findOption(this.prime$options.streamline().reflexMode());
         if (reflexWidget != null) {
-            reflexWidget.active = StreamlineReflex.available();
+            reflexWidget.active = StreamlineReflex.available()
+                    || PrimeConfig.reflexMode() != ReflexMode.OFF;
         }
-        AbstractWidget dlssFrameGenerationWidget =
-                list.findOption(this.prime$options.streamline().dlssFrameGenerationEnabled());
-        if (dlssFrameGenerationWidget != null) {
-            dlssFrameGenerationWidget.active = StreamlineReflex.available();
+        boolean frameGenerationAvailable =
+                StreamlineReflex.available() && StreamlineFrameGeneration.available();
+        boolean frameGenerationEnabled = PrimeConfig.dlssFrameGenerationEnabled();
+        AbstractWidget enableWidget = list.findOption(
+                this.prime$options.streamline().dlssFrameGenerationEnabled());
+        if (enableWidget != null) {
+            // An unavailable saved option must remain switchable so users can turn it off.
+            enableWidget.active = frameGenerationAvailable || frameGenerationEnabled;
         }
-        AbstractWidget dlssFrameGenerationMultiplierWidget =
-                list.findOption(this.prime$options.streamline().dlssFrameGenerationMultiplier());
-        if (dlssFrameGenerationMultiplierWidget != null) {
-            dlssFrameGenerationMultiplierWidget.active = StreamlineReflex.available();
-        }
-        AbstractWidget dlssFrameGenerationUiRecompositionWidget =
-                list.findOption(this.prime$options.streamline().dlssFrameGenerationUiRecomposition());
-        if (dlssFrameGenerationUiRecompositionWidget != null) {
-            dlssFrameGenerationUiRecompositionWidget.active = StreamlineReflex.available();
+        for (OptionInstance<?> option : new OptionInstance<?>[] {
+            this.prime$options.streamline().dlssFrameGenerationMultiplier(),
+            this.prime$options.streamline().dlssFrameGenerationUiRecomposition()
+        }) {
+            AbstractWidget widget = list.findOption(option);
+            if (widget != null) {
+                widget.active = frameGenerationAvailable;
+            }
         }
     }
 

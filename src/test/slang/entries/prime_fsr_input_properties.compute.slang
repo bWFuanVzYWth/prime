@@ -3,6 +3,7 @@
 import "service/reconstruct/nrd/common.slang";
 import "model/material/defaults.slang";
 import "service/reconstruct/fsr_input.slang";
+import "service/reconstruct/streamline_input.slang";
 import "prime_fsr_contract.slang";
 
 static const uint PRIME_FSR_INPUT_WORDS = 3u;
@@ -37,7 +38,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
             mask |= PRIME_TEST_FAILURE_STATE;
         }
     } else if (kind == 1u) {
-        actual.x = primeFsrReversedInfiniteDepth(values.x);
+        actual.x = primeStreamlineReversedDepth(values.x);
         expected.x = primeNrdIsFinite(values.x) && values.x > 0.0
                 ? clamp(PRIME_FSR_NEAR_PLANE / values.x, 0.0, 1.0)
                 : 0.0;
@@ -84,6 +85,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
             mask |= PRIME_TEST_FAILURE_RANGE;
         }
         if (!primeTestClose(actual.x, expected.x, 0.0, 0.0)) {
+            mask |= PRIME_TEST_FAILURE_IDENTITY;
+        }
+    } else if (kind == 5u) {
+        actual.xy = primeStreamlineTopLeftMotion(values.xy);
+        expected.xy = float2(values.x, -values.y);
+        if (!primeTestClose(actual.x, expected.x, 0.0, 0.0)
+                || !primeTestClose(actual.y, expected.y, 0.0, 0.0)) {
             mask |= PRIME_TEST_FAILURE_IDENTITY;
         }
     } else {

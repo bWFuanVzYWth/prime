@@ -232,6 +232,12 @@ final class TracePipelinesContractTest {
                 descriptorBindings(List.of("image_diagnostic_rgba16.comp.spv"), 0));
     }
 
+    static void streamlineInputPreparationHasOneNarrowDescriptorLayout() throws IOException {
+        assertEquals(
+                Set.of(0, 1, 2, 3),
+                descriptorBindings(List.of("streamline_input.comp.spv"), 0));
+    }
+
     static void setOneAbiDoesNotCrossRendererBoundary() throws IOException {
         for (String suffix : List.of("", "_ser")) {
             Set<Integer> realtime = descriptorBindings(

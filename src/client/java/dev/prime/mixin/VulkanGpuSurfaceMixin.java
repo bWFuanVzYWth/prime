@@ -75,6 +75,11 @@ public abstract class VulkanGpuSurfaceMixin {
             GpuSurface.Configuration configuration,
             CallbackInfo callbackInfo)
             throws SurfaceException {
+        try {
+            StreamlineFrameGeneration.beforeSwapchainReconfigure();
+        } catch (RuntimeException exception) {
+            throw new SurfaceException(exception);
+        }
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer count = stack.callocInt(1);
             for (int attempt = 0;
@@ -156,13 +161,19 @@ public abstract class VulkanGpuSurfaceMixin {
                 }
                 this.prime$swapchainImageFormat = selected.format();
                 this.prime$swapchainColorSpace = selected.colorSpace();
-                StreamlineFrameGeneration.onSwapchainConfigured(
-                        this.prime$swapchainImageFormat,
-                        this.swapchainImages.size());
                 return;
             }
         }
         throw new SurfaceException("Surface formats kept changing during enumeration");
+    }
+
+    @Inject(method = "configure", at = @At("TAIL"))
+    private void prime$publishSwapchainConfiguration(
+            GpuSurface.Configuration configuration,
+            CallbackInfo callbackInfo) {
+        StreamlineFrameGeneration.onSwapchainConfigured(
+                this.prime$swapchainImageFormat,
+                this.swapchainImages.size());
     }
 
     @ModifyArg(

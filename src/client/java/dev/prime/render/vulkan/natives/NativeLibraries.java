@@ -4,13 +4,33 @@ import net.fabricmc.loader.api.FabricLoader;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.system.SharedLibrary;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.function.Function;
 
 public final class NativeLibraries {
     private static final String EXTRACTED_PATH_PROPERTY = "prime.native.libraryDirectory";
     public static final String BUNDLED_NATIVE_PATH = "/prime/natives/";
-
+    private static final List<String> WINDOWS_RUNTIME_FILES = List.of(
+            "prime_dlss_rr.dll",
+            "nvngx_dlssd.dll",
+            "prime_nrd.dll",
+            "amd_fidelityfx_vk.dll",
+            "sl.common.dll",
+            "sl.interposer.dll",
+            "sl.pcl.dll",
+            "sl.reflex.dll",
+            "sl.dlss_g.dll",
+            "nvngx_dlssg.dll",
+            "NvLowLatencyVk.dll");
 
     public static final NativeLibrary NATIVE_DLSSRR_BRIDGE;
     public static final NativeLibrary NATIVE_DLSSRR_FEATURE;
@@ -64,10 +84,7 @@ public final class NativeLibraries {
         if (override != null && !override.isBlank()) {
             return Path.of(override).toAbsolutePath();
         }
-        return FabricLoader.getInstance()
-                .getConfigDir()
-                .resolve("prime")
-                .resolve("libraries");
+        return DefaultRuntimePath.VALUE;
     }
 
     private static NativeLibrary createLibrary(
@@ -116,6 +133,76 @@ public final class NativeLibraries {
     public static void checkResult(int result, String operation) {
         if (result != 0) {
             throw new IllegalStateException(operation + " failed with native result " + result);
+        }
+    }
+
+    static Path contentAddressedDirectory(
+            Path root,
+            String namespace,
+            List<String> names,
+            Function<String, InputStream> open) {
+        Objects.requireNonNull(root, "root");
+        Objects.requireNonNull(namespace, "namespace");
+        Objects.requireNonNull(names, "names");
+        Objects.requireNonNull(open, "open");
+        MessageDigest bundle = sha256();
+        for (String name : names) {
+            byte[] encodedName = name.getBytes(StandardCharsets.UTF_8);
+            bundle.update((byte) (encodedName.length >>> 24));
+            bundle.update((byte) (encodedName.length >>> 16));
+            bundle.update((byte) (encodedName.length >>> 8));
+            bundle.update((byte) encodedName.length);
+            bundle.update(encodedName);
+            MessageDigest payload = sha256();
+            try (InputStream input = open.apply(name)) {
+                if (input == null) {
+                    throw new IllegalStateException(
+                            "Missing bundled native runtime " + name);
+                }
+                byte[] buffer = new byte[8192];
+                int count;
+                while ((count = input.read(buffer)) >= 0) {
+                    if (count > 0) {
+                        payload.update(buffer, 0, count);
+                    }
+                }
+            } catch (IOException exception) {
+                throw new IllegalStateException(
+                        "Unable to fingerprint bundled native runtime " + name,
+                        exception);
+            }
+            bundle.update(payload.digest());
+        }
+        return root.resolve(namespace)
+                .resolve(HexFormat.of().formatHex(bundle.digest()))
+                .toAbsolutePath();
+    }
+
+    private static MessageDigest sha256() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 digest is unavailable", exception);
+        }
+    }
+
+    private static final class DefaultRuntimePath {
+        private static final Path VALUE = create();
+
+        private static Path create() {
+            Path root = FabricLoader.getInstance()
+                    .getConfigDir()
+                    .resolve("prime")
+                    .resolve("libraries");
+            if (!isWindowsX64()) {
+                return root.resolve("unsupported-platform").toAbsolutePath();
+            }
+            String resourceRoot = getBundledNativePath();
+            return contentAddressedDirectory(
+                    root,
+                    "windows-x86_64",
+                    WINDOWS_RUNTIME_FILES,
+                    name -> NativeLibraries.class.getResourceAsStream(resourceRoot + name));
         }
     }
 }
