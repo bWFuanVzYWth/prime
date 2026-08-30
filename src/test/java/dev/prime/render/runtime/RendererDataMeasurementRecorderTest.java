@@ -8,6 +8,7 @@ import dev.prime.render.FrameCamera;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.vulkan.MaterialTexturePages;
+import dev.prime.render.vulkan.RendererDataRangeDiagnostics;
 import dev.prime.render.vulkan.VulkanMemorySnapshot;
 import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.nio.file.Files;
@@ -40,6 +41,29 @@ final class RendererDataMeasurementRecorderTest {
                 new TerrainScene.SceneStatistics(12, 34L, 56L, 7, 8);
         TerrainScene.MediumIdStatistics mediumIds =
                 new TerrainScene.MediumIdStatistics(4, 4L);
+        long[] motionHistogram = new long[128];
+        long[] depthHistogram = new long[128];
+        motionHistogram[64] = 7L;
+        depthHistogram[68] = 5L;
+        RendererDataRangeDiagnostics.Snapshot ranges =
+                new RendererDataRangeDiagnostics.Snapshot(
+                        2L,
+                        1L,
+                        2_073_600L,
+                        2_073_600L,
+                        0L,
+                        3L,
+                        7L,
+                        0.25F,
+                        0.5F,
+                        540.0F,
+                        5L,
+                        0L,
+                        2_073_595L,
+                        1.5F,
+                        96.0F,
+                        motionHistogram,
+                        depthHistogram);
         RealtimeRenderer.DiagnosticSnapshot renderer =
                 new RealtimeRenderer.DiagnosticSnapshot(
                         PostProcessingMode.DLSS_RR,
@@ -51,7 +75,8 @@ final class RendererDataMeasurementRecorderTest {
                         3,
                         9,
                         10L,
-                        null);
+                        null,
+                        ranges);
         VulkanMemorySnapshot firstMemory = new VulkanMemorySnapshot(
                 9,
                 3,
@@ -90,6 +115,9 @@ final class RendererDataMeasurementRecorderTest {
         assertTrue(encoded.contains("\"allocationCount\": 8"));
         assertTrue(encoded.contains("\"blockBytes\": 8192"));
         assertTrue(encoded.contains("\"allocationBytes\": 3072"));
+        assertTrue(encoded.contains("\"gpuRanges\""));
+        assertTrue(encoded.contains("\"maximumMotionPixels\": 540.000000"));
+        assertTrue(encoded.contains("\"depthSkyCount\": 2073595"));
         assertFalse(encoded.contains("\"cameraX\"")
                 || encoded.contains("\"cameraY\"")
                 || encoded.contains("\"cameraZ\""));

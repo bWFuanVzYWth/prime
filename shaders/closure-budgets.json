@@ -117,6 +117,10 @@
       "maxFiles": 8,
       "maxBytes": 73311
     },
+    "entry/post/renderer_data_range.compute.slang": {
+      "maxFiles": 2,
+      "maxBytes": 12000
+    },
     "entry/post/ui_alpha_clear.compute.slang": {
       "maxFiles": 2,
       "maxBytes": 4096

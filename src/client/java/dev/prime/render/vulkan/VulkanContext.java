@@ -179,6 +179,11 @@ public final class VulkanContext implements AutoCloseable {
         return this.sharedPrograms.acquireStreamlineInput();
     }
 
+    SharedComputeProgram acquireRendererDataRangeProgram() {
+        requireOpen();
+        return this.sharedPrograms.acquireRendererDataRange();
+    }
+
     public VulkanImage recordHdrPresentation(
             VkCommandBuffer commandBuffer,
             long hdrView,

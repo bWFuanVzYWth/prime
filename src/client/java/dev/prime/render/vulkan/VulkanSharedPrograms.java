@@ -24,6 +24,7 @@ final class VulkanSharedPrograms implements AutoCloseable {
     private SharedComputeProgram uiAlphaClear;
     private SharedComputeProgram uiAlphaExtract;
     private SharedComputeProgram streamlineInput;
+    private SharedComputeProgram rendererDataRange;
     private boolean closed;
 
     VulkanSharedPrograms(VulkanContext context) {
@@ -113,6 +114,19 @@ final class VulkanSharedPrograms implements AutoCloseable {
         return this.streamlineInput.retain();
     }
 
+    SharedComputeProgram acquireRendererDataRange() {
+        requireOpen();
+        if (this.rendererDataRange == null) {
+            this.rendererDataRange = SharedComputeProgram.create(
+                    this.context,
+                    "renderer-data range measurement",
+                    16,
+                    new int[] {SAMPLED_IMAGE, SAMPLED_IMAGE, STORAGE_BUFFER},
+                    new String[] {GeneratedShaderPrograms.resource("renderer_data_range")});
+        }
+        return this.rendererDataRange.retain();
+    }
+
     void invalidate() {
         requireOpen();
         if (this.displayTransform != null) {
@@ -138,6 +152,10 @@ final class VulkanSharedPrograms implements AutoCloseable {
         if (this.streamlineInput != null) {
             this.streamlineInput.release();
             this.streamlineInput = null;
+        }
+        if (this.rendererDataRange != null) {
+            this.rendererDataRange.release();
+            this.rendererDataRange = null;
         }
     }
 

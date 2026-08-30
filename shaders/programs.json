@@ -162,6 +162,11 @@
       "stage": "compute",
       "resource": "rr_prepare.comp.spv"
     },
+    "renderer_data_range": {
+      "source": "shaders/entry/post/renderer_data_range.compute.slang",
+      "stage": "compute",
+      "resource": "renderer_data_range.comp.spv"
+    },
     "sun_shadow_hierarchy": {
       "source": "shaders/entry/post/sun_shadow_hierarchy.compute.slang",
       "stage": "compute",

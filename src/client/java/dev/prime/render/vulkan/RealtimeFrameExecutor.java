@@ -46,6 +46,7 @@ public final class RealtimeFrameExecutor implements Destroyable {
             VulkanImage stableRadiance,
             ImageDiagnosticSelection diagnostics,
             DisplayExposureDiagnostics exposureDiagnostics,
+            RendererDataRangeDiagnostics rangeDiagnostics,
             VulkanGpuTextureView atlasView,
             List<TraceBackend.SceneTexture> sceneTextures,
             long textureRevision,
@@ -56,6 +57,7 @@ public final class RealtimeFrameExecutor implements Destroyable {
         long atmosphereFrame = 0L;
         MaterialTexturePages.FrameToken materialFrame = null;
         DisplayExposureDiagnostics.Capture exposureCapture = null;
+        RendererDataRangeDiagnostics.Capture rangeCapture = null;
         VulkanFrameSubmission submission =
                 new VulkanFrameSubmission(this.imageInitialization);
         FrameCompletion completion = new FrameCompletion();
@@ -124,6 +126,20 @@ public final class RealtimeFrameExecutor implements Destroyable {
                     processorFrame,
                     plan.reconstruction(),
                     this.imageInitialization);
+            if (rangeDiagnostics != null
+                    && processor.mode()
+                            != dev.prime.render.post.PostProcessingMode.DISABLED) {
+                rangeCapture = rangeDiagnostics.record(
+                        commandBuffer,
+                        processor.rawFrame().viewZ(),
+                        processor.rawFrame().visibleMotion(),
+                        plan.reconstructionReset());
+                RendererDataRangeDiagnostics.Capture trackedRangeCapture = rangeCapture;
+                completion.onCommit(6, () -> rangeDiagnostics.submitted(
+                        trackedRangeCapture));
+                completion.onAbandon(6, failure -> ResourceCleanup.run(
+                        () -> rangeDiagnostics.abandon(trackedRangeCapture), failure));
+            }
             processor.presentRendererDiagnostic(commandBuffer, diagnostics.renderer());
             exposureCapture = exposureDiagnostics.record(
                     commandBuffer, processor.displayExposureStateBuffer());

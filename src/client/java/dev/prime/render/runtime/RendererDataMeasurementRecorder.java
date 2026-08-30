@@ -3,6 +3,7 @@ package dev.prime.render.runtime;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.FrameCamera;
 import dev.prime.render.vulkan.MaterialTexturePages;
+import dev.prime.render.vulkan.RendererDataRangeDiagnostics;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanMemorySnapshot;
 import dev.prime.render.vulkan.terrain.TerrainScene;
@@ -50,6 +51,7 @@ final class RendererDataMeasurementRecorder {
     private long previousTextureGeneration = Long.MIN_VALUE;
     private String reconstruction = "unknown";
     private String quality = "unknown";
+    private RealtimeRenderer.DiagnosticSnapshot latestRenderer;
     private boolean warned;
     private boolean dirty;
 
@@ -144,6 +146,7 @@ final class RendererDataMeasurementRecorder {
         this.maximumDisplayHeight = Math.max(this.maximumDisplayHeight, renderer.displayHeight());
         this.reconstruction = renderer.postProcessingMode().name();
         this.quality = renderer.quality().name();
+        this.latestRenderer = renderer;
         this.maximumTlasInstances = Math.max(
                 this.maximumTlasInstances, scene.tlasInstanceCount());
         this.maximumUniqueTriangles = Math.max(
@@ -209,6 +212,7 @@ final class RendererDataMeasurementRecorder {
         trimComma(json).append("\n  },");
         appendMediumIds(json, this.mediumIds);
         appendTextures(json, this.textures);
+        appendRanges(json, this.latestRanges());
         appendMemory(json, this.memory);
         trimComma(json).append("\n}\n");
         return json.toString();
@@ -311,6 +315,45 @@ final class RendererDataMeasurementRecorder {
             trimComma(json);
         }
         json.append("\n    ],");
+        trimComma(json).append("\n  },");
+    }
+
+    private RendererDataRangeDiagnostics.Snapshot latestRanges() {
+        // The latest immutable aggregate belongs to the realtime renderer snapshot already
+        // consumed on the render thread; no image readback or synchronization happens here.
+        return this.latestRenderer == null ? null : this.latestRenderer.ranges();
+    }
+
+    private static void appendRanges(
+            StringBuilder json, RendererDataRangeDiagnostics.Snapshot value) {
+        json.append("\n  \"gpuRanges\": ");
+        if (value == null) {
+            json.append("null,");
+            return;
+        }
+        json.append('{');
+        field(json, "captureCount", value.captureCount());
+        field(json, "resetCaptureCount", value.resetCaptureCount());
+        field(json, "sampledPixels", value.sampledPixels());
+        field(json, "motionFiniteCount", value.motionFiniteCount());
+        field(json, "motionNonfiniteCount", value.motionNonfiniteCount());
+        field(json, "motionOutsideUnitCount", value.motionOutsideUnitCount());
+        field(json, "motionNonzeroCount", value.motionNonzeroCount());
+        field(json, "maximumAbsoluteMotionUvX", value.maximumAbsoluteMotionUvX());
+        field(json, "maximumAbsoluteMotionUvY", value.maximumAbsoluteMotionUvY());
+        field(json, "maximumMotionPixels", value.maximumMotionPixels());
+        field(json, "motionPixelsP50Upper", value.motionPixelsPercentile(0.50));
+        field(json, "motionPixelsP95Upper", value.motionPixelsPercentile(0.95));
+        field(json, "motionPixelsP99Upper", value.motionPixelsPercentile(0.99));
+        field(json, "depthSurfaceCount", value.depthSurfaceCount());
+        field(json, "depthInvalidCount", value.depthInvalidCount());
+        field(json, "depthSkyCount", value.depthSkyCount());
+        field(json, "minimumSurfaceViewZ",
+                value.depthSurfaceCount() == 0L ? 0.0 : value.minimumSurfaceViewZ());
+        field(json, "maximumSurfaceViewZ", value.maximumSurfaceViewZ());
+        field(json, "surfaceViewZP50Upper", value.surfaceViewZPercentile(0.50));
+        field(json, "surfaceViewZP95Upper", value.surfaceViewZPercentile(0.95));
+        field(json, "surfaceViewZP99Upper", value.surfaceViewZPercentile(0.99));
         trimComma(json).append("\n  },");
     }
 
