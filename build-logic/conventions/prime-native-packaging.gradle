@@ -60,6 +60,7 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 			'prime/natives/windows-x86_64/amd_fidelityfx_vk.dll',
 			'prime/natives/windows-x86_64/prime_dlss_rr.dll',
 			'prime/natives/windows-x86_64/nvngx_dlssd.dll',
+			'prime/natives/windows-x86_64/nvngx_dlssg.dll',
 			'prime/shaders/manifest.sha256'
 		] + requiredShaders
 		def missing = required.findAll { !names.contains(it) }
@@ -116,7 +117,8 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 			}
 			[
 					'prime/natives/windows-x86_64/prime_dlss_rr.dll',
-					'prime/natives/windows-x86_64/nvngx_dlssd.dll'
+					'prime/natives/windows-x86_64/nvngx_dlssd.dll',
+					'prime/natives/windows-x86_64/nvngx_dlssg.dll'
 			].each { rrNativeName ->
 				def rrNativeInput = zip.getInputStream(zip.getEntry(rrNativeName))
 				def rrNativeHeader = rrNativeInput.withCloseable { it.readNBytes(2) }
@@ -144,7 +146,6 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 					|| it.toLowerCase(java.util.Locale.ROOT).contains('development')
 					|| it.toLowerCase(java.util.Locale.ROOT).contains('_dev')
 					|| it.endsWith('/nvngx_dlss.dll')
-					|| it.endsWith('/nvngx_dlssg.dll')
 					|| it ==~ /.*\.(glsl|rgen|rchit|rmiss|rahit|comp)$/
 		}
 		if (!forbidden.isEmpty()) {

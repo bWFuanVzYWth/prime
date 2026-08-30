@@ -15,6 +15,7 @@ import dev.prime.render.HdrOutput;
 import dev.prime.render.vulkan.HdrPresentation;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanImage;
+import dev.prime.streamline.StreamlineFrameGeneration;
 import it.unimi.dsi.fastutil.longs.LongList;
 import java.nio.IntBuffer;
 import org.lwjgl.vulkan.EXTSwapchainColorspace;
@@ -155,6 +156,9 @@ public abstract class VulkanGpuSurfaceMixin {
                 }
                 this.prime$swapchainImageFormat = selected.format();
                 this.prime$swapchainColorSpace = selected.colorSpace();
+                StreamlineFrameGeneration.onSwapchainConfigured(
+                        this.prime$swapchainImageFormat,
+                        this.swapchainImages.size());
                 return;
             }
         }

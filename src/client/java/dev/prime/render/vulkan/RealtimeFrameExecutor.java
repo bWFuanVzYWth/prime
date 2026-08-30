@@ -6,6 +6,8 @@ import dev.prime.render.RealtimeFramePlan;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.ImageDiagnosticSelection;
 import dev.prime.render.vulkan.reconstruction.VulkanReconstructionProcessor;
+import dev.prime.streamline.StreamlineFrameGeneration;
+import dev.prime.streamline.StreamlineReflex;
 import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.util.List;
 import java.util.Objects;
@@ -124,7 +126,7 @@ public final class RealtimeFrameExecutor {
             DisplayExposureDiagnostics.Capture trackedExposureCapture = exposureCapture;
             completion.onCommit(1, () -> exposureDiagnostics.submitted(
                     trackedExposureCapture));
-            completion.onAbandon(4, failure -> ResourceCleanup.run(
+            completion.onAbandon(5, failure -> ResourceCleanup.run(
                     () -> exposureDiagnostics.abandon(trackedExposureCapture), failure));
             VulkanImageTransitions.finishAtlasRead(
                     commandBuffer, atlasView.texture());
@@ -136,6 +138,25 @@ public final class RealtimeFrameExecutor {
                     mainColor,
                     processor.displayWidth(),
                     processor.displayHeight());
+            StreamlineFrameGeneration.publish(
+                    StreamlineReflex.currentFrameIndex(),
+                    plan.integrator().camera(),
+                    processor.rawFrame(),
+                    output,
+                    processor.displayWidth(),
+                    processor.displayHeight(),
+                    output.format(),
+                    0);
+            StreamlineInputFlipPass streamlineInputs = StreamlineInputFlipPass.create(
+                    this.context,
+                    processor.rawFrame().viewZ(),
+                    processor.rawFrame().transportMetadata(),
+                    output);
+            completion.onCommit(5, () -> this.context.defer(streamlineInputs));
+            completion.onAbandon(4, failure -> ResourceCleanup.destroy(
+                    streamlineInputs, failure));
+            streamlineInputs.record(commandBuffer);
+            StreamlineFrameGeneration.prepare(commandBuffer, streamlineInputs);
             this.context.device().instance().debug().endDebugGroup(
                     commandBuffer);
             submission.submit(

@@ -1,14 +1,35 @@
 package dev.prime;
 
+import dev.prime.binding.streamline.EngineType;
+import dev.prime.binding.streamline.FrameGeneration;
+import dev.prime.binding.streamline.Pcl;
+import dev.prime.binding.streamline.PreferenceFlag;
+import dev.prime.binding.streamline.Preferences;
+import dev.prime.binding.streamline.Reflex;
+import dev.prime.binding.streamline.RenderApi;
+import dev.prime.binding.streamline.Streamline;
 import dev.prime.config.PrimeConfig;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.client.PrimeRuntime;
 import dev.prime.render.runtime.RendererLifecycle;
 import dev.prime.render.scene.vanilla.ItemFrameModelFallback;
+import dev.prime.streamline.StreamlineReflex;
+import dev.prime.streamline.StreamlineFrameGeneration;
+
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
+
+import static java.lang.foreign.ValueLayout.ADDRESS;
+import static java.lang.foreign.ValueLayout.JAVA_INT;
+
+import dev.prime.render.vulkan.natives.NativeLibraries;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
 import net.fabricmc.fabric.api.resource.v1.reloader.ResourceReloaderKeys;
 import net.minecraft.client.Minecraft;
@@ -19,6 +40,59 @@ import net.minecraft.server.packs.resources.PreparableReloadListener;
 public final class PrimeClient implements ClientModInitializer {
     private static final Identifier RELOAD_LISTENER_ID = Identifier.fromNamespaceAndPath(
             PrimeInfo.MOD_ID, "ray_tracing_resources");
+
+    public static Streamline streamline() {
+        return streamlineInstance;
+    }
+
+    private static Streamline streamlineInstance;
+
+    public static void initializeStreamline(){
+        NativeLibraries.NATIVE_STREAMLINE_COMMON.getOrCreateLibrary();
+        NativeLibraries.NATIVE_STREAMLINE_PCL.getOrCreateLibrary();
+        NativeLibraries.NATIVE_STREAMLINE_REFLEX.getOrCreateLibrary();
+        NativeLibraries.NATIVE_STREAMLINE_DLSSG.getOrCreateLibrary();
+        NativeLibraries.NATIVE_STREAMLINE_DLSSG_FEATURE.getOrCreateLibrary();
+        NativeLibraries.NATIVE_STREAMLINE_LOWLATENCY_FEATURE.getOrCreateLibrary();
+        Path interposerPath = NativeLibraries.NATIVE_STREAMLINE_INTERPOSER.tryToExtract();
+        streamlineInstance = Streamline.open(interposerPath);
+
+        try (Arena arena = Arena.ofConfined()) {
+            var preferences = Preferences.allocate(arena);
+            MemorySegment pluginPath = arena.allocateFrom(
+                    NativeLibraries.extractedNativePath().toString(), StandardCharsets.UTF_16LE);
+            preferences.pathsToPlugins(arena.allocateFrom(ADDRESS, pluginPath));
+            preferences.numPathsToPlugins(1);
+            Path logDir = FabricLoader.getInstance().getConfigDir()
+                    .resolve("prime")
+                    .resolve("streamline");
+            preferences.pathToLogsAndData(arena.allocateFrom(logDir.toString(), StandardCharsets.UTF_16LE));
+            preferences.featuresToLoad(arena.allocateFrom(JAVA_INT,
+                    FrameGeneration.FEATURE_ID,
+                    Pcl.FEATURE_ID,
+                    Reflex.FEATURE_ID
+            ));
+            preferences.numFeaturesToLoad(3);
+            preferences.flags(
+                    PreferenceFlag.DISABLE_CL_STATE_TRACKING.mask
+                    | PreferenceFlag.USE_FRAME_BASED_RESOURCE_TAGGING.mask
+            );
+            preferences.renderApi(RenderApi.VULKAN);
+            preferences.engine(EngineType.CUSTOM);
+            preferences.engineVersion(arena.allocateFrom("0.1.0"));
+            preferences.projectId(arena.allocateFrom("07210721-0721-4E6F-A8C1-1145142D0A3C"));
+            preferences.showConsole(true);
+            int initResult = streamlineInstance.init(preferences);
+            if (initResult != Streamline.RESULT_OK) {
+                PrimeInfo.LOGGER.warn(
+                        "Streamline slInit failed (result {}); Reflex/PCL features disabled",
+                        initResult);
+                return;
+            }
+        }
+        PrimeInfo.LOGGER.info("Streamline initialized (Reflex available: {})", StreamlineReflex.available());
+    }
+
     @Override
     public void onInitializeClient() {
         PrimeConfig.load();

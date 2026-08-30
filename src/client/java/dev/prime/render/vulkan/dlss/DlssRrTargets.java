@@ -24,7 +24,9 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     static final int SPECULAR_HIT_DISTANCE_FORMAT = VK12.VK_FORMAT_R16_SFLOAT;
     static final int RESPONSIVITY_FORMAT = VK12.VK_FORMAT_R16_SFLOAT;
     private static final int USAGE =
-            VK12.VK_IMAGE_USAGE_STORAGE_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT;
+            VK12.VK_IMAGE_USAGE_STORAGE_BIT
+                    | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
+                    | VK12.VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
     private final VulkanImage noisyDiffuse;
     private final VulkanImage noisySpecular;

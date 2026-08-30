@@ -31,7 +31,7 @@ public final class VulkanSync {
         }
     }
 
-    public static void memoryBarrier(
+    private static void memoryBarrier(
             VkCommandBuffer commandBuffer,
             MemoryStack stack,
             long sourceStage,
@@ -50,6 +50,41 @@ public final class VulkanSync {
                     VkDependencyInfo.calloc(frame)
                             .sType$Default()
                             .pMemoryBarriers(barrier));
+        }
+    }
+
+    public static void imageBarrier(
+            VkCommandBuffer commandBuffer,
+            long image,
+            int oldLayout,
+            int newLayout,
+            long sourceStage,
+            long sourceAccess,
+            long destinationStage,
+            long destinationAccess) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkImageMemoryBarrier2.Buffer barrier = VkImageMemoryBarrier2.calloc(1, stack);
+            barrier.get(0).sType$Default()
+                    .srcStageMask(sourceStage)
+                    .srcAccessMask(sourceAccess)
+                    .dstStageMask(destinationStage)
+                    .dstAccessMask(destinationAccess)
+                    .oldLayout(oldLayout)
+                    .newLayout(newLayout)
+                    .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
+                    .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
+                    .image(image);
+            barrier.get(0).subresourceRange()
+                    .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
+                    .baseMipLevel(0)
+                    .levelCount(1)
+                    .baseArrayLayer(0)
+                    .layerCount(1);
+            KHRSynchronization2.vkCmdPipelineBarrier2KHR(
+                    commandBuffer,
+                    VkDependencyInfo.calloc(stack)
+                            .sType$Default()
+                            .pImageMemoryBarriers(barrier));
         }
     }
 

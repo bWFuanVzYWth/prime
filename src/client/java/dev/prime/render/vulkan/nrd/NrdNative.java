@@ -1,6 +1,6 @@
 package dev.prime.render.vulkan.nrd;
 
-import dev.prime.render.vulkan.NativeLibraries;
+import dev.prime.render.vulkan.natives.NativeLibraries;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
@@ -57,7 +57,6 @@ public final class NrdNative {
     private static final int DISPATCH_SIZE = 48;
     private static final int RESOURCE_SIZE = 16;
     private static final int DISPATCH_LIST_SIZE = 16;
-    private static final String WINDOWS_RESOURCE = "/prime/natives/windows-x86_64/prime_nrd.dll";
 
     private final SharedLibrary library;
     private final long createFunction;
@@ -67,7 +66,7 @@ public final class NrdNative {
     private final long destroyFunction;
 
     private NrdNative() {
-        SharedLibrary loaded = loadLibrary();
+        SharedLibrary loaded = NativeLibraries.NATIVE_NRD.getOrCreateLibrary();
         try {
             this.library = loaded;
             long getAbiVersionFunction = requireFunction(loaded, "primeNrdGetAbiVersion");
@@ -258,14 +257,6 @@ public final class NrdNative {
             length++;
         }
         return MemoryUtil.memUTF8(address, length);
-    }
-
-    private static SharedLibrary loadLibrary() {
-        if (!isSupportedPlatform()) {
-            throw new IllegalStateException("The bundled NRD native library currently supports Windows x86-64 only");
-        }
-        return NativeLibraries.loadBundled(
-                "prime-nrd", WINDOWS_RESOURCE, "prime_nrd.dll", "NRD native library");
     }
 
     private static long requireFunction(SharedLibrary library, String name) {

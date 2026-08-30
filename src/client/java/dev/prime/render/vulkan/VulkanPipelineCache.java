@@ -57,7 +57,8 @@ final class VulkanPipelineCache implements AutoCloseable {
             vendorId, deviceId, driverVersion, HexFormat.of().formatHex(uuid));
         Path path = FabricLoader.getInstance()
                         .getConfigDir()
-                        .resolve("prime-cache")
+                        .resolve("prime")
+                        .resolve("pipeline_caches")
                         .resolve("vulkan")
                         .resolve(name);
         byte[] initialData = read(path, vendorId, deviceId, uuid);

@@ -10,31 +10,9 @@ import java.util.List;
 import java.util.Set;
 import dev.prime.render.vulkan.dlss.DlssRrBootstrap;
 import org.lwjgl.system.MemoryStack;
-import org.lwjgl.vulkan.EXTRayTracingInvocationReorder;
-import org.lwjgl.vulkan.EXTOpacityMicromap;
-import org.lwjgl.vulkan.KHRAccelerationStructure;
-import org.lwjgl.vulkan.KHRDedicatedAllocation;
-import org.lwjgl.vulkan.KHRDeferredHostOperations;
-import org.lwjgl.vulkan.KHRGetMemoryRequirements2;
-import org.lwjgl.vulkan.KHRRayTracingPipeline;
-import org.lwjgl.vulkan.NVRayTracingInvocationReorder;
-import org.lwjgl.vulkan.VK11;
-import org.lwjgl.vulkan.VK12;
-import org.lwjgl.vulkan.VkPhysicalDeviceAccelerationStructureFeaturesKHR;
-import org.lwjgl.vulkan.VkPhysicalDeviceAccelerationStructurePropertiesKHR;
-import org.lwjgl.vulkan.VkPhysicalDeviceOpacityMicromapFeaturesEXT;
-import org.lwjgl.vulkan.VkPhysicalDeviceOpacityMicromapPropertiesEXT;
-import org.lwjgl.vulkan.VkPhysicalDeviceFeatures;
-import org.lwjgl.vulkan.VkPhysicalDeviceFeatures2;
-import org.lwjgl.vulkan.VkPhysicalDeviceProperties2;
-import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT;
-import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingInvocationReorderPropertiesEXT;
-import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingPipelineFeaturesKHR;
-import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingPipelinePropertiesKHR;
-import org.lwjgl.vulkan.VkPhysicalDeviceSubgroupProperties;
-import org.lwjgl.vulkan.VkPhysicalDeviceVulkan12Features;
-import org.lwjgl.vulkan.VkPhysicalDeviceVulkan11Features;
-import org.lwjgl.vulkan.VkFormatProperties;
+import org.lwjgl.vulkan.*;
+
+import static org.lwjgl.vulkan.EXTPrivateData.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES_EXT;
 
 public final class VulkanDeviceNegotiator {
     private static final List<String> REQUIRED_EXTENSIONS = List.of(
@@ -59,6 +37,9 @@ public final class VulkanDeviceNegotiator {
     private static final VulkanPNextStruct OPACITY_MICROMAP_FEATURES = new VulkanPNextStruct(
             EXTOpacityMicromap.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT,
             VkPhysicalDeviceOpacityMicromapFeaturesEXT.SIZEOF);
+    private static final VulkanPNextStruct PRIVATE_DATA_FEATURES = new VulkanPNextStruct(
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES_EXT,
+            VkPhysicalDevicePrivateDataFeaturesEXT.SIZEOF);
 
     private static final VulkanFeature SHADER_INT64 = new VulkanFeature(
             VulkanBackend.VK10_FEATURES_STRUCT,
@@ -122,6 +103,10 @@ public final class VulkanDeviceNegotiator {
             OPACITY_MICROMAP_FEATURES,
             "micromap",
             VkPhysicalDeviceOpacityMicromapFeaturesEXT.MICROMAP);
+    private static final VulkanFeature PRIVATE_DATA = new VulkanFeature(
+            PRIVATE_DATA_FEATURES,
+            "privateData",
+            VkPhysicalDevicePrivateDataFeaturesEXT.PRIVATEDATA);
 
     private VulkanDeviceNegotiator() {
     }
@@ -137,6 +122,8 @@ public final class VulkanDeviceNegotiator {
                         .VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
         boolean opacityMicromapExtension = physicalDevice.hasDeviceExtension(
                 EXTOpacityMicromap.VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME);
+        boolean privateDataExtension = physicalDevice.hasDeviceExtension(
+                EXTPrivateData.VK_EXT_PRIVATE_DATA_EXTENSION_NAME);
         for (String extension : REQUIRED_EXTENSIONS) {
             if (!physicalDevice.hasDeviceExtension(extension)) {
                 missing.add(extension);
@@ -156,6 +143,9 @@ public final class VulkanDeviceNegotiator {
                             .sType$Default();
             VkPhysicalDeviceOpacityMicromapFeaturesEXT opacityMicromap =
                     VkPhysicalDeviceOpacityMicromapFeaturesEXT.calloc(stack).sType$Default();
+            VkPhysicalDevicePrivateDataFeaturesEXT privateDataFeatures =
+                    VkPhysicalDevicePrivateDataFeaturesEXT.calloc(stack)
+                            .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES_EXT);
             features.pNext(vulkan11.address());
             vulkan11.pNext(vulkan12.address());
             vulkan12.pNext(acceleration.address());
@@ -168,6 +158,10 @@ public final class VulkanDeviceNegotiator {
             if (opacityMicromapExtension) {
                 opacityMicromap.pNext(optionalFeatureChain);
                 optionalFeatureChain = opacityMicromap.address();
+            }
+            if (privateDataExtension) {
+                privateDataFeatures.pNext(optionalFeatureChain);
+                optionalFeatureChain = privateDataFeatures.address();
             }
             rayTracing.pNext(optionalFeatureChain);
             VK12.vkGetPhysicalDeviceFeatures2(physicalDevice.vkPhysicalDevice(), features);
@@ -381,6 +375,12 @@ public final class VulkanDeviceNegotiator {
             if (opacityMicromapSupported) {
                 enabledExtensions.add(EXTOpacityMicromap.VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME);
                 enabledFeatures.add(OPACITY_MICROMAP);
+            }
+
+            // The Streamline interposer required it
+            if (privateDataExtension && privateDataFeatures.privateData()) {
+                enabledExtensions.add(EXTPrivateData.VK_EXT_PRIVATE_DATA_EXTENSION_NAME);
+                enabledFeatures.add(PRIVATE_DATA);
             }
 
             return new VulkanCapabilities(

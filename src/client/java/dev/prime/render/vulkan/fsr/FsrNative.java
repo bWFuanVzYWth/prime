@@ -2,7 +2,7 @@ package dev.prime.render.vulkan.fsr;
 
 import dev.prime.render.fsr.FsrDispatchPlan;
 import dev.prime.render.fsr.FsrSettings;
-import dev.prime.render.vulkan.NativeLibraries;
+import dev.prime.render.vulkan.natives.NativeLibraries;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanImage;
 import java.nio.ByteBuffer;
@@ -63,7 +63,7 @@ final class FsrNative {
     private final long queryFunction;
 
     private FsrNative() {
-        SharedLibrary loaded = loadLibrary();
+        SharedLibrary loaded = NativeLibraries.NATIVE_FFXFSR.getOrCreateLibrary();
         try {
             this.library = loaded;
             this.createFunction = requireFunction(loaded, "ffxCreateContext");
@@ -318,18 +318,6 @@ final class FsrNative {
 
     static boolean isSupportedPlatform(String osName, String architecture) {
         return NativeLibraries.isWindowsX64(osName, architecture);
-    }
-
-    private static SharedLibrary loadLibrary() {
-        if (!isSupportedPlatform()) {
-            throw new IllegalStateException(
-                    "The bundled FidelityFX Vulkan library supports Windows x86-64 only");
-        }
-        return NativeLibraries.loadBundled(
-                "prime-fsr",
-                WINDOWS_RESOURCE,
-                "amd_fidelityfx_vk.dll",
-                "FidelityFX library");
     }
 
     private static long requireFunction(SharedLibrary library, String name) {

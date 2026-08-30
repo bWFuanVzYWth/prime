@@ -21,6 +21,8 @@ final class VulkanSharedPrograms implements AutoCloseable {
     private SharedComputeProgram displayTransform;
     private SharedComputeProgram hdrPresent;
     private SharedComputeProgram autoExposure;
+    private SharedComputeProgram uiAlphaClear;
+    private SharedComputeProgram uiAlphaExtract;
     private boolean closed;
 
     VulkanSharedPrograms(VulkanContext context) {
@@ -31,6 +33,8 @@ final class VulkanSharedPrograms implements AutoCloseable {
         acquireDisplayTransform().release();
         acquireAutoExposure().release();
         acquireHdrPresent().release();
+        acquireUiAlphaClear().release();
+        acquireUiAlphaExtract().release();
     }
 
     SharedComputeProgram acquireDisplayTransform() {
@@ -69,6 +73,32 @@ final class VulkanSharedPrograms implements AutoCloseable {
         return this.hdrPresent.retain();
     }
 
+    SharedComputeProgram acquireUiAlphaClear() {
+        requireOpen();
+        if (this.uiAlphaClear == null) {
+            this.uiAlphaClear = SharedComputeProgram.create(
+                    this.context,
+                    "UI alpha clear",
+                    8,
+                    new int[] {STORAGE_IMAGE},
+                    new String[] {GeneratedShaderPrograms.resource("ui_alpha_clear")});
+        }
+        return this.uiAlphaClear.retain();
+    }
+
+    SharedComputeProgram acquireUiAlphaExtract() {
+        requireOpen();
+        if (this.uiAlphaExtract == null) {
+            this.uiAlphaExtract = SharedComputeProgram.create(
+                    this.context,
+                    "UI alpha extraction",
+                    8,
+                    new int[] {SAMPLED_IMAGE, STORAGE_IMAGE},
+                    new String[] {GeneratedShaderPrograms.resource("ui_alpha_extract")});
+        }
+        return this.uiAlphaExtract.retain();
+    }
+
     void invalidate() {
         requireOpen();
         if (this.displayTransform != null) {
@@ -82,6 +112,14 @@ final class VulkanSharedPrograms implements AutoCloseable {
         if (this.hdrPresent != null) {
             this.hdrPresent.release();
             this.hdrPresent = null;
+        }
+        if (this.uiAlphaClear != null) {
+            this.uiAlphaClear.release();
+            this.uiAlphaClear = null;
+        }
+        if (this.uiAlphaExtract != null) {
+            this.uiAlphaExtract.release();
+            this.uiAlphaExtract = null;
         }
     }
 

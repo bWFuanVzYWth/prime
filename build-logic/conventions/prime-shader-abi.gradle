@@ -539,6 +539,8 @@ tasks.register('nativeTest', Test) {
 		includeTags 'native'
 	}
 	systemProperty 'prime.nativeTests.required', 'true'
+	systemProperty 'prime.native.libraryDirectory',
+			layout.buildDirectory.dir('native-test-libraries').get().asFile.absolutePath
 	outputs.upToDateWhen { false }
 	doFirst {
 		def os = System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT)

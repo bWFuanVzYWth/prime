@@ -5,6 +5,7 @@
   "prime.options.header.display": "Prime：曝光与显示",
   "prime.options.header.material": "Prime：材质",
   "prime.options.header.diagnostics": "Prime：诊断",
+  "prime.options.header.streamline": "Prime：NVIDIA Streamline",
   "prime.options.path_tracing": "Prime 路径追踪",
   "prime.options.path_tracing.tooltip": "开启后使用 Prime 路径追踪渲染；关闭后恢复原版渲染。需要更高帧率或遇到兼容性问题时可以关闭。",
   "prime.options.additional_specular_bounces": "额外镜面反弹次数",
@@ -134,5 +135,17 @@
   "prime.options.debug.image_view.sigma_view_z": "SIGMA：ViewZ 原图",
   "prime.options.debug.image_view.sigma_penumbra": "SIGMA：半影原图",
   "prime.options.restore_defaults": "恢复 Prime 默认值",
-  "prime.options.open_repository": "打开 Prime GitHub 仓库"
+  "prime.options.open_repository": "打开 Prime GitHub 仓库",
+  "prime.options.low_latency.reflex_mode": "NVIDIA Reflex 低延迟",
+  "prime.options.low_latency.reflex_mode.tooltip": "通过 Streamline 的 Reflex 驱动对帧模拟进行节拍控制，降低输入到画面的延迟。「开启 + Boost」还会让 GPU 保持高频率。设置了帧率上限时，Reflex 会接管原版限制器的帧节拍控制。",
+  "prime.options.low_latency.reflex_mode.unavailable.tooltip": "需要 Windows、NVIDIA 显卡，且 Streamline 初始化成功。",
+  "prime.options.low_latency.reflex_mode.off": "关闭",
+  "prime.options.low_latency.reflex_mode.on": "开启",
+  "prime.options.low_latency.reflex_mode.boost": "开启 + Boost",
+  "prime.options.streamline.dlss_frame_generation": "DLSS 帧生成",
+  "prime.options.streamline.dlss_frame_generation.tooltip": "通过 NVIDIA Streamline DLSS-G 生成插值帧。需要 Windows、兼容的 NVIDIA 显卡、Streamline 和 Reflex；Reflex 关闭时本功能不会生效。",
+  "prime.options.streamline.dlss_frame_generation_multiplier": "DLSS 帧生成倍率",
+  "prime.options.streamline.dlss_frame_generation_multiplier.tooltip": "设置每个真实渲染帧对应的输出帧倍率。实际可用上限由驱动和 Streamline 决定。",
+  "prime.options.streamline.dlss_frame_generation_ui_recomposition": "DLSS UI 重混合",
+  "prime.options.streamline.dlss_frame_generation_ui_recomposition.tooltip": "提取游戏 UI 不透明度供 DLSS-G 重混合使用。需要启用 DLSS 帧生成，并且 Streamline UI Alpha 路径可用。"
 }

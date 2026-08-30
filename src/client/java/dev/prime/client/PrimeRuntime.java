@@ -2,7 +2,9 @@ package dev.prime.client;
 
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.prime.PrimeClient;
 import dev.prime.mixin.MinecraftAccessor;
+import dev.prime.config.PrimeConfig;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.RendererSettings;
 import dev.prime.render.diagnostic.NrdInputView;
@@ -19,6 +21,8 @@ import dev.prime.render.runtime.VulkanRenderer;
 import dev.prime.render.scene.vanilla.DynamicSceneFrame;
 import dev.prime.render.vulkan.HdrPresentation;
 import java.util.List;
+
+import dev.prime.streamline.StreamlineReflex;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import org.joml.Matrix4fc;
@@ -155,6 +159,36 @@ public final class PrimeRuntime {
         }
         try {
             activeRenderer.render(mainTarget, settings);
+        } catch (RuntimeException exception) {
+            this.fail(exception);
+        }
+    }
+
+    public void clearUiAlpha(RenderTarget mainTarget) {
+        VulkanRenderer activeRenderer = this.lifecycle.renderer();
+        if (activeRenderer == null
+                || this.lifecycle.state() != RuntimeState.ACTIVE
+                || activeRenderer.screenshotActive()) {
+            return;
+        }
+        try {
+            activeRenderer.clearUiAlpha(
+                    mainTarget, PrimeConfig.dlssFrameGenerationUiRecomposition());
+        } catch (RuntimeException exception) {
+            this.fail(exception);
+        }
+    }
+
+    public void captureUiAlpha(RenderTarget mainTarget) {
+        VulkanRenderer activeRenderer = this.lifecycle.renderer();
+        if (activeRenderer == null
+                || this.lifecycle.state() != RuntimeState.ACTIVE
+                || activeRenderer.screenshotActive()) {
+            return;
+        }
+        try {
+            activeRenderer.captureUiAlpha(
+                    mainTarget, PrimeConfig.dlssFrameGenerationUiRecomposition());
         } catch (RuntimeException exception) {
             this.fail(exception);
         }

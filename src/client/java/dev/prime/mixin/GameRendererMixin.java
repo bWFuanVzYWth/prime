@@ -64,6 +64,27 @@ public abstract class GameRendererMixin {
     }
 
     @Inject(
+            method = "render(Lnet/minecraft/client/DeltaTracker;Z)V",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lcom/mojang/blaze3d/systems/CommandEncoder;clearDepthTexture(Lcom/mojang/blaze3d/textures/GpuTexture;D)V"))
+    private void prime$clearUiAlpha(
+            DeltaTracker deltaTracker, boolean advanceGameTime, CallbackInfo ci) {
+        PrimeRuntime.instance().clearUiAlpha(this.mainRenderTarget);
+    }
+
+    @Inject(
+            method = "render(Lnet/minecraft/client/DeltaTracker;Z)V",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/client/gui/render/GuiRenderer;render()V",
+                    shift = At.Shift.AFTER))
+    private void prime$captureUiAlpha(
+            DeltaTracker deltaTracker, boolean advanceGameTime, CallbackInfo ci) {
+        PrimeRuntime.instance().captureUiAlpha(this.mainRenderTarget);
+    }
+
+    @Inject(
             method = "renderLevel(Lnet/minecraft/client/DeltaTracker;)V",
             at = @At(
                     value = "INVOKE",

@@ -10,7 +10,9 @@ import org.lwjgl.vulkan.VK12;
 /** Owns every persistent and transient image used by one NRD instance. */
 final class NrdImages implements Destroyable {
     private static final int IMAGE_USAGE =
-            VK12.VK_IMAGE_USAGE_STORAGE_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT;
+            VK12.VK_IMAGE_USAGE_STORAGE_BIT
+                    | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
+                    | VK12.VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     final VulkanImage noisyDiffuse;
     final VulkanImage noisySpecular;
     final VulkanImage noisyDiffuseSh1;

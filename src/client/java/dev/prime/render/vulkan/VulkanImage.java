@@ -13,6 +13,7 @@ public final class VulkanImage implements Destroyable {
     private final long view;
     private final long[] mipViews;
     private final int format;
+    private final int usage;
     private final int width;
     private final int height;
     private final int depth;
@@ -27,6 +28,7 @@ public final class VulkanImage implements Destroyable {
             long view,
             long[] mipViews,
             int format,
+            int usage,
             int width,
             int height,
             int depth) {
@@ -37,6 +39,7 @@ public final class VulkanImage implements Destroyable {
         this.view = view;
         this.mipViews = mipViews.clone();
         this.format = format;
+        this.usage = usage;
         this.width = width;
         this.height = height;
         this.depth = depth;
@@ -65,6 +68,10 @@ public final class VulkanImage implements Destroyable {
 
     public int format() {
         return this.format;
+    }
+
+    public int usage() {
+        return this.usage;
     }
 
     public int height() {

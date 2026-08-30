@@ -22,4 +22,17 @@ public abstract class VulkanGpuTextureMixin {
                 ? flags | VK12.VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT
                 : flags;
     }
+
+    @ModifyArg(
+            method = "<init>",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lorg/lwjgl/vulkan/VkImageCreateInfo;usage(I)Lorg/lwjgl/vulkan/VkImageCreateInfo;"),
+            index = 0)
+    private int prime$allowMainColorStorage(int usage) {
+        VulkanGpuTexture texture = (VulkanGpuTexture) (Object) this;
+        return (texture.usage() & 32) != 0
+                ? usage | VK12.VK_IMAGE_USAGE_STORAGE_BIT
+                : usage;
+    }
 }

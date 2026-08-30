@@ -113,6 +113,14 @@
       "maxFiles": 8,
       "maxBytes": 73311
     },
+    "entry/post/ui_alpha_clear.compute.slang": {
+      "maxFiles": 2,
+      "maxBytes": 4096
+    },
+    "entry/post/ui_alpha_extract.compute.slang": {
+      "maxFiles": 2,
+      "maxBytes": 4096
+    },
     "entry/post/sun_shadow_hierarchy.compute.slang": {
       "maxFiles": 3,
       "maxBytes": 5647

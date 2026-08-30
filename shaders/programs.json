@@ -117,6 +117,16 @@
       "stage": "compute",
       "resource": "hdr_present.comp.spv"
     },
+    "ui_alpha_clear": {
+      "source": "shaders/entry/post/ui_alpha_clear.compute.slang",
+      "stage": "compute",
+      "resource": "ui_alpha_clear.comp.spv"
+    },
+    "ui_alpha_extract": {
+      "source": "shaders/entry/post/ui_alpha_extract.compute.slang",
+      "stage": "compute",
+      "resource": "ui_alpha_extract.comp.spv"
+    },
     "image_diagnostic_rgba16": {
       "source": "shaders/entry/post/image_diagnostic_rgba16.compute.slang",
       "stage": "compute",

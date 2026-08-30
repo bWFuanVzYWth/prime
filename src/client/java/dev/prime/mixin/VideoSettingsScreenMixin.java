@@ -1,5 +1,6 @@
 package dev.prime.mixin;
 
+import dev.prime.binding.streamline.ReflexMode;
 import dev.prime.client.PrimeVideoOptions;
 import dev.prime.config.PrimeConfig;
 import dev.prime.render.AstronomySettings;
@@ -22,6 +23,7 @@ import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.terrain.TerrainWorkerSettings;
 import dev.prime.render.terrain.VoxelSurfaceSettings;
+import dev.prime.streamline.StreamlineReflex;
 import java.net.URI;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -52,6 +54,8 @@ public abstract class VideoSettingsScreenMixin {
             Component.translatable("prime.options.header.display");
     private static final Component PRIME$MATERIAL_HEADER =
             Component.translatable("prime.options.header.material");
+    private static final Component PRIME$STREAMLINE_HEADER =
+            Component.translatable("prime.options.header.streamline");
     private static final Component PRIME$DIAGNOSTICS_HEADER =
             Component.translatable("prime.options.header.diagnostics");
     @Unique private PrimeVideoOptions.OptionSet prime$options;
@@ -103,6 +107,31 @@ public abstract class VideoSettingsScreenMixin {
             list.addHeader(PRIME$MATERIAL_HEADER);
             list.addSmall(this.prime$options.material().defaultRoughness(), this.prime$options.material().seamlessGlass());
             list.addSmall(this.prime$options.material().airGap(), this.prime$options.material().vanillaPbrPresets());
+            list.addHeader(PRIME$STREAMLINE_HEADER);
+            list.addBig(this.prime$options.streamline().reflexMode());
+            AbstractWidget reflexWidget =
+                    list.findOption(this.prime$options.streamline().reflexMode());
+            if (reflexWidget != null) {
+                reflexWidget.active = StreamlineReflex.available();
+            }
+            list.addBig(this.prime$options.streamline().dlssFrameGenerationEnabled());
+            list.addBig(this.prime$options.streamline().dlssFrameGenerationMultiplier());
+            list.addBig(this.prime$options.streamline().dlssFrameGenerationUiRecomposition());
+            AbstractWidget dlssFrameGenerationWidget =
+                    list.findOption(this.prime$options.streamline().dlssFrameGenerationEnabled());
+            AbstractWidget dlssFrameGenerationMultiplierWidget =
+                    list.findOption(this.prime$options.streamline().dlssFrameGenerationMultiplier());
+            AbstractWidget dlssFrameGenerationUiRecompositionWidget =
+                    list.findOption(this.prime$options.streamline().dlssFrameGenerationUiRecomposition());
+            if (dlssFrameGenerationWidget != null) {
+                dlssFrameGenerationWidget.active = StreamlineReflex.available();
+            }
+            if (dlssFrameGenerationMultiplierWidget != null) {
+                dlssFrameGenerationMultiplierWidget.active = StreamlineReflex.available();
+            }
+            if (dlssFrameGenerationUiRecompositionWidget != null) {
+                dlssFrameGenerationUiRecompositionWidget.active = StreamlineReflex.available();
+            }
             list.addHeader(PRIME$DIAGNOSTICS_HEADER);
             list.addBig(this.prime$options.diagnostics().rendererDiagnostics());
             list.addBig(this.prime$options.diagnostics().rawOutput());
@@ -214,6 +243,33 @@ public abstract class VideoSettingsScreenMixin {
         this.prime$refresh(this.prime$options.diagnostics().rendererImageView(), RendererImageView.OFF);
         this.prime$refresh(this.prime$options.diagnostics().rrInputView(), RrInputView.OFF);
         this.prime$refresh(this.prime$options.diagnostics().nrdInputView(), NrdInputView.OFF);
+        this.prime$refresh(this.prime$options.streamline().reflexMode(), ReflexMode.OFF);
+        this.prime$refresh(
+                this.prime$options.streamline().dlssFrameGenerationEnabled(), false);
+        this.prime$refresh(
+                this.prime$options.streamline().dlssFrameGenerationMultiplier(), 2);
+        this.prime$refresh(
+                this.prime$options.streamline().dlssFrameGenerationUiRecomposition(), false);
+        AbstractWidget reflexWidget =
+                list.findOption(this.prime$options.streamline().reflexMode());
+        if (reflexWidget != null) {
+            reflexWidget.active = StreamlineReflex.available();
+        }
+        AbstractWidget dlssFrameGenerationWidget =
+                list.findOption(this.prime$options.streamline().dlssFrameGenerationEnabled());
+        if (dlssFrameGenerationWidget != null) {
+            dlssFrameGenerationWidget.active = StreamlineReflex.available();
+        }
+        AbstractWidget dlssFrameGenerationMultiplierWidget =
+                list.findOption(this.prime$options.streamline().dlssFrameGenerationMultiplier());
+        if (dlssFrameGenerationMultiplierWidget != null) {
+            dlssFrameGenerationMultiplierWidget.active = StreamlineReflex.available();
+        }
+        AbstractWidget dlssFrameGenerationUiRecompositionWidget =
+                list.findOption(this.prime$options.streamline().dlssFrameGenerationUiRecomposition());
+        if (dlssFrameGenerationUiRecompositionWidget != null) {
+            dlssFrameGenerationUiRecompositionWidget.active = StreamlineReflex.available();
+        }
     }
 
     @Unique

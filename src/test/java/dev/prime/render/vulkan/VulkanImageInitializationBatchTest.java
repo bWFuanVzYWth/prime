@@ -47,6 +47,7 @@ final class VulkanImageInitializationBatchTest {
                 3L,
                 new long[] {3L},
                 VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
+                VK12.VK_IMAGE_USAGE_STORAGE_BIT,
                 1,
                 1,
                 1);

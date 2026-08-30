@@ -3,6 +3,7 @@ package dev.prime.render.vulkan;
 import com.mojang.blaze3d.vulkan.Destroyable;
 import com.mojang.blaze3d.vulkan.VulkanCommandEncoder;
 import com.mojang.blaze3d.vulkan.VulkanDevice;
+import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
 import java.nio.LongBuffer;
@@ -37,6 +38,7 @@ public final class VulkanContext implements AutoCloseable {
     private final VulkanPipelineCache pipelineCache;
     private final VulkanSharedPrograms sharedPrograms;
     private HdrPresentPass hdrPresentPass;
+    private UiAlphaCapturePass uiAlphaCapturePass;
     private final Set<Destroyable> deferred = Collections.newSetFromMap(new IdentityHashMap<>());
     private boolean closed;
 
@@ -118,6 +120,16 @@ public final class VulkanContext implements AutoCloseable {
         return this.sharedPrograms.acquireHdrPresent();
     }
 
+    SharedComputeProgram acquireUiAlphaExtractProgram() {
+        requireOpen();
+        return this.sharedPrograms.acquireUiAlphaExtract();
+    }
+
+    SharedComputeProgram acquireUiAlphaClearProgram() {
+        requireOpen();
+        return this.sharedPrograms.acquireUiAlphaClear();
+    }
+
     public VulkanImage recordHdrPresentation(
             VkCommandBuffer commandBuffer,
             long hdrView,
@@ -143,6 +155,39 @@ public final class VulkanContext implements AutoCloseable {
                 compositePrimeHdr,
                 scRgbScale);
         return this.hdrPresentPass.output();
+    }
+
+    public void clearMainColorAlpha(
+            VkCommandBuffer commandBuffer,
+            long mainColorImage,
+            long mainColorView,
+            int width,
+            int height) {
+        requireOpen();
+        UiAlphaCapturePass previous = this.uiAlphaCapturePass;
+        this.uiAlphaCapturePass = UiAlphaCapturePass.create(
+                this, width, height, mainColorImage, mainColorView);
+        if (previous != null) {
+            this.defer(previous);
+        }
+        this.uiAlphaCapturePass.recordClear(commandBuffer);
+    }
+
+    public VulkanImage captureMainColorAlpha(
+            VkCommandBuffer commandBuffer,
+            VulkanGpuTexture mainColor,
+            long mainColorImage,
+            long mainColorView,
+            int width,
+            int height) {
+        requireOpen();
+        UiAlphaCapturePass current = this.uiAlphaCapturePass;
+        if (current == null
+                || !current.matches(width, height, mainColorImage, mainColorView)) {
+            return null;
+        }
+        current.recordExtract(commandBuffer, mainColor);
+        return current.alpha();
     }
 
     public void invalidateSharedPrograms() {
@@ -435,6 +480,7 @@ public final class VulkanContext implements AutoCloseable {
                         view,
                         mipViews,
                         format,
+                        usage,
                         width,
                         height,
                         depth);
@@ -546,6 +592,10 @@ public final class VulkanContext implements AutoCloseable {
             if (this.hdrPresentPass != null) {
                 this.hdrPresentPass.destroy();
                 this.hdrPresentPass = null;
+            }
+            if (this.uiAlphaCapturePass != null) {
+                this.uiAlphaCapturePass.destroy();
+                this.uiAlphaCapturePass = null;
             }
             this.sharedPrograms.close();
         } catch (RuntimeException exception) {

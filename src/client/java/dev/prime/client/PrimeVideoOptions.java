@@ -1,8 +1,11 @@
 package dev.prime.client;
 
 import com.mojang.serialization.Codec;
+import dev.prime.binding.streamline.ReflexMode;
 import dev.prime.config.PrimeConfig;
 import dev.prime.mixin.MinecraftAccessor;
+import dev.prime.streamline.StreamlineFrameGeneration;
+import dev.prime.streamline.StreamlineReflex;
 import dev.prime.render.AstronomySettings;
 import dev.prime.render.DisplaySettings;
 import dev.prime.render.HdrOutput;
@@ -83,7 +86,12 @@ public final class PrimeVideoOptions {
                         rawOutput(),
                         rendererImageView(diagnosticChanged),
                         rrInputView(diagnosticChanged),
-                        nrdInputView(diagnosticChanged)));
+                        nrdInputView(diagnosticChanged)),
+                new Streamline(
+                        reflexMode(),
+                        dlssFrameGenerationEnabled(),
+                        dlssFrameGenerationMultiplier(),
+                        dlssFrameGenerationUiRecomposition()));
     }
 
     private static OptionInstance<Boolean> pathTracingEnabled() {
@@ -579,6 +587,61 @@ public final class PrimeVideoOptions {
         return String.format(Locale.ROOT, "%.2f", MaterialSettings.linearRoughness(steps));
     }
 
+    private static OptionInstance<ReflexMode> reflexMode() {
+        boolean available = StreamlineReflex.available();
+        return new OptionInstance<>(
+                "prime.options.low_latency.reflex_mode",
+                OptionInstance.cachedConstantTooltip(Component.translatable(available
+                        ? "prime.options.low_latency.reflex_mode.tooltip"
+                        : "prime.options.low_latency.reflex_mode.unavailable.tooltip")),
+                (caption, mode) -> Component.translatable(
+                        "prime.options.low_latency.reflex_mode." + switch (mode) {
+                            case OFF -> "off";
+                            case LOW_LATENCY -> "on";
+                            case LOW_LATENCY_WITH_BOOST -> "boost";
+                        }),
+                new OptionInstance.Enum<>(
+                        List.of(ReflexMode.values()),
+                        Codec.STRING.xmap(
+                                id -> ReflexMode.valueOf(id.toUpperCase(Locale.ROOT)),
+                                mode -> mode.name().toLowerCase(Locale.ROOT))),
+                PrimeConfig.reflexMode(),
+                PrimeConfig::setReflexMode);
+    }
+
+    private static OptionInstance<Boolean> dlssFrameGenerationEnabled() {
+        return OptionInstance.createBoolean(
+                "prime.options.streamline.dlss_frame_generation",
+                OptionInstance.cachedConstantTooltip(Component.translatable(
+                        "prime.options.streamline.dlss_frame_generation.tooltip")),
+                PrimeConfig.dlssFrameGenerationEnabled(),
+                PrimeConfig::setDlssFrameGenerationEnabled);
+    }
+
+    private static OptionInstance<Integer> dlssFrameGenerationMultiplier() {
+        int maximumMultiplier = StreamlineFrameGeneration.maximumMultiplier();
+        int effectiveMultiplier = Math.min(
+                PrimeConfig.dlssFrameGenerationMultiplier(), maximumMultiplier);
+        return new OptionInstance<>(
+                "prime.options.streamline.dlss_frame_generation_multiplier",
+                OptionInstance.cachedConstantTooltip(Component.translatable(
+                        "prime.options.streamline.dlss_frame_generation_multiplier.tooltip")),
+                (caption, multiplier) -> Options.genericValueLabel(
+                        caption, Component.literal(multiplier + "x")),
+                new OptionInstance.IntRange(2, maximumMultiplier),
+                effectiveMultiplier,
+                PrimeConfig::setDlssFrameGenerationMultiplier);
+    }
+
+    private static OptionInstance<Boolean> dlssFrameGenerationUiRecomposition() {
+        return OptionInstance.createBoolean(
+                "prime.options.streamline.dlss_frame_generation_ui_recomposition",
+                OptionInstance.cachedConstantTooltip(Component.translatable(
+                        "prime.options.streamline.dlss_frame_generation_ui_recomposition.tooltip")),
+                PrimeConfig.dlssFrameGenerationUiRecomposition(),
+                PrimeConfig::setDlssFrameGenerationUiRecomposition);
+    }
+
     private static OptionInstance<Boolean> hdr() {
         return OptionInstance.createBoolean(
                 "prime.options.display.hdr",
@@ -601,7 +664,8 @@ public final class PrimeVideoOptions {
             Lighting lighting,
             Display display,
             Material material,
-            Diagnostics diagnostics) {
+            Diagnostics diagnostics,
+            Streamline streamline) {
     }
 
     public record Rendering(
@@ -647,5 +711,12 @@ public final class PrimeVideoOptions {
             OptionInstance<RendererImageView> rendererImageView,
             OptionInstance<RrInputView> rrInputView,
             OptionInstance<NrdInputView> nrdInputView) {
+    }
+
+    public record Streamline(
+            OptionInstance<ReflexMode> reflexMode,
+            OptionInstance<Boolean> dlssFrameGenerationEnabled,
+            OptionInstance<Integer> dlssFrameGenerationMultiplier,
+            OptionInstance<Boolean> dlssFrameGenerationUiRecomposition) {
     }
 }

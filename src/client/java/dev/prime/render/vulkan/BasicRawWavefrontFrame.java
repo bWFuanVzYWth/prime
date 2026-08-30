@@ -11,7 +11,10 @@ import org.lwjgl.vulkan.VkImageMemoryBarrier2;
 
 /** Minimal image-backed wavefront signal set for unfiltered realtime presentation. */
 public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroyable {
-    private static final int SIGNAL_USAGE = VK12.VK_IMAGE_USAGE_STORAGE_BIT;
+    private static final int SIGNAL_USAGE =
+            VK12.VK_IMAGE_USAGE_STORAGE_BIT
+                    | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
+                    | VK12.VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     private static final int LINEAR_OUTPUT_USAGE =
             SIGNAL_USAGE | VK12.VK_IMAGE_USAGE_SAMPLED_BIT;
 

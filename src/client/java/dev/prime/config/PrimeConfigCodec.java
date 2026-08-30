@@ -1,5 +1,6 @@
 package dev.prime.config;
 
+import dev.prime.binding.streamline.ReflexMode;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.AstronomySettings;
 import dev.prime.render.DisplaySettings;
@@ -16,6 +17,7 @@ import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.terrain.TerrainWorkerSettings;
 import dev.prime.render.terrain.VoxelSurfaceSettings;
 import java.math.BigDecimal;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
 import java.util.function.Function;
@@ -53,6 +55,13 @@ final class PrimeConfigCodec {
     private static final String SEAMLESS_GLASS_KEY = "material.seamless_glass";
     private static final String AIR_GAP_KEY = "material.air_gap";
     private static final String VANILLA_PBR_PRESETS_KEY = "material.vanilla_pbr_presets";
+    private static final String REFLEX_MODE_KEY = "low_latency.reflex_mode";
+    private static final String DLSS_FRAME_GENERATION_ENABLED_KEY =
+            "streamline.dlss_frame_generation";
+    private static final String DLSS_FRAME_GENERATION_MULTIPLIER_KEY =
+            "streamline.dlss_frame_generation_multiplier";
+    private static final String DLSS_FRAME_GENERATION_UI_RECOMPOSITION_KEY =
+            "streamline.dlss_frame_generation_ui_recomposition";
     private static final Set<String> CURRENT_KEYS = Set.of(
             PATH_TRACING_ENABLED_KEY,
             ADDITIONAL_SPECULAR_BOUNCES_KEY,
@@ -76,7 +85,11 @@ final class PrimeConfigCodec {
             DEFAULT_ROUGHNESS_KEY,
             SEAMLESS_GLASS_KEY,
             AIR_GAP_KEY,
-            VANILLA_PBR_PRESETS_KEY);
+            VANILLA_PBR_PRESETS_KEY,
+            REFLEX_MODE_KEY,
+            DLSS_FRAME_GENERATION_ENABLED_KEY,
+            DLSS_FRAME_GENERATION_MULTIPLIER_KEY,
+            DLSS_FRAME_GENERATION_UI_RECOMPOSITION_KEY);
 
     private PrimeConfigCodec() {
     }
@@ -203,6 +216,26 @@ final class PrimeConfigCodec {
                 defaultSettings.vanillaPbrPresets(),
                 PrimeConfigCodec::parseBoolean,
                 "vanilla-PBR preset switch");
+        ReflexMode reflexMode = reader.value(
+                REFLEX_MODE_KEY,
+                defaults.reflexMode(),
+                PrimeConfigCodec::parseReflexMode,
+                "Reflex mode");
+        boolean dlssFrameGenerationEnabled = reader.value(
+                DLSS_FRAME_GENERATION_ENABLED_KEY,
+                defaults.dlssFrameGenerationEnabled(),
+                PrimeConfigCodec::parseBoolean,
+                "DLSS frame-generation switch");
+        int dlssFrameGenerationMultiplier = reader.value(
+                DLSS_FRAME_GENERATION_MULTIPLIER_KEY,
+                defaults.dlssFrameGenerationMultiplier(),
+                PrimeConfigCodec::parseDlssFrameGenerationMultiplier,
+                "DLSS frame-generation multiplier");
+        boolean dlssFrameGenerationUiRecomposition = reader.value(
+                DLSS_FRAME_GENERATION_UI_RECOMPOSITION_KEY,
+                defaults.dlssFrameGenerationUiRecomposition(),
+                PrimeConfigCodec::parseBoolean,
+                "DLSS frame-generation UI recomposition switch");
 
         PrimeSettings settings = new PrimeSettings(
                 pathTracing,
@@ -229,7 +262,11 @@ final class PrimeConfigCodec {
                         maximumBounces,
                         terrainWorkers,
                         hdr,
-                        referenceWhite),
+                        referenceWhite,
+                        reflexMode,
+                        dlssFrameGenerationEnabled,
+                        dlssFrameGenerationMultiplier,
+                        dlssFrameGenerationUiRecomposition),
                 reader.rewriteNeeded);
     }
 
@@ -265,13 +302,18 @@ final class PrimeConfigCodec {
                 + formatRoughness(settings.defaultRoughnessSteps()) + "\n"
                 + SEAMLESS_GLASS_KEY + "=" + settings.seamlessGlass() + "\n"
                 + AIR_GAP_KEY + "=" + settings.airGap() + "\n"
-                + VANILLA_PBR_PRESETS_KEY + "=" + settings.vanillaPbrPresets() + "\n";
+                + VANILLA_PBR_PRESETS_KEY + "=" + settings.vanillaPbrPresets() + "\n"
+                + REFLEX_MODE_KEY + "=" + data.reflexMode().name().toLowerCase(Locale.ROOT) + "\n"
+                + DLSS_FRAME_GENERATION_ENABLED_KEY + "=" + data.dlssFrameGenerationEnabled() + "\n"
+                + DLSS_FRAME_GENERATION_MULTIPLIER_KEY + "=" + data.dlssFrameGenerationMultiplier() + "\n"
+                + DLSS_FRAME_GENERATION_UI_RECOMPOSITION_KEY + "="
+                + data.dlssFrameGenerationUiRecomposition() + "\n";
     }
 
     static void log(PrimeConfigData data) {
         PrimeSettings settings = data.settings();
         PrimeInfo.LOGGER.info(
-                "Prime settings: path tracing {}, additional specular bounces {}, minimum bounces {}, maximum bounces {}, terrain workers {}%, surface detail {} at {}x displacement height, post-processing {} quality {} (NRD-FSR {}x), latitude {} degrees, solar longitude {} degrees, sun {} EV, stars {} EV, block lights {} EV, transparent NEE {}, final exposure {} EV, HDR {}, reference white {}, auto-exposure compensation {}, default roughness {}, seamless glass {}, air gap {}, vanilla PBR presets {}",
+                "Prime settings: path tracing {}, additional specular bounces {}, minimum bounces {}, maximum bounces {}, terrain workers {}%, surface detail {} at {}x displacement height, post-processing {} quality {} (NRD-FSR {}x), latitude {} degrees, solar longitude {} degrees, sun {} EV, stars {} EV, block lights {} EV, transparent NEE {}, final exposure {} EV, HDR {}, reference white {}, auto-exposure compensation {}, default roughness {}, seamless glass {}, air gap {}, vanilla PBR presets {}, Reflex {}, DLSS frame generation {}, multiplier {}x, UI recomposition {}",
                 settings.pathTracingEnabled() ? "enabled" : "disabled",
                 data.additionalSpecularBounces(),
                 data.minimumBounces(),
@@ -297,7 +339,19 @@ final class PrimeConfigCodec {
                 formatRoughness(settings.defaultRoughnessSteps()),
                 settings.seamlessGlass() ? "enabled" : "disabled",
                 settings.airGap() ? "enabled" : "disabled",
-                settings.vanillaPbrPresets() ? "enabled" : "disabled");
+                settings.vanillaPbrPresets() ? "enabled" : "disabled",
+                data.reflexMode().name().toLowerCase(Locale.ROOT),
+                data.dlssFrameGenerationEnabled() ? "enabled" : "disabled",
+                data.dlssFrameGenerationMultiplier(),
+                data.dlssFrameGenerationUiRecomposition() ? "enabled" : "disabled");
+    }
+
+    static ReflexMode parseReflexMode(String value) {
+        try {
+            return ReflexMode.valueOf(value.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("Unknown Reflex mode", exception);
+        }
     }
 
     private static PostProcessingMode parsePersistentMode(String value) {
@@ -336,6 +390,20 @@ final class PrimeConfigCodec {
             return false;
         }
         throw new IllegalArgumentException("Boolean setting must be true or false");
+    }
+
+    static int parseDlssFrameGenerationMultiplier(String value) {
+        try {
+            int multiplier = Integer.parseInt(value);
+            if (multiplier < 2) {
+                throw new IllegalArgumentException(
+                        "DLSS frame-generation multiplier must be at least 2");
+            }
+            return multiplier;
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(
+                    "DLSS frame-generation multiplier must be an integer", exception);
+        }
     }
 
     static int parseMaximumBounces(String value) {

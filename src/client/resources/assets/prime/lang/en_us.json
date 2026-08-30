@@ -5,6 +5,7 @@
   "prime.options.header.display": "Prime: Exposure & Display",
   "prime.options.header.material": "Prime: Materials",
   "prime.options.header.diagnostics": "Prime: Diagnostics",
+  "prime.options.header.streamline": "Prime: NVIDIA Streamline",
   "prime.options.path_tracing": "Prime Path Tracing",
   "prime.options.path_tracing.tooltip": "Enables Prime path-traced rendering. Disable it to restore vanilla rendering when you need more performance or encounter compatibility problems.",
   "prime.options.additional_specular_bounces": "Additional Specular Bounces",
@@ -134,5 +135,16 @@
   "prime.options.debug.image_view.sigma_view_z": "SIGMA: Raw ViewZ",
   "prime.options.debug.image_view.sigma_penumbra": "SIGMA: Raw Penumbra",
   "prime.options.restore_defaults": "Restore Prime Defaults",
-  "prime.options.open_repository": "Open Prime on GitHub"
-}
+  "prime.options.open_repository": "Open Prime on GitHub",
+  "prime.options.low_latency.reflex_mode": "NVIDIA Reflex Low Latency",
+  "prime.options.low_latency.reflex_mode.tooltip": "Paces frame simulation through Streamline's Reflex driver to reduce input-to-photon latency. On + Boost additionally keeps GPU clocks high. When a framerate limit is set, Reflex takes over frame pacing from the vanilla limiter.",
+  "prime.options.low_latency.reflex_mode.unavailable.tooltip": "Requires Windows, an NVIDIA GPU, and a successful Streamline initialization.",
+  "prime.options.low_latency.reflex_mode.off": "Off",
+  "prime.options.low_latency.reflex_mode.on": "On",
+  "prime.options.low_latency.reflex_mode.boost": "On + Boost",
+  "prime.options.streamline.dlss_frame_generation": "DLSS Frame Generation",
+  "prime.options.streamline.dlss_frame_generation.tooltip": "Generates interpolated frames through NVIDIA Streamline DLSS-G. Requires Windows, a compatible NVIDIA GPU, Streamline, and Reflex; it is inactive while Reflex is off.",
+  "prime.options.streamline.dlss_frame_generation_multiplier": "DLSS Frame Generation Multiplier",
+  "prime.options.streamline.dlss_frame_generation_multiplier.tooltip": "Sets the output-frame multiplier for each rendered frame. The available maximum is determined by the driver and Streamline.",
+  "prime.options.streamline.dlss_frame_generation_ui_recomposition": "DLSS UI Recomposition",
+  "prime.options.streamline.dlss_frame_generation_ui_recomposition.tooltip": "Separates the game's UI opacity for DLSS-G recomposition. Requires DLSS Frame Generation and a compatible Streamline UI alpha path."}

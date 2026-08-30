@@ -2,8 +2,8 @@ package dev.prime.render.vulkan.dlss;
 
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.post.ReconstructionQualityMode;
-import dev.prime.render.vulkan.NativeRuntimeFiles;
-import dev.prime.render.vulkan.NativeLibraries;
+import dev.prime.render.vulkan.natives.NativeLibrary;
+import dev.prime.render.vulkan.natives.NativeLibraries;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanImage;
 import java.io.IOException;
@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.Objects;
 import net.fabricmc.loader.api.FabricLoader;
 import org.joml.Matrix4fc;
-import org.lwjgl.system.APIUtil;
 import org.lwjgl.system.JNI;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
@@ -36,12 +35,6 @@ public final class DlssRrNative {
     static final int EVALUATE_DESCRIPTION_SIZE = 176 + IMAGE_COUNT * IMAGE_SIZE;
     private static final int EXTENSION_CAPACITY = 64;
     private static final int EXTENSION_NAME_STRIDE = 256;
-    private static final String BRIDGE_RESOURCE =
-            "/prime/natives/windows-x86_64/prime_dlss_rr.dll";
-    private static final String FEATURE_RESOURCE =
-            "/prime/natives/windows-x86_64/nvngx_dlssd.dll";
-
-    private final SharedLibrary library;
     private final Path featureDirectory;
     private final Path applicationDataDirectory;
     private final String engineVersion;
@@ -65,10 +58,9 @@ public final class DlssRrNative {
         if (this.engineVersion.isBlank()) {
             throw new IllegalStateException("Prime's NGX engine version must not be blank");
         }
-        SharedLibrary loaded = APIUtil.apiCreateLibrary(runtime.bridge().toString());
+        SharedLibrary loaded = runtime.bridge.getOrCreateLibrary();
         try {
             BridgeFunctions functions = validateBridge(loaded);
-            this.library = loaded;
             this.instanceExtensionsFunction = functions.instanceExtensions();
             this.deviceExtensionsFunction = functions.deviceExtensions();
             this.initializeFunction = functions.initialize();
@@ -113,7 +105,7 @@ public final class DlssRrNative {
 
     static void verifyLibrary() {
         ExtractedRuntime runtime = extractRuntime();
-        SharedLibrary loaded = APIUtil.apiCreateLibrary(runtime.bridge().toString());
+        SharedLibrary loaded = runtime.bridge().getOrCreateLibrary();
         try {
             validateBridge(loaded);
         } catch (RuntimeException | Error exception) {
@@ -218,14 +210,12 @@ public final class DlssRrNative {
         if (!isSupportedPlatform()) {
             throw new IllegalStateException("DLSS RR currently supports Windows x86-64 only");
         }
-        byte[] bridge = readResource(BRIDGE_RESOURCE);
-        byte[] feature = readResource(FEATURE_RESOURCE);
-        Path directory = NativeRuntimeFiles.directory("prime-dlss-rr", bridge, feature);
-        Path bridgePath = directory.resolve("prime_dlss_rr.dll");
-        Path featurePath = directory.resolve("nvngx_dlssd.dll");
-        NativeRuntimeFiles.publish(bridgePath, bridge);
-        NativeRuntimeFiles.publish(featurePath, feature);
-        return new ExtractedRuntime(directory, bridgePath);
+        NativeLibraries.NATIVE_DLSSRR_BRIDGE.tryToExtract();
+        NativeLibraries.NATIVE_DLSSRR_FEATURE.tryToExtract();
+        return new ExtractedRuntime(
+                NativeLibraries.extractedNativePath(),
+                NativeLibraries.NATIVE_DLSSRR_BRIDGE
+        );
     }
 
     private static Path createApplicationDataDirectory() {
@@ -240,10 +230,6 @@ public final class DlssRrNative {
             throw new IllegalStateException("Unable to create Prime's NGX application-data directory", exception);
         }
         return path;
-    }
-
-    private static byte[] readResource(String name) {
-        return NativeLibraries.readResource(name, "DLSS RR runtime");
     }
 
     private static void checkResult(int result, String operation) {
@@ -549,7 +535,7 @@ public final class DlssRrNative {
             long releaseFeature,
             long shutdown) {}
 
-    private record ExtractedRuntime(Path directory, Path bridge) {}
+    private record ExtractedRuntime(Path directory, NativeLibrary bridge) {}
 
     private static final class Holder {
         private static final DlssRrNative INSTANCE = new DlssRrNative();

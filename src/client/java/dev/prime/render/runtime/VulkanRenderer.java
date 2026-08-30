@@ -23,7 +23,9 @@ import dev.prime.render.vulkan.SunShadowPipeline;
 import dev.prime.render.vulkan.TraceBackend;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanImageInitializationBatch;
+import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.VulkanShaderModules;
+import dev.prime.streamline.StreamlineFrameGeneration;
 import dev.prime.render.vulkan.dlss.DlssRrBootstrap;
 import dev.prime.render.vulkan.dlss.DlssRrNative;
 import java.util.ArrayList;
@@ -702,6 +704,65 @@ public final class VulkanRenderer implements AutoCloseable {
             throw new IllegalArgumentException("Resource reload belongs to another renderer");
         }
         return reload.terrainReload;
+    }
+
+    public void clearUiAlpha(RenderTarget mainTarget, boolean uiRecompositionEnabled) {
+        if (!uiRecompositionEnabled
+                || !(mainTarget.getColorTexture() instanceof VulkanGpuTexture mainColor)
+                || !(mainTarget.getColorTextureView() instanceof VulkanGpuTextureView mainColorView)) {
+            return;
+        }
+        var encoder = this.context.commandEncoder();
+        VkCommandBuffer commandBuffer = encoder.allocateAndBeginTransientCommandBuffer();
+        this.context.clearMainColorAlpha(
+                commandBuffer,
+                mainColor.vkImage(),
+                mainColorView.vkImageView(),
+                mainColor.getWidth(0),
+                mainColor.getHeight(0));
+        VulkanContext.check(
+                VK12.vkEndCommandBuffer(commandBuffer),
+                "end Prime UI alpha clear command buffer");
+        encoder.execute(commandBuffer);
+    }
+
+    public void captureUiAlpha(RenderTarget mainTarget, boolean uiRecompositionEnabled) {
+        if (!uiRecompositionEnabled
+                || !(mainTarget.getColorTexture() instanceof VulkanGpuTexture mainColor)
+                || !(mainTarget.getColorTextureView() instanceof VulkanGpuTextureView mainColorView)) {
+            return;
+        }
+        var encoder = this.context.commandEncoder();
+        VkCommandBuffer commandBuffer = encoder.allocateAndBeginTransientCommandBuffer();
+        VulkanImage alpha = this.context.captureMainColorAlpha(
+                commandBuffer,
+                mainColor,
+                mainColor.vkImage(),
+                mainColorView.vkImageView(),
+                mainColor.getWidth(0),
+                mainColor.getHeight(0));
+        if (alpha == null) {
+            VulkanContext.check(
+                    VK12.vkEndCommandBuffer(commandBuffer),
+                    "end Prime UI alpha extraction command buffer");
+            encoder.execute(commandBuffer);
+            return;
+        }
+        if (!StreamlineFrameGeneration.prepareUiAlpha(
+                commandBuffer,
+                alpha,
+                mainColor.getWidth(0),
+                mainColor.getHeight(0))) {
+            VulkanContext.check(
+                    VK12.vkEndCommandBuffer(commandBuffer),
+                    "end Prime UI alpha extraction command buffer");
+            encoder.execute(commandBuffer);
+            return;
+        }
+        VulkanContext.check(
+                VK12.vkEndCommandBuffer(commandBuffer),
+                "end Prime UI alpha extraction command buffer");
+        encoder.execute(commandBuffer);
     }
 
     @Override
