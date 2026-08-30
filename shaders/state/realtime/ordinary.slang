@@ -9,6 +9,7 @@ import "policy/runtime/config.slang";
 import "math/sampling.slang";
 import "math/transport.slang";
 import "state/realtime/medium.slang";
+import "state/realtime/path_storage.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/transport.slang";
 import "model/realtime/transport.slang";
@@ -24,9 +25,8 @@ public PathState primeWavefrontPath(
     path.physicalOrigin = record.physicalOriginAndPreviousBsdfPdf.xyz;
     path.previousBsdfPdf = record.physicalOriginAndPreviousBsdfPdf.w;
     path.rayDirection = record.rayDirectionAndDenoiserControl.xyz;
-    path.etaScale = primeUnpackWavefrontEtaScale(
-            (pathControl >> PRIME_WAVEFRONT_ETA_SCALE_SHIFT)
-                    & PRIME_WAVEFRONT_ETA_SCALE_MASK);
+    primeUnpackWavefrontPreviousLightNormalAndEtaScale(
+            record.previousLightNormalAndEtaScale, path);
     path.throughput = record.throughputAndReserved.xyz;
     uint bounce = (pathControl >> PRIME_WAVEFRONT_BOUNCE_SHIFT)
             & PRIME_WAVEFRONT_BYTE_MASK;
@@ -42,7 +42,6 @@ public PathState primeWavefrontPath(
             : 0u;
     path.sampleSeed = primePathSampleSeed(
             pixel, primeSampleEpoch(), samplePathIndex);
-    path.previousLightNormal = record.previousLightNormal.xyz;
     return path;
 }
 

@@ -260,6 +260,8 @@
   "materialPageCount": 16,
   "realtimeWavefrontContract": {
     "pathRecordSize": 144,
+    "etaScaleOffset": 108,
+    "pathControlReservedMask": "0x00ffff00",
     "pathSlotsPerPixel": 2,
     "areaRecordSize": 320,
     "queueEntriesPerPixel": 2,

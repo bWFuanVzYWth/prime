@@ -24,7 +24,7 @@ public struct PrimeWavefrontTransportRecord {
     public float4 throughputAndReserved;
     public uint4 medium0;
     public uint4 medium1;
-    public float4 previousLightNormal;
+    public float4 previousLightNormalAndEtaScale;
 };
 
 // 112 bytes of transport are followed by exact queued PSR/previous-position data and the branch
@@ -50,8 +50,6 @@ public static const uint PRIME_WAVEFRONT_DIRECTIONAL_GUIDE = 64u;
 public static const uint PRIME_WAVEFRONT_PRIMARY_REFLECTION_ONLY = 128u;
 public static const uint PRIME_WAVEFRONT_BRANCH_CONTROL_MASK = 0xf8u;
 public static const uint PRIME_WAVEFRONT_BOUNCE_SHIFT = 0u;
-public static const uint PRIME_WAVEFRONT_ETA_SCALE_SHIFT = 8u;
-public static const uint PRIME_WAVEFRONT_ETA_SCALE_MASK = 0xffffu;
 public static const uint PRIME_WAVEFRONT_PATH_FLAGS_SHIFT = 24u;
 public static const uint PRIME_WAVEFRONT_PATH_FLAGS_MASK =
         PRIME_PATH_PREVIOUS_DISCRETE

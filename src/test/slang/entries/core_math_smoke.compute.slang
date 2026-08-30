@@ -19,8 +19,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             max(second.xyz, float3(1.0e-20)),
             max(first.w, 1.0e-20));
     float weight = primePowerHeuristicValue(abs(first.x), abs(second.x));
-    uint packedEta = primePackWavefrontEtaScale(abs(second.w));
     outputs[index] = float4(
             color + transport * weight,
-            primeUnpackWavefrontEtaScale(packedEta));
+            abs(second.w));
 }

@@ -127,14 +127,10 @@ void primeCheckRoulette(
     float expectedSurvival = min(sqrt(max(
             max(throughput.r, max(throughput.g, throughput.b)) * etaScale,
             0.0)), 1.0);
-    uint packedEtaScale = primePackWavefrontEtaScale(etaScale);
-    float queuedEtaScale = primeUnpackWavefrontEtaScale(packedEtaScale);
     primeTransportClassify(result.mask, survival);
-    primeTransportClassify(result.mask, queuedEtaScale);
+    primeTransportClassify(result.mask, etaScale);
     if (survival < 0.0 || survival > 1.0
             || !primeTestClose(survival, expectedSurvival, 0.0, 0.0)
-            || !primeTestClose(queuedEtaScale, etaScale, 0.0, 6.0e-4)
-            || (packedEtaScale & 0xffff0000) != 0
             || primeRussianRouletteApplies(0, 1)
             || !primeRussianRouletteApplies(1, 1)
             || !primeRussianRouletteApplies(2, 1)
@@ -175,7 +171,7 @@ void primeCheckRoulette(
         result.mask |= PRIME_TEST_FAILURE_EVENT;
     }
     result.first = float4(throughput, survival);
-    result.second = float4(etaScale, queuedEtaScale, sampleValue, expectedSurvival);
+    result.second = float4(etaScale, etaScale, sampleValue, expectedSurvival);
 }
 
 void primeCheckOfflineRoulette(

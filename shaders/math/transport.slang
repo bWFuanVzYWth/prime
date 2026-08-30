@@ -104,16 +104,6 @@ public bool primeRussianRouletteApplies(uint completedScatters, uint minimumComp
     return completedScatters >= minimumCompletedScatters;
 }
 
-public uint primePackWavefrontEtaScale(float etaScale)
-{
-    return packHalf2x16(float2(etaScale, 0.0)) & 0xffff;
-}
-
-public float primeUnpackWavefrontEtaScale(uint packedEtaScale)
-{
-    return unpackHalf2x16ToFloat(packedEtaScale & 0xffff).x;
-}
-
 public float3 primeRussianRouletteReweight(float3 throughput, float survival)
 {
     return throughput / survival;

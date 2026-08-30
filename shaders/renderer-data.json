@@ -318,7 +318,7 @@
       "usage": ["storage", "sampled"],
       "access": "write-then-read",
       "sampling": "point",
-      "descriptorOrOffset": "generated-later",
+      "descriptorOrOffset": "rr.visibleMotion",
       "lifetime": {"owner": "reconstruction-frame", "generation": "frame", "firstWrite": "reconstruction-prepare", "consumers": ["reconstruction"], "lastRead": "reconstruction", "aliasGroup": "none", "retire": "frame-retire"},
       "conversion": {"producer": "visible-surface-projector", "sourceSemantic": "world-position-history", "owner": "core-reconstruction", "targetSemantic": "VisibleMotionUv", "backendBoundary": "none"},
       "verification": {"artifactChecks": "format-extent-binding", "behaviorOracle": "cross-adapter-camera", "numericOrImageThreshold": "projection-double-oracle", "benchmark": "adapter-pass-gpu-time"}
@@ -336,6 +336,20 @@
       "lifetime": {"owner": "renderer-frame", "generation": "frame", "firstWrite": "trace", "consumers": ["reconstruction", "presentation"], "lastRead": "presentation", "aliasGroup": "none", "retire": "frame-retire"},
       "conversion": {"producer": "texture-translation-and-transport", "sourceSemantic": "source-color-and-radiance", "owner": "source-boundary", "targetSemantic": "LinearRec2020Radiance", "backendBoundary": "display-only"},
       "verification": {"artifactChecks": "colorimetry-and-format", "behaviorOracle": "linear-rec2020-end-to-end", "numericOrImageThreshold": "declared-per-encoding", "benchmark": "texture-translation-and-hot-sampling"}
+    },
+    {
+      "id": "realtime-roulette-eta-scale",
+      "semantic": "RouletteEtaScale",
+      "encoding": "r32f-baseline",
+      "resourceKind": "buffer-field",
+      "extentSource": "render-path-slot",
+      "usage": ["storage"],
+      "access": "read-write",
+      "sampling": "none",
+      "descriptorOrOffset": "realtime.wavefrontPaths+108",
+      "lifetime": {"owner": "realtime-wavefront", "generation": "frame", "firstWrite": "trace", "consumers": ["trace"], "lastRead": "trace", "aliasGroup": "none", "retire": "frame-retire"},
+      "conversion": {"producer": "path-scatter", "sourceSemantic": "RouletteEtaScale", "owner": "transport", "targetSemantic": "RouletteEtaScale", "backendBoundary": "none"},
+      "verification": {"artifactChecks": "offset-stride-and-reserved-control", "behaviorOracle": "f32-bit-exact-cross-dispatch", "numericOrImageThreshold": "lossless-f32", "benchmark": "unchanged-stride"}
     },
     {
       "id": "current-transport-motion-alias",

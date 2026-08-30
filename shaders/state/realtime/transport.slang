@@ -9,19 +9,17 @@ import "contract/realtime/guide.slang";
 import "math/queued_psr.slang";
 import "math/transport.slang";
 import "state/realtime/medium.slang";
+import "state/realtime/path_storage.slang";
 import "model/realtime/transport.slang";
 import "bsdf/compact/contract/volume.slang";
 import "contract/path.slang";
 
 public uint primePackWavefrontPathControl(PathState path) {
-    // FP16 etaScale only changes the roulette probability; survivor reweighting preserves the
-    // estimator's expectation. Medium extinction remains f32; IOR is reconstructed from its
-    // exact source code instead of carrying an anonymous float.
+    // Bits 8..23 remain zero and reserved. etaScale is accumulated transport state, so it keeps
+    // the otherwise-unused f32 lane beside previousLightNormal instead of changing roulette
+    // probability through an FP16 round-trip.
     return (min(primePathBounce(path.control), PRIME_WAVEFRONT_BYTE_MASK)
                     << PRIME_WAVEFRONT_BOUNCE_SHIFT)
-            | ((primePackWavefrontEtaScale(path.etaScale)
-                    & PRIME_WAVEFRONT_ETA_SCALE_MASK)
-                    << PRIME_WAVEFRONT_ETA_SCALE_SHIFT)
             | ((primePathFlags(path.control)
                     & PRIME_WAVEFRONT_PATH_FLAGS_MASK)
                     << PRIME_WAVEFRONT_PATH_FLAGS_SHIFT);
@@ -143,7 +141,8 @@ public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
     record.rayDirectionAndDenoiserControl =
             float4(path.rayDirection, asfloat(denoiserControl));
     record.throughputAndReserved = float4(path.throughput, 0.0);
-    record.previousLightNormal = float4(path.previousLightNormal, 0.0);
+    record.previousLightNormalAndEtaScale =
+            primePackWavefrontPreviousLightNormalAndEtaScale(path);
     return record;
 }
 

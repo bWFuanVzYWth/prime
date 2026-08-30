@@ -129,6 +129,8 @@ abstract class GenerateShaderAbi extends DefaultTask {
 			throw new GradleException('Prime FSR signal and projection contracts changed without a coordinated migration')
 		}
 		if (wavefrontContract.pathRecordSize != 144
+				|| wavefrontContract.etaScaleOffset != 108
+				|| !wavefrontContract.pathControlReservedMask.toString().equalsIgnoreCase('0x00ffff00')
 				|| wavefrontContract.pathSlotsPerPixel != 2
 				|| wavefrontContract.areaRecordSize != 320
 				|| wavefrontContract.areaRecordSize
@@ -374,6 +376,8 @@ public final class ShaderAbi {
     public static final int SCENE_TEXTURE_COUNT = ${schema.sceneTextureCount};
     public static final int MATERIAL_PAGE_COUNT = ${schema.materialPageCount};
     public static final int WAVEFRONT_PATH_RECORD_SIZE = ${wavefrontContract.pathRecordSize};
+    public static final int WAVEFRONT_ETA_SCALE_OFFSET = ${wavefrontContract.etaScaleOffset};
+    public static final int WAVEFRONT_PATH_CONTROL_RESERVED_MASK = ${wavefrontContract.pathControlReservedMask};
     public static final int WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${wavefrontContract.pathSlotsPerPixel};
     public static final int OFFLINE_WAVEFRONT_PATH_RECORD_SIZE = ${offlineWavefrontContract.pathRecordSize};
     public static final int OFFLINE_WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${offlineWavefrontContract.pathSlotsPerPixel};
@@ -739,6 +743,8 @@ public static const uint PRIME_RENDERER_DESCRIPTOR_SET = 1;
 public static const uint PRIME_DESCRIPTOR_WAVEFRONT_PATHS = ${schema.realtimeDescriptors.wavefrontPaths};
 public static const uint PRIME_DESCRIPTOR_WAVEFRONT_QUEUE = ${schema.realtimeDescriptors.wavefrontQueue};
 public static const uint PRIME_WAVEFRONT_PATH_RECORD_SIZE = ${wavefrontContract.pathRecordSize};
+public static const uint PRIME_WAVEFRONT_ETA_SCALE_OFFSET = ${wavefrontContract.etaScaleOffset};
+public static const uint PRIME_WAVEFRONT_PATH_CONTROL_RESERVED_MASK = ${wavefrontContract.pathControlReservedMask};
 public static const uint PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${wavefrontContract.pathSlotsPerPixel};
 public static const uint PRIME_WAVEFRONT_SURFACE_RECORD_SIZE = ${wavefrontSurfaceRecord.size};
 public static const uint PRIME_WAVEFRONT_AREA_RECORD_SIZE = ${wavefrontContract.areaRecordSize};

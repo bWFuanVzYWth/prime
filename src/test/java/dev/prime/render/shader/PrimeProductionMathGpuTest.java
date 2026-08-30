@@ -15,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 final class PrimeProductionMathGpuTest {
     private static final int CASES_PER_KIND = 8_192;
     private static final long TRANSPORT_SEED = 0x71A4_5A09_D522_0101L;
+    private static final long REALTIME_STATE_SEED = 0x4554_4153_5445_0001L;
     private static final long CELESTIAL_SEED = 0x4345_4C45_5354_0001L;
     private static final long MATERIAL_SEED = 0x4A7E_21A1_0000_0001L;
     private static final long NRD_SEED = 0x4E52_4404_1700_0001L;
@@ -45,6 +46,12 @@ final class PrimeProductionMathGpuTest {
         @Test
         void integratorAndLightTransportMathKeepsItsNumericalContracts() throws IOException {
             assertIntegratorAndLightTransportMath(runner);
+        }
+
+        @Test
+        void realtimeEtaScaleAndPathControlStayBitExactAcrossDispatchStorage()
+                throws IOException {
+            assertRealtimeState(runner);
         }
 
         @Test
@@ -140,6 +147,40 @@ final class PrimeProductionMathGpuTest {
                 inputWords,
                 10,
                 TRANSPORT_SEED);
+    }
+
+    private static void assertRealtimeState(ShaderComputeRunner runner) throws IOException {
+        int cases = CASES_PER_KIND;
+        int inputWords = 2;
+        ByteBuffer input = ShaderTestBuffer.inputs(cases, inputWords);
+        SplittableRandom random = new SplittableRandom(REALTIME_STATE_SEED);
+        int[] specialEtaBits = {0x0000_0001, 0x0080_0000, 0x3f80_0000, 0x7f7f_ffff};
+        for (int index = 0; index < cases; index++) {
+            putInt(input, index, inputWords, 0, 0, 0);
+            putInt(input, index, inputWords, 0, 1, random.nextInt(256));
+            putInt(input, index, inputWords, 0, 2, random.nextInt() & 0x3);
+            float etaScale = index < specialEtaBits.length
+                    ? Float.intBitsToFloat(specialEtaBits[index])
+                    : positiveFloat(random, -125, 120);
+            float[] normal = randomUnitVector(random);
+            putVec4(
+                    input,
+                    index,
+                    inputWords,
+                    1,
+                    etaScale,
+                    normal[0],
+                    normal[1],
+                    normal[2]);
+        }
+        ShaderPropertyBatch.assertProperties(
+                runner,
+                slangShader("prime_realtime_state_properties.comp.spv"),
+                input,
+                cases,
+                inputWords,
+                4,
+                REALTIME_STATE_SEED);
     }
 
     private static void assertBsdfAndMediumBoundaryContracts(ShaderComputeRunner runner)
