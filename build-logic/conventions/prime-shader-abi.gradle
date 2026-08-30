@@ -1,5 +1,8 @@
 def shaderAbiJavaRoot = layout.buildDirectory.dir('generated/sources/shaderAbi/java')
 def shaderAbiSlangRoot = layout.buildDirectory.dir('generated/sources/shaderAbi/slang')
+def rendererDataJavaRoot = layout.buildDirectory.dir('generated/sources/rendererData/java')
+def rendererDataSlangRoot = layout.buildDirectory.dir('generated/sources/rendererData/slang')
+def rendererDataLedger = layout.buildDirectory.file('reports/renderer-data/memory-ledger.csv')
 def shaderProgramJavaRoot = layout.buildDirectory.dir('generated/sources/shaderPrograms/java')
 def compiledSlangShaderRoot = layout.buildDirectory.dir('generated/resources/shaders')
 def compiledSlangTestShaderRoot = layout.buildDirectory.dir('generated/testSlangShaders')
@@ -75,6 +78,16 @@ def generateShaderAbi = tasks.register(
 	slangOutputDirectory = shaderAbiSlangRoot
 }
 
+def generateRendererDataContracts = tasks.register(
+        'generateRendererDataContracts', primeShaderTaskTypes.generateRendererData) {
+	group = 'build'
+	description = 'Validates the renderer-data IR and generates contract leaves and a memory ledger.'
+	schemaFile = file('shaders/renderer-data.json')
+	javaOutputDirectory = rendererDataJavaRoot
+	slangOutputDirectory = rendererDataSlangRoot
+	memoryLedgerFile = rendererDataLedger
+}
+
 def shaderProgramManifest = layout.projectDirectory.file('shaders/programs.json')
 def generateShaderPrograms = tasks.register(
         'generateShaderPrograms', primeShaderTaskTypes.generatePrograms) {
@@ -94,11 +107,12 @@ def removedShaderReferencePaths = [
 def verifyShaderIncludeGraph = tasks.register('verifyShaderIncludeGraph') {
 	group = 'verification'
 	description = 'Verifies that Prime Slang includes and path imports are resolvable and acyclic.'
-	dependsOn generateShaderAbi
+	dependsOn generateShaderAbi, generateRendererDataContracts
 	inputs.files(
 			fileTree('shaders'),
 			fileTree('src/test/slang'),
-			shaderAbiSlangRoot)
+			shaderAbiSlangRoot,
+			rendererDataSlangRoot)
 	outputs.file(shaderIncludeReport)
 
 	doLast {
@@ -112,7 +126,8 @@ def verifyShaderIncludeGraph = tasks.register('verifyShaderIncludeGraph') {
 		def includeRoots = [
 				shaderRoot,
 				shaderTestIncludeRoot,
-				shaderAbiSlangRoot.get().asFile
+				shaderAbiSlangRoot.get().asFile,
+				rendererDataSlangRoot.get().asFile
 		]
 		includeRoots.each { root ->
 			if (root.isDirectory()) {
@@ -296,13 +311,15 @@ def verifyShaderTestManifest = tasks.register('verifyShaderTestManifest') {
 
 def compileSlangTestShaders = tasks.register(
 		'compileSlangTestShaders', primeShaderTaskTypes.compileSlang) {
-	dependsOn generateShaderAbi, verifyRoboCuteReference, verifyShaderIncludeGraph,
+	dependsOn generateShaderAbi, generateRendererDataContracts,
+			verifyRoboCuteReference, verifyShaderIncludeGraph,
 			'verifyShaderTestManifest', 'verifySlangToolchain'
 	sourceDirectory = file('src/test/slang/entries')
 	includeDirectories.from(
 			file('src/test/slang'),
 			file('shaders'),
-			shaderAbiSlangRoot)
+			shaderAbiSlangRoot,
+			rendererDataSlangRoot)
 	outputDirectory = compiledSlangTestShaderRoot
 	debugLevel = '-g0'
 	maxCompilerProcesses = slangCompilerProcesses
@@ -472,6 +489,7 @@ def verifyGeneratedSlangAbi = tasks.register(
 }
 
 sourceSets.client.java.srcDir(files(shaderAbiJavaRoot).builtBy(generateShaderAbi))
+sourceSets.client.java.srcDir(files(rendererDataJavaRoot).builtBy(generateRendererDataContracts))
 sourceSets.client.java.srcDir(files(shaderProgramJavaRoot).builtBy(generateShaderPrograms))
 sourceSets.client.resources.srcDir(files(compiledSlangShaderRoot).builtBy(compileSlangShaders))
 // Loom associates the test source set with the complete client output. Replace that dependency
@@ -506,12 +524,13 @@ tasks.withType(Test).configureEach {
 
 tasks.named('test') {
 	useJUnitPlatform {
-		excludeTags 'artifact', 'native', 'gpu-shader', 'gpu-ray-tracing'
+		excludeTags 'artifact', 'native', 'gpu-shader', 'gpu-ray-tracing', 'gpu-benchmark'
 	}
 }
 
 tasks.named('check') {
-	dependsOn verifySlangToolchain,
+	dependsOn generateRendererDataContracts,
+			verifySlangToolchain,
 			verifyGeneratedSlangAbi,
 			compileSlangShaders,
 			verifySlangRayPayloadAbi,
@@ -563,6 +582,33 @@ tasks.register('shaderTest', Test) {
 	}
 	systemProperty 'prime.shaderTests.required', 'true'
 	systemProperty 'prime.shaderValidation.required', 'true'
+	systemProperty 'prime.vulkanValidationReportDirectory',
+			layout.buildDirectory.dir('reports/vulkan-validation').get().asFile.absolutePath
+	outputs.upToDateWhen { false }
+	doFirst {
+		systemProperty 'prime.test.slangShaderDirectory',
+				new File(compiledSlangTestShaderRoot.get().asFile, 'prime/shaders').absolutePath
+	}
+}
+
+def rendererDataGpuBenchmarkReport = layout.buildDirectory.file(
+		'reports/benchmarks/renderer-data-gpu.json')
+tasks.register('rendererDataGpuBenchmark', Test) {
+	group = 'benchmark'
+	description = 'Records a validated Vulkan timestamp baseline for canonical coordinate/color work.'
+	dependsOn 'verifyCompiledShaderTestManifest'
+	mustRunAfter 'shaderTest', 'rayTracingTest'
+	inputs.dir(compiledSlangTestShaderRoot)
+	outputs.file(rendererDataGpuBenchmarkReport)
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform {
+		includeTags 'gpu-benchmark'
+	}
+	systemProperty 'prime.shaderTests.required', 'true'
+	systemProperty 'prime.shaderValidation.required', 'true'
+	systemProperty 'prime.gpuBenchmark.report',
+			rendererDataGpuBenchmarkReport.get().asFile.absolutePath
 	systemProperty 'prime.vulkanValidationReportDirectory',
 			layout.buildDirectory.dir('reports/vulkan-validation').get().asFile.absolutePath
 	outputs.upToDateWhen { false }

@@ -18,6 +18,9 @@ import org.lwjgl.util.vma.Vma;
 import org.lwjgl.util.vma.VmaAllocationCreateInfo;
 import org.lwjgl.util.vma.VmaAllocationInfo;
 import org.lwjgl.util.vma.VmaAllocatorCreateInfo;
+import org.lwjgl.util.vma.VmaBudget;
+import org.lwjgl.util.vma.VmaStatistics;
+import org.lwjgl.util.vma.VmaTotalStatistics;
 import org.lwjgl.util.vma.VmaVulkanFunctions;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkBufferCreateInfo;
@@ -98,6 +101,47 @@ public final class VulkanContext implements AutoCloseable {
 
     public long maxStorageBufferRange() {
         return this.maxStorageBufferRange;
+    }
+
+    /**
+     * Captures allocator totals for before/after resize, reload and backend-switch measurements.
+     *
+     * <p>The heap budget is VMA's estimate unless the host device enabled
+     * {@code VK_EXT_memory_budget}; Prime does not turn an unavailable extension into a guessed
+     * hardware budget. Allocations made entirely inside an external SDK must be reported by that
+     * SDK and are not included here.
+     */
+    public VulkanMemorySnapshot memorySnapshot() {
+        requireOpen();
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VmaTotalStatistics totals = VmaTotalStatistics.calloc(stack);
+            Vma.vmaCalculateStatistics(this.allocator, totals);
+            VmaStatistics total = totals.total().statistics();
+            VmaBudget.Buffer budgets = VmaBudget.calloc(VK12.VK_MAX_MEMORY_HEAPS, stack);
+            Vma.vmaGetHeapBudgets(this.allocator, budgets);
+            ArrayList<VulkanMemorySnapshot.Heap> heaps = new ArrayList<>();
+            for (int index = 0; index < budgets.capacity(); index++) {
+                VmaStatistics statistics = totals.memoryHeap(index).statistics();
+                VmaBudget budget = budgets.get(index);
+                if (statistics.blockCount() == 0
+                        && statistics.allocationCount() == 0
+                        && budget.budget() == 0L) {
+                    continue;
+                }
+                heaps.add(new VulkanMemorySnapshot.Heap(
+                        index,
+                        statistics.blockBytes(),
+                        statistics.allocationBytes(),
+                        budget.usage(),
+                        budget.budget()));
+            }
+            return new VulkanMemorySnapshot(
+                    total.blockCount(),
+                    total.allocationCount(),
+                    total.blockBytes(),
+                    total.allocationBytes(),
+                    heaps);
+        }
     }
 
     VulkanPipelineCache.Session pipelineCacheSession() {

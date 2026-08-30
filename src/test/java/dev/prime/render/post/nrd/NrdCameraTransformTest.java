@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.prime.render.FrameCamera;
+import dev.prime.render.data.RendererDataContracts;
 import org.joml.Matrix4f;
 import org.joml.Vector2f;
 import org.joml.Vector3f;
@@ -138,7 +139,12 @@ final class NrdCameraTransformTest {
         Vector2f currentUv = NrdCameraTransform.screenUv(currentWorldToClip, currentRelative);
         Vector2f previousUv = NrdCameraTransform.screenUv(
                 NrdCameraTransform.previousWorldToClip(current, previous), currentRelative);
-        return new Motion(currentUv, previousUv, new Vector2f(previousUv).sub(currentUv));
+        double[] canonical = RendererDataContracts.visibleMotionUv(
+                previousUv.x, previousUv.y, currentUv.x, currentUv.y);
+        Vector2f vector = new Vector2f(previousUv).sub(currentUv);
+        assertEquals(canonical[0], vector.x, EPSILON);
+        assertEquals(canonical[1], vector.y, EPSILON);
+        return new Motion(currentUv, previousUv, vector);
     }
 
     private static float currentViewZ(FrameCamera current) {

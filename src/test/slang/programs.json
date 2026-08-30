@@ -29,6 +29,8 @@
     {"entry": "prime_numerical_properties.compute.slang", "artifact": "prime_numerical_properties.comp.spv", "mode": "runtime"},
     {"entry": "prime_payload_location_compile.raygeneration.slang", "artifact": "prime_payload_location_compile.rgen.spv", "mode": "compile-only"},
     {"entry": "prime_projected_solid_angle_properties.compute.slang", "artifact": "prime_projected_solid_angle_properties.comp.spv", "mode": "runtime"},
+    {"entry": "prime_renderer_data_contract.compute.slang", "artifact": "prime_renderer_data_contract.comp.spv", "mode": "runtime"},
+    {"entry": "prime_renderer_data_benchmark.compute.slang", "artifact": "prime_renderer_data_benchmark.comp.spv", "mode": "runtime"},
     {"entry": "prime_queued_psr_properties.compute.slang", "artifact": "prime_queued_psr_properties.comp.spv", "mode": "runtime"},
     {"entry": "prime_sampling_parity.compute.slang", "artifact": "prime_sampling_parity.comp.spv", "mode": "runtime"},
     {"entry": "prime_scene_core_compile.compute.slang", "artifact": "prime_scene_core_compile.comp.spv", "mode": "compile-only"},

@@ -38,8 +38,11 @@ import org.lwjgl.vulkan.VkPhysicalDevice;
 import org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties;
 import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
 import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
+import org.lwjgl.vulkan.VkPhysicalDeviceProperties;
 import org.lwjgl.vulkan.VkPushConstantRange;
 import org.lwjgl.vulkan.VkQueue;
+import org.lwjgl.vulkan.VkQueueFamilyProperties;
+import org.lwjgl.vulkan.VkQueryPoolCreateInfo;
 import org.lwjgl.vulkan.VkSamplerCreateInfo;
 import org.lwjgl.vulkan.VkShaderModuleCreateInfo;
 import org.lwjgl.vulkan.VkSubmitInfo;
@@ -77,6 +80,21 @@ final class ShaderComputeRunner implements AutoCloseable {
     static ShaderComputeRunner open() throws UnavailableException {
         return new ShaderComputeRunner(VulkanTestDevice.open());
     }
+
+    DeviceInfo deviceInfo() {
+        requireOpen();
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.calloc(stack);
+            VK12.vkGetPhysicalDeviceProperties(this.physicalDevice, properties);
+            return new DeviceInfo(
+                    properties.deviceNameString(),
+                    Integer.toUnsignedLong(properties.vendorID()),
+                    Integer.toUnsignedLong(properties.deviceID()),
+                    Integer.toUnsignedLong(properties.driverVersion()),
+                    Integer.toUnsignedLong(properties.apiVersion()),
+                    properties.limits().timestampPeriod());
+        }
+    }
     ByteBuffer dispatch(
             Path shaderPath, ByteBuffer input, int outputBytes, int invocationCount)
             throws IOException {
@@ -94,6 +112,33 @@ final class ShaderComputeRunner implements AutoCloseable {
             int outputBytes,
             Workgroups workgroups,
             ByteBuffer pushConstants)
+            throws IOException {
+        return dispatchWithTiming(
+                shaderPath, input, outputBytes, workgroups, pushConstants, false).output();
+    }
+
+    TimedDispatch dispatchTimed(
+            Path shaderPath,
+            ByteBuffer input,
+            int outputBytes,
+            Workgroups workgroups,
+            ByteBuffer pushConstants)
+            throws IOException {
+        TimedDispatch result = dispatchWithTiming(
+                shaderPath, input, outputBytes, workgroups, pushConstants, true);
+        if (result.gpuNanoseconds() < 0L) {
+            throw new IllegalStateException("Timed Vulkan dispatch returned no timestamp");
+        }
+        return result;
+    }
+
+    private TimedDispatch dispatchWithTiming(
+            Path shaderPath,
+            ByteBuffer input,
+            int outputBytes,
+            Workgroups workgroups,
+            ByteBuffer pushConstants,
+            boolean timed)
             throws IOException {
         requireOpen();
         if (outputBytes <= 0) {
@@ -114,13 +159,14 @@ final class ShaderComputeRunner implements AutoCloseable {
                 MappedBuffer outputBuffer = createMappedBuffer(outputBytes)) {
             inputBuffer.bytes().put(inputData).flip();
             zero(outputBuffer.bytes());
-            dispatch(shaderPath, inputBuffer, outputBuffer, workgroups, pushData);
+            long gpuNanoseconds = dispatch(
+                    shaderPath, inputBuffer, outputBuffer, workgroups, pushData, timed);
 
             ByteBuffer result = ByteBuffer.allocateDirect(outputBytes).order(ByteOrder.LITTLE_ENDIAN);
             ByteBuffer mappedOutput = outputBuffer.bytes().duplicate();
             mappedOutput.clear().limit(outputBytes);
             result.put(mappedOutput).flip();
-            return result;
+            return new TimedDispatch(result, gpuNanoseconds);
         }
     }
 
@@ -341,18 +387,22 @@ final class ShaderComputeRunner implements AutoCloseable {
         }
     }
 
-    private void dispatch(
+    private long dispatch(
             Path shaderPath,
             MappedBuffer inputBuffer,
             MappedBuffer outputBuffer,
             Workgroups workgroups,
-            ByteBuffer pushConstants)
+            ByteBuffer pushConstants,
+            boolean timed)
             throws IOException {
         long setLayout = 0L;
         long pipelineLayout = 0L;
         long shaderModule = 0L;
         long pipeline = 0L;
         long descriptorPool = 0L;
+        long queryPool = 0L;
+        long gpuNanoseconds = -1L;
+        int timestampValidBits = 0;
         VkCommandBuffer commandBuffer = null;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             LongBuffer handle = stack.mallocLong(1);
@@ -426,6 +476,22 @@ final class ShaderComputeRunner implements AutoCloseable {
             pipeline = handle.get(0);
             VK12.vkDestroyShaderModule(this.device, shaderModule, null);
             shaderModule = 0L;
+
+            if (timed) {
+                timestampValidBits = timestampValidBits(stack);
+                handle.clear();
+                check(
+                        VK12.vkCreateQueryPool(
+                                this.device,
+                                VkQueryPoolCreateInfo.calloc(stack)
+                                        .sType$Default()
+                                        .queryType(VK12.VK_QUERY_TYPE_TIMESTAMP)
+                                        .queryCount(2),
+                                null,
+                                handle),
+                        "create shader-benchmark timestamp query pool");
+                queryPool = handle.get(0);
+            }
 
             int sampledImageCount = 0;
             int storageImageCount = 0;
@@ -564,11 +630,20 @@ final class ShaderComputeRunner implements AutoCloseable {
                         0,
                         pushConstants);
             }
+            if (queryPool != 0L) {
+                VK12.vkCmdResetQueryPool(commandBuffer, queryPool, 0, 2);
+                VK12.vkCmdWriteTimestamp(
+                        commandBuffer, VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, 0);
+            }
             VK12.vkCmdDispatch(
                     commandBuffer,
                     workgroups.x(),
                     workgroups.y(),
                     workgroups.z());
+            if (queryPool != 0L) {
+                VK12.vkCmdWriteTimestamp(
+                        commandBuffer, VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, queryPool, 1);
+            }
             VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1, stack);
             barrier.get(0)
                     .sType$Default()
@@ -590,12 +665,37 @@ final class ShaderComputeRunner implements AutoCloseable {
                     .pCommandBuffers(stack.pointers(commandBuffer.address()));
             check(VK12.vkQueueSubmit(this.queue, submit, 0L), "submit shader-test dispatch");
             check(VK12.vkQueueWaitIdle(this.queue), "wait for shader-test dispatch");
+            if (queryPool != 0L) {
+                LongBuffer timestamps = stack.mallocLong(2);
+                check(
+                        VK12.vkGetQueryPoolResults(
+                                this.device,
+                                queryPool,
+                                0,
+                                2,
+                                timestamps,
+                                Long.BYTES,
+                                VK12.VK_QUERY_RESULT_64_BIT | VK12.VK_QUERY_RESULT_WAIT_BIT),
+                        "read shader-benchmark timestamps");
+                long ticks = timestamps.get(1) - timestamps.get(0);
+                if (timestampValidBits < Long.SIZE) {
+                    ticks &= (1L << timestampValidBits) - 1L;
+                }
+                double elapsed = ticks * timestampPeriod(stack);
+                if (!Double.isFinite(elapsed) || elapsed < 0.0 || elapsed > Long.MAX_VALUE) {
+                    throw new IllegalStateException("Invalid shader-benchmark GPU timestamp");
+                }
+                gpuNanoseconds = Math.round(elapsed);
+            }
         } finally {
             if (commandBuffer != null) {
                 VK12.vkFreeCommandBuffers(this.device, this.commandPool, commandBuffer);
             }
             if (descriptorPool != 0L) {
                 VK12.vkDestroyDescriptorPool(this.device, descriptorPool, null);
+            }
+            if (queryPool != 0L) {
+                VK12.vkDestroyQueryPool(this.device, queryPool, null);
             }
             if (pipeline != 0L) {
                 VK12.vkDestroyPipeline(this.device, pipeline, null);
@@ -610,6 +710,27 @@ final class ShaderComputeRunner implements AutoCloseable {
                 VK12.vkDestroyDescriptorSetLayout(this.device, setLayout, null);
             }
         }
+        return gpuNanoseconds;
+    }
+
+    private int timestampValidBits(MemoryStack stack) {
+        IntBuffer count = stack.ints(0);
+        VK12.vkGetPhysicalDeviceQueueFamilyProperties(this.physicalDevice, count, null);
+        VkQueueFamilyProperties.Buffer properties =
+                VkQueueFamilyProperties.calloc(count.get(0), stack);
+        VK12.vkGetPhysicalDeviceQueueFamilyProperties(this.physicalDevice, count, properties);
+        int result = properties.get(this.testDevice.queueFamily()).timestampValidBits();
+        if (result == 0) {
+            throw new UnsupportedOperationException(
+                    "Vulkan compute queue does not support timestamp queries");
+        }
+        return result;
+    }
+
+    private double timestampPeriod(MemoryStack stack) {
+        VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.calloc(stack);
+        VK12.vkGetPhysicalDeviceProperties(this.physicalDevice, properties);
+        return properties.limits().timestampPeriod();
     }
 
     private void prepareImage(
@@ -934,6 +1055,22 @@ final class ShaderComputeRunner implements AutoCloseable {
             }
         }
     }
+
+    record TimedDispatch(ByteBuffer output, long gpuNanoseconds) {
+        TimedDispatch {
+            if (gpuNanoseconds < -1L) {
+                throw new IllegalArgumentException("Invalid GPU dispatch timestamp");
+            }
+        }
+    }
+
+    record DeviceInfo(
+            String name,
+            long vendorId,
+            long deviceId,
+            long driverVersion,
+            long apiVersion,
+            float timestampPeriodNanoseconds) {}
 
     enum ImageDimension {
         TWO_D(VK12.VK_IMAGE_TYPE_2D, VK12.VK_IMAGE_VIEW_TYPE_2D),

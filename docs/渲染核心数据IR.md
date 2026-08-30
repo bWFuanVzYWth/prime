@@ -595,6 +595,7 @@ NVIDIA GPU benchmark 才能选择的 encoding 决策。未经证据，保留当�
 owner、lifetime 和编码准入方式；当前冲突文档不再把全 f32、运行时 sRGB atlas 或 SDK 补偿写成
 永久目标；生产代码、ABI 和测试行为保持不变。
 
-阶段 1 才建立 schema/generator、artifact 合同、跨 adapter 相机 oracle、linear Rec.2020 颜色
-oracle、精度/统计测试、alias/liveness 门禁、显存账本和 benchmark baseline。任何生产迁移必须
-在这些门禁之后进行。
+阶段 1 已开始建立 schema/generator、artifact 合同、跨 adapter 相机 oracle、linear Rec.2020
+颜色 oracle、精度/统计测试、alias/liveness 门禁、显存账本和 benchmark baseline。机器来源为
+`shaders/renderer-data.json`；生成物仍是 contract skeleton，生产数据格式、descriptor 和 pass
+尚未迁移。任何生产迁移必须在相应门禁之后进行。

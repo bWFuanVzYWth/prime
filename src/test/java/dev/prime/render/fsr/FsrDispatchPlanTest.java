@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.prime.render.FrameCamera;
+import dev.prime.render.data.RendererDataContracts;
 import dev.prime.render.post.SubpixelJitter;
 import dev.prime.render.post.ReconstructionExtent;
 import dev.prime.render.shader.ShaderAbi;
@@ -26,6 +27,10 @@ final class FsrDispatchPlanTest {
 
         assertEquals(0.25F, plan.jitterOffset().x());
         assertEquals(-1.0F / 6.0F, plan.jitterOffset().y());
+        double[] canonicalProjectionJitter =
+                RendererDataContracts.projectionJitterPixels(-0.25, 1.0 / 6.0);
+        assertEquals(canonicalProjectionJitter[0], plan.jitterOffset().x(), 0.0);
+        assertEquals(canonicalProjectionJitter[1], plan.jitterOffset().y(), 1.0e-8);
         assertEquals(2560.0F, plan.motionScaleX());
         assertEquals(1440.0F, plan.motionScaleY());
         assertTrue(plan.sharpening());

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.prime.binding.streamline.Constants;
 import dev.prime.binding.streamline.SlBoolean;
 import dev.prime.render.FrameCamera;
+import dev.prime.render.data.RendererDataContracts;
 import dev.prime.render.post.SubpixelJitter;
 import dev.prime.render.shader.ShaderAbi;
 import java.lang.foreign.Arena;
@@ -39,8 +40,11 @@ final class StreamlineFrameConstantsTest {
             values.write(constants);
 
             assertArrayEquals(rowMajor(PROJECTION), constants.cameraViewToClip());
-            assertEquals(-0.25F, constants.jitterOffset()[0]);
-            assertEquals(-0.375F, constants.jitterOffset()[1]);
+            double[] canonicalJitter =
+                    RendererDataContracts.projectionJitterPixels(0.25, -0.375);
+            assertEquals(canonicalJitter[0], constants.jitterOffset()[0], 0.0);
+            // The transitional full-frame Streamline input flip reverses image Y once more.
+            assertEquals(-canonicalJitter[1], constants.jitterOffset()[1], 0.0);
             assertEquals(1280.0F, constants.mvecScale()[0]);
             assertEquals(720.0F, constants.mvecScale()[1]);
             assertEquals(12.0F, constants.cameraPos()[0]);

@@ -2,9 +2,10 @@
 
 ## 目标与当前阶段
 
-Prime 接下来会建立 Java 与 Vulkan benchmark，但 benchmark 只回答“有多快”，不能证明优化后
-“仍然正确”。当前阶段只建设正确性门禁，不实现 benchmark：先把高风险行为、状态转换、ABI、
-资源生命周期和数学性质锁定，再允许热点进入测量和优化。
+Prime 已进入 renderer data IR 阶段 1。benchmark 只回答“有多快”，不能证明优化后“仍然正确”；
+因此 Java JMH 与 Vulkan timestamp 测量都必须先经过行为、编码摘要、ABI 和资源生命周期门禁。
+当前已经为翻译层建立典型/极端 JMH corpus，并为规范坐标/色彩叶建立首个 Vulkan timestamp
+基线；完整生产 frame/pass 的长期门槛仍需在对应数据迁移前逐项接入。
 
 本轮改造后的原则是：
 
@@ -14,6 +15,8 @@ Prime 接下来会建立 Java 与 Vulkan benchmark，但 benchmark 只回答“�
 - 覆盖率只用于发现空白，不能代替行为正确性；
 - 测试重构不得扩大生产 API，也不得复制第二套 OpenPBR 实现；
 - benchmark 不得成为 `test`、`check` 或生产构建的隐式依赖。
+- `testSupport` 只承载 test/benchmark 共用的确定性 corpus，不进入生产 jar；`benchmark` 是独立
+  source set，不进入 `test` 或 `check`。
 
 ## 清单与基线
 
@@ -278,6 +281,42 @@ validation 报告；发行构建产物继续单独保存。
 显式运行缺扩展或 validation layer 时直接失败。接入稳定 RT CI runner 后应把其 JUnit 和
 validation 报告纳入同一制品保留规则。
 
+## 阶段 1 数据合同与测量入口
+
+规范的机器来源是 `shaders/renderer-data.json`。`generateRendererDataContracts` 会先验证 semantic、
+encoding、binding、conversion、verification、phase lifetime、alias 和 memory plan，再生成：
+
+- Java `RendererDataContracts`：坐标/色彩 oracle、semantic/encoding/binding 类型、资源计划和
+  benchmark 元数据；
+- 两个窄 Slang 叶模块 `prime_coordinate_contract.slang` 与 `prime_color_contract.slang`；它们不
+  通过 umbrella import 扩大生产 entry 闭包；
+- `build/reports/renderer-data/memory-ledger.csv`：render/display 每像素字节与固定开销。
+
+当前静态账本锁定的显式下界是 realtime wavefront 648 B/render px、offline wavefront
+264 B/render px、unfiltered raw images 95 B/render px、DLSS RR 135 B/render px +
+8 B/display px，以及 Prime 自有 NRD images 291 B/render px。`VulkanContext.memorySnapshot()` 提供
+VMA block/allocation 与 heap budget estimate 的同点快照，用于 resize、reload 和 backend switch
+前后取样；完全由外部 SDK 分配的内存不伪装成 VMA 数据，仍需 SDK 专门归因。
+
+可重复测量命令：
+
+```powershell
+.\gradlew.bat translationBenchmark
+.\gradlew.bat rendererDataGpuBenchmark
+```
+
+前者运行 JMH 1.37，输出 `build/reports/benchmarks/translation.json`。典型 corpus 是 4×4×4
+section 的常见 opaque/overlay/transparent/fluid 混合；极端 corpus 含 1024 个原子 boundary cell。
+每次 fork 在计时前都校验 triangle/primitive/byte count 与完整编码 SHA-256。2026-08-31 的本机
+初始样本（JDK 25.0.2，2 forks）为典型约 0.318 ms/op、极端约 1.665 ms/op；它只作为本机比较
+起点，不是跨机器阈值。
+
+后者在 validation layer 下对 1280×720 的规范坐标/linear Rec.2020 转换 kernel 使用 Vulkan
+timestamp，输出 GPU、driver、Vulkan API、timestamp period、extent 和原始样本到
+`build/reports/benchmarks/renderer-data-gpu.json`。该项证明 timestamp 基础设施和规范 Slang 叶
+可测；短任务仍受 GPU 时钟状态影响，原始样本必须保留，且它不等同于完整 RR/NRD/Streamline
+adapter pass 成本。
+
 ## 已知缺口
 
 本阶段明确不建设：
@@ -286,8 +325,9 @@ validation 报告纳入同一制品保留规则。
 - 完整生产 ray-tracing frame；当前只执行最小 BLAS/TLAS 四阶段 trace，并已覆盖 executor 的
   CPU 提交/回滚协议，尚未执行完整生产 descriptor/queue/history 组合；
 - 图像回归及多 GPU/driver 差分；
-- benchmark harness、JMH source set 和 Vulkan timestamp query；
-- 固定硬件上的长期性能回归门槛。
+- 完整生产 frame 的逐 pass timestamp、register/spill/occupancy 与 cache 指标；
+- 外部 DLSS/Streamline native pool 的可靠显存归因；
+- 固定 NVIDIA GPU/driver 上的长期性能回归门槛与图像回归。
 
 这些不是默认可忽略风险。未来 benchmark 或优化若触及对应路径，必须先补该路径的行为测试。
 覆盖率报告出现的大块空白也只作为风险线索，由行为和契约测试补齐。
@@ -305,7 +345,7 @@ validation 报告纳入同一制品保留规则。
    通过 `rayTracingTest`；
 7. `test`、`artifactTest` 及该路径对应的 `nativeTest`/`shaderTest`/`rayTracingTest` 全部通过。
 
-未来 Java benchmark 使用 JMH，GPU benchmark 使用 Vulkan timestamp query，并分开报告 setup、
+Java benchmark 使用 JMH，GPU benchmark 使用 Vulkan timestamp query，并分开报告 setup、
 command recording、submission、GPU 执行、同步和 readback。benchmark 不在测量区间编译
 Shader、生成随机输入、写日志或执行正确性断言。只有正确性门禁全部通过且收益超过测量噪声时，
 优化才可保留。

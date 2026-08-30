@@ -78,6 +78,37 @@ tasks.named('runClient') {
 apply plugin: 'prime.shader-abi-conventions'
 apply plugin: 'prime.native-packaging-conventions'
 
+def testSupportSourceSet = sourceSets.create('testSupport')
+def benchmarkSourceSet = sourceSets.create('benchmark')
+
+def clientJavaClasses = files(tasks.named('compileClientJava').flatMap { it.destinationDirectory })
+testSupportSourceSet.compileClasspath = files(
+		sourceSets.main.output,
+		sourceSets.client.compileClasspath,
+		configurations.testSupportCompileClasspath,
+		clientJavaClasses)
+testSupportSourceSet.runtimeClasspath = files(
+		testSupportSourceSet.output,
+		sourceSets.main.output,
+		configurations.testSupportRuntimeClasspath,
+		configurations.clientRuntimeClasspath,
+		clientJavaClasses)
+benchmarkSourceSet.compileClasspath = files(
+		sourceSets.main.output,
+		sourceSets.client.compileClasspath,
+		configurations.benchmarkCompileClasspath,
+		clientJavaClasses,
+		testSupportSourceSet.output)
+benchmarkSourceSet.runtimeClasspath = files(
+		benchmarkSourceSet.output,
+		testSupportSourceSet.output,
+		sourceSets.main.output,
+		configurations.benchmarkRuntimeClasspath,
+		configurations.clientRuntimeClasspath,
+		clientJavaClasses)
+sourceSets.test.compileClasspath += testSupportSourceSet.output
+sourceSets.test.runtimeClasspath += testSupportSourceSet.output
+
 sourceSets.test.compileClasspath += sourceSets.streamline.output
 sourceSets.test.runtimeClasspath += sourceSets.streamline.output
 tasks.withType(Test).configureEach {
@@ -108,6 +139,42 @@ dependencies {
 	testImplementation 'org.junit.jupiter:junit-jupiter'
 	testImplementation 'org.jetbrains:jetCheck:0.3.0'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	benchmarkImplementation 'org.openjdk.jmh:jmh-core:1.37'
+	benchmarkAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.37'
+}
+
+tasks.named('compileTestSupportJava') {
+	dependsOn tasks.named('compileClientJava')
+}
+
+tasks.named('compileBenchmarkJava') {
+	dependsOn tasks.named('compileClientJava'), tasks.named('testSupportClasses')
+}
+
+tasks.named('compileTestJava') {
+	dependsOn tasks.named('compileClientJava'), tasks.named('testSupportClasses')
+}
+
+def translationBenchmarkReportDirectory =
+		layout.buildDirectory.dir('reports/benchmarks').get().asFile
+def translationBenchmarkResult =
+		new File(translationBenchmarkReportDirectory, 'translation.json')
+tasks.register('translationBenchmark', JavaExec) {
+	group = 'benchmark'
+	description = 'Runs the correctness-gated typical/extreme cluster translation JMH baseline.'
+	dependsOn tasks.named('benchmarkClasses'), tasks.named('test')
+	classpath = benchmarkSourceSet.runtimeClasspath
+	mainClass = 'org.openjdk.jmh.Main'
+	args 'dev.prime.render.terrain.ClusterTranslationBenchmark',
+			'-wi', '5', '-i', '10', '-f', '2',
+			'-w', '500ms', '-r', '1s', '-foe', 'true',
+			'-rf', 'json', '-rff',
+			translationBenchmarkResult.absolutePath
+	outputs.file(translationBenchmarkResult)
+	outputs.upToDateWhen { false }
+	doFirst {
+		translationBenchmarkReportDirectory.mkdirs()
+	}
 }
 
 jacoco {
@@ -133,10 +200,6 @@ tasks.named('jacocoTestReport', JacocoReport) {
 	}
 }
 
-
-tasks.named('compileTestJava') {
-	dependsOn tasks.named('compileClientJava')
-}
 
 def resourceVersion = project.version.toString()
 processResources {

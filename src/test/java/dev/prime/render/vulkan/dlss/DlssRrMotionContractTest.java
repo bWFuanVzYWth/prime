@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.prime.render.FrameCamera;
+import dev.prime.render.data.RendererDataContracts;
 import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.post.SubpixelJitter;
 import dev.prime.render.post.nrd.NrdCameraTransform;
@@ -25,8 +26,9 @@ final class DlssRrMotionContractTest {
 
     @Test
     void ngxReceivesTheOppositeOfTheRaySampleJitter() {
-        assertEquals(-0.25F, DlssRrNative.ngxJitterOffset(0.25F));
-        assertEquals(0.375F, DlssRrNative.ngxJitterOffset(-0.375F));
+        double[] expected = RendererDataContracts.projectionJitterPixels(0.25, -0.375);
+        assertEquals(expected[0], DlssRrNative.ngxJitterOffset(0.25F), 0.0);
+        assertEquals(expected[1], DlssRrNative.ngxJitterOffset(-0.375F), 0.0);
     }
 
     @Test
@@ -91,12 +93,16 @@ final class DlssRrMotionContractTest {
         Vector2f previousUv = projectSurface(current, previous, primaryPosition);
         Vector2f normalizedMotion = motion(
                 current, previous, currentSampleUv, primaryPosition, false);
+        double[] canonicalMotion = RendererDataContracts.visibleMotionUv(
+                previousUv.x, previousUv.y, currentSampleUv.x, currentSampleUv.y);
         Vector2f motionPixels = new Vector2f(
                 normalizedMotion.x * WIDTH,
                 normalizedMotion.y * HEIGHT);
 
         assertEquals(previousUv.x, currentSampleUv.x + normalizedMotion.x, EPSILON);
         assertEquals(previousUv.y, currentSampleUv.y + normalizedMotion.y, EPSILON);
+        assertEquals(canonicalMotion[0], normalizedMotion.x, EPSILON);
+        assertEquals(canonicalMotion[1], normalizedMotion.y, EPSILON);
         assertEquals(
                 previousUv.x * WIDTH,
                 currentSampleUv.x * WIDTH + motionPixels.x,

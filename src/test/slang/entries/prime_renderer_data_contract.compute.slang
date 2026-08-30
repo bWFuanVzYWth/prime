@@ -1,0 +1,43 @@
+import "prime_coordinate_contract.slang";
+import "prime_color_contract.slang";
+
+layout(set = 0, binding = 0, std430) readonly buffer PrimeRendererDataInput {
+    uint words[];
+} primeRendererDataInput;
+
+layout(set = 0, binding = 1, std430) writeonly buffer PrimeRendererDataOutput {
+    float4 values[];
+} primeRendererDataOutput;
+
+[numthreads(1, 1, 1)]
+void main(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixel = uint2(primeRendererDataInput.words[0], primeRendererDataInput.words[1]);
+    uint2 extent = uint2(primeRendererDataInput.words[2], primeRendererDataInput.words[3]);
+    float2 sampleJitter = float2(
+            asfloat(primeRendererDataInput.words[4]),
+            asfloat(primeRendererDataInput.words[5]));
+    float2 previousUv = float2(
+            asfloat(primeRendererDataInput.words[6]),
+            asfloat(primeRendererDataInput.words[7]));
+    float2 currentUv = float2(
+            asfloat(primeRendererDataInput.words[8]),
+            asfloat(primeRendererDataInput.words[9]));
+    float3 encodedSrgb = float3(
+            asfloat(primeRendererDataInput.words[10]),
+            asfloat(primeRendererDataInput.words[11]),
+            asfloat(primeRendererDataInput.words[12]));
+
+    float2 sampleUv = primeCanonicalSampleUv(pixel, extent);
+    primeRendererDataOutput.values[0] = float4(
+            sampleUv, primeCanonicalUvToClip(sampleUv));
+    primeRendererDataOutput.values[1] = float4(
+            primeCanonicalProjectionJitterPixels(sampleJitter),
+            primeCanonicalVisibleMotionUv(previousUv, currentUv));
+    float3 linearSrgb = float3(
+            primeCanonicalDecodeSrgb(encodedSrgb.x),
+            primeCanonicalDecodeSrgb(encodedSrgb.y),
+            primeCanonicalDecodeSrgb(encodedSrgb.z));
+    primeRendererDataOutput.values[2] = float4(
+            primeCanonicalLinearSrgbToLinearRec2020(linearSrgb), 1.0);
+}
