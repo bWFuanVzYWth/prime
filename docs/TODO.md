@@ -2,6 +2,14 @@
 
 本页只记录非缺陷型增强；可复现的当前问题见 [FIXME](FIXME.md)。
 
+## 渲染核心数据 IR
+
+- 阶段 0 规范已在[渲染核心数据 IR](渲染核心数据IR.md)定稿。下一步只执行阶段 1：建立
+  semantic/encoding/binding/lifetime schema 与窄 Java/Slang 生成 accessor，补跨后端相机、
+  linear Rec.2020 texture/color、精度、alias/liveness 和 ABI 门禁，并建立显存账本与典型/极端
+  replay benchmark baseline；门禁完成前不迁移生产格式或 wavefront 布局。
+- 后续迁移顺序、现状证据和成本见[渲染数据标准化调查报告](渲染数据标准化调查报告.md)。
+
 ## Shader 编译边界
 
 - 按[生产 Shader 编译边界契约](生产Shader编译边界契约.md)补齐同机冷编译、驱动冷/热缓存

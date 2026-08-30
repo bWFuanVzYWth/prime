@@ -176,6 +176,7 @@ $env:Path = "$env:JAVA_HOME\bin;$env:VULKAN_SDK\Bin;$env:Path"
 - [构建与验证](docs/构建与验证.md)
 - [渲染实现](docs/渲染实现.md)
 - [架构与数据流](docs/纯函数式架构.md)
+- [渲染核心数据 IR](docs/渲染核心数据IR.md)
 
 ### 场景、资源与材质
 
@@ -200,6 +201,7 @@ $env:Path = "$env:JAVA_HOME\bin;$env:VULKAN_SDK\Bin;$env:Path"
 ### 维护记录
 
 - [TODO](docs/TODO.md)
+- [渲染数据标准化调查报告](docs/渲染数据标准化调查报告.md)
 - [斜水面细密黑纹排查与修复记录](docs/斜水面细密黑纹排查报告.md)
 
 ## 相关开源项目

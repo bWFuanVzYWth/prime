@@ -60,14 +60,21 @@ Vendored 代码同步、生成代码和 ABI 完整性可以使用哈希或产物
 
 ## 9. GPU 几何追踪精度
 
+所有常用渲染数据必须遵守[渲染核心数据 IR](docs/渲染核心数据IR.md)。语义、encoding、binding
+与 lifetime 分别表达；整数/枚举能够精确表达的身份和拓扑不得提前转换为浮点。连续数据按消费
+行为声明最低信息需求和可审计误差，当前 f32 是缺少相应门禁时的保守基线，不是一律强制的
+永久格式。GPU scene color 与颜色纹理统一为 D65、线性 Rec.2020，源 encoded sRGB 只存在于
+捕获和显示边界。
+
 实时、离线、阴影和 guide 必须遵守 [GPU 几何追踪精度契约](docs/GPU几何追踪精度契约.md)。
 BLAS 前为修复 Minecraft 场景语义而执行的 CPU 几何吸附是独立的显式翻译，不得与 GPU
 自交保护混淆。
 
-GPU 路径必须以提交给 BLAS 的 f32 顶点、硬件重心坐标和精确源/目标身份为依据。禁止为了
-降低显存、带宽、寄存器、any-hit 或调度成本而恢复固定 epsilon、量化重心、射线算术命中点、
-截断身份或宽泛图元忽略。性能优化只有在不改变可见性拓扑、身份、精度等级和数值边界，并以
-行为测试证明等价时才可接受；不能用性能收益换取精度损失。
+GPU 路径必须以提交给 BLAS 的 f32 顶点、硬件重心坐标和精确源/目标身份为权威依据。禁止为了
+降低显存、带宽、寄存器、any-hit 或调度成本而恢复固定 epsilon、射线算术命中点、截断身份或
+宽泛图元忽略。重心、世界法线、介质参数等连续数据只有在最坏误差、分支、分布和重建门禁先行
+建立并通过后才能收窄；源切线空间 RG8 法线可以使用不丢失源信息的紧凑格式，但不能据此压缩
+任意斜面或 guide 世界法线。性能收益不能替代正确性证明。
 
 ## 10. 生产 Shader 编译边界
 
@@ -87,11 +94,18 @@ LabPBR 文件 I/O 和 Minecraft 动画对象只能存在于资源捕获边界；
 捕获后的不可变 source 生成规范页面。terrain、light、OMM、descriptor/sampling 路径和生产
 shader 只消费 renderer 生命周期稳定的 `TextureId`、sprite-local UV 与规范通道或派生数据。
 
+源颜色必须在资源翻译边界执行 EOTF 与色域变换，在线性 Rec.2020 中生成 gutter、mip 和动画
+更新，再以满足误差合同的页面 encoding 上传。生产 shader 不得依赖 Minecraft atlas、在 encoded
+sRGB 上过滤或逐 hit 执行 sRGB/色域转换；alpha/coverage、normal 和 optical code 是独立非颜色
+语义。物理格式可以按信息需求使用整数、UNORM、float 或受支持压缩格式，不要求所有通道 f32。
+当前 atlas/sRGB view/逐 hit 色域矩阵是文档化的阶段 0 迁移基线，在阶段 1 门禁完成前可以保留但
+不得扩大；只能按[渲染数据标准化调查报告](docs/渲染数据标准化调查报告.md)的顺序迁移和删除。
+
 `TextureId` 按 `SpriteId` 单调分配且不得因资源 reload 重编号或复用；新 generation 发布前必须
 上传完整 catalog。大资源包可以优化 packing、mip、上传和临时数据，但不得按可见性、引用或
 加载顺序主动裁剪、驱逐或延迟合法纹理。
 
-禁止恢复与原版 atlas 等尺寸的 normal/optical 镜像、按最大纹理尺寸分配 array layer、每纹理
+禁止恢复与原版 atlas 等尺寸的 base/normal/optical 镜像、按最大纹理尺寸分配 array layer、每纹理
 一个 VkImage/descriptor 或无用途的永久 source 像素副本。物理存储必须按实际矩形分页；
 `PrimitiveRecord` 保持 32 bytes，纹理查表必须窄加载且不得把无关通道引入生产 shader 闭包或
 路径状态。

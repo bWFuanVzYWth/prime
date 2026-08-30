@@ -29,6 +29,10 @@ entry 从源头只能依赖完成自身工作所需的最小代码；不能以 S
 ## 强制依赖规则
 
 - import/include 必须构成从 entry root 到能力叶再到数据叶的单向无环图。
+- [渲染核心数据 IR](渲染核心数据IR.md)的 schema 与生成 accessor 必须按 semantic 生成独立数据
+  叶；禁止通过 `renderer_ir`、全量 record 或资源合同 umbrella 把无关字段和能力带入 entry。
+- 相同物理 encoding、image 或 buffer alias 不构成源码复用理由。entry 只导入所消费 semantic 的
+  typed accessor；binding/offset 的共享由生成合同解决。
 - `common` 只允许窄数据或基础数学，不得成为“暂时方便”的算法聚合入口。
 - 数据叶不能反向依赖行为；分类器不能依赖采样、NEE 或路径推进；resolve/output 不能依赖
   BSDF、灯光遍历或 TraceRay。
@@ -111,7 +115,8 @@ evaluate/sample 模块；通用采样器的 delta 分支反向复用同一离散
 
 ## 文档所有权
 
-本文唯一维护生产 Shader 的依赖、可见性、编译岛和变种选择规则。`渲染实现.md` 只描述已经
+本文唯一维护生产 Shader 的依赖、可见性、编译岛和变种选择规则；数据语义、坐标、颜色和精度
+准入由[渲染核心数据 IR](渲染核心数据IR.md)维护。`渲染实现.md` 只描述已经
 落地的运行时调度，`构建与验证.md` 只描述已经可用的任务和门禁，开放迁移只在 `TODO.md`
 保留一个入口。其他文档应链接本文，不复制一套容易漂移的规则。改变本契约必须在同一变更中
 提供编译与 GPU 运行证据；只改变实现状态时更新对应实现文档，不改写契约。

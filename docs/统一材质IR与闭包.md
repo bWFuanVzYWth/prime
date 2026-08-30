@@ -11,6 +11,8 @@ Minecraft 表面语义 / 规范 TextureRecord / 默认值
 ```
 
 源格式和 atlas 坐标只在输入适配层出现，完整纹理契约见[纹理翻译架构](纹理翻译架构.md)。
+材质 IR 是[渲染核心数据 IR](渲染核心数据IR.md)的 Scene/Transport 子规范；颜色、坐标、精度
+准入、所有权和 semantic/encoding 分离以该文为准。
 命中 ABI、surface relation、闭包编译器和积分器只消费 Prime
 的规范语义；它们不得根据 LabPBR 字节、纹理来源或 roughness 猜测材质类别和离散事件。
 Prime 的 OpenPBR ABI、公式和专用状态位于 `shaders/bsdf/compact`，材质翻译与窄适配位于
@@ -61,8 +63,9 @@ cluster 编码仅是测试源码集内的当前格式回放工具，用于证明
 
 ## Canonical shader IR
 
-命中阶段合成一个寄存器内 `PrimeMaterialSample`：base color、opacity、shading normal、float32
-roughness、`materialControl` 和 `opticalControl`。合成顺序固定为：
+命中阶段合成一个寄存器内 `PrimeMaterialSample`：D65 linear Rec.2020 base color、opacity、
+shading normal、roughness、`materialControl` 和 `opticalControl`。当前 roughness 使用 f32；这是
+误差门禁建立前的保守 encoding，不是材质语义本身。合成顺序固定为：
 
 1. 采样 base/albedo；
 2. 建立全局 roughness 与 dielectric F0 默认值；
@@ -73,7 +76,8 @@ roughness、`materialControl` 和 `opticalControl`。合成顺序固定为：
 
 availability 是逐 sprite 事实；关闭时不采样 descriptor 完整性所需的 1×1 dummy image。
 “无 / 资源包法线 / 几何位移”在地形翻译前解析为互斥模式；默认资源包法线，无 `_n` 时
-不会生成法线依赖或命中采样。法线 page 的 RG 保存归一化平均方向，B 保留 AO，A 保存从
+不会生成法线依赖或命中采样。法线 page 的 RG 以不低于源切线空间 RG8 的信息量保存归一化
+平均方向，B 保留 AO，A 保存从
 平均法线长度反演的等效 GGX 感知粗糙度；运行时在 squared-alpha 空间与材质粗糙度合并。
 原始 normal alpha 只留在 CPU 位移路径。几何法线仍唯一决定可见性、介质边界和射线原点；
 法线贴图的 BSDF 方向另受几何半球约束。发光仍由 emitter 管线独立提取。
@@ -133,14 +137,14 @@ IOR 1.333 和既有吸收参数。
 
 ## 命中 ABI 与表面关系
 
-`PrimitiveRecord`、`TracePayload`、`SurfaceInteraction` 继续保持 32、80、96 字节。原 raw
-LabPBR 字段现分别承载 float32 roughness、canonical `opticalControl` 与
+当前 `PrimitiveRecord`、`TracePayload`、`SurfaceInteraction` 分别为 32、112、112 字节，唯一
+尺寸来源是 `shaders/abi.json` 及其生成常量。原 raw LabPBR 字段现分别承载当前 f32 roughness、canonical `opticalControl` 与
 `adjacentInterfaceControl`，offset 不变。
 
 动态几何不能作为 light-tree emitter，因此命中时复用 emitter/texture-LOD 两个槽逐位保存
 两项硬件 f32 重心坐标，并在 `motionZFlags` 的 31-bit identity lane 保存全局 triangle id；
 上一帧位置和几何法线从既有 f32 顶点缓冲重建。静态命中仍保留原 emitter 与 texture LOD
-语义，`TracePayload` 和 `SurfaceInteraction` 尺寸不变。动态
+语义；任何布局迁移必须先更新生成 ABI 和行为门禁。动态
 cluster 中的 instanced voxel BLAS 没有对应的上一帧三角形流，因此不发布 base BLAS 的运动地址，
 而是明确回退为零物体运动，避免用不相关的局部 triangle id 越界读取。
 
@@ -173,5 +177,6 @@ NEE 查询 SOLID_ANGLE 支持，guide/deterministic 分支只判断是否 discre
 
 改动材质链时至少验证 primitive 三种模式的穷举往返、当前测试编码往返、composer 的 preset 与
 LabPBR 覆盖、玻璃 alpha 阈值与空气微缝矩阵、overlay 两层独立 preset、闭包 measure/sample
-一致性、dummy image 不可观察性，以及 32/80/96 字节 ABI。最终还需运行 shader include、
+一致性、dummy image 不可观察性及生成 ABI。最终还需运行 shader include、
 `verifyRoboCuteReference`、production/test shader 编译、Java 测试和 Vulkan shader property tests。
+当前 ABI 验收读取生成合同中的 32/112/112，不在本文复制另一套可漂移 offset 表。
