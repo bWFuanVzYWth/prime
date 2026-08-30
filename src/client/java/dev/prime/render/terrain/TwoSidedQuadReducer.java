@@ -191,8 +191,9 @@ final class TwoSidedQuadReducer {
             CapturedSectionGeometry.Quad first,
             CapturedSectionGeometry.Quad second) {
         int reverseOffset = reverseOffset(first, second);
+        // Exact reversed positions already prove opposite triangle winding. A warped quad's
+        // per-quad normal samples a different triangle after reversal and need not be opposed.
         if (reverseOffset < 0
-                || !opposedNormals(first, second)
                 || !sameSurface(first.surface(), second.surface())
                 || !sameUvCorners(first, second)) {
             return false;

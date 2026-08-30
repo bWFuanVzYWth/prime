@@ -61,6 +61,28 @@ final class FluidQuadTranslationTest {
     }
 
     @Test
+    void warpedWaterRasterPairBecomesOneOutwardBoundary() {
+        try (SectionMeshAccumulatorTest.TestSprite water =
+                new SectionMeshAccumulatorTest.TestSprite("warped_water")) {
+            water.fill(0xff40_80c0);
+            CapturedSectionGeometry.MutableQuad top = warpedTop();
+            CapturedSectionGeometry.MutableQuad rasterBack = reversed(top);
+            setGeometricNormal(rasterBack);
+            CapturedSectionGeometry.Builder section =
+                    new CapturedSectionGeometry.Builder();
+            CapturedSectionGeometry.Surface surface =
+                    fluidSurface(water, 0, true, 0);
+            section.add(top, surface);
+            section.add(rasterBack, surface);
+
+            CpuClusterMesh cluster = translate(section.build(), false);
+
+            assertEquals(2L, cluster.transmissiveTriangleCount());
+            assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
+        }
+    }
+
+    @Test
     void shallowSlopedWaterWithoutRasterBackFaceIsNotDiscarded() {
         try (SectionMeshAccumulatorTest.TestSprite water =
                 new SectionMeshAccumulatorTest.TestSprite("one_sided_sloped_water")) {
@@ -153,6 +175,16 @@ final class FluidQuadTranslationTest {
         quad.y[3] = 0.30F;
         quad.z[3] = 0.0F;
         setUnitUv(quad);
+        setGeometricNormal(quad);
+        return quad;
+    }
+
+    private static CapturedSectionGeometry.MutableQuad warpedTop() {
+        CapturedSectionGeometry.MutableQuad quad = slopedTop();
+        quad.y[0] = 0.999F;
+        quad.y[1] = 0.999F;
+        quad.y[2] = 0.999F;
+        quad.y[3] = 0.388F;
         setGeometricNormal(quad);
         return quad;
     }
