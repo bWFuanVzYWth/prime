@@ -36,6 +36,7 @@ import "transport/surface/emission.slang";
 import "transport/surface/medium.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/guide.slang";
+import "state/realtime/guide_normal.slang";
 import "state/realtime/light.slang";
 import "state/realtime/ordinary.slang";
 import "state/realtime/queue.slang";
@@ -53,7 +54,8 @@ import "contract/realtime/transparent.slang";
 
 static const uint PRIME_SPLIT_FIRST_STEADY = 1u << 0u;
 static const uint PRIME_SPLIT_SECOND_STEADY = 1u << 1u;
-static const uint PRIME_SPLIT_DELTA_WALK = 1u << 2u;
+static const uint PRIME_SPLIT_FIRST_DELTA_WALK = 1u << 2u;
+static const uint PRIME_SPLIT_SECOND_DELTA_WALK = 1u << 3u;
 
 public uint primeInitializeTransparentWavefront(
         inout PrimeIntegratorContext context,
@@ -180,10 +182,7 @@ public uint primeInitializeTransparentWavefront(
         bool hasGuide = guideEnabled
                 && hasScatter
                 && (bsdf.eventFlags & PRIME_BSDF_EVENT_DISCRETE) == 0u;
-        bool guideFallback = guideEnabled
-                && hasScatter
-                && !hasGuide
-                && primeSurfaceHasMotion(surface);
+        bool guideFallback = false;
         bool diffusePath = transmissionBranch;
         uint guideBounce = primePathBounce(path.control);
 
@@ -203,7 +202,6 @@ public uint primeInitializeTransparentWavefront(
                     shadingNormal,
                     surfaceLinearRoughness,
                     albedos,
-                    path.throughput,
                     path.physicalOrigin,
                     psrState);
             if (transmissionBranch) {
@@ -267,8 +265,14 @@ public uint primeInitializeTransparentWavefront(
         }
         uint pathIndex = primeWavefrontIndex(pixel, branch);
         primeWavefrontPaths[pathIndex] = record;
+        if (hasGuide) {
+            primeStoreWavefrontGuideNormal(
+                    pathIndex, branchResult.guides.primaryNormal);
+        }
         uint continuationBit = deltaWalk
-                ? PRIME_SPLIT_DELTA_WALK
+                ? (transmissionBranch
+                        ? PRIME_SPLIT_FIRST_DELTA_WALK
+                        : PRIME_SPLIT_SECOND_DELTA_WALK)
                 : (transmissionBranch
                         ? PRIME_SPLIT_FIRST_STEADY
                         : PRIME_SPLIT_SECOND_STEADY);
@@ -351,7 +355,9 @@ public void primeSplitVisibleSurface<AreaNee>(
         primeWavefrontPaths[recordIndex] = updated;
         primeStoreWavefrontIntermediate(pixel, result);
         continuationMask = continuation
-                ? (deltaWalk ? PRIME_SPLIT_DELTA_WALK : PRIME_SPLIT_FIRST_STEADY)
+                ? (deltaWalk
+                        ? PRIME_SPLIT_FIRST_DELTA_WALK
+                        : PRIME_SPLIT_FIRST_STEADY)
                 : 0u;
     }
     primeAppendWavefrontContinuation(
@@ -368,5 +374,10 @@ public void primeSplitVisibleSurface<AreaNee>(
             PrimeWavefrontContinuationAppender(),
             PRIME_WAVEFRONT_TRACE_QUEUE_0,
             recordIndex,
-            (continuationMask & PRIME_SPLIT_DELTA_WALK) != 0u);
+            (continuationMask & PRIME_SPLIT_FIRST_DELTA_WALK) != 0u);
+    primeAppendWavefrontContinuation(
+            PrimeWavefrontContinuationAppender(),
+            PRIME_WAVEFRONT_TRACE_QUEUE_1,
+            primeWavefrontIndex(pixel, 1u),
+            (continuationMask & PRIME_SPLIT_SECOND_DELTA_WALK) != 0u);
 }

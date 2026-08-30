@@ -29,7 +29,6 @@ public PrimeDenoiserGuides primeQueuedPsrGuide(
         float3 shadingNormal,
         float linearRoughness,
         PrimeDenoiseAlbedos albedos,
-        float3 guideThroughput,
         float3 lastPosition,
         PrimeQueuedPsrState state) {
     float3 position = surface.position - primePush.cameraPosition;
@@ -50,12 +49,13 @@ public PrimeDenoiserGuides primeQueuedPsrGuide(
     guides.primaryPosition = position;
     guides.primaryPreviousPosition = position;
     guides.primaryHasMotion = false;
-    guides.primaryAlbedo = guideThroughput * albedos.diffuse;
+    // Reconstruction material identity must not inherit stochastic Fresnel or path throughput.
+    guides.primaryAlbedo = albedos.diffuse;
     guides.primaryNormal = normal;
     guides.primaryHitKind = surface.hitKind;
     guides.primaryMaterialFlags = primeNrdGuideControl(
             surface.materialControl, surface.opticalControl);
-    guides.primarySpecularAlbedo = guideThroughput * albedos.specular;
+    guides.primarySpecularAlbedo = albedos.specular;
     guides.primaryLinearRoughness = linearRoughness;
     return guides;
 }

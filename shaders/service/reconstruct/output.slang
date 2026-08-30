@@ -184,9 +184,7 @@ public void primeWriteRealtimeOutput(
             primeNrdSpecularMaterial,
             int2(pixel),
             float4(
-                    primeNrdSanitizeAlbedo(rrUsesTransmissionGuide
-                            ? sampleResult.guides.primarySpecularAlbedo
-                            : nrdGuides.primarySpecularAlbedo),
+                    primeNrdSanitizeAlbedo(nrdGuides.primarySpecularAlbedo),
                     nrdShInputs
                             ? float(nrdGuides.primaryMaterialFlags)
                             : (rrUsesReflectionGuide

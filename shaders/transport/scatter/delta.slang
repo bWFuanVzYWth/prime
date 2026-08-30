@@ -139,6 +139,37 @@ public PrimePathScatter primeSampleDiscretePathSurface(
             surface, viewDirection, volumeStack, result);
 }
 
+// Canonical reconstruction follows transmission whenever that exact discrete event is valid.
+// TIR and unsupported transmission fall back to the reflection event from the same production
+// sampler, so radiance and guide cannot drift onto different Fresnel or refraction formulas.
+public PrimePathScatter primeSamplePreferredTransmissionDiscretePathSurface(
+        inout PrimeIntegratorContext context,
+        SurfaceInteraction surface,
+        float3 viewDirection,
+        PrimeOpenPbrVolumeStack volumeStack) {
+    PrimePathScatter preferred = primeSampleDiscretePathSurface(
+            context,
+            surface,
+            viewDirection,
+            float3(0.0),
+            volumeStack);
+    if (primeHasScatter(preferred.bsdf)
+            || !primeMaterialIsTransmissive(surface.materialControl)) {
+        return preferred;
+    }
+    return primeSampleDiscretePathSurface(
+            context,
+            surface,
+            viewDirection,
+            float3(0.0, 0.0, 1.0),
+            volumeStack);
+}
+
+public uint primeDiscreteEventKind(BsdfSample sample) {
+    return sample.eventFlags
+            & (PRIME_BSDF_EVENT_REFLECTION | PRIME_BSDF_EVENT_TRANSMISSION);
+}
+
 public PrimeGuidedPathScatter primeSampleGuidedDiscretePathSurface(
         inout PrimeIntegratorContext context,
         SurfaceInteraction surface,

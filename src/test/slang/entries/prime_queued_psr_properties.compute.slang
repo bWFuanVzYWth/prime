@@ -3,6 +3,7 @@ import "math/queued_psr.slang";
 
 static const uint PRIME_PSR_INPUT_WORDS = 21;
 static const uint PRIME_PSR_WITNESS_WORDS = 6;
+static const uint PRIME_TEST_PSR_SEGMENTS = 8;
 
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -11,7 +12,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (!primeTestBegin(dispatchThreadId, caseIndex)) return;
     uint inputOffset = primeTestInputOffset(caseIndex, PRIME_PSR_INPUT_WORDS);
     uint4 control = primeTestInput[inputOffset];
-    uint count = min(control.x, PRIME_QUEUED_PSR_CAPACITY);
+    uint count = min(control.x, PRIME_TEST_PSR_SEGMENTS);
     uint reflectionMask = control.y;
     bool forceOverflow = control.z != 0;
     float3 cameraPosition = asfloat(primeTestInput[inputOffset + 1]).xyz;
@@ -19,14 +20,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 targetNormal = normalize(asfloat(primeTestInput[inputOffset + 3]).xyz);
     float3 direction = normalize(asfloat(primeTestInput[inputOffset + 4]).xyz);
 
-    float3 positions[8];
-    float3 normals[8];
+    float3 positions[PRIME_TEST_PSR_SEGMENTS];
+    float3 normals[PRIME_TEST_PSR_SEGMENTS];
     PrimeQueuedPsrState state = primeEmptyQueuedPsrState();
     float3 previousPosition = cameraPosition;
     for (uint index = 0; index < count; ++index) {
         positions[index] = asfloat(primeTestInput[inputOffset + 5 + index]).xyz;
         normals[index] = normalize(asfloat(
-                primeTestInput[inputOffset + 5 + PRIME_QUEUED_PSR_CAPACITY + index]).xyz);
+                primeTestInput[inputOffset + 5 + PRIME_TEST_PSR_SEGMENTS + index]).xyz);
         state = primeAppendQueuedPsrState(
                 state,
                 cameraPosition,
@@ -37,11 +38,21 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         previousPosition = positions[index];
     }
     if (forceOverflow) {
-        state = primeAppendQueuedPsrState(
+        for (uint index = count; index < PRIME_QUEUED_PSR_CAPACITY; ++index) {
+            previousPosition += float3(1.0, 0.0, 0.0);
+            state = primeAppendQueuedPsrSegment(
+                    state,
+                    cameraPosition,
+                    previousPosition,
+                    1.0,
+                    float3(0.0, 1.0, 0.0),
+                    false);
+        }
+        state = primeAppendQueuedPsrSegment(
                 state,
                 cameraPosition,
                 previousPosition,
-                target,
+                1.0,
                 targetNormal,
                 false);
     }
@@ -100,9 +111,23 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     uint mask = 0;
     bool expectedBuilt = count > 0 && !forceOverflow;
+    uint reflectionParity = 0u;
+    for (uint index = 0u; index < count; ++index) {
+        reflectionParity ^= (reflectionMask >> index) & 1u;
+    }
+    uint expectedStorageFlags = (forceOverflow ? 1u : 0u)
+            | (reflectionParity << 1u);
+    uint storageFlags = primeQueuedPsrStorageFlags(state);
+    PrimeQueuedPsrState restored = primeQueuedPsrWithRuntimeControl(
+            primeEmptyQueuedPsrState(), primeQueuedPsrCount(state), storageFlags);
     if (built != expectedBuilt
-            || primeQueuedPsrCount(state) != count
-            || primeQueuedPsrOverflowed(state) != forceOverflow) {
+            || primeQueuedPsrCount(state)
+                    != (forceOverflow ? PRIME_QUEUED_PSR_CAPACITY : count)
+            || primeQueuedPsrOverflowed(state) != forceOverflow
+            || storageFlags != expectedStorageFlags
+            || primeQueuedPsrCount(restored) != primeQueuedPsrCount(state)
+            || primeQueuedPsrOverflowed(restored) != forceOverflow
+            || primeQueuedPsrStorageFlags(restored) != expectedStorageFlags) {
         mask |= PRIME_TEST_FAILURE_EVENT;
     }
     if (!primeTestClose(virtualDirection, expectedDirection, 2.0e-6, 2.0e-5)

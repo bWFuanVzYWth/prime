@@ -24,6 +24,8 @@ import "transport/surface/emission.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/light.slang";
 import "state/realtime/ordinary.slang";
+import "state/realtime/guide_normal.slang";
+import "state/realtime/psr.slang";
 import "state/realtime/guide.slang";
 import "state/realtime/transparent.slang";
 import "state/realtime/transport.slang";
@@ -142,7 +144,7 @@ public bool primeAdvanceTransparentWavefrontRecord<Phase>(
     bool directionalGuide = primeWavefrontDirectionalGuide(control);
     bool hadDirectionalGuide = directionalGuide;
     bool guideFallback = primeWavefrontGuideFallback(
-            record.sourceAndPathControl.w);
+            record.sourceAndPathControl.z);
     bool continuation = primeIntegrateTransparentWavefrontSurface(
             phase,
             PrimeStagedSecondarySunNee(),
@@ -182,6 +184,10 @@ public bool primeAdvanceTransparentWavefrontRecord<Phase>(
     } else {
         primeStoreWavefrontPreviousLightNormal(
                 recordIndex, primePathPreviousLightNormal(path.control));
+    }
+    if (!hadGuide && hasGuide) {
+        primeStoreWavefrontGuideNormal(
+                recordIndex, branchResult.guides.primaryNormal);
     }
     primeStoreTransparentBranchActiveIntermediate(
             pixel,

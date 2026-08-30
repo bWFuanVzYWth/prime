@@ -37,7 +37,7 @@ public void primeAdmitRealtimeTailPath(uint sourceQueue, uint launchIndex) {
         bool pathOwnsGuide = primeTransparentTransportOwnsGuide(
                 false,
                 primeWavefrontGuideFallback(
-                        record.sourceAndPathControl.w));
+                        record.sourceAndPathControl.z));
         rouletteBlocked = primeTransparentRouletteBlocked(
                 pathOwnsGuide, guideEnabled, hasGuide);
     }

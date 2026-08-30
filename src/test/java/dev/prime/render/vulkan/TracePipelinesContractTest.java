@@ -61,11 +61,11 @@ final class TracePipelinesContractTest {
 
     @Test
     void realtimeAndOfflineHaveIndependentSchedulesAndDescriptors() {
-        assertEquals(20, RealtimeRayTracingPipeline.RAYGEN_GROUP_COUNT);
-        assertEquals(15, RealtimeRayTracingPipeline.RAYGEN_MODULE_COUNT);
-        assertEquals(11, RealtimeRayTracingPipeline.dispatchCount(1));
-        assertEquals(15, RealtimeRayTracingPipeline.dispatchCount(2));
-        assertEquals(39, RealtimeRayTracingPipeline.dispatchCount(8));
+        assertEquals(23, RealtimeRayTracingPipeline.RAYGEN_GROUP_COUNT);
+        assertEquals(16, RealtimeRayTracingPipeline.RAYGEN_MODULE_COUNT);
+        assertEquals(14, RealtimeRayTracingPipeline.dispatchCount(1));
+        assertEquals(18, RealtimeRayTracingPipeline.dispatchCount(2));
+        assertEquals(42, RealtimeRayTracingPipeline.dispatchCount(8));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> RealtimeRayTracingPipeline.dispatchCount(0));
@@ -88,16 +88,16 @@ final class TracePipelinesContractTest {
         assertEquals(3, OfflineRayTracingPipeline.DESCRIPTOR_BINDING_COUNT);
 
         assertEquals(List.of(
-                        0, 1, 2, 3, 4, 5, 6,
-                        7, 8, 9, 10, 7, 8, 9, 10,
-                        11, 11, 12, 13, 14),
+                        0, 1, 2, 3, 4, 3, 4, 5, 6, 7,
+                        8, 9, 10, 11, 8, 9, 10, 11,
+                        12, 12, 13, 14, 15),
                 java.util.stream.IntStream
                 .range(0, RealtimeRayTracingPipeline.RAYGEN_GROUP_COUNT)
                 .map(RealtimeRayTracingPipeline::raygenModule)
                 .boxed()
                 .toList());
         assertEquals(List.of(
-                        0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
                         0, 0, 0, 0, 1, 1, 1, 1,
                         0, 1, 0, 0, 0),
                 java.util.stream.IntStream
@@ -132,7 +132,9 @@ final class TracePipelinesContractTest {
                 },
                 RealtimeRayTracingPipeline.nextStepInputImageIndices());
         assertTrue(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
-                RealtimePrimaryGroups.DELTA_WALK));
+                RealtimePrimaryGroups.DELTA_WALK_0));
+        assertTrue(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
+                RealtimePrimaryGroups.GUIDE_DELTA_WALK_0));
         assertTrue(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
                 RealtimePrimaryGroups.LANDING_DIRECT));
         assertTrue(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
@@ -158,16 +160,19 @@ final class TracePipelinesContractTest {
                 "/prime/shaders/realtime_wavefront_surface_split_ser.rgen.spv",
                 realtime.moduleResource(2));
         assertEquals(
+                "/prime/shaders/realtime_wavefront_guide_delta_walk_ser.rgen.spv",
+                realtime.moduleResource(4));
+        assertEquals(
                 "/prime/shaders/realtime_wavefront_fixed_direct_ser.rgen.spv",
-                realtime.moduleResource(9));
+                realtime.moduleResource(10));
         assertEquals(
                 "/prime/shaders/realtime_wavefront_tail_admission_ser.rgen.spv",
-                realtime.moduleResource(11));
+                realtime.moduleResource(12));
         assertEquals(
                 "/prime/shaders/realtime_wavefront_tail_ser.rgen.spv",
-                realtime.moduleResource(12));
-        assertEquals(11, RealtimeRayTracingPipeline.dispatchCount(1));
-        assertEquals(39, RealtimeRayTracingPipeline.dispatchCount(8));
+                realtime.moduleResource(13));
+        assertEquals(14, RealtimeRayTracingPipeline.dispatchCount(1));
+        assertEquals(42, RealtimeRayTracingPipeline.dispatchCount(8));
     }
 
     @Test
@@ -234,6 +239,7 @@ final class TracePipelinesContractTest {
                             wavefrontShader("realtime", "camera_trace", suffix),
                             wavefrontShader("realtime", "surface_split", suffix),
                             wavefrontShader("realtime", "delta_walk", suffix),
+                            wavefrontShader("realtime", "guide_delta_walk", suffix),
                             wavefrontShader("realtime", "landing_light_select", suffix),
                             wavefrontShader("realtime", "landing_direct", suffix),
                             wavefrontShader("realtime", "landing_scatter", suffix),
@@ -322,6 +328,11 @@ final class TracePipelinesContractTest {
                     Set.of(tracePayload),
                     payloadShapes(
                             wavefrontShader("realtime", "delta_walk", suffix),
+                            STORAGE_RAY_PAYLOAD));
+            assertEquals(
+                    Set.of(tracePayload),
+                    payloadShapes(
+                            wavefrontShader("realtime", "guide_delta_walk", suffix),
                             STORAGE_RAY_PAYLOAD));
             assertEquals(
                     Set.of(),
@@ -477,7 +488,7 @@ final class TracePipelinesContractTest {
 
     @Test
     void wavefrontBackingHasDeclaredFourKSize() {
-        assertEquals(4_080_844_896L,
+        assertEquals(4_445_798_512L,
                 RealtimeRayTracingPipeline.wavefrontBytes(3840, 2160));
         assertEquals(1_990_656_032L,
                 OfflineRayTracingPipeline.wavefrontBytes(3840, 2160));
@@ -519,6 +530,10 @@ final class TracePipelinesContractTest {
         for (String suffix : List.of("", "_ser")) {
             assertRecordStride(
                     wavefrontShader("realtime", "delta_walk", suffix),
+                    ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
+                    ShaderAbi.WAVEFRONT_PATH_RECORD_SIZE);
+            assertRecordStride(
+                    wavefrontShader("realtime", "guide_delta_walk", suffix),
                     ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
                     ShaderAbi.WAVEFRONT_PATH_RECORD_SIZE);
             assertRecordStride(

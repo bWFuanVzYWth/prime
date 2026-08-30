@@ -2,6 +2,7 @@
 module "transport/realtime/delta_walk_state.slang";
 
 import "prime_abi_types.slang";
+import "prime_realtime_abi.slang";
 import "state/path.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/sanitization.slang";
@@ -23,9 +24,12 @@ import "transport/surface/access.slang";
 import "transport/surface/accumulate.slang";
 import "transport/surface/medium.slang";
 import "state/realtime/contract.slang";
+import "state/realtime/detached_guide.slang";
 import "state/realtime/guide.slang";
 import "state/realtime/light.slang";
 import "state/realtime/ordinary.slang";
+import "state/realtime/psr.slang";
+import "state/realtime/queue.slang";
 import "state/realtime/transparent.slang";
 import "state/realtime/transport.slang";
 import "bsdf/compact/contract/volume.slang";
@@ -143,15 +147,11 @@ public bool primeAdvanceTransparentDeltaWalk(
             (control & PRIME_WAVEFRONT_GUIDE_ENABLED) != 0u;
     bool hadGuide =
             (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) != 0u;
-    bool guideFallback = primeWavefrontGuideFallback(
-            record.sourceAndPathControl.w);
+    bool guideDetached = primeWavefrontGuideDetached(
+            record.sourceAndPathControl.z);
     bool observesGuide = guideEnabled
             && !hadGuide
-            && !guideFallback;
-    if (observesGuide && primeSurfaceHasMotion(surface)) {
-        guideFallback = true;
-        observesGuide = false;
-    }
+            && !guideDetached;
     bool diffusePath =
             (control & PRIME_WAVEFRONT_DIFFUSE_PATH) != 0u;
     uint guideBounce =
@@ -202,12 +202,56 @@ public bool primeAdvanceTransparentDeltaWalk(
                     PRIME_SAMPLE_DIMENSION_PRIMARY),
             volumeStack);
     BsdfSample bsdf = scatter.bsdf;
+    PrimePathScatter guideScatter;
+    guideScatter.bsdf = primeInvalidBsdfSample();
+    guideScatter.volumeStack = volumeStack;
+    if (observesGuide) {
+        guideScatter = primeSamplePreferredTransmissionDiscretePathSurface(
+                context, surface, viewDirection, volumeStack);
+        if (primeHasScatter(guideScatter.bsdf)) {
+            psrState = primeAppendQueuedPsrDiscrete(
+                    psrState,
+                    path.physicalOrigin,
+                    surface,
+                    guideScatter.bsdf);
+            bool sameEvent = primeHasScatter(bsdf)
+                    && primeDiscreteEventKind(bsdf)
+                            == primeDiscreteEventKind(guideScatter.bsdf);
+            if (!sameEvent) {
+                PrimeDetachedGuideRecord guideRecord;
+                guideRecord.physicalOrigin = surface.position;
+                guideRecord.sourcePrimitive = uint2(
+                        surface.sectionIndex,
+                        primeSurfaceTriangleIndex(surface));
+                guideRecord.rayDirection = guideScatter.bsdf.direction;
+                guideRecord.mediumIor = primeDetachedGuideMediumIor(
+                        guideScatter.volumeStack);
+                primeStoreDetachedGuideRecord(pixel, guideRecord);
+                primeStoreWavefrontPsrState(recordIndex, psrState);
+                record.throughputAndReserved.w =
+                        psrState.firstDirectionLength.w;
+                record = primeWavefrontWithQueuedPsrControl(
+                        record, primeQueuedPsrStorageFlags(psrState));
+                record = primeWavefrontWithGuideTransitions(
+                        record, primeQueuedPsrCount(psrState));
+                record = primeWavefrontWithGuideFallback(record, true);
+                primeStoreWavefrontTransportRecord(recordIndex, record);
+                primeAppendWavefrontPath(
+                        PRIME_WAVEFRONT_GUIDE_QUEUE, recordIndex);
+                guideDetached = true;
+                observesGuide = false;
+            }
+        } else {
+            guideEnabled = false;
+            uint disabledControl = control & ~PRIME_WAVEFRONT_GUIDE_ENABLED;
+            record.rayDirectionAndDenoiserControl.w = asfloat(disabledControl);
+            primeStoreWavefrontTransportRecord(recordIndex, record);
+            control = disabledControl;
+            observesGuide = false;
+        }
+    }
     if (!primeHasScatter(bsdf)) {
         return false;
-    }
-    if (observesGuide) {
-        psrState = primeAppendQueuedPsrDiscrete(
-                psrState, path.physicalOrigin, surface, bsdf);
     }
     volumeStack = scatter.volumeStack;
     if (!primeAdvancePathWithoutRoulette(
@@ -231,12 +275,18 @@ public bool primeAdvanceTransparentDeltaWalk(
                     guideBounce,
                     directionalGuide,
                     control,
-                    guideFallback,
+                    guideDetached,
                     true);
+    if (guideDetached) {
+        PrimeWavefrontTransportRecord guideOwner =
+                primeWavefrontPaths[recordIndex].transport;
+        updated.throughputAndReserved.w = guideOwner.throughputAndReserved.w;
+        updated.sourceAndPathControl.z = guideOwner.sourceAndPathControl.z;
+    }
     primeStoreWavefrontTransportRecord(recordIndex, updated);
     if (observesGuide) {
         primeStoreWavefrontPsrState(recordIndex, psrState);
-    } else {
+    } else if (!guideDetached) {
         primeStoreWavefrontPreviousLightNormal(
                 recordIndex, primePathPreviousLightNormal(path.control));
     }

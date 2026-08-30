@@ -80,7 +80,7 @@ public void primeProcessDeltaWalkBranch(
                     && (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) == 0u
                     && !primeWavefrontDirectionalGuide(control)
                     && !primeWavefrontGuideFallback(
-                            record.sourceAndPathControl.w);
+                            record.sourceAndPathControl.z);
             if (guidePending) {
                 primeInvalidatePendingTransparentGuide(recordIndex, record);
             }
@@ -112,19 +112,11 @@ public void primeProcessDeltaWalkBranch(
 }
 
 public void primeWavefrontDeltaWalk(
-        inout PrimeIntegratorContext context, uint launchIndex) {
+        inout PrimeIntegratorContext context,
+        uint sourceQueue,
+        uint launchIndex) {
     uint taskIndex = primeWavefrontQueuedPath(
-            PRIME_WAVEFRONT_TRACE_QUEUE_0, launchIndex);
-    uint2 pixel = primeWavefrontPixel(taskIndex);
+            sourceQueue, launchIndex);
     uint maximumTransitions = primeAdditionalSpecularBounces();
-    PrimeWavefrontTransportRecord first =
-            primeLoadWavefrontTransportRecord(primeWavefrontIndex(pixel, 0u));
-    bool branchedPrimary = primeWavefrontTransparentBranch(
-            asuint(first.rayDirectionAndDenoiserControl.w));
-    uint branchCount = branchedPrimary ? 2u : 1u;
-    [loop]
-    for (uint branch = 0u; branch < branchCount; ++branch) {
-        primeProcessDeltaWalkBranch(
-                context, primeWavefrontIndex(pixel, branch), maximumTransitions);
-    }
+    primeProcessDeltaWalkBranch(context, taskIndex, maximumTransitions);
 }

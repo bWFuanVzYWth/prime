@@ -1,10 +1,10 @@
 #language slang 2026
 module "math/queued_psr.slang";
 
-public static const uint PRIME_QUEUED_PSR_CAPACITY = 8;
-static const uint PRIME_QUEUED_PSR_COUNT_MASK = 0x0f;
-static const uint PRIME_QUEUED_PSR_OVERFLOW = 0x10;
-static const uint PRIME_QUEUED_PSR_ODD_REFLECTION = 0x20;
+public static const uint PRIME_QUEUED_PSR_CAPACITY = 64;
+static const uint PRIME_QUEUED_PSR_COUNT_MASK = 0x7f;
+static const uint PRIME_QUEUED_PSR_OVERFLOW = 0x80;
+static const uint PRIME_QUEUED_PSR_ODD_REFLECTION = 0x100;
 
 public struct PrimeQueuedPsrState
 {
@@ -26,6 +26,24 @@ public uint primeQueuedPsrCount(PrimeQueuedPsrState state)
 public bool primeQueuedPsrOverflowed(PrimeQueuedPsrState state)
 {
     return (primeQueuedPsrControl(state) & PRIME_QUEUED_PSR_OVERFLOW) != 0;
+}
+
+public uint primeQueuedPsrStorageFlags(PrimeQueuedPsrState state)
+{
+    return (primeQueuedPsrOverflowed(state) ? 1u : 0u)
+            | ((primeQueuedPsrControl(state)
+                    & PRIME_QUEUED_PSR_ODD_REFLECTION) != 0u ? 2u : 0u);
+}
+
+public PrimeQueuedPsrState primeQueuedPsrWithRuntimeControl(
+        PrimeQueuedPsrState state, uint count, uint storageFlags)
+{
+    state.control = min(count, PRIME_QUEUED_PSR_CAPACITY)
+            | ((storageFlags & 1u) != 0u ? PRIME_QUEUED_PSR_OVERFLOW : 0u)
+            | ((storageFlags & 2u) != 0u
+                    ? PRIME_QUEUED_PSR_ODD_REFLECTION
+                    : 0u);
+    return state;
 }
 
 public PrimeQueuedPsrState primeEmptyQueuedPsrState()

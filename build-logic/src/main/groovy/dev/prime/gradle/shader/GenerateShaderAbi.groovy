@@ -130,13 +130,14 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		}
 		if (wavefrontContract.pathRecordSize != 112
 				|| wavefrontContract.pathSlotsPerPixel != 2
-				|| wavefrontContract.areaRecordSize != 232
+				|| wavefrontContract.areaRecordSize != 272
 				|| wavefrontContract.areaRecordSize
 						!= 16 + (wavefrontSurfaceRecord.size + 12)
 								* wavefrontContract.pathSlotsPerPixel
+								+ 40
 				|| wavefrontContract.queueEntriesPerPixel != 2
-				|| wavefrontContract.queueStorageEntriesPerPixel != 9
-				|| wavefrontContract.queueCount != 6
+				|| wavefrontContract.queueStorageEntriesPerPixel != 10
+				|| wavefrontContract.queueCount != 7
 				|| wavefrontContract.traceQueue0 != 0
 				|| wavefrontContract.traceQueue1 != 1
 				|| wavefrontContract.primaryQueue != 2
@@ -144,6 +145,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| wavefrontContract.transparentTraceQueue1 != 2
 				|| wavefrontContract.areaQueue != 4
 				|| wavefrontContract.transparentResolveQueue != 5
+				|| wavefrontContract.guideQueue != 6
 				|| wavefrontContract.queueCommandStride != 16
 				|| wavefrontContract.queueIndexSize != 4
 				|| !wavefrontContract.activeMask.toString().equalsIgnoreCase('0x1')) {
@@ -392,6 +394,7 @@ public final class ShaderAbi {
     public static final int WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1 = ${wavefrontContract.transparentTraceQueue1};
     public static final int WAVEFRONT_AREA_QUEUE = ${wavefrontContract.areaQueue};
     public static final int WAVEFRONT_TRANSPARENT_RESOLVE_QUEUE = ${wavefrontContract.transparentResolveQueue};
+    public static final int WAVEFRONT_GUIDE_QUEUE = ${wavefrontContract.guideQueue};
     public static final int WAVEFRONT_QUEUE_COMMAND_STRIDE = ${wavefrontContract.queueCommandStride};
     public static final int WAVEFRONT_QUEUE_INDEX_SIZE = ${wavefrontContract.queueIndexSize};
     public static final int WAVEFRONT_ACTIVE_MASK = ${wavefrontContract.activeMask};
@@ -751,6 +754,7 @@ public static const uint PRIME_WAVEFRONT_SHADE_QUEUE = PRIME_WAVEFRONT_PRIMARY_Q
 public static const uint PRIME_WAVEFRONT_TRANSPARENT_SHADE_QUEUE = PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0;
 public static const uint PRIME_WAVEFRONT_AREA_QUEUE = ${wavefrontContract.areaQueue};
 public static const uint PRIME_WAVEFRONT_TRANSPARENT_RESOLVE_QUEUE = ${wavefrontContract.transparentResolveQueue};
+public static const uint PRIME_WAVEFRONT_GUIDE_QUEUE = ${wavefrontContract.guideQueue};
 public static const uint PRIME_WAVEFRONT_QUEUE_COMMAND_STRIDE = ${wavefrontContract.queueCommandStride};
 public static const uint PRIME_WAVEFRONT_QUEUE_INDEX_SIZE = ${wavefrontContract.queueIndexSize};
 public static const uint PRIME_WAVEFRONT_ACTIVE_MASK = ${wavefrontContract.activeMask};

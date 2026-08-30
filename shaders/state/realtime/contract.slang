@@ -29,7 +29,9 @@ public struct PrimeWavefrontTransportRecord {
 };
 
 // Four f32 transport lanes, two 16-byte medium lanes and one cold lane give this record its
-// explicit 112-byte std430 CPU/GPU ABI. Medium extinction and IOR stay f32 across dispatches.
+// explicit 112-byte std430 CPU/GPU ABI. Pending transparent guides keep their f32 rotation in the
+// cold lane and path length in the otherwise-unused transport w component; no direction or
+// transform quantization occurs across dispatches.
 public struct PrimeWavefrontPathRecord {
     public PrimeWavefrontTransportRecord transport;
     public uint4 psrPacked;
@@ -64,11 +66,12 @@ public static const uint PRIME_WAVEFRONT_PRIMARY_FLAGS_SHIFT = 18u;
 public static const uint PRIME_WAVEFRONT_BYTE_MASK = 0xffu;
 public static const uint PRIME_WAVEFRONT_MEDIUM_COUNT_MASK = 0x3u;
 public static const uint PRIME_WAVEFRONT_PRIMARY_FLAGS_MASK = 0x3fffu;
-public static const uint PRIME_WAVEFRONT_PSR_CONTROL_SHIFT = 25u;
-public static const uint PRIME_WAVEFRONT_PSR_CONTROL_MASK = 0x3fu;
-// Transparent full-mode paths use the otherwise-unused top path-control bit when queued PSR can
-// no longer publish a stable target and the resident visible-interface guide must remain active.
-public static const uint PRIME_WAVEFRONT_GUIDE_FALLBACK = 0x80000000u;
+public static const uint PRIME_WAVEFRONT_PSR_CONTROL_MASK = 0x3u;
+// sourceAndPathControl.z is guide-only so guide state cannot alter radiance path flags. During
+// delta walk fallback means detached; later phases reuse it after abandoning an invalid PSR guide.
+public static const uint PRIME_WAVEFRONT_GUIDE_FALLBACK = 0x4u;
+public static const uint PRIME_WAVEFRONT_GUIDE_DETACHED =
+        PRIME_WAVEFRONT_GUIDE_FALLBACK;
 public static const uint PRIME_WAVEFRONT_LIGHT_NORMAL_SHIFT = 16u;
 public static const uint PRIME_WAVEFRONT_LIGHT_NORMAL_MASK = 0xffffu;
 public static const uint PRIME_WAVEFRONT_PRIMARY_MOTION = 1u;
@@ -130,8 +133,12 @@ public uint primeWavefrontQueueWord(uint queue, uint entry) {
     if (queue == PRIME_WAVEFRONT_AREA_QUEUE) {
         return indexWords + 6u * pixelCount + entry;
     }
-    // The area queue occupies both slots 6 and 7; resolve starts after its compact domain.
-    return indexWords + 8u * pixelCount + entry;
+    // The area queue occupies both slots 6 and 7. Resolve and the serialized detached-guide
+    // queue own the two remaining one-entry-per-pixel regions.
+    if (queue == PRIME_WAVEFRONT_TRANSPARENT_RESOLVE_QUEUE) {
+        return indexWords + 8u * pixelCount + entry;
+    }
+    return indexWords + 9u * pixelCount + entry;
 }
 
 public uint primeAdditionalSpecularBounces() {
@@ -206,8 +213,12 @@ public bool primeWavefrontDirectionalGuide(uint control) {
     return (control & PRIME_WAVEFRONT_DIRECTIONAL_GUIDE) != 0u;
 }
 
-public bool primeWavefrontGuideFallback(uint pathControl) {
-    return (pathControl & PRIME_WAVEFRONT_GUIDE_FALLBACK) != 0u;
+public bool primeWavefrontGuideFallback(uint guideControl) {
+    return (guideControl & PRIME_WAVEFRONT_GUIDE_FALLBACK) != 0u;
+}
+
+public bool primeWavefrontGuideDetached(uint guideControl) {
+    return (guideControl & PRIME_WAVEFRONT_GUIDE_DETACHED) != 0u;
 }
 
 public bool primeWavefrontPixelTransparent(uint2 pixel) {

@@ -54,11 +54,10 @@ public void primePublishLandingContinuation(
     if (continuation) {
         PrimeWavefrontTransportRecord record =
                 primeLoadWavefrontTransportRecord(recordIndex);
-        uint psrControl = (record.sourceAndPathControl.w
-                >> PRIME_WAVEFRONT_PSR_CONTROL_SHIFT)
+        uint psrControl = record.sourceAndPathControl.z
                 & PRIME_WAVEFRONT_PSR_CONTROL_MASK;
-        PrimeQueuedPsrState psrState = primeEmptyQueuedPsrState();
-        psrState.control = psrControl;
+        PrimeQueuedPsrState psrState = primeQueuedPsrWithRuntimeControl(
+                primeEmptyQueuedPsrState(), 0u, psrControl);
         uint control = asuint(record.rayDirectionAndDenoiserControl.w);
         bool invalidGuide = primeQueuedPsrOverflowed(psrState)
                 && (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) == 0u

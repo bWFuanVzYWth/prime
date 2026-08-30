@@ -180,6 +180,20 @@
         "-DPRIME_ENABLE_SUBGROUP_QUEUE=1"
       ]
     },
+    "realtime_wavefront_guide_delta_walk": {
+      "source": "shaders/entry/realtime/guide_delta_walk.raygeneration.slang",
+      "stage": "raygeneration",
+      "resource": "realtime_wavefront_guide_delta_walk.rgen.spv"
+    },
+    "realtime_wavefront_guide_delta_walk_ser": {
+      "source": "shaders/entry/realtime/guide_delta_walk.raygeneration.slang",
+      "stage": "raygeneration",
+      "resource": "realtime_wavefront_guide_delta_walk_ser.rgen.spv",
+      "definitions": [
+        "-DPRIME_ENABLE_SER=1",
+        "-DPRIME_ENABLE_SUBGROUP_QUEUE=1"
+      ]
+    },
     "realtime_wavefront_visible_direct": {
       "source": "shaders/entry/realtime/visible_direct.raygeneration.slang",
       "stage": "raygeneration",
@@ -382,6 +396,7 @@
         "realtime_wavefront_visible_direct",
         "realtime_wavefront_surface_split",
         "realtime_wavefront_delta_walk",
+        "realtime_wavefront_guide_delta_walk",
         "realtime_wavefront_landing_light_select",
         "realtime_wavefront_landing_direct",
         "realtime_wavefront_landing_scatter",
@@ -416,6 +431,14 @@
           "control": 0
         },
         {
+          "module": 3,
+          "control": 1
+        },
+        {
+          "module": 4,
+          "control": 0
+        },
+        {
           "module": 5,
           "control": 0
         },
@@ -440,8 +463,8 @@
           "control": 0
         },
         {
-          "module": 7,
-          "control": 1
+          "module": 11,
+          "control": 0
         },
         {
           "module": 8,
@@ -457,10 +480,6 @@
         },
         {
           "module": 11,
-          "control": 0
-        },
-        {
-          "module": 11,
           "control": 1
         },
         {
@@ -468,11 +487,19 @@
           "control": 0
         },
         {
+          "module": 12,
+          "control": 1
+        },
+        {
           "module": 13,
           "control": 0
         },
         {
           "module": 14,
+          "control": 0
+        },
+        {
+          "module": 15,
           "control": 0
         }
       ]
@@ -483,6 +510,7 @@
         "realtime_wavefront_visible_direct",
         "realtime_wavefront_surface_split_ser",
         "realtime_wavefront_delta_walk_ser",
+        "realtime_wavefront_guide_delta_walk_ser",
         "realtime_wavefront_landing_light_select_ser",
         "realtime_wavefront_landing_direct_ser",
         "realtime_wavefront_landing_scatter_ser",
@@ -517,6 +545,14 @@
           "control": 0
         },
         {
+          "module": 3,
+          "control": 1
+        },
+        {
+          "module": 4,
+          "control": 0
+        },
+        {
           "module": 5,
           "control": 0
         },
@@ -541,8 +577,8 @@
           "control": 0
         },
         {
-          "module": 7,
-          "control": 1
+          "module": 11,
+          "control": 0
         },
         {
           "module": 8,
@@ -558,10 +594,6 @@
         },
         {
           "module": 11,
-          "control": 0
-        },
-        {
-          "module": 11,
           "control": 1
         },
         {
@@ -569,11 +601,19 @@
           "control": 0
         },
         {
+          "module": 12,
+          "control": 1
+        },
+        {
           "module": 13,
           "control": 0
         },
         {
           "module": 14,
+          "control": 0
+        },
+        {
+          "module": 15,
           "control": 0
         }
       ]

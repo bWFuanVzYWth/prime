@@ -188,7 +188,6 @@ public bool primeIntegrateTransparentWavefrontSurface<Phase, SunNee, AreaNee>(
                 primeSurfaceShadingNormal(surface, viewDirection),
                 surfaceLinearRoughness,
                 surfaceAlbedos,
-                path.throughput,
                 path.physicalOrigin,
                 psrState);
         if (transmissionBranch) {

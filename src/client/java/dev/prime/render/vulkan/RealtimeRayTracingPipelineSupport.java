@@ -259,7 +259,7 @@ abstract class RealtimeRayTracingPipelineSupport implements RealtimeIntegratorPi
                 commandBuffer, stack, activeProgram, width, height, group);
     }
 
-    /** Records groups 0..6, from visible-primary tracing through secondary-queue publication. */
+    /** Records groups 1..9, from visible-primary work through secondary-queue publication. */
     protected final void recordPrimaryPrefix(
             VkCommandBuffer commandBuffer,
             MemoryStack stack,
@@ -286,10 +286,34 @@ abstract class RealtimeRayTracingPipelineSupport implements RealtimeIntegratorPi
                 commandBuffer,
                 stack,
                 program,
-                RealtimePrimaryGroups.DELTA_WALK,
+                RealtimePrimaryGroups.DELTA_WALK_0,
                 commandOffset,
                 ShaderAbi.WAVEFRONT_TRACE_QUEUE_0);
-        this.queueBarrier(commandBuffer, stack);
+        this.nextStepBarrier(commandBuffer, stack);
+        this.traceQueued(
+                commandBuffer,
+                stack,
+                program,
+                RealtimePrimaryGroups.GUIDE_DELTA_WALK_0,
+                commandOffset,
+                ShaderAbi.WAVEFRONT_GUIDE_QUEUE);
+        this.nextStepBarrier(commandBuffer, stack);
+        this.traceQueued(
+                commandBuffer,
+                stack,
+                program,
+                RealtimePrimaryGroups.DELTA_WALK_1,
+                commandOffset,
+                ShaderAbi.WAVEFRONT_TRACE_QUEUE_1);
+        this.nextStepBarrier(commandBuffer, stack);
+        this.traceQueued(
+                commandBuffer,
+                stack,
+                program,
+                RealtimePrimaryGroups.GUIDE_DELTA_WALK_1,
+                commandOffset,
+                ShaderAbi.WAVEFRONT_GUIDE_QUEUE);
+        this.nextStepBarrier(commandBuffer, stack);
         this.traceQueued(
                 commandBuffer,
                 stack,

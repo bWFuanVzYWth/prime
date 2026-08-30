@@ -176,7 +176,7 @@ path,
             volumeStack,
             denoiserState,
             previousDenoiserControl,
-            psrState.control,
+            primeQueuedPsrStorageFlags(psrState),
             enabled);
     uint control = asuint(record.rayDirectionAndDenoiserControl.w);
     control = directionalGuide

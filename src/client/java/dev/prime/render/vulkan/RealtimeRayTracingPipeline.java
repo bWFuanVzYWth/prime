@@ -15,7 +15,7 @@ public final class RealtimeRayTracingPipeline extends RealtimeRayTracingPipeline
                 minimumBounces);
         // Landing owns the primary-surface bounce. Every additional minimum bounce has four
         // narrow stages; admission and the register tail replace all remaining dispatches.
-        return 4 * (minimumBounces - 1) + 11;
+        return 4 * (minimumBounces - 1) + 14;
     }
 
     static int[] primaryDirectInputImageIndices() {
@@ -38,7 +38,10 @@ public final class RealtimeRayTracingPipeline extends RealtimeRayTracingPipeline
 
     static boolean standardBarrierPublishesImagesBefore(int group) {
         return switch (group) {
-            case RealtimePrimaryGroups.DELTA_WALK,
+            case RealtimePrimaryGroups.DELTA_WALK_0,
+                    RealtimePrimaryGroups.GUIDE_DELTA_WALK_0,
+                    RealtimePrimaryGroups.DELTA_WALK_1,
+                    RealtimePrimaryGroups.GUIDE_DELTA_WALK_1,
                     RealtimePrimaryGroups.LANDING_DIRECT,
                     RealtimePrimaryGroups.LANDING_SCATTER,
                     RealtimeStandardGroups.DIRECT_0,

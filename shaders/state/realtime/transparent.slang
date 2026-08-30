@@ -11,6 +11,7 @@ import "math/packed_geometry.slang";
 import "policy/runtime/config.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/guide.slang";
+import "state/realtime/guide_normal.slang";
 import "state/realtime/signal.slang";
 import "contract/path.slang";
 import "model/realtime/guide.slang";
@@ -506,6 +507,11 @@ public PrimeTransparentBranchResult primeLoadTransparentBranchIntermediate(
                             primeNrdReflectionSpecularDirection,
                             coordinate).xyz);
         }
+    }
+    if ((control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) != 0u) {
+        uint branch = transmissionBranch ? 0u : 1u;
+        result.guides.primaryNormal = primeLoadWavefrontGuideNormal(
+                primeWavefrontIndex(pixel, branch));
     }
     primeLoadWavefrontArea(
             pixel,

@@ -134,15 +134,19 @@
       "maxBytes": 577500
     },
     "entry/realtime/delta_walk.raygeneration.slang": {
-      "maxFiles": 96,
+      "maxFiles": 97,
       "maxBytes": 349115
+    },
+    "entry/realtime/guide_delta_walk.raygeneration.slang": {
+      "maxFiles": 110,
+      "maxBytes": 390000
     },
     "entry/realtime/visible_direct.raygeneration.slang": {
       "maxFiles": 123,
       "maxBytes": 496000
     },
     "entry/realtime/surface_split.raygeneration.slang": {
-      "maxFiles": 154,
+      "maxFiles": 155,
       "maxBytes": 611000
     },
     "entry/realtime/noisy_output_resolve.raygeneration.slang": {
@@ -162,7 +166,7 @@
       "maxBytes": 451000
     },
     "entry/realtime/fixed_scatter.raygeneration.slang": {
-      "maxFiles": 143,
+      "maxFiles": 144,
       "maxBytes": 547000
     },
     "entry/realtime/tail_admission.raygeneration.slang": {
@@ -174,8 +178,8 @@
       "maxBytes": 590000
     },
     "entry/realtime/branch_resolve.raygeneration.slang": {
-      "maxFiles": 32,
-      "maxBytes": 139321
+      "maxFiles": 33,
+      "maxBytes": 140000
     }
   }
 }

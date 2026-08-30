@@ -49,12 +49,9 @@ public PrimeWavefrontTransportRecord primeWavefrontWithActive(
 public PrimeWavefrontTransportRecord primeWavefrontWithQueuedPsrControl(
         PrimeWavefrontTransportRecord record,
         uint control) {
-    uint pathControl = record.sourceAndPathControl.w;
-    pathControl &= ~(PRIME_WAVEFRONT_PSR_CONTROL_MASK
-            << PRIME_WAVEFRONT_PSR_CONTROL_SHIFT);
-    pathControl |= (control & PRIME_WAVEFRONT_PSR_CONTROL_MASK)
-            << PRIME_WAVEFRONT_PSR_CONTROL_SHIFT;
-    record.sourceAndPathControl.w = pathControl;
+    record.sourceAndPathControl.z =
+            (record.sourceAndPathControl.z & ~PRIME_WAVEFRONT_PSR_CONTROL_MASK)
+            | (control & PRIME_WAVEFRONT_PSR_CONTROL_MASK);
     return record;
 }
 
@@ -62,31 +59,45 @@ public PrimeWavefrontTransportRecord primeWavefrontWithGuideFallback(
         PrimeWavefrontTransportRecord record,
         bool fallback) {
     if (fallback) {
-        record.sourceAndPathControl.w |= PRIME_WAVEFRONT_GUIDE_FALLBACK;
+        record.sourceAndPathControl.z |= PRIME_WAVEFRONT_GUIDE_FALLBACK;
     } else {
-        record.sourceAndPathControl.w &= ~PRIME_WAVEFRONT_GUIDE_FALLBACK;
+        record.sourceAndPathControl.z &= ~PRIME_WAVEFRONT_GUIDE_FALLBACK;
     }
     return record;
 }
 
+static const uint PRIME_WAVEFRONT_GUIDE_TRANSITIONS_SHIFT = 8u;
+static const uint PRIME_WAVEFRONT_GUIDE_TRANSITIONS_MASK = 0x7fu;
+
+public uint primeWavefrontGuideTransitions(uint guideControl) {
+    return (guideControl >> PRIME_WAVEFRONT_GUIDE_TRANSITIONS_SHIFT)
+            & PRIME_WAVEFRONT_GUIDE_TRANSITIONS_MASK;
+}
+
+public PrimeWavefrontTransportRecord primeWavefrontWithGuideTransitions(
+        PrimeWavefrontTransportRecord record,
+        uint transitions) {
+    uint mask = PRIME_WAVEFRONT_GUIDE_TRANSITIONS_MASK
+            << PRIME_WAVEFRONT_GUIDE_TRANSITIONS_SHIFT;
+    record.sourceAndPathControl.z =
+            (record.sourceAndPathControl.z & ~mask)
+            | ((min(transitions, PRIME_WAVEFRONT_GUIDE_TRANSITIONS_MASK)
+                    & PRIME_WAVEFRONT_GUIDE_TRANSITIONS_MASK)
+                    << PRIME_WAVEFRONT_GUIDE_TRANSITIONS_SHIFT);
+    return record;
+}
+
 public uint4 primePackWavefrontPsrState(PrimeQueuedPsrState state) {
-    float3 firstDirection = state.firstDirectionLength.xyz;
-    if (!(dot(firstDirection, firstDirection) > 0.0)) {
-        firstDirection = float3(0.0, 0.0, 1.0);
-    }
-    return uint4(
-            primePackOctahedralNormal(firstDirection),
-            asuint(state.firstDirectionLength.w),
-            packSnorm2x16(clamp(state.rotation.xy, float2(-1.0), float2(1.0))),
-            packSnorm2x16(clamp(state.rotation.zw, float2(-1.0), float2(1.0))));
+    return asuint(state.rotation);
 }
 
 public PrimeWavefrontPathRecord primeWavefrontWithQueuedPsrState(
         PrimeWavefrontPathRecord record,
         PrimeQueuedPsrState state) {
     record.transport = primeWavefrontWithQueuedPsrControl(
-            record.transport, state.control);
+            record.transport, primeQueuedPsrStorageFlags(state));
     record.psrPacked = primePackWavefrontPsrState(state);
+    record.transport.throughputAndReserved.w = state.firstDirectionLength.w;
     return record;
 }
 
@@ -121,34 +132,6 @@ public void primeStoreWavefrontPreviousLightNormal(
             (packed & PRIME_WAVEFRONT_LIGHT_NORMAL_MASK)
             | ((packedNormal & PRIME_WAVEFRONT_LIGHT_NORMAL_MASK)
                     << PRIME_WAVEFRONT_LIGHT_NORMAL_SHIFT);
-}
-
-public PrimeQueuedPsrState primeLoadWavefrontPsrState(
-        uint pathIndex,
-        PrimeWavefrontTransportRecord record) {
-    uint4 packed = primeWavefrontPaths[pathIndex].psrPacked;
-    PrimeQueuedPsrState state;
-    state.firstDirectionLength = float4(
-            primeUnpackOctahedralNormal(packed.x),
-            asfloat(packed.y));
-    state.rotation = float4(
-            unpackSnorm2x16ToFloat(packed.z),
-            unpackSnorm2x16ToFloat(packed.w));
-    float rotationLengthSquared = dot(state.rotation, state.rotation);
-    state.rotation = rotationLengthSquared > 0.0
-            ? state.rotation * rsqrt(rotationLengthSquared)
-            : float4(0.0, 0.0, 0.0, 1.0);
-    uint pathControl = record.sourceAndPathControl.w;
-    state.control = (pathControl >> PRIME_WAVEFRONT_PSR_CONTROL_SHIFT)
-            & PRIME_WAVEFRONT_PSR_CONTROL_MASK;
-    return state;
-}
-
-public void primeStoreWavefrontPsrState(
-        uint pathIndex,
-        PrimeQueuedPsrState state) {
-    primeWavefrontPaths[pathIndex].psrPacked =
-            primePackWavefrontPsrState(state);
 }
 
 public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
