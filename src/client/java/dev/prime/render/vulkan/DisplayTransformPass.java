@@ -63,7 +63,7 @@ public final class DisplayTransformPass implements Destroyable {
                 context,
                 linearInput,
                 meteringGuide.material(),
-                meteringGuide.normalRoughness(),
+                meteringGuide.materialClass(),
                 displayOutput,
                 false,
                 null);
@@ -88,7 +88,7 @@ public final class DisplayTransformPass implements Destroyable {
             VulkanContext context,
             VulkanImage linearInput,
             VulkanImage albedo,
-            VulkanImage normalRoughness,
+            VulkanImage materialClass,
             VulkanImage displayOutput,
             boolean accumulatedMetering,
             VulkanBuffer frozenExposure) {
@@ -107,7 +107,7 @@ public final class DisplayTransformPass implements Destroyable {
                         context,
                         linearInput,
                         java.util.Objects.requireNonNull(albedo, "albedo"),
-                        java.util.Objects.requireNonNull(normalRoughness, "normalRoughness"),
+                        java.util.Objects.requireNonNull(materialClass, "materialClass"),
                         accumulatedMetering)
                 : null;
         VulkanBuffer exposureState = frozenExposure == null

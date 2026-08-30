@@ -17,7 +17,7 @@ import org.lwjgl.vulkan.VkImageMemoryBarrier2;
 public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     static final int COLOR_FORMAT = VK12.VK_FORMAT_R16G16B16A16_SFLOAT;
     static final int ALBEDO_FORMAT = VK12.VK_FORMAT_R16G16B16A16_SFLOAT;
-    static final int NORMAL_ROUGHNESS_FORMAT = VK12.VK_FORMAT_R16G16B16A16_SFLOAT;
+    static final int NORMAL_ROUGHNESS_FORMAT = VK12.VK_FORMAT_R32G32B32A32_SFLOAT;
     static final int LINEAR_DEPTH_FORMAT = VK12.VK_FORMAT_R32_SFLOAT;
     static final int MOTION_FORMAT = VK12.VK_FORMAT_R16G16_SFLOAT;
     static final int SPECULAR_MOTION_FORMAT = VK12.VK_FORMAT_R32G32_SFLOAT;
@@ -28,7 +28,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
 
     private final VulkanImage noisyDiffuse;
     private final VulkanImage noisySpecular;
-    private final VulkanImage packedNormalRoughness;
+    private final VulkanImage sourceNormalRoughness;
     private final VulkanImage linearViewZ;
     private final VulkanImage motion;
     private final VulkanImage material;
@@ -43,13 +43,14 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     private final VulkanImage reflectionPosition;
     private final VulkanImage rrOutput;
     private final VulkanImage responsivity;
+    private final VulkanImage materialClass;
     private final VulkanImage[] owned;
     private boolean destroyed;
 
     private DlssRrTargets(ArrayList<VulkanImage> images) {
         this.noisyDiffuse = images.get(0);
         this.noisySpecular = images.get(1);
-        this.packedNormalRoughness = images.get(2);
+        this.sourceNormalRoughness = images.get(2);
         this.linearViewZ = images.get(3);
         this.motion = images.get(4);
         this.material = images.get(5);
@@ -64,6 +65,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
         this.reflectionPosition = images.get(14);
         this.rrOutput = images.get(15);
         this.responsivity = images.get(16);
+        this.materialClass = images.get(17);
         this.owned = images.toArray(VulkanImage[]::new);
     }
 
@@ -80,7 +82,8 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
             add(context, images, renderWidth, renderHeight,
                     VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "Prime RR noisy specular");
             add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_A2B10G10R10_UNORM_PACK32, "Prime RR packed world normal and roughness");
+                    VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
+                    "Prime RR source world normal and roughness");
             add(context, images, renderWidth, renderHeight,
                     LINEAR_DEPTH_FORMAT, "Prime RR linear view Z");
             add(context, images, renderWidth, renderHeight,
@@ -110,6 +113,8 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
                     COLOR_FORMAT, "Prime RR linear HDR output");
             add(context, images, renderWidth, renderHeight,
                     RESPONSIVITY_FORMAT, "Prime RR responsivity");
+            add(context, images, renderWidth, renderHeight,
+                    VK12.VK_FORMAT_R8_UNORM, "Prime RR material class");
             return new DlssRrTargets(images);
         } catch (RuntimeException exception) {
             for (int index = images.size() - 1; index >= 0; index--) {
@@ -173,11 +178,12 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
 
     @Override public VulkanImage noisyDiffuse() { return this.noisyDiffuse; }
     @Override public VulkanImage noisySpecular() { return this.noisySpecular; }
-    @Override public VulkanImage normalRoughness() { return this.packedNormalRoughness; }
+    @Override public VulkanImage normalRoughness() { return this.sourceNormalRoughness; }
     @Override public VulkanImage viewZ() { return this.linearViewZ; }
     @Override public VulkanImage transportMetadata() { return this.motion; }
     @Override public VulkanImage material() { return this.material; }
     @Override public VulkanImage specularMaterial() { return this.specularMaterial; }
+    @Override public VulkanImage materialClass() { return this.materialClass; }
     @Override public VulkanImage primaryPosition() { return this.primaryPosition; }
     @Override public VulkanImage reflectionPosition() { return this.reflectionPosition; }
     @Override public VulkanImage sunLighting() { return this.sunLighting; }

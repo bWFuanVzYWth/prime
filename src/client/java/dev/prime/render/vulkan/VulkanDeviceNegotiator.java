@@ -280,18 +280,18 @@ public final class VulkanDeviceNegotiator {
                         deviceName,
                         "RGBA16F linearly filtered images required for the BSDF lookup are not supported");
             }
-            VkFormatProperties nrdNormalFormat = VkFormatProperties.calloc(stack);
+            VkFormatProperties exactNormalFormat = VkFormatProperties.calloc(stack);
             VK12.vkGetPhysicalDeviceFormatProperties(
                     physicalDevice.vkPhysicalDevice(),
-                    VK12.VK_FORMAT_A2B10G10R10_UNORM_PACK32,
-                    nrdNormalFormat);
-            int requiredNrdNormalFeatures =
+                    VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
+                    exactNormalFormat);
+            int requiredExactNormalFeatures =
                     VK12.VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK12.VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
-            if ((nrdNormalFormat.optimalTilingFeatures() & requiredNrdNormalFeatures)
-                    != requiredNrdNormalFeatures) {
+            if ((exactNormalFormat.optimalTilingFeatures() & requiredExactNormalFeatures)
+                    != requiredExactNormalFeatures) {
                 return VulkanCapabilities.unavailable(
                         deviceName,
-                        "A2B10G10R10 UNORM sampled/storage images required for NRD normals are not supported");
+                        "RGBA32F sampled/storage images required for exact guide normals are not supported");
             }
             if (rayProperties.shaderGroupHandleSize() <= 0
                     || rayProperties.maxShaderGroupStride() == 0

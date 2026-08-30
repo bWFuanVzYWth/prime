@@ -65,6 +65,17 @@ NRD 与 DLSS RR 的历史重投影。
 独立的自交 epsilon。跨 dispatch 保存的物理 origin、源身份、命中位置和动态重建数据必须保持
 其声明的 f32/整数精度。
 
+几何法线、材质 shading normal、光源选择/MIS 的接收面法线和重建 guide normal 在 payload、
+surface scratch、path record 与中间图像中一律保存为三个独立 f32 分量，不得使用八面体、
+SNORM、UNORM、FP16 或其他有损编码。normal 与 roughness 不得借用最终重建输入图像作为阶段间
+scratch 后再解码。NRD 以 direct signed-component 模式编译，Prime 为 NRD 与 DLSS RR 提供的
+normal/roughness 图均为 RGBA32F，其中 xyz 是直接世界法线，w 是线性粗糙度；外部适配边界也
+不得重新引入八面体或低精度法线编码。
+
+不参与几何、BSDF 半球、介质或重建身份的普通单位方向可以拥有单独注明误差边界的紧凑格式，
+例如灯光树的保守发射锥轴。此类接口必须以 `UnitVector`、`Direction` 或具体用途命名，不能暴露
+为通用 normal pack/unpack API。
+
 大气坐标和太阳壳层等独立数值域有各自的尺度与边界规则；其中出现的常量不能移植为
 几何追踪 epsilon。
 
@@ -74,7 +85,7 @@ NRD 与 DLSS RR 的历史重投影。
 
 - 固定或距离相关的射线起点偏移、正 `tMin`、缩短有限光源的 `tMax`；
 - 用射线算术重建位置，代替权威顶点与硬件重心插值；
-- 量化重心坐标、位置、介质参数或身份，或截断能改变图元对应关系的索引；
+- 量化重心坐标、位置、法线、介质参数或身份，或截断能改变图元对应关系的索引；
 - 用宽泛的 instance、geometry、材质或邻域忽略代替精确源/目标身份；
 - 以非零面积阈值、近似法线或不同求值顺序改变有效几何的拓扑。
 

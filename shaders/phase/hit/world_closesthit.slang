@@ -75,7 +75,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
         primePayload.textureLod = textureLodValue;
     }
     primePayload.opacity = material.opacity;
-    primePayload.shadingNormal = primePackOctahedralNormal(material.shadingNormal);
+    primePayload.shadingNormal = material.shadingNormal;
     primePayload.roughness = material.roughness;
     primePayload.opticalControl = material.opticalControl;
     primePayload.adjacentBaseColor = float3(0.0);

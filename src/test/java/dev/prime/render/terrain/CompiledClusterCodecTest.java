@@ -28,10 +28,10 @@ final class CompiledClusterCodecTest {
             PrimitivePacking.packUv(1.0F, 0.0F),
             PrimitivePacking.packUv(0.0F, 1.0F),
             PrimitivePacking.packTintControl(PrimitivePacking.packTint(-1), 0),
-            PrimitivePacking.packOctahedralNormal(0.0F, 0.0F, 1.0F),
+            PrimitivePacking.packOctahedralUnitVector(0.0F, 0.0F, 1.0F),
             PrimitivePacking.packControlTexture(0, 1),
             Float.floatToRawIntBits(-1.0F),
-            PrimitivePacking.packOctahedralNormal(1.0F, 0.0F, 0.0F)
+            PrimitivePacking.packOctahedralUnitVector(1.0F, 0.0F, 0.0F)
         };
         CpuSectionMesh section = new CpuSectionMesh(
                 new float[] {
@@ -80,7 +80,7 @@ final class CompiledClusterCodecTest {
                     0,
                     PrimitivePacking.packControlTexture(flags, 1),
                     Float.floatToRawIntBits(1.0F),
-                    PrimitivePacking.packOctahedralNormal(1.0F, 0.0F, 0.0F)
+                    PrimitivePacking.packOctahedralUnitVector(1.0F, 0.0F, 0.0F)
                 },
                 0,
                 1,
@@ -145,7 +145,7 @@ final class CompiledClusterCodecTest {
                     0,
                     PrimitivePacking.packControlTexture(0, 1),
                     Float.floatToRawIntBits(1.0F),
-                    PrimitivePacking.packOctahedralNormal(1.0F, 0.0F, 0.0F)
+                    PrimitivePacking.packOctahedralUnitVector(1.0F, 0.0F, 0.0F)
                 },
                 1,
                 0,

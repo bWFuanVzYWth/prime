@@ -8,9 +8,10 @@ public struct PrimeOfflineSurfaceScratch {
     public uint4 geometry;
     public uint4 identity;
     public uint4 baseOpacity;
-    public uint4 materialAdjacentX;
-    public uint4 adjacentPositionX;
-    public uint3 positionYzMotion;
+    public uint4 shadingRoughness;
+    public uint4 materialAdjacent;
+    public uint4 positionControl;
+    public uint motion;
 };
 
 public PrimeOfflineSurfaceScratch primePackOfflineSurfaceScratch(
@@ -31,20 +32,22 @@ public PrimeOfflineSurfaceScratch primePackOfflineSurfaceScratch(
             asuint(surface.baseColor.y),
             asuint(surface.baseColor.z),
             asuint(surface.opacity));
-    scratch.materialAdjacentX = uint4(
-            surface.shadingNormal,
-            asuint(surface.roughness),
+    scratch.shadingRoughness = uint4(
+            asuint(surface.shadingNormal.x),
+            asuint(surface.shadingNormal.y),
+            asuint(surface.shadingNormal.z),
+            asuint(surface.roughness));
+    scratch.materialAdjacent = uint4(
             surface.opticalControl,
-            asuint(surface.adjacentBaseColor.x));
-    scratch.adjacentPositionX = uint4(
+            asuint(surface.adjacentBaseColor.x),
             asuint(surface.adjacentBaseColor.y),
-            asuint(surface.adjacentBaseColor.z),
+            asuint(surface.adjacentBaseColor.z));
+    scratch.positionControl = uint4(
             surface.adjacentInterfaceControl,
-            asuint(surface.position.x));
-    scratch.positionYzMotion = uint3(
+            asuint(surface.position.x),
             asuint(surface.position.y),
-            asuint(surface.position.z),
-            surface.motionZFlags);
+            asuint(surface.position.z));
+    scratch.motion = surface.motionZFlags;
     return scratch;
 }
 
@@ -60,18 +63,12 @@ public SurfaceInteraction primeUnpackOfflineSurfaceScratch(
     surface.baseColor = asfloat(scratch.baseOpacity.xyz);
     surface.textureLod = 0.0;
     surface.opacity = asfloat(scratch.baseOpacity.w);
-    surface.shadingNormal = scratch.materialAdjacentX.x;
-    surface.roughness = asfloat(scratch.materialAdjacentX.y);
-    surface.opticalControl = scratch.materialAdjacentX.z;
-    surface.motionZFlags = scratch.positionYzMotion.z;
-    surface.adjacentBaseColor = float3(
-            asfloat(scratch.materialAdjacentX.w),
-            asfloat(scratch.adjacentPositionX.x),
-            asfloat(scratch.adjacentPositionX.y));
-    surface.adjacentInterfaceControl = scratch.adjacentPositionX.z;
-    surface.position = float3(
-            asfloat(scratch.adjacentPositionX.w),
-            asfloat(scratch.positionYzMotion.x),
-            asfloat(scratch.positionYzMotion.y));
+    surface.shadingNormal = asfloat(scratch.shadingRoughness.xyz);
+    surface.roughness = asfloat(scratch.shadingRoughness.w);
+    surface.opticalControl = scratch.materialAdjacent.x;
+    surface.motionZFlags = scratch.motion;
+    surface.adjacentBaseColor = asfloat(scratch.materialAdjacent.yzw);
+    surface.adjacentInterfaceControl = scratch.positionControl.x;
+    surface.position = asfloat(scratch.positionControl.yzw);
     return surface;
 }

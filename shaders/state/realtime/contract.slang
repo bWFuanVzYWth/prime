@@ -15,10 +15,8 @@ import "model/realtime/guide.slang";
 import "contract/realtime/ordinary.slang";
 
 // Two signal slots belong to each realtime pixel so transparent reflection and transmission
-// keep independent reconstruction histories. The execution-local type contains six hot transport
-// lanes; storage adds one cold lane. Transparent paths use it for queued PSR, while ordinary paths
-// use the same mutually exclusive lane for the exact previous primary position. Primary area-light
-// moments are immutable pixel state and live once per pixel in the queue-buffer prefix.
+// keep independent reconstruction histories. Normals that affect visibility, MIS or reconstruction
+// remain exact f32 vectors across dispatch boundaries.
 public struct PrimeWavefrontTransportRecord {
     public float4 physicalOriginAndPreviousBsdfPdf;
     public uint4 sourceAndPathControl;
@@ -26,15 +24,15 @@ public struct PrimeWavefrontTransportRecord {
     public float4 throughputAndReserved;
     public uint4 medium0;
     public uint4 medium1;
+    public float4 previousLightNormal;
 };
 
-// Four f32 transport lanes, two 16-byte medium lanes and one cold lane give this record its
-// explicit 112-byte std430 CPU/GPU ABI. Pending transparent guides keep their f32 rotation in the
-// cold lane and path length in the otherwise-unused transport w component; no direction or
-// transform quantization occurs across dispatches.
+// 112 bytes of transport are followed by exact queued PSR/previous-position data and the branch
+// guide normal/roughness: 144 bytes in total. Visible-interface data is shared once per pixel.
 public struct PrimeWavefrontPathRecord {
     public PrimeWavefrontTransportRecord transport;
     public uint4 psrPacked;
+    public float4 guideNormalRoughness;
 };
 
 [[vk::binding(PRIME_DESCRIPTOR_WAVEFRONT_PATHS, PRIME_RENDERER_DESCRIPTOR_SET)]]
@@ -72,8 +70,6 @@ public static const uint PRIME_WAVEFRONT_PSR_CONTROL_MASK = 0x3u;
 public static const uint PRIME_WAVEFRONT_GUIDE_FALLBACK = 0x4u;
 public static const uint PRIME_WAVEFRONT_GUIDE_DETACHED =
         PRIME_WAVEFRONT_GUIDE_FALLBACK;
-public static const uint PRIME_WAVEFRONT_LIGHT_NORMAL_SHIFT = 16u;
-public static const uint PRIME_WAVEFRONT_LIGHT_NORMAL_MASK = 0xffffu;
 public static const uint PRIME_WAVEFRONT_PRIMARY_MOTION = 1u;
 
 public uint primeWavefrontIndex(uint2 pixel) {
@@ -147,7 +143,7 @@ public uint primeAdditionalSpecularBounces() {
             & 0xffu;
 }
 
-public static const uint PRIME_WAVEFRONT_AREA_GUIDE_WORDS = 4u;
+public static const uint PRIME_WAVEFRONT_AREA_GUIDE_WORDS = 8u;
 
 public uint primeWavefrontAreaWord(uint2 pixel, uint component) {
     return primeWavefrontIndex(pixel) * PRIME_WAVEFRONT_AREA_GUIDE_WORDS + component;
@@ -180,7 +176,7 @@ public void primeStoreWavefrontArea(uint2 pixel, PrimeDenoiserGuides guides) {
     primeWavefrontQueue[primeWavefrontAreaWord(pixel, 1u)] = radiance.y;
     primeWavefrontQueue[primeWavefrontAreaWord(pixel, 2u)] = radiance.z;
     primeWavefrontQueue[primeWavefrontAreaWord(pixel, 3u)] =
-            primePackOctahedralNormal(direction);
+            primePackOctahedralUnitVector(direction);
 }
 
 public void primeLoadWavefrontArea(
@@ -193,7 +189,7 @@ public void primeLoadWavefrontArea(
             primeWavefrontQueue[primeWavefrontAreaWord(pixel, 1u)],
             primeWavefrontQueue[primeWavefrontAreaWord(pixel, 2u)]);
     primeUnpackWavefrontPair(radiance, diffuse, specular);
-    direction = primeUnpackOctahedralNormal(
+    direction = primeUnpackOctahedralUnitVector(
             primeWavefrontQueue[primeWavefrontAreaWord(pixel, 3u)]);
 }
 
@@ -258,14 +254,14 @@ public PrimeOrdinarySample primeLoadWavefrontIntermediate(
     result.guides.primaryHitKind = position.w >= 0.0
             ? PRIME_HIT_SURFACE
             : PRIME_HIT_NONE;
-    float primaryNormalX = primeImageLoad(primeNrdViewZ, coordinate).r;
-    result.guides.primaryNormal = primeUnpackOctahedralNormal(
-            packSnorm2x16(float2(primaryNormalX, specularMaterial.a)));
+    float4 guideNormalRoughness =
+            primeWavefrontPaths[pathIndex].guideNormalRoughness;
+    result.guides.primaryNormal = guideNormalRoughness.xyz;
     result.guides.primaryMaterialFlags =
             (denoiserControl >> PRIME_WAVEFRONT_PRIMARY_FLAGS_SHIFT)
                     & PRIME_WAVEFRONT_PRIMARY_FLAGS_MASK;
     result.guides.primarySpecularAlbedo = specularMaterial.rgb;
-    result.guides.primaryLinearRoughness = material.w;
+    result.guides.primaryLinearRoughness = guideNormalRoughness.w;
     result.guides.primaryPosition = position.xyz;
     uint4 previous = primeWavefrontPaths[pathIndex].psrPacked;
     result.guides.primaryHasMotion =

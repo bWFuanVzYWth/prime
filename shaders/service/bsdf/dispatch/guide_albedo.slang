@@ -2,7 +2,6 @@
 module "service/bsdf/dispatch/guide_albedo.slang";
 
 import "prime_abi_types.slang";
-import "math/packed_geometry.slang";
 import "bsdf/compact/foliage/contract.slang";
 import "bsdf/compact/opaque/state.slang";
 import "bsdf/compact/dielectric/contract.slang";
@@ -21,7 +20,7 @@ public PrimeDenoiseAlbedos primeSurfaceGuideAlbedos(
         float3 viewDirection,
         PrimeOpenPbrVolumeStack volumeStack,
         bool usesAirGap) {
-    float3 outwardNormal = primeUnpackOctahedralNormal(surface.shadingNormal);
+    float3 outwardNormal = surface.shadingNormal;
     outwardNormal = dot(outwardNormal, surface.geometricNormal) >= 0.0
             ? outwardNormal
             : -outwardNormal;

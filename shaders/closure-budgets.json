@@ -3,23 +3,23 @@
   "entries": {
     "entry/atmosphere/atmosphere_aerial.compute.slang": {
       "maxFiles": 9,
-      "maxBytes": 73223
+      "maxBytes": 73309
     },
     "entry/atmosphere/atmosphere_aerial_transmittance.compute.slang": {
       "maxFiles": 5,
-      "maxBytes": 37061
+      "maxBytes": 37147
     },
     "entry/atmosphere/atmosphere_multi_scattering.compute.slang": {
       "maxFiles": 5,
-      "maxBytes": 37178
+      "maxBytes": 37264
     },
     "entry/atmosphere/atmosphere_sky.compute.slang": {
       "maxFiles": 6,
-      "maxBytes": 38418
+      "maxBytes": 38503
     },
     "entry/atmosphere/atmosphere_transmittance.compute.slang": {
       "maxFiles": 5,
-      "maxBytes": 33615
+      "maxBytes": 33701
     },
     "entry/hit/shadow.anyhit.slang": {
       "maxFiles": 15,
@@ -91,19 +91,19 @@
     },
     "entry/post/image_diagnostic_rgba16.compute.slang": {
       "maxFiles": 5,
-      "maxBytes": 21878
+      "maxBytes": 21911
     },
     "entry/post/image_diagnostic_rgba8.compute.slang": {
       "maxFiles": 5,
-      "maxBytes": 21879
+      "maxBytes": 21912
     },
     "entry/post/noisy_composite.compute.slang": {
       "maxFiles": 8,
-      "maxBytes": 66352
+      "maxBytes": 66471
     },
     "entry/post/nrd_composite.compute.slang": {
       "maxFiles": 13,
-      "maxBytes": 98306
+      "maxBytes": 98425
     },
     "entry/post/nrd_motion.compute.slang": {
       "maxFiles": 9,
@@ -111,7 +111,7 @@
     },
     "entry/post/rr_prepare.compute.slang": {
       "maxFiles": 8,
-      "maxBytes": 73192
+      "maxBytes": 73311
     },
     "entry/post/sun_shadow_hierarchy.compute.slang": {
       "maxFiles": 3,

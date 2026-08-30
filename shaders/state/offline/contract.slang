@@ -12,9 +12,10 @@ public struct PrimeOfflineTransportRecord {
     public float4 throughput;
     public uint4 medium0;
     public uint4 medium1;
+    public float4 previousLightNormal;
 };
 
-// 96 bytes of transport and media plus 32 bytes of beauty metadata. Surface and selected-light
+// 112 bytes of transport and media plus 32 bytes of beauty metadata. Surface and selected-light
 // scratch live in the queue prefix so the four narrow stages do not inflate persistent paths.
 public struct PrimeOfflinePathRecord {
     public PrimeOfflineTransportRecord transport;

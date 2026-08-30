@@ -94,7 +94,7 @@
       ]
     },
     "pathState": {
-      "size": 64,
+      "size": 80,
       "fields": [
         { "name": "physicalOrigin", "type": "vec3", "offset": 0 },
         { "name": "previousBsdfPdf", "type": "float", "offset": 12 },
@@ -103,11 +103,12 @@
         { "name": "throughput", "type": "vec3", "offset": 32 },
         { "name": "control", "type": "uint", "offset": 44 },
         { "name": "sourcePrimitive", "type": "uvec2", "offset": 48 },
-        { "name": "sampleSeed", "type": "uint", "offset": 56 }
+        { "name": "sampleSeed", "type": "uint", "offset": 56 },
+        { "name": "previousLightNormal", "type": "vec3", "offset": 64 }
       ]
     },
     "tracePayload": {
-      "size": 96,
+      "size": 112,
       "fields": [
         { "name": "geometricNormal", "type": "vec3", "offset": 0 },
         { "name": "t", "type": "float", "offset": 12 },
@@ -117,18 +118,18 @@
         { "name": "emitterIndex", "type": "uint", "offset": 36 },
         { "name": "textureLod", "type": "float", "offset": 40 },
         { "name": "opacity", "type": "float", "offset": 44 },
-        { "name": "shadingNormal", "type": "uint", "offset": 48 },
-        { "name": "roughness", "type": "float", "offset": 52 },
-        { "name": "opticalControl", "type": "uint", "offset": 56 },
-        { "name": "hitKind", "type": "uint", "offset": 60 },
-        { "name": "adjacentBaseColor", "type": "vec3", "offset": 64 },
-        { "name": "adjacentInterfaceControl", "type": "uint", "offset": 76 },
-        { "name": "position", "type": "vec3", "offset": 80 },
-        { "name": "positionReserved", "type": "uint", "offset": 92 }
+        { "name": "shadingNormal", "type": "vec3", "offset": 48 },
+        { "name": "roughness", "type": "float", "offset": 60 },
+        { "name": "opticalControl", "type": "uint", "offset": 64 },
+        { "name": "hitKind", "type": "uint", "offset": 68 },
+        { "name": "adjacentBaseColor", "type": "vec3", "offset": 80 },
+        { "name": "adjacentInterfaceControl", "type": "uint", "offset": 92 },
+        { "name": "position", "type": "vec3", "offset": 96 },
+        { "name": "positionReserved", "type": "uint", "offset": 108 }
       ]
     },
     "surfaceInteraction": {
-      "size": 96,
+      "size": 112,
       "fields": [
         { "name": "position", "type": "vec3", "offset": 0 },
         { "name": "t", "type": "float", "offset": 12 },
@@ -140,23 +141,24 @@
         { "name": "emitterIndex", "type": "uint", "offset": 52 },
         { "name": "textureLod", "type": "float", "offset": 56 },
         { "name": "opacity", "type": "float", "offset": 60 },
-        { "name": "shadingNormal", "type": "uint", "offset": 64 },
-        { "name": "roughness", "type": "float", "offset": 68 },
-        { "name": "opticalControl", "type": "uint", "offset": 72 },
-        { "name": "motionZFlags", "type": "uint", "offset": 76 },
-        { "name": "adjacentBaseColor", "type": "vec3", "offset": 80 },
-        { "name": "adjacentInterfaceControl", "type": "uint", "offset": 92 }
+        { "name": "shadingNormal", "type": "vec3", "offset": 64 },
+        { "name": "roughness", "type": "float", "offset": 76 },
+        { "name": "opticalControl", "type": "uint", "offset": 80 },
+        { "name": "motionZFlags", "type": "uint", "offset": 84 },
+        { "name": "adjacentBaseColor", "type": "vec3", "offset": 96 },
+        { "name": "adjacentInterfaceControl", "type": "uint", "offset": 108 }
       ]
     },
     "wavefrontSurfaceRecord": {
-      "size": 96,
+      "size": 112,
       "fields": [
         { "name": "distanceGeometricNormal", "type": "uvec4", "offset": 0 },
         { "name": "hitMaterialSectionEmitter", "type": "uvec4", "offset": 16 },
         { "name": "baseColorTextureLod", "type": "uvec4", "offset": 32 },
-        { "name": "opacityShadingRoughnessOptical", "type": "uvec4", "offset": 48 },
-        { "name": "adjacentBaseColorInterface", "type": "uvec4", "offset": 64 },
-        { "name": "positionReserved", "type": "uvec4", "offset": 80 }
+        { "name": "opacityRoughnessOpticalReserved", "type": "uvec4", "offset": 48 },
+        { "name": "shadingNormalAdjacentX", "type": "uvec4", "offset": 64 },
+        { "name": "adjacentPositionX", "type": "uvec4", "offset": 80 },
+        { "name": "positionYzMotionReserved", "type": "uvec4", "offset": 96 }
       ]
     },
     "pushConstants": {
@@ -228,6 +230,7 @@
     "nrdPrimaryPosition": 14,
     "nrdNoisySpecular": 15,
     "nrdSpecularMaterial": 16,
+    "nrdMaterialClass": 17,
     "nrdSunLighting": 20,
     "nrdSunPenumbra": 21,
     "nrdDiffuseDirection": 22,
@@ -252,9 +255,9 @@
   "sceneTextureCount": 64,
   "materialPageCount": 16,
   "realtimeWavefrontContract": {
-    "pathRecordSize": 112,
+    "pathRecordSize": 144,
     "pathSlotsPerPixel": 2,
-    "areaRecordSize": 272,
+    "areaRecordSize": 320,
     "queueEntriesPerPixel": 2,
     "queueStorageEntriesPerPixel": 10,
     "queueCount": 7,
@@ -271,10 +274,10 @@
     "activeMask": "0x1"
   },
   "offlineWavefrontContract": {
-    "pathRecordSize": 128,
+    "pathRecordSize": 144,
     "pathSlotsPerPixel": 1,
-    "surfaceRecordSize": 92,
-    "stageRecordSize": 104,
+    "surfaceRecordSize": 100,
+    "stageRecordSize": 112,
     "queueEntriesPerPixel": 1,
     "queueStorageEntriesPerPixel": 2,
     "queueCount": 2,
@@ -319,7 +322,7 @@
   "nrdContract": {
     "version": "4.17.4",
     "denoiser": "dual-reblur-diffuse-specular-sh-plus-sigma-sun-shadow",
-    "normalEncoding": "r10g10b10a2-unorm",
+    "normalEncoding": "rgba32-sfloat-direct",
     "roughnessEncoding": "linear",
     "motionSpace": "screen-pixel-2.5d",
     "signalSpace": "demodulated-linear-rec2020-d65"

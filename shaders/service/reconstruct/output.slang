@@ -176,10 +176,13 @@ public void primeWriteRealtimeOutput(
     primeImageStore(
             primeNrdNormalRoughness,
             int2(pixel),
-            primeNrdPackNormalRoughness(
+            primeNrdDirectNormalRoughness(
                     nrdGuides.primaryNormal,
-                    nrdGuides.primaryLinearRoughness,
-                    primeNrdMaterialId(primaryMaterialFlags)));
+                    nrdGuides.primaryLinearRoughness));
+    primeImageStore(
+            primeNrdMaterialClass,
+            int2(pixel),
+            float4(primeNrdMaterialId(primaryMaterialFlags)));
     primeImageStore(
             primeNrdSpecularMaterial,
             int2(pixel),
@@ -272,10 +275,9 @@ public void primeWriteRealtimeOutput(
             primeImageStore(
                     primeNrdReflectionNormalRoughness,
                     int2(pixel),
-                    primeNrdPackNormalRoughness(
+                    primeNrdDirectNormalRoughness(
                             reflectionGuides.primaryNormal,
-                            reflectionGuides.primaryLinearRoughness,
-                            primeNrdMaterialId(reflectionGuides.primaryMaterialFlags)));
+                            reflectionGuides.primaryLinearRoughness));
             primeImageStore(
                     primeNrdReflectionSpecularMaterial,
                     int2(pixel),

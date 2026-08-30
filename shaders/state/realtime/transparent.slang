@@ -7,7 +7,6 @@ import "prime_realtime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/realtime/guide.slang";
 import "service/reconstruct/nrd/common.slang";
-import "math/packed_geometry.slang";
 import "policy/runtime/config.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/guide.slang";
@@ -46,18 +45,10 @@ public void primeStoreRrReflectionGuide(
             float4(
                     result.guides.primaryAlbedo,
                     result.guides.primaryLinearRoughness));
-    float2 normalOctahedral = unpackSnorm2x16ToFloat(
-            primePackOctahedralNormal(result.guides.primaryNormal));
     primeImageStore(
             primeNrdSpecularMaterial,
             coordinate,
-            float4(
-                    result.guides.primarySpecularAlbedo,
-                    normalOctahedral.y));
-    primeImageStore(
-            primeNrdViewZ,
-            coordinate,
-            float4(normalOctahedral.x));
+            float4(result.guides.primarySpecularAlbedo, 0.0));
 }
 
 public void primeStoreTransparentBranchIntermediate(
@@ -92,13 +83,10 @@ public void primeStoreTransparentBranchIntermediate(
                 float4(
                         result.guides.primaryAlbedo,
                         result.guides.primaryLinearRoughness));
-        float2 normalOctahedral = unpackSnorm2x16ToFloat(
-                primePackOctahedralNormal(result.guides.primaryNormal));
         primeImageStore(
                 primeNrdSpecularMaterial,
                 coordinate,
-                float4(result.guides.primarySpecularAlbedo, normalOctahedral.y));
-        primeImageStore(primeNrdViewZ, coordinate, float4(normalOctahedral.x));
+                float4(result.guides.primarySpecularAlbedo, 0.0));
         if (primeWritesNrdShInputs()) {
             primeImageStore(
                     primeNrdDiffuseDirection,
@@ -171,13 +159,6 @@ public void primeStoreTransparentBranchIntermediate(
             primeNrdReflectionSpecularMaterial,
             coordinate,
             float4(result.guides.primarySpecularAlbedo, 0.0));
-    primeImageStore(
-            primeNrdReflectionNormalRoughness,
-            coordinate,
-            primeNrdPackNormalRoughness(
-                    result.guides.primaryNormal,
-                    result.guides.primaryLinearRoughness,
-                    primeNrdMaterialId(result.guides.primaryMaterialFlags)));
     if (primeWritesNrdShInputs()) {
         primeImageStore(
                 primeNrdReflectionDiffuseDirection,
@@ -288,13 +269,10 @@ public void primeStoreTransparentBranchGuide(
                 float4(
                         result.guides.primaryAlbedo,
                         result.guides.primaryLinearRoughness));
-        float2 normalOctahedral = unpackSnorm2x16ToFloat(
-                primePackOctahedralNormal(result.guides.primaryNormal));
         primeImageStore(
                 primeNrdSpecularMaterial,
                 coordinate,
-                float4(result.guides.primarySpecularAlbedo, normalOctahedral.y));
-        primeImageStore(primeNrdViewZ, coordinate, float4(normalOctahedral.x));
+                float4(result.guides.primarySpecularAlbedo, 0.0));
         if (primeWritesNrdShInputs()) {
             primeImageStore(
                     primeNrdDiffuseDirection,
@@ -325,13 +303,6 @@ public void primeStoreTransparentBranchGuide(
             primeNrdReflectionSpecularMaterial,
             coordinate,
             float4(result.guides.primarySpecularAlbedo, 0.0));
-    primeImageStore(
-            primeNrdReflectionNormalRoughness,
-            coordinate,
-            primeNrdPackNormalRoughness(
-                    result.guides.primaryNormal,
-                    result.guides.primaryLinearRoughness,
-                    primeNrdMaterialId(result.guides.primaryMaterialFlags)));
     primeImageStore(
             primeNrdReflectionDiffuseDirection,
             coordinate,
@@ -477,10 +448,6 @@ public PrimeTransparentBranchResult primeLoadTransparentBranchIntermediate(
                     & PRIME_WAVEFRONT_PRIMARY_FLAGS_MASK;
     result.guides.primarySpecularAlbedo = specularMaterial.rgb;
     if (transmissionBranch || rrReflectionPrimaryGuide) {
-        result.guides.primaryNormal = primeUnpackOctahedralNormal(
-                packSnorm2x16(float2(
-                        primeImageLoad(primeNrdViewZ, coordinate).r,
-                        specularMaterial.a)));
         result.guides.primaryLinearRoughness = material.w;
         if (transmissionBranch && primeWritesNrdShInputs()) {
             result.guides.diffuseDirection = primeRestoreFp16Direction(
@@ -489,14 +456,6 @@ public PrimeTransparentBranchResult primeLoadTransparentBranchIntermediate(
                     primeImageLoad(primeNrdSpecularDirection, coordinate).xyz);
         }
     } else if (nrdShInputs) {
-        float3 reflectionNormal;
-        float reflectionRoughness;
-        primeNrdUnpackNormalRoughness(
-                primeImageLoad(primeNrdReflectionNormalRoughness, coordinate),
-                reflectionNormal,
-                reflectionRoughness);
-        result.guides.primaryNormal = reflectionNormal;
-        result.guides.primaryLinearRoughness = reflectionRoughness;
         if (primeWritesNrdShInputs()) {
             result.guides.diffuseDirection = primeRestoreFp16Direction(
                     primeImageLoad(
@@ -508,11 +467,12 @@ public PrimeTransparentBranchResult primeLoadTransparentBranchIntermediate(
                             coordinate).xyz);
         }
     }
-    if ((control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) != 0u) {
-        uint branch = transmissionBranch ? 0u : 1u;
-        result.guides.primaryNormal = primeLoadWavefrontGuideNormal(
-                primeWavefrontIndex(pixel, branch));
-    }
+    uint branch = transmissionBranch ? 0u : 1u;
+    uint guidePathIndex = primeWavefrontIndex(pixel, branch);
+    result.guides.primaryNormal =
+            primeLoadWavefrontGuideNormal(guidePathIndex);
+    result.guides.primaryLinearRoughness =
+            primeLoadWavefrontGuideRoughness(guidePathIndex);
     primeLoadWavefrontArea(
             pixel,
             result.guides.primaryAreaDiffuse,

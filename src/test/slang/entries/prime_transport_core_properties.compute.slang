@@ -3,7 +3,6 @@ import "prime_offline_abi.slang";
 import "prime_abi_types.slang";
 import "service/bsdf/contract/sample.slang";
 import "math/color_space.slang";
-import "math/light_receiver.slang";
 import "math/light_tree.slang";
 import "math/transport.slang";
 import "math/packed_geometry.slang";
@@ -593,19 +592,16 @@ void primeCheckLightBranch(
 void primeCheckLightReceiverNormal(
         inout PrimeTransportResult result, float3 receiverNormal)
 {
-    uint packed = primePackLightReceiverNormal(receiverNormal);
-    float3 decoded = primeUnpackLightReceiverNormal(packed);
-    float3 disabled = primeUnpackLightReceiverNormal(0);
-    primeTransportClassify(result.mask, decoded);
-    if ((packed & PRIME_LIGHT_RECEIVER_NORMAL_ACTIVE) == 0
-            || any(disabled != float3(0.0))
-            || abs(dot(decoded, decoded) - 1.0) > 2.0e-6
-            || dot(receiverNormal, decoded) < 0.998) {
+    float3 stored = receiverNormal;
+    float3 disabled = float3(0.0);
+    primeTransportClassify(result.mask, stored);
+    if (any(asuint(stored) != asuint(receiverNormal))
+            || any(disabled != float3(0.0))) {
         result.mask |= PRIME_TEST_FAILURE_STATE;
     }
-    result.first = float4(decoded, 0.0);
+    result.first = float4(stored, 0.0);
     result.second = float4(receiverNormal, 0.0);
-    result.third = float4(asfloat(packed), 0.0, 0.0, 0.0);
+    result.third = float4(disabled, 0.0);
 }
 
 void primeCheckLightEmissionBound(
@@ -717,14 +713,14 @@ void primeCheckOfflineSurfaceScratch(
     surface.sectionIndex = control.z;
     surface.emitterIndex = control.w;
     surface.baseColor = second.xyz;
-    surface.textureLod = fifth.w;
+    surface.textureLod = 0.0;
     surface.opacity = second.w;
-    surface.shadingNormal = asuint(third.x);
-    surface.roughness = third.y;
-    surface.opticalControl = asuint(third.z);
-    surface.motionZFlags = asuint(third.w);
+    surface.shadingNormal = third.xyz;
+    surface.roughness = third.w;
+    surface.opticalControl = asuint(fourth.w);
+    surface.motionZFlags = asuint(fifth.w);
     surface.adjacentBaseColor = fourth.xyz;
-    surface.adjacentInterfaceControl = asuint(fourth.w);
+    surface.adjacentInterfaceControl = control.y ^ control.z;
     surface.position = fifth.xyz;
 
     PrimeOfflineSurfaceScratch packed = primePackOfflineSurfaceScratch(surface);
@@ -733,9 +729,10 @@ void primeCheckOfflineSurfaceScratch(
     bool exact = all(packed.geometry == roundTrip.geometry)
             && all(packed.identity == roundTrip.identity)
             && all(packed.baseOpacity == roundTrip.baseOpacity)
-            && all(packed.materialAdjacentX == roundTrip.materialAdjacentX)
-            && all(packed.adjacentPositionX == roundTrip.adjacentPositionX)
-            && all(packed.positionYzMotion == roundTrip.positionYzMotion)
+            && all(packed.shadingRoughness == roundTrip.shadingRoughness)
+            && all(packed.materialAdjacent == roundTrip.materialAdjacent)
+            && all(packed.positionControl == roundTrip.positionControl)
+            && packed.motion == roundTrip.motion
             && asuint(unpacked.textureLod) == 0u
             && primeSurfaceTriangleIndex(unpacked)
                     == (surface.motionZFlags & PRIME_SURFACE_TRIANGLE_MASK);
@@ -744,7 +741,7 @@ void primeCheckOfflineSurfaceScratch(
     }
     result.first = asfloat(packed.geometry);
     result.second = asfloat(uint4(
-            packed.positionYzMotion, primeSurfaceTriangleIndex(unpacked)));
+            packed.positionControl.xyz, primeSurfaceTriangleIndex(unpacked)));
     result.third = float4(unpacked.position, unpacked.textureLod);
 }
 

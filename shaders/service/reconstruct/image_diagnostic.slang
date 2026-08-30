@@ -1,8 +1,6 @@
 #language slang 2026
 module "service/reconstruct/image_diagnostic.slang";
 
-import "service/reconstruct/nrd/common.slang";
-
 public struct PrimeImageDiagnosticPushConstants
 {
     public uint2 sourceExtent;
@@ -43,12 +41,6 @@ public float3 primeDiagnosticValue(float4 source)
         return lengthSquared > 1.0e-12
                 ? normal * rsqrt(lengthSquared) * 0.5 + 0.5
                 : float3(0.0);
-    }
-    if (mode == 3u || mode == 5u) {
-        float3 normal;
-        float roughness;
-        primeNrdUnpackNormalRoughness(source, normal, roughness);
-        return mode == 3u ? normal * 0.5 + 0.5 : float3(roughness);
     }
     if (mode == 4u) return float3(clamp(source.a, 0.0, 1.0));
     if (mode == 6u) {

@@ -15,7 +15,7 @@
 
 namespace
 {
-    constexpr uint32_t PRIME_NRD_ABI_VERSION = 10;
+    constexpr uint32_t PRIME_NRD_ABI_VERSION = 11;
     constexpr nrd::Identifier PRIME_NRD_PRIMARY_REBLUR_ID = 0;
     constexpr nrd::Identifier PRIME_NRD_SIGMA_SUN_ID = 1;
     constexpr nrd::Identifier PRIME_NRD_REFLECTION_REBLUR_ID = 2;
@@ -72,7 +72,7 @@ namespace
         uint32_t setsMaxNum;
         uint32_t constantBufferAndSamplersSpaceIndex;
         uint32_t resourcesSpaceIndex;
-        uint32_t reserved;
+        uint32_t normalEncoding;
         char shaderEntryPoint[32];
     };
 
@@ -225,6 +225,7 @@ namespace
         description.constantBufferAndSamplersSpaceIndex =
             instance->constantBufferAndSamplersSpaceIndex;
         description.resourcesSpaceIndex = instance->resourcesSpaceIndex;
+        description.normalEncoding = static_cast<uint32_t>(library->normalEncoding);
         const size_t entryPointLength = std::min(
             std::strlen(instance->shaderEntryPoint),
             sizeof(description.shaderEntryPoint) - 1);
@@ -359,7 +360,6 @@ PRIME_NRD_EXPORT int32_t primeNrdSetFrameSettings(
         ? nrd::AccumulationMode::RESTART
         : nrd::AccumulationMode::CONTINUE;
     settings.isMotionVectorInWorldSpace = false;
-    settings.strandMaterialID = 1.0f;
     settings.enableValidation = input->enableValidation != 0;
 
     nrd::SigmaSettings sigmaSettings = {};

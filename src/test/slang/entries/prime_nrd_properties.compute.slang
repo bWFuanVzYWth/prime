@@ -155,11 +155,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
         result0 = float4(encoded, 0.0);
         result1 = float4(decoded, 0.0);
     } else if (kind == 2u) {
-        float4 packed = primeNrdPackNormalRoughness(first.xyz, first.w, second.x);
+        float4 stored = primeNrdDirectNormalRoughness(first.xyz, first.w);
         float3 normal;
         float roughness;
-        primeNrdUnpackNormalRoughness(packed, normal, roughness);
-        primeNrdCheckUnit(mask, packed);
+        primeNrdReadNormalRoughness(stored, normal, roughness);
+        primeNrdCheckFinite(mask, stored);
+        primeNrdCheckUnit(mask, stored.w);
         primeNrdCheckFinite(mask, normal);
         primeNrdCheckUnit(mask, roughness);
         float lengthSquared = dot(normal, normal);
@@ -167,10 +168,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
             mask |= PRIME_TEST_FAILURE_UNIT_LENGTH;
         }
         float3 expectedNormal = primeNrdSafeNormalize(first.xyz, float3(0.0, 0.0, 1.0));
-        if (!primeTestClose(normal, expectedNormal, 5.0e-5, 5.0e-5)) {
+        float expectedRoughness = primeNrdSanitizeUnit(
+                first.w, PRIME_DEFAULT_REFERENCE_LINEAR_ROUGHNESS);
+        if (!primeTestClose(stored.xyz, expectedNormal, 0.0, 0.0)
+                || !primeTestClose(stored.w, expectedRoughness, 0.0, 0.0)) {
+            mask |= PRIME_TEST_FAILURE_IDENTITY;
+        }
+        if (!primeTestClose(normal, expectedNormal, 2.0e-6, 2.0e-6)) {
             mask |= PRIME_TEST_FAILURE_ROUND_TRIP;
         }
-        result0 = packed;
+        result0 = stored;
         result1 = float4(normal, roughness);
     } else if (kind == 3u) {
         float normalized =

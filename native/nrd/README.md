@@ -5,6 +5,8 @@ returns SPIR-V, texture descriptions and per-frame dispatch descriptions while P
 ownership of every Vulkan object and synchronization point.
 
 The checked-in release DLL is rebuilt only when this bridge or the pinned NRD version changes.
+Prime compiles NRD with normal encoding mode 4 and binds `RGBA32_SFLOAT`: xyz are direct signed
+world-normal components and w is linear roughness. Do not restore the octahedral 10:10:10:2 mode.
 From the repository root on Windows:
 
 ```powershell

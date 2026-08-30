@@ -24,7 +24,7 @@ public SurfaceInteraction primeMissSurfaceInteraction(uint2 sourcePrimitive) {
     surface.emitterIndex = PRIME_NO_LIGHT_INDEX;
     surface.textureLod = 0.0;
     surface.opacity = 0.0;
-    surface.shadingNormal = primePackOctahedralNormal(float3(0.0, 1.0, 0.0));
+    surface.shadingNormal = float3(0.0, 1.0, 0.0);
     surface.roughness = primeConfiguredDefaultLinearRoughness();
     surface.opticalControl = 0u;
     surface.motionZFlags = sourcePrimitive.y;
@@ -43,8 +43,7 @@ public void primeResetSurfacePayload(uint2 sourcePrimitive) {
     primeSurfacePayload.emitterIndex = PRIME_NO_LIGHT_INDEX;
     primeSurfacePayload.textureLod = 0.0;
     primeSurfacePayload.opacity = 0.0;
-    primeSurfacePayload.shadingNormal =
-            primePackOctahedralNormal(float3(0.0, 1.0, 0.0));
+    primeSurfacePayload.shadingNormal = float3(0.0, 1.0, 0.0);
     primeSurfacePayload.roughness = primeConfiguredDefaultLinearRoughness();
     primeSurfacePayload.opticalControl = 0u;
     primeSurfacePayload.adjacentBaseColor = float3(0.0);

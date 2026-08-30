@@ -116,33 +116,17 @@ public uint primeNrdPrimaryMaterialFlags(
             : guideMaterialFlags;
 }
 
-public float4 primeNrdPackNormalRoughness(float3 normal, float roughness, float materialId) {
-    float3 encodedNormal = primeNrdSafeNormalize(normal, float3(0.0, 0.0, 1.0));
-    encodedNormal /= max(abs(encodedNormal.x) + abs(encodedNormal.y) + abs(encodedNormal.z), 1.0e-9);
-    float3 packed;
-    packed.y = encodedNormal.y * 0.5 + 0.5;
-    packed.x = encodedNormal.x * 0.5 + packed.y;
-    packed.y -= encodedNormal.x * 0.5;
-    float safeRoughness = primeNrdSanitizeUnit(
-            roughness, PRIME_DEFAULT_REFERENCE_LINEAR_ROUGHNESS);
-    float signedRoughness = encodedNormal.z < 0.0
-            ? -max(safeRoughness, 1.5 / 512.0)
-            : max(safeRoughness, 1.5 / 512.0);
-    packed.z = signedRoughness * 0.5 + 0.5;
-    return float4(packed, primeNrdSanitizeUnit(materialId, 0.0));
+public float4 primeNrdDirectNormalRoughness(float3 normal, float roughness) {
+    return float4(
+            primeNrdSafeNormalize(normal, float3(0.0, 0.0, 1.0)),
+            primeNrdSanitizeUnit(
+                    roughness, PRIME_DEFAULT_REFERENCE_LINEAR_ROUGHNESS));
 }
 
-public void primeNrdUnpackNormalRoughness(
-        float4 packedValue, out float3 normal, out float roughness) {
-    float3 packed = packedValue.rgb;
-    float2 octahedral = float2(
-            packed.x - packed.y,
-            packed.x + packed.y - 1.0);
-    float signedRoughness = packed.z * 2.0 - 1.0;
-    float z = sign(signedRoughness)
-            * max(1.0 - abs(octahedral.x) - abs(octahedral.y), 0.0);
-    normal = primeNrdSafeNormalize(float3(octahedral, z), float3(0.0, 0.0, 1.0));
-    roughness = primeNrdSanitizeUnit(abs(signedRoughness),
+public void primeNrdReadNormalRoughness(
+        float4 value, out float3 normal, out float roughness) {
+    normal = primeNrdSafeNormalize(value.xyz, float3(0.0, 0.0, 1.0));
+    roughness = primeNrdSanitizeUnit(value.w,
             PRIME_DEFAULT_REFERENCE_LINEAR_ROUGHNESS);
 }
 

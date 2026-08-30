@@ -3,10 +3,16 @@ module "state/realtime/guide_normal.slang";
 
 import "state/realtime/contract.slang";
 
-public void primeStoreWavefrontGuideNormal(uint pathIndex, float3 normal) {
-    primeWavefrontPaths[pathIndex].psrPacked.xyz = asuint(normal);
+public void primeStoreWavefrontGuideSurface(
+        uint pathIndex, float3 normal, float roughness) {
+    primeWavefrontPaths[pathIndex].guideNormalRoughness =
+            float4(normal, roughness);
 }
 
 public float3 primeLoadWavefrontGuideNormal(uint pathIndex) {
-    return asfloat(primeWavefrontPaths[pathIndex].psrPacked.xyz);
+    return primeWavefrontPaths[pathIndex].guideNormalRoughness.xyz;
+}
+
+public float primeLoadWavefrontGuideRoughness(uint pathIndex) {
+    return primeWavefrontPaths[pathIndex].guideNormalRoughness.w;
 }

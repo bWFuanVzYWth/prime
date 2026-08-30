@@ -22,6 +22,7 @@ final class NrdImages implements Destroyable {
     final VulkanImage fsrDepth;
     final VulkanImage material;
     final VulkanImage specularMaterial;
+    final VulkanImage materialClass;
     final VulkanImage primaryPosition;
     final VulkanImage sunLighting;
     final VulkanImage sunPenumbra;
@@ -64,6 +65,7 @@ final class NrdImages implements Destroyable {
             VulkanImage fsrDepth,
             VulkanImage material,
             VulkanImage specularMaterial,
+            VulkanImage materialClass,
             VulkanImage primaryPosition,
             VulkanImage sunLighting,
             VulkanImage sunPenumbra,
@@ -103,6 +105,7 @@ final class NrdImages implements Destroyable {
         this.fsrDepth = fsrDepth;
         this.material = material;
         this.specularMaterial = specularMaterial;
+        this.materialClass = materialClass;
         this.primaryPosition = primaryPosition;
         this.sunLighting = sunLighting;
         this.sunPenumbra = sunPenumbra;
@@ -157,7 +160,8 @@ final class NrdImages implements Destroyable {
                     context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
                     debugPrefix + " noisy specular SH1");
             VulkanImage normal = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_A2B10G10R10_UNORM_PACK32, debugPrefix + " normal roughness");
+                    context, created, width, height, VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
+                    debugPrefix + " normal roughness");
             VulkanImage viewZ = createImage(
                     context, created, width, height, VK12.VK_FORMAT_R32_SFLOAT, debugPrefix + " view Z");
             VulkanImage motion = createImage(
@@ -170,6 +174,9 @@ final class NrdImages implements Destroyable {
                     context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT, debugPrefix + " material metadata");
             VulkanImage specularMaterial = createImage(
                     context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT, debugPrefix + " specular material or virtual guide");
+            VulkanImage materialClass = createImage(
+                    context, created, width, height, VK12.VK_FORMAT_R8_UNORM,
+                    debugPrefix + " material class");
             VulkanImage primaryPosition = createImage(
                     context, created, width, height, VK12.VK_FORMAT_R32G32B32A32_SFLOAT, debugPrefix + " primary or virtual position");
             VulkanImage sunLighting = createImage(
@@ -206,7 +213,7 @@ final class NrdImages implements Destroyable {
                     context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
                     debugPrefix + " reflection noisy specular SH1");
             VulkanImage reflectionNormalRoughness = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+                    context, created, width, height, VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
                     debugPrefix + " reflection normal roughness");
             VulkanImage reflectionViewZ = createImage(
                     context, created, width, height, VK12.VK_FORMAT_R32_SFLOAT,
@@ -258,6 +265,7 @@ final class NrdImages implements Destroyable {
                     fsrDepth,
                     material,
                     specularMaterial,
+                    materialClass,
                     primaryPosition,
                     sunLighting,
                     sunPenumbra,

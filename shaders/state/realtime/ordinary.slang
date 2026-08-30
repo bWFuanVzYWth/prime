@@ -32,7 +32,7 @@ public PathState primeWavefrontPath(
             & PRIME_WAVEFRONT_BYTE_MASK;
     uint flags = (pathControl >> PRIME_WAVEFRONT_PATH_FLAGS_SHIFT)
             & PRIME_WAVEFRONT_PATH_FLAGS_MASK;
-    path.control = primeMakePathStateControl(bounce, flags, 0u);
+    path.control = primeMakePathStateControl(bounce, flags);
     path.sourcePrimitive = record.sourceAndPathControl.xy;
     uint denoiserControl =
             asuint(record.rayDirectionAndDenoiserControl.w);
@@ -42,6 +42,7 @@ public PathState primeWavefrontPath(
             : 0u;
     path.sampleSeed = primePathSampleSeed(
             pixel, primeSampleEpoch(), samplePathIndex);
+    path.previousLightNormal = record.previousLightNormal.xyz;
     return path;
 }
 

@@ -544,7 +544,8 @@ abstract class RealtimeRayTracingPipelineSupport implements RealtimeIntegratorPi
             ShaderAbi.DESCRIPTOR_NRD_REFLECTION_SPECULAR_DIRECTION,
             ShaderAbi.DESCRIPTOR_NRD_DISPLAY_POSITION,
             ShaderAbi.DESCRIPTOR_NRD_SUN_LIGHTING,
-            ShaderAbi.DESCRIPTOR_NRD_SUN_PENUMBRA
+            ShaderAbi.DESCRIPTOR_NRD_SUN_PENUMBRA,
+            ShaderAbi.DESCRIPTOR_NRD_MATERIAL_CLASS
         };
     }
 
@@ -755,7 +756,8 @@ abstract class RealtimeRayTracingPipelineSupport implements RealtimeIntegratorPi
                 signals.reflectionSpecularDirection(),
                 signals.displayPosition(),
                 signals.sunLighting(),
-                signals.sunPenumbra()
+                signals.sunPenumbra(),
+                signals.materialClass()
             };
         }
 

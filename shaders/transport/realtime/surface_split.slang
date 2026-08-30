@@ -266,8 +266,10 @@ public uint primeInitializeTransparentWavefront(
         uint pathIndex = primeWavefrontIndex(pixel, branch);
         primeWavefrontPaths[pathIndex] = record;
         if (hasGuide) {
-            primeStoreWavefrontGuideNormal(
-                    pathIndex, branchResult.guides.primaryNormal);
+            primeStoreWavefrontGuideSurface(
+                    pathIndex,
+                    branchResult.guides.primaryNormal,
+                    branchResult.guides.primaryLinearRoughness);
         }
         uint continuationBit = deltaWalk
                 ? (transmissionBranch

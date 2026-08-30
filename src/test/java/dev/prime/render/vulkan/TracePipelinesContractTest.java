@@ -72,7 +72,7 @@ final class TracePipelinesContractTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> RealtimeRayTracingPipeline.dispatchCount(9));
-        assertEquals(24, RealtimeRayTracingPipeline.DESCRIPTOR_BINDING_COUNT);
+        assertEquals(25, RealtimeRayTracingPipeline.DESCRIPTOR_BINDING_COUNT);
 
         assertEquals(10, OfflineRayTracingPipeline.RAYGEN_GROUP_COUNT);
         assertEquals(6, OfflineRayTracingPipeline.RAYGEN_MODULE_COUNT);
@@ -304,7 +304,7 @@ final class TracePipelinesContractTest {
 
     static void optimizedModulesPreservePayloadAbi() throws IOException {
         String tracePayload = "struct(vec3(f32),f32,vec3(f32),"
-                + "u32,u32,u32,f32,f32,u32,f32,u32,u32,vec3(f32),u32,vec3(f32),u32)";
+                + "u32,u32,u32,f32,f32,vec3(f32),f32,u32,u32,vec3(f32),u32,vec3(f32),u32)";
         String shadowPayload = "struct(vec4(f32),vec4(f32),vec4(f32),vec4(f32),"
                 + "u32,vec2(u32),vec2(u32))";
         for (String shader : List.of("world.rmiss.spv", "world.rchit.spv")) {
@@ -488,16 +488,16 @@ final class TracePipelinesContractTest {
 
     @Test
     void wavefrontBackingHasDeclaredFourKSize() {
-        assertEquals(4_445_798_512L,
+        assertEquals(5_374_771_312L,
                 RealtimeRayTracingPipeline.wavefrontBytes(3840, 2160));
-        assertEquals(1_990_656_032L,
+        assertEquals(2_189_721_632L,
                 OfflineRayTracingPipeline.wavefrontBytes(3840, 2160));
-        assertEquals(928_972_832L,
+        assertEquals(995_328_032L,
                 OfflineRayTracingPipeline.queueBytes(3840, 2160));
-        assertEquals(1_924_300_800L,
+        assertEquals(2_123_366_400L,
                 OfflineRayTracingPipeline.queueCommandOffset(3840, 2160));
         assertEquals(
-                1898.4375305175781,
+                2088.2812805175781,
                 OfflineRayTracingPipeline.wavefrontBytes(3840, 2160)
                         / (1024.0 * 1024.0));
         assertThrows(

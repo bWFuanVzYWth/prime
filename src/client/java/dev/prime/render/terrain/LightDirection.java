@@ -91,8 +91,8 @@ final class LightDirection {
             return FULL;
         }
         if (bounds.mode == MODE_ONE_SIDED_CONE || bounds.mode == MODE_TWO_SIDED_CONE) {
-            int[] oct = packOctahedral(bounds.x, bounds.y, bounds.z);
-            float[] decoded = unpackOctahedral(oct[0], oct[1]);
+            int[] encoded = packUnitVector(bounds.x, bounds.y, bounds.z);
+            float[] decoded = unpackUnitVector(encoded[0], encoded[1]);
             float dot = clamp(bounds.x * decoded[0] + bounds.y * decoded[1] + bounds.z * decoded[2], -1.0F, 1.0F);
             // Fold axis quantization into the cone and add one angular step for CPU/GPU rounding.
             float expandedAngle = bounds.halfAngle
@@ -102,8 +102,8 @@ final class LightDirection {
                 int coneSine = Math.min(
                         CONE_SINE_MASK,
                         (int) Math.ceil(Math.sin(expandedAngle) * CONE_SINE_MASK));
-                return oct[0]
-                        | oct[1] << 10
+                return encoded[0]
+                        | encoded[1] << 10
                         | coneSine << 20
                         | bounds.mode << MODE_SHIFT;
             }
@@ -138,7 +138,7 @@ final class LightDirection {
                     unpackLobe(packed >>> 20),
                     unpackLobe(packed >>> 25));
         }
-        float[] axis = unpackOctahedral(packed & OCT_MASK, packed >>> 10 & OCT_MASK);
+        float[] axis = unpackUnitVector(packed & OCT_MASK, packed >>> 10 & OCT_MASK);
         float halfAngle = (float) Math.asin(
                 (float) (packed >>> 20 & CONE_SINE_MASK) / CONE_SINE_MASK);
         float positiveX;
@@ -201,7 +201,7 @@ final class LightDirection {
                     * axisCosineBound(bounds, pointX, pointY, pointZ, 0.0F, 0.0F, -1.0F, inverseDistance);
             return Math.min(result, 1.0F);
         }
-        float[] axis = unpackOctahedral(packed & OCT_MASK, packed >>> 10 & OCT_MASK);
+        float[] axis = unpackUnitVector(packed & OCT_MASK, packed >>> 10 & OCT_MASK);
         float halfAngle = (float) Math.asin(
                 (float) (packed >>> 20 & CONE_SINE_MASK) / CONE_SINE_MASK);
         float forward = expandedConeBound(
@@ -290,7 +290,7 @@ final class LightDirection {
         return new Cone(x * inverseLength, y * inverseLength, z * inverseLength, halfAngle);
     }
 
-    private static int[] packOctahedral(float x, float y, float z) {
+    private static int[] packUnitVector(float x, float y, float z) {
         float inverseL1 = 1.0F / Math.max(Math.abs(x) + Math.abs(y) + Math.abs(z), 1.0E-20F);
         x *= inverseL1;
         y *= inverseL1;
@@ -306,7 +306,7 @@ final class LightDirection {
         };
     }
 
-    private static float[] unpackOctahedral(int xBits, int yBits) {
+    private static float[] unpackUnitVector(int xBits, int yBits) {
         float x = (float) xBits / OCT_MASK * 2.0F - 1.0F;
         float y = (float) yBits / OCT_MASK * 2.0F - 1.0F;
         float z = 1.0F - Math.abs(x) - Math.abs(y);

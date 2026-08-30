@@ -36,8 +36,8 @@ public bool primeAdvanceRealtimePath(
         PrimePreparedSampleBase bounceSample,
         bool discreteOnlyInterface,
         bool skipRoulette) {
-    uint previousLightNormal = discreteOnlyInterface
-            ? 0u
+    float3 previousLightNormal = discreteOnlyInterface
+            ? float3(0.0)
             : primeAreaLightReceiverNormal(surface, -path.rayDirection);
     if (!primeAdvancePathWithoutRoulette(
             context,

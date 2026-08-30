@@ -108,8 +108,10 @@ void primePublishDetachedGuideSurface(
     owner = primeWavefrontWithGuideTransitions(owner, 0u);
     owner = primeWavefrontWithGuideFallback(owner, false);
     primeStoreWavefrontTransportRecord(recordIndex, owner);
-    primeStoreWavefrontGuideNormal(
-            recordIndex, result.guides.primaryNormal);
+    primeStoreWavefrontGuideSurface(
+            recordIndex,
+            result.guides.primaryNormal,
+            result.guides.primaryLinearRoughness);
 }
 
 void primePublishDetachedGuideMiss(

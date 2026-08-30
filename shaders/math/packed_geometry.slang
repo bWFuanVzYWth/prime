@@ -196,7 +196,7 @@ float2 primeSignNotZero(float2 value)
     return float2(value.x >= 0.0 ? 1.0 : -1.0, value.y >= 0.0 ? 1.0 : -1.0);
 }
 
-public float3 primeUnpackOctahedralNormal(uint packedValue)
+public float3 primeUnpackOctahedralUnitVector(uint packedValue)
 {
     float2 encoded = unpackSnorm2x16ToFloat(packedValue);
     float3 normal = float3(encoded, 1.0 - abs(encoded.x) - abs(encoded.y));
@@ -206,7 +206,7 @@ public float3 primeUnpackOctahedralNormal(uint packedValue)
     return normalize(normal);
 }
 
-public uint primePackOctahedralNormal(float3 value)
+public uint primePackOctahedralUnitVector(float3 value)
 {
     float3 normal = normalize(value);
     normal /= max(abs(normal.x) + abs(normal.y) + abs(normal.z), 1.0e-20);

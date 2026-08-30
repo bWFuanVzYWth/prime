@@ -77,7 +77,7 @@ struct SurfaceInteraction {
     uint materialControl;
     float t;
     float opacity;
-    uint shadingNormal;
+    float3 shadingNormal;
     float roughness;
     uint opticalControl;
     float3 adjacentBaseColor;

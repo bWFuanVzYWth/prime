@@ -19,7 +19,7 @@ public bool primePreviousCannotUseMis(PathState path) {
 }
 
 public float3 primeSurfaceOutwardShadingNormal(SurfaceInteraction surface) {
-    float3 shadingNormal = primeUnpackOctahedralNormal(surface.shadingNormal);
+    float3 shadingNormal = surface.shadingNormal;
     return dot(shadingNormal, surface.geometricNormal) >= 0.0
             ? shadingNormal
             : -shadingNormal;

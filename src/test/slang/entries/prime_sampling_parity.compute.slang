@@ -26,8 +26,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint dimension = second.w;
     PrimePreparedSampleBase prepared = primePrepareSampleBase(sampleBase);
     PathState path = {};
-    path.control = primeMakePathStateControl(
-            second.x, second.z, first.w);
+    path.control = primeMakePathStateControl(second.x, second.z);
     path.sampleSeed = primePathSampleSeed(
             sampleBase.pixel, sampleBase.sampleEpoch, sampleBase.pathIndex);
     PrimePreparedSampleBase compact = primePreparePathSample(
@@ -49,9 +48,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     primeTestOutput[outputOffset + 2] = asuint(
             primeSobolSample4D(prepared, effect, dimension));
     uint repackedControl = primeMakePathStateControl(
-            primePathBounce(path.control),
-            primePathFlags(path.control),
-            primePathPreviousLightNormal(path.control));
+            primePathBounce(path.control), primePathFlags(path.control));
     primeTestOutput[outputOffset + 3] = uint4(
             compact.seed ^ prepared.seed,
             compact.sampleIndex ^ prepared.sampleIndex,

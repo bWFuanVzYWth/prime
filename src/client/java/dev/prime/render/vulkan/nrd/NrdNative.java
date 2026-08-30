@@ -21,8 +21,9 @@ import org.lwjgl.system.SharedLibrary;
  * arrays and is versioned independently from NRD's C++ structures.
  */
 public final class NrdNative {
-    static final int ABI_VERSION = 10;
+    static final int ABI_VERSION = 11;
     static final int EXPECTED_NRD_VERSION = 4 << 24 | 17 << 16 | 4;
+    static final int EXPECTED_NORMAL_ENCODING = 4;
 
     public static final int DESCRIPTOR_TEXTURE = 0;
     public static final int DESCRIPTOR_STORAGE_TEXTURE = 1;
@@ -148,12 +149,17 @@ public final class NrdNative {
                 "read NRD instance description");
         int abiVersion = output.getInt(0);
         int nrdVersion = output.getInt(4);
-        if (abiVersion != ABI_VERSION || nrdVersion != EXPECTED_NRD_VERSION) {
+        int normalEncoding = output.getInt(100);
+        if (abiVersion != ABI_VERSION
+                || nrdVersion != EXPECTED_NRD_VERSION
+                || normalEncoding != EXPECTED_NORMAL_ENCODING) {
             throw new IllegalStateException(
                     "Unsupported NRD native description: ABI "
                             + abiVersion
                             + ", NRD "
-                            + formatVersion(nrdVersion));
+                            + formatVersion(nrdVersion)
+                            + ", normal encoding "
+                            + normalEncoding);
         }
 
         int samplersNum = output.getInt(48);
@@ -178,6 +184,7 @@ public final class NrdNative {
                 output.getInt(88),
                 output.getInt(92),
                 output.getInt(96),
+                normalEncoding,
                 entryPoint,
                 samplers,
                 pipelines,
@@ -362,6 +369,7 @@ public final class NrdNative {
             int setsMaxNum,
             int constantBufferAndSamplersSpaceIndex,
             int resourcesSpaceIndex,
+            int normalEncoding,
             String shaderEntryPoint,
             List<Integer> samplers,
             List<Pipeline> pipelines,

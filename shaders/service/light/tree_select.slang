@@ -5,7 +5,6 @@ import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/light_sample.slang";
 import "math/light_tree.slang";
-import "math/light_receiver.slang";
 import "service/light/emission.slang";
 import "service/light/tree_common.slang";
 
@@ -116,9 +115,8 @@ public AreaLightSelection primeInvalidAreaLightSelection() {
 
 public AreaLightSelection primeSelectAreaLight(
         float3 surfacePosition,
-        uint packedReceiverNormal,
+        float3 receiverNormal,
         float treeSample) {
-    float3 receiverNormal = primeUnpackLightReceiverNormal(packedReceiverNormal);
     SectionRecord* sections = (SectionRecord*)primePush.sectionTableAddress;
     uint64_t worldNodeAddress = sections[0].worldLightAddress;
     uint64_t worldLeafAddress = sections[0].worldLightLeafAddress;

@@ -169,8 +169,8 @@ public final class RendererImageDebugPass implements Destroyable {
             case SUN_LIGHTING -> image(SUN_LIGHTING, ImageDiagnosticPass.RADIANCE);
             case SUN_VISIBILITY -> image(SUN_LIGHTING, ImageDiagnosticPass.VISIBILITY_A);
             case SUN_PENUMBRA -> image(SUN_PENUMBRA, ImageDiagnosticPass.HIT_R);
-            case NORMAL -> image(NORMAL_ROUGHNESS, ImageDiagnosticPass.PACKED_NORMAL);
-            case ROUGHNESS -> image(NORMAL_ROUGHNESS, ImageDiagnosticPass.PACKED_ROUGHNESS);
+            case NORMAL -> image(NORMAL_ROUGHNESS, ImageDiagnosticPass.NORMAL);
+            case ROUGHNESS -> image(NORMAL_ROUGHNESS, ImageDiagnosticPass.ROUGHNESS);
             case DIFFUSE_ALBEDO -> image(DIFFUSE_ALBEDO, ImageDiagnosticPass.ALBEDO);
             case SPECULAR_ALBEDO -> image(SPECULAR_ALBEDO, ImageDiagnosticPass.ALBEDO);
             case DIFFUSE_HIT_DISTANCE -> image(NOISY_DIFFUSE, ImageDiagnosticPass.HIT_A);

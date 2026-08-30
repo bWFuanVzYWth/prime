@@ -55,12 +55,6 @@ public bool primeAdvanceOrdinaryWavefrontRecord<Phase>(
             ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
     integrator.environmentRadiance = float4(0.0);
 
-    if (primeSurfaceEmitterIndex(surface) != PRIME_NO_LIGHT_INDEX
-            && !primePreviousCannotUseMis(path)) {
-        path.control = primePathWithPreviousLightNormal(
-                path.control,
-                primeLoadWavefrontPreviousLightNormal(recordIndex));
-    }
     bool guideWasPending =
             (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) == 0u;
     PrimeOrdinarySample result =
@@ -90,8 +84,12 @@ public bool primeAdvanceOrdinaryWavefrontRecord<Phase>(
                     0u,
                     continuation);
     primeStoreWavefrontTransportRecord(recordIndex, updatedRecord);
-    primeStoreWavefrontPreviousLightNormal(
-            recordIndex, primePathPreviousLightNormal(path.control));
+    if (guideWasPending && denoiserState.reachedSolidAngle) {
+        primeStoreWavefrontGuideSurface(
+                recordIndex,
+                result.guides.primaryNormal,
+                result.guides.primaryLinearRoughness);
+    }
     primeStoreWavefrontActiveIntermediate(
             pixel, guideWasPending, result);
     return continuation;
@@ -115,13 +113,6 @@ public bool primeAdvanceTransparentWavefrontRecord<Phase>(
             primePush.sunDirection,
             ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
     integrator.environmentRadiance = float4(0.0);
-
-    if (primeSurfaceEmitterIndex(surface) != PRIME_NO_LIGHT_INDEX
-            && !primePreviousCannotUseMis(path)) {
-        path.control = primePathWithPreviousLightNormal(
-                path.control,
-                primeLoadWavefrontPreviousLightNormal(recordIndex));
-    }
 
     bool hadGuide =
             (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) != 0u;
@@ -181,13 +172,12 @@ public bool primeAdvanceTransparentWavefrontRecord<Phase>(
     primeStoreWavefrontTransportRecord(recordIndex, updatedRecord);
     if (continuation && guideEnabled && !hasGuide) {
         primeStoreWavefrontPsrState(recordIndex, psrState);
-    } else {
-        primeStoreWavefrontPreviousLightNormal(
-                recordIndex, primePathPreviousLightNormal(path.control));
     }
     if (!hadGuide && hasGuide) {
-        primeStoreWavefrontGuideNormal(
-                recordIndex, branchResult.guides.primaryNormal);
+        primeStoreWavefrontGuideSurface(
+                recordIndex,
+                branchResult.guides.primaryNormal,
+                branchResult.guides.primaryLinearRoughness);
     }
     primeStoreTransparentBranchActiveIntermediate(
             pixel,

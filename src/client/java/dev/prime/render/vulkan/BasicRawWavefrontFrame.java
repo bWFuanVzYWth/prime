@@ -25,6 +25,7 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
     private final VulkanImage primaryPosition;
     private final VulkanImage sunLighting;
     private final VulkanImage sunPenumbra;
+    private final VulkanImage materialClass;
     private final VulkanImage linearOutput;
     private final VulkanImage[] owned;
     private final boolean hasLinearOutput;
@@ -41,7 +42,8 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
         this.primaryPosition = images.get(7);
         this.sunLighting = images.get(8);
         this.sunPenumbra = images.get(9);
-        this.linearOutput = hasLinearOutput ? images.get(10) : null;
+        this.materialClass = images.get(10);
+        this.linearOutput = hasLinearOutput ? images.get(11) : null;
         this.owned = images.toArray(VulkanImage[]::new);
         this.hasLinearOutput = hasLinearOutput;
     }
@@ -64,8 +66,8 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
                     label + " diffuse");
             add(context, images, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
                     label + " specular");
-            add(context, images, width, height, VK12.VK_FORMAT_A2B10G10R10_UNORM_PACK32,
-                    label + " packed normal and roughness");
+            add(context, images, width, height, VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
+                    label + " world normal and roughness");
             add(context, images, width, height, VK12.VK_FORMAT_R32_SFLOAT,
                     label + " view Z");
             add(context, images, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
@@ -80,6 +82,8 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
                     label + " sun lighting");
             add(context, images, width, height, VK12.VK_FORMAT_R16_SFLOAT,
                     label + " sun penumbra");
+            add(context, images, width, height, VK12.VK_FORMAT_R8_UNORM,
+                    label + " material class");
             if (hasLinearOutput) {
                 add(context, images, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
                         LINEAR_OUTPUT_USAGE, label + " linear HDR output");
@@ -161,6 +165,7 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
     @Override public VulkanImage transportMetadata() { return this.transportMetadata; }
     @Override public VulkanImage material() { return this.material; }
     @Override public VulkanImage specularMaterial() { return this.specularMaterial; }
+    @Override public VulkanImage materialClass() { return this.materialClass; }
     @Override public VulkanImage primaryPosition() { return this.primaryPosition; }
     @Override public VulkanImage sunLighting() { return this.sunLighting; }
     @Override public VulkanImage sunPenumbra() { return this.sunPenumbra; }

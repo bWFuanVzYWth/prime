@@ -22,6 +22,8 @@ public interface RawWavefrontFrame {
 
     VulkanImage specularMaterial();
 
+    VulkanImage materialClass();
+
     VulkanImage primaryPosition();
 
     VulkanImage sunLighting();

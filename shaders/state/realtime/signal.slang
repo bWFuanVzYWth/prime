@@ -3,7 +3,6 @@ module "state/realtime/signal.slang";
 
 import "prime_realtime_abi.slang";
 import "service/reconstruct/nrd/common.slang";
-import "math/packed_geometry.slang";
 import "policy/runtime/config.slang";
 import "contract/realtime/ordinary.slang";
 public void primeStoreWavefrontIntermediate(
@@ -46,18 +45,14 @@ public void primeStoreWavefrontIntermediate(
             primeNrdMaterial,
             coordinate,
             float4(result.guides.primaryAlbedo, result.guides.primaryLinearRoughness));
-    float2 primaryNormalOctahedral = unpackSnorm2x16ToFloat(
-            primePackOctahedralNormal(result.guides.primaryNormal));
     primeImageStore(
             primeNrdSpecularMaterial,
             coordinate,
-            float4(
-                    result.guides.primarySpecularAlbedo,
-                    primaryNormalOctahedral.y));
+            float4(result.guides.primarySpecularAlbedo, 0.0));
     primeImageStore(
             primeNrdViewZ,
             coordinate,
-            float4(primaryNormalOctahedral.x));
+            float4(0.0));
     if (primeWritesNrdShInputs()) {
         primeImageStore(
                 primeNrdDiffuseDirection,

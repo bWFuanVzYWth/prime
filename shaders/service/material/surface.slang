@@ -158,7 +158,7 @@ public PrimeMaterialSample primeEvaluateMaterial(
     }
     result.materialControl = materialControl;
     if (usesNormalMap) {
-        float3 tangent = primeUnpackOctahedralNormal(primitive.tangent);
+        float3 tangent = primeUnpackOctahedralUnitVector(primitive.tangent);
         tangent = normalize(tangent - geometricNormal * dot(tangent, geometricNormal));
         float3 bitangent = cross(geometricNormal, tangent);
         bitangent *= (recipeControl & PRIME_RECIPE_TANGENT_NEGATIVE) != 0u

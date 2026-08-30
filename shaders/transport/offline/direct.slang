@@ -112,11 +112,10 @@ public void primeEvaluateOfflineDirect(
             PrimeOfflineStagedLightSelection selection =
                     primeLoadOfflineStagedLightSelection(pathIndex);
             bool usedAreaNee = primeOfflineStagedDirectEnabled(selection);
-            uint receiverNormal = usedAreaNee
+            float3 receiverNormal = usedAreaNee
                     ? primeAreaLightReceiverNormal(surface, viewDirection)
-                    : 0u;
-            path.control = primePathWithPreviousLightNormal(
-                    path.control, receiverNormal);
+                    : float3(0.0);
+            path.previousLightNormal = receiverNormal;
             if (usedAreaNee) {
                 PrimePreparedSampleBase preparedSample = primePreparePathSample(
                         path.sampleSeed,

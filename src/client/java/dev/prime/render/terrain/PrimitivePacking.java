@@ -450,11 +450,11 @@ public final class PrimitivePacking {
         float crossY = normalZ * tangentX - normalX * tangentZ;
         float crossZ = normalX * tangentY - normalY * tangentX;
         boolean negative = crossX * bitangentX + crossY * bitangentY + crossZ * bitangentZ < 0.0F;
-        return Integer.toUnsignedLong(packOctahedralNormal(tangentX, tangentY, tangentZ))
+        return Integer.toUnsignedLong(packOctahedralUnitVector(tangentX, tangentY, tangentZ))
                 | (negative ? 0x1_0000_0000L : 0L);
     }
 
-    public static int packOctahedralNormal(float x, float y, float z) {
+    public static int packOctahedralUnitVector(float x, float y, float z) {
         float inverseLength = 1.0F / Math.max(1.0e-20F, Math.abs(x) + Math.abs(y) + Math.abs(z));
         x *= inverseLength;
         y *= inverseLength;

@@ -7,7 +7,6 @@ import "prime_abi_types.slang";
 import "state/path.slang";
 import "contract/realtime/guide.slang";
 import "math/queued_psr.slang";
-import "math/packed_geometry.slang";
 import "math/transport.slang";
 import "state/realtime/medium.slang";
 import "model/realtime/transport.slang";
@@ -101,20 +100,6 @@ public PrimeWavefrontPathRecord primeWavefrontWithQueuedPsrState(
     return record;
 }
 
-public uint primeLoadWavefrontPreviousLightNormal(uint pathIndex) {
-    return (primeWavefrontPaths[pathIndex].psrPacked.w
-            >> PRIME_WAVEFRONT_LIGHT_NORMAL_SHIFT)
-            & PRIME_WAVEFRONT_LIGHT_NORMAL_MASK;
-}
-
-public PrimeWavefrontPathRecord primeWavefrontWithPreviousLightNormal(
-        PrimeWavefrontPathRecord record, uint packedNormal) {
-    record.psrPacked.w = (record.psrPacked.w & PRIME_WAVEFRONT_LIGHT_NORMAL_MASK)
-            | ((packedNormal & PRIME_WAVEFRONT_LIGHT_NORMAL_MASK)
-                    << PRIME_WAVEFRONT_LIGHT_NORMAL_SHIFT);
-    return record;
-}
-
 public PrimeWavefrontPathRecord primeWavefrontWithPrimaryPreviousPosition(
         PrimeWavefrontPathRecord record, PrimeDenoiserGuides guides) {
     record.psrPacked.xyz = asuint(guides.primaryHasMotion
@@ -123,15 +108,6 @@ public PrimeWavefrontPathRecord primeWavefrontWithPrimaryPreviousPosition(
     record.psrPacked.w = (record.psrPacked.w & ~PRIME_WAVEFRONT_PRIMARY_MOTION)
             | (guides.primaryHasMotion ? PRIME_WAVEFRONT_PRIMARY_MOTION : 0u);
     return record;
-}
-
-public void primeStoreWavefrontPreviousLightNormal(
-        uint pathIndex, uint packedNormal) {
-    uint packed = primeWavefrontPaths[pathIndex].psrPacked.w;
-    primeWavefrontPaths[pathIndex].psrPacked.w =
-            (packed & PRIME_WAVEFRONT_LIGHT_NORMAL_MASK)
-            | ((packedNormal & PRIME_WAVEFRONT_LIGHT_NORMAL_MASK)
-                    << PRIME_WAVEFRONT_LIGHT_NORMAL_SHIFT);
 }
 
 public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
@@ -166,6 +142,7 @@ public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
     record.rayDirectionAndDenoiserControl =
             float4(path.rayDirection, asfloat(denoiserControl));
     record.throughputAndReserved = float4(path.throughput, 0.0);
+    record.previousLightNormal = float4(path.previousLightNormal, 0.0);
     return record;
 }
 
@@ -184,8 +161,8 @@ public PrimeWavefrontPathRecord primeMakeWavefrontRecord(
             enabled);
     record = primeWavefrontWithQueuedPsrState(
             record, primeEmptyQueuedPsrState());
-    record = primeWavefrontWithPreviousLightNormal(
-            record, primePathPreviousLightNormal(path.control));
     record = primeWavefrontWithPrimaryPreviousPosition(record, guides);
+    record.guideNormalRoughness = float4(
+            guides.primaryNormal, guides.primaryLinearRoughness);
     return record;
 }

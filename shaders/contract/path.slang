@@ -12,5 +12,3 @@ public static const uint PRIME_PATH_PREVIOUS_NO_SUN_NEE = 2u;
 public static const uint PRIME_PATH_STATE_BOUNCE_MASK = 0xffu;
 public static const uint PRIME_PATH_STATE_FLAGS_SHIFT = 8u;
 public static const uint PRIME_PATH_STATE_FLAGS_MASK = 0x3u;
-public static const uint PRIME_PATH_STATE_LIGHT_NORMAL_SHIFT = 16u;
-public static const uint PRIME_PATH_STATE_LIGHT_NORMAL_MASK = 0xffffu;

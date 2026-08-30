@@ -68,12 +68,11 @@ public bool primeAdvancePathWithoutRoulette(
         inout PathState path,
         SurfaceInteraction surface,
         BsdfSample bsdf,
-        uint previousLightNormal) {
+        float3 previousLightNormal) {
     if (!primeApplyPathScatter(context, path, surface, bsdf)) {
         return false;
     }
-    path.control = primePathWithPreviousLightNormal(
-            path.control, previousLightNormal);
+    path.previousLightNormal = previousLightNormal;
     return true;
 }
 

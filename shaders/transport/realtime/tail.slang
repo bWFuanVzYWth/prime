@@ -228,9 +228,6 @@ public void primeRunRealtimeTailPath(
         uint control) {
     uint2 pixel = primeWavefrontPixel(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
-    path.control = primePathWithPreviousLightNormal(
-            path.control,
-            primeLoadWavefrontPreviousLightNormal(recordIndex));
     PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
     bool transparent = primeWavefrontTransparentBranch(control);
     bool transmission = primeWavefrontTransmissionBranch(control);
@@ -275,8 +272,6 @@ public void primeRunRealtimeTailPath(
             0u,
             false);
     primeStoreWavefrontTransportRecord(recordIndex, updated);
-    primeStoreWavefrontPreviousLightNormal(
-            recordIndex, primePathPreviousLightNormal(path.control));
     primeStoreRealtimeTailSignal(
             pixel, transparent, transmission, signal);
 }

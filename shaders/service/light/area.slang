@@ -7,14 +7,14 @@ import "service/light/tree_select.slang";
 
 public AreaLightSample primeSampleAreaLight(
         float3 surfacePosition,
-        uint packedReceiverNormal,
+        float3 receiverNormal,
         float2 treeSample,
         float2 positionSample) {
     AreaLightSelection selection = primeSelectAreaLight(
-            surfacePosition, packedReceiverNormal, treeSample.x);
+            surfacePosition, receiverNormal, treeSample.x);
     return primeSampleAreaLightSelection(
             surfacePosition,
-            packedReceiverNormal,
+            receiverNormal,
             selection,
             treeSample.y,
             positionSample);

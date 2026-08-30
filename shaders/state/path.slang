@@ -3,15 +3,11 @@ module "state/path.slang";
 
 import "contract/path.slang";
 
-// PathState keeps only one exact control word live. Bounce is bounded to 128, the current flag
-// domain occupies two bits, and the previous light normal is already octahedral 16-bit data.
-public uint primeMakePathStateControl(
-        uint bounce, uint flags, uint previousLightNormal) {
+// Bounce and flags share one exact control word. Geometric state remains full-precision fields.
+public uint primeMakePathStateControl(uint bounce, uint flags) {
     return (bounce & PRIME_PATH_STATE_BOUNCE_MASK)
             | ((flags & PRIME_PATH_STATE_FLAGS_MASK)
-                    << PRIME_PATH_STATE_FLAGS_SHIFT)
-            | ((previousLightNormal & PRIME_PATH_STATE_LIGHT_NORMAL_MASK)
-                    << PRIME_PATH_STATE_LIGHT_NORMAL_SHIFT);
+                    << PRIME_PATH_STATE_FLAGS_SHIFT);
 }
 
 public uint primePathBounce(uint control) {
@@ -42,18 +38,4 @@ public uint primePathWithFlags(uint control, uint flags) {
 
 public uint primePathWithAddedFlags(uint control, uint flags) {
     return primePathWithFlags(control, primePathFlags(control) | flags);
-}
-
-public uint primePathPreviousLightNormal(uint control) {
-    return (control >> PRIME_PATH_STATE_LIGHT_NORMAL_SHIFT)
-            & PRIME_PATH_STATE_LIGHT_NORMAL_MASK;
-}
-
-public uint primePathWithPreviousLightNormal(
-        uint control, uint packedNormal) {
-    return (control
-                    & ~(PRIME_PATH_STATE_LIGHT_NORMAL_MASK
-                            << PRIME_PATH_STATE_LIGHT_NORMAL_SHIFT))
-            | ((packedNormal & PRIME_PATH_STATE_LIGHT_NORMAL_MASK)
-                    << PRIME_PATH_STATE_LIGHT_NORMAL_SHIFT);
 }

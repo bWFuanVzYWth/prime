@@ -5,7 +5,6 @@ import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/light_sample.slang";
 import "math/basis.slang";
-import "math/light_receiver.slang";
 import "math/projected_solid_angle_domain.slang";
 import "math/projected_solid_angle_sample.slang";
 import "service/light/area_common.slang";
@@ -86,7 +85,7 @@ bool primeIntersectAreaLight(
 
 AreaLightSample primeSampleAreaLightEmitter(
         float3 surfacePosition,
-        uint packedReceiverNormal,
+        float3 receiverNormal,
         uint sectionIndex,
         uint emitterIndex,
         float emitterSelectionPdf,
@@ -114,8 +113,6 @@ AreaLightSample primeSampleAreaLightEmitter(
     float3 secondEdge = emitters[emitterIndex].edgeTwoPower.xyz;
     float3 lightCorner = emitterCornerArea.xyz
             + sections[sectionIndex].translation;
-    float3 receiverNormal = primeUnpackLightReceiverNormal(
-            packedReceiverNormal);
     float projectedArea = 0.0;
     if (dot(receiverNormal, receiverNormal) > 0.0) {
         projectedArea = primePrepareProjectedSolidAngleTriangle(
@@ -225,7 +222,7 @@ AreaLightSample primeSampleAreaLightEmitter(
 
 public AreaLightSample primeSampleAreaLightSelection(
         float3 surfacePosition,
-        uint packedReceiverNormal,
+        float3 receiverNormal,
         AreaLightSelection selection,
         float cellSample,
         float2 positionSample) {
@@ -236,7 +233,7 @@ public AreaLightSample primeSampleAreaLightSelection(
     }
     return primeSampleAreaLightEmitter(
             surfacePosition,
-            packedReceiverNormal,
+            receiverNormal,
             selection.sectionIndex,
             selection.emitterIndex,
             selection.pdf,

@@ -23,9 +23,7 @@ public final class ImageDiagnosticPass implements Destroyable {
     public static final int RAW = 0;
     public static final int RADIANCE = 1;
     public static final int NORMAL = 2;
-    public static final int PACKED_NORMAL = 3;
     public static final int ROUGHNESS = 4;
-    public static final int PACKED_ROUGHNESS = 5;
     public static final int DEPTH = 6;
     public static final int MOTION = 7;
     public static final int HIT_R = 8;

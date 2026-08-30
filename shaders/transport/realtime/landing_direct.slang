@@ -55,11 +55,11 @@ public void primeEvaluateLandingDirect(
     float cellSample = primeDirectSample2D(
             directSample, PRIME_DIRECT_SAMPLE_AREA_PRIMARY).y;
     float3 viewDirection = -path.rayDirection;
-    uint packedReceiverNormal = primeAreaLightReceiverNormal(
+    float3 receiverNormal = primeAreaLightReceiverNormal(
             surface, viewDirection);
     AreaLightSample area = primeSampleAreaLightSelection(
             surface.position,
-            packedReceiverNormal,
+            receiverNormal,
             selection.area,
             cellSample,
             primeDirectSample2D(

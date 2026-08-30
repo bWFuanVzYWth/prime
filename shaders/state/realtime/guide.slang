@@ -6,7 +6,6 @@ import "prime_abi_types.slang";
 import "contract/realtime/guide.slang";
 import "service/camera/projection.slang";
 import "service/reconstruct/nrd/common.slang";
-import "math/packed_geometry.slang";
 import "policy/runtime/config.slang";
 import "model/material/defaults.slang";
 import "state/realtime/contract.slang";
@@ -20,13 +19,14 @@ import "service/reconstruct/ordinary.slang";
 public void primeStoreWavefrontVisibleScratch(
         uint2 pixel, PrimeDenoiserGuides visibleGuides) {
     int2 coordinate = int2(pixel);
-    primeImageStore(
-            primeNrdNormalRoughness,
-            coordinate,
-            primeNrdPackNormalRoughness(
-                    visibleGuides.primaryNormal,
-                    visibleGuides.primaryLinearRoughness,
-                    primeNrdMaterialId(visibleGuides.primaryMaterialFlags)));
+    primeWavefrontQueue[primeWavefrontAreaWord(pixel, 4u)] =
+            asuint(visibleGuides.primaryNormal.x);
+    primeWavefrontQueue[primeWavefrontAreaWord(pixel, 5u)] =
+            asuint(visibleGuides.primaryNormal.y);
+    primeWavefrontQueue[primeWavefrontAreaWord(pixel, 6u)] =
+            asuint(visibleGuides.primaryNormal.z);
+    primeWavefrontQueue[primeWavefrontAreaWord(pixel, 7u)] =
+            asuint(visibleGuides.primaryLinearRoughness);
     primeImageStore(
             primeStableRadiance,
             coordinate,
@@ -62,14 +62,13 @@ public PrimeDenoiserGuides primeLoadWavefrontVisibleGuides(
     guides.primaryHitKind = guides.primaryDistance >= 0.0
             ? PRIME_HIT_SURFACE
             : PRIME_HIT_NONE;
-    float3 normal;
-    float roughness;
-    primeNrdUnpackNormalRoughness(
-            primeImageLoad(primeNrdNormalRoughness, coordinate),
-            normal,
-            roughness);
-    guides.primaryNormal = normal;
-    guides.primaryLinearRoughness = roughness;
+    float4 visibleNormalRoughness = asfloat(uint4(
+            primeWavefrontQueue[primeWavefrontAreaWord(pixel, 4u)],
+            primeWavefrontQueue[primeWavefrontAreaWord(pixel, 5u)],
+            primeWavefrontQueue[primeWavefrontAreaWord(pixel, 6u)],
+            primeWavefrontQueue[primeWavefrontAreaWord(pixel, 7u)]));
+    guides.primaryNormal = visibleNormalRoughness.xyz;
+    guides.primaryLinearRoughness = visibleNormalRoughness.w;
     if (primeWritesNrdShInputs()) {
         float4 displayPosition =
                 primeImageLoad(primeNrdDisplayPosition, coordinate);

@@ -24,6 +24,7 @@ final class NrdNativeExecutionTest {
         try (NrdNative.Instance instance = NrdNative.create(64, 48)) {
             NrdNative.Description description = instance.description();
             assertEquals(NrdNative.EXPECTED_NRD_VERSION, description.nrdVersion());
+            assertEquals(NrdNative.EXPECTED_NORMAL_ENCODING, description.normalEncoding());
             assertEquals("main", description.shaderEntryPoint());
             assertEquals(0, description.resourcesSpaceIndex());
             assertEquals(1, description.constantBufferAndSamplersSpaceIndex());

@@ -26,6 +26,8 @@ public PrimeWavefrontTransportRecord primeLoadWavefrontTransportRecord(uint path
             primeWavefrontPaths[pathIndex].transport.throughputAndReserved;
     record.medium0 = primeWavefrontPaths[pathIndex].transport.medium0;
     record.medium1 = primeWavefrontPaths[pathIndex].transport.medium1;
+    record.previousLightNormal =
+            primeWavefrontPaths[pathIndex].transport.previousLightNormal;
     return record;
 }
 
@@ -44,6 +46,8 @@ public void primeStoreWavefrontTransportRecord(
             record.throughputAndReserved;
     primeWavefrontPaths[pathIndex].transport.medium0 = record.medium0;
     primeWavefrontPaths[pathIndex].transport.medium1 = record.medium1;
+    primeWavefrontPaths[pathIndex].transport.previousLightNormal =
+            record.previousLightNormal;
 }
 
 public void primeAccumulateDeferredDirectLight(

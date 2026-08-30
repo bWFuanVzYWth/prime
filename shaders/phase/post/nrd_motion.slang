@@ -14,7 +14,7 @@ import "prime_nrd_motion_contract.slang";
 [[vk::binding(3, 0)]] [[vk::image_format("r32f")]] writeonly RWTexture2D<float4> primeFsrDepth;
 [[vk::binding(4, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> primeNoisyDiffuse;
 [[vk::binding(5, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> primeNoisySpecular;
-[[vk::binding(6, 0)]] [[vk::image_format("rgb10_a2")]] RWTexture2D<float4> primeNormalRoughness;
+[[vk::binding(6, 0)]] [[vk::image_format("rgba32f")]] RWTexture2D<float4> primeNormalRoughness;
 [[vk::binding(7, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> primeMaterial;
 [[vk::binding(8, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> primeSpecularMaterial;
 [[vk::binding(9, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> primeDiffuseDirection;
@@ -25,7 +25,7 @@ import "prime_nrd_motion_contract.slang";
 [[vk::binding(13, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> primeReflectionPosition;
 [[vk::binding(14, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> primeReflectionNoisyDiffuse;
 [[vk::binding(15, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> primeReflectionNoisySpecular;
-[[vk::binding(16, 0)]] [[vk::image_format("rgb10_a2")]] RWTexture2D<float4> primeReflectionNormalRoughness;
+[[vk::binding(16, 0)]] [[vk::image_format("rgba32f")]] RWTexture2D<float4> primeReflectionNormalRoughness;
 [[vk::binding(17, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> primeReflectionMaterial;
 [[vk::binding(18, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> primeReflectionSpecularMaterial;
 [[vk::binding(19, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> primeReflectionDiffuseDirection;
@@ -77,7 +77,7 @@ float4 primeLoadSpecular(int2 pixel, bool reflection) {
             : primeImageLoad(primeNoisySpecular, pixel);
 }
 
-float4 primeLoadPackedNormal(int2 pixel, bool reflection) {
+float4 primeLoadNormalRoughness(int2 pixel, bool reflection) {
     return reflection
             ? primeImageLoad(primeReflectionNormalRoughness, pixel)
             : primeImageLoad(primeNormalRoughness, pixel);
@@ -146,7 +146,7 @@ void primeClearBranch(int2 pixel, bool reflection) {
     primeStoreDiffuseDirection(pixel, reflection, float4(0.0));
     primeStoreSpecularDirection(pixel, reflection, float4(0.0));
     primeStoreNormal(pixel, reflection, float4(
-            0.5, 0.5, PRIME_DEFAULT_REFERENCE_LINEAR_ROUGHNESS * 0.5 + 0.5, 0.0));
+            0.0, 0.0, 1.0, PRIME_DEFAULT_REFERENCE_LINEAR_ROUGHNESS));
     primeStoreViewZ(pixel, reflection, PRIME_MOTION_SKY_VIEW_Z);
     primeStoreMotion(pixel, reflection, float4(0.0));
     primeStoreMaterial(pixel, reflection, float4(1.0, 1.0, 1.0, -1.0));
@@ -206,9 +206,9 @@ void primePrepareBranch(
     float4 rawSpecularMaterial = primeLoadSpecularMaterial(pixel, reflection);
     float3 normal;
     float roughness;
-    primeNrdUnpackNormalRoughness(
-            primeLoadPackedNormal(pixel, reflection), normal, roughness);
-    // Raygen owns this private pre-NRD contract: these albedos, hit distances, packed normals and
+    primeNrdReadNormalRoughness(
+            primeLoadNormalRoughness(pixel, reflection), normal, roughness);
+    // Raygen owns this private pre-NRD contract: these albedos, hit distances, normals and
     // direction moments are already finite and range-limited. Revalidating them here doubles the
     // full-screen scalar work and extends every raw vector's lifetime.
     float3 diffuseAlbedo = rawMaterial.rgb;

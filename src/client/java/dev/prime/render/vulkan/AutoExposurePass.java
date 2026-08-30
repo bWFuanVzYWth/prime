@@ -64,7 +64,7 @@ final class AutoExposurePass implements Destroyable {
             VulkanContext context,
             VulkanImage linearInput,
             VulkanImage albedo,
-            VulkanImage normalRoughness,
+            VulkanImage materialClass,
             boolean accumulatedMetering) {
         SharedComputeProgram program = context.acquireAutoExposureProgram();
         VulkanBuffer histogram = null;
@@ -111,7 +111,7 @@ final class AutoExposurePass implements Destroyable {
                         .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
                 imageInfo.get(1).imageView(albedo.view())
                         .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                imageInfo.get(2).imageView(normalRoughness.view())
+                imageInfo.get(2).imageView(materialClass.view())
                         .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
                 VkDescriptorBufferInfo.Buffer bufferInfos =
                         VkDescriptorBufferInfo.calloc(2, stack);

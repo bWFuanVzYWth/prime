@@ -28,7 +28,7 @@ import "service/reconstruct/nrd/sh.slang";
 [[vk::binding(11, 0)]] [[vk::image_format("r16f")]] readonly RWTexture2D<float4> primeSigmaSunShadow;
 [[vk::binding(12, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> primeDenoisedDiffuseSh1;
 [[vk::binding(13, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> primeDenoisedSpecularSh1;
-[[vk::binding(14, 0)]] [[vk::image_format("rgb10_a2")]] readonly RWTexture2D<float4> primeCompositeNormalRoughness;
+[[vk::binding(14, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> primeCompositeNormalRoughness;
 [[vk::binding(15, 0)]] [[vk::image_format("r32f")]] readonly RWTexture2D<float4> primeCompositeViewZ;
 [[vk::binding(16, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> primeCompositePrimaryPosition;
 [[vk::binding(17, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> primeNoisySpecular;
@@ -38,7 +38,7 @@ import "service/reconstruct/nrd/sh.slang";
 [[vk::binding(21, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> primeReflectionCompositeSpecularMaterial;
 [[vk::binding(22, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> primeReflectionDenoisedDiffuseSh1;
 [[vk::binding(23, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> primeReflectionDenoisedSpecularSh1;
-[[vk::binding(24, 0)]] [[vk::image_format("rgb10_a2")]] readonly RWTexture2D<float4> primeReflectionCompositeNormalRoughness;
+[[vk::binding(24, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> primeReflectionCompositeNormalRoughness;
 [[vk::binding(25, 0)]] [[vk::image_format("r32f")]] readonly RWTexture2D<float4> primeReflectionCompositeViewZ;
 [[vk::binding(26, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> primeReflectionCompositePosition;
 [[vk::binding(27, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> primeDisplayPosition;
@@ -212,7 +212,7 @@ PrimeCompositeResolveGuide primeCompositeLoadResolveGuide(
     float4 normalRoughness =
             primeCompositeLoadNormalRoughness(
                     pixel, reflection);
-    primeNrdUnpackNormalRoughness(
+    primeNrdReadNormalRoughness(
             normalRoughness, guide.normal, guide.roughness);
     guide.view = primeNrdSafeNormalize(
             -primeCompositeLoadPosition(pixel, reflection),
@@ -236,28 +236,28 @@ PrimeCompositeResolveGuide primeCompositeLoadResolveGuide(
     float4 neighborNormalRoughness =
             primeCompositeLoadNormalRoughness(
                     east, reflection);
-    primeNrdUnpackNormalRoughness(
+    primeNrdReadNormalRoughness(
             neighborNormalRoughness,
             guide.eastNormal,
             neighborRoughness);
     neighborNormalRoughness =
             primeCompositeLoadNormalRoughness(
                     west, reflection);
-    primeNrdUnpackNormalRoughness(
+    primeNrdReadNormalRoughness(
             neighborNormalRoughness,
             guide.westNormal,
             neighborRoughness);
     neighborNormalRoughness =
             primeCompositeLoadNormalRoughness(
                     north, reflection);
-    primeNrdUnpackNormalRoughness(
+    primeNrdReadNormalRoughness(
             neighborNormalRoughness,
             guide.northNormal,
             neighborRoughness);
     neighborNormalRoughness =
             primeCompositeLoadNormalRoughness(
                     south, reflection);
-    primeNrdUnpackNormalRoughness(
+    primeNrdReadNormalRoughness(
             neighborNormalRoughness,
             guide.southNormal,
             neighborRoughness);

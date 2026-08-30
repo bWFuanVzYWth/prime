@@ -63,19 +63,24 @@ public void primeStoreWavefrontSurface(uint pathIndex, SurfaceInteraction surfac
             asuint(surface.textureLod)));
     primeStoreWavefrontSurfaceLane(base, 3u, uint4(
             asuint(surface.opacity),
-            surface.shadingNormal,
             asuint(surface.roughness),
-            surface.opticalControl));
+            surface.opticalControl,
+            0u));
     primeStoreWavefrontSurfaceLane(base, 4u, uint4(
-            asuint(surface.adjacentBaseColor.x),
+            asuint(surface.shadingNormal.x),
+            asuint(surface.shadingNormal.y),
+            asuint(surface.shadingNormal.z),
+            asuint(surface.adjacentBaseColor.x)));
+    primeStoreWavefrontSurfaceLane(base, 5u, uint4(
             asuint(surface.adjacentBaseColor.y),
             asuint(surface.adjacentBaseColor.z),
-            surface.adjacentInterfaceControl));
-    primeStoreWavefrontSurfaceLane(base, 5u, uint4(
-            asuint(surface.position.x),
+            surface.adjacentInterfaceControl,
+            asuint(surface.position.x)));
+    primeStoreWavefrontSurfaceLane(base, 6u, uint4(
             asuint(surface.position.y),
             asuint(surface.position.z),
-            surface.motionZFlags));
+            surface.motionZFlags,
+            0u));
 }
 
 public SurfaceInteraction primeLoadWavefrontSurface(uint pathIndex) {
@@ -106,16 +111,18 @@ public SurfaceInteraction primeLoadWavefrontSurface(uint pathIndex) {
     surface.textureLod = asfloat(lane.w);
     lane = primeLoadWavefrontSurfaceLane(base, 3u);
     surface.opacity = asfloat(lane.x);
-    surface.shadingNormal = lane.y;
-    surface.roughness = asfloat(lane.z);
-    surface.opticalControl = lane.w;
+    surface.roughness = asfloat(lane.y);
+    surface.opticalControl = lane.z;
     lane = primeLoadWavefrontSurfaceLane(base, 4u);
-    surface.adjacentBaseColor = float3(
-            asfloat(lane.x), asfloat(lane.y), asfloat(lane.z));
-    surface.adjacentInterfaceControl = lane.w;
+    surface.shadingNormal = asfloat(lane.xyz);
+    float adjacentX = asfloat(lane.w);
     lane = primeLoadWavefrontSurfaceLane(base, 5u);
-    surface.position = float3(
-            asfloat(lane.x), asfloat(lane.y), asfloat(lane.z));
-    surface.motionZFlags = lane.w;
+    surface.adjacentBaseColor = float3(
+            adjacentX, asfloat(lane.x), asfloat(lane.y));
+    surface.adjacentInterfaceControl = lane.z;
+    float positionX = asfloat(lane.w);
+    lane = primeLoadWavefrontSurfaceLane(base, 6u);
+    surface.position = float3(positionX, asfloat(lane.x), asfloat(lane.y));
+    surface.motionZFlags = lane.z;
     return surface;
 }

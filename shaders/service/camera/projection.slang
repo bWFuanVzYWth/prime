@@ -72,5 +72,6 @@ public PathState primeCameraPath(uint2 pixel, uint pathIndex, float2 cameraSampl
     path.sourcePrimitive = uint2(PRIME_NO_PRIMITIVE_INDEX);
     path.sampleSeed = primePathSampleSeed(
             pixel, primeSampleEpoch(), pathIndex);
+    path.previousLightNormal = float3(0.0);
     return path;
 }

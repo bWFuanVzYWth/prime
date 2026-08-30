@@ -115,7 +115,7 @@ public bool primeAdvanceOrdinaryDeltaWalk(
             path,
             surface,
             bsdf,
-            0u)) {
+            float3(0.0))) {
         return false;
     }
     path.control = primeIncrementPathBounce(path.control);
@@ -127,8 +127,6 @@ public bool primeAdvanceOrdinaryDeltaWalk(
             0u,
             true);
     primeStoreWavefrontTransportRecord(recordIndex, updated);
-    primeStoreWavefrontPreviousLightNormal(
-            recordIndex, primePathPreviousLightNormal(path.control));
     primeStoreWavefrontActiveIntermediate(pixel, false, result);
     return true;
 }
@@ -259,7 +257,7 @@ public bool primeAdvanceTransparentDeltaWalk(
             path,
             surface,
             bsdf,
-            0u)) {
+            float3(0.0))) {
         return false;
     }
     path.control = primeIncrementPathBounce(path.control);
@@ -286,9 +284,6 @@ public bool primeAdvanceTransparentDeltaWalk(
     primeStoreWavefrontTransportRecord(recordIndex, updated);
     if (observesGuide) {
         primeStoreWavefrontPsrState(recordIndex, psrState);
-    } else if (!guideDetached) {
-        primeStoreWavefrontPreviousLightNormal(
-                recordIndex, primePathPreviousLightNormal(path.control));
     }
     primeStoreTransparentBranchActiveIntermediate(
             pixel,

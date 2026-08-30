@@ -18,7 +18,7 @@ public uint primeOfflineSurfaceWord(uint pathIndex) {
 }
 
 // Offline does not consume texture LOD after traversal. Source triangle identity remains exact;
-// the scratch record therefore needs 23 words instead of the realtime 24-word record.
+// the scratch record therefore needs 25 words instead of the realtime 28-word record.
 public void primeStoreOfflineSurface(uint pathIndex, SurfaceInteraction surface) {
     uint word = primeOfflineSurfaceWord(pathIndex);
     if (surface.hitKind == PRIME_HIT_NONE) {
@@ -38,17 +38,19 @@ public void primeStoreOfflineSurface(uint pathIndex, SurfaceInteraction surface)
     primeOfflineQueue[word + 9u] = scratch.baseOpacity.y;
     primeOfflineQueue[word + 10u] = scratch.baseOpacity.z;
     primeOfflineQueue[word + 11u] = scratch.baseOpacity.w;
-    primeOfflineQueue[word + 12u] = scratch.materialAdjacentX.x;
-    primeOfflineQueue[word + 13u] = scratch.materialAdjacentX.y;
-    primeOfflineQueue[word + 14u] = scratch.materialAdjacentX.z;
-    primeOfflineQueue[word + 15u] = scratch.materialAdjacentX.w;
-    primeOfflineQueue[word + 16u] = scratch.adjacentPositionX.x;
-    primeOfflineQueue[word + 17u] = scratch.adjacentPositionX.y;
-    primeOfflineQueue[word + 18u] = scratch.adjacentPositionX.z;
-    primeOfflineQueue[word + 19u] = scratch.adjacentPositionX.w;
-    primeOfflineQueue[word + 20u] = scratch.positionYzMotion.x;
-    primeOfflineQueue[word + 21u] = scratch.positionYzMotion.y;
-    primeOfflineQueue[word + 22u] = scratch.positionYzMotion.z;
+    primeOfflineQueue[word + 12u] = scratch.shadingRoughness.x;
+    primeOfflineQueue[word + 13u] = scratch.shadingRoughness.y;
+    primeOfflineQueue[word + 14u] = scratch.shadingRoughness.z;
+    primeOfflineQueue[word + 15u] = scratch.shadingRoughness.w;
+    primeOfflineQueue[word + 16u] = scratch.materialAdjacent.x;
+    primeOfflineQueue[word + 17u] = scratch.materialAdjacent.y;
+    primeOfflineQueue[word + 18u] = scratch.materialAdjacent.z;
+    primeOfflineQueue[word + 19u] = scratch.materialAdjacent.w;
+    primeOfflineQueue[word + 20u] = scratch.positionControl.x;
+    primeOfflineQueue[word + 21u] = scratch.positionControl.y;
+    primeOfflineQueue[word + 22u] = scratch.positionControl.z;
+    primeOfflineQueue[word + 23u] = scratch.positionControl.w;
+    primeOfflineQueue[word + 24u] = scratch.motion;
 }
 
 public SurfaceInteraction primeLoadOfflineSurface(uint pathIndex) {
@@ -74,20 +76,22 @@ public SurfaceInteraction primeLoadOfflineSurface(uint pathIndex) {
             primeOfflineQueue[word + 9u],
             primeOfflineQueue[word + 10u],
             primeOfflineQueue[word + 11u]);
-    scratch.materialAdjacentX = uint4(
+    scratch.shadingRoughness = uint4(
             primeOfflineQueue[word + 12u],
             primeOfflineQueue[word + 13u],
             primeOfflineQueue[word + 14u],
             primeOfflineQueue[word + 15u]);
-    scratch.adjacentPositionX = uint4(
+    scratch.materialAdjacent = uint4(
             primeOfflineQueue[word + 16u],
             primeOfflineQueue[word + 17u],
             primeOfflineQueue[word + 18u],
             primeOfflineQueue[word + 19u]);
-    scratch.positionYzMotion = uint3(
+    scratch.positionControl = uint4(
             primeOfflineQueue[word + 20u],
             primeOfflineQueue[word + 21u],
-            primeOfflineQueue[word + 22u]);
+            primeOfflineQueue[word + 22u],
+            primeOfflineQueue[word + 23u]);
+    scratch.motion = primeOfflineQueue[word + 24u];
     SurfaceInteraction surface = primeUnpackOfflineSurfaceScratch(scratch);
     return surface;
 }

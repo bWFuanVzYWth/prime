@@ -52,11 +52,11 @@ public void primeEvaluateFixedDirect(
     float2 areaSample = primeDirectSample2D(
             directSample, PRIME_DIRECT_SAMPLE_AREA_PRIMARY);
     float3 viewDirection = -path.rayDirection;
-    uint packedReceiverNormal = primeAreaLightReceiverNormal(
+    float3 receiverNormal = primeAreaLightReceiverNormal(
             surface, viewDirection);
     AreaLightSample area = primeSampleAreaLightSelection(
             surface.position,
-            packedReceiverNormal,
+            receiverNormal,
             selection.area,
             areaSample.y,
             primeDirectSample2D(

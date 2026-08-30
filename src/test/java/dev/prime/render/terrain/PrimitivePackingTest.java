@@ -181,7 +181,7 @@ final class PrimitivePackingTest {
     }
 
     @Test
-    void octahedralEncodingPreservesNormalDirection() {
+    void octahedralEncodingPreservesUnitVectorDirection() {
         assertNormalDirection(1.0F, 0.0F, 0.0F);
         assertNormalDirection(0.0F, -1.0F, 0.0F);
         assertNormalDirection(0.0F, 0.0F, -1.0F);
@@ -206,7 +206,7 @@ final class PrimitivePackingTest {
                 1.0F, 0.0F,
                 0.0F, 1.0F,
                 0.0F, 0.0F, 1.0F);
-        assertPackedNormalDirection((int) positive, 1.0F, 0.0F, 0.0F);
+        assertPackedUnitVectorDirection((int) positive, 1.0F, 0.0F, 0.0F);
         assertFalse((positive & 0x1_0000_0000L) != 0L);
 
         long negative = PrimitivePacking.packTriangleTangent(
@@ -262,11 +262,11 @@ final class PrimitivePackingTest {
         x *= inverseLength;
         y *= inverseLength;
         z *= inverseLength;
-        int packed = PrimitivePacking.packOctahedralNormal(x, y, z);
-        assertPackedNormalDirection(packed, x, y, z);
+        int packed = PrimitivePacking.packOctahedralUnitVector(x, y, z);
+        assertPackedUnitVectorDirection(packed, x, y, z);
     }
 
-    private static void assertPackedNormalDirection(int packed, float x, float y, float z) {
+    private static void assertPackedUnitVectorDirection(int packed, float x, float y, float z) {
         float inverseLength = 1.0F / (float) Math.sqrt(x * x + y * y + z * z);
         x *= inverseLength;
         y *= inverseLength;

@@ -20,6 +20,8 @@ ABI exposes that selection so the Java loader and contract test reject a mismatc
 ABI v8 appends an optional input-resolution `VK_FORMAT_R16_SFLOAT` responsivity image. An all-zero
 image descriptor is the explicit absent value and is forwarded to NGX as a null
 `pInResponsivityMask`; every nonzero descriptor must satisfy the exact format and extent contract.
+ABI v9 changes only normal/roughness to direct `VK_FORMAT_R32G32B32A32_SFLOAT`; the bridge rejects
+older RGBA16F or octahedral guide inputs before calling NGX.
 
 Copy `prime_dlss_rr.dll` beside the release `nvngx_dlssd.dll` in
 `src/client/resources/prime/natives/windows-x86_64`. The bundled runtime is `310.7.128.0` with

@@ -19,7 +19,7 @@
 
 namespace {
 
-constexpr std::uint32_t PRIME_DLSS_RR_ABI_VERSION = 8;
+constexpr std::uint32_t PRIME_DLSS_RR_ABI_VERSION = 9;
 constexpr auto PRIME_DLSS_RR_RENDER_PRESET = NVSDK_NGX_RayReconstruction_Hint_Render_Preset_F;
 constexpr char PROJECT_ID[] = "7bc01faf-de5e-4c7c-9936-43cb5c301232";
 constexpr std::uint32_t EXTENSION_NAME_STRIDE = 256;
@@ -478,7 +478,7 @@ PRIME_EXPORT int primeDlssRrEvaluate(PrimeEvaluateDescription* description) {
                     feature->renderHeight)
             && validImage(
                     description->images[NORMAL_ROUGHNESS],
-                    VK_FORMAT_R16G16B16A16_SFLOAT,
+                    VK_FORMAT_R32G32B32A32_SFLOAT,
                     feature->renderWidth,
                     feature->renderHeight)
             && validImage(

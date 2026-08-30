@@ -1,14 +1,16 @@
 #language slang 2026
 module "math/light_tree.slang";
 
-import "math/light_receiver.slang";
-
 public static const float PRIME_LIGHT_RECEIVER_COSINE_FLOOR = 1.0 / 256.0;
 public static const uint PRIME_LIGHT_DIRECTION_MODE_SHIFT = 30u;
 public static const uint PRIME_LIGHT_DIRECTION_MODE_LOBES = 2u;
 public static const uint PRIME_LIGHT_DIRECTION_MODE_FULL = 3u;
 public static const uint PRIME_LIGHT_DIRECTION_OCT_MASK = 0x3ffu;
 public static const uint PRIME_LIGHT_DIRECTION_LOBE_MASK = 0x1fu;
+
+public float2 primeLightDirectionSignNotZero(float2 value) {
+    return float2(value.x >= 0.0 ? 1.0 : -1.0, value.y >= 0.0 ? 1.0 : -1.0);
+}
 
 public float3 primeUnpackLightEmissionAxis(uint packedValue) {
     float2 encoded = float2(
@@ -17,7 +19,7 @@ public float3 primeUnpackLightEmissionAxis(uint packedValue) {
             / 1023.0 * 2.0 - 1.0;
     float3 axis = float3(encoded, 1.0 - abs(encoded.x) - abs(encoded.y));
     if (axis.z < 0.0) {
-        axis.xy = (1.0 - abs(axis.yx)) * primeLightReceiverSignNotZero(axis.xy);
+        axis.xy = (1.0 - abs(axis.yx)) * primeLightDirectionSignNotZero(axis.xy);
     }
     return normalize(axis);
 }

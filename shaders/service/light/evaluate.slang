@@ -5,7 +5,6 @@ import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/light_sample.slang";
 import "math/packed_geometry.slang";
-import "math/light_receiver.slang";
 import "math/projected_solid_angle_domain.slang";
 import "service/material/surface.slang";
 import "service/light/area_common.slang";
@@ -17,7 +16,7 @@ public LightEvaluation primeEvaluateAreaLight(
         SurfaceInteraction surface,
         float3 rayOrigin,
         float3 rayDirection,
-        uint packedReceiverNormal,
+        float3 receiverNormal,
         bool evaluatePdf) {
     LightEvaluation result;
     result.radiance = float3(0.0);
@@ -69,8 +68,6 @@ public LightEvaluation primeEvaluateAreaLight(
                     emitters[emitterIndex].uvsTint.xyz,
                     parentBarycentric),
             0.0);
-    float3 receiverNormal = primeUnpackLightReceiverNormal(packedReceiverNormal);
-
     uint64_t worldNodeAddress = sections[surface.sectionIndex].worldLightAddress;
     uint64_t worldLeafAddress =
             sections[surface.sectionIndex].worldLightLeafAddress;

@@ -49,8 +49,8 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| lightLeaf.size != 8 || lightLeafEntry.size != 8
 				|| lightEmitter.size != 96 || lightCell.size != 12
 				|| sectionLightHeader.size != 48
-				|| integrator.size != 32 || pathState.size != 64 || tracePayload.size != 96
-				|| surfaceInteraction.size != 96 || wavefrontSurfaceRecord.size != 96
+				|| integrator.size != 32 || pathState.size != 80 || tracePayload.size != 112
+				|| surfaceInteraction.size != 112 || wavefrontSurfaceRecord.size != 112
 				|| push.size != 128
 				|| nrdMotionPush.size != 144
 				|| sunShadowQuery.size != 48
@@ -115,7 +115,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		}
 		if (nrdContract.version != '4.17.4'
                 || nrdContract.denoiser != 'dual-reblur-diffuse-specular-sh-plus-sigma-sun-shadow'
-				|| nrdContract.normalEncoding != 'r10g10b10a2-unorm'
+				|| nrdContract.normalEncoding != 'rgba32-sfloat-direct'
 				|| nrdContract.roughnessEncoding != 'linear'
 				|| nrdContract.motionSpace != 'screen-pixel-2.5d'
 				|| nrdContract.signalSpace != 'demodulated-linear-rec2020-d65') {
@@ -128,11 +128,11 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| fsrContract.viewSpaceToMetersFactor != 1.0) {
 			throw new GradleException('Prime FSR signal and projection contracts changed without a coordinated migration')
 		}
-		if (wavefrontContract.pathRecordSize != 112
+		if (wavefrontContract.pathRecordSize != 144
 				|| wavefrontContract.pathSlotsPerPixel != 2
-				|| wavefrontContract.areaRecordSize != 272
+				|| wavefrontContract.areaRecordSize != 320
 				|| wavefrontContract.areaRecordSize
-						!= 16 + (wavefrontSurfaceRecord.size + 12)
+						!= 32 + (wavefrontSurfaceRecord.size + 12)
 								* wavefrontContract.pathSlotsPerPixel
 								+ 40
 				|| wavefrontContract.queueEntriesPerPixel != 2
@@ -152,10 +152,10 @@ abstract class GenerateShaderAbi extends DefaultTask {
 			throw new GradleException(
 					'Prime realtime scheduler must preserve its execution-mode queue ABI')
 		}
-		if (offlineWavefrontContract.pathRecordSize != 128
+		if (offlineWavefrontContract.pathRecordSize != 144
 				|| offlineWavefrontContract.pathSlotsPerPixel != 1
-				|| offlineWavefrontContract.surfaceRecordSize != 92
-				|| offlineWavefrontContract.stageRecordSize != 104
+				|| offlineWavefrontContract.surfaceRecordSize != 100
+				|| offlineWavefrontContract.stageRecordSize != 112
 				|| offlineWavefrontContract.stageRecordSize
 						!= offlineWavefrontContract.surfaceRecordSize + 12
 				|| offlineWavefrontContract.queueEntriesPerPixel != 1
@@ -335,6 +335,7 @@ public final class ShaderAbi {
     public static final int DESCRIPTOR_NRD_PRIMARY_POSITION = ${schema.realtimeDescriptors.nrdPrimaryPosition};
     public static final int DESCRIPTOR_NRD_NOISY_SPECULAR = ${schema.realtimeDescriptors.nrdNoisySpecular};
     public static final int DESCRIPTOR_NRD_SPECULAR_MATERIAL = ${schema.realtimeDescriptors.nrdSpecularMaterial};
+    public static final int DESCRIPTOR_NRD_MATERIAL_CLASS = ${schema.realtimeDescriptors.nrdMaterialClass};
     public static final int DESCRIPTOR_TRANSMISSION_GGX_ENERGY = ${schema.sharedDescriptors.transmissionGgxEnergy};
     public static final int DESCRIPTOR_TEXTURE_RECORDS = ${schema.sharedDescriptors.textureRecords};
     public static final int DESCRIPTOR_MATERIAL_NORMAL_PAGES = ${schema.sharedDescriptors.materialNormalPages};
@@ -765,7 +766,7 @@ public RWTexture2D<float4> primeStableRadiance;
 public RWTexture2D<float4> primeNrdNoisyDiffuse;
 [[vk::binding(${schema.realtimeDescriptors.nrdNoisySpecular}, 1)]] [[vk::image_format("rgba16f")]]
 public RWTexture2D<float4> primeNrdNoisySpecular;
-[[vk::binding(${schema.realtimeDescriptors.nrdNormalRoughness}, 1)]] [[vk::image_format("rgb10_a2")]]
+[[vk::binding(${schema.realtimeDescriptors.nrdNormalRoughness}, 1)]] [[vk::image_format("rgba32f")]]
 public RWTexture2D<float4> primeNrdNormalRoughness;
 [[vk::binding(${schema.realtimeDescriptors.nrdViewZ}, 1)]] [[vk::image_format("r32f")]]
 public RWTexture2D<float> primeNrdViewZ;
@@ -775,6 +776,8 @@ public RWTexture2D<float4> primeWavefrontTransportMetadata;
 public RWTexture2D<float4> primeNrdMaterial;
 [[vk::binding(${schema.realtimeDescriptors.nrdSpecularMaterial}, 1)]] [[vk::image_format("rgba16f")]]
 public RWTexture2D<float4> primeNrdSpecularMaterial;
+[[vk::binding(${schema.realtimeDescriptors.nrdMaterialClass}, 1)]] [[vk::image_format("r8")]]
+public RWTexture2D<float> primeNrdMaterialClass;
 [[vk::binding(${schema.realtimeDescriptors.nrdPrimaryPosition}, 1)]] [[vk::image_format("rgba32f")]]
 public RWTexture2D<float4> primeNrdPrimaryPosition;
 [[vk::binding(${schema.realtimeDescriptors.nrdSunLighting}, 1)]] [[vk::image_format("rgba16f")]]
@@ -789,7 +792,7 @@ public RWTexture2D<float4> primeNrdSpecularDirection;
 public RWTexture2D<float4> primeNrdReflectionNoisyDiffuse;
 [[vk::binding(${schema.realtimeDescriptors.nrdReflectionNoisySpecular}, 1)]] [[vk::image_format("rgba16f")]]
 public RWTexture2D<float4> primeNrdReflectionNoisySpecular;
-[[vk::binding(${schema.realtimeDescriptors.nrdReflectionNormalRoughness}, 1)]] [[vk::image_format("rgb10_a2")]]
+[[vk::binding(${schema.realtimeDescriptors.nrdReflectionNormalRoughness}, 1)]] [[vk::image_format("rgba32f")]]
 public RWTexture2D<float4> primeNrdReflectionNormalRoughness;
 [[vk::binding(${schema.realtimeDescriptors.nrdReflectionMaterial}, 1)]] [[vk::image_format("rgba16f")]]
 public RWTexture2D<float4> primeNrdReflectionMaterial;

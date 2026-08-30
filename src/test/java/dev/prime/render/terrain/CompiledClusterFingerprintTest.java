@@ -69,7 +69,7 @@ final class CompiledClusterFingerprintTest {
             PrimitivePacking.packUv(1.0F, 0.0F),
             PrimitivePacking.packUv(0.0F, 1.0F),
             PrimitivePacking.packTintControl(PrimitivePacking.packTint(-1), 0),
-            PrimitivePacking.packOctahedralNormal(0.0F, 0.0F, 1.0F),
+            PrimitivePacking.packOctahedralUnitVector(0.0F, 0.0F, 1.0F),
             PrimitivePacking.packControlTexture(0, 1),
             Float.floatToRawIntBits(1.0F),
             tangentMarker
