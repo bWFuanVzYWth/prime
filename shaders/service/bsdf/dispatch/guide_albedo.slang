@@ -52,8 +52,10 @@ public PrimeDenoiseAlbedos primeSurfaceGuideAlbedos(
                         viewDirection,
                         surface.t,
                         volumeStack,
+                        surface.mediumId,
                         surface.adjacentBaseColor,
                         surface.adjacentInterfaceControl,
+                        surface.adjacentMediumId,
                         usesAirGap);
         return primeDenoiseAlbedosFromState(
                 state, viewDirection, PRIME_DENOISE_CLOSURE_TRANSMISSIVE);

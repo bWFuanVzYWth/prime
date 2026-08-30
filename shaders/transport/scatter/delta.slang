@@ -98,8 +98,10 @@ public PrimePathScatter primeSampleDiscretePathSurface(
                         viewDirection,
                         surface.t,
                         volumeStack,
+                        surface.mediumId,
                         surface.adjacentBaseColor,
                         surface.adjacentInterfaceControl,
+                        surface.adjacentMediumId,
                         primeUsesAirGap());
         PrimeTransmissiveBsdfSample sampled =
                 primeSampleMinecraftTransmissionDiscreteFromState(
@@ -115,8 +117,10 @@ public PrimePathScatter primeSampleDiscretePathSurface(
                 primeSurfaceOpacity(surface),
                 surface.materialControl,
                 surface.opticalControl,
+                surface.mediumId,
                 surface.adjacentBaseColor,
                 surface.adjacentInterfaceControl,
+                surface.adjacentMediumId,
                 primeUsesAirGap());
         result.bsdf = sampled.bsdfSample;
         result.volumeStack = sampled.volumeStack;
@@ -194,8 +198,10 @@ public PrimeGuidedPathScatter primeSampleGuidedDiscretePathSurface(
                         viewDirection,
                         surface.t,
                         volumeStack,
+                        surface.mediumId,
                         surface.adjacentBaseColor,
                         surface.adjacentInterfaceControl,
+                        surface.adjacentMediumId,
                         primeUsesAirGap());
         result.albedos = primeDenoiseAlbedosFromState(
                 state,
@@ -215,8 +221,10 @@ public PrimeGuidedPathScatter primeSampleGuidedDiscretePathSurface(
                 primeSurfaceOpacity(surface),
                 surface.materialControl,
                 surface.opticalControl,
+                surface.mediumId,
                 surface.adjacentBaseColor,
                 surface.adjacentInterfaceControl,
+                surface.adjacentMediumId,
                 primeUsesAirGap());
         result.scatter.bsdf = sampled.bsdfSample;
         result.scatter.volumeStack = sampled.volumeStack;

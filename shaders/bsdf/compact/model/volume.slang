@@ -26,5 +26,7 @@ public PrimeOpenPbrVolume primeOpenPbrVolumeFromTransmission(
         result.anisotropy = 0.0;
     }
     result.ior = 1.0;
+    result.mediumId = 0u;
+    result.iorEncoding = 0u;
     return result;
 }

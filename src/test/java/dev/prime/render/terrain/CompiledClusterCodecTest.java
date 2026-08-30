@@ -198,7 +198,14 @@ final class CompiledClusterCodecTest {
 
     private static PayloadOffsets firstPayloadOffsets(byte[] encoded) {
         ByteBuffer input = littleEndian(encoded);
-        input.position(56 + 6 * Integer.BYTES);
+        input.position(52);
+        int mediumCount = input.getInt();
+        input.position(Math.addExact(
+                input.position(), Math.multiplyExact(mediumCount, 4 * Integer.BYTES)));
+        if (input.getInt() != 1) {
+            throw new AssertionError("Unexpected cluster segment count");
+        }
+        input.position(input.position() + 6 * Integer.BYTES);
         int positionCount = input.getInt();
         int positions = input.position();
         input.position(Math.addExact(

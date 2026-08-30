@@ -67,6 +67,7 @@ public void primePhase()
     primeShadowPayload.terminalExtinctionRayDistance = float4(0.0, 0.0, 0.0, traceDistance);
     primeShadowPayload.startingExtinction0Winding = float4(0.0);
     primeShadowPayload.startingExtinction1Winding = float4(0.0);
+    primeShadowPayload.startingMediumIds = uint2(0u);
     primeShadowPayload.startingMediumCount = 0u;
     primeShadowPayload.sourcePrimitive = uint2(PRIME_NO_PRIMITIVE_INDEX);
     primeShadowPayload.targetEmitter = uint2(PRIME_NO_PRIMITIVE_INDEX);

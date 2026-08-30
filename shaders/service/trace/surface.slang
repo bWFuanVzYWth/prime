@@ -28,6 +28,8 @@ public SurfaceInteraction primeMissSurfaceInteraction(uint2 sourcePrimitive) {
     surface.roughness = primeConfiguredDefaultLinearRoughness();
     surface.opticalControl = 0u;
     surface.motionZFlags = sourcePrimitive.y;
+    surface.mediumId = 0u;
+    surface.adjacentMediumId = 0u;
     surface.adjacentBaseColor = float3(0.0);
     surface.adjacentInterfaceControl = 0u;
     return surface;
@@ -46,6 +48,8 @@ public void primeResetSurfacePayload(uint2 sourcePrimitive) {
     primeSurfacePayload.shadingNormal = float3(0.0, 1.0, 0.0);
     primeSurfacePayload.roughness = primeConfiguredDefaultLinearRoughness();
     primeSurfacePayload.opticalControl = 0u;
+    primeSurfacePayload.mediumId = 0u;
+    primeSurfacePayload.adjacentMediumId = 0u;
     primeSurfacePayload.adjacentBaseColor = float3(0.0);
     primeSurfacePayload.adjacentInterfaceControl = 0u;
     primeSurfacePayload.position = float3(0.0);
@@ -71,6 +75,8 @@ public SurfaceInteraction primeSurfaceInteractionFromPayload() {
     surface.roughness = primeSurfacePayload.roughness;
     surface.opticalControl = primeSurfacePayload.opticalControl;
     surface.motionZFlags = primeSurfacePayload.positionReserved;
+    surface.mediumId = primeSurfacePayload.mediumId;
+    surface.adjacentMediumId = primeSurfacePayload.adjacentMediumId;
     surface.adjacentBaseColor = primeSurfacePayload.adjacentBaseColor;
     surface.adjacentInterfaceControl = primeSurfacePayload.adjacentInterfaceControl;
     return surface;

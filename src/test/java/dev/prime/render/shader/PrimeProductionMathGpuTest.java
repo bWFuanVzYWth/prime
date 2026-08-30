@@ -563,6 +563,9 @@ final class PrimeProductionMathGpuTest {
                             random.nextFloat() * 2.0F,
                             random.nextFloat() * 2.0F);
                 } else if (kind == 7) {
+                    putInt(input, index, words, 0, 1, random.nextInt() | 1);
+                    int iorEncoding = local == 0 ? 1 << 8 : local & 0xff;
+                    putInt(input, index, words, 0, 2, iorEncoding);
                     putVec4(
                             input,
                             index,

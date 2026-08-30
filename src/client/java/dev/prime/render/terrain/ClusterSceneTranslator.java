@@ -36,6 +36,7 @@ public final class ClusterSceneTranslator {
         CapturedCluster captured = input.captured();
         LabPbrMaterialSet materials = input.materials();
         ClusterTranslationSettings settings = input.settings();
+        MediumCatalog mediumCatalog = new MediumCatalog();
 
         SectionClusterMeshBuilder cluster = new SectionClusterMeshBuilder(
                 captured.clusterX(),
@@ -74,10 +75,13 @@ public final class ClusterSceneTranslator {
                             materials,
                             settings,
                             emissionBuildCache,
+                            mediumCatalog,
                             work));
         }
         work.checkpoint();
-        return cluster.build().withCompatibilityIssues(boundaries.issues());
+        return cluster.build()
+                .withMediumCatalog(mediumCatalog.snapshot())
+                .withCompatibilityIssues(boundaries.issues());
     }
 
     private static CpuSectionGeometry translateSection(
@@ -85,6 +89,7 @@ public final class ClusterSceneTranslator {
             LabPbrMaterialSet materials,
             ClusterTranslationSettings settings,
             java.util.Map<EmissionDistribution.Key, EmissionDistribution> emissionBuildCache,
+            MediumCatalog mediumCatalog,
             ClusterTranslationWork work) {
         SectionMeshAccumulator accumulator = new SectionMeshAccumulator(
                 materials,
@@ -92,7 +97,8 @@ public final class ClusterSceneTranslator {
                 settings.segmentTriangleTarget(),
                 settings.maxOpacity2StateSubdivisionLevel(),
                 settings.maxOpacity4StateSubdivisionLevel(),
-                emissionBuildCache);
+                emissionBuildCache,
+                mediumCatalog);
         SectionMeshAccumulator.Quad quad = new SectionMeshAccumulator.Quad();
         SectionMeshAccumulator.Surface surface = new SectionMeshAccumulator.Surface();
         for (TransparentBoundaryResolver.ResolvedQuad resolved : resolvedQuads) {
@@ -126,6 +132,7 @@ public final class ClusterSceneTranslator {
                     capturedSurface.lightEmission(),
                     capturedSurface.sprite(),
                     capturedSurface.builtinMaterialClass())
+                    .setMediumId(mediumCatalog.resolve(definition.primary()))
                     .setDefinition(definition);
             accumulator.addQuad(quad, surface);
         }

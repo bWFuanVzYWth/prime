@@ -38,8 +38,10 @@ BsdfEvaluation primeEvaluateOfflineMinecraftTransmission(
             viewDirection,
             surface.t,
             volumeStack,
+            surface.mediumId,
             surface.adjacentBaseColor,
             surface.adjacentInterfaceControl,
+            surface.adjacentMediumId,
             primeUsesAirGap());
     return primeEvaluateMinecraftTransmissionCompleteFromState(
             state,

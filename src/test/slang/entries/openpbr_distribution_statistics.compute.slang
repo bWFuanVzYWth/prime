@@ -61,6 +61,8 @@ PrimeOpenPbrVolumeStack primeStatEmptyStack() {
     volume.albedo = float3(0.0);
     volume.anisotropy = 0.0;
     volume.ior = 1.0;
+    volume.mediumId = 0u;
+    volume.iorEncoding = 0u;
     stack.values[0] = volume;
     stack.values[1] = volume;
     stack.count = 0u;

@@ -9,6 +9,8 @@ import dev.prime.render.material.PrimitiveControl;
 import dev.prime.render.material.ScatteringFamily;
 
 public final class PrimitivePacking {
+    /** PrimitiveRecord word carrying an exact cluster-local or renderer-lifetime MediumId. */
+    public static final int MEDIUM_ID_WORD = 4;
     private static final float UV_FIXED_SCALE = 65_536.0F;
     private static final int UV_FIXED_ONE = 0xffff;
     public static final int CONTROL_ALPHA_CUTOUT = 1;

@@ -5,6 +5,7 @@ import "bsdf/compact/contract/material.slang";
 import "model/material/defaults.slang";
 import "model/material/translation.slang";
 import "model/material/transparent.slang";
+import "service/bsdf/support/medium_identity.slang";
 import "bsdf/compact/contract/volume.slang";
 import "bsdf/compact/math/spectrum.slang";
 import "bsdf/compact/model/material.slang";
@@ -16,6 +17,8 @@ public PrimeOpenPbrVolumeStack primeEmptyVolumeStack() {
     result.values[0].albedo = float3(0.0);
     result.values[0].anisotropy = 0.0;
     result.values[0].ior = 1.0;
+    result.values[0].mediumId = PRIME_MEDIUM_ID_VACUUM;
+    result.values[0].iorEncoding = 0u;
     result.values[1] = result.values[0];
     result.count = 0u;
     return result;
@@ -100,6 +103,8 @@ public PrimeOpenPbrVolumeStack primeCameraWaterVolumeStack() {
             0u);
     PrimeOpenPbrVolume volume = primeOpenPbrVolumeFromTransmission(material.transmission);
     volume.ior = material.specular.ior;
+    volume.mediumId = PRIME_MEDIUM_ID_WATER;
+    volume.iorEncoding = PRIME_MEDIUM_IOR_WATER;
     primeOpenPbrStackPush(result, volume);
     return result;
 }

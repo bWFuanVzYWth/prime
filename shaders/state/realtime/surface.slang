@@ -65,7 +65,7 @@ public void primeStoreWavefrontSurface(uint pathIndex, SurfaceInteraction surfac
             asuint(surface.opacity),
             asuint(surface.roughness),
             surface.opticalControl,
-            0u));
+            surface.mediumId));
     primeStoreWavefrontSurfaceLane(base, 4u, uint4(
             asuint(surface.shadingNormal.x),
             asuint(surface.shadingNormal.y),
@@ -80,7 +80,7 @@ public void primeStoreWavefrontSurface(uint pathIndex, SurfaceInteraction surfac
             asuint(surface.position.y),
             asuint(surface.position.z),
             surface.motionZFlags,
-            0u));
+            surface.adjacentMediumId));
 }
 
 public SurfaceInteraction primeLoadWavefrontSurface(uint pathIndex) {
@@ -113,6 +113,7 @@ public SurfaceInteraction primeLoadWavefrontSurface(uint pathIndex) {
     surface.opacity = asfloat(lane.x);
     surface.roughness = asfloat(lane.y);
     surface.opticalControl = lane.z;
+    surface.mediumId = lane.w;
     lane = primeLoadWavefrontSurfaceLane(base, 4u);
     surface.shadingNormal = asfloat(lane.xyz);
     float adjacentX = asfloat(lane.w);
@@ -124,5 +125,6 @@ public SurfaceInteraction primeLoadWavefrontSurface(uint pathIndex) {
     lane = primeLoadWavefrontSurfaceLane(base, 6u);
     surface.position = float3(positionX, asfloat(lane.x), asfloat(lane.y));
     surface.motionZFlags = lane.z;
+    surface.adjacentMediumId = lane.w;
     return surface;
 }

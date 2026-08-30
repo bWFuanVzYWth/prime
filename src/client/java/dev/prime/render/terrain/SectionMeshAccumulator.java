@@ -28,6 +28,7 @@ public final class SectionMeshAccumulator {
     private final int maxOpacity2StateSubdivisionLevel;
     private final int maxOpacity4StateSubdivisionLevel;
     private final Map<EmissionDistribution.Key, EmissionDistribution> emissionBuildCache;
+    private final MediumCatalog mediumCatalog;
     private final ArrayList<CpuSectionMesh> segments = new ArrayList<>();
     private final ArrayList<MergeFace> mergeFaces = new ArrayList<>();
     private MeshBuilder opaque;
@@ -82,7 +83,8 @@ public final class SectionMeshAccumulator {
                 segmentTriangleTarget,
                 maxOpacity2StateSubdivisionLevel,
                 maxOpacity4StateSubdivisionLevel,
-                new HashMap<>());
+                new HashMap<>(),
+                new MediumCatalog());
     }
 
     SectionMeshAccumulator(
@@ -92,6 +94,24 @@ public final class SectionMeshAccumulator {
             int maxOpacity2StateSubdivisionLevel,
             int maxOpacity4StateSubdivisionLevel,
             Map<EmissionDistribution.Key, EmissionDistribution> emissionBuildCache) {
+        this(
+                labPbrMaterialSet,
+                buildOpacityMicromap,
+                segmentTriangleTarget,
+                maxOpacity2StateSubdivisionLevel,
+                maxOpacity4StateSubdivisionLevel,
+                emissionBuildCache,
+                new MediumCatalog());
+    }
+
+    SectionMeshAccumulator(
+            LabPbrMaterialSet labPbrMaterialSet,
+            boolean buildOpacityMicromap,
+            int segmentTriangleTarget,
+            int maxOpacity2StateSubdivisionLevel,
+            int maxOpacity4StateSubdivisionLevel,
+            Map<EmissionDistribution.Key, EmissionDistribution> emissionBuildCache,
+            MediumCatalog mediumCatalog) {
         if (segmentTriangleTarget < 2 || (segmentTriangleTarget & 1) != 0) {
             throw new IllegalArgumentException(
                     "Section mesh segment capacity must contain whole quads");
@@ -109,6 +129,7 @@ public final class SectionMeshAccumulator {
         this.maxOpacity4StateSubdivisionLevel = maxOpacity4StateSubdivisionLevel;
         this.emissionBuildCache = Objects.requireNonNull(
                 emissionBuildCache, "emissionBuildCache");
+        this.mediumCatalog = Objects.requireNonNull(mediumCatalog, "mediumCatalog");
         this.beginSegment();
     }
 
@@ -362,7 +383,7 @@ public final class SectionMeshAccumulator {
                 surface.sprite(),
                 this.labPbrMaterials.emissionMap(surface.sprite().id()));
         destination.primitives.add(packedTint);
-        destination.primitives.add(0);
+        destination.primitives.add(surface.mediumId);
         destination.primitives.add(encodedEmitterIndex == 0
                 ? PrimitivePacking.packControlTexture(flags, surface.sprite().textureId())
                 : PrimitivePacking.packControlEmitter(flags, encodedEmitterIndex - 1));
@@ -409,7 +430,8 @@ public final class SectionMeshAccumulator {
                 PrimitivePacking.packUv(endpoint.referenceU(), endpoint.referenceV()),
                 PrimitivePacking.packTint(
                         ClusterSceneTranslator.averageColor(adjacent)),
-                adjacent.sprite().textureId()
+                adjacent.sprite().textureId(),
+                this.mediumCatalog.resolve(endpoint)
             };
         }
         SurfaceDefinition.MaterialBinding secondary;
@@ -487,7 +509,7 @@ public final class SectionMeshAccumulator {
             PrimitivePacking.packUv(uv1U, uv1V),
             PrimitivePacking.packUv(uv2U, uv2V),
             packedTint,
-            0,
+            this.mediumCatalog.resolve(binding),
             PrimitivePacking.packControlTexture(flags, captured.sprite().textureId()),
             PrimitivePacking.packUvDensity(
                     edge1X, edge1Y, edge1Z,
@@ -547,6 +569,7 @@ public final class SectionMeshAccumulator {
         private CapturedSprite sprite;
         private SurfaceDefinition definition;
         private BuiltinMaterialClass builtinMaterialClass;
+        private int mediumId;
 
         public Surface set(
                 int tint,
@@ -628,6 +651,15 @@ public final class SectionMeshAccumulator {
             this.builtinMaterialClass = Objects.requireNonNull(
                     builtinMaterialClass, "builtinMaterialClass");
             this.definition = null;
+            this.mediumId = 0;
+            return this;
+        }
+
+        Surface setMediumId(int mediumId) {
+            if (mediumId < 0) {
+                throw new IllegalArgumentException("MediumId must not be negative");
+            }
+            this.mediumId = mediumId;
             return this;
         }
 
@@ -642,6 +674,10 @@ public final class SectionMeshAccumulator {
 
         int tint() {
             return this.tint;
+        }
+
+        int mediumId() {
+            return this.mediumId;
         }
 
         boolean cutout() {

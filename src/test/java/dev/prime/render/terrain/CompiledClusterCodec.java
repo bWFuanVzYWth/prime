@@ -9,8 +9,9 @@ import java.util.Objects;
 /** Current-format binary replay used by behavior tests. */
 final class CompiledClusterCodec {
     private static final int MAGIC = 0x3143_4350;
-    private static final int VERSION = 16;
+    private static final int VERSION = 17;
     private static final int MAX_SEGMENTS = 4_096;
+    private static final int MAX_MEDIA = 1_048_576;
     private static final int MAX_VOXEL_MESHES = 4_096;
     private static final int MAX_VOXEL_INSTANCES = 4_194_304;
     private static final int MAX_ENCODED_BYTES = 1 << 30;
@@ -40,6 +41,13 @@ final class CompiledClusterCodec {
         output.putLong(mesh.opaqueTriangleCount());
         output.putLong(mesh.cutoutTriangleCount());
         output.putLong(mesh.transmissiveTriangleCount());
+        output.putInt(mesh.mediumCatalog().size());
+        for (MediumKey medium : mesh.mediumCatalog()) {
+            output.putInt(medium.kind().ordinal());
+            output.putInt(medium.sourceIdentity());
+            output.putInt(medium.tint());
+            output.putInt(medium.water() ? 1 : 0);
+        }
         output.putInt(mesh.segments().size());
         for (CpuClusterMesh.Segment segment : mesh.segments()) {
             output.putInt(segment.opaqueTriangleCount());
@@ -112,6 +120,28 @@ final class CompiledClusterCodec {
             long cutout = nonnegative(input.getLong(), "cutout triangle count");
             long transmissive = nonnegative(
                     input.getLong(), "transmissive triangle count");
+            int mediumCount = boundedCount(
+                    input.getInt(), MAX_MEDIA, "medium catalog count");
+            ArrayList<MediumKey> mediumCatalog = new ArrayList<>(mediumCount);
+            for (int index = 0; index < mediumCount; index++) {
+                int kind = input.getInt();
+                if (kind < 0 || kind >= MediumKey.Kind.values().length) {
+                    throw new IllegalArgumentException(
+                            "Compiled-cluster medium kind is invalid");
+                }
+                int sourceIdentity = input.getInt();
+                int tint = input.getInt();
+                int water = input.getInt();
+                if (water != 0 && water != 1) {
+                    throw new IllegalArgumentException(
+                            "Compiled-cluster medium water flag is invalid");
+                }
+                mediumCatalog.add(new MediumKey(
+                        MediumKey.Kind.values()[kind],
+                        sourceIdentity,
+                        tint,
+                        water != 0));
+            }
             int segmentCount = boundedCount(
                     input.getInt(), MAX_SEGMENTS, "cluster segment count");
             ArrayList<CpuClusterMesh.Segment> segments =
@@ -260,7 +290,7 @@ final class CompiledClusterCodec {
                     opacity,
                     lights,
                     voxelMeshes,
-                    voxelInstances);
+                    voxelInstances).withMediumCatalog(mediumCatalog);
             validatePrimitiveRecords(mesh);
             return new CompiledCluster(
                     key, clusterX, clusterY, clusterZ, mesh);
@@ -271,7 +301,10 @@ final class CompiledClusterCodec {
     }
 
     private static long encodedByteSize(CompiledCluster cluster) {
-        long result = 56L;
+        long result = Math.addExact(
+                60L,
+                Math.multiplyExact(
+                        (long) cluster.mesh().mediumCatalog().size(), 16L));
         for (CpuClusterMesh.Segment segment : cluster.mesh().segments()) {
             result = Math.addExact(result, 24L);
             result = arrayBytes(result, segment.positions().length, Float.BYTES);
@@ -399,6 +432,7 @@ final class CompiledClusterCodec {
 
     private static void validatePrimitiveRecords(CpuClusterMesh mesh) {
         int emitterCount = mesh.lights().emitterCount();
+        int mediumCount = mesh.mediumCatalog().size();
         for (CpuClusterMesh.Segment segment : mesh.segments()) {
             validatePrimitiveRecords(
                     segment.primitiveRecords(),
@@ -408,12 +442,19 @@ final class CompiledClusterCodec {
                     segment.opaqueMacroTriangleCount(),
                     segment.cutoutMacroTriangleCount(),
                     segment.transmissiveMacroTriangleCount(),
-                    emitterCount);
+                    emitterCount,
+                    mediumCount);
             SurfaceRelationTable.validate(
                     segment.surfaceRelationRecords(),
                     segment.opaquePrimitiveCount()
                             + segment.cutoutPrimitiveCount()
                             + segment.transmissivePrimitiveCount());
+            validateSurfaceRelationMediumIds(
+                    segment.surfaceRelationRecords(),
+                    segment.opaquePrimitiveCount()
+                            + segment.cutoutPrimitiveCount()
+                            + segment.transmissivePrimitiveCount(),
+                    mediumCount);
         }
         for (CpuVoxelMesh voxelMesh : mesh.voxelMeshes()) {
             validatePrimitiveRecords(
@@ -421,6 +462,7 @@ final class CompiledClusterCodec {
                     voxelMesh.opaqueTriangleCount(),
                     voxelMesh.cutoutTriangleCount(),
                     voxelMesh.transmissiveTriangleCount(),
+                    0,
                     0,
                     0,
                     0,
@@ -436,7 +478,8 @@ final class CompiledClusterCodec {
             int opaqueMacroCount,
             int cutoutMacroCount,
             int transmissiveMacroCount,
-            int emitterCount) {
+            int emitterCount,
+            int mediumCount) {
         int opaqueEnd = CpuSectionMesh.primitiveCount(opaqueCount, opaqueMacroCount);
         int cutoutEnd = Math.addExact(
                 opaqueEnd,
@@ -448,13 +491,18 @@ final class CompiledClusterCodec {
         for (int primitiveIndex = 0; primitiveIndex < primitiveCount; primitiveIndex++) {
             int record = Math.multiplyExact(
                     primitiveIndex, CpuSectionMesh.PRIMITIVE_WORDS);
-            if (records[record + 4] != 0) {
-                throw new IllegalArgumentException(
-                        "Compiled-cluster primitive has nonzero reserved data");
-            }
             int flags = PrimitivePacking.unpackControl(
                     records[record + 3], records[record + 5]);
             PrimitivePacking.requireValidControl(flags);
+            int mediumId = records[record + PrimitivePacking.MEDIUM_ID_WORD];
+            boolean solidMedium = PrimitivePacking.isTransmissive(flags)
+                    && !PrimitivePacking.isThinWalled(flags);
+            if (mediumId < 0
+                    || mediumId > mediumCount
+                    || solidMedium != (mediumId != 0)) {
+                throw new IllegalArgumentException(
+                        "Compiled-cluster primitive has an invalid MediumId");
+            }
             boolean constantUv = records[record + 6]
                     == PrimitivePacking.CONSTANT_UV_DENSITY;
             int constantMode = 0;
@@ -499,6 +547,39 @@ final class CompiledClusterCodec {
             if (!Float.isFinite(uvDensity)) {
                 throw new IllegalArgumentException(
                         "Compiled-cluster UV density must be finite");
+            }
+        }
+    }
+
+    private static void validateSurfaceRelationMediumIds(
+            int[] table, int primitiveCount, int mediumCount) {
+        if (table.length == 0) {
+            return;
+        }
+        for (int primitive = 0; primitive < primitiveCount; primitive++) {
+            int offset = table[primitive];
+            if (offset == 0) {
+                continue;
+            }
+            int kind = table[offset] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK;
+            int mediumId = kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY
+                    ? table[offset + 4]
+                    : table[offset + 1 + PrimitivePacking.MEDIUM_ID_WORD];
+            boolean requiresMedium;
+            if (kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY) {
+                requiresMedium = true;
+            } else {
+                int material = offset + 1;
+                int flags = PrimitivePacking.unpackControl(
+                        table[material + 3], table[material + 5]);
+                requiresMedium = PrimitivePacking.isTransmissive(flags)
+                        && !PrimitivePacking.isThinWalled(flags);
+            }
+            if (mediumId < 0
+                    || mediumId > mediumCount
+                    || requiresMedium != (mediumId != 0)) {
+                throw new IllegalArgumentException(
+                        "Compiled-cluster relation has an invalid MediumId");
             }
         }
     }

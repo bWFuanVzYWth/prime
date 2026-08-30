@@ -12,6 +12,7 @@ public struct PrimeOfflineSurfaceScratch {
     public uint4 materialAdjacent;
     public uint4 positionControl;
     public uint motion;
+    public uint2 mediumIds;
 };
 
 public PrimeOfflineSurfaceScratch primePackOfflineSurfaceScratch(
@@ -48,6 +49,7 @@ public PrimeOfflineSurfaceScratch primePackOfflineSurfaceScratch(
             asuint(surface.position.y),
             asuint(surface.position.z));
     scratch.motion = surface.motionZFlags;
+    scratch.mediumIds = uint2(surface.mediumId, surface.adjacentMediumId);
     return scratch;
 }
 
@@ -67,6 +69,8 @@ public SurfaceInteraction primeUnpackOfflineSurfaceScratch(
     surface.roughness = asfloat(scratch.shadingRoughness.w);
     surface.opticalControl = scratch.materialAdjacent.x;
     surface.motionZFlags = scratch.motion;
+    surface.mediumId = scratch.mediumIds.x;
+    surface.adjacentMediumId = scratch.mediumIds.y;
     surface.adjacentBaseColor = asfloat(scratch.materialAdjacent.yzw);
     surface.adjacentInterfaceControl = scratch.positionControl.x;
     surface.position = asfloat(scratch.positionControl.yzw);

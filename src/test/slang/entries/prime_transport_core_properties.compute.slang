@@ -7,6 +7,7 @@ import "math/light_tree.slang";
 import "math/transport.slang";
 import "math/packed_geometry.slang";
 import "model/material/transparent.slang";
+import "service/bsdf/support/medium_identity.slang";
 import "state/realtime/medium.slang";
 import "state/offline/queue_layout.slang";
 import "state/offline/surface_record.slang";
@@ -346,11 +347,12 @@ void primeCheckShadowOpticalDepth(
     queuedFirstMedium.ior = 1.333;
     queuedFirstMedium.albedo = float3(0.0);
     queuedFirstMedium.anisotropy = 0.0;
+    queuedFirstMedium.mediumId = PRIME_MEDIUM_ID_WATER;
+    queuedFirstMedium.iorEncoding = PRIME_MEDIUM_IOR_WATER;
     float3 queuedFirstExtinction = primeShadowCanonicalExtinction(
             primeUnpackWavefrontMedium(
-                    primePackWavefrontMedium(queuedFirstMedium)).extinction);
-    float3 nearbyBoundaryExtinction = queuedFirstExtinction
-            + float3(0.25, -0.25, 0.125) * (1.0 / 1024.0);
+                    primePackWavefrontMedium(queuedFirstMedium),
+                    queuedFirstMedium.iorEncoding).extinction);
     float3 insideMoment = primeShadowBoundaryOpticalDepthMoment(
             float3(0.0), queuedFirstExtinction, firstHit, false);
     float3 insideTerminal = float3(0.0);
@@ -424,7 +426,20 @@ void primeCheckShadowOpticalDepth(
     if (!primeTestClose(forward, expectedOutside, distanceTolerance, 2.0e-6)
             || !primeTestClose(forward, reverse, distanceTolerance, 2.0e-6)
             || any(queuedFirstExtinction != firstExtinction)
-            || !primeShadowSameMedium(queuedFirstExtinction, nearbyBoundaryExtinction)
+            || primeShadowStartingMediumIndex(
+                    PRIME_MEDIUM_ID_WATER,
+                    uint2(PRIME_MEDIUM_ID_WATER, 29u),
+                    float4(firstExtinction, 1.0),
+                    float4(secondExtinction, 1.0),
+                    2u,
+                    true) != 0
+            || primeShadowStartingMediumIndex(
+                    17u,
+                    uint2(PRIME_MEDIUM_ID_WATER, 29u),
+                    float4(firstExtinction, 1.0),
+                    float4(secondExtinction, 1.0),
+                    2u,
+                    true) != -1
             || !primeTestClose(inside, expectedInside, distanceTolerance, 2.0e-6)
             || !primeTestClose(nested, expectedNested, distanceTolerance, 2.0e-6)
             || !primeTestClose(
@@ -455,22 +470,42 @@ void primeCheckShadowOpticalDepth(
 }
 
 void primeCheckWavefrontMedium(
-        inout PrimeTransportResult result, float4 transport, float4 coldVolumeFields)
+        inout PrimeTransportResult result,
+        uint2 identity,
+        float4 transport,
+        float4 coldVolumeFields)
 {
     PrimeOpenPbrVolume medium;
     medium.extinction = transport.xyz;
-    medium.ior = transport.w;
+    medium.ior = primeDecodeMediumIor(identity.y);
     medium.albedo = coldVolumeFields.xyz;
     medium.anisotropy = coldVolumeFields.w;
+    medium.mediumId = identity.x;
+    medium.iorEncoding = identity.y;
     uint4 packed = primePackWavefrontMedium(medium);
-    PrimeOpenPbrVolume restored = primeUnpackWavefrontMedium(packed);
+    PrimeOpenPbrVolume restored = primeUnpackWavefrontMedium(packed, identity.y);
+    PrimeOpenPbrVolumeStack stack;
+    stack.values[0] = medium;
+    stack.values[1] = medium;
+    stack.count = 2u;
+    uint packedIors = primePackWavefrontMediumIors(stack);
+    uint guideControl = 0x00007f07u;
+    uint mergedControl = primeMergeWavefrontGuideControl(packedIors, guideControl);
     primeTransportClassify(result.mask, restored.extinction);
     primeTransportClassify(result.mask, restored.ior);
     if (any(primePackWavefrontMedium(restored) != packed)
             || any(restored.albedo != float3(0.0))
             || restored.anisotropy != 0.0
             || any(asuint(restored.extinction) != asuint(medium.extinction))
-            || asuint(restored.ior) != asuint(medium.ior)) {
+            || asuint(restored.ior) != asuint(medium.ior)
+            || restored.mediumId != medium.mediumId
+            || restored.iorEncoding != medium.iorEncoding
+            || primeUnpackWavefrontMediumIor(packedIors, 0u) != identity.y
+            || primeUnpackWavefrontMediumIor(packedIors, 1u) != identity.y
+            || (mergedControl & ~PRIME_WAVEFRONT_GUIDE_CONTROL_MASK)
+                    != (packedIors & ~PRIME_WAVEFRONT_GUIDE_CONTROL_MASK)
+            || (mergedControl & PRIME_WAVEFRONT_GUIDE_CONTROL_MASK)
+                    != (guideControl & PRIME_WAVEFRONT_GUIDE_CONTROL_MASK)) {
         result.mask |= PRIME_TEST_FAILURE_STATE;
     }
     result.first = float4(restored.extinction, restored.ior);
@@ -722,6 +757,8 @@ void primeCheckOfflineSurfaceScratch(
     surface.adjacentBaseColor = fourth.xyz;
     surface.adjacentInterfaceControl = control.y ^ control.z;
     surface.position = fifth.xyz;
+    surface.mediumId = 0xfedcba98u;
+    surface.adjacentMediumId = 0x89abcdefu;
 
     PrimeOfflineSurfaceScratch packed = primePackOfflineSurfaceScratch(surface);
     SurfaceInteraction unpacked = primeUnpackOfflineSurfaceScratch(packed);
@@ -733,6 +770,8 @@ void primeCheckOfflineSurfaceScratch(
             && all(packed.materialAdjacent == roundTrip.materialAdjacent)
             && all(packed.positionControl == roundTrip.positionControl)
             && packed.motion == roundTrip.motion
+            && unpacked.mediumId == surface.mediumId
+            && unpacked.adjacentMediumId == surface.adjacentMediumId
             && asuint(unpacked.textureLod) == 0u
             && primeSurfaceTriangleIndex(unpacked)
                     == (surface.motionZFlags & PRIME_SURFACE_TRIANGLE_MASK);
@@ -809,7 +848,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     } else if (kind == 6) {
         primeCheckShadowOpticalDepth(result, first, second);
     } else if (kind == 7) {
-        primeCheckWavefrontMedium(result, first, second);
+        primeCheckWavefrontMedium(result, control.yz, first, second);
     } else if (kind == 8) {
         primeCheckLightBranch(
                 result,

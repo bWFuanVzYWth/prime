@@ -65,7 +65,7 @@ public static const uint PRIME_WAVEFRONT_BYTE_MASK = 0xffu;
 public static const uint PRIME_WAVEFRONT_MEDIUM_COUNT_MASK = 0x3u;
 public static const uint PRIME_WAVEFRONT_PRIMARY_FLAGS_MASK = 0x3fffu;
 public static const uint PRIME_WAVEFRONT_PSR_CONTROL_MASK = 0x3u;
-// sourceAndPathControl.z is guide-only so guide state cannot alter radiance path flags. During
+// The low guide lanes are disjoint from exact medium IOR-source encodings in this word. During
 // delta walk fallback means detached; later phases reuse it after abandoning an invalid PSR guide.
 public static const uint PRIME_WAVEFRONT_GUIDE_FALLBACK = 0x4u;
 public static const uint PRIME_WAVEFRONT_GUIDE_DETACHED =

@@ -27,6 +27,7 @@ import "state/realtime/contract.slang";
 import "state/realtime/detached_guide.slang";
 import "state/realtime/guide.slang";
 import "state/realtime/light.slang";
+import "state/realtime/medium.slang";
 import "state/realtime/ordinary.slang";
 import "state/realtime/psr.slang";
 import "state/realtime/queue.slang";
@@ -279,7 +280,9 @@ public bool primeAdvanceTransparentDeltaWalk(
         PrimeWavefrontTransportRecord guideOwner =
                 primeWavefrontPaths[recordIndex].transport;
         updated.throughputAndReserved.w = guideOwner.throughputAndReserved.w;
-        updated.sourceAndPathControl.z = guideOwner.sourceAndPathControl.z;
+        updated.sourceAndPathControl.z = primeMergeWavefrontGuideControl(
+                updated.sourceAndPathControl.z,
+                guideOwner.sourceAndPathControl.z);
     }
     primeStoreWavefrontTransportRecord(recordIndex, updated);
     if (observesGuide) {

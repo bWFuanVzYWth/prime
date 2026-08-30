@@ -1072,17 +1072,7 @@ final class TransparentBoundaryResolver {
         private static boolean sameMedium(Candidate first, Candidate second) {
             CapturedSectionGeometry.Surface a = first.quad.surface();
             CapturedSectionGeometry.Surface b = second.quad.surface();
-            int familyA = a.block().mediumFamily();
-            int familyB = b.block().mediumFamily();
-            if (a.fluid() != null && b.fluid() != null) {
-                return a.water() == b.water();
-            }
-            boolean sameIdentity = familyA != 0 && familyA == familyB
-                    || a.sprite().id().equals(b.sprite().id());
-            return a.water() == b.water()
-                    && ClusterSceneTranslator.averageColor(a)
-                    == ClusterSceneTranslator.averageColor(b)
-                    && sameIdentity;
+            return MediumKey.of(a).equals(MediumKey.of(b));
         }
     }
 

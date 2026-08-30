@@ -138,7 +138,7 @@ final class SurfaceRelationTable {
                             "Boundary relation contains invalid control flags");
                 }
                 PrimitivePacking.requireValidControl(recipe);
-                yield 4;
+                yield 5;
             }
             case CpuSectionMesh.SURFACE_RELATION_OVERLAY -> {
                 int lowAllowed = CpuSectionMesh.SURFACE_RELATION_KIND_MASK

@@ -27,12 +27,6 @@ public float3 primeShadowCanonicalExtinction(float3 extinction)
     return float3(extinction01, extinction2);
 }
 
-public bool primeShadowSameMedium(float3 firstExtinction, float3 secondExtinction)
-{
-    float3 scale = max(max(abs(firstExtinction), abs(secondExtinction)), float3(1.0));
-    return all(abs(firstExtinction - secondExtinction) <= scale * (1.0 / 1024.0));
-}
-
 public float3 primeShadowStartingMediumCoefficient(
         float3 outerExtinction,
         float3 innerExtinction,
@@ -42,16 +36,17 @@ public float3 primeShadowStartingMediumCoefficient(
 }
 
 public int primeShadowStartingMediumIndex(
-        float3 boundaryExtinction,
+        uint boundaryMediumId,
+        uint2 startingMediumIds,
         float4 outerExtinctionWinding,
         float4 innerExtinctionWinding,
         uint mediumCount,
         bool entering)
 {
     bool matchesOuter = mediumCount > 0
-            && primeShadowSameMedium(boundaryExtinction, outerExtinctionWinding.xyz);
+            && boundaryMediumId == startingMediumIds.x;
     bool matchesInner = mediumCount > 1
-            && primeShadowSameMedium(boundaryExtinction, innerExtinctionWinding.xyz);
+            && boundaryMediumId == startingMediumIds.y;
     if (matchesOuter && matchesInner) {
         if (entering) {
             return outerExtinctionWinding.w <= 0.0 ? 0 : 1;

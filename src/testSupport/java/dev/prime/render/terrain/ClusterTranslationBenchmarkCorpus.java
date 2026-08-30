@@ -31,15 +31,15 @@ public final class ClusterTranslationBenchmarkCorpus {
     public static Fingerprint expected(String id) {
         return switch (id) {
             case "typical" -> new Fingerprint(
-                    "fe968f0abae0d13d59d0b3dd6680364d8de4f10b12b37ea7b68300812f044bef",
+                    "3882d4f51e05353426c62cdc6c06ef55c430063523f8ab024b6ded37f467cd97",
                     134L,
                     70L,
-                    7448L);
+                    7456L);
             case "extreme" -> new Fingerprint(
-                    "ce49711ba93101b0b4444947c6c685fbb084be618d096443980aed07fc23080b",
+                    "9beccf5cc7ecd1bd147836c4fd6466d7e86b15ff0c722024b2e1b51d6ff96e99",
                     2174L,
                     2111L,
-                    187028L);
+                    195220L);
             default -> throw new IllegalArgumentException("Unknown translation corpus: " + id);
         };
     }

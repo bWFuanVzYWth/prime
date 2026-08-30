@@ -18,10 +18,12 @@ layout(location = 1) rayPayloadInEXT PrimeShadowPayload primeShadowPayload;
 
 void primeAccumulateSolidMediumBoundary(
         inout PrimeShadowPayload primeShadowPayload,
+        uint mediumId,
         float3 extinction,
         bool entering) {
     int startingMediumIndex = primeShadowStartingMediumIndex(
-            extinction,
+            mediumId,
+            primeShadowPayload.startingMediumIds,
             primeShadowPayload.startingExtinction0Winding,
             primeShadowPayload.startingExtinction1Winding,
             primeShadowPayload.startingMediumCount,
@@ -169,11 +171,12 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     } else {
         bool entering = cosine < 0.0;
         primeAccumulateSolidMediumBoundary(
-                primeShadowPayload, extinction, entering);
+                primeShadowPayload, primitive.mediumId, extinction, entering);
         if ((relation.control & PRIME_SURFACE_RELATION_KIND_MASK)
                 == PRIME_SURFACE_RELATION_BOUNDARY) {
             primeAccumulateSolidMediumBoundary(
                     primeShadowPayload,
+                    relation.mediumId,
                     primeShadowCanonicalExtinction(
                             primeSurfaceBoundaryExtinction(relation)),
                     !entering);

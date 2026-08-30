@@ -30,6 +30,7 @@ public PrimeShadowTrace primeTracePreparedShadow(
         uint2 targetEmitter,
         float3 startingExtinction0,
         float3 startingExtinction1,
+        uint2 startingMediumIds,
         uint startingMediumCount) {
     primeShadowPayload.opticalDepthMomentHitDistance = float4(0.0);
     primeShadowPayload.terminalExtinctionRayDistance = float4(
@@ -38,6 +39,7 @@ public PrimeShadowTrace primeTracePreparedShadow(
             startingExtinction0, startingMediumCount > 0u ? 1.0 : 0.0);
     primeShadowPayload.startingExtinction1Winding = float4(
             startingExtinction1, startingMediumCount > 1u ? 1.0 : 0.0);
+    primeShadowPayload.startingMediumIds = startingMediumIds;
     primeShadowPayload.startingMediumCount = startingMediumCount;
     primeShadowPayload.sourcePrimitive = sourcePrimitive;
     primeShadowPayload.targetEmitter = targetEmitter;
@@ -86,6 +88,9 @@ public PrimeShadowTrace primeTraceShadow(
             ? primeShadowCanonicalExtinction(
                     volumeStack.values[1].extinction)
             : float3(0.0);
+    uint2 startingMediumIds = uint2(
+            startingMediumCount > 0u ? volumeStack.values[0].mediumId : 0u,
+            startingMediumCount > 1u ? volumeStack.values[1].mediumId : 0u);
     return primeTracePreparedShadow(context,
             surface.position,
             light.direction,
@@ -94,6 +99,7 @@ public PrimeShadowTrace primeTraceShadow(
             targetEmitter,
             startingExtinction0,
             startingExtinction1,
+            startingMediumIds,
             startingMediumCount);
 }
 

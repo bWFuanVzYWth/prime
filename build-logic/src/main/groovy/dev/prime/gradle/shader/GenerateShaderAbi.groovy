@@ -154,10 +154,10 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		}
 		if (offlineWavefrontContract.pathRecordSize != 144
 				|| offlineWavefrontContract.pathSlotsPerPixel != 1
-				|| offlineWavefrontContract.surfaceRecordSize != 100
+				|| offlineWavefrontContract.surfaceRecordSize != 108
 				|| offlineWavefrontContract.stageRecordSize != 112
 				|| offlineWavefrontContract.stageRecordSize
-						!= offlineWavefrontContract.surfaceRecordSize + 12
+						!= offlineWavefrontContract.surfaceRecordSize + 4
 				|| offlineWavefrontContract.queueEntriesPerPixel != 1
 				|| offlineWavefrontContract.queueStorageEntriesPerPixel != 2
 				|| offlineWavefrontContract.queueCount != 2

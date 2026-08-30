@@ -149,21 +149,28 @@ final class TransparentBoundaryResolverTest {
 
             assertEquals(2L, mesh.transmissiveTriangleCount());
             assertEquals(0L, mesh.opaqueTriangleCount());
-            assertEquals(40L, mesh.surfaceRelationBytes());
+            assertEquals(48L, mesh.surfaceRelationBytes());
             int[] records = mesh.segments().getFirst().surfaceRelationRecords();
-            assertEquals(10, records.length);
+            assertEquals(12, records.length);
             assertEquals(2, records[0]);
-            assertEquals(6, records[1]);
+            assertEquals(7, records[1]);
+            int primaryMedium = mesh.segments().getFirst()
+                    .primitiveRecords()[PrimitivePacking.MEDIUM_ID_WORD];
+            assertTrue(primaryMedium != 0);
+            assertTrue(records[6] != 0);
+            assertTrue(primaryMedium != records[6]);
+            assertEquals(2, mesh.mediumCatalog().size());
             assertEquals(
                     CpuSectionMesh.SURFACE_RELATION_BOUNDARY,
                     records[2] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
             assertEquals(
                     CpuSectionMesh.SURFACE_RELATION_BOUNDARY,
-                    records[6] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
+                    records[7] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
             CompiledCluster decoded = CompiledClusterCodec.decode(
                     CompiledClusterCodec.encode(
                             new CompiledCluster(0L, 0, 0, 0, mesh)));
-            assertEquals(40L, decoded.mesh().surfaceRelationBytes());
+            assertEquals(48L, decoded.mesh().surfaceRelationBytes());
+            assertEquals(mesh.mediumCatalog(), decoded.mesh().mediumCatalog());
             assertArrayEquals(
                     records,
                     decoded.mesh().segments().getFirst().surfaceRelationRecords());
@@ -378,7 +385,7 @@ final class TransparentBoundaryResolverTest {
             CpuClusterMesh mesh = translate(0, section.build());
 
             assertEquals(2L, mesh.transmissiveTriangleCount());
-            assertEquals(40L, mesh.surfaceRelationBytes());
+            assertEquals(48L, mesh.surfaceRelationBytes());
             assertEquals(1.0F, mesh.segments().getFirst().positions()[0], 0.0F);
         }
     }
@@ -437,9 +444,9 @@ final class TransparentBoundaryResolverTest {
     @Test
     void clusterHaloUsesTheLowerBlockAsTheOnlyOwner() {
         try (SectionMeshAccumulatorTest.TestSprite glass =
-                        new SectionMeshAccumulatorTest.TestSprite("halo_glass");
+                        new SectionMeshAccumulatorTest.TestSprite("halo_glass", 1);
                 SectionMeshAccumulatorTest.TestSprite ice =
-                        new SectionMeshAccumulatorTest.TestSprite("halo_ice")) {
+                        new SectionMeshAccumulatorTest.TestSprite("halo_ice", 2)) {
             CapturedSectionGeometry.Builder lowerSection =
                     new CapturedSectionGeometry.Builder();
             lowerSection.add(
@@ -466,7 +473,7 @@ final class TransparentBoundaryResolverTest {
             CpuClusterMesh upperMesh = translate(upper.build());
 
             assertEquals(2L, lowerMesh.transmissiveTriangleCount());
-            assertEquals(40L, lowerMesh.surfaceRelationBytes());
+            assertEquals(48L, lowerMesh.surfaceRelationBytes());
             assertEquals(0L, upperMesh.triangleCount());
         }
     }

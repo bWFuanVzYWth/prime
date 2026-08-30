@@ -80,8 +80,10 @@ struct SurfaceInteraction {
     float3 shadingNormal;
     float roughness;
     uint opticalControl;
+    uint mediumId;
     float3 adjacentBaseColor;
     uint adjacentInterfaceControl;
+    uint adjacentMediumId;
 };
 
 float3 primeSurfaceOutwardShadingNormal(SurfaceInteraction surface) {
@@ -127,9 +129,13 @@ PrimeOpenPbrVolumeStack primeAdapterStack(uint count) {
     volume.albedo = float3(0.0);
     volume.anisotropy = 0.0;
     volume.ior = 1.333;
+    volume.mediumId = 1u;
+    volume.iorEncoding = 1u << 8u;
     primeOpenPbrStackPush(stack, volume);
     volume.extinction = float3(0.02, 0.01, 0.005);
     volume.ior = 1.5;
+    volume.mediumId = 2u;
+    volume.iorEncoding = 0u;
     primeOpenPbrStackPush(stack, volume);
     stack.count = min(count, PRIME_OPENPBR_MAX_VOLUME_STACK_SIZE);
     return stack;
@@ -165,7 +171,9 @@ bool primeAdapterSameStack(
         if (!all(equal(a.extinction, b.extinction))
                 || !all(equal(a.albedo, b.albedo))
                 || a.anisotropy != b.anisotropy
-                || a.ior != b.ior) {
+                || a.ior != b.ior
+                || a.mediumId != b.mediumId
+                || a.iorEncoding != b.iorEncoding) {
             return false;
         }
     }
@@ -610,7 +618,8 @@ void primeAdapterProperties(
                 opticalControl,
                 viewDirection,
                 rayT,
-                stack);
+                stack,
+                37u);
         PrimeClosureTraits transmissionTraits =
                 primeMinecraftTransmissionClosureTraits(state);
         PrimeClosureTraits fastTransmissionTraits =
@@ -759,7 +768,12 @@ void primeAdapterProperties(
                 viewDirection,
                 firstSample,
                 rayT,
-                stack);
+                stack,
+                37u,
+                float3(0.0),
+                0u,
+                0u,
+                primeUsesAirGap());
         result.first = sampled.paths.reflection.bsdfSample;
         result.second = sampled.paths.transmission.bsdfSample;
         result.stackCounts = uint2(
@@ -775,7 +789,8 @@ void primeAdapterProperties(
                 opticalControl,
                 viewDirection,
                 rayT,
-                stack);
+                stack,
+                37u);
         primeAdapterCheckTransmissionMaterial(
                 result.mask,
                 state,
@@ -797,7 +812,12 @@ void primeAdapterProperties(
                         viewDirection,
                         secondSample,
                         rayT,
-                        stack);
+                        stack,
+                        37u,
+                        float3(0.0),
+                        0u,
+                        0u,
+                        primeUsesAirGap());
         bool thinWalled = state.geometryThinWalled != 0u;
         bool canRefract = primeAdapterCanRefract(
                 state,
@@ -1007,7 +1027,7 @@ void primeAdapterProperties(
                         << PRIME_ADJACENT_FRESNEL_SHIFT;
         float3 adjacentBaseColor = float3(0.2, 0.5, 0.8);
         PrimeOpenPbrVolume adjacent = primeAdjacentMediumVolume(
-                adjacentBaseColor, adjacentInterfaceControl);
+                adjacentBaseColor, adjacentInterfaceControl, 41u);
         PrimeCompactTransmissionState state = primeMinecraftBoundaryTransmissionState(
                 baseColor,
                 opacity,
@@ -1018,8 +1038,10 @@ void primeAdapterProperties(
                 viewDirection,
                 rayT,
                 stack,
+                37u,
                 adjacentBaseColor,
                 adjacentInterfaceControl,
+                41u,
                 primeUsesAirGap());
         PrimeClosureTraits boundaryTraits =
                 primeMinecraftTransmissionClosureTraits(state);
@@ -1053,8 +1075,10 @@ void primeAdapterProperties(
                 opacity,
                 materialControl,
                 opticalControl,
+                37u,
                 adjacentBaseColor,
                 adjacentInterfaceControl,
+                41u,
                 primeUsesAirGap());
         result.first = sampled.bsdfSample;
         result.stackCounts.x = sampled.volumeStack.count;
@@ -1098,9 +1122,9 @@ void primeAdapterProperties(
                         << PRIME_ADJACENT_FRESNEL_SHIFT;
         float3 adjacentBaseColor = float3(0.2, 0.5, 0.8);
         PrimeOpenPbrVolume surfaceMedium = primeBoundarySurfaceVolume(
-                baseColor, opacity, materialControl, opticalControl);
+                baseColor, opacity, materialControl, opticalControl, 37u);
         PrimeOpenPbrVolume adjacent = primeAdjacentMediumVolume(
-                adjacentBaseColor, adjacentInterfaceControl);
+                adjacentBaseColor, adjacentInterfaceControl, 41u);
         PrimeCompactTransmissionState state = primeMinecraftBoundaryTransmissionState(
                 baseColor,
                 opacity,
@@ -1111,8 +1135,10 @@ void primeAdapterProperties(
                 viewDirection,
                 rayT,
                 stack,
+                37u,
                 adjacentBaseColor,
                 adjacentInterfaceControl,
+                41u,
                 primeUsesAirGap());
         PrimeClosureTraits airGapTraits =
                 primeMinecraftTransmissionClosureTraits(state);
@@ -1146,8 +1172,10 @@ void primeAdapterProperties(
                 opacity,
                 materialControl,
                 opticalControl,
+                37u,
                 adjacentBaseColor,
                 adjacentInterfaceControl,
+                41u,
                 primeUsesAirGap());
         result.first = sampled.bsdfSample;
         result.stackCounts.x = sampled.volumeStack.count;
@@ -1189,7 +1217,8 @@ void primeAdapterProperties(
                 opticalControl,
                 viewDirection,
                 rayT,
-                stack);
+                stack,
+                37u);
         primeAdapterCheckTransmissionMaterial(
                 result.mask,
                 state,

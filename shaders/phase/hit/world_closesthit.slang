@@ -78,6 +78,8 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     primePayload.shadingNormal = material.shadingNormal;
     primePayload.roughness = material.roughness;
     primePayload.opticalControl = material.opticalControl;
+    primePayload.mediumId = primitive.mediumId;
+    primePayload.adjacentMediumId = 0u;
     primePayload.adjacentBaseColor = float3(0.0);
     primePayload.adjacentInterfaceControl = 0u;
     if ((relation.control & PRIME_SURFACE_RELATION_KIND_MASK)
@@ -88,6 +90,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
                 relation.textureId,
                 primeUnpackUv(relation.referenceUv));
         primePayload.adjacentBaseColor = adjacent.baseColor;
+        primePayload.adjacentMediumId = relation.mediumId;
         uint adjacentFresnelCode = adjacent.opticalControl
                 & PRIME_OPTICAL_FRESNEL_MASK;
         primePayload.adjacentInterfaceControl =

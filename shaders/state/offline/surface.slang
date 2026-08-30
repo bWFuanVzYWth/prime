@@ -17,8 +17,8 @@ public uint primeOfflineSurfaceWord(uint pathIndex) {
     return pathIndex * PRIME_OFFLINE_SURFACE_WORDS;
 }
 
-// Offline does not consume texture LOD after traversal. Source triangle identity remains exact;
-// the scratch record therefore needs 25 words instead of the realtime 28-word record.
+// Offline does not consume texture LOD after traversal. Source triangle and both medium identities
+// remain exact; the scratch record therefore needs 27 words instead of the realtime 28 words.
 public void primeStoreOfflineSurface(uint pathIndex, SurfaceInteraction surface) {
     uint word = primeOfflineSurfaceWord(pathIndex);
     if (surface.hitKind == PRIME_HIT_NONE) {
@@ -51,6 +51,8 @@ public void primeStoreOfflineSurface(uint pathIndex, SurfaceInteraction surface)
     primeOfflineQueue[word + 22u] = scratch.positionControl.z;
     primeOfflineQueue[word + 23u] = scratch.positionControl.w;
     primeOfflineQueue[word + 24u] = scratch.motion;
+    primeOfflineQueue[word + 25u] = scratch.mediumIds.x;
+    primeOfflineQueue[word + 26u] = scratch.mediumIds.y;
 }
 
 public SurfaceInteraction primeLoadOfflineSurface(uint pathIndex) {
@@ -92,6 +94,9 @@ public SurfaceInteraction primeLoadOfflineSurface(uint pathIndex) {
             primeOfflineQueue[word + 22u],
             primeOfflineQueue[word + 23u]);
     scratch.motion = primeOfflineQueue[word + 24u];
+    scratch.mediumIds = uint2(
+            primeOfflineQueue[word + 25u],
+            primeOfflineQueue[word + 26u]);
     SurfaceInteraction surface = primeUnpackOfflineSurfaceScratch(scratch);
     return surface;
 }

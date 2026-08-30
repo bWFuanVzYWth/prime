@@ -30,8 +30,10 @@ public PrimeTransmissivePrimarySample primeSampleMinecraftTransmissionPrimary(
         float3 reflectionSample,
         float rayT,
         PrimeOpenPbrVolumeStack volumeStack,
+        uint mediumId,
         float3 adjacentBaseColor,
         uint adjacentInterfaceControl,
+        uint adjacentMediumId,
         bool usesAirGap) {
     // This is the only fixed-split entry point. Translation, closure initialization, local-view
     // conversion and guide energy are shared before reflection and refraction diverge.
@@ -45,8 +47,10 @@ public PrimeTransmissivePrimarySample primeSampleMinecraftTransmissionPrimary(
             viewDirection,
             rayT,
             volumeStack,
+            mediumId,
             adjacentBaseColor,
             adjacentInterfaceControl,
+            adjacentMediumId,
             usesAirGap);
     float3 localView = primeOpenPbrOnbToLocal(state.onb, viewDirection);
     // One directional-energy lookup supplies the reflection guide and the complementary weights
@@ -78,54 +82,10 @@ public PrimeTransmissivePrimarySample primeSampleMinecraftTransmissionPrimary(
             opacity,
             materialControl,
             opticalControl,
+            mediumId,
             adjacentBaseColor,
             adjacentInterfaceControl,
+            adjacentMediumId,
             usesAirGap);
-    return result;
-}
-
-public PrimeTransmissivePrimarySample primeSampleMinecraftTransmissionPrimary(
-        float3 baseColor,
-        float opacity,
-        float3 outwardNormal,
-        uint materialControl,
-        float roughness,
-        uint opticalControl,
-        float3 viewDirection,
-        float3 reflectionSample,
-        float rayT,
-        PrimeOpenPbrVolumeStack volumeStack) {
-    // Preserve the original no-boundary instruction graph: its guide values are part of the
-    // deterministic primary split contract and do not need adjacent-medium specialization.
-    PrimeCompactTransmissionState state = primeMinecraftTransmissionState(
-            baseColor,
-            opacity,
-            outwardNormal,
-            materialControl,
-            roughness,
-            opticalControl,
-            viewDirection,
-            rayT,
-            volumeStack);
-    float3 localView = primeOpenPbrOnbToLocal(state.onb, viewDirection);
-    PrimeMinecraftMirrorSplit mirror = primeMinecraftMirrorSplit(
-            state, localView);
-
-    PrimeTransmissivePrimarySample result;
-    result.albedos.diffuse = primeSanitizeDenoiseAlbedo(
-            primeMinecraftPrimaryTransmissionAlbedo(state, materialControl));
-    result.albedos.specular = primeSanitizeDenoiseAlbedo(
-            mirror.reflectance);
-    result.paths = primeSampleMinecraftTransmissionSplitFromState(
-            state,
-            localView,
-            mirror,
-            outwardNormal,
-            viewDirection,
-            reflectionSample,
-            baseColor,
-            opacity,
-            materialControl,
-            volumeStack);
     return result;
 }

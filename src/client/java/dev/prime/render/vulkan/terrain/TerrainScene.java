@@ -38,6 +38,7 @@ public final class TerrainScene implements AutoCloseable {
     private final OpacityMicromapPool opacityMicromapPool;
     private final DynamicBufferPool dynamicBufferPool;
     private final VoxelBlasPool voxelBlasPool = new VoxelBlasPool();
+    private final MediumIdRegistry mediumIds = new MediumIdRegistry();
     private final BlasCompactionScheduler compactionScheduler =
             new BlasCompactionScheduler();
     private Long2ObjectOpenHashMap<GpuCluster> resident = new Long2ObjectOpenHashMap<>();
@@ -1160,7 +1161,12 @@ public final class TerrainScene implements AutoCloseable {
                             "Prime cluster " + upload.key() + " primitives");
                 }
                 copyMeshSegments(
-                        commandBuffer, stagingBatch, mesh, positions, primitives);
+                        commandBuffer,
+                        stagingBatch,
+                        mesh,
+                        this.mediumIds.resolve(mesh.mediumCatalog()),
+                        positions,
+                        primitives);
                 if (upload.dynamic()) {
                     blas = PreparedBlas.createWithBorrowedGeometry(
                             this.context,
@@ -1334,6 +1340,7 @@ public final class TerrainScene implements AutoCloseable {
             VkCommandBuffer commandBuffer,
             StagingArena.Batch staging,
             CpuClusterMesh mesh,
+            int[] localToRendererMediumId,
             VulkanBuffer positions,
             VulkanBuffer primitives) {
         long[] positionCursors = new long[] {
@@ -1353,6 +1360,8 @@ public final class TerrainScene implements AutoCloseable {
                     (long) CpuSectionMesh.PRIMITIVE_WORDS * Integer.BYTES)
         };
         for (CpuClusterMesh.Segment segment : mesh.segments()) {
+            int[] primitiveRecords = MediumIdResolver.primitiveRecords(
+                    segment.primitiveRecords(), localToRendererMediumId);
             int sourcePosition = 0;
             int sourcePrimitive = 0;
             for (int category = 0; category < 3; category++) {
@@ -1378,7 +1387,7 @@ public final class TerrainScene implements AutoCloseable {
                             positions,
                             positionCursors[category]);
                     StagingArena.Slice primitiveSlice = staging.write(
-                            segment.primitiveRecords(),
+                            primitiveRecords,
                             sourcePrimitive,
                             primitiveWords,
                             Integer.BYTES);
@@ -1396,6 +1405,10 @@ public final class TerrainScene implements AutoCloseable {
         }
         int[] relations = mesh.surfaceRelationRecords();
         if (relations.length != 0) {
+            relations = MediumIdResolver.surfaceRelations(
+                    relations,
+                    Math.toIntExact(mesh.primitiveCount()),
+                    localToRendererMediumId);
             copyBuffer(
                     commandBuffer,
                     staging.write(relations, Integer.BYTES),

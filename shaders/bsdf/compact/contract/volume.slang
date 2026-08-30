@@ -8,6 +8,8 @@ public struct PrimeOpenPbrVolume {
     public float3 albedo;
     public float anisotropy;
     public float ior;
+    public uint mediumId;
+    public uint iorEncoding;
 };
 
 public struct PrimeOpenPbrVolumeStack {

@@ -15,7 +15,8 @@ import "contract/path.slang";
 
 public uint primePackWavefrontPathControl(PathState path) {
     // FP16 etaScale only changes the roulette probability; survivor reweighting preserves the
-    // estimator's expectation. Medium extinction and IOR remain FP32 in the transport record.
+    // estimator's expectation. Medium extinction remains f32; IOR is reconstructed from its
+    // exact source code instead of carrying an anonymous float.
     return (min(primePathBounce(path.control), PRIME_WAVEFRONT_BYTE_MASK)
                     << PRIME_WAVEFRONT_BOUNCE_SHIFT)
             | ((primePackWavefrontEtaScale(path.etaScale)
@@ -121,7 +122,7 @@ public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
             float4(path.physicalOrigin, path.previousBsdfPdf);
     record.sourceAndPathControl = uint4(
             path.sourcePrimitive,
-            0u,
+            primePackWavefrontMediumIors(volumeStack),
             primePackWavefrontPathControl(path));
     record.medium0 = primePackWavefrontMedium(volumeStack.values[0]);
     record.medium1 = primePackWavefrontMedium(volumeStack.values[1]);

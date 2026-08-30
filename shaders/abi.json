@@ -7,7 +7,7 @@
         { "name": "uv1", "type": "uint", "offset": 4 },
         { "name": "uv2", "type": "uint", "offset": 8 },
         { "name": "tint", "type": "uint", "offset": 12 },
-        { "name": "unused", "type": "uint", "offset": 16 },
+        { "name": "mediumId", "type": "uint", "offset": 16 },
         { "name": "flagsEmitter", "type": "uint", "offset": 20 },
         { "name": "uvDensity", "type": "uint", "offset": 24 },
         { "name": "tangent", "type": "uint", "offset": 28 }
@@ -122,6 +122,8 @@
         { "name": "roughness", "type": "float", "offset": 60 },
         { "name": "opticalControl", "type": "uint", "offset": 64 },
         { "name": "hitKind", "type": "uint", "offset": 68 },
+        { "name": "mediumId", "type": "uint", "offset": 72 },
+        { "name": "adjacentMediumId", "type": "uint", "offset": 76 },
         { "name": "adjacentBaseColor", "type": "vec3", "offset": 80 },
         { "name": "adjacentInterfaceControl", "type": "uint", "offset": 92 },
         { "name": "position", "type": "vec3", "offset": 96 },
@@ -145,6 +147,8 @@
         { "name": "roughness", "type": "float", "offset": 76 },
         { "name": "opticalControl", "type": "uint", "offset": 80 },
         { "name": "motionZFlags", "type": "uint", "offset": 84 },
+        { "name": "mediumId", "type": "uint", "offset": 88 },
+        { "name": "adjacentMediumId", "type": "uint", "offset": 92 },
         { "name": "adjacentBaseColor", "type": "vec3", "offset": 96 },
         { "name": "adjacentInterfaceControl", "type": "uint", "offset": 108 }
       ]
@@ -155,10 +159,10 @@
         { "name": "distanceGeometricNormal", "type": "uvec4", "offset": 0 },
         { "name": "hitMaterialSectionEmitter", "type": "uvec4", "offset": 16 },
         { "name": "baseColorTextureLod", "type": "uvec4", "offset": 32 },
-        { "name": "opacityRoughnessOpticalReserved", "type": "uvec4", "offset": 48 },
+        { "name": "opacityRoughnessOpticalMedium", "type": "uvec4", "offset": 48 },
         { "name": "shadingNormalAdjacentX", "type": "uvec4", "offset": 64 },
         { "name": "adjacentPositionX", "type": "uvec4", "offset": 80 },
-        { "name": "positionYzMotionReserved", "type": "uvec4", "offset": 96 }
+        { "name": "positionYzMotionAdjacentMedium", "type": "uvec4", "offset": 96 }
       ]
     },
     "pushConstants": {
@@ -276,7 +280,7 @@
   "offlineWavefrontContract": {
     "pathRecordSize": 144,
     "pathSlotsPerPixel": 1,
-    "surfaceRecordSize": 100,
+    "surfaceRecordSize": 108,
     "stageRecordSize": 112,
     "queueEntriesPerPixel": 1,
     "queueStorageEntriesPerPixel": 2,

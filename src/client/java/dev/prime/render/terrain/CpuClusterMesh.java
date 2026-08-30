@@ -23,6 +23,7 @@ public final class CpuClusterMesh {
     private final CompiledClusterLights lights;
     private final List<CpuVoxelMesh> voxelMeshes;
     private final CpuVoxelInstances voxelInstances;
+    private final List<MediumKey> mediumCatalog;
     private final Set<StaticCompatibilityIssue> compatibilityIssues;
 
     private CpuClusterMesh(
@@ -55,6 +56,30 @@ public final class CpuClusterMesh {
             CompiledClusterLights lights,
             List<CpuVoxelMesh> voxelMeshes,
             CpuVoxelInstances voxelInstances,
+            Set<StaticCompatibilityIssue> compatibilityIssues) {
+        this(
+                segments,
+                opaqueTriangleCount,
+                cutoutTriangleCount,
+                transmissiveTriangleCount,
+                opacityMicromap,
+                lights,
+                voxelMeshes,
+                voxelInstances,
+                List.of(),
+                compatibilityIssues);
+    }
+
+    private CpuClusterMesh(
+            List<Segment> segments,
+            long opaqueTriangleCount,
+            long cutoutTriangleCount,
+            long transmissiveTriangleCount,
+            OpacityMicromapData opacityMicromap,
+            CompiledClusterLights lights,
+            List<CpuVoxelMesh> voxelMeshes,
+            CpuVoxelInstances voxelInstances,
+            List<MediumKey> mediumCatalog,
             Set<StaticCompatibilityIssue> compatibilityIssues) {
         this.segments = List.copyOf(segments);
         if (opaqueTriangleCount < 0L
@@ -93,6 +118,12 @@ public final class CpuClusterMesh {
         this.voxelMeshes = List.copyOf(voxelMeshes);
         this.voxelInstances = Objects.requireNonNull(
                 voxelInstances, "voxelInstances");
+        this.mediumCatalog = List.copyOf(mediumCatalog);
+        if (new java.util.HashSet<>(this.mediumCatalog).size()
+                != this.mediumCatalog.size()) {
+            throw new IllegalArgumentException(
+                    "Cluster medium catalog contains duplicate identities");
+        }
         this.compatibilityIssues = Set.copyOf(compatibilityIssues);
         if (opacityMicromap.triangleCount() != cutoutTriangleCount) {
             throw new IllegalArgumentException(
@@ -308,6 +339,11 @@ public final class CpuClusterMesh {
         return this.voxelInstances;
     }
 
+    /** Cluster-local MediumId n names {@code mediumCatalog().get(n - 1)}. */
+    public List<MediumKey> mediumCatalog() {
+        return this.mediumCatalog;
+    }
+
     public Set<StaticCompatibilityIssue> compatibilityIssues() {
         return this.compatibilityIssues;
     }
@@ -326,7 +362,26 @@ public final class CpuClusterMesh {
                 this.lights,
                 this.voxelMeshes,
                 this.voxelInstances,
+                this.mediumCatalog,
                 copied);
+    }
+
+    CpuClusterMesh withMediumCatalog(List<MediumKey> catalog) {
+        List<MediumKey> copied = List.copyOf(catalog);
+        if (this.mediumCatalog.equals(copied)) {
+            return this;
+        }
+        return new CpuClusterMesh(
+                this.segments,
+                this.opaqueTriangleCount,
+                this.cutoutTriangleCount,
+                this.transmissiveTriangleCount,
+                this.opacityMicromap,
+                this.lights,
+                this.voxelMeshes,
+                this.voxelInstances,
+                copied,
+                this.compatibilityIssues);
     }
 
     public boolean isEmpty() {

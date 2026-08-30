@@ -62,9 +62,11 @@ public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
                         viewDirection,
                         surface.t,
                         volumeStack,
+                        surface.mediumId,
                         minimumLinearRoughness,
                         surface.adjacentBaseColor,
                         surface.adjacentInterfaceControl,
+                        surface.adjacentMediumId,
                         usesAirGap);
         PrimeTransmissiveBsdfSample sampled =
                 primeSampleMinecraftTransmissionCompleteFromState(
@@ -83,8 +85,10 @@ public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
                 primeSurfaceOpacity(surface),
                 surface.materialControl,
                 surface.opticalControl,
+                surface.mediumId,
                 surface.adjacentBaseColor,
                 surface.adjacentInterfaceControl,
+                surface.adjacentMediumId,
                 usesAirGap);
         result.bsdf = sampled.bsdfSample;
         result.volumeStack = sampled.volumeStack;
@@ -175,8 +179,10 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
                         viewDirection,
                         surface.t,
                         volumeStack,
+                        surface.mediumId,
                         surface.adjacentBaseColor,
                         surface.adjacentInterfaceControl,
+                        surface.adjacentMediumId,
                         usesAirGap);
         result.albedos = primeDenoiseAlbedosFromState(
                 state,
@@ -199,8 +205,10 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
                 primeSurfaceOpacity(surface),
                 surface.materialControl,
                 surface.opticalControl,
+                surface.mediumId,
                 surface.adjacentBaseColor,
                 surface.adjacentInterfaceControl,
+                surface.adjacentMediumId,
                 usesAirGap);
         result.scatter.bsdf = sampled.bsdfSample;
         result.scatter.volumeStack = sampled.volumeStack;

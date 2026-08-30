@@ -65,7 +65,7 @@ final class SectionMeshAccumulatorTest {
                     LabPbrMaterialSet.EMPTY, false);
             accumulator.addQuad(
                     horizontalQuad(0.0F, 0.0F, 2.0F, 1.0F),
-                    transmissiveSurface(sprite, false));
+                    transmissiveSurface(sprite, false).setMediumId(73));
             accumulator.addQuad(
                     horizontalQuad(1.0F, 0.0F, 2.0F, 1.0F),
                     transmissiveSurface(sprite, true));
@@ -74,6 +74,7 @@ final class SectionMeshAccumulatorTest {
 
             assertEquals(1, geometry.mergeFaces().size());
             assertTrue(geometry.mergeFaces().getFirst().transmissive());
+            assertEquals(73, geometry.mergeFaces().getFirst().primitive()[4]);
             assertEquals(1, geometry.meshes().size());
             assertEquals(2, geometry.meshes().getFirst().transmissiveTriangleCount());
         }
@@ -245,15 +246,29 @@ final class SectionMeshAccumulatorTest {
             this(path, FRAME_SIZE, FRAME_SIZE, 0, 0);
         }
 
+        TestSprite(String path, int textureId) {
+            this(path, textureId, FRAME_SIZE, FRAME_SIZE, 0, 0);
+        }
+
         TestSprite(
                 String path,
                 int atlasWidth,
                 int atlasHeight,
                 int x,
                 int y) {
+            this(path, 1, atlasWidth, atlasHeight, x, y);
+        }
+
+        private TestSprite(
+                String path,
+                int textureId,
+                int atlasWidth,
+                int atlasHeight,
+                int x,
+                int y) {
             this.sprite = new CapturedSprite(
                     new SpriteId("prime", path),
-                    1,
+                    textureId,
                     FRAME_SIZE,
                     FRAME_SIZE,
                     false,

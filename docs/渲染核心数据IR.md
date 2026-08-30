@@ -518,7 +518,7 @@ motion、ID 和 mask 的可视化是显式 diagnostic transform，不得通过�
 | vertex/instance encoded tint | LinearRec2020Tint | shader 热解码、颜色域不显式 | capture/frame adapter，阶段 2 |
 | normal/optical pages | TangentNormal、AO、Roughness、OpticalCode | 连续与离散通道共采样 | texture schema/accessor，阶段 2/4 |
 | TextureRecord/TextureId | CanonicalTexture + stable TextureId | albedo rect 仍指向源 atlas | texture catalog，阶段 2 |
-| PrimitiveRecord 32 B | PrimitiveIdentity/Material/Texture/Emitter tagged views | bit lane 多模式复用 | generated accessors，阶段 2 |
+| PrimitiveRecord 32 B | PrimitiveIdentity/Material/Texture/Emitter tagged views | offset 16 已迁移为 exact MediumId；其余 control 仍有多模式复用 | generated accessors，阶段 2 |
 | SectionRecord 96 B | StaticSection/DynamicSection tagged views | `lightAddress` 语义依 cluster 猜测 | scene schema，阶段 2/4 |
 | BLAS/TLAS/OMM handles 与地址 | SceneGeometryRevision + interop handles | GPU 地址易越过生命周期边界 | scene owner/Vulkan interop，阶段 1/2 |
 | f32 BLAS vertices + hardware barycentrics | AuthoritativeHitGeometry | 当前正确保守基线 | 保留；任何变化按几何合同 |
@@ -527,8 +527,8 @@ motion、ID 和 mask 的可视化是显式 diagnostic transform，不得通过�
 | realtime path 144 B×2 | RealtimePathState | medium/guide/branch live range 宽 | wavefront schema/bench，阶段 3 |
 | realtime area 320 B/px | phase-local surface/area/guide states | 大范围 alias 与字段过载 | liveness plan，阶段 3 |
 | offline path 144 B | OfflinePathState | 文档仍写 128 B | schema/docs，阶段 0/1 |
-| offline surface 100 B + stage 112 B | OfflineTraceSurface/StageState | 文档仍写 104 B | schema/docs，阶段 0/1 |
-| FP16 shadow-medium recognition | MediumId + continuous parameters | 由量化参数推断身份 | transport，阶段 2 |
+| offline surface 108 B + stage 112 B | OfflineTraceSurface/StageState | 两个 MediumId 已进入 surface，stage stride 未增长 | schema/docs，阶段 2 第一批已完成 |
+| FP16 shadow-medium recognition | MediumId + continuous parameters | 身份已改为 exact ID；连续 extinction 的 FP16 数值误差仍待审计 | transport，阶段 2 身份迁移已完成 |
 | FP16 realtime etaScale | RouletteEtaScale | 分布误差未审计 | error oracle 后决定 encoding，阶段 1/2 |
 | packed ray cone/texture LOD | RayCone/TextureLod | 精度、单位和 mip 传播分散 | transport/texture schema，阶段 1/3 |
 | `transportMetadata`/各 `w` lane | phase-specific typed fields | 调用方记忆语义 | generated accessors，阶段 2/3 |
@@ -554,7 +554,7 @@ motion、ID 和 mask 的可视化是显式 diagnostic transform，不得通过�
 
 本表中的现有 ABI 尺寸以当前 `shaders/abi.json` 为准：`PrimitiveRecord=32`、
 `SectionRecord=96`、`TracePayload=112`、`SurfaceInteraction=112`、实时/离线路径记录均为 144
-bytes；实时 area record 为 320 bytes，离线 surface/stage 为 100/112 bytes。目标 IR 不承诺保持
+bytes；实时 area record 为 320 bytes，离线 surface/stage 为 108/112 bytes。目标 IR 不承诺保持
 这些宽度，迁移前仍不得擅自改变。
 
 ## 14. 已锁定与有意开放的决策

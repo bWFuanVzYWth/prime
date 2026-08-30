@@ -43,6 +43,8 @@ PrimeOpenPbrVolumeStack primeMixedEmptyStack() {
     air.albedo = float3(0.0);
     air.anisotropy = 0.0;
     air.ior = 1.0;
+    air.mediumId = 0u;
+    air.iorEncoding = 0u;
     stack.values[0] = air;
     stack.values[1] = air;
     stack.count = 0u;

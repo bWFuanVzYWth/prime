@@ -49,8 +49,12 @@ public PathState primeWavefrontPath(
 public PrimeOpenPbrVolumeStack primeWavefrontVolumeStack(
         PrimeWavefrontTransportRecord record) {
     PrimeOpenPbrVolumeStack volumeStack;
-    volumeStack.values[0] = primeUnpackWavefrontMedium(record.medium0);
-    volumeStack.values[1] = primeUnpackWavefrontMedium(record.medium1);
+    volumeStack.values[0] = primeUnpackWavefrontMedium(
+            record.medium0,
+            primeUnpackWavefrontMediumIor(record.sourceAndPathControl.z, 0u));
+    volumeStack.values[1] = primeUnpackWavefrontMedium(
+            record.medium1,
+            primeUnpackWavefrontMediumIor(record.sourceAndPathControl.z, 1u));
     uint denoiserControl =
             asuint(record.rayDirectionAndDenoiserControl.w);
     volumeStack.count = min(

@@ -249,6 +249,13 @@ fluid inset 契约驱动。该 corpus 仍不纳入长期资源，后续可用新
 该审计与非平面 fluid raster-back 行为测试共同关闭了斜水面黑纹和玻璃离散闪烁两项现场问题。
 最终根因、无效路线和重新出现时的取证要求见[斜水面细密黑纹排查与修复记录](斜水面细密黑纹排查报告.md)。
 
+阶段 2 第一批数据迁移为翻译结果增加 invocation-local medium catalog，并在 Vulkan 上传边界映射为
+renderer-lifetime `MediumId`。测试覆盖 family/TextureId/tint/water 身份划分、local→renderer
+remap、不复用、primitive merge 保留、boundary 两端、codec v17 回放、非法 local ID 拒绝，以及
+SPIR-V trace/shadow payload shape。Shader property 进一步覆盖任意 u32 ID、全部 8-bit IOR source
+code、跨 dispatch f32 extinction、guide-control 位合并、offline surface round-trip 和 shadow
+ID match/mismatch；identity 测试不得退回 extinction epsilon 比较。
+
 ## 测试编写与维护规则
 
 新增或重构测试应优先证明以下内容：

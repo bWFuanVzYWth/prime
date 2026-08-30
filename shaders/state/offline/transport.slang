@@ -26,7 +26,7 @@ public PrimeOfflineTransportRecord primeMakeOfflineTransport(
             float4(path.physicalOrigin, path.previousBsdfPdf);
     record.sourceAndPathControl = uint4(
             path.sourcePrimitive,
-            0u,
+            primePackWavefrontMediumIors(volumeStack),
             primePackOfflinePathControl(path));
     uint control = enabled ? PRIME_OFFLINE_CONTROL_ACTIVE : 0u;
     control |= min(volumeStack.count, 2u) << PRIME_OFFLINE_CONTROL_MEDIUM_SHIFT;
@@ -63,8 +63,12 @@ public PathState primeOfflinePath(
 public PrimeOpenPbrVolumeStack primeOfflineVolumeStack(
         PrimeOfflineTransportRecord record) {
     PrimeOpenPbrVolumeStack stack;
-    stack.values[0] = primeUnpackWavefrontMedium(record.medium0);
-    stack.values[1] = primeUnpackWavefrontMedium(record.medium1);
+    stack.values[0] = primeUnpackWavefrontMedium(
+            record.medium0,
+            primeUnpackWavefrontMediumIor(record.sourceAndPathControl.z, 0u));
+    stack.values[1] = primeUnpackWavefrontMedium(
+            record.medium1,
+            primeUnpackWavefrontMediumIor(record.sourceAndPathControl.z, 1u));
     uint control = asuint(record.rayDirectionAndControl.w);
     stack.count = min(
             (control >> PRIME_OFFLINE_CONTROL_MEDIUM_SHIFT)

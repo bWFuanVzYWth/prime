@@ -109,8 +109,10 @@ public uint primeInitializeTransparentWavefront(
                     PRIME_SAMPLE_DIMENSION_PRIMARY),
             surface.t,
             volumeStack,
+            surface.mediumId,
             surface.adjacentBaseColor,
             surface.adjacentInterfaceControl,
+            surface.adjacentMediumId,
             primeUsesAirGap());
     bool normalMapped = primeMaterialUsesNormalMap(surface.opticalControl);
     if (!primeGeometricSampleSupport(

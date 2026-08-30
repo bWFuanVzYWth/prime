@@ -485,8 +485,10 @@ final class ClusterTranslationSemanticOracle {
 
     private static boolean sameMedium(Face first, Face second) {
         boolean sameIdentity = first.mediumFamily() != 0
-                        && first.mediumFamily() == second.mediumFamily()
-                || SPRITES[first.sprite()].id().equals(SPRITES[second.sprite()].id());
+                ? first.mediumFamily() == second.mediumFamily()
+                : second.mediumFamily() == 0
+                        && SPRITES[first.sprite()].textureId()
+                                == SPRITES[second.sprite()].textureId();
         return first.color() == second.color() && sameIdentity;
     }
 
