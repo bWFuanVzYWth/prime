@@ -200,7 +200,7 @@ $env:Path = "$env:JAVA_HOME\bin;$env:VULKAN_SDK\Bin;$env:Path"
 ### 维护记录
 
 - [TODO](docs/TODO.md)
-- [斜水面细密黑纹排查报告](docs/斜水面细密黑纹排查报告.md)
+- [斜水面细密黑纹排查与修复记录](docs/斜水面细密黑纹排查报告.md)
 
 ## 相关开源项目
 

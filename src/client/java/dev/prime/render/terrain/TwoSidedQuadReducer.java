@@ -18,6 +18,11 @@ import java.util.Objects;
  * outward direction is lowered into canonical BLAS winding before publication.
  */
 final class TwoSidedQuadReducer {
+    // Vanilla's cube_all_inner_faces model authors its reverse shell at [0.002, 15.998].
+    // Recognize that exact model-space contract after block/Section translation; this is not a
+    // general near-plane tolerance.
+    private static final float INNER_FACE_MODEL_OFFSET = 0.002F / 16.0F;
+
     private TwoSidedQuadReducer() {
     }
 
@@ -70,6 +75,9 @@ final class TwoSidedQuadReducer {
         Objects.requireNonNull(work, "work");
         work.checkpoint();
         boolean[] removed = new boolean[quads.size()];
+        int[] exactPeer = new int[quads.size()];
+        int[] exactOffset = new int[quads.size()];
+        Arrays.fill(exactPeer, -1);
         Map<PositionSet, ArrayList<Integer>> pending = new HashMap<>();
         for (int index = 0; index < quads.size(); index++) {
             work.step();
@@ -78,7 +86,35 @@ final class TwoSidedQuadReducer {
             if (topology.get(quad) == null) {
                 continue;
             }
-            if (!eligible(quad)) {
+            PositionSet key = PositionSet.of(quad);
+            ArrayList<Integer> candidates =
+                    pending.computeIfAbsent(key, ignored -> new ArrayList<>());
+            int match = -1;
+            for (int candidate = candidates.size() - 1;
+                    candidate >= 0;
+                    candidate--) {
+                work.step();
+                CapturedSectionGeometry.Quad previous = quads.get(candidates.get(candidate));
+                if (formsIdenticalRasterDuplicate(previous, quad)) {
+                    match = candidate;
+                    break;
+                }
+            }
+            if (match < 0) {
+                candidates.add(index);
+                continue;
+            }
+            removed[index] = true;
+        }
+
+        pending.clear();
+        for (int index = 0; index < quads.size(); index++) {
+            work.step();
+            if (removed[index]) {
+                continue;
+            }
+            CapturedSectionGeometry.Quad quad = quads.get(index);
+            if (topology.get(quad) == null) {
                 continue;
             }
             PositionSet key = PositionSet.of(quad);
@@ -98,8 +134,62 @@ final class TwoSidedQuadReducer {
                 candidates.add(index);
                 continue;
             }
-            candidates.remove(match);
+            int pairedIndex = candidates.remove(match);
             removed[index] = true;
+            if (quad.surface().lightEmission() != 0) {
+                exactPeer[pairedIndex] = index;
+                exactOffset[pairedIndex] = reverseOffset(quads.get(pairedIndex), quad);
+            }
+        }
+
+        Map<CapturedSectionGeometry.BlockFacts, ArrayList<Integer>> innerShells =
+                new HashMap<>();
+        for (int index = 0; index < quads.size(); index++) {
+            work.step();
+            if (removed[index]) {
+                continue;
+            }
+            CapturedSectionGeometry.Quad quad = quads.get(index);
+            if (!innerShellEligible(quad)) {
+                continue;
+            }
+            ArrayList<Integer> candidates = innerShells.computeIfAbsent(
+                    quad.surface().block(), ignored -> new ArrayList<>());
+            int match = -1;
+            boolean currentIsOuter = false;
+            for (int candidate = candidates.size() - 1; candidate >= 0; candidate--) {
+                work.step();
+                CapturedSectionGeometry.Quad previous = quads.get(candidates.get(candidate));
+                int relation = authoredInnerShellRelation(previous, quad);
+                if (relation != 0) {
+                    match = candidate;
+                    currentIsOuter = relation < 0;
+                    break;
+                }
+            }
+            if (match < 0) {
+                candidates.add(index);
+                continue;
+            }
+            int previousIndex = candidates.remove(match);
+            int retainedIndex;
+            int removedIndex;
+            if (currentIsOuter) {
+                removed[previousIndex] = true;
+                candidates.add(index);
+                retainedIndex = index;
+                removedIndex = previousIndex;
+            } else {
+                removed[index] = true;
+                retainedIndex = previousIndex;
+                removedIndex = index;
+            }
+            if (quad.surface().lightEmission() != 0) {
+                CapturedSectionGeometry.Quad retained = quads.get(retainedIndex);
+                CapturedSectionGeometry.Quad peer = quads.get(removedIndex);
+                exactPeer[retainedIndex] = removedIndex;
+                exactOffset[retainedIndex] = authoredInnerShellReverseOffset(retained, peer);
+            }
         }
 
         int[] bilateralPeer = new int[quads.size()];
@@ -156,6 +246,12 @@ final class TwoSidedQuadReducer {
                 SurfaceDefinition.MaterialBinding primary =
                         SurfaceDefinition.MaterialBinding.of(quad, primaryTopology);
                 int peer = bilateralPeer[index];
+                if (peer < 0) {
+                    peer = exactPeer[index];
+                    if (peer >= 0) {
+                        bilateralOffset[index] = exactOffset[index];
+                    }
+                }
                 SurfaceDefinition definition = peer < 0
                         ? SurfaceDefinition.single(primary)
                         : SurfaceDefinition.bilateral(
@@ -171,11 +267,97 @@ final class TwoSidedQuadReducer {
         return List.copyOf(result);
     }
 
-    private static boolean eligible(CapturedSectionGeometry.Quad quad) {
+    private static boolean innerShellEligible(CapturedSectionGeometry.Quad quad) {
         CapturedSectionGeometry.Surface surface = quad.surface();
-        return surface.fluid() != null
-                || ClusterSceneTranslator.isCutout(surface)
-                || ClusterSceneTranslator.isTransmissive(surface);
+        return surface.block() != null
+                && surface.fluid() == null;
+    }
+
+    /** Returns 1 when first is outer, -1 when second is outer, and 0 when there is no proof. */
+    private static int authoredInnerShellRelation(
+            CapturedSectionGeometry.Quad first,
+            CapturedSectionGeometry.Quad second) {
+        if (!sameSurface(first.surface(), second.surface())
+                || !opposedNormals(first, second)
+                || !sameUvCorners(first, second)) {
+            return 0;
+        }
+        int reverseOffset = authoredInnerShellReverseOffset(first, second);
+        if (reverseOffset < 0) {
+            return 0;
+        }
+        for (int vertex = 0; vertex < 4; vertex++) {
+            if (first.surface().color(vertex)
+                    != second.surface().color(reverseIndex(reverseOffset, vertex))) {
+                return 0;
+            }
+        }
+        float firstSpan = coordinateSpan(first);
+        float secondSpan = coordinateSpan(second);
+        float tolerance = Math.max(Math.ulp(firstSpan), Math.ulp(secondSpan));
+        if (Math.abs(firstSpan - secondSpan) <= tolerance) {
+            return 0;
+        }
+        return firstSpan > secondSpan ? 1 : -1;
+    }
+
+    private static int authoredInnerShellReverseOffset(
+            CapturedSectionGeometry.Quad first,
+            CapturedSectionGeometry.Quad second) {
+        for (int offset = 0; offset < 4; offset++) {
+            boolean matches = true;
+            for (int vertex = 0; vertex < 4; vertex++) {
+                int other = reverseIndex(offset, vertex);
+                if (!innerShellCoordinate(first.x(vertex), second.x(other))
+                        || !innerShellCoordinate(first.y(vertex), second.y(other))
+                        || !innerShellCoordinate(first.z(vertex), second.z(other))) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) {
+                return offset;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean innerShellCoordinate(float first, float second) {
+        float tolerance = Math.max(Math.ulp(first), Math.ulp(second));
+        return Math.abs(Math.abs(first - second) - INNER_FACE_MODEL_OFFSET) <= tolerance;
+    }
+
+    private static float coordinateSpan(CapturedSectionGeometry.Quad quad) {
+        float result = 0.0F;
+        for (int axis = 0; axis < 3; axis++) {
+            result += maximum(quad, axis) - minimum(quad, axis);
+        }
+        return result;
+    }
+
+    private static float minimum(CapturedSectionGeometry.Quad quad, int axis) {
+        float result = coordinate(quad, axis, 0);
+        for (int vertex = 1; vertex < 4; vertex++) {
+            result = Math.min(result, coordinate(quad, axis, vertex));
+        }
+        return result;
+    }
+
+    private static float maximum(CapturedSectionGeometry.Quad quad, int axis) {
+        float result = coordinate(quad, axis, 0);
+        for (int vertex = 1; vertex < 4; vertex++) {
+            result = Math.max(result, coordinate(quad, axis, vertex));
+        }
+        return result;
+    }
+
+    private static float coordinate(
+            CapturedSectionGeometry.Quad quad, int axis, int vertex) {
+        return switch (axis) {
+            case 0 -> quad.x(vertex);
+            case 1 -> quad.y(vertex);
+            default -> quad.z(vertex);
+        };
     }
 
     private static boolean directionalEligible(
@@ -206,6 +388,46 @@ final class TwoSidedQuadReducer {
             }
         }
         return true;
+    }
+
+    private static boolean formsIdenticalRasterDuplicate(
+            CapturedSectionGeometry.Quad first,
+            CapturedSectionGeometry.Quad second) {
+        if (first.surface().lightEmission() != 0
+                || !sameSurface(first.surface(), second.surface())) {
+            return false;
+        }
+        int offset = sameWindingOffset(first, second);
+        if (offset < 0) {
+            return false;
+        }
+        for (int vertex = 0; vertex < 4; vertex++) {
+            int other = vertex + offset & 3;
+            if (!sameFloat(first.u(vertex), second.u(other))
+                    || !sameFloat(first.v(vertex), second.v(other))
+                    || first.surface().color(vertex) != second.surface().color(other)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int sameWindingOffset(
+            CapturedSectionGeometry.Quad first,
+            CapturedSectionGeometry.Quad second) {
+        for (int offset = 0; offset < 4; offset++) {
+            boolean matches = true;
+            for (int vertex = 0; vertex < 4; vertex++) {
+                if (!samePosition(first, vertex, second, vertex + offset & 3)) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) {
+                return offset;
+            }
+        }
+        return -1;
     }
 
     private static boolean formsDirectionalPair(

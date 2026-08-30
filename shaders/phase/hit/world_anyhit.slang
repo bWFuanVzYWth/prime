@@ -60,12 +60,15 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
         // shadow.anyhit.slang instead, where straight glass and water transmission are accumulated.
         return;
     }
-    float opacity = primeEvaluateOpacity(
-            primitive,
-            primePrimitiveTextureId(section, primitive),
-            primeInterpolateUv(
-                    section, primitive, barycentrics, hit.localPosition, normal));
-    if (opacity < PRIME_CUTOUT_ALPHA_THRESHOLD) {
-        IgnoreHit();
+    uint recipeControl = primePrimitiveControl(primitive);
+    if ((recipeControl & PRIME_RECIPE_ALPHA_CUTOUT) != 0u) {
+        float opacity = primeEvaluateOpacity(
+                primitive,
+                primePrimitiveTextureId(section, primitive),
+                primeInterpolateUv(
+                        section, primitive, barycentrics, hit.localPosition, normal));
+        if (opacity < PRIME_CUTOUT_ALPHA_THRESHOLD) {
+            IgnoreHit();
+        }
     }
 }

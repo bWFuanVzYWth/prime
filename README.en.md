@@ -242,7 +242,7 @@ The technical documents are currently written in Chinese.
 ### Maintenance Records
 
 - [TODO](docs/TODO.md)
-- [Oblique-water fine black-line investigation](docs/斜水面细密黑纹排查报告.md)
+- [Oblique-water fine black-line investigation and fix](docs/斜水面细密黑纹排查报告.md)
 
 ## Related Open-Source Projects
 

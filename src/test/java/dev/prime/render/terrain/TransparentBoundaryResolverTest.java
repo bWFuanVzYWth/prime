@@ -336,6 +336,105 @@ final class TransparentBoundaryResolverTest {
     }
 
     @Test
+    void adjacentCutoutFacesBecomeOneDirectionalSheet() {
+        try (SectionMeshAccumulatorTest.TestSprite first =
+                        new SectionMeshAccumulatorTest.TestSprite("adjacent_cutout_first");
+                SectionMeshAccumulatorTest.TestSprite second =
+                        new SectionMeshAccumulatorTest.TestSprite("adjacent_cutout_second")) {
+            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+            section.add(
+                    xFace(1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                    cutoutSurface(first, 0, 0, 0));
+            section.add(
+                    xFace(-1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                    cutoutSurface(second, 1, 0, 0));
+
+            CpuClusterMesh mesh = translate(0, section.build());
+
+            assertEquals(2L, mesh.cutoutTriangleCount());
+            assertEquals(0L, mesh.opaqueTriangleCount());
+            int[] table = mesh.segments().getFirst().surfaceRelationRecords();
+            assertEquals(2, table[0]);
+            assertEquals(
+                    CpuSectionMesh.SURFACE_RELATION_BILATERAL,
+                    table[2] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
+        }
+    }
+
+    @Test
+    void knownFluidSideInsetBecomesTheExactGlassBoundary() {
+        try (SectionMeshAccumulatorTest.TestSprite water =
+                        new SectionMeshAccumulatorTest.TestSprite("inset_water");
+                SectionMeshAccumulatorTest.TestSprite glass =
+                        new SectionMeshAccumulatorTest.TestSprite("inset_glass")) {
+            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+            section.add(
+                    xFaceAt(0.999F, 1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                    fluidSurface(water, 0, 0, 0));
+            section.add(
+                    xFaceAt(1.0F, -1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                    surface(glass, 0xffb0_d8f0, false, false, 1, 0, 0, 9));
+
+            CpuClusterMesh mesh = translate(0, section.build());
+
+            assertEquals(2L, mesh.transmissiveTriangleCount());
+            assertEquals(40L, mesh.surfaceRelationBytes());
+            assertEquals(1.0F, mesh.segments().getFirst().positions()[0], 0.0F);
+        }
+    }
+
+    @Test
+    void knownFluidSideInsetCompositesCutoutCoverageOverWater() {
+        try (SectionMeshAccumulatorTest.TestSprite water =
+                        new SectionMeshAccumulatorTest.TestSprite("inset_leaf_water");
+                SectionMeshAccumulatorTest.TestSprite leaves =
+                        new SectionMeshAccumulatorTest.TestSprite("inset_leaves")) {
+            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+            section.add(
+                    xFaceAt(0.999F, 1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                    fluidSurface(water, 0, 0, 0));
+            section.add(
+                    xFaceAt(1.0F, -1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                    cutoutSurface(leaves, 1, 0, 0));
+
+            CpuClusterMesh mesh = translate(0, section.build());
+
+            assertEquals(2L, mesh.cutoutTriangleCount());
+            assertEquals(0L, mesh.transmissiveTriangleCount());
+            CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+            int[] relation = SurfaceRelationTable.record(
+                    segment.surfaceRelationRecords(), segment.cutoutPrimitiveCount(), 0);
+            assertEquals(
+                    CpuSectionMesh.SURFACE_RELATION_OVERLAY,
+                    relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
+            int secondaryFlags = PrimitivePacking.unpackControl(relation[4], relation[6]);
+            assertTrue(PrimitivePacking.isTransmissive(secondaryFlags));
+            assertEquals(1.0F, segment.positions()[0], 0.0F);
+        }
+    }
+
+    @Test
+    void arbitraryFluidGapIsNotSnapped() {
+        try (SectionMeshAccumulatorTest.TestSprite water =
+                        new SectionMeshAccumulatorTest.TestSprite("unsnapped_water");
+                SectionMeshAccumulatorTest.TestSprite glass =
+                        new SectionMeshAccumulatorTest.TestSprite("unsnapped_glass")) {
+            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+            section.add(
+                    xFaceAt(0.9985F, 1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                    fluidSurface(water, 0, 0, 0));
+            section.add(
+                    xFaceAt(1.0F, -1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                    surface(glass, 0xffb0_d8f0, false, false, 1, 0, 0, 9));
+
+            CpuClusterMesh mesh = translate(0, section.build());
+
+            assertEquals(4L, mesh.transmissiveTriangleCount());
+            assertEquals(0L, mesh.surfaceRelationBytes());
+        }
+    }
+
+    @Test
     void clusterHaloUsesTheLowerBlockAsTheOnlyOwner() {
         try (SectionMeshAccumulatorTest.TestSprite glass =
                         new SectionMeshAccumulatorTest.TestSprite("halo_glass");

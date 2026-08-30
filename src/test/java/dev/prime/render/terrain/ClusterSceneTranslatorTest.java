@@ -411,6 +411,242 @@ final class ClusterSceneTranslatorTest {
     }
 
     @Test
+    void exactOpaqueRasterBackIsAlsoOnePhysicalFace() {
+        try (SectionMeshAccumulatorTest.TestSprite stone =
+                new SectionMeshAccumulatorTest.TestSprite("opaque_raster_back")) {
+            CapturedSectionGeometry.MutableQuad front = face(0.5F);
+            CapturedSectionGeometry.MutableQuad back = rasterBack(front);
+            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+            CapturedSectionGeometry.Surface surface = surface(stone, -1, false, false);
+            section.add(front, surface);
+            section.add(back, surface);
+            CapturedSectionGeometry captured = section.build();
+
+            java.util.List<TwoSidedQuadReducer.ResolvedQuad> resolved =
+                    TwoSidedQuadReducer.resolve(captured.quads());
+
+            assertEquals(1, resolved.size());
+            assertSame(captured.quads().getFirst(), resolved.getFirst().quad());
+            assertEquals(
+                    SurfaceDefinition.InterfaceMode.SINGLE,
+                    resolved.getFirst().definition().interfaceMode());
+        }
+    }
+
+    @Test
+    void identicalSameWindingRasterFacesArePublishedOnce() {
+        try (SectionMeshAccumulatorTest.TestSprite flowers =
+                new SectionMeshAccumulatorTest.TestSprite("identical_raster_faces")) {
+            CapturedSectionGeometry.MutableQuad first = face(0.5F);
+            CapturedSectionGeometry.MutableQuad duplicate = face(0.5F);
+            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+            CapturedSectionGeometry.Surface surface = ownedCutoutSurface(flowers);
+            section.add(first, surface);
+            section.add(rasterBack(first), surface);
+            section.add(duplicate, surface);
+            section.add(rasterBack(duplicate), surface);
+            CapturedSectionGeometry captured = section.build();
+
+            java.util.List<TwoSidedQuadReducer.ResolvedQuad> resolved =
+                    TwoSidedQuadReducer.resolve(captured.quads());
+
+            assertEquals(1, resolved.size());
+            assertSame(captured.quads().getFirst(), resolved.getFirst().quad());
+        }
+    }
+
+    @Test
+    void emissiveOpaqueRasterPairBecomesOneTwoSidedEmitter() {
+        try (SectionMeshAccumulatorTest.TestSprite flame =
+                new SectionMeshAccumulatorTest.TestSprite("emissive_raster_pair")) {
+            flame.fill(0xffff_c040);
+            CapturedSectionGeometry.MutableQuad front = face(0.5F);
+            CapturedSectionGeometry.MutableQuad back = rasterBack(front);
+            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+            CapturedSectionGeometry.Surface surface = CapturedSectionGeometry.Surface.uniform(
+                    -1,
+                    CapturedSectionGeometry.Layer.OPAQUE,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    15,
+                    flame.sprite(),
+                    new CapturedSectionGeometry.BlockFacts(0, 0, 0));
+            section.add(front, surface);
+            section.add(back, surface);
+
+            CpuClusterMesh mesh = translate(section.build(), false, false);
+
+            assertEquals(2L, mesh.opaqueTriangleCount());
+            assertEquals(2, mesh.lights().emitterCount());
+            CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+            int[] relation = SurfaceRelationTable.record(
+                    segment.surfaceRelationRecords(), segment.opaquePrimitiveCount(), 0);
+            assertEquals(
+                    CpuSectionMesh.SURFACE_RELATION_BILATERAL,
+                    relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
+        }
+    }
+
+    @Test
+    void exactEmissiveCutoutLayerCompositesWithItsBaseSheet() {
+        try (SectionMeshAccumulatorTest.TestSprite base =
+                        new SectionMeshAccumulatorTest.TestSprite("emissive_layer_base");
+                SectionMeshAccumulatorTest.TestSprite glow =
+                        new SectionMeshAccumulatorTest.TestSprite("emissive_layer_glow")) {
+            base.fill(0xff40_8020);
+            glow.fill(0xffff_e080);
+            CapturedSectionGeometry.MutableQuad baseFront = diagonalFace(false);
+            CapturedSectionGeometry.MutableQuad glowFront = diagonalFace(false);
+            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+            section.add(baseFront, ownedCutoutSurface(base, 0));
+            section.add(rasterBack(baseFront), ownedCutoutSurface(base, 0));
+            section.add(glowFront, ownedCutoutSurface(glow, 15));
+            section.add(rasterBack(glowFront), ownedCutoutSurface(glow, 15));
+
+            CpuClusterMesh mesh = translate(section.build(), false, true);
+
+            assertEquals(2L, mesh.cutoutTriangleCount());
+            assertEquals(2, mesh.lights().emitterCount());
+            CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+            int[] relation = SurfaceRelationTable.record(
+                    segment.surfaceRelationRecords(), segment.cutoutPrimitiveCount(), 0);
+            assertEquals(
+                    CpuSectionMesh.SURFACE_RELATION_OVERLAY,
+                    relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
+        }
+    }
+
+    @Test
+    void vanillaAuthoredInnerFaceShellKeepsOnlyItsOuterFace() {
+        try (SectionMeshAccumulatorTest.TestSprite cage =
+                new SectionMeshAccumulatorTest.TestSprite("inner_face_shell")) {
+            CapturedSectionGeometry.MutableQuad outer = face(0.0F);
+            CapturedSectionGeometry.MutableQuad inner = rasterBack(outer);
+            float inset = 0.002F / 16.0F;
+            for (int vertex = 0; vertex < 4; vertex++) {
+                inner.x[vertex] = inner.x[vertex] < 0.5F ? inset : 1.0F - inset;
+                inner.y[vertex] = inner.y[vertex] < 0.5F ? inset : 1.0F - inset;
+                inner.z[vertex] = inset;
+            }
+            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+            CapturedSectionGeometry.Surface surface = ownedCutoutSurface(cage);
+            section.add(inner, surface);
+            section.add(outer, surface);
+            CapturedSectionGeometry captured = section.build();
+
+            java.util.List<TwoSidedQuadReducer.ResolvedQuad> resolved =
+                    TwoSidedQuadReducer.resolve(captured.quads());
+
+            assertEquals(1, resolved.size());
+            assertSame(captured.quads().get(1), resolved.getFirst().quad());
+        }
+    }
+
+    @Test
+    void arbitraryThinShellIsNotTreatedAsVanillaInnerFaces() {
+        try (SectionMeshAccumulatorTest.TestSprite cage =
+                new SectionMeshAccumulatorTest.TestSprite("unrecognized_thin_shell")) {
+            CapturedSectionGeometry.MutableQuad outer = face(0.0F);
+            CapturedSectionGeometry.MutableQuad inner = rasterBack(outer);
+            float inset = 0.0002F;
+            for (int vertex = 0; vertex < 4; vertex++) {
+                inner.x[vertex] = inner.x[vertex] < 0.5F ? inset : 1.0F - inset;
+                inner.y[vertex] = inner.y[vertex] < 0.5F ? inset : 1.0F - inset;
+                inner.z[vertex] = inset;
+            }
+            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+            CapturedSectionGeometry.Surface surface = ownedCutoutSurface(cage);
+            section.add(outer, surface);
+            section.add(inner, surface);
+
+            assertEquals(2, TwoSidedQuadReducer.resolve(section.build().quads()).size());
+        }
+    }
+
+    @Test
+    void unsupportedVoxelOverlayFallsBackToOneLayeredPlane() {
+        try (SectionMeshAccumulatorTest.TestSprite base =
+                        new SectionMeshAccumulatorTest.TestSprite("voxel_fallback_base");
+                SectionMeshAccumulatorTest.TestSprite overlay =
+                        new SectionMeshAccumulatorTest.TestSprite("voxel_fallback_overlay")) {
+            CapturedSectionGeometry.MutableQuad baseQuad = face(0.5F);
+            CapturedSectionGeometry.MutableQuad overlayQuad = face(0.5F);
+            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+            section.add(baseQuad, surface(base, -1, false, false));
+            section.add(overlayQuad, CapturedSectionGeometry.Surface.uniform(
+                    -1,
+                    CapturedSectionGeometry.Layer.CUTOUT,
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                    true,
+                    true,
+                    0,
+                    overlay.sprite()));
+
+            CpuClusterMesh mesh = translate(section.build(), false, true);
+
+            assertEquals(2L, mesh.opaqueTriangleCount());
+            assertEquals(0L, mesh.cutoutTriangleCount());
+            assertEquals(0, mesh.voxelInstances().count());
+            CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+            int[] relation = SurfaceRelationTable.record(
+                    segment.surfaceRelationRecords(), segment.opaquePrimitiveCount(), 0);
+            assertEquals(
+                    CpuSectionMesh.SURFACE_RELATION_OVERLAY,
+                    relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
+        }
+    }
+
+    @Test
+    void cutoutVoxelOverlayFallbackRetainsBothCoverageDomainsOnOnePlane() {
+        try (SectionMeshAccumulatorTest.TestSprite base =
+                        new SectionMeshAccumulatorTest.TestSprite("cutout_fallback_base");
+                SectionMeshAccumulatorTest.TestSprite overlay =
+                        new SectionMeshAccumulatorTest.TestSprite("cutout_fallback_overlay")) {
+            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+            section.add(face(0.5F), ownedCutoutSurface(base));
+            section.add(face(0.5F), CapturedSectionGeometry.Surface.uniform(
+                    -1,
+                    CapturedSectionGeometry.Layer.CUTOUT,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    true,
+                    true,
+                    0,
+                    overlay.sprite(),
+                    new CapturedSectionGeometry.BlockFacts(0, 0, 0)));
+
+            CpuClusterMesh mesh = translate(section.build(), false, true);
+
+            assertEquals(2L, mesh.cutoutTriangleCount());
+            assertEquals(0L, mesh.opaqueTriangleCount());
+            assertEquals(0, mesh.voxelInstances().count());
+            CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+            int[] relation = SurfaceRelationTable.record(
+                    segment.surfaceRelationRecords(), segment.cutoutPrimitiveCount(), 0);
+            assertEquals(
+                    CpuSectionMesh.SURFACE_RELATION_OVERLAY,
+                    relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
+            int secondaryFlags = PrimitivePacking.unpackControl(relation[4], relation[6]);
+            assertTrue(PrimitivePacking.isCutout(secondaryFlags));
+            for (int index : mesh.opacityMicromap().triangleIndices()) {
+                assertTrue(index < 0);
+            }
+        }
+    }
+
+    @Test
     void vanillaSunflowerDiscKeepsDistinctDirectionalMaterialsWithoutHitCompetition() {
         try (FaceBakerySprite bakedSprite = new FaceBakerySprite();
                 SectionMeshAccumulatorTest.TestSprite front =
@@ -571,6 +807,28 @@ final class ClusterSceneTranslatorTest {
                 rasterOverlay,
                 0,
                 sprite.sprite());
+    }
+
+    private static CapturedSectionGeometry.Surface ownedCutoutSurface(
+            SectionMeshAccumulatorTest.TestSprite sprite) {
+        return ownedCutoutSurface(sprite, 0);
+    }
+
+    private static CapturedSectionGeometry.Surface ownedCutoutSurface(
+            SectionMeshAccumulatorTest.TestSprite sprite, int lightEmission) {
+        return CapturedSectionGeometry.Surface.uniform(
+                -1,
+                CapturedSectionGeometry.Layer.CUTOUT,
+                false,
+                false,
+                false,
+                false,
+                false,
+                true,
+                false,
+                lightEmission,
+                sprite.sprite(),
+                new CapturedSectionGeometry.BlockFacts(0, 0, 0));
     }
 
     private static CapturedSectionGeometry.MutableQuad face(float plane) {

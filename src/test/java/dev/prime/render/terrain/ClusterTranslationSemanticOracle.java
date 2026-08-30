@@ -231,8 +231,15 @@ final class ClusterTranslationSemanticOracle {
             }
             return result;
         }
-        emitSingles(gridSize, edges, cell, normalPositive, result);
-        emitSingles(gridSize, edges, cell, normalNegative, result);
+        Face geometry = negativeMediumSide.peerOnly()
+                ? positiveMediumSide
+                : negativeMediumSide;
+        Face secondary = geometry == negativeMediumSide
+                ? positiveMediumSide
+                : negativeMediumSide;
+        if (!geometry.peerOnly()) {
+            result.add(bilateral(gridSize, edges, cell, geometry, secondary));
+        }
         return result;
     }
 
@@ -302,6 +309,17 @@ final class ClusterTranslationSemanticOracle {
                 null,
                 medium(gridSize, positiveMediumSide),
                 medium(gridSize, negativeMediumSide),
+                false);
+    }
+
+    private static SurfaceKey bilateral(
+            int gridSize, Edges edges, Cell cell, Face primary, Face secondary) {
+        return new SurfaceKey(
+                SurfaceDefinition.InterfaceMode.BILATERAL,
+                binding(gridSize, edges, cell, primary),
+                binding(gridSize, edges, cell, secondary),
+                null,
+                null,
                 false);
     }
 

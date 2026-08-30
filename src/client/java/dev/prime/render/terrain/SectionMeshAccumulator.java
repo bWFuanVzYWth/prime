@@ -689,9 +689,12 @@ public final class SectionMeshAccumulator {
         }
 
         boolean geometryCutout() {
-            return this.definition instanceof SurfaceDefinition.Overlay
-                    ? false
-                    : this.cutout;
+            if (this.definition instanceof SurfaceDefinition.Overlay overlay) {
+                CapturedSectionGeometry.Surface secondary = overlay.secondary().surface();
+                return ClusterSceneTranslator.isCutout(secondary)
+                        || ClusterSceneTranslator.isTransmissive(secondary);
+            }
+            return this.cutout;
         }
 
         boolean geometryTransmissive() {
@@ -704,9 +707,10 @@ public final class SectionMeshAccumulator {
         }
 
         boolean emitterTwoSided() {
-            return this.cutout
-                    && (!(this.definition instanceof SurfaceDefinition.Overlay overlay)
-                            || !overlay.positiveOnly());
+            return (this.cutout
+                            && (!(this.definition instanceof SurfaceDefinition.Overlay overlay)
+                                    || !overlay.positiveOnly()))
+                    || this.definition instanceof SurfaceDefinition.Bilateral;
         }
     }
 

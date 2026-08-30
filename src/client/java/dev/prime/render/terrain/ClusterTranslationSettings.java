@@ -1,6 +1,11 @@
 package dev.prime.render.terrain;
 
-/** Explicit policy inputs for one captured-cluster translation. */
+/**
+ * Explicit policy inputs for one captured-cluster translation.
+ *
+ * @param suppressFluidFaceAgainstFullCollision replay-v1 compatibility field; proven full
+ *     collision is now an unconditional translation invariant
+ */
 public record ClusterTranslationSettings(
         boolean buildOpacityMicromap,
         int segmentTriangleTarget,

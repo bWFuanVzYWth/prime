@@ -17,7 +17,7 @@ final class ClusterTranslationScaleFixtureTest {
     private static final CapturedSprite MEDIUM_B = sprite("scale_medium_b", 4);
 
     @Test
-    void singleSectionMixedOverlayFixtureKeepsAll384PhysicalSurfaces() {
+    void singleSectionMixedOverlayFixtureCollapsesDuplicateRasterSubmissions() {
         CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
         CapturedSectionGeometry.Surface base = surface(
                 BASE, CapturedSectionGeometry.Layer.OPAQUE, false, false, null);
@@ -34,7 +34,7 @@ final class ClusterTranslationScaleFixtureTest {
         TransparentBoundaryResolver.Result result =
                 TransparentBoundaryResolver.resolve(cluster, true);
 
-        assertEquals(384, result.section(0).size());
+        assertEquals(1, result.section(0).size());
         assertTrue(result.section(0).stream().allMatch(quad ->
                 quad.definition().interfaceMode() == SurfaceDefinition.InterfaceMode.OVERLAY));
     }
@@ -65,7 +65,7 @@ final class ClusterTranslationScaleFixtureTest {
         TransparentBoundaryResolver.Result result =
                 TransparentBoundaryResolver.resolve(cluster, true);
 
-        assertEquals(2048, result.section(0).size());
+        assertEquals(1024, result.section(0).size());
     }
 
     @Test

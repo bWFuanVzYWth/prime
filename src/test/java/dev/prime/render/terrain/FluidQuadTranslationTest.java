@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 final class FluidQuadTranslationTest {
     @Test
-    void rasterBackFaceIsCollapsedBeforeCollisionSuppression() {
+    void fullCollisionSuppressionIsIndependentOfTheLegacyPolicyFlag() {
         try (SectionMeshAccumulatorTest.TestSprite water =
                 new SectionMeshAccumulatorTest.TestSprite("captured_water")) {
             water.fill(0xff40_80c0);
@@ -28,13 +28,13 @@ final class FluidQuadTranslationTest {
             CpuClusterMesh translated = translate(captured, false);
             CpuClusterMesh suppressed = translate(captured, true);
 
-            assertEquals(2L, translated.transmissiveTriangleCount());
+            assertEquals(0L, translated.transmissiveTriangleCount());
             assertEquals(0L, suppressed.transmissiveTriangleCount());
         }
     }
 
     @Test
-    void shallowSlopedWaterKeepsTheAuthoredUpwardBoundary() {
+    void fullCollisionAlsoSuppressesASlopedInternalBoundary() {
         try (SectionMeshAccumulatorTest.TestSprite water =
                 new SectionMeshAccumulatorTest.TestSprite("sloped_water")) {
             water.fill(0xff40_80c0);
@@ -52,10 +52,9 @@ final class FluidQuadTranslationTest {
             CpuClusterMesh cluster = translate(captured, false);
             CpuClusterMesh suppressed = translate(captured, true);
 
-            assertEquals(2L, cluster.transmissiveTriangleCount());
+            assertEquals(0L, cluster.transmissiveTriangleCount());
             assertEquals(0L, cluster.opaqueTriangleCount());
             assertEquals(0, cluster.lights().emitterCount());
-            assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
             assertEquals(0L, suppressed.transmissiveTriangleCount());
         }
     }

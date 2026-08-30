@@ -224,8 +224,10 @@ public final class ClusterSceneTranslator {
         // owning block's midpoint, which would invert water medium transitions and lava emission.
         Direction direction =
                 Direction.getApproximateNearest(normalX, normalY, normalZ);
-        if (settings.suppressFluidFaceAgainstFullCollision()
-                && fluid.fullCollision(direction.ordinal())) {
+        // A full neighboring collision face proves that this raster inset is internal. Keeping it
+        // creates a second, nearly coincident ray surface; this is a representation invariant, not
+        // an optional visual tweak.
+        if (fluid.fullCollision(direction.ordinal())) {
             return false;
         }
         float inverseNormalLength =

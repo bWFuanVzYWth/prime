@@ -99,13 +99,16 @@ final class MergedFaceMeshBuilder {
                         this.work)
                 : null;
         Set<MergeFace> composited = Collections.newSetFromMap(new IdentityHashMap<>());
+        ArrayList<CompositeFallback> compositeFallbacks = new ArrayList<>();
         Map<FaceLocation, MergeFace> opaqueFaces = new HashMap<>();
         Map<FaceLocation, MergeFace> cutoutFaces = new HashMap<>();
         Set<FaceLocation> ambiguous = new HashSet<>();
         for (MergeFace face : faces) {
             this.work.step();
             requireInGrid(face);
-            if (usesVoxelSurface(face) && !face.cutout() && !face.transmissive()) {
+            if (usesVoxelSurface(face)
+                    && !face.transmissive()
+                    && !face.rasterOverlay()) {
                 putUnique(opaqueFaces, ambiguous, face);
             } else if (usesVoxelSurface(face)
                     && face.cutout()
@@ -129,6 +132,13 @@ final class MergedFaceMeshBuilder {
             if (resolved) {
                 composited.add(base);
                 composited.add(overlay);
+            } else {
+                // A material that cannot use texture voxels still has one physical raster plane.
+                // Preserve its alpha-over-base semantics instead of publishing two coincident
+                // triangles that compete in traversal.
+                composited.add(base);
+                composited.add(overlay);
+                compositeFallbacks.add(new CompositeFallback(base, overlay));
             }
         }
         ArrayList<MergeFace> ordinaryFaces = new ArrayList<>(faces.size());
@@ -173,6 +183,10 @@ final class MergedFaceMeshBuilder {
         for (MergeFace fallback : unmergedFallbacks) {
             this.work.step();
             this.emit(fallback, fallback.cellU(), fallback.cellV(), 1, 1);
+        }
+        for (CompositeFallback fallback : compositeFallbacks) {
+            this.work.step();
+            this.emitComposite(fallback.base, fallback.overlay);
         }
         this.finishSegment();
         if (detailBuilder != null) {
@@ -313,6 +327,9 @@ final class MergedFaceMeshBuilder {
         }
     }
 
+    private record CompositeFallback(MergeFace base, MergeFace overlay) {
+    }
+
     private static long lowBits(int count) {
         return count == Long.SIZE ? -1L : (1L << count) - 1L;
     }
@@ -322,6 +339,13 @@ final class MergedFaceMeshBuilder {
             this.finishSegment();
         }
         this.segment.add(face, u, v, width, height);
+    }
+
+    private void emitComposite(MergeFace base, MergeFace overlay) {
+        if (this.segment.triangleCount() + 2 > this.segmentTriangleTarget) {
+            this.finishSegment();
+        }
+        this.segment.addComposite(base, overlay);
     }
 
     private void finishSegment() {
@@ -341,6 +365,9 @@ final class MergedFaceMeshBuilder {
         private final IntBuilder cutoutPrimitives = new IntBuilder();
         private final FloatBuilder transmissivePositions = new FloatBuilder();
         private final IntBuilder transmissivePrimitives = new IntBuilder();
+        private final ArrayList<int[]> opaqueRelations = new ArrayList<>();
+        private final ArrayList<int[]> cutoutRelations = new ArrayList<>();
+        private final ArrayList<int[]> transmissiveRelations = new ArrayList<>();
         private final OpacityMicromapData.Builder opacityMicromap;
         private int opaqueTriangles;
         private int cutoutTriangles;
@@ -375,8 +402,10 @@ final class MergedFaceMeshBuilder {
             primitives.add(face.primitive());
             if (face.transmissive()) {
                 this.transmissiveTriangles += 2;
+                this.transmissiveRelations.add(null);
             } else if (face.cutout()) {
                 this.cutoutTriangles += 2;
+                this.cutoutRelations.add(null);
                 if (face.buildOpacityMicromap() && !face.frontFaceOnly()) {
                     this.addMicromapTriangle(face, u, v, width, corners, 0, 1, 2);
                     this.addMicromapTriangle(face, u, v, width, corners, 0, 2, 3);
@@ -385,6 +414,41 @@ final class MergedFaceMeshBuilder {
                     this.opacityMicromap.addFullyUnknownTriangle();
                 }
             } else {
+                this.opaqueTriangles += 2;
+                this.opaqueRelations.add(null);
+            }
+        }
+
+        void addComposite(MergeFace base, MergeFace overlay) {
+            float[][] corners = corners(base, base.cellU(), base.cellV(), 1, 1);
+            boolean cutoutGeometry = base.cutout() || base.transmissive();
+            FloatBuilder positions = cutoutGeometry
+                    ? this.cutoutPositions
+                    : this.opaquePositions;
+            IntBuilder primitives = cutoutGeometry
+                    ? this.cutoutPrimitives
+                    : this.opaquePrimitives;
+            addTriangle(positions, corners[0], corners[1], corners[2]);
+            addTriangle(positions, corners[0], corners[2], corners[3]);
+            primitives.add(overlay.primitive());
+            int[] relation = new int[1 + CpuSectionMesh.PRIMITIVE_WORDS];
+            int overlayFlags = PrimitivePacking.unpackControl(
+                    overlay.primitive()[3], overlay.primitive()[5]);
+            relation[0] = CpuSectionMesh.SURFACE_RELATION_OVERLAY
+                    | PrimitivePacking.materialRecipeControl(overlayFlags) << 8;
+            System.arraycopy(
+                    base.primitive(),
+                    0,
+                    relation,
+                    1,
+                    CpuSectionMesh.PRIMITIVE_WORDS);
+            if (cutoutGeometry) {
+                this.cutoutRelations.add(relation);
+                this.cutoutTriangles += 2;
+                this.opacityMicromap.addFullyUnknownTriangle();
+                this.opacityMicromap.addFullyUnknownTriangle();
+            } else {
+                this.opaqueRelations.add(relation);
                 this.opaqueTriangles += 2;
             }
         }
@@ -423,9 +487,17 @@ final class MergedFaceMeshBuilder {
                     this.opaquePrimitives,
                     this.cutoutPrimitives,
                     this.transmissivePrimitives);
+            ArrayList<int[]> relations = new ArrayList<>(
+                    this.opaqueRelations.size()
+                            + this.cutoutRelations.size()
+                            + this.transmissiveRelations.size());
+            relations.addAll(this.opaqueRelations);
+            relations.addAll(this.cutoutRelations);
+            relations.addAll(this.transmissiveRelations);
             return new CpuSectionMesh(
                     positions,
                     primitives,
+                    SurfaceRelationTable.encode(relations),
                     this.opaqueTriangles,
                     this.cutoutTriangles,
                     this.transmissiveTriangles,
