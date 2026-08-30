@@ -19,7 +19,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     static final int ALBEDO_FORMAT = VK12.VK_FORMAT_R16G16B16A16_SFLOAT;
     static final int NORMAL_ROUGHNESS_FORMAT = VK12.VK_FORMAT_R32G32B32A32_SFLOAT;
     static final int LINEAR_DEPTH_FORMAT = VK12.VK_FORMAT_R32_SFLOAT;
-    static final int MOTION_FORMAT = VK12.VK_FORMAT_R16G16_SFLOAT;
+    static final int MOTION_FORMAT = VK12.VK_FORMAT_R32G32_SFLOAT;
     static final int SPECULAR_MOTION_FORMAT = VK12.VK_FORMAT_R32G32_SFLOAT;
     static final int SPECULAR_HIT_DISTANCE_FORMAT = VK12.VK_FORMAT_R16_SFLOAT;
     static final int RESPONSIVITY_FORMAT = VK12.VK_FORMAT_R16_SFLOAT;
@@ -32,6 +32,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     private final VulkanImage noisySpecular;
     private final VulkanImage sourceNormalRoughness;
     private final VulkanImage linearViewZ;
+    private final VulkanImage transportScratch;
     private final VulkanImage motion;
     private final VulkanImage material;
     private final VulkanImage specularMaterial;
@@ -54,20 +55,21 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
         this.noisySpecular = images.get(1);
         this.sourceNormalRoughness = images.get(2);
         this.linearViewZ = images.get(3);
-        this.motion = images.get(4);
-        this.material = images.get(5);
-        this.specularMaterial = images.get(6);
-        this.primaryPosition = images.get(7);
-        this.sunLighting = images.get(8);
-        this.sunPenumbra = images.get(9);
-        this.inputColor = images.get(10);
-        this.normalRoughness = images.get(11);
-        this.specularMotion = images.get(12);
-        this.specularHitDistance = images.get(13);
-        this.reflectionPosition = images.get(14);
-        this.rrOutput = images.get(15);
-        this.responsivity = images.get(16);
-        this.materialClass = images.get(17);
+        this.transportScratch = images.get(4);
+        this.motion = images.get(5);
+        this.material = images.get(6);
+        this.specularMaterial = images.get(7);
+        this.primaryPosition = images.get(8);
+        this.sunLighting = images.get(9);
+        this.sunPenumbra = images.get(10);
+        this.inputColor = images.get(11);
+        this.normalRoughness = images.get(12);
+        this.specularMotion = images.get(13);
+        this.specularHitDistance = images.get(14);
+        this.reflectionPosition = images.get(15);
+        this.rrOutput = images.get(16);
+        this.responsivity = images.get(17);
+        this.materialClass = images.get(18);
         this.owned = images.toArray(VulkanImage[]::new);
     }
 
@@ -89,7 +91,9 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
             add(context, images, renderWidth, renderHeight,
                     LINEAR_DEPTH_FORMAT, "Prime RR linear view Z");
             add(context, images, renderWidth, renderHeight,
-                    MOTION_FORMAT, "Prime RR low-resolution motion");
+                    VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "Prime RR transport scratch");
+            add(context, images, renderWidth, renderHeight,
+                    MOTION_FORMAT, "Prime RR canonical visible motion");
             add(context, images, renderWidth, renderHeight,
                     ALBEDO_FORMAT, "Prime RR diffuse albedo and distance");
             add(context, images, renderWidth, renderHeight,
@@ -182,7 +186,8 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     @Override public VulkanImage noisySpecular() { return this.noisySpecular; }
     @Override public VulkanImage normalRoughness() { return this.sourceNormalRoughness; }
     @Override public VulkanImage viewZ() { return this.linearViewZ; }
-    @Override public VulkanImage transportMetadata() { return this.motion; }
+    @Override public VulkanImage transportScratch() { return this.transportScratch; }
+    @Override public VulkanImage visibleMotion() { return this.motion; }
     @Override public VulkanImage material() { return this.material; }
     @Override public VulkanImage specularMaterial() { return this.specularMaterial; }
     @Override public VulkanImage materialClass() { return this.materialClass; }

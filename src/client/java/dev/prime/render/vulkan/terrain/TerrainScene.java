@@ -590,6 +590,12 @@ public final class TerrainScene implements AutoCloseable {
                 snapshot.completedCount());
     }
 
+    /** Renderer-lifetime exact-medium allocation totals for opt-in data measurements. */
+    public MediumIdStatistics mediumIdStatistics() {
+        MediumIdRegistry.Snapshot snapshot = this.mediumIds.snapshot();
+        return new MediumIdStatistics(snapshot.assignedCount(), snapshot.highWaterId());
+    }
+
     public static boolean requiresWorldLightUpload(
             boolean rebuildWorldLights, CpuWorldLightTree.Result worldLightTree) {
         return rebuildWorldLights && !worldLightTree.isEmpty();
@@ -1558,6 +1564,15 @@ public final class TerrainScene implements AutoCloseable {
                     || topLevelLightTreeNodeCount < 0) {
                 throw new IllegalArgumentException(
                         "Resident scene statistics must be non-negative");
+            }
+        }
+    }
+
+    public record MediumIdStatistics(int assignedCount, long highWaterId) {
+        public MediumIdStatistics {
+            if (assignedCount < 1 || highWaterId < MediumIdRegistry.WATER_ID
+                    || highWaterId > 0xffff_ffffL) {
+                throw new IllegalArgumentException("Invalid renderer MediumId statistics");
             }
         }
     }

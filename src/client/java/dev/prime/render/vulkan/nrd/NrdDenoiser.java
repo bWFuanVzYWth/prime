@@ -712,7 +712,8 @@ public final class NrdDenoiser implements Destroyable {
         @Override public VulkanImage specularDirection() { return this.images.noisySpecularSh1; }
         @Override public VulkanImage normalRoughness() { return this.images.normalRoughness; }
         @Override public VulkanImage viewZ() { return this.images.viewZ; }
-        @Override public VulkanImage transportMetadata() { return this.images.fsrMotion; }
+        @Override public VulkanImage transportScratch() { return this.images.fsrMotion; }
+        @Override public VulkanImage visibleMotion() { return this.images.fsrMotion; }
         @Override public VulkanImage material() { return this.images.material; }
         @Override public VulkanImage specularMaterial() { return this.images.specularMaterial; }
         @Override public VulkanImage materialClass() { return this.images.materialClass; }

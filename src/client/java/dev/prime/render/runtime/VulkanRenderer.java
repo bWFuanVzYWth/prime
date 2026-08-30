@@ -50,6 +50,7 @@ public final class VulkanRenderer implements AutoCloseable {
     private final TerrainStreamer terrain;
     private final VanillaLabPbrAtlas labPbrSource = new VanillaLabPbrAtlas();
     private final MaterialTexturePages materialTextures;
+    private final RendererDataMeasurementRecorder dataMeasurements;
     private final BlockPos.MutableBlockPos cameraBlockPosition = new BlockPos.MutableBlockPos();
     private final TraceBackend traceBackend;
     private AtmospherePipeline atmosphere;
@@ -100,6 +101,8 @@ public final class VulkanRenderer implements AutoCloseable {
             this.atmosphere = newAtmosphere;
             this.terrain = newTerrain;
             this.materialTextures = newMaterialTextures;
+            this.dataMeasurements = RendererDataMeasurementRecorder.fromSystemProperties(
+                    newContext.capabilities().deviceName());
             this.shaderFingerprint = VulkanShaderModules.fingerprint();
         } catch (RuntimeException exception) {
             ResourceCleanup.destroy(newOfflineRenderer, exception);
@@ -369,6 +372,17 @@ public final class VulkanRenderer implements AutoCloseable {
                         atlas.textureRevision(),
                         this.sceneTextures));
         this.debugLines = this.withRendererDiagnostics(settings);
+        RealtimeRenderer.DiagnosticSnapshot diagnostic =
+                this.realtimeRenderer.diagnosticSnapshot();
+        if (diagnostic != null) {
+            this.dataMeasurements.recordFrame(
+                    this.context,
+                    this.materialTextures.measurementSnapshot(),
+                    scene.statistics(),
+                    this.terrain.mediumIdStatistics(),
+                    frameCamera,
+                    diagnostic);
+        }
         if (this.realtimeRenderer.hasSizedResources()) {
             this.modeLifecycle = this.modeLifecycle.allocateRealtimeSized();
         }
@@ -771,6 +785,7 @@ public final class VulkanRenderer implements AutoCloseable {
             return;
         }
         this.acceptsResourceReloadEffects = false;
+        this.dataMeasurements.finish(this.context);
         // A failed wait leaves every GPU child live and permits a later close attempt. After a
         // successful wait, every child is attempted once and failures are aggregated.
         this.context.awaitIdle();

@@ -740,7 +740,7 @@ abstract class RealtimeRayTracingPipelineSupport implements RealtimeIntegratorPi
                 signals.noisySpecular(),
                 signals.normalRoughness(),
                 signals.viewZ(),
-                signals.transportMetadata(),
+                signals.transportScratch(),
                 signals.material(),
                 signals.specularMaterial(),
                 signals.primaryPosition(),

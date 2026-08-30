@@ -165,7 +165,8 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
     @Override public VulkanImage noisySpecular() { return this.noisySpecular; }
     @Override public VulkanImage normalRoughness() { return this.normalRoughness; }
     @Override public VulkanImage viewZ() { return this.viewZ; }
-    @Override public VulkanImage transportMetadata() { return this.transportMetadata; }
+    @Override public VulkanImage transportScratch() { return this.transportMetadata; }
+    @Override public VulkanImage visibleMotion() { return this.transportMetadata; }
     @Override public VulkanImage material() { return this.material; }
     @Override public VulkanImage specularMaterial() { return this.specularMaterial; }
     @Override public VulkanImage materialClass() { return this.materialClass; }

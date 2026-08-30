@@ -22,7 +22,10 @@ image descriptor is the explicit absent value and is forwarded to NGX as a null
 `pInResponsivityMask`; every nonzero descriptor must satisfy the exact format and extent contract.
 ABI v9 changes only normal/roughness to direct `VK_FORMAT_R32G32B32A32_SFLOAT`; the bridge rejects
 older RGBA16F or octahedral guide inputs before calling NGX.
+ABI v10 changes primary visible-surface motion to `VK_FORMAT_R32G32_SFLOAT`; reflection motion
+already used the same lossless baseline format. The semantic inputs now have independent images
+instead of reusing the transport scratch image across phases.
 
 Copy `prime_dlss_rr.dll` beside the release `nvngx_dlssd.dll` in
 `src/client/resources/prime/natives/windows-x86_64`. The bundled runtime is `310.7.128.0` with
-SHA-256 `5D8EA393A9C8656EE3E2B863910A8DE10A2F96B9693493743F59AC6910F6F4F1`.
+SHA-256 `59A005A6BEBBDE6DB27282B22D35E5E746FFB0BC91B07736B986BC658DC631FE`.

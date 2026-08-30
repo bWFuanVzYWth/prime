@@ -156,7 +156,7 @@ public final class RealtimeFrameExecutor implements Destroyable {
             if (prepareFrameGeneration) {
                 StreamlineInputFlipPass streamlineInputs = this.ensureStreamlineInputs(
                         processor.rawFrame().viewZ(),
-                        processor.rawFrame().transportMetadata(),
+                        processor.rawFrame().visibleMotion(),
                         output);
                 streamlineInputs.record(commandBuffer);
                 if (StreamlineFrameGeneration.prepare(commandBuffer, streamlineInputs)) {

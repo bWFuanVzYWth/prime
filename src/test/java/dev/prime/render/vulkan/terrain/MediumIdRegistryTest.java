@@ -23,4 +23,16 @@ final class MediumIdRegistryTest {
         assertEquals(MediumIdRegistry.WATER_ID, initial[1]);
         assertNotEquals(initial[2], initial[3]);
     }
+
+    @Test
+    void snapshotReportsRendererLifetimeHighWater() {
+        MediumIdRegistry registry = new MediumIdRegistry();
+        assertEquals(new MediumIdRegistry.Snapshot(1, 1L), registry.snapshot());
+
+        registry.resolve(List.of(
+                new MediumKey(MediumKey.Kind.FAMILY, 7, 0xff102030, false),
+                new MediumKey(MediumKey.Kind.FAMILY, 8, 0xff405060, false)));
+
+        assertEquals(new MediumIdRegistry.Snapshot(3, 3L), registry.snapshot());
+    }
 }

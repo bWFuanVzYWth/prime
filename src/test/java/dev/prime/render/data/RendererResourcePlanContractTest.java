@@ -34,7 +34,7 @@ final class RendererResourcePlanContractTest {
         assertEquals(264, offline.renderBytesPerPixel());
         assertEquals(95, RendererDataContracts
                 .memoryPlan("raw-wavefront-images-current").renderBytesPerPixel());
-        assertEquals(135, RendererDataContracts
+        assertEquals(147, RendererDataContracts
                 .memoryPlan("dlss-rr-images-current").renderBytesPerPixel());
         assertEquals(8, RendererDataContracts
                 .memoryPlan("dlss-rr-images-current").displayBytesPerPixel());
@@ -54,7 +54,7 @@ final class RendererResourcePlanContractTest {
         RendererDataContracts.MemoryPlan rr =
                 RendererDataContracts.memoryPlan("dlss-rr-images-current");
         assertEquals(
-                135L * 1920L * 1080L + 8L * 3840L * 2160L,
+                147L * 1920L * 1080L + 8L * 3840L * 2160L,
                 rr.bytes(1920, 1080, 3840, 2160));
         assertThrows(
                 IllegalArgumentException.class,

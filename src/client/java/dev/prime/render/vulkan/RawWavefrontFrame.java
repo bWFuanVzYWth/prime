@@ -4,8 +4,9 @@ package dev.prime.render.vulkan;
  * Lifetime-stable image view written by one resolved wavefront frame.
  *
  * <p>These are transport outputs, not reconstruction inputs. In particular,
- * {@link #transportMetadata()} is private raygen scratch; a reconstruction preparation stage may
- * alias and overwrite it with a backend-specific motion vector only after ray tracing completes.
+ * {@link #transportScratch()} is private raygen scratch. {@link #visibleMotion()} is the
+ * reconstruction-facing visible-surface motion image; a backend may explicitly alias both only
+ * while it still carries a legacy adapter encoding.
  */
 public interface RawWavefrontFrame {
     VulkanImage noisyDiffuse();
@@ -16,7 +17,9 @@ public interface RawWavefrontFrame {
 
     VulkanImage viewZ();
 
-    VulkanImage transportMetadata();
+    VulkanImage transportScratch();
+
+    VulkanImage visibleMotion();
 
     VulkanImage material();
 

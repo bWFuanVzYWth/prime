@@ -13,7 +13,7 @@ import org.lwjgl.vulkan.VK12;
 final class DlssRrNativeContractTest {
     @Test
     void fixedWidthJavaAbiMatchesTheNativeBridge() {
-        assertEquals(9, DlssRrNative.ABI_VERSION);
+        assertEquals(10, DlssRrNative.ABI_VERSION);
         assertEquals(6, DlssRrNative.RENDER_PRESET_F);
         assertEquals(56, DlssRrNative.EXTENSION_QUERY_SIZE);
         assertEquals(56, DlssRrNative.INIT_DESCRIPTION_SIZE);
@@ -32,7 +32,7 @@ final class DlssRrNativeContractTest {
                 VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
                 DlssRrTargets.NORMAL_ROUGHNESS_FORMAT);
         assertEquals(VK12.VK_FORMAT_R32_SFLOAT, DlssRrTargets.LINEAR_DEPTH_FORMAT);
-        assertEquals(VK12.VK_FORMAT_R16G16_SFLOAT, DlssRrTargets.MOTION_FORMAT);
+        assertEquals(VK12.VK_FORMAT_R32G32_SFLOAT, DlssRrTargets.MOTION_FORMAT);
         assertEquals(VK12.VK_FORMAT_R32G32_SFLOAT, DlssRrTargets.SPECULAR_MOTION_FORMAT);
         assertEquals(
                 VK12.VK_FORMAT_R16_SFLOAT,

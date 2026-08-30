@@ -24,6 +24,10 @@ final class MediumIdRegistry {
         return result;
     }
 
+    Snapshot snapshot() {
+        return new Snapshot(this.ids.size(), this.nextId - 1L);
+    }
+
     private int resolve(MediumKey key) {
         Integer existing = this.ids.get(key);
         if (existing != null) {
@@ -35,5 +39,13 @@ final class MediumIdRegistry {
         int assigned = (int) this.nextId++;
         this.ids.put(key, assigned);
         return assigned;
+    }
+
+    record Snapshot(int assignedCount, long highWaterId) {
+        Snapshot {
+            if (assignedCount < 1 || highWaterId < WATER_ID || highWaterId > 0xffff_ffffL) {
+                throw new IllegalArgumentException("Invalid renderer MediumId statistics");
+            }
+        }
     }
 }

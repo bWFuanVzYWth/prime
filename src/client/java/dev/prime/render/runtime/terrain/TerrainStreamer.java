@@ -192,6 +192,10 @@ public final class TerrainStreamer implements AutoCloseable {
         return this.scene.compactionStats();
     }
 
+    public TerrainScene.MediumIdStatistics mediumIdStatistics() {
+        return this.scene.mediumIdStatistics();
+    }
+
     /**
      * Atomically replaces the one render-thread-owned dynamic BLAS.
      *
