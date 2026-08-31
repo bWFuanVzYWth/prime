@@ -7,7 +7,7 @@
         { "name": "uv1", "type": "uint", "offset": 4 },
         { "name": "uv2", "type": "uint", "offset": 8 },
         { "name": "tint", "type": "uint", "offset": 12 },
-        { "name": "mediumMaterialIds", "type": "uint", "offset": 16 },
+        { "name": "identity", "type": "uint", "offset": 16 },
         { "name": "flagsEmitter", "type": "uint", "offset": 20 },
         { "name": "uvDensity", "type": "uint", "offset": 24 },
         { "name": "tangent", "type": "uint", "offset": 28 }
@@ -264,10 +264,12 @@
   "materialPageCount": 16,
   "baseColorPageCount": 64,
   "materialCoreContract": {
-    "recordSize": 4,
+    "recordSize": 8,
     "textureIdMask": "0xffff",
     "recipeControlShift": 16,
-    "recipeControlMask": "0xffff"
+    "recipeControlMask": "0xffff",
+    "mediumIdOffset": 4,
+    "mediumIdMask": "0xffff"
   },
   "realtimeWavefrontContract": {
     "pathRecordSize": 144,

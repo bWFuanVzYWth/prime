@@ -8,6 +8,7 @@ import "math/packed_geometry.slang";
 import "policy/runtime/config.slang";
 import "model/material/defaults.slang";
 import "service/material/access.slang";
+import "service/material/medium_access.slang";
 import "service/material/normal_mapping.slang";
 import "service/material/surface.slang";
 
@@ -101,7 +102,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
                 adjacentCore & PRIME_MATERIAL_CORE_TEXTURE_ID_MASK,
                 primeUnpackUv(relation.referenceUv));
         primePayload.adjacentBaseColor = adjacent.baseColor;
-        primePayload.adjacentMediumId = relation.mediumId;
+        primePayload.adjacentMediumId = primeMaterialMediumId(relation.materialId);
         uint adjacentFresnelCode = adjacent.opticalControl
                 & PRIME_OPTICAL_FRESNEL_MASK;
         primePayload.adjacentInterfaceControl =

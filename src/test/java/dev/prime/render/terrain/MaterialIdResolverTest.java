@@ -32,7 +32,7 @@ final class MaterialIdResolverTest {
                     }));
 
         int identity = packed[PrimitivePacking.MEDIUM_ID_WORD];
-        assertEquals(19, MaterialIdResolver.unpackMediumId(identity));
+        assertEquals(0, MaterialIdResolver.unpackMediumId(identity));
         assertEquals(41, MaterialIdResolver.unpackMaterialId(identity));
         assertEquals(resolvedMedium[3] & 0x00ff_ffff, packed[3]);
         for (int word = 0; word < CpuSectionMesh.PRIMITIVE_WORDS; word++) {
@@ -89,6 +89,28 @@ final class MaterialIdResolverTest {
                 0,
                 packed[CpuSectionMesh.PRIMITIVE_WORDS
                         + PrimitivePacking.MEDIUM_ID_WORD]);
+    }
+
+    @Test
+    void reservedZeroMaterialIdentityRetainsItsInlineMedium() {
+        int[] source = primitive(1, 1, PrimitivePacking.CONTROL_DIELECTRIC_SOLID);
+        source[5] = PrimitivePacking.packDynamicControl(
+                PrimitivePacking.CONTROL_DIELECTRIC_SOLID, 1, false);
+        int[] resolvedMedium = MediumIdResolver.primitiveRecords(
+                source, new int[] {0, 19});
+
+        int[] packed = MaterialIdResolver.primitiveRecords(
+                resolvedMedium,
+                source,
+                CompiledClusterLights.EMPTY,
+                MaterialIdResolver.cache(List.of(GLASS), key -> {
+                    throw new AssertionError("Dynamic material must not allocate an ID");
+                }));
+
+        assertEquals(19, MaterialIdResolver.unpackMediumId(
+                packed[PrimitivePacking.MEDIUM_ID_WORD]));
+        assertEquals(0, MaterialIdResolver.unpackMaterialId(
+                packed[PrimitivePacking.MEDIUM_ID_WORD]));
     }
 
     @Test

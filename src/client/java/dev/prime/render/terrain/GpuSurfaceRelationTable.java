@@ -4,10 +4,11 @@ import java.util.Arrays;
 
 /** Upload-only relation encoding addressed from existing primitive and emitter payload words. */
 public final class GpuSurfaceRelationTable {
-    public static final int BOUNDARY_WORDS = 4;
-    public static final int MATERIAL_WORDS = 8;
+    public static final int BOUNDARY_WORDS = 3;
+    public static final int MATERIAL_WORDS = 7;
     private static final int MAX_ENCODED_OFFSET = 0x00ff_ffff;
     private static final int STATIC_PAYLOAD_MASK = PrimitivePacking.MAX_TEXTURE_ID << 3;
+    private static final int MATERIAL_TANGENT_NEGATIVE = 0x8000_0000;
 
     private GpuSurfaceRelationTable() {
     }
@@ -63,10 +64,15 @@ public final class GpuSurfaceRelationTable {
                     throw new IllegalArgumentException(
                             "GPU boundary relation requires a resolved MaterialId");
                 }
+                if ((record[2] & ~TintIdResolver.MAX_TINT_ID) != 0) {
+                    throw new IllegalArgumentException(
+                            "GPU boundary relation requires a resolved u16 TintId");
+                }
                 words[cursor] = record[0] & 0xff;
                 words[cursor + 1] = record[1];
-                words[cursor + 2] = record[2];
-                words[cursor + 3] = identity;
+                words[cursor + 2] = MaterialIdResolver.pack(
+                        record[2] & TintIdResolver.MAX_TINT_ID,
+                        MaterialIdResolver.unpackMaterialId(identity));
                 cursor += BOUNDARY_WORDS;
             } else {
                 int materialId = MaterialIdResolver.unpackMaterialId(
@@ -75,14 +81,21 @@ public final class GpuSurfaceRelationTable {
                     throw new IllegalArgumentException(
                             "GPU material relation requires a resolved MaterialId");
                 }
-                words[cursor] = record[0];
+                if ((record[4] & 0x00ff_0000) != 0) {
+                    throw new IllegalArgumentException(
+                            "GPU material relation requires a resolved u16 TintId");
+                }
+                words[cursor] = record[0]
+                        | ((record[4] & PrimitivePacking.CONTROL_TANGENT_NEGATIVE << 24) != 0
+                                ? MATERIAL_TANGENT_NEGATIVE
+                                : 0);
                 words[cursor + 1] = record[1];
                 words[cursor + 2] = record[2];
                 words[cursor + 3] = record[3];
-                words[cursor + 4] = PrimitivePacking.retainGeometryTintControl(record[4]);
-                words[cursor + 5] = record[5];
-                words[cursor + 6] = record[7];
-                words[cursor + 7] = record[8];
+                words[cursor + 4] = MaterialIdResolver.pack(
+                        record[4] & TintIdResolver.MAX_TINT_ID, materialId);
+                words[cursor + 5] = record[7];
+                words[cursor + 6] = record[8];
                 cursor += MATERIAL_WORDS;
             }
         }

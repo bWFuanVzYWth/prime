@@ -10,6 +10,7 @@ import "policy/runtime/config.slang";
 import "policy/transport/transparent_nee.slang";
 import "model/material/defaults.slang";
 import "service/material/access.slang";
+import "service/material/medium_access.slang";
 import "service/material/static_color.slang";
 import "model/material/transparent.slang";
 
@@ -185,7 +186,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
                 == PRIME_SURFACE_RELATION_BOUNDARY) {
             primeAccumulateSolidMediumBoundary(
                     primeShadowPayload,
-                    relation.mediumId,
+                    primeMaterialMediumId(relation.materialId),
                     primeShadowCanonicalExtinction(
                             primeSurfaceBoundaryExtinction(relation)),
                     !entering);

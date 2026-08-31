@@ -64,10 +64,12 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| schema.sharedDescriptors.tintOperators != 50
 				|| schema.sharedDescriptors.baseColorPages != 51
 				|| schema.sharedDescriptors.materialCoreRecords != 52
-				|| materialCoreContract.recordSize != 4
+				|| materialCoreContract.recordSize != 8
 				|| !materialCoreContract.textureIdMask.toString().equalsIgnoreCase('0xffff')
 				|| materialCoreContract.recipeControlShift != 16
-				|| !materialCoreContract.recipeControlMask.toString().equalsIgnoreCase('0xffff')) {
+				|| !materialCoreContract.recipeControlMask.toString().equalsIgnoreCase('0xffff')
+				|| materialCoreContract.mediumIdOffset != 4
+				|| !materialCoreContract.mediumIdMask.toString().equalsIgnoreCase('0xffff')) {
 			throw new GradleException(
 					'Prime shader ABI sizes or scene texture count changed without a coordinated migration')
 		}
@@ -335,6 +337,8 @@ public final class ShaderAbi {
     public static final int MATERIAL_CORE_TEXTURE_ID_MASK = ${materialCoreContract.textureIdMask};
     public static final int MATERIAL_CORE_RECIPE_CONTROL_SHIFT = ${materialCoreContract.recipeControlShift};
     public static final int MATERIAL_CORE_RECIPE_CONTROL_MASK = ${materialCoreContract.recipeControlMask};
+    public static final int MATERIAL_CORE_MEDIUM_ID_OFFSET = ${materialCoreContract.mediumIdOffset};
+    public static final int MATERIAL_CORE_MEDIUM_ID_MASK = ${materialCoreContract.mediumIdMask};
     public static final int DESCRIPTOR_TLAS = ${schema.sharedDescriptors.tlas};
     public static final int DESCRIPTOR_BLOCK_ATLAS = ${schema.sharedDescriptors.blockAtlas};
     public static final int DESCRIPTOR_STABLE_RADIANCE = ${schema.realtimeDescriptors.stableRadiance};
@@ -524,6 +528,8 @@ public static const uint PRIME_MATERIAL_CORE_RECORD_SIZE = ${materialCoreContrac
 public static const uint PRIME_MATERIAL_CORE_TEXTURE_ID_MASK = ${materialCoreContract.textureIdMask};
 public static const uint PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT = ${materialCoreContract.recipeControlShift};
 public static const uint PRIME_MATERIAL_CORE_RECIPE_CONTROL_MASK = ${materialCoreContract.recipeControlMask};
+public static const uint PRIME_MATERIAL_CORE_MEDIUM_ID_OFFSET = ${materialCoreContract.mediumIdOffset};
+public static const uint PRIME_MATERIAL_CORE_MEDIUM_ID_MASK = ${materialCoreContract.mediumIdMask};
 """
 		new File(slangDir, 'prime_abi_bindings.slang').text = """\
 #language slang 2026

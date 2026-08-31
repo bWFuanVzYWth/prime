@@ -24,14 +24,13 @@ final class GpuSurfaceRelationTableTest {
         GpuSurfaceRelationTable.Encoding encoded =
                 GpuSurfaceRelationTable.encodeResolved(source, 3, 0);
 
-        assertEquals(12, encoded.words().length);
+        assertEquals(10, encoded.words().length);
         assertArrayEquals(
                 new int[] {
                     CpuSectionMesh.SURFACE_RELATION_BOUNDARY
                             | CpuSectionMesh.SURFACE_RELATION_MICRO_GAP_ELIGIBLE,
                     boundary[1],
-                    boundary[2],
-                    identity
+                    MaterialIdResolver.pack(boundary[2], 53)
                 },
                 GpuSurfaceRelationTable.record(encoded, 0));
         assertNull(GpuSurfaceRelationTable.record(encoded, 1));
@@ -49,7 +48,7 @@ final class GpuSurfaceRelationTableTest {
                 CpuSectionLights.EMPTY);
         CpuClusterMesh mesh = CpuClusterMesh.fromSegments(List.of(section));
         assertEquals(68L, mesh.surfaceRelationBytes());
-        assertEquals(48L, GpuSurfaceRelationTable.byteSize(mesh));
+        assertEquals(40L, GpuSurfaceRelationTable.byteSize(mesh));
     }
 
     @Test
@@ -93,7 +92,7 @@ final class GpuSurfaceRelationTableTest {
                         packed[second + 3], packed[second + 5]));
         assertEquals(0, packed[second + 5] >>> 3 & PrimitivePacking.MAX_TEXTURE_ID);
         assertEquals(primitives[third + 5], packed[third + 5]);
-        assertArrayEquals(new int[] {5}, relations.completedEmitterOffsets());
+        assertArrayEquals(new int[] {4}, relations.completedEmitterOffsets());
         assertArrayEquals(original, primitives);
     }
 
@@ -151,8 +150,8 @@ final class GpuSurfaceRelationTableTest {
         int[] secondPacked = GpuSurfaceRelationTable.primitiveRecords(
                 second, 1, 1, 1, 1, 3, 5, relations);
 
-        assertArrayEquals(new int[] {1, 9, 17}, relationPayloads(firstPacked));
-        assertArrayEquals(new int[] {5, 13, 21}, relationPayloads(secondPacked));
+        assertArrayEquals(new int[] {1, 7, 13}, relationPayloads(firstPacked));
+        assertArrayEquals(new int[] {4, 10, 16}, relationPayloads(secondPacked));
     }
 
     @Test
@@ -177,13 +176,30 @@ final class GpuSurfaceRelationTableTest {
                 () -> GpuSurfaceRelationTable.encodeResolved(source, 1, 0));
     }
 
+    @Test
+    void encodingRejectsUnresolvedTintPayloadsInsteadOfTruncatingThem() {
+        int[] unresolvedBoundary = boundary(MaterialIdResolver.pack(0, 53));
+        unresolvedBoundary[2] = 0x0001_0000;
+        int[] unresolvedMaterial = overlay();
+        unresolvedMaterial[4] |= 0x0001_0000;
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> GpuSurfaceRelationTable.encodeResolved(
+                        SurfaceRelationTable.encode(List.of(unresolvedBoundary)), 1, 0));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> GpuSurfaceRelationTable.encodeResolved(
+                        SurfaceRelationTable.encode(List.of(unresolvedMaterial)), 1, 0));
+    }
+
     private static int[] boundary(int identity) {
         return new int[] {
             CpuSectionMesh.SURFACE_RELATION_BOUNDARY
                     | CpuSectionMesh.SURFACE_RELATION_MICRO_GAP_ELIGIBLE
                     | GLASS_CONTROL << 8,
             PrimitivePacking.packUv(0.25F, 0.75F),
-            0x0012_3456,
+            73,
             7,
             identity
         };
@@ -194,7 +210,7 @@ final class GpuSurfaceRelationTableTest {
         result[0] = CpuSectionMesh.SURFACE_RELATION_OVERLAY
                 | PrimitivePacking.CONTROL_ALPHA_CUTOUT << 8;
         result[4] = PrimitivePacking.packTintControl(
-                0x00ff_ffff,
+                202,
                 PrimitivePacking.CONTROL_NORMAL_TEXTURE
                         | PrimitivePacking.CONTROL_TANGENT_NEGATIVE);
         result[5] = MaterialIdResolver.pack(0, 27);
@@ -206,12 +222,13 @@ final class GpuSurfaceRelationTableTest {
 
     private static int[] compactMaterialRelation(int[] source) {
         return new int[] {
-            source[0],
+            source[0] | 0x8000_0000,
             source[1],
             source[2],
             source[3],
-            PrimitivePacking.retainGeometryTintControl(source[4]),
-            source[5],
+            MaterialIdResolver.pack(
+                    source[4] & TintIdResolver.MAX_TINT_ID,
+                    MaterialIdResolver.unpackMaterialId(source[5])),
             source[7],
             source[8]
         };

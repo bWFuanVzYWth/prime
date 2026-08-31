@@ -17,7 +17,6 @@ public struct PrimeSurfaceRelation {
     public uint control;
     public uint referenceUv;
     public uint tint;
-    public uint mediumId;
     public uint materialId;
     public PrimitiveRecord material;
 };
@@ -34,6 +33,7 @@ static const uint PRIME_SURFACE_RELATION_OVERLAY = 2u;
 static const uint PRIME_SURFACE_RELATION_BILATERAL = 3u;
 public static const uint PRIME_SURFACE_RELATION_MICRO_GAP_ELIGIBLE = 1u << 4u;
 static const uint PRIME_SURFACE_RELATION_POSITIVE_ONLY = 1u << 4u;
+static const uint PRIME_SURFACE_RELATION_MATERIAL_TANGENT_NEGATIVE = 1u << 31u;
 
 // Static immutable semantics come from MaterialId. Tangent handedness remains per triangle;
 // dynamic and baked records have no MaterialId and retain their inline recipe.
@@ -82,8 +82,13 @@ public PrimitiveRecord primePrimitive(SectionRecord section) {
     // Their instance tint is applied after per-primitive color selection in material.slang.
     if ((section.instanceTint & 0x80000000u) != 0u
             && !primeUsesBakedMaterial(primitive)) {
-        primitive.tint = (primitive.tint & 0xff000000u)
-                | (section.instanceTint & 0x00ffffffu);
+        if (primePrimitiveMaterialId(primitive) != 0u) {
+            primitive.identity = (primitive.identity & 0xffff0000u)
+                    | (section.instanceTint & 0xffffu);
+        } else {
+            primitive.tint = (primitive.tint & 0xff000000u)
+                    | (section.instanceTint & 0x00ffffffu);
+        }
     }
     return primitive;
 }
@@ -203,13 +208,12 @@ public PrimeSurfaceRelation primeSurfaceRelation(
     result.control = 0u;
     result.referenceUv = 0u;
     result.tint = 0u;
-    result.mediumId = 0u;
     result.materialId = 0u;
     result.material.uv0 = 0u;
     result.material.uv1 = 0u;
     result.material.uv2 = 0u;
     result.material.tint = 0u;
-    result.material.mediumMaterialIds = 0u;
+    result.material.identity = 0u;
     result.material.flagsEmitter = 0u;
     result.material.uvDensity = 0u;
     result.material.tangent = 0u;
@@ -243,20 +247,23 @@ public PrimeSurfaceRelation primeSurfaceRelation(
     uint kind = result.control & PRIME_SURFACE_RELATION_KIND_MASK;
     if (kind == PRIME_SURFACE_RELATION_BOUNDARY) {
         result.referenceUv = relations[offset + 1u];
-        result.tint = relations[offset + 2u];
-        result.mediumId = primeMediumId(relations[offset + 3u]);
-        result.materialId = primeMaterialId(relations[offset + 3u]);
+        uint identity = relations[offset + 2u];
+        result.tint = identity & 0xffffu;
+        result.materialId = primeMaterialId(identity);
     } else {
         result.material.uv0 = relations[offset + 1u];
         result.material.uv1 = relations[offset + 2u];
         result.material.uv2 = relations[offset + 3u];
-        result.material.tint = relations[offset + 4u];
-        result.material.mediumMaterialIds = relations[offset + 5u];
+        result.material.tint = (result.control
+                        & PRIME_SURFACE_RELATION_MATERIAL_TANGENT_NEGATIVE) != 0u
+                ? PRIME_RECIPE_TANGENT_NEGATIVE << 24u
+                : 0u;
+        result.material.identity = relations[offset + 4u];
         // Immutable recipe and texture facts come from MaterialId. Relation materials cannot be
         // dynamic or emissive, so their former flags/payload word is redundant.
         result.material.flagsEmitter = 0u;
-        result.material.uvDensity = relations[offset + 6u];
-        result.material.tangent = relations[offset + 7u];
+        result.material.uvDensity = relations[offset + 5u];
+        result.material.tangent = relations[offset + 6u];
     }
     return result;
 }
@@ -308,7 +315,7 @@ public PrimeResolvedSurface primeResolveSurfacePrimitive(
                             geometricNormal)) >= PRIME_CUTOUT_ALPHA_THRESHOLD;
     if (overlayCovered) {
         // The overlay recipe is an explicit relation semantic, not an alternate primitive ABI.
-        result.recipeControl = relation.control >> 8u;
+        result.recipeControl = relation.control >> 8u & PRIME_RECIPE_MATERIAL_MASK;
     } else {
         result.primitive = relation.material;
         result.materialCoreWord = primePrimitiveMaterialCoreWord(relation.material);

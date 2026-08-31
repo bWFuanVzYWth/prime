@@ -11,8 +11,8 @@ import "math/packed_geometry.slang";
 [[vk::binding(18, 0)]]
 public ByteAddressBuffer primeTextureRecords;
 
-// The first material-table lane is deliberately one word: texture identity and immutable recipe
-// control are independently addressable without extending their lifetime across wavefront stages.
+// Opacity-only paths load only texture/recipe word zero. Medium and combined access live in the
+// hit-only medium accessor so entries that do not consume medium cannot see that source.
 [[vk::binding(52, 0)]]
 public ByteAddressBuffer primeMaterialCoreRecords;
 
@@ -67,16 +67,18 @@ public int primeTextureMaximumMip(uint textureId) {
     return int(primeTextureRecordWord(textureId, 20u) & 0xffu);
 }
 
-public uint primePrimitiveMediumId(PrimitiveRecord primitive) {
-    return primeMediumId(primitive.mediumMaterialIds);
-}
-
 public uint primePrimitiveMaterialId(PrimitiveRecord primitive) {
-    return primeMaterialId(primitive.mediumMaterialIds);
+    return primeMaterialId(primitive.identity);
 }
 
 public uint primeMaterialCoreWord(uint materialId) {
     return primeMaterialCoreRecords.Load(materialId * PRIME_MATERIAL_CORE_RECORD_SIZE);
+}
+
+public uint primePrimitiveTintId(PrimitiveRecord primitive) {
+    return primePrimitiveMaterialId(primitive) == 0u
+            ? primitive.tint & 0xffffu
+            : primitive.identity & 0xffffu;
 }
 
 public uint primeMaterialTextureId(uint materialId) {

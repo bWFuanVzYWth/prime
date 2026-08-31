@@ -400,8 +400,13 @@ header word。table-backed 普通静态 primitive 可复用已经由 `MaterialId
 table-backed GPU primitive 的 immutable recipe/builtin 只存在于 material core；inline control 仅保留
 tangent handedness/front-face 等 geometry-varying 事实。hit resolver 返回显式 recipe override 与
 可复用的单个 core word，不通过改写 primitive 编码传语义。CPU/replay relation 保留可独立审计的
-完整记录；GPU boundary 为 4 words，overlay/bilateral secondary 为 8 words，后者不再复制可由
-`MaterialId` 恢复的 flags/texture/recipe word。
+完整记录；GPU boundary 为 3 words，overlay/bilateral secondary 为 7 words，后者不再复制可由
+`MaterialId` 恢复的 flags/texture/recipe/medium，也不为单个 handedness bit 保留整 word。
+
+material core 的 word0 保存 `TextureId:u16 | recipe:u16`，word1 保存 `MediumId:u16`；两者可窄读，
+也可在生命周期一致时合并读取。table-backed primitive/relation 的 identity 保存
+`TintId:u16 | MaterialId:u16`。当前 TintId 是旧 RGB8 operator 的精确迁移 carrier，不是连续 tint
+规范；释放出的 primitive tint payload 用于后续接入与 albedo 同精度的 `RGBA16F` tint-field addressing。
 
 `TextureId` 是 `MaterialId` 去重键的首要组成；只有 medium、recipe、coverage 和其他会改变行为的
 离散事实才扩展该 key。同一 `TextureId` 不能因为 section 不同而产生副本。常规 terrain 的主要

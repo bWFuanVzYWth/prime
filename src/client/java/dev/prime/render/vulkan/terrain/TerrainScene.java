@@ -42,7 +42,7 @@ public final class TerrainScene implements AutoCloseable {
     private final DynamicBufferPool dynamicBufferPool;
     private final VoxelBlasPool voxelBlasPool = new VoxelBlasPool();
     private final MediumIdRegistry mediumIds = new MediumIdRegistry();
-    private final MaterialIdRegistry materialIds = new MaterialIdRegistry();
+    private final MaterialIdRegistry materialIds = new MaterialIdRegistry(this.mediumIds);
     private final VulkanBuffer materialCoreRecords;
     private final TintOperatorTable tintOperators;
     private final boolean measurementsEnabled = Boolean.getBoolean(MEASUREMENT_ENABLE_PROPERTY);

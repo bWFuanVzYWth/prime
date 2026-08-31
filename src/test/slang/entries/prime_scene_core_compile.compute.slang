@@ -13,7 +13,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     primitive.uv1 = 0;
     primitive.uv2 = 0;
     primitive.tint = 0;
-    primitive.mediumMaterialIds = 0;
+    primitive.identity = 0;
     primitive.flagsEmitter = 0;
     primitive.uvDensity = 0;
     primitive.tangent = 0;

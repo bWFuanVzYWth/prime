@@ -29,7 +29,7 @@ final class MediumIdRegistry {
         return new Snapshot(this.ids.size(), this.nextId - 1L);
     }
 
-    private int resolve(MediumKey key) {
+    int resolve(MediumKey key) {
         Integer existing = this.ids.get(key);
         if (existing != null) {
             return existing;

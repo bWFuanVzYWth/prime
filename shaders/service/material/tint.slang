@@ -15,8 +15,8 @@ public struct PrimeTintOperator {
     public float4 row2;
 };
 
-PrimeTintOperator primeTintOperator(uint packedControlTintId) {
-    uint tintId = packedControlTintId & 0x00ffffffu;
+PrimeTintOperator primeTintOperator(uint tintIdentity) {
+    uint tintId = tintIdentity & 0xffffu;
     uint offset = tintId * PRIME_TINT_OPERATOR_SIZE;
     PrimeTintOperator result;
     result.row0 = asfloat(primeTintOperators.Load4(offset));
@@ -25,8 +25,8 @@ PrimeTintOperator primeTintOperator(uint packedControlTintId) {
     return result;
 }
 
-public float3 primeStaticTintColor(uint packedControlTintId) {
-    PrimeTintOperator tint = primeTintOperator(packedControlTintId);
+public float3 primeStaticTintColor(uint tintIdentity) {
+    PrimeTintOperator tint = primeTintOperator(tintIdentity);
     return float3(tint.row0.w, tint.row1.w, tint.row2.w);
 }
 
@@ -42,7 +42,7 @@ public float3 primeApplyStaticTint(
 }
 
 public float3 primeApplyStaticTint(
-        float3 linearRec2020, uint packedControlTintId) {
+        float3 linearRec2020, uint tintIdentity) {
     return primeApplyStaticTint(
-            linearRec2020, primeTintOperator(packedControlTintId));
+            linearRec2020, primeTintOperator(tintIdentity));
 }

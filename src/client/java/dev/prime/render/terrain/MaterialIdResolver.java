@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.ToIntFunction;
 
-/** Packs renderer-lifetime MaterialId and MediumId into their shared primitive identity lane. */
+/** Resolves renderer-lifetime MaterialIds and packs exact u16 identity lanes. */
 public final class MaterialIdResolver {
     public static final int MAX_ID = 0xffff;
 
@@ -34,12 +34,14 @@ public final class MaterialIdResolver {
                 base += CpuSectionMesh.PRIMITIVE_WORDS) {
             int materialId = cache.primitiveId(localRecords, base, lights);
             result[base + PrimitivePacking.MEDIUM_ID_WORD] = pack(
-                    resolvedMediumRecords[base + PrimitivePacking.MEDIUM_ID_WORD],
+                    materialId == 0
+                            ? resolvedMediumRecords[base + PrimitivePacking.MEDIUM_ID_WORD]
+                            : 0,
                     materialId);
             if (materialId != 0) {
-                // A resolved MaterialId is the sole immutable recipe source on the GPU. Keep only
-                // per-triangle orientation beside the primitive and leave dynamic/baked ABI zero
-                // identities unchanged.
+                // A resolved MaterialId owns immutable material and medium facts on the GPU. Keep
+                // only per-triangle orientation beside the primitive; dynamic/baked ABI zero
+                // identities retain their inline representation.
                 result[base + 3] = PrimitivePacking.retainGeometryTintControl(
                         result[base + 3]);
                 result[base + 5] = PrimitivePacking.retainGeometryFlagsControl(
@@ -93,10 +95,10 @@ public final class MaterialIdResolver {
         return result;
     }
 
-    public static int pack(int mediumId, int materialId) {
-        requireId(mediumId, "MediumId", true);
+    public static int pack(int lowIdentity, int materialId) {
+        requireId(lowIdentity, "Low identity", true);
         requireId(materialId, "MaterialId", true);
-        return mediumId | materialId << 16;
+        return lowIdentity | materialId << 16;
     }
 
     public static int unpackMediumId(int packed) {

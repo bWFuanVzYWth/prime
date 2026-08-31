@@ -25,8 +25,20 @@ public final class TintIdResolver {
             if (result == null) {
                 result = source.clone();
             }
-            result[record + 3] = replaceTint(
-                    source[record + 3], resolver.applyAsInt(source[record + 3] & 0x00ff_ffff));
+            int tintId = requireTintId(
+                    resolver.applyAsInt(source[record + 3] & 0x00ff_ffff));
+            int identity = source[record + PrimitivePacking.MEDIUM_ID_WORD];
+            int materialId = MaterialIdResolver.unpackMaterialId(identity);
+            if (materialId == 0) {
+                // Dynamic and constant/baked records retain their inline compatibility ABI.
+                result[record + 3] = replaceTint(source[record + 3], tintId);
+            } else {
+                // Table-backed GPU records use the low identity lane for exact TintId; MediumId
+                // comes from MaterialId core. Only tangent handedness remains in the tint word.
+                result[record + 3] = source[record + 3] & 0xff00_0000;
+                result[record + PrimitivePacking.MEDIUM_ID_WORD] =
+                        MaterialIdResolver.pack(tintId, materialId);
+            }
         }
         return result == null ? source : result;
     }
@@ -46,9 +58,13 @@ public final class TintIdResolver {
             int tintWord = kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY
                     ? cursor + 2
                     : cursor + 1 + 3;
-            result[tintWord] = replaceTint(
-                    result[tintWord],
+            int tintId = requireTintId(
                     resolver.applyAsInt(result[tintWord] & 0x00ff_ffff));
+            // Boundary tint is a pure color fact and may carry a non-semantic source alpha byte;
+            // embedded material tint shares its high byte with validated recipe control.
+            result[tintWord] = kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY
+                    ? tintId
+                    : replaceTint(result[tintWord], tintId);
             cursor += SurfaceRelationTable.wordsForControl(result[cursor]);
         }
         return result;

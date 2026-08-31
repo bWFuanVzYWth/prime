@@ -10,13 +10,20 @@ import java.util.Objects;
 
 /** Render-thread-owned renderer-lifetime MaterialId allocator; IDs are never reused. */
 final class MaterialIdRegistry {
+    private static final int CORE_WORDS = ShaderAbi.MATERIAL_CORE_RECORD_SIZE / Integer.BYTES;
     static final long BUFFER_BYTES = Math.multiplyExact(
             (long) MaterialIdResolver.MAX_ID + 1L,
             ShaderAbi.MATERIAL_CORE_RECORD_SIZE);
 
+    private final MediumIdRegistry mediumIds;
     private final Map<MaterialTableCandidate.Key, Integer> ids = new HashMap<>();
-    private final int[] coreRecords = new int[MaterialIdResolver.MAX_ID + 1];
+    private final int[] coreRecords =
+            new int[(MaterialIdResolver.MAX_ID + 1) * CORE_WORDS];
     private int nextId = 1;
+
+    MaterialIdRegistry(MediumIdRegistry mediumIds) {
+        this.mediumIds = Objects.requireNonNull(mediumIds, "mediumIds");
+    }
 
     int resolve(MaterialTableCandidate.Key key) {
         Objects.requireNonNull(key, "key");
@@ -29,12 +36,15 @@ final class MaterialIdRegistry {
         }
         int assigned = this.nextId++;
         this.ids.put(key, assigned);
-        this.coreRecords[assigned] = encodeCore(key);
+        int base = assigned * CORE_WORDS;
+        this.coreRecords[base] = encodeCoreWord(key);
+        this.coreRecords[base + ShaderAbi.MATERIAL_CORE_MEDIUM_ID_OFFSET / Integer.BYTES] =
+                encodeMediumId(key.medium() == null ? 0 : this.mediumIds.resolve(key.medium()));
         return assigned;
     }
 
     int[] encodedCoreRecords() {
-        return Arrays.copyOf(this.coreRecords, this.nextId);
+        return Arrays.copyOf(this.coreRecords, this.nextId * CORE_WORDS);
     }
 
     Snapshot snapshot() {
@@ -53,7 +63,7 @@ final class MaterialIdRegistry {
         }
     }
 
-    static int encodeCore(MaterialTableCandidate.Key key) {
+    static int encodeCoreWord(MaterialTableCandidate.Key key) {
         Objects.requireNonNull(key, "key");
         int textureId = key.textureId();
         int control = key.materialControl();
@@ -63,5 +73,12 @@ final class MaterialIdRegistry {
                     "Material core facts exceed their generated ABI fields");
         }
         return textureId | control << ShaderAbi.MATERIAL_CORE_RECIPE_CONTROL_SHIFT;
+    }
+
+    static int encodeMediumId(int mediumId) {
+        if ((mediumId & ~ShaderAbi.MATERIAL_CORE_MEDIUM_ID_MASK) != 0) {
+            throw new IllegalArgumentException("MediumId exceeds the material core ABI field");
+        }
+        return mediumId;
     }
 }

@@ -63,7 +63,8 @@ public PrimeMaterialSample primeEvaluateMaterial(
                             * primeDecodeSrgb(primeUnpackTint(primitive.tint).rgb));
         } else {
             result.opacity = textureSample.a;
-            result.baseColor = primeApplyStaticTint(textureSample.rgb, primitive.tint);
+            result.baseColor = primeApplyStaticTint(
+                    textureSample.rgb, primePrimitiveTintId(primitive));
         }
     }
     uint recipeScattering = recipeControl & PRIME_RECIPE_SCATTERING_MASK;
@@ -120,7 +121,7 @@ public PrimeMaterialSample primeEvaluateMaterial(
         float referenceOpacity;
         float3 referenceBaseColor = primeStaticBaseColor(
                 textureId,
-                primitive.tint,
+                primePrimitiveTintId(primitive),
                 primePrimitiveMaterialReferenceUv(primitive),
                 0.0,
                 referenceOpacity);
@@ -187,7 +188,7 @@ public PrimeMaterialSample primeEvaluateMaterialReference(
     primitive.uv2 = 0u;
     uint referenceControl = recipeControl & ~PRIME_RECIPE_NORMAL_TEXTURE;
     primitive.tint = tintId & 0x00ffffffu;
-    primitive.mediumMaterialIds = 0u;
+    primitive.identity = 0u;
     primitive.flagsEmitter = 0u;
     primitive.uvDensity = PRIME_CONSTANT_UV_DENSITY;
     primitive.tangent = 0u;

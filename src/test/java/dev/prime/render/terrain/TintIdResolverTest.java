@@ -12,12 +12,14 @@ import org.junit.jupiter.api.Test;
 
 final class TintIdResolverTest {
     @Test
-    void remapsOnlyStaticPrimitiveTintAndPreservesControl() {
+    void movesTableBackedTintIntoTheExactIdentityLaneAndPreservesControl() {
         int[] staticPrimitive = primitive(
                 3,
                 0x0012_3456,
                 PrimitivePacking.CONTROL_DIELECTRIC_SOLID
                         | PrimitivePacking.CONTROL_WATER_MEDIUM);
+        staticPrimitive[PrimitivePacking.MEDIUM_ID_WORD] =
+                MaterialIdResolver.pack(0, 41);
         int[] dynamicPrimitive = primitive(1, 0x00ab_cdef, 0);
         dynamicPrimitive[5] = PrimitivePacking.packDynamicControl(0, 1, false);
         int[] source = concatenate(staticPrimitive, dynamicPrimitive);
@@ -30,10 +32,16 @@ final class TintIdResolverTest {
         });
 
         assertNotSame(source, result);
-        assertEquals(0x1400_0049, result[3]);
+        assertEquals(0x1400_0000, result[3]);
+        assertEquals(
+                MaterialIdResolver.pack(73, 41),
+                result[PrimitivePacking.MEDIUM_ID_WORD]);
         assertEquals(dynamicPrimitive[3], result[CpuSectionMesh.PRIMITIVE_WORDS + 3]);
         assertEquals(1, calls.get());
         assertEquals(0x1412_3456, source[3]);
+        assertEquals(
+                MaterialIdResolver.pack(0, 41),
+                source[PrimitivePacking.MEDIUM_ID_WORD]);
     }
 
     @Test
@@ -53,7 +61,7 @@ final class TintIdResolverTest {
         int[] boundary = {
             CpuSectionMesh.SURFACE_RELATION_BOUNDARY,
             PrimitivePacking.packUv(0.5F, 0.5F),
-            0x0011_2233,
+            0xff11_2233,
             7,
             3
         };
