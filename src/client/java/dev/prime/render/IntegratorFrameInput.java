@@ -27,7 +27,8 @@ public record IntegratorFrameInput(
         TransparentGuideMode transparentGuideMode,
         LightingSettings.Snapshot lighting,
         MaterialSettings.Snapshot material,
-        boolean shInput) {
+        boolean shInput,
+        boolean historyValid) {
     private static final int ZSOBOL_MAXIMUM_EXTENT = 1 << 18;
 
     public IntegratorFrameInput(
@@ -52,7 +53,7 @@ public record IntegratorFrameInput(
                 maximumBounces,
                 sampleIndex, sampleEpoch, jitterPhase,
                 cameraInWater, postProcessingMode, transparentGuideMode, lighting, material,
-                shInput);
+                shInput, sampleIndex != 0);
     }
 
     public IntegratorFrameInput(
@@ -78,6 +79,45 @@ public record IntegratorFrameInput(
                 maximumBounces,
                 sampleIndex, sampleEpoch, jitterPhase, cameraInWater,
                 postProcessingMode, transparentGuideMode, lighting, material, shInput);
+    }
+
+    public IntegratorFrameInput(
+            FrameCamera camera,
+            int width,
+            int height,
+            AstronomyState astronomy,
+            int packedRayCone,
+            int additionalSpecularBounces,
+            int minimumBounces,
+            int maximumBounces,
+            int sampleIndex,
+            int sampleEpoch,
+            int jitterPhase,
+            boolean cameraInWater,
+            PostProcessingMode postProcessingMode,
+            TransparentGuideMode transparentGuideMode,
+            LightingSettings.Snapshot lighting,
+            MaterialSettings.Snapshot material,
+            boolean shInput) {
+        this(
+                camera,
+                width,
+                height,
+                astronomy,
+                packedRayCone,
+                additionalSpecularBounces,
+                minimumBounces,
+                maximumBounces,
+                sampleIndex,
+                sampleEpoch,
+                jitterPhase,
+                cameraInWater,
+                postProcessingMode,
+                transparentGuideMode,
+                lighting,
+                material,
+                shInput,
+                sampleIndex != 0);
     }
 
     public IntegratorFrameInput {
@@ -122,7 +162,7 @@ public record IntegratorFrameInput(
                 material.airGap(),
                 material.vanillaPbrPresets(),
                 lighting.transparentNeeMode());
-        IntegratorSettings.packSampleEpoch(sampleEpoch);
+        IntegratorSettings.packSampleEpoch(sampleEpoch, historyValid);
         IntegratorSettings.packPathControl(
                 maximumBounces,
                 jitterPhase,

@@ -25,6 +25,10 @@ public record RealtimeFramePlan(
             throw new IllegalArgumentException(
                     "Realtime resident scene revision must be non-negative");
         }
+        if (integrator.historyValid() == reconstructionReset) {
+            throw new IllegalArgumentException(
+                    "Integrator history validity must be the inverse of reconstruction reset");
+        }
     }
 
     public static RealtimeFramePlan complete(
@@ -57,7 +61,8 @@ public record RealtimeFramePlan(
                         sample.sampleIndex(),
                         sample.epoch(),
                         jitterPhase,
-                        packedRayCone),
+                        packedRayCone,
+                        !reconstructionFrame.reset()),
                 reconstruction,
                 input.residentSceneRevision(),
                 reconstructionFrame.frameIndex(),

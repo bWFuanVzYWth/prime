@@ -262,7 +262,7 @@ final class PrimeProductionMathGpuTest {
     }
 
     private static void assertFsrDepthAndMotion(ShaderComputeRunner runner) throws IOException {
-        int kinds = 5;
+        int kinds = 8;
         int inputWords = 3;
         ByteBuffer input = fsrGuideCases(kinds, inputWords);
         ShaderPropertyBatch.assertProperties(
@@ -1515,7 +1515,7 @@ final class PrimeProductionMathGpuTest {
                             : Float.floatToRawIntBits(
                                     random.nextFloat() * 4.0F - 1.5F);
                     putInt(input, index, words, 1, 0, bits);
-                } else {
+                } else if (kind == 4) {
                     putVec4(
                             input,
                             index,
@@ -1525,6 +1525,55 @@ final class PrimeProductionMathGpuTest {
                             random.nextFloat() * 2.0F - 1.0F,
                             0.0F,
                             0.0F);
+                } else if (kind == 5) {
+                    float[] ray = randomUnitVector(random);
+                    float[] forward = randomUnitVector(random);
+                    float viewZ = random.nextFloat() * 4_096.0F + 0.01F;
+                    if ((local & 31) == 0) {
+                        viewZ = Float.intBitsToFloat(
+                                SPECIAL_FLOAT_BITS[local % SPECIAL_FLOAT_BITS.length]);
+                    }
+                    putVec4(
+                            input,
+                            index,
+                            words,
+                            1,
+                            ray[0],
+                            ray[1],
+                            ray[2],
+                            viewZ);
+                    putVec4(
+                            input,
+                            index,
+                            words,
+                            2,
+                            forward[0],
+                            forward[1],
+                            forward[2],
+                            0.0F);
+                } else if (kind == 7) {
+                    int historyMask = 1 << random.nextInt(32);
+                    int control = random.nextInt();
+                    if ((local & 3) == 0) {
+                        control |= historyMask;
+                    } else if ((local & 3) == 1) {
+                        control &= ~historyMask;
+                    }
+                    putInt(input, index, words, 0, 1, control);
+                    putInt(input, index, words, 0, 2, historyMask);
+                    putInt(input, index, words, 0, 3, (local & 1) == 0 ? 0 : 1);
+                } else {
+                    putVec4(
+                            input,
+                            index,
+                            words,
+                            1,
+                            random.nextFloat() * 8.0F - 4.0F,
+                            random.nextFloat() * 8.0F - 4.0F,
+                            random.nextFloat() * 8.0F - 4.0F,
+                            (local & 15) == 0
+                                    ? 0.0F
+                                    : random.nextFloat() * 8.0F - 2.0F);
                 }
             }
         }

@@ -54,7 +54,8 @@ final class RayTracingPushConstantsTest {
                         input.material().vanillaPbrPresets()),
                 firstBuffer.getInt(ShaderAbi.PUSH_PATH_OFFSET));
         assertEquals(
-                IntegratorSettings.packSampleEpoch(input.sampleEpoch()),
+                IntegratorSettings.packSampleEpoch(
+                        input.sampleEpoch(), input.historyValid()),
                 firstBuffer.getInt(ShaderAbi.PUSH_PATH_OFFSET + Integer.BYTES));
         assertEquals(
                 IntegratorSettings.packPathControl(

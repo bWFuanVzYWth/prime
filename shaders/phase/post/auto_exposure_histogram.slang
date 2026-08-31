@@ -15,8 +15,8 @@ struct PrimeAutoExposureHistogramPushConstants
 [[vk::image_format("rgba16f")]]
 readonly RWTexture2D<float4> primeAutoExposureAlbedo;
 [[vk::binding(2, 0)]]
-[[vk::image_format("r8")]]
-readonly RWTexture2D<float4> primeAutoExposureMaterialClass;
+[[vk::image_format("r8ui")]]
+readonly RWTexture2D<uint> primeAutoExposureControl;
 [[vk::binding(3, 0)]] RWStructuredBuffer<uint> primeAutoExposureHistogram;
 [[vk::push_constant]]
 ConstantBuffer<PrimeAutoExposureHistogramPushConstants> primeAutoExposureHistogramPush;
@@ -69,15 +69,12 @@ public void primePhase(uint3 groupId : SV_GroupID,
                                         / float2(primeAutoExposureHistogramPush.inputExtent)),
                         guideExtent - 1);
                 float4 material = primeAutoExposureAlbedo.Load(guidePixel);
-                float materialClassValue =
-                        primeAutoExposureMaterialClass.Load(guidePixel).x;
+                uint reconstructionControl =
+                        primeAutoExposureControl.Load(guidePixel);
                 if (any(isnan(material))
-                        || any(isinf(material))
-                        || isnan(materialClassValue)
-                        || isinf(materialClassValue)) continue;
+                        || any(isinf(material))) continue;
 
-                uint materialClass =
-                        uint(round(clamp(materialClassValue, 0.0, 1.0) * 3.0));
+                uint materialClass = reconstructionControl & 0x03u;
                 float confidence = primeAutoExposureMaterialConfidence(
                         materialClass,
                         material.a);

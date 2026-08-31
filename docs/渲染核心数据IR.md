@@ -475,9 +475,9 @@ Reconstruction IR 至少区分：
 
 ### 10.3 当前迁移基线
 
-当前相机 raygen 使用 row 0→NDC `y=-1`，RR/NRD 通过 Y-flipped projection 补偿，Streamline 再用
-全屏 pass 翻转图像、depth 和 motion。迁移目标是核心 producer 直接采用本节 top-left 规范，RR
-与 Streamline 删除补偿；NRD/FSR adapter 显式承担差异。迁移期间不得同时改变符号、jitter 和
+当前相机 raygen 使用 row 0→NDC `y=-1`，RR/NRD 通过 Y-flipped projection 补偿，Streamline 的
+可见 depth/motion 已与 backend virtual guide 分离，但仍由全屏 pass 转成 top-left。迁移目标是
+核心 producer 直接采用本节 top-left 规范，RR 与 Streamline 删除补偿；NRD/FSR adapter 显式承担
 历史 owner 而缺少跨 adapter oracle。
 
 ## 11. Presentation
@@ -535,7 +535,7 @@ motion、ID 和 mask 的可视化是显式 diagnostic transform，不得通过�
 | FrameCamera row0→clip -Y | TopLeftCamera | 与 NVIDIA 图像方向相反 | frame camera，阶段 2 |
 | NrdCameraTransform Y flip | NrdCameraAdapter | 既承担 core 补偿又承担 NRD 差异 | NRD adapter，阶段 2 |
 | RR matrices borrowed from NRD transform | RrCameraConstants | 语义 owner 错位 | RR adapter，阶段 2 |
-| StreamlineInputFlipPass | FgColor/Depth/VisibleMotion | 独立全屏 flip/convert | producer + FG interop，阶段 2 |
+| StreamlineInputFlipPass | FgColor/Depth/VisibleMotion | 已改读真实可见 surface 并在 backend overwrite 前捕获；仍承担全屏 Y flip，动态物体 delta 暂为 FP16 phase alias | producer + FG interop，阶段 2 |
 | RR/NRD/FSR raw images | typed ReconstructionViews | format 相同易错接、接口过宽 | resource schema，阶段 1/2 |
 | normalized motion + backend scales | VisibleMotionUv | 名称/符号分散 | frame/reconstruction schema，阶段 1/2 |
 | view-Z/depth/hit distance sentinels | typed depth + validity | 数值域和无效值混用 | backend adapters，阶段 2 |

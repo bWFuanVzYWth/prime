@@ -545,7 +545,7 @@ abstract class RealtimeRayTracingPipelineSupport implements RealtimeIntegratorPi
             ShaderAbi.DESCRIPTOR_NRD_DISPLAY_POSITION,
             ShaderAbi.DESCRIPTOR_NRD_SUN_LIGHTING,
             ShaderAbi.DESCRIPTOR_NRD_SUN_PENUMBRA,
-            ShaderAbi.DESCRIPTOR_NRD_MATERIAL_CLASS
+            ShaderAbi.DESCRIPTOR_RECONSTRUCTION_CONTROL
         };
     }
 
@@ -757,7 +757,7 @@ abstract class RealtimeRayTracingPipelineSupport implements RealtimeIntegratorPi
                 signals.displayPosition(),
                 signals.sunLighting(),
                 signals.sunPenumbra(),
-                signals.materialClass()
+                signals.reconstructionControl()
             };
         }
 

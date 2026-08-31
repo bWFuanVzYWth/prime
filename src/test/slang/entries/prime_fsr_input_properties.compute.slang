@@ -94,6 +94,56 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
                 || !primeTestClose(actual.y, expected.y, 0.0, 0.0)) {
             mask |= PRIME_TEST_FAILURE_IDENTITY;
         }
+    } else if (kind == 6u) {
+        float3 position;
+        bool valid = primeStreamlineVisiblePosition(
+                values.xyz, second.xyz, values.w, position);
+        float denominator = dot(values.xyz, second.xyz);
+        bool expectedValid = primeNrdIsFinite(values.xyz)
+                && primeNrdIsFinite(second.xyz)
+                && primeNrdIsFinite(values.w)
+                && values.w > 0.0
+                && primeNrdIsFinite(denominator)
+                && denominator > 1.0e-6;
+        float3 expectedPosition = expectedValid
+                ? values.xyz * (values.w / denominator)
+                : float3(0.0);
+        expectedValid = expectedValid && primeNrdIsFinite(expectedPosition);
+        if (!expectedValid) expectedPosition = float3(0.0);
+        actual = float4(position, valid ? 1.0 : 0.0);
+        expected = float4(expectedPosition, expectedValid ? 1.0 : 0.0);
+        if (valid != expectedValid
+                || !primeTestClose(actual.xyz, expected.xyz, 2.0e-6, 2.0e-6)
+                || !primeTestClose(actual.w, expected.w, 0.0, 0.0)) {
+            mask |= PRIME_TEST_FAILURE_IDENTITY;
+        }
+    } else if (kind == 7u) {
+        float2 previousUv;
+        bool valid = primeStreamlinePreviousUv(values, previousUv);
+        bool expectedValid = values.w > 1.0e-6 && primeNrdIsFinite(values);
+        float2 expectedUv = expectedValid
+                ? values.xy / values.w * float2(0.5, -0.5) + float2(0.5)
+                : float2(0.0);
+        expectedValid = expectedValid && primeNrdIsFinite(expectedUv);
+        actual = float4(previousUv, valid ? 1.0 : 0.0, 0.0);
+        expected = float4(expectedUv, expectedValid ? 1.0 : 0.0, 0.0);
+        if (valid != expectedValid
+                || !primeTestClose(actual.xyz, expected.xyz, 2.0e-6, 2.0e-6)
+                || !primeTestClose(actual.w, expected.w, 0.0, 0.0)) {
+            mask |= PRIME_TEST_FAILURE_IDENTITY;
+        }
+    } else if (kind == 8u) {
+        uint historyMask = control.z;
+        bool localHistoryValid = control.w != 0u;
+        bool valid = primeStreamlineHistoryValid(
+                control.y, historyMask, localHistoryValid);
+        bool expectedValid = localHistoryValid
+                && (control.y & historyMask) != 0u;
+        actual.x = valid ? 1.0 : 0.0;
+        expected.x = expectedValid ? 1.0 : 0.0;
+        if (valid != expectedValid) {
+            mask |= PRIME_TEST_FAILURE_IDENTITY;
+        }
     } else {
         mask |= PRIME_TEST_FAILURE_EVENT;
     }

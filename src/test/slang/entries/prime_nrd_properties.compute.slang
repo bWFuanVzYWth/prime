@@ -3,6 +3,7 @@
 import "core/numerical.slang";
 import "math/direction.slang";
 import "service/reconstruct/nrd/common.slang";
+import "service/reconstruct/control.slang";
 import "model/material/defaults.slang";
 import "service/reconstruct/nrd/sh.slang";
 import "contract/path.slang";
@@ -56,6 +57,21 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
     float4 third = asfloat(primeTestInput[inputOffset + 3u]);
     uint kind = control.x;
     uint mask = 0u;
+    for (uint materialClass = 0u; materialClass < 4u; ++materialClass) {
+        uint packedControl = primePackReconstructionControl(
+                materialClass, true, true);
+        uint withMotion = primeSetReconstructionMotionValid(packedControl, true);
+        uint withoutMotion = primeSetReconstructionMotionValid(withMotion, false);
+        if (primeReconstructionMaterialClass(packedControl) != materialClass
+                || !primeReconstructionSurfaceValid(packedControl)
+                || !primeReconstructionHistoryValid(packedControl)
+                || primeReconstructionMotionValid(packedControl)
+                || !primeReconstructionMotionValid(withMotion)
+                || primeReconstructionMotionValid(withoutMotion)
+                || (withMotion & ~PRIME_RECONSTRUCTION_CONTROL_VALID_MASK) != 0u) {
+            mask |= PRIME_TEST_FAILURE_IDENTITY;
+        }
+    }
     PrimeResolvedSample reflectionOnly =
             primeResolveOrdinarySample(primeEmptyOrdinarySample());
     reflectionOnly.transparentPrimary = true;

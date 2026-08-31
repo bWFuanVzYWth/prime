@@ -10,17 +10,19 @@ final class NrdMotionBindingContractTest {
     void nrdAndFsrMotionUseDistinctShaderOutputs() {
         Object nrdMotion = new Object();
         Object fsrMotion = new Object();
+        Object reconstructionControl = new Object();
         Object[] bindings = new Object[NrdDenoiser.MOTION_BINDING_COUNT];
         bindings[NrdDenoiser.MOTION_NRD_BINDING] = nrdMotion;
         bindings[NrdDenoiser.MOTION_FSR_BINDING] = fsrMotion;
+        bindings[NrdDenoiser.MOTION_CONTROL_BINDING] = reconstructionControl;
 
         assertDoesNotThrow(() -> NrdDenoiser.validateMotionBindings(
-                bindings, nrdMotion, fsrMotion));
+                bindings, nrdMotion, fsrMotion, reconstructionControl));
 
         bindings[NrdDenoiser.MOTION_NRD_BINDING] = fsrMotion;
         assertThrows(
                 IllegalStateException.class,
                 () -> NrdDenoiser.validateMotionBindings(
-                        bindings, nrdMotion, fsrMotion));
+                        bindings, nrdMotion, fsrMotion, reconstructionControl));
     }
 }

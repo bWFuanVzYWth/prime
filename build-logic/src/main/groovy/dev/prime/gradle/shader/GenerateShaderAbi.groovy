@@ -170,6 +170,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 					'Prime offline scheduler must preserve its single-slot four-stage queue ABI')
 		}
 		if (!schema.pathControl.sampleEpochMask.toString().equalsIgnoreCase('0x7fffffff')
+				|| !schema.pathControl.historyValidMask.toString().equalsIgnoreCase('0x80000000')
 				|| !schema.pathControl.seamlessGlassMask.toString().equalsIgnoreCase('0x02000000')
 				|| !schema.pathControl.airGapMask.toString().equalsIgnoreCase('0x04000000')
 				|| !schema.pathControl.vanillaPbrPresetsMask.toString().equalsIgnoreCase('0x08000000')
@@ -337,7 +338,7 @@ public final class ShaderAbi {
     public static final int DESCRIPTOR_NRD_PRIMARY_POSITION = ${schema.realtimeDescriptors.nrdPrimaryPosition};
     public static final int DESCRIPTOR_NRD_NOISY_SPECULAR = ${schema.realtimeDescriptors.nrdNoisySpecular};
     public static final int DESCRIPTOR_NRD_SPECULAR_MATERIAL = ${schema.realtimeDescriptors.nrdSpecularMaterial};
-    public static final int DESCRIPTOR_NRD_MATERIAL_CLASS = ${schema.realtimeDescriptors.nrdMaterialClass};
+    public static final int DESCRIPTOR_RECONSTRUCTION_CONTROL = ${schema.realtimeDescriptors.nrdMaterialClass};
     public static final int DESCRIPTOR_TRANSMISSION_GGX_ENERGY = ${schema.sharedDescriptors.transmissionGgxEnergy};
     public static final int DESCRIPTOR_TEXTURE_RECORDS = ${schema.sharedDescriptors.textureRecords};
     public static final int DESCRIPTOR_MATERIAL_NORMAL_PAGES = ${schema.sharedDescriptors.materialNormalPages};
@@ -411,6 +412,7 @@ public final class ShaderAbi {
     public static final int PATH_VANILLA_PBR_PRESETS_MASK = ${schema.pathControl.vanillaPbrPresetsMask};
     public static final int PATH_TRANSPARENT_NEE_UNBIASED_MASK = ${schema.pathControl.transparentNeeUnbiasedMask};
     public static final int PATH_SAMPLE_EPOCH_MASK = ${schema.pathControl.sampleEpochMask};
+    public static final int PATH_HISTORY_VALID_MASK = ${schema.pathControl.historyValidMask};
     public static final int PATH_MAXIMUM_BOUNCES_MASK = ${schema.pathControl.maximumBouncesMask};
     public static final int PATH_LATITUDE_SHIFT = ${schema.pathControl.latitudeShift};
     public static final int PATH_LATITUDE_MASK = ${schema.pathControl.latitudeMask};
@@ -782,8 +784,8 @@ public RWTexture2D<float4> primeWavefrontTransportMetadata;
 public RWTexture2D<float4> primeNrdMaterial;
 [[vk::binding(${schema.realtimeDescriptors.nrdSpecularMaterial}, 1)]] [[vk::image_format("rgba16f")]]
 public RWTexture2D<float4> primeNrdSpecularMaterial;
-[[vk::binding(${schema.realtimeDescriptors.nrdMaterialClass}, 1)]] [[vk::image_format("r8")]]
-public RWTexture2D<float> primeNrdMaterialClass;
+[[vk::binding(${schema.realtimeDescriptors.nrdMaterialClass}, 1)]] [[vk::image_format("r8ui")]]
+public RWTexture2D<uint> primeReconstructionControl;
 [[vk::binding(${schema.realtimeDescriptors.nrdPrimaryPosition}, 1)]] [[vk::image_format("rgba32f")]]
 public RWTexture2D<float4> primeNrdPrimaryPosition;
 [[vk::binding(${schema.realtimeDescriptors.nrdSunLighting}, 1)]] [[vk::image_format("rgba16f")]]
@@ -831,6 +833,16 @@ public void primeImageStore(RWTexture2D<float4> image, int2 coordinate, float4 v
 public void primeImageStore(RWTexture2D<float> image, int2 coordinate, float4 value)
 {
     image[coordinate] = value.x;
+}
+
+public uint primeImageLoad(RWTexture2D<uint> image, int2 coordinate)
+{
+    return image[coordinate];
+}
+
+public void primeImageStore(RWTexture2D<uint> image, int2 coordinate, uint value)
+{
+    image[coordinate] = value;
 }
 
 public void primeImageStoreWriteOnly(

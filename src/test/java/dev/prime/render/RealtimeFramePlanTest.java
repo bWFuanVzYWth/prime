@@ -45,6 +45,7 @@ final class RealtimeFramePlanTest {
             assertEquals(7, plan.integrator().jitterPhase());
             assertEquals(JITTER, plan.jitter());
             assertTrue(plan.reconstructionReset());
+            assertFalse(plan.integrator().historyValid());
         }
     }
 
@@ -86,6 +87,7 @@ final class RealtimeFramePlanTest {
                 PACKED_RAY_CONE);
 
         assertFalse(second.reset());
+        assertTrue(plan.integrator().historyValid());
         assertEquals(1, plan.integrator().sampleIndex());
         assertEquals(99L, plan.reconstruction().frameTimeNanos());
         plan.requireSceneRevision(secondInput.residentSceneRevision());

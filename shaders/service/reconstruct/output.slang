@@ -2,9 +2,11 @@
 module "service/reconstruct/output.slang";
 
 import "prime_realtime_abi.slang";
+import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/realtime/guide.slang";
 import "service/reconstruct/auto_exposure.slang";
+import "service/reconstruct/control.slang";
 import "service/reconstruct/nrd/common.slang";
 import "policy/runtime/config.slang";
 import "contract/path.slang";
@@ -14,6 +16,46 @@ import "service/reconstruct/resolved.slang";
 
 // The realtime output adapter encodes reconstruction signals from one resolved model sample and
 // never feeds output data back into transport.
+
+static const uint PRIME_OUTPUT_HISTORY_VALID = 0x80000000u;
+
+float primeVisibleSurfaceViewZ(float3 position, bool surfaceValid) {
+    if (!surfaceValid || any(isnan(position)) || any(isinf(position))) {
+        return -1.0;
+    }
+    float4 nearPoint = primePush.inverseViewProjection * float4(0.0, 0.0, 1.0, 1.0);
+    float4 farPoint = primePush.inverseViewProjection * float4(0.0, 0.0, 0.0, 1.0);
+    if (!(abs(nearPoint.w) > 1.0e-12)
+            || !(abs(farPoint.w) > 1.0e-12)
+            || any(isnan(nearPoint))
+            || any(isinf(nearPoint))
+            || any(isnan(farPoint))
+            || any(isinf(farPoint))) {
+        return -1.0;
+    }
+    float3 direction = farPoint.xyz / farPoint.w - nearPoint.xyz / nearPoint.w;
+    float directionLengthSquared = dot(direction, direction);
+    if (!(directionLengthSquared > 1.0e-12)
+            || isnan(directionLengthSquared)
+            || isinf(directionLengthSquared)) {
+        return -1.0;
+    }
+    float viewZ = dot(position, direction * rsqrt(directionLengthSquared));
+    return viewZ > 0.0 && !isnan(viewZ) && !isinf(viewZ) ? viewZ : -1.0;
+}
+
+float3 primeVisibleSurfaceMotionDelta(
+        float3 currentPosition,
+        float3 previousPosition,
+        bool hasMotion) {
+    if (!hasMotion) {
+        return float3(0.0);
+    }
+    float3 delta = previousPosition - currentPosition;
+    return any(isnan(delta)) || any(isinf(delta))
+            ? float3(0.0)
+            : clamp(delta, float3(-65504.0), float3(65504.0));
+}
 
 public float3 primeNrdEffectiveDirection(
         float3 totalRadiance,
@@ -85,7 +127,13 @@ public void primeWriteRealtimeOutput(
                     ? sampleResult.transmissionAnchorDistance
                     : nrdGuides.primaryDistance,
             hasPrimarySurface);
-    bool hasVisibleSurface = sampleResult.guides.primaryHitKind == PRIME_HIT_SURFACE;
+    bool visibleHit = sampleResult.guides.primaryHitKind == PRIME_HIT_SURFACE;
+    float visibleViewZ = primeVisibleSurfaceViewZ(
+            sampleResult.guides.primaryPosition, visibleHit);
+    bool hasVisibleSurface = visibleViewZ > 0.0;
+    bool visibleHasMotion = sampleResult.guides.primaryHasMotion
+            && hasVisibleSurface
+            && primeNrdIsFinite(sampleResult.guides.primaryPreviousPosition);
     float visibleDistance = primeNrdSanitizePrimaryDistance(
             sampleResult.guides.primaryDistance, hasVisibleSurface);
     uint primaryMaterialFlags = primeNrdPrimaryMaterialFlags(
@@ -180,9 +228,12 @@ public void primeWriteRealtimeOutput(
                     nrdGuides.primaryNormal,
                     nrdGuides.primaryLinearRoughness));
     primeImageStore(
-            primeNrdMaterialClass,
+            primeReconstructionControl,
             int2(pixel),
-            float4(primeNrdMaterialId(primaryMaterialFlags)));
+            primePackReconstructionControl(
+                    primeNrdMaterialClass(primaryMaterialFlags),
+                    hasVisibleSurface,
+                    (primePush.path.y & PRIME_OUTPUT_HISTORY_VALID) != 0u));
     primeImageStore(
             primeNrdSpecularMaterial,
             int2(pixel),
@@ -194,10 +245,6 @@ public void primeWriteRealtimeOutput(
                                     ? nrdGuides.primaryLinearRoughness
                                     : sampleResult.guides.primaryLinearRoughness)));
     if (nrdShInputs) {
-        bool visibleHasMotion = sampleResult.guides.primaryHasMotion
-                && hasVisibleSurface
-                && primeNrdIsFinite(
-                        sampleResult.guides.primaryPreviousPosition);
         primeImageStore(
                 primeNrdDisplayPosition,
                 int2(pixel),
@@ -318,6 +365,18 @@ public void primeWriteRealtimeOutput(
             primeStableRadiance,
             int2(pixel),
             float4(primeNrdSanitizeRadiance(sampleResult.radiance.stable), 1.0));
+    // Once resolve reaches this point, the per-pixel wavefront metadata is dead. Reuse its
+    // existing FP16 lanes for the visible object's previous-minus-current displacement. The
+    // Streamline adapter consumes this narrow, camera-independent delta before any reconstruction
+    // backend overwrites its private depth/motion guides.
+    primeImageStore(primeNrdViewZ, int2(pixel), float4(visibleViewZ));
+    primeImageStore(
+            primeWavefrontTransportMetadata,
+            int2(pixel),
+            float4(primeVisibleSurfaceMotionDelta(
+                    sampleResult.guides.primaryPosition,
+                    sampleResult.guides.primaryPreviousPosition,
+                    visibleHasMotion), 0.0));
 }
 
 public void primeWriteRealtimeOutput(
@@ -325,7 +384,7 @@ public void primeWriteRealtimeOutput(
         float2 cameraSample,
         PrimeResolvedSample sampleResult) {
     primeWriteRealtimeOutput(
-pixel,
+            pixel,
             cameraSample,
             sampleResult,
             float4(0.0, 0.0, 0.0, -1.0));

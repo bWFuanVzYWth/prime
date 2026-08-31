@@ -2,10 +2,15 @@ package dev.prime.render.vulkan;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.infrastructure.ResourceCleanup;
+import dev.prime.render.FrameCamera;
+import dev.prime.render.post.SubpixelJitter;
+import dev.prime.render.post.nrd.NrdCameraTransform;
+import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Objects;
+import org.joml.Matrix4f;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
@@ -13,30 +18,37 @@ import org.lwjgl.vulkan.VkDescriptorImageInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
 import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
-/** Provides persistent top-left-origin depth, motion and color inputs for Streamline. */
+/** Builds persistent NVIDIA-coordinate visible depth, motion and color inputs for Streamline. */
 public final class StreamlineInputFlipPass implements Destroyable {
     private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
     private static final int LOCAL_SIZE = 8;
-    private static final int PUSH_SIZE = 8;
+    private static final int PUSH_SIZE = ShaderAbi.NRD_MOTION_PUSH_CONSTANT_SIZE;
+    private static final int HISTORY_VALID_OFFSET = 136;
 
     private final VulkanContext context;
     private final SharedComputeProgram program;
     private final VulkanImage sourceDepth;
-    private final VulkanImage sourceMotion;
+    private final VulkanImage sourceVisibleDelta;
+    private final VulkanImage sourceControl;
     private final VulkanImage sourceColor;
     private final VulkanImage depth;
     private final VulkanImage motion;
     private final VulkanImage color;
     private final long descriptorPool;
     private final long descriptorSet;
-    private boolean initialized;
+    private final Matrix4f currentClipToWorld = new Matrix4f();
+    private final Matrix4f previousWorldToClip = new Matrix4f();
+    private final Matrix4f worldToViewScratch = new Matrix4f();
+    private boolean guidesInitialized;
+    private boolean colorInitialized;
     private boolean destroyed;
 
     private StreamlineInputFlipPass(
             VulkanContext context,
             SharedComputeProgram program,
             VulkanImage sourceDepth,
-            VulkanImage sourceMotion,
+            VulkanImage sourceVisibleDelta,
+            VulkanImage sourceControl,
             VulkanImage sourceColor,
             VulkanImage depth,
             VulkanImage motion,
@@ -46,7 +58,8 @@ public final class StreamlineInputFlipPass implements Destroyable {
         this.context = context;
         this.program = program;
         this.sourceDepth = sourceDepth;
-        this.sourceMotion = sourceMotion;
+        this.sourceVisibleDelta = sourceVisibleDelta;
+        this.sourceControl = sourceControl;
         this.sourceColor = sourceColor;
         this.depth = depth;
         this.motion = motion;
@@ -58,19 +71,30 @@ public final class StreamlineInputFlipPass implements Destroyable {
     public static StreamlineInputFlipPass create(
             VulkanContext context,
             VulkanImage depth,
-            VulkanImage motion,
+            VulkanImage visibleDelta,
+            VulkanImage control,
             VulkanImage color) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(depth, "depth");
-        Objects.requireNonNull(motion, "motion");
+        Objects.requireNonNull(visibleDelta, "visible delta");
+        Objects.requireNonNull(control, "control");
         Objects.requireNonNull(color, "color");
-        if (depth.width() != motion.width() || depth.height() != motion.height()) {
-            throw new IllegalArgumentException("Streamline depth and motion extents differ");
+        if (depth.width() != visibleDelta.width()
+                || depth.height() != visibleDelta.height()
+                || depth.width() != control.width()
+                || depth.height() != control.height()) {
+            throw new IllegalArgumentException("Streamline guide extents differ");
         }
         if ((depth.usage() & VK12.VK_IMAGE_USAGE_SAMPLED_BIT) == 0
-                || (motion.usage() & VK12.VK_IMAGE_USAGE_SAMPLED_BIT) == 0) {
+                || (visibleDelta.usage() & VK12.VK_IMAGE_USAGE_SAMPLED_BIT) == 0
+                || (control.usage() & VK12.VK_IMAGE_USAGE_STORAGE_BIT) == 0) {
             throw new IllegalArgumentException(
-                    "Streamline depth and motion images must support sampled reads");
+                    "Streamline guide images have incompatible Vulkan usage");
+        }
+        if (depth.format() != VK12.VK_FORMAT_R32_SFLOAT
+                || visibleDelta.format() != VK12.VK_FORMAT_R16G16B16A16_SFLOAT
+                || control.format() != VK12.VK_FORMAT_R8_UINT) {
+            throw new IllegalArgumentException("Streamline guide formats violate their contract");
         }
         requireTransferSource(color, "color");
 
@@ -88,8 +112,8 @@ public final class StreamlineInputFlipPass implements Destroyable {
                     VK12.VK_IMAGE_USAGE_STORAGE_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT,
                     "Prime Streamline reversed depth");
             flippedMotion = context.createImage2D(
-                    motion.width(),
-                    motion.height(),
+                    visibleDelta.width(),
+                    visibleDelta.height(),
                     VK12.VK_FORMAT_R32G32_SFLOAT,
                     VK12.VK_IMAGE_USAGE_STORAGE_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT,
                     "Prime Streamline top-left motion");
@@ -101,7 +125,7 @@ public final class StreamlineInputFlipPass implements Destroyable {
                         .descriptorCount(2);
                 sizes.get(1)
                         .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .descriptorCount(2);
+                        .descriptorCount(3);
                 descriptorPool = VulkanDescriptors.createPool(
                         context,
                         stack,
@@ -114,13 +138,14 @@ public final class StreamlineInputFlipPass implements Destroyable {
                         descriptorPool,
                         program.descriptorSetLayout(),
                         "allocate Streamline input descriptor set");
-                VkDescriptorImageInfo.Buffer infos = VkDescriptorImageInfo.calloc(4, stack);
+                VkDescriptorImageInfo.Buffer infos = VkDescriptorImageInfo.calloc(5, stack);
                 infos.get(0).imageView(depth.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                infos.get(1).imageView(motion.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                infos.get(2).imageView(flippedDepth.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                infos.get(3).imageView(flippedMotion.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(4, stack);
-                for (int binding = 0; binding < 4; binding++) {
+                infos.get(1).imageView(visibleDelta.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
+                infos.get(2).imageView(control.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
+                infos.get(3).imageView(flippedDepth.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
+                infos.get(4).imageView(flippedMotion.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
+                VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(5, stack);
+                for (int binding = 0; binding < 5; binding++) {
                     writes.get(binding)
                             .sType$Default()
                             .dstSet(descriptorSet)
@@ -137,7 +162,8 @@ public final class StreamlineInputFlipPass implements Destroyable {
                         context,
                         program,
                         depth,
-                        motion,
+                        visibleDelta,
+                        control,
                         color,
                         flippedDepth,
                         flippedMotion,
@@ -169,22 +195,46 @@ public final class StreamlineInputFlipPass implements Destroyable {
         return this.color;
     }
 
-    public boolean matches(VulkanImage depth, VulkanImage motion, VulkanImage color) {
+    public boolean matches(
+            VulkanImage depth,
+            VulkanImage visibleDelta,
+            VulkanImage control,
+            VulkanImage color) {
         return this.sourceDepth == depth
-                && this.sourceMotion == motion
+                && this.sourceVisibleDelta == visibleDelta
+                && this.sourceControl == control
                 && this.sourceColor == color;
     }
 
-    public void record(VkCommandBuffer commandBuffer) {
+    public void recordGuides(
+            VkCommandBuffer commandBuffer,
+            FrameCamera camera,
+            FrameCamera previousCamera,
+            SubpixelJitter jitter,
+            boolean historyValid) {
         requireOpen();
+        Objects.requireNonNull(camera, "camera");
+        Objects.requireNonNull(previousCamera, "previous camera");
+        Objects.requireNonNull(jitter, "jitter");
+        NrdCameraTransform.currentClipToWorld(camera, this.currentClipToWorld);
+        NrdCameraTransform.previousWorldToClip(
+                camera,
+                previousCamera,
+                this.previousWorldToClip,
+                this.worldToViewScratch);
         prepareSampledSource(commandBuffer, this.sourceDepth);
-        prepareSampledSource(commandBuffer, this.sourceMotion);
+        prepareSampledSource(commandBuffer, this.sourceVisibleDelta);
+        prepareStorageSource(commandBuffer, this.sourceControl);
         prepareStorageOutput(commandBuffer, this.depth);
         prepareStorageOutput(commandBuffer, this.motion);
         try (MemoryStack stack = MemoryStack.stackPush()) {
             ByteBuffer push = stack.malloc(PUSH_SIZE).order(ByteOrder.nativeOrder());
-            push.putInt(0, this.depth.width());
-            push.putInt(4, this.depth.height());
+            writeReprojectionConstants(
+                    push,
+                    this.currentClipToWorld,
+                    this.previousWorldToClip,
+                    jitter,
+                    historyValid);
             VK12.vkCmdBindPipeline(
                     commandBuffer,
                     VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -214,8 +264,13 @@ public final class StreamlineInputFlipPass implements Destroyable {
                 VK12.VK_ACCESS_SHADER_WRITE_BIT,
                 VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                 VK12.VK_ACCESS_MEMORY_READ_BIT);
+        this.guidesInitialized = true;
+    }
+
+    public void recordColor(VkCommandBuffer commandBuffer) {
+        requireOpen();
         recordColorFlip(commandBuffer, this.sourceColor, this.color);
-        this.initialized = true;
+        this.colorInitialized = true;
     }
 
     private static VulkanImage createColorDestination(
@@ -248,19 +303,51 @@ public final class StreamlineInputFlipPass implements Destroyable {
                 VK12.VK_ACCESS_SHADER_READ_BIT);
     }
 
+    private static void prepareStorageSource(
+            VkCommandBuffer commandBuffer, VulkanImage source) {
+        VulkanSync.imageBarrier(
+                commandBuffer,
+                source.image(),
+                VK12.VK_IMAGE_LAYOUT_GENERAL,
+                VK12.VK_IMAGE_LAYOUT_GENERAL,
+                VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                VK12.VK_ACCESS_MEMORY_WRITE_BIT,
+                COMPUTE_STAGE,
+                VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
+    }
+
+    private static void writeReprojectionConstants(
+            ByteBuffer target,
+            Matrix4f currentClipToWorld,
+            Matrix4f previousWorldToClip,
+            SubpixelJitter jitter,
+            boolean historyValid) {
+        currentClipToWorld.get(
+                ShaderAbi.NRD_MOTION_PUSH_CURRENT_CLIP_TO_WORLD_OFFSET,
+                target);
+        previousWorldToClip.get(
+                ShaderAbi.NRD_MOTION_PUSH_PREVIOUS_WORLD_TO_CLIP_OFFSET,
+                target);
+        int jitterOffset = ShaderAbi.NRD_MOTION_PUSH_CURRENT_JITTER_PIXELS_OFFSET;
+        target.putFloat(jitterOffset, jitter.x());
+        target.putFloat(jitterOffset + Float.BYTES, jitter.y());
+        target.putInt(HISTORY_VALID_OFFSET, historyValid ? 1 : 0);
+        target.putInt(HISTORY_VALID_OFFSET + Integer.BYTES, 0);
+    }
+
     private void prepareStorageOutput(
             VkCommandBuffer commandBuffer, VulkanImage destination) {
         VulkanSync.imageBarrier(
                 commandBuffer,
                 destination.image(),
-                this.initialized
+                this.guidesInitialized
                         ? VK12.VK_IMAGE_LAYOUT_GENERAL
                         : VK12.VK_IMAGE_LAYOUT_UNDEFINED,
                 VK12.VK_IMAGE_LAYOUT_GENERAL,
-                this.initialized
+                this.guidesInitialized
                         ? VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
                         : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                this.initialized
+                this.guidesInitialized
                         ? VK12.VK_ACCESS_MEMORY_READ_BIT | VK12.VK_ACCESS_MEMORY_WRITE_BIT
                         : 0L,
                 COMPUTE_STAGE,
@@ -281,14 +368,14 @@ public final class StreamlineInputFlipPass implements Destroyable {
         VulkanSync.imageBarrier(
                 commandBuffer,
                 destination.image(),
-                this.initialized
+                this.colorInitialized
                         ? VK12.VK_IMAGE_LAYOUT_GENERAL
                         : VK12.VK_IMAGE_LAYOUT_UNDEFINED,
                 VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                this.initialized
+                this.colorInitialized
                         ? VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
                         : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                this.initialized ? VK12.VK_ACCESS_MEMORY_READ_BIT : 0L,
+                this.colorInitialized ? VK12.VK_ACCESS_MEMORY_READ_BIT : 0L,
                 VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
                 VK12.VK_ACCESS_TRANSFER_WRITE_BIT);
         try (MemoryStack stack = MemoryStack.stackPush()) {

@@ -300,6 +300,7 @@
     "vanillaPbrPresetsMask": "0x08000000",
     "transparentNeeUnbiasedMask": "0x10000000",
     "sampleEpochMask": "0x7fffffff",
+    "historyValidMask": "0x80000000",
     "maximumBouncesMask": "0xff",
     "latitudeShift": 8,
     "latitudeMask": "0xff",

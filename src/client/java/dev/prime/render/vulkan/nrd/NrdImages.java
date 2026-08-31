@@ -24,7 +24,7 @@ final class NrdImages implements Destroyable {
     final VulkanImage fsrDepth;
     final VulkanImage material;
     final VulkanImage specularMaterial;
-    final VulkanImage materialClass;
+    final VulkanImage reconstructionControl;
     final VulkanImage primaryPosition;
     final VulkanImage sunLighting;
     final VulkanImage sunPenumbra;
@@ -67,7 +67,7 @@ final class NrdImages implements Destroyable {
             VulkanImage fsrDepth,
             VulkanImage material,
             VulkanImage specularMaterial,
-            VulkanImage materialClass,
+            VulkanImage reconstructionControl,
             VulkanImage primaryPosition,
             VulkanImage sunLighting,
             VulkanImage sunPenumbra,
@@ -107,7 +107,7 @@ final class NrdImages implements Destroyable {
         this.fsrDepth = fsrDepth;
         this.material = material;
         this.specularMaterial = specularMaterial;
-        this.materialClass = materialClass;
+        this.reconstructionControl = reconstructionControl;
         this.primaryPosition = primaryPosition;
         this.sunLighting = sunLighting;
         this.sunPenumbra = sunPenumbra;
@@ -176,9 +176,9 @@ final class NrdImages implements Destroyable {
                     context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT, debugPrefix + " material metadata");
             VulkanImage specularMaterial = createImage(
                     context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT, debugPrefix + " specular material or virtual guide");
-            VulkanImage materialClass = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R8_UNORM,
-                    debugPrefix + " material class");
+            VulkanImage reconstructionControl = createImage(
+                    context, created, width, height, VK12.VK_FORMAT_R8_UINT,
+                    debugPrefix + " reconstruction control");
             VulkanImage primaryPosition = createImage(
                     context, created, width, height, VK12.VK_FORMAT_R32G32B32A32_SFLOAT, debugPrefix + " primary or virtual position");
             VulkanImage sunLighting = createImage(
@@ -267,7 +267,7 @@ final class NrdImages implements Destroyable {
                     fsrDepth,
                     material,
                     specularMaterial,
-                    materialClass,
+                    reconstructionControl,
                     primaryPosition,
                     sunLighting,
                     sunPenumbra,

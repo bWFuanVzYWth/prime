@@ -32,8 +32,12 @@ import "prime_nrd_motion_contract.slang";
 [[vk::binding(20, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> primeReflectionSpecularDirection;
 [[vk::binding(21, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> primeDisplayPosition;
 [[vk::binding(22, 0)]] [[vk::image_format("rgba16f")]] writeonly RWTexture2D<float4> primeFsrMotion;
+[[vk::binding(23, 0)]] [[vk::image_format("r8ui")]] RWTexture2D<uint> primeReconstructionControl;
 
 static const float PRIME_MOTION_SKY_VIEW_Z = 65504.0;
+static const uint PRIME_MOTION_SURFACE_VALID = 0x04u;
+static const uint PRIME_MOTION_HISTORY_VALID = 0x08u;
+static const uint PRIME_MOTION_VECTOR_VALID = 0x10u;
 
 float3 primeMotionRayDirection(float2 screenUv) {
     float2 clipXY = screenUv * float2(2.0, -2.0) + float2(-1.0, 1.0);
@@ -158,9 +162,8 @@ void primePrepareBranch(
         int2 extent,
         float2 currentSampleUv,
         float3 cameraForward,
-        bool reflection,
-        bool primaryHasMotion,
-        float3 primaryPreviousPosition) {
+        bool historyValid,
+        bool reflection) {
     float4 rawMaterial = primeLoadMaterial(pixel, reflection);
     float primaryDistance = rawMaterial.a;
     if (!primeNrdIsFinite(primaryDistance) || primaryDistance < 0.0) {
@@ -171,10 +174,11 @@ void primePrepareBranch(
     float4 rawPosition = primeLoadPosition(pixel, reflection);
     float3 position = rawPosition.xyz;
     bool directional = reflection && rawPosition.w > 0.5;
+    bool primaryHasMotion = !reflection && rawPosition.w < 0.0;
     // A collapsed reflection target lies on the current pixel ray. Its position image carries
     // previous virtual geometry for reprojection, so current depth must come from the independent
     // path-distance guide instead of that previous point.
-    float currentViewZ = directional || reflection
+    float currentViewZ = directional || reflection || primaryHasMotion
             ? dot(primeMotionRayDirection(currentSampleUv) * primaryDistance, cameraForward)
             : dot(position, cameraForward);
     currentViewZ = primeNrdIsFinite(currentViewZ) && currentViewZ > 0.0
@@ -183,12 +187,10 @@ void primePrepareBranch(
 
     // Finish matrix work before loading material and lighting vectors. Position and clip
     // temporaries then die before demodulation, keeping the two largest live ranges disjoint.
-    float3 reprojectionPosition = !reflection && primaryHasMotion
-            ? primaryPreviousPosition
-            : position;
     float4 previousClip = primeMotionPush.previousWorldToClip
-            * float4(reprojectionPosition, directional ? 0.0 : 1.0);
-    bool validPreviousClip = previousClip.w > 1.0e-6
+            * float4(position, directional ? 0.0 : 1.0);
+    bool validPreviousClip = historyValid
+            && previousClip.w > 1.0e-6
             && !any(isnan(previousClip)) && !any(isinf(previousClip));
     float2 previousUv = float2(0.0);
     if (validPreviousClip) {
@@ -241,29 +243,34 @@ void primePrepareBranch(
             pixel, reflection, float4(specularAlbedo, rawSpecularMaterial.a));
 }
 
-void primePrepareFsrGuide(
+bool primePrepareFsrGuide(
         int2 pixel,
         int2 extent,
         float3 currentPosition,
         float3 previousPosition,
         bool hasMotion,
+        bool surfaceValid,
+        bool historyValid,
         float2 currentSampleUv,
         float3 cameraForward) {
-    if (all(currentPosition == float3(0.0))) {
+    if (!surfaceValid) {
         float3 rayDirection = primeMotionRayDirection(currentSampleUv);
         float4 previousClip = primeMotionPush.previousWorldToClip * float4(rayDirection, 0.0);
         float2 motion = float2(0.0);
-        if (previousClip.w > 1.0e-6
-                && !any(isnan(previousClip)) && !any(isinf(previousClip))) {
+        bool valid = historyValid
+                && previousClip.w > 1.0e-6
+                && !any(isnan(previousClip)) && !any(isinf(previousClip));
+        if (valid) {
             float2 previousUv = previousClip.xy / previousClip.w
                     * float2(0.5, -0.5) + float2(0.5);
-            if (!any(isnan(previousUv)) && !any(isinf(previousUv))) {
+            valid = !any(isnan(previousUv)) && !any(isinf(previousUv));
+            if (valid) {
                 motion = primeFsrNormalizedMotion(previousUv, currentSampleUv);
             }
         }
         primeWriteImageStore(primeFsrMotion, pixel, float4(motion, 0.0, 0.0));
         primeWriteImageStore(primeFsrDepth, pixel, float4(0.0));
-        return;
+        return valid;
     }
 
     float viewZ = primeFsrSurfaceViewZ(currentPosition, cameraForward);
@@ -271,15 +278,19 @@ void primePrepareFsrGuide(
     float4 previousClip = primeMotionPush.previousWorldToClip
             * float4(hasMotion ? previousPosition : currentPosition, 1.0);
     float2 motion = float2(0.0);
-    if (previousClip.w > 1.0e-6
-            && !any(isnan(previousClip)) && !any(isinf(previousClip))) {
+    bool valid = historyValid
+            && previousClip.w > 1.0e-6
+            && !any(isnan(previousClip)) && !any(isinf(previousClip));
+    if (valid) {
         float2 previousUv = previousClip.xy / previousClip.w
                 * float2(0.5, -0.5) + float2(0.5);
-        if (!any(isnan(previousUv)) && !any(isinf(previousUv))) {
+        valid = !any(isnan(previousUv)) && !any(isinf(previousUv));
+        if (valid) {
             motion = primeFsrNormalizedMotion(previousUv, currentSampleUv);
         }
     }
     primeWriteImageStore(primeFsrMotion, pixel, float4(motion, 0.0, 0.0));
+    return valid;
 }
 
 public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
@@ -287,42 +298,61 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupI
     int2 pixel = int2(dispatchThreadId.xy);
     int2 extent = primeImageSize(primeViewZ);
     if (any(pixel >= extent)) return;
+    uint reconstructionControl = primeReconstructionControl[pixel];
+    bool surfaceValid = (reconstructionControl & PRIME_MOTION_SURFACE_VALID) != 0u;
+    bool historyValid = (reconstructionControl & PRIME_MOTION_HISTORY_VALID) != 0u;
     float2 currentSampleUv = primeMotionSampleUv(pixel, extent);
+    float visibleViewZ = primeImageLoad(primeViewZ, pixel).x;
     float4 display = primeReadonlyImageLoad(primeDisplayPosition, pixel);
     bool displayHasMotion = (asuint(display.w)
             & PRIME_DISPLAY_MOTION_FLAG) != 0u;
-    float3 currentDisplayPosition = displayHasMotion
-            ? primeReadonlyImageLoad(primePrimaryPosition, pixel).xyz
-            : display.xyz;
-    bool sky = all(currentDisplayPosition == float3(0.0));
+    bool sky = !surfaceValid;
     // Surface branches and the FSR depth guide share the same center ray. Sky only needs its
     // per-pixel direction, avoiding an otherwise unused matrix reconstruction.
     float3 cameraForward = sky
             ? float3(0.0, 0.0, 1.0)
             : primeMotionRayDirection(float2(0.5));
+    float3 currentDisplayPosition = float3(0.0);
+    if (surfaceValid) {
+        float3 rayDirection = primeMotionRayDirection(currentSampleUv);
+        float denominator = dot(rayDirection, cameraForward);
+        surfaceValid = visibleViewZ > 0.0
+                && primeNrdIsFinite(visibleViewZ)
+                && denominator > 1.0e-6
+                && primeNrdIsFinite(denominator);
+        if (surfaceValid) {
+            currentDisplayPosition = rayDirection * (visibleViewZ / denominator);
+        }
+    }
     primePrepareBranch(
             pixel,
             extent,
             currentSampleUv,
             cameraForward,
-            false,
-            displayHasMotion,
-            display.xyz);
+            historyValid,
+            false);
     primePrepareBranch(
             pixel,
             extent,
             currentSampleUv,
             cameraForward,
-            true,
-            false,
-            float3(0.0));
-    primePrepareFsrGuide(
+            historyValid,
+            true);
+    bool visibleMotionValid = primePrepareFsrGuide(
             pixel,
             extent,
             currentDisplayPosition,
-            display.xyz,
+            displayHasMotion ? display.xyz : currentDisplayPosition,
             displayHasMotion,
+            surfaceValid,
+            historyValid,
             currentSampleUv,
             cameraForward);
+    reconstructionControl = surfaceValid
+            ? reconstructionControl
+            : reconstructionControl & ~PRIME_MOTION_SURFACE_VALID;
+    primeReconstructionControl[pixel] = visibleMotionValid
+            ? reconstructionControl | PRIME_MOTION_VECTOR_VALID
+            : reconstructionControl & ~PRIME_MOTION_VECTOR_VALID;
 }
 

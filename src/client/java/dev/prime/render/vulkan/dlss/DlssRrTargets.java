@@ -46,7 +46,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     private final VulkanImage reflectionPosition;
     private final VulkanImage rrOutput;
     private final VulkanImage responsivity;
-    private final VulkanImage materialClass;
+    private final VulkanImage reconstructionControl;
     private final VulkanImage[] owned;
     private boolean destroyed;
 
@@ -69,7 +69,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
         this.reflectionPosition = images.get(15);
         this.rrOutput = images.get(16);
         this.responsivity = images.get(17);
-        this.materialClass = images.get(18);
+        this.reconstructionControl = images.get(18);
         this.owned = images.toArray(VulkanImage[]::new);
     }
 
@@ -120,7 +120,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
             add(context, images, renderWidth, renderHeight,
                     RESPONSIVITY_FORMAT, "Prime RR responsivity");
             add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_R8_UNORM, "Prime RR material class");
+                    VK12.VK_FORMAT_R8_UINT, "Prime RR reconstruction control");
             return new DlssRrTargets(images);
         } catch (RuntimeException exception) {
             for (int index = images.size() - 1; index >= 0; index--) {
@@ -187,10 +187,10 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     @Override public VulkanImage normalRoughness() { return this.sourceNormalRoughness; }
     @Override public VulkanImage viewZ() { return this.linearViewZ; }
     @Override public VulkanImage transportScratch() { return this.transportScratch; }
-    @Override public VulkanImage visibleMotion() { return this.motion; }
+    @Override public VulkanImage reconstructionMotion() { return this.motion; }
     @Override public VulkanImage material() { return this.material; }
     @Override public VulkanImage specularMaterial() { return this.specularMaterial; }
-    @Override public VulkanImage materialClass() { return this.materialClass; }
+    @Override public VulkanImage reconstructionControl() { return this.reconstructionControl; }
     @Override public VulkanImage primaryPosition() { return this.primaryPosition; }
     @Override public VulkanImage reflectionPosition() { return this.reflectionPosition; }
     @Override public VulkanImage sunLighting() { return this.sunLighting; }

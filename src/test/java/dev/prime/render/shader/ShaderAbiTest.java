@@ -54,7 +54,7 @@ final class ShaderAbiTest {
         assertEquals(14, ShaderAbi.DESCRIPTOR_NRD_PRIMARY_POSITION);
         assertEquals(15, ShaderAbi.DESCRIPTOR_NRD_NOISY_SPECULAR);
         assertEquals(16, ShaderAbi.DESCRIPTOR_NRD_SPECULAR_MATERIAL);
-        assertEquals(17, ShaderAbi.DESCRIPTOR_NRD_MATERIAL_CLASS);
+        assertEquals(17, ShaderAbi.DESCRIPTOR_RECONSTRUCTION_CONTROL);
         assertEquals(17, ShaderAbi.DESCRIPTOR_TRANSMISSION_GGX_ENERGY);
         assertEquals(18, ShaderAbi.DESCRIPTOR_TEXTURE_RECORDS);
         assertEquals(19, ShaderAbi.DESCRIPTOR_MATERIAL_NORMAL_PAGES);

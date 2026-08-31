@@ -87,7 +87,7 @@
     },
     "entry/post/streamline_input.compute.slang": {
       "maxFiles": 7,
-      "maxBytes": 20500
+      "maxBytes": 23682
     },
     "entry/post/hdr_present.compute.slang": {
       "maxFiles": 2,
@@ -111,7 +111,7 @@
     },
     "entry/post/nrd_motion.compute.slang": {
       "maxFiles": 9,
-      "maxBytes": 47222
+      "maxBytes": 47713
     },
     "entry/post/rr_prepare.compute.slang": {
       "maxFiles": 8,
@@ -166,8 +166,8 @@
       "maxBytes": 611000
     },
     "entry/realtime/noisy_output_resolve.raygeneration.slang": {
-      "maxFiles": 23,
-      "maxBytes": 98112
+      "maxFiles": 24,
+      "maxBytes": 100499
     },
     "entry/realtime/fixed_bridge_trace.raygeneration.slang": {
       "maxFiles": 34,
@@ -194,8 +194,8 @@
       "maxBytes": 590000
     },
     "entry/realtime/branch_resolve.raygeneration.slang": {
-      "maxFiles": 33,
-      "maxBytes": 140000
+      "maxFiles": 34,
+      "maxBytes": 141560
     }
   }
 }

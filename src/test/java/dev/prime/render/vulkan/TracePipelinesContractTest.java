@@ -234,7 +234,7 @@ final class TracePipelinesContractTest {
 
     static void streamlineInputPreparationHasOneNarrowDescriptorLayout() throws IOException {
         assertEquals(
-                Set.of(0, 1, 2, 3),
+                Set.of(0, 1, 2, 3, 4),
                 descriptorBindings(List.of("streamline_input.comp.spv"), 0));
     }
 

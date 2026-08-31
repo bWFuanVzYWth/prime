@@ -119,6 +119,27 @@ public final class RealtimeFrameExecutor implements Destroyable {
             completion.onAbandon(1, failure -> ResourceCleanup.run(
                     () -> atmosphere.abandon(trackedAtmosphereFrame), failure));
             pipeline.trace(commandBuffer, plan.integrator(), scene);
+            boolean prepareFrameGeneration = StreamlineFrameGeneration.publish(
+                    StreamlineReflex.currentFrameIndex(),
+                    plan.integrator().camera(),
+                    plan.jitter(),
+                    plan.reconstructionReset(),
+                    processor.rawFrame(),
+                    output,
+                    processor.displayWidth(),
+                    processor.displayHeight(),
+                    output.format(),
+                    0);
+            StreamlineInputFlipPass frameGenerationInputs = null;
+            if (prepareFrameGeneration) {
+                frameGenerationInputs = this.ensureStreamlineInputs(
+                        processor.rawFrame().viewZ(),
+                        processor.rawFrame().transportScratch(),
+                        processor.rawFrame().reconstructionControl(),
+                        output);
+                prepareFrameGeneration = StreamlineFrameGeneration.recordInputs(
+                        commandBuffer, frameGenerationInputs);
+            }
             processor.captureRendererDiagnostic(
                     commandBuffer, this.imageInitialization, diagnostics.renderer());
             processor.record(
@@ -132,7 +153,7 @@ public final class RealtimeFrameExecutor implements Destroyable {
                 rangeCapture = rangeDiagnostics.record(
                         commandBuffer,
                         processor.rawFrame().viewZ(),
-                        processor.rawFrame().visibleMotion(),
+                        processor.rawFrame().reconstructionMotion(),
                         plan.reconstructionReset());
                 RendererDataRangeDiagnostics.Capture trackedRangeCapture = rangeCapture;
                 completion.onCommit(6, () -> rangeDiagnostics.submitted(
@@ -158,24 +179,9 @@ public final class RealtimeFrameExecutor implements Destroyable {
                     mainColor,
                     processor.displayWidth(),
                     processor.displayHeight());
-            boolean prepareFrameGeneration = StreamlineFrameGeneration.publish(
-                    StreamlineReflex.currentFrameIndex(),
-                    plan.integrator().camera(),
-                    plan.jitter(),
-                    plan.reconstructionReset(),
-                    processor.rawFrame(),
-                    output,
-                    processor.displayWidth(),
-                    processor.displayHeight(),
-                    output.format(),
-                    0);
             if (prepareFrameGeneration) {
-                StreamlineInputFlipPass streamlineInputs = this.ensureStreamlineInputs(
-                        processor.rawFrame().viewZ(),
-                        processor.rawFrame().visibleMotion(),
-                        output);
-                streamlineInputs.record(commandBuffer);
-                if (StreamlineFrameGeneration.prepare(commandBuffer, streamlineInputs)) {
+                frameGenerationInputs.recordColor(commandBuffer);
+                if (StreamlineFrameGeneration.prepare(commandBuffer, frameGenerationInputs)) {
                     int frameGenerationIndex = StreamlineReflex.currentFrameIndex();
                     completion.onCommit(5, () -> StreamlineFrameGeneration.submitted(
                             frameGenerationIndex));
@@ -200,13 +206,17 @@ public final class RealtimeFrameExecutor implements Destroyable {
     }
 
     private StreamlineInputFlipPass ensureStreamlineInputs(
-            VulkanImage depth, VulkanImage motion, VulkanImage color) {
+            VulkanImage depth,
+            VulkanImage visibleDelta,
+            VulkanImage control,
+            VulkanImage color) {
         StreamlineInputFlipPass current = this.streamlineInputs;
-        if (current != null && current.matches(depth, motion, color)) {
+        if (current != null && current.matches(depth, visibleDelta, control, color)) {
             return current;
         }
         StreamlineInputFlipPass replacement =
-                StreamlineInputFlipPass.create(this.context, depth, motion, color);
+                StreamlineInputFlipPass.create(
+                        this.context, depth, visibleDelta, control, color);
         this.streamlineInputs = replacement;
         if (current != null) {
             this.context.defer(current);

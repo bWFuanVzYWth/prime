@@ -71,16 +71,17 @@ final class RendererResourcePlanContractTest {
                 .filter(binding -> binding.lifetime().aliasGroup().equals("motion-or-transport"))
                 .toList();
         assertEquals(2, aliased.size());
-        RendererDataContracts.Binding transport = aliased.stream()
-                .filter(binding -> binding.semantic().equals("TransportScratch"))
+        RendererDataContracts.Binding visibleDelta = aliased.stream()
+                .filter(binding -> binding.semantic().equals("VisibleSurfaceMotionDelta"))
                 .findFirst()
                 .orElseThrow();
         RendererDataContracts.Binding motion = aliased.stream()
                 .filter(binding -> binding.semantic().equals("VisibleMotionUv"))
                 .findFirst()
                 .orElseThrow();
-        assertTrue(phase(transport.lifetime().lastRead())
+        assertTrue(phase(visibleDelta.lifetime().lastRead())
                 < phase(motion.lifetime().firstWrite()));
+        assertEquals("trace-interop-boundary", visibleDelta.conversion().owner());
         assertEquals("backend-adapter", motion.conversion().owner());
         assertFalse(motion.verification().behaviorOracle().isBlank());
     }

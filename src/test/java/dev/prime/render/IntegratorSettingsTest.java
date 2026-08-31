@@ -15,6 +15,12 @@ final class IntegratorSettingsTest {
     @Test
     void sampleEpochUsesOnlySamplingState() {
         assertEquals(17, IntegratorSettings.packSampleEpoch(17));
+        assertEquals(
+                17 | ShaderAbi.PATH_HISTORY_VALID_MASK,
+                IntegratorSettings.packSampleEpoch(17, true));
+        assertEquals(
+                17,
+                IntegratorSettings.packSampleEpoch(17, false));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> IntegratorSettings.packSampleEpoch(-1));

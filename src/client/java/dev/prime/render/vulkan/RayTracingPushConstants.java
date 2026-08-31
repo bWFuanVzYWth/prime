@@ -70,7 +70,8 @@ public final class RayTracingPushConstants {
                         input.lighting().transparentNeeMode()));
         buffer.putInt(
                 pathOffset + Integer.BYTES,
-                IntegratorSettings.packSampleEpoch(input.sampleEpoch()));
+                IntegratorSettings.packSampleEpoch(
+                        input.sampleEpoch(), input.historyValid()));
         buffer.putInt(
                 pathOffset + 2 * Integer.BYTES,
                 IntegratorSettings.packPathControl(

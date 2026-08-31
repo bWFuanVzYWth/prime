@@ -164,8 +164,8 @@ public final class StreamlineFrameGeneration {
         if (!support.supportsFrame(
                 rawFrame.viewZ().width(),
                 rawFrame.viewZ().height(),
-                rawFrame.visibleMotion().width(),
-                rawFrame.visibleMotion().height(),
+                rawFrame.transportScratch().width(),
+                rawFrame.transportScratch().height(),
                 colorWidth,
                 colorHeight)) {
             if (active()) disableInternal(false);
@@ -183,6 +183,29 @@ public final class StreamlineFrameGeneration {
         return true;
     }
 
+    /** Captures visible guides before a reconstruction backend reuses their raw scratch images. */
+    public static synchronized boolean recordInputs(
+            VkCommandBuffer commandBuffer, StreamlineInputFlipPass inputs) {
+        Frame current = frame;
+        if (current == null
+                || inputs == null
+                || current.logicalFrameIndex != currentFrameIndex()) {
+            return false;
+        }
+        try {
+            FrameHistory history = frameHistory(current);
+            inputs.recordGuides(
+                    commandBuffer,
+                    current.camera,
+                    history.previous,
+                    current.jitter,
+                    !history.reset);
+            return true;
+        } catch (Throwable failure) {
+            return fail("record-inputs", "DLSS-G visible input preparation failed", failure);
+        }
+    }
+
     public static synchronized boolean prepare(
             VkCommandBuffer commandBuffer, StreamlineInputFlipPass flippedInputs) {
         Frame current = frame;
@@ -194,16 +217,12 @@ public final class StreamlineFrameGeneration {
         try (Arena callArena = Arena.ofConfined()) {
             ViewportHandle viewport = ViewportHandle.allocate(callArena).value(VIEWPORT);
             Constants constants = Constants.allocate(callArena);
-            SubmittedFrame history = lastSubmittedFrame;
-            boolean reset = current.reconstructionReset
-                    || history == null
-                    || current.logicalFrameIndex != history.logicalFrameIndex + 1;
-            FrameCamera previous = reset ? current.camera : history.camera;
+            FrameHistory history = frameHistory(current);
             StreamlineFrameConstants.create(
                             current.camera,
-                            previous,
+                            history.previous,
                             current.jitter,
-                            reset,
+                            history.reset,
                             flippedInputs.motion().width(),
                             flippedInputs.motion().height())
                     .write(constants);
@@ -488,11 +507,22 @@ public final class StreamlineFrameGeneration {
             int backBufferCount) {
     }
 
+    private static FrameHistory frameHistory(Frame current) {
+        SubmittedFrame history = lastSubmittedFrame;
+        boolean reset = current.reconstructionReset
+                || history == null
+                || current.logicalFrameIndex != history.logicalFrameIndex + 1;
+        return new FrameHistory(reset ? current.camera : history.camera, reset);
+    }
+
     private static boolean active() {
         return lastOptions != null || featureResourcesMayExist;
     }
 
     private record SubmittedFrame(int logicalFrameIndex, FrameCamera camera) {
+    }
+
+    private record FrameHistory(FrameCamera previous, boolean reset) {
     }
 
     private record OptionsKey(

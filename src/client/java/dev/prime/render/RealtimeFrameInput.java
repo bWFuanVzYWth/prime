@@ -155,7 +155,8 @@ public record RealtimeFrameInput(
             int sampleIndex,
             int sampleEpoch,
             int jitterPhase,
-            int packedRayCone) {
+            int packedRayCone,
+            boolean historyValid) {
         return new IntegratorFrameInput(
                 this.camera,
                 this.width,
@@ -173,7 +174,8 @@ public record RealtimeFrameInput(
                 this.transparentGuideMode,
                 this.lighting,
                 this.material,
-                this.shInput);
+                this.shInput,
+                historyValid);
     }
 
     public SunDirection sunDirection() {

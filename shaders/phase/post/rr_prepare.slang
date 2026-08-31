@@ -26,6 +26,7 @@ import "service/reconstruct/nrd/common.slang";
 [[vk::binding(15, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> rrReflectionPreviousVirtualPosition;
 [[vk::binding(16, 0)]] [[vk::image_format("r16f")]] writeonly RWTexture2D<float4> rrSpecularHitDistance;
 [[vk::binding(17, 0)]] [[vk::image_format("r16f")]] writeonly RWTexture2D<float4> rrResponsivity;
+[[vk::binding(18, 0)]] [[vk::image_format("r8ui")]] readonly RWTexture2D<uint> rrReconstructionControl;
 
 struct PrimeRrPreparePushConstants {
     float4x4 currentClipToWorld;
@@ -40,6 +41,7 @@ struct PrimeRrPreparePushConstants {
 
 static const float PRIME_RR_SKY_VIEW_Z = 65504.0;
 static const float PRIME_RR_SPECULAR_MOTION_ROUGHNESS = 0.25;
+static const uint PRIME_RR_HISTORY_VALID = 0x08u;
 
 // The viewport corner angles are identical for every lane in this 8x8 workgroup.
 groupshared AtmEpipolarRange rrEpipolarRange;
@@ -80,14 +82,21 @@ bool rrPreviousMotion(
     return true;
 }
 
-float2 rrMotionVector(float2 currentSampleUv, float3 position, bool sky) {
-    float2 motion;
-    rrPreviousMotion(
+bool rrMotionVector(
+        float2 currentSampleUv,
+        float3 position,
+        bool sky,
+        bool historyValid,
+        out float2 motion) {
+    if (!historyValid) {
+        motion = float2(0.0);
+        return false;
+    }
+    return rrPreviousMotion(
             currentSampleUv,
             sky ? rrRayDirection(currentSampleUv) : position,
             sky,
             motion);
-    return motion;
 }
 
 float3 rrApplyAerial(
@@ -141,6 +150,8 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupI
     }
 
     primeWriteImageStore(rrResponsivity, pixel, float4(rrPush.responsivity));
+    bool historyValid = (rrReconstructionControl[pixel]
+            & PRIME_RR_HISTORY_VALID) != 0u;
 
     float4 material = primeImageLoad(rrDiffuseMaterial, pixel);
     float4 specularMaterial = primeImageLoad(rrSpecularMaterial, pixel);
@@ -160,7 +171,13 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupI
         float2 currentSampleUv =
                 (float2(pixel) + float2(0.5) + rrPush.currentJitterPixels)
                 / float2(extent);
-        float2 motion = rrMotionVector(currentSampleUv, float3(0.0), true);
+        float2 motion;
+        rrMotionVector(
+                currentSampleUv,
+                float3(0.0),
+                true,
+                historyValid,
+                motion);
         float4 packedMotion = float4(
                 primeNrdSanitizeMotion(float3(motion, 0.0)), 0.0);
         primeWriteImageStore(rrMotion, pixel, packedMotion);
@@ -206,7 +223,13 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupI
         viewZ = PRIME_RR_SKY_VIEW_Z;
     }
     primeWriteImageStore(rrLinearViewZ, pixel, float4(viewZ));
-    float2 primaryMotion = rrMotionVector(currentSampleUv, primary.xyz, false);
+    float2 primaryMotion;
+    rrMotionVector(
+            currentSampleUv,
+            primary.xyz,
+            false,
+            historyValid,
+            primaryMotion);
     primeWriteImageStore(rrMotion, pixel, float4(
             primeNrdSanitizeMotion(float3(primaryMotion, 0.0)), 0.0));
 
@@ -215,7 +238,8 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupI
             rrReflectionPreviousVirtualPosition, pixel);
     bool hasReflectionProbe = reflectionPreviousVirtualPosition.w >= 0.0
             && primeNrdIsFinite(reflectionPreviousVirtualPosition);
-    if (hasReflectionProbe
+    if (historyValid
+            && hasReflectionProbe
             && reflectionRoughness < PRIME_RR_SPECULAR_MOTION_ROUGHNESS) {
         // The raygen probe supplies the previous-frame virtual target itself. Its w lane selects
         // a finite mirrored hit (zero) or an environment direction (one).

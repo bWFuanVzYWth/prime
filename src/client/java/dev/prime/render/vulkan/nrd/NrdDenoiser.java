@@ -54,7 +54,8 @@ public final class NrdDenoiser implements Destroyable {
     private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
     static final int MOTION_NRD_BINDING = 0;
     static final int MOTION_FSR_BINDING = 22;
-    static final int MOTION_BINDING_COUNT = 23;
+    static final int MOTION_CONTROL_BINDING = 23;
+    static final int MOTION_BINDING_COUNT = 24;
     // Wavefront resolve writes 65504 for a sky view-Z. Keep the valid range below that sentinel while
     // remaining far beyond Minecraft's usable terrain and Prime's 16,000-block aerial volume.
     private static final float DENOISING_RANGE = 60_000.0f;
@@ -134,13 +135,14 @@ public final class NrdDenoiser implements Destroyable {
     }
 
     static <T> void validateMotionBindings(
-            T[] descriptorImages, T nrdMotion, T fsrMotion) {
+            T[] descriptorImages, T nrdMotion, T fsrMotion, T reconstructionControl) {
         if (descriptorImages.length != MOTION_BINDING_COUNT
                 || descriptorImages[MOTION_NRD_BINDING] != nrdMotion
                 || descriptorImages[MOTION_FSR_BINDING] != fsrMotion
+                || descriptorImages[MOTION_CONTROL_BINDING] != reconstructionControl
                 || nrdMotion == fsrMotion) {
             throw new IllegalStateException(
-                    "NRD and FSR motion outputs must use distinct ABI bindings");
+                    "NRD motion, visible motion, and control must use their ABI bindings");
         }
     }
 
@@ -713,10 +715,12 @@ public final class NrdDenoiser implements Destroyable {
         @Override public VulkanImage normalRoughness() { return this.images.normalRoughness; }
         @Override public VulkanImage viewZ() { return this.images.viewZ; }
         @Override public VulkanImage transportScratch() { return this.images.fsrMotion; }
-        @Override public VulkanImage visibleMotion() { return this.images.fsrMotion; }
+        @Override public VulkanImage reconstructionMotion() { return this.images.fsrMotion; }
         @Override public VulkanImage material() { return this.images.material; }
         @Override public VulkanImage specularMaterial() { return this.images.specularMaterial; }
-        @Override public VulkanImage materialClass() { return this.images.materialClass; }
+        @Override public VulkanImage reconstructionControl() {
+            return this.images.reconstructionControl;
+        }
         @Override public VulkanImage primaryPosition() { return this.images.primaryPosition; }
         @Override public VulkanImage sunLighting() { return this.images.sunLighting; }
         @Override public VulkanImage sunPenumbra() { return this.images.sunPenumbra; }

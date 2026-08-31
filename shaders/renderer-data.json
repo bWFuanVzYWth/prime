@@ -33,6 +33,7 @@
     "translate",
     "upload",
     "trace",
+    "interop-prepare",
     "reconstruction-prepare",
     "reconstruction",
     "presentation",
@@ -202,7 +203,29 @@
       "unit": "enum-code",
       "colorimetry": "none",
       "validity": "declared material-class code",
-      "minimumEncoding": "r8-unorm-exact-code"
+      "minimumEncoding": "r8ui-reconstruction-control"
+    },
+    {
+      "id": "ReconstructionControl",
+      "valueKind": "exact-bitset",
+      "components": 1,
+      "domain": "reconstruction",
+      "space": "none",
+      "unit": "bitset",
+      "colorimetry": "none",
+      "validity": "bits 0-1 material class; bit 2 visible surface; bit 3 previous history; bit 4 canonical visible motion; bits 5-7 zero",
+      "minimumEncoding": "r8ui-reconstruction-control"
+    },
+    {
+      "id": "VisibleSurfaceMotionDelta",
+      "valueKind": "bounded-continuous",
+      "components": 3,
+      "domain": "trace-to-interop",
+      "space": "camera-relative-world",
+      "unit": "block-per-frame",
+      "colorimetry": "none",
+      "validity": "finite previous-minus-current visible-surface displacement; zero for static surfaces and misses",
+      "minimumEncoding": "rgba16f-visible-delta"
     },
     {
       "id": "TransportScratch",
@@ -236,6 +259,16 @@
       "decode": "round-saturate-times-255",
       "exactCodes": "all-u8",
       "errorContract": "lossless-for-u8-codes"
+    },
+    {
+      "id": "r8ui-reconstruction-control",
+      "scalarOrFormat": "VK_FORMAT_R8_UINT",
+      "bytes": 1,
+      "channelMap": "bits0-1=material,b2=surface,b3=history,b4=motion",
+      "encode": "exact-bit-pack",
+      "decode": "bit-mask",
+      "exactCodes": "0x00-0x1f",
+      "errorContract": "lossless; reserved bits must be zero"
     },
     {
       "id": "rg8-unorm-exact",
@@ -306,9 +339,33 @@
       "decode": "current-physical-layout",
       "exactCodes": "none",
       "errorContract": "characterized-current-layout-not-canonical-semantic"
+    },
+    {
+      "id": "rgba16f-visible-delta",
+      "scalarOrFormat": "VK_FORMAT_R16G16B16A16_SFLOAT",
+      "bytes": 8,
+      "channelMap": "rgb=previous-minus-current,a=zero",
+      "encode": "binary32-to-binary16-round-to-nearest-even",
+      "decode": "binary16-to-binary32",
+      "exactCodes": "zero and binary16 values",
+      "errorContract": "finite values clamped to 65504; projected-motion error is measured at the consumer"
     }
   ],
   "bindings": [
+    {
+      "id": "reconstruction-control",
+      "semantic": "ReconstructionControl",
+      "encoding": "r8ui-reconstruction-control",
+      "resourceKind": "image2d",
+      "extentSource": "render",
+      "usage": ["storage", "sampled"],
+      "access": "write-then-read-write",
+      "sampling": "point",
+      "descriptorOrOffset": "realtime.reconstructionControl",
+      "lifetime": {"owner": "raw-wavefront-frame", "generation": "frame", "firstWrite": "trace", "consumers": ["reconstruction-prepare", "reconstruction"], "lastRead": "reconstruction", "aliasGroup": "none", "retire": "frame-retire"},
+      "conversion": {"producer": "realtime-output-resolve", "sourceSemantic": "material-and-frame-state", "owner": "core-reconstruction", "targetSemantic": "ReconstructionControl", "backendBoundary": "none"},
+      "verification": {"artifactChecks": "r8ui-format-and-binding", "behaviorOracle": "bit-exact-pack-round-trip", "numericOrImageThreshold": "lossless", "benchmark": "unchanged-one-byte-per-pixel"}
+    },
     {
       "id": "canonical-visible-motion",
       "semantic": "VisibleMotionUv",
@@ -318,9 +375,9 @@
       "usage": ["storage", "sampled"],
       "access": "write-then-read",
       "sampling": "point",
-      "descriptorOrOffset": "rr.visibleMotion",
-      "lifetime": {"owner": "reconstruction-frame", "generation": "frame", "firstWrite": "reconstruction-prepare", "consumers": ["reconstruction"], "lastRead": "reconstruction", "aliasGroup": "none", "retire": "frame-retire"},
-      "conversion": {"producer": "visible-surface-projector", "sourceSemantic": "world-position-history", "owner": "core-reconstruction", "targetSemantic": "VisibleMotionUv", "backendBoundary": "none"},
+      "descriptorOrOffset": "nrd.fsrMotion|streamline.motion",
+      "lifetime": {"owner": "reconstruction-or-interop-frame", "generation": "frame", "firstWrite": "interop-prepare", "consumers": ["reconstruction", "streamline"], "lastRead": "reconstruction", "aliasGroup": "none", "retire": "frame-retire"},
+      "conversion": {"producer": "visible-surface-projector", "sourceSemantic": "world-position-history", "owner": "core-reconstruction", "targetSemantic": "VisibleMotionUv", "backendBoundary": "nrd-or-streamline"},
       "verification": {"artifactChecks": "format-extent-binding", "behaviorOracle": "cross-adapter-camera", "numericOrImageThreshold": "projection-double-oracle", "benchmark": "adapter-pass-gpu-time"}
     },
     {
@@ -353,17 +410,17 @@
     },
     {
       "id": "current-transport-motion-alias",
-      "semantic": "TransportScratch",
-      "encoding": "rgba16f-current",
+      "semantic": "VisibleSurfaceMotionDelta",
+      "encoding": "rgba16f-visible-delta",
       "resourceKind": "image2d",
       "extentSource": "render",
       "usage": ["storage", "sampled"],
       "access": "phase-aliased",
       "sampling": "point",
       "descriptorOrOffset": "realtime.wavefrontTransportMetadata",
-      "lifetime": {"owner": "raw-wavefront-frame", "generation": "frame", "firstWrite": "trace", "consumers": ["trace"], "lastRead": "trace", "aliasGroup": "motion-or-transport", "retire": "frame-retire"},
-      "conversion": {"producer": "raygen", "sourceSemantic": "none", "owner": "trace", "targetSemantic": "TransportScratch", "backendBoundary": "none"},
-      "verification": {"artifactChecks": "descriptor-and-format", "behaviorOracle": "phase-alias-liveness", "numericOrImageThreshold": "none", "benchmark": "memory-ledger"}
+      "lifetime": {"owner": "raw-wavefront-frame", "generation": "frame", "firstWrite": "trace", "consumers": ["trace", "interop-prepare"], "lastRead": "interop-prepare", "aliasGroup": "motion-or-transport", "retire": "frame-retire"},
+      "conversion": {"producer": "realtime-output-resolve", "sourceSemantic": "visible-position-history", "owner": "trace-interop-boundary", "targetSemantic": "VisibleSurfaceMotionDelta", "backendBoundary": "streamline"},
+      "verification": {"artifactChecks": "descriptor-format-and-phase-order", "behaviorOracle": "projected-motion-double-oracle", "numericOrImageThreshold": "measured-binary16-projection-error", "benchmark": "zero-added-memory"}
     },
     {
       "id": "current-motion-overwrite",
@@ -413,7 +470,7 @@
         {"id": "primary-position", "semantic": "primary-world-position", "debugLabel": "Prime unfiltered primary position", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "sun-lighting", "semantic": "unshadowed-sun-lighting", "debugLabel": "Prime unfiltered sun lighting", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "sun-penumbra", "semantic": "sun-penumbra", "debugLabel": "Prime unfiltered sun penumbra", "extentSource": "render", "bytesPerElement": 2, "elementsPerPixel": 1, "fixedBytes": 0},
-        {"id": "material-class", "semantic": "material-class", "debugLabel": "Prime unfiltered material class", "extentSource": "render", "bytesPerElement": 1, "elementsPerPixel": 1, "fixedBytes": 0},
+        {"id": "reconstruction-control", "semantic": "material-class-and-validity", "debugLabel": "Prime unfiltered reconstruction control", "extentSource": "render", "bytesPerElement": 1, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "linear-output", "semantic": "linear-rec2020-radiance", "debugLabel": "Prime unfiltered linear HDR output", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0}
       ]
     },
@@ -439,7 +496,7 @@
         {"id": "reflection-position", "semantic": "reflection-previous-position", "debugLabel": "Prime RR reflection previous virtual position", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "output", "semantic": "linear-rec2020-radiance", "debugLabel": "Prime RR linear HDR output", "extentSource": "display", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "responsivity", "semantic": "rr-responsivity", "debugLabel": "Prime RR responsivity", "extentSource": "render", "bytesPerElement": 2, "elementsPerPixel": 1, "fixedBytes": 0},
-        {"id": "material-class", "semantic": "material-class", "debugLabel": "Prime RR material class", "extentSource": "render", "bytesPerElement": 1, "elementsPerPixel": 1, "fixedBytes": 0}
+        {"id": "reconstruction-control", "semantic": "material-class-and-validity", "debugLabel": "Prime RR reconstruction control", "extentSource": "render", "bytesPerElement": 1, "elementsPerPixel": 1, "fixedBytes": 0}
       ]
     },
     {
@@ -450,7 +507,7 @@
         {"id": "rgba32f-guides", "semantic": "nrd-world-normal-and-position-guides", "debugLabel": "Prime NRD RGBA32F world guides", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 5, "fixedBytes": 0},
         {"id": "r32f-depth", "semantic": "nrd-and-fsr-depth", "debugLabel": "Prime NRD R32F depth", "extentSource": "render", "bytesPerElement": 4, "elementsPerPixel": 3, "fixedBytes": 0},
         {"id": "r16f-penumbra", "semantic": "nrd-penumbra-and-sigma-shadow", "debugLabel": "Prime NRD R16F penumbra", "extentSource": "render", "bytesPerElement": 2, "elementsPerPixel": 2, "fixedBytes": 0},
-        {"id": "r8-codes", "semantic": "nrd-material-class-and-fsr-masks", "debugLabel": "Prime NRD R8 codes", "extentSource": "render", "bytesPerElement": 1, "elementsPerPixel": 3, "fixedBytes": 0}
+        {"id": "r8-codes", "semantic": "nrd-reconstruction-control-and-fsr-masks", "debugLabel": "Prime NRD R8 codes", "extentSource": "render", "bytesPerElement": 1, "elementsPerPixel": 3, "fixedBytes": 0}
       ]
     }
   ],

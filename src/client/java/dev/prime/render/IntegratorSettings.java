@@ -96,10 +96,14 @@ public final class IntegratorSettings {
     }
 
     public static int packSampleEpoch(int sampleEpoch) {
+        return packSampleEpoch(sampleEpoch, false);
+    }
+
+    public static int packSampleEpoch(int sampleEpoch, boolean historyValid) {
         if ((sampleEpoch & ~ShaderAbi.PATH_SAMPLE_EPOCH_MASK) != 0) {
             throw new IllegalArgumentException("Sample epoch does not fit in 31 bits");
         }
-        return sampleEpoch;
+        return sampleEpoch | (historyValid ? ShaderAbi.PATH_HISTORY_VALID_MASK : 0);
     }
 
     public static int packPathControl(

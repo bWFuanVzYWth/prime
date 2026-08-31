@@ -152,10 +152,14 @@ final class NrdInputPreparationPass implements Destroyable {
                 images.reflectionNoisyDiffuseSh1,
                 images.reflectionNoisySpecularSh1,
                 images.displayPosition,
-                images.fsrMotion
+                images.fsrMotion,
+                images.reconstructionControl
             };
             NrdDenoiser.validateMotionBindings(
-                    descriptorImages, images.motion, images.fsrMotion);
+                    descriptorImages,
+                    images.motion,
+                    images.fsrMotion,
+                    images.reconstructionControl);
             VkDescriptorImageInfo.Buffer imageInfos =
                     VkDescriptorImageInfo.calloc(BINDING_COUNT, stack);
             VkWriteDescriptorSet.Buffer writes =

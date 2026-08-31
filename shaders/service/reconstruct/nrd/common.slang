@@ -91,17 +91,21 @@ public uint primeNrdGuideControl(uint materialControl, uint opticalControl) {
                     : 0u);
 }
 
-public float primeNrdMaterialId(uint materialControl) {
-    // R10_G10_B10_A2_UNORM provides four exact classes. These categories deliberately describe
-    // reconstruction behavior, not every authored material: ordinary dielectrics, conductors,
-    // transmissive interfaces, and strand-like foliage must not exchange temporal history.
+public uint primeNrdMaterialClass(uint materialControl) {
+    // The two-bit reconstruction class deliberately describes temporal behavior, not every
+    // authored material: ordinary dielectrics, conductors, transmissive interfaces, and
+    // strand-like foliage must not exchange history.
     if (primeMaterialIsFoliage(materialControl)) {
-        return 1.0;
+        return 3u;
     }
     if (primeMaterialIsTransmissive(materialControl)) {
-        return 2.0 / 3.0;
+        return 2u;
     }
-    return (materialControl & PRIME_NRD_GUIDE_CONDUCTOR) != 0u ? 1.0 / 3.0 : 0.0;
+    return (materialControl & PRIME_NRD_GUIDE_CONDUCTOR) != 0u ? 1u : 0u;
+}
+
+public float primeNrdMaterialId(uint materialControl) {
+    return float(primeNrdMaterialClass(materialControl)) / 3.0;
 }
 
 public uint primeNrdPrimaryMaterialFlags(

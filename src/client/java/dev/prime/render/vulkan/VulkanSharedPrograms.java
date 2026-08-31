@@ -107,8 +107,14 @@ final class VulkanSharedPrograms implements AutoCloseable {
             this.streamlineInput = SharedComputeProgram.create(
                     this.context,
                     "Streamline input preparation",
-                    8,
-                    new int[] {SAMPLED_IMAGE, SAMPLED_IMAGE, STORAGE_IMAGE, STORAGE_IMAGE},
+                    dev.prime.render.shader.ShaderAbi.NRD_MOTION_PUSH_CONSTANT_SIZE,
+                    new int[] {
+                        SAMPLED_IMAGE,
+                        SAMPLED_IMAGE,
+                        STORAGE_IMAGE,
+                        STORAGE_IMAGE,
+                        STORAGE_IMAGE
+                    },
                     new String[] {GeneratedShaderPrograms.resource("streamline_input")});
         }
         return this.streamlineInput.retain();
