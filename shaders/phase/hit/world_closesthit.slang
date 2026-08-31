@@ -78,7 +78,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     primePayload.shadingNormal = material.shadingNormal;
     primePayload.roughness = material.roughness;
     primePayload.opticalControl = material.opticalControl;
-    primePayload.mediumId = primitive.mediumId;
+    primePayload.mediumId = primePrimitiveMediumId(primitive);
     primePayload.adjacentMediumId = 0u;
     primePayload.adjacentBaseColor = float3(0.0);
     primePayload.adjacentInterfaceControl = 0u;

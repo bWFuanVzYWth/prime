@@ -194,7 +194,7 @@ final class ShaderAbiTest {
     void generatedOffsetsMatchTheStd430Layout() {
         assertEquals(0, ShaderAbi.PRIMITIVE_UV0_OFFSET);
         assertEquals(12, ShaderAbi.PRIMITIVE_TINT_OFFSET);
-        assertEquals(16, ShaderAbi.PRIMITIVE_MEDIUM_ID_OFFSET);
+        assertEquals(16, ShaderAbi.PRIMITIVE_MEDIUM_MATERIAL_IDS_OFFSET);
         assertEquals(24, ShaderAbi.PRIMITIVE_UV_DENSITY_OFFSET);
         assertEquals(28, ShaderAbi.PRIMITIVE_TANGENT_OFFSET);
         assertEquals(0, ShaderAbi.SECTION_PRIMITIVE_ADDRESS_OFFSET);
@@ -241,7 +241,7 @@ final class ShaderAbiTest {
         assertEquals(48, ShaderAbi.PATH_STATE_SOURCE_PRIMITIVE_OFFSET);
         assertEquals(56, ShaderAbi.PATH_STATE_SAMPLE_SEED_OFFSET);
         assertEquals(64, ShaderAbi.PATH_STATE_PREVIOUS_LIGHT_NORMAL_OFFSET);
-        assertEquals(16, ShaderAbi.PRIMITIVE_MEDIUM_ID_OFFSET);
+        assertEquals(16, ShaderAbi.PRIMITIVE_MEDIUM_MATERIAL_IDS_OFFSET);
         assertEquals(0, ShaderAbi.TRACE_PAYLOAD_GEOMETRIC_NORMAL_OFFSET);
         assertEquals(28, ShaderAbi.TRACE_PAYLOAD_MATERIAL_CONTROL_OFFSET);
         assertEquals(32, ShaderAbi.TRACE_PAYLOAD_SECTION_INDEX_OFFSET);

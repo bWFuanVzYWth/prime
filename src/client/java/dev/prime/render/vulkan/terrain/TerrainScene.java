@@ -41,6 +41,7 @@ public final class TerrainScene implements AutoCloseable {
     private final DynamicBufferPool dynamicBufferPool;
     private final VoxelBlasPool voxelBlasPool = new VoxelBlasPool();
     private final MediumIdRegistry mediumIds = new MediumIdRegistry();
+    private final MaterialIdRegistry materialIds = new MaterialIdRegistry();
     private final TintOperatorTable tintOperators;
     private final boolean measurementsEnabled = Boolean.getBoolean(MEASUREMENT_ENABLE_PROPERTY);
     private final BlasCompactionScheduler compactionScheduler =
@@ -601,6 +602,12 @@ public final class TerrainScene implements AutoCloseable {
         return new MediumIdStatistics(snapshot.assignedCount(), snapshot.highWaterId());
     }
 
+    /** Renderer-lifetime exact-material allocation totals for migration measurements. */
+    public MaterialIdStatistics materialIdStatistics() {
+        MaterialIdRegistry.Snapshot snapshot = this.materialIds.snapshot();
+        return new MaterialIdStatistics(snapshot.assignedCount(), snapshot.highWaterId());
+    }
+
     /** Renderer-lifetime exact-tint allocation totals for opt-in data measurements. */
     public TintIdStatistics tintIdStatistics() {
         TintOperatorTable.Snapshot snapshot = this.tintOperators.snapshot();
@@ -964,6 +971,9 @@ public final class TerrainScene implements AutoCloseable {
         ArrayList<TextureTintUsage> textureTintUsage = this.measurementsEnabled
                 ? new ArrayList<>(finalClusters.size())
                 : null;
+        ArrayList<MaterialTableCandidate> materialTableCandidates = this.measurementsEnabled
+                ? new ArrayList<>(finalClusters.size())
+                : null;
         IdentityHashMap<PreparedBlas, Boolean> uniqueBlases = new IdentityHashMap<>();
         for (var entry : this.resident.long2ObjectEntrySet()) {
             if (removedKeys.contains(entry.getLongKey())) {
@@ -990,6 +1000,7 @@ public final class TerrainScene implements AutoCloseable {
                     areaLightEmitters, cluster.lights().emitterCount());
             if (textureTintUsage != null) {
                 textureTintUsage.add(cluster.textureTintUsage());
+                materialTableCandidates.add(cluster.materialTableCandidate());
             }
         }
         for (PreparedBlas blas : uniqueBlases.keySet()) {
@@ -1009,7 +1020,10 @@ public final class TerrainScene implements AutoCloseable {
                 replacementWorldLightTree.nodeCount(),
                 textureTintUsage == null
                         ? TextureTintUsage.EMPTY
-                        : TextureTintUsage.combine(textureTintUsage));
+                        : TextureTintUsage.combine(textureTintUsage),
+                materialTableCandidates == null
+                        ? MaterialTableCandidate.EMPTY
+                        : MaterialTableCandidate.combine(materialTableCandidates));
 
         TopLevelAccelerationStructure previousTlas = this.currentTlas;
         VulkanBuffer previousWorldLights = replaceWorldLights ? this.currentWorldLights : null;
@@ -1190,11 +1204,14 @@ public final class TerrainScene implements AutoCloseable {
                             false,
                             "Prime cluster " + upload.key() + " primitives");
                 }
+                MaterialIdResolver.Cache materialCache = MaterialIdResolver.cache(
+                        mesh.mediumCatalog(), this.materialIds::resolve);
                 copyMeshSegments(
                         commandBuffer,
                         stagingBatch,
                         mesh,
                         this.mediumIds.resolve(mesh.mediumCatalog()),
+                        materialCache,
                         this.tintOperators::resolve,
                         positions,
                         primitives);
@@ -1289,6 +1306,9 @@ public final class TerrainScene implements AutoCloseable {
                     this.measurementsEnabled
                             ? TextureTintUsage.measure(mesh)
                             : TextureTintUsage.EMPTY,
+                    this.measurementsEnabled
+                            ? MaterialTableCandidate.measure(mesh)
+                            : MaterialTableCandidate.EMPTY,
                     upload.dynamic(),
                     dynamicBuffers);
         } catch (RuntimeException exception) {
@@ -1349,7 +1369,14 @@ public final class TerrainScene implements AutoCloseable {
                     commandBuffer,
                     stagingBatch.write(
                             TintIdResolver.primitiveRecords(
-                                    mesh.primitiveRecords(), tintResolver),
+                                    MaterialIdResolver.primitiveRecords(
+                                            mesh.primitiveRecords(),
+                                            mesh.primitiveRecords(),
+                                            CompiledClusterLights.EMPTY,
+                                            MaterialIdResolver.cache(
+                                                    List.of(),
+                                                    this.materialIds::resolve)),
+                                    tintResolver),
                             Integer.BYTES),
                     primitives);
             blas = PreparedBlas.create(
@@ -1384,6 +1411,7 @@ public final class TerrainScene implements AutoCloseable {
             StagingArena.Batch staging,
             CpuClusterMesh mesh,
             int[] localToRendererMediumId,
+            MaterialIdResolver.Cache materialCache,
             IntUnaryOperator tintResolver,
             VulkanBuffer positions,
             VulkanBuffer primitives) {
@@ -1406,6 +1434,11 @@ public final class TerrainScene implements AutoCloseable {
         for (CpuClusterMesh.Segment segment : mesh.segments()) {
             int[] primitiveRecords = MediumIdResolver.primitiveRecords(
                     segment.primitiveRecords(), localToRendererMediumId);
+            primitiveRecords = MaterialIdResolver.primitiveRecords(
+                    primitiveRecords,
+                    segment.primitiveRecords(),
+                    mesh.lights(),
+                    materialCache);
             primitiveRecords = TintIdResolver.primitiveRecords(
                     primitiveRecords, tintResolver);
             int sourcePosition = 0;
@@ -1451,10 +1484,16 @@ public final class TerrainScene implements AutoCloseable {
         }
         int[] relations = mesh.surfaceRelationRecords();
         if (relations.length != 0) {
+            int[] localRelations = relations;
             relations = MediumIdResolver.surfaceRelations(
                     relations,
                     Math.toIntExact(mesh.primitiveCount()),
                     localToRendererMediumId);
+            relations = MaterialIdResolver.surfaceRelations(
+                    relations,
+                    localRelations,
+                    Math.toIntExact(mesh.primitiveCount()),
+                    materialCache);
             relations = TintIdResolver.surfaceRelations(
                     relations,
                     Math.toIntExact(mesh.primitiveCount()),
@@ -1602,9 +1641,34 @@ public final class TerrainScene implements AutoCloseable {
             long instancedTriangleCount,
             int areaLightEmitterCount,
             int topLevelLightTreeNodeCount,
-            TextureTintUsage textureTintUsage) {
+            TextureTintUsage textureTintUsage,
+            MaterialTableCandidate materialTableCandidate) {
         static final SceneStatistics EMPTY =
-                new SceneStatistics(0, 0L, 0L, 0, 0, TextureTintUsage.EMPTY);
+                new SceneStatistics(
+                        0,
+                        0L,
+                        0L,
+                        0,
+                        0,
+                        TextureTintUsage.EMPTY,
+                        MaterialTableCandidate.EMPTY);
+
+        public SceneStatistics(
+                int tlasInstanceCount,
+                long uniqueBlasTriangleCount,
+                long instancedTriangleCount,
+                int areaLightEmitterCount,
+                int topLevelLightTreeNodeCount,
+                TextureTintUsage textureTintUsage) {
+            this(
+                    tlasInstanceCount,
+                    uniqueBlasTriangleCount,
+                    instancedTriangleCount,
+                    areaLightEmitterCount,
+                    topLevelLightTreeNodeCount,
+                    textureTintUsage,
+                    MaterialTableCandidate.EMPTY);
+        }
 
         public SceneStatistics(
                 int tlasInstanceCount,
@@ -1618,12 +1682,15 @@ public final class TerrainScene implements AutoCloseable {
                     instancedTriangleCount,
                     areaLightEmitterCount,
                     topLevelLightTreeNodeCount,
-                    TextureTintUsage.EMPTY);
+                    TextureTintUsage.EMPTY,
+                    MaterialTableCandidate.EMPTY);
         }
 
         public SceneStatistics {
             textureTintUsage = java.util.Objects.requireNonNull(
                     textureTintUsage, "textureTintUsage");
+            materialTableCandidate = java.util.Objects.requireNonNull(
+                    materialTableCandidate, "materialTableCandidate");
             if (tlasInstanceCount < 0
                     || uniqueBlasTriangleCount < 0L
                     || instancedTriangleCount < 0L
@@ -1653,8 +1720,20 @@ public final class TerrainScene implements AutoCloseable {
     public record MediumIdStatistics(int assignedCount, long highWaterId) {
         public MediumIdStatistics {
             if (assignedCount < 1 || highWaterId < MediumIdRegistry.WATER_ID
-                    || highWaterId > 0xffff_ffffL) {
+                    || highWaterId > MaterialIdResolver.MAX_ID) {
                 throw new IllegalArgumentException("Invalid renderer MediumId statistics");
+            }
+        }
+    }
+
+    public record MaterialIdStatistics(int assignedCount, int highWaterId) {
+        public MaterialIdStatistics {
+            if (assignedCount < 0
+                    || assignedCount > MaterialIdResolver.MAX_ID
+                    || highWaterId < 0
+                    || highWaterId > MaterialIdResolver.MAX_ID
+                    || assignedCount != highWaterId) {
+                throw new IllegalArgumentException("Invalid renderer MaterialId statistics");
             }
         }
     }

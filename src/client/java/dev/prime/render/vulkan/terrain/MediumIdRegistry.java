@@ -1,5 +1,6 @@
 package dev.prime.render.vulkan.terrain;
 
+import dev.prime.render.terrain.MaterialIdResolver;
 import dev.prime.render.terrain.MediumKey;
 import java.util.HashMap;
 import java.util.List;
@@ -33,8 +34,8 @@ final class MediumIdRegistry {
         if (existing != null) {
             return existing;
         }
-        if (this.nextId > 0xffff_ffffL) {
-            throw new IllegalStateException("Prime exhausted its 32-bit MediumId space");
+        if (this.nextId > MaterialIdResolver.MAX_ID) {
+            throw new IllegalStateException("Prime exhausted its u16 MediumId space");
         }
         int assigned = (int) this.nextId++;
         this.ids.put(key, assigned);
@@ -43,7 +44,9 @@ final class MediumIdRegistry {
 
     record Snapshot(int assignedCount, long highWaterId) {
         Snapshot {
-            if (assignedCount < 1 || highWaterId < WATER_ID || highWaterId > 0xffff_ffffL) {
+            if (assignedCount < 1
+                    || highWaterId < WATER_ID
+                    || highWaterId > MaterialIdResolver.MAX_ID) {
                 throw new IllegalArgumentException("Invalid renderer MediumId statistics");
             }
         }

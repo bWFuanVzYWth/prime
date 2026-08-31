@@ -215,3 +215,13 @@ public uint primePackOctahedralUnitVector(float3 value)
     }
     return packSnorm2x16(clamp(normal.xy, float2(-1.0), float2(1.0)));
 }
+
+public uint primeMediumId(uint packedIdentity)
+{
+    return packedIdentity & 0xffffu;
+}
+
+public uint primeMaterialId(uint packedIdentity)
+{
+    return packedIdentity >> 16u;
+}

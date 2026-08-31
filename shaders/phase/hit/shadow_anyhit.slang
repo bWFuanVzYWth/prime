@@ -172,7 +172,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     } else {
         bool entering = cosine < 0.0;
         primeAccumulateSolidMediumBoundary(
-                primeShadowPayload, primitive.mediumId, extinction, entering);
+                primeShadowPayload, primePrimitiveMediumId(primitive), extinction, entering);
         if ((relation.control & PRIME_SURFACE_RELATION_KIND_MASK)
                 == PRIME_SURFACE_RELATION_BOUNDARY) {
             primeAccumulateSolidMediumBoundary(

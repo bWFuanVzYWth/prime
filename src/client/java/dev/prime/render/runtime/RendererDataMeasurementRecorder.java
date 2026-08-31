@@ -6,6 +6,7 @@ import dev.prime.render.post.nrd.NrdCameraTransform;
 import dev.prime.render.scene.vanilla.DynamicSceneMotion;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.terrain.CpuClusterMesh;
+import dev.prime.render.terrain.MaterialTableCandidate;
 import dev.prime.render.terrain.TextureTintUsage;
 import dev.prime.render.vulkan.MaterialTexturePages;
 import dev.prime.render.vulkan.RendererDataRangeDiagnostics;
@@ -54,9 +55,12 @@ final class RendererDataMeasurementRecorder {
     private int maximumAreaLights;
     private int maximumLightTreeNodes;
     private TerrainScene.MediumIdStatistics mediumIds;
+    private TerrainScene.MaterialIdStatistics materialIds;
     private TerrainScene.TintIdStatistics tintIds;
     private MaterialTexturePages.MeasurementSnapshot textures;
     private TextureTintUsage observedTextureTints = TextureTintUsage.EMPTY;
+    private MaterialTableCandidate observedMaterialCandidates = MaterialTableCandidate.EMPTY;
+    private long maximumResidentMaterialReferences;
     private VulkanMemorySnapshot memory;
     private long textureGenerationCount;
     private long previousTextureGeneration = Long.MIN_VALUE;
@@ -116,10 +120,12 @@ final class RendererDataMeasurementRecorder {
             MaterialTexturePages.MeasurementSnapshot textures,
             TerrainScene.SceneStatistics scene,
             TerrainScene.MediumIdStatistics mediumIds,
+            TerrainScene.MaterialIdStatistics materialIds,
             TerrainScene.TintIdStatistics tintIds,
             FrameCamera camera,
             RealtimeRenderer.DiagnosticSnapshot renderer) {
-        if (!this.accumulate(textures, scene, mediumIds, tintIds, camera, renderer)) {
+        if (!this.accumulate(
+                textures, scene, mediumIds, materialIds, tintIds, camera, renderer)) {
             return;
         }
         this.captureAndWrite(context);
@@ -130,11 +136,13 @@ final class RendererDataMeasurementRecorder {
             MaterialTexturePages.MeasurementSnapshot textures,
             TerrainScene.SceneStatistics scene,
             TerrainScene.MediumIdStatistics mediumIds,
+            TerrainScene.MaterialIdStatistics materialIds,
             TerrainScene.TintIdStatistics tintIds,
             FrameCamera camera,
             RealtimeRenderer.DiagnosticSnapshot renderer,
             VulkanMemorySnapshot memory) {
-        if (this.accumulate(textures, scene, mediumIds, tintIds, camera, renderer)) {
+        if (this.accumulate(
+                textures, scene, mediumIds, materialIds, tintIds, camera, renderer)) {
             this.memory = mergeMemory(this.memory, memory);
             try {
                 writeAtomically(this.output, this.json());
@@ -150,6 +158,7 @@ final class RendererDataMeasurementRecorder {
             MaterialTexturePages.MeasurementSnapshot textures,
             TerrainScene.SceneStatistics scene,
             TerrainScene.MediumIdStatistics mediumIds,
+            TerrainScene.MaterialIdStatistics materialIds,
             TerrainScene.TintIdStatistics tintIds,
             FrameCamera camera,
             RealtimeRenderer.DiagnosticSnapshot renderer) {
@@ -163,9 +172,15 @@ final class RendererDataMeasurementRecorder {
             this.textureGenerationCount++;
         }
         this.mediumIds = mediumIds;
+        this.materialIds = materialIds;
         this.tintIds = tintIds;
         this.observedTextureTints = this.observedTextureTints.observedUnion(
                 scene.textureTintUsage());
+        this.observedMaterialCandidates = this.observedMaterialCandidates.observedUnion(
+                scene.materialTableCandidate());
+        this.maximumResidentMaterialReferences = Math.max(
+                this.maximumResidentMaterialReferences,
+                scene.materialTableCandidate().candidateReferenceCount());
         this.maximumRenderWidth = Math.max(this.maximumRenderWidth, renderer.renderWidth());
         this.maximumRenderHeight = Math.max(this.maximumRenderHeight, renderer.renderHeight());
         this.maximumDisplayWidth = Math.max(this.maximumDisplayWidth, renderer.displayWidth());
@@ -254,9 +269,14 @@ final class RendererDataMeasurementRecorder {
         field(json, "maximumTopLevelLightTreeNodes", this.maximumLightTreeNodes);
         trimComma(json).append("\n  },");
         appendMediumIds(json, this.mediumIds);
+        appendMaterialIds(json, this.materialIds);
         appendTintIds(json, this.tintIds);
         appendTextures(json, this.textures);
         appendTextureTintUsage(json, this.observedTextureTints, this.textures);
+        appendMaterialTableCandidate(
+                json,
+                this.observedMaterialCandidates,
+                this.maximumResidentMaterialReferences);
         appendRanges(json, this.latestRanges());
         appendSignals(
                 json,
@@ -290,6 +310,21 @@ final class RendererDataMeasurementRecorder {
         json.append('{');
         field(json, "assignedCount", value.assignedCount());
         field(json, "highWaterId", value.highWaterId());
+        trimComma(json).append("\n  },");
+    }
+
+    private static void appendMaterialIds(
+            StringBuilder json, TerrainScene.MaterialIdStatistics value) {
+        json.append("\n  \"materialIds\": ");
+        if (value == null) {
+            json.append("null,");
+            return;
+        }
+        json.append('{');
+        field(json, "assignedCount", value.assignedCount());
+        field(json, "highWaterId", value.highWaterId());
+        field(json, "remainingU16Ids", MaterialTableCandidate.MAX_MATERIAL_ID
+                - value.highWaterId());
         trimComma(json).append("\n  },");
     }
 
@@ -391,6 +426,31 @@ final class RendererDataMeasurementRecorder {
                 canonicalMipTexels == 0L
                         ? 0.0
                         : (double) variantMipTexels / canonicalMipTexels);
+        trimComma(json).append("\n  },");
+    }
+
+    private static void appendMaterialTableCandidate(
+            StringBuilder json,
+            MaterialTableCandidate value,
+            long maximumResidentReferences) {
+        json.append("\n  \"materialTableCandidate\": {");
+        int unique = value.uniqueMaterialCount();
+        field(json, "keySchema", "texture-medium-semantic-control-v1");
+        field(json, "observedUniqueMaterialCount", unique);
+        field(json, "denseHighWaterId", unique);
+        field(json, "remainingU16Ids", MaterialTableCandidate.MAX_MATERIAL_ID - unique);
+        field(json, "observedReferenceHighWaterSum", value.candidateReferenceCount());
+        field(json, "maximumResidentCandidateReferences", maximumResidentReferences);
+        field(
+                json,
+                "maximumResidentReferencesPerObservedMaterial",
+                unique == 0 ? 0.0 : (double) maximumResidentReferences / unique);
+        field(json, "staticSurfaceReferences", value.staticSurfaceReferences());
+        field(json, "relationMaterialReferences", value.relationMaterialReferences());
+        field(json, "lightEmitterReferences", value.lightEmitterReferences());
+        field(json, "voxelSurfaceReferences", value.voxelSurfaceReferences());
+        field(json, "excludedDynamicReferences", value.dynamicReferences());
+        field(json, "excludedBakedReferences", value.bakedReferences());
         trimComma(json).append("\n  },");
     }
 

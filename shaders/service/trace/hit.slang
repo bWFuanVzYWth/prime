@@ -18,6 +18,7 @@ public struct PrimeSurfaceRelation {
     public uint tint;
     public uint textureId;
     public uint mediumId;
+    public uint materialId;
     public PrimitiveRecord material;
 };
 
@@ -173,11 +174,12 @@ public PrimeSurfaceRelation primeSurfaceRelation(SectionRecord section) {
     result.tint = 0u;
     result.textureId = 0u;
     result.mediumId = 0u;
+    result.materialId = 0u;
     result.material.uv0 = 0u;
     result.material.uv1 = 0u;
     result.material.uv2 = 0u;
     result.material.tint = 0u;
-    result.material.mediumId = 0u;
+    result.material.mediumMaterialIds = 0u;
     result.material.flagsEmitter = 0u;
     result.material.uvDensity = 0u;
     result.material.tangent = 0u;
@@ -195,13 +197,14 @@ public PrimeSurfaceRelation primeSurfaceRelation(SectionRecord section) {
         result.referenceUv = relations[offset + 1u];
         result.tint = relations[offset + 2u];
         result.textureId = relations[offset + 3u];
-        result.mediumId = relations[offset + 4u];
+        result.mediumId = primeMediumId(relations[offset + 4u]);
+        result.materialId = primeMaterialId(relations[offset + 4u]);
     } else {
         result.material.uv0 = relations[offset + 1u];
         result.material.uv1 = relations[offset + 2u];
         result.material.uv2 = relations[offset + 3u];
         result.material.tint = relations[offset + 4u];
-        result.material.mediumId = relations[offset + 5u];
+        result.material.mediumMaterialIds = relations[offset + 5u];
         result.material.flagsEmitter = relations[offset + 6u];
         result.material.uvDensity = relations[offset + 7u];
         result.material.tangent = relations[offset + 8u];

@@ -61,6 +61,14 @@ public int primeTextureMaximumMip(uint textureId) {
     return int(primeTextureRecordWord(textureId, 20u) & 0xffu);
 }
 
+public uint primePrimitiveMediumId(PrimitiveRecord primitive) {
+    return primeMediumId(primitive.mediumMaterialIds);
+}
+
+public uint primePrimitiveMaterialId(PrimitiveRecord primitive) {
+    return primeMaterialId(primitive.mediumMaterialIds);
+}
+
 public uint primeTextureBaseColorPage(uint textureId) {
     return (primeTextureRecordWord(textureId, 20u) >> 8u) & 0xffu;
 }

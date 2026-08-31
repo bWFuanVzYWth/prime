@@ -1,5 +1,6 @@
 import "prime_coordinate_contract.slang";
 import "prime_color_contract.slang";
+import "math/packed_geometry.slang";
 import "service/material/tint.slang";
 
 layout(set = 0, binding = 0, std430) readonly buffer PrimeRendererDataInput {
@@ -63,4 +64,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             primeCanonicalLinearSrgbToLinearRec2020(linearSrgb), 1.0);
     primeRendererDataOutput.values[3] = float4(
             primeApplyStaticTint(canonicalBase, tint), 1.0);
+    uint packedMaterialIdentity = primeRendererDataInput.words[28];
+    primeRendererDataOutput.values[4] = float4(
+            float(primeMediumId(packedMaterialIdentity)),
+            float(primeMaterialId(packedMaterialIdentity)),
+            0.0,
+            0.0);
 }

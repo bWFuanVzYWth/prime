@@ -11,6 +11,7 @@ import dev.prime.render.terrain.CompiledClusterLights;
 import dev.prime.render.terrain.CpuClusterMesh;
 import dev.prime.render.terrain.CpuSectionLights;
 import dev.prime.render.terrain.CpuSectionMesh;
+import dev.prime.render.terrain.MaterialTableCandidate;
 import dev.prime.render.terrain.OpacityMicromapData;
 import dev.prime.render.terrain.PrimitivePacking;
 import dev.prime.render.terrain.TextureTintUsage;
@@ -48,10 +49,20 @@ final class RendererDataMeasurementRecorderTest {
                         11_173_888L, channel, channel, channel, 256L, 512L,
                         Map.of(2, 100L), Set.of(2));
         TextureTintUsage textureTints = measuredTextureTints();
+        MaterialTableCandidate materialCandidates = measuredMaterialCandidates();
         TerrainScene.SceneStatistics scene =
-                new TerrainScene.SceneStatistics(12, 34L, 56L, 7, 8, textureTints);
+                new TerrainScene.SceneStatistics(
+                        12,
+                        34L,
+                        56L,
+                        7,
+                        8,
+                        textureTints,
+                        materialCandidates);
         TerrainScene.MediumIdStatistics mediumIds =
                 new TerrainScene.MediumIdStatistics(4, 4L);
+        TerrainScene.MaterialIdStatistics materialIds =
+                new TerrainScene.MaterialIdStatistics(1, 1);
         TerrainScene.TintIdStatistics tintIds =
                 new TerrainScene.TintIdStatistics(672, 671);
         long[] motionHistogram = new long[128];
@@ -107,10 +118,10 @@ final class RendererDataMeasurementRecorderTest {
                         new VulkanMemorySnapshot.Heap(1, 1024L, 512L, 768L, 4096L)));
 
         recorder.recordFrame(
-                textures, scene, mediumIds, tintIds,
+                textures, scene, mediumIds, materialIds, tintIds,
                 camera(1.0, 2.0, 3.0), renderer, firstMemory);
         recorder.recordFrame(
-                textures, scene, mediumIds, tintIds,
+                textures, scene, mediumIds, materialIds, tintIds,
                 camera(4.0, 6.0, 3.0), renderer, secondMemory);
 
         String encoded = Files.readString(output);
@@ -132,7 +143,13 @@ final class RendererDataMeasurementRecorderTest {
         assertTrue(encoded.contains("\"tintVariantMipTexels\": 200"));
         assertTrue(encoded.contains("\"rgba16fVariantBytes\": 1600"));
         assertTrue(encoded.contains("\"variantTexelInflation\": 2.00000000"));
+        assertTrue(encoded.contains("\"materialTableCandidate\""));
+        assertTrue(encoded.contains("\"observedUniqueMaterialCount\": 1"));
+        assertTrue(encoded.contains("\"maximumResidentCandidateReferences\": 2"));
+        assertTrue(encoded.contains("\"remainingU16Ids\": 65534"));
         assertTrue(encoded.contains("\"highWaterId\": 4"));
+        assertTrue(encoded.contains("\"materialIds\""));
+        assertTrue(encoded.contains("\"remainingU16Ids\": 65534"));
         assertTrue(encoded.contains("\"tintIds\""));
         assertTrue(encoded.contains("\"assignedCount\": 672"));
         assertTrue(encoded.contains("\"highWaterId\": 671"));
@@ -205,5 +222,26 @@ final class RendererDataMeasurementRecorderTest {
         CpuClusterMesh cluster = CpuClusterMesh.fromSegments(List.of(section));
         assertEquals(CompiledClusterLights.EMPTY, cluster.lights());
         return TextureTintUsage.measure(cluster);
+    }
+
+    private static MaterialTableCandidate measuredMaterialCandidates() {
+        int[] primitives = new int[2 * CpuSectionMesh.PRIMITIVE_WORDS];
+        primitives[3] = PrimitivePacking.packTintControl(0x0011_2233, 0);
+        primitives[5] = PrimitivePacking.packControlTexture(0, 2);
+        primitives[6] = Float.floatToRawIntBits(1.0F);
+        int second = CpuSectionMesh.PRIMITIVE_WORDS;
+        primitives[second + 3] = PrimitivePacking.packTintControl(0x0044_5566, 0);
+        primitives[second + 5] = PrimitivePacking.packControlTexture(0, 2);
+        primitives[second + 6] = Float.floatToRawIntBits(1.0F);
+        CpuSectionMesh section = new CpuSectionMesh(
+                new float[18],
+                primitives,
+                2,
+                0,
+                0,
+                OpacityMicromapData.EMPTY,
+                CpuSectionLights.EMPTY);
+        return MaterialTableCandidate.measure(
+                CpuClusterMesh.fromSegments(List.of(section)));
     }
 }

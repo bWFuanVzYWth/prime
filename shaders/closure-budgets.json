@@ -3,27 +3,27 @@
   "entries": {
     "entry/atmosphere/atmosphere_aerial.compute.slang": {
       "maxFiles": 9,
-      "maxBytes": 73435
+      "maxBytes": 73444
     },
     "entry/atmosphere/atmosphere_aerial_transmittance.compute.slang": {
       "maxFiles": 5,
-      "maxBytes": 37273
+      "maxBytes": 37282
     },
     "entry/atmosphere/atmosphere_multi_scattering.compute.slang": {
       "maxFiles": 5,
-      "maxBytes": 37390
+      "maxBytes": 37399
     },
     "entry/atmosphere/atmosphere_sky.compute.slang": {
       "maxFiles": 6,
-      "maxBytes": 38629
+      "maxBytes": 38638
     },
     "entry/atmosphere/atmosphere_transmittance.compute.slang": {
       "maxFiles": 5,
-      "maxBytes": 33827
+      "maxBytes": 33836
     },
     "entry/hit/shadow.anyhit.slang": {
       "maxFiles": 17,
-      "maxBytes": 67266
+      "maxBytes": 67873
     },
     "entry/hit/shadow.closesthit.slang": {
       "maxFiles": 3,
@@ -39,7 +39,7 @@
     },
     "entry/hit/world.closesthit.slang": {
       "maxFiles": 21,
-      "maxBytes": 92836
+      "maxBytes": 93452
     },
     "entry/hit/world.miss.slang": {
       "maxFiles": 4,
@@ -51,19 +51,19 @@
     },
     "entry/offline/bridge_trace.raygeneration.slang": {
       "maxFiles": 47,
-      "maxBytes": 158501
+      "maxBytes": 158944
     },
     "entry/offline/camera_trace.raygeneration.slang": {
       "maxFiles": 45,
-      "maxBytes": 157844
+      "maxBytes": 158287
     },
     "entry/offline/direct.raygeneration.slang": {
       "maxFiles": 119,
-      "maxBytes": 444696
+      "maxBytes": 445139
     },
     "entry/offline/light_select.raygeneration.slang": {
       "maxFiles": 71,
-      "maxBytes": 209815
+      "maxBytes": 210258
     },
     "entry/offline/sample_resolve.raygeneration.slang": {
       "maxFiles": 19,
@@ -71,7 +71,7 @@
     },
     "entry/offline/scatter.raygeneration.slang": {
       "maxFiles": 100,
-      "maxBytes": 325615
+      "maxBytes": 326058
     },
     "entry/post/auto_exposure_histogram.compute.slang": {
       "maxFiles": 3,
@@ -139,7 +139,7 @@
     },
     "entry/realtime/camera_trace.raygeneration.slang": {
       "maxFiles": 56,
-      "maxBytes": 219638
+      "maxBytes": 220081
     },
     "entry/realtime/landing_light_select.raygeneration.slang": {
       "maxFiles": 82,
@@ -147,7 +147,7 @@
     },
     "entry/realtime/landing_direct.raygeneration.slang": {
       "maxFiles": 115,
-      "maxBytes": 451500
+      "maxBytes": 451773
     },
     "entry/realtime/landing_scatter.raygeneration.slang": {
       "maxFiles": 147,
@@ -183,7 +183,7 @@
     },
     "entry/realtime/fixed_direct.raygeneration.slang": {
       "maxFiles": 117,
-      "maxBytes": 451000
+      "maxBytes": 451390
     },
     "entry/realtime/fixed_scatter.raygeneration.slang": {
       "maxFiles": 147,

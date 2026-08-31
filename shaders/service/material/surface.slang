@@ -188,7 +188,7 @@ public PrimeMaterialSample primeEvaluateMaterialReference(
     uint referenceControl = recipeControl & ~PRIME_RECIPE_NORMAL_TEXTURE;
     primitive.tint = (tintId & 0x00ffffffu)
             | ((referenceControl & 0xffu) << 24u);
-    primitive.mediumId = 0u;
+    primitive.mediumMaterialIds = 0u;
     primitive.flagsEmitter = ((referenceControl >> 8u) & 7u)
             | ((referenceControl & PRIME_RECIPE_BUILTIN_MASK) << 16u);
     primitive.uvDensity = PRIME_CONSTANT_UV_DENSITY;

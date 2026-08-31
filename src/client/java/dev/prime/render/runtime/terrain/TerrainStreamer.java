@@ -196,6 +196,10 @@ public final class TerrainStreamer implements AutoCloseable {
         return this.scene.mediumIdStatistics();
     }
 
+    public TerrainScene.MaterialIdStatistics materialIdStatistics() {
+        return this.scene.materialIdStatistics();
+    }
+
     public TerrainScene.TintIdStatistics tintIdStatistics() {
         return this.scene.tintIdStatistics();
     }
