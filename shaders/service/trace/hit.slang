@@ -148,6 +148,10 @@ public uint primePrimitiveEmitterIndex(PrimitiveRecord primitive) {
 
 public uint primePrimitiveTextureId(
         SectionRecord section, PrimitiveRecord primitive) {
+    uint materialId = primePrimitiveMaterialId(primitive);
+    if (materialId != 0u) {
+        return primeMaterialTextureId(materialId);
+    }
     if ((primitive.flagsEmitter & PRIME_DYNAMIC_TEXTURE_FLAG) != 0u) {
         return 0u;
     }
@@ -308,8 +312,8 @@ public float2 primeInterpolateUv(
 }
 
 public float primeRayConeTextureLod(
-        SectionRecord section,
         PrimitiveRecord primitive,
+        uint textureId,
         float3 geometricNormal,
         float3 hitPosition) {
     float2 rayCone = unpackHalf2x16ToFloat(primePush.rayCone);
@@ -322,7 +326,6 @@ public float primeRayConeTextureLod(
     if (dynamic) {
         dimensions = primeSceneTextureDimensions(textureIndex);
     } else {
-        uint textureId = primePrimitiveTextureId(section, primitive);
         dimensions.extent = primeTextureFrameExtent(textureId);
         dimensions.mipLevels = primeTextureMaximumMip(textureId) + 1;
     }

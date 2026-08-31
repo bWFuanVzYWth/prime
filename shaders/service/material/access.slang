@@ -3,12 +3,18 @@ module "service/material/access.slang";
 
 import "prime_abi.slang";
 import "prime_abi_types.slang";
+import "prime_material_core_abi.slang";
 import "math/packed_geometry.slang";
 
 // Reviewed binding in shaders/abi.json. This stays with static albedo access so opacity-only
 // entries do not see the independently bound normal and optical page arrays.
 [[vk::binding(18, 0)]]
 public ByteAddressBuffer primeTextureRecords;
+
+// The first material-table lane is deliberately one word: texture identity and immutable recipe
+// control are independently addressable without extending their lifetime across wavefront stages.
+[[vk::binding(52, 0)]]
+public ByteAddressBuffer primeMaterialCoreRecords;
 
 // Static Minecraft albedo is translated once into renderer-owned linear Rec.2020 pages. Alpha is
 // an exact 0..255 coverage code carried in f16, so filtering preserves linear coverage semantics.
@@ -67,6 +73,19 @@ public uint primePrimitiveMediumId(PrimitiveRecord primitive) {
 
 public uint primePrimitiveMaterialId(PrimitiveRecord primitive) {
     return primeMaterialId(primitive.mediumMaterialIds);
+}
+
+public uint primeMaterialCoreWord(uint materialId) {
+    return primeMaterialCoreRecords.Load(materialId * PRIME_MATERIAL_CORE_RECORD_SIZE);
+}
+
+public uint primeMaterialTextureId(uint materialId) {
+    return primeMaterialCoreWord(materialId) & PRIME_MATERIAL_CORE_TEXTURE_ID_MASK;
+}
+
+public uint primeMaterialRecipeControl(uint materialId) {
+    return (primeMaterialCoreWord(materialId) >> PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT)
+            & PRIME_MATERIAL_CORE_RECIPE_CONTROL_MASK;
 }
 
 public uint primeTextureBaseColorPage(uint textureId) {

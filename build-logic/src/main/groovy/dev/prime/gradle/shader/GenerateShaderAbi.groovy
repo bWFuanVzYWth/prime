@@ -44,6 +44,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		def fsrContract = schema.fsrContract
 		def wavefrontContract = schema.realtimeWavefrontContract
 		def offlineWavefrontContract = schema.offlineWavefrontContract
+		def materialCoreContract = schema.materialCoreContract
 
 		if (primitive.size != 32 || section.size != 96 || lightNode.size != 32
 				|| lightLeaf.size != 8 || lightLeafEntry.size != 8
@@ -61,7 +62,12 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| schema.sharedDescriptors.materialNormalPages != 19
 				|| schema.sharedDescriptors.materialOpticalPages != 49
 				|| schema.sharedDescriptors.tintOperators != 50
-				|| schema.sharedDescriptors.baseColorPages != 51) {
+				|| schema.sharedDescriptors.baseColorPages != 51
+				|| schema.sharedDescriptors.materialCoreRecords != 52
+				|| materialCoreContract.recordSize != 4
+				|| !materialCoreContract.textureIdMask.toString().equalsIgnoreCase('0xffff')
+				|| materialCoreContract.recipeControlShift != 16
+				|| !materialCoreContract.recipeControlMask.toString().equalsIgnoreCase('0xffff')) {
 			throw new GradleException(
 					'Prime shader ABI sizes or scene texture count changed without a coordinated migration')
 		}
@@ -325,6 +331,10 @@ public final class ShaderAbi {
     public static final int PUSH_CONSTANT_SIZE = ${push.size};
     public static final int NRD_MOTION_PUSH_CONSTANT_SIZE = ${nrdMotionPush.size};
     public static final int SUN_SHADOW_QUERY_CONSTANT_SIZE = ${sunShadowQuery.size};
+    public static final int MATERIAL_CORE_RECORD_SIZE = ${materialCoreContract.recordSize};
+    public static final int MATERIAL_CORE_TEXTURE_ID_MASK = ${materialCoreContract.textureIdMask};
+    public static final int MATERIAL_CORE_RECIPE_CONTROL_SHIFT = ${materialCoreContract.recipeControlShift};
+    public static final int MATERIAL_CORE_RECIPE_CONTROL_MASK = ${materialCoreContract.recipeControlMask};
     public static final int DESCRIPTOR_TLAS = ${schema.sharedDescriptors.tlas};
     public static final int DESCRIPTOR_BLOCK_ATLAS = ${schema.sharedDescriptors.blockAtlas};
     public static final int DESCRIPTOR_STABLE_RADIANCE = ${schema.realtimeDescriptors.stableRadiance};
@@ -348,6 +358,7 @@ public final class ShaderAbi {
     public static final int DESCRIPTOR_MATERIAL_OPTICAL_PAGES = ${schema.sharedDescriptors.materialOpticalPages};
     public static final int DESCRIPTOR_TINT_OPERATORS = ${schema.sharedDescriptors.tintOperators};
     public static final int DESCRIPTOR_BASE_COLOR_PAGES = ${schema.sharedDescriptors.baseColorPages};
+    public static final int DESCRIPTOR_MATERIAL_CORE_RECORDS = ${schema.sharedDescriptors.materialCoreRecords};
     public static final int DESCRIPTOR_NRD_SUN_LIGHTING = ${schema.realtimeDescriptors.nrdSunLighting};
     public static final int DESCRIPTOR_NRD_SUN_PENUMBRA = ${schema.realtimeDescriptors.nrdSunPenumbra};
     public static final int DESCRIPTOR_NRD_DIFFUSE_DIRECTION = ${schema.realtimeDescriptors.nrdDiffuseDirection};
@@ -504,6 +515,16 @@ ${javaOffsets}
 
 		def slangDir = slangOutputDirectory.get().asFile
 		slangDir.mkdirs()
+		new File(slangDir, 'prime_material_core_abi.slang').text = """\
+#language slang 2026
+module "prime_material_core_abi.slang";
+
+// Generated from shaders/abi.json. Do not edit by hand.
+public static const uint PRIME_MATERIAL_CORE_RECORD_SIZE = ${materialCoreContract.recordSize};
+public static const uint PRIME_MATERIAL_CORE_TEXTURE_ID_MASK = ${materialCoreContract.textureIdMask};
+public static const uint PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT = ${materialCoreContract.recipeControlShift};
+public static const uint PRIME_MATERIAL_CORE_RECIPE_CONTROL_MASK = ${materialCoreContract.recipeControlMask};
+"""
 		new File(slangDir, 'prime_abi_bindings.slang').text = """\
 #language slang 2026
 module "prime_abi_bindings.slang";

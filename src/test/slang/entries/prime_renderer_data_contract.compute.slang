@@ -1,5 +1,6 @@
 import "prime_coordinate_contract.slang";
 import "prime_color_contract.slang";
+import "prime_material_core_abi.slang";
 import "math/packed_geometry.slang";
 import "service/material/tint.slang";
 
@@ -65,9 +66,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     primeRendererDataOutput.values[3] = float4(
             primeApplyStaticTint(canonicalBase, tint), 1.0);
     uint packedMaterialIdentity = primeRendererDataInput.words[28];
+    uint packedMaterialCore = primeRendererDataInput.words[29];
     primeRendererDataOutput.values[4] = float4(
             float(primeMediumId(packedMaterialIdentity)),
             float(primeMaterialId(packedMaterialIdentity)),
-            0.0,
-            0.0);
+            float(packedMaterialCore & PRIME_MATERIAL_CORE_TEXTURE_ID_MASK),
+            float((packedMaterialCore >> PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT)
+                    & PRIME_MATERIAL_CORE_RECIPE_CONTROL_MASK));
 }

@@ -60,6 +60,11 @@ final class ShaderAbiTest {
         assertEquals(19, ShaderAbi.DESCRIPTOR_MATERIAL_NORMAL_PAGES);
         assertEquals(49, ShaderAbi.DESCRIPTOR_MATERIAL_OPTICAL_PAGES);
         assertEquals(51, ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES);
+        assertEquals(52, ShaderAbi.DESCRIPTOR_MATERIAL_CORE_RECORDS);
+        assertEquals(4, ShaderAbi.MATERIAL_CORE_RECORD_SIZE);
+        assertEquals(0xffff, ShaderAbi.MATERIAL_CORE_TEXTURE_ID_MASK);
+        assertEquals(16, ShaderAbi.MATERIAL_CORE_RECIPE_CONTROL_SHIFT);
+        assertEquals(0xffff, ShaderAbi.MATERIAL_CORE_RECIPE_CONTROL_MASK);
         assertEquals(16, ShaderAbi.MATERIAL_PAGE_COUNT);
         assertEquals(64, ShaderAbi.BASE_COLOR_PAGE_COUNT);
         assertEquals(20, ShaderAbi.DESCRIPTOR_NRD_SUN_LIGHTING);

@@ -150,6 +150,8 @@ final class RendererDataMeasurementRecorderTest {
         assertTrue(encoded.contains("\"highWaterId\": 4"));
         assertTrue(encoded.contains("\"materialIds\""));
         assertTrue(encoded.contains("\"remainingU16Ids\": 65534"));
+        assertTrue(encoded.contains("\"activeCoreBytes\": 8"));
+        assertTrue(encoded.contains("\"reservedCoreBytes\": 262144"));
         assertTrue(encoded.contains("\"tintIds\""));
         assertTrue(encoded.contains("\"assignedCount\": 672"));
         assertTrue(encoded.contains("\"highWaterId\": 671"));

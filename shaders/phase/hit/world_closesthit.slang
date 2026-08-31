@@ -38,7 +38,8 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     float textureLodValue =
             bakedMaterial
                     ? 0.0
-                    : primeRayConeTextureLod(section, primitive, normal, hit.position);
+                    : primeRayConeTextureLod(
+                            primitive, textureId, normal, hit.position);
     float2 materialUv = bakedMaterial
             ? float2(0.0)
             : primeInterpolateUv(

@@ -3,6 +3,7 @@ package dev.prime.render.vulkan.terrain;
 import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.scene.SceneRevisionView;
+import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.terrain.*;
 import dev.prime.render.vulkan.PreparedBlas;
 import dev.prime.render.vulkan.OpacityMicromapPool;
@@ -42,6 +43,7 @@ public final class TerrainScene implements AutoCloseable {
     private final VoxelBlasPool voxelBlasPool = new VoxelBlasPool();
     private final MediumIdRegistry mediumIds = new MediumIdRegistry();
     private final MaterialIdRegistry materialIds = new MaterialIdRegistry();
+    private final VulkanBuffer materialCoreRecords;
     private final TintOperatorTable tintOperators;
     private final boolean measurementsEnabled = Boolean.getBoolean(MEASUREMENT_ENABLE_PROPERTY);
     private final BlasCompactionScheduler compactionScheduler =
@@ -66,6 +68,12 @@ public final class TerrainScene implements AutoCloseable {
         this.stagingArena = stagingArena;
         this.opacityMicromapPool = new OpacityMicromapPool(context);
         this.dynamicBufferPool = new DynamicBufferPool(context);
+        this.materialCoreRecords = context.createBuffer(
+                MaterialIdRegistry.BUFFER_BYTES,
+                VK12.VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                        | VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                false,
+                "Prime material core records");
         this.tintOperators = new TintOperatorTable(context);
     }
 
@@ -210,6 +218,14 @@ public final class TerrainScene implements AutoCloseable {
                         Float.BYTES);
             }
         }
+        if (needsClusterStaging) {
+            // Use the fixed capacity in the admission budget: preparing clusters may allocate
+            // any remaining dense IDs before the actual compact upload length is known.
+            clusterStagingBytes = StagingArena.requiredEndOffset(
+                    clusterStagingBytes,
+                    this.materialCoreRecords.size(),
+                    ShaderAbi.MATERIAL_CORE_RECORD_SIZE);
+        }
         StagingArena.Batch clusterStagingBatch = needsClusterStaging
                 ? this.stagingArena.tryBeginBatch(clusterStagingBytes)
                 : null;
@@ -255,6 +271,15 @@ public final class TerrainScene implements AutoCloseable {
                                 upload, clusterStagingBatch, commandBuffer));
                     }
                 }
+            }
+
+            if (clusterStagingBatch != null) {
+                int[] materialCore = this.materialIds.encodedCoreRecords();
+                copyBuffer(
+                        commandBuffer,
+                        clusterStagingBatch.write(
+                                materialCore, ShaderAbi.MATERIAL_CORE_RECORD_SIZE),
+                        this.materialCoreRecords);
             }
 
             List<GpuCluster> finalClusters = this.buildFinalClusterList(
@@ -666,6 +691,7 @@ public final class TerrainScene implements AutoCloseable {
         this.currentWorldLightTree = CpuWorldLightTree.Result.empty(0);
         failure = ResourceCleanup.close(this.voxelBlasPool, failure);
         failure = ResourceCleanup.close(this.tintOperators, failure);
+        failure = ResourceCleanup.destroy(this.materialCoreRecords, failure);
         failure = ResourceCleanup.run(this.dynamicBufferPool::destroy, failure);
         failure = ResourceCleanup.close(this.opacityMicromapPool, failure);
         ResourceCleanup.throwIfFailed(failure);
@@ -1039,6 +1065,9 @@ public final class TerrainScene implements AutoCloseable {
                         new TintOperatorBinding(
                                 this.tintOperators.buffer().handle(),
                                 this.tintOperators.buffer().size()),
+                        new MaterialCoreBinding(
+                                this.materialCoreRecords.handle(),
+                                this.materialCoreRecords.size()),
                         nextOriginX,
                         nextOriginY,
                         nextOriginZ,
@@ -1573,6 +1602,7 @@ public final class TerrainScene implements AutoCloseable {
             long tlas,
             long sectionTableAddress,
             TintOperatorBinding tintOperators,
+            MaterialCoreBinding materialCore,
             int originX,
             int originY,
             int originZ,
@@ -1584,8 +1614,37 @@ public final class TerrainScene implements AutoCloseable {
         public ResidentSceneView {
             tintOperators = java.util.Objects.requireNonNull(
                     tintOperators, "tintOperators");
+            materialCore = java.util.Objects.requireNonNull(
+                    materialCore, "materialCore");
             occluderChanges = List.copyOf(occluderChanges);
             statistics = java.util.Objects.requireNonNull(statistics, "statistics");
+        }
+
+        public ResidentSceneView(
+                long tlas,
+                long sectionTableAddress,
+                TintOperatorBinding tintOperators,
+                int originX,
+                int originY,
+                int originZ,
+                long revision,
+                long resetRevision,
+                long occluderRevision,
+                List<TerrainOccluderChange> occluderChanges,
+                SceneStatistics statistics) {
+            this(
+                    tlas,
+                    sectionTableAddress,
+                    tintOperators,
+                    MaterialCoreBinding.EMPTY,
+                    originX,
+                    originY,
+                    originZ,
+                    revision,
+                    resetRevision,
+                    occluderRevision,
+                    occluderChanges,
+                    statistics);
         }
 
         public ResidentSceneView(
@@ -1602,6 +1661,7 @@ public final class TerrainScene implements AutoCloseable {
                     tlas,
                     sectionTableAddress,
                     TintOperatorBinding.EMPTY,
+                    MaterialCoreBinding.EMPTY,
                     originX,
                     originY,
                     originZ,
@@ -1624,6 +1684,7 @@ public final class TerrainScene implements AutoCloseable {
                     tlas,
                     sectionTableAddress,
                     TintOperatorBinding.EMPTY,
+                    MaterialCoreBinding.EMPTY,
                     originX,
                     originY,
                     originZ,
@@ -1709,6 +1770,23 @@ public final class TerrainScene implements AutoCloseable {
         public TintOperatorBinding {
             if ((buffer == 0L) != (bytes == 0L) || bytes < 0L) {
                 throw new IllegalArgumentException("Tint-operator binding is incomplete");
+            }
+        }
+
+        public boolean present() {
+            return this.buffer != 0L;
+        }
+    }
+
+    /** Stable fixed-width material-core descriptor owned by the renderer scene lifetime. */
+    public record MaterialCoreBinding(long buffer, long bytes) {
+        static final MaterialCoreBinding EMPTY = new MaterialCoreBinding(0L, 0L);
+
+        public MaterialCoreBinding {
+            if ((buffer == 0L) != (bytes == 0L)
+                    || bytes < 0L
+                    || bytes != 0L && bytes != MaterialIdRegistry.BUFFER_BYTES) {
+                throw new IllegalArgumentException("Material-core binding is incomplete");
             }
         }
 

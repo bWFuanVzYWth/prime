@@ -1,5 +1,6 @@
 package dev.prime.render.vulkan.terrain;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -20,6 +21,19 @@ final class MaterialIdRegistryTest {
         assertEquals(2, registry.resolve(second));
         assertEquals(1, registry.resolve(first));
         assertEquals(new MaterialIdRegistry.Snapshot(2, 2), registry.snapshot());
+        assertArrayEquals(
+                new int[] {
+                    0,
+                    MaterialIdRegistry.encodeCore(first),
+                    MaterialIdRegistry.encodeCore(second)
+                },
+                registry.encodedCoreRecords());
+        assertEquals(
+                7 | PrimitivePacking.CONTROL_NORMAL_TEXTURE << 16,
+                MaterialIdRegistry.encodeCore(new MaterialTableCandidate.Key(
+                        7,
+                        null,
+                        PrimitivePacking.CONTROL_NORMAL_TEXTURE)));
     }
 
     @Test

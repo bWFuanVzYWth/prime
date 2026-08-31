@@ -177,6 +177,7 @@ final class OfflineRenderer implements Destroyable {
                 input.materialTextures().normalPages(),
                 input.materialTextures().opticalPages(),
                 input.materialTextures().textureRecords(),
+                current.scene().materialCore(),
                 current.scene().tintOperators(),
                 input.atmosphere());
         OfflineFramePlan framePlan = new OfflineFrameInput(

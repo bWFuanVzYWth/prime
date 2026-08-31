@@ -325,6 +325,12 @@ final class RendererDataMeasurementRecorder {
         field(json, "highWaterId", value.highWaterId());
         field(json, "remainingU16Ids", MaterialTableCandidate.MAX_MATERIAL_ID
                 - value.highWaterId());
+        field(json, "activeCoreBytes", Math.multiplyExact(
+                (long) value.highWaterId() + 1L,
+                ShaderAbi.MATERIAL_CORE_RECORD_SIZE));
+        field(json, "reservedCoreBytes", Math.multiplyExact(
+                (long) MaterialTableCandidate.MAX_MATERIAL_ID + 1L,
+                ShaderAbi.MATERIAL_CORE_RECORD_SIZE));
         trimComma(json).append("\n  },");
     }
 

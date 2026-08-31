@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.prime.render.vulkan.terrain.TerrainScene;
+import dev.prime.render.shader.ShaderAbi;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -61,5 +62,22 @@ final class SceneStatisticsTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new TerrainScene.TintIdStatistics(1, 0x1_0000));
+    }
+
+    @Test
+    void materialCoreBindingRequiresTheCompleteFixedU16Table() {
+        long bytes = Math.multiplyExact(
+                (long) MaterialIdResolver.MAX_ID + 1L,
+                ShaderAbi.MATERIAL_CORE_RECORD_SIZE);
+
+        assertEquals(
+                new TerrainScene.MaterialCoreBinding(3L, bytes),
+                new TerrainScene.MaterialCoreBinding(3L, bytes));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerrainScene.MaterialCoreBinding(3L, bytes - 1L));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerrainScene.MaterialCoreBinding(0L, bytes));
     }
 }

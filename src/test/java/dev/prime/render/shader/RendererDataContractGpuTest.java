@@ -43,7 +43,11 @@ final class RendererDataContractGpuTest {
         CanonicalColorEncoding.Color tinted = tint.apply(base);
         int mediumId = 0x1234;
         int materialId = 0xabcd;
-        ByteBuffer input = ByteBuffer.allocateDirect(29 * Integer.BYTES)
+        int textureId = 0x3456;
+        int recipeControl = 0x7123;
+        int materialCore = textureId
+                | recipeControl << ShaderAbi.MATERIAL_CORE_RECIPE_CONTROL_SHIFT;
+        ByteBuffer input = ByteBuffer.allocateDirect(30 * Integer.BYTES)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(pixelX).putInt(pixelY).putInt(width).putInt(height)
                 .putFloat(jitterX).putFloat(jitterY)
@@ -55,6 +59,7 @@ final class RendererDataContractGpuTest {
                 .putFloat(tint.m20()).putFloat(tint.m21()).putFloat(tint.m22()).putFloat(0.0F)
                 .putFloat(base.red()).putFloat(base.green()).putFloat(base.blue())
                 .putInt(MaterialIdResolver.pack(mediumId, materialId))
+                .putInt(materialCore)
                 .flip();
         Path shader = Path.of(
                 System.getProperty("prime.test.slangShaderDirectory"),
@@ -88,6 +93,8 @@ final class RendererDataContractGpuTest {
         assertEquals(tinted.blue(), value(output, 3, 2), 2.0e-7);
         assertEquals(mediumId, value(output, 4, 0), 0.0);
         assertEquals(materialId, value(output, 4, 1), 0.0);
+        assertEquals(textureId, value(output, 4, 2), 0.0);
+        assertEquals(recipeControl, value(output, 4, 3), 0.0);
     }
 
     private static float value(ByteBuffer output, int entry, int component) {
