@@ -164,8 +164,8 @@ public final class StreamlineFrameGeneration {
         if (!support.supportsFrame(
                 rawFrame.viewZ().width(),
                 rawFrame.viewZ().height(),
-                rawFrame.transportScratch().width(),
-                rawFrame.transportScratch().height(),
+                rawFrame.visibleHistoryPosition().width(),
+                rawFrame.visibleHistoryPosition().height(),
                 colorWidth,
                 colorHeight)) {
             if (active()) disableInternal(false);

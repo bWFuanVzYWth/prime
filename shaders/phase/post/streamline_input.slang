@@ -9,13 +9,13 @@ struct PrimeStreamlineInputPushConstants
     float4x4 previousWorldToClip;
     float2 currentJitterPixels;
     uint historyValid;
-    uint reserved;
+    uint transmissiveHistoryExact;
 };
 [[vk::push_constant]]
 ConstantBuffer<PrimeStreamlineInputPushConstants> primeStreamlineInputPush;
 
 [[vk::binding(0, 0)]] Texture2D<float> primeStreamlineViewZ;
-[[vk::binding(1, 0)]] Texture2D<float4> primeStreamlineVisibleDelta;
+[[vk::binding(1, 0)]] Texture2D<float4> primeStreamlineHistoryPosition;
 [[vk::binding(2, 0)]]
 [[vk::image_format("r8ui")]]
 RWTexture2D<uint> primeStreamlineReconstructionControl;
@@ -29,6 +29,9 @@ WTexture2D<float2> primeStreamlineMotion;
 static const uint PRIME_STREAMLINE_SURFACE_VALID = 0x04u;
 static const uint PRIME_STREAMLINE_HISTORY_VALID = 0x08u;
 static const uint PRIME_STREAMLINE_MOTION_VALID = 0x10u;
+static const uint PRIME_STREAMLINE_OBJECT_MOTION = 0x20u;
+static const uint PRIME_STREAMLINE_MATERIAL_CLASS_MASK = 0x03u;
+static const uint PRIME_STREAMLINE_MATERIAL_CLASS_TRANSMISSIVE = 2u;
 
 float3 primeStreamlineRayDirection(float2 screenUv)
 {
@@ -75,9 +78,17 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID)
         valid = valid && primeStreamlineVisiblePosition(
                 rayDirection, cameraForward, viewZ, currentPosition);
         if (valid) {
-            target = currentPosition
-                    + primeStreamlineVisibleDelta.Load(int3(sourcePixel, 0)).xyz;
-            valid = !any(isnan(target)) && !any(isinf(target));
+            bool objectMotion = (control & PRIME_STREAMLINE_OBJECT_MOTION) != 0u;
+            bool transmissive = (control & PRIME_STREAMLINE_MATERIAL_CLASS_MASK)
+                    == PRIME_STREAMLINE_MATERIAL_CLASS_TRANSMISSIVE;
+            valid = primeStreamlineVisibleHistoryPosition(
+                    objectMotion,
+                    !transmissive
+                            || primeStreamlineInputPush.transmissiveHistoryExact != 0u,
+                    currentPosition,
+                    primeStreamlineHistoryPosition.Load(
+                            int3(sourcePixel, 0)).xyz,
+                    target);
         }
     }
     float2 previousUv;

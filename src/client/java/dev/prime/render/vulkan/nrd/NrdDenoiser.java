@@ -749,6 +749,10 @@ public final class NrdDenoiser implements Destroyable {
             return this.images.reflectionNoisySpecularSh1;
         }
         @Override public VulkanImage displayPosition() { return this.images.displayPosition; }
+        @Override public VulkanImage visibleHistoryPosition() {
+            return this.images.displayPosition;
+        }
+        @Override public boolean hasExactTransmissiveVisibleHistory() { return true; }
         @Override public boolean usesShInputs() { return true; }
     }
 

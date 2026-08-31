@@ -71,19 +71,27 @@ final class RendererResourcePlanContractTest {
                 .filter(binding -> binding.lifetime().aliasGroup().equals("motion-or-transport"))
                 .toList();
         assertEquals(2, aliased.size());
-        RendererDataContracts.Binding visibleDelta = aliased.stream()
-                .filter(binding -> binding.semantic().equals("VisibleSurfaceMotionDelta"))
+        RendererDataContracts.Binding transport = aliased.stream()
+                .filter(binding -> binding.semantic().equals("TransportScratch"))
                 .findFirst()
                 .orElseThrow();
         RendererDataContracts.Binding motion = aliased.stream()
                 .filter(binding -> binding.semantic().equals("VisibleMotionUv"))
                 .findFirst()
                 .orElseThrow();
-        assertTrue(phase(visibleDelta.lifetime().lastRead())
+        assertTrue(phase(transport.lifetime().lastRead())
                 < phase(motion.lifetime().firstWrite()));
-        assertEquals("trace-interop-boundary", visibleDelta.conversion().owner());
+        assertEquals("transport", transport.conversion().owner());
         assertEquals("backend-adapter", motion.conversion().owner());
         assertFalse(motion.verification().behaviorOracle().isBlank());
+
+        RendererDataContracts.Binding visibleHistory = RendererDataContracts.BINDINGS.stream()
+                .filter(binding -> binding.semantic().equals("VisibleHistoryPosition"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("rgba32f-baseline", visibleHistory.encoding());
+        assertEquals("none", visibleHistory.lifetime().aliasGroup());
+        assertEquals("core-reconstruction", visibleHistory.conversion().owner());
     }
 
     @Test

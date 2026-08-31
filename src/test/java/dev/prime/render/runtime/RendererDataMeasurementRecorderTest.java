@@ -123,6 +123,36 @@ final class RendererDataMeasurementRecorderTest {
                 || encoded.contains("\"cameraZ\""));
     }
 
+    @Test
+    void measuresHalfDynamicDisplacementInProjectedPixels() {
+        float firstDelta = 1.0006F;
+        float quantizedDelta = Float.float16ToFloat(Float.floatToFloat16(firstDelta));
+        RendererDataMeasurementRecorder.DynamicMotionSnapshot measured =
+                RendererDataMeasurementRecorder.measureDynamicMotion(
+                        new float[] {0.0F, 0.0F, 0.0F, 1.0F, 2.0F, 3.0F},
+                        new float[] {firstDelta, 0.0F, 0.0F, 2.0F, 2.0F, 3.0F},
+                        0,
+                        0,
+                        0,
+                        camera(0.0, 0.0, 0.0),
+                        camera(0.0, 0.0, 0.0),
+                        1000,
+                        500);
+
+        assertEquals(2L, measured.sampledVertices());
+        assertEquals(2L, measured.movingVertices());
+        assertEquals(2L, measured.projectedVertices());
+        assertEquals(1L, measured.halfExactVertices());
+        assertEquals(
+                Math.abs(quantizedDelta - firstDelta),
+                measured.maximumHalfComponentErrorBlocks(),
+                1.0e-12);
+        assertEquals(
+                Math.abs(quantizedDelta - firstDelta) * 500.0,
+                measured.maximumProjectedHalfErrorPixels(),
+                1.0e-6);
+    }
+
     private static FrameCamera camera(double x, double y, double z) {
         return new FrameCamera(
                 new Matrix4f(), new Matrix4f(), new Matrix4f(),

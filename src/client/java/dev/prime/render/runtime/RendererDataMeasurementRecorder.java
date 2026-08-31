@@ -2,6 +2,10 @@ package dev.prime.render.runtime;
 
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.FrameCamera;
+import dev.prime.render.post.nrd.NrdCameraTransform;
+import dev.prime.render.scene.vanilla.DynamicSceneMotion;
+import dev.prime.render.shader.ShaderAbi;
+import dev.prime.render.terrain.CpuClusterMesh;
 import dev.prime.render.vulkan.MaterialTexturePages;
 import dev.prime.render.vulkan.RendererDataRangeDiagnostics;
 import dev.prime.render.vulkan.VulkanContext;
@@ -17,6 +21,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
 import net.fabricmc.loader.api.FabricLoader;
+import org.joml.Matrix4f;
+import org.joml.Vector4f;
 
 /** Render-thread-owned, opt-in aggregate recorder for stage-2 renderer-data decisions. */
 final class RendererDataMeasurementRecorder {
@@ -52,6 +58,9 @@ final class RendererDataMeasurementRecorder {
     private String reconstruction = "unknown";
     private String quality = "unknown";
     private RealtimeRenderer.DiagnosticSnapshot latestRenderer;
+    private DynamicSceneMotion latestDynamicMotion;
+    private DynamicMotionSnapshot dynamicMotion;
+    private FrameCamera previousFrameCamera;
     private boolean warned;
     private boolean dirty;
 
@@ -89,6 +98,12 @@ final class RendererDataMeasurementRecorder {
                         .resolve("latest.json"),
                 interval,
                 deviceName);
+    }
+
+    void recordDynamicMotion(DynamicSceneMotion motion) {
+        if (this.output != null) {
+            this.latestDynamicMotion = java.util.Objects.requireNonNull(motion, "motion");
+        }
     }
 
     void recordFrame(
@@ -147,6 +162,22 @@ final class RendererDataMeasurementRecorder {
         this.reconstruction = renderer.postProcessingMode().name();
         this.quality = renderer.quality().name();
         this.latestRenderer = renderer;
+        if (this.latestDynamicMotion != null && this.previousFrameCamera != null) {
+            DynamicSceneFrameInput dynamic = dynamicInput(this.latestDynamicMotion);
+            this.dynamicMotion = DynamicMotionSnapshot.merge(
+                    this.dynamicMotion,
+                    measureDynamicMotion(
+                            dynamic.currentPositions,
+                            dynamic.previousPositions,
+                            dynamic.clusterX,
+                            dynamic.clusterY,
+                            dynamic.clusterZ,
+                            camera,
+                            this.previousFrameCamera,
+                            renderer.renderWidth(),
+                            renderer.renderHeight()));
+        }
+        this.latestDynamicMotion = null;
         this.maximumTlasInstances = Math.max(
                 this.maximumTlasInstances, scene.tlasInstanceCount());
         this.maximumUniqueTriangles = Math.max(
@@ -167,6 +198,7 @@ final class RendererDataMeasurementRecorder {
         this.previousX = camera.renderX();
         this.previousY = camera.renderY();
         this.previousZ = camera.renderZ();
+        this.previousFrameCamera = camera;
         this.hasPreviousCamera = true;
         this.dirty = true;
         return this.frameCount >= this.nextWriteFrame;
@@ -213,6 +245,7 @@ final class RendererDataMeasurementRecorder {
         appendMediumIds(json, this.mediumIds);
         appendTextures(json, this.textures);
         appendRanges(json, this.latestRanges());
+        appendDynamicMotion(json, this.dynamicMotion);
         appendMemory(json, this.memory);
         trimComma(json).append("\n}\n");
         return json.toString();
@@ -357,6 +390,171 @@ final class RendererDataMeasurementRecorder {
         trimComma(json).append("\n  },");
     }
 
+    private static void appendDynamicMotion(
+            StringBuilder json, DynamicMotionSnapshot value) {
+        json.append("\n  \"dynamicMotion\": ");
+        if (value == null) {
+            json.append("null,");
+            return;
+        }
+        json.append('{');
+        field(json, "sampledVertices", value.sampledVertices());
+        field(json, "movingVertices", value.movingVertices());
+        field(json, "projectedVertices", value.projectedVertices());
+        field(json, "projectedErrorOverOne256Pixel", value.projectedErrorOverOne256Pixel());
+        field(json, "projectedErrorOverOne64Pixel", value.projectedErrorOverOne64Pixel());
+        field(json, "projectedErrorOverPointOnePixel", value.projectedErrorOverPointOnePixel());
+        field(json, "halfExactVertices", value.halfExactVertices());
+        field(json, "maximumDisplacementBlocks", value.maximumDisplacementBlocks());
+        field(json, "minimumNonzeroDisplacementBlocks", value.minimumNonzeroDisplacementBlocks());
+        field(json, "maximumHalfComponentErrorBlocks", value.maximumHalfComponentErrorBlocks());
+        field(json, "maximumHalfVectorErrorBlocks", value.maximumHalfVectorErrorBlocks());
+        field(json, "maximumProjectedHalfErrorPixels", value.maximumProjectedHalfErrorPixels());
+        trimComma(json).append("\n  },");
+    }
+
+    private static DynamicSceneFrameInput dynamicInput(DynamicSceneMotion motion) {
+        CpuClusterMesh mesh = motion.frame().mesh();
+        float[] current = mesh.isEmpty()
+                ? new float[0]
+                : mesh.segments().getFirst().positions();
+        return new DynamicSceneFrameInput(
+                current,
+                motion.previousPositions(),
+                motion.frame().clusterX(),
+                motion.frame().clusterY(),
+                motion.frame().clusterZ());
+    }
+
+    static DynamicMotionSnapshot measureDynamicMotion(
+            float[] current,
+            float[] previous,
+            int clusterX,
+            int clusterY,
+            int clusterZ,
+            FrameCamera camera,
+            FrameCamera previousCamera,
+            int width,
+            int height) {
+        if (current.length != previous.length || current.length % 3 != 0) {
+            throw new IllegalArgumentException("Dynamic motion position arrays differ");
+        }
+        if (width <= 0 || height <= 0) {
+            throw new IllegalArgumentException("Dynamic motion extent must be positive");
+        }
+        Matrix4f previousWorldToClip = NrdCameraTransform.previousWorldToClip(
+                camera, previousCamera);
+        double originX = (long) clusterX << 4;
+        double originY = (long) clusterY << 4;
+        double originZ = (long) clusterZ << 4;
+        long sampled = current.length / 3L;
+        long moving = 0L;
+        long projected = 0L;
+        long overOne256 = 0L;
+        long overOne64 = 0L;
+        long overPointOne = 0L;
+        long halfExact = 0L;
+        double maximumDisplacement = 0.0;
+        double minimumDisplacement = Double.POSITIVE_INFINITY;
+        double maximumComponentError = 0.0;
+        double maximumVectorError = 0.0;
+        double maximumProjectedError = 0.0;
+        Vector4f actualClip = new Vector4f();
+        Vector4f quantizedClip = new Vector4f();
+        for (int offset = 0; offset < current.length; offset += 3) {
+            float deltaX = previous[offset] - current[offset];
+            float deltaY = previous[offset + 1] - current[offset + 1];
+            float deltaZ = previous[offset + 2] - current[offset + 2];
+            double displacement = length(deltaX, deltaY, deltaZ);
+            if (displacement > 0.0) {
+                moving++;
+                maximumDisplacement = Math.max(maximumDisplacement, displacement);
+                minimumDisplacement = Math.min(minimumDisplacement, displacement);
+            }
+            float quantizedX = halfRoundTrip(deltaX);
+            float quantizedY = halfRoundTrip(deltaY);
+            float quantizedZ = halfRoundTrip(deltaZ);
+            float errorX = quantizedX - deltaX;
+            float errorY = quantizedY - deltaY;
+            float errorZ = quantizedZ - deltaZ;
+            double vectorError = length(errorX, errorY, errorZ);
+            if (vectorError == 0.0) {
+                halfExact++;
+            }
+            maximumComponentError = Math.max(
+                    maximumComponentError,
+                    Math.max(Math.abs(errorX), Math.max(Math.abs(errorY), Math.abs(errorZ))));
+            maximumVectorError = Math.max(maximumVectorError, vectorError);
+
+            float currentRelativeX = (float) (originX + current[offset] - camera.renderX());
+            float currentRelativeY = (float) (originY + current[offset + 1] - camera.renderY());
+            float currentRelativeZ = (float) (originZ + current[offset + 2] - camera.renderZ());
+            previousWorldToClip.transform(
+                    actualClip.set(
+                            currentRelativeX + deltaX,
+                            currentRelativeY + deltaY,
+                            currentRelativeZ + deltaZ,
+                            1.0F));
+            previousWorldToClip.transform(
+                    quantizedClip.set(
+                            currentRelativeX + quantizedX,
+                            currentRelativeY + quantizedY,
+                            currentRelativeZ + quantizedZ,
+                            1.0F));
+            double pixelError = projectedPixelError(
+                    actualClip, quantizedClip, width, height);
+            if (Double.isFinite(pixelError)) {
+                projected++;
+                if (pixelError > 1.0 / 256.0) overOne256++;
+                if (pixelError > 1.0 / 64.0) overOne64++;
+                if (pixelError > 0.1) overPointOne++;
+                maximumProjectedError = Math.max(maximumProjectedError, pixelError);
+            }
+        }
+        return new DynamicMotionSnapshot(
+                sampled,
+                moving,
+                projected,
+                overOne256,
+                overOne64,
+                overPointOne,
+                halfExact,
+                maximumDisplacement,
+                minimumDisplacement == Double.POSITIVE_INFINITY ? 0.0 : minimumDisplacement,
+                maximumComponentError,
+                maximumVectorError,
+                maximumProjectedError);
+    }
+
+    private static float halfRoundTrip(float value) {
+        float bounded = Math.clamp(value, -65_504.0F, 65_504.0F);
+        return Float.float16ToFloat(Float.floatToFloat16(bounded));
+    }
+
+    private static double length(float x, float y, float z) {
+        return Math.sqrt((double) x * x + (double) y * y + (double) z * z);
+    }
+
+    private static double projectedPixelError(
+            Vector4f actual, Vector4f quantized, int width, int height) {
+        if (!(actual.w >= ShaderAbi.FSR_NEAR_PLANE)
+                || !(quantized.w >= ShaderAbi.FSR_NEAR_PLANE)
+                || !actual.isFinite()
+                || !quantized.isFinite()) {
+            return Double.NaN;
+        }
+        double actualX = actual.x / actual.w;
+        double actualY = actual.y / actual.w;
+        double quantizedX = quantized.x / quantized.w;
+        double quantizedY = quantized.y / quantized.w;
+        if (Math.abs(actualX) > 3.0 || Math.abs(actualY) > 3.0) {
+            return Double.NaN;
+        }
+        return Math.hypot(
+                (actualX - quantizedX) * 0.5 * width,
+                (actualY - quantizedY) * 0.5 * height);
+    }
+
     private static void field(StringBuilder json, String name, String value) {
         json.append("\n    ").append(quote(name)).append(": ")
                 .append(quote(value)).append(',');
@@ -463,6 +661,67 @@ final class RendererDataMeasurementRecorder {
             PrimeInfo.LOGGER.warn(
                     "Unable to export Prime renderer-data measurements; rendering continues",
                     failure);
+        }
+    }
+
+    private record DynamicSceneFrameInput(
+            float[] currentPositions,
+            float[] previousPositions,
+            int clusterX,
+            int clusterY,
+            int clusterZ) {
+    }
+
+    record DynamicMotionSnapshot(
+            long sampledVertices,
+            long movingVertices,
+            long projectedVertices,
+            long projectedErrorOverOne256Pixel,
+            long projectedErrorOverOne64Pixel,
+            long projectedErrorOverPointOnePixel,
+            long halfExactVertices,
+            double maximumDisplacementBlocks,
+            double minimumNonzeroDisplacementBlocks,
+            double maximumHalfComponentErrorBlocks,
+            double maximumHalfVectorErrorBlocks,
+            double maximumProjectedHalfErrorPixels) {
+        static DynamicMotionSnapshot merge(
+                DynamicMotionSnapshot previous, DynamicMotionSnapshot sample) {
+            if (previous == null) {
+                return sample;
+            }
+            double minimum = previous.minimumNonzeroDisplacementBlocks == 0.0
+                    ? sample.minimumNonzeroDisplacementBlocks
+                    : sample.minimumNonzeroDisplacementBlocks == 0.0
+                            ? previous.minimumNonzeroDisplacementBlocks
+                            : Math.min(
+                                    previous.minimumNonzeroDisplacementBlocks,
+                                    sample.minimumNonzeroDisplacementBlocks);
+            return new DynamicMotionSnapshot(
+                    Math.addExact(previous.sampledVertices, sample.sampledVertices),
+                    Math.addExact(previous.movingVertices, sample.movingVertices),
+                    Math.addExact(previous.projectedVertices, sample.projectedVertices),
+                    Math.addExact(
+                            previous.projectedErrorOverOne256Pixel,
+                            sample.projectedErrorOverOne256Pixel),
+                    Math.addExact(
+                            previous.projectedErrorOverOne64Pixel,
+                            sample.projectedErrorOverOne64Pixel),
+                    Math.addExact(
+                            previous.projectedErrorOverPointOnePixel,
+                            sample.projectedErrorOverPointOnePixel),
+                    Math.addExact(previous.halfExactVertices, sample.halfExactVertices),
+                    Math.max(previous.maximumDisplacementBlocks, sample.maximumDisplacementBlocks),
+                    minimum,
+                    Math.max(
+                            previous.maximumHalfComponentErrorBlocks,
+                            sample.maximumHalfComponentErrorBlocks),
+                    Math.max(
+                            previous.maximumHalfVectorErrorBlocks,
+                            sample.maximumHalfVectorErrorBlocks),
+                    Math.max(
+                            previous.maximumProjectedHalfErrorPixels,
+                            sample.maximumProjectedHalfErrorPixels));
         }
     }
 }

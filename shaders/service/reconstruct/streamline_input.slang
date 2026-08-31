@@ -42,6 +42,23 @@ public bool primeStreamlineVisiblePosition(
     return valid;
 }
 
+public bool primeStreamlineVisibleHistoryPosition(
+        bool objectMotion,
+        bool historyPositionAvailable,
+        float3 currentPosition,
+        float3 historyPosition,
+        out float3 targetPosition) {
+    targetPosition = currentPosition;
+    if (!objectMotion) {
+        return primeNrdIsFinite(currentPosition);
+    }
+    if (!historyPositionAvailable) {
+        return false;
+    }
+    targetPosition = historyPosition;
+    return primeNrdIsFinite(historyPosition);
+}
+
 public bool primeStreamlinePreviousUv(float4 previousClip, out float2 previousUv) {
     previousUv = float2(0.0);
     if (!(previousClip.w > 1.0e-6) || !primeNrdIsFinite(previousClip)) {

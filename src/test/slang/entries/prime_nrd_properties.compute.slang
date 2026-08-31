@@ -59,12 +59,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
     uint mask = 0u;
     for (uint materialClass = 0u; materialClass < 4u; ++materialClass) {
         uint packedControl = primePackReconstructionControl(
-                materialClass, true, true);
+                materialClass, true, true, true);
+        uint withoutObjectMotion = primePackReconstructionControl(
+                materialClass, true, true, false);
         uint withMotion = primeSetReconstructionMotionValid(packedControl, true);
         uint withoutMotion = primeSetReconstructionMotionValid(withMotion, false);
         if (primeReconstructionMaterialClass(packedControl) != materialClass
                 || !primeReconstructionSurfaceValid(packedControl)
                 || !primeReconstructionHistoryValid(packedControl)
+                || !primeReconstructionObjectMotion(packedControl)
+                || primeReconstructionObjectMotion(withoutObjectMotion)
                 || primeReconstructionMotionValid(packedControl)
                 || !primeReconstructionMotionValid(withMotion)
                 || primeReconstructionMotionValid(withoutMotion)

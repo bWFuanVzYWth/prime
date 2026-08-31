@@ -262,7 +262,7 @@ final class PrimeProductionMathGpuTest {
     }
 
     private static void assertFsrDepthAndMotion(ShaderComputeRunner runner) throws IOException {
-        int kinds = 8;
+        int kinds = 9;
         int inputWords = 3;
         ByteBuffer input = fsrGuideCases(kinds, inputWords);
         ShaderPropertyBatch.assertProperties(
@@ -1562,6 +1562,31 @@ final class PrimeProductionMathGpuTest {
                     putInt(input, index, words, 0, 1, control);
                     putInt(input, index, words, 0, 2, historyMask);
                     putInt(input, index, words, 0, 3, (local & 1) == 0 ? 0 : 1);
+                } else if (kind == 8) {
+                    int materialClass = local & 3;
+                    boolean objectMotion = (local & 4) != 0;
+                    putInt(
+                            input,
+                            index,
+                            words,
+                            0,
+                            1,
+                            materialClass | (objectMotion ? 0x20 : 0));
+                    putInt(input, index, words, 0, 2, (local & 8) != 0 ? 1 : 0);
+                    for (int component = 0; component < 3; component++) {
+                        int currentBits = local < SPECIAL_FLOAT_BITS.length
+                                ? SPECIAL_FLOAT_BITS[
+                                        (local + component) % SPECIAL_FLOAT_BITS.length]
+                                : Float.floatToRawIntBits(
+                                        random.nextFloat() * 8_192.0F - 4_096.0F);
+                        int historyBits = local < SPECIAL_FLOAT_BITS.length
+                                ? SPECIAL_FLOAT_BITS[
+                                        (local + component + 3) % SPECIAL_FLOAT_BITS.length]
+                                : Float.floatToRawIntBits(
+                                        random.nextFloat() * 8_192.0F - 4_096.0F);
+                        putInt(input, index, words, 1, component, currentBits);
+                        putInt(input, index, words, 2, component, historyBits);
+                    }
                 } else {
                     putVec4(
                             input,

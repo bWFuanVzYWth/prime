@@ -134,9 +134,10 @@ public final class RealtimeFrameExecutor implements Destroyable {
             if (prepareFrameGeneration) {
                 frameGenerationInputs = this.ensureStreamlineInputs(
                         processor.rawFrame().viewZ(),
-                        processor.rawFrame().transportScratch(),
+                        processor.rawFrame().visibleHistoryPosition(),
                         processor.rawFrame().reconstructionControl(),
-                        output);
+                        output,
+                        processor.rawFrame().hasExactTransmissiveVisibleHistory());
                 prepareFrameGeneration = StreamlineFrameGeneration.recordInputs(
                         commandBuffer, frameGenerationInputs);
             }
@@ -207,16 +208,27 @@ public final class RealtimeFrameExecutor implements Destroyable {
 
     private StreamlineInputFlipPass ensureStreamlineInputs(
             VulkanImage depth,
-            VulkanImage visibleDelta,
+            VulkanImage visibleHistoryPosition,
             VulkanImage control,
-            VulkanImage color) {
+            VulkanImage color,
+            boolean exactTransmissiveHistory) {
         StreamlineInputFlipPass current = this.streamlineInputs;
-        if (current != null && current.matches(depth, visibleDelta, control, color)) {
+        if (current != null && current.matches(
+                depth,
+                visibleHistoryPosition,
+                control,
+                color,
+                exactTransmissiveHistory)) {
             return current;
         }
         StreamlineInputFlipPass replacement =
                 StreamlineInputFlipPass.create(
-                        this.context, depth, visibleDelta, control, color);
+                        this.context,
+                        depth,
+                        visibleHistoryPosition,
+                        control,
+                        color,
+                        exactTransmissiveHistory);
         this.streamlineInputs = replacement;
         if (current != null) {
             this.context.defer(current);

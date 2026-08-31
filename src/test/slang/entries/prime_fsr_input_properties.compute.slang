@@ -4,6 +4,7 @@ import "service/reconstruct/nrd/common.slang";
 import "model/material/defaults.slang";
 import "service/reconstruct/fsr_input.slang";
 import "service/reconstruct/streamline_input.slang";
+import "service/reconstruct/control.slang";
 import "prime_fsr_contract.slang";
 
 static const uint PRIME_FSR_INPUT_WORDS = 3u;
@@ -142,6 +143,31 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
         actual.x = valid ? 1.0 : 0.0;
         expected.x = expectedValid ? 1.0 : 0.0;
         if (valid != expectedValid) {
+            mask |= PRIME_TEST_FAILURE_IDENTITY;
+        }
+    } else if (kind == 9u) {
+        bool transmissiveHistoryExact = control.z != 0u;
+        bool objectMotion = primeReconstructionObjectMotion(control.y);
+        bool unsupportedTransmissive = objectMotion
+                && primeReconstructionMaterialClass(control.y)
+                        == PRIME_RECONSTRUCTION_MATERIAL_CLASS_TRANSMISSIVE
+                && !transmissiveHistoryExact;
+        float3 targetPosition;
+        bool valid = primeStreamlineVisibleHistoryPosition(
+                objectMotion,
+                !unsupportedTransmissive,
+                values.xyz,
+                second.xyz,
+                targetPosition);
+        float3 expectedPosition = objectMotion ? second.xyz : values.xyz;
+        bool expectedValid = !unsupportedTransmissive
+                && primeNrdIsFinite(expectedPosition);
+        actual = float4(targetPosition, valid ? 1.0 : 0.0);
+        expected = float4(
+                unsupportedTransmissive ? values.xyz : expectedPosition,
+                expectedValid ? 1.0 : 0.0);
+        if (valid != expectedValid
+                || any(asuint(actual) != asuint(expected))) {
             mask |= PRIME_TEST_FAILURE_IDENTITY;
         }
     } else {

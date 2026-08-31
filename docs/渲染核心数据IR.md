@@ -535,7 +535,7 @@ motion、ID 和 mask 的可视化是显式 diagnostic transform，不得通过�
 | FrameCamera row0→clip -Y | TopLeftCamera | 与 NVIDIA 图像方向相反 | frame camera，阶段 2 |
 | NrdCameraTransform Y flip | NrdCameraAdapter | 既承担 core 补偿又承担 NRD 差异 | NRD adapter，阶段 2 |
 | RR matrices borrowed from NRD transform | RrCameraConstants | 语义 owner 错位 | RR adapter，阶段 2 |
-| StreamlineInputFlipPass | FgColor/Depth/VisibleMotion | 已改读真实可见 surface 并在 backend overwrite 前捕获；仍承担全屏 Y flip，动态物体 delta 暂为 FP16 phase alias | producer + FG interop，阶段 2 |
+| StreamlineInputFlipPass | FgColor/Depth/VisibleMotion | 已改读真实可见 surface；普通/RR 复用 f32 primary history，NRD 复用 f32 display history；仍承担全屏 Y flip，RR 运动透射接口明确 motion invalid | producer + FG interop，阶段 2 |
 | RR/NRD/FSR raw images | typed ReconstructionViews | format 相同易错接、接口过宽 | resource schema，阶段 1/2 |
 | normalized motion + backend scales | VisibleMotionUv | 名称/符号分散 | frame/reconstruction schema，阶段 1/2 |
 | view-Z/depth/hit distance sentinels | typed depth + validity | 数值域和无效值混用 | backend adapters，阶段 2 |

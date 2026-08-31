@@ -87,7 +87,7 @@
     },
     "entry/post/streamline_input.compute.slang": {
       "maxFiles": 7,
-      "maxBytes": 23682
+      "maxBytes": 24789
     },
     "entry/post/hdr_present.compute.slang": {
       "maxFiles": 2,

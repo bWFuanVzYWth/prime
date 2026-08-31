@@ -213,19 +213,19 @@
       "space": "none",
       "unit": "bitset",
       "colorimetry": "none",
-      "validity": "bits 0-1 material class; bit 2 visible surface; bit 3 previous history; bit 4 canonical visible motion; bits 5-7 zero",
+      "validity": "bits 0-1 material class; bit 2 visible surface; bit 3 previous history; bit 4 canonical visible motion; bit 5 visible object motion; bits 6-7 zero",
       "minimumEncoding": "r8ui-reconstruction-control"
     },
     {
-      "id": "VisibleSurfaceMotionDelta",
+      "id": "VisibleHistoryPosition",
       "valueKind": "bounded-continuous",
       "components": 3,
       "domain": "trace-to-interop",
       "space": "camera-relative-world",
-      "unit": "block-per-frame",
+      "unit": "block",
       "colorimetry": "none",
-      "validity": "finite previous-minus-current visible-surface displacement; zero for static surfaces and misses",
-      "minimumEncoding": "rgba16f-visible-delta"
+      "validity": "finite previous visible position for moving objects and current position otherwise; RR transmissive motion is explicitly unavailable",
+      "minimumEncoding": "rgba32f-baseline"
     },
     {
       "id": "TransportScratch",
@@ -264,10 +264,10 @@
       "id": "r8ui-reconstruction-control",
       "scalarOrFormat": "VK_FORMAT_R8_UINT",
       "bytes": 1,
-      "channelMap": "bits0-1=material,b2=surface,b3=history,b4=motion",
+      "channelMap": "bits0-1=material,b2=surface,b3=history,b4=motion,b5=object-motion",
       "encode": "exact-bit-pack",
       "decode": "bit-mask",
-      "exactCodes": "0x00-0x1f",
+      "exactCodes": "0x00-0x3f",
       "errorContract": "lossless; reserved bits must be zero"
     },
     {
@@ -339,16 +339,6 @@
       "decode": "current-physical-layout",
       "exactCodes": "none",
       "errorContract": "characterized-current-layout-not-canonical-semantic"
-    },
-    {
-      "id": "rgba16f-visible-delta",
-      "scalarOrFormat": "VK_FORMAT_R16G16B16A16_SFLOAT",
-      "bytes": 8,
-      "channelMap": "rgb=previous-minus-current,a=zero",
-      "encode": "binary32-to-binary16-round-to-nearest-even",
-      "decode": "binary16-to-binary32",
-      "exactCodes": "zero and binary16 values",
-      "errorContract": "finite values clamped to 65504; projected-motion error is measured at the consumer"
     }
   ],
   "bindings": [
@@ -409,18 +399,32 @@
       "verification": {"artifactChecks": "offset-stride-and-reserved-control", "behaviorOracle": "f32-bit-exact-cross-dispatch", "numericOrImageThreshold": "lossless-f32", "benchmark": "unchanged-stride"}
     },
     {
-      "id": "current-transport-motion-alias",
-      "semantic": "VisibleSurfaceMotionDelta",
-      "encoding": "rgba16f-visible-delta",
+      "id": "visible-history-position",
+      "semantic": "VisibleHistoryPosition",
+      "encoding": "rgba32f-baseline",
+      "resourceKind": "image2d",
+      "extentSource": "render",
+      "usage": ["storage", "sampled"],
+      "access": "write-then-read",
+      "sampling": "point",
+      "descriptorOrOffset": "realtime.primaryPosition|nrd.displayPosition",
+      "lifetime": {"owner": "raw-wavefront-frame", "generation": "frame", "firstWrite": "trace", "consumers": ["interop-prepare", "reconstruction-prepare"], "lastRead": "reconstruction-prepare", "aliasGroup": "none", "retire": "frame-retire"},
+      "conversion": {"producer": "realtime-output-resolve", "sourceSemantic": "visible-position-history", "owner": "core-reconstruction", "targetSemantic": "VisibleHistoryPosition", "backendBoundary": "streamline"},
+      "verification": {"artifactChecks": "descriptor-format-and-source-selection", "behaviorOracle": "bit-exact-history-selection-and-projection", "numericOrImageThreshold": "lossless-f32-source", "benchmark": "zero-added-memory"}
+    },
+    {
+      "id": "current-transport-scratch",
+      "semantic": "TransportScratch",
+      "encoding": "rgba16f-current",
       "resourceKind": "image2d",
       "extentSource": "render",
       "usage": ["storage", "sampled"],
       "access": "phase-aliased",
       "sampling": "point",
       "descriptorOrOffset": "realtime.wavefrontTransportMetadata",
-      "lifetime": {"owner": "raw-wavefront-frame", "generation": "frame", "firstWrite": "trace", "consumers": ["trace", "interop-prepare"], "lastRead": "interop-prepare", "aliasGroup": "motion-or-transport", "retire": "frame-retire"},
-      "conversion": {"producer": "realtime-output-resolve", "sourceSemantic": "visible-position-history", "owner": "trace-interop-boundary", "targetSemantic": "VisibleSurfaceMotionDelta", "backendBoundary": "streamline"},
-      "verification": {"artifactChecks": "descriptor-format-and-phase-order", "behaviorOracle": "projected-motion-double-oracle", "numericOrImageThreshold": "measured-binary16-projection-error", "benchmark": "zero-added-memory"}
+      "lifetime": {"owner": "raw-wavefront-frame", "generation": "frame", "firstWrite": "trace", "consumers": ["trace"], "lastRead": "trace", "aliasGroup": "motion-or-transport", "retire": "frame-retire"},
+      "conversion": {"producer": "wavefront-transport", "sourceSemantic": "transport-state", "owner": "transport", "targetSemantic": "TransportScratch", "backendBoundary": "none"},
+      "verification": {"artifactChecks": "descriptor-format-and-phase-order", "behaviorOracle": "phase-alias-liveness", "numericOrImageThreshold": "private-current-layout", "benchmark": "zero-added-memory"}
     },
     {
       "id": "current-motion-overwrite",

@@ -44,19 +44,6 @@ float primeVisibleSurfaceViewZ(float3 position, bool surfaceValid) {
     return viewZ > 0.0 && !isnan(viewZ) && !isinf(viewZ) ? viewZ : -1.0;
 }
 
-float3 primeVisibleSurfaceMotionDelta(
-        float3 currentPosition,
-        float3 previousPosition,
-        bool hasMotion) {
-    if (!hasMotion) {
-        return float3(0.0);
-    }
-    float3 delta = previousPosition - currentPosition;
-    return any(isnan(delta)) || any(isinf(delta))
-            ? float3(0.0)
-            : clamp(delta, float3(-65504.0), float3(65504.0));
-}
-
 public float3 primeNrdEffectiveDirection(
         float3 totalRadiance,
         float3 primaryAreaRadiance,
@@ -233,7 +220,8 @@ public void primeWriteRealtimeOutput(
             primePackReconstructionControl(
                     primeNrdMaterialClass(primaryMaterialFlags),
                     hasVisibleSurface,
-                    (primePush.path.y & PRIME_OUTPUT_HISTORY_VALID) != 0u));
+                    (primePush.path.y & PRIME_OUTPUT_HISTORY_VALID) != 0u,
+                    visibleHasMotion));
     primeImageStore(
             primeNrdSpecularMaterial,
             int2(pixel),
@@ -365,18 +353,7 @@ public void primeWriteRealtimeOutput(
             primeStableRadiance,
             int2(pixel),
             float4(primeNrdSanitizeRadiance(sampleResult.radiance.stable), 1.0));
-    // Once resolve reaches this point, the per-pixel wavefront metadata is dead. Reuse its
-    // existing FP16 lanes for the visible object's previous-minus-current displacement. The
-    // Streamline adapter consumes this narrow, camera-independent delta before any reconstruction
-    // backend overwrites its private depth/motion guides.
     primeImageStore(primeNrdViewZ, int2(pixel), float4(visibleViewZ));
-    primeImageStore(
-            primeWavefrontTransportMetadata,
-            int2(pixel),
-            float4(primeVisibleSurfaceMotionDelta(
-                    sampleResult.guides.primaryPosition,
-                    sampleResult.guides.primaryPreviousPosition,
-                    visibleHasMotion), 0.0));
 }
 
 public void primeWriteRealtimeOutput(

@@ -295,6 +295,7 @@ public final class VulkanRenderer implements AutoCloseable {
                 List.copyOf(textures);
         DynamicSceneMotion motion = DynamicSceneMotion.prepare(
                 frame, this.publishedDynamicFrame);
+        this.dataMeasurements.recordDynamicMotion(motion);
         if (this.terrain.updateDynamic(motion)) {
             this.sceneTextures = capturedTextures;
             this.publishedDynamicFrame = frame;
