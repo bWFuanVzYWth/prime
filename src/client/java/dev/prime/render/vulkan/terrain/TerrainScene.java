@@ -32,6 +32,7 @@ public final class TerrainScene implements AutoCloseable {
     private static final long[] EMPTY_EVICTIONS = new long[0];
     private static final int TLAS_SLOT_COUNT = 3;
     private static final int REBASE_DISTANCE = 256;
+    private static final String MEASUREMENT_ENABLE_PROPERTY = "prime.renderer.measure";
 
     private final VulkanContext context;
     private final StagingArena stagingArena;
@@ -39,6 +40,7 @@ public final class TerrainScene implements AutoCloseable {
     private final DynamicBufferPool dynamicBufferPool;
     private final VoxelBlasPool voxelBlasPool = new VoxelBlasPool();
     private final MediumIdRegistry mediumIds = new MediumIdRegistry();
+    private final boolean measurementsEnabled = Boolean.getBoolean(MEASUREMENT_ENABLE_PROPERTY);
     private final BlasCompactionScheduler compactionScheduler =
             new BlasCompactionScheduler();
     private Long2ObjectOpenHashMap<GpuCluster> resident = new Long2ObjectOpenHashMap<>();
@@ -949,6 +951,9 @@ public final class TerrainScene implements AutoCloseable {
         long uniqueTriangles = 0L;
         long instancedTriangles = 0L;
         int areaLightEmitters = 0;
+        ArrayList<TextureTintUsage> textureTintUsage = this.measurementsEnabled
+                ? new ArrayList<>(finalClusters.size())
+                : null;
         IdentityHashMap<PreparedBlas, Boolean> uniqueBlases = new IdentityHashMap<>();
         for (var entry : this.resident.long2ObjectEntrySet()) {
             if (removedKeys.contains(entry.getLongKey())) {
@@ -973,6 +978,9 @@ public final class TerrainScene implements AutoCloseable {
                     instancedTriangles, cluster.instancedTriangleCount());
             areaLightEmitters = Math.addExact(
                     areaLightEmitters, cluster.lights().emitterCount());
+            if (textureTintUsage != null) {
+                textureTintUsage.add(cluster.textureTintUsage());
+            }
         }
         for (PreparedBlas blas : uniqueBlases.keySet()) {
             uniqueTriangles = Math.addExact(
@@ -988,7 +996,10 @@ public final class TerrainScene implements AutoCloseable {
                 uniqueTriangles,
                 instancedTriangles,
                 areaLightEmitters,
-                replacementWorldLightTree.nodeCount());
+                replacementWorldLightTree.nodeCount(),
+                textureTintUsage == null
+                        ? TextureTintUsage.EMPTY
+                        : TextureTintUsage.combine(textureTintUsage));
 
         TopLevelAccelerationStructure previousTlas = this.currentTlas;
         VulkanBuffer previousWorldLights = replaceWorldLights ? this.currentWorldLights : null;
@@ -1256,6 +1267,9 @@ public final class TerrainScene implements AutoCloseable {
                     lights,
                     motion,
                     lightSummary,
+                    this.measurementsEnabled
+                            ? TextureTintUsage.measure(mesh)
+                            : TextureTintUsage.EMPTY,
                     upload.dynamic(),
                     dynamicBuffers);
         } catch (RuntimeException exception) {
@@ -1552,11 +1566,29 @@ public final class TerrainScene implements AutoCloseable {
             long uniqueBlasTriangleCount,
             long instancedTriangleCount,
             int areaLightEmitterCount,
-            int topLevelLightTreeNodeCount) {
+            int topLevelLightTreeNodeCount,
+            TextureTintUsage textureTintUsage) {
         static final SceneStatistics EMPTY =
-                new SceneStatistics(0, 0L, 0L, 0, 0);
+                new SceneStatistics(0, 0L, 0L, 0, 0, TextureTintUsage.EMPTY);
+
+        public SceneStatistics(
+                int tlasInstanceCount,
+                long uniqueBlasTriangleCount,
+                long instancedTriangleCount,
+                int areaLightEmitterCount,
+                int topLevelLightTreeNodeCount) {
+            this(
+                    tlasInstanceCount,
+                    uniqueBlasTriangleCount,
+                    instancedTriangleCount,
+                    areaLightEmitterCount,
+                    topLevelLightTreeNodeCount,
+                    TextureTintUsage.EMPTY);
+        }
 
         public SceneStatistics {
+            textureTintUsage = java.util.Objects.requireNonNull(
+                    textureTintUsage, "textureTintUsage");
             if (tlasInstanceCount < 0
                     || uniqueBlasTriangleCount < 0L
                     || instancedTriangleCount < 0L

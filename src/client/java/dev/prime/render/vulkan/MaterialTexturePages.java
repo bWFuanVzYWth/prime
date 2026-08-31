@@ -6,7 +6,11 @@ import dev.prime.render.terrain.LabPbrAtlasFrame;
 import dev.prime.render.terrain.LabPbrMaterialSet;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
@@ -1114,12 +1118,26 @@ public final class MaterialTexturePages implements AutoCloseable {
         int maximumContentWidth = 0;
         int maximumContentHeight = 0;
         int maximumPadding = 0;
+        HashMap<Integer, Long> textureMipTexels = new HashMap<>();
+        HashSet<Integer> animatedTextureIds = new HashSet<>();
         for (LabPbrAtlasFrame.Sprite sprite : source.sprites()) {
             maximumTextureId = Math.max(maximumTextureId, sprite.textureId());
             animatedSprites += sprite.animated() ? 1 : 0;
             maximumContentWidth = Math.max(maximumContentWidth, sprite.contentWidth());
             maximumContentHeight = Math.max(maximumContentHeight, sprite.contentHeight());
             maximumPadding = Math.max(maximumPadding, sprite.padding());
+            long mipTexels = 0L;
+            int levels = textureMipLevels(sprite, source.mipLevels());
+            for (int mip = 0; mip < levels; mip++) {
+                mipTexels = Math.addExact(
+                        mipTexels,
+                        Math.multiplyExact(
+                                (long) sprite.mipWidth(mip), sprite.mipHeight(mip)));
+            }
+            textureMipTexels.put(sprite.textureId(), mipTexels);
+            if (sprite.animated()) {
+                animatedTextureIds.add(sprite.textureId());
+            }
         }
         return new MeasurementSnapshot(
                 sourceGeneration,
@@ -1137,7 +1155,9 @@ public final class MaterialTexturePages implements AutoCloseable {
                 measureChannel(source, normalLayout, normalPages, true),
                 measureChannel(source, opticalLayout, opticalPages, false),
                 textureRecordBytes,
-                animationFrameBytes);
+                animationFrameBytes,
+                textureMipTexels,
+                animatedTextureIds);
     }
 
     private static ChannelMeasurement measureChannel(
@@ -1233,7 +1253,52 @@ public final class MaterialTexturePages implements AutoCloseable {
             ChannelMeasurement normal,
             ChannelMeasurement optical,
             long textureRecordBytes,
-            long animationFrameBytes) {}
+            long animationFrameBytes,
+            Map<Integer, Long> textureMipTexels,
+            Set<Integer> animatedTextureIds) {
+        public MeasurementSnapshot {
+            textureMipTexels = Map.copyOf(textureMipTexels);
+            animatedTextureIds = Set.copyOf(animatedTextureIds);
+        }
+
+        public MeasurementSnapshot(
+                long sourceGeneration,
+                int atlasWidth,
+                int atlasHeight,
+                int mipLevels,
+                int textureCount,
+                int maximumTextureId,
+                int unusedTextureIdsBelowHighWater,
+                int animatedSpriteCount,
+                int maximumContentWidth,
+                int maximumContentHeight,
+                int maximumPadding,
+                long baseAtlasRgba8Bytes,
+                ChannelMeasurement normal,
+                ChannelMeasurement optical,
+                long textureRecordBytes,
+                long animationFrameBytes) {
+            this(
+                    sourceGeneration,
+                    atlasWidth,
+                    atlasHeight,
+                    mipLevels,
+                    textureCount,
+                    maximumTextureId,
+                    unusedTextureIdsBelowHighWater,
+                    animatedSpriteCount,
+                    maximumContentWidth,
+                    maximumContentHeight,
+                    maximumPadding,
+                    baseAtlasRgba8Bytes,
+                    normal,
+                    optical,
+                    textureRecordBytes,
+                    animationFrameBytes,
+                    Map.of(),
+                    Set.of());
+        }
+    }
 
     public record ChannelMeasurement(
             int sourceCount,

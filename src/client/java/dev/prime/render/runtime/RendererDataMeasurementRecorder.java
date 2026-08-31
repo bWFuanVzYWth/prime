@@ -6,6 +6,7 @@ import dev.prime.render.post.nrd.NrdCameraTransform;
 import dev.prime.render.scene.vanilla.DynamicSceneMotion;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.terrain.CpuClusterMesh;
+import dev.prime.render.terrain.TextureTintUsage;
 import dev.prime.render.vulkan.MaterialTexturePages;
 import dev.prime.render.vulkan.RendererDataRangeDiagnostics;
 import dev.prime.render.vulkan.RendererSignalRangeDiagnostics;
@@ -21,6 +22,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import net.fabricmc.loader.api.FabricLoader;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
@@ -53,6 +55,7 @@ final class RendererDataMeasurementRecorder {
     private int maximumLightTreeNodes;
     private TerrainScene.MediumIdStatistics mediumIds;
     private MaterialTexturePages.MeasurementSnapshot textures;
+    private TextureTintUsage observedTextureTints = TextureTintUsage.EMPTY;
     private VulkanMemorySnapshot memory;
     private long textureGenerationCount;
     private long previousTextureGeneration = Long.MIN_VALUE;
@@ -156,6 +159,8 @@ final class RendererDataMeasurementRecorder {
             this.textureGenerationCount++;
         }
         this.mediumIds = mediumIds;
+        this.observedTextureTints = this.observedTextureTints.observedUnion(
+                scene.textureTintUsage());
         this.maximumRenderWidth = Math.max(this.maximumRenderWidth, renderer.renderWidth());
         this.maximumRenderHeight = Math.max(this.maximumRenderHeight, renderer.renderHeight());
         this.maximumDisplayWidth = Math.max(this.maximumDisplayWidth, renderer.displayWidth());
@@ -245,6 +250,7 @@ final class RendererDataMeasurementRecorder {
         trimComma(json).append("\n  },");
         appendMediumIds(json, this.mediumIds);
         appendTextures(json, this.textures);
+        appendTextureTintUsage(json, this.observedTextureTints, this.textures);
         appendRanges(json, this.latestRanges());
         appendSignals(
                 json,
@@ -292,6 +298,79 @@ final class RendererDataMeasurementRecorder {
         field(json, "animationFrameBytes", value.animationFrameBytes());
         appendChannel(json, "normal", value.normal());
         appendChannel(json, "optical", value.optical());
+        trimComma(json).append("\n  },");
+    }
+
+    private static void appendTextureTintUsage(
+            StringBuilder json,
+            TextureTintUsage usage,
+            MaterialTexturePages.MeasurementSnapshot textures) {
+        json.append("\n  \"textureTintUsage\": {");
+        int pairCount = usage.pairReferences().size();
+        int textureCount = usage.textureIds().size();
+        int tintCount = usage.packedTints().size();
+        int untintedPairs = 0;
+        int animatedPairs = 0;
+        int unknownPairs = 0;
+        long canonicalMipTexels = 0L;
+        long variantMipTexels = 0L;
+        long maximumPairReferences = 0L;
+        Map<Integer, Long> footprints = textures == null
+                ? Map.of()
+                : textures.textureMipTexels();
+        for (int textureId : usage.textureIds()) {
+            Long footprint = footprints.get(textureId);
+            if (footprint != null) {
+                canonicalMipTexels = Math.addExact(canonicalMipTexels, footprint);
+            }
+        }
+        for (Map.Entry<TextureTintUsage.Pair, Long> entry
+                : usage.pairReferences().entrySet()) {
+            TextureTintUsage.Pair pair = entry.getKey();
+            untintedPairs += pair.packedTint() == 0x00ff_ffff ? 1 : 0;
+            maximumPairReferences = Math.max(maximumPairReferences, entry.getValue());
+            Long footprint = footprints.get(pair.textureId());
+            if (footprint == null) {
+                unknownPairs++;
+            } else {
+                variantMipTexels = Math.addExact(variantMipTexels, footprint);
+            }
+            if (textures != null
+                    && textures.animatedTextureIds().contains(pair.textureId())) {
+                animatedPairs++;
+            }
+        }
+        field(json, "observedTextureCount", textureCount);
+        field(json, "observedPackedTintCount", tintCount);
+        field(json, "observedTextureTintPairCount", pairCount);
+        field(json, "additionalTintVariantCount", Math.max(0, pairCount - textureCount));
+        field(json, "untintedPairCount", untintedPairs);
+        field(json, "animatedPairCount", animatedPairs);
+        field(json, "unknownCatalogPairCount", unknownPairs);
+        field(json, "pairReferenceHighWaterSum", usage.pairReferenceCount());
+        field(json, "maximumPairReferenceHighWater", maximumPairReferences);
+        field(json, "staticSurfaceReferences", usage.staticSurfaceReferences());
+        field(json, "relationMaterialReferences", usage.relationMaterialReferences());
+        field(json, "lightEmitterReferences", usage.lightEmitterReferences());
+        field(json, "voxelSurfaceReferences", usage.voxelSurfaceReferences());
+        field(json, "excludedDynamicReferences", usage.dynamicReferences());
+        field(json, "excludedBakedReferences", usage.bakedReferences());
+        field(json, "canonicalUsedMipTexels", canonicalMipTexels);
+        field(json, "tintVariantMipTexels", variantMipTexels);
+        field(
+                json,
+                "additionalTintVariantMipTexels",
+                Math.max(0L, variantMipTexels - canonicalMipTexels));
+        field(
+                json,
+                "rgba16fVariantBytes",
+                Math.multiplyExact(variantMipTexels, 8L));
+        field(
+                json,
+                "variantTexelInflation",
+                canonicalMipTexels == 0L
+                        ? 0.0
+                        : (double) variantMipTexels / canonicalMipTexels);
         trimComma(json).append("\n  },");
     }
 

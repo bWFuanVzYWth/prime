@@ -23,6 +23,7 @@ record GpuCluster(
         VulkanBuffer lightBuffer,
         VulkanBuffer motionBuffer,
         CompiledClusterLights.Summary lights,
+        TextureTintUsage textureTintUsage,
         boolean dynamic,
         DynamicBufferPool.Lease dynamicBuffers) {
     GpuCluster {
@@ -30,6 +31,7 @@ record GpuCluster(
         voxelInstances = Objects.requireNonNull(
                 voxelInstances, "voxelInstances");
         lights = Objects.requireNonNull(lights, "lights");
+        textureTintUsage = Objects.requireNonNull(textureTintUsage, "textureTintUsage");
         if (lightBuffer != null && motionBuffer != null
                 || motionBuffer != null && !dynamic) {
             throw new IllegalArgumentException(
@@ -76,6 +78,7 @@ record GpuCluster(
                 lightBuffer,
                 motionBuffer,
                 lights,
+                TextureTintUsage.EMPTY,
                 dynamic,
                 null);
     }
@@ -120,6 +123,7 @@ record GpuCluster(
                 lightBuffer,
                 null,
                 lights,
+                TextureTintUsage.EMPTY,
                 dynamic,
                 null);
     }

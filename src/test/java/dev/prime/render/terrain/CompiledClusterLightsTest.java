@@ -40,6 +40,21 @@ final class CompiledClusterLightsTest {
     }
 
     @Test
+    void exposesExactEmitterTextureAndTintIdentity() {
+        int[] relative = validOneEmitterPayload();
+        relative[24 + 19] = 0x0012_3456;
+        relative[24 + 23] = 91;
+        CompiledClusterLights lights = CompiledClusterLights.fromEncoded(
+                relative,
+                new CompiledClusterLights.Summary(
+                        1, -1.0F, -2.0F, -3.0F, 1.0F, 2.0F, 3.0F, 4.0F));
+
+        assertEquals(
+                new CompiledClusterLights.EmitterMaterial(0x0012_3456, 91),
+                lights.emitterMaterial(0));
+    }
+
+    @Test
     void encodedPayloadValidationRejectsBrokenIdentity() {
         int[] header = new int[12];
         header[11] = 2;

@@ -101,6 +101,20 @@ public final class CompiledClusterLights {
         return this.relativeWords.clone();
     }
 
+    EmitterMaterial emitterMaterial(int emitterIndex) {
+        if (emitterIndex < 0 || emitterIndex >= this.emitterCount()) {
+            throw new IndexOutOfBoundsException(emitterIndex);
+        }
+        int emitterWords = ShaderAbi.LIGHT_EMITTER_SIZE / Integer.BYTES;
+        int emitterStart = Math.toIntExact(getLong(this.relativeWords, 6) / Integer.BYTES);
+        int base = emitterStart + emitterIndex * emitterWords;
+        int tintWord = ShaderAbi.LIGHT_EMITTER_UVS_TINT_OFFSET / Integer.BYTES + 3;
+        int textureWord = ShaderAbi.LIGHT_EMITTER_METADATA_OFFSET / Integer.BYTES + 3;
+        return new EmitterMaterial(
+                this.relativeWords[base + tintWord] & 0x00ff_ffff,
+                this.relativeWords[base + textureWord]);
+    }
+
     /** Returns one owned upload payload relocated to {@code deviceAddress}. */
     public int[] relocate(long deviceAddress) {
         if (this.isEmpty()) {
@@ -128,6 +142,17 @@ public final class CompiledClusterLights {
     private static void putLong(int[] words, int offset, long value) {
         words[offset] = (int) value;
         words[offset + 1] = (int) (value >>> 32);
+    }
+
+    record EmitterMaterial(int packedTint, int textureId) {
+        EmitterMaterial {
+            if ((packedTint & 0xff00_0000) != 0
+                    || textureId <= 0
+                    || textureId > PrimitivePacking.MAX_TEXTURE_ID) {
+                throw new IllegalStateException(
+                        "Compiled light emitter has an invalid material identity");
+            }
+        }
     }
 
     private static void validateLayout(

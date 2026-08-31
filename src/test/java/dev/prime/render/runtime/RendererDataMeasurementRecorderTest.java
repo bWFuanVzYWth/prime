@@ -7,6 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.prime.render.FrameCamera;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionQualityMode;
+import dev.prime.render.terrain.CompiledClusterLights;
+import dev.prime.render.terrain.CpuClusterMesh;
+import dev.prime.render.terrain.CpuSectionLights;
+import dev.prime.render.terrain.CpuSectionMesh;
+import dev.prime.render.terrain.OpacityMicromapData;
+import dev.prime.render.terrain.PrimitivePacking;
+import dev.prime.render.terrain.TextureTintUsage;
 import dev.prime.render.vulkan.MaterialTexturePages;
 import dev.prime.render.vulkan.RendererDataRangeDiagnostics;
 import dev.prime.render.vulkan.VulkanMemorySnapshot;
@@ -14,6 +21,8 @@ import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.joml.Matrix4f;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -36,9 +45,11 @@ final class RendererDataMeasurementRecorderTest {
         MaterialTexturePages.MeasurementSnapshot textures =
                 new MaterialTexturePages.MeasurementSnapshot(
                         3L, 2048, 1024, 5, 5, 7, 2, 1, 64, 32, 4,
-                        11_173_888L, channel, channel, 256L, 512L);
+                        11_173_888L, channel, channel, 256L, 512L,
+                        Map.of(2, 100L), Set.of(2));
+        TextureTintUsage textureTints = measuredTextureTints();
         TerrainScene.SceneStatistics scene =
-                new TerrainScene.SceneStatistics(12, 34L, 56L, 7, 8);
+                new TerrainScene.SceneStatistics(12, 34L, 56L, 7, 8, textureTints);
         TerrainScene.MediumIdStatistics mediumIds =
                 new TerrainScene.MediumIdStatistics(4, 4L);
         long[] motionHistogram = new long[128];
@@ -110,6 +121,12 @@ final class RendererDataMeasurementRecorderTest {
         assertTrue(encoded.contains("\"maximumCameraStepBlocks\": 5.00000000"));
         assertTrue(encoded.contains("\"maximumTextureId\": 7"));
         assertTrue(encoded.contains("\"baseAtlasRgba8Bytes\": 11173888"));
+        assertTrue(encoded.contains("\"observedTextureTintPairCount\": 2"));
+        assertTrue(encoded.contains("\"additionalTintVariantCount\": 1"));
+        assertTrue(encoded.contains("\"animatedPairCount\": 2"));
+        assertTrue(encoded.contains("\"tintVariantMipTexels\": 200"));
+        assertTrue(encoded.contains("\"rgba16fVariantBytes\": 1600"));
+        assertTrue(encoded.contains("\"variantTexelInflation\": 2.00000000"));
         assertTrue(encoded.contains("\"highWaterId\": 4"));
         assertTrue(encoded.contains("\"maximumSampledMemory\""));
         assertTrue(encoded.contains("\"blockCount\": 9"));
@@ -158,5 +175,27 @@ final class RendererDataMeasurementRecorderTest {
         return new FrameCamera(
                 new Matrix4f(), new Matrix4f(), new Matrix4f(),
                 x, y, z, x, y, z);
+    }
+
+    private static TextureTintUsage measuredTextureTints() {
+        int[] primitives = new int[2 * CpuSectionMesh.PRIMITIVE_WORDS];
+        primitives[3] = PrimitivePacking.packTintControl(0x0011_2233, 0);
+        primitives[5] = PrimitivePacking.packControlTexture(0, 2);
+        primitives[6] = Float.floatToRawIntBits(1.0F);
+        int second = CpuSectionMesh.PRIMITIVE_WORDS;
+        primitives[second + 3] = PrimitivePacking.packTintControl(0x0044_5566, 0);
+        primitives[second + 5] = PrimitivePacking.packControlTexture(0, 2);
+        primitives[second + 6] = Float.floatToRawIntBits(1.0F);
+        CpuSectionMesh section = new CpuSectionMesh(
+                new float[18],
+                primitives,
+                2,
+                0,
+                0,
+                OpacityMicromapData.EMPTY,
+                CpuSectionLights.EMPTY);
+        CpuClusterMesh cluster = CpuClusterMesh.fromSegments(List.of(section));
+        assertEquals(CompiledClusterLights.EMPTY, cluster.lights());
+        return TextureTintUsage.measure(cluster);
     }
 }
