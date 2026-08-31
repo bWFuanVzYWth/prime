@@ -19,23 +19,43 @@ public final class CanonicalColorEncoding {
         double sourceRed = decodeSrgb8(argb >>> 16);
         double sourceGreen = decodeSrgb8(argb >>> 8);
         double sourceBlue = decodeSrgb8(argb);
-        int red = Float.floatToFloat16((float) (
+        float red = (float) (
                 SRGB_TO_REC2020[0][0] * sourceRed
                         + SRGB_TO_REC2020[0][1] * sourceGreen
-                        + SRGB_TO_REC2020[0][2] * sourceBlue)) & 0xffff;
-        int green = Float.floatToFloat16((float) (
+                        + SRGB_TO_REC2020[0][2] * sourceBlue);
+        float green = (float) (
                 SRGB_TO_REC2020[1][0] * sourceRed
                         + SRGB_TO_REC2020[1][1] * sourceGreen
-                        + SRGB_TO_REC2020[1][2] * sourceBlue)) & 0xffff;
-        int blue = Float.floatToFloat16((float) (
+                        + SRGB_TO_REC2020[1][2] * sourceBlue);
+        float blue = (float) (
                 SRGB_TO_REC2020[2][0] * sourceRed
                         + SRGB_TO_REC2020[2][1] * sourceGreen
-                        + SRGB_TO_REC2020[2][2] * sourceBlue)) & 0xffff;
-        int coverage = Float.floatToFloat16((float) (argb >>> 24)) & 0xffff;
-        return Integer.toUnsignedLong(red)
-                | (long) green << 16
-                | (long) blue << 32
-                | (long) coverage << 48;
+                        + SRGB_TO_REC2020[2][2] * sourceBlue);
+        return encodeLinearRgba16f(red, green, blue, argb >>> 24);
+    }
+
+    /** Encodes bounded linear Rec.2020 reflectance and a raw 0..255 coverage code. */
+    public static long encodeLinearRgba16f(
+            float red, float green, float blue, float coverageCode) {
+        if (!Float.isFinite(red) || !Float.isFinite(green) || !Float.isFinite(blue)
+                || !Float.isFinite(coverageCode)
+                || red < 0.0F || red > 1.0F
+                || green < 0.0F || green > 1.0F
+                || blue < 0.0F || blue > 1.0F
+                || coverageCode < 0.0F || coverageCode > 255.0F) {
+            throw new IllegalArgumentException(
+                    "Canonical base color exceeds its bounded domain: rgb=("
+                            + red + ", " + green + ", " + blue
+                            + "), coverage=" + coverageCode);
+        }
+        int encodedRed = Float.floatToFloat16(red) & 0xffff;
+        int encodedGreen = Float.floatToFloat16(green) & 0xffff;
+        int encodedBlue = Float.floatToFloat16(blue) & 0xffff;
+        int encodedCoverage = Float.floatToFloat16(coverageCode) & 0xffff;
+        return Integer.toUnsignedLong(encodedRed)
+                | (long) encodedGreen << 16
+                | (long) encodedBlue << 32
+                | (long) encodedCoverage << 48;
     }
 
     public static Color decodeRgba16f(long encoded) {
@@ -50,13 +70,19 @@ public final class CanonicalColorEncoding {
         return SRGB8_TO_LINEAR[code & 0xff];
     }
 
-    public static TintOperator tintOperator(int packedRgb) {
-        if ((packedRgb & 0xff00_0000) != 0) {
+    /**
+     * Builds the exact operator for the RGB lanes of the PrimitiveRecord RGBA8 word.
+     *
+     * <p>The physical integer is little-lane RGBA8: R occupies bits 0..7, G bits 8..15 and B
+     * bits 16..23. It is deliberately not the display-oriented {@code 0xRRGGBB} notation.
+     */
+    public static TintOperator tintOperator(int packedRgbaRgb) {
+        if ((packedRgbaRgb & 0xff00_0000) != 0) {
             throw new IllegalArgumentException("Packed tint exceeds RGB8");
         }
-        double red = decodeSrgb8(packedRgb >>> 16);
-        double green = decodeSrgb8(packedRgb >>> 8);
-        double blue = decodeSrgb8(packedRgb);
+        double red = decodeSrgb8(packedRgbaRgb);
+        double green = decodeSrgb8(packedRgbaRgb >>> 8);
+        double blue = decodeSrgb8(packedRgbaRgb >>> 16);
         double[] tint = {red, green, blue};
         float[] operator = new float[9];
         for (int row = 0; row < 3; row++) {
@@ -76,13 +102,13 @@ public final class CanonicalColorEncoding {
                 operator[6], operator[7], operator[8]);
     }
 
-    static Color sourcePath(int argb, int packedRgb) {
+    static Color sourcePath(int argb, int packedRgbaRgb) {
         float baseRed = decodeSrgb8(argb >>> 16);
         float baseGreen = decodeSrgb8(argb >>> 8);
         float baseBlue = decodeSrgb8(argb);
-        float tintRed = decodeSrgb8(packedRgb >>> 16);
-        float tintGreen = decodeSrgb8(packedRgb >>> 8);
-        float tintBlue = decodeSrgb8(packedRgb);
+        float tintRed = decodeSrgb8(packedRgbaRgb);
+        float tintGreen = decodeSrgb8(packedRgbaRgb >>> 8);
+        float tintBlue = decodeSrgb8(packedRgbaRgb >>> 16);
         return new Color(
                 matrixValue(0, baseRed * tintRed, baseGreen * tintGreen, baseBlue * tintBlue),
                 matrixValue(1, baseRed * tintRed, baseGreen * tintGreen, baseBlue * tintBlue),
@@ -93,16 +119,16 @@ public final class CanonicalColorEncoding {
     static double maximumOperatorInfinityNorm() {
         double maximum = 0.0;
         for (int mask = 0; mask < 8; mask++) {
-            int tint = ((mask & 1) == 0 ? 0 : 0xff) << 16
+            int tint = ((mask & 1) == 0 ? 0 : 0xff)
                     | ((mask & 2) == 0 ? 0 : 0xff) << 8
-                    | ((mask & 4) == 0 ? 0 : 0xff);
+                    | ((mask & 4) == 0 ? 0 : 0xff) << 16;
             TintOperator operator = tintOperator(tint);
             maximum = Math.max(maximum, operator.infinityNorm());
         }
         return maximum;
     }
 
-    private static float matrixValue(int row, float red, float green, float blue) {
+    static float matrixValue(int row, float red, float green, float blue) {
         return (float) SRGB_TO_REC2020[row][0] * red
                 + (float) SRGB_TO_REC2020[row][1] * green
                 + (float) SRGB_TO_REC2020[row][2] * blue;

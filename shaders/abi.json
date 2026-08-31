@@ -211,6 +211,7 @@
     "materialNormalPages": 19,
     "materialOpticalPages": 49,
     "tintOperators": 50,
+    "baseColorPages": 51,
     "starmap": 34,
     "realtimeStbn": 35,
     "sunShadowDepth0": 38,
@@ -259,6 +260,7 @@
   },
   "sceneTextureCount": 64,
   "materialPageCount": 16,
+  "baseColorPageCount": 64,
   "realtimeWavefrontContract": {
     "pathRecordSize": 144,
     "etaScaleOffset": 108,

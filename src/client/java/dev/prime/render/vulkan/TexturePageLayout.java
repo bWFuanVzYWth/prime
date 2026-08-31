@@ -13,6 +13,7 @@ import java.util.function.Function;
 final class TexturePageLayout {
     static final int MAX_PAGE_COUNT = ShaderAbi.MATERIAL_PAGE_COUNT;
     private static final int TARGET_PAGE_EXTENT = 2048;
+    private static final int BASE_COLOR_TARGET_PAGE_EXTENT = 4096;
     private static final int MIN_PAGE_EXTENT = 64;
 
     private TexturePageLayout() {
@@ -20,8 +21,32 @@ final class TexturePageLayout {
 
     static Layout pack(
             List<LabPbrAtlasFrame.Sprite> sprites,
-            Function<LabPbrAtlasFrame.Sprite, LabPbrAtlasFrame.MaterialSource> source,
+            Function<LabPbrAtlasFrame.Sprite, ? extends LabPbrAtlasFrame.TextureSource> source,
             int requestedMipLevels) {
+        return pack(
+                sprites,
+                source,
+                requestedMipLevels,
+                TARGET_PAGE_EXTENT,
+                MAX_PAGE_COUNT);
+    }
+
+    static Layout packBaseColor(
+            List<LabPbrAtlasFrame.Sprite> sprites, int requestedMipLevels) {
+        return pack(
+                sprites,
+                LabPbrAtlasFrame.Sprite::baseColor,
+                requestedMipLevels,
+                BASE_COLOR_TARGET_PAGE_EXTENT,
+                ShaderAbi.BASE_COLOR_PAGE_COUNT);
+    }
+
+    private static Layout pack(
+            List<LabPbrAtlasFrame.Sprite> sprites,
+            Function<LabPbrAtlasFrame.Sprite, ? extends LabPbrAtlasFrame.TextureSource> source,
+            int requestedMipLevels,
+            int targetPageExtent,
+            int maximumPageCount) {
         ArrayList<Request> regular = new ArrayList<>();
         ArrayList<Request> oversized = new ArrayList<>();
         long totalArea = 0L;
@@ -41,7 +66,7 @@ final class TexturePageLayout {
                     alignUp(outerWidth, alignment),
                     alignUp(outerHeight, alignment),
                     alignment);
-            if (request.width > TARGET_PAGE_EXTENT || request.height > TARGET_PAGE_EXTENT) {
+            if (request.width > targetPageExtent || request.height > targetPageExtent) {
                 oversized.add(request);
             } else {
                 regular.add(request);
@@ -58,7 +83,7 @@ final class TexturePageLayout {
 
         int estimatedExtent = nextPowerOfTwo((int) Math.ceil(Math.sqrt(totalArea)));
         int regularExtent = Math.min(
-                TARGET_PAGE_EXTENT,
+                targetPageExtent,
                 Math.max(MIN_PAGE_EXTENT, Math.max(maximumRegularExtent, estimatedExtent)));
         ArrayList<PageBuilder> pages = new ArrayList<>();
         HashMap<Integer, Placement> placements = new HashMap<>();
@@ -77,7 +102,7 @@ final class TexturePageLayout {
                 }
             }
             if (point == null) {
-                requirePageCapacity(pages.size() + 1);
+                requirePageCapacity(pages.size() + 1, maximumPageCount);
                 PageBuilder page = new PageBuilder(regularExtent, regularExtent);
                 pages.add(page);
                 pageIndex = pages.size() - 1;
@@ -91,7 +116,7 @@ final class TexturePageLayout {
                     new Placement(pageIndex, point.x, point.y, request.sprite));
         }
         for (Request request : oversized) {
-            requirePageCapacity(pages.size() + 1);
+            requirePageCapacity(pages.size() + 1, maximumPageCount);
             int pageIndex = pages.size();
             PageBuilder page = new PageBuilder(
                     nextPowerOfTwo(request.width),
@@ -117,10 +142,11 @@ final class TexturePageLayout {
         return new Layout(List.copyOf(immutablePages), Map.copyOf(placements));
     }
 
-    private static void requirePageCapacity(int pageCount) {
-        if (pageCount > MAX_PAGE_COUNT) {
+    private static void requirePageCapacity(int pageCount, int maximumPageCount) {
+        if (pageCount > maximumPageCount) {
             throw new IllegalStateException(
-                    "Translated material channel exceeds the " + MAX_PAGE_COUNT + " page ABI");
+                    "Translated material channel exceeds the "
+                            + maximumPageCount + " page ABI");
         }
     }
 

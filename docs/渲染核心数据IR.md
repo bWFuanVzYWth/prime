@@ -294,9 +294,14 @@ CPU 可用 double 保存绝对世界位置。GPU 当前以 camera-relative f32 �
 
 ### 7.1 GPU 工作色彩
 
-所有 scene-referred RGB radiance、reflectance/base color、emission、tint、灯光颜色、天空 RGB
+所有 scene-referred RGB radiance、reflectance/base color、emission、灯光颜色、天空 RGB
 资产和重建颜色在 GPU 核心中统一为 D65、线性 Rec.2020。该规定是滤波、插值、混合和光传输的
 正确性边界，不是可用运行时省事替代的性能偏好。
+
+tint 是颜色调制操作数而不是普通 scene-referred RGB。其连续 RGBA sample 必须携带明确的
+modulation-domain tag；material adapter 负责执行与源语义等价的色域转换，输出立即回到线性
+Rec.2020。禁止把已转为 Rec.2020 的 base 和 tint 直接逐通道相乘，也禁止为了维持工作空间规范
+而省略这项不可交换的转换。
 
 encoded sRGB 只允许存在于 Source IR 和 SDR presentation/interop 边界。在 encoded sRGB 上做
 线性过滤、mip、颜色混合或光传输均不合法。alpha/coverage 是非颜色语义，不执行 EOTF 或色域
@@ -315,13 +320,15 @@ Rec.2020 转换。
 4. 在线性 Rec.2020 中生成 gutter、mip、缩放和动画所需派生；
 5. 以满足颜色误差合同的 page encoding 上传。
 
-最终物理格式可以是 UNORM、float 或受支持压缩格式；规范不预设 `RGBA16F`。选择必须覆盖暗部、
-超白、负值是否允许、mip 累计、过滤和 emission 范围。反照率通常有界不代表所有 scene color
-共用同一 encoding。
+阶段 2 已把 bounded base color 和连续 tint field 锁定为 `RGBA16F`；这不外推到 radiance、
+emission、starmap 或其他可能超白/为负/累计的 scene color。后者的最终物理格式仍必须分别覆盖
+暗部、动态范围、mip 累计、过滤和消费误差。
 
-顶点/实例 tint 和固定资产也在上游转为具名 `LinearRec2020Color`。若 tint 随帧来自 Minecraft，
-CPU frame adapter 转换一次；不得让每个 hit 解码 encoded sRGB。starmap 等静态 RGB 资产应离线
-或加载时转码，生产采样不得每次执行 sRGB→Rec.2020 矩阵。
+顶点/实例 tint 在捕获边界完成 EOTF，作为具名 `LinearTintModulation` 的 `RGBA16F` 连续 field
+与 albedo binding 关联；四顶点、biome blend、资源包 colormap 和 alpha 均不得平均成单个 RGB8
+身份。每 hit 不再解码 encoded sRGB，但 material adapter 仍必须执行 tint modulation 所需的显式
+色域转换。starmap 等普通静态 RGB 资产应离线或加载时转为 Rec.2020，生产采样不得每次执行
+sRGB EOTF。
 
 源资产缺少 primaries、white point 或 transfer metadata 时不得在生产 Shader 中猜测。资源必须
 通过经审查的资产元数据明确其 colorimetry，或在构建/加载边界清晰拒绝；该决定和源 hash 一同
@@ -353,6 +360,11 @@ Scene IR 使用稳定、非零、具名 ID 表达 texture、section、primitive�
 material recipe、emitter 和动态 instance。ID 的 bit width 是 encoding；不复用、generation 和
 有效范围属于 semantic/lifetime。
 
+资源 catalog identity 与按场景生成的 identity 分域：`TextureId`、`MediumId` 和 `MaterialId`
+使用 exact u16；triangle 与 emitter 最坏可达到同一数量级，使用 exact u32。
+Vulkan instance custom index 等 API carrier 可以有更窄的硬件上限，但 core semantic 仍由具名类型
+和 adapter 的范围验证约束，不能把硬件 bit field 当成通用身份。
+
 轴对齐事实、front/back、thin/solid、positive-only、overlay/bilateral/boundary 和介质端点是
 离散语义。不要把它们从 normal 符号、颜色、roughness 或浮点相等关系重新推断。合法退化输入
 在 CPU 翻译边界明确拒绝或删除；有效斜面不能因 Minecraft 中少见而降精度。
@@ -373,6 +385,33 @@ validated source facts
 是枚举/bit。base color 和 emission 是 `LinearRec2020Color`；roughness、IOR、extinction 等是连续
 参数，各自拥有域和精度合同。物理 control word 可以复用现有 ABI，但只有 generated accessor
 解释 bit。
+
+Scene IR 的目标布局以全局材质耦合查表为默认：一个 u16 `MaterialId` 关联 `TextureId`、
+`MediumId`、recipe、source codes、channel availability、coverage/emission/animation facts 和规范
+texture-record references。triangle 只保存 UV、relation、tint-field addressing 等确实随几何变化的
+数据。surface relation 和 `EmitterId u32` 复用同一 binding，不复制整份 secondary material。
+
+`TextureId` 是 `MaterialId` 去重键的首要组成；只有 medium、recipe、coverage 和其他会改变行为的
+离散事实才扩展该 key。同一 `TextureId` 不能因为 section 不同而产生副本。常规 terrain 的主要
+变化量收敛为 exact orientation、命中导出的 world position 和连续 tint；世界位置本身不重复写入
+triangle record。不能由这些量推出的少数例外必须成为具名字段或 exact availability 控制的
+companion data，不得反过来要求所有 triangle 携带完整材质状态。
+
+该表是 renderer-generation 全局 dense table，不是 section/cluster-local palette。`TextureId` 是资源
+翻译和去重的关键键，`MaterialId` 是 GPU 热路径的一跳寻址入口。material table 使用固定 schema，
+但不规定每个阶段必须整份加载一个 AoS `MaterialRecord`：generated accessor 同时提供窄字段访问和
+需要多个相邻事实时的合并加载能力，物理布局可按测量选择 AoS、SoA 或混合形式。wavefront 阶段只
+在消费点加载所需字段，不把完整材质状态写入 path state 或延长到后续阶段。只有 exact availability
+证明不会访问的冷数据允许一次 companion lookup。禁止变长 record、hash probing、链表和多级指针
+追逐；少量全局 table entry 重复优于在数千万 triangle 上增加不规则 load。
+
+纹理、material record、OMM block/pattern、emission distribution 和其他有稳定内容键的不可变资源
+在全局 generation 内唯一化。普通随机 terrain BLAS 由其 cluster 独占，不为几乎不存在的整 BLAS
+重复支付全局比较和索引成本；只有纹理体素或模板 geometry 等已有稳定复用键的 BLAS 可共享。
+
+derived roughness、IOR 等在消费寄存器中从权威 u8 source code/table 展开为 f32；f32 运算精度不
+构成把派生值逐 triangle 持久化的理由。若缓存有性能收益，缓存粒度也是 material binding/table
+entry，而不是 triangle。该表耦合必须进入 schema 和生成 accessor，不能依赖调用方记忆字段关联。
 
 ### 8.3 介质
 
@@ -515,7 +554,7 @@ motion、ID 和 mask 的可视化是显式 diagnostic transform，不得通过�
 | 当前数据 | 目标 semantic | 当前主要问题 | 迁移 owner/阶段 |
 | --- | --- | --- | --- |
 | Minecraft atlas RGBA8 + sRGB companion | BaseColorLinearRec2020 + Coverage | 每 hit 色域转换、源 backing 泄漏到生产 | texture builder，阶段 2 |
-| vertex/instance encoded tint | LinearRec2020Tint | shader 热解码、颜色域不显式 | capture/frame adapter，阶段 2 |
+| vertex/instance encoded tint | LinearTintModulation RGBA16F field | 当前面平均丢失过渡；离散 TintId 不能表达四顶点/biome 插值；混合域不显式 | capture/material adapter，阶段 2 |
 | normal/optical pages | TangentNormal、AO、Roughness、OpticalCode | 连续与离散通道共采样 | texture schema/accessor，阶段 2/4 |
 | TextureRecord/TextureId | CanonicalTexture + stable TextureId | albedo rect 仍指向源 atlas | texture catalog，阶段 2 |
 | PrimitiveRecord 32 B | PrimitiveIdentity/Material/Texture/Emitter tagged views | offset 16 已迁移为 exact MediumId；其余 control 仍有多模式复用 | generated accessors，阶段 2 |
@@ -570,9 +609,24 @@ bytes；实时 area record 为 320 bytes，离线 surface/stage 为 108/112 byte
 - 单一转换 owner、typed semantic views、schema 生成与 phase alias 规则；
 - CPU 几何语义翻译与 GPU 自交精度的边界。
 
-阶段 0 有意不锁定：
+阶段 2 已追加锁定：
 
-- base color/normal/roughness/radiance 的最终 VkFormat；
+- renderer resource catalog 的 `TextureId`/`MediumId` 为 exact `u16`；当前 `u32` 只可作为高位为零
+  的迁移 carrier；
+- `MaterialId` 为 exact `u16`；triangle/emitter 是按场景程序化生成的身份，最坏可达到
+  同一数量级，均保持 exact `u32`；
+- bounded base color 使用 linear Rec.2020 `RGBA16F`，连续 tint field 使用带 modulation-domain tag
+  的 `RGBA16F`，并保留四顶点/biome 插值与 alpha；
+- tint 与 base 的调制必须执行数学等价的显式色域转换，不能在 Rec.2020 中直接逐通道相乘。
+- sprite-local UV 使用 `UQ0.16x2`，不建立任意 f32 UV 持久化分支；材质参考点保存 texture-local
+  integer identity 后按需生成坐标；
+- derived material 参数不以高于权威 source code 的精度逐 triangle 持久化，f32 只用于寄存器内
+  filtering、组合和 BSDF 计算。
+
+仍有意不锁定：
+
+- normal/radiance 等其他连续数据的最终 VkFormat；
+- 连续 tint field 使用 buffer、采样页或等价 operator field，以及 conversion 的具体调度方式；
 - 哪些连续字段可用 FP16、UNORM、SNORM、共享指数或压缩纹理；
 - wavefront 最终 stride、SoA/AoS、queue/alias 物理布局；
 - medium 参数内联还是表索引、starmap 最终压缩方式；

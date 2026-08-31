@@ -40,6 +40,7 @@ final class VulkanDeviceNegotiatorTest {
     @Test
     void sceneTextureDescriptorLimitsAreUnsignedAndCoverBothDescriptorClasses() {
         int required = ShaderAbi.SCENE_TEXTURE_COUNT
+                + ShaderAbi.BASE_COLOR_PAGE_COUNT
                 + 2 * ShaderAbi.MATERIAL_PAGE_COUNT + 2;
 
         assertTrue(VulkanDeviceNegotiator.supportsSceneTextureDescriptors(

@@ -90,6 +90,29 @@ final class TexturePageLayoutTest {
     }
 
     @Test
+    void baseColorUsesItsIndependentSixtyFourPageAbi() {
+        LabPbrAtlasFrame.ColorSource source = LabPbrAtlasFrame.ColorSource.copyOf(
+                new int[4097], 4097, 1, 4097, 1);
+        ArrayList<LabPbrAtlasFrame.Sprite> accepted = new ArrayList<>();
+        for (int id = 1; id <= 17; id++) {
+            accepted.add(new LabPbrAtlasFrame.Sprite(
+                    id, 0, 0, 4097, 1, 0, source, null, null, -1));
+        }
+
+        TexturePageLayout.Layout layout = TexturePageLayout.packBaseColor(accepted, 1);
+
+        assertEquals(17, layout.pages().size());
+        ArrayList<LabPbrAtlasFrame.Sprite> rejected = new ArrayList<>();
+        for (int id = 1; id <= 65; id++) {
+            rejected.add(new LabPbrAtlasFrame.Sprite(
+                    id, 0, 0, 4097, 1, 0, source, null, null, -1));
+        }
+        assertThrows(
+                IllegalStateException.class,
+                () -> TexturePageLayout.packBaseColor(rejected, 1));
+    }
+
+    @Test
     void missingChannelUsesOnlyTheDescriptorSafeDummyPage() {
         TexturePageLayout.Layout layout = TexturePageLayout.pack(
                 List.of(sprite(1, 16, 16, 0)),
@@ -142,6 +165,6 @@ final class TexturePageLayoutTest {
     private static LabPbrAtlasFrame.Sprite sprite(
             int id, int width, int height, int padding) {
         return new LabPbrAtlasFrame.Sprite(
-                id, 0, 0, width, height, padding, SOURCE, null, -1);
+                id, 0, 0, width, height, padding, null, SOURCE, null, -1);
     }
 }

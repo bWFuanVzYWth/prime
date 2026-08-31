@@ -73,6 +73,13 @@ public final class VanillaLabPbrAtlas {
         this.requestedGeneration.incrementAndGet();
     }
 
+    /** Drops the one-shot base RGBA8 capture after canonical pages and animation caches own it. */
+    public void retireBaseColorSources(long generation) {
+        if (this.snapshot != null && this.capturedGeneration == generation) {
+            this.snapshot = this.snapshot.withoutBaseColorSources();
+        }
+    }
+
     private Capture capture(ResourceManager resourceManager, TextureAtlas atlas) {
         TextureAtlasAccessor atlasAccess = (TextureAtlasAccessor) (Object) atlas;
         boolean supported = readsLabPbr13(resourceManager);
@@ -92,6 +99,19 @@ public final class VanillaLabPbrAtlas {
             SpriteId spriteId = spriteId(name);
             int textureId = this.textureIds.resolve(spriteId);
             textureIds.put(spriteId, textureId);
+            SpriteContents contents = sprite.contents();
+            NativeImage baseImage =
+                    ((SpriteContentsAccessor) (Object) contents).prime$originalImage();
+            if (baseImage == null || baseImage.isClosed()) {
+                throw new IllegalStateException(
+                        "Stitched base-color source is unavailable for " + name);
+            }
+            LabPbrAtlasFrame.ColorSource baseColor = LabPbrAtlasFrame.ColorSource.capture(
+                    baseImage.getWidth(),
+                    baseImage.getHeight(),
+                    contents.width(),
+                    contents.height(),
+                    baseImage::getPixel);
             LabPbrAtlasFrame.MaterialSource normal = supported
                     ? readMaterial(resourceManager, materialResource(name, "_n"), sprite)
                     : null;
@@ -124,23 +144,29 @@ public final class VanillaLabPbrAtlas {
                         emissionMaps.put(spriteId, emission);
                     }
                 }
-                SpriteContents contents = sprite.contents();
                 if ((normal != null || specular != null) && !contents.isAnimated()) {
                     materialMaps.put(spriteId, new LabPbrMaterialMap(
                             materialPixels(normal, contents.width(), contents.height(), false),
                             materialPixels(specular, contents.width(), contents.height(), true)));
                 }
             }
-            drafts.add(new MaterialDraft(textureId, sprite, normal, specular));
+            drafts.add(new MaterialDraft(textureId, sprite, baseColor, normal, specular));
         }
 
-        List<SpriteContents.AnimationState> animations = bindAnimations(atlasAccess, drafts);
+        Map<Identifier, SpriteContents.AnimationState> stateByName =
+                animationStatesByName(atlasAccess);
+        ArrayList<SpriteContents.AnimationState> animations = new ArrayList<>();
         IdentityHashMap<SpriteContents.AnimationState, Integer> animationIndices =
                 new IdentityHashMap<>();
-        for (int index = 0; index < animations.size(); index++) {
-            animationIndices.put(animations.get(index), index);
+        for (MaterialDraft draft : drafts) {
+            SpriteContents.AnimationState state =
+                    stateByName.get(draft.sprite.contents().name());
+            if (state != null && state.animationInfo.frames.size() > 1
+                    && !animationIndices.containsKey(state)) {
+                animationIndices.put(state, animations.size());
+                animations.add(state);
+            }
         }
-        Map<Identifier, SpriteContents.AnimationState> stateByName = animationStatesByName(atlasAccess);
         ArrayList<LabPbrAtlasFrame.Sprite> sprites = new ArrayList<>(drafts.size());
         for (MaterialDraft draft : drafts) {
             TextureAtlasSprite sprite = draft.sprite;
@@ -153,6 +179,7 @@ public final class VanillaLabPbrAtlas {
                     contents.width(),
                     contents.height(),
                     ((TextureAtlasSpriteAccessor) (Object) sprite).prime$padding(),
+                    draft.baseColor,
                     draft.normal,
                     draft.specular,
                     state == null ? -1 : animationIndices.getOrDefault(state, -1)));
@@ -191,26 +218,6 @@ public final class VanillaLabPbrAtlas {
             result.put(sprite.contents().name(), states.get(stateIndex++));
         }
         return result;
-    }
-
-    private static List<SpriteContents.AnimationState> bindAnimations(
-            TextureAtlasAccessor atlas,
-            List<MaterialDraft> materials) {
-        Set<Identifier> materialNames = new HashSet<>();
-        for (MaterialDraft material : materials) {
-            if (material.normal != null || material.specular != null) {
-                materialNames.add(material.sprite.contents().name());
-            }
-        }
-        ArrayList<SpriteContents.AnimationState> result = new ArrayList<>();
-        for (Map.Entry<Identifier, SpriteContents.AnimationState> entry
-                : animationStatesByName(atlas).entrySet()) {
-            if (materialNames.contains(entry.getKey())
-                    && entry.getValue().animationInfo.frames.size() > 1) {
-                result.add(entry.getValue());
-            }
-        }
-        return List.copyOf(result);
     }
 
     private static boolean readsLabPbr13(ResourceManager manager) {
@@ -334,6 +341,7 @@ public final class VanillaLabPbrAtlas {
     private record MaterialDraft(
             int textureId,
             TextureAtlasSprite sprite,
+            LabPbrAtlasFrame.ColorSource baseColor,
             LabPbrAtlasFrame.MaterialSource normal,
             LabPbrAtlasFrame.MaterialSource specular) {
     }

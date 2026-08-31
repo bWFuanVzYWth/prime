@@ -33,6 +33,8 @@ import org.lwjgl.vulkan.VkImageMemoryBarrier2;
  */
 public final class MaterialTexturePages implements AutoCloseable {
     private static final String MEASUREMENT_ENABLE_PROPERTY = "prime.renderer.measure";
+    private static final int BASE_COLOR_BYTES_PER_PIXEL = 8;
+    private static final int AUXILIARY_BYTES_PER_PIXEL = 4;
     private static final int NORMAL_DEFAULT_ARGB = 0x008080ff;
     private static final int OPTICAL_DEFAULT_ARGB = 0xff000400;
 
@@ -90,6 +92,10 @@ public final class MaterialTexturePages implements AutoCloseable {
 
     public List<VulkanImage> normalPages() {
         return requireResources().normalImages();
+    }
+
+    public List<VulkanImage> baseColorPages() {
+        return requireResources().baseColorImages();
     }
 
     public List<VulkanImage> opticalPages() {
@@ -165,6 +171,21 @@ public final class MaterialTexturePages implements AutoCloseable {
                                 batch,
                                 page.image,
                                 change.owner.normal,
+                                change.sample,
+                                mip);
+                    }
+                }
+                if (change.owner.baseColor != null) {
+                    TexturePageLayout.Placement placement =
+                            change.owner.baseColor.placement();
+                    PageResource page = current.baseColorPages.get(placement.page());
+                    int mipLevels = change.owner.baseColor.mipLevels();
+                    for (int mip = 0; mip < mipLevels; mip++) {
+                        addAnimatedColorCopy(
+                                this.animationCopies,
+                                batch,
+                                page.image,
+                                change.owner.baseColor,
                                 change.sample,
                                 mip);
                     }
@@ -310,35 +331,55 @@ public final class MaterialTexturePages implements AutoCloseable {
             LabPbrAtlasFrame.Snapshot source,
             long vanillaAtlasView,
             long sourceGeneration) {
+        for (LabPbrAtlasFrame.Sprite sprite : source.sprites()) {
+            if (sprite.baseColor() == null) {
+                throw new IllegalStateException(
+                        "Canonical base-color source was retired before page construction");
+            }
+        }
+        TexturePageLayout.Layout baseColorLayout = TexturePageLayout.packBaseColor(
+                source.sprites(), source.mipLevels());
         TexturePageLayout.Layout normalLayout = TexturePageLayout.pack(
                 source.sprites(), LabPbrAtlasFrame.Sprite::normal, source.mipLevels());
         TexturePageLayout.Layout opticalLayout = TexturePageLayout.pack(
                 source.sprites(), LabPbrAtlasFrame.Sprite::specular, source.mipLevels());
+        List<PageResource> baseColorPages = List.of();
         List<PageResource> normalPages = List.of();
         List<PageResource> opticalPages = List.of();
         VulkanBuffer textureRecords = null;
         Resources resources = null;
         try {
+            baseColorPages = this.buildColorPages(source, baseColorLayout);
             normalPages = this.buildPages(
                     source, normalLayout, true, NORMAL_DEFAULT_ARGB);
             opticalPages = this.buildPages(
                     source, opticalLayout, false, OPTICAL_DEFAULT_ARGB);
             textureRecords = this.buildTextureRecords(
-                    source, normalLayout, opticalLayout, normalPages, opticalPages);
+                    source,
+                    baseColorLayout,
+                    normalLayout,
+                    opticalLayout,
+                    baseColorPages,
+                    normalPages,
+                    opticalPages);
             resources = new Resources(
                     sourceGeneration,
                     vanillaAtlasView,
+                    baseColorPages,
                     normalPages,
                     opticalPages,
                     textureRecords,
                     source.materials(),
                     source,
+                    baseColorLayout,
                     normalLayout,
                     opticalLayout,
                     this.measurementsEnabled);
             PrimeInfo.LOGGER.info(
-                    "Translated material storage: {} textures, normal={} pages/{} bytes, optical={} pages/{} bytes, records={} bytes, animation cache={} bytes",
+                    "Translated material storage: {} textures, base={} pages/{} bytes, normal={} pages/{} bytes, optical={} pages/{} bytes, records={} bytes, animation cache={} bytes",
                     source.sprites().size(),
+                    baseColorPages.size(),
+                    pageBytes(baseColorPages),
                     normalPages.size(),
                     pageBytes(normalPages),
                     opticalPages.size(),
@@ -353,7 +394,57 @@ public final class MaterialTexturePages implements AutoCloseable {
             RuntimeException failure = ResourceCleanup.destroy(textureRecords, exception);
             failure = destroyPages(opticalPages, failure);
             failure = destroyPages(normalPages, failure);
+            failure = destroyPages(baseColorPages, failure);
             throw failure;
+        }
+    }
+
+    private List<PageResource> buildColorPages(
+            LabPbrAtlasFrame.Snapshot source,
+            TexturePageLayout.Layout layout) {
+        ArrayList<PageResource> pages = new ArrayList<>(layout.pages().size());
+        try {
+            int usage = VK12.VK_IMAGE_USAGE_SAMPLED_BIT | VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+            for (int pageIndex = 0; pageIndex < layout.pages().size(); pageIndex++) {
+                int width = layout.pages().get(pageIndex).width();
+                int height = layout.pages().get(pageIndex).height();
+                int mipLevels = Math.min(
+                        source.mipLevels(),
+                        32 - Integer.numberOfLeadingZeros(Math.max(width, height)));
+                VulkanImage image = this.context.createMipmappedImage2D(
+                        width,
+                        height,
+                        mipLevels,
+                        VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
+                        usage,
+                        "Prime canonical base-color page " + pageIndex);
+                VulkanBuffer upload = null;
+                try {
+                    long byteSize = totalMipBytes(
+                            width, height, mipLevels, BASE_COLOR_BYTES_PER_PIXEL);
+                    upload = this.context.createBuffer(
+                            byteSize,
+                            VK12.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                            true,
+                            "Prime canonical base-color upload " + pageIndex);
+                    fillColorPage(
+                            upload,
+                            width,
+                            height,
+                            mipLevels,
+                            pageIndex,
+                            source.sprites(),
+                            layout);
+                    pages.add(new PageResource(
+                            image, upload, BASE_COLOR_BYTES_PER_PIXEL));
+                } catch (RuntimeException exception) {
+                    RuntimeException failure = ResourceCleanup.destroy(upload, exception);
+                    throw ResourceCleanup.destroy(image, failure);
+                }
+            }
+            return List.copyOf(pages);
+        } catch (RuntimeException exception) {
+            throw destroyPages(pages, exception);
         }
     }
 
@@ -397,7 +488,8 @@ public final class MaterialTexturePages implements AutoCloseable {
                             layout,
                             normal,
                             defaultArgb);
-                    pages.add(new PageResource(image, upload));
+                    pages.add(new PageResource(
+                            image, upload, AUXILIARY_BYTES_PER_PIXEL));
                 } catch (RuntimeException exception) {
                     RuntimeException failure = ResourceCleanup.destroy(upload, exception);
                     throw ResourceCleanup.destroy(image, failure);
@@ -411,8 +503,10 @@ public final class MaterialTexturePages implements AutoCloseable {
 
     private VulkanBuffer buildTextureRecords(
             LabPbrAtlasFrame.Snapshot source,
+            TexturePageLayout.Layout baseColorLayout,
             TexturePageLayout.Layout normalLayout,
             TexturePageLayout.Layout opticalLayout,
+            List<PageResource> baseColorPages,
             List<PageResource> normalPages,
             List<PageResource> opticalPages) {
         int maximumTextureId = 0;
@@ -429,11 +523,16 @@ public final class MaterialTexturePages implements AutoCloseable {
         MemoryUtil.memSet(target, 0, byteSize);
         for (LabPbrAtlasFrame.Sprite sprite : source.sprites()) {
             long record = target + (long) sprite.textureId() * 32L;
+            TexturePageLayout.Placement baseColor =
+                    baseColorLayout.placement(sprite.textureId());
+            if (baseColor == null) {
+                throw new IllegalStateException("Base-color texture has no page placement");
+            }
             putPackedExtent(
                     record,
                     0,
-                    sprite.x() + sprite.padding(),
-                    sprite.y() + sprite.padding());
+                    baseColor.contentX(),
+                    baseColor.contentY());
             putPackedExtent(record, 4, sprite.contentWidth(), sprite.contentHeight());
             TexturePageLayout.Placement normal = normalLayout.placement(sprite.textureId());
             TexturePageLayout.Placement specular = opticalLayout.placement(sprite.textureId());
@@ -458,9 +557,10 @@ public final class MaterialTexturePages implements AutoCloseable {
             MemoryUtil.memPutInt(
                     record + 16L,
                     normalPage | specularPage << 8 | normalMip << 16 | specularMip << 24);
-            MemoryUtil.memPutInt(
-                    record + 20L,
-                    textureMipLevels(sprite, source.mipLevels()) - 1);
+            int baseColorPage = baseColor.page();
+            int baseColorMip = textureMipLimit(
+                    sprite, baseColorPages.get(baseColor.page()).image);
+            MemoryUtil.memPutInt(record + 20L, baseColorMip | baseColorPage << 8);
             MemoryUtil.memPutInt(record + 24L, 0);
             MemoryUtil.memPutInt(record + 28L, 0);
         }
@@ -506,9 +606,48 @@ public final class MaterialTexturePages implements AutoCloseable {
                     totalMipBytes(
                             page.image.width(),
                             page.image.height(),
-                            page.image.mipLevels()));
+                            page.image.mipLevels(),
+                            page.bytesPerPixel));
         }
         return result;
+    }
+
+    private static void fillColorPage(
+            VulkanBuffer upload,
+            int width,
+            int height,
+            int mipLevels,
+            int pageIndex,
+            List<LabPbrAtlasFrame.Sprite> sprites,
+            TexturePageLayout.Layout layout) {
+        long byteSize = totalMipBytes(
+                width, height, mipLevels, BASE_COLOR_BYTES_PER_PIXEL);
+        long target = upload.mappedAddress();
+        MemoryUtil.memSet(target, 0, byteSize);
+        long mipOffset = 0L;
+        for (int mip = 0; mip < mipLevels; mip++) {
+            int mipWidth = Math.max(1, width >> mip);
+            int mipHeight = Math.max(1, height >> mip);
+            for (LabPbrAtlasFrame.Sprite sprite : sprites) {
+                TexturePageLayout.Placement placement = layout.placement(sprite.textureId());
+                if (placement != null
+                        && placement.page() == pageIndex
+                        && mip < textureMipLevels(sprite, mipLevels)) {
+                    writeColorSpriteRgba16f(
+                            target,
+                            mipOffset,
+                            mipWidth,
+                            placement,
+                            java.util.Objects.requireNonNull(
+                                    sprite.baseColor(), "baseColor"),
+                            LabPbrAtlasFrame.AnimationSample.ZERO,
+                            mip,
+                            false);
+                }
+            }
+            mipOffset += (long) mipWidth * mipHeight * BASE_COLOR_BYTES_PER_PIXEL;
+        }
+        upload.flush(0L, byteSize);
     }
 
     private static void fillPage(
@@ -521,7 +660,8 @@ public final class MaterialTexturePages implements AutoCloseable {
             TexturePageLayout.Layout layout,
             boolean normal,
             int defaultArgb) {
-        long byteSize = totalMipBytes(width, height, mipLevels);
+        long byteSize = totalMipBytes(
+                width, height, mipLevels, AUXILIARY_BYTES_PER_PIXEL);
         long target = upload.mappedAddress();
         fillArgb(target, byteSize, defaultArgb);
         long mipOffset = 0L;
@@ -613,7 +753,7 @@ public final class MaterialTexturePages implements AutoCloseable {
                         0,
                         width,
                         height));
-                offset += (long) width * height * 4L;
+                offset += (long) width * height * page.bytesPerPixel;
             }
         }
         transitionImages(commandBuffer, resources.allImages(), true, false);
@@ -632,6 +772,32 @@ public final class MaterialTexturePages implements AutoCloseable {
         int height = sprite.mipHeight(mip);
         long byteSize = Math.multiplyExact(Math.multiplyExact((long) width, height), 4L);
         StagingArena.Slice slice = batch.allocate(byteSize, 4L);
+        frames.write(slice.mappedAddress(), sample, mip);
+        copies.add(new Copy(
+                image,
+                slice.buffer(),
+                slice.offset(),
+                mip,
+                placement.mipX(mip),
+                placement.mipY(mip),
+                width,
+                height));
+    }
+
+    private static void addAnimatedColorCopy(
+            List<Copy> copies,
+            StagingArena.Batch batch,
+            VulkanImage image,
+            ColorAnimationFrames frames,
+            LabPbrAtlasFrame.AnimationSample sample,
+            int mip) {
+        TexturePageLayout.Placement placement = frames.placement();
+        LabPbrAtlasFrame.Sprite sprite = placement.sprite();
+        int width = sprite.mipWidth(mip);
+        int height = sprite.mipHeight(mip);
+        long byteSize = Math.multiplyExact(
+                Math.multiplyExact((long) width, height), BASE_COLOR_BYTES_PER_PIXEL);
+        StagingArena.Slice slice = batch.allocate(byteSize, BASE_COLOR_BYTES_PER_PIXEL);
         frames.write(slice.mappedAddress(), sample, mip);
         copies.add(new Copy(
                 image,
@@ -724,13 +890,21 @@ public final class MaterialTexturePages implements AutoCloseable {
     }
 
     static long totalMipBytes(int width, int height, int mipLevels) {
+        return totalMipBytes(width, height, mipLevels, AUXILIARY_BYTES_PER_PIXEL);
+    }
+
+    static long totalMipBytes(
+            int width, int height, int mipLevels, int bytesPerPixel) {
+        if (bytesPerPixel <= 0) {
+            throw new IllegalArgumentException("Texture bytes per pixel must be positive");
+        }
         long result = 0L;
         for (int mip = 0; mip < mipLevels; mip++) {
             result = Math.addExact(
                     result,
                     Math.multiplyExact(
                             (long) Math.max(1, width >> mip) * Math.max(1, height >> mip),
-                            4L));
+                            bytesPerPixel));
         }
         return result;
     }
@@ -747,6 +921,13 @@ public final class MaterialTexturePages implements AutoCloseable {
         MemoryUtil.memPutByte(target + offset + 1L, (byte) (argb >>> 8));
         MemoryUtil.memPutByte(target + offset + 2L, (byte) argb);
         MemoryUtil.memPutByte(target + offset + 3L, (byte) (argb >>> 24));
+    }
+
+    static void writeRgba16f(long target, long offset, long encoded) {
+        MemoryUtil.memPutShort(target + offset, (short) encoded);
+        MemoryUtil.memPutShort(target + offset + 2L, (short) (encoded >>> 16));
+        MemoryUtil.memPutShort(target + offset + 4L, (short) (encoded >>> 32));
+        MemoryUtil.memPutShort(target + offset + 6L, (short) (encoded >>> 48));
     }
 
     private static void fillArgb(long target, long byteSize, int argb) {
@@ -787,6 +968,18 @@ public final class MaterialTexturePages implements AutoCloseable {
             long cursor,
             AnimatedMaterialSprite animation) {
         long result = cursor;
+        if (animation.baseColor != null) {
+            int mipLevels = animation.baseColor.mipLevels();
+            for (int mip = 0; mip < mipLevels; mip++) {
+                long bytes = Math.multiplyExact(
+                        Math.multiplyExact(
+                                (long) animation.sprite.mipWidth(mip),
+                                animation.sprite.mipHeight(mip)),
+                        BASE_COLOR_BYTES_PER_PIXEL);
+                result = StagingArena.requiredEndOffset(
+                        result, bytes, BASE_COLOR_BYTES_PER_PIXEL);
+            }
+        }
         if (animation.normal != null) {
             int mipLevels = animation.normal.mipLevels();
             for (int mip = 0; mip < mipLevels; mip++) {
@@ -852,6 +1045,7 @@ public final class MaterialTexturePages implements AutoCloseable {
     private static final class AnimatedMaterialSprite
             implements com.mojang.blaze3d.vulkan.Destroyable {
         private final LabPbrAtlasFrame.Sprite sprite;
+        private final ColorAnimationFrames baseColor;
         private final MaterialAnimationFrames normal;
         private final MaterialAnimationFrames specular;
         private final int animationIndex;
@@ -859,13 +1053,23 @@ public final class MaterialTexturePages implements AutoCloseable {
 
         static AnimatedMaterialSprite create(
                 LabPbrAtlasFrame.Sprite source,
+                TexturePageLayout.Placement baseColor,
                 TexturePageLayout.Placement normal,
                 TexturePageLayout.Placement specular,
+                List<PageResource> baseColorPages,
                 List<PageResource> normalPages,
                 List<PageResource> opticalPages) {
+            ColorAnimationFrames colorFrames = null;
             MaterialAnimationFrames normalFrames = null;
             MaterialAnimationFrames specularFrames = null;
             try {
+                if (baseColor != null && source.baseColor().frameCount() > 1) {
+                    VulkanImage image = baseColorPages.get(baseColor.page()).image;
+                    colorFrames = ColorAnimationFrames.create(
+                            baseColor,
+                            source.baseColor(),
+                            textureMipLevels(source, image.mipLevels()));
+                }
                 if (normal != null && source.normal().frameCount() > 1) {
                     VulkanImage image = normalPages.get(normal.page()).image;
                     normalFrames = MaterialAnimationFrames.create(
@@ -882,19 +1086,23 @@ public final class MaterialTexturePages implements AutoCloseable {
                             textureMipLevels(source, image.mipLevels()),
                             true);
                 }
-                return new AnimatedMaterialSprite(source, normalFrames, specularFrames);
+                return new AnimatedMaterialSprite(
+                        source, colorFrames, normalFrames, specularFrames);
             } catch (RuntimeException | Error failure) {
                 ResourceCleanup.destroy(specularFrames, null);
                 ResourceCleanup.destroy(normalFrames, null);
+                ResourceCleanup.destroy(colorFrames, null);
                 throw failure;
             }
         }
 
         private AnimatedMaterialSprite(
                 LabPbrAtlasFrame.Sprite source,
+                ColorAnimationFrames baseColor,
                 MaterialAnimationFrames normal,
                 MaterialAnimationFrames specular) {
             this.sprite = source;
+            this.baseColor = baseColor;
             this.normal = normal;
             this.specular = specular;
             this.animationIndex = source.animationIndex();
@@ -902,7 +1110,8 @@ public final class MaterialTexturePages implements AutoCloseable {
         }
 
         long frameBytes() {
-            return (this.normal == null ? 0L : this.normal.byteSize())
+            return (this.baseColor == null ? 0L : this.baseColor.byteSize())
+                    + (this.normal == null ? 0L : this.normal.byteSize())
                     + (this.specular == null ? 0L : this.specular.byteSize());
         }
 
@@ -910,18 +1119,21 @@ public final class MaterialTexturePages implements AutoCloseable {
         public void destroy() {
             RuntimeException failure = ResourceCleanup.destroy(this.specular, null);
             failure = ResourceCleanup.destroy(this.normal, failure);
+            failure = ResourceCleanup.destroy(this.baseColor, failure);
             ResourceCleanup.throwIfFailed(failure);
         }
     }
 
     private static final class PageResource implements com.mojang.blaze3d.vulkan.Destroyable {
         private final VulkanImage image;
+        private final int bytesPerPixel;
         private VulkanBuffer upload;
         private boolean destroyed;
 
-        private PageResource(VulkanImage image, VulkanBuffer upload) {
+        private PageResource(VulkanImage image, VulkanBuffer upload, int bytesPerPixel) {
             this.image = image;
             this.upload = upload;
+            this.bytesPerPixel = bytesPerPixel;
         }
 
         private void retireUpload(VulkanContext context) {
@@ -946,9 +1158,11 @@ public final class MaterialTexturePages implements AutoCloseable {
     private static final class Resources implements com.mojang.blaze3d.vulkan.Destroyable {
         private final long sourceGeneration;
         private final long vanillaAtlasView;
+        private final List<PageResource> baseColorPages;
         private final List<PageResource> normalPages;
         private final List<PageResource> opticalPages;
         private final List<PageResource> allPages;
+        private final List<VulkanImage> baseColorImages;
         private final List<VulkanImage> normalImages;
         private final List<VulkanImage> opticalImages;
         private final List<VulkanImage> allImages;
@@ -962,23 +1176,28 @@ public final class MaterialTexturePages implements AutoCloseable {
         Resources(
                 long sourceGeneration,
                 long vanillaAtlasView,
+                List<PageResource> baseColorPages,
                 List<PageResource> normalPages,
                 List<PageResource> opticalPages,
                 VulkanBuffer textureRecords,
                 LabPbrMaterialSet materials,
                 LabPbrAtlasFrame.Snapshot source,
+                TexturePageLayout.Layout baseColorLayout,
                 TexturePageLayout.Layout normalLayout,
                 TexturePageLayout.Layout opticalLayout,
                 boolean measurementsEnabled) {
             this.sourceGeneration = sourceGeneration;
             this.vanillaAtlasView = vanillaAtlasView;
+            this.baseColorPages = baseColorPages;
             this.normalPages = normalPages;
             this.opticalPages = opticalPages;
             ArrayList<PageResource> allPages = new ArrayList<>(
-                    normalPages.size() + opticalPages.size());
+                    baseColorPages.size() + normalPages.size() + opticalPages.size());
+            allPages.addAll(baseColorPages);
             allPages.addAll(normalPages);
             allPages.addAll(opticalPages);
             this.allPages = List.copyOf(allPages);
+            this.baseColorImages = images(baseColorPages);
             this.normalImages = images(normalPages);
             this.opticalImages = images(opticalPages);
             this.allImages = images(this.allPages);
@@ -987,18 +1206,25 @@ public final class MaterialTexturePages implements AutoCloseable {
             ArrayList<AnimatedMaterialSprite> animated = new ArrayList<>();
             try {
                 for (LabPbrAtlasFrame.Sprite sprite : source.sprites()) {
+                    TexturePageLayout.Placement baseColor =
+                            baseColorLayout.placement(sprite.textureId());
                     TexturePageLayout.Placement normal =
                             normalLayout.placement(sprite.textureId());
                     TexturePageLayout.Placement specular =
                             opticalLayout.placement(sprite.textureId());
+                    boolean animatedColor = baseColor != null
+                            && sprite.baseColor().frameCount() > 1;
                     boolean animatedNormal = normal != null && sprite.normal().frameCount() > 1;
                     boolean animatedSpecular =
                             specular != null && sprite.specular().frameCount() > 1;
-                    if (sprite.animated() && (animatedNormal || animatedSpecular)) {
+                    if (sprite.animated()
+                            && (animatedColor || animatedNormal || animatedSpecular)) {
                         animated.add(AnimatedMaterialSprite.create(
                                 sprite,
+                                baseColor,
                                 normal,
                                 specular,
+                                baseColorPages,
                                 normalPages,
                                 opticalPages));
                     }
@@ -1012,8 +1238,10 @@ public final class MaterialTexturePages implements AutoCloseable {
                     ? measure(
                             sourceGeneration,
                             source,
+                            baseColorLayout,
                             normalLayout,
                             opticalLayout,
+                            baseColorPages,
                             normalPages,
                             opticalPages,
                             textureRecords.size(),
@@ -1031,6 +1259,10 @@ public final class MaterialTexturePages implements AutoCloseable {
 
         List<VulkanImage> normalImages() {
             return this.normalImages;
+        }
+
+        List<VulkanImage> baseColorImages() {
+            return this.baseColorImages;
         }
 
         List<VulkanImage> opticalImages() {
@@ -1090,6 +1322,7 @@ public final class MaterialTexturePages implements AutoCloseable {
                 failure = ResourceCleanup.destroy(this.textureRecords, failure);
                 failure = destroyPages(this.opticalPages, failure);
                 failure = destroyPages(this.normalPages, failure);
+                failure = destroyPages(this.baseColorPages, failure);
                 ResourceCleanup.throwIfFailed(failure);
             }
         }
@@ -1104,11 +1337,116 @@ public final class MaterialTexturePages implements AutoCloseable {
         }
     }
 
+    static void writeColorSpriteF32(
+            long target,
+            long baseOffset,
+            int rowWidth,
+            TexturePageLayout.Placement placement,
+            LabPbrAtlasFrame.ColorSource source,
+            LabPbrAtlasFrame.AnimationSample sample,
+            int mip,
+            boolean tightlyPacked) {
+        writeColorSprite(
+                target,
+                baseOffset,
+                rowWidth,
+                placement,
+                source,
+                sample,
+                mip,
+                tightlyPacked,
+                true);
+    }
+
+    private static void writeColorSpriteRgba16f(
+            long target,
+            long baseOffset,
+            int rowWidth,
+            TexturePageLayout.Placement placement,
+            LabPbrAtlasFrame.ColorSource source,
+            LabPbrAtlasFrame.AnimationSample sample,
+            int mip,
+            boolean tightlyPacked) {
+        writeColorSprite(
+                target,
+                baseOffset,
+                rowWidth,
+                placement,
+                source,
+                sample,
+                mip,
+                tightlyPacked,
+                false);
+    }
+
+    private static void writeColorSprite(
+            long target,
+            long baseOffset,
+            int rowWidth,
+            TexturePageLayout.Placement placement,
+            LabPbrAtlasFrame.ColorSource source,
+            LabPbrAtlasFrame.AnimationSample sample,
+            int mip,
+            boolean tightlyPacked,
+            boolean f32) {
+        LabPbrAtlasFrame.Sprite sprite = placement.sprite();
+        int outputWidth = sprite.mipWidth(mip);
+        int outputHeight = sprite.mipHeight(mip);
+        int destinationX = tightlyPacked ? 0 : placement.mipX(mip);
+        int destinationY = tightlyPacked ? 0 : placement.mipY(mip);
+        int baseWidth = sprite.contentWidth() + 2 * sprite.padding();
+        int baseHeight = sprite.contentHeight() + 2 * sprite.padding();
+        int bytesPerPixel = f32 ? 4 * Float.BYTES : BASE_COLOR_BYTES_PER_PIXEL;
+        float[] filtered = new float[4];
+        for (int y = 0; y < outputHeight; y++) {
+            double baseY0 = (double) y * baseHeight / outputHeight - sprite.padding();
+            double baseY1 = (double) (y + 1) * baseHeight / outputHeight - sprite.padding();
+            for (int x = 0; x < outputWidth; x++) {
+                double baseX0 = (double) x * baseWidth / outputWidth - sprite.padding();
+                double baseX1 = (double) (x + 1) * baseWidth / outputWidth - sprite.padding();
+                source.filtered(
+                        sample,
+                        baseX0,
+                        baseY0,
+                        baseX1,
+                        baseY1,
+                        sprite.contentWidth(),
+                        sprite.contentHeight(),
+                        filtered);
+                long offset = Math.addExact(
+                        baseOffset,
+                        Math.multiplyExact(
+                                Math.addExact(
+                                        Math.multiplyExact((long) destinationY + y, rowWidth),
+                                        (long) destinationX + x),
+                                bytesPerPixel));
+                if (f32) {
+                    MemoryUtil.memPutFloat(target + offset, filtered[0]);
+                    MemoryUtil.memPutFloat(target + offset + 4L, filtered[1]);
+                    MemoryUtil.memPutFloat(target + offset + 8L, filtered[2]);
+                    MemoryUtil.memPutFloat(target + offset + 12L, filtered[3]);
+                } else {
+                    writeRgba16f(
+                            target,
+                            offset,
+                            dev.prime.render.terrain.CanonicalColorEncoding
+                                    .encodeLinearRgba16f(
+                                            filtered[0],
+                                            filtered[1],
+                                            filtered[2],
+                                            filtered[3]));
+                }
+            }
+        }
+    }
+
     private static MeasurementSnapshot measure(
             long sourceGeneration,
             LabPbrAtlasFrame.Snapshot source,
+            TexturePageLayout.Layout baseColorLayout,
             TexturePageLayout.Layout normalLayout,
             TexturePageLayout.Layout opticalLayout,
+            List<PageResource> baseColorPages,
             List<PageResource> normalPages,
             List<PageResource> opticalPages,
             long textureRecordBytes,
@@ -1152,8 +1490,10 @@ public final class MaterialTexturePages implements AutoCloseable {
                 maximumContentHeight,
                 maximumPadding,
                 totalMipBytes(source.width(), source.height(), source.mipLevels()),
-                measureChannel(source, normalLayout, normalPages, true),
-                measureChannel(source, opticalLayout, opticalPages, false),
+                measureChannel(
+                        source, baseColorLayout, baseColorPages, SourceChannel.BASE_COLOR),
+                measureChannel(source, normalLayout, normalPages, SourceChannel.NORMAL),
+                measureChannel(source, opticalLayout, opticalPages, SourceChannel.OPTICAL),
                 textureRecordBytes,
                 animationFrameBytes,
                 textureMipTexels,
@@ -1164,7 +1504,7 @@ public final class MaterialTexturePages implements AutoCloseable {
             LabPbrAtlasFrame.Snapshot source,
             TexturePageLayout.Layout layout,
             List<PageResource> pages,
-            boolean normal) {
+            SourceChannel channel) {
         int sourceCount = 0;
         int animatedSourceCount = 0;
         long sourceTexels = 0L;
@@ -1177,18 +1517,21 @@ public final class MaterialTexturePages implements AutoCloseable {
         int maximumPackedX = 0;
         int maximumPackedY = 0;
         for (LabPbrAtlasFrame.Sprite sprite : source.sprites()) {
-            LabPbrAtlasFrame.MaterialSource material = normal
-                    ? sprite.normal()
-                    : sprite.specular();
-            if (material == null) {
+            LabPbrAtlasFrame.TextureSource textureSource = switch (channel) {
+                case BASE_COLOR -> sprite.baseColor();
+                case NORMAL -> sprite.normal();
+                case OPTICAL -> sprite.specular();
+            };
+            if (textureSource == null) {
                 continue;
             }
             sourceCount++;
-            animatedSourceCount += sprite.animated() && material.frameCount() > 1 ? 1 : 0;
+            animatedSourceCount += sprite.animated() && textureSource.frameCount() > 1 ? 1 : 0;
             sourceTexels = Math.addExact(
-                    sourceTexels, Math.multiplyExact((long) material.width(), material.height()));
-            maximumFrameCount = Math.max(maximumFrameCount, material.frameCount());
-            for (int pixel : material.pixels()) {
+                    sourceTexels,
+                    Math.multiplyExact((long) textureSource.width(), textureSource.height()));
+            maximumFrameCount = Math.max(maximumFrameCount, textureSource.frameCount());
+            for (int pixel : textureSource.pixels()) {
                 alpha.add(pixel >>> 24);
                 red.add(pixel >>> 16 & 0xff);
                 green.add(pixel >>> 8 & 0xff);
@@ -1250,6 +1593,7 @@ public final class MaterialTexturePages implements AutoCloseable {
             int maximumContentHeight,
             int maximumPadding,
             long baseAtlasRgba8Bytes,
+            ChannelMeasurement baseColor,
             ChannelMeasurement normal,
             ChannelMeasurement optical,
             long textureRecordBytes,
@@ -1274,6 +1618,7 @@ public final class MaterialTexturePages implements AutoCloseable {
                 int maximumContentHeight,
                 int maximumPadding,
                 long baseAtlasRgba8Bytes,
+                ChannelMeasurement baseColor,
                 ChannelMeasurement normal,
                 ChannelMeasurement optical,
                 long textureRecordBytes,
@@ -1291,6 +1636,7 @@ public final class MaterialTexturePages implements AutoCloseable {
                     maximumContentHeight,
                     maximumPadding,
                     baseAtlasRgba8Bytes,
+                    baseColor,
                     normal,
                     optical,
                     textureRecordBytes,
@@ -1320,6 +1666,12 @@ public final class MaterialTexturePages implements AutoCloseable {
             ByteRange blue) {}
 
     public record ByteRange(int minimum, int maximum, int distinctCount) {}
+
+    private enum SourceChannel {
+        BASE_COLOR,
+        NORMAL,
+        OPTICAL
+    }
 
     private static final class ByteRangeAccumulator {
         private final boolean[] seen = new boolean[256];

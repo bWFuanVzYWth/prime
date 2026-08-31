@@ -10,7 +10,7 @@ final class CanonicalColorEncodingTest {
     private static final int[] CODES = {
         0, 1, 2, 4, 8, 16, 32, 64, 96, 128, 160, 192, 224, 240, 254, 255
     };
-    private static final int[] TINTS = {
+    private static final int[] TINT_RGB = {
         0x0000_0000,
         0x00ff_ffff,
         0x00ff_0000,
@@ -47,7 +47,8 @@ final class CanonicalColorEncodingTest {
     @Test
     void halfBaseAndTintOperatorStayWithinTheAuditedReflectanceError() {
         float maximum = 0.0F;
-        for (int tint : TINTS) {
+        for (int tintRgb : TINT_RGB) {
+            int tint = packedTint(tintRgb);
             CanonicalColorEncoding.TintOperator operator =
                     CanonicalColorEncoding.tintOperator(tint);
             for (int red : CODES) {
@@ -84,7 +85,7 @@ final class CanonicalColorEncodingTest {
     @Test
     void linearMipFilteringCommutesWithCanonicalConversionAndTint() {
         int[] texels = {0xff00_2040, 0xff80_ffff, 0xffff_4000, 0xff04_0810};
-        int tint = 0x0091_bd59;
+        int tint = packedTint(0x0091_bd59);
         CanonicalColorEncoding.TintOperator operator =
                 CanonicalColorEncoding.tintOperator(tint);
         CanonicalColorEncoding.Color expected = averageSource(texels, tint);
@@ -92,6 +93,22 @@ final class CanonicalColorEncodingTest {
 
         assertTrue(error(expected, canonical)
                 <= CanonicalColorEncoding.MAXIMUM_REFLECTANCE_ERROR);
+    }
+
+    @Test
+    void minecraftArgbTintKeepsRedAndBlueAcrossThePrimitiveRgba8Abi() {
+        int grassArgb = 0xff91_bd59;
+        int packedTint = PrimitivePacking.packTint(grassArgb) & 0x00ff_ffff;
+        CanonicalColorEncoding.Color actual = CanonicalColorEncoding.tintOperator(packedTint)
+                .apply(new CanonicalColorEncoding.Color(1.0F, 1.0F, 1.0F, 1.0F));
+        CanonicalColorEncoding.Color expected = CanonicalColorEncoding.sourcePath(
+                0xffff_ffff, packedTint);
+
+        assertEquals(0x0059_bd91, packedTint);
+        assertEquals(expected.red(), actual.red());
+        assertEquals(expected.green(), actual.green());
+        assertEquals(expected.blue(), actual.blue());
+        assertTrue(actual.red() > actual.blue());
     }
 
     private static CanonicalColorEncoding.Color averageSource(int[] texels, int tint) {
@@ -142,5 +159,9 @@ final class CanonicalColorEncodingTest {
                 Math.max(
                         Math.abs(expected.green() - actual.green()),
                         Math.abs(expected.blue() - actual.blue())));
+    }
+
+    private static int packedTint(int rgb) {
+        return PrimitivePacking.packTint(0xff00_0000 | rgb) & 0x00ff_ffff;
     }
 }

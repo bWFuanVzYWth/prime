@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import dev.prime.render.data.RendererDataContracts;
 import dev.prime.render.terrain.CanonicalColorEncoding;
+import dev.prime.render.terrain.PrimitivePacking;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -32,7 +33,7 @@ final class RendererDataContractGpuTest {
         float red = 0.25F;
         float green = 0.5F;
         float blue = 0.75F;
-        int tintRgb = 0x0023_a7e1;
+        int tintRgb = PrimitivePacking.packTint(0xff23_a7e1) & 0x00ff_ffff;
         int sourceArgb = 0xff91_37c4;
         CanonicalColorEncoding.TintOperator tint =
                 CanonicalColorEncoding.tintOperator(tintRgb);

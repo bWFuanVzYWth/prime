@@ -35,6 +35,36 @@ public record LabPbrAtlasFrame(
             Objects.requireNonNull(materials, "materials");
             sprites = List.copyOf(sprites);
         }
+
+        public Snapshot withoutBaseColorSources() {
+            boolean present = false;
+            for (Sprite sprite : this.sprites) {
+                present |= sprite.baseColor() != null;
+            }
+            if (!present) {
+                return this;
+            }
+            java.util.ArrayList<Sprite> stripped = new java.util.ArrayList<>(this.sprites.size());
+            for (Sprite sprite : this.sprites) {
+                stripped.add(new Sprite(
+                        sprite.textureId(),
+                        sprite.x(),
+                        sprite.y(),
+                        sprite.contentWidth(),
+                        sprite.contentHeight(),
+                        sprite.padding(),
+                        null,
+                        sprite.normal(),
+                        sprite.specular(),
+                        sprite.animationIndex()));
+            }
+            return new Snapshot(
+                    this.width,
+                    this.height,
+                    this.mipLevels,
+                    this.materials,
+                    stripped);
+        }
     }
 
     public record Sprite(
@@ -44,6 +74,7 @@ public record LabPbrAtlasFrame(
             int contentWidth,
             int contentHeight,
             int padding,
+            ColorSource baseColor,
             MaterialSource normal,
             MaterialSource specular,
             int animationIndex) {
@@ -54,6 +85,12 @@ public record LabPbrAtlasFrame(
             }
             if (animationIndex < -1) {
                 throw new IllegalArgumentException("Invalid LabPBR animation index");
+            }
+            if (baseColor != null
+                    && (baseColor.frameWidth() != contentWidth
+                            || baseColor.frameHeight() != contentHeight)) {
+                throw new IllegalArgumentException(
+                        "Base-color frame extent does not match its sprite");
             }
         }
 
@@ -92,6 +129,226 @@ public record LabPbrAtlasFrame(
         }
     }
 
+    public interface TextureSource {
+        int[] pixels();
+
+        int width();
+
+        int height();
+
+        int frameWidth();
+
+        int frameHeight();
+
+        int columns();
+
+        int frameCount();
+    }
+
+    /** Exact captured ARGB8 source owned only until canonical pages and animation caches exist. */
+    public static final class ColorSource implements TextureSource {
+        private final int[] pixels;
+        private final int width;
+        private final int height;
+        private final int frameWidth;
+        private final int frameHeight;
+        private final int columns;
+        private final int frameCount;
+
+        private ColorSource(
+                int[] pixels,
+                int width,
+                int height,
+                int frameWidth,
+                int frameHeight,
+                boolean owned) {
+            if (width <= 0 || height <= 0 || frameWidth <= 0 || frameHeight <= 0
+                    || width % frameWidth != 0 || height % frameHeight != 0
+                    || pixels.length != Math.multiplyExact(width, height)) {
+                throw new IllegalArgumentException("Invalid base-color source layout");
+            }
+            this.pixels = owned ? pixels : pixels.clone();
+            this.width = width;
+            this.height = height;
+            this.frameWidth = frameWidth;
+            this.frameHeight = frameHeight;
+            this.columns = width / frameWidth;
+            this.frameCount = Math.multiplyExact(this.columns, height / frameHeight);
+        }
+
+        public static ColorSource copyOf(
+                int[] pixels, int width, int height, int frameWidth, int frameHeight) {
+            Objects.requireNonNull(pixels, "pixels");
+            return new ColorSource(
+                    pixels, width, height, frameWidth, frameHeight, false);
+        }
+
+        public static ColorSource capture(
+                int width,
+                int height,
+                int frameWidth,
+                int frameHeight,
+                ArgbReader reader) {
+            Objects.requireNonNull(reader, "reader");
+            int[] pixels = new int[Math.multiplyExact(width, height)];
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    pixels[y * width + x] = reader.argb(x, y);
+                }
+            }
+            return new ColorSource(
+                    pixels, width, height, frameWidth, frameHeight, true);
+        }
+
+        @Override
+        public int[] pixels() {
+            return this.pixels.clone();
+        }
+
+        @Override
+        public int width() {
+            return this.width;
+        }
+
+        @Override
+        public int height() {
+            return this.height;
+        }
+
+        @Override
+        public int frameWidth() {
+            return this.frameWidth;
+        }
+
+        @Override
+        public int frameHeight() {
+            return this.frameHeight;
+        }
+
+        @Override
+        public int columns() {
+            return this.columns;
+        }
+
+        @Override
+        public int frameCount() {
+            return this.frameCount;
+        }
+
+        public void filtered(
+                AnimationSample sample,
+                double baseX0,
+                double baseY0,
+                double baseX1,
+                double baseY1,
+                int baseFrameWidth,
+                int baseFrameHeight,
+                float[] output) {
+            Objects.requireNonNull(sample, "sample");
+            if (output == null || output.length < 4) {
+                throw new IllegalArgumentException("Base-color filter output requires four lanes");
+            }
+            this.filteredFrame(
+                    sample.currentFrame(),
+                    baseX0,
+                    baseY0,
+                    baseX1,
+                    baseY1,
+                    baseFrameWidth,
+                    baseFrameHeight,
+                    output);
+            int progress = this.frameCount == 1 ? 0 : sample.progressThousandths();
+            if (progress <= 0 || sample.currentFrame() == sample.nextFrame()) {
+                return;
+            }
+            float currentRed = output[0];
+            float currentGreen = output[1];
+            float currentBlue = output[2];
+            float currentCoverage = output[3];
+            this.filteredFrame(
+                    sample.nextFrame(),
+                    baseX0,
+                    baseY0,
+                    baseX1,
+                    baseY1,
+                    baseFrameWidth,
+                    baseFrameHeight,
+                    output);
+            float nextWeight = progress / 1000.0F;
+            float currentWeight = 1.0F - nextWeight;
+            output[0] = currentRed * currentWeight + output[0] * nextWeight;
+            output[1] = currentGreen * currentWeight + output[1] * nextWeight;
+            output[2] = currentBlue * currentWeight + output[2] * nextWeight;
+            output[3] = currentCoverage * currentWeight + output[3] * nextWeight;
+        }
+
+        private void filteredFrame(
+                int requestedFrame,
+                double baseX0,
+                double baseY0,
+                double baseX1,
+                double baseY1,
+                int baseFrameWidth,
+                int baseFrameHeight,
+                float[] output) {
+            int frame = this.frameCount == 1
+                    ? 0
+                    : Math.max(0, Math.min(requestedFrame, this.frameCount - 1));
+            int frameX = frame % this.columns * this.frameWidth;
+            int frameY = frame / this.columns * this.frameHeight;
+            int sourceX0 = clamp(
+                    (int) Math.floor(baseX0 * this.frameWidth / baseFrameWidth),
+                    0,
+                    this.frameWidth - 1);
+            int sourceY0 = clamp(
+                    (int) Math.floor(baseY0 * this.frameHeight / baseFrameHeight),
+                    0,
+                    this.frameHeight - 1);
+            int sourceX1 = clamp(
+                    (int) Math.ceil(baseX1 * this.frameWidth / baseFrameWidth),
+                    sourceX0 + 1,
+                    this.frameWidth);
+            int sourceY1 = clamp(
+                    (int) Math.ceil(baseY1 * this.frameHeight / baseFrameHeight),
+                    sourceY0 + 1,
+                    this.frameHeight);
+            double red = 0.0;
+            double green = 0.0;
+            double blue = 0.0;
+            long coverage = 0L;
+            int count = 0;
+            for (int y = sourceY0; y < sourceY1; y++) {
+                for (int x = sourceX0; x < sourceX1; x++) {
+                    int argb = this.pixels[(frameY + y) * this.width + frameX + x];
+                    float sourceRed = CanonicalColorEncoding.decodeSrgb8(argb >>> 16);
+                    float sourceGreen = CanonicalColorEncoding.decodeSrgb8(argb >>> 8);
+                    float sourceBlue = CanonicalColorEncoding.decodeSrgb8(argb);
+                    red += CanonicalColorEncoding.matrixValue(
+                            0, sourceRed, sourceGreen, sourceBlue);
+                    green += CanonicalColorEncoding.matrixValue(
+                            1, sourceRed, sourceGreen, sourceBlue);
+                    blue += CanonicalColorEncoding.matrixValue(
+                            2, sourceRed, sourceGreen, sourceBlue);
+                    coverage += argb >>> 24;
+                    count++;
+                }
+            }
+            output[0] = (float) (red / count);
+            output[1] = (float) (green / count);
+            output[2] = (float) (blue / count);
+            output[3] = (float) coverage / count;
+        }
+
+        private static int clamp(int value, int minimum, int maximum) {
+            return Math.max(minimum, Math.min(maximum, value));
+        }
+
+        @FunctionalInterface
+        public interface ArgbReader {
+            int argb(int x, int y);
+        }
+    }
+
     public record MaterialSource(
             int[] pixels,
             int width,
@@ -99,7 +356,7 @@ public record LabPbrAtlasFrame(
             int frameWidth,
             int frameHeight,
             int columns,
-            int frameCount) {
+            int frameCount) implements TextureSource {
         private static final double[] MACRO_NORMAL_LENGTH_BY_ROUGHNESS_BYTE =
                 createMacroNormalLengthTable();
 

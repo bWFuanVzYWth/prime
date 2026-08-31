@@ -3,13 +3,17 @@ module "service/material/access.slang";
 
 import "prime_abi.slang";
 import "prime_abi_types.slang";
-import "math/color_space.slang";
 import "math/packed_geometry.slang";
 
 // Reviewed binding in shaders/abi.json. This stays with static albedo access so opacity-only
 // entries do not see the independently bound normal and optical page arrays.
 [[vk::binding(18, 0)]]
 public ByteAddressBuffer primeTextureRecords;
+
+// Static Minecraft albedo is translated once into renderer-owned linear Rec.2020 pages. Alpha is
+// an exact 0..255 coverage code carried in f16, so filtering preserves linear coverage semantics.
+[[vk::binding(51, 0)]]
+public Sampler2D<float4> primeBaseColorPages[64];
 
 public float4 primeSampleSceneTexture(uint index, float2 uv, float lod)
 {
@@ -57,6 +61,10 @@ public int primeTextureMaximumMip(uint textureId) {
     return int(primeTextureRecordWord(textureId, 20u) & 0xffu);
 }
 
+public uint primeTextureBaseColorPage(uint textureId) {
+    return (primeTextureRecordWord(textureId, 20u) >> 8u) & 0xffu;
+}
+
 public float2 primeTranslatedUv(
         uint packedOrigin, int2 extent, int2 backingExtent, float2 uv) {
     float2 origin = float2(packedOrigin & 0xffffu, packedOrigin >> 16u);
@@ -64,16 +72,21 @@ public float2 primeTranslatedUv(
 }
 
 public float4 primeSampleStaticAlbedo(uint textureId, float2 uv, float lod) {
-    int2 atlasExtent = primeSceneTextureExtent(0u);
+    uint page = primeTextureBaseColorPage(textureId);
+    uint width;
+    uint height;
+    uint levels;
+    primeBaseColorPages[NonUniformResourceIndex(page)].GetDimensions(
+            0, width, height, levels);
     uint2 rect = primeTextureRecords.Load2(textureId * PRIME_TEXTURE_RECORD_SIZE);
-    return primeSampleSceneTexture(
-            0u,
+    float4 sample = primeBaseColorPages[NonUniformResourceIndex(page)].SampleLevel(
             primeTranslatedUv(
                     rect.x,
                     int2(rect.y & 0xffffu, rect.y >> 16u),
-                    atlasExtent,
+                    int2(width, height),
                     uv),
             min(lod, float(primeTextureMaximumMip(textureId))));
+    return float4(sample.rgb, sample.a / 255.0);
 }
 
 float4 primeLoadSceneTexture(uint index, int2 texel)
@@ -170,6 +183,7 @@ public float2 primePrimitiveMaterialReferenceUv(PrimitiveRecord primitive) {
 public float primeEvaluateOpacity(
         PrimitiveRecord primitive, uint textureId, float2 uv) {
     if ((primitive.flagsEmitter & PRIME_DYNAMIC_TEXTURE_FLAG) == 0u) {
+        uint page = primeTextureBaseColorPage(textureId);
         uint packedOrigin = primeTextureRecordWord(textureId, 0u);
         int2 origin = int2(packedOrigin & 0xffffu, packedOrigin >> 16u);
         int2 extent = primeTextureFrameExtent(textureId);
@@ -177,7 +191,8 @@ public float primeEvaluateOpacity(
                 int2(floor(uv * float2(extent))),
                 int2(0),
                 max(extent - 1, int2(0)));
-        return primeLoadSceneTexture(0u, texel).a;
+        return primeBaseColorPages[NonUniformResourceIndex(page)].Load(int3(texel, 0)).a
+                / 255.0;
     }
     uint textureIndex = min(
             primePrimitiveTextureIndex(primitive), PRIME_SCENE_TEXTURE_COUNT - 1u);

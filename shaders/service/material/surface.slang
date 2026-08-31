@@ -62,8 +62,7 @@ public PrimeMaterialSample primeEvaluateMaterial(
                             * primeDecodeSrgb(primeUnpackTint(primitive.tint).rgb));
         } else {
             result.opacity = textureSample.a;
-            result.baseColor = primeApplyStaticTint(
-                    primeLinearSrgbToLinearRec2020(textureSample.rgb), primitive.tint);
+            result.baseColor = primeApplyStaticTint(textureSample.rgb, primitive.tint);
         }
     }
     uint recipeControl = primePrimitiveControl(primitive);

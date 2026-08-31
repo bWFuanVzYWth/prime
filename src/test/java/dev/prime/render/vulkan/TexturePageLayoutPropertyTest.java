@@ -45,6 +45,7 @@ final class TexturePageLayoutPropertyTest {
                     width,
                     height,
                     padding,
+                    null,
                     present ? SOURCE : null,
                     null,
                     -1));

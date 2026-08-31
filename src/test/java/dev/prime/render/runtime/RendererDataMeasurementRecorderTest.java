@@ -45,7 +45,7 @@ final class RendererDataMeasurementRecorderTest {
         MaterialTexturePages.MeasurementSnapshot textures =
                 new MaterialTexturePages.MeasurementSnapshot(
                         3L, 2048, 1024, 5, 5, 7, 2, 1, 64, 32, 4,
-                        11_173_888L, channel, channel, 256L, 512L,
+                        11_173_888L, channel, channel, channel, 256L, 512L,
                         Map.of(2, 100L), Set.of(2));
         TextureTintUsage textureTints = measuredTextureTints();
         TerrainScene.SceneStatistics scene =
@@ -125,6 +125,7 @@ final class RendererDataMeasurementRecorderTest {
         assertTrue(encoded.contains("\"maximumCameraStepBlocks\": 5.00000000"));
         assertTrue(encoded.contains("\"maximumTextureId\": 7"));
         assertTrue(encoded.contains("\"baseAtlasRgba8Bytes\": 11173888"));
+        assertTrue(encoded.contains("\"baseColor\""));
         assertTrue(encoded.contains("\"observedTextureTintPairCount\": 2"));
         assertTrue(encoded.contains("\"additionalTintVariantCount\": 1"));
         assertTrue(encoded.contains("\"animatedPairCount\": 2"));

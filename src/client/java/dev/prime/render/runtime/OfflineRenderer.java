@@ -173,6 +173,7 @@ final class OfflineRenderer implements Destroyable {
                 input.atlasView(),
                 input.atlasSampler(),
                 current.sceneTextures(),
+                input.materialTextures().baseColorPages(),
                 input.materialTextures().normalPages(),
                 input.materialTextures().opticalPages(),
                 input.materialTextures().textureRecords(),

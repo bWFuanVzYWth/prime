@@ -2,9 +2,11 @@ package dev.prime.render.vulkan;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.prime.render.terrain.CanonicalColorEncoding;
 import dev.prime.render.terrain.LabPbrAtlasFrame;
 import dev.prime.render.terrain.LabPbrMaterialSet;
 import java.nio.ByteBuffer;
@@ -13,6 +15,93 @@ import org.junit.jupiter.api.Test;
 import org.lwjgl.system.MemoryUtil;
 
 final class MaterialTexturePagesTest {
+    @Test
+    void capturedBaseColorPixelsAreImmutableAndExplicitlyRetirable() {
+        int[] pixels = {0xff102030};
+        LabPbrAtlasFrame.ColorSource source =
+                LabPbrAtlasFrame.ColorSource.copyOf(pixels, 1, 1, 1, 1);
+        LabPbrAtlasFrame.Sprite sprite = new LabPbrAtlasFrame.Sprite(
+                1, 0, 0, 1, 1, 0, source, null, null, -1);
+        LabPbrAtlasFrame.Snapshot snapshot = new LabPbrAtlasFrame.Snapshot(
+                1, 1, 1, LabPbrMaterialSet.EMPTY, List.of(sprite));
+
+        pixels[0] = 0;
+        int[] exposed = source.pixels();
+        exposed[0] = 0;
+        LabPbrAtlasFrame.Snapshot retired = snapshot.withoutBaseColorSources();
+
+        assertArrayEquals(new int[] {0xff102030}, source.pixels());
+        assertEquals(source, snapshot.sprites().getFirst().baseColor());
+        assertNull(retired.sprites().getFirst().baseColor());
+        assertEquals(snapshot.materials(), retired.materials());
+    }
+
+    @Test
+    void baseColorMipFilteringOccursInLinearRec2020WithLinearCoverage() {
+        LabPbrAtlasFrame.ColorSource source = LabPbrAtlasFrame.ColorSource.copyOf(
+                new int[] {0x00000000, 0xffffffff}, 2, 1, 2, 1);
+        float[] filtered = new float[4];
+
+        source.filtered(
+                LabPbrAtlasFrame.AnimationSample.ZERO,
+                0.0,
+                0.0,
+                2.0,
+                1.0,
+                2,
+                1,
+                filtered);
+
+        assertEquals(0.5F, filtered[0], 1.0E-6F);
+        assertEquals(0.5F, filtered[1], 1.0E-6F);
+        assertEquals(0.5F, filtered[2], 1.0E-6F);
+        assertEquals(127.5F, filtered[3], 0.0F);
+    }
+
+    @Test
+    void canonicalAnimationCacheInterpolatesBeforeItsOnlyHalfQuantization() {
+        LabPbrAtlasFrame.ColorSource source = LabPbrAtlasFrame.ColorSource.copyOf(
+                new int[] {0xff000000, 0xffffffff}, 1, 2, 1, 1);
+        LabPbrAtlasFrame.Sprite sprite = new LabPbrAtlasFrame.Sprite(
+                1, 0, 0, 1, 1, 0, source, null, null, 0);
+        TexturePageLayout.Placement placement =
+                new TexturePageLayout.Placement(0, 0, 0, sprite);
+        ColorAnimationFrames frames = ColorAnimationFrames.create(placement, source, 1);
+        ByteBuffer target = MemoryUtil.memAlloc(8);
+        try {
+            long address = MemoryUtil.memAddress(target);
+            frames.write(
+                    address,
+                    new LabPbrAtlasFrame.AnimationSample(0, 1, 500),
+                    0);
+            long encoded = Short.toUnsignedLong(MemoryUtil.memGetShort(address))
+                    | (long) Short.toUnsignedInt(MemoryUtil.memGetShort(address + 2L)) << 16
+                    | (long) Short.toUnsignedInt(MemoryUtil.memGetShort(address + 4L)) << 32
+                    | (long) Short.toUnsignedInt(MemoryUtil.memGetShort(address + 6L)) << 48;
+            CanonicalColorEncoding.Color decoded =
+                    CanonicalColorEncoding.decodeRgba16f(encoded);
+
+            assertEquals(0.5F, decoded.red(), 0.0F);
+            assertEquals(0.5F, decoded.green(), 0.0F);
+            assertEquals(0.5F, decoded.blue(), 0.0F);
+            assertEquals(1.0F, decoded.alpha(), 0.0F);
+        } finally {
+            MemoryUtil.memFree(target);
+            frames.destroy();
+        }
+    }
+
+    @Test
+    void baseColorFrameExtentMustMatchTheSprite() {
+        LabPbrAtlasFrame.ColorSource source = LabPbrAtlasFrame.ColorSource.copyOf(
+                new int[] {-1, -1}, 2, 1, 2, 1);
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new LabPbrAtlasFrame.Sprite(
+                        1, 0, 0, 1, 1, 0, source, null, null, -1));
+    }
+
     @Test
     void capturedMaterialPixelsAreImmutable() {
         int[] pixels = {0xff102030};
@@ -31,7 +120,7 @@ final class MaterialTexturePagesTest {
         LabPbrAtlasFrame.MaterialSource source = LabPbrAtlasFrame.MaterialSource.create(
                 new int[] {0xff102030}, 1, 1, 1, 1, 1, 1);
         LabPbrAtlasFrame.Sprite sprite = new LabPbrAtlasFrame.Sprite(
-                1, 0, 0, 1, 1, 0, source, null, 0);
+                1, 0, 0, 1, 1, 0, null, source, null, 0);
         LabPbrAtlasFrame.Snapshot snapshot = new LabPbrAtlasFrame.Snapshot(
                 1, 1, 1, LabPbrMaterialSet.EMPTY, List.of(sprite));
 
@@ -96,7 +185,7 @@ final class MaterialTexturePagesTest {
                 1,
                 2);
         LabPbrAtlasFrame.Sprite sprite = new LabPbrAtlasFrame.Sprite(
-                1, 0, 0, 1, 1, 0, null, source, 0);
+                1, 0, 0, 1, 1, 0, null, null, source, 0);
         TexturePageLayout.Placement placement =
                 new TexturePageLayout.Placement(0, 0, 0, sprite);
         MaterialAnimationFrames frames =

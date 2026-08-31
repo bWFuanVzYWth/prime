@@ -315,6 +315,7 @@ final class RendererDataMeasurementRecorder {
         field(json, "baseAtlasRgba8Bytes", value.baseAtlasRgba8Bytes());
         field(json, "textureRecordBytes", value.textureRecordBytes());
         field(json, "animationFrameBytes", value.animationFrameBytes());
+        appendChannel(json, "baseColor", value.baseColor());
         appendChannel(json, "normal", value.normal());
         appendChannel(json, "optical", value.optical());
         trimComma(json).append("\n  },");

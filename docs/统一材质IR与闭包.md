@@ -51,6 +51,15 @@ alpha cutout，negative tangent 必须确有 normal texture。albedo alpha 始�
 物理记录不扩容：逻辑位 0..7 写入 `tint.a`，8..10 写入 `flagsEmitter[0..2]`，11..14 写入
 `flagsEmitter[27..30]`。shader 先重建逻辑控制字，其他代码不得解释这些物理位置。
 
+这是当前迁移 ABI，不是阶段 2 的目标材质布局。目标以 exact u16 `MaterialId` 查
+renderer-generation 全局 immutable material table：`TextureId`、`MediumId`、recipe/source codes、
+availability、coverage、emission 和 animation facts 每 material record 只保存一次。triangle 只保留
+UV、relation、连续 tint-field addressing 等几何变化量；secondary relation 与 u32 emitter 引用同一
+material record，不再复制完整材质 primitive。section/cluster 不建立重复 material palette；GPU 以
+`MaterialId` 一跳寻址固定 schema，各阶段通过 generated accessor 按需窄加载，只有确实消费多数
+事实时才合并加载。完整 material record 不进入跨阶段 path state；AoS、SoA 或混合物理布局由测量
+决定。冷 companion data 最多按 exact availability 再读取一次，不使用变长编码或指针链。
+
 `flagsEmitter` 的中段按 primitive 模式复用：静态图元的 3..26 位保存 `emitterIndex + 1`；
 raster composite 保存 overlay RGB24；dynamic 保存 6-bit scene texture index、red-alpha 和
 visible-emission。静态 emitter 最大索引为 `0xFFFFFE`，dynamic scene texture 上限为 64，
@@ -64,8 +73,9 @@ cluster 编码仅是测试源码集内的当前格式回放工具，用于证明
 ## Canonical shader IR
 
 命中阶段合成一个寄存器内 `PrimeMaterialSample`：D65 linear Rec.2020 base color、opacity、
-shading normal、roughness、`materialControl` 和 `opticalControl`。当前 roughness 使用 f32；这是
-误差门禁建立前的保守 encoding，不是材质语义本身。合成顺序固定为：
+shading normal、roughness、`materialControl` 和 `opticalControl`。roughness 的权威持久化来源是
+u8 code/texture；过滤、法线分布组合和 BSDF 消费在寄存器中使用 f32，不按 triangle 保存派生 f32。
+合成顺序固定为：
 
 1. 采样 base/albedo；
 2. 建立全局 roughness 与 dielectric F0 默认值；

@@ -219,6 +219,7 @@ public final class VulkanRenderer implements AutoCloseable {
         LabPbrAtlasFrame labPbrFrame = this.labPbrSource.ensure(minecraft, atlas);
         this.terrain.setLabPbrMaterials(
                 this.materialTextures.ensure(labPbrFrame, atlasView.vkImageView()));
+        this.labPbrSource.retireBaseColorSources(labPbrFrame.sourceGeneration());
         long sourceGeneration = labPbrFrame.sourceGeneration();
         BlockAtlasFrame previous = this.blockAtlasFrame;
         boolean changed = previous == null

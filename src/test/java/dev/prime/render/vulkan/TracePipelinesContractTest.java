@@ -26,10 +26,12 @@ final class TracePipelinesContractTest {
     private static final int OP_TYPE_INT = 21;
     private static final int OP_TYPE_FLOAT = 22;
     private static final int OP_TYPE_VECTOR = 23;
+    private static final int OP_TYPE_ARRAY = 28;
     private static final int OP_TYPE_RUNTIME_ARRAY = 29;
     private static final int OP_TYPE_STRUCT = 30;
     private static final int OP_TYPE_POINTER = 32;
     private static final int OP_VARIABLE = 59;
+    private static final int OP_CONSTANT = 43;
     private static final int OP_DECORATE = 71;
     private static final int OP_MEMBER_DECORATE = 72;
     private static final int OP_GROUP_NON_UNIFORM_ELECT = 333;
@@ -306,6 +308,22 @@ final class TracePipelinesContractTest {
                     0);
             assertFalse(offline.contains(ShaderAbi.DESCRIPTOR_REALTIME_STBN));
         }
+    }
+
+    static void canonicalBaseColorDescriptorUsesTheGeneratedPageCapacity()
+            throws IOException {
+        assertEquals(
+                ShaderAbi.BASE_COLOR_PAGE_COUNT,
+                descriptorArrayLength(
+                        "world.rchit.spv",
+                        0,
+                        ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES));
+        assertEquals(
+                ShaderAbi.BASE_COLOR_PAGE_COUNT,
+                descriptorArrayLength(
+                        "shadow.rahit.spv",
+                        0,
+                        ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES));
     }
 
     static void optimizedModulesPreservePayloadAbi() throws IOException {
@@ -635,6 +653,28 @@ final class TracePipelinesContractTest {
         return result;
     }
 
+    private static int descriptorArrayLength(
+            String shader, int descriptorSet, int binding) throws IOException {
+        Spirv module = parse(shader);
+        Variable descriptor = module.variables.stream()
+                .filter(variable -> module.sets.getOrDefault(variable.identifier, -1)
+                        == descriptorSet)
+                .filter(variable -> module.bindings.getOrDefault(variable.identifier, -1)
+                        == binding)
+                .findFirst()
+                .orElseThrow();
+        Type pointer = module.requireType(descriptor.type);
+        Type array = module.requireType(pointer.operands[1]);
+        if (array.opcode != OP_TYPE_ARRAY) {
+            throw new IllegalArgumentException("Descriptor is not a fixed-size array");
+        }
+        Integer length = module.constants.get(array.operands[1]);
+        if (length == null) {
+            throw new IllegalArgumentException("Descriptor array has no constant length");
+        }
+        return length;
+    }
+
     private static Spirv parse(String shader) throws IOException {
         int[] words = spirvWords(shader);
         Spirv result = new Spirv();
@@ -650,6 +690,7 @@ final class TracePipelinesContractTest {
             if (opcode == OP_TYPE_INT
                     || opcode == OP_TYPE_FLOAT
                     || opcode == OP_TYPE_VECTOR
+                    || opcode == OP_TYPE_ARRAY
                     || opcode == OP_TYPE_RUNTIME_ARRAY
                     || opcode == OP_TYPE_STRUCT
                     || opcode == OP_TYPE_POINTER) {
@@ -657,6 +698,8 @@ final class TracePipelinesContractTest {
                         words[offset + 1],
                         new Type(opcode, Arrays.copyOfRange(
                                 words, offset + 2, offset + wordCount)));
+            } else if (opcode == OP_CONSTANT && wordCount == 4) {
+                result.constants.put(words[offset + 2], words[offset + 3]);
             } else if (opcode == OP_VARIABLE) {
                 result.variables.add(new Variable(
                         words[offset + 1], words[offset + 2], words[offset + 3]));
@@ -717,6 +760,7 @@ final class TracePipelinesContractTest {
         final Map<Integer, Type> types = new HashMap<>();
         final Map<Integer, Integer> bindings = new HashMap<>();
         final Map<Integer, Integer> sets = new HashMap<>();
+        final Map<Integer, Integer> constants = new HashMap<>();
         final Map<Integer, Integer> arrayStrides = new HashMap<>();
         final List<Variable> variables = new ArrayList<>();
         final Set<Integer> opcodes = new HashSet<>();

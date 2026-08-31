@@ -4,12 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import dev.prime.render.terrain.CanonicalColorEncoding;
+import dev.prime.render.terrain.PrimitivePacking;
 import org.junit.jupiter.api.Test;
 
 final class TintOperatorTableEncodingTest {
     @Test
     void tableRowsPreserveOperatorAndCacheItsExactWhiteInput() {
-        int packedRgb = 0x0023_a7e1;
+        int packedRgb = PrimitivePacking.packTint(0xff23_a7e1) & 0x00ff_ffff;
         CanonicalColorEncoding.TintOperator operator =
                 CanonicalColorEncoding.tintOperator(packedRgb);
         float[] entry = TintOperatorTable.encodedEntry(packedRgb);

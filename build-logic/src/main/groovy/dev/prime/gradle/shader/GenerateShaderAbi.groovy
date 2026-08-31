@@ -56,10 +56,12 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| sunShadowQuery.size != 48
 				|| schema.sceneTextureCount != 64
 				|| schema.materialPageCount != 16
+				|| schema.baseColorPageCount != 64
 				|| schema.sharedDescriptors.textureRecords != 18
 				|| schema.sharedDescriptors.materialNormalPages != 19
 				|| schema.sharedDescriptors.materialOpticalPages != 49
-				|| schema.sharedDescriptors.tintOperators != 50) {
+				|| schema.sharedDescriptors.tintOperators != 50
+				|| schema.sharedDescriptors.baseColorPages != 51) {
 			throw new GradleException(
 					'Prime shader ABI sizes or scene texture count changed without a coordinated migration')
 		}
@@ -345,6 +347,7 @@ public final class ShaderAbi {
     public static final int DESCRIPTOR_MATERIAL_NORMAL_PAGES = ${schema.sharedDescriptors.materialNormalPages};
     public static final int DESCRIPTOR_MATERIAL_OPTICAL_PAGES = ${schema.sharedDescriptors.materialOpticalPages};
     public static final int DESCRIPTOR_TINT_OPERATORS = ${schema.sharedDescriptors.tintOperators};
+    public static final int DESCRIPTOR_BASE_COLOR_PAGES = ${schema.sharedDescriptors.baseColorPages};
     public static final int DESCRIPTOR_NRD_SUN_LIGHTING = ${schema.realtimeDescriptors.nrdSunLighting};
     public static final int DESCRIPTOR_NRD_SUN_PENUMBRA = ${schema.realtimeDescriptors.nrdSunPenumbra};
     public static final int DESCRIPTOR_NRD_DIFFUSE_DIRECTION = ${schema.realtimeDescriptors.nrdDiffuseDirection};
@@ -378,6 +381,7 @@ public final class ShaderAbi {
     public static final int DESCRIPTOR_SUN_SHADOW_QUERY = ${schema.sharedDescriptors.sunShadowQuery};
     public static final int SCENE_TEXTURE_COUNT = ${schema.sceneTextureCount};
     public static final int MATERIAL_PAGE_COUNT = ${schema.materialPageCount};
+    public static final int BASE_COLOR_PAGE_COUNT = ${schema.baseColorPageCount};
     public static final int WAVEFRONT_PATH_RECORD_SIZE = ${wavefrontContract.pathRecordSize};
     public static final int WAVEFRONT_ETA_SCALE_OFFSET = ${wavefrontContract.etaScaleOffset};
     public static final int WAVEFRONT_PATH_CONTROL_RESERVED_MASK = ${wavefrontContract.pathControlReservedMask};

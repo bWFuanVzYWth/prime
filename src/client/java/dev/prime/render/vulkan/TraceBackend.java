@@ -28,7 +28,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
  * offline, atmosphere and sun-shadow programs only borrow its descriptor set.
  */
 public final class TraceBackend implements Destroyable {
-    private static final int BINDING_COUNT = 25;
+    private static final int BINDING_COUNT = 26;
     private static final int STARMAP_UPLOAD = 1;
     private static final int BSDF_LOOKUP_UPLOAD = 1 << 1;
     private static final int REALTIME_STBN_UPLOAD = 1 << 2;
@@ -109,6 +109,7 @@ public final class TraceBackend implements Destroyable {
             VulkanGpuTextureView atlasView,
             VulkanGpuSampler atlasSampler,
             List<SceneTexture> sceneTextures,
+            List<VulkanImage> materialBaseColorPages,
             List<VulkanImage> materialNormalPages,
             List<VulkanImage> materialOpticalPages,
             VulkanBuffer textureRecords,
@@ -123,6 +124,7 @@ public final class TraceBackend implements Destroyable {
                         SrgbTextureView.imageView(atlasView),
                         atlasSampler.vkSampler(),
                         sceneTextures,
+                        materialBaseColorPages,
                         materialNormalPages,
                         materialOpticalPages,
                         textureRecords.handle(),
@@ -137,6 +139,7 @@ public final class TraceBackend implements Destroyable {
                 atlasView,
                 atlasSampler,
                 sceneTextures,
+                materialBaseColorPages,
                 materialNormalPages,
                 materialOpticalPages,
                 textureRecords,
@@ -288,6 +291,11 @@ public final class TraceBackend implements Destroyable {
                     .stageFlags(ALL_RT_STAGES);
         }
         bindings.get(cursor++)
+                .binding(ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES)
+                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(ShaderAbi.BASE_COLOR_PAGE_COUNT)
+                .stageFlags(ALL_RT_STAGES);
+        bindings.get(cursor++)
                 .binding(ShaderAbi.DESCRIPTOR_MATERIAL_NORMAL_PAGES)
                 .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                 .descriptorCount(ShaderAbi.MATERIAL_PAGE_COUNT)
@@ -385,6 +393,7 @@ public final class TraceBackend implements Destroyable {
         private final long atlasView;
         private final long atlasSampler;
         private final List<SceneTexture> sceneTextures;
+        private final List<Long> baseColorPages;
         private final List<Long> normalPages;
         private final List<Long> opticalPages;
         private final long textureRecords;
@@ -406,6 +415,7 @@ public final class TraceBackend implements Destroyable {
                 long atlasView,
                 long atlasSampler,
                 List<SceneTexture> sceneTextures,
+                List<VulkanImage> baseColorPages,
                 List<VulkanImage> normalPages,
                 List<VulkanImage> opticalPages,
                 long textureRecords,
@@ -419,6 +429,7 @@ public final class TraceBackend implements Destroyable {
             this.atlasView = atlasView;
             this.atlasSampler = atlasSampler;
             this.sceneTextures = List.copyOf(sceneTextures);
+            this.baseColorPages = pageViews(baseColorPages);
             this.normalPages = pageViews(normalPages);
             this.opticalPages = pageViews(opticalPages);
             this.textureRecords = textureRecords;
@@ -439,6 +450,7 @@ public final class TraceBackend implements Destroyable {
                 VulkanGpuTextureView atlasView,
                 VulkanGpuSampler atlasSampler,
                 List<SceneTexture> sceneTextures,
+                List<VulkanImage> baseColorPages,
                 List<VulkanImage> normalPages,
                 List<VulkanImage> opticalPages,
                 VulkanBuffer textureRecords,
@@ -459,7 +471,9 @@ public final class TraceBackend implements Destroyable {
                 sizes.get(2)
                         .type(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                         .descriptorCount(ShaderAbi.SCENE_TEXTURE_COUNT
-                                + 2 * ShaderAbi.MATERIAL_PAGE_COUNT + 2);
+                                + ShaderAbi.BASE_COLOR_PAGE_COUNT
+                                + 2 * ShaderAbi.MATERIAL_PAGE_COUNT
+                                + 2);
                 sizes.get(3)
                         .type(VK12.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                         .descriptorCount(1);
@@ -492,7 +506,9 @@ public final class TraceBackend implements Destroyable {
                         throw new IllegalArgumentException(
                                 "Dynamic scene texture count exceeds the descriptor ABI");
                     }
-                    if (normalPages.isEmpty()
+                    if (baseColorPages.isEmpty()
+                            || baseColorPages.size() > ShaderAbi.BASE_COLOR_PAGE_COUNT
+                            || normalPages.isEmpty()
                             || normalPages.size() > ShaderAbi.MATERIAL_PAGE_COUNT
                             || opticalPages.isEmpty()
                             || opticalPages.size() > ShaderAbi.MATERIAL_PAGE_COUNT) {
@@ -501,7 +517,8 @@ public final class TraceBackend implements Destroyable {
                     }
                     int atmosphereStart = ShaderAbi.SCENE_TEXTURE_COUNT;
                     int sampledStart = atmosphereStart + 5;
-                    int normalStart = sampledStart + 1;
+                    int baseColorStart = sampledStart + 1;
+                    int normalStart = baseColorStart + ShaderAbi.BASE_COLOR_PAGE_COUNT;
                     int opticalStart = normalStart + ShaderAbi.MATERIAL_PAGE_COUNT;
                     int starmapIndex = opticalStart + ShaderAbi.MATERIAL_PAGE_COUNT;
                     int shadowStart = starmapIndex + 1;
@@ -538,6 +555,14 @@ public final class TraceBackend implements Destroyable {
                             .sampler(bsdfLookup.sampler())
                             .imageView(bsdfLookup.transmissionGgxEnergy().view())
                             .imageLayout(VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                    for (int index = 0; index < ShaderAbi.BASE_COLOR_PAGE_COUNT; index++) {
+                        VulkanImage baseColor = baseColorPages.get(
+                                Math.min(index, baseColorPages.size() - 1));
+                        infos.get(baseColorStart + index)
+                                .sampler(atlasSampler.vkSampler())
+                                .imageView(baseColor.view())
+                                .imageLayout(VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                    }
                     for (int index = 0; index < ShaderAbi.MATERIAL_PAGE_COUNT; index++) {
                         VulkanImage normal = normalPages.get(
                                 Math.min(index, normalPages.size() - 1));
@@ -676,6 +701,15 @@ public final class TraceBackend implements Destroyable {
                     writes.get(write++)
                             .sType$Default()
                             .dstSet(set)
+                            .dstBinding(ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES)
+                            .descriptorCount(ShaderAbi.BASE_COLOR_PAGE_COUNT)
+                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                            .pImageInfo(VkDescriptorImageInfo.create(
+                                    infos.get(baseColorStart).address(),
+                                    ShaderAbi.BASE_COLOR_PAGE_COUNT));
+                    writes.get(write++)
+                            .sType$Default()
+                            .dstSet(set)
                             .dstBinding(ShaderAbi.DESCRIPTOR_REALTIME_STBN)
                             .descriptorCount(1)
                             .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
@@ -717,6 +751,7 @@ public final class TraceBackend implements Destroyable {
                             atlasColorView,
                             atlasSampler.vkSampler(),
                             sceneTextures,
+                            baseColorPages,
                             normalPages,
                             opticalPages,
                             textureRecords.handle(),
@@ -735,6 +770,7 @@ public final class TraceBackend implements Destroyable {
                 long candidateAtlasView,
                 long candidateAtlasSampler,
                 List<SceneTexture> candidateSceneTextures,
+                List<VulkanImage> candidateBaseColorPages,
                 List<VulkanImage> candidateNormalPages,
                 List<VulkanImage> candidateOpticalPages,
                 long candidateTextureRecords,
@@ -744,6 +780,7 @@ public final class TraceBackend implements Destroyable {
                     || this.atlasView != candidateAtlasView
                     || this.atlasSampler != candidateAtlasSampler
                     || !this.sceneTextures.equals(candidateSceneTextures)
+                    || !matchesPageViews(this.baseColorPages, candidateBaseColorPages)
                     || !matchesPageViews(this.normalPages, candidateNormalPages)
                     || !matchesPageViews(this.opticalPages, candidateOpticalPages)
                     || this.textureRecords != candidateTextureRecords

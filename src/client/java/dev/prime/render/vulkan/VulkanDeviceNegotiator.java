@@ -439,6 +439,7 @@ public final class VulkanDeviceNegotiator {
             int descriptorSetSamplerLimit,
             int descriptorSetSampledImageLimit) {
         int required = dev.prime.render.shader.ShaderAbi.SCENE_TEXTURE_COUNT
+                + dev.prime.render.shader.ShaderAbi.BASE_COLOR_PAGE_COUNT
                 + 2 * dev.prime.render.shader.ShaderAbi.MATERIAL_PAGE_COUNT
                 + 2;
         return Integer.compareUnsigned(perStageSamplerLimit, required) >= 0

@@ -33,6 +33,11 @@ final class TracePipelinesArtifactTest {
     }
 
     @Test
+    void canonicalBaseColorDescriptorUsesTheGeneratedPageCapacity() throws IOException {
+        TracePipelinesContractTest.canonicalBaseColorDescriptorUsesTheGeneratedPageCapacity();
+    }
+
+    @Test
     void optimizedModulesPreservePayloadAbi() throws IOException {
         TracePipelinesContractTest.optimizedModulesPreservePayloadAbi();
     }
