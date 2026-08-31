@@ -7,6 +7,7 @@ import dev.prime.render.scene.vanilla.DynamicSceneMotion;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.terrain.CpuClusterMesh;
 import dev.prime.render.terrain.MaterialTableCandidate;
+import dev.prime.render.terrain.SurfaceTintUsage;
 import dev.prime.render.terrain.TextureTintUsage;
 import dev.prime.render.vulkan.MaterialTexturePages;
 import dev.prime.render.vulkan.RendererDataRangeDiagnostics;
@@ -61,6 +62,7 @@ final class RendererDataMeasurementRecorder {
     private TerrainScene.TintIdStatistics tintIds;
     private MaterialTexturePages.MeasurementSnapshot textures;
     private TextureTintUsage observedTextureTints = TextureTintUsage.EMPTY;
+    private SurfaceTintUsage observedSurfaceTints = SurfaceTintUsage.EMPTY;
     private MaterialTableCandidate observedMaterialCandidates = MaterialTableCandidate.EMPTY;
     private long maximumResidentMaterialReferences;
     private VulkanMemorySnapshot memory;
@@ -178,6 +180,8 @@ final class RendererDataMeasurementRecorder {
         this.tintIds = tintIds;
         this.observedTextureTints = this.observedTextureTints.observedUnion(
                 scene.textureTintUsage());
+        this.observedSurfaceTints = this.observedSurfaceTints.observedUnion(
+                scene.surfaceTintUsage());
         this.observedMaterialCandidates = this.observedMaterialCandidates.observedUnion(
                 scene.materialTableCandidate());
         this.maximumResidentMaterialReferences = Math.max(
@@ -285,6 +289,7 @@ final class RendererDataMeasurementRecorder {
         appendTintIds(json, this.tintIds);
         appendTextures(json, this.textures);
         appendTextureTintUsage(json, this.observedTextureTints, this.textures);
+        appendSurfaceTintUsage(json, this.observedSurfaceTints);
         appendMaterialTableCandidate(
                 json,
                 this.observedMaterialCandidates,
@@ -322,6 +327,25 @@ final class RendererDataMeasurementRecorder {
         json.append('{');
         field(json, "assignedCount", value.assignedCount());
         field(json, "highWaterId", value.highWaterId());
+        trimComma(json).append("\n  },");
+    }
+
+    private static void appendSurfaceTintUsage(
+            StringBuilder json, SurfaceTintUsage value) {
+        json.append("\n  \"surfaceTintField\": {");
+        field(json, "uniqueSourceRgba8Colors", value.sourceColors().size());
+        field(json, "primaryReferences", value.primaryReferences());
+        field(json, "relationReferences", value.relationReferences());
+        field(json, "constantReferences", value.constantReferences());
+        field(json, "varyingReferences", value.varyingReferences());
+        field(json, "varyingRgbReferences", value.varyingRgbReferences());
+        field(json, "varyingAlphaReferences", value.varyingAlphaReferences());
+        field(json, "nonOpaqueAlphaReferences", value.nonOpaqueAlphaReferences());
+        field(json, "globalSamplePaletteRgba16fBytes", value.globalSamplePaletteRgba16fBytes());
+        field(json, "quadIndexedRgba16fBytes", value.quadIndexedRgba16fBytes());
+        field(json, "triangleIndexedRgba16fBytes", value.triangleIndexedRgba16fBytes());
+        field(json, "quadSharedRgba16fBytes", value.quadSharedRgba16fBytes());
+        field(json, "triangleLocalRgba16fBytes", value.triangleLocalRgba16fBytes());
         trimComma(json).append("\n  },");
     }
 

@@ -557,6 +557,10 @@ public final class SectionMeshAccumulator {
     /** Mutable per-session scratch for semantics kept outside Minecraft's mesh interfaces. */
     public static final class Surface {
         private int tint;
+        private int color0;
+        private int color1;
+        private int color2;
+        private int color3;
         private boolean cutout;
         private boolean animated;
         private boolean transmissive;
@@ -638,6 +642,10 @@ public final class SectionMeshAccumulator {
                 CapturedSprite sprite,
                 BuiltinMaterialClass builtinMaterialClass) {
             this.tint = tint;
+            this.color0 = tint;
+            this.color1 = tint;
+            this.color2 = tint;
+            this.color3 = tint;
             this.cutout = cutout;
             this.animated = animated;
             this.transmissive = transmissive;
@@ -652,6 +660,14 @@ public final class SectionMeshAccumulator {
                     builtinMaterialClass, "builtinMaterialClass");
             this.definition = null;
             this.mediumId = 0;
+            return this;
+        }
+
+        Surface setVertexColors(int color0, int color1, int color2, int color3) {
+            this.color0 = color0;
+            this.color1 = color1;
+            this.color2 = color2;
+            this.color3 = color3;
             return this;
         }
 
@@ -674,6 +690,22 @@ public final class SectionMeshAccumulator {
 
         int tint() {
             return this.tint;
+        }
+
+        boolean hasUniformVertexColor() {
+            return this.color0 == this.color1
+                    && this.color0 == this.color2
+                    && this.color0 == this.color3;
+        }
+
+        int vertexColor(int vertex) {
+            return switch (vertex) {
+                case 0 -> this.color0;
+                case 1 -> this.color1;
+                case 2 -> this.color2;
+                case 3 -> this.color3;
+                default -> throw new IndexOutOfBoundsException(vertex);
+            };
         }
 
         int mediumId() {

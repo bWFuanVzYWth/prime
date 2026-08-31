@@ -34,7 +34,6 @@ public final class TerrainScene implements AutoCloseable {
     private static final long[] EMPTY_EVICTIONS = new long[0];
     private static final int TLAS_SLOT_COUNT = 3;
     private static final int REBASE_DISTANCE = 256;
-    private static final String MEASUREMENT_ENABLE_PROPERTY = "prime.renderer.measure";
 
     private final VulkanContext context;
     private final StagingArena stagingArena;
@@ -45,7 +44,8 @@ public final class TerrainScene implements AutoCloseable {
     private final MaterialIdRegistry materialIds = new MaterialIdRegistry(this.mediumIds);
     private final VulkanBuffer materialCoreRecords;
     private final TintOperatorTable tintOperators;
-    private final boolean measurementsEnabled = Boolean.getBoolean(MEASUREMENT_ENABLE_PROPERTY);
+    private final boolean measurementsEnabled = Boolean.getBoolean(
+            SurfaceTintUsage.MEASUREMENT_ENABLE_PROPERTY);
     private final BlasCompactionScheduler compactionScheduler =
             new BlasCompactionScheduler();
     private Long2ObjectOpenHashMap<GpuCluster> resident = new Long2ObjectOpenHashMap<>();
@@ -999,6 +999,9 @@ public final class TerrainScene implements AutoCloseable {
         ArrayList<TextureTintUsage> textureTintUsage = this.measurementsEnabled
                 ? new ArrayList<>(finalClusters.size())
                 : null;
+        ArrayList<SurfaceTintUsage> surfaceTintUsage = this.measurementsEnabled
+                ? new ArrayList<>(finalClusters.size())
+                : null;
         ArrayList<MaterialTableCandidate> materialTableCandidates = this.measurementsEnabled
                 ? new ArrayList<>(finalClusters.size())
                 : null;
@@ -1032,6 +1035,7 @@ public final class TerrainScene implements AutoCloseable {
                     areaLightEmitters, cluster.lights().emitterCount());
             if (textureTintUsage != null) {
                 textureTintUsage.add(cluster.textureTintUsage());
+                surfaceTintUsage.add(cluster.surfaceTintUsage());
                 materialTableCandidates.add(cluster.materialTableCandidate());
             }
         }
@@ -1053,6 +1057,9 @@ public final class TerrainScene implements AutoCloseable {
                 textureTintUsage == null
                         ? TextureTintUsage.EMPTY
                         : TextureTintUsage.combine(textureTintUsage),
+                surfaceTintUsage == null
+                        ? SurfaceTintUsage.EMPTY
+                        : SurfaceTintUsage.combine(surfaceTintUsage),
                 materialTableCandidates == null
                         ? MaterialTableCandidate.EMPTY
                         : MaterialTableCandidate.combine(materialTableCandidates),
@@ -1368,6 +1375,9 @@ public final class TerrainScene implements AutoCloseable {
                     this.measurementsEnabled
                             ? TextureTintUsage.measure(mesh)
                             : TextureTintUsage.EMPTY,
+                    this.measurementsEnabled
+                            ? mesh.surfaceTintUsage()
+                            : SurfaceTintUsage.EMPTY,
                     this.measurementsEnabled
                             ? MaterialTableCandidate.measure(mesh)
                             : MaterialTableCandidate.EMPTY,
@@ -1741,6 +1751,7 @@ public final class TerrainScene implements AutoCloseable {
             int areaLightEmitterCount,
             int topLevelLightTreeNodeCount,
             TextureTintUsage textureTintUsage,
+            SurfaceTintUsage surfaceTintUsage,
             MaterialTableCandidate materialTableCandidate,
             long surfaceRelationSourceBytes,
             long surfaceRelationGpuBytes) {
@@ -1752,9 +1763,33 @@ public final class TerrainScene implements AutoCloseable {
                         0,
                         0,
                         TextureTintUsage.EMPTY,
+                        SurfaceTintUsage.EMPTY,
                         MaterialTableCandidate.EMPTY,
                         0L,
                         0L);
+
+        public SceneStatistics(
+                int tlasInstanceCount,
+                long uniqueBlasTriangleCount,
+                long instancedTriangleCount,
+                int areaLightEmitterCount,
+                int topLevelLightTreeNodeCount,
+                TextureTintUsage textureTintUsage,
+                MaterialTableCandidate materialTableCandidate,
+                long surfaceRelationSourceBytes,
+                long surfaceRelationGpuBytes) {
+            this(
+                    tlasInstanceCount,
+                    uniqueBlasTriangleCount,
+                    instancedTriangleCount,
+                    areaLightEmitterCount,
+                    topLevelLightTreeNodeCount,
+                    textureTintUsage,
+                    SurfaceTintUsage.EMPTY,
+                    materialTableCandidate,
+                    surfaceRelationSourceBytes,
+                    surfaceRelationGpuBytes);
+        }
 
         public SceneStatistics(
                 int tlasInstanceCount,
@@ -1771,6 +1806,29 @@ public final class TerrainScene implements AutoCloseable {
                     areaLightEmitterCount,
                     topLevelLightTreeNodeCount,
                     textureTintUsage,
+                    SurfaceTintUsage.EMPTY,
+                    materialTableCandidate,
+                    0L,
+                    0L);
+        }
+
+        public SceneStatistics(
+                int tlasInstanceCount,
+                long uniqueBlasTriangleCount,
+                long instancedTriangleCount,
+                int areaLightEmitterCount,
+                int topLevelLightTreeNodeCount,
+                TextureTintUsage textureTintUsage,
+                SurfaceTintUsage surfaceTintUsage,
+                MaterialTableCandidate materialTableCandidate) {
+            this(
+                    tlasInstanceCount,
+                    uniqueBlasTriangleCount,
+                    instancedTriangleCount,
+                    areaLightEmitterCount,
+                    topLevelLightTreeNodeCount,
+                    textureTintUsage,
+                    surfaceTintUsage,
                     materialTableCandidate,
                     0L,
                     0L);
@@ -1790,6 +1848,7 @@ public final class TerrainScene implements AutoCloseable {
                     areaLightEmitterCount,
                     topLevelLightTreeNodeCount,
                     textureTintUsage,
+                    SurfaceTintUsage.EMPTY,
                     MaterialTableCandidate.EMPTY,
                     0L,
                     0L);
@@ -1808,6 +1867,7 @@ public final class TerrainScene implements AutoCloseable {
                     areaLightEmitterCount,
                     topLevelLightTreeNodeCount,
                     TextureTintUsage.EMPTY,
+                    SurfaceTintUsage.EMPTY,
                     MaterialTableCandidate.EMPTY,
                     0L,
                     0L);
@@ -1816,6 +1876,8 @@ public final class TerrainScene implements AutoCloseable {
         public SceneStatistics {
             textureTintUsage = java.util.Objects.requireNonNull(
                     textureTintUsage, "textureTintUsage");
+            surfaceTintUsage = java.util.Objects.requireNonNull(
+                    surfaceTintUsage, "surfaceTintUsage");
             materialTableCandidate = java.util.Objects.requireNonNull(
                     materialTableCandidate, "materialTableCandidate");
             if (tlasInstanceCount < 0

@@ -83,6 +83,77 @@ final class CanonicalColorEncodingTest {
     }
 
     @Test
+    void rgba16fLinearTintPreservesSourceDomainAndAlphaWithinTheColorBudget() {
+        int baseArgb = 0xc080_40e0;
+        CanonicalColorEncoding.Color base = CanonicalColorEncoding.decodeRgba16f(
+                CanonicalColorEncoding.encodeRgba16f(baseArgb));
+        float maximum = 0.0F;
+        for (int alpha = 0; alpha < 256; alpha++) {
+            for (int tintRgb : TINT_RGB) {
+                int tintArgb = alpha << 24 | tintRgb;
+                CanonicalColorEncoding.LinearTintModulation actualTint =
+                        CanonicalColorEncoding.decodeLinearSrgbTintRgba16f(
+                                CanonicalColorEncoding.encodeLinearSrgbTintRgba16f(tintArgb));
+                CanonicalColorEncoding.LinearTintModulation expectedTint =
+                        new CanonicalColorEncoding.LinearTintModulation(
+                                CanonicalColorEncoding.decodeSrgb8(tintArgb >>> 16),
+                                CanonicalColorEncoding.decodeSrgb8(tintArgb >>> 8),
+                                CanonicalColorEncoding.decodeSrgb8(tintArgb),
+                                alpha / 255.0F);
+                CanonicalColorEncoding.Color actual = actualTint.apply(base);
+                CanonicalColorEncoding.Color expected = expectedTint.apply(base);
+                maximum = Math.max(maximum, error(expected, actual));
+                maximum = Math.max(maximum, Math.abs(expected.alpha() - actual.alpha()));
+            }
+        }
+
+        assertTrue(maximum <= CanonicalColorEncoding.MAXIMUM_REFLECTANCE_ERROR,
+                "Maximum continuous tint error was " + maximum);
+    }
+
+    @Test
+    void interpolatedTintStaysInLinearModulationDomain() {
+        int firstArgb = 0x4091_bd59;
+        int secondArgb = 0xe03f_76e4;
+        float weight = 0.375F;
+        CanonicalColorEncoding.LinearTintModulation first =
+                CanonicalColorEncoding.decodeLinearSrgbTintRgba16f(
+                        CanonicalColorEncoding.encodeLinearSrgbTintRgba16f(firstArgb));
+        CanonicalColorEncoding.LinearTintModulation second =
+                CanonicalColorEncoding.decodeLinearSrgbTintRgba16f(
+                        CanonicalColorEncoding.encodeLinearSrgbTintRgba16f(secondArgb));
+        CanonicalColorEncoding.LinearTintModulation interpolated =
+                new CanonicalColorEncoding.LinearTintModulation(
+                        lerp(first.red(), second.red(), weight),
+                        lerp(first.green(), second.green(), weight),
+                        lerp(first.blue(), second.blue(), weight),
+                        lerp(first.alpha(), second.alpha(), weight));
+        CanonicalColorEncoding.LinearTintModulation expected =
+                new CanonicalColorEncoding.LinearTintModulation(
+                        lerp(
+                                CanonicalColorEncoding.decodeSrgb8(firstArgb >>> 16),
+                                CanonicalColorEncoding.decodeSrgb8(secondArgb >>> 16),
+                                weight),
+                        lerp(
+                                CanonicalColorEncoding.decodeSrgb8(firstArgb >>> 8),
+                                CanonicalColorEncoding.decodeSrgb8(secondArgb >>> 8),
+                                weight),
+                        lerp(
+                                CanonicalColorEncoding.decodeSrgb8(firstArgb),
+                                CanonicalColorEncoding.decodeSrgb8(secondArgb),
+                                weight),
+                        lerp((firstArgb >>> 24) / 255.0F, (secondArgb >>> 24) / 255.0F, weight));
+        CanonicalColorEncoding.Color base = CanonicalColorEncoding.decodeRgba16f(
+                CanonicalColorEncoding.encodeRgba16f(0xffa0_8060));
+
+        CanonicalColorEncoding.Color actual = interpolated.apply(base);
+        CanonicalColorEncoding.Color wanted = expected.apply(base);
+        assertTrue(error(wanted, actual) <= CanonicalColorEncoding.MAXIMUM_REFLECTANCE_ERROR);
+        assertEquals(wanted.alpha(), actual.alpha(),
+                CanonicalColorEncoding.MAXIMUM_REFLECTANCE_ERROR);
+    }
+
+    @Test
     void linearMipFilteringCommutesWithCanonicalConversionAndTint() {
         int[] texels = {0xff00_2040, 0xff80_ffff, 0xffff_4000, 0xff04_0810};
         int tint = packedTint(0x0091_bd59);
@@ -163,5 +234,9 @@ final class CanonicalColorEncodingTest {
 
     private static int packedTint(int rgb) {
         return PrimitivePacking.packTint(0xff00_0000 | rgb) & 0x00ff_ffff;
+    }
+
+    private static float lerp(float first, float second, float weight) {
+        return first + (second - first) * weight;
     }
 }

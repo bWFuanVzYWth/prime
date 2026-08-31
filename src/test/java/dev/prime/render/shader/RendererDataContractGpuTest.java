@@ -47,7 +47,14 @@ final class RendererDataContractGpuTest {
         int recipeControl = 0x7123;
         int materialCore = textureId
                 | recipeControl << ShaderAbi.MATERIAL_CORE_RECIPE_CONTROL_SHIFT;
-        ByteBuffer input = ByteBuffer.allocateDirect(30 * Integer.BYTES)
+        int continuousTintArgb = 0xa037_b9e1;
+        long continuousTintEncoding =
+                CanonicalColorEncoding.encodeLinearSrgbTintRgba16f(continuousTintArgb);
+        CanonicalColorEncoding.Color continuouslyTinted =
+                CanonicalColorEncoding.decodeLinearSrgbTintRgba16f(continuousTintEncoding)
+                        .apply(new CanonicalColorEncoding.Color(
+                                base.red(), base.green(), base.blue(), 0.75F));
+        ByteBuffer input = ByteBuffer.allocateDirect(32 * Integer.BYTES)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(pixelX).putInt(pixelY).putInt(width).putInt(height)
                 .putFloat(jitterX).putFloat(jitterY)
@@ -60,12 +67,14 @@ final class RendererDataContractGpuTest {
                 .putFloat(base.red()).putFloat(base.green()).putFloat(base.blue())
                 .putInt(MaterialIdResolver.pack(mediumId, materialId))
                 .putInt(materialCore)
+                .putInt((int) continuousTintEncoding)
+                .putInt((int) (continuousTintEncoding >>> 32))
                 .flip();
         Path shader = Path.of(
                 System.getProperty("prime.test.slangShaderDirectory"),
                 "prime_renderer_data_contract.comp.spv");
 
-        ByteBuffer output = runner.dispatch(shader, input, 5 * 4 * Float.BYTES, 1);
+        ByteBuffer output = runner.dispatch(shader, input, 6 * 4 * Float.BYTES, 1);
         double[] uv = RendererDataContracts.sampleUv(pixelX, pixelY, width, height);
         double[] clip = RendererDataContracts.uvToClip(uv[0], uv[1]);
         double[] projectionJitter =
@@ -95,6 +104,10 @@ final class RendererDataContractGpuTest {
         assertEquals(materialId, value(output, 4, 1), 0.0);
         assertEquals(textureId, value(output, 4, 2), 0.0);
         assertEquals(recipeControl, value(output, 4, 3), 0.0);
+        assertEquals(continuouslyTinted.red(), value(output, 5, 0), 3.0e-7);
+        assertEquals(continuouslyTinted.green(), value(output, 5, 1), 3.0e-7);
+        assertEquals(continuouslyTinted.blue(), value(output, 5, 2), 3.0e-7);
+        assertEquals(continuouslyTinted.alpha(), value(output, 5, 3), 0.0);
     }
 
     private static float value(ByteBuffer output, int entry, int component) {

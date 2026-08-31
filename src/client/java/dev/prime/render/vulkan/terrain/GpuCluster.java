@@ -24,6 +24,7 @@ record GpuCluster(
         VulkanBuffer motionBuffer,
         CompiledClusterLights.Summary lights,
         TextureTintUsage textureTintUsage,
+        SurfaceTintUsage surfaceTintUsage,
         MaterialTableCandidate materialTableCandidate,
         long surfaceRelationSourceBytes,
         long surfaceRelationGpuBytes,
@@ -35,6 +36,7 @@ record GpuCluster(
                 voxelInstances, "voxelInstances");
         lights = Objects.requireNonNull(lights, "lights");
         textureTintUsage = Objects.requireNonNull(textureTintUsage, "textureTintUsage");
+        surfaceTintUsage = Objects.requireNonNull(surfaceTintUsage, "surfaceTintUsage");
         materialTableCandidate = Objects.requireNonNull(
                 materialTableCandidate, "materialTableCandidate");
         if (surfaceRelationSourceBytes < 0L
@@ -91,6 +93,7 @@ record GpuCluster(
                 motionBuffer,
                 lights,
                 TextureTintUsage.EMPTY,
+                SurfaceTintUsage.EMPTY,
                 MaterialTableCandidate.EMPTY,
                 0L,
                 0L,
@@ -139,6 +142,7 @@ record GpuCluster(
                 null,
                 lights,
                 TextureTintUsage.EMPTY,
+                SurfaceTintUsage.EMPTY,
                 MaterialTableCandidate.EMPTY,
                 0L,
                 0L,

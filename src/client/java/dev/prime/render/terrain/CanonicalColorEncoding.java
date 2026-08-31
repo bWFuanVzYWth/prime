@@ -34,6 +34,15 @@ public final class CanonicalColorEncoding {
         return encodeLinearRgba16f(red, green, blue, argb >>> 24);
     }
 
+    /** Encodes a source-linear sRGB modulation operand and normalized alpha as RGBA16F. */
+    public static long encodeLinearSrgbTintRgba16f(int argb) {
+        float red = decodeSrgb8(argb >>> 16);
+        float green = decodeSrgb8(argb >>> 8);
+        float blue = decodeSrgb8(argb);
+        float alpha = (argb >>> 24) / 255.0F;
+        return packRgba16f(red, green, blue, alpha);
+    }
+
     /** Encodes bounded linear Rec.2020 reflectance and a raw 0..255 coverage code. */
     public static long encodeLinearRgba16f(
             float red, float green, float blue, float coverageCode) {
@@ -48,14 +57,7 @@ public final class CanonicalColorEncoding {
                             + red + ", " + green + ", " + blue
                             + "), coverage=" + coverageCode);
         }
-        int encodedRed = Float.floatToFloat16(red) & 0xffff;
-        int encodedGreen = Float.floatToFloat16(green) & 0xffff;
-        int encodedBlue = Float.floatToFloat16(blue) & 0xffff;
-        int encodedCoverage = Float.floatToFloat16(coverageCode) & 0xffff;
-        return Integer.toUnsignedLong(encodedRed)
-                | (long) encodedGreen << 16
-                | (long) encodedBlue << 32
-                | (long) encodedCoverage << 48;
+        return packRgba16f(red, green, blue, coverageCode);
     }
 
     public static Color decodeRgba16f(long encoded) {
@@ -64,6 +66,14 @@ public final class CanonicalColorEncoding {
                 Float.float16ToFloat((short) (encoded >>> 16)),
                 Float.float16ToFloat((short) (encoded >>> 32)),
                 Float.float16ToFloat((short) (encoded >>> 48)) / 255.0F);
+    }
+
+    public static LinearTintModulation decodeLinearSrgbTintRgba16f(long encoded) {
+        return new LinearTintModulation(
+                Float.float16ToFloat((short) encoded),
+                Float.float16ToFloat((short) (encoded >>> 16)),
+                Float.float16ToFloat((short) (encoded >>> 32)),
+                Float.float16ToFloat((short) (encoded >>> 48)));
     }
 
     public static float decodeSrgb8(int code) {
@@ -134,6 +144,17 @@ public final class CanonicalColorEncoding {
                 + (float) SRGB_TO_REC2020[row][2] * blue;
     }
 
+    private static long packRgba16f(float red, float green, float blue, float alpha) {
+        int encodedRed = Float.floatToFloat16(red) & 0xffff;
+        int encodedGreen = Float.floatToFloat16(green) & 0xffff;
+        int encodedBlue = Float.floatToFloat16(blue) & 0xffff;
+        int encodedAlpha = Float.floatToFloat16(alpha) & 0xffff;
+        return Integer.toUnsignedLong(encodedRed)
+                | (long) encodedGreen << 16
+                | (long) encodedBlue << 32
+                | (long) encodedAlpha << 48;
+    }
+
     private static float[] createSrgb8ToLinear() {
         float[] result = new float[256];
         for (int code = 0; code < result.length; code++) {
@@ -184,6 +205,42 @@ public final class CanonicalColorEncoding {
     }
 
     public record Color(float red, float green, float blue, float alpha) {
+    }
+
+    /** Linear-sRGB tint is an operand, not a scene color; apply returns linear Rec.2020. */
+    public record LinearTintModulation(float red, float green, float blue, float alpha) {
+        public LinearTintModulation {
+            if (!insideUnit(red) || !insideUnit(green)
+                    || !insideUnit(blue) || !insideUnit(alpha)) {
+                throw new IllegalArgumentException("Linear tint modulation must be in [0, 1]");
+            }
+        }
+
+        public Color apply(Color base) {
+            float sourceRed = inverseMatrixValue(0, base.red, base.green, base.blue) * this.red;
+            float sourceGreen = inverseMatrixValue(1, base.red, base.green, base.blue) * this.green;
+            float sourceBlue = inverseMatrixValue(2, base.red, base.green, base.blue) * this.blue;
+            return new Color(
+                    clampReflectance(matrixValue(0, sourceRed, sourceGreen, sourceBlue)),
+                    clampReflectance(matrixValue(1, sourceRed, sourceGreen, sourceBlue)),
+                    clampReflectance(matrixValue(2, sourceRed, sourceGreen, sourceBlue)),
+                    base.alpha * this.alpha);
+        }
+
+        private static boolean insideUnit(float value) {
+            return Float.isFinite(value) && value >= 0.0F && value <= 1.0F;
+        }
+
+        private static float inverseMatrixValue(
+                int row, float red, float green, float blue) {
+            return (float) REC2020_TO_SRGB[row][0] * red
+                    + (float) REC2020_TO_SRGB[row][1] * green
+                    + (float) REC2020_TO_SRGB[row][2] * blue;
+        }
+
+        private static float clampReflectance(float value) {
+            return Math.max(0.0F, Math.min(1.0F, value));
+        }
     }
 
     /** Row-major Rec.2020 operator for one exact source RGB8 tint identity. */

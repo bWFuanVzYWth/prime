@@ -3,6 +3,7 @@ import "prime_color_contract.slang";
 import "prime_material_core_abi.slang";
 import "math/packed_geometry.slang";
 import "service/material/tint.slang";
+import "service/material/continuous_tint.slang";
 
 layout(set = 0, binding = 0, std430) readonly buffer PrimeRendererDataInput {
     uint words[];
@@ -73,4 +74,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             float(packedMaterialCore & PRIME_MATERIAL_CORE_TEXTURE_ID_MASK),
             float((packedMaterialCore >> PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT)
                     & PRIME_MATERIAL_CORE_RECIPE_CONTROL_MASK));
+    PrimeLinearTintModulation continuousTint = primeUnpackLinearTintModulation(
+            uint2(primeRendererDataInput.words[30], primeRendererDataInput.words[31]));
+    primeRendererDataOutput.values[5] = primeApplyLinearTintModulation(
+            float4(canonicalBase, 0.75), continuousTint);
 }

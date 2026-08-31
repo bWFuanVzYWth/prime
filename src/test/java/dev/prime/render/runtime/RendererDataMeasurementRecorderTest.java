@@ -159,6 +159,8 @@ final class RendererDataMeasurementRecorderTest {
         assertTrue(encoded.contains("\"tintIds\""));
         assertTrue(encoded.contains("\"assignedCount\": 672"));
         assertTrue(encoded.contains("\"highWaterId\": 671"));
+        assertTrue(encoded.contains("\"surfaceTintField\""));
+        assertTrue(encoded.contains("\"quadSharedRgba16fBytes\": 0"));
         assertTrue(encoded.contains("\"maximumSampledMemory\""));
         assertTrue(encoded.contains("\"blockCount\": 9"));
         assertTrue(encoded.contains("\"allocationCount\": 8"));

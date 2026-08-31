@@ -1,6 +1,7 @@
 package dev.prime.render.terrain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -12,6 +13,24 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 final class SectionMeshAccumulatorTest {
+    @Test
+    void loweringScratchRetainsAllFourVertexTintValues() {
+        try (TestSprite sprite = new TestSprite("varying_vertex_tint")) {
+            SectionMeshAccumulator.Surface surface = opaqueSurface(sprite)
+                    .setVertexColors(
+                            0xff20_4020,
+                            0xff40_8040,
+                            0xff20_4020,
+                            0xff40_8040);
+
+            assertEquals(0xff20_4020, surface.vertexColor(0));
+            assertEquals(0xff40_8040, surface.vertexColor(1));
+            assertEquals(0xff20_4020, surface.vertexColor(2));
+            assertEquals(0xff40_8040, surface.vertexColor(3));
+            assertFalse(surface.hasUniformVertexColor());
+        }
+    }
+
     @Test
     void buildTransfersOwnershipExactlyOnce() {
         SectionMeshAccumulator accumulator = new SectionMeshAccumulator(
