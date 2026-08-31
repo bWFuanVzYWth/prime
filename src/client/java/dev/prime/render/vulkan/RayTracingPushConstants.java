@@ -3,6 +3,7 @@ package dev.prime.render.vulkan;
 import dev.prime.render.IntegratorFrameInput;
 import dev.prime.render.AtmosphereCoordinates;
 import dev.prime.render.IntegratorSettings;
+import dev.prime.render.RayConeParameters;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.nio.ByteBuffer;
@@ -57,7 +58,7 @@ public final class RayTracingPushConstants {
         buffer.putFloat(sunOffset, input.sunDirection().x());
         buffer.putFloat(sunOffset + Float.BYTES, input.sunDirection().y());
         buffer.putFloat(sunOffset + 2 * Float.BYTES, input.sunDirection().z());
-        buffer.putInt(ShaderAbi.PUSH_RAY_CONE_OFFSET, input.packedRayCone());
+        buffer.putInt(ShaderAbi.PUSH_RAY_CONE_OFFSET, packRayCone(input.rayCone()));
         int pathOffset = ShaderAbi.PUSH_PATH_OFFSET;
         buffer.putInt(
                 pathOffset,
@@ -88,5 +89,11 @@ public final class RayTracingPushConstants {
                         input.lighting().blockLightQuarterSteps(),
                         input.material().roughnessSteps(),
                         input.shInput()));
+    }
+
+    static int packRayCone(RayConeParameters rayCone) {
+        int width = Float.floatToFloat16(rayCone.width()) & 0xffff;
+        int mipBias = Float.floatToFloat16(rayCone.mipBias()) & 0xffff;
+        return width | mipBias << 16;
     }
 }

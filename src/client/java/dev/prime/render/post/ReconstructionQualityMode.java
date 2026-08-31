@@ -1,5 +1,6 @@
 package dev.prime.render.post;
 
+import dev.prime.render.RayConeParameters;
 import dev.prime.render.StableIds;
 import java.util.Optional;
 
@@ -60,20 +61,10 @@ public enum ReconstructionQualityMode {
         return Math.floorMod(frameIndex, this.jitterPhaseCount) + 1;
     }
 
-    /** Packs the primary-ray pixel-cone spread and mip bias as half2. */
-    public int packedRayCone(float projectionM00, float projectionM11, int width, int height) {
-        if (width <= 0 || height <= 0) {
-            throw new IllegalArgumentException("Ray-cone render dimensions must be positive");
-        }
-        float x = 2.0F / (width * Math.abs(projectionM00));
-        float y = 2.0F / (height * Math.abs(projectionM11));
-        float spread = Math.max(x, y);
-        if (!Float.isFinite(spread) || spread <= 0.0F) {
-            throw new IllegalArgumentException("Ray-cone projection must be finite and non-zero");
-        }
-        int low = Float.floatToFloat16(spread) & 0xffff;
-        int high = Float.floatToFloat16(this.mipBias) & 0xffff;
-        return low | high << 16;
+    public RayConeParameters rayConeParameters(
+            float projectionM00, float projectionM11, int width, int height) {
+        return RayConeParameters.fromProjection(
+                projectionM00, projectionM11, width, height, this.mipBias);
     }
 
     public static Optional<ReconstructionQualityMode> findById(String id) {

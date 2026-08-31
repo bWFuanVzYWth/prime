@@ -31,7 +31,7 @@ final class OfflineFramePlanTest {
         assertEquals(PostProcessingMode.DISABLED,
                 first.integrator().postProcessingMode());
         assertEquals(0, first.integrator().jitterPhase());
-        assertEquals(0, first.integrator().packedRayCone() >>> 16);
+        assertEquals(0.0F, first.integrator().rayCone().mipBias());
         assertFalse(first.integrator().shInput());
         first.requireSceneRevision(input.sceneRevision());
         assertThrows(

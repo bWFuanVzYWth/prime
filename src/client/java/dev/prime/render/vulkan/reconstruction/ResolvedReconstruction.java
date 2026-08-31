@@ -1,5 +1,6 @@
 package dev.prime.render.vulkan.reconstruction;
 
+import dev.prime.render.RayConeParameters;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionExtent;
 import dev.prime.render.post.ReconstructionQualityMode;
@@ -51,9 +52,9 @@ public record ResolvedReconstruction(
         return this.backend.jitterPhase(this.quality, frameIndex);
     }
 
-    public int packedRayCone(
+    public RayConeParameters rayConeParameters(
             float projectionM00, float projectionM11) {
-        return this.backend.packedRayCone(
+        return this.backend.rayConeParameters(
                 this.quality,
                 projectionM00,
                 projectionM11,

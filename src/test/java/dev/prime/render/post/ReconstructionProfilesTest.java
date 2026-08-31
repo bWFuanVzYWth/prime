@@ -14,8 +14,8 @@ final class ReconstructionProfilesTest {
         int[] mipBits = {
             0xbf80_0000, 0xbfca_e00d, 0xbfe1_fd0b, 0xc000_0000, 0xc025_7007
         };
-        int[] coneBits = {
-            0xbc00_110f, 0xbe57_1396, 0xbf10_144d, 0xc000_150f, 0xc12c_1796
+        int[] coneWidthBits = {
+            0x3a21_d13a, 0x3a72_b9d6, 0x3a89_9bc0, 0x3aa1_d13a, 0x3af2_b9d6
         };
         int[] phases = {8, 18, 23, 32, 72};
 
@@ -26,11 +26,13 @@ final class ReconstructionProfilesTest {
             assertEquals(heights[index], quality.renderExtent(3840, 2160).height());
             assertEquals(mipBits[index], Float.floatToRawIntBits(quality.mipBias()));
             assertEquals(phases[index], quality.jitterPhaseCount());
-            assertEquals(coneBits[index], quality.packedRayCone(
-                    1.25F,
-                    1.5F,
-                    widths[index],
-                    heights[index]));
+            assertEquals(
+                    coneWidthBits[index],
+                    Float.floatToRawIntBits(quality.rayConeParameters(
+                            1.25F,
+                            1.5F,
+                            widths[index],
+                            heights[index]).width()));
             assertEquals(0x0000_0000, Float.floatToRawIntBits(quality.jitter(0).x()));
             assertEquals(0xbe2a_aaaa, Float.floatToRawIntBits(quality.jitter(0).y()));
         }

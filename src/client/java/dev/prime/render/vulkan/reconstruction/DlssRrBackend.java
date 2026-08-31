@@ -77,16 +77,6 @@ final class DlssRrBackend implements ReconstructionBackend {
     }
 
     @Override
-    public int packedRayCone(
-            ReconstructionQualityMode quality,
-            float projectionM00,
-            float projectionM11,
-            int width,
-            int height) {
-        return quality.packedRayCone(projectionM00, projectionM11, width, height);
-    }
-
-    @Override
     public String executionLabel() {
         return "Prime 1spp path tracing and DLSS Ray Reconstruction";
     }

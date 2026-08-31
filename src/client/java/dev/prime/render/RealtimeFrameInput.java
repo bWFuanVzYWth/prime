@@ -155,14 +155,14 @@ public record RealtimeFrameInput(
             int sampleIndex,
             int sampleEpoch,
             int jitterPhase,
-            int packedRayCone,
+            RayConeParameters rayCone,
             boolean historyValid) {
         return new IntegratorFrameInput(
                 this.camera,
                 this.width,
                 this.height,
                 this.astronomy,
-                packedRayCone,
+                rayCone,
                 this.additionalSpecularBounces,
                 this.minimumBounces,
                 this.maximumBounces,

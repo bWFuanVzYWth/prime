@@ -15,7 +15,7 @@ public record IntegratorFrameInput(
         int width,
         int height,
         AstronomyState astronomy,
-        int packedRayCone,
+        RayConeParameters rayCone,
         int additionalSpecularBounces,
         int minimumBounces,
         int maximumBounces,
@@ -36,7 +36,7 @@ public record IntegratorFrameInput(
             int width,
             int height,
             AstronomyState astronomy,
-            int packedRayCone,
+            RayConeParameters rayCone,
             int maximumBounces,
             int sampleIndex,
             int sampleEpoch,
@@ -48,7 +48,7 @@ public record IntegratorFrameInput(
             MaterialSettings.Snapshot material,
             boolean shInput) {
         this(
-                camera, width, height, astronomy, packedRayCone,
+                camera, width, height, astronomy, rayCone,
                 SpecularBounceSettings.DEFAULT_COUNT, MinimumBounceSettings.DEFAULT_COUNT,
                 maximumBounces,
                 sampleIndex, sampleEpoch, jitterPhase,
@@ -61,7 +61,7 @@ public record IntegratorFrameInput(
             int width,
             int height,
             AstronomyState astronomy,
-            int packedRayCone,
+            RayConeParameters rayCone,
             int maximumBounces,
             int additionalSpecularBounces,
             int sampleIndex,
@@ -74,7 +74,7 @@ public record IntegratorFrameInput(
             MaterialSettings.Snapshot material,
             boolean shInput) {
         this(
-                camera, width, height, astronomy, packedRayCone,
+                camera, width, height, astronomy, rayCone,
                 additionalSpecularBounces, MinimumBounceSettings.DEFAULT_COUNT,
                 maximumBounces,
                 sampleIndex, sampleEpoch, jitterPhase, cameraInWater,
@@ -86,7 +86,7 @@ public record IntegratorFrameInput(
             int width,
             int height,
             AstronomyState astronomy,
-            int packedRayCone,
+            RayConeParameters rayCone,
             int additionalSpecularBounces,
             int minimumBounces,
             int maximumBounces,
@@ -104,7 +104,7 @@ public record IntegratorFrameInput(
                 width,
                 height,
                 astronomy,
-                packedRayCone,
+                rayCone,
                 additionalSpecularBounces,
                 minimumBounces,
                 maximumBounces,
@@ -123,6 +123,7 @@ public record IntegratorFrameInput(
     public IntegratorFrameInput {
         Objects.requireNonNull(camera, "camera");
         Objects.requireNonNull(astronomy, "astronomy");
+        Objects.requireNonNull(rayCone, "rayCone");
         Objects.requireNonNull(postProcessingMode, "postProcessingMode");
         Objects.requireNonNull(transparentGuideMode, "transparentGuideMode");
         Objects.requireNonNull(lighting, "lighting");
@@ -140,16 +141,6 @@ public record IntegratorFrameInput(
         if (sampleIndex < 0 || sampleIndex >= 1 << 16) {
             throw new IllegalArgumentException(
                     "Sample index must fit the Sobol sequence");
-        }
-        float rayConeWidth =
-                Float.float16ToFloat((short) packedRayCone);
-        float mipBias =
-                Float.float16ToFloat((short) (packedRayCone >>> 16));
-        if (!(rayConeWidth > 0.0F)
-                || !Float.isFinite(rayConeWidth)
-                || !Float.isFinite(mipBias)) {
-            throw new IllegalArgumentException(
-                    "Packed ray cone must contain a positive finite width and finite mip bias");
         }
         if (!camera.isFinite()) {
             throw new IllegalArgumentException(

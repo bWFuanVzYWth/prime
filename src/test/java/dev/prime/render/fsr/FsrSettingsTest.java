@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.prime.render.post.SubpixelJitter;
+import dev.prime.render.RayConeParameters;
 import dev.prime.render.post.ReconstructionExtent;
 import dev.prime.render.post.ReconstructionQualityMode;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -70,11 +71,11 @@ final class FsrSettingsTest {
     @Test
     void rayConeCarriesProjectionFootprintAndModeMipBias() {
         ReconstructionQualityMode mode = ReconstructionQualityMode.QUALITY;
-        int packed = mode.packedRayCone(1.0F, 1.0F, 1920, 1080);
-        float spread = Float.float16ToFloat((short) packed);
-        float bias = Float.float16ToFloat((short) (packed >>> 16));
-        assertEquals(2.0F / 1080.0F, spread, 1.0e-6F);
-        assertEquals(mode.mipBias(), bias, 5.0e-4F);
+        RayConeParameters rayCone = mode.rayConeParameters(1.0F, 1.0F, 1920, 1080);
+        assertEquals(2.0F / 1080.0F, rayCone.width());
+        assertEquals(mode.mipBias(), rayCone.mipBias());
+        assertTrue(rayCone.binary16LodError()
+                <= RayConeParameters.MAXIMUM_BINARY16_LOD_ERROR);
     }
 
     @Test

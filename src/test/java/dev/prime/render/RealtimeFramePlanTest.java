@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 
 final class RealtimeFramePlanTest {
     private static final SubpixelJitter JITTER = new SubpixelJitter(-0.25F, 1.0F / 6.0F);
-    private static final int PACKED_RAY_CONE = Float.floatToFloat16(0.1F) & 0xffff;
+    private static final RayConeParameters RAY_CONE = new RayConeParameters(0.1F, 0.0F);
 
     @Test
     void everyProductModeProducesOneBackendNeutralPlan() {
@@ -33,11 +33,11 @@ final class RealtimeFramePlanTest {
                     new ReconstructionFrame(0, JITTER, true),
                     JITTER,
                     7,
-                    PACKED_RAY_CONE);
+                    RAY_CONE);
 
             assertEquals(mode, plan.integrator().postProcessingMode());
             assertEquals(input.transparentGuideMode(), plan.integrator().transparentGuideMode());
-            assertEquals(PACKED_RAY_CONE, plan.integrator().packedRayCone());
+            assertEquals(RAY_CONE, plan.integrator().rayCone());
             assertEquals(input.maximumBounces(), plan.integrator().maximumBounces());
             assertEquals(
                     input.minimumBounces(),
@@ -84,7 +84,7 @@ final class RealtimeFramePlanTest {
                 new ReconstructionFrame(1, JITTER, false),
                 JITTER,
                 8,
-                PACKED_RAY_CONE);
+                RAY_CONE);
 
         assertFalse(second.reset());
         assertTrue(plan.integrator().historyValid());
@@ -116,7 +116,7 @@ final class RealtimeFramePlanTest {
                         new ReconstructionFrame(0, JITTER, false),
                         JITTER,
                         1,
-                        PACKED_RAY_CONE));
+                        RAY_CONE));
         assertThrows(
                 IllegalStateException.class,
                 () -> RealtimeFramePlan.complete(
@@ -126,7 +126,7 @@ final class RealtimeFramePlanTest {
                         new ReconstructionFrame(0, new SubpixelJitter(0.0F, 0.0F), true),
                         JITTER,
                         1,
-                        PACKED_RAY_CONE));
+                        RAY_CONE));
         ReconstructionFrameParameters wrongTexture = new ReconstructionFrameParameters(
                 parameters.camera(),
                 parameters.frameTimeNanos(),
@@ -145,7 +145,7 @@ final class RealtimeFramePlanTest {
                         new ReconstructionFrame(0, JITTER, true),
                         JITTER,
                         1,
-                        PACKED_RAY_CONE));
+                        RAY_CONE));
     }
 
     private static RealtimeFrameInput input(PostProcessingMode mode) {

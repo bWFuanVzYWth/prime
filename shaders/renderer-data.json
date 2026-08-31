@@ -152,14 +152,25 @@
     },
     {
       "id": "RayConeWidth",
-      "valueKind": "accumulated-transport",
+      "valueKind": "bounded-continuous",
       "components": 1,
       "domain": "transport",
-      "space": "world",
-      "unit": "block",
+      "space": "view-projection",
+      "unit": "block-footprint-per-block-distance",
       "colorimetry": "none",
-      "validity": "finite nonnegative footprint propagated along the active path",
-      "minimumEncoding": "r32f-baseline"
+      "validity": "finite positive primary pixel-cone spread; distance scaling is derived at the hit",
+      "minimumEncoding": "half2-ray-cone-lod-audited"
+    },
+    {
+      "id": "TextureMipBias",
+      "valueKind": "bounded-continuous",
+      "components": 1,
+      "domain": "texture-sampling",
+      "space": "texture-local",
+      "unit": "mip-level",
+      "colorimetry": "none",
+      "validity": "finite quality-profile value; binary16 pair must keep final LOD error within 1/512 mip",
+      "minimumEncoding": "half2-ray-cone-lod-audited"
     },
     {
       "id": "TextureLod",
@@ -289,6 +300,16 @@
       "decode": "identity",
       "exactCodes": "none",
       "errorContract": "baseline-not-an-approval-for-narrowing"
+    },
+    {
+      "id": "half2-ray-cone-lod-audited",
+      "scalarOrFormat": "uint32-containing-two-ieee754-binary16-lanes",
+      "bytes": 4,
+      "channelMap": "low16=ray-cone-width,high16=mip-bias",
+      "encode": "round-each-semantic-f32-to-nearest-binary16-at-vulkan-push-boundary",
+      "decode": "unpack-binary16x2-to-binary32-before-lod-calculation",
+      "exactCodes": "none",
+      "errorContract": "combined-ray-cone-and-bias-error-at-most-1/512-mip"
     },
     {
       "id": "rg32f-baseline",

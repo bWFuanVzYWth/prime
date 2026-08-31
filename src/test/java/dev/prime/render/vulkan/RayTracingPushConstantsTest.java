@@ -11,8 +11,10 @@ import dev.prime.render.IntegratorFrameInput;
 import dev.prime.render.IntegratorSettings;
 import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
+import dev.prime.render.RayConeParameters;
 import dev.prime.render.SunDirection;
 import dev.prime.render.post.PostProcessingMode;
+import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.post.TransparentGuideMode;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.vulkan.terrain.TerrainScene;
@@ -23,6 +25,26 @@ import org.joml.Matrix4f;
 import org.junit.jupiter.api.Test;
 
 final class RayTracingPushConstantsTest {
+    @Test
+    void fiveProductionProfilesKeepTheirHistoricalRayConeAbiBits() {
+        int[] widths = {3840, 2560, 2258, 1920, 1280};
+        int[] heights = {2160, 1440, 1270, 1080, 720};
+        int[] expected = {
+            0xbc00_110f, 0xbe57_1396, 0xbf10_144d, 0xc000_150f, 0xc12c_1796
+        };
+        ReconstructionQualityMode[] qualities = ReconstructionQualityMode.values();
+        for (int index = 0; index < qualities.length; index++) {
+            assertEquals(
+                    expected[index],
+                    RayTracingPushConstants.packRayCone(
+                            qualities[index].rayConeParameters(
+                                    1.25F,
+                                    1.5F,
+                                    widths[index],
+                                    heights[index])));
+        }
+    }
+
     @Test
     void completeFrameInputEncodesDeterministicallyAndOverwritesEveryByte() {
         Fixture fixture = input(37);
@@ -45,6 +67,9 @@ final class RayTracingPushConstantsTest {
         assertEquals(
                 input.height(),
                 firstBuffer.getInt(ShaderAbi.PUSH_OUTPUT_EXTENT_OFFSET + Integer.BYTES));
+        assertEquals(
+                0x1234_5678,
+                firstBuffer.getInt(ShaderAbi.PUSH_RAY_CONE_OFFSET));
         assertEquals(
                 IntegratorSettings.packSampleControl(
                         input.sampleIndex(),
@@ -78,7 +103,7 @@ final class RayTracingPushConstantsTest {
                         0,
                         valid.height(),
                         valid.astronomy(),
-                        valid.packedRayCone(),
+                        valid.rayCone(),
                         valid.maximumBounces(),
                         valid.sampleIndex(),
                         valid.sampleEpoch(),
@@ -96,7 +121,7 @@ final class RayTracingPushConstantsTest {
                         (1 << 18) + 1,
                         valid.height(),
                         valid.astronomy(),
-                        valid.packedRayCone(),
+                        valid.rayCone(),
                         valid.maximumBounces(),
                         valid.sampleIndex(),
                         valid.sampleEpoch(),
@@ -135,7 +160,9 @@ final class RayTracingPushConstantsTest {
                 AstronomyState.atSolarHourAngle(
                         0.7F,
                         new AstronomySettings(-45, 270)),
-                0x1234_5678,
+                new RayConeParameters(
+                        Float.float16ToFloat((short) 0x5678),
+                        Float.float16ToFloat((short) 0x1234)),
                 4,
                 sampleIndex,
                 19,

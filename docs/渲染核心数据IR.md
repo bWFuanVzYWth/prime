@@ -530,7 +530,7 @@ motion、ID 和 mask 的可视化是显式 diagnostic transform，不得通过�
 | offline surface 108 B + stage 112 B | OfflineTraceSurface/StageState | 两个 MediumId 已进入 surface，stage stride 未增长 | schema/docs，阶段 2 第一批已完成 |
 | FP16 shadow-medium recognition | MediumId + continuous parameters | 身份已改为 exact ID；连续 extinction 的 FP16 数值误差仍待审计 | transport，阶段 2 身份迁移已完成 |
 | FP16 realtime etaScale | RouletteEtaScale | 分布误差未审计 | error oracle 后决定 encoding，阶段 1/2 |
-| packed ray cone/texture LOD | RayCone/TextureLod | 精度、单位和 mip 传播分散 | transport/texture schema，阶段 1/3 |
+| ray cone/texture LOD | RayConeWidth/TextureMipBias/TextureLod | 已用 typed f32 参数限制 binary16 push 误差；derived LOD 保持 f32 | 已完成用途专属 ABI 门禁 |
 | `transportMetadata`/各 `w` lane | phase-specific typed fields | 调用方记忆语义 | generated accessors，阶段 2/3 |
 | FrameCamera row0→clip -Y | TopLeftCamera | 与 NVIDIA 图像方向相反 | frame camera，阶段 2 |
 | NrdCameraTransform Y flip | NrdCameraAdapter | 既承担 core 补偿又承担 NRD 差异 | NRD adapter，阶段 2 |

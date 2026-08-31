@@ -38,7 +38,7 @@ public record RealtimeFramePlan(
             ReconstructionFrame reconstructionFrame,
             SubpixelJitter expectedJitter,
             int jitterPhase,
-            int packedRayCone) {
+            RayConeParameters rayCone) {
         Objects.requireNonNull(input, "input");
         Objects.requireNonNull(sample, "sample");
         input.requireReconstructionInput(reconstruction, sample.reset());
@@ -61,7 +61,7 @@ public record RealtimeFramePlan(
                         sample.sampleIndex(),
                         sample.epoch(),
                         jitterPhase,
-                        packedRayCone,
+                        rayCone,
                         !reconstructionFrame.reset()),
                 reconstruction,
                 input.residentSceneRevision(),

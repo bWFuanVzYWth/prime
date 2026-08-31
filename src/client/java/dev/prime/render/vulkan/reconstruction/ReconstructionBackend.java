@@ -1,5 +1,6 @@
 package dev.prime.render.vulkan.reconstruction;
 
+import dev.prime.render.RayConeParameters;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionExtent;
 import dev.prime.render.post.ReconstructionQualityMode;
@@ -27,13 +28,13 @@ interface ReconstructionBackend {
 
     int jitterPhase(ReconstructionQualityMode quality, int frameIndex);
 
-    default int packedRayCone(
+    default RayConeParameters rayConeParameters(
             ReconstructionQualityMode quality,
             float projectionM00,
             float projectionM11,
             int width,
             int height) {
-        return quality.packedRayCone(projectionM00, projectionM11, width, height);
+        return quality.rayConeParameters(projectionM00, projectionM11, width, height);
     }
 
     String executionLabel();

@@ -319,7 +319,7 @@ final class RealtimeRenderer implements Destroyable {
                     reconstructionFrame,
                     selection.jitter(reconstructionFrame.frameIndex()),
                     selection.jitterPhase(reconstructionFrame.frameIndex()),
-                    selection.packedRayCone(
+                    selection.rayConeParameters(
                             input.camera().projection().m00(),
                             input.camera().projection().m11()));
         } catch (RuntimeException exception) {

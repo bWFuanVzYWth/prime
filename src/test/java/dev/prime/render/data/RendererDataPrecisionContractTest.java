@@ -80,7 +80,8 @@ final class RendererDataPrecisionContractTest {
     void accumulatedFootprintsAndWorldDirectionsRemainAtTheirConservativeBaselines() {
         assertMinimumEncoding("LinearRec2020Radiance", "rgba32f-baseline");
         assertMinimumEncoding("LinearRec2020Reflectance", "rgb32f-baseline");
-        assertMinimumEncoding("RayConeWidth", "r32f-baseline");
+        assertMinimumEncoding("RayConeWidth", "half2-ray-cone-lod-audited");
+        assertMinimumEncoding("TextureMipBias", "half2-ray-cone-lod-audited");
         assertMinimumEncoding("TextureLod", "r32f-baseline");
         assertMinimumEncoding("AreaDirectionWorld", "rgb32f-baseline");
         assertMinimumEncoding("ShDirectionWorld", "rgb32f-baseline");

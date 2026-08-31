@@ -67,11 +67,12 @@ public record OfflineFrameInput(
                         this.width,
                         this.height,
                         this.astronomy,
-                        packRayCone(
+                        RayConeParameters.fromProjection(
                                 this.camera.projection().m00(),
                                 this.camera.projection().m11(),
                                 this.width,
-                                this.height),
+                                this.height,
+                                0.0F),
                         this.maximumBounces,
                         sampleIndex,
                         sampleEpoch,
@@ -88,19 +89,4 @@ public record OfflineFrameInput(
         return this.astronomy.sunDirection();
     }
 
-    private static int packRayCone(
-            float projectionM00,
-            float projectionM11,
-            int width,
-            int height) {
-        float x = 2.0F / (width * Math.abs(projectionM00));
-        float y = 2.0F / (height * Math.abs(projectionM11));
-        float spread = Math.max(x, y);
-        if (!Float.isFinite(spread) || spread <= 0.0F) {
-            throw new IllegalArgumentException(
-                    "Offline ray-cone projection must be finite and non-zero");
-        }
-        // Native offline accumulation has no upscaler-specific LOD bias.
-        return Float.floatToFloat16(spread) & 0xffff;
-    }
 }
