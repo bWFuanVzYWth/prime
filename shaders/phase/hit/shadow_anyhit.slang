@@ -3,6 +3,7 @@ module "phase/hit/shadow_anyhit.slang";
 
 
 import glsl;
+import "prime_material_core_abi.slang";
 import "prime_abi_types.slang";
 import "math/packed_geometry.slang";
 import "policy/runtime/config.slang";
@@ -55,12 +56,15 @@ void primeAccumulateSolidMediumBoundary(
 }
 
 float3 primeSurfaceBoundaryExtinction(PrimeSurfaceRelation relation) {
-    if (((relation.control >> 8u) & PRIME_RECIPE_WATER) != 0u) {
+    uint core = primeMaterialCoreWord(relation.materialId);
+    uint recipeControl = (core >> PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT)
+            & PRIME_MATERIAL_CORE_RECIPE_CONTROL_MASK;
+    if ((recipeControl & PRIME_RECIPE_WATER) != 0u) {
         return PRIME_PURE_WATER_ABSORPTION_M_INV;
     }
     float opacity;
     float3 baseColor = primeStaticBaseColor(
-            relation.textureId,
+            core & PRIME_MATERIAL_CORE_TEXTURE_ID_MASK,
             relation.tint,
             primeUnpackUv(relation.referenceUv),
             0.0,

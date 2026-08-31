@@ -3,8 +3,8 @@ package dev.prime.render.terrain;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import dev.prime.render.vulkan.terrain.TerrainScene;
 import dev.prime.render.shader.ShaderAbi;
+import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -47,6 +47,18 @@ final class SceneStatisticsTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new TerrainScene.SceneStatistics(0, 0L, 0L, 0, -1));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerrainScene.SceneStatistics(
+                        0,
+                        0L,
+                        0L,
+                        0,
+                        0,
+                        TextureTintUsage.EMPTY,
+                        MaterialTableCandidate.EMPTY,
+                        3L,
+                        4L));
     }
 
     @Test

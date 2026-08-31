@@ -16,7 +16,6 @@ public struct PrimeSurfaceRelation {
     public uint control;
     public uint referenceUv;
     public uint tint;
-    public uint textureId;
     public uint mediumId;
     public uint materialId;
     public PrimitiveRecord material;
@@ -176,7 +175,6 @@ public PrimeSurfaceRelation primeSurfaceRelation(SectionRecord section) {
     result.control = 0u;
     result.referenceUv = 0u;
     result.tint = 0u;
-    result.textureId = 0u;
     result.mediumId = 0u;
     result.materialId = 0u;
     result.material.uv0 = 0u;
@@ -200,9 +198,8 @@ public PrimeSurfaceRelation primeSurfaceRelation(SectionRecord section) {
     if (kind == PRIME_SURFACE_RELATION_BOUNDARY) {
         result.referenceUv = relations[offset + 1u];
         result.tint = relations[offset + 2u];
-        result.textureId = relations[offset + 3u];
-        result.mediumId = primeMediumId(relations[offset + 4u]);
-        result.materialId = primeMaterialId(relations[offset + 4u]);
+        result.mediumId = primeMediumId(relations[offset + 3u]);
+        result.materialId = primeMaterialId(relations[offset + 3u]);
     } else {
         result.material.uv0 = relations[offset + 1u];
         result.material.uv1 = relations[offset + 2u];

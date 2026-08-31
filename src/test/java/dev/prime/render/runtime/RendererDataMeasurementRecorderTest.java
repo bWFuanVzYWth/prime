@@ -58,7 +58,9 @@ final class RendererDataMeasurementRecorderTest {
                         7,
                         8,
                         textureTints,
-                        materialCandidates);
+                        materialCandidates,
+                        4096L,
+                        3584L);
         TerrainScene.MediumIdStatistics mediumIds =
                 new TerrainScene.MediumIdStatistics(4, 4L);
         TerrainScene.MaterialIdStatistics materialIds =
@@ -151,6 +153,8 @@ final class RendererDataMeasurementRecorderTest {
         assertTrue(encoded.contains("\"materialIds\""));
         assertTrue(encoded.contains("\"remainingU16Ids\": 65534"));
         assertTrue(encoded.contains("\"activeCoreBytes\": 8"));
+        assertTrue(encoded.contains("\"maximumSurfaceRelationSourceBytes\": 4096"));
+        assertTrue(encoded.contains("\"maximumSurfaceRelationGpuBytes\": 3584"));
         assertTrue(encoded.contains("\"reservedCoreBytes\": 262144"));
         assertTrue(encoded.contains("\"tintIds\""));
         assertTrue(encoded.contains("\"assignedCount\": 672"));

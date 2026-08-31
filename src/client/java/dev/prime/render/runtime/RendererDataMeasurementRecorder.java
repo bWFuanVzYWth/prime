@@ -52,6 +52,8 @@ final class RendererDataMeasurementRecorder {
     private int maximumTlasInstances;
     private long maximumUniqueTriangles;
     private long maximumInstancedTriangles;
+    private long maximumSurfaceRelationSourceBytes;
+    private long maximumSurfaceRelationGpuBytes;
     private int maximumAreaLights;
     private int maximumLightTreeNodes;
     private TerrainScene.MediumIdStatistics mediumIds;
@@ -210,6 +212,12 @@ final class RendererDataMeasurementRecorder {
                 this.maximumUniqueTriangles, scene.uniqueBlasTriangleCount());
         this.maximumInstancedTriangles = Math.max(
                 this.maximumInstancedTriangles, scene.instancedTriangleCount());
+        this.maximumSurfaceRelationSourceBytes = Math.max(
+                this.maximumSurfaceRelationSourceBytes,
+                scene.surfaceRelationSourceBytes());
+        this.maximumSurfaceRelationGpuBytes = Math.max(
+                this.maximumSurfaceRelationGpuBytes,
+                scene.surfaceRelationGpuBytes());
         this.maximumAreaLights = Math.max(
                 this.maximumAreaLights, scene.areaLightEmitterCount());
         this.maximumLightTreeNodes = Math.max(
@@ -265,6 +273,10 @@ final class RendererDataMeasurementRecorder {
         field(json, "maximumTlasInstances", this.maximumTlasInstances);
         field(json, "maximumUniqueBlasTriangles", this.maximumUniqueTriangles);
         field(json, "maximumInstancedTriangles", this.maximumInstancedTriangles);
+        field(json, "maximumSurfaceRelationSourceBytes",
+                this.maximumSurfaceRelationSourceBytes);
+        field(json, "maximumSurfaceRelationGpuBytes",
+                this.maximumSurfaceRelationGpuBytes);
         field(json, "maximumAreaLightEmitters", this.maximumAreaLights);
         field(json, "maximumTopLevelLightTreeNodes", this.maximumLightTreeNodes);
         trimComma(json).append("\n  },");

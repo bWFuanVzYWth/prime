@@ -3,6 +3,7 @@ package dev.prime.render.vulkan.terrain;
 import dev.prime.render.terrain.CpuClusterMesh;
 import dev.prime.render.terrain.CpuSectionMesh;
 import dev.prime.render.terrain.CpuVoxelMesh;
+import dev.prime.render.terrain.GpuSurfaceRelationTable;
 import dev.prime.render.terrain.OpacityMicromapData;
 import dev.prime.render.vulkan.StagingArena;
 import org.lwjgl.vulkan.VkMicromapTriangleEXT;
@@ -22,9 +23,10 @@ public final class ClusterStagingLayout {
             result = segmentEndOffset(result, segment.cutoutTriangleCount(), segment.cutoutPrimitiveCount());
             result = segmentEndOffset(result, segment.transmissiveTriangleCount(), segment.transmissivePrimitiveCount());
         }
-        if (mesh.surfaceRelationBytes() != 0L) {
+        long surfaceRelationBytes = GpuSurfaceRelationTable.byteSize(mesh);
+        if (surfaceRelationBytes != 0L) {
             result = StagingArena.requiredEndOffset(
-                    result, mesh.surfaceRelationBytes(), Integer.BYTES);
+                    result, surfaceRelationBytes, Integer.BYTES);
         }
         result = opacityEndOffset(result, mesh.opacityMicromap(), includeOpacityMicromap);
         if (!mesh.lights().isEmpty()) {

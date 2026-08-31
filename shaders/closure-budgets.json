@@ -23,7 +23,7 @@
     },
     "entry/hit/shadow.anyhit.slang": {
       "maxFiles": 18,
-      "maxBytes": 69142
+      "maxBytes": 69281
     },
     "entry/hit/shadow.closesthit.slang": {
       "maxFiles": 3,
@@ -39,7 +39,7 @@
     },
     "entry/hit/world.closesthit.slang": {
       "maxFiles": 22,
-      "maxBytes": 94752
+      "maxBytes": 94893
     },
     "entry/hit/world.miss.slang": {
       "maxFiles": 4,

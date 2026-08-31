@@ -2,6 +2,7 @@
 module "phase/hit/world_closesthit.slang";
 
 import glsl;
+import "prime_material_core_abi.slang";
 import "prime_abi_types.slang";
 import "math/packed_geometry.slang";
 import "policy/runtime/config.slang";
@@ -85,10 +86,12 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     primePayload.adjacentInterfaceControl = 0u;
     if ((relation.control & PRIME_SURFACE_RELATION_KIND_MASK)
             == PRIME_SURFACE_RELATION_BOUNDARY) {
+        uint adjacentCore = primeMaterialCoreWord(relation.materialId);
         PrimeMaterialSample adjacent = primeEvaluateMaterialReference(
-                relation.control >> 8u,
+                (adjacentCore >> PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT)
+                        & PRIME_MATERIAL_CORE_RECIPE_CONTROL_MASK,
                 relation.tint,
-                relation.textureId,
+                adjacentCore & PRIME_MATERIAL_CORE_TEXTURE_ID_MASK,
                 primeUnpackUv(relation.referenceUv));
         primePayload.adjacentBaseColor = adjacent.baseColor;
         primePayload.adjacentMediumId = relation.mediumId;

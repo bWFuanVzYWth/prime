@@ -993,6 +993,8 @@ public final class TerrainScene implements AutoCloseable {
         int tlasInstances = 0;
         long uniqueTriangles = 0L;
         long instancedTriangles = 0L;
+        long surfaceRelationSourceBytes = 0L;
+        long surfaceRelationGpuBytes = 0L;
         int areaLightEmitters = 0;
         ArrayList<TextureTintUsage> textureTintUsage = this.measurementsEnabled
                 ? new ArrayList<>(finalClusters.size())
@@ -1022,6 +1024,10 @@ public final class TerrainScene implements AutoCloseable {
             cluster.forEachBlas(blas -> uniqueBlases.put(blas, Boolean.TRUE));
             instancedTriangles = Math.addExact(
                     instancedTriangles, cluster.instancedTriangleCount());
+            surfaceRelationSourceBytes = Math.addExact(
+                    surfaceRelationSourceBytes, cluster.surfaceRelationSourceBytes());
+            surfaceRelationGpuBytes = Math.addExact(
+                    surfaceRelationGpuBytes, cluster.surfaceRelationGpuBytes());
             areaLightEmitters = Math.addExact(
                     areaLightEmitters, cluster.lights().emitterCount());
             if (textureTintUsage != null) {
@@ -1049,7 +1055,9 @@ public final class TerrainScene implements AutoCloseable {
                         : TextureTintUsage.combine(textureTintUsage),
                 materialTableCandidates == null
                         ? MaterialTableCandidate.EMPTY
-                        : MaterialTableCandidate.combine(materialTableCandidates));
+                        : MaterialTableCandidate.combine(materialTableCandidates),
+                surfaceRelationSourceBytes,
+                surfaceRelationGpuBytes);
 
         TopLevelAccelerationStructure previousTlas = this.currentTlas;
         VulkanBuffer previousWorldLights = replaceWorldLights ? this.currentWorldLights : null;
@@ -1209,8 +1217,9 @@ public final class TerrainScene implements AutoCloseable {
                 new ArrayList<>(mesh.voxelMeshes().size());
         try {
             if (mesh.triangleCount() != 0L) {
+                long surfaceRelationBytes = GpuSurfaceRelationTable.byteSize(mesh);
                 long primitiveBytes = Math.addExact(
-                        mesh.primitiveBytes(), mesh.surfaceRelationBytes());
+                        mesh.primitiveBytes(), surfaceRelationBytes);
                 if (upload.dynamic()) {
                     dynamicBuffers = this.dynamicBufferPool.acquire(
                             mesh.positionBytes(),
@@ -1338,6 +1347,8 @@ public final class TerrainScene implements AutoCloseable {
                     this.measurementsEnabled
                             ? MaterialTableCandidate.measure(mesh)
                             : MaterialTableCandidate.EMPTY,
+                    mesh.surfaceRelationBytes(),
+                    GpuSurfaceRelationTable.byteSize(mesh),
                     upload.dynamic(),
                     dynamicBuffers);
         } catch (RuntimeException exception) {
@@ -1527,6 +1538,8 @@ public final class TerrainScene implements AutoCloseable {
                     relations,
                     Math.toIntExact(mesh.primitiveCount()),
                     tintResolver);
+            relations = GpuSurfaceRelationTable.encodeResolved(
+                    relations, Math.toIntExact(mesh.primitiveCount()));
             copyBuffer(
                     commandBuffer,
                     staging.write(relations, Integer.BYTES),
@@ -1703,7 +1716,9 @@ public final class TerrainScene implements AutoCloseable {
             int areaLightEmitterCount,
             int topLevelLightTreeNodeCount,
             TextureTintUsage textureTintUsage,
-            MaterialTableCandidate materialTableCandidate) {
+            MaterialTableCandidate materialTableCandidate,
+            long surfaceRelationSourceBytes,
+            long surfaceRelationGpuBytes) {
         static final SceneStatistics EMPTY =
                 new SceneStatistics(
                         0,
@@ -1712,7 +1727,29 @@ public final class TerrainScene implements AutoCloseable {
                         0,
                         0,
                         TextureTintUsage.EMPTY,
-                        MaterialTableCandidate.EMPTY);
+                        MaterialTableCandidate.EMPTY,
+                        0L,
+                        0L);
+
+        public SceneStatistics(
+                int tlasInstanceCount,
+                long uniqueBlasTriangleCount,
+                long instancedTriangleCount,
+                int areaLightEmitterCount,
+                int topLevelLightTreeNodeCount,
+                TextureTintUsage textureTintUsage,
+                MaterialTableCandidate materialTableCandidate) {
+            this(
+                    tlasInstanceCount,
+                    uniqueBlasTriangleCount,
+                    instancedTriangleCount,
+                    areaLightEmitterCount,
+                    topLevelLightTreeNodeCount,
+                    textureTintUsage,
+                    materialTableCandidate,
+                    0L,
+                    0L);
+        }
 
         public SceneStatistics(
                 int tlasInstanceCount,
@@ -1728,7 +1765,9 @@ public final class TerrainScene implements AutoCloseable {
                     areaLightEmitterCount,
                     topLevelLightTreeNodeCount,
                     textureTintUsage,
-                    MaterialTableCandidate.EMPTY);
+                    MaterialTableCandidate.EMPTY,
+                    0L,
+                    0L);
         }
 
         public SceneStatistics(
@@ -1744,7 +1783,9 @@ public final class TerrainScene implements AutoCloseable {
                     areaLightEmitterCount,
                     topLevelLightTreeNodeCount,
                     TextureTintUsage.EMPTY,
-                    MaterialTableCandidate.EMPTY);
+                    MaterialTableCandidate.EMPTY,
+                    0L,
+                    0L);
         }
 
         public SceneStatistics {
@@ -1756,7 +1797,10 @@ public final class TerrainScene implements AutoCloseable {
                     || uniqueBlasTriangleCount < 0L
                     || instancedTriangleCount < 0L
                     || areaLightEmitterCount < 0
-                    || topLevelLightTreeNodeCount < 0) {
+                    || topLevelLightTreeNodeCount < 0
+                    || surfaceRelationSourceBytes < 0L
+                    || surfaceRelationGpuBytes < 0L
+                    || surfaceRelationGpuBytes > surfaceRelationSourceBytes) {
                 throw new IllegalArgumentException(
                         "Resident scene statistics must be non-negative");
             }

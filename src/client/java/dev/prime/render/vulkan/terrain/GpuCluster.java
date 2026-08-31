@@ -25,6 +25,8 @@ record GpuCluster(
         CompiledClusterLights.Summary lights,
         TextureTintUsage textureTintUsage,
         MaterialTableCandidate materialTableCandidate,
+        long surfaceRelationSourceBytes,
+        long surfaceRelationGpuBytes,
         boolean dynamic,
         DynamicBufferPool.Lease dynamicBuffers) {
     GpuCluster {
@@ -35,6 +37,13 @@ record GpuCluster(
         textureTintUsage = Objects.requireNonNull(textureTintUsage, "textureTintUsage");
         materialTableCandidate = Objects.requireNonNull(
                 materialTableCandidate, "materialTableCandidate");
+        if (surfaceRelationSourceBytes < 0L
+                || surfaceRelationGpuBytes < 0L
+                || surfaceRelationGpuBytes > surfaceRelationSourceBytes
+                || (surfaceRelationAddress == 0L) != (surfaceRelationGpuBytes == 0L)) {
+            throw new IllegalArgumentException(
+                    "GPU surface-relation storage is inconsistent");
+        }
         if (lightBuffer != null && motionBuffer != null
                 || motionBuffer != null && !dynamic) {
             throw new IllegalArgumentException(
@@ -83,6 +92,8 @@ record GpuCluster(
                 lights,
                 TextureTintUsage.EMPTY,
                 MaterialTableCandidate.EMPTY,
+                0L,
+                0L,
                 dynamic,
                 null);
     }
@@ -129,6 +140,8 @@ record GpuCluster(
                 lights,
                 TextureTintUsage.EMPTY,
                 MaterialTableCandidate.EMPTY,
+                0L,
+                0L,
                 dynamic,
                 null);
     }
