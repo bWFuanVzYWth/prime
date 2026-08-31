@@ -384,7 +384,11 @@ def verifyShaderArchitecture = tasks.register(
 	closureBudget = layout.projectDirectory.file('shaders/closure-budgets.json')
 	reportFile = shaderArchitectureReport
 }
-def programManifest = new groovy.json.JsonSlurper().parse(shaderProgramManifest.asFile)
+// The artifact set creates tasks during configuration, so make the manifest contents an explicit
+// configuration-cache input. A direct File read can otherwise reuse a stale task graph after a
+// program is added even though execution-time manifest checks already see the new artifact.
+def programManifest = new groovy.json.JsonSlurper().parseText(
+		providers.fileContents(shaderProgramManifest).asText.get())
 def compiledProgramFiles = objects.fileCollection()
 programManifest.artifacts.each { String id, artifact ->
 	def taskName = 'compileSlangProgram' + id.split('_').collect { part ->

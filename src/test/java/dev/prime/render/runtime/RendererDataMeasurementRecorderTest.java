@@ -76,7 +76,8 @@ final class RendererDataMeasurementRecorderTest {
                         9,
                         10L,
                         null,
-                        ranges);
+                        ranges,
+                        null);
         VulkanMemorySnapshot firstMemory = new VulkanMemorySnapshot(
                 9,
                 3,

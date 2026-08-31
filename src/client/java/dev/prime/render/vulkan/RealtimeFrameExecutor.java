@@ -47,6 +47,7 @@ public final class RealtimeFrameExecutor implements Destroyable {
             ImageDiagnosticSelection diagnostics,
             DisplayExposureDiagnostics exposureDiagnostics,
             RendererDataRangeDiagnostics rangeDiagnostics,
+            RendererSignalRangeDiagnostics signalDiagnostics,
             VulkanGpuTextureView atlasView,
             List<TraceBackend.SceneTexture> sceneTextures,
             long textureRevision,
@@ -58,6 +59,7 @@ public final class RealtimeFrameExecutor implements Destroyable {
         MaterialTexturePages.FrameToken materialFrame = null;
         DisplayExposureDiagnostics.Capture exposureCapture = null;
         RendererDataRangeDiagnostics.Capture rangeCapture = null;
+        RendererSignalRangeDiagnostics.Capture signalCapture = null;
         VulkanFrameSubmission submission =
                 new VulkanFrameSubmission(this.imageInitialization);
         FrameCompletion completion = new FrameCompletion();
@@ -143,6 +145,15 @@ public final class RealtimeFrameExecutor implements Destroyable {
             }
             processor.captureRendererDiagnostic(
                     commandBuffer, this.imageInitialization, diagnostics.renderer());
+            if (signalDiagnostics != null) {
+                signalCapture = signalDiagnostics.record(
+                        commandBuffer, processor.rawFrame());
+                RendererSignalRangeDiagnostics.Capture trackedSignalCapture = signalCapture;
+                completion.onCommit(7, () -> signalDiagnostics.submitted(
+                        trackedSignalCapture));
+                completion.onAbandon(7, failure -> ResourceCleanup.run(
+                        () -> signalDiagnostics.abandon(trackedSignalCapture), failure));
+            }
             processor.record(
                     commandBuffer,
                     processorFrame,

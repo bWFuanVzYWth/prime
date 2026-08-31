@@ -8,6 +8,7 @@ import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.terrain.CpuClusterMesh;
 import dev.prime.render.vulkan.MaterialTexturePages;
 import dev.prime.render.vulkan.RendererDataRangeDiagnostics;
+import dev.prime.render.vulkan.RendererSignalRangeDiagnostics;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanMemorySnapshot;
 import dev.prime.render.vulkan.terrain.TerrainScene;
@@ -245,6 +246,9 @@ final class RendererDataMeasurementRecorder {
         appendMediumIds(json, this.mediumIds);
         appendTextures(json, this.textures);
         appendRanges(json, this.latestRanges());
+        appendSignals(
+                json,
+                this.latestRenderer == null ? null : this.latestRenderer.signals());
         appendDynamicMotion(json, this.dynamicMotion);
         appendMemory(json, this.memory);
         trimComma(json).append("\n}\n");
@@ -410,6 +414,54 @@ final class RendererDataMeasurementRecorder {
         field(json, "maximumHalfComponentErrorBlocks", value.maximumHalfComponentErrorBlocks());
         field(json, "maximumHalfVectorErrorBlocks", value.maximumHalfVectorErrorBlocks());
         field(json, "maximumProjectedHalfErrorPixels", value.maximumProjectedHalfErrorPixels());
+        trimComma(json).append("\n  },");
+    }
+
+    private static void appendSignals(
+            StringBuilder json, RendererSignalRangeDiagnostics.Snapshot value) {
+        json.append("\n  \"rawSignals\": ");
+        if (value == null) {
+            json.append("null,");
+            return;
+        }
+        json.append('{');
+        field(json, "captureCount", value.captureCount());
+        field(json, "sampledPixels", value.sampledPixels());
+        field(json, "radianceFiniteCount", value.radianceFiniteCount());
+        field(json, "radianceNonfiniteCount", value.radianceNonfiniteCount());
+        field(json, "radianceNegativeCount", value.radianceNegativeCount());
+        field(json, "radianceSaturatedCount", value.radianceSaturatedCount());
+        field(json, "maximumRadiance", value.maximumRadiance());
+        field(json, "radianceP50Upper", value.radiancePercentile(0.50));
+        field(json, "radianceP95Upper", value.radiancePercentile(0.95));
+        field(json, "radianceP99Upper", value.radiancePercentile(0.99));
+        field(json, "surfaceCount", value.surfaceCount());
+        field(json, "normalNonfiniteCount", value.normalNonfiniteCount());
+        field(json, "maximumNormalLengthError", value.maximumNormalLengthError());
+        field(json, "roughnessInvalidCount", value.roughnessInvalidCount());
+        field(json, "minimumRoughness",
+                value.surfaceCount() == value.roughnessInvalidCount()
+                        ? 0.0
+                        : value.minimumRoughness());
+        field(json, "maximumRoughness", value.maximumRoughness());
+        field(json, "roughnessZeroCount", value.roughnessZeroCount());
+        field(json, "roughnessP50Upper", value.roughnessPercentile(0.50));
+        field(json, "roughnessP95Upper", value.roughnessPercentile(0.95));
+        field(json, "roughnessP99Upper", value.roughnessPercentile(0.99));
+        field(json, "albedoInvalidCount", value.albedoInvalidCount());
+        field(json, "maximumAlbedo", value.maximumAlbedo());
+        field(json, "hitDistanceFiniteCount", value.hitDistanceFiniteCount());
+        field(json, "hitDistanceInvalidCount", value.hitDistanceInvalidCount());
+        field(json, "hitDistanceZeroCount", value.hitDistanceZeroCount());
+        field(json, "hitDistanceSaturatedCount", value.hitDistanceSaturatedCount());
+        field(json, "minimumPositiveHitDistance",
+                value.hitDistanceFiniteCount() == value.hitDistanceZeroCount()
+                        ? 0.0
+                        : value.minimumPositiveHitDistance());
+        field(json, "maximumHitDistance", value.maximumHitDistance());
+        field(json, "hitDistanceP50Upper", value.hitDistancePercentile(0.50));
+        field(json, "hitDistanceP95Upper", value.hitDistancePercentile(0.95));
+        field(json, "hitDistanceP99Upper", value.hitDistancePercentile(0.99));
         trimComma(json).append("\n  },");
     }
 
