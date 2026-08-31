@@ -157,20 +157,6 @@ public bool primeUsesBakedMaterial(PrimitiveRecord primitive) {
             && (primitive.uv2 & PRIME_CONSTANT_UV_BAKED_MATERIAL) != 0u;
 }
 
-public float3 primeStaticBaseColor(
-        uint textureId,
-        uint packedTint,
-        float2 uv,
-        float textureLodValue,
-        out float opacity) {
-    float4 textureSample = primeSampleStaticAlbedo(textureId, uv, textureLodValue);
-    float4 tint = primeUnpackTint(packedTint);
-    opacity = textureSample.a;
-    float3 linearSrgbAlbedo =
-            textureSample.rgb * primeDecodeSrgb(tint.rgb);
-    return primeLinearSrgbToLinearRec2020(linearSrgbAlbedo);
-}
-
 public float2 primePrimitiveMaterialReferenceUv(PrimitiveRecord primitive) {
     if (primitive.uvDensity == PRIME_CONSTANT_UV_DENSITY) {
         return float2(asfloat(primitive.uv0), asfloat(primitive.uv1));

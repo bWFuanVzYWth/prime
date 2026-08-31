@@ -1,5 +1,6 @@
 import "prime_coordinate_contract.slang";
 import "prime_color_contract.slang";
+import "service/material/tint.slang";
 
 layout(set = 0, binding = 0, std430) readonly buffer PrimeRendererDataInput {
     uint words[];
@@ -27,6 +28,26 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             asfloat(primeRendererDataInput.words[10]),
             asfloat(primeRendererDataInput.words[11]),
             asfloat(primeRendererDataInput.words[12]));
+    PrimeTintOperator tint;
+    tint.row0 = asfloat(uint4(
+            primeRendererDataInput.words[13],
+            primeRendererDataInput.words[14],
+            primeRendererDataInput.words[15],
+            primeRendererDataInput.words[16]));
+    tint.row1 = asfloat(uint4(
+            primeRendererDataInput.words[17],
+            primeRendererDataInput.words[18],
+            primeRendererDataInput.words[19],
+            primeRendererDataInput.words[20]));
+    tint.row2 = asfloat(uint4(
+            primeRendererDataInput.words[21],
+            primeRendererDataInput.words[22],
+            primeRendererDataInput.words[23],
+            primeRendererDataInput.words[24]));
+    float3 canonicalBase = float3(
+            asfloat(primeRendererDataInput.words[25]),
+            asfloat(primeRendererDataInput.words[26]),
+            asfloat(primeRendererDataInput.words[27]));
 
     float2 sampleUv = primeCanonicalSampleUv(pixel, extent);
     primeRendererDataOutput.values[0] = float4(
@@ -40,4 +61,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             primeCanonicalDecodeSrgb(encodedSrgb.z));
     primeRendererDataOutput.values[2] = float4(
             primeCanonicalLinearSrgbToLinearRec2020(linearSrgb), 1.0);
+    primeRendererDataOutput.values[3] = float4(
+            primeApplyStaticTint(canonicalBase, tint), 1.0);
 }

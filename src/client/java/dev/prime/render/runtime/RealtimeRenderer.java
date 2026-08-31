@@ -137,7 +137,7 @@ final class RealtimeRenderer implements Destroyable {
             AtmospherePipeline atmosphere,
             MaterialTexturePages materialTextures,
             ResolvedReconstruction selection,
-            long tlas,
+            TerrainScene.ResidentSceneView scene,
             VulkanGpuTextureView atlasView,
             VulkanGpuSampler atlasSampler,
             List<TraceBackend.SceneTexture> sceneTextures) {
@@ -145,7 +145,7 @@ final class RealtimeRenderer implements Destroyable {
         boolean resourcesMatch = current != null && current.matches(selection);
         if (resourcesMatch) {
             this.pipeline.ensureDescriptors(
-                    tlas,
+                    scene.tlas(),
                     current.stableRadiance(),
                     atlasView,
                     atlasSampler,
@@ -153,6 +153,7 @@ final class RealtimeRenderer implements Destroyable {
                     materialTextures.normalPages(),
                     materialTextures.opticalPages(),
                     materialTextures.textureRecords(),
+                    scene.tintOperators(),
                     atmosphere,
                     current.processor().rawFrame());
             return false;
@@ -165,7 +166,7 @@ final class RealtimeRenderer implements Destroyable {
                     replacementResources.selection().extent().width(),
                     replacementResources.selection().extent().height());
             this.pipeline.ensureDescriptors(
-                    tlas,
+                    scene.tlas(),
                     replacementResources.stableRadiance(),
                     atlasView,
                     atlasSampler,
@@ -173,6 +174,7 @@ final class RealtimeRenderer implements Destroyable {
                     materialTextures.normalPages(),
                     materialTextures.opticalPages(),
                     materialTextures.textureRecords(),
+                    scene.tintOperators(),
                     atmosphere,
                     replacementResources.processor().rawFrame());
         } catch (RuntimeException exception) {
@@ -237,7 +239,7 @@ final class RealtimeRenderer implements Destroyable {
                 input.atmosphere(),
                 input.materialTextures(),
                 requestedSelection,
-                input.scene().tlas(),
+                input.scene(),
                 input.atlasView(),
                 input.atlasSampler(),
                 input.sceneTextures());

@@ -18,6 +18,7 @@ import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.IntUnaryOperator;
 import net.minecraft.core.SectionPos;
 import org.jspecify.annotations.Nullable;
 import org.lwjgl.system.MemoryStack;
@@ -40,6 +41,7 @@ public final class TerrainScene implements AutoCloseable {
     private final DynamicBufferPool dynamicBufferPool;
     private final VoxelBlasPool voxelBlasPool = new VoxelBlasPool();
     private final MediumIdRegistry mediumIds = new MediumIdRegistry();
+    private final TintOperatorTable tintOperators;
     private final boolean measurementsEnabled = Boolean.getBoolean(MEASUREMENT_ENABLE_PROPERTY);
     private final BlasCompactionScheduler compactionScheduler =
             new BlasCompactionScheduler();
@@ -63,6 +65,7 @@ public final class TerrainScene implements AutoCloseable {
         this.stagingArena = stagingArena;
         this.opacityMicromapPool = new OpacityMicromapPool(context);
         this.dynamicBufferPool = new DynamicBufferPool(context);
+        this.tintOperators = new TintOperatorTable(context);
     }
 
     public boolean updateStatic(
@@ -598,6 +601,12 @@ public final class TerrainScene implements AutoCloseable {
         return new MediumIdStatistics(snapshot.assignedCount(), snapshot.highWaterId());
     }
 
+    /** Renderer-lifetime exact-tint allocation totals for opt-in data measurements. */
+    public TintIdStatistics tintIdStatistics() {
+        TintOperatorTable.Snapshot snapshot = this.tintOperators.snapshot();
+        return new TintIdStatistics(snapshot.assignedCount(), snapshot.highWaterId());
+    }
+
     public static boolean requiresWorldLightUpload(
             boolean rebuildWorldLights, CpuWorldLightTree.Result worldLightTree) {
         return rebuildWorldLights && !worldLightTree.isEmpty();
@@ -649,6 +658,7 @@ public final class TerrainScene implements AutoCloseable {
         }
         this.currentWorldLightTree = CpuWorldLightTree.Result.empty(0);
         failure = ResourceCleanup.close(this.voxelBlasPool, failure);
+        failure = ResourceCleanup.close(this.tintOperators, failure);
         failure = ResourceCleanup.run(this.dynamicBufferPool::destroy, failure);
         failure = ResourceCleanup.close(this.opacityMicromapPool, failure);
         ResourceCleanup.throwIfFailed(failure);
@@ -884,7 +894,7 @@ public final class TerrainScene implements AutoCloseable {
                 float sectionX = (cluster.clusterX() << 4) - originX;
                 float sectionY = (cluster.clusterY() << 4) - originY;
                 float sectionZ = (cluster.clusterZ() << 4) - originZ;
-                CpuVoxelInstances instances = cluster.voxelInstances();
+                ResolvedVoxelInstances instances = cluster.voxelInstances();
                 for (int index = 0; index < instances.count(); index++) {
                     PreparedBlas voxel =
                             cluster.voxelBlases().get(instances.meshIndex(index));
@@ -910,7 +920,7 @@ public final class TerrainScene implements AutoCloseable {
                             cluster.lights().emitterCount(),
                             worldLightLeafCount,
                             0xff,
-                            0x8000_0000 | instances.packedTint(index),
+                            0x8000_0000 | instances.tintId(index),
                             sectionX + instances.translationX(index),
                             sectionY + instances.translationY(index),
                             sectionZ + instances.translationZ(index),
@@ -1012,6 +1022,9 @@ public final class TerrainScene implements AutoCloseable {
                 : new ResidentSceneView(
                         replacementTlas.handle(),
                         replacementTlas.sectionTableAddress(),
+                        new TintOperatorBinding(
+                                this.tintOperators.buffer().handle(),
+                                this.tintOperators.buffer().size()),
                         nextOriginX,
                         nextOriginY,
                         nextOriginZ,
@@ -1182,6 +1195,7 @@ public final class TerrainScene implements AutoCloseable {
                         stagingBatch,
                         mesh,
                         this.mediumIds.resolve(mesh.mediumCatalog()),
+                        this.tintOperators::resolve,
                         positions,
                         primitives);
                 if (upload.dynamic()) {
@@ -1230,7 +1244,10 @@ public final class TerrainScene implements AutoCloseable {
             if (lights != null) {
                 copyBuffer(
                         commandBuffer,
-                        stagingBatch.write(mesh.lights().relocate(lights.deviceAddress()), 16L),
+                        stagingBatch.write(
+                                mesh.lights().relocate(
+                                        lights.deviceAddress(), this.tintOperators::resolve),
+                                16L),
                         lights);
             }
             CompiledClusterLights.Summary lightSummary = mesh.lights().summary();
@@ -1244,6 +1261,7 @@ public final class TerrainScene implements AutoCloseable {
                                 voxelMesh,
                                 stagingBatch,
                                 commandBuffer,
+                                this.tintOperators::resolve,
                                 label)));
             }
             if (upload.dynamic() && mesh.triangleCount() != 0L) {
@@ -1260,7 +1278,8 @@ public final class TerrainScene implements AutoCloseable {
                     upload.clusterZ(),
                     blas,
                     voxelBlases,
-                    mesh.voxelInstances(),
+                    ResolvedVoxelInstances.resolve(
+                            mesh.voxelInstances(), this.tintOperators::resolve),
                     mesh.hasSurfaceRelations()
                             ? primitives.deviceAddress() + mesh.primitiveBytes()
                             : 0L,
@@ -1304,6 +1323,7 @@ public final class TerrainScene implements AutoCloseable {
             CpuVoxelMesh mesh,
             StagingArena.Batch stagingBatch,
             VkCommandBuffer commandBuffer,
+            IntUnaryOperator tintResolver,
             String label) {
         VulkanBuffer positions = null;
         VulkanBuffer primitives = null;
@@ -1327,7 +1347,10 @@ public final class TerrainScene implements AutoCloseable {
                     positions);
             copyBuffer(
                     commandBuffer,
-                    stagingBatch.write(mesh.primitiveRecords(), Integer.BYTES),
+                    stagingBatch.write(
+                            TintIdResolver.primitiveRecords(
+                                    mesh.primitiveRecords(), tintResolver),
+                            Integer.BYTES),
                     primitives);
             blas = PreparedBlas.create(
                     this.context,
@@ -1361,6 +1384,7 @@ public final class TerrainScene implements AutoCloseable {
             StagingArena.Batch staging,
             CpuClusterMesh mesh,
             int[] localToRendererMediumId,
+            IntUnaryOperator tintResolver,
             VulkanBuffer positions,
             VulkanBuffer primitives) {
         long[] positionCursors = new long[] {
@@ -1382,6 +1406,8 @@ public final class TerrainScene implements AutoCloseable {
         for (CpuClusterMesh.Segment segment : mesh.segments()) {
             int[] primitiveRecords = MediumIdResolver.primitiveRecords(
                     segment.primitiveRecords(), localToRendererMediumId);
+            primitiveRecords = TintIdResolver.primitiveRecords(
+                    primitiveRecords, tintResolver);
             int sourcePosition = 0;
             int sourcePrimitive = 0;
             for (int category = 0; category < 3; category++) {
@@ -1429,6 +1455,10 @@ public final class TerrainScene implements AutoCloseable {
                     relations,
                     Math.toIntExact(mesh.primitiveCount()),
                     localToRendererMediumId);
+            relations = TintIdResolver.surfaceRelations(
+                    relations,
+                    Math.toIntExact(mesh.primitiveCount()),
+                    tintResolver);
             copyBuffer(
                     commandBuffer,
                     staging.write(relations, Integer.BYTES),
@@ -1503,6 +1533,7 @@ public final class TerrainScene implements AutoCloseable {
     public record ResidentSceneView(
             long tlas,
             long sectionTableAddress,
+            TintOperatorBinding tintOperators,
             int originX,
             int originY,
             int originZ,
@@ -1512,6 +1543,8 @@ public final class TerrainScene implements AutoCloseable {
             List<TerrainOccluderChange> occluderChanges,
             SceneStatistics statistics) implements SceneRevisionView {
         public ResidentSceneView {
+            tintOperators = java.util.Objects.requireNonNull(
+                    tintOperators, "tintOperators");
             occluderChanges = List.copyOf(occluderChanges);
             statistics = java.util.Objects.requireNonNull(statistics, "statistics");
         }
@@ -1529,6 +1562,7 @@ public final class TerrainScene implements AutoCloseable {
             this(
                     tlas,
                     sectionTableAddress,
+                    TintOperatorBinding.EMPTY,
                     originX,
                     originY,
                     originZ,
@@ -1550,6 +1584,7 @@ public final class TerrainScene implements AutoCloseable {
             this(
                     tlas,
                     sectionTableAddress,
+                    TintOperatorBinding.EMPTY,
                     originX,
                     originY,
                     originZ,
@@ -1600,11 +1635,38 @@ public final class TerrainScene implements AutoCloseable {
         }
     }
 
+    /** Stable borrowed descriptor identity owned by this scene's render-thread lifetime. */
+    public record TintOperatorBinding(long buffer, long bytes) {
+        static final TintOperatorBinding EMPTY = new TintOperatorBinding(0L, 0L);
+
+        public TintOperatorBinding {
+            if ((buffer == 0L) != (bytes == 0L) || bytes < 0L) {
+                throw new IllegalArgumentException("Tint-operator binding is incomplete");
+            }
+        }
+
+        public boolean present() {
+            return this.buffer != 0L;
+        }
+    }
+
     public record MediumIdStatistics(int assignedCount, long highWaterId) {
         public MediumIdStatistics {
             if (assignedCount < 1 || highWaterId < MediumIdRegistry.WATER_ID
                     || highWaterId > 0xffff_ffffL) {
                 throw new IllegalArgumentException("Invalid renderer MediumId statistics");
+            }
+        }
+    }
+
+    public record TintIdStatistics(int assignedCount, int highWaterId) {
+        public TintIdStatistics {
+            if (assignedCount < 1
+                    || assignedCount > TintOperatorTable.MAX_TINT_ID + 1
+                    || highWaterId < 0
+                    || highWaterId > TintOperatorTable.MAX_TINT_ID
+                    || assignedCount != highWaterId + 1) {
+                throw new IllegalArgumentException("Invalid renderer TintId statistics");
             }
         }
     }

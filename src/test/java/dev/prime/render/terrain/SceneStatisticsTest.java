@@ -16,6 +16,7 @@ final class SceneStatisticsTest {
                 new TerrainScene.ResidentSceneView(
                         1L,
                         2L,
+                        new TerrainScene.TintOperatorBinding(3L, 48L),
                         3,
                         4,
                         5,
@@ -45,5 +46,20 @@ final class SceneStatisticsTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new TerrainScene.SceneStatistics(0, 0L, 0L, 0, -1));
+    }
+
+    @Test
+    void tintIdStatisticsRejectImpossibleRegistrySnapshots() {
+        assertEquals(new TerrainScene.TintIdStatistics(1, 0),
+                new TerrainScene.TintIdStatistics(1, 0));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerrainScene.TintIdStatistics(0, 0));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerrainScene.TintIdStatistics(3, 1));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new TerrainScene.TintIdStatistics(1, 0x1_0000));
     }
 }

@@ -381,6 +381,7 @@ public final class VulkanRenderer implements AutoCloseable {
                     this.materialTextures.measurementSnapshot(),
                     scene.statistics(),
                     this.terrain.mediumIdStatistics(),
+                    this.terrain.tintIdStatistics(),
                     frameCamera,
                     diagnostic);
         }

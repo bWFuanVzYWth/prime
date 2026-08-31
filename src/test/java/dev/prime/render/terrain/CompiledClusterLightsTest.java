@@ -55,6 +55,24 @@ final class CompiledClusterLightsTest {
     }
 
     @Test
+    void relocationReplacesEmitterRgbWithExactTintIdWithoutMutatingSource() {
+        int[] relative = validOneEmitterPayload();
+        relative[24 + 19] = 0x0012_3456;
+        CompiledClusterLights lights = CompiledClusterLights.fromEncoded(
+                relative,
+                new CompiledClusterLights.Summary(
+                        1, -1.0F, -2.0F, -3.0F, 1.0F, 2.0F, 3.0F, 4.0F));
+
+        int[] relocated = lights.relocate(0x1000L, packedRgb -> {
+            assertEquals(0x0012_3456, packedRgb);
+            return 37;
+        });
+
+        assertEquals(37, relocated[24 + 19]);
+        assertEquals(0x0012_3456, lights.encodedWords()[24 + 19]);
+    }
+
+    @Test
     void encodedPayloadValidationRejectsBrokenIdentity() {
         int[] header = new int[12];
         header[11] = 2;

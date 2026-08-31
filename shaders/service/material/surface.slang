@@ -13,6 +13,8 @@ import "model/material/translation.slang";
 import "model/material/transparent.slang";
 import "service/material/access.slang";
 import "service/material/auxiliary_access.slang";
+import "service/material/static_color.slang";
+import "service/material/tint.slang";
 
 // Minimal translated-texture adapter. The integrator consumes only this result, so backing-page
 // changes cannot affect path scheduling or traversal.
@@ -36,28 +38,32 @@ public PrimeMaterialSample primeEvaluateMaterial(
         float3 geometricNormal) {
     PrimeMaterialSample result;
     bool bakedMaterial = primeUsesBakedMaterial(primitive);
-    // The Vulkan sRGB view decodes texture RGB before filtering; packed vertex/instance tint is
-    // still encoded sRGB. Alpha remains coverage and is never color-decoded.
+    // Static source RGB8 tints are exact renderer TintIds. Dynamic attachments retain their
+    // explicit source-color adapter until they gain a canonical resource path.
     if (bakedMaterial) {
-        float3 linearSrgbAlbedo = primeDecodeSrgb(primeUnpackTint(primitive.tint).rgb);
+        float3 baseColor = primeStaticTintColor(primitive.tint);
         bool ownsTint = (primitive.uv2 & PRIME_CONSTANT_UV_OWN_TINT) != 0u;
         if (!ownsTint && (instanceTint & 0x80000000u) != 0u) {
-            linearSrgbAlbedo *= primeDecodeSrgb(primeUnpackTint(instanceTint).rgb);
+            baseColor = primeApplyStaticTint(baseColor, instanceTint);
         }
-        result.baseColor = primeLinearSrgbToLinearRec2020(linearSrgbAlbedo);
+        result.baseColor = baseColor;
         result.opacity = 1.0;
     } else {
         float4 textureSample =
                 primeSamplePrimitiveTexture(primitive, textureId, uv, textureLodValue);
-        float4 tint = primeUnpackTint(primitive.tint);
         if (primeUsesDynamicRedAlpha(primitive)) {
             result.opacity = textureSample.r;
             result.baseColor = primeLinearSrgbToLinearRec2020(
-                    primeDecodeSrgb(tint.rgb));
-        } else {
+                    primeDecodeSrgb(primeUnpackTint(primitive.tint).rgb));
+        } else if ((primitive.flagsEmitter & PRIME_DYNAMIC_TEXTURE_FLAG) != 0u) {
             result.opacity = textureSample.a;
             result.baseColor = primeLinearSrgbToLinearRec2020(
-                    textureSample.rgb * primeDecodeSrgb(tint.rgb));
+                    textureSample.rgb
+                            * primeDecodeSrgb(primeUnpackTint(primitive.tint).rgb));
+        } else {
+            result.opacity = textureSample.a;
+            result.baseColor = primeApplyStaticTint(
+                    primeLinearSrgbToLinearRec2020(textureSample.rgb), primitive.tint);
         }
     }
     uint recipeControl = primePrimitiveControl(primitive);
@@ -175,13 +181,13 @@ public PrimeMaterialSample primeEvaluateMaterial(
 }
 
 public PrimeMaterialSample primeEvaluateMaterialReference(
-        uint recipeControl, uint packedTint, uint textureId, float2 uv) {
+        uint recipeControl, uint tintId, uint textureId, float2 uv) {
     PrimitiveRecord primitive;
     primitive.uv0 = asuint(uv.x);
     primitive.uv1 = asuint(uv.y);
     primitive.uv2 = 0u;
     uint referenceControl = recipeControl & ~PRIME_RECIPE_NORMAL_TEXTURE;
-    primitive.tint = (packedTint & 0x00ffffffu)
+    primitive.tint = (tintId & 0x00ffffffu)
             | ((referenceControl & 0xffu) << 24u);
     primitive.mediumId = 0u;
     primitive.flagsEmitter = ((referenceControl >> 8u) & 7u)

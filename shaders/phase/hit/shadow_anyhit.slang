@@ -9,6 +9,7 @@ import "policy/runtime/config.slang";
 import "policy/transport/transparent_nee.slang";
 import "model/material/defaults.slang";
 import "service/material/access.slang";
+import "service/material/static_color.slang";
 import "model/material/transparent.slang";
 
 import "service/trace/hit.slang";

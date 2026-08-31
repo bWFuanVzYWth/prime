@@ -52,6 +52,8 @@ final class RendererDataMeasurementRecorderTest {
                 new TerrainScene.SceneStatistics(12, 34L, 56L, 7, 8, textureTints);
         TerrainScene.MediumIdStatistics mediumIds =
                 new TerrainScene.MediumIdStatistics(4, 4L);
+        TerrainScene.TintIdStatistics tintIds =
+                new TerrainScene.TintIdStatistics(672, 671);
         long[] motionHistogram = new long[128];
         long[] depthHistogram = new long[128];
         motionHistogram[64] = 7L;
@@ -105,9 +107,11 @@ final class RendererDataMeasurementRecorderTest {
                         new VulkanMemorySnapshot.Heap(1, 1024L, 512L, 768L, 4096L)));
 
         recorder.recordFrame(
-                textures, scene, mediumIds, camera(1.0, 2.0, 3.0), renderer, firstMemory);
+                textures, scene, mediumIds, tintIds,
+                camera(1.0, 2.0, 3.0), renderer, firstMemory);
         recorder.recordFrame(
-                textures, scene, mediumIds, camera(4.0, 6.0, 3.0), renderer, secondMemory);
+                textures, scene, mediumIds, tintIds,
+                camera(4.0, 6.0, 3.0), renderer, secondMemory);
 
         String encoded = Files.readString(output);
         // Gson is supplied by Minecraft but its optional Error Prone annotations are absent from
@@ -128,6 +132,9 @@ final class RendererDataMeasurementRecorderTest {
         assertTrue(encoded.contains("\"rgba16fVariantBytes\": 1600"));
         assertTrue(encoded.contains("\"variantTexelInflation\": 2.00000000"));
         assertTrue(encoded.contains("\"highWaterId\": 4"));
+        assertTrue(encoded.contains("\"tintIds\""));
+        assertTrue(encoded.contains("\"assignedCount\": 672"));
+        assertTrue(encoded.contains("\"highWaterId\": 671"));
         assertTrue(encoded.contains("\"maximumSampledMemory\""));
         assertTrue(encoded.contains("\"blockCount\": 9"));
         assertTrue(encoded.contains("\"allocationCount\": 8"));

@@ -2,6 +2,7 @@ package dev.prime.render.terrain;
 
 import dev.prime.render.shader.ShaderAbi;
 import java.util.Objects;
+import java.util.function.IntUnaryOperator;
 
 /**
  * Relocatable final light payload produced by cluster compilation.
@@ -117,13 +118,28 @@ public final class CompiledClusterLights {
 
     /** Returns one owned upload payload relocated to {@code deviceAddress}. */
     public int[] relocate(long deviceAddress) {
+        return this.relocate(deviceAddress, null);
+    }
+
+    /** Returns one relocated payload whose static RGB8 tints have exact renderer TintIds. */
+    public int[] relocate(long deviceAddress, IntUnaryOperator tintResolver) {
         if (this.isEmpty()) {
             return new int[0];
         }
-        if (deviceAddress == 0L) {
-            return this.encodedWords();
-        }
         int[] relocated = this.relativeWords.clone();
+        if (tintResolver != null) {
+            int emitterWords = ShaderAbi.LIGHT_EMITTER_SIZE / Integer.BYTES;
+            int emitterStart = Math.toIntExact(getLong(relocated, 6) / Integer.BYTES);
+            int tintWord = ShaderAbi.LIGHT_EMITTER_UVS_TINT_OFFSET / Integer.BYTES + 3;
+            for (int emitter = 0; emitter < this.emitterCount(); emitter++) {
+                int word = emitterStart + emitter * emitterWords + tintWord;
+                relocated[word] = TintIdResolver.resolvePackedRgb(
+                        relocated[word] & 0x00ff_ffff, tintResolver);
+            }
+        }
+        if (deviceAddress == 0L) {
+            return relocated;
+        }
         for (int pointer = 0; pointer < POINTER_COUNT; pointer++) {
             int word = pointer * 2;
             putLong(

@@ -5,6 +5,7 @@ import com.mojang.blaze3d.vulkan.VulkanGpuSampler;
 import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.shader.ShaderAbi;
+import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.nio.LongBuffer;
 import java.util.List;
 import org.lwjgl.system.MemoryStack;
@@ -27,7 +28,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
  * offline, atmosphere and sun-shadow programs only borrow its descriptor set.
  */
 public final class TraceBackend implements Destroyable {
-    private static final int BINDING_COUNT = 24;
+    private static final int BINDING_COUNT = 25;
     private static final int STARMAP_UPLOAD = 1;
     private static final int BSDF_LOOKUP_UPLOAD = 1 << 1;
     private static final int REALTIME_STBN_UPLOAD = 1 << 2;
@@ -111,7 +112,11 @@ public final class TraceBackend implements Destroyable {
             List<VulkanImage> materialNormalPages,
             List<VulkanImage> materialOpticalPages,
             VulkanBuffer textureRecords,
+            TerrainScene.TintOperatorBinding tintOperators,
             AtmospherePipeline atmosphere) {
+        if (!tintOperators.present()) {
+            throw new IllegalArgumentException("Scene has no tint-operator binding");
+        }
         if (this.sceneBindings != null
                 && this.sceneBindings.matches(
                         tlas,
@@ -121,6 +126,7 @@ public final class TraceBackend implements Destroyable {
                         materialNormalPages,
                         materialOpticalPages,
                         textureRecords.handle(),
+                        tintOperators,
                         atmosphere)) {
             return;
         }
@@ -134,6 +140,7 @@ public final class TraceBackend implements Destroyable {
                 materialNormalPages,
                 materialOpticalPages,
                 textureRecords,
+                tintOperators,
                 atmosphere,
                 this.bsdfLookup,
                 this.starmap,
@@ -296,6 +303,11 @@ public final class TraceBackend implements Destroyable {
                 .descriptorCount(1)
                 .stageFlags(ALL_RT_STAGES);
         bindings.get(cursor++)
+                .binding(ShaderAbi.DESCRIPTOR_TINT_OPERATORS)
+                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                .descriptorCount(1)
+                .stageFlags(ALL_RT_STAGES);
+        bindings.get(cursor++)
                 .binding(ShaderAbi.DESCRIPTOR_REALTIME_STBN)
                 .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                 .descriptorCount(1)
@@ -376,6 +388,7 @@ public final class TraceBackend implements Destroyable {
         private final List<Long> normalPages;
         private final List<Long> opticalPages;
         private final long textureRecords;
+        private final TerrainScene.TintOperatorBinding tintOperators;
         private final long skyView;
         private final long transmittanceLow;
         private final long transmittanceHigh;
@@ -396,6 +409,7 @@ public final class TraceBackend implements Destroyable {
                 List<VulkanImage> normalPages,
                 List<VulkanImage> opticalPages,
                 long textureRecords,
+                TerrainScene.TintOperatorBinding tintOperators,
                 AtmospherePipeline atmosphere,
                 long[] sunShadowDepths) {
             this.context = context;
@@ -408,6 +422,7 @@ public final class TraceBackend implements Destroyable {
             this.normalPages = pageViews(normalPages);
             this.opticalPages = pageViews(opticalPages);
             this.textureRecords = textureRecords;
+            this.tintOperators = tintOperators;
             this.skyView = atmosphere.skyView().view();
             this.transmittanceLow = atmosphere.transmittanceLow().view();
             this.transmittanceHigh = atmosphere.transmittanceHigh().view();
@@ -427,6 +442,7 @@ public final class TraceBackend implements Destroyable {
                 List<VulkanImage> normalPages,
                 List<VulkanImage> opticalPages,
                 VulkanBuffer textureRecords,
+                TerrainScene.TintOperatorBinding tintOperators,
                 AtmospherePipeline atmosphere,
                 BsdfLookupTable bsdfLookup,
                 StarmapTexture starmap,
@@ -449,7 +465,7 @@ public final class TraceBackend implements Destroyable {
                         .descriptorCount(1);
                 sizes.get(4)
                         .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                        .descriptorCount(2);
+                        .descriptorCount(3);
                 VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
                         .sType$Default()
                         .maxSets(1)
@@ -559,7 +575,7 @@ public final class TraceBackend implements Destroyable {
                                     .sType$Default()
                                     .pAccelerationStructures(stack.longs(tlas));
                     VkDescriptorBufferInfo.Buffer bufferInfos =
-                            VkDescriptorBufferInfo.calloc(3, stack);
+                            VkDescriptorBufferInfo.calloc(4, stack);
                     VkDescriptorBufferInfo queryInfo = bufferInfos.get(0);
                     queryInfo
                                     .buffer(atmosphere.sunShadowQuery().handle())
@@ -575,6 +591,11 @@ public final class TraceBackend implements Destroyable {
                             .buffer(realtimeStbn.buffer().handle())
                             .offset(0L)
                             .range(realtimeStbn.buffer().size());
+                    VkDescriptorBufferInfo tintOperatorInfo = bufferInfos.get(3);
+                    tintOperatorInfo
+                            .buffer(tintOperators.buffer())
+                            .offset(0L)
+                            .range(tintOperators.bytes());
                     VkWriteDescriptorSet.Buffer writes =
                             VkWriteDescriptorSet.calloc(BINDING_COUNT, stack);
                     int write = 0;
@@ -660,6 +681,14 @@ public final class TraceBackend implements Destroyable {
                             .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                             .pBufferInfo(VkDescriptorBufferInfo.create(
                                     stbnInfo.address(), 1));
+                    writes.get(write++)
+                            .sType$Default()
+                            .dstSet(set)
+                            .dstBinding(ShaderAbi.DESCRIPTOR_TINT_OPERATORS)
+                            .descriptorCount(1)
+                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                            .pBufferInfo(VkDescriptorBufferInfo.create(
+                                    tintOperatorInfo.address(), 1));
                     int[] shadowBindings = sunShadowBindings();
                     for (int index = 0; index < shadowBindings.length; index++) {
                         writes.get(write++)
@@ -691,6 +720,7 @@ public final class TraceBackend implements Destroyable {
                             normalPages,
                             opticalPages,
                             textureRecords.handle(),
+                            tintOperators,
                             atmosphere,
                             shadowViews);
                 } catch (RuntimeException exception) {
@@ -708,6 +738,7 @@ public final class TraceBackend implements Destroyable {
                 List<VulkanImage> candidateNormalPages,
                 List<VulkanImage> candidateOpticalPages,
                 long candidateTextureRecords,
+                TerrainScene.TintOperatorBinding candidateTintOperators,
                 AtmospherePipeline atmosphere) {
             if (this.tlas != candidateTlas
                     || this.atlasView != candidateAtlasView
@@ -716,6 +747,7 @@ public final class TraceBackend implements Destroyable {
                     || !matchesPageViews(this.normalPages, candidateNormalPages)
                     || !matchesPageViews(this.opticalPages, candidateOpticalPages)
                     || this.textureRecords != candidateTextureRecords
+                    || !this.tintOperators.equals(candidateTintOperators)
                     || this.skyView != atmosphere.skyView().view()
                     || this.transmittanceLow != atmosphere.transmittanceLow().view()
                     || this.transmittanceHigh != atmosphere.transmittanceHigh().view()

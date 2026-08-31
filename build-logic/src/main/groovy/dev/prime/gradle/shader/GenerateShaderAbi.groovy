@@ -58,7 +58,8 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| schema.materialPageCount != 16
 				|| schema.sharedDescriptors.textureRecords != 18
 				|| schema.sharedDescriptors.materialNormalPages != 19
-				|| schema.sharedDescriptors.materialOpticalPages != 49) {
+				|| schema.sharedDescriptors.materialOpticalPages != 49
+				|| schema.sharedDescriptors.tintOperators != 50) {
 			throw new GradleException(
 					'Prime shader ABI sizes or scene texture count changed without a coordinated migration')
 		}
@@ -343,6 +344,7 @@ public final class ShaderAbi {
     public static final int DESCRIPTOR_TEXTURE_RECORDS = ${schema.sharedDescriptors.textureRecords};
     public static final int DESCRIPTOR_MATERIAL_NORMAL_PAGES = ${schema.sharedDescriptors.materialNormalPages};
     public static final int DESCRIPTOR_MATERIAL_OPTICAL_PAGES = ${schema.sharedDescriptors.materialOpticalPages};
+    public static final int DESCRIPTOR_TINT_OPERATORS = ${schema.sharedDescriptors.tintOperators};
     public static final int DESCRIPTOR_NRD_SUN_LIGHTING = ${schema.realtimeDescriptors.nrdSunLighting};
     public static final int DESCRIPTOR_NRD_SUN_PENUMBRA = ${schema.realtimeDescriptors.nrdSunPenumbra};
     public static final int DESCRIPTOR_NRD_DIFFUSE_DIRECTION = ${schema.realtimeDescriptors.nrdDiffuseDirection};

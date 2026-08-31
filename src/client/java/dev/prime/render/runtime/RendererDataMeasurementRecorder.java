@@ -54,6 +54,7 @@ final class RendererDataMeasurementRecorder {
     private int maximumAreaLights;
     private int maximumLightTreeNodes;
     private TerrainScene.MediumIdStatistics mediumIds;
+    private TerrainScene.TintIdStatistics tintIds;
     private MaterialTexturePages.MeasurementSnapshot textures;
     private TextureTintUsage observedTextureTints = TextureTintUsage.EMPTY;
     private VulkanMemorySnapshot memory;
@@ -115,9 +116,10 @@ final class RendererDataMeasurementRecorder {
             MaterialTexturePages.MeasurementSnapshot textures,
             TerrainScene.SceneStatistics scene,
             TerrainScene.MediumIdStatistics mediumIds,
+            TerrainScene.TintIdStatistics tintIds,
             FrameCamera camera,
             RealtimeRenderer.DiagnosticSnapshot renderer) {
-        if (!this.accumulate(textures, scene, mediumIds, camera, renderer)) {
+        if (!this.accumulate(textures, scene, mediumIds, tintIds, camera, renderer)) {
             return;
         }
         this.captureAndWrite(context);
@@ -128,10 +130,11 @@ final class RendererDataMeasurementRecorder {
             MaterialTexturePages.MeasurementSnapshot textures,
             TerrainScene.SceneStatistics scene,
             TerrainScene.MediumIdStatistics mediumIds,
+            TerrainScene.TintIdStatistics tintIds,
             FrameCamera camera,
             RealtimeRenderer.DiagnosticSnapshot renderer,
             VulkanMemorySnapshot memory) {
-        if (this.accumulate(textures, scene, mediumIds, camera, renderer)) {
+        if (this.accumulate(textures, scene, mediumIds, tintIds, camera, renderer)) {
             this.memory = mergeMemory(this.memory, memory);
             try {
                 writeAtomically(this.output, this.json());
@@ -147,6 +150,7 @@ final class RendererDataMeasurementRecorder {
             MaterialTexturePages.MeasurementSnapshot textures,
             TerrainScene.SceneStatistics scene,
             TerrainScene.MediumIdStatistics mediumIds,
+            TerrainScene.TintIdStatistics tintIds,
             FrameCamera camera,
             RealtimeRenderer.DiagnosticSnapshot renderer) {
         if (this.output == null) {
@@ -159,6 +163,7 @@ final class RendererDataMeasurementRecorder {
             this.textureGenerationCount++;
         }
         this.mediumIds = mediumIds;
+        this.tintIds = tintIds;
         this.observedTextureTints = this.observedTextureTints.observedUnion(
                 scene.textureTintUsage());
         this.maximumRenderWidth = Math.max(this.maximumRenderWidth, renderer.renderWidth());
@@ -249,6 +254,7 @@ final class RendererDataMeasurementRecorder {
         field(json, "maximumTopLevelLightTreeNodes", this.maximumLightTreeNodes);
         trimComma(json).append("\n  },");
         appendMediumIds(json, this.mediumIds);
+        appendTintIds(json, this.tintIds);
         appendTextures(json, this.textures);
         appendTextureTintUsage(json, this.observedTextureTints, this.textures);
         appendRanges(json, this.latestRanges());
@@ -264,6 +270,19 @@ final class RendererDataMeasurementRecorder {
     private static void appendMediumIds(
             StringBuilder json, TerrainScene.MediumIdStatistics value) {
         json.append("\n  \"mediumIds\": ");
+        if (value == null) {
+            json.append("null,");
+            return;
+        }
+        json.append('{');
+        field(json, "assignedCount", value.assignedCount());
+        field(json, "highWaterId", value.highWaterId());
+        trimComma(json).append("\n  },");
+    }
+
+    private static void appendTintIds(
+            StringBuilder json, TerrainScene.TintIdStatistics value) {
+        json.append("\n  \"tintIds\": ");
         if (value == null) {
             json.append("null,");
             return;

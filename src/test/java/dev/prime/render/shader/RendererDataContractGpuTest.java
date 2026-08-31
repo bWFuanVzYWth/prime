@@ -3,6 +3,7 @@ package dev.prime.render.shader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import dev.prime.render.data.RendererDataContracts;
+import dev.prime.render.terrain.CanonicalColorEncoding;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -31,19 +32,30 @@ final class RendererDataContractGpuTest {
         float red = 0.25F;
         float green = 0.5F;
         float blue = 0.75F;
-        ByteBuffer input = ByteBuffer.allocateDirect(13 * Integer.BYTES)
+        int tintRgb = 0x0023_a7e1;
+        int sourceArgb = 0xff91_37c4;
+        CanonicalColorEncoding.TintOperator tint =
+                CanonicalColorEncoding.tintOperator(tintRgb);
+        CanonicalColorEncoding.Color base = CanonicalColorEncoding.decodeRgba16f(
+                CanonicalColorEncoding.encodeRgba16f(sourceArgb));
+        CanonicalColorEncoding.Color tinted = tint.apply(base);
+        ByteBuffer input = ByteBuffer.allocateDirect(28 * Integer.BYTES)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(pixelX).putInt(pixelY).putInt(width).putInt(height)
                 .putFloat(jitterX).putFloat(jitterY)
                 .putFloat(previousU).putFloat(previousV)
                 .putFloat(currentU).putFloat(currentV)
                 .putFloat(red).putFloat(green).putFloat(blue)
+                .putFloat(tint.m00()).putFloat(tint.m01()).putFloat(tint.m02()).putFloat(0.0F)
+                .putFloat(tint.m10()).putFloat(tint.m11()).putFloat(tint.m12()).putFloat(0.0F)
+                .putFloat(tint.m20()).putFloat(tint.m21()).putFloat(tint.m22()).putFloat(0.0F)
+                .putFloat(base.red()).putFloat(base.green()).putFloat(base.blue())
                 .flip();
         Path shader = Path.of(
                 System.getProperty("prime.test.slangShaderDirectory"),
                 "prime_renderer_data_contract.comp.spv");
 
-        ByteBuffer output = runner.dispatch(shader, input, 3 * 4 * Float.BYTES, 1);
+        ByteBuffer output = runner.dispatch(shader, input, 4 * 4 * Float.BYTES, 1);
         double[] uv = RendererDataContracts.sampleUv(pixelX, pixelY, width, height);
         double[] clip = RendererDataContracts.uvToClip(uv[0], uv[1]);
         double[] projectionJitter =
@@ -66,6 +78,9 @@ final class RendererDataContractGpuTest {
         assertEquals(rec2020[0], value(output, 2, 0), 2.0e-6);
         assertEquals(rec2020[1], value(output, 2, 1), 2.0e-6);
         assertEquals(rec2020[2], value(output, 2, 2), 2.0e-6);
+        assertEquals(tinted.red(), value(output, 3, 0), 2.0e-7);
+        assertEquals(tinted.green(), value(output, 3, 1), 2.0e-7);
+        assertEquals(tinted.blue(), value(output, 3, 2), 2.0e-7);
     }
 
     private static float value(ByteBuffer output, int entry, int component) {
