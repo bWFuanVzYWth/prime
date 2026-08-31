@@ -89,6 +89,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
         return;
     }
     PrimitiveRecord primitive = primePrimitive(section);
+    uint primaryMaterialCoreWord = primePrimitiveMaterialCoreWord(primitive);
     bool targetSection = InstanceID() == primeShadowPayload.targetEmitter.x;
     if (targetSection
             && primePrimitiveEmitterIndex(primitive)
@@ -103,27 +104,30 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     PrimeSurfaceRelation relation = primeSurfaceRelation(section, primitive);
     PrimeHitTriangle hit = primeHitTriangle(section, barycentrics);
     float3 outwardNormal = hit.geometricNormal;
-    primitive = primeResolveSurfacePrimitive(
+    PrimeResolvedSurface resolved = primeResolveSurfacePrimitive(
             section,
             primitive,
+            primaryMaterialCoreWord,
             relation,
             barycentrics,
             hit.localPosition,
             outwardNormal);
+    primitive = resolved.primitive;
     if (targetSection
             && primePrimitiveEmitterIndex(primitive)
                     == primeShadowPayload.targetEmitter.y) {
         IgnoreHit();
         return;
     }
-    uint recipeControl = primePrimitiveControl(primitive);
+    uint recipeControl = resolved.recipeControl;
     float2 materialUv = primeInterpolateUv(
             section,
             primitive,
             barycentrics,
             hit.localPosition,
             outwardNormal);
-    uint textureId = primePrimitiveTextureId(section, primitive);
+    uint textureId = primePrimitiveTextureId(
+            section, primitive, resolved.materialCoreWord);
     float surfaceOpacity = primeEvaluateOpacity(primitive, textureId, materialUv);
     if ((recipeControl & PRIME_RECIPE_ALPHA_CUTOUT) != 0u
             && surfaceOpacity < PRIME_CUTOUT_ALPHA_THRESHOLD) {

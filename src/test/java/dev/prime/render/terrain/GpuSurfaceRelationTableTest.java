@@ -15,7 +15,7 @@ final class GpuSurfaceRelationTableTest {
             << PrimitivePacking.CONTROL_SCATTERING_SHIFT;
 
     @Test
-    void boundaryFactsCollapseToOneMaterialIdentityWhileOtherRelationsStayUnchanged() {
+    void boundaryAndEmbeddedMaterialFactsUseTheirCompactGpuLayouts() {
         int identity = MaterialIdResolver.pack(23, 53);
         int[] boundary = boundary(identity);
         int[] overlay = overlay();
@@ -24,7 +24,7 @@ final class GpuSurfaceRelationTableTest {
         GpuSurfaceRelationTable.Encoding encoded =
                 GpuSurfaceRelationTable.encodeResolved(source, 3, 0);
 
-        assertEquals(13, encoded.words().length);
+        assertEquals(12, encoded.words().length);
         assertArrayEquals(
                 new int[] {
                     CpuSectionMesh.SURFACE_RELATION_BOUNDARY
@@ -35,8 +35,7 @@ final class GpuSurfaceRelationTableTest {
                 },
                 GpuSurfaceRelationTable.record(encoded, 0));
         assertNull(GpuSurfaceRelationTable.record(encoded, 1));
-        assertArrayEquals(
-                overlay,
+        assertArrayEquals(compactMaterialRelation(overlay),
                 GpuSurfaceRelationTable.record(encoded, 2));
 
         CpuSectionMesh section = new CpuSectionMesh(
@@ -50,7 +49,7 @@ final class GpuSurfaceRelationTableTest {
                 CpuSectionLights.EMPTY);
         CpuClusterMesh mesh = CpuClusterMesh.fromSegments(List.of(section));
         assertEquals(68L, mesh.surfaceRelationBytes());
-        assertEquals(52L, GpuSurfaceRelationTable.byteSize(mesh));
+        assertEquals(48L, GpuSurfaceRelationTable.byteSize(mesh));
     }
 
     @Test
@@ -166,6 +165,18 @@ final class GpuSurfaceRelationTableTest {
                 () -> GpuSurfaceRelationTable.encodeResolved(source, 1, 0));
     }
 
+    @Test
+    void embeddedMaterialEncodingRejectsAnUnresolvedMaterialIdentity() {
+        int[] relation = overlay();
+        relation[1 + PrimitivePacking.MEDIUM_ID_WORD] =
+                MaterialIdResolver.pack(0, 0);
+        int[] source = SurfaceRelationTable.encode(List.of(relation));
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> GpuSurfaceRelationTable.encodeResolved(source, 1, 0));
+    }
+
     private static int[] boundary(int identity) {
         return new int[] {
             CpuSectionMesh.SURFACE_RELATION_BOUNDARY
@@ -182,10 +193,28 @@ final class GpuSurfaceRelationTableTest {
         int[] result = new int[9];
         result[0] = CpuSectionMesh.SURFACE_RELATION_OVERLAY
                 | PrimitivePacking.CONTROL_ALPHA_CUTOUT << 8;
-        result[4] = PrimitivePacking.packTintControl(0x00ff_ffff, 0);
+        result[4] = PrimitivePacking.packTintControl(
+                0x00ff_ffff,
+                PrimitivePacking.CONTROL_NORMAL_TEXTURE
+                        | PrimitivePacking.CONTROL_TANGENT_NEGATIVE);
+        result[5] = MaterialIdResolver.pack(0, 27);
         result[6] = PrimitivePacking.packControlTexture(0, 9);
         result[7] = Float.floatToRawIntBits(1.0F);
+        result[8] = 0x1234_5678;
         return result;
+    }
+
+    private static int[] compactMaterialRelation(int[] source) {
+        return new int[] {
+            source[0],
+            source[1],
+            source[2],
+            source[3],
+            PrimitivePacking.retainGeometryTintControl(source[4]),
+            source[5],
+            source[7],
+            source[8]
+        };
     }
 
     private static int[] tableBackedPrimitives(int count) {

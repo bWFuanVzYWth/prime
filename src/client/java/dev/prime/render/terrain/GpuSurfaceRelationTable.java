@@ -5,6 +5,7 @@ import java.util.Arrays;
 /** Upload-only relation encoding addressed from existing primitive and emitter payload words. */
 public final class GpuSurfaceRelationTable {
     public static final int BOUNDARY_WORDS = 4;
+    public static final int MATERIAL_WORDS = 8;
     private static final int MAX_ENCODED_OFFSET = 0x00ff_ffff;
     private static final int STATIC_PAYLOAD_MASK = PrimitivePacking.MAX_TEXTURE_ID << 3;
 
@@ -68,8 +69,21 @@ public final class GpuSurfaceRelationTable {
                 words[cursor + 3] = identity;
                 cursor += BOUNDARY_WORDS;
             } else {
-                System.arraycopy(record, 0, words, cursor, record.length);
-                cursor += record.length;
+                int materialId = MaterialIdResolver.unpackMaterialId(
+                        record[1 + PrimitivePacking.MEDIUM_ID_WORD]);
+                if (materialId == 0) {
+                    throw new IllegalArgumentException(
+                            "GPU material relation requires a resolved MaterialId");
+                }
+                words[cursor] = record[0];
+                words[cursor + 1] = record[1];
+                words[cursor + 2] = record[2];
+                words[cursor + 3] = record[3];
+                words[cursor + 4] = PrimitivePacking.retainGeometryTintControl(record[4]);
+                words[cursor + 5] = record[5];
+                words[cursor + 6] = record[7];
+                words[cursor + 7] = record[8];
+                cursor += MATERIAL_WORDS;
             }
         }
         if (cursor != words.length) {
@@ -159,7 +173,7 @@ public final class GpuSurfaceRelationTable {
         return (control & CpuSectionMesh.SURFACE_RELATION_KIND_MASK)
                         == CpuSectionMesh.SURFACE_RELATION_BOUNDARY
                 ? BOUNDARY_WORDS
-                : 9;
+                : MATERIAL_WORDS;
     }
 
     /** Invocation-local mutable upload product; one scene update owns and completes it. */

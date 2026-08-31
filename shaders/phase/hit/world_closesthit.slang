@@ -27,15 +27,21 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     bool dynamic = (primitive.flagsEmitter & PRIME_DYNAMIC_TEXTURE_FLAG) != 0u
             && section.lightAddress != uint64_t(0);
     primePayload.hitKind = PRIME_HIT_SURFACE;
-    primitive = primeResolveSurfacePrimitive(
+    uint primaryMaterialCoreWord = primePrimitiveMaterialCoreWord(primitive);
+    PrimeResolvedSurface resolved = primeResolveSurfacePrimitive(
             section,
             primitive,
+            primaryMaterialCoreWord,
             relation,
             barycentrics,
             hit.localPosition,
             normal);
+    primitive = resolved.primitive;
     bool bakedMaterial = primeUsesBakedMaterial(primitive);
-    uint textureId = bakedMaterial ? 0u : primePrimitiveTextureId(section, primitive);
+    uint textureId = bakedMaterial
+            ? 0u
+            : primePrimitiveTextureId(
+                    section, primitive, resolved.materialCoreWord);
     float textureLodValue =
             bakedMaterial
                     ? 0.0
@@ -47,6 +53,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
                     section, primitive, barycentrics, hit.localPosition, normal);
     PrimeMaterialSample material = primeEvaluateMaterial(
             primitive,
+            resolved.recipeControl,
             textureId,
             materialUv,
             textureLodValue,

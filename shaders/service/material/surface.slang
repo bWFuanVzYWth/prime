@@ -31,6 +31,7 @@ static const uint PRIME_EMITTER_FLAG_TWO_SIDED = 1u;
 static const uint PRIME_EMITTER_FLAG_LABPBR_EMISSION = 2u;
 public PrimeMaterialSample primeEvaluateMaterial(
         PrimitiveRecord primitive,
+        uint recipeControl,
         uint textureId,
         float2 uv,
         float textureLodValue,
@@ -65,7 +66,6 @@ public PrimeMaterialSample primeEvaluateMaterial(
             result.baseColor = primeApplyStaticTint(textureSample.rgb, primitive.tint);
         }
     }
-    uint recipeControl = primePrimitiveControl(primitive);
     uint recipeScattering = recipeControl & PRIME_RECIPE_SCATTERING_MASK;
     bool recipeTransmissive = recipeScattering == PRIME_RECIPE_DIELECTRIC_SOLID
             || recipeScattering == PRIME_RECIPE_DIELECTRIC_THIN;
@@ -186,15 +186,19 @@ public PrimeMaterialSample primeEvaluateMaterialReference(
     primitive.uv1 = asuint(uv.y);
     primitive.uv2 = 0u;
     uint referenceControl = recipeControl & ~PRIME_RECIPE_NORMAL_TEXTURE;
-    primitive.tint = (tintId & 0x00ffffffu)
-            | ((referenceControl & 0xffu) << 24u);
+    primitive.tint = tintId & 0x00ffffffu;
     primitive.mediumMaterialIds = 0u;
-    primitive.flagsEmitter = ((referenceControl >> 8u) & 7u)
-            | ((referenceControl & PRIME_RECIPE_BUILTIN_MASK) << 16u);
+    primitive.flagsEmitter = 0u;
     primitive.uvDensity = PRIME_CONSTANT_UV_DENSITY;
     primitive.tangent = 0u;
     return primeEvaluateMaterial(
-            primitive, textureId, uv, 0.0, 0u, float3(0.0, 0.0, 1.0));
+            primitive,
+            referenceControl,
+            textureId,
+            uv,
+            0.0,
+            0u,
+            float3(0.0, 0.0, 1.0));
 }
 
 public float3 primeEvaluateEmitterRadiance(

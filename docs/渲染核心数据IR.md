@@ -397,6 +397,12 @@ header word。table-backed 普通静态 primitive 可复用已经由 `MaterialId
 保存同一 offset，dynamic/baked 不参与。该局部 offset 不是 `SurfaceRelationId` 或 `EmitterId`，不得
 跨 cluster 保存或被解释为缩窄全局身份。
 
+table-backed GPU primitive 的 immutable recipe/builtin 只存在于 material core；inline control 仅保留
+tangent handedness/front-face 等 geometry-varying 事实。hit resolver 返回显式 recipe override 与
+可复用的单个 core word，不通过改写 primitive 编码传语义。CPU/replay relation 保留可独立审计的
+完整记录；GPU boundary 为 4 words，overlay/bilateral secondary 为 8 words，后者不再复制可由
+`MaterialId` 恢复的 flags/texture/recipe word。
+
 `TextureId` 是 `MaterialId` 去重键的首要组成；只有 medium、recipe、coverage 和其他会改变行为的
 离散事实才扩展该 key。同一 `TextureId` 不能因为 section 不同而产生副本。常规 terrain 的主要
 变化量收敛为 exact orientation、命中导出的 world position 和连续 tint；世界位置本身不重复写入

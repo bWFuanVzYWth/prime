@@ -4,6 +4,7 @@ module "service/trace/hit.slang";
 import glsl;
 import "prime_abi.slang";
 import "prime_abi_types.slang";
+import "prime_material_core_abi.slang";
 import "math/packed_geometry.slang";
 import "model/material/defaults.slang";
 import "model/material/medium_boundary.slang";
@@ -21,12 +22,36 @@ public struct PrimeSurfaceRelation {
     public PrimitiveRecord material;
 };
 
+public struct PrimeResolvedSurface {
+    public PrimitiveRecord primitive;
+    public uint materialCoreWord;
+    public uint recipeControl;
+};
+
 public static const uint PRIME_SURFACE_RELATION_KIND_MASK = 0xfu;
 public static const uint PRIME_SURFACE_RELATION_BOUNDARY = 1u;
 static const uint PRIME_SURFACE_RELATION_OVERLAY = 2u;
 static const uint PRIME_SURFACE_RELATION_BILATERAL = 3u;
 public static const uint PRIME_SURFACE_RELATION_MICRO_GAP_ELIGIBLE = 1u << 4u;
 static const uint PRIME_SURFACE_RELATION_POSITIVE_ONLY = 1u << 4u;
+
+// Static immutable semantics come from MaterialId. Tangent handedness remains per triangle;
+// dynamic and baked records have no MaterialId and retain their inline recipe.
+public uint primePrimitiveMaterialCoreWord(PrimitiveRecord primitive) {
+    uint materialId = primePrimitiveMaterialId(primitive);
+    return materialId == 0u ? 0u : primeMaterialCoreWord(materialId);
+}
+
+public uint primePrimitiveRecipeControl(
+        PrimitiveRecord primitive, uint materialCoreWord) {
+    uint inlineControl = primePrimitiveControl(primitive);
+    uint materialId = primePrimitiveMaterialId(primitive);
+    return materialId == 0u
+            ? inlineControl & PRIME_RECIPE_MATERIAL_MASK
+            : ((materialCoreWord >> PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT)
+                            & PRIME_MATERIAL_CORE_RECIPE_CONTROL_MASK
+                    | (inlineControl & PRIME_RECIPE_TANGENT_NEGATIVE));
+}
 
 public SectionRecord primeSection() {
     return ((SectionRecord*)primePush.sectionTableAddress)[InstanceID()];
@@ -146,10 +171,12 @@ public uint primePrimitiveEmitterIndex(PrimitiveRecord primitive) {
 }
 
 public uint primePrimitiveTextureId(
-        SectionRecord section, PrimitiveRecord primitive) {
+        SectionRecord section,
+        PrimitiveRecord primitive,
+        uint materialCoreWord) {
     uint materialId = primePrimitiveMaterialId(primitive);
     if (materialId != 0u) {
-        return primeMaterialTextureId(materialId);
+        return materialCoreWord & PRIME_MATERIAL_CORE_TEXTURE_ID_MASK;
     }
     if ((primitive.flagsEmitter & PRIME_DYNAMIC_TEXTURE_FLAG) != 0u) {
         return 0u;
@@ -225,22 +252,13 @@ public PrimeSurfaceRelation primeSurfaceRelation(
         result.material.uv2 = relations[offset + 3u];
         result.material.tint = relations[offset + 4u];
         result.material.mediumMaterialIds = relations[offset + 5u];
-        result.material.flagsEmitter = relations[offset + 6u];
-        result.material.uvDensity = relations[offset + 7u];
-        result.material.tangent = relations[offset + 8u];
+        // Immutable recipe and texture facts come from MaterialId. Relation materials cannot be
+        // dynamic or emissive, so their former flags/payload word is redundant.
+        result.material.flagsEmitter = 0u;
+        result.material.uvDensity = relations[offset + 6u];
+        result.material.tangent = relations[offset + 7u];
     }
     return result;
-}
-
-PrimitiveRecord primePrimitiveWithMaterialRecipe(
-        PrimitiveRecord primitive, uint recipe) {
-    uint control = (primePrimitiveControl(primitive) & ~PRIME_RECIPE_MATERIAL_MASK)
-            | (recipe & PRIME_RECIPE_MATERIAL_MASK);
-    primitive.tint = (primitive.tint & 0x00ffffffu) | ((control & 0xffu) << 24u);
-    primitive.flagsEmitter = (primitive.flagsEmitter & ~0x78000003u)
-            | ((control >> 8u) & 3u)
-            | ((control & PRIME_RECIPE_BUILTIN_MASK) << 16u);
-    return primitive;
 }
 
 public float2 primeInterpolateUv(
@@ -250,36 +268,54 @@ public float2 primeInterpolateUv(
         float3 localPosition,
         float3 geometricNormal);
 
-public PrimitiveRecord primeResolveSurfacePrimitive(
+public PrimeResolvedSurface primeResolveSurfacePrimitive(
         SectionRecord section,
         PrimitiveRecord primary,
+        uint primaryMaterialCoreWord,
         PrimeSurfaceRelation relation,
         float2 barycentrics,
         float3 localPosition,
         float3 geometricNormal) {
+    PrimeResolvedSurface result;
+    result.primitive = primary;
+    result.materialCoreWord = primaryMaterialCoreWord;
+    result.recipeControl = primePrimitiveRecipeControl(
+            primary, primaryMaterialCoreWord);
     uint kind = relation.control & PRIME_SURFACE_RELATION_KIND_MASK;
     bool backFacing = HitKind() == HIT_KIND_TRIANGLE_BACK_FACE;
     if (kind == PRIME_SURFACE_RELATION_BILATERAL && backFacing) {
-        return relation.material;
+        result.primitive = relation.material;
+        result.materialCoreWord = primePrimitiveMaterialCoreWord(relation.material);
+        result.recipeControl = primePrimitiveRecipeControl(
+                relation.material, result.materialCoreWord);
+        return result;
     }
     if (kind != PRIME_SURFACE_RELATION_OVERLAY) {
-        return primary;
+        return result;
     }
     bool positiveOnly =
             (relation.control & PRIME_SURFACE_RELATION_POSITIVE_ONLY) != 0u;
     bool overlayCovered = !(positiveOnly && backFacing)
             && primeEvaluateOpacity(
                     primary,
-                    primePrimitiveTextureId(section, primary),
+                    primePrimitiveTextureId(
+                            section, primary, primaryMaterialCoreWord),
                     primeInterpolateUv(
                             section,
                             primary,
                             barycentrics,
                             localPosition,
                             geometricNormal)) >= PRIME_CUTOUT_ALPHA_THRESHOLD;
-    return overlayCovered
-            ? primePrimitiveWithMaterialRecipe(primary, relation.control >> 8u)
-            : relation.material;
+    if (overlayCovered) {
+        // The overlay recipe is an explicit relation semantic, not an alternate primitive ABI.
+        result.recipeControl = relation.control >> 8u;
+    } else {
+        result.primitive = relation.material;
+        result.materialCoreWord = primePrimitiveMaterialCoreWord(relation.material);
+        result.recipeControl = primePrimitiveRecipeControl(
+                relation.material, result.materialCoreWord);
+    }
+    return result;
 }
 
 public PrimitiveRecord primePrimitive() {

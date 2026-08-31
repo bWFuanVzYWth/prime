@@ -36,6 +36,15 @@ public final class MaterialIdResolver {
             result[base + PrimitivePacking.MEDIUM_ID_WORD] = pack(
                     resolvedMediumRecords[base + PrimitivePacking.MEDIUM_ID_WORD],
                     materialId);
+            if (materialId != 0) {
+                // A resolved MaterialId is the sole immutable recipe source on the GPU. Keep only
+                // per-triangle orientation beside the primitive and leave dynamic/baked ABI zero
+                // identities unchanged.
+                result[base + 3] = PrimitivePacking.retainGeometryTintControl(
+                        result[base + 3]);
+                result[base + 5] = PrimitivePacking.retainGeometryFlagsControl(
+                        result[base + 5]);
+            }
         }
         return result;
     }

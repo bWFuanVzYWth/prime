@@ -278,6 +278,17 @@ public final class PrimitivePacking {
         return control & MATERIAL_RECIPE_MASK;
     }
 
+    /** Retains only geometry-varying control stored beside a table-backed primitive's tint. */
+    static int retainGeometryTintControl(int packedTint) {
+        return packedTint & 0x00ff_ffff
+                | packedTint & CONTROL_TANGENT_NEGATIVE << 24;
+    }
+
+    /** Removes immutable builtin semantics after MaterialId makes the material table authoritative. */
+    static int retainGeometryFlagsControl(int packedFlagsEmitter) {
+        return packedFlagsEmitter & ~(CONTROL_BUILTIN_MASK << 16);
+    }
+
     public static boolean isCutout(int control) {
         return (control & CONTROL_ALPHA_CUTOUT) != 0;
     }

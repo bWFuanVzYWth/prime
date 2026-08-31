@@ -35,8 +35,9 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
         return;
     }
     PrimitiveRecord primitive = primePrimitive(section);
-    bool primaryTransmissive =
-            primeRecipeIsTransmissive(primePrimitiveControl(primitive));
+    // Geometry class is already an exact translation result. Use it for the transparent fast
+    // path so a no-relation hit does not need a random material-table access.
+    bool primaryTransmissive = GeometryIndex() == 2u;
     // Without a relation, transparent radiance hits need neither triangle reconstruction nor
     // opacity evaluation.
     if (primaryTransmissive && section.surfaceRelationAddress == uint64_t(0)) {
@@ -46,25 +47,29 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     if (primaryTransmissive && relation.control == 0u) {
         return;
     }
+    uint primaryMaterialCoreWord = primePrimitiveMaterialCoreWord(primitive);
     PrimeHitTriangle hit = primeHitTriangle(section, barycentrics);
     float3 normal = hit.geometricNormal;
-    primitive = primeResolveSurfacePrimitive(
+    PrimeResolvedSurface resolved = primeResolveSurfacePrimitive(
             section,
             primitive,
+            primaryMaterialCoreWord,
             relation,
             barycentrics,
             hit.localPosition,
             normal);
-    if (primeRecipeIsTransmissive(primePrimitiveControl(primitive))) {
+    primitive = resolved.primitive;
+    if (primeRecipeIsTransmissive(resolved.recipeControl)) {
         // Radiance rays keep transparent geometry as explicit path vertices. Shadow rays use
         // shadow.anyhit.slang instead, where straight glass and water transmission are accumulated.
         return;
     }
-    uint recipeControl = primePrimitiveControl(primitive);
+    uint recipeControl = resolved.recipeControl;
     if ((recipeControl & PRIME_RECIPE_ALPHA_CUTOUT) != 0u) {
         float opacity = primeEvaluateOpacity(
                 primitive,
-                primePrimitiveTextureId(section, primitive),
+                primePrimitiveTextureId(
+                        section, primitive, resolved.materialCoreWord),
                 primeInterpolateUv(
                         section, primitive, barycentrics, hit.localPosition, normal));
         if (opacity < PRIME_CUTOUT_ALPHA_THRESHOLD) {

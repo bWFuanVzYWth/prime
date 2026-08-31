@@ -15,7 +15,7 @@ final class MaterialIdResolverTest {
             new MediumKey(MediumKey.Kind.TEXTURE, 7, 0, false);
 
     @Test
-    void packsExactMaterialAndMediumIdsWithoutChangingOtherPrimitiveWords() {
+    void packsExactIdsAndMakesTheMaterialTableTheOnlyImmutableRecipeSource() {
         int[] local = primitive(7, 1, GLASS_CONTROL);
         int[] resolvedMedium = MediumIdResolver.primitiveRecords(
                 local, new int[] {0, 19});
@@ -34,11 +34,37 @@ final class MaterialIdResolverTest {
         int identity = packed[PrimitivePacking.MEDIUM_ID_WORD];
         assertEquals(19, MaterialIdResolver.unpackMediumId(identity));
         assertEquals(41, MaterialIdResolver.unpackMaterialId(identity));
+        assertEquals(resolvedMedium[3] & 0x00ff_ffff, packed[3]);
         for (int word = 0; word < CpuSectionMesh.PRIMITIVE_WORDS; word++) {
-            if (word != PrimitivePacking.MEDIUM_ID_WORD) {
+            if (word != 3 && word != PrimitivePacking.MEDIUM_ID_WORD) {
                 assertEquals(resolvedMedium[word], packed[word]);
             }
         }
+    }
+
+    @Test
+    void resolvedRecordsRetainGeometryOrientationAndPhysicalPayloadOnly() {
+        int control = PrimitivePacking.CONTROL_ALPHA_CUTOUT
+                | PrimitivePacking.CONTROL_NORMAL_TEXTURE
+                | PrimitivePacking.CONTROL_TANGENT_NEGATIVE
+                | PrimitivePacking.CONTROL_FRONT_FACE_ONLY
+                | 9 << PrimitivePacking.CONTROL_BUILTIN_SHIFT;
+        int[] local = primitive(7, 0, control);
+
+        int[] packed = MaterialIdResolver.primitiveRecords(
+                local,
+                local,
+                CompiledClusterLights.EMPTY,
+                MaterialIdResolver.cache(List.of(), key -> 41));
+
+        assertEquals(
+                PrimitivePacking.CONTROL_TANGENT_NEGATIVE,
+                packed[3] >>> 24);
+        assertEquals(0x00ff_ffff, packed[3] & 0x00ff_ffff);
+        assertEquals(PrimitivePacking.CONTROL_FRONT_FACE_ONLY,
+                (packed[5] & 3) << 8);
+        assertEquals(7, PrimitivePacking.unpackTextureId(packed[5]));
+        assertEquals(0, packed[5] >>> 27 & 15);
     }
 
     @Test
