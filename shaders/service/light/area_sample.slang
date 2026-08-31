@@ -184,7 +184,7 @@ AreaLightSample primeSampleAreaLightEmitter(
     float distance = sqrt(distanceSquared);
     float3 direction = toLight / distance;
     float lightCosine = primeEmitterCosine(
-            emitters[emitterIndex].normalPadding.xyz,
+            emitters[emitterIndex].normal,
             emitters[emitterIndex].metadata.z,
             direction);
     if (!(lightCosine > 0.0)) {

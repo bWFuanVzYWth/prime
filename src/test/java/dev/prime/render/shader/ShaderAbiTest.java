@@ -224,7 +224,8 @@ final class ShaderAbiTest {
         assertEquals(0, ShaderAbi.LIGHT_LEAF_ENTRY_INDEX_OFFSET);
         assertEquals(4, ShaderAbi.LIGHT_LEAF_ENTRY_POWER_OFFSET);
         assertEquals(0, ShaderAbi.LIGHT_EMITTER_CORNER_AREA_OFFSET);
-        assertEquals(48, ShaderAbi.LIGHT_EMITTER_NORMAL_PADDING_OFFSET);
+        assertEquals(48, ShaderAbi.LIGHT_EMITTER_NORMAL_OFFSET);
+        assertEquals(60, ShaderAbi.LIGHT_EMITTER_RELATION_OFFSET_OFFSET);
         assertEquals(64, ShaderAbi.LIGHT_EMITTER_UVS_TINT_OFFSET);
         assertEquals(80, ShaderAbi.LIGHT_EMITTER_METADATA_OFFSET);
         assertEquals(0, ShaderAbi.LIGHT_CELL_ALIAS_PROBABILITY_OFFSET);

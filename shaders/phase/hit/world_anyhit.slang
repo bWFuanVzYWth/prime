@@ -42,7 +42,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     if (primaryTransmissive && section.surfaceRelationAddress == uint64_t(0)) {
         return;
     }
-    PrimeSurfaceRelation relation = primeSurfaceRelation(section);
+    PrimeSurfaceRelation relation = primeSurfaceRelation(section, primitive);
     if (primaryTransmissive && relation.control == 0u) {
         return;
     }

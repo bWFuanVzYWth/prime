@@ -3,27 +3,27 @@
   "entries": {
     "entry/atmosphere/atmosphere_aerial.compute.slang": {
       "maxFiles": 9,
-      "maxBytes": 73444
+      "maxBytes": 73469
     },
     "entry/atmosphere/atmosphere_aerial_transmittance.compute.slang": {
       "maxFiles": 5,
-      "maxBytes": 37282
+      "maxBytes": 37307
     },
     "entry/atmosphere/atmosphere_multi_scattering.compute.slang": {
       "maxFiles": 5,
-      "maxBytes": 37399
+      "maxBytes": 37424
     },
     "entry/atmosphere/atmosphere_sky.compute.slang": {
       "maxFiles": 6,
-      "maxBytes": 38638
+      "maxBytes": 38663
     },
     "entry/atmosphere/atmosphere_transmittance.compute.slang": {
       "maxFiles": 5,
-      "maxBytes": 33836
+      "maxBytes": 33861
     },
     "entry/hit/shadow.anyhit.slang": {
       "maxFiles": 18,
-      "maxBytes": 69281
+      "maxBytes": 70042
     },
     "entry/hit/shadow.closesthit.slang": {
       "maxFiles": 3,
@@ -35,11 +35,11 @@
     },
     "entry/hit/world.anyhit.slang": {
       "maxFiles": 11,
-      "maxBytes": 52679
+      "maxBytes": 53335
     },
     "entry/hit/world.closesthit.slang": {
       "maxFiles": 22,
-      "maxBytes": 94893
+      "maxBytes": 95654
     },
     "entry/hit/world.miss.slang": {
       "maxFiles": 4,
@@ -51,11 +51,11 @@
     },
     "entry/offline/bridge_trace.raygeneration.slang": {
       "maxFiles": 48,
-      "maxBytes": 160146
+      "maxBytes": 160160
     },
     "entry/offline/camera_trace.raygeneration.slang": {
       "maxFiles": 46,
-      "maxBytes": 159489
+      "maxBytes": 159503
     },
     "entry/offline/direct.raygeneration.slang": {
       "maxFiles": 120,
@@ -71,7 +71,7 @@
     },
     "entry/offline/scatter.raygeneration.slang": {
       "maxFiles": 101,
-      "maxBytes": 327260
+      "maxBytes": 327274
     },
     "entry/post/auto_exposure_histogram.compute.slang": {
       "maxFiles": 3,
@@ -139,7 +139,7 @@
     },
     "entry/realtime/camera_trace.raygeneration.slang": {
       "maxFiles": 57,
-      "maxBytes": 221283
+      "maxBytes": 221297
     },
     "entry/realtime/landing_light_select.raygeneration.slang": {
       "maxFiles": 83,
@@ -147,7 +147,7 @@
     },
     "entry/realtime/landing_direct.raygeneration.slang": {
       "maxFiles": 116,
-      "maxBytes": 452975
+      "maxBytes": 452978
     },
     "entry/realtime/landing_scatter.raygeneration.slang": {
       "maxFiles": 148,
@@ -183,7 +183,7 @@
     },
     "entry/realtime/fixed_direct.raygeneration.slang": {
       "maxFiles": 118,
-      "maxBytes": 452592
+      "maxBytes": 452595
     },
     "entry/realtime/fixed_scatter.raygeneration.slang": {
       "maxFiles": 148,

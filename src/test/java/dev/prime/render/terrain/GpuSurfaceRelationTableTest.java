@@ -2,6 +2,7 @@ package dev.prime.render.terrain;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.prime.render.material.ScatteringFamily;
@@ -20,12 +21,10 @@ final class GpuSurfaceRelationTableTest {
         int[] overlay = overlay();
         int[] source = SurfaceRelationTable.encode(Arrays.asList(boundary, null, overlay));
 
-        int[] encoded = GpuSurfaceRelationTable.encodeResolved(source, 3);
+        GpuSurfaceRelationTable.Encoding encoded =
+                GpuSurfaceRelationTable.encodeResolved(source, 3, 0);
 
-        assertEquals(source.length - 1, encoded.length);
-        assertEquals(3, encoded[0]);
-        assertEquals(0, encoded[1]);
-        assertEquals(7, encoded[2]);
+        assertEquals(13, encoded.words().length);
         assertArrayEquals(
                 new int[] {
                     CpuSectionMesh.SURFACE_RELATION_BOUNDARY
@@ -34,10 +33,11 @@ final class GpuSurfaceRelationTableTest {
                     boundary[2],
                     identity
                 },
-                GpuSurfaceRelationTable.record(encoded, 3, 0));
+                GpuSurfaceRelationTable.record(encoded, 0));
+        assertNull(GpuSurfaceRelationTable.record(encoded, 1));
         assertArrayEquals(
                 overlay,
-                GpuSurfaceRelationTable.record(encoded, 3, 2));
+                GpuSurfaceRelationTable.record(encoded, 2));
 
         CpuSectionMesh section = new CpuSectionMesh(
                 new float[3 * 9],
@@ -50,7 +50,110 @@ final class GpuSurfaceRelationTableTest {
                 CpuSectionLights.EMPTY);
         CpuClusterMesh mesh = CpuClusterMesh.fromSegments(List.of(section));
         assertEquals(68L, mesh.surfaceRelationBytes());
-        assertEquals(64L, GpuSurfaceRelationTable.byteSize(mesh));
+        assertEquals(52L, GpuSurfaceRelationTable.byteSize(mesh));
+    }
+
+    @Test
+    void relationOffsetsReuseStaticPayloadAndEmitterPaddingWithoutChangingControls() {
+        int[] sourceRelations = SurfaceRelationTable.encode(Arrays.asList(
+                boundary(MaterialIdResolver.pack(23, 53)),
+                null,
+                overlay()));
+        GpuSurfaceRelationTable.Encoding relations =
+                GpuSurfaceRelationTable.encodeResolved(sourceRelations, 3, 1);
+        int[] primitives = new int[3 * CpuSectionMesh.PRIMITIVE_WORDS];
+        primitives[PrimitivePacking.MEDIUM_ID_WORD] = MaterialIdResolver.pack(11, 41);
+        primitives[3] = PrimitivePacking.packTintControl(
+                0x0012_3456, PrimitivePacking.CONTROL_NORMAL_TEXTURE);
+        primitives[5] = PrimitivePacking.packControlTexture(
+                PrimitivePacking.CONTROL_NORMAL_TEXTURE, 91);
+        int second = CpuSectionMesh.PRIMITIVE_WORDS;
+        primitives[second + PrimitivePacking.MEDIUM_ID_WORD] =
+                MaterialIdResolver.pack(12, 42);
+        primitives[second + 3] = PrimitivePacking.packTintControl(
+                0x0065_4321, PrimitivePacking.CONTROL_ALPHA_CUTOUT);
+        primitives[second + 5] = PrimitivePacking.packControlTexture(
+                PrimitivePacking.CONTROL_ALPHA_CUTOUT, 92);
+        int third = 2 * CpuSectionMesh.PRIMITIVE_WORDS;
+        primitives[third + PrimitivePacking.MEDIUM_ID_WORD] =
+                MaterialIdResolver.pack(13, 43);
+        primitives[third + 5] = PrimitivePacking.packControlEmitter(
+                PrimitivePacking.CONTROL_DIELECTRIC_SOLID, 0);
+        int[] original = primitives.clone();
+
+        int[] packed = GpuSurfaceRelationTable.primitiveRecords(
+                primitives, 3, 0, 0, 0, 3, 3, relations);
+
+        assertEquals(
+                PrimitivePacking.CONTROL_NORMAL_TEXTURE,
+                PrimitivePacking.unpackControl(packed[3], packed[5]));
+        assertEquals(1, packed[5] >>> 3 & PrimitivePacking.MAX_TEXTURE_ID);
+        assertEquals(
+                PrimitivePacking.CONTROL_ALPHA_CUTOUT,
+                PrimitivePacking.unpackControl(
+                        packed[second + 3], packed[second + 5]));
+        assertEquals(0, packed[second + 5] >>> 3 & PrimitivePacking.MAX_TEXTURE_ID);
+        assertEquals(primitives[third + 5], packed[third + 5]);
+        assertArrayEquals(new int[] {5}, relations.completedEmitterOffsets());
+        assertArrayEquals(original, primitives);
+    }
+
+    @Test
+    void nonTablePrimitiveCannotOwnARelation() {
+        GpuSurfaceRelationTable.Encoding relations =
+                GpuSurfaceRelationTable.encodeResolved(
+                        SurfaceRelationTable.encode(List.of(
+                                boundary(MaterialIdResolver.pack(23, 53)))),
+                        1,
+                        0);
+        int[] dynamic = new int[CpuSectionMesh.PRIMITIVE_WORDS];
+        dynamic[5] = PrimitivePacking.packDynamicControl(0, 1, false);
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> GpuSurfaceRelationTable.primitiveRecords(
+                        dynamic, 1, 0, 0, 0, 1, 1, relations));
+    }
+
+    @Test
+    void emitterWithoutARelationStillPublishesAnExplicitZeroOffset() {
+        GpuSurfaceRelationTable.Encoding relations =
+                GpuSurfaceRelationTable.encodeResolved(new int[0], 1, 1);
+        int[] emitter = new int[CpuSectionMesh.PRIMITIVE_WORDS];
+        emitter[PrimitivePacking.MEDIUM_ID_WORD] = MaterialIdResolver.pack(3, 7);
+        emitter[5] = PrimitivePacking.packControlEmitter(0, 0);
+
+        int[] packed = GpuSurfaceRelationTable.primitiveRecords(
+                emitter, 1, 0, 0, 0, 1, 1, relations);
+
+        assertArrayEquals(emitter, packed);
+        assertArrayEquals(new int[] {0}, relations.completedEmitterOffsets());
+    }
+
+    @Test
+    void categoryBasesPreserveGlobalOrderAcrossSegments() {
+        int identity = MaterialIdResolver.pack(3, 7);
+        GpuSurfaceRelationTable.Encoding relations =
+                GpuSurfaceRelationTable.encodeResolved(
+                        SurfaceRelationTable.encode(List.of(
+                                boundary(identity),
+                                boundary(identity),
+                                boundary(identity),
+                                boundary(identity),
+                                boundary(identity),
+                                boundary(identity))),
+                        6,
+                        0);
+        int[] first = tableBackedPrimitives(3);
+        int[] second = tableBackedPrimitives(3);
+
+        int[] firstPacked = GpuSurfaceRelationTable.primitiveRecords(
+                first, 1, 1, 1, 0, 2, 4, relations);
+        int[] secondPacked = GpuSurfaceRelationTable.primitiveRecords(
+                second, 1, 1, 1, 1, 3, 5, relations);
+
+        assertArrayEquals(new int[] {1, 9, 17}, relationPayloads(firstPacked));
+        assertArrayEquals(new int[] {5, 13, 21}, relationPayloads(secondPacked));
     }
 
     @Test
@@ -60,7 +163,7 @@ final class GpuSurfaceRelationTableTest {
 
         assertThrows(
                 IllegalArgumentException.class,
-                () -> GpuSurfaceRelationTable.encodeResolved(source, 1));
+                () -> GpuSurfaceRelationTable.encodeResolved(source, 1, 0));
     }
 
     private static int[] boundary(int identity) {
@@ -82,6 +185,28 @@ final class GpuSurfaceRelationTableTest {
         result[4] = PrimitivePacking.packTintControl(0x00ff_ffff, 0);
         result[6] = PrimitivePacking.packControlTexture(0, 9);
         result[7] = Float.floatToRawIntBits(1.0F);
+        return result;
+    }
+
+    private static int[] tableBackedPrimitives(int count) {
+        int[] result = new int[count * CpuSectionMesh.PRIMITIVE_WORDS];
+        for (int primitive = 0; primitive < count; primitive++) {
+            int base = primitive * CpuSectionMesh.PRIMITIVE_WORDS;
+            result[base + PrimitivePacking.MEDIUM_ID_WORD] =
+                    MaterialIdResolver.pack(3, 7);
+            result[base + 5] = PrimitivePacking.packControlTexture(0, 91);
+        }
+        return result;
+    }
+
+    private static int[] relationPayloads(int[] primitives) {
+        int[] result = new int[primitives.length / CpuSectionMesh.PRIMITIVE_WORDS];
+        for (int primitive = 0; primitive < result.length; primitive++) {
+            result[primitive] = primitives[
+                            primitive * CpuSectionMesh.PRIMITIVE_WORDS + 5]
+                    >>> 3
+                    & PrimitivePacking.MAX_TEXTURE_ID;
+        }
         return result;
     }
 }

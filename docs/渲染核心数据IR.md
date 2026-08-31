@@ -391,6 +391,12 @@ Scene IR 的目标布局以全局材质耦合查表为默认：一个 u16 `Mater
 texture-record references。triangle 只保存 UV、relation、tint-field addressing 等确实随几何变化的
 数据。surface relation 和 `EmitterId u32` 复用同一 binding，不复制整份 secondary material。
 
+GPU 物理 relation table 是按 cluster 定址的 tail-only 存储，不为无 relation 的 primitive 分配
+header word。table-backed 普通静态 primitive 可复用已经由 `MaterialId` 取代的旧 TextureId payload
+保存受 24-bit 上限约束的 relation word offset+1；emitter 通过具名 `LightEmitter.relationOffset`
+保存同一 offset，dynamic/baked 不参与。该局部 offset 不是 `SurfaceRelationId` 或 `EmitterId`，不得
+跨 cluster 保存或被解释为缩窄全局身份。
+
 `TextureId` 是 `MaterialId` 去重键的首要组成；只有 medium、recipe、coverage 和其他会改变行为的
 离散事实才扩展该 key。同一 `TextureId` 不能因为 section 不同而产生副本。常规 terrain 的主要
 变化量收敛为 exact orientation、命中导出的 world position 和连续 tint；世界位置本身不重复写入

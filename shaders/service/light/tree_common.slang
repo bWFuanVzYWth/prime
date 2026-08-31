@@ -69,7 +69,7 @@ public float2 primeEmitterMetrics(
             boundsMin,
             boundsMax,
             point,
-            emitter.normalPadding.xyz,
+            emitter.normal,
             boundsDistanceSquared,
             inverseDistance);
     if ((emitter.metadata.z & PRIME_EMITTER_TWO_SIDED) != 0u) {
@@ -79,7 +79,7 @@ public float2 primeEmitterMetrics(
                         boundsMin,
                         boundsMax,
                         point,
-                        -emitter.normalPadding.xyz,
+                        -emitter.normal,
                         boundsDistanceSquared,
                         inverseDistance));
     }

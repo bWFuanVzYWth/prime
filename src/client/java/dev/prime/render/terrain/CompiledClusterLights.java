@@ -13,6 +13,7 @@ import java.util.function.IntUnaryOperator;
 public final class CompiledClusterLights {
     private static final int POINTER_COUNT = 5;
     private static final int HEADER_WORDS = 12;
+    private static final int MAX_RELATION_OFFSET = 0x00ff_ffff;
     public static final CompiledClusterLights EMPTY =
             new CompiledClusterLights(new int[0], Summary.EMPTY);
 
@@ -123,19 +124,42 @@ public final class CompiledClusterLights {
 
     /** Returns one relocated payload whose static RGB8 tints have exact renderer TintIds. */
     public int[] relocate(long deviceAddress, IntUnaryOperator tintResolver) {
+        return this.relocate(deviceAddress, tintResolver, new int[this.emitterCount()]);
+    }
+
+    /** Returns one relocated payload with exact tint and per-emitter surface-relation offsets. */
+    public int[] relocate(
+            long deviceAddress,
+            IntUnaryOperator tintResolver,
+            int[] relationOffsets) {
+        Objects.requireNonNull(relationOffsets, "relationOffsets");
+        if (relationOffsets.length != this.emitterCount()) {
+            throw new IllegalArgumentException(
+                    "Emitter relation offsets disagree with the compiled light table");
+        }
         if (this.isEmpty()) {
             return new int[0];
         }
         int[] relocated = this.relativeWords.clone();
+        int emitterWords = ShaderAbi.LIGHT_EMITTER_SIZE / Integer.BYTES;
+        int emitterStart = Math.toIntExact(getLong(relocated, 6) / Integer.BYTES);
         if (tintResolver != null) {
-            int emitterWords = ShaderAbi.LIGHT_EMITTER_SIZE / Integer.BYTES;
-            int emitterStart = Math.toIntExact(getLong(relocated, 6) / Integer.BYTES);
             int tintWord = ShaderAbi.LIGHT_EMITTER_UVS_TINT_OFFSET / Integer.BYTES + 3;
             for (int emitter = 0; emitter < this.emitterCount(); emitter++) {
                 int word = emitterStart + emitter * emitterWords + tintWord;
                 relocated[word] = TintIdResolver.resolvePackedRgb(
                         relocated[word] & 0x00ff_ffff, tintResolver);
             }
+        }
+        int relationWord = ShaderAbi.LIGHT_EMITTER_RELATION_OFFSET_OFFSET / Integer.BYTES;
+        for (int emitter = 0; emitter < relationOffsets.length; emitter++) {
+            int relationOffset = relationOffsets[emitter];
+            if (relationOffset < 0 || relationOffset > MAX_RELATION_OFFSET) {
+                throw new IllegalArgumentException(
+                        "Emitter relation offset exceeds its exact 24-bit domain");
+            }
+            relocated[emitterStart + emitter * emitterWords + relationWord] =
+                    relationOffset;
         }
         if (deviceAddress == 0L) {
             return relocated;

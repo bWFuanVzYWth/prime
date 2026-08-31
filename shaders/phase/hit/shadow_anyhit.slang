@@ -100,7 +100,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     if (GeometryIndex() == 0u) {
         return;
     }
-    PrimeSurfaceRelation relation = primeSurfaceRelation(section);
+    PrimeSurfaceRelation relation = primeSurfaceRelation(section, primitive);
     PrimeHitTriangle hit = primeHitTriangle(section, barycentrics);
     float3 outwardNormal = hit.geometricNormal;
     primitive = primeResolveSurfacePrimitive(

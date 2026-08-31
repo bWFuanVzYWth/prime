@@ -61,7 +61,8 @@
         { "name": "cornerArea", "type": "vec4", "offset": 0 },
         { "name": "edgeOneScale", "type": "vec4", "offset": 16 },
         { "name": "edgeTwoPower", "type": "vec4", "offset": 32 },
-        { "name": "normalPadding", "type": "vec4", "offset": 48 },
+        { "name": "normal", "type": "vec3", "offset": 48 },
+        { "name": "relationOffset", "type": "uint", "offset": 60 },
         { "name": "uvsTint", "type": "uvec4", "offset": 64 },
         { "name": "metadata", "type": "uvec4", "offset": 80 }
       ]

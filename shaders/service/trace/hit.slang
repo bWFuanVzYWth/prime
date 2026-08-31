@@ -170,7 +170,8 @@ public uint primePrimitiveTextureId(
     return emitters[emitterIndex].metadata.w;
 }
 
-public PrimeSurfaceRelation primeSurfaceRelation(SectionRecord section) {
+public PrimeSurfaceRelation primeSurfaceRelation(
+        SectionRecord section, PrimitiveRecord primitive) {
     PrimeSurfaceRelation result;
     result.control = 0u;
     result.referenceUv = 0u;
@@ -188,11 +189,29 @@ public PrimeSurfaceRelation primeSurfaceRelation(SectionRecord section) {
     if (section.surfaceRelationAddress == uint64_t(0)) {
         return result;
     }
-    uint* relations = (uint*)section.surfaceRelationAddress;
-    uint offset = relations[primeGlobalPrimitiveIndex(section)];
-    if (offset == 0u) {
+    if (primePrimitiveMaterialId(primitive) == 0u) {
         return result;
     }
+    uint encodedOffset = 0u;
+    uint emitterIndex = primePrimitiveEmitterIndex(primitive);
+    if (emitterIndex != PRIME_NO_PRIMITIVE_INDEX) {
+        if (section.lightAddress == uint64_t(0)) {
+            return result;
+        }
+        SectionLightHeader* header = (SectionLightHeader*)section.lightAddress;
+        if (emitterIndex >= header[0].emitterCount) {
+            return result;
+        }
+        LightEmitter* emitters = (LightEmitter*)header[0].emitterAddress;
+        encodedOffset = emitters[emitterIndex].relationOffset;
+    } else {
+        encodedOffset = primitive.flagsEmitter >> 3u & 0x00ffffffu;
+    }
+    if (encodedOffset == 0u) {
+        return result;
+    }
+    uint* relations = (uint*)section.surfaceRelationAddress;
+    uint offset = encodedOffset - 1u;
     result.control = relations[offset];
     uint kind = result.control & PRIME_SURFACE_RELATION_KIND_MASK;
     if (kind == PRIME_SURFACE_RELATION_BOUNDARY) {

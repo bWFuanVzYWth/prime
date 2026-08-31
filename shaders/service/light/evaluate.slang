@@ -42,7 +42,7 @@ public LightEvaluation primeEvaluateAreaLight(
     LightEmitter* emitters = (LightEmitter*)sectionBuffer[0].emitterAddress;
     float4 emitterCornerArea = emitters[emitterIndex].cornerArea;
     float lightCosine = primeEmitterCosine(
-            emitters[emitterIndex].normalPadding.xyz,
+            emitters[emitterIndex].normal,
             emitters[emitterIndex].metadata.z,
             rayDirection);
     if (!(lightCosine > 0.0) || !(emitterCornerArea.w > 0.0)) {

@@ -73,6 +73,28 @@ final class CompiledClusterLightsTest {
     }
 
     @Test
+    void relocationPublishesEmitterRelationOffsetsWithoutMutatingSource() {
+        int[] relative = validOneEmitterPayload();
+        CompiledClusterLights lights = CompiledClusterLights.fromEncoded(
+                relative,
+                new CompiledClusterLights.Summary(
+                        1, -1.0F, -2.0F, -3.0F, 1.0F, 2.0F, 3.0F, 4.0F));
+
+        int[] relocated = lights.relocate(0x1000L, null, new int[] {123});
+        int relationWord = 24
+                + ShaderAbi.LIGHT_EMITTER_RELATION_OFFSET_OFFSET / Integer.BYTES;
+
+        assertEquals(123, relocated[relationWord]);
+        assertEquals(0, lights.encodedWords()[relationWord]);
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> lights.relocate(0x1000L, null, new int[0]));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> lights.relocate(0x1000L, null, new int[] {0x0100_0000}));
+    }
+
+    @Test
     void encodedPayloadValidationRejectsBrokenIdentity() {
         int[] header = new int[12];
         header[11] = 2;

@@ -21,7 +21,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     float2 barycentrics = attributes.barycentrics;
     SectionRecord section = primeSection();
     PrimitiveRecord primitive = primePrimitive(section);
-    PrimeSurfaceRelation relation = primeSurfaceRelation(section);
+    PrimeSurfaceRelation relation = primeSurfaceRelation(section, primitive);
     PrimeHitTriangle hit = primeHitTriangle(section, barycentrics);
     float3 normal = hit.geometricNormal;
     bool dynamic = (primitive.flagsEmitter & PRIME_DYNAMIC_TEXTURE_FLAG) != 0u

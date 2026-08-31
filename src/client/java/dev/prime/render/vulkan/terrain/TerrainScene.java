@@ -1213,11 +1213,34 @@ public final class TerrainScene implements AutoCloseable {
         VulkanBuffer motion = null;
         PreparedBlas blas = null;
         DynamicBufferPool.Lease dynamicBuffers = null;
+        GpuSurfaceRelationTable.Encoding relationEncoding =
+                GpuSurfaceRelationTable.encodeResolved(
+                        new int[0], 0, mesh.lights().emitterCount());
         ArrayList<PreparedBlas> voxelBlases =
                 new ArrayList<>(mesh.voxelMeshes().size());
         try {
             if (mesh.triangleCount() != 0L) {
-                long surfaceRelationBytes = GpuSurfaceRelationTable.byteSize(mesh);
+                int primitiveCount = Math.toIntExact(mesh.primitiveCount());
+                int[] mediumMap = this.mediumIds.resolve(mesh.mediumCatalog());
+                MaterialIdResolver.Cache materialCache = MaterialIdResolver.cache(
+                        mesh.mediumCatalog(), this.materialIds::resolve);
+                IntUnaryOperator tintResolver = this.tintOperators::resolve;
+                int[] sourceRelations = mesh.surfaceRelationRecords();
+                int[] relations = sourceRelations;
+                if (relations.length != 0) {
+                    relations = MediumIdResolver.surfaceRelations(
+                            relations, primitiveCount, mediumMap);
+                    relations = MaterialIdResolver.surfaceRelations(
+                            relations,
+                            sourceRelations,
+                            primitiveCount,
+                            materialCache);
+                    relations = TintIdResolver.surfaceRelations(
+                            relations, primitiveCount, tintResolver);
+                }
+                relationEncoding = GpuSurfaceRelationTable.encodeResolved(
+                        relations, primitiveCount, mesh.lights().emitterCount());
+                long surfaceRelationBytes = relationEncoding.byteSize();
                 long primitiveBytes = Math.addExact(
                         mesh.primitiveBytes(), surfaceRelationBytes);
                 if (upload.dynamic()) {
@@ -1242,15 +1265,14 @@ public final class TerrainScene implements AutoCloseable {
                             false,
                             "Prime cluster " + upload.key() + " primitives");
                 }
-                MaterialIdResolver.Cache materialCache = MaterialIdResolver.cache(
-                        mesh.mediumCatalog(), this.materialIds::resolve);
                 copyMeshSegments(
                         commandBuffer,
                         stagingBatch,
                         mesh,
-                        this.mediumIds.resolve(mesh.mediumCatalog()),
+                        mediumMap,
                         materialCache,
-                        this.tintOperators::resolve,
+                        tintResolver,
+                        relationEncoding,
                         positions,
                         primitives);
                 if (upload.dynamic()) {
@@ -1301,7 +1323,9 @@ public final class TerrainScene implements AutoCloseable {
                         commandBuffer,
                         stagingBatch.write(
                                 mesh.lights().relocate(
-                                        lights.deviceAddress(), this.tintOperators::resolve),
+                                        lights.deviceAddress(),
+                                        this.tintOperators::resolve,
+                                        relationEncoding.completedEmitterOffsets()),
                                 16L),
                         lights);
             }
@@ -1335,7 +1359,7 @@ public final class TerrainScene implements AutoCloseable {
                     voxelBlases,
                     ResolvedVoxelInstances.resolve(
                             mesh.voxelInstances(), this.tintOperators::resolve),
-                    mesh.hasSurfaceRelations()
+                    !relationEncoding.isEmpty()
                             ? primitives.deviceAddress() + mesh.primitiveBytes()
                             : 0L,
                     lights,
@@ -1348,7 +1372,7 @@ public final class TerrainScene implements AutoCloseable {
                             ? MaterialTableCandidate.measure(mesh)
                             : MaterialTableCandidate.EMPTY,
                     mesh.surfaceRelationBytes(),
-                    GpuSurfaceRelationTable.byteSize(mesh),
+                    relationEncoding.byteSize(),
                     upload.dynamic(),
                     dynamicBuffers);
         } catch (RuntimeException exception) {
@@ -1453,6 +1477,7 @@ public final class TerrainScene implements AutoCloseable {
             int[] localToRendererMediumId,
             MaterialIdResolver.Cache materialCache,
             IntUnaryOperator tintResolver,
+            GpuSurfaceRelationTable.Encoding relationEncoding,
             VulkanBuffer positions,
             VulkanBuffer primitives) {
         long[] positionCursors = new long[] {
@@ -1471,6 +1496,13 @@ public final class TerrainScene implements AutoCloseable {
                     Math.addExact(mesh.opaquePrimitiveCount(), mesh.cutoutPrimitiveCount()),
                     (long) CpuSectionMesh.PRIMITIVE_WORDS * Integer.BYTES)
         };
+        int[] relationCursors = new int[] {
+            0,
+            Math.toIntExact(mesh.opaquePrimitiveCount()),
+            Math.toIntExact(
+                    Math.addExact(
+                            mesh.opaquePrimitiveCount(), mesh.cutoutPrimitiveCount()))
+        };
         for (CpuClusterMesh.Segment segment : mesh.segments()) {
             int[] primitiveRecords = MediumIdResolver.primitiveRecords(
                     segment.primitiveRecords(), localToRendererMediumId);
@@ -1481,6 +1513,15 @@ public final class TerrainScene implements AutoCloseable {
                     materialCache);
             primitiveRecords = TintIdResolver.primitiveRecords(
                     primitiveRecords, tintResolver);
+            primitiveRecords = GpuSurfaceRelationTable.primitiveRecords(
+                    primitiveRecords,
+                    segment.opaquePrimitiveCount(),
+                    segment.cutoutPrimitiveCount(),
+                    segment.transmissivePrimitiveCount(),
+                    relationCursors[0],
+                    relationCursors[1],
+                    relationCursors[2],
+                    relationEncoding);
             int sourcePosition = 0;
             int sourcePrimitive = 0;
             for (int category = 0; category < 3; category++) {
@@ -1520,29 +1561,13 @@ public final class TerrainScene implements AutoCloseable {
                 sourcePrimitive += primitiveWords;
                 positionCursors[category] += (long) positionWords * Float.BYTES;
                 primitiveCursors[category] += (long) primitiveWords * Integer.BYTES;
+                relationCursors[category] += primitiveCount;
             }
         }
-        int[] relations = mesh.surfaceRelationRecords();
-        if (relations.length != 0) {
-            int[] localRelations = relations;
-            relations = MediumIdResolver.surfaceRelations(
-                    relations,
-                    Math.toIntExact(mesh.primitiveCount()),
-                    localToRendererMediumId);
-            relations = MaterialIdResolver.surfaceRelations(
-                    relations,
-                    localRelations,
-                    Math.toIntExact(mesh.primitiveCount()),
-                    materialCache);
-            relations = TintIdResolver.surfaceRelations(
-                    relations,
-                    Math.toIntExact(mesh.primitiveCount()),
-                    tintResolver);
-            relations = GpuSurfaceRelationTable.encodeResolved(
-                    relations, Math.toIntExact(mesh.primitiveCount()));
+        if (!relationEncoding.isEmpty()) {
             copyBuffer(
                     commandBuffer,
-                    staging.write(relations, Integer.BYTES),
+                    staging.write(relationEncoding.words(), Integer.BYTES),
                     primitives,
                     mesh.primitiveBytes());
         }
