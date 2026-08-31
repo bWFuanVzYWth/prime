@@ -55,6 +55,7 @@ public final class VulkanRenderer implements AutoCloseable {
     private final TraceBackend traceBackend;
     private AtmospherePipeline atmosphere;
     private BlockAtlasFrame blockAtlasFrame;
+    private final ReloadGate<ResourceReload> resourceReloads = new ReloadGate<>();
     private long blockAtlasTextureRevision;
     private List<TraceBackend.SceneTexture> sceneTextures = List.of();
     private DynamicSceneFrame publishedDynamicFrame;
@@ -163,6 +164,9 @@ public final class VulkanRenderer implements AutoCloseable {
         if (this.screenshotRequestRejected) {
             screenshotRequested = false;
             this.screenshotRequestRejected = false;
+        }
+        if (this.resourceReloads.active()) {
+            return screenshotRequested;
         }
         this.reloadPipelineIfRequested();
         this.synchronizeLabPbr(minecraft);
@@ -685,14 +689,23 @@ public final class VulkanRenderer implements AutoCloseable {
     }
 
     public ResourceReload beginResourceReload() {
-        return new ResourceReload(this, this.terrain.beginResourceReload());
+        this.resourceReloads.requireIdle();
+        ResourceReload reload = new ResourceReload(
+                this, this.terrain.beginResourceReload());
+        this.resourceReloads.begin(reload);
+        // Minecraft may replace the atlas between frames. Withholding the frame snapshot keeps
+        // both old and not-yet-uploaded generations out of trace descriptors until commit.
+        this.blockAtlasFrame = null;
+        return reload;
     }
 
     public void finishResourceReload(
             ResourceReload reload, Minecraft minecraft, boolean reloadShaders) {
+        this.resourceReloads.require(reload);
         TerrainStreamer.ResourceReload terrainReload = this.requireReload(reload);
         if (!this.acceptsResourceReloadEffects) {
             this.terrain.finishResourceReload(terrainReload);
+            this.resourceReloads.complete(reload);
             return;
         }
         this.labPbrSource.requestReload();
@@ -706,10 +719,13 @@ public final class VulkanRenderer implements AutoCloseable {
             this.reloadPipelineIfRequested();
         }
         this.terrain.finishResourceReload(terrainReload);
+        this.resourceReloads.complete(reload);
     }
 
     public void abortResourceReload(ResourceReload reload) {
+        this.resourceReloads.require(reload);
         this.terrain.abortResourceReload(this.requireReload(reload));
+        this.resourceReloads.complete(reload);
     }
 
     private TerrainStreamer.ResourceReload requireReload(ResourceReload reload) {
@@ -936,6 +952,40 @@ public final class VulkanRenderer implements AutoCloseable {
             VulkanGpuSampler sampler,
             long sourceGeneration,
             long textureRevision) {
+    }
+
+    /** Render-thread-only transaction gate for an atlas/resource generation replacement. */
+    static final class ReloadGate<T> {
+        private T active;
+
+        void begin(T token) {
+            java.util.Objects.requireNonNull(token, "token");
+            if (this.active != null) {
+                throw new IllegalStateException("A renderer resource reload is already active");
+            }
+            this.active = token;
+        }
+
+        boolean active() {
+            return this.active != null;
+        }
+
+        void requireIdle() {
+            if (this.active != null) {
+                throw new IllegalStateException("A renderer resource reload is already active");
+            }
+        }
+
+        void require(T token) {
+            if (token == null || token != this.active) {
+                throw new IllegalArgumentException("Renderer resource reload is not active");
+            }
+        }
+
+        void complete(T token) {
+            this.require(token);
+            this.active = null;
+        }
     }
 
     public static final class ResourceReload {
