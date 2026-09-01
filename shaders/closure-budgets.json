@@ -138,8 +138,8 @@
       "maxBytes": 5647
     },
     "entry/realtime/camera_trace.raygeneration.slang": {
-      "maxFiles": 58,
-      "maxBytes": 225690
+      "maxFiles": 40,
+      "maxBytes": 179200
     },
     "entry/realtime/landing_light_select.raygeneration.slang": {
       "maxFiles": 74,
@@ -162,12 +162,12 @@
       "maxBytes": 365500
     },
     "entry/realtime/visible_direct.raygeneration.slang": {
-      "maxFiles": 124,
-      "maxBytes": 474600
+      "maxFiles": 122,
+      "maxBytes": 471000
     },
     "entry/realtime/surface_split.raygeneration.slang": {
       "maxFiles": 160,
-      "maxBytes": 609600
+      "maxBytes": 609100
     },
     "entry/realtime/noisy_output_resolve.raygeneration.slang": {
       "maxFiles": 24,

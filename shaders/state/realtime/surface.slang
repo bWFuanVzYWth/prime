@@ -56,15 +56,14 @@ public void primeStoreWavefrontSurface(uint pathIndex, SurfaceInteraction surfac
     primeWavefrontQueue[base + 24u] = asuint(surface.textureLod);
 }
 
-public SurfaceInteraction primeLoadWavefrontSurface(uint pathIndex) {
+public SurfaceInteraction primeLoadWavefrontSurface(
+        uint pathIndex, uint2 missSourcePrimitive) {
     uint base = primeWavefrontSurfaceWord(pathIndex);
     uint hitKind = primeWavefrontQueue[
             base + PRIME_WAVEFRONT_SURFACE_LANE_WORDS]
             & PRIME_HIT_KIND_MASK;
     if (hitKind == PRIME_HIT_NONE) {
-        return primeMissSurfaceInteraction(
-                primeWavefrontPaths[pathIndex]
-                        .transport.sourceAndPathControl.xy);
+        return primeMissSurfaceInteraction(missSourcePrimitive);
     }
     PrimeSurfaceStorageRecord record;
     record.geometry = primeLoadWavefrontSurfaceLane(base, 0u);
@@ -76,4 +75,11 @@ public SurfaceInteraction primeLoadWavefrontSurface(uint pathIndex) {
     SurfaceInteraction surface = primeUnpackSurfaceStorageRecord(record);
     surface.textureLod = asfloat(primeWavefrontQueue[base + 24u]);
     return surface;
+}
+
+public SurfaceInteraction primeLoadWavefrontSurface(uint pathIndex) {
+    return primeLoadWavefrontSurface(
+            pathIndex,
+            primeWavefrontPaths[pathIndex]
+                    .transport.sourceAndPathControl.xy);
 }

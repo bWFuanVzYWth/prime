@@ -234,6 +234,29 @@ final class TracePipelinesContractTest {
                 descriptorBindings(List.of("image_diagnostic_rgba16.comp.spv"), 0));
     }
 
+    static void realtimePrimaryPrefixDoesNotPublishPersistentPaths() throws IOException {
+        for (String suffix : List.of("", "_ser")) {
+            Set<Integer> camera = descriptorBindings(
+                    List.of(wavefrontShader(
+                            "realtime", "camera_trace", suffix)),
+                    1);
+            assertTrue(camera.contains(ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE));
+            assertFalse(camera.contains(ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS));
+        }
+        Set<Integer> visibleDirect = descriptorBindings(
+                List.of(wavefrontShader(
+                        "realtime", "visible_direct", "")),
+                1);
+        assertTrue(visibleDirect.contains(ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE));
+        assertFalse(visibleDirect.contains(ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS));
+        for (String suffix : List.of("", "_ser")) {
+            assertTrue(descriptorBindings(
+                    List.of(wavefrontShader(
+                            "realtime", "surface_split", suffix)),
+                    1).contains(ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS));
+        }
+    }
+
     static void streamlineInputPreparationHasOneNarrowDescriptorLayout() throws IOException {
         assertEquals(
                 Set.of(0, 1, 2, 3, 4),

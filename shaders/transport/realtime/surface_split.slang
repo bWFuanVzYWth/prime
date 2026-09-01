@@ -10,6 +10,9 @@ import "prime_abi_types.slang";
 import "state/path.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/sanitization.slang";
+import "service/bsdf/support/volume_transition.slang";
+import "service/camera/projection.slang";
+import "service/reconstruct/ordinary.slang";
 import "contract/realtime/guide.slang";
 import "model/atmosphere/sky.slang";
 import "service/reconstruct/nrd/common.slang";
@@ -37,8 +40,8 @@ import "transport/surface/medium.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/guide.slang";
 import "state/realtime/guide_normal.slang";
-import "state/realtime/light.slang";
 import "state/realtime/ordinary.slang";
+import "state/realtime/primary_signal.slang";
 import "state/realtime/queue.slang";
 import "state/realtime/signal.slang";
 import "state/realtime/surface.slang";
@@ -300,20 +303,20 @@ public void primeSplitVisibleSurface<AreaNee>(
     uint recordIndex = primeWavefrontQueuedPath(
             PRIME_WAVEFRONT_PRIMARY_QUEUE, launchIndex);
     uint2 pixel = primeWavefrontPixel(recordIndex);
-    PrimeWavefrontTransportRecord record =
-            primeLoadWavefrontTransportRecord(recordIndex);
-    SurfaceInteraction surface = primeLoadWavefrontSurface(recordIndex);
-    PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
-    uint denoiserControl = asuint(
-            record.rayDirectionAndDenoiserControl.w);
+    SurfaceInteraction surface = primeLoadWavefrontSurface(
+            recordIndex, uint2(PRIME_NO_PRIMITIVE_INDEX));
+    PathState path = primeCameraPath(
+            pixel, 0u, primeRealtimeCameraSample(pixel));
+    PrimeOpenPbrVolumeStack volumeStack =
+            (primePush.path.z & PRIME_PATH_CAMERA_IN_WATER_MASK) != 0u
+            ? primeCameraWaterVolumeStack()
+            : primeEmptyVolumeStack();
     uint continuationMask = 0u;
 
     if (surface.hitKind == PRIME_HIT_SURFACE
             && primeMaterialIsTransmissive(surface.materialControl)) {
         PrimeOrdinarySample initialResult =
-                primeLoadWavefrontIntermediate(
-                        pixel, recordIndex, denoiserControl);
+                primeLoadWavefrontPrimaryIntermediate(pixel);
         continuationMask = primeInitializeTransparentWavefront(
                 context,
                 pixel,
@@ -328,9 +331,9 @@ public void primeSplitVisibleSurface<AreaNee>(
                 ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
         integrator.environmentRadiance = float4(0.0);
         PrimeDenoiserState denoiserState = primeInitialDenoiserState();
-        PrimeOrdinarySample result =
-                primeLoadWavefrontIntermediate(
-                        pixel, recordIndex, denoiserControl);
+        PrimeOrdinarySample result = surface.hitKind == PRIME_HIT_SURFACE
+                ? primeLoadWavefrontPrimaryIntermediate(pixel)
+                : primeEmptyOrdinarySample();
         bool continuation = primeIntegrateWavefrontSurface(
                 PrimeLandingTransportPhase(),
                 PrimeStagedSecondarySunNee(),

@@ -13,6 +13,12 @@ final class TracePipelinesArtifactTest {
     }
 
     @Test
+    void realtimePrimaryPrefixDoesNotPublishPersistentPaths() throws IOException {
+        TracePipelinesContractTest
+                .realtimePrimaryPrefixDoesNotPublishPersistentPaths();
+    }
+
+    @Test
     void imageDiagnosticsUseOneIsolatedSourceAndTargetLayout() throws IOException {
         TracePipelinesContractTest.imageDiagnosticsUseOneIsolatedSourceAndTargetLayout();
     }
