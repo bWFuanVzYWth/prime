@@ -162,7 +162,5 @@ public PrimeWavefrontPathRecord primeMakeWavefrontRecord(
     record = primeWavefrontWithQueuedPsrState(
             record, primeEmptyQueuedPsrState());
     record = primeWavefrontWithPrimaryPreviousPosition(record, guides);
-    record.guideNormalRoughness = float4(
-            guides.primaryNormal, guides.primaryLinearRoughness);
     return record;
 }

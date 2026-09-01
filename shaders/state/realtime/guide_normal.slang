@@ -1,18 +1,23 @@
 #language slang 2026
 module "state/realtime/guide_normal.slang";
 
+import "prime_realtime_abi.slang";
 import "state/realtime/contract.slang";
 
 public void primeStoreWavefrontGuideSurface(
-        uint pathIndex, float3 normal, float roughness) {
-    primeWavefrontPaths[pathIndex].guideNormalRoughness =
-            float4(normal, roughness);
+    uint pathIndex, float3 normal, float roughness) {
+    int2 pixel = int2(primeWavefrontPixel(pathIndex));
+    float4 guide = float4(normal, roughness);
+    if (pathIndex >= primeWavefrontPixelCount()) {
+        primeImageStore(primeNrdReflectionNormalRoughness, pixel, guide);
+    } else {
+        primeImageStore(primeNrdNormalRoughness, pixel, guide);
+    }
 }
 
-public float3 primeLoadWavefrontGuideNormal(uint pathIndex) {
-    return primeWavefrontPaths[pathIndex].guideNormalRoughness.xyz;
-}
-
-public float primeLoadWavefrontGuideRoughness(uint pathIndex) {
-    return primeWavefrontPaths[pathIndex].guideNormalRoughness.w;
+public float4 primeLoadWavefrontGuideSurface(uint pathIndex) {
+    int2 pixel = int2(primeWavefrontPixel(pathIndex));
+    return pathIndex >= primeWavefrontPixelCount()
+    ? primeImageLoad(primeNrdReflectionNormalRoughness, pixel)
+    : primeImageLoad(primeNrdNormalRoughness, pixel);
 }

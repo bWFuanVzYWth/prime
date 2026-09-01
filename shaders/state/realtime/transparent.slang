@@ -468,10 +468,10 @@ public PrimeTransparentBranchResult primeLoadTransparentBranchIntermediate(
     }
     uint branch = transmissionBranch ? 0u : 1u;
     uint guidePathIndex = primeWavefrontIndex(pixel, branch);
-    result.guides.primaryNormal =
-            primeLoadWavefrontGuideNormal(guidePathIndex);
-    result.guides.primaryLinearRoughness =
-            primeLoadWavefrontGuideRoughness(guidePathIndex);
+    float4 guideNormalRoughness =
+            primeLoadWavefrontGuideSurface(guidePathIndex);
+    result.guides.primaryNormal = guideNormalRoughness.xyz;
+    result.guides.primaryLinearRoughness = guideNormalRoughness.w;
     primeLoadWavefrontArea(
             pixel,
             result.guides.primaryAreaDiffuse,

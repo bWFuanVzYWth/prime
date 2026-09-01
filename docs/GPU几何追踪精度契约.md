@@ -75,15 +75,16 @@ UNORM16/FP16 重心或 FP16 position delta。
 其数据合同声明的信息等级；精确身份只能使用整数/枚举。
 
 几何法线、材质 shading normal、光源选择/MIS 的接收面法线和重建 guide normal 是不同语义，
-不能因编码相同而互换。当前 payload、surface scratch、path record 及 NRD/RR normal 输入使用
+不能因编码相同而互换。当前 payload、surface scratch 及声明为 `GuideSurface` carrier 的
+NRD/RR normal 输入使用
 三个 f32 世界空间分量，这是在最坏角误差门禁建立前的保守基线，而不是要求所有法线来源全程
 f32。源纹理只表达切线空间 RG8 法线时，可以在 Source/Scene IR 中使用无损表达该源信息的紧凑
 格式；它不能被复用为任意世界空间法线、斜面几何法线或 guide normal 的精度依据。
 
 任何世界空间法线压缩必须分别覆盖任意合法斜面、掠角 Fresnel、TIR、BSDF 几何半球、动态
 重投影和重建历史稳定性，且声明最坏角误差与累计位置误差。在这些行为测试通过前不得恢复
-八面体、SNORM、UNORM 或 FP16 世界法线。normal 与 roughness 也不得借用最终重建输入图像作为
-未声明的阶段 scratch。
+八面体、SNORM、UNORM 或 FP16 世界法线。normal 与 roughness 只有在语义、encoding、phase owner、
+覆写边界和屏障均由机器 IR 声明时，才可复用最终重建输入图像；不得作为未声明的阶段 scratch。
 
 不参与几何、BSDF 半球、介质或重建身份的普通单位方向可以拥有用途专属的紧凑格式，例如灯光
 树的保守发射锥轴。该合同必须说明允许误差与保守性，并以 `LightConeDirection` 等具体用途命名，

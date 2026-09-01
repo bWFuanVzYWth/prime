@@ -31,7 +31,7 @@ public final class RealtimeRayTracingPipeline extends RealtimeRayTracingPipeline
         // first-owned guide stores require an explicit WAW dependency. Omitting those images lets
         // an earlier fallback write win after the ownership transition.
         return new int[] {
-            0, 1, 2, 4, 5, 6, 7, 8, 9, 10,
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
             11, 12, 13, 14, 15, 16, 17, 18, 21
         };
     }

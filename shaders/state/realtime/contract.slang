@@ -27,12 +27,11 @@ public struct PrimeWavefrontTransportRecord {
     public float4 previousLightNormalAndEtaScale;
 };
 
-// 112 bytes of transport are followed by exact queued PSR/previous-position data and the branch
-// guide normal/roughness: 144 bytes in total. Visible-interface data is shared once per pixel.
+// 112 bytes of transport are followed by exact queued PSR/previous-position data: 128 bytes in
+// total. Exact branch guide normals live in the already-resident RGBA32F reconstruction images.
 public struct PrimeWavefrontPathRecord {
     public PrimeWavefrontTransportRecord transport;
     public uint4 psrPacked;
-    public float4 guideNormalRoughness;
 };
 
 [[vk::binding(PRIME_DESCRIPTOR_WAVEFRONT_PATHS, PRIME_RENDERER_DESCRIPTOR_SET)]]
@@ -249,8 +248,9 @@ public PrimeOrdinarySample primeLoadWavefrontIntermediate(
     result.guides.primaryHitKind = position.w >= 0.0
             ? PRIME_HIT_SURFACE
             : PRIME_HIT_NONE;
-    float4 guideNormalRoughness =
-            primeWavefrontPaths[pathIndex].guideNormalRoughness;
+    float4 guideNormalRoughness = pathIndex >= primeWavefrontPixelCount()
+            ? primeImageLoad(primeNrdReflectionNormalRoughness, coordinate)
+            : primeImageLoad(primeNrdNormalRoughness, coordinate);
     result.guides.primaryNormal = guideNormalRoughness.xyz;
     result.guides.primaryMaterialFlags =
             (denoiserControl >> PRIME_WAVEFRONT_PRIMARY_FLAGS_SHIFT)

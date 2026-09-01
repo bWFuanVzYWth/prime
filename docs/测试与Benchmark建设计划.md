@@ -299,7 +299,7 @@ encoding、binding、conversion、verification、phase lifetime、alias 和 memo
   通过 umbrella import 扩大生产 entry 闭包；
 - `build/reports/renderer-data/memory-ledger.csv`：render/display 每像素字节与固定开销。
 
-当前静态账本锁定的显式下界是 realtime wavefront 600 B/render px、offline wavefront
+当前静态账本锁定的显式下界是 realtime wavefront 568 B/render px、offline wavefront
 244 B/render px、unfiltered raw images 95 B/render px、DLSS RR 147 B/render px +
 8 B/display px，以及 Prime 自有 NRD images 291 B/render px。`VulkanContext.memorySnapshot()` 提供
 VMA block/allocation 与 heap budget estimate 的同点快照，用于 resize、reload 和 backend switch

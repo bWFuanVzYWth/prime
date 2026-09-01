@@ -24,7 +24,7 @@ final class RendererResourcePlanContractTest {
                         + ShaderAbi.WAVEFRONT_AREA_RECORD_SIZE
                         + ShaderAbi.WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL * Integer.BYTES,
                 realtime.renderBytesPerPixel());
-        assertEquals(600, realtime.renderBytesPerPixel());
+        assertEquals(568, realtime.renderBytesPerPixel());
         assertEquals(
                 ShaderAbi.WAVEFRONT_AREA_GUIDE_RECORD_SIZE
                         + ShaderAbi.WAVEFRONT_SURFACE_RECORD_SIZE
@@ -106,6 +106,19 @@ final class RendererResourcePlanContractTest {
                 .orElseThrow();
         assertEquals("rgba32f-baseline", visibleHistory.encoding());
         assertEquals("none", visibleHistory.lifetime().aliasGroup());
+
+        RendererDataContracts.Binding guideSurface = RendererDataContracts.BINDINGS.stream()
+                .filter(binding -> binding.id().equals("realtime-guide-surface-carrier"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("GuideSurface", guideSurface.semantic());
+        assertEquals("rgba32f-baseline", guideSurface.encoding());
+        assertEquals(
+                "realtime.normalRoughness|realtime.reflectionNormalRoughness",
+                guideSurface.descriptorOrOffset());
+        assertEquals("transport-reconstruction-boundary", guideSurface.conversion().owner());
+        assertEquals(List.of("trace", "reconstruction-prepare", "reconstruction"),
+                guideSurface.lifetime().consumers());
         assertEquals("core-reconstruction", visibleHistory.conversion().owner());
     }
 

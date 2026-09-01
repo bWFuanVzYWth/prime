@@ -85,6 +85,17 @@
       "minimumEncoding": "rgb32f-baseline"
     },
     {
+      "id": "GuideSurface",
+      "valueKind": "bounded-continuous-composite",
+      "components": 4,
+      "domain": "transport-and-reconstruction",
+      "space": "world-normal-plus-scalar",
+      "unit": "unit-vector-plus-linear-roughness",
+      "colorimetry": "none",
+      "validity": "finite unit world normal and finite linear roughness in [0,1]",
+      "minimumEncoding": "rgba32f-baseline"
+    },
+    {
       "id": "VisibleMotionUv",
       "valueKind": "bounded-continuous",
       "components": 2,
@@ -420,6 +431,20 @@
       "verification": {"artifactChecks": "offset-stride-and-reserved-control", "behaviorOracle": "f32-bit-exact-cross-dispatch", "numericOrImageThreshold": "lossless-f32", "benchmark": "unchanged-stride"}
     },
     {
+      "id": "realtime-guide-surface-carrier",
+      "semantic": "GuideSurface",
+      "encoding": "rgba32f-baseline",
+      "resourceKind": "image2d",
+      "extentSource": "render",
+      "usage": ["storage", "sampled"],
+      "access": "trace-read-write-then-reconstruction-read",
+      "sampling": "point",
+      "descriptorOrOffset": "realtime.normalRoughness|realtime.reflectionNormalRoughness",
+      "lifetime": {"owner": "realtime-wavefront-then-raw-frame", "generation": "frame", "firstWrite": "trace", "consumers": ["trace", "reconstruction-prepare", "reconstruction"], "lastRead": "reconstruction", "aliasGroup": "none", "retire": "frame-retire"},
+      "conversion": {"producer": "surface-split-and-realtime-output-resolve", "sourceSemantic": "branch-guide-surface", "owner": "transport-reconstruction-boundary", "targetSemantic": "GuideSurface", "backendBoundary": "nrd-or-rr"},
+      "verification": {"artifactChecks": "rgba32f-format-and-reflection-binding", "behaviorOracle": "branch-guide-lifetime-and-final-overwrite", "numericOrImageThreshold": "lossless-f32", "benchmark": "minus-16-bytes-per-path-slot"}
+    },
+    {
       "id": "visible-history-position",
       "semantic": "VisibleHistoryPosition",
       "encoding": "rgba32f-baseline",
@@ -467,7 +492,7 @@
       "id": "realtime-wavefront-current",
       "kind": "buffer",
       "items": [
-        {"id": "paths", "semantic": "transport-path-state", "debugLabel": "Prime realtime wavefront paths", "extentSource": "render", "bytesPerElement": 144, "elementsPerPixel": 2, "fixedBytes": 0},
+        {"id": "paths", "semantic": "transport-path-state", "debugLabel": "Prime realtime wavefront paths", "extentSource": "render", "bytesPerElement": 128, "elementsPerPixel": 2, "fixedBytes": 0},
         {"id": "area", "semantic": "transport-stage-scratch", "debugLabel": "Prime realtime wavefront area", "extentSource": "render", "bytesPerElement": 272, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "queue-index", "semantic": "queue-index", "debugLabel": "Prime realtime wavefront queue indices", "extentSource": "render", "bytesPerElement": 4, "elementsPerPixel": 10, "fixedBytes": 112}
       ]

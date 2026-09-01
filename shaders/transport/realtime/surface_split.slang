@@ -60,6 +60,15 @@ static const uint PRIME_SPLIT_SECOND_STEADY = 1u << 1u;
 static const uint PRIME_SPLIT_FIRST_DELTA_WALK = 1u << 2u;
 static const uint PRIME_SPLIT_SECOND_DELTA_WALK = 1u << 3u;
 
+void primeStoreInitialPath(
+        uint pathIndex,
+        PrimeWavefrontPathRecord record,
+        PrimeDenoiserGuides guides) {
+    primeWavefrontPaths[pathIndex] = record;
+    primeStoreWavefrontGuideSurface(
+            pathIndex, guides.primaryNormal, guides.primaryLinearRoughness);
+}
+
 public uint primeInitializeTransparentWavefront(
         inout PrimeIntegratorContext context,
         uint2 pixel,
@@ -75,8 +84,10 @@ public uint primeInitializeTransparentWavefront(
                 emptyState,
                 initialResult.guides,
                 false);
-        primeWavefrontPaths[primeWavefrontIndex(pixel, 0u)] = emptyRecord;
-        primeWavefrontPaths[primeWavefrontIndex(pixel, 1u)] = emptyRecord;
+        primeStoreInitialPath(
+                primeWavefrontIndex(pixel, 0u), emptyRecord, initialResult.guides);
+        primeStoreInitialPath(
+                primeWavefrontIndex(pixel, 1u), emptyRecord, initialResult.guides);
         primeStoreWavefrontIntermediate(pixel, initialResult);
         return continuationMask;
     }
@@ -269,13 +280,7 @@ public uint primeInitializeTransparentWavefront(
             record.transport = primeEnterSecondaryRecord(record.transport);
         }
         uint pathIndex = primeWavefrontIndex(pixel, branch);
-        primeWavefrontPaths[pathIndex] = record;
-        if (hasGuide) {
-            primeStoreWavefrontGuideSurface(
-                    pathIndex,
-                    branchResult.guides.primaryNormal,
-                    branchResult.guides.primaryLinearRoughness);
-        }
+        primeStoreInitialPath(pathIndex, record, branchResult.guides);
         uint continuationBit = deltaWalk
                 ? (transmissionBranch
                         ? PRIME_SPLIT_FIRST_DELTA_WALK
@@ -363,7 +368,7 @@ public void primeSplitVisibleSurface<AreaNee>(
         if (continuation && !deltaWalk) {
             updated.transport = primeEnterSecondaryRecord(updated.transport);
         }
-        primeWavefrontPaths[recordIndex] = updated;
+        primeStoreInitialPath(recordIndex, updated, result.guides);
         primeStoreWavefrontIntermediate(pixel, result);
         continuationMask = continuation
                 ? (deltaWalk

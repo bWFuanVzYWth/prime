@@ -190,6 +190,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     @Override public VulkanImage reconstructionMotion() { return this.motion; }
     @Override public VulkanImage material() { return this.material; }
     @Override public VulkanImage specularMaterial() { return this.specularMaterial; }
+    @Override public VulkanImage reflectionNormalRoughness() { return this.normalRoughness; }
     @Override public VulkanImage reconstructionControl() { return this.reconstructionControl; }
     @Override public VulkanImage primaryPosition() { return this.primaryPosition; }
     @Override public VulkanImage reflectionPosition() { return this.reflectionPosition; }

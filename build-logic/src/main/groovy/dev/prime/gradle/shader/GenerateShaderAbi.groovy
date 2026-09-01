@@ -139,7 +139,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| fsrContract.viewSpaceToMetersFactor != 1.0) {
 			throw new GradleException('Prime FSR signal and projection contracts changed without a coordinated migration')
 		}
-		if (wavefrontContract.pathRecordSize != 144
+		if (wavefrontContract.pathRecordSize != 128
 				|| wavefrontContract.etaScaleOffset != 108
 				|| !wavefrontContract.pathControlReservedMask.toString().equalsIgnoreCase('0x00ffff00')
 				|| wavefrontContract.pathSlotsPerPixel != 2

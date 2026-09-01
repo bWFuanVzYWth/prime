@@ -129,7 +129,7 @@ final class TracePipelinesContractTest {
                 RealtimeRayTracingPipeline.primaryInputImageIndices());
         assertArrayEquals(
                 new int[] {
-                    0, 1, 2, 4, 5, 6, 7, 8, 9, 10,
+                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
                     11, 12, 13, 14, 15, 16, 17, 18, 21
                 },
                 RealtimeRayTracingPipeline.nextStepInputImageIndices());
@@ -536,7 +536,7 @@ final class TracePipelinesContractTest {
 
     @Test
     void wavefrontBackingHasDeclaredFourKSize() {
-        assertEquals(4_976_640_112L,
+        assertEquals(4_711_219_312L,
                 RealtimeRayTracingPipeline.wavefrontBytes(3840, 2160));
         assertEquals(2_023_833_632L,
                 OfflineRayTracingPipeline.wavefrontBytes(3840, 2160));

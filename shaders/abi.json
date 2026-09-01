@@ -290,7 +290,7 @@
     "mediumIdMask": "0xffff"
   },
   "realtimeWavefrontContract": {
-    "pathRecordSize": 144,
+    "pathRecordSize": 128,
     "etaScaleOffset": 108,
     "pathControlReservedMask": "0x00ffff00",
     "pathSlotsPerPixel": 2,

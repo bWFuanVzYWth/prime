@@ -26,7 +26,7 @@ final class RendererDataArtifactTest {
                         + "item,semantic,debug_label,extent,bytes_per_element,elements_per_pixel",
                 lines.getFirst());
         assertTrue(lines.stream().anyMatch(line -> line.startsWith(
-                "realtime-wavefront-current,buffer,600,0,112,")));
+                "realtime-wavefront-current,buffer,568,0,112,")));
         assertTrue(lines.stream().anyMatch(line -> line.startsWith(
                 "nrd-prime-images-current,image,291,0,0,")));
     }
