@@ -225,7 +225,7 @@ public bool primeWavefrontPixelTransparent(uint2 pixel) {
 public PrimeOrdinarySample primeLoadWavefrontIntermediate(
         uint2 pixel,
         uint pathIndex,
-        PrimeWavefrontTransportRecord record) {
+        uint denoiserControl) {
     int2 coordinate = int2(pixel);
     float4 diffuse = primeImageLoad(primeNrdNoisyDiffuse, coordinate);
     float4 specular = primeImageLoad(primeNrdNoisySpecular, coordinate);
@@ -234,9 +234,6 @@ public PrimeOrdinarySample primeLoadWavefrontIntermediate(
     float4 position = primeImageLoad(primeNrdPrimaryPosition, coordinate);
     float4 material = primeImageLoad(primeNrdMaterial, coordinate);
     float4 specularMaterial = primeImageLoad(primeNrdSpecularMaterial, coordinate);
-    uint denoiserControl =
-            asuint(record.rayDirectionAndDenoiserControl.w);
-
     PrimeOrdinarySample result;
     result.radiance.diffuse = diffuse.rgb;
     result.radiance.specular = specular.rgb;

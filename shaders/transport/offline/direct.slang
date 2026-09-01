@@ -91,7 +91,7 @@ public void primeEvaluateOfflineDirect(
                     primeEvaluateEnvironmentContribution(
                             context, path, primeOfflineIntegrator()));
         } else if (primeApplySegmentMedium(
-                context, path, surface, volumeStack)) {
+                path.throughput, surface, volumeStack)) {
             bool previousUsedAreaNee =
                     (primePathFlags(path.control)
                             & PRIME_OFFLINE_PATH_PREVIOUS_AREA_NEE) != 0u;

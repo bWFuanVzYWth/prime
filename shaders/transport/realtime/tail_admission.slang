@@ -10,23 +10,18 @@ import "math/transport.slang";
 import "policy/realtime/queue.slang";
 import "policy/runtime/config.slang";
 import "policy/transport/path.slang";
-import "state/path.slang";
 import "state/realtime/contract.slang";
-import "state/realtime/light.slang";
-import "state/realtime/ordinary.slang";
 import "state/realtime/queue.slang";
-import "state/realtime/transport.slang";
 
 // The fixed prefix has already scattered this path. Apply its deferred roulette decision, then
 // compact only paths with remaining bounce budget into the register tail.
 public void primeAdmitRealtimeTailPath(uint sourceQueue, uint launchIndex) {
     uint recordIndex = primeWavefrontQueuedPath(sourceQueue, launchIndex);
-    PrimeWavefrontTransportRecord record =
-            primeLoadWavefrontTransportRecord(recordIndex);
-    uint control = asuint(record.rayDirectionAndDenoiserControl.w);
-    PathState path = primeWavefrontPath(
-            primeWavefrontPixel(recordIndex), record);
-    uint secondaryBounce = primePathBounce(path.control);
+    uint pathControl = primeWavefrontPaths[recordIndex]
+            .transport.sourceAndPathControl.w;
+    uint control = asuint(primeWavefrontPaths[recordIndex]
+            .transport.rayDirectionAndDenoiserControl.w);
+    uint secondaryBounce = pathControl & PRIME_WAVEFRONT_BYTE_MASK;
     bool continuation = primeRealtimeCompletedBounceCount(secondaryBounce)
             < primeMaximumBounces();
     bool rouletteBlocked = false;
@@ -34,10 +29,11 @@ public void primeAdmitRealtimeTailPath(uint sourceQueue, uint launchIndex) {
         bool guideEnabled = primeWavefrontGuideEnabled(control);
         bool hasGuide =
                 (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) != 0u;
+        uint guideControl = primeWavefrontPaths[recordIndex]
+                .transport.sourceAndPathControl.z;
         bool pathOwnsGuide = primeTransparentTransportOwnsGuide(
                 false,
-                primeWavefrontGuideFallback(
-                        record.sourceAndPathControl.z));
+                primeWavefrontGuideFallback(guideControl));
         rouletteBlocked = primeTransparentRouletteBlocked(
                 pathOwnsGuide, guideEnabled, hasGuide);
     }
@@ -46,22 +42,30 @@ public void primeAdmitRealtimeTailPath(uint sourceQueue, uint launchIndex) {
             && !rouletteBlocked
             && primeRussianRouletteApplies(
                     rouletteScatterIndex, PRIME_RUSSIAN_ROULETTE_START)) {
+        uint2 pixel = primeWavefrontPixel(recordIndex);
+        uint samplePathIndex = primeWavefrontTransmissionBranch(control)
+                ? 1u
+                : 0u;
         PrimePreparedSampleBase preparedSample = primePreparePathSample(
-                path.sampleSeed,
+                primePathSampleSeed(
+                        pixel, primeSampleEpoch(), samplePathIndex),
                 primeSampleIndex(),
                 rouletteScatterIndex);
+        float3 throughput = primeWavefrontPaths[recordIndex]
+                .transport.throughputAndReserved.xyz;
+        float etaScale = primeWavefrontPaths[recordIndex]
+                .transport.previousLightNormalAndEtaScale.w;
         float survival = primeRussianRouletteSurvival(
-                path.throughput, path.etaScale);
+                throughput, etaScale);
         float rouletteSample = primeHashSample1D(
                 preparedSample,
                 PRIME_SAMPLE_EFFECT_RUSSIAN_ROULETTE,
                 PRIME_SAMPLE_DIMENSION_PRIMARY);
         continuation = rouletteSample < survival;
         if (continuation) {
-            path.throughput = primeRussianRouletteReweight(
-                    path.throughput, survival);
-            record.throughputAndReserved.xyz = path.throughput;
-            primeStoreWavefrontTransportRecord(recordIndex, record);
+            primeWavefrontPaths[recordIndex]
+                    .transport.throughputAndReserved.xyz =
+                    primeRussianRouletteReweight(throughput, survival);
         }
     }
     primeAppendWavefrontContinuation(

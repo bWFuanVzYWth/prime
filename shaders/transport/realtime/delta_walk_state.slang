@@ -25,6 +25,7 @@ import "transport/surface/accumulate.slang";
 import "transport/surface/medium.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/detached_guide.slang";
+import "state/realtime/detached_guide_medium.slang";
 import "state/realtime/guide.slang";
 import "state/realtime/light.slang";
 import "state/realtime/medium.slang";
@@ -64,7 +65,7 @@ public bool primeAdvanceOrdinaryDeltaWalk(
             result.guides.specularHitDistance = hitDistance;
         }
     }
-    if (!primeApplySegmentMedium(context, path, surface, volumeStack)) {
+    if (!primeApplySegmentMedium(path.throughput, surface, volumeStack)) {
         return false;
     }
 
@@ -176,7 +177,7 @@ public bool primeAdvanceTransparentDeltaWalk(
                     primeNrdSanitizeHitDistance(surface.t);
         }
     }
-    if (!primeApplySegmentMedium(context, path, surface, volumeStack)) {
+    if (!primeApplySegmentMedium(path.throughput, surface, volumeStack)) {
         return false;
     }
 
@@ -223,7 +224,7 @@ public bool primeAdvanceTransparentDeltaWalk(
                         surface.sectionIndex,
                         primeSurfaceTriangleIndex(surface));
                 guideRecord.rayDirection = guideScatter.bsdf.direction;
-                guideRecord.mediumIor = primeDetachedGuideMediumIor(
+                guideRecord.mediumState = primePackDetachedGuideMediumStack(
                         guideScatter.volumeStack);
                 primeStoreDetachedGuideRecord(pixel, guideRecord);
                 primeStoreWavefrontPsrState(recordIndex, psrState);
@@ -234,7 +235,9 @@ public bool primeAdvanceTransparentDeltaWalk(
                 record = primeWavefrontWithGuideTransitions(
                         record, primeQueuedPsrCount(psrState));
                 record = primeWavefrontWithGuideFallback(record, true);
-                primeStoreWavefrontTransportRecord(recordIndex, record);
+                primeWavefrontPaths[recordIndex]
+                        .transport.sourceAndPathControl.z =
+                        record.sourceAndPathControl.z;
                 primeAppendWavefrontPath(
                         PRIME_WAVEFRONT_GUIDE_QUEUE, recordIndex);
                 guideDetached = true;
@@ -244,7 +247,9 @@ public bool primeAdvanceTransparentDeltaWalk(
             guideEnabled = false;
             uint disabledControl = control & ~PRIME_WAVEFRONT_GUIDE_ENABLED;
             record.rayDirectionAndDenoiserControl.w = asfloat(disabledControl);
-            primeStoreWavefrontTransportRecord(recordIndex, record);
+            primeWavefrontPaths[recordIndex]
+                    .transport.rayDirectionAndDenoiserControl.w =
+                    asfloat(disabledControl);
             control = disabledControl;
             observesGuide = false;
         }
@@ -277,12 +282,10 @@ public bool primeAdvanceTransparentDeltaWalk(
                     guideDetached,
                     true);
     if (guideDetached) {
-        PrimeWavefrontTransportRecord guideOwner =
-                primeWavefrontPaths[recordIndex].transport;
-        updated.throughputAndReserved.w = guideOwner.throughputAndReserved.w;
+        updated.throughputAndReserved.w = record.throughputAndReserved.w;
         updated.sourceAndPathControl.z = primeMergeWavefrontGuideControl(
                 updated.sourceAndPathControl.z,
-                guideOwner.sourceAndPathControl.z);
+                record.sourceAndPathControl.z);
     }
     primeStoreWavefrontTransportRecord(recordIndex, updated);
     if (observesGuide) {

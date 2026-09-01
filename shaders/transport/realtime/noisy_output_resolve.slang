@@ -23,10 +23,12 @@ public void primeResolveNoisyOutput(
     if (primeWavefrontPixelTransparent(pixel)) {
         return;
     }
-    PrimeWavefrontTransportRecord primaryRecord =
-            primeWavefrontPaths[primeWavefrontIndex(pixel, 0u)].transport;
+    uint pathIndex = primeWavefrontIndex(pixel, 0u);
+    uint denoiserControl = asuint(
+            primeWavefrontPaths[pathIndex]
+                    .transport.rayDirectionAndDenoiserControl.w);
     PrimeOrdinarySample ordinary = primeLoadWavefrontIntermediate(
-            pixel, primeWavefrontIndex(pixel, 0u), primaryRecord);
+            pixel, pathIndex, denoiserControl);
     PrimeResolvedSample result = primeResolveOrdinarySample(ordinary);
     float2 cameraSample = primeRealtimeCameraSample(pixel);
     primeWriteRealtimeOutput(pixel, cameraSample, result);

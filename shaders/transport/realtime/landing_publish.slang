@@ -6,22 +6,59 @@ import "prime_realtime_abi.slang";
 import "math/queued_psr.slang";
 import "service/reconstruct/nrd/common.slang";
 import "state/realtime/contract.slang";
-import "state/realtime/light.slang";
-import "state/realtime/ordinary.slang";
 import "state/realtime/queue.slang";
-import "state/realtime/secondary_transition.slang";
 import "state/realtime/transparent.slang";
-import "state/realtime/transport.slang";
 import "contract/realtime/transparent.slang";
 
-public PrimeWavefrontTransportRecord primeSealLandingGuide(
+struct PrimeWavefrontContinuationControl {
+    uint guide;
+    uint path;
+    uint denoiser;
+};
+
+PrimeWavefrontContinuationControl primeLoadWavefrontContinuationControl(
+        uint pathIndex) {
+    uint4 sourceAndPathControl =
+            primeWavefrontPaths[pathIndex].transport.sourceAndPathControl;
+    float4 rayDirectionAndDenoiserControl =
+            primeWavefrontPaths[pathIndex]
+                    .transport.rayDirectionAndDenoiserControl;
+    PrimeWavefrontContinuationControl control;
+    control.guide = sourceAndPathControl.z;
+    control.path = sourceAndPathControl.w;
+    control.denoiser = asuint(rayDirectionAndDenoiserControl.w);
+    return control;
+}
+
+PrimeWavefrontContinuationControl primeEnterSecondaryControl(
+        PrimeWavefrontContinuationControl control) {
+    control.path &= ~PRIME_WAVEFRONT_BYTE_MASK;
+    control.denoiser &= ~(PRIME_WAVEFRONT_BYTE_MASK
+            << PRIME_WAVEFRONT_PRIMARY_BOUNCE_SHIFT);
+    control.guide &= ~(PRIME_WAVEFRONT_PSR_CONTROL_MASK
+            | PRIME_WAVEFRONT_GUIDE_FALLBACK);
+    return control;
+}
+
+void primeStoreWavefrontContinuationControl(
+        uint pathIndex,
+        PrimeWavefrontContinuationControl control) {
+    primeWavefrontPaths[pathIndex].transport.sourceAndPathControl.z =
+            control.guide;
+    primeWavefrontPaths[pathIndex].transport.sourceAndPathControl.w =
+            control.path;
+    primeWavefrontPaths[pathIndex]
+            .transport.rayDirectionAndDenoiserControl.w =
+            asfloat(control.denoiser);
+}
+
+public uint primeSealLandingGuide(
         uint recordIndex,
-        PrimeWavefrontTransportRecord record,
         uint control) {
     bool guidePending = primeWavefrontGuideEnabled(control)
             && (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) == 0u;
     if (!guidePending) {
-        return record;
+        return control;
     }
 
     // Reaching the configured delta limit is the only live path that can leave landing without a
@@ -45,31 +82,31 @@ public PrimeWavefrontTransportRecord primeSealLandingGuide(
             (control & PRIME_WAVEFRONT_PRIMARY_REFLECTION_ONLY) != 0u,
             result);
     control &= ~PRIME_WAVEFRONT_GUIDE_ENABLED;
-    record.rayDirectionAndDenoiserControl.w = asfloat(control);
-    return record;
+    return control;
 }
 
 public void primePublishLandingContinuation(
         uint recordIndex, bool transparent, bool continuation) {
     if (continuation) {
-        PrimeWavefrontTransportRecord record =
-                primeLoadWavefrontTransportRecord(recordIndex);
-        uint psrControl = record.sourceAndPathControl.z
+        PrimeWavefrontContinuationControl control =
+                primeLoadWavefrontContinuationControl(recordIndex);
+        uint psrControl = control.guide
                 & PRIME_WAVEFRONT_PSR_CONTROL_MASK;
         PrimeQueuedPsrState psrState = primeQueuedPsrWithRuntimeControl(
                 primeEmptyQueuedPsrState(), 0u, psrControl);
-        uint control = asuint(record.rayDirectionAndDenoiserControl.w);
         bool invalidGuide = primeQueuedPsrOverflowed(psrState)
-                && (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) == 0u
-                && !primeWavefrontDirectionalGuide(control);
+                && (control.denoiser & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) == 0u
+                && !primeWavefrontDirectionalGuide(control.denoiser);
         if (transparent && invalidGuide) {
-            primeInvalidatePendingTransparentGuide(recordIndex, record);
+            primeInvalidatePendingTransparentGuide(
+                    recordIndex, control.denoiser);
         }
         if (transparent) {
-            record = primeSealLandingGuide(recordIndex, record, control);
+            control.denoiser = primeSealLandingGuide(
+                    recordIndex, control.denoiser);
         }
-        record = primeEnterSecondaryRecord(record);
-        primeStoreWavefrontTransportRecord(recordIndex, record);
+        control = primeEnterSecondaryControl(control);
+        primeStoreWavefrontContinuationControl(recordIndex, control);
     }
     primeAppendWavefrontContinuation(
             PrimeWavefrontContinuationAppender(),

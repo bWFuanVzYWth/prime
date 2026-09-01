@@ -65,7 +65,7 @@ public uint primeInitializeTransparentWavefront(
         SurfaceInteraction surface,
         PrimeOrdinarySample initialResult) {
     uint continuationMask = 0u;
-    if (!primeApplySegmentMedium(context, path, surface, volumeStack)) {
+    if (!primeApplySegmentMedium(path.throughput, surface, volumeStack)) {
         PrimeDenoiserState emptyState = primeInitialDenoiserState();
         PrimeWavefrontPathRecord emptyRecord = primeMakeWavefrontRecord(path,
                 volumeStack,
@@ -305,12 +305,15 @@ public void primeSplitVisibleSurface<AreaNee>(
     SurfaceInteraction surface = primeLoadWavefrontSurface(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
     PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
+    uint denoiserControl = asuint(
+            record.rayDirectionAndDenoiserControl.w);
     uint continuationMask = 0u;
 
     if (surface.hitKind == PRIME_HIT_SURFACE
             && primeMaterialIsTransmissive(surface.materialControl)) {
         PrimeOrdinarySample initialResult =
-                primeLoadWavefrontIntermediate(pixel, recordIndex, record);
+                primeLoadWavefrontIntermediate(
+                        pixel, recordIndex, denoiserControl);
         continuationMask = primeInitializeTransparentWavefront(
                 context,
                 pixel,
@@ -326,7 +329,8 @@ public void primeSplitVisibleSurface<AreaNee>(
         integrator.environmentRadiance = float4(0.0);
         PrimeDenoiserState denoiserState = primeInitialDenoiserState();
         PrimeOrdinarySample result =
-                primeLoadWavefrontIntermediate(pixel, recordIndex, record);
+                primeLoadWavefrontIntermediate(
+                        pixel, recordIndex, denoiserControl);
         bool continuation = primeIntegrateWavefrontSurface(
                 PrimeLandingTransportPhase(),
                 PrimeStagedSecondarySunNee(),

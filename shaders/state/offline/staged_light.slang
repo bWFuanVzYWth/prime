@@ -2,6 +2,7 @@
 module "state/offline/staged_light.slang";
 
 import "prime_abi_types.slang";
+import "prime_offline_abi.slang";
 import "contract/light_sample.slang";
 import "service/light/emission.slang";
 import "state/offline/contract.slang";
@@ -12,7 +13,8 @@ public struct PrimeOfflineStagedLightSelection {
     public AreaLightSelection area;
 };
 
-public static const uint PRIME_OFFLINE_STAGED_LIGHT_WORDS = 3u;
+public static const uint PRIME_OFFLINE_STAGED_LIGHT_WORDS =
+        PRIME_OFFLINE_STAGED_LIGHT_RECORD_SIZE / 4u;
 
 public PrimeOfflineStagedLightSelection primeDisabledOfflineStagedLightSelection() {
     PrimeOfflineStagedLightSelection selection;

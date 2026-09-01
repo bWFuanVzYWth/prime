@@ -24,14 +24,14 @@ final class RendererResourcePlanContractTest {
                         + ShaderAbi.WAVEFRONT_AREA_RECORD_SIZE
                         + ShaderAbi.WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL * Integer.BYTES,
                 realtime.renderBytesPerPixel());
-        assertEquals(648, realtime.renderBytesPerPixel());
+        assertEquals(624, realtime.renderBytesPerPixel());
         assertEquals(
                 ShaderAbi.OFFLINE_WAVEFRONT_PATH_RECORD_SIZE
                         + ShaderAbi.OFFLINE_WAVEFRONT_STAGE_RECORD_SIZE
                         + ShaderAbi.OFFLINE_WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL
                                 * Integer.BYTES,
                 offline.renderBytesPerPixel());
-        assertEquals(264, offline.renderBytesPerPixel());
+        assertEquals(244, offline.renderBytesPerPixel());
         assertEquals(95, RendererDataContracts
                 .memoryPlan("raw-wavefront-images-current").renderBytesPerPixel());
         assertEquals(147, RendererDataContracts
@@ -40,6 +40,11 @@ final class RendererResourcePlanContractTest {
                 .memoryPlan("dlss-rr-images-current").displayBytesPerPixel());
         assertEquals(291, RendererDataContracts
                 .memoryPlan("nrd-prime-images-current").renderBytesPerPixel());
+        assertEquals(
+                ShaderAbi.OFFLINE_WAVEFRONT_SURFACE_RECORD_SIZE
+                        + ShaderAbi.OFFLINE_WAVEFRONT_STAGED_LIGHT_RECORD_SIZE,
+                ShaderAbi.OFFLINE_WAVEFRONT_STAGE_RECORD_SIZE,
+                "offline light selection must end before queue commands begin");
     }
 
     @Test

@@ -468,7 +468,7 @@
       "kind": "buffer",
       "items": [
         {"id": "paths", "semantic": "transport-path-state", "debugLabel": "Prime realtime wavefront paths", "extentSource": "render", "bytesPerElement": 144, "elementsPerPixel": 2, "fixedBytes": 0},
-        {"id": "area", "semantic": "transport-stage-scratch", "debugLabel": "Prime realtime wavefront area", "extentSource": "render", "bytesPerElement": 320, "elementsPerPixel": 1, "fixedBytes": 0},
+        {"id": "area", "semantic": "transport-stage-scratch", "debugLabel": "Prime realtime wavefront area", "extentSource": "render", "bytesPerElement": 296, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "queue-index", "semantic": "queue-index", "debugLabel": "Prime realtime wavefront queue indices", "extentSource": "render", "bytesPerElement": 4, "elementsPerPixel": 10, "fixedBytes": 112}
       ]
     },
@@ -476,8 +476,8 @@
       "id": "offline-wavefront-current",
       "kind": "buffer",
       "items": [
-        {"id": "path", "semantic": "offline-path-state", "debugLabel": "Prime offline wavefront paths", "extentSource": "render", "bytesPerElement": 144, "elementsPerPixel": 1, "fixedBytes": 0},
-        {"id": "stage", "semantic": "offline-stage-scratch", "debugLabel": "Prime offline wavefront stage", "extentSource": "render", "bytesPerElement": 112, "elementsPerPixel": 1, "fixedBytes": 0},
+        {"id": "path", "semantic": "offline-path-state", "debugLabel": "Prime offline wavefront paths", "extentSource": "render", "bytesPerElement": 128, "elementsPerPixel": 1, "fixedBytes": 0},
+        {"id": "stage", "semantic": "offline-stage-scratch", "debugLabel": "Prime offline wavefront stage", "extentSource": "render", "bytesPerElement": 108, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "queue-index", "semantic": "queue-index", "debugLabel": "Prime offline wavefront queue indices", "extentSource": "render", "bytesPerElement": 4, "elementsPerPixel": 2, "fixedBytes": 48}
       ]
     },

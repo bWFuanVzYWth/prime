@@ -4,17 +4,15 @@ module "transport/realtime/fixed_direct.slang";
 import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/light_sample.slang";
-import "contract/path.slang";
 import "math/direct_sampling.slang";
 import "model/atmosphere/sky.slang";
 import "policy/runtime/config.slang";
 import "service/light/area_sample.slang";
 import "service/trace/context.slang";
-import "state/path.slang";
 import "state/realtime/contract.slang";
+import "state/realtime/direct.slang";
+import "state/realtime/direct_accumulation.slang";
 import "state/realtime/staged_light.slang";
-import "state/realtime/light.slang";
-import "state/realtime/ordinary.slang";
 import "state/realtime/queue.slang";
 import "state/realtime/surface.slang";
 import "transport/direct/primary.slang";
@@ -32,14 +30,12 @@ public void primeEvaluateFixedDirect(
     if (!primeStagedDirectEnabled(selection)) {
         return;
     }
-    PrimeWavefrontTransportRecord record =
-            primeLoadWavefrontTransportRecord(recordIndex);
     uint2 pixel = primeWavefrontPixel(recordIndex);
-    PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
+    PrimeWavefrontDirectState path =
+            primeLoadWavefrontDirectState(recordIndex);
     SurfaceInteraction surface = primeLoadWavefrontSurface(recordIndex);
     if (!primeApplySegmentMedium(
-            context, path, surface, volumeStack)) {
+            path.throughput, surface, path.volumeStack)) {
         return;
     }
 
@@ -47,13 +43,12 @@ public void primeEvaluateFixedDirect(
             pixel,
             primeSampleIndex(),
             primeSampleEpoch(),
-            primePathBounce(path.control) + 1u,
+            path.bounce + 1u,
             uint(recordIndex >= primeWavefrontPixelCount()));
     float2 areaSample = primeDirectSample2D(
             directSample, PRIME_DIRECT_SAMPLE_AREA_PRIMARY);
-    float3 viewDirection = -path.rayDirection;
     float3 receiverNormal = primeAreaLightReceiverNormal(
-            surface, viewDirection);
+            surface, path.viewDirection);
     AreaLightSample area = primeSampleAreaLightSelection(
             surface.position,
             receiverNormal,
@@ -70,22 +65,21 @@ public void primeEvaluateFixedDirect(
             context,
             integrator,
             surface,
-            viewDirection,
+            path.viewDirection,
             primeDirectSample2D(
                     directSample, PRIME_DIRECT_SAMPLE_SUN),
-            volumeStack);
+            path.volumeStack);
     direct += primeEstimateDirectPreparedAreaLight(
             context,
             surface,
-            viewDirection,
+            path.viewDirection,
             area,
-            volumeStack);
+            path.volumeStack);
     float3 contribution = path.throughput * direct;
     if (any(contribution > float3(0.0))) {
         primeAccumulateDeferredDirectLight(
-                context,
                 pixel,
-                asuint(record.rayDirectionAndDenoiserControl.w),
+                path.control,
                 contribution);
     }
 }

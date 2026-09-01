@@ -9,8 +9,11 @@ import "math/packed_geometry.slang";
 import "model/material/transparent.slang";
 import "service/bsdf/support/medium_identity.slang";
 import "state/realtime/medium.slang";
+import "state/realtime/detached_guide_medium.slang";
 import "state/offline/queue_layout.slang";
-import "state/offline/surface_record.slang";
+import "state/offline/path_storage.slang";
+import "state/path.slang";
+import "state/surface_storage.slang";
 
 import "bsdf/compact/contract/volume.slang";
 import "contract/path.slang";
@@ -509,6 +512,46 @@ void primeCheckWavefrontMedium(
     result.third = float4(restored.albedo, restored.anisotropy);
 }
 
+void primeCheckDetachedGuideMedium(
+        inout PrimeTransportResult result,
+        uint count,
+        uint2 mediumIds,
+        uint2 iorEncodings)
+{
+    PrimeOpenPbrVolumeStack stack;
+    stack.count = count;
+    [unroll]
+    for (uint index = 0u; index < 2u; ++index) {
+        stack.values[index].mediumId = mediumIds[index];
+        stack.values[index].iorEncoding = iorEncodings[index];
+        stack.values[index].ior = primeDecodeMediumIor(iorEncodings[index]);
+    }
+    uint2 packed = primePackDetachedGuideMediumStack(stack);
+    PrimeOpenPbrVolumeStack restored =
+            primeUnpackDetachedGuideMediumStack(packed);
+    bool exact = restored.count == count;
+    [unroll]
+    for (uint index = 0u; index < 2u; ++index) {
+        bool active = index < count;
+        exact = exact
+                && restored.values[index].mediumId
+                        == (active ? mediumIds[index] : PRIME_MEDIUM_ID_VACUUM)
+                && restored.values[index].iorEncoding
+                        == (active ? iorEncodings[index] : 0u)
+                && asuint(restored.values[index].ior) == asuint(active
+                        ? primeDecodeMediumIor(iorEncodings[index])
+                        : 1.0)
+                && all(restored.values[index].extinction == float3(0.0))
+                && all(restored.values[index].albedo == float3(0.0))
+                && restored.values[index].anisotropy == 0.0;
+    }
+    if (!exact) {
+        result.mask |= PRIME_TEST_FAILURE_IDENTITY;
+    }
+    result.first = asfloat(uint4(packed, mediumIds));
+    result.second = asfloat(uint4(iorEncodings, count, restored.count));
+}
+
 void primeCheckPreviousDynamicSurface(
         inout PrimeTransportResult result,
         float4 firstTranslationX,
@@ -740,7 +783,7 @@ void primeCheckOfflineSurfaceScratch(
     surface.t = first.x;
     surface.geometricNormal = first.yzw;
     surface.hitKind = PRIME_HIT_SURFACE;
-    surface.materialControl = control.y;
+    surface.materialControl = control.y & PRIME_SURFACE_STORAGE_MATERIAL_MASK;
     surface.sectionIndex = control.z;
     surface.emitterIndex = control.w;
     surface.baseColor = second.xyz;
@@ -748,26 +791,30 @@ void primeCheckOfflineSurfaceScratch(
     surface.opacity = second.w;
     surface.shadingNormal = third.xyz;
     surface.roughness = third.w;
-    surface.opticalControl = asuint(fourth.w);
+    surface.opticalControl = asuint(fourth.w) & PRIME_SURFACE_STORAGE_OPTICAL_MASK;
     surface.motionZFlags = asuint(fifth.w);
     surface.adjacentBaseColor = fourth.xyz;
-    surface.adjacentInterfaceControl = control.y ^ control.z;
+    surface.adjacentInterfaceControl = (control.y ^ control.z)
+            & PRIME_SURFACE_STORAGE_ADJACENT_MASK;
     surface.position = fifth.xyz;
-    surface.mediumId = 0xfedcba98u;
-    surface.adjacentMediumId = 0x89abcdefu;
+    surface.mediumId = 0xfedcu;
+    surface.adjacentMediumId = 0x89abu;
 
-    PrimeOfflineSurfaceScratch packed = primePackOfflineSurfaceScratch(surface);
-    SurfaceInteraction unpacked = primeUnpackOfflineSurfaceScratch(packed);
-    PrimeOfflineSurfaceScratch roundTrip = primePackOfflineSurfaceScratch(unpacked);
+    PrimeSurfaceStorageRecord packed = primePackSurfaceStorageRecord(surface);
+    SurfaceInteraction unpacked = primeUnpackSurfaceStorageRecord(packed);
+    PrimeSurfaceStorageRecord roundTrip = primePackSurfaceStorageRecord(unpacked);
     bool exact = all(packed.geometry == roundTrip.geometry)
-            && all(packed.identity == roundTrip.identity)
-            && all(packed.baseOpacity == roundTrip.baseOpacity)
-            && all(packed.shadingRoughness == roundTrip.shadingRoughness)
-            && all(packed.materialAdjacent == roundTrip.materialAdjacent)
-            && all(packed.positionControl == roundTrip.positionControl)
-            && packed.motion == roundTrip.motion
+            && all(packed.identityBaseX == roundTrip.identityBaseX)
+            && all(packed.baseYzOpacityRoughness == roundTrip.baseYzOpacityRoughness)
+            && all(packed.opticalShadingNormal == roundTrip.opticalShadingNormal)
+            && all(packed.adjacentBasePositionX == roundTrip.adjacentBasePositionX)
+            && all(packed.positionYzMotionAdjacent
+                    == roundTrip.positionYzMotionAdjacent)
             && unpacked.mediumId == surface.mediumId
             && unpacked.adjacentMediumId == surface.adjacentMediumId
+            && unpacked.adjacentInterfaceControl == surface.adjacentInterfaceControl
+            && unpacked.materialControl == surface.materialControl
+            && unpacked.opticalControl == surface.opticalControl
             && asuint(unpacked.textureLod) == 0u
             && primeSurfaceTriangleIndex(unpacked)
                     == (surface.motionZFlags & PRIME_SURFACE_TRIANGLE_MASK);
@@ -776,7 +823,7 @@ void primeCheckOfflineSurfaceScratch(
     }
     result.first = asfloat(packed.geometry);
     result.second = asfloat(uint4(
-            packed.positionControl.xyz, primeSurfaceTriangleIndex(unpacked)));
+            packed.adjacentBasePositionX.xyz, primeSurfaceTriangleIndex(unpacked)));
     result.third = float4(unpacked.position, unpacked.textureLod);
 }
 
@@ -794,6 +841,10 @@ void primeCheckOfflineQueueLayout(
             pixelCount, queue, entry);
     uint indexEnd = indexBegin
             + pixelCount * PRIME_WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL;
+    uint surfaceEnd = pixelCount
+            * (PRIME_OFFLINE_WAVEFRONT_SURFACE_RECORD_SIZE / 4u);
+    uint stagedLightEnd = surfaceEnd
+            + pixelCount * (PRIME_OFFLINE_STAGED_LIGHT_RECORD_SIZE / 4u);
     bool exact = commandWord == stageEnd
                     + queue * (PRIME_WAVEFRONT_QUEUE_COMMAND_STRIDE / 4u)
             && indexBegin == stageEnd
@@ -801,13 +852,101 @@ void primeCheckOfflineQueueLayout(
                             * (PRIME_WAVEFRONT_QUEUE_COMMAND_STRIDE / 4u)
             && indexWord == indexBegin + queue * pixelCount + entry
             && indexWord >= indexBegin
-            && indexWord < indexEnd;
+            && indexWord < indexEnd
+            && surfaceEnd <= stagedLightEnd
+            && stagedLightEnd == stageEnd;
     if (!exact) {
         result.mask |= PRIME_TEST_FAILURE_IDENTITY;
     }
     result.first = asfloat(uint4(
             stageEnd, commandWord, indexBegin, indexWord));
     result.second = asfloat(uint4(indexEnd, pixelCount, queue, entry));
+}
+
+void primeCheckOfflineTransportStorage(
+        inout PrimeTransportResult result,
+        uint4 control,
+        float4 first,
+        float4 second,
+        float4 third,
+        float4 fourth,
+        float4 fifth)
+{
+    uint count = control.w & 0x3u;
+    bool active = (control.w & 0x4u) != 0u;
+    uint bounce = (control.w >> 8u) & PRIME_OFFLINE_PATH_BYTE_MASK;
+    uint flags = (control.w >> 16u) & PRIME_OFFLINE_PATH_FLAGS_MASK;
+    PathState path;
+    path.physicalOrigin = first.xyz;
+    path.previousBsdfPdf = first.w;
+    path.rayDirection = second.xyz;
+    path.etaScale = second.w;
+    path.throughput = third.xyz;
+    path.previousLightNormal = float3(third.w, fourth.w, fifth.w);
+    path.sourcePrimitive = control.yz;
+    path.control = primeMakePathStateControl(bounce, flags);
+    path.sampleSeed = 0u;
+    PrimeOpenPbrVolumeStack stack;
+    stack.count = count;
+    stack.values[0].extinction = fourth.xyz;
+    stack.values[0].albedo = float3(0.0);
+    stack.values[0].anisotropy = 0.0;
+    stack.values[0].mediumId = control.y & 0xffffu;
+    stack.values[0].iorEncoding = (control.y >> 16u) & 0x1ffu;
+    stack.values[0].ior = primeDecodeMediumIor(stack.values[0].iorEncoding);
+    stack.values[1].extinction = fifth.xyz;
+    stack.values[1].albedo = float3(0.0);
+    stack.values[1].anisotropy = 0.0;
+    stack.values[1].mediumId = control.z & 0xffffu;
+    stack.values[1].iorEncoding = (control.z >> 16u) & 0x1ffu;
+    stack.values[1].ior = primeDecodeMediumIor(stack.values[1].iorEncoding);
+
+    PrimeOfflineTransportRecord packed =
+            primePackOfflineTransport(path, stack, active);
+    PathState restoredPath;
+    primeUnpackOfflineTransportPath(packed, restoredPath);
+    PrimeOpenPbrVolumeStack restoredStack =
+            primeUnpackOfflineTransportVolumeStack(packed);
+    PrimeOfflineTransportRecord roundTrip = primePackOfflineTransport(
+            restoredPath, restoredStack, primeOfflineTransportIsActive(packed));
+    bool exact = all(packed.physicalOriginAndPreviousBsdfPdf
+                        == roundTrip.physicalOriginAndPreviousBsdfPdf)
+            && all(packed.sourceStateAndMediumIds
+                        == roundTrip.sourceStateAndMediumIds)
+            && all(packed.rayDirectionAndEtaScale
+                        == roundTrip.rayDirectionAndEtaScale)
+            && all(packed.throughputAndPreviousLightNormalX
+                        == roundTrip.throughputAndPreviousLightNormalX)
+            && all(packed.medium0AndPreviousLightNormalY
+                        == roundTrip.medium0AndPreviousLightNormalY)
+            && all(packed.medium1AndPreviousLightNormalZ
+                        == roundTrip.medium1AndPreviousLightNormalZ)
+            && all(asuint(restoredPath.physicalOrigin) == asuint(path.physicalOrigin))
+            && asuint(restoredPath.previousBsdfPdf) == asuint(path.previousBsdfPdf)
+            && all(asuint(restoredPath.rayDirection) == asuint(path.rayDirection))
+            && asuint(restoredPath.etaScale) == asuint(path.etaScale)
+            && all(asuint(restoredPath.throughput) == asuint(path.throughput))
+            && all(asuint(restoredPath.previousLightNormal)
+                        == asuint(path.previousLightNormal))
+            && all(restoredPath.sourcePrimitive == path.sourcePrimitive)
+            && primePathBounce(restoredPath.control) == bounce
+            && primePathFlags(restoredPath.control) == flags
+            && restoredStack.count == count
+            && restoredStack.values[0].mediumId == stack.values[0].mediumId
+            && restoredStack.values[1].mediumId == stack.values[1].mediumId
+            && restoredStack.values[0].iorEncoding == stack.values[0].iorEncoding
+            && restoredStack.values[1].iorEncoding == stack.values[1].iorEncoding
+            && all(asuint(restoredStack.values[0].extinction)
+                        == asuint(stack.values[0].extinction))
+            && all(asuint(restoredStack.values[1].extinction)
+                        == asuint(stack.values[1].extinction))
+            && primeOfflineTransportIsActive(packed) == active;
+    if (!exact) {
+        result.mask |= PRIME_TEST_FAILURE_IDENTITY;
+    }
+    result.first = asfloat(packed.sourceStateAndMediumIds);
+    result.second = asfloat(packed.medium0AndPreviousLightNormalY);
+    result.third = asfloat(packed.medium1AndPreviousLightNormalZ);
 }
 
 [numthreads(64, 1, 1)]
@@ -892,6 +1031,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     } else if (kind == 19) {
         primeCheckOfflineQueueLayout(
                 result, control.y, control.z, control.w);
+    } else if (kind == 20) {
+        primeCheckDetachedGuideMedium(
+                result, control.w, control.yz, asuint(first.xy));
+    } else if (kind == 21) {
+        primeCheckOfflineTransportStorage(
+                result, control, first, second, third, fourth, fifth);
     } else {
         result.mask |= PRIME_TEST_FAILURE_EVENT;
     }

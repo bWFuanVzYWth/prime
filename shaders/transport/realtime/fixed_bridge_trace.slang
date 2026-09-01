@@ -13,12 +13,6 @@ public void primeTraceFixedBridge(
         uint sourceQueue,
         uint launchIndex) {
     uint recordIndex = primeWavefrontQueuedPath(sourceQueue, launchIndex);
-    uint control = asuint(
-            primeWavefrontPaths[recordIndex]
-                    .transport.rayDirectionAndDenoiserControl.w);
-    SurfaceInteraction surface = primeFusedWavefrontTrace(
-            context,
-            recordIndex,
-            primeWavefrontTransparentBranch(control));
+    SurfaceInteraction surface = primeFusedWavefrontTrace(recordIndex);
     primeStoreWavefrontSurface(recordIndex, surface);
 }

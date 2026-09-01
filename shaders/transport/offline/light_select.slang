@@ -2,6 +2,7 @@
 module "transport/offline/light_select.slang";
 
 import "prime_abi.slang";
+import "prime_offline_abi.slang";
 import "prime_abi_types.slang";
 import "math/sampling.slang";
 import "policy/runtime/config.slang";
@@ -10,6 +11,7 @@ import "service/bsdf/dispatch/traits.slang";
 import "service/light/tree_select.slang";
 import "state/path.slang";
 import "state/offline/contract.slang";
+import "state/offline/path_storage.slang";
 import "state/offline/index.slang";
 import "state/offline/queue.slang";
 import "state/offline/staged_light.slang";

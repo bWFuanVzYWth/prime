@@ -51,7 +51,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| lightEmitter.size != 96 || lightCell.size != 12
 				|| sectionLightHeader.size != 48
 				|| integrator.size != 32 || pathState.size != 80 || tracePayload.size != 112
-				|| surfaceInteraction.size != 112 || wavefrontSurfaceRecord.size != 112
+				|| surfaceInteraction.size != 112 || wavefrontSurfaceRecord.size != 100
 				|| push.size != 128
 				|| nrdMotionPush.size != 144
 				|| sunShadowQuery.size != 48
@@ -143,7 +143,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| wavefrontContract.etaScaleOffset != 108
 				|| !wavefrontContract.pathControlReservedMask.toString().equalsIgnoreCase('0x00ffff00')
 				|| wavefrontContract.pathSlotsPerPixel != 2
-				|| wavefrontContract.areaRecordSize != 320
+				|| wavefrontContract.areaRecordSize != 296
 				|| wavefrontContract.areaRecordSize
 						!= 32 + (wavefrontSurfaceRecord.size + 12)
 								* wavefrontContract.pathSlotsPerPixel
@@ -165,12 +165,14 @@ abstract class GenerateShaderAbi extends DefaultTask {
 			throw new GradleException(
 					'Prime realtime scheduler must preserve its execution-mode queue ABI')
 		}
-		if (offlineWavefrontContract.pathRecordSize != 144
+		if (offlineWavefrontContract.pathRecordSize != 128
 				|| offlineWavefrontContract.pathSlotsPerPixel != 1
-				|| offlineWavefrontContract.surfaceRecordSize != 108
-				|| offlineWavefrontContract.stageRecordSize != 112
+				|| offlineWavefrontContract.surfaceRecordSize != 96
+				|| offlineWavefrontContract.stagedLightRecordSize != 12
+				|| offlineWavefrontContract.stageRecordSize != 108
 				|| offlineWavefrontContract.stageRecordSize
-						!= offlineWavefrontContract.surfaceRecordSize + 4
+						!= offlineWavefrontContract.surfaceRecordSize
+								+ offlineWavefrontContract.stagedLightRecordSize
 				|| offlineWavefrontContract.queueEntriesPerPixel != 1
 				|| offlineWavefrontContract.queueStorageEntriesPerPixel != 2
 				|| offlineWavefrontContract.queueCount != 2
@@ -404,6 +406,7 @@ public final class ShaderAbi {
     public static final int OFFLINE_WAVEFRONT_PATH_RECORD_SIZE = ${offlineWavefrontContract.pathRecordSize};
     public static final int OFFLINE_WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${offlineWavefrontContract.pathSlotsPerPixel};
     public static final int OFFLINE_WAVEFRONT_SURFACE_RECORD_SIZE = ${offlineWavefrontContract.surfaceRecordSize};
+    public static final int OFFLINE_WAVEFRONT_STAGED_LIGHT_RECORD_SIZE = ${offlineWavefrontContract.stagedLightRecordSize};
     public static final int OFFLINE_WAVEFRONT_STAGE_RECORD_SIZE = ${offlineWavefrontContract.stageRecordSize};
     public static final int OFFLINE_WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL = ${offlineWavefrontContract.queueEntriesPerPixel};
     public static final int OFFLINE_WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL = ${offlineWavefrontContract.queueStorageEntriesPerPixel};
@@ -680,12 +683,6 @@ public struct SurfaceInteraction
 ${slangStructFields(surfaceInteraction)}
 };
 
-// Physical queue lanes. Floating-point members are stored by bit representation.
-public struct WavefrontSurfaceRecord
-{
-${slangStructFields(wavefrontSurfaceRecord)}
-};
-
 public struct PrimePushConstants
 {
 ${slangStructFields(push)}
@@ -896,6 +893,7 @@ public static const uint PRIME_DESCRIPTOR_WAVEFRONT_QUEUE = ${schema.offlineDesc
 public static const uint PRIME_WAVEFRONT_PATH_RECORD_SIZE = ${offlineWavefrontContract.pathRecordSize};
 public static const uint PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${offlineWavefrontContract.pathSlotsPerPixel};
 public static const uint PRIME_OFFLINE_WAVEFRONT_SURFACE_RECORD_SIZE = ${offlineWavefrontContract.surfaceRecordSize};
+public static const uint PRIME_OFFLINE_STAGED_LIGHT_RECORD_SIZE = ${offlineWavefrontContract.stagedLightRecordSize};
 public static const uint PRIME_OFFLINE_WAVEFRONT_STAGE_RECORD_SIZE = ${offlineWavefrontContract.stageRecordSize};
 public static const uint PRIME_WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL = ${offlineWavefrontContract.queueEntriesPerPixel};
 public static const uint PRIME_WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL = ${offlineWavefrontContract.queueStorageEntriesPerPixel};
@@ -903,6 +901,15 @@ public static const uint PRIME_WAVEFRONT_QUEUE_COUNT = ${offlineWavefrontContrac
 public static const uint PRIME_WAVEFRONT_QUEUE_COMMAND_STRIDE = ${offlineWavefrontContract.queueCommandStride};
 public static const uint PRIME_WAVEFRONT_QUEUE_INDEX_SIZE = ${offlineWavefrontContract.queueIndexSize};
 public static const uint PRIME_WAVEFRONT_ACTIVE_MASK = ${offlineWavefrontContract.activeMask};
+
+public struct PrimeOfflineTransportRecord {
+    public uint4 physicalOriginAndPreviousBsdfPdf;
+    public uint4 sourceStateAndMediumIds;
+    public uint4 rayDirectionAndEtaScale;
+    public uint4 throughputAndPreviousLightNormalX;
+    public uint4 medium0AndPreviousLightNormalY;
+    public uint4 medium1AndPreviousLightNormalZ;
+};
 
 [[vk::binding(${schema.offlineDescriptors.runningMean}, 1)]] [[vk::image_format("rgba32f")]]
 public RWTexture2D<float4> primeOfflineRunningMean;

@@ -2,16 +2,18 @@
 module "state/realtime/detached_guide.slang";
 
 import "prime_realtime_abi.slang";
-import "state/realtime/contract.slang";
 import "bsdf/compact/contract/volume.slang";
+import "state/realtime/contract.slang";
+import "state/realtime/detached_guide_medium.slang";
 
 // T and R guides are drained serially, so one exact 40-byte ray record per pixel is sufficient.
-// Extinction is radiance state; deterministic guide traversal consumes only the two exact f32 IORs.
+// Extinction is radiance state; deterministic guide traversal retains exact boundary identities and
+// IOR sources without carrying the continuous absorption values.
 public struct PrimeDetachedGuideRecord {
     public float3 physicalOrigin;
     public uint2 sourcePrimitive;
     public float3 rayDirection;
-    public float2 mediumIor;
+    public uint2 mediumState;
 };
 
 public static const uint PRIME_DETACHED_GUIDE_RECORD_WORDS = 10u;
@@ -36,8 +38,8 @@ public void primeStoreDetachedGuideRecord(
     primeWavefrontQueue[word + 5u] = asuint(record.rayDirection.y);
     primeWavefrontQueue[word + 6u] = asuint(record.rayDirection.z);
     primeWavefrontQueue[word + 7u] = record.sourcePrimitive.y;
-    primeWavefrontQueue[word + 8u] = asuint(record.mediumIor.x);
-    primeWavefrontQueue[word + 9u] = asuint(record.mediumIor.y);
+    primeWavefrontQueue[word + 8u] = record.mediumState.x;
+    primeWavefrontQueue[word + 9u] = record.mediumState.y;
 }
 
 public PrimeDetachedGuideRecord primeLoadDetachedGuideRecord(uint2 pixel) {
@@ -53,30 +55,13 @@ public PrimeDetachedGuideRecord primeLoadDetachedGuideRecord(uint2 pixel) {
             asfloat(primeWavefrontQueue[word + 5u]),
             asfloat(primeWavefrontQueue[word + 6u]));
     record.sourcePrimitive.y = primeWavefrontQueue[word + 7u];
-    record.mediumIor = float2(
-            asfloat(primeWavefrontQueue[word + 8u]),
-            asfloat(primeWavefrontQueue[word + 9u]));
+    record.mediumState = uint2(
+            primeWavefrontQueue[word + 8u],
+            primeWavefrontQueue[word + 9u]);
     return record;
-}
-
-public float2 primeDetachedGuideMediumIor(PrimeOpenPbrVolumeStack stack) {
-    return float2(
-            stack.count > 0u ? stack.values[0].ior : 0.0,
-            stack.count > 1u ? stack.values[1].ior : 0.0);
 }
 
 public PrimeOpenPbrVolumeStack primeDetachedGuideVolumeStack(
         PrimeDetachedGuideRecord record) {
-    PrimeOpenPbrVolumeStack stack;
-    [unroll]
-    for (uint index = 0u; index < 2u; ++index) {
-        stack.values[index].extinction = float3(0.0);
-        stack.values[index].albedo = float3(0.0);
-        stack.values[index].anisotropy = 0.0;
-        stack.values[index].ior = record.mediumIor[index];
-    }
-    stack.count = record.mediumIor.y > 0.0
-            ? 2u
-            : (record.mediumIor.x > 0.0 ? 1u : 0u);
-    return stack;
+    return primeUnpackDetachedGuideMediumStack(record.mediumState);
 }

@@ -104,7 +104,7 @@ public bool primeIntegrateTransparentWavefrontSurface<Phase, SunNee, AreaNee>(
                 primeEvaluateEnvironmentContribution(context, path, integrator));
         return false;
     }
-    if (!primeApplySegmentMedium(context, path, surface, volumeStack)) {
+    if (!primeApplySegmentMedium(path.throughput, surface, volumeStack)) {
         return false;
     }
     if (observesGuide

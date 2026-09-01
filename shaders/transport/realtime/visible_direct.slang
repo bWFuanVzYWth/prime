@@ -4,7 +4,6 @@ module "transport/realtime/visible_direct.slang";
 import "prime_realtime_abi.slang";
 import "prime_abi.slang";
 import "prime_abi_types.slang";
-import "state/path.slang";
 import "service/bsdf/contract/sample.slang";
 import "contract/realtime/guide.slang";
 import "model/atmosphere/sky.slang";
@@ -14,9 +13,9 @@ import "model/material/defaults.slang";
 import "service/bsdf/dispatch/traits.slang";
 import "service/trace/context.slang";
 import "state/realtime/contract.slang";
+import "state/realtime/direct.slang";
+import "state/realtime/direct_accumulation.slang";
 import "state/realtime/guide.slang";
-import "state/realtime/light.slang";
-import "state/realtime/ordinary.slang";
 import "state/realtime/queue.slang";
 import "state/realtime/surface.slang";
 import "contract/light.slang";
@@ -31,18 +30,19 @@ public void primeShadeVisibleDirect(
         uint launchIndex) {
     uint recordIndex = primeWavefrontQueuedPath(
             PRIME_WAVEFRONT_AREA_QUEUE, launchIndex);
-    PrimeWavefrontTransportRecord record =
-            primeLoadWavefrontTransportRecord(recordIndex);
     SurfaceInteraction surface = primeLoadWavefrontSurface(recordIndex);
     uint2 pixel = primeWavefrontPixel(recordIndex);
-    PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
-    if (!primeApplySegmentMedium(context, path, surface, volumeStack)) {
+    PrimeWavefrontDirectState path =
+            primeLoadWavefrontDirectState(recordIndex);
+    if (!primeApplySegmentMedium(
+            path.throughput, surface, path.volumeStack)) {
         return;
     }
-    float3 viewDirection = -path.rayDirection;
     PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
-            surface, viewDirection, volumeStack, primeUsesAirGap());
+            surface,
+            path.viewDirection,
+            path.volumeStack,
+            primeUsesAirGap());
     if (!primeClosureSupports(closureTraits, PRIME_MEASURE_SOLID_ANGLE)) {
         return;
     }
@@ -51,23 +51,23 @@ public void primeShadeVisibleDirect(
             pixel,
             primeSampleIndex(),
             primeSampleEpoch(),
-            primePathBounce(path.control) + 1u,
+            path.bounce + 1u,
             uint(recordIndex >= primeWavefrontPixelCount()));
     bool transparent = primeMaterialIsTransmissive(surface.materialControl);
 
     PrimeDirectLightingSplit area = primeEstimatePrimaryNonsunDirectSampled(
             context,
             surface,
-            viewDirection,
+            path.viewDirection,
             primeDirectSample2D(
                     directSample, PRIME_DIRECT_SAMPLE_AREA_PRIMARY),
             primeDirectSample2D(
                     directSample, PRIME_DIRECT_SAMPLE_AREA_SECONDARY),
-            volumeStack,
+            path.volumeStack,
             transparent);
     area.diffuse *= path.throughput;
     area.specular *= path.throughput;
-    primeAccumulatePrimaryDirectSplit(context, pixel, area);
+    primeAccumulatePrimaryDirectSplit(pixel, area);
 
     PrimeDenoiserGuides guides = primeEmptyDenoiserGuides();
     guides.primaryAreaDiffuse = area.diffuse;
@@ -87,10 +87,10 @@ public void primeShadeVisibleDirect(
             context,
             integrator,
             surface,
-            viewDirection,
+            path.viewDirection,
             primeDirectSample2D(
                     directSample, PRIME_DIRECT_SAMPLE_SUN),
-            volumeStack,
+            path.volumeStack,
             transparent);
     PrimeDirectLightingSplit direct = sun.lighting;
     direct.diffuse *= path.throughput;
@@ -98,7 +98,7 @@ public void primeShadeVisibleDirect(
     if (transparent) {
         direct.diffuse *= sun.visibility;
         direct.specular *= sun.visibility;
-        primeAccumulatePrimaryDirectSplit(context, pixel, direct);
+        primeAccumulatePrimaryDirectSplit(pixel, direct);
     } else {
         primeStoreWavefrontPrimarySun(
                 pixel,

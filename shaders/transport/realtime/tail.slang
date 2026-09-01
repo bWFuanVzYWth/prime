@@ -150,7 +150,7 @@ public bool primeIntegrateRealtimeTailSurface(
                         context, path, integrator));
         return false;
     }
-    if (!primeApplySegmentMedium(context, path, surface, volumeStack)) {
+    if (!primeApplySegmentMedium(path.throughput, surface, volumeStack)) {
         return false;
     }
 

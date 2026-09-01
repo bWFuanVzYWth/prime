@@ -23,14 +23,13 @@ public float3 primeEvaluateDeltaHitEmission(
 }
 
 public bool primeApplySegmentMedium(
-        inout PrimeIntegratorContext context,
-        inout PathState path,
+        inout float3 throughput,
         SurfaceInteraction surface,
         PrimeOpenPbrVolumeStack volumeStack) {
     if (volumeStack.count == 0u) {
         return true;
     }
     PrimeOpenPbrVolume medium = volumeStack.values[volumeStack.count - 1u];
-    path.throughput *= primeSegmentTransmittance(medium.extinction, surface.t);
-    return !all(path.throughput == float3(0.0));
+    throughput *= primeSegmentTransmittance(medium.extinction, surface.t);
+    return !all(throughput == float3(0.0));
 }

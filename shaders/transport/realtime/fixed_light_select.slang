@@ -10,11 +10,9 @@ import "policy/runtime/config.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/dispatch/traits.slang";
 import "service/light/tree_select.slang";
-import "state/path.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/staged_light.slang";
-import "state/realtime/light.slang";
-import "state/realtime/ordinary.slang";
+import "state/realtime/light_selection.slang";
 import "state/realtime/queue.slang";
 import "state/realtime/surface.slang";
 import "transport/direct/selection.slang";
@@ -22,17 +20,14 @@ import "bsdf/compact/contract/volume.slang";
 
 public void primeSelectFixedLight(uint sourceQueue, uint launchIndex) {
     uint recordIndex = primeWavefrontQueuedPath(sourceQueue, launchIndex);
-    PrimeWavefrontTransportRecord record =
-            primeLoadWavefrontTransportRecord(recordIndex);
     SurfaceInteraction surface = primeLoadWavefrontSurface(recordIndex);
     PrimeStagedLightSelection selection = primeDisabledStagedLightSelection();
     if (surface.hitKind == PRIME_HIT_SURFACE) {
         uint2 pixel = primeWavefrontPixel(recordIndex);
-        PathState path = primeWavefrontPath(pixel, record);
-        PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
-        float3 viewDirection = -path.rayDirection;
+        PrimeWavefrontLightSelectionState path =
+                primeLoadWavefrontLightSelectionState(recordIndex);
         PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
-                surface, viewDirection, volumeStack, primeUsesAirGap());
+                surface, path.viewDirection, path.volumeStack, primeUsesAirGap());
         if (primeClosureSupports(
                 closureTraits, PRIME_MEASURE_SOLID_ANGLE)) {
             selection.area = primeInvalidAreaLightSelection();
@@ -40,11 +35,11 @@ public void primeSelectFixedLight(uint sourceQueue, uint launchIndex) {
                     pixel,
                     primeSampleIndex(),
                     primeSampleEpoch(),
-                    primePathBounce(path.control) + 1u,
+                    path.bounce + 1u,
                     uint(recordIndex >= primeWavefrontPixelCount()));
             selection.area = primeSelectAreaLight(
                     surface.position,
-                    primeAreaLightReceiverNormal(surface, viewDirection),
+                    primeAreaLightReceiverNormal(surface, path.viewDirection),
                     primeDirectSample2D(
                             directSample,
                             PRIME_DIRECT_SAMPLE_AREA_PRIMARY).x);

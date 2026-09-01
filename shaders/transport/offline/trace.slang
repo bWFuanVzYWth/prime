@@ -2,11 +2,13 @@
 module "transport/offline/trace.slang";
 
 import "prime_abi.slang";
+import "prime_offline_abi.slang";
 import "prime_abi_types.slang";
 import "state/path.slang";
 import "service/camera/projection.slang";
 import "service/trace/surface.slang";
 import "state/offline/contract.slang";
+import "state/offline/path_storage.slang";
 import "state/offline/index.slang";
 import "state/offline/queue.slang";
 import "state/offline/surface.slang";
@@ -40,8 +42,8 @@ public void primeTraceOfflineBridge(uint sourceQueue, uint launchIndex) {
     uint pathIndex = primeOfflineQueuedPath(sourceQueue, launchIndex);
     PrimeOfflineTransportRecord transport = primeOfflinePaths[pathIndex].transport;
     SurfaceInteraction surface = primeTraceSurface(
-            transport.physicalOriginAndPreviousBsdfPdf.xyz,
-            transport.rayDirectionAndControl.xyz,
-            transport.sourceAndPathControl.xy);
+            primeOfflinePhysicalOrigin(transport),
+            primeOfflineRayDirection(transport),
+            primeOfflineSourcePrimitive(transport));
     primeStoreOfflineSurface(pathIndex, surface);
 }

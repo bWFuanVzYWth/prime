@@ -232,9 +232,8 @@ public PrimeTransparentBranchResult primeLoadTransparentBranchActiveIntermediate
 
 public void primeInvalidatePendingTransparentGuide(
         uint recordIndex,
-        PrimeWavefrontTransportRecord record) {
+        uint control) {
     uint2 pixel = primeWavefrontPixel(recordIndex);
-    uint control = asuint(record.rayDirectionAndDenoiserControl.w);
     bool transmission = primeWavefrontTransmissionBranch(control);
     PrimeTransparentBranchResult result =
             primeLoadTransparentBranchActiveIntermediate(

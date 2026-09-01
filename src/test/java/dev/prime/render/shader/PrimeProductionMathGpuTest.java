@@ -137,7 +137,7 @@ final class PrimeProductionMathGpuTest {
 
     private static void assertIntegratorAndLightTransportMath(ShaderComputeRunner runner)
             throws IOException {
-        int kinds = 20;
+        int kinds = 22;
         int inputWords = 6;
         ShaderPropertyBatch.assertProperties(
                 runner,
@@ -829,6 +829,31 @@ final class PrimeProductionMathGpuTest {
                     putInt(input, index, words, 0, 1, pixelCount);
                     putInt(input, index, words, 0, 2, queue);
                     putInt(input, index, words, 0, 3, entry);
+                } else if (kind == 20) {
+                    int count = local % 3;
+                    int firstMediumId = local == 0 ? 0xffff : random.nextInt(1, 0x1_0000);
+                    int secondMediumId = local == 1 ? 0xffff : random.nextInt(1, 0x1_0000);
+                    int firstIor = local == 2 ? 1 << 8 : random.nextInt(0x100);
+                    int secondIor = local == 3 ? 1 << 8 : random.nextInt(0x100);
+                    putInt(input, index, words, 0, 1, firstMediumId);
+                    putInt(input, index, words, 0, 2, secondMediumId);
+                    putInt(input, index, words, 0, 3, count);
+                    putInt(input, index, words, 1, 0, firstIor);
+                    putInt(input, index, words, 1, 1, secondIor);
+                } else if (kind == 21) {
+                    int count = local % 3;
+                    int active = (local & 1) << 2;
+                    int bounce = random.nextInt(0x100) << 8;
+                    int flags = random.nextInt(4) << 16;
+                    putInt(input, index, words, 0, 1, random.nextInt());
+                    putInt(input, index, words, 0, 2, random.nextInt());
+                    putInt(input, index, words, 0, 3,
+                            count | active | bounce | flags);
+                    for (int word = 1; word < words; word++) {
+                        for (int component = 0; component < 4; component++) {
+                            putInt(input, index, words, word, component, random.nextInt());
+                        }
+                    }
                 } else {
                     putVec4(
                             input,

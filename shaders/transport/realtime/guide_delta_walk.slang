@@ -15,13 +15,12 @@ import "service/trace/context.slang";
 import "service/trace/surface.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/detached_guide.slang";
+import "state/realtime/detached_guide_medium.slang";
+import "state/realtime/detached_guide_owner.slang";
 import "state/realtime/guide_normal.slang";
-import "state/realtime/light.slang";
-import "state/realtime/ordinary.slang";
-import "state/realtime/psr.slang";
+import "state/realtime/medium.slang";
 import "state/realtime/queue.slang";
 import "state/realtime/transparent.slang";
-import "state/realtime/transport.slang";
 import "transport/guide/queued_psr.slang";
 import "transport/scatter/delta.slang";
 import "transport/scatter/contract.slang";
@@ -30,47 +29,34 @@ import "transport/surface/access.slang";
 import "contract/material/normal.slang";
 import "contract/path.slang";
 
-PrimeQueuedPsrState primeLoadDetachedGuidePsrState(
+void primeFinishDetachedGuide(
         uint recordIndex,
-        PrimeWavefrontTransportRecord owner) {
-    PrimeQueuedPsrState state = primeLoadWavefrontPsrState(recordIndex, owner);
-    return primeQueuedPsrWithRuntimeControl(
-            state,
-            primeWavefrontGuideTransitions(owner.sourceAndPathControl.z),
-            primeQueuedPsrStorageFlags(state));
-}
-
-void primeFinishDetachedGuide(uint recordIndex, bool directional) {
-    PrimeWavefrontTransportRecord owner =
-            primeLoadWavefrontTransportRecord(recordIndex);
-    uint control = asuint(owner.rayDirectionAndDenoiserControl.w);
-    control = directional
-            ? control | PRIME_WAVEFRONT_DIRECTIONAL_GUIDE
-            : control & ~PRIME_WAVEFRONT_DIRECTIONAL_GUIDE;
+        PrimeDetachedGuideOwnerState owner,
+        bool directional) {
+    owner.denoiserControl = directional
+            ? owner.denoiserControl | PRIME_WAVEFRONT_DIRECTIONAL_GUIDE
+            : owner.denoiserControl & ~PRIME_WAVEFRONT_DIRECTIONAL_GUIDE;
     if (!directional) {
-        control &= ~PRIME_WAVEFRONT_GUIDE_ENABLED;
+        owner.denoiserControl &= ~PRIME_WAVEFRONT_GUIDE_ENABLED;
     }
-    owner.rayDirectionAndDenoiserControl.w = asfloat(control);
-    owner = primeWavefrontWithQueuedPsrControl(owner, 0u);
-    owner = primeWavefrontWithGuideTransitions(owner, 0u);
-    owner = primeWavefrontWithGuideFallback(owner, false);
-    primeStoreWavefrontTransportRecord(recordIndex, owner);
+    owner.guideControl = primeMergeWavefrontGuideControl(
+            owner.guideControl, 0u);
+    primeStoreDetachedGuideOwnerControl(recordIndex, owner);
 }
 
 void primePublishDetachedGuideSurface(
         uint recordIndex,
+        PrimeDetachedGuideOwnerState owner,
         PrimeDetachedGuideRecord guide,
         PrimeOpenPbrVolumeStack volumeStack,
         SurfaceInteraction surface) {
     uint2 pixel = primeWavefrontPixel(recordIndex);
-    PrimeWavefrontTransportRecord owner =
-            primeLoadWavefrontTransportRecord(recordIndex);
-    uint control = asuint(owner.rayDirectionAndDenoiserControl.w);
+    uint control = owner.denoiserControl;
     bool transmission = primeWavefrontTransmissionBranch(control);
     PrimeTransparentBranchResult result =
             primeLoadTransparentBranchActiveIntermediate(
                     pixel, transmission, control);
-    PrimeQueuedPsrState psrState = primeLoadDetachedGuidePsrState(
+    PrimeQueuedPsrState psrState = primeLoadDetachedGuideOwnerPsrState(
             recordIndex, owner);
     float3 viewDirection = -guide.rayDirection;
     PrimeDenoiseAlbedos albedos = primeSurfaceGuideAlbedos(
@@ -103,11 +89,10 @@ void primePublishDetachedGuideSurface(
     control |= (result.guides.primaryMaterialFlags
             & PRIME_WAVEFRONT_PRIMARY_FLAGS_MASK)
             << PRIME_WAVEFRONT_PRIMARY_FLAGS_SHIFT;
-    owner.rayDirectionAndDenoiserControl.w = asfloat(control);
-    owner = primeWavefrontWithQueuedPsrControl(owner, 0u);
-    owner = primeWavefrontWithGuideTransitions(owner, 0u);
-    owner = primeWavefrontWithGuideFallback(owner, false);
-    primeStoreWavefrontTransportRecord(recordIndex, owner);
+    owner.denoiserControl = control;
+    owner.guideControl = primeMergeWavefrontGuideControl(
+            owner.guideControl, 0u);
+    primeStoreDetachedGuideOwnerControl(recordIndex, owner);
     primeStoreWavefrontGuideSurface(
             recordIndex,
             result.guides.primaryNormal,
@@ -115,16 +100,16 @@ void primePublishDetachedGuideSurface(
 }
 
 void primePublishDetachedGuideMiss(
-        uint recordIndex, PrimeDetachedGuideRecord guide) {
+        uint recordIndex,
+        PrimeDetachedGuideOwnerState owner,
+        PrimeDetachedGuideRecord guide) {
     uint2 pixel = primeWavefrontPixel(recordIndex);
-    PrimeWavefrontTransportRecord owner =
-            primeLoadWavefrontTransportRecord(recordIndex);
-    uint control = asuint(owner.rayDirectionAndDenoiserControl.w);
+    uint control = owner.denoiserControl;
     bool transmission = primeWavefrontTransmissionBranch(control);
     PrimeTransparentBranchResult result =
             primeLoadTransparentBranchActiveIntermediate(
                     pixel, transmission, control);
-    PrimeQueuedPsrState psrState = primeLoadDetachedGuidePsrState(
+    PrimeQueuedPsrState psrState = primeLoadDetachedGuideOwnerPsrState(
             recordIndex, owner);
     float3 direction = primeQueuedPsrVirtualDirection(
             psrState, guide.rayDirection);
@@ -140,10 +125,10 @@ void primePublishDetachedGuideMiss(
                 true,
                 (control & PRIME_WAVEFRONT_PRIMARY_REFLECTION_ONLY) != 0u,
                 result);
-        primeFinishDetachedGuide(recordIndex, true);
+        primeFinishDetachedGuide(recordIndex, owner, true);
         return;
     }
-    primeFinishDetachedGuide(recordIndex, false);
+    primeFinishDetachedGuide(recordIndex, owner, false);
 }
 
 public void primeDetachedGuideDeltaWalk(
@@ -156,9 +141,9 @@ public void primeDetachedGuideDeltaWalk(
 
     [loop]
     for (uint step = 0u; step < maximumTransitions; ++step) {
-        PrimeWavefrontTransportRecord owner =
-                primeLoadWavefrontTransportRecord(recordIndex);
-        uint ownerControl = asuint(owner.rayDirectionAndDenoiserControl.w);
+        PrimeDetachedGuideOwnerState owner =
+                primeLoadDetachedGuideOwnerState(recordIndex);
+        uint ownerControl = owner.denoiserControl;
         uint pathClass = primeWavefrontTransmissionBranch(ownerControl) ? 2u : 1u;
         SurfaceInteraction surface = primeTraceSurfaceClassified(
                 PrimeSurfaceTracePolicy(),
@@ -167,7 +152,7 @@ public void primeDetachedGuideDeltaWalk(
                 guide.sourcePrimitive,
                 pathClass);
         if (surface.hitKind == PRIME_HIT_NONE) {
-            primePublishDetachedGuideMiss(recordIndex, guide);
+            primePublishDetachedGuideMiss(recordIndex, owner, guide);
             return;
         }
 
@@ -176,15 +161,15 @@ public void primeDetachedGuideDeltaWalk(
         if (!primeSurfaceIsDiscreteOnly(
                 surface, -guide.rayDirection, volumeStack)) {
             primePublishDetachedGuideSurface(
-                    recordIndex, guide, volumeStack, surface);
+                    recordIndex, owner, guide, volumeStack, surface);
             return;
         }
-        PrimeQueuedPsrState psrState = primeLoadDetachedGuidePsrState(
+        PrimeQueuedPsrState psrState = primeLoadDetachedGuideOwnerPsrState(
                 recordIndex, owner);
-        uint transitions = primeWavefrontGuideTransitions(
-                owner.sourceAndPathControl.z);
+        uint transitions = (owner.guideControl
+                & PRIME_WAVEFRONT_GUIDE_CONTROL_MASK) >> 8u;
         if (transitions >= maximumTransitions) {
-            primeFinishDetachedGuide(recordIndex, false);
+            primeFinishDetachedGuide(recordIndex, owner, false);
             return;
         }
 
@@ -195,7 +180,7 @@ public void primeDetachedGuideDeltaWalk(
                         -guide.rayDirection,
                         volumeStack);
         if (!primeHasScatter(scatter.bsdf)) {
-            primeFinishDetachedGuide(recordIndex, false);
+            primeFinishDetachedGuide(recordIndex, owner, false);
             return;
         }
         psrState = primeAppendQueuedPsrDiscrete(
@@ -203,19 +188,15 @@ public void primeDetachedGuideDeltaWalk(
                 guide.physicalOrigin,
                 surface,
                 scatter.bsdf);
-        primeStoreWavefrontPsrState(recordIndex, psrState);
-        owner.throughputAndReserved.w = psrState.firstDirectionLength.w;
-        owner = primeWavefrontWithQueuedPsrControl(
-                owner, primeQueuedPsrStorageFlags(psrState));
-        owner = primeWavefrontWithGuideTransitions(
-                owner, primeQueuedPsrCount(psrState));
-        primeStoreWavefrontTransportRecord(recordIndex, owner);
+        primeStoreDetachedGuideOwnerPsrState(recordIndex, owner, psrState);
         guide.physicalOrigin = surface.position;
         guide.sourcePrimitive = uint2(
                 surface.sectionIndex, primeSurfaceTriangleIndex(surface));
         guide.rayDirection = scatter.bsdf.direction;
-        guide.mediumIor = primeDetachedGuideMediumIor(scatter.volumeStack);
+        guide.mediumState = primePackDetachedGuideMediumStack(scatter.volumeStack);
         primeStoreDetachedGuideRecord(pixel, guide);
     }
-    primeFinishDetachedGuide(recordIndex, false);
+    PrimeDetachedGuideOwnerState owner =
+            primeLoadDetachedGuideOwnerState(recordIndex);
+    primeFinishDetachedGuide(recordIndex, owner, false);
 }

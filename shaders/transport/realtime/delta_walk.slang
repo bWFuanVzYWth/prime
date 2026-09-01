@@ -49,9 +49,10 @@ public void primeProcessDeltaWalkBranch(
         inout PrimeIntegratorContext context,
         uint recordIndex,
         uint maximumTransitions) {
-    PrimeWavefrontTransportRecord record =
-            primeLoadWavefrontTransportRecord(recordIndex);
-    if (!primeWavefrontActive(record)) {
+    uint initialControl = asuint(
+            primeWavefrontPaths[recordIndex]
+                    .transport.rayDirectionAndDenoiserControl.w);
+    if ((initialControl & PRIME_WAVEFRONT_ACTIVE_MASK) == 0u) {
         return;
     }
 
@@ -60,12 +61,11 @@ public void primeProcessDeltaWalkBranch(
     uint transitions = 1u;
     [loop]
     for (uint step = 0u; step < maximumTransitions; ++step) {
+        SurfaceInteraction surface = primeFusedWavefrontTrace(recordIndex);
+        PrimeWavefrontTransportRecord record =
+                primeLoadWavefrontTransportRecord(recordIndex);
         uint control = asuint(record.rayDirectionAndDenoiserControl.w);
         bool transparent = primeWavefrontTransparentBranch(control);
-        SurfaceInteraction surface = primeFusedWavefrontTrace(
-                context, recordIndex, transparent);
-        record = primeLoadWavefrontTransportRecord(recordIndex);
-        control = asuint(record.rayDirectionAndDenoiserControl.w);
 
         if (!primeDeltaWalkHitIsDeltaOnly(
                 recordIndex, record, surface)) {
@@ -82,11 +82,15 @@ public void primeProcessDeltaWalkBranch(
                     && !primeWavefrontGuideFallback(
                             record.sourceAndPathControl.z);
             if (guidePending) {
-                primeInvalidatePendingTransparentGuide(recordIndex, record);
+                primeInvalidatePendingTransparentGuide(recordIndex, control);
             }
-            record = primeWavefrontWithActive(record, false);
-            record = primeWavefrontWithGuideFallback(record, false);
-            primeStoreWavefrontTransportRecord(recordIndex, record);
+            control &= ~PRIME_WAVEFRONT_ACTIVE_MASK;
+            primeWavefrontPaths[recordIndex]
+                    .transport.rayDirectionAndDenoiserControl.w =
+                    asfloat(control);
+            primeWavefrontPaths[recordIndex]
+                    .transport.sourceAndPathControl.z &=
+                    ~PRIME_WAVEFRONT_GUIDE_FALLBACK;
             return;
         }
 
@@ -107,7 +111,6 @@ public void primeProcessDeltaWalkBranch(
             return;
         }
         transitions++;
-        record = primeLoadWavefrontTransportRecord(recordIndex);
     }
 }
 

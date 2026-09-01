@@ -7,6 +7,7 @@ import "prime_abi_types.slang";
 import "math/packed_geometry.slang";
 import "model/material/defaults.slang";
 import "service/trace/surface.slang";
+import "state/surface_storage.slang";
 import "contract/path.slang";
 
 public static const uint PRIME_WAVEFRONT_SURFACE_LANE_WORDS = 4u;
@@ -30,9 +31,8 @@ public uint4 primeLoadWavefrontSurfaceLane(uint base, uint laneIndex) {
 
 // Area guides and the two path-indexed hit arrays occupy separate contiguous regions. Keeping the
 // surface arrays branch-major preserves coalesced ordinary-path access while both fixed transparent
-// continuations can safely remain in flight. Position is retained as f32 hit output rather than
-// reconstructed from ray arithmetic. hitKind occupies the low payload byte while motionZFlags
-// occupies the remaining bits, so their original packed word is also lossless.
+// continuations can safely remain in flight. The shared 96-byte exact surface core is followed by
+// realtime's phase-specific f32 texture LOD.
 public uint primeWavefrontSurfaceWord(uint pathIndex) {
     uint guideWords = primeWavefrontPixelCount() * PRIME_WAVEFRONT_AREA_GUIDE_WORDS;
     return guideWords
@@ -46,41 +46,14 @@ public void primeStoreWavefrontSurface(uint pathIndex, SurfaceInteraction surfac
                 PRIME_HIT_NONE;
         return;
     }
-    primeStoreWavefrontSurfaceLane(base, 0u, uint4(
-            asuint(surface.t),
-            asuint(surface.geometricNormal.x),
-            asuint(surface.geometricNormal.y),
-            asuint(surface.geometricNormal.z)));
-    primeStoreWavefrontSurfaceLane(base, 1u, uint4(
-            surface.hitKind,
-            surface.materialControl,
-            surface.sectionIndex,
-            surface.emitterIndex));
-    primeStoreWavefrontSurfaceLane(base, 2u, uint4(
-            asuint(surface.baseColor.x),
-            asuint(surface.baseColor.y),
-            asuint(surface.baseColor.z),
-            asuint(surface.textureLod)));
-    primeStoreWavefrontSurfaceLane(base, 3u, uint4(
-            asuint(surface.opacity),
-            asuint(surface.roughness),
-            surface.opticalControl,
-            surface.mediumId));
-    primeStoreWavefrontSurfaceLane(base, 4u, uint4(
-            asuint(surface.shadingNormal.x),
-            asuint(surface.shadingNormal.y),
-            asuint(surface.shadingNormal.z),
-            asuint(surface.adjacentBaseColor.x)));
-    primeStoreWavefrontSurfaceLane(base, 5u, uint4(
-            asuint(surface.adjacentBaseColor.y),
-            asuint(surface.adjacentBaseColor.z),
-            surface.adjacentInterfaceControl,
-            asuint(surface.position.x)));
-    primeStoreWavefrontSurfaceLane(base, 6u, uint4(
-            asuint(surface.position.y),
-            asuint(surface.position.z),
-            surface.motionZFlags,
-            surface.adjacentMediumId));
+    PrimeSurfaceStorageRecord record = primePackSurfaceStorageRecord(surface);
+    primeStoreWavefrontSurfaceLane(base, 0u, record.geometry);
+    primeStoreWavefrontSurfaceLane(base, 1u, record.identityBaseX);
+    primeStoreWavefrontSurfaceLane(base, 2u, record.baseYzOpacityRoughness);
+    primeStoreWavefrontSurfaceLane(base, 3u, record.opticalShadingNormal);
+    primeStoreWavefrontSurfaceLane(base, 4u, record.adjacentBasePositionX);
+    primeStoreWavefrontSurfaceLane(base, 5u, record.positionYzMotionAdjacent);
+    primeWavefrontQueue[base + 24u] = asuint(surface.textureLod);
 }
 
 public SurfaceInteraction primeLoadWavefrontSurface(uint pathIndex) {
@@ -93,38 +66,14 @@ public SurfaceInteraction primeLoadWavefrontSurface(uint pathIndex) {
                 primeWavefrontPaths[pathIndex]
                         .transport.sourceAndPathControl.xy);
     }
-    SurfaceInteraction surface;
-    uint4 lane = primeLoadWavefrontSurfaceLane(base, 0u);
-    surface.t = asfloat(lane.x);
-    surface.geometricNormal = float3(
-            asfloat(lane.y), asfloat(lane.z), asfloat(lane.w));
-    surface.hitKind = hitKind;
-    surface.materialControl = primeWavefrontQueue[
-            base + PRIME_WAVEFRONT_SURFACE_LANE_WORDS + 1u];
-    surface.sectionIndex = primeWavefrontQueue[
-            base + PRIME_WAVEFRONT_SURFACE_LANE_WORDS + 2u];
-    surface.emitterIndex = primeWavefrontQueue[
-            base + PRIME_WAVEFRONT_SURFACE_LANE_WORDS + 3u];
-    lane = primeLoadWavefrontSurfaceLane(base, 2u);
-    surface.baseColor = float3(
-            asfloat(lane.x), asfloat(lane.y), asfloat(lane.z));
-    surface.textureLod = asfloat(lane.w);
-    lane = primeLoadWavefrontSurfaceLane(base, 3u);
-    surface.opacity = asfloat(lane.x);
-    surface.roughness = asfloat(lane.y);
-    surface.opticalControl = lane.z;
-    surface.mediumId = lane.w;
-    lane = primeLoadWavefrontSurfaceLane(base, 4u);
-    surface.shadingNormal = asfloat(lane.xyz);
-    float adjacentX = asfloat(lane.w);
-    lane = primeLoadWavefrontSurfaceLane(base, 5u);
-    surface.adjacentBaseColor = float3(
-            adjacentX, asfloat(lane.x), asfloat(lane.y));
-    surface.adjacentInterfaceControl = lane.z;
-    float positionX = asfloat(lane.w);
-    lane = primeLoadWavefrontSurfaceLane(base, 6u);
-    surface.position = float3(positionX, asfloat(lane.x), asfloat(lane.y));
-    surface.motionZFlags = lane.z;
-    surface.adjacentMediumId = lane.w;
+    PrimeSurfaceStorageRecord record;
+    record.geometry = primeLoadWavefrontSurfaceLane(base, 0u);
+    record.identityBaseX = primeLoadWavefrontSurfaceLane(base, 1u);
+    record.baseYzOpacityRoughness = primeLoadWavefrontSurfaceLane(base, 2u);
+    record.opticalShadingNormal = primeLoadWavefrontSurfaceLane(base, 3u);
+    record.adjacentBasePositionX = primeLoadWavefrontSurfaceLane(base, 4u);
+    record.positionYzMotionAdjacent = primeLoadWavefrontSurfaceLane(base, 5u);
+    SurfaceInteraction surface = primeUnpackSurfaceStorageRecord(record);
+    surface.textureLod = asfloat(primeWavefrontQueue[base + 24u]);
     return surface;
 }

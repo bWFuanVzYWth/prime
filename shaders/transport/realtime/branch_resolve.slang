@@ -21,12 +21,9 @@ public void primeResolveRealtimeBranch(
     uint recordIndex = primeWavefrontQueuedPath(
             PRIME_WAVEFRONT_TRANSPARENT_RESOLVE_QUEUE, launchIndex);
     uint2 pixel = primeWavefrontPixel(recordIndex);
-    PrimeWavefrontTransportRecord primaryRecord =
-            primeWavefrontPaths[primeWavefrontIndex(pixel, 0u)].transport;
-    PrimeWavefrontTransportRecord secondaryRecord =
-            primeWavefrontPaths[primeWavefrontIndex(pixel, 1u)].transport;
     uint reflectionControl = asuint(
-            secondaryRecord.rayDirectionAndDenoiserControl.w);
+            primeWavefrontPaths[primeWavefrontIndex(pixel, 1u)]
+                    .transport.rayDirectionAndDenoiserControl.w);
 
     float2 cameraSample = primeRealtimeCameraSample(pixel);
     bool guideModeEnabled = primeTransparentGuideMode()

@@ -1,7 +1,7 @@
 # 渲染核心数据 IR
 
 本文是 Prime 常用渲染数据的规范来源，只记录长期约束和已冻结的编码。当前进度与未决项
-见[阶段 3 准入检查表](阶段3准入账本.md)；测量数字、旧实现和迁移过程见
+见[跨阶段实施检查表](阶段3准入账本.md)；测量数字、旧实现和迁移过程见
 [阶段 2 编码精度初始预算](阶段2编码精度初始预算.md)与
 [渲染数据标准化调查报告](渲染数据标准化调查报告.md)。历史记录不能反向定义当前规范。
 
@@ -144,6 +144,17 @@ GPU surface relation 使用 cluster-local tail-only 存储：boundary 3 words，
 
 medium 匹配始终只比较 `MediumId`；extinction、IOR 和 phase 参数只参与数值计算。emitter class、
 two-sided、sampling strategy 和 tree role 是离散事实；radiance/power/bound 是各自有误差合同的连续值。
+
+跨 dispatch 的 surface scratch 保留 position、normal、color、LOD 等连续量的原始 f32 bit pattern。
+`hitKind:u8 | materialControl:u8 | MediumId:u16` 共用一字，`opticalControl:25 bit` 与
+`adjacentInterfaceControl:18 bit` 的高位共用一字，`AdjacentMediumId:u16` 与其低 16 位共用一字；
+所有域由生产者类型/枚举和 GPU round-trip oracle 约束。共享 core 为 96 B，realtime 追加 4 B
+texture LOD；不得把这项 exact packing 误写成连续量量化。
+
+offline path 使用 128 B 固定记录。origin、direction、throughput、PDF、eta、previous-light normal
+和两层 extinction 均逐位 f32；两项 `MediumId:u16` 共用一字，两个 9-bit IOR source code、2-bit
+stack count、active、8-bit bounce 和 2-bit flags 共用一个 31-bit state word。consumer 通过
+`state/offline/transport.slang` 的窄 accessor 读取，不重复位布局。
 
 材质配方、OpenPBR compact 拓扑、采样与闭包测度见
 [统一材质 IR 与闭包](统一材质IR与闭包.md)。
