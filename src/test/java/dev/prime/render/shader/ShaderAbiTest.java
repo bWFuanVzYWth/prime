@@ -60,6 +60,14 @@ final class ShaderAbiTest {
         assertEquals(0, ShaderAbi.TEXTURE_BASE_ORIGIN_OFFSET);
         assertEquals(4, ShaderAbi.TEXTURE_FRAME_EXTENT_OFFSET);
         assertEquals(8, ShaderAbi.TEXTURE_BASE_INFO_OFFSET);
+        assertEquals(0xff, ShaderAbi.TEXTURE_BASE_MIP_MASK);
+        assertEquals(8, ShaderAbi.TEXTURE_BASE_PAGE_SHIFT);
+        assertEquals(16, ShaderAbi.TEXTURE_PAGE_EXTENT_CODE_SHIFT);
+        assertEquals(0xfff, ShaderAbi.TEXTURE_PAGE_WIDTH_MINUS_ONE_MASK);
+        assertEquals(12, ShaderAbi.TEXTURE_PAGE_HEIGHT_LOG2_SHIFT);
+        assertEquals(0xf, ShaderAbi.TEXTURE_PAGE_HEIGHT_LOG2_MASK);
+        assertEquals(0xf, ShaderAbi.TEXTURE_PAGE_HEIGHT_SAME_AS_WIDTH_CODE);
+        assertEquals(0xffff, ShaderAbi.TEXTURE_PAGE_EXTENT_QUERY_CODE);
         assertEquals(12, ShaderAbi.TEXTURE_NORMAL_ORIGIN_OFFSET);
         assertEquals(16, ShaderAbi.TEXTURE_AUXILIARY_INFO_OFFSET);
         assertEquals(20, ShaderAbi.TEXTURE_OPTICAL_ORIGIN_OFFSET);

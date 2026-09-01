@@ -163,13 +163,21 @@ final class MaterialTexturePagesTest {
         ByteBuffer bytes = MemoryUtil.memAlloc(32);
         try {
             MaterialTexturePages.writeTextureRecord(
-                    MemoryUtil.memAddress(bytes), sprite, base, normal, optical, 4, 3, 2);
+                    MemoryUtil.memAddress(bytes),
+                    sprite,
+                    base,
+                    new TexturePageLayout.Page(4096, 2048),
+                    normal,
+                    optical,
+                    4,
+                    3,
+                    2);
 
             assertArrayEquals(
                     new int[] {
                         66 | 130 << 16,
                         31 | 17 << 16,
-                        4 | 5 << 8,
+                        4 | 5 << 8 | 0xbfff << 16,
                         258 | 514 << 16,
                         6 | 7 << 8 | 3 << 16 | 2 << 24,
                         1026 | 2050 << 16,
@@ -200,11 +208,69 @@ final class MaterialTexturePagesTest {
         ByteBuffer bytes = MemoryUtil.memAlloc(32);
         try {
             MaterialTexturePages.writeTextureRecord(
-                    MemoryUtil.memAddress(bytes), sprite, base, null, null, 0, 0, 0);
+                    MemoryUtil.memAddress(bytes),
+                    sprite,
+                    base,
+                    new TexturePageLayout.Page(1, 1),
+                    null,
+                    null,
+                    0,
+                    0,
+                    0);
 
             assertEquals(0x0000_ffff, bytes.getInt(16));
             assertEquals(0, bytes.getInt(12));
             assertEquals(0, bytes.getInt(20));
+        } finally {
+            MemoryUtil.memFree(bytes);
+        }
+    }
+
+    @Test
+    void textureRecordFallsBackToAnExactQueryOutsideItsCompactExtentEncoding() {
+        LabPbrAtlasFrame.Sprite sprite = new LabPbrAtlasFrame.Sprite(
+                1, 0, 0, 1, 1, 0, null, null, null, -1);
+        TexturePageLayout.Placement base =
+                new TexturePageLayout.Placement(0, 0, 0, sprite);
+        ByteBuffer bytes = MemoryUtil.memAlloc(32);
+        try {
+            MaterialTexturePages.writeTextureRecord(
+                    MemoryUtil.memAddress(bytes),
+                    sprite,
+                    base,
+                    new TexturePageLayout.Page(8192, 4096),
+                    null,
+                    null,
+                    0,
+                    0,
+                    0);
+
+            assertEquals(0xffff, bytes.getInt(8) >>> 16);
+        } finally {
+            MemoryUtil.memFree(bytes);
+        }
+    }
+
+    @Test
+    void textureRecordEncodesAnArbitraryFullSquareExactly() {
+        LabPbrAtlasFrame.Sprite sprite = new LabPbrAtlasFrame.Sprite(
+                1, 0, 0, 1, 1, 0, null, null, null, -1);
+        TexturePageLayout.Placement base =
+                new TexturePageLayout.Placement(0, 0, 0, sprite);
+        ByteBuffer bytes = MemoryUtil.memAlloc(32);
+        try {
+            MaterialTexturePages.writeTextureRecord(
+                    MemoryUtil.memAddress(bytes),
+                    sprite,
+                    base,
+                    new TexturePageLayout.Page(3000, 3000),
+                    null,
+                    null,
+                    0,
+                    0,
+                    0);
+
+            assertEquals(0xfbb7, bytes.getInt(8) >>> 16);
         } finally {
             MemoryUtil.memFree(bytes);
         }

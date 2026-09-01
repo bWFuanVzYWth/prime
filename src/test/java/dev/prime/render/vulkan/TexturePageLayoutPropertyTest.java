@@ -64,6 +64,8 @@ final class TexturePageLayoutPropertyTest {
         assertTrue(first.pages().size() <= TexturePageLayout.MAX_PAGE_COUNT);
         for (TexturePageLayout.Page page : first.pages()) {
             assertTrue(page.width() > 0 && page.height() > 0);
+            assertTrue(page.height() == page.width()
+                    || Integer.bitCount(page.height()) == 1);
         }
         for (LabPbrAtlasFrame.Sprite sprite : sprites) {
             TexturePageLayout.Placement placement = first.placement(sprite.textureId());

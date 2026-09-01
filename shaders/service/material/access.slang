@@ -6,18 +6,15 @@ import "prime_abi_types.slang";
 import "prime_material_core_abi.slang";
 import "math/packed_geometry.slang";
 
-// Binding reviewed in abi.json. Keep static albedo here so opacity-only entries cannot see the
-// independently bound normal and optical page arrays.
+// Base/opacity entries cannot see the auxiliary page arrays.
 [[vk::binding(18, 0)]]
 public ByteAddressBuffer primeTextureRecords;
 
-// Opacity-only paths load texture/recipe word zero. Medium and combined access stay in the
-// hit-only accessor, outside entries that do not consume medium.
+// Medium access stays in the hit-only module.
 [[vk::binding(52, 0)]]
 public ByteAddressBuffer primeMaterialCoreRecords;
 
-// Static Minecraft albedo is translated once into renderer-owned linear Rec.2020 pages. Alpha is
-// an exact 0..255 coverage code carried in f16, so filtering preserves linear coverage semantics.
+// Static albedo is linear Rec.2020; f16 alpha carries an exact 0..255 coverage code.
 [[vk::binding(51, 0)]]
 public Sampler2D<float4> primeBaseColorPages[64];
 
@@ -98,23 +95,32 @@ public uint primeTextureBaseColorPage(uint textureId) {
 public float2 primeTranslatedUv(
         uint packedOrigin, int2 extent, int2 backingExtent, float2 uv) {
     float2 origin = float2(packedOrigin & 0xffffu, packedOrigin >> 16u);
-    return (origin + uv * float2(extent)) / float2(max(backingExtent, int2(1)));
+    return (origin + uv * float2(extent)) / float2(backingExtent);
 }
 
 public float4 primeSampleStaticAlbedo(uint textureId, float2 uv, float lod) {
     uint3 rect = primeTextureRecords.Load3(textureId * PRIME_TEXTURE_RECORD_SIZE);
     uint info = rect.z;
     uint page = info >> 8u & 0xffu;
-    uint width;
-    uint height;
-    uint levels;
-    primeBaseColorPages[NonUniformResourceIndex(page)].GetDimensions(
-            0, width, height, levels);
+    uint extentCode = info >> 16u;
+    int2 backingExtent;
+    if (extentCode != 0xffffu) {
+        uint width = (extentCode & 0xfffu) + 1u;
+        uint heightCode = extentCode >> 12u & 0xfu;
+        backingExtent = int2(width, heightCode == 0xfu ? width : 1u << heightCode);
+    } else {
+        uint width;
+        uint height;
+        uint levels;
+        primeBaseColorPages[NonUniformResourceIndex(page)].GetDimensions(
+                0, width, height, levels);
+        backingExtent = int2(width, height);
+    }
     float4 sample = primeBaseColorPages[NonUniformResourceIndex(page)].SampleLevel(
             primeTranslatedUv(
                     rect.x,
                     int2(rect.y & 0xffffu, rect.y >> 16u),
-                    int2(width, height),
+                    backingExtent,
                     uv),
             min(lod, float(info & 0xffu)));
     return float4(sample.rgb, sample.a / 255.0);

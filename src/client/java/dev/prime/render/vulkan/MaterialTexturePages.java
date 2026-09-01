@@ -540,10 +540,13 @@ public final class MaterialTexturePages implements AutoCloseable {
                     : textureMipLimit(sprite, opticalPages.get(specular.page()).image);
             int baseColorMip = textureMipLimit(
                     sprite, baseColorPages.get(baseColor.page()).image);
+            TexturePageLayout.Page baseColorPage =
+                    baseColorLayout.pages().get(baseColor.page());
             writeTextureRecord(
                     record,
                     sprite,
                     baseColor,
+                    baseColorPage,
                     normal,
                     specular,
                     baseColorMip,
@@ -602,6 +605,7 @@ public final class MaterialTexturePages implements AutoCloseable {
             long record,
             LabPbrAtlasFrame.Sprite sprite,
             TexturePageLayout.Placement baseColor,
+            TexturePageLayout.Page baseColorPage,
             TexturePageLayout.Placement normal,
             TexturePageLayout.Placement optical,
             int baseColorMip,
@@ -619,7 +623,10 @@ public final class MaterialTexturePages implements AutoCloseable {
                 sprite.contentHeight());
         MemoryUtil.memPutInt(
                 record + ShaderAbi.TEXTURE_BASE_INFO_OFFSET,
-                baseColorMip | baseColor.page() << 8);
+                baseColorMip
+                        | baseColor.page() << ShaderAbi.TEXTURE_BASE_PAGE_SHIFT
+                        | pageExtentCode(baseColorPage)
+                                << ShaderAbi.TEXTURE_PAGE_EXTENT_CODE_SHIFT);
         putPackedExtent(
                 record,
                 ShaderAbi.TEXTURE_NORMAL_ORIGIN_OFFSET,
@@ -637,6 +644,27 @@ public final class MaterialTexturePages implements AutoCloseable {
                 optical == null ? 0 : optical.contentY());
         MemoryUtil.memPutInt(record + 24L, 0);
         MemoryUtil.memPutInt(record + 28L, 0);
+    }
+
+    private static int pageExtentCode(TexturePageLayout.Page page) {
+        int width = page.width();
+        int height = page.height();
+        if (width <= 0 || height <= 0) {
+            throw new IllegalStateException("Texture page extent is not positive");
+        }
+        int heightCode = height == width
+                ? ShaderAbi.TEXTURE_PAGE_HEIGHT_SAME_AS_WIDTH_CODE
+                : Integer.numberOfTrailingZeros(height);
+        boolean exactHeight = height == width
+                || (Integer.bitCount(height) == 1
+                        && heightCode < ShaderAbi.TEXTURE_PAGE_HEIGHT_SAME_AS_WIDTH_CODE);
+        if (width <= ShaderAbi.TEXTURE_PAGE_WIDTH_MINUS_ONE_MASK + 1 && exactHeight) {
+            int code = width - 1 | heightCode << ShaderAbi.TEXTURE_PAGE_HEIGHT_LOG2_SHIFT;
+            if (code != ShaderAbi.TEXTURE_PAGE_EXTENT_QUERY_CODE) {
+                return code;
+            }
+        }
+        return ShaderAbi.TEXTURE_PAGE_EXTENT_QUERY_CODE;
     }
 
     private static void fillColorPage(

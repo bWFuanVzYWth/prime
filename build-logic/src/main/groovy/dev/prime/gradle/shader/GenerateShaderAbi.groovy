@@ -69,6 +69,14 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| textureRecordContract.baseOriginOffset != 0
 				|| textureRecordContract.frameExtentOffset != 4
 				|| textureRecordContract.baseInfoOffset != 8
+				|| !textureRecordContract.baseMipMask.toString().equalsIgnoreCase('0xff')
+				|| textureRecordContract.basePageShift != 8
+				|| textureRecordContract.pageExtentCodeShift != 16
+				|| !textureRecordContract.pageWidthMinusOneMask.toString().equalsIgnoreCase('0xfff')
+				|| textureRecordContract.pageHeightLog2Shift != 12
+				|| !textureRecordContract.pageHeightLog2Mask.toString().equalsIgnoreCase('0xf')
+				|| !textureRecordContract.pageHeightSameAsWidthCode.toString().equalsIgnoreCase('0xf')
+				|| !textureRecordContract.pageExtentQueryCode.toString().equalsIgnoreCase('0xffff')
 				|| textureRecordContract.normalOriginOffset != 12
 				|| textureRecordContract.auxiliaryInfoOffset != 16
 				|| textureRecordContract.opticalOriginOffset != 20
@@ -354,6 +362,14 @@ public final class ShaderAbi {
     public static final int TEXTURE_BASE_ORIGIN_OFFSET = ${textureRecordContract.baseOriginOffset};
     public static final int TEXTURE_FRAME_EXTENT_OFFSET = ${textureRecordContract.frameExtentOffset};
     public static final int TEXTURE_BASE_INFO_OFFSET = ${textureRecordContract.baseInfoOffset};
+    public static final int TEXTURE_BASE_MIP_MASK = ${textureRecordContract.baseMipMask};
+    public static final int TEXTURE_BASE_PAGE_SHIFT = ${textureRecordContract.basePageShift};
+    public static final int TEXTURE_PAGE_EXTENT_CODE_SHIFT = ${textureRecordContract.pageExtentCodeShift};
+    public static final int TEXTURE_PAGE_WIDTH_MINUS_ONE_MASK = ${textureRecordContract.pageWidthMinusOneMask};
+    public static final int TEXTURE_PAGE_HEIGHT_LOG2_SHIFT = ${textureRecordContract.pageHeightLog2Shift};
+    public static final int TEXTURE_PAGE_HEIGHT_LOG2_MASK = ${textureRecordContract.pageHeightLog2Mask};
+    public static final int TEXTURE_PAGE_HEIGHT_SAME_AS_WIDTH_CODE = ${textureRecordContract.pageHeightSameAsWidthCode};
+    public static final int TEXTURE_PAGE_EXTENT_QUERY_CODE = ${textureRecordContract.pageExtentQueryCode};
     public static final int TEXTURE_NORMAL_ORIGIN_OFFSET = ${textureRecordContract.normalOriginOffset};
     public static final int TEXTURE_AUXILIARY_INFO_OFFSET = ${textureRecordContract.auxiliaryInfoOffset};
     public static final int TEXTURE_OPTICAL_ORIGIN_OFFSET = ${textureRecordContract.opticalOriginOffset};
