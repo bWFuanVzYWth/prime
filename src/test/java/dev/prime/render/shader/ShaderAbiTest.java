@@ -95,13 +95,13 @@ final class ShaderAbiTest {
         assertEquals(92, ShaderAbi.WAVEFRONT_ETA_SCALE_OFFSET);
         assertEquals(0x00ff_ff00, ShaderAbi.WAVEFRONT_PATH_CONTROL_RESERVED_MASK);
         assertEquals(2, ShaderAbi.WAVEFRONT_PATH_SLOTS_PER_PIXEL);
-        assertEquals(32, ShaderAbi.WAVEFRONT_AREA_GUIDE_RECORD_SIZE);
+        assertEquals(16, ShaderAbi.WAVEFRONT_AREA_GUIDE_RECORD_SIZE);
         assertEquals(24, ShaderAbi.WAVEFRONT_STAGED_LIGHT_RECORD_SIZE);
         assertEquals(12, ShaderAbi.WAVEFRONT_STAGED_RECEIVER_NORMAL_OFFSET);
         assertEquals(40, ShaderAbi.WAVEFRONT_DETACHED_GUIDE_RECORD_SIZE);
-        assertEquals(280, ShaderAbi.WAVEFRONT_AREA_RECORD_SIZE);
+        assertEquals(264, ShaderAbi.WAVEFRONT_AREA_RECORD_SIZE);
         assertEquals(2, ShaderAbi.WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL);
-        assertEquals(10, ShaderAbi.WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL);
+        assertEquals(9, ShaderAbi.WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL);
         assertEquals(7, ShaderAbi.WAVEFRONT_QUEUE_COUNT);
         assertEquals(0, ShaderAbi.WAVEFRONT_TRACE_QUEUE_0);
         assertEquals(1, ShaderAbi.WAVEFRONT_TRACE_QUEUE_1);

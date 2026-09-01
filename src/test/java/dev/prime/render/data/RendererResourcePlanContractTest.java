@@ -24,7 +24,7 @@ final class RendererResourcePlanContractTest {
                         + ShaderAbi.WAVEFRONT_AREA_RECORD_SIZE
                         + ShaderAbi.WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL * Integer.BYTES,
                 realtime.renderBytesPerPixel());
-        assertEquals(544, realtime.renderBytesPerPixel());
+        assertEquals(524, realtime.renderBytesPerPixel());
         assertEquals(
                 ShaderAbi.WAVEFRONT_STAGED_LIGHT_RECORD_SIZE,
                 ShaderAbi.WAVEFRONT_STAGED_RECEIVER_NORMAL_OFFSET
@@ -39,6 +39,10 @@ final class RendererResourcePlanContractTest {
                                         * ShaderAbi.WAVEFRONT_PATH_SLOTS_PER_PIXEL),
                 ShaderAbi.WAVEFRONT_AREA_RECORD_SIZE,
                 "detached guide must alias the later selection and receiver-normal region");
+        assertEquals(
+                4 * Integer.BYTES,
+                ShaderAbi.WAVEFRONT_AREA_GUIDE_RECORD_SIZE,
+                "area guide stores two FP16 radiance triplets and one packed direction");
         assertEquals(
                 ShaderAbi.OFFLINE_WAVEFRONT_PATH_RECORD_SIZE
                         + ShaderAbi.OFFLINE_WAVEFRONT_STAGE_RECORD_SIZE

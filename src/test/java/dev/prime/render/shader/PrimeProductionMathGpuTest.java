@@ -150,12 +150,12 @@ final class PrimeProductionMathGpuTest {
     }
 
     private static void assertRealtimeState(ShaderComputeRunner runner) throws IOException {
-        int cases = CASES_PER_KIND;
+        int cases = 2 * CASES_PER_KIND;
         int inputWords = 2;
         ByteBuffer input = ShaderTestBuffer.inputs(cases, inputWords);
         SplittableRandom random = new SplittableRandom(REALTIME_STATE_SEED);
         int[] specialEtaBits = {0x0000_0001, 0x0080_0000, 0x3f80_0000, 0x7f7f_ffff};
-        for (int index = 0; index < cases; index++) {
+        for (int index = 0; index < CASES_PER_KIND; index++) {
             putInt(input, index, inputWords, 0, 0, 0);
             putInt(input, index, inputWords, 0, 1, random.nextInt(1 << 16));
             putInt(input, index, inputWords, 0, 2, random.nextInt(1 << 16));
@@ -172,6 +172,17 @@ final class PrimeProductionMathGpuTest {
                     normal[0],
                     normal[1],
                     normal[2]);
+        }
+        for (int local = 0; local < CASES_PER_KIND; local++) {
+            int index = CASES_PER_KIND + local;
+            int pixelCount = random.nextInt(1, 8_294_401);
+            int queue = local % 7;
+            boolean wide = queue == 0 || queue == 2 || queue == 3 || queue == 4;
+            int capacity = Math.multiplyExact(pixelCount, wide ? 2 : 1);
+            putInt(input, index, inputWords, 0, 0, 1);
+            putInt(input, index, inputWords, 0, 1, pixelCount);
+            putInt(input, index, inputWords, 0, 2, queue);
+            putInt(input, index, inputWords, 0, 3, random.nextInt(capacity));
         }
         ShaderPropertyBatch.assertProperties(
                 runner,

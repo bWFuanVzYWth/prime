@@ -536,7 +536,7 @@ final class TracePipelinesContractTest {
 
     @Test
     void wavefrontBackingHasDeclaredFourKSize() {
-        assertEquals(4_512_153_712L,
+        assertEquals(4_346_265_712L,
                 RealtimeRayTracingPipeline.wavefrontBytes(3840, 2160));
         assertEquals(2_023_833_632L,
                 OfflineRayTracingPipeline.wavefrontBytes(3840, 2160));

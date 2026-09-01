@@ -77,16 +77,7 @@ public uint primeWavefrontPixelCount() {
 }
 
 public uint primeWavefrontQueueCapacity(uint queue) {
-    // Either transparent branch can independently defer area work from the same pixel.
-    bool wideQueue = queue == PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0
-            || queue == PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1
-            || queue == PRIME_WAVEFRONT_AREA_QUEUE;
-    // AREA events alias queue zero and may contain both transparent branches.
-    wideQueue = wideQueue || queue == PRIME_WAVEFRONT_TRACE_QUEUE_0;
-    uint entriesPerPixel = wideQueue
-            ? PRIME_WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL
-            : 1u;
-    return primeWavefrontPixelCount() * entriesPerPixel;
+    return primeRealtimeQueueCapacity(primeWavefrontPixelCount(), queue);
 }
 
 public uint primeWavefrontIndex(uint2 pixel, uint branch) {
@@ -101,36 +92,13 @@ public uint2 primeWavefrontPixel(uint pathIndex) {
 }
 
 public uint primeWavefrontQueueCommandWord(uint queue) {
-    uint areaWords = primeWavefrontPixelCount()
-            * (PRIME_WAVEFRONT_AREA_RECORD_SIZE / 4u);
-    return areaWords + queue * (PRIME_WAVEFRONT_QUEUE_COMMAND_STRIDE / 4u);
+    return primeRealtimeQueueCommandWord(
+            primeWavefrontPixelCount(), queue);
 }
 
 public uint primeWavefrontQueueWord(uint queue, uint entry) {
-    uint indexWords = primeWavefrontQueueCommandWord(PRIME_WAVEFRONT_QUEUE_COUNT);
-    uint pixelCount = primeWavefrontPixelCount();
-    if (queue == PRIME_WAVEFRONT_TRACE_QUEUE_0) {
-        return indexWords + entry;
-    }
-    if (queue == PRIME_WAVEFRONT_TRACE_QUEUE_1) {
-        return indexWords + pixelCount + entry;
-    }
-    if (queue == PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1) {
-        // Primary is consumed before this transparent ping-pong target becomes reachable.
-        return indexWords + 2u * pixelCount + entry;
-    }
-    if (queue == PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0) {
-        return indexWords + 4u * pixelCount + entry;
-    }
-    if (queue == PRIME_WAVEFRONT_AREA_QUEUE) {
-        return indexWords + 6u * pixelCount + entry;
-    }
-    // The area queue occupies both slots 6 and 7. Resolve and the serialized detached-guide
-    // queue own the two remaining one-entry-per-pixel regions.
-    if (queue == PRIME_WAVEFRONT_TRANSPARENT_RESOLVE_QUEUE) {
-        return indexWords + 8u * pixelCount + entry;
-    }
-    return indexWords + 9u * pixelCount + entry;
+    return primeRealtimeQueueWord(
+            primeWavefrontPixelCount(), queue, entry);
 }
 
 public uint primeAdditionalSpecularBounces() {
@@ -139,7 +107,8 @@ public uint primeAdditionalSpecularBounces() {
             & 0xffu;
 }
 
-public static const uint PRIME_WAVEFRONT_AREA_GUIDE_WORDS = 8u;
+public static const uint PRIME_WAVEFRONT_AREA_GUIDE_WORDS =
+        PRIME_WAVEFRONT_AREA_GUIDE_RECORD_SIZE / 4u;
 
 public uint primeWavefrontAreaWord(uint2 pixel, uint component) {
     return primeWavefrontIndex(pixel) * PRIME_WAVEFRONT_AREA_GUIDE_WORDS + component;

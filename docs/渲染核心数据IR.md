@@ -166,6 +166,11 @@ continuation 的常驻字段：它位于 24 B/path 的后期 phase record 偏移
 阶段的 NEE 完成后才窄加载这一状态，避免 origin/PDF/normal 跨 shadow-trace 调用树存活；queued
 scatter 不得重新引入反向面积光求值闭包。
 
+realtime phase scratch 为 264 B/pixel：16 B area guide、两项 100 B surface 和 48 B 的
+detached-guide/后期 staged-record 最大别名区。area guide 只承载两个 FP16 radiance triplet 与一个
+oct-SNORM16x2 direction。九项物理 queue index 中，串行 guide queue 在初始 area 消费之后、tail
+area 发布之前复用 area queue 的首槽；transparent resolve 与 tail 同时存活，不参与该 alias。
+
 材质配方、OpenPBR compact 拓扑、采样与闭包测度见
 [统一材质 IR 与闭包](统一材质IR与闭包.md)。
 

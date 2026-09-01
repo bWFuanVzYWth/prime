@@ -159,13 +159,13 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| wavefrontContract.etaScaleOffset != 92
 				|| !wavefrontContract.pathControlReservedMask.toString().equalsIgnoreCase('0x00ffff00')
 				|| wavefrontContract.pathSlotsPerPixel != 2
-				|| wavefrontContract.areaGuideRecordSize != 32
+				|| wavefrontContract.areaGuideRecordSize != 16
 				|| wavefrontContract.stagedLightRecordSize != 24
 				|| wavefrontContract.stagedReceiverNormalOffset != 12
 				|| wavefrontContract.stagedLightRecordSize
 						!= wavefrontContract.stagedReceiverNormalOffset + 12
 				|| wavefrontContract.detachedGuideRecordSize != 40
-				|| wavefrontContract.areaRecordSize != 280
+				|| wavefrontContract.areaRecordSize != 264
 				|| wavefrontContract.areaRecordSize
 						!= wavefrontContract.areaGuideRecordSize
 								+ wavefrontSurfaceRecord.size
@@ -175,7 +175,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 												* wavefrontContract.pathSlotsPerPixel,
 										wavefrontContract.detachedGuideRecordSize)
 				|| wavefrontContract.queueEntriesPerPixel != 2
-				|| wavefrontContract.queueStorageEntriesPerPixel != 10
+				|| wavefrontContract.queueStorageEntriesPerPixel != 9
 				|| wavefrontContract.queueCount != 7
 				|| wavefrontContract.traceQueue0 != 0
 				|| wavefrontContract.traceQueue1 != 1
@@ -823,9 +823,11 @@ public static const uint PRIME_WAVEFRONT_PATH_RECORD_SIZE = ${wavefrontContract.
 public static const uint PRIME_WAVEFRONT_ETA_SCALE_OFFSET = ${wavefrontContract.etaScaleOffset};
 public static const uint PRIME_WAVEFRONT_PATH_CONTROL_RESERVED_MASK = ${wavefrontContract.pathControlReservedMask};
 public static const uint PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${wavefrontContract.pathSlotsPerPixel};
+public static const uint PRIME_WAVEFRONT_AREA_GUIDE_RECORD_SIZE = ${wavefrontContract.areaGuideRecordSize};
 public static const uint PRIME_WAVEFRONT_SURFACE_RECORD_SIZE = ${wavefrontSurfaceRecord.size};
 public static const uint PRIME_WAVEFRONT_STAGED_LIGHT_RECORD_SIZE = ${wavefrontContract.stagedLightRecordSize};
 public static const uint PRIME_WAVEFRONT_STAGED_RECEIVER_NORMAL_OFFSET = ${wavefrontContract.stagedReceiverNormalOffset};
+public static const uint PRIME_WAVEFRONT_DETACHED_GUIDE_RECORD_SIZE = ${wavefrontContract.detachedGuideRecordSize};
 public static const uint PRIME_WAVEFRONT_AREA_RECORD_SIZE = ${wavefrontContract.areaRecordSize};
 public static const uint PRIME_WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL = ${wavefrontContract.queueEntriesPerPixel};
 public static const uint PRIME_WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL = ${wavefrontContract.queueStorageEntriesPerPixel};
@@ -844,6 +846,34 @@ public static const uint PRIME_WAVEFRONT_GUIDE_QUEUE = ${wavefrontContract.guide
 public static const uint PRIME_WAVEFRONT_QUEUE_COMMAND_STRIDE = ${wavefrontContract.queueCommandStride};
 public static const uint PRIME_WAVEFRONT_QUEUE_INDEX_SIZE = ${wavefrontContract.queueIndexSize};
 public static const uint PRIME_WAVEFRONT_ACTIVE_MASK = ${wavefrontContract.activeMask};
+
+public uint primeRealtimeQueueCapacity(uint pixelCount, uint queue) {
+    bool wide = queue == PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0
+            || queue == PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1
+            || queue == PRIME_WAVEFRONT_AREA_QUEUE
+            || queue == PRIME_WAVEFRONT_TRACE_QUEUE_0;
+    return pixelCount * (wide ? PRIME_WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL : 1u);
+}
+
+public uint primeRealtimeQueueCommandWord(uint pixelCount, uint queue) {
+    return pixelCount * (PRIME_WAVEFRONT_AREA_RECORD_SIZE / 4u)
+            + queue * (PRIME_WAVEFRONT_QUEUE_COMMAND_STRIDE / 4u);
+}
+
+public uint primeRealtimeQueueWord(uint pixelCount, uint queue, uint entry) {
+    uint base = primeRealtimeQueueCommandWord(
+            pixelCount, PRIME_WAVEFRONT_QUEUE_COUNT);
+    // Primary/transparent-1 share slot 2 after primary consumption. Initial area, serialized
+    // guide, and tail area share slot 6; dispatch barriers order all three lifetimes.
+    uint slot = queue == PRIME_WAVEFRONT_TRACE_QUEUE_0 ? 0u
+            : queue == PRIME_WAVEFRONT_TRACE_QUEUE_1 ? 1u
+            : queue == PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1 ? 2u
+            : queue == PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0 ? 4u
+            : queue == PRIME_WAVEFRONT_AREA_QUEUE
+                    || queue == PRIME_WAVEFRONT_GUIDE_QUEUE ? 6u
+            : 8u;
+    return base + slot * pixelCount + entry;
+}
 
 [[vk::binding(${schema.realtimeDescriptors.stableRadiance}, 1)]] [[vk::image_format("rgba32f")]]
 public RWTexture2D<float4> primeStableRadiance;
