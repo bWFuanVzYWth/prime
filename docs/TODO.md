@@ -4,11 +4,10 @@
 
 ## 渲染核心数据 IR
 
-- 阶段 0 规范已在[渲染核心数据 IR](渲染核心数据IR.md)定稿。下一步只执行阶段 1：建立
-  semantic/encoding/binding/lifetime schema 与窄 Java/Slang 生成 accessor，补跨后端相机、
-  linear Rec.2020 texture/color、精度、alias/liveness 和 ABI 门禁，并建立显存账本与典型/极端
-  replay benchmark baseline；门禁完成前不迁移生产格式或 wavefront 布局。
-- 后续迁移顺序、现状证据和成本见[渲染数据标准化调查报告](渲染数据标准化调查报告.md)。
+- 规范与主要阶段 2 正确性迁移已完成。以[阶段 3 准入检查表](阶段3准入账本.md)为当前任务边界：
+  可提前开始 wavefront 存活期/布局、材质表热路径、NVIDIA top-left producer 和 backend 资源 alias；
+  没有误差合同的 transport 连续量不得压窄。
+- 规范只在[渲染核心数据 IR](渲染核心数据IR.md)更新；历史调查和精度推导不作当前计划。
 
 ## Shader 编译边界
 

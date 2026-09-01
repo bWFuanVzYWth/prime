@@ -53,14 +53,14 @@ CPU 翻译/replay 记录不扩容：逻辑位 0..7 写入 `tint.a`，8..10 写�
 immutable recipe/builtin，只保留 tangent handedness、front-face 与 emitter/relation payload；Shader
 从 material core 恢复 recipe。其他代码不得解释这些物理位置。
 
-这是当前迁移 ABI，不是阶段 2 的目标材质布局。目标以 exact u16 `MaterialId` 查
-renderer-generation 全局 immutable material table：`TextureId`、`MediumId`、recipe/source codes、
-availability、coverage、emission 和 animation facts 每 material record 只保存一次。triangle 只保留
+材质布局以 exact u16 `MaterialId` 查 renderer-generation 全局 immutable table：
+`TextureId`、`MediumId`、recipe/source codes、availability、coverage、emission 和 animation facts
+每 material 只保存一次。triangle 只保留
 UV、relation、连续 tint-field addressing 等几何变化量；secondary relation 与 u32 emitter 引用同一
 material record，不再复制完整材质 primitive。section/cluster 不建立重复 material palette；GPU 以
 `MaterialId` 一跳寻址固定 schema，各阶段通过 generated accessor 按需窄加载，只有确实消费多数
-事实时才合并加载。完整 material record 不进入跨阶段 path state；AoS、SoA 或混合物理布局由测量
-决定。冷 companion data 最多按 exact availability 再读取一次，不使用变长编码或指针链。
+事实时才合并加载。完整 material record 不进入跨阶段 path state；冷 companion data 最多按
+exact availability 再读取一次，不使用变长编码或指针链。
 
 当前 material core 的首两个固定 word 已落实这一访问契约：word0 为
 `TextureId:u16 | recipe:u16`，word1 为 `MediumId:u16`。accessor 提供单 word 与 `Load2`，调用点按
