@@ -44,7 +44,7 @@ final class RendererResourcePlanContractTest {
         assertEquals(244, offline.renderBytesPerPixel());
         assertEquals(95, RendererDataContracts
                 .memoryPlan("raw-wavefront-images-current").renderBytesPerPixel());
-        assertEquals(147, RendererDataContracts
+        assertEquals(137, RendererDataContracts
                 .memoryPlan("dlss-rr-images-current").renderBytesPerPixel());
         assertEquals(8, RendererDataContracts
                 .memoryPlan("dlss-rr-images-current").displayBytesPerPixel());
@@ -69,7 +69,7 @@ final class RendererResourcePlanContractTest {
         RendererDataContracts.MemoryPlan rr =
                 RendererDataContracts.memoryPlan("dlss-rr-images-current");
         assertEquals(
-                147L * 1920L * 1080L + 8L * 3840L * 2160L,
+                137L * 1920L * 1080L + 8L * 3840L * 2160L,
                 rr.bytes(1920, 1080, 3840, 2160));
         assertThrows(
                 IllegalArgumentException.class,
@@ -99,6 +99,15 @@ final class RendererResourcePlanContractTest {
         assertEquals("transport", transport.conversion().owner());
         assertEquals("backend-adapter", motion.conversion().owner());
         assertFalse(motion.verification().behaviorOracle().isBlank());
+
+        assertOrderedAlias(
+                "rr-transport-or-input-color",
+                "rr-transport-scratch",
+                "rr-input-color-overwrite");
+        assertOrderedAlias(
+                "rr-penumbra-or-hit-distance",
+                "rr-sun-penumbra",
+                "rr-specular-hit-distance-overwrite");
 
         RendererDataContracts.Binding visibleHistory = RendererDataContracts.BINDINGS.stream()
                 .filter(binding -> binding.semantic().equals("VisibleHistoryPosition"))
@@ -137,5 +146,25 @@ final class RendererResourcePlanContractTest {
         int index = RendererDataContracts.PHASES.indexOf(name);
         assertTrue(index >= 0, "unknown phase " + name);
         return index;
+    }
+
+    private static void assertOrderedAlias(String group, String firstId, String secondId) {
+        List<RendererDataContracts.Binding> bindings = RendererDataContracts.BINDINGS.stream()
+                .filter(binding -> binding.lifetime().aliasGroup().equals(group))
+                .toList();
+        assertEquals(2, bindings.size());
+        RendererDataContracts.Binding first = bindings.stream()
+                .filter(binding -> binding.id().equals(firstId))
+                .findFirst()
+                .orElseThrow();
+        RendererDataContracts.Binding second = bindings.stream()
+                .filter(binding -> binding.id().equals(secondId))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(phase(first.lifetime().lastRead())
+                < phase(second.lifetime().firstWrite()));
+        assertEquals(first.resourceKind(), second.resourceKind());
+        assertEquals(first.extentSource(), second.extentSource());
+        assertEquals(first.encoding(), second.encoding());
     }
 }

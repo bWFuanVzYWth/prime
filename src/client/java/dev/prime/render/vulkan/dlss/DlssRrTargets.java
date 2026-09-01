@@ -62,14 +62,14 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
         this.primaryPosition = images.get(8);
         this.sunLighting = images.get(9);
         this.sunPenumbra = images.get(10);
-        this.inputColor = images.get(11);
-        this.normalRoughness = images.get(12);
-        this.specularMotion = images.get(13);
-        this.specularHitDistance = images.get(14);
-        this.reflectionPosition = images.get(15);
-        this.rrOutput = images.get(16);
-        this.responsivity = images.get(17);
-        this.reconstructionControl = images.get(18);
+        this.inputColor = this.transportScratch;
+        this.normalRoughness = images.get(11);
+        this.specularMotion = images.get(12);
+        this.specularHitDistance = this.sunPenumbra;
+        this.reflectionPosition = images.get(13);
+        this.rrOutput = images.get(14);
+        this.responsivity = images.get(15);
+        this.reconstructionControl = images.get(16);
         this.owned = images.toArray(VulkanImage[]::new);
     }
 
@@ -91,7 +91,8 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
             add(context, images, renderWidth, renderHeight,
                     LINEAR_DEPTH_FORMAT, "Prime RR linear view Z");
             add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "Prime RR transport scratch");
+                    VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
+                    "Prime RR transport scratch / input color");
             add(context, images, renderWidth, renderHeight,
                     MOTION_FORMAT, "Prime RR canonical visible motion");
             add(context, images, renderWidth, renderHeight,
@@ -103,15 +104,12 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
             add(context, images, renderWidth, renderHeight,
                     VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "Prime RR sun lighting");
             add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_R16_SFLOAT, "Prime RR sun penumbra");
-            add(context, images, renderWidth, renderHeight,
-                    COLOR_FORMAT, "Prime RR input color");
+                    VK12.VK_FORMAT_R16_SFLOAT,
+                    "Prime RR sun penumbra / specular hit distance");
             add(context, images, renderWidth, renderHeight,
                     NORMAL_ROUGHNESS_FORMAT, "Prime RR world normal and roughness");
             add(context, images, renderWidth, renderHeight,
                     SPECULAR_MOTION_FORMAT, "Prime RR reflection motion");
-            add(context, images, renderWidth, renderHeight,
-                    SPECULAR_HIT_DISTANCE_FORMAT, "Prime RR specular hit distance");
             add(context, images, renderWidth, renderHeight,
                     VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
                     "Prime RR reflection previous virtual position");

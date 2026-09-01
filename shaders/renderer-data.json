@@ -259,6 +259,28 @@
       "colorimetry": "none",
       "validity": "trace phase only",
       "minimumEncoding": "rgba16f-current"
+    },
+    {
+      "id": "SunPenumbra",
+      "valueKind": "bounded-continuous",
+      "components": 1,
+      "domain": "lighting-and-reconstruction",
+      "space": "none",
+      "unit": "packed-directional-penumbra",
+      "colorimetry": "none",
+      "validity": "finite SIGMA directional-penumbra value in [0,32768]",
+      "minimumEncoding": "r16f-current"
+    },
+    {
+      "id": "SpecularHitDistance",
+      "valueKind": "bounded-continuous",
+      "components": 1,
+      "domain": "transport-and-reconstruction",
+      "space": "world",
+      "unit": "block",
+      "colorimetry": "none",
+      "validity": "finite nonnegative first specular hit distance or the declared finite miss value",
+      "minimumEncoding": "r16f-current"
     }
   ],
   "encodings": [
@@ -371,6 +393,16 @@
       "decode": "current-physical-layout",
       "exactCodes": "none",
       "errorContract": "characterized-current-layout-not-canonical-semantic"
+    },
+    {
+      "id": "r16f-current",
+      "scalarOrFormat": "VK_FORMAT_R16_SFLOAT",
+      "bytes": 2,
+      "channelMap": "r=value",
+      "encode": "ieee754-binary16-current",
+      "decode": "binary16-to-binary32",
+      "exactCodes": "none",
+      "errorContract": "current-reconstruction-guide-layout"
     }
   ],
   "bindings": [
@@ -485,6 +517,62 @@
       "lifetime": {"owner": "raw-wavefront-frame", "generation": "frame", "firstWrite": "reconstruction-prepare", "consumers": ["reconstruction"], "lastRead": "reconstruction", "aliasGroup": "motion-or-transport", "retire": "frame-retire"},
       "conversion": {"producer": "backend-motion-adapter", "sourceSemantic": "VisibleMotionUv", "owner": "backend-adapter", "targetSemantic": "VisibleMotionUv", "backendBoundary": "nrd-or-fsr"},
       "verification": {"artifactChecks": "descriptor-and-format", "behaviorOracle": "phase-alias-liveness", "numericOrImageThreshold": "projection-double-oracle", "benchmark": "adapter-pass-gpu-time"}
+    },
+    {
+      "id": "rr-transport-scratch",
+      "semantic": "TransportScratch",
+      "encoding": "rgba16f-current",
+      "resourceKind": "image2d",
+      "extentSource": "render",
+      "usage": ["storage", "sampled", "transfer-src"],
+      "access": "phase-aliased",
+      "sampling": "point",
+      "descriptorOrOffset": "rr.transportScratch",
+      "lifetime": {"owner": "rr-ray-tracing", "generation": "frame", "firstWrite": "trace", "consumers": ["trace"], "lastRead": "trace", "aliasGroup": "rr-transport-or-input-color", "retire": "frame-retire"},
+      "conversion": {"producer": "wavefront-transport", "sourceSemantic": "transport-state", "owner": "transport", "targetSemantic": "TransportScratch", "backendBoundary": "none"},
+      "verification": {"artifactChecks": "descriptor-format-and-phase-order", "behaviorOracle": "phase-alias-liveness", "numericOrImageThreshold": "private-current-layout", "benchmark": "minus-eight-bytes-per-render-pixel"}
+    },
+    {
+      "id": "rr-input-color-overwrite",
+      "semantic": "LinearRec2020Radiance",
+      "encoding": "rgba16f-current",
+      "resourceKind": "image2d",
+      "extentSource": "render",
+      "usage": ["storage", "sampled", "transfer-src"],
+      "access": "phase-aliased",
+      "sampling": "point",
+      "descriptorOrOffset": "rr.inputColor",
+      "lifetime": {"owner": "rr-prepare-then-ngx", "generation": "frame", "firstWrite": "reconstruction-prepare", "consumers": ["reconstruction"], "lastRead": "reconstruction", "aliasGroup": "rr-transport-or-input-color", "retire": "frame-retire"},
+      "conversion": {"producer": "rr-prepare", "sourceSemantic": "transport-radiance", "owner": "rr-adapter", "targetSemantic": "LinearRec2020Radiance", "backendBoundary": "streamline"},
+      "verification": {"artifactChecks": "descriptor-format-and-phase-order", "behaviorOracle": "phase-alias-liveness", "numericOrImageThreshold": "existing-rgba16f-rr-input-contract", "benchmark": "minus-eight-bytes-per-render-pixel"}
+    },
+    {
+      "id": "rr-sun-penumbra",
+      "semantic": "SunPenumbra",
+      "encoding": "r16f-current",
+      "resourceKind": "image2d",
+      "extentSource": "render",
+      "usage": ["storage", "sampled", "transfer-src"],
+      "access": "phase-aliased",
+      "sampling": "point",
+      "descriptorOrOffset": "rr.sunPenumbra",
+      "lifetime": {"owner": "rr-ray-tracing", "generation": "frame", "firstWrite": "trace", "consumers": ["trace"], "lastRead": "trace", "aliasGroup": "rr-penumbra-or-hit-distance", "retire": "frame-retire"},
+      "conversion": {"producer": "direct-lighting", "sourceSemantic": "occluder-distance", "owner": "lighting", "targetSemantic": "SunPenumbra", "backendBoundary": "none"},
+      "verification": {"artifactChecks": "descriptor-format-and-phase-order", "behaviorOracle": "phase-alias-liveness", "numericOrImageThreshold": "existing-r16f-penumbra-contract", "benchmark": "minus-two-bytes-per-render-pixel"}
+    },
+    {
+      "id": "rr-specular-hit-distance-overwrite",
+      "semantic": "SpecularHitDistance",
+      "encoding": "r16f-current",
+      "resourceKind": "image2d",
+      "extentSource": "render",
+      "usage": ["storage", "sampled", "transfer-src"],
+      "access": "phase-aliased",
+      "sampling": "point",
+      "descriptorOrOffset": "rr.specularHitDistance",
+      "lifetime": {"owner": "rr-prepare-then-ngx", "generation": "frame", "firstWrite": "reconstruction-prepare", "consumers": ["reconstruction"], "lastRead": "reconstruction", "aliasGroup": "rr-penumbra-or-hit-distance", "retire": "frame-retire"},
+      "conversion": {"producer": "rr-prepare", "sourceSemantic": "noisy-specular-hit-distance", "owner": "rr-adapter", "targetSemantic": "SpecularHitDistance", "backendBoundary": "streamline"},
+      "verification": {"artifactChecks": "descriptor-format-and-phase-order", "behaviorOracle": "phase-alias-liveness", "numericOrImageThreshold": "existing-r16f-hit-distance-contract", "benchmark": "minus-two-bytes-per-render-pixel"}
     }
   ],
   "memoryPlans": [
@@ -532,17 +620,15 @@
         {"id": "noisy-specular", "semantic": "noisy-specular-radiance", "debugLabel": "Prime RR noisy specular", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "source-normal", "semantic": "source-world-normal-roughness", "debugLabel": "Prime RR source world normal and roughness", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "view-z", "semantic": "linear-view-z", "debugLabel": "Prime RR linear view Z", "extentSource": "render", "bytesPerElement": 4, "elementsPerPixel": 1, "fixedBytes": 0},
-        {"id": "transport-scratch", "semantic": "transport-scratch", "debugLabel": "Prime RR transport scratch", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
+        {"id": "transport-scratch-input-color", "semantic": "transport-scratch-then-rr-input-radiance", "debugLabel": "Prime RR transport scratch / input color", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "motion", "semantic": "visible-motion-uv", "debugLabel": "Prime RR canonical visible motion", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "material", "semantic": "diffuse-material-guide", "debugLabel": "Prime RR diffuse albedo and distance", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "specular-material", "semantic": "specular-material-guide", "debugLabel": "Prime RR specular albedo and material flags", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "primary-position", "semantic": "primary-world-position", "debugLabel": "Prime RR primary position", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "sun-lighting", "semantic": "unshadowed-sun-lighting", "debugLabel": "Prime RR sun lighting", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
-        {"id": "sun-penumbra", "semantic": "sun-penumbra", "debugLabel": "Prime RR sun penumbra", "extentSource": "render", "bytesPerElement": 2, "elementsPerPixel": 1, "fixedBytes": 0},
-        {"id": "input-color", "semantic": "rr-input-radiance", "debugLabel": "Prime RR input color", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
+        {"id": "sun-penumbra-hit-distance", "semantic": "sun-penumbra-then-specular-hit-distance", "debugLabel": "Prime RR sun penumbra / specular hit distance", "extentSource": "render", "bytesPerElement": 2, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "normal", "semantic": "rr-world-normal-roughness", "debugLabel": "Prime RR world normal and roughness", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "specular-motion", "semantic": "reflection-motion-uv", "debugLabel": "Prime RR reflection motion", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
-        {"id": "hit-distance", "semantic": "specular-hit-distance", "debugLabel": "Prime RR specular hit distance", "extentSource": "render", "bytesPerElement": 2, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "reflection-position", "semantic": "reflection-previous-position", "debugLabel": "Prime RR reflection previous virtual position", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "output", "semantic": "linear-rec2020-radiance", "debugLabel": "Prime RR linear HDR output", "extentSource": "display", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "responsivity", "semantic": "rr-responsivity", "debugLabel": "Prime RR responsivity", "extentSource": "render", "bytesPerElement": 2, "elementsPerPixel": 1, "fixedBytes": 0},

@@ -171,6 +171,10 @@ queue/alias 必须声明 capacity、条目类型、producer/consumer 和屏障�
 前一语义最后读已完成、新写入前旧内容不可观察时合法。resize、reload、backend switch、cancel 和
 abandon 不得读取旧 generation。debug view 不得延长生产资源生命周期。
 
+RR render targets 中 ray-tracing `transportScratch` 在 `rr_prepare` 后成为 `inputColor`，
+`sunPenumbra` 成为 `specularHitDistance`。两组分别共享 RGBA16F/R16F image；ray tracing 与 prepare
+之间的 compute barrier 是 owner 转换边界，诊断捕获必须在覆盖前完成。
+
 Reconstruction IR 至少区分：
 
 - stable/noisy `LinearRec2020Radiance`，diffuse/specular/transparent branch；
