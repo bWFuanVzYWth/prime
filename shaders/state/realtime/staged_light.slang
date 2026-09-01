@@ -12,6 +12,7 @@ public struct PrimeStagedLightSelection {
 };
 
 public static const uint PRIME_STAGED_LIGHT_SELECTION_WORDS = 3u;
+static const float PRIME_STAGED_LIGHT_HIT_ONLY = -2.0;
 
 public PrimeStagedLightSelection primeDisabledStagedLightSelection() {
     PrimeStagedLightSelection selection;
@@ -21,8 +22,18 @@ public PrimeStagedLightSelection primeDisabledStagedLightSelection() {
     return selection;
 }
 
+public PrimeStagedLightSelection primeHitOnlyStagedLightSelection() {
+    PrimeStagedLightSelection selection = primeDisabledStagedLightSelection();
+    selection.area.pdf = PRIME_STAGED_LIGHT_HIT_ONLY;
+    return selection;
+}
+
 public bool primeStagedDirectEnabled(PrimeStagedLightSelection selection) {
     return selection.area.pdf >= 0.0;
+}
+
+public bool primeStagedHitEnabled(PrimeStagedLightSelection selection) {
+    return selection.area.pdf != -1.0;
 }
 
 public uint primeStagedLightSelectionWord(uint pathIndex) {
@@ -32,7 +43,7 @@ public uint primeStagedLightSelectionWord(uint pathIndex) {
             * PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL
             * (PRIME_WAVEFRONT_SURFACE_RECORD_SIZE / 4u);
     return guideWords + surfaceWords
-            + pathIndex * PRIME_STAGED_LIGHT_SELECTION_WORDS;
+            + pathIndex * (PRIME_WAVEFRONT_STAGED_LIGHT_RECORD_SIZE / 4u);
 }
 
 public void primeStoreStagedLightSelection(

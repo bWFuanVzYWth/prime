@@ -20,10 +20,12 @@ import "model/realtime/transport.slang";
 import "transport/scatter/surface.slang";
 import "transport/scatter/transparent.slang";
 import "transport/surface/access.slang";
-import "transport/surface/emission.slang";
+import "transport/surface/environment.slang";
+import "transport/surface/medium.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/light.slang";
 import "state/realtime/ordinary.slang";
+import "state/realtime/phase_scratch.slang";
 import "state/realtime/guide_normal.slang";
 import "state/realtime/psr.slang";
 import "state/realtime/guide.slang";
@@ -61,20 +63,23 @@ public bool primeAdvanceOrdinaryWavefrontRecord<Phase>(
             primeLoadWavefrontActiveIntermediate(pixel, control);
     PrimeDenoiserState denoiserState =
             primeWavefrontDenoiserState(control, result);
-    bool continuation = primeIntegrateWavefrontSurface(
-            phase,
-            PrimeStagedSecondarySunNee(),
-            PrimeFixedSecondaryAreaNee(),
-            PrimeNoIndirectReuse(),
-            context,
-            path,
-            integrator,
-            volumeStack,
-            denoiserState,
-            result,
-            surface,
-            skipRoulette,
-            recordIndex);
+    bool segmentAlive = surface.hitKind != PRIME_HIT_SURFACE
+            || primeApplySegmentMedium(path.throughput, surface, volumeStack);
+    bool continuation = segmentAlive
+            && primeIntegrateWavefrontSurface(
+                    phase,
+                    PrimeStagedSecondarySunNee(),
+                    PrimeFixedSecondaryAreaNee(),
+                    PrimeNoIndirectReuse(),
+                    context,
+                    path,
+                    integrator,
+                    volumeStack,
+                    denoiserState,
+                    result,
+                    surface,
+                    skipRoulette,
+                    recordIndex);
     PrimeWavefrontTransportRecord updatedRecord =
             primeMakeUpdatedWavefrontRecord(
                     path,
@@ -84,6 +89,8 @@ public bool primeAdvanceOrdinaryWavefrontRecord<Phase>(
                     0u,
                     continuation);
     primeStoreWavefrontTransportRecord(recordIndex, updatedRecord);
+    primeStoreWavefrontPreviousLightNormal(
+            recordIndex, path.previousLightNormal);
     if (guideWasPending && denoiserState.reachedSolidAngle) {
         primeStoreWavefrontGuideSurface(
                 recordIndex,
@@ -170,6 +177,8 @@ public bool primeAdvanceTransparentWavefrontRecord<Phase>(
                     guideFallback,
                     continuation);
     primeStoreWavefrontTransportRecord(recordIndex, updatedRecord);
+    primeStoreWavefrontPreviousLightNormal(
+            recordIndex, path.previousLightNormal);
     if (continuation && guideEnabled && !hasGuide) {
         primeStoreWavefrontPsrState(recordIndex, psrState);
     }

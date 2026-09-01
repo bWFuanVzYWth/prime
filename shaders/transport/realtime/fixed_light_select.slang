@@ -23,6 +23,7 @@ public void primeSelectFixedLight(uint sourceQueue, uint launchIndex) {
     SurfaceInteraction surface = primeLoadWavefrontSurface(recordIndex);
     PrimeStagedLightSelection selection = primeDisabledStagedLightSelection();
     if (surface.hitKind == PRIME_HIT_SURFACE) {
+        selection = primeHitOnlyStagedLightSelection();
         uint2 pixel = primeWavefrontPixel(recordIndex);
         PrimeWavefrontLightSelectionState path =
                 primeLoadWavefrontLightSelectionState(recordIndex);

@@ -19,9 +19,6 @@ public PrimeWavefrontTransportRecord primeLoadWavefrontTransportRecord(uint path
             primeWavefrontPaths[pathIndex].transport.throughputAndReserved;
     record.medium0 = primeWavefrontPaths[pathIndex].transport.medium0;
     record.medium1 = primeWavefrontPaths[pathIndex].transport.medium1;
-    record.previousLightNormalAndEtaScale =
-            primeWavefrontPaths[pathIndex]
-                    .transport.previousLightNormalAndEtaScale;
     return record;
 }
 
@@ -40,7 +37,4 @@ public void primeStoreWavefrontTransportRecord(
             record.throughputAndReserved;
     primeWavefrontPaths[pathIndex].transport.medium0 = record.medium0;
     primeWavefrontPaths[pathIndex].transport.medium1 = record.medium1;
-    primeWavefrontPaths[pathIndex]
-            .transport.previousLightNormalAndEtaScale =
-            record.previousLightNormalAndEtaScale;
 }

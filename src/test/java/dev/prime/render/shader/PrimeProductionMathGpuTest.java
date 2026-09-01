@@ -157,8 +157,8 @@ final class PrimeProductionMathGpuTest {
         int[] specialEtaBits = {0x0000_0001, 0x0080_0000, 0x3f80_0000, 0x7f7f_ffff};
         for (int index = 0; index < cases; index++) {
             putInt(input, index, inputWords, 0, 0, 0);
-            putInt(input, index, inputWords, 0, 1, random.nextInt(256));
-            putInt(input, index, inputWords, 0, 2, random.nextInt() & 0x3);
+            putInt(input, index, inputWords, 0, 1, random.nextInt(1 << 16));
+            putInt(input, index, inputWords, 0, 2, random.nextInt(1 << 16));
             float etaScale = index < specialEtaBits.length
                     ? Float.intBitsToFloat(specialEtaBits[index])
                     : positiveFloat(random, -125, 120);

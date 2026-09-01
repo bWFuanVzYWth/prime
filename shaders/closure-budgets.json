@@ -58,8 +58,8 @@
       "maxBytes": 163890
     },
     "entry/offline/direct.raygeneration.slang": {
-      "maxFiles": 121,
-      "maxBytes": 450690
+      "maxFiles": 122,
+      "maxBytes": 451000
     },
     "entry/offline/light_select.raygeneration.slang": {
       "maxFiles": 73,
@@ -142,12 +142,12 @@
       "maxBytes": 179200
     },
     "entry/realtime/landing_light_select.raygeneration.slang": {
-      "maxFiles": 74,
-      "maxBytes": 233600
+      "maxFiles": 75,
+      "maxBytes": 235500
     },
     "entry/realtime/landing_direct.raygeneration.slang": {
-      "maxFiles": 112,
-      "maxBytes": 433400
+      "maxFiles": 122,
+      "maxBytes": 473800
     },
     "entry/realtime/landing_scatter.raygeneration.slang": {
       "maxFiles": 148,
@@ -155,19 +155,19 @@
     },
     "entry/realtime/delta_walk.raygeneration.slang": {
       "maxFiles": 103,
-      "maxBytes": 341400
+      "maxBytes": 342000
     },
     "entry/realtime/guide_delta_walk.raygeneration.slang": {
-      "maxFiles": 107,
-      "maxBytes": 365500
+      "maxFiles": 108,
+      "maxBytes": 367800
     },
     "entry/realtime/visible_direct.raygeneration.slang": {
       "maxFiles": 122,
-      "maxBytes": 471000
+      "maxBytes": 471100
     },
     "entry/realtime/surface_split.raygeneration.slang": {
-      "maxFiles": 160,
-      "maxBytes": 609100
+      "maxFiles": 162,
+      "maxBytes": 612600
     },
     "entry/realtime/noisy_output_resolve.raygeneration.slang": {
       "maxFiles": 24,
@@ -178,12 +178,12 @@
       "maxBytes": 132100
     },
     "entry/realtime/fixed_light_select.raygeneration.slang": {
-      "maxFiles": 76,
-      "maxBytes": 234500
+      "maxFiles": 77,
+      "maxBytes": 236400
     },
     "entry/realtime/fixed_direct.raygeneration.slang": {
-      "maxFiles": 114,
-      "maxBytes": 433000
+      "maxFiles": 124,
+      "maxBytes": 472800
     },
     "entry/realtime/fixed_scatter.raygeneration.slang": {
       "maxFiles": 149,
@@ -194,8 +194,8 @@
       "maxBytes": 83500
     },
     "entry/realtime/tail.raygeneration.slang": {
-      "maxFiles": 144,
-      "maxBytes": 545000
+      "maxFiles": 146,
+      "maxBytes": 547200
     },
     "entry/realtime/branch_resolve.raygeneration.slang": {
       "maxFiles": 34,

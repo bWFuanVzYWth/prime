@@ -18,6 +18,7 @@ import "state/realtime/surface.slang";
 import "transport/direct/primary.slang";
 import "transport/direct/selection.slang";
 import "transport/surface/medium.slang";
+import "transport/realtime/staged_hit_emission_direct.slang";
 import "bsdf/compact/contract/volume.slang";
 
 public void primeEvaluateFixedDirect(
@@ -27,7 +28,7 @@ public void primeEvaluateFixedDirect(
     uint recordIndex = primeWavefrontQueuedPath(sourceQueue, launchIndex);
     PrimeStagedLightSelection selection =
             primeLoadStagedLightSelection(recordIndex);
-    if (!primeStagedDirectEnabled(selection)) {
+    if (!primeStagedHitEnabled(selection)) {
         return;
     }
     uint2 pixel = primeWavefrontPixel(recordIndex);
@@ -39,47 +40,61 @@ public void primeEvaluateFixedDirect(
         return;
     }
 
-    PrimeDirectSampleBase directSample = primeMakeDirectSampleBase(
-            pixel,
-            primeSampleIndex(),
-            primeSampleEpoch(),
-            path.bounce + 1u,
-            uint(recordIndex >= primeWavefrontPixelCount()));
-    float2 areaSample = primeDirectSample2D(
-            directSample, PRIME_DIRECT_SAMPLE_AREA_PRIMARY);
-    float3 receiverNormal = primeAreaLightReceiverNormal(
-            surface, path.viewDirection);
-    AreaLightSample area = primeSampleAreaLightSelection(
-            surface.position,
-            receiverNormal,
-            selection.area,
-            areaSample.y,
-            primeDirectSample2D(
-                    directSample, PRIME_DIRECT_SAMPLE_AREA_SECONDARY));
-    IntegratorRecord integrator;
-    integrator.sunDirectionIntensity = float4(
-            primePush.sunDirection,
-            ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
-    integrator.environmentRadiance = float4(0.0);
-    float3 direct = primeEstimateDirectSun(
-            context,
-            integrator,
-            surface,
-            path.viewDirection,
-            primeDirectSample2D(
-                    directSample, PRIME_DIRECT_SAMPLE_SUN),
-            path.volumeStack);
-    direct += primeEstimateDirectPreparedAreaLight(
-            context,
-            surface,
-            path.viewDirection,
-            area,
-            path.volumeStack);
-    float3 contribution = path.throughput * direct;
-    if (any(contribution > float3(0.0))) {
-        primeAccumulateDeferredDirectLight(
+    if (primeStagedDirectEnabled(selection)) {
+        PrimeDirectSampleBase directSample = primeMakeDirectSampleBase(
+                pixel,
+                primeSampleIndex(),
+                primeSampleEpoch(),
+                path.bounce + 1u,
+                uint(recordIndex >= primeWavefrontPixelCount()));
+        float2 areaSample = primeDirectSample2D(
+                directSample, PRIME_DIRECT_SAMPLE_AREA_PRIMARY);
+        float3 receiverNormal = primeAreaLightReceiverNormal(
+                surface, path.viewDirection);
+        AreaLightSample area = primeSampleAreaLightSelection(
+                surface.position,
+                receiverNormal,
+                selection.area,
+                areaSample.y,
+                primeDirectSample2D(
+                        directSample, PRIME_DIRECT_SAMPLE_AREA_SECONDARY));
+        IntegratorRecord integrator;
+        integrator.sunDirectionIntensity = float4(
+                primePush.sunDirection,
+                ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
+        integrator.environmentRadiance = float4(0.0);
+        float3 direct = primeEstimateDirectSun(
+                context,
+                integrator,
+                surface,
+                path.viewDirection,
+                primeDirectSample2D(
+                        directSample, PRIME_DIRECT_SAMPLE_SUN),
+                path.volumeStack);
+        direct += primeEstimateDirectPreparedAreaLight(
+                context,
+                surface,
+                path.viewDirection,
+                area,
+                path.volumeStack);
+        float3 contribution = path.throughput * direct;
+        if (any(contribution > float3(0.0))) {
+            primeAccumulateDeferredDirectLight(
+                    pixel,
+                    path.control,
+                    contribution);
+        }
+    }
+    PrimeWavefrontHitEmissionState hitPath =
+            primeLoadWavefrontHitEmissionState(recordIndex);
+    float3 emitted = primeEvaluateStagedHitEmission(
+            surface, hitPath, path.throughput, true);
+    if (any(emitted > float3(0.0))) {
+        primeAccumulateDeferredLight(
                 pixel,
                 path.control,
-                contribution);
+                primeStagedHitEmissionDiffuse(
+                        recordIndex, surface, hitPath, true),
+                emitted);
     }
 }

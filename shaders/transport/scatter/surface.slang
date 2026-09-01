@@ -24,8 +24,7 @@ import "transport/scatter/path_update.slang";
 import "transport/scatter/phase_contract.slang";
 import "transport/surface/access.slang";
 import "transport/surface/accumulate.slang";
-import "transport/surface/emission.slang";
-import "transport/surface/medium.slang";
+import "transport/surface/environment.slang";
 import "bsdf/compact/contract/volume.slang";
 import "contract/path.slang";
 import "contract/realtime/ordinary.slang";
@@ -33,7 +32,8 @@ import "contract/realtime/ordinary.slang";
 // Processes exactly one ordinary realtime path vertex. Primary transparent interfaces remain a
 // local island because two reconstruction records share one output pixel. Every other
 // continuation can cross this boundary without carrying invocation-local BSDF state.
-public bool primeIntegrateWavefrontSurface<Phase, SunNee, AreaNee, IndirectReuse>(
+public bool primeIntegrateWavefrontSurface<
+        Phase, SunNee, AreaNee, IndirectReuse>(
         Phase phase,
         SunNee sunNee,
         AreaNee areaNee,
@@ -79,11 +79,6 @@ public bool primeIntegrateWavefrontSurface<Phase, SunNee, AreaNee, IndirectReuse
         }
         return false;
     }
-    if (!primeApplySegmentMedium(path.throughput, surface, volumeStack)) {
-        return false;
-    }
-
-
     PrimeIndirectReuseResult reuse;
     reuse.contribution = float3(0.0);
     reuse.hit = false;
@@ -104,17 +99,6 @@ public bool primeIntegrateWavefrontSurface<Phase, SunNee, AreaNee, IndirectReuse
     }
 
     float3 viewDirection = -path.rayDirection;
-    bool previousUsedAreaNee =
-            areaNee.enabled() && denoiserState.hasPrimarySurface;
-    float3 emitted = primeEvaluateHitEmission(
-            context, path, surface, previousUsedAreaNee);
-    if (!denoiserState.hasPrimarySurface) {
-        primeAccumulate(context, result.radiance.stable, emitted);
-    } else {
-        primeAccumulateAfterPrimary(
-                context, result, denoiserState.diffusePath, emitted);
-    }
-
     bool transmissive = primeMaterialIsTransmissive(surface.materialControl);
     float surfaceLinearRoughness =
             (transmissive || !denoiserState.reachedSolidAngle)

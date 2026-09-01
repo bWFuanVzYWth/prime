@@ -36,11 +36,13 @@ import "transport/scatter/surface.slang";
 import "transport/surface/access.slang";
 import "transport/surface/accumulate.slang";
 import "transport/surface/emission.slang";
+import "transport/surface/environment.slang";
 import "transport/surface/medium.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/guide.slang";
 import "state/realtime/guide_normal.slang";
 import "state/realtime/ordinary.slang";
+import "state/realtime/phase_scratch.slang";
 import "state/realtime/primary_signal.slang";
 import "state/realtime/queue.slang";
 import "state/realtime/signal.slang";
@@ -63,8 +65,11 @@ static const uint PRIME_SPLIT_SECOND_DELTA_WALK = 1u << 3u;
 void primeStoreInitialPath(
         uint pathIndex,
         PrimeWavefrontPathRecord record,
-        PrimeDenoiserGuides guides) {
+        PrimeDenoiserGuides guides,
+        float3 previousLightNormal) {
     primeWavefrontPaths[pathIndex] = record;
+    primeStoreWavefrontPreviousLightNormal(
+            pathIndex, previousLightNormal);
     primeStoreWavefrontGuideSurface(
             pathIndex, guides.primaryNormal, guides.primaryLinearRoughness);
 }
@@ -85,9 +90,15 @@ public uint primeInitializeTransparentWavefront(
                 initialResult.guides,
                 false);
         primeStoreInitialPath(
-                primeWavefrontIndex(pixel, 0u), emptyRecord, initialResult.guides);
+                primeWavefrontIndex(pixel, 0u),
+                emptyRecord,
+                initialResult.guides,
+                path.previousLightNormal);
         primeStoreInitialPath(
-                primeWavefrontIndex(pixel, 1u), emptyRecord, initialResult.guides);
+                primeWavefrontIndex(pixel, 1u),
+                emptyRecord,
+                initialResult.guides,
+                path.previousLightNormal);
         primeStoreWavefrontIntermediate(pixel, initialResult);
         return continuationMask;
     }
@@ -280,7 +291,11 @@ public uint primeInitializeTransparentWavefront(
             record.transport = primeEnterSecondaryRecord(record.transport);
         }
         uint pathIndex = primeWavefrontIndex(pixel, branch);
-        primeStoreInitialPath(pathIndex, record, branchResult.guides);
+        primeStoreInitialPath(
+                pathIndex,
+                record,
+                branchResult.guides,
+                branchPath.previousLightNormal);
         uint continuationBit = deltaWalk
                 ? (transmissionBranch
                         ? PRIME_SPLIT_FIRST_DELTA_WALK
@@ -339,20 +354,31 @@ public void primeSplitVisibleSurface<AreaNee>(
         PrimeOrdinarySample result = surface.hitKind == PRIME_HIT_SURFACE
                 ? primeLoadWavefrontPrimaryIntermediate(pixel)
                 : primeEmptyOrdinarySample();
-        bool continuation = primeIntegrateWavefrontSurface(
-                PrimeLandingTransportPhase(),
-                PrimeStagedSecondarySunNee(),
-                areaNee,
-                PrimeNoIndirectReuse(),
-                context,
-                path,
-                integrator,
-                volumeStack,
-                denoiserState,
-                result,
-                surface,
-                true,
-                recordIndex);
+        bool segmentAlive = surface.hitKind != PRIME_HIT_SURFACE
+                || primeApplySegmentMedium(
+                        path.throughput, surface, volumeStack);
+        if (segmentAlive && surface.hitKind == PRIME_HIT_SURFACE) {
+            primeAccumulate(
+                    context,
+                    result.radiance.stable,
+                    primeEvaluateHitEmission(
+                            context, path, surface, false));
+        }
+        bool continuation = segmentAlive
+                && primeIntegrateWavefrontSurface(
+                        PrimeLandingTransportPhase(),
+                        PrimeStagedSecondarySunNee(),
+                        areaNee,
+                        PrimeNoIndirectReuse(),
+                        context,
+                        path,
+                        integrator,
+                        volumeStack,
+                        denoiserState,
+                        result,
+                        surface,
+                        true,
+                        recordIndex);
         bool deltaWalk = continuation
                 && (primePathFlags(path.control)
                         & PRIME_PATH_PREVIOUS_DISCRETE) != 0u;
@@ -368,7 +394,11 @@ public void primeSplitVisibleSurface<AreaNee>(
         if (continuation && !deltaWalk) {
             updated.transport = primeEnterSecondaryRecord(updated.transport);
         }
-        primeStoreInitialPath(recordIndex, updated, result.guides);
+        primeStoreInitialPath(
+                recordIndex,
+                updated,
+                result.guides,
+                path.previousLightNormal);
         primeStoreWavefrontIntermediate(pixel, result);
         continuationMask = continuation
                 ? (deltaWalk

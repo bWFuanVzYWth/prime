@@ -155,14 +155,17 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| fsrContract.viewSpaceToMetersFactor != 1.0) {
 			throw new GradleException('Prime FSR signal and projection contracts changed without a coordinated migration')
 		}
-		if (wavefrontContract.pathRecordSize != 128
-				|| wavefrontContract.etaScaleOffset != 108
+		if (wavefrontContract.pathRecordSize != 112
+				|| wavefrontContract.etaScaleOffset != 92
 				|| !wavefrontContract.pathControlReservedMask.toString().equalsIgnoreCase('0x00ffff00')
 				|| wavefrontContract.pathSlotsPerPixel != 2
 				|| wavefrontContract.areaGuideRecordSize != 32
-				|| wavefrontContract.stagedLightRecordSize != 12
+				|| wavefrontContract.stagedLightRecordSize != 24
+				|| wavefrontContract.stagedReceiverNormalOffset != 12
+				|| wavefrontContract.stagedLightRecordSize
+						!= wavefrontContract.stagedReceiverNormalOffset + 12
 				|| wavefrontContract.detachedGuideRecordSize != 40
-				|| wavefrontContract.areaRecordSize != 272
+				|| wavefrontContract.areaRecordSize != 280
 				|| wavefrontContract.areaRecordSize
 						!= wavefrontContract.areaGuideRecordSize
 								+ wavefrontSurfaceRecord.size
@@ -443,6 +446,7 @@ public final class ShaderAbi {
     public static final int WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${wavefrontContract.pathSlotsPerPixel};
     public static final int WAVEFRONT_AREA_GUIDE_RECORD_SIZE = ${wavefrontContract.areaGuideRecordSize};
     public static final int WAVEFRONT_STAGED_LIGHT_RECORD_SIZE = ${wavefrontContract.stagedLightRecordSize};
+    public static final int WAVEFRONT_STAGED_RECEIVER_NORMAL_OFFSET = ${wavefrontContract.stagedReceiverNormalOffset};
     public static final int WAVEFRONT_DETACHED_GUIDE_RECORD_SIZE = ${wavefrontContract.detachedGuideRecordSize};
     public static final int OFFLINE_WAVEFRONT_PATH_RECORD_SIZE = ${offlineWavefrontContract.pathRecordSize};
     public static final int OFFLINE_WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${offlineWavefrontContract.pathSlotsPerPixel};
@@ -820,6 +824,8 @@ public static const uint PRIME_WAVEFRONT_ETA_SCALE_OFFSET = ${wavefrontContract.
 public static const uint PRIME_WAVEFRONT_PATH_CONTROL_RESERVED_MASK = ${wavefrontContract.pathControlReservedMask};
 public static const uint PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${wavefrontContract.pathSlotsPerPixel};
 public static const uint PRIME_WAVEFRONT_SURFACE_RECORD_SIZE = ${wavefrontSurfaceRecord.size};
+public static const uint PRIME_WAVEFRONT_STAGED_LIGHT_RECORD_SIZE = ${wavefrontContract.stagedLightRecordSize};
+public static const uint PRIME_WAVEFRONT_STAGED_RECEIVER_NORMAL_OFFSET = ${wavefrontContract.stagedReceiverNormalOffset};
 public static const uint PRIME_WAVEFRONT_AREA_RECORD_SIZE = ${wavefrontContract.areaRecordSize};
 public static const uint PRIME_WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL = ${wavefrontContract.queueEntriesPerPixel};
 public static const uint PRIME_WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL = ${wavefrontContract.queueStorageEntriesPerPixel};

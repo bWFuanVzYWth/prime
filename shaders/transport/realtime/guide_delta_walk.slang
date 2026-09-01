@@ -19,6 +19,7 @@ import "state/realtime/detached_guide_medium.slang";
 import "state/realtime/detached_guide_owner.slang";
 import "state/realtime/guide_normal.slang";
 import "state/realtime/medium.slang";
+import "state/realtime/phase_scratch.slang";
 import "state/realtime/queue.slang";
 import "state/realtime/transparent.slang";
 import "transport/guide/queued_psr.slang";
@@ -42,6 +43,11 @@ void primeFinishDetachedGuide(
     owner.guideControl = primeMergeWavefrontGuideControl(
             owner.guideControl, 0u);
     primeStoreDetachedGuideOwnerControl(recordIndex, owner);
+    // The detached guide aliases the later staged-light/receiver-normal phase region. Paths that
+    // can coexist with it all left a transmissive or discrete receiver, whose exact Area-NEE
+    // normal is zero; republish both branch values before either path reaches light selection.
+    primeClearWavefrontPreviousLightNormals(
+            primeWavefrontPixel(recordIndex));
 }
 
 void primePublishDetachedGuideSurface(

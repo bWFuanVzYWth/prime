@@ -25,8 +25,10 @@ public PathState primeWavefrontPath(
     path.physicalOrigin = record.physicalOriginAndPreviousBsdfPdf.xyz;
     path.previousBsdfPdf = record.physicalOriginAndPreviousBsdfPdf.w;
     path.rayDirection = record.rayDirectionAndDenoiserControl.xyz;
-    primeUnpackWavefrontPreviousLightNormalAndEtaScale(
-            record.previousLightNormalAndEtaScale, path);
+    // Queued scatter has already consumed hit-emission MIS before this state is reconstructed.
+    // The register tail restores the exact previous normal from phase scratch explicitly.
+    path.previousLightNormal = float3(0.0);
+    path.etaScale = primeUnpackWavefrontEtaScale(record.medium1);
     path.throughput = record.throughputAndReserved.xyz;
     uint bounce = (pathControl >> PRIME_WAVEFRONT_BOUNCE_SHIFT)
             & PRIME_WAVEFRONT_BYTE_MASK;
@@ -48,11 +50,15 @@ public PathState primeWavefrontPath(
 public PrimeOpenPbrVolumeStack primeWavefrontVolumeStack(
         PrimeWavefrontTransportRecord record) {
     PrimeOpenPbrVolumeStack volumeStack;
-    volumeStack.values[0] = primeUnpackWavefrontMedium(
+    volumeStack.values[0] = primeUnpackWavefrontMediumState(
             record.medium0,
-            primeUnpackWavefrontMediumIor(record.sourceAndPathControl.z, 0u));
-    volumeStack.values[1] = primeUnpackWavefrontMedium(
             record.medium1,
+            0u,
+            primeUnpackWavefrontMediumIor(record.sourceAndPathControl.z, 0u));
+    volumeStack.values[1] = primeUnpackWavefrontMediumState(
+            record.medium0,
+            record.medium1,
+            1u,
             primeUnpackWavefrontMediumIor(record.sourceAndPathControl.z, 1u));
     uint denoiserControl =
             asuint(record.rayDirectionAndDenoiserControl.w);

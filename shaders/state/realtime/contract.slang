@@ -15,8 +15,8 @@ import "model/realtime/guide.slang";
 import "contract/realtime/ordinary.slang";
 
 // Two signal slots belong to each realtime pixel so transparent reflection and transmission
-// keep independent reconstruction histories. Normals that affect visibility, MIS or reconstruction
-// remain exact f32 vectors across dispatch boundaries.
+// keep independent reconstruction histories. The previous receiver normal remains exact f32 in
+// phase scratch until the direct stage consumes its reverse-MIS query.
 public struct PrimeWavefrontTransportRecord {
     public float4 physicalOriginAndPreviousBsdfPdf;
     public uint4 sourceAndPathControl;
@@ -24,10 +24,9 @@ public struct PrimeWavefrontTransportRecord {
     public float4 throughputAndReserved;
     public uint4 medium0;
     public uint4 medium1;
-    public float4 previousLightNormalAndEtaScale;
 };
 
-// 112 bytes of transport are followed by exact queued PSR/previous-position data: 128 bytes in
+// 96 bytes of transport are followed by exact queued PSR/previous-position data: 112 bytes in
 // total. Exact branch guide normals live in the already-resident RGBA32F reconstruction images.
 public struct PrimeWavefrontPathRecord {
     public PrimeWavefrontTransportRecord transport;

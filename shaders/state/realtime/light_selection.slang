@@ -3,6 +3,7 @@ module "state/realtime/light_selection.slang";
 
 import "state/realtime/contract.slang";
 import "state/realtime/medium.slang";
+import "state/realtime/path_storage.slang";
 import "bsdf/compact/contract/volume.slang";
 
 // Light selection consumes only the incident direction, local bounce and volume identity. Keep
@@ -27,11 +28,15 @@ public PrimeWavefrontLightSelectionState primeLoadWavefrontLightSelectionState(
     state.viewDirection = -rayDirectionAndDenoiserControl.xyz;
     state.bounce = (sourceAndPathControl.w >> PRIME_WAVEFRONT_BOUNCE_SHIFT)
             & PRIME_WAVEFRONT_BYTE_MASK;
-    state.volumeStack.values[0] = primeUnpackWavefrontMedium(
+    state.volumeStack.values[0] = primeUnpackWavefrontMediumState(
             medium0,
-            primeUnpackWavefrontMediumIor(sourceAndPathControl.z, 0u));
-    state.volumeStack.values[1] = primeUnpackWavefrontMedium(
             medium1,
+            0u,
+            primeUnpackWavefrontMediumIor(sourceAndPathControl.z, 0u));
+    state.volumeStack.values[1] = primeUnpackWavefrontMediumState(
+            medium0,
+            medium1,
+            1u,
             primeUnpackWavefrontMediumIor(sourceAndPathControl.z, 1u));
     uint denoiserControl = asuint(rayDirectionAndDenoiserControl.w);
     state.volumeStack.count = min(

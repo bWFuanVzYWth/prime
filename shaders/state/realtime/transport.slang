@@ -15,9 +15,7 @@ import "bsdf/compact/contract/volume.slang";
 import "contract/path.slang";
 
 public uint primePackWavefrontPathControl(PathState path) {
-    // Bits 8..23 remain zero and reserved. etaScale is accumulated transport state, so it keeps
-    // the otherwise-unused f32 lane beside previousLightNormal instead of changing roulette
-    // probability through an FP16 round-trip.
+    // Bits 8..23 remain zero and reserved.
     return (min(primePathBounce(path.control), PRIME_WAVEFRONT_BYTE_MASK)
                     << PRIME_WAVEFRONT_BOUNCE_SHIFT)
             | ((primePathFlags(path.control)
@@ -122,8 +120,8 @@ public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
             path.sourcePrimitive,
             primePackWavefrontMediumIors(volumeStack),
             primePackWavefrontPathControl(path));
-    record.medium0 = primePackWavefrontMedium(volumeStack.values[0]);
-    record.medium1 = primePackWavefrontMedium(volumeStack.values[1]);
+    primePackWavefrontMediumState(
+            volumeStack, path.etaScale, record.medium0, record.medium1);
     uint denoiserControl = enabled ? PRIME_WAVEFRONT_ACTIVE_MASK : 0u;
     if (denoiserState.reachedSolidAngle) {
         denoiserControl |= PRIME_WAVEFRONT_REACHED_SOLID_ANGLE;
@@ -141,8 +139,6 @@ public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
     record.rayDirectionAndDenoiserControl =
             float4(path.rayDirection, asfloat(denoiserControl));
     record.throughputAndReserved = float4(path.throughput, 0.0);
-    record.previousLightNormalAndEtaScale =
-            primePackWavefrontPreviousLightNormalAndEtaScale(path);
     return record;
 }
 

@@ -7,17 +7,14 @@ import "policy/runtime/config.slang";
 import "state/realtime/contract.slang";
 import "contract/light.slang";
 
-public void primeAccumulateDeferredDirectLight(
+public void primeAccumulateDeferredLight(
         uint2 pixel,
         uint control,
+        bool diffuse,
         float3 contribution) {
     int2 coordinate = int2(pixel);
     bool transparent = (control & PRIME_WAVEFRONT_TRANSPARENT_BRANCH) != 0u;
     bool transmission = (control & PRIME_WAVEFRONT_TRANSMISSION_BRANCH) != 0u;
-    bool guideEnabled = (control & PRIME_WAVEFRONT_GUIDE_ENABLED) != 0u;
-    bool diffuse = transparent && !guideEnabled
-            ? transmission
-            : (control & PRIME_WAVEFRONT_DIFFUSE_PATH) != 0u;
     float4 current;
     if (!transparent || transmission) {
         current = diffuse
@@ -48,6 +45,20 @@ public void primeAccumulateDeferredDirectLight(
     } else {
         primeImageStore(primeStableRadiance, coordinate, current);
     }
+}
+
+public void primeAccumulateDeferredDirectLight(
+        uint2 pixel,
+        uint control,
+        float3 contribution) {
+    bool transparent = (control & PRIME_WAVEFRONT_TRANSPARENT_BRANCH) != 0u;
+    bool transmission = (control & PRIME_WAVEFRONT_TRANSMISSION_BRANCH) != 0u;
+    bool guideEnabled = (control & PRIME_WAVEFRONT_GUIDE_ENABLED) != 0u;
+    bool diffuse = transparent && !guideEnabled
+            ? transmission
+            : (control & PRIME_WAVEFRONT_DIFFUSE_PATH) != 0u;
+    primeAccumulateDeferredLight(
+            pixel, control, diffuse, contribution);
 }
 
 public void primeAccumulatePrimaryDirectSplit(

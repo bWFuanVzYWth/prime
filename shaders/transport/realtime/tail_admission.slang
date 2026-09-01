@@ -53,8 +53,8 @@ public void primeAdmitRealtimeTailPath(uint sourceQueue, uint launchIndex) {
                 rouletteScatterIndex);
         float3 throughput = primeWavefrontPaths[recordIndex]
                 .transport.throughputAndReserved.xyz;
-        float etaScale = primeWavefrontPaths[recordIndex]
-                .transport.previousLightNormalAndEtaScale.w;
+        float etaScale = asfloat(
+                primeWavefrontPaths[recordIndex].transport.medium1.w);
         float survival = primeRussianRouletteSurvival(
                 throughput, etaScale);
         float rouletteSample = primeHashSample1D(

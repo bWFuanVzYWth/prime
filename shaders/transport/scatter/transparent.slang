@@ -27,7 +27,7 @@ import "transport/scatter/path_update.slang";
 import "transport/scatter/phase_contract.slang";
 import "transport/surface/access.slang";
 import "transport/surface/accumulate.slang";
-import "transport/surface/emission.slang";
+import "transport/surface/environment.slang";
 import "transport/surface/medium.slang";
 import "bsdf/compact/contract/volume.slang";
 import "contract/path.slang";
@@ -132,16 +132,6 @@ public bool primeIntegrateTransparentWavefrontSurface<Phase, SunNee, AreaNee>(
     bool discreteContinuation = discreteOnlyInterface;
     bool primarySurfaceReplacement =
             observesGuide && !discreteContinuation;
-    bool contributionDiffuse = guideEnabled
-            ? (primarySurfaceReplacement || diffusePath)
-            : transmissionBranch;
-    bool previousUsedAreaNee = phase.transparentPreviousUsedAreaNee(
-            areaNee.enabled(), primePathBounce(path.control));
-    float3 emitted = primeEvaluateHitEmission(
-            context, path, surface, previousUsedAreaNee);
-    primeAccumulateTransparentBranch(
-            context, result, contributionDiffuse, emitted);
-
     if (supportsSolidAngle && !primarySurfaceReplacement) {
         // Wavefront Step evaluates primary transparent direct lighting after its surface trace,
         // keeping both shadow traces out of this register-heavy BSDF continuation.

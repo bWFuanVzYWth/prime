@@ -157,6 +157,15 @@ offline path 使用 128 B 固定记录。origin、direction、throughput、PDF�
 stack count、active、8-bit bounce 和 2-bit flags 共用一个 31-bit state word。consumer 通过
 `state/offline/transport.slang` 的窄 accessor 读取，不重复位布局。
 
+realtime path 使用 112 B 固定记录，其中 96 B 是跨 dispatch transport，16 B 是 PSR/previous-position
+cold lane。两层 extinction 和 f32 `etaScale` 逐位保留；两项 `MediumId:u16` 共用第一层的第四字，
+`etaScale` 使用第二层的第四字。反向面积光 MIS 所需的 f32 previous receiver normal 不属于整条
+continuation 的常驻字段：它位于 24 B/path 的后期 phase record 偏移 12，和前 12 B light selection
+同时存活，并与更早的 40 B/pixel detached-guide 严格按阶段复用。detached guide 完成后必须先
+重新发布其覆盖的零 receiver normal，之后才可进入 light selection/direct。命中发光在 direct
+阶段的 NEE 完成后才窄加载这一状态，避免 origin/PDF/normal 跨 shadow-trace 调用树存活；queued
+scatter 不得重新引入反向面积光求值闭包。
+
 材质配方、OpenPBR compact 拓扑、采样与闭包测度见
 [统一材质 IR 与闭包](统一材质IR与闭包.md)。
 

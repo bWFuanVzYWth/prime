@@ -19,6 +19,8 @@ import "service/trace/context.slang";
 import "service/trace/surface.slang";
 import "state/path.slang";
 import "state/realtime/contract.slang";
+import "state/realtime/path_storage.slang";
+import "state/realtime/phase_scratch.slang";
 import "state/realtime/light.slang";
 import "state/realtime/ordinary.slang";
 import "state/realtime/queue.slang";
@@ -29,6 +31,7 @@ import "transport/scatter/contract.slang";
 import "transport/scatter/ordinary.slang";
 import "transport/scatter/path_update.slang";
 import "transport/surface/access.slang";
+import "transport/surface/environment.slang";
 import "transport/surface/medium.slang";
 import "transport/surface/emission.slang";
 import "bsdf/compact/contract/volume.slang";
@@ -228,6 +231,8 @@ public void primeRunRealtimeTailPath(
         uint control) {
     uint2 pixel = primeWavefrontPixel(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
+    path.previousLightNormal =
+            primeLoadWavefrontPreviousLightNormal(recordIndex);
     PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
     bool transparent = primeWavefrontTransparentBranch(control);
     bool transmission = primeWavefrontTransmissionBranch(control);
@@ -272,6 +277,8 @@ public void primeRunRealtimeTailPath(
             0u,
             false);
     primeStoreWavefrontTransportRecord(recordIndex, updated);
+    primeStoreWavefrontPreviousLightNormal(
+            recordIndex, path.previousLightNormal);
     primeStoreRealtimeTailSignal(
             pixel, transparent, transmission, signal);
 }

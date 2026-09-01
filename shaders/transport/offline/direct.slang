@@ -26,6 +26,7 @@ import "transport/offline/context.slang";
 import "transport/surface/access.slang";
 import "transport/surface/accumulate.slang";
 import "transport/surface/emission.slang";
+import "transport/surface/environment.slang";
 import "transport/surface/medium.slang";
 import "bsdf/compact/contract/volume.slang";
 import "contract/path.slang";
