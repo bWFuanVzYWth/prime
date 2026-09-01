@@ -19,19 +19,23 @@ final class TintIdResolverTest {
                 PrimitivePacking.CONTROL_DIELECTRIC_SOLID
                         | PrimitivePacking.CONTROL_WATER_MEDIUM);
         staticPrimitive[PrimitivePacking.MEDIUM_ID_WORD] =
+                PrimitivePacking.packSourceMaterialIdentity(0, 0xa000_0000);
+        int[] resolvedStatic = staticPrimitive.clone();
+        resolvedStatic[PrimitivePacking.MEDIUM_ID_WORD] =
                 MaterialIdResolver.pack(0, 41);
         int[] dynamicPrimitive = primitive(1, 0x00ab_cdef, 0);
         dynamicPrimitive[5] = PrimitivePacking.packDynamicControl(0, 1, false);
         int[] source = concatenate(staticPrimitive, dynamicPrimitive);
+        int[] resolved = concatenate(resolvedStatic, dynamicPrimitive);
         AtomicInteger calls = new AtomicInteger();
 
-        int[] result = TintIdResolver.primitiveRecords(source, packedRgb -> {
+        int[] result = TintIdResolver.primitiveRecords(resolved, source, packedRgba -> {
             calls.incrementAndGet();
-            assertEquals(0x0012_3456, packedRgb);
+            assertEquals(0xa012_3456, packedRgba);
             return 73;
         });
 
-        assertNotSame(source, result);
+        assertNotSame(resolved, result);
         assertEquals(0x1400_0000, result[3]);
         assertEquals(
                 MaterialIdResolver.pack(73, 41),
@@ -41,7 +45,7 @@ final class TintIdResolverTest {
         assertEquals(0x1412_3456, source[3]);
         assertEquals(
                 MaterialIdResolver.pack(0, 41),
-                source[PrimitivePacking.MEDIUM_ID_WORD]);
+                resolved[PrimitivePacking.MEDIUM_ID_WORD]);
     }
 
     @Test
@@ -51,8 +55,9 @@ final class TintIdResolverTest {
 
         assertSame(source, TintIdResolver.primitiveRecords(
                 source,
+                source,
                 ignored -> {
-                    throw new AssertionError("dynamic source tint must remain packed RGB8");
+                    throw new AssertionError("dynamic source tint must remain inline");
                 }));
     }
 
@@ -72,8 +77,9 @@ final class TintIdResolverTest {
 
         int[] result = TintIdResolver.surfaceRelations(
                 source,
+                source,
                 2,
-                packedRgb -> packedRgb == 0x0011_2233 ? 101 : 202);
+                packedRgba -> packedRgba == 0xff11_2233 ? 101 : 202);
 
         assertNotSame(source, result);
         assertEquals(101, SurfaceRelationTable.record(result, 2, 0)[2]);
@@ -86,14 +92,31 @@ final class TintIdResolverTest {
     void rejectsIncompleteRecordsAndOutOfRangeResolvedIdentity() {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> TintIdResolver.primitiveRecords(new int[1], ignored -> 0));
+                () -> TintIdResolver.primitiveRecords(
+                        new int[1], new int[1], ignored -> 0));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> TintIdResolver.resolvePackedRgb(0x0100_0000, ignored -> 0));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> TintIdResolver.resolvePackedRgb(
+                () -> TintIdResolver.resolvePackedRgba(
                         0, ignored -> TintIdResolver.MAX_TINT_ID + 1));
+    }
+
+    @Test
+    void explicitZeroAlphaDoesNotAliasLegacyOpaqueSourceRecords() {
+        int[] explicitZero = primitive(3, 0x0012_3456, 0);
+        explicitZero[PrimitivePacking.MEDIUM_ID_WORD] =
+                PrimitivePacking.packSourceMaterialIdentity(0, 0x0012_3456);
+        int[] legacyOpaque = primitive(3, 0x0012_3456, 0);
+        int[] source = concatenate(explicitZero, legacyOpaque);
+        int[] resolved = source.clone();
+        resolved[PrimitivePacking.MEDIUM_ID_WORD] = 0;
+
+        int[] result = TintIdResolver.primitiveRecords(
+                resolved,
+                source,
+                packedRgba -> packedRgba == 0x0012_3456 ? 7 : 11);
+
+        assertEquals(7, result[3] & 0xffff);
+        assertEquals(11, result[CpuSectionMesh.PRIMITIVE_WORDS + 3] & 0xffff);
     }
 
     private static int[] primitive(int textureId, int tint, int control) {

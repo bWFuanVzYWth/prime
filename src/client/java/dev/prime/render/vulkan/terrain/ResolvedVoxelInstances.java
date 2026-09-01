@@ -29,7 +29,7 @@ record ResolvedVoxelInstances(int[] meshIndices, int[] tintIds, float[] translat
         }
         int[] tintIds = new int[source.count()];
         for (int index = 0; index < tintIds.length; index++) {
-            tintIds[index] = TintIdResolver.resolvePackedRgb(
+            tintIds[index] = TintIdResolver.resolveOpaquePackedRgb(
                     source.packedTint(index), resolver);
         }
         return new ResolvedVoxelInstances(

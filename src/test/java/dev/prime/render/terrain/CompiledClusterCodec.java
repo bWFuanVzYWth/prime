@@ -494,7 +494,8 @@ final class CompiledClusterCodec {
             int flags = PrimitivePacking.unpackControl(
                     records[record + 3], records[record + 5]);
             PrimitivePacking.requireValidControl(flags);
-            int mediumId = records[record + PrimitivePacking.MEDIUM_ID_WORD];
+            int mediumId = PrimitivePacking.unpackSourceMediumId(
+                    records[record + PrimitivePacking.MEDIUM_ID_WORD]);
             boolean solidMedium = PrimitivePacking.isTransmissive(flags)
                     && !PrimitivePacking.isThinWalled(flags);
             if (mediumId < 0
@@ -562,9 +563,10 @@ final class CompiledClusterCodec {
                 continue;
             }
             int kind = table[offset] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK;
-            int mediumId = kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY
+            int sourceIdentity = kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY
                     ? table[offset + 4]
                     : table[offset + 1 + PrimitivePacking.MEDIUM_ID_WORD];
+            int mediumId = PrimitivePacking.unpackSourceMediumId(sourceIdentity);
             boolean requiresMedium;
             if (kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY) {
                 requiresMedium = true;

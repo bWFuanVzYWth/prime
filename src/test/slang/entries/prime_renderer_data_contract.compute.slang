@@ -3,7 +3,6 @@ import "prime_color_contract.slang";
 import "prime_material_core_abi.slang";
 import "math/packed_geometry.slang";
 import "service/material/tint.slang";
-import "service/material/continuous_tint.slang";
 
 layout(set = 0, binding = 0, std430) readonly buffer PrimeRendererDataInput {
     uint words[];
@@ -31,22 +30,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             asfloat(primeRendererDataInput.words[10]),
             asfloat(primeRendererDataInput.words[11]),
             asfloat(primeRendererDataInput.words[12]));
-    PrimeTintOperator tint;
-    tint.row0 = asfloat(uint4(
-            primeRendererDataInput.words[13],
-            primeRendererDataInput.words[14],
-            primeRendererDataInput.words[15],
-            primeRendererDataInput.words[16]));
-    tint.row1 = asfloat(uint4(
-            primeRendererDataInput.words[17],
-            primeRendererDataInput.words[18],
-            primeRendererDataInput.words[19],
-            primeRendererDataInput.words[20]));
-    tint.row2 = asfloat(uint4(
-            primeRendererDataInput.words[21],
-            primeRendererDataInput.words[22],
-            primeRendererDataInput.words[23],
-            primeRendererDataInput.words[24]));
+    PrimeLinearTintModulation tint = primeUnpackLinearTintModulation(
+            uint2(primeRendererDataInput.words[13], primeRendererDataInput.words[14]));
     float3 canonicalBase = float3(
             asfloat(primeRendererDataInput.words[25]),
             asfloat(primeRendererDataInput.words[26]),
@@ -64,8 +49,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             primeCanonicalDecodeSrgb(encodedSrgb.z));
     primeRendererDataOutput.values[2] = float4(
             primeCanonicalLinearSrgbToLinearRec2020(linearSrgb), 1.0);
-    primeRendererDataOutput.values[3] = float4(
-            primeApplyStaticTint(canonicalBase, tint), 1.0);
+    primeRendererDataOutput.values[3] = primeApplyStaticTint(
+            float4(canonicalBase, 0.75), tint);
     uint packedMaterialIdentity = primeRendererDataInput.words[28];
     uint packedMaterialCore = primeRendererDataInput.words[29];
     primeRendererDataOutput.values[4] = float4(
@@ -78,4 +63,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             uint2(primeRendererDataInput.words[30], primeRendererDataInput.words[31]));
     primeRendererDataOutput.values[5] = primeApplyLinearTintModulation(
             float4(canonicalBase, 0.75), continuousTint);
+    primeRendererDataOutput.values[6] = float4(
+            primeInlineSrgbTintColor(encodedSrgb), 1.0);
 }

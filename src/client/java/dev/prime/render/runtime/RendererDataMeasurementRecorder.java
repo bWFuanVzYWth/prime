@@ -327,6 +327,9 @@ final class RendererDataMeasurementRecorder {
         json.append('{');
         field(json, "assignedCount", value.assignedCount());
         field(json, "highWaterId", value.highWaterId());
+        field(json, "sampleEntryBytes", value.entryBytes());
+        field(json, "activeSampleBytes", value.activeSampleBytes());
+        field(json, "reservedSampleBytes", value.reservedSampleBytes());
         trimComma(json).append("\n  },");
     }
 

@@ -61,7 +61,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| schema.sharedDescriptors.textureRecords != 18
 				|| schema.sharedDescriptors.materialNormalPages != 19
 				|| schema.sharedDescriptors.materialOpticalPages != 49
-				|| schema.sharedDescriptors.tintOperators != 50
+				|| schema.sharedDescriptors.tintSamples != 50
 				|| schema.sharedDescriptors.baseColorPages != 51
 				|| schema.sharedDescriptors.materialCoreRecords != 52
 				|| materialCoreContract.recordSize != 8
@@ -360,7 +360,7 @@ public final class ShaderAbi {
     public static final int DESCRIPTOR_TEXTURE_RECORDS = ${schema.sharedDescriptors.textureRecords};
     public static final int DESCRIPTOR_MATERIAL_NORMAL_PAGES = ${schema.sharedDescriptors.materialNormalPages};
     public static final int DESCRIPTOR_MATERIAL_OPTICAL_PAGES = ${schema.sharedDescriptors.materialOpticalPages};
-    public static final int DESCRIPTOR_TINT_OPERATORS = ${schema.sharedDescriptors.tintOperators};
+    public static final int DESCRIPTOR_TINT_SAMPLES = ${schema.sharedDescriptors.tintSamples};
     public static final int DESCRIPTOR_BASE_COLOR_PAGES = ${schema.sharedDescriptors.baseColorPages};
     public static final int DESCRIPTOR_MATERIAL_CORE_RECORDS = ${schema.sharedDescriptors.materialCoreRecords};
     public static final int DESCRIPTOR_NRD_SUN_LIGHTING = ${schema.realtimeDescriptors.nrdSunLighting};

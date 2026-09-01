@@ -136,7 +136,6 @@ final class MaterialTableCandidateTest {
                 PrimitivePacking.packUv(1.0F, 0.0F),
                 PrimitivePacking.packUv(0.0F, 1.0F),
                 0xffff_ffff,
-                0x00ff_ffff,
                 false,
                 15,
                 EMITTER_SPRITE,

@@ -16,7 +16,9 @@ final class ResolvedVoxelInstancesTest {
         CpuVoxelInstances source = new CpuVoxelInstances(meshes, packedTints, translations);
 
         ResolvedVoxelInstances result = ResolvedVoxelInstances.resolve(
-                source, packedRgb -> packedRgb == packedTints[0] ? 7 : 11);
+                source, packedRgba -> packedRgba == (packedTints[0] | 0xff00_0000)
+                        ? 7
+                        : 11);
         meshes[0] = 99;
         translations[0] = 99.0F;
 

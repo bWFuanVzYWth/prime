@@ -223,7 +223,8 @@ public final class MergeFace {
             packedUv1,
             packedUv2,
             PrimitivePacking.packTintControl(PrimitivePacking.packTint(surface.tint()), flags),
-            surface.mediumId(),
+            PrimitivePacking.packSourceMaterialIdentity(
+                    surface.mediumId(), PrimitivePacking.packTint(surface.tint())),
             PrimitivePacking.packControlTexture(flags, surface.sprite().textureId()),
             density | Integer.MIN_VALUE,
             (int) packedTangent

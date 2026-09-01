@@ -23,7 +23,7 @@
     },
     "entry/hit/shadow.anyhit.slang": {
       "maxFiles": 19,
-      "maxBytes": 73400
+      "maxBytes": 74280
     },
     "entry/hit/shadow.closesthit.slang": {
       "maxFiles": 3,
@@ -39,7 +39,7 @@
     },
     "entry/hit/world.closesthit.slang": {
       "maxFiles": 23,
-      "maxBytes": 99050
+      "maxBytes": 100320
     },
     "entry/hit/world.miss.slang": {
       "maxFiles": 4,
@@ -51,19 +51,19 @@
     },
     "entry/offline/bridge_trace.raygeneration.slang": {
       "maxFiles": 48,
-      "maxBytes": 160325
+      "maxBytes": 161540
     },
     "entry/offline/camera_trace.raygeneration.slang": {
       "maxFiles": 46,
-      "maxBytes": 159675
+      "maxBytes": 160890
     },
     "entry/offline/direct.raygeneration.slang": {
       "maxFiles": 120,
-      "maxBytes": 446475
+      "maxBytes": 447690
     },
     "entry/offline/light_select.raygeneration.slang": {
       "maxFiles": 72,
-      "maxBytes": 211625
+      "maxBytes": 212840
     },
     "entry/offline/sample_resolve.raygeneration.slang": {
       "maxFiles": 19,
@@ -71,7 +71,7 @@
     },
     "entry/offline/scatter.raygeneration.slang": {
       "maxFiles": 101,
-      "maxBytes": 327450
+      "maxBytes": 328665
     },
     "entry/post/auto_exposure_histogram.compute.slang": {
       "maxFiles": 3,
@@ -139,7 +139,7 @@
     },
     "entry/realtime/camera_trace.raygeneration.slang": {
       "maxFiles": 57,
-      "maxBytes": 221475
+      "maxBytes": 222690
     },
     "entry/realtime/landing_light_select.raygeneration.slang": {
       "maxFiles": 83,
@@ -147,7 +147,7 @@
     },
     "entry/realtime/landing_direct.raygeneration.slang": {
       "maxFiles": 116,
-      "maxBytes": 453150
+      "maxBytes": 454365
     },
     "entry/realtime/landing_scatter.raygeneration.slang": {
       "maxFiles": 148,
@@ -167,7 +167,7 @@
     },
     "entry/realtime/surface_split.raygeneration.slang": {
       "maxFiles": 159,
-      "maxBytes": 611000
+      "maxBytes": 611120
     },
     "entry/realtime/noisy_output_resolve.raygeneration.slang": {
       "maxFiles": 24,
@@ -183,7 +183,7 @@
     },
     "entry/realtime/fixed_direct.raygeneration.slang": {
       "maxFiles": 118,
-      "maxBytes": 452775
+      "maxBytes": 453990
     },
     "entry/realtime/fixed_scatter.raygeneration.slang": {
       "maxFiles": 148,

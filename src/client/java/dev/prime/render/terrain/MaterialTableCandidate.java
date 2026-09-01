@@ -193,7 +193,10 @@ public final class MaterialTableCandidate {
         }
         return new Key(
                 textureId,
-                medium(mediumCatalog, words[base + PrimitivePacking.MEDIUM_ID_WORD]),
+                medium(
+                        mediumCatalog,
+                        PrimitivePacking.unpackSourceMediumId(
+                                words[base + PrimitivePacking.MEDIUM_ID_WORD])),
                 semanticControl(PrimitivePacking.unpackControl(
                         words[base + 3], flagsEmitter)));
     }
@@ -201,7 +204,9 @@ public final class MaterialTableCandidate {
     static Key boundaryKey(int[] relation, int base, List<MediumKey> mediumCatalog) {
         return new Key(
                 relation[base + 3],
-                medium(mediumCatalog, relation[base + 4]),
+                medium(
+                        mediumCatalog,
+                        PrimitivePacking.unpackSourceMediumId(relation[base + 4])),
                 semanticControl(relation[base] >>> 8));
     }
 

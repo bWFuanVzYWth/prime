@@ -11,6 +11,7 @@ public float3 primeStaticBaseColor(
         float textureLodValue,
         out float opacity) {
     float4 textureSample = primeSampleStaticAlbedo(textureId, uv, textureLodValue);
-    opacity = textureSample.a;
-    return primeApplyStaticTint(textureSample.rgb, tintId);
+    float4 tinted = primeApplyStaticTint(textureSample, tintId);
+    opacity = tinted.a;
+    return tinted.rgb;
 }

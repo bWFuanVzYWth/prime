@@ -847,7 +847,8 @@ final class TextureVoxelMeshBuilder {
             this.primitives.add(material.constantMode);
             this.primitives.add(
                     PrimitivePacking.packTintControl(material.packedTint, flags));
-            this.primitives.add(0);
+            this.primitives.add(PrimitivePacking.packSourceMaterialIdentity(
+                    0, material.packedTint | 0xff00_0000));
             this.primitives.add(PrimitivePacking.packControlTexture(
                     flags, material.textureId));
             this.primitives.add(PrimitivePacking.CONSTANT_UV_DENSITY);

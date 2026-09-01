@@ -376,14 +376,15 @@ public final class SectionMeshAccumulator {
                 packedUv1,
                 packedUv2,
                 surface.tint(),
-                packedTint,
                 surface.cutout(),
                 surface.emitterTwoSided(),
                 surface.lightEmission(),
                 surface.sprite(),
                 this.labPbrMaterials.emissionMap(surface.sprite().id()));
         destination.primitives.add(packedTint);
-        destination.primitives.add(surface.mediumId);
+        destination.primitives.add(PrimitivePacking.packSourceMaterialIdentity(
+                surface.mediumId,
+                PrimitivePacking.packTint(surface.tint())));
         destination.primitives.add(encodedEmitterIndex == 0
                 ? PrimitivePacking.packControlTexture(flags, surface.sprite().textureId())
                 : PrimitivePacking.packControlEmitter(flags, encodedEmitterIndex - 1));
@@ -509,7 +510,10 @@ public final class SectionMeshAccumulator {
             PrimitivePacking.packUv(uv1U, uv1V),
             PrimitivePacking.packUv(uv2U, uv2V),
             packedTint,
-            this.mediumCatalog.resolve(binding),
+            PrimitivePacking.packSourceMaterialIdentity(
+                    this.mediumCatalog.resolve(binding),
+                    PrimitivePacking.packTint(
+                            ClusterSceneTranslator.averageColor(binding.surface()))),
             PrimitivePacking.packControlTexture(flags, captured.sprite().textureId()),
             PrimitivePacking.packUvDensity(
                     edge1X, edge1Y, edge1Z,

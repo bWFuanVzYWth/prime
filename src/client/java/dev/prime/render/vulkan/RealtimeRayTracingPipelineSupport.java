@@ -116,7 +116,7 @@ abstract class RealtimeRayTracingPipelineSupport implements RealtimeIntegratorPi
             List<VulkanImage> materialOpticalPages,
             VulkanBuffer textureRecords,
             TerrainScene.MaterialCoreBinding materialCore,
-            TerrainScene.TintOperatorBinding tintOperators,
+            TerrainScene.TintSampleBinding tintSamples,
             AtmospherePipeline atmosphere,
             RawWavefrontFrame signals) {
         this.backend.ensureSceneDescriptors(
@@ -129,7 +129,7 @@ abstract class RealtimeRayTracingPipelineSupport implements RealtimeIntegratorPi
                 materialOpticalPages,
                 textureRecords,
                 materialCore,
-                tintOperators,
+                tintSamples,
                 atmosphere);
         int width = signals.noisyDiffuse().width();
         int height = signals.noisyDiffuse().height();

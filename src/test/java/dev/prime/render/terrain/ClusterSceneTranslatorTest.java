@@ -212,7 +212,7 @@ final class ClusterSceneTranslatorTest {
                     PrimitivePacking.packUv(
                             firstPlane.u[2], firstPlane.v[2]),
                     primitives[2]);
-            assertEquals(0, primitives[4]);
+            assertEquals(0, PrimitivePacking.unpackSourceMediumId(primitives[4]));
             float[] positions = cluster.segments().getFirst().positions();
             float edgeOneX = positions[3] - positions[0];
             float edgeOneZ = positions[5] - positions[2];
@@ -276,7 +276,7 @@ final class ClusterSceneTranslatorTest {
                 assertEquals(
                         CpuSectionMesh.SURFACE_RELATION_OVERLAY,
                         relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
-                assertEquals(0, relation[5]);
+                assertEquals(0, PrimitivePacking.unpackSourceMediumId(relation[5]));
                 assertTrue((relation[0] >> 8
                         & PrimitivePacking.CONTROL_ALPHA_CUTOUT) != 0);
             }
@@ -737,7 +737,7 @@ final class ClusterSceneTranslatorTest {
             assertEquals(
                     CpuSectionMesh.SURFACE_RELATION_BILATERAL,
                     relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
-            assertEquals(0, relation[5]);
+            assertEquals(0, PrimitivePacking.unpackSourceMediumId(relation[5]));
         }
     }
 

@@ -122,7 +122,7 @@ public final class CompiledClusterLights {
         return this.relocate(deviceAddress, null);
     }
 
-    /** Returns one relocated payload whose static RGB8 tints have exact renderer TintIds. */
+    /** Returns one relocated payload whose static RGBA8 tints have exact renderer TintIds. */
     public int[] relocate(long deviceAddress, IntUnaryOperator tintResolver) {
         return this.relocate(deviceAddress, tintResolver, new int[this.emitterCount()]);
     }
@@ -147,8 +147,8 @@ public final class CompiledClusterLights {
             int tintWord = ShaderAbi.LIGHT_EMITTER_UVS_TINT_OFFSET / Integer.BYTES + 3;
             for (int emitter = 0; emitter < this.emitterCount(); emitter++) {
                 int word = emitterStart + emitter * emitterWords + tintWord;
-                relocated[word] = TintIdResolver.resolvePackedRgb(
-                        relocated[word] & 0x00ff_ffff, tintResolver);
+                relocated[word] = TintIdResolver.resolvePackedRgba(
+                        relocated[word], tintResolver);
             }
         }
         int relationWord = ShaderAbi.LIGHT_EMITTER_RELATION_OFFSET_OFFSET / Integer.BYTES;

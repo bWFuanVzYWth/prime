@@ -65,8 +65,8 @@ material record，不再复制完整材质 primitive。section/cluster 不建立
 当前 material core 的首两个固定 word 已落实这一访问契约：word0 为
 `TextureId:u16 | recipe:u16`，word1 为 `MediumId:u16`。accessor 提供单 word 与 `Load2`，调用点按
 生命周期选择，不能因为物理相邻就强制整记录存活。table-backed primitive 的 identity 为
-`TintId:u16 | MaterialId:u16`；现有 TintId 仅是旧 RGB8 operator 的无损过渡，后续连续 tint-field
-仍必须按与 albedo 一致的 `RGBA16F` 精度接入。
+`TintId:u16 | MaterialId:u16`；TintId 寻址 renderer-lifetime 全局 source-linear sRGB `RGBA16F`
+sample，常量 quad 不复制 sample。只有实际出现四角差异时才分配 companion tint field。
 
 `flagsEmitter` 的中段按 primitive 模式复用：table-backed 普通静态图元保存 relation word
 offset+1，静态 emitter 保存 `emitterIndex + 1`，dynamic 保存 6-bit scene texture index、red-alpha

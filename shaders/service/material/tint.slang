@@ -1,48 +1,67 @@
 #language slang 2026
 module "service/material/tint.slang";
 
-// Each immutable TintId names three row-major operator rows. The w lanes cache the same source
-// tint converted to Rec.2020 for constant/baked materials.
+import glsl;
+import "math/color_space.slang";
+
+// Each immutable TintId names one source-linear sRGB RGBA16F modulation sample.
 // Binding 50 is reviewed in shaders/abi.json.
 [[vk::binding(50, 0)]]
-public ByteAddressBuffer primeTintOperators;
+public ByteAddressBuffer primeTintSamples;
 
-static const uint PRIME_TINT_OPERATOR_SIZE = 48u;
+static const uint PRIME_TINT_SAMPLE_SIZE = 8u;
 
-public struct PrimeTintOperator {
-    public float4 row0;
-    public float4 row1;
-    public float4 row2;
+/** Source-linear sRGB modulation plus non-color alpha, stored as one RGBA16F sample. */
+public struct PrimeLinearTintModulation {
+    public float4 value;
 };
 
-PrimeTintOperator primeTintOperator(uint tintIdentity) {
-    uint tintId = tintIdentity & 0xffffu;
-    uint offset = tintId * PRIME_TINT_OPERATOR_SIZE;
-    PrimeTintOperator result;
-    result.row0 = asfloat(primeTintOperators.Load4(offset));
-    result.row1 = asfloat(primeTintOperators.Load4(offset + 16u));
-    result.row2 = asfloat(primeTintOperators.Load4(offset + 32u));
+public PrimeLinearTintModulation primeUnpackLinearTintModulation(uint2 packed) {
+    PrimeLinearTintModulation result;
+    result.value = float4(
+            unpackHalf2x16ToFloat(packed.x),
+            unpackHalf2x16ToFloat(packed.y));
     return result;
 }
 
-public float3 primeStaticTintColor(uint tintIdentity) {
-    PrimeTintOperator tint = primeTintOperator(tintIdentity);
-    return float3(tint.row0.w, tint.row1.w, tint.row2.w);
+/** Applies Minecraft's source-linear modulation and immediately returns to linear Rec.2020. */
+public float4 primeApplyLinearTintModulation(
+        float4 linearRec2020Base,
+        PrimeLinearTintModulation tint) {
+    float3 sourceLinear = primeLinearRec2020ToLinearBt709(linearRec2020Base.rgb);
+    float3 result = primeLinearSrgbToLinearRec2020(sourceLinear * tint.value.rgb);
+    return float4(clamp(result, float3(0.0), float3(1.0)),
+            linearRec2020Base.a * tint.value.a);
 }
 
-public float3 primeApplyStaticTint(
-        float3 linearRec2020, PrimeTintOperator tint) {
-    return clamp(
-            float3(
-                    dot(tint.row0.xyz, linearRec2020),
-                    dot(tint.row1.xyz, linearRec2020),
-                    dot(tint.row2.xyz, linearRec2020)),
-            float3(0.0),
-            float3(1.0));
+/** Adapts an inline encoded-sRGB vertex color that has not entered the global sample table. */
+public float3 primeInlineSrgbTintColor(float3 encodedSrgb) {
+    return primeLinearSrgbToLinearRec2020(primeDecodeSrgb(encodedSrgb));
+}
+
+public PrimeLinearTintModulation primeTintSample(uint tintIdentity) {
+    uint tintId = tintIdentity & 0xffffu;
+    return primeUnpackLinearTintModulation(
+            primeTintSamples.Load2(tintId * PRIME_TINT_SAMPLE_SIZE));
+}
+
+public float4 primeStaticTintColor(uint tintIdentity) {
+    return primeApplyLinearTintModulation(
+            float4(1.0), primeTintSample(tintIdentity));
+}
+
+public float4 primeApplyStaticTint(
+        float4 linearRec2020, PrimeLinearTintModulation tint) {
+    return primeApplyLinearTintModulation(linearRec2020, tint);
+}
+
+public float4 primeApplyStaticTint(
+        float4 linearRec2020, uint tintIdentity) {
+    return primeApplyStaticTint(linearRec2020, primeTintSample(tintIdentity));
 }
 
 public float3 primeApplyStaticTint(
         float3 linearRec2020, uint tintIdentity) {
     return primeApplyStaticTint(
-            linearRec2020, primeTintOperator(tintIdentity));
+            float4(linearRec2020, 1.0), tintIdentity).rgb;
 }

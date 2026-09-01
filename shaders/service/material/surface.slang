@@ -39,32 +39,40 @@ public PrimeMaterialSample primeEvaluateMaterial(
         float3 geometricNormal) {
     PrimeMaterialSample result;
     bool bakedMaterial = primeUsesBakedMaterial(primitive);
+    bool dynamicPrimitive =
+            (primitive.flagsEmitter & PRIME_DYNAMIC_TEXTURE_FLAG) != 0u;
     // Static source RGB8 tints are exact renderer TintIds. Dynamic attachments retain their
     // explicit source-color adapter until they gain a canonical resource path.
     if (bakedMaterial) {
-        float3 baseColor = primeStaticTintColor(primitive.tint);
+        float4 baseColor = dynamicPrimitive
+                ? float4(
+                        primeInlineSrgbTintColor(
+                                primeUnpackTint(primitive.tint).rgb),
+                        1.0)
+                : primeStaticTintColor(primitive.tint);
         bool ownsTint = (primitive.uv2 & PRIME_CONSTANT_UV_OWN_TINT) != 0u;
         if (!ownsTint && (instanceTint & 0x80000000u) != 0u) {
             baseColor = primeApplyStaticTint(baseColor, instanceTint);
         }
-        result.baseColor = baseColor;
-        result.opacity = 1.0;
+        result.baseColor = baseColor.rgb;
+        result.opacity = baseColor.a;
     } else {
         float4 textureSample =
                 primeSamplePrimitiveTexture(primitive, textureId, uv, textureLodValue);
         if (primeUsesDynamicRedAlpha(primitive)) {
             result.opacity = textureSample.r;
-            result.baseColor = primeLinearSrgbToLinearRec2020(
-                    primeDecodeSrgb(primeUnpackTint(primitive.tint).rgb));
+            result.baseColor = primeInlineSrgbTintColor(
+                    primeUnpackTint(primitive.tint).rgb);
         } else if ((primitive.flagsEmitter & PRIME_DYNAMIC_TEXTURE_FLAG) != 0u) {
             result.opacity = textureSample.a;
             result.baseColor = primeLinearSrgbToLinearRec2020(
                     textureSample.rgb
                             * primeDecodeSrgb(primeUnpackTint(primitive.tint).rgb));
         } else {
-            result.opacity = textureSample.a;
-            result.baseColor = primeApplyStaticTint(
-                    textureSample.rgb, primePrimitiveTintId(primitive));
+            float4 tinted = primeApplyStaticTint(
+                    textureSample, primePrimitiveTintId(primitive));
+            result.opacity = tinted.a;
+            result.baseColor = tinted.rgb;
         }
     }
     uint recipeScattering = recipeControl & PRIME_RECIPE_SCATTERING_MASK;

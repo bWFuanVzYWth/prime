@@ -154,11 +154,13 @@ final class TransparentBoundaryResolverTest {
             assertEquals(12, records.length);
             assertEquals(2, records[0]);
             assertEquals(7, records[1]);
-            int primaryMedium = mesh.segments().getFirst()
-                    .primitiveRecords()[PrimitivePacking.MEDIUM_ID_WORD];
+            int primaryMedium = PrimitivePacking.unpackSourceMediumId(
+                    mesh.segments().getFirst()
+                            .primitiveRecords()[PrimitivePacking.MEDIUM_ID_WORD]);
             assertTrue(primaryMedium != 0);
-            assertTrue(records[6] != 0);
-            assertTrue(primaryMedium != records[6]);
+            int secondaryMedium = PrimitivePacking.unpackSourceMediumId(records[6]);
+            assertTrue(secondaryMedium != 0);
+            assertTrue(primaryMedium != secondaryMedium);
             assertEquals(2, mesh.mediumCatalog().size());
             assertEquals(
                     CpuSectionMesh.SURFACE_RELATION_BOUNDARY,

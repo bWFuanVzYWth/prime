@@ -17,7 +17,7 @@ final class SceneStatisticsTest {
                 new TerrainScene.ResidentSceneView(
                         1L,
                         2L,
-                        new TerrainScene.TintOperatorBinding(3L, 48L),
+                        new TerrainScene.TintSampleBinding(3L, 8L),
                         3,
                         4,
                         5,

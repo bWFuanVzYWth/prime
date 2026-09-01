@@ -104,7 +104,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
             List<VulkanImage> materialOpticalPages,
             VulkanBuffer textureRecords,
             TerrainScene.MaterialCoreBinding materialCore,
-            TerrainScene.TintOperatorBinding tintOperators,
+            TerrainScene.TintSampleBinding tintSamples,
             AtmospherePipeline atmosphere) {
         this.backend.ensureSceneDescriptors(
                 tlas,
@@ -116,7 +116,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
                 materialOpticalPages,
                 textureRecords,
                 materialCore,
-                tintOperators,
+                tintSamples,
                 atmosphere);
         int width = runningMean.width();
         int height = runningMean.height();

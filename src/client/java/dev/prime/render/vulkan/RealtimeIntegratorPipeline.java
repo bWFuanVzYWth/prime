@@ -21,7 +21,7 @@ public interface RealtimeIntegratorPipeline extends Destroyable {
             List<VulkanImage> materialOpticalPages,
             VulkanBuffer textureRecords,
             TerrainScene.MaterialCoreBinding materialCore,
-            TerrainScene.TintOperatorBinding tintOperators,
+            TerrainScene.TintSampleBinding tintSamples,
             AtmospherePipeline atmosphere,
             RawWavefrontFrame signals);
 

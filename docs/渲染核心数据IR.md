@@ -405,8 +405,9 @@ tangent handedness/front-face 等 geometry-varying 事实。hit resolver 返回�
 
 material core 的 word0 保存 `TextureId:u16 | recipe:u16`，word1 保存 `MediumId:u16`；两者可窄读，
 也可在生命周期一致时合并读取。table-backed primitive/relation 的 identity 保存
-`TintId:u16 | MaterialId:u16`。当前 TintId 是旧 RGB8 operator 的精确迁移 carrier，不是连续 tint
-规范；释放出的 primitive tint payload 用于后续接入与 albedo 同精度的 `RGBA16F` tint-field addressing。
+`TintId:u16 | MaterialId:u16`。TintId 是全局 source-linear sRGB `RGBA16F` modulation sample 的
+精确地址；常量 quad 共用 sample，释放出的 primitive tint payload 保留给实际非均匀输入的 sparse
+tint-field addressing。
 
 `TextureId` 是 `MaterialId` 去重键的首要组成；只有 medium、recipe、coverage 和其他会改变行为的
 离散事实才扩展该 key。同一 `TextureId` 不能因为 section 不同而产生副本。常规 terrain 的主要
@@ -571,7 +572,7 @@ motion、ID 和 mask 的可视化是显式 diagnostic transform，不得通过�
 | 当前数据 | 目标 semantic | 当前主要问题 | 迁移 owner/阶段 |
 | --- | --- | --- | --- |
 | Minecraft atlas RGBA8 + sRGB companion | BaseColorLinearRec2020 + Coverage | 每 hit 色域转换、源 backing 泄漏到生产 | texture builder，阶段 2 |
-| vertex/instance encoded tint | LinearTintModulation RGBA16F field | 当前面平均丢失过渡；离散 TintId 不能表达四顶点/biome 插值；混合域不显式 | capture/material adapter，阶段 2 |
+| vertex/instance encoded tint | LinearTintModulation RGBA16F sample/field | 常量 sample 已全局化；mod 四角变化仍需 sparse field；色域往返已显式 | capture/material adapter，阶段 2 |
 | normal/optical pages | TangentNormal、AO、Roughness、OpticalCode | 连续与离散通道共采样 | texture schema/accessor，阶段 2/4 |
 | TextureRecord/TextureId | CanonicalTexture + stable TextureId | albedo rect 仍指向源 atlas | texture catalog，阶段 2 |
 | PrimitiveRecord 32 B | PrimitiveIdentity/Material/Texture/Emitter tagged views | offset 16 已迁移为 exact MediumId；其余 control 仍有多模式复用 | generated accessors，阶段 2 |
@@ -632,8 +633,8 @@ bytes；实时 area record 为 320 bytes，离线 surface/stage 为 108/112 byte
   的迁移 carrier；
 - `MaterialId` 为 exact `u16`；triangle/emitter 是按场景程序化生成的身份，最坏可达到
   同一数量级，均保持 exact `u32`；
-- bounded base color 使用 linear Rec.2020 `RGBA16F`，连续 tint field 使用带 modulation-domain tag
-  的 `RGBA16F`，并保留四顶点/biome 插值与 alpha；
+- bounded base color 使用 linear Rec.2020 `RGBA16F`；tint 使用带 modulation-domain tag 的
+  `RGBA16F`，保留 Vanilla 已完成的逐 block biome sample、mod 四顶点插值与 alpha；
 - tint 与 base 的调制必须执行数学等价的显式色域转换，不能在 Rec.2020 中直接逐通道相乘。
 - sprite-local UV 使用 `UQ0.16x2`，不建立任意 f32 UV 持久化分支；材质参考点保存 texture-local
   integer identity 后按需生成坐标；

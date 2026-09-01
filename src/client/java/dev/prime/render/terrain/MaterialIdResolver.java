@@ -35,7 +35,9 @@ public final class MaterialIdResolver {
             int materialId = cache.primitiveId(localRecords, base, lights);
             result[base + PrimitivePacking.MEDIUM_ID_WORD] = pack(
                     materialId == 0
-                            ? resolvedMediumRecords[base + PrimitivePacking.MEDIUM_ID_WORD]
+                            ? PrimitivePacking.unpackSourceMediumId(
+                                    resolvedMediumRecords[
+                                            base + PrimitivePacking.MEDIUM_ID_WORD])
                             : 0,
                     materialId);
             if (materialId != 0) {
@@ -88,7 +90,8 @@ public final class MaterialIdResolver {
                 }
             }
             result[identityWord] = pack(
-                    resolvedMediumRelations[identityWord],
+                    PrimitivePacking.unpackSourceMediumId(
+                            resolvedMediumRelations[identityWord]),
                     materialId);
             cursor += SurfaceRelationTable.wordsForControl(localRelations[cursor]);
         }
@@ -149,7 +152,8 @@ public final class MaterialIdResolver {
             if (emitter != PrimitivePacking.NO_EMITTER_INDEX) {
                 textureId = lights.emitterMaterial(emitter).textureId();
             }
-            int localMediumId = words[base + PrimitivePacking.MEDIUM_ID_WORD];
+            int localMediumId = PrimitivePacking.unpackSourceMediumId(
+                    words[base + PrimitivePacking.MEDIUM_ID_WORD]);
             int control = semanticControl(PrimitivePacking.unpackControl(
                     words[base + 3], flagsEmitter));
             long localKey = localKey(textureId, localMediumId, control);
@@ -170,7 +174,7 @@ public final class MaterialIdResolver {
 
         int boundaryId(int[] relation, int base) {
             int textureId = relation[base + 3];
-            int localMediumId = relation[base + 4];
+            int localMediumId = PrimitivePacking.unpackSourceMediumId(relation[base + 4]);
             int control = semanticControl(relation[base] >>> 8);
             long localKey = localKey(textureId, localMediumId, control);
             int existing = this.ids.get(localKey);

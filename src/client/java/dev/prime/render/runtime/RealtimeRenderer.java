@@ -155,7 +155,7 @@ final class RealtimeRenderer implements Destroyable {
                     materialTextures.opticalPages(),
                     materialTextures.textureRecords(),
                     scene.materialCore(),
-                    scene.tintOperators(),
+                    scene.tintSamples(),
                     atmosphere,
                     current.processor().rawFrame());
             return false;
@@ -178,7 +178,7 @@ final class RealtimeRenderer implements Destroyable {
                     materialTextures.opticalPages(),
                     materialTextures.textureRecords(),
                     scene.materialCore(),
-                    scene.tintOperators(),
+                    scene.tintSamples(),
                     atmosphere,
                     replacementResources.processor().rawFrame());
         } catch (RuntimeException exception) {

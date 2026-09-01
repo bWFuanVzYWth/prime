@@ -69,7 +69,8 @@ final class SectionMeshAccumulatorTest {
             CpuSectionGeometry geometry = accumulator.build();
 
             assertEquals(1, geometry.mergeFaces().size());
-            assertEquals(0, geometry.mergeFaces().getFirst().primitive()[4]);
+            assertEquals(0, PrimitivePacking.unpackSourceMediumId(
+                    geometry.mergeFaces().getFirst().primitive()[4]));
             assertEquals(1, geometry.meshes().size());
             assertEquals(4, geometry.meshes().getFirst().opaqueTriangleCount());
             assertTrue(Float.intBitsToFloat(
@@ -93,7 +94,8 @@ final class SectionMeshAccumulatorTest {
 
             assertEquals(1, geometry.mergeFaces().size());
             assertTrue(geometry.mergeFaces().getFirst().transmissive());
-            assertEquals(73, geometry.mergeFaces().getFirst().primitive()[4]);
+            assertEquals(73, PrimitivePacking.unpackSourceMediumId(
+                    geometry.mergeFaces().getFirst().primitive()[4]));
             assertEquals(1, geometry.meshes().size());
             assertEquals(2, geometry.meshes().getFirst().transmissiveTriangleCount());
         }
@@ -203,8 +205,9 @@ final class SectionMeshAccumulatorTest {
                 float edgeTwoX = positions[position + 6] - positions[position];
                 float edgeTwoY = positions[position + 7] - positions[position + 1];
                 assertTrue(edgeOneX * edgeTwoY - edgeOneY * edgeTwoX < 0.0F);
-                assertEquals(0, mesh.primitiveRecords()[
-                        triangle * CpuSectionMesh.PRIMITIVE_WORDS + 4]);
+                assertEquals(0, PrimitivePacking.unpackSourceMediumId(
+                        mesh.primitiveRecords()[
+                                triangle * CpuSectionMesh.PRIMITIVE_WORDS + 4]));
             }
         }
     }

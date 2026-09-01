@@ -16,7 +16,8 @@ public final class MediumIdResolver {
         boolean any = false;
         for (int record = 0; record < source.length;
                 record += CpuSectionMesh.PRIMITIVE_WORDS) {
-            int localId = source[record + PrimitivePacking.MEDIUM_ID_WORD];
+            int sourceIdentity = source[record + PrimitivePacking.MEDIUM_ID_WORD];
+            int localId = PrimitivePacking.unpackSourceMediumId(sourceIdentity);
             int flags = PrimitivePacking.unpackControl(
                     source[record + 3], source[record + 5]);
             requireMediumUse(localId, flags);
@@ -29,8 +30,12 @@ public final class MediumIdResolver {
         int[] result = source.clone();
         for (int record = 0; record < result.length;
                 record += CpuSectionMesh.PRIMITIVE_WORDS) {
-            result[record + PrimitivePacking.MEDIUM_ID_WORD] = resolve(
-                    result[record + PrimitivePacking.MEDIUM_ID_WORD], localToRenderer);
+            int sourceIdentity = result[record + PrimitivePacking.MEDIUM_ID_WORD];
+            result[record + PrimitivePacking.MEDIUM_ID_WORD] =
+                    PrimitivePacking.retainSourceTintAlpha(sourceIdentity)
+                            | resolve(
+                                    PrimitivePacking.unpackSourceMediumId(sourceIdentity),
+                                    localToRenderer);
         }
         return result;
     }
@@ -52,7 +57,8 @@ public final class MediumIdResolver {
             int mediumWord = kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY
                     ? cursor + 4
                     : cursor + 1 + PrimitivePacking.MEDIUM_ID_WORD;
-            int localId = result[mediumWord];
+            int sourceIdentity = result[mediumWord];
+            int localId = PrimitivePacking.unpackSourceMediumId(sourceIdentity);
             if (kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY) {
                 if (localId == 0) {
                     throw new IllegalArgumentException(
@@ -64,7 +70,8 @@ public final class MediumIdResolver {
                         result[material + 3], result[material + 5]);
                 requireMediumUse(localId, flags);
             }
-            result[mediumWord] = resolve(localId, localToRenderer);
+            result[mediumWord] = PrimitivePacking.retainSourceTintAlpha(sourceIdentity)
+                    | resolve(localId, localToRenderer);
             any |= localId != 0;
             cursor += SurfaceRelationTable.wordsForControl(result[cursor]);
         }

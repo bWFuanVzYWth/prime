@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import dev.prime.render.data.RendererDataContracts;
 import dev.prime.render.terrain.CanonicalColorEncoding;
 import dev.prime.render.terrain.MaterialIdResolver;
-import dev.prime.render.terrain.PrimitivePacking;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -34,13 +33,15 @@ final class RendererDataContractGpuTest {
         float red = 0.25F;
         float green = 0.5F;
         float blue = 0.75F;
-        int tintRgb = PrimitivePacking.packTint(0xff23_a7e1) & 0x00ff_ffff;
+        int tintArgb = 0xa023_a7e1;
         int sourceArgb = 0xff91_37c4;
-        CanonicalColorEncoding.TintOperator tint =
-                CanonicalColorEncoding.tintOperator(tintRgb);
+        long tintEncoding = CanonicalColorEncoding.encodeLinearSrgbTintRgba16f(tintArgb);
         CanonicalColorEncoding.Color base = CanonicalColorEncoding.decodeRgba16f(
                 CanonicalColorEncoding.encodeRgba16f(sourceArgb));
-        CanonicalColorEncoding.Color tinted = tint.apply(base);
+        CanonicalColorEncoding.Color tinted =
+                CanonicalColorEncoding.decodeLinearSrgbTintRgba16f(tintEncoding)
+                        .apply(new CanonicalColorEncoding.Color(
+                                base.red(), base.green(), base.blue(), 0.75F));
         int mediumId = 0x1234;
         int materialId = 0xabcd;
         int textureId = 0x3456;
@@ -61,9 +62,8 @@ final class RendererDataContractGpuTest {
                 .putFloat(previousU).putFloat(previousV)
                 .putFloat(currentU).putFloat(currentV)
                 .putFloat(red).putFloat(green).putFloat(blue)
-                .putFloat(tint.m00()).putFloat(tint.m01()).putFloat(tint.m02()).putFloat(0.0F)
-                .putFloat(tint.m10()).putFloat(tint.m11()).putFloat(tint.m12()).putFloat(0.0F)
-                .putFloat(tint.m20()).putFloat(tint.m21()).putFloat(tint.m22()).putFloat(0.0F)
+                .putInt((int) tintEncoding).putInt((int) (tintEncoding >>> 32))
+                .put(new byte[10 * Integer.BYTES])
                 .putFloat(base.red()).putFloat(base.green()).putFloat(base.blue())
                 .putInt(MaterialIdResolver.pack(mediumId, materialId))
                 .putInt(materialCore)
@@ -74,7 +74,7 @@ final class RendererDataContractGpuTest {
                 System.getProperty("prime.test.slangShaderDirectory"),
                 "prime_renderer_data_contract.comp.spv");
 
-        ByteBuffer output = runner.dispatch(shader, input, 6 * 4 * Float.BYTES, 1);
+        ByteBuffer output = runner.dispatch(shader, input, 7 * 4 * Float.BYTES, 1);
         double[] uv = RendererDataContracts.sampleUv(pixelX, pixelY, width, height);
         double[] clip = RendererDataContracts.uvToClip(uv[0], uv[1]);
         double[] projectionJitter =
@@ -100,6 +100,7 @@ final class RendererDataContractGpuTest {
         assertEquals(tinted.red(), value(output, 3, 0), 2.0e-7);
         assertEquals(tinted.green(), value(output, 3, 1), 2.0e-7);
         assertEquals(tinted.blue(), value(output, 3, 2), 2.0e-7);
+        assertEquals(tinted.alpha(), value(output, 3, 3), 0.0);
         assertEquals(mediumId, value(output, 4, 0), 0.0);
         assertEquals(materialId, value(output, 4, 1), 0.0);
         assertEquals(textureId, value(output, 4, 2), 0.0);
@@ -108,6 +109,9 @@ final class RendererDataContractGpuTest {
         assertEquals(continuouslyTinted.green(), value(output, 5, 1), 3.0e-7);
         assertEquals(continuouslyTinted.blue(), value(output, 5, 2), 3.0e-7);
         assertEquals(continuouslyTinted.alpha(), value(output, 5, 3), 0.0);
+        assertEquals(rec2020[0], value(output, 6, 0), 2.0e-6);
+        assertEquals(rec2020[1], value(output, 6, 1), 2.0e-6);
+        assertEquals(rec2020[2], value(output, 6, 2), 2.0e-6);
     }
 
     private static float value(ByteBuffer output, int entry, int component) {

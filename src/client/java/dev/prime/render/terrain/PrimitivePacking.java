@@ -9,8 +9,9 @@ import dev.prime.render.material.PrimitiveControl;
 import dev.prime.render.material.ScatteringFamily;
 
 public final class PrimitivePacking {
-    /** PrimitiveRecord word carrying an exact cluster-local or renderer-lifetime MediumId. */
+    /** PrimitiveRecord word carrying source material facts or the resolved GPU identity. */
     public static final int MEDIUM_ID_WORD = 4;
+    private static final int SOURCE_TINT_ALPHA_PRESENT = 1 << 16;
     private static final float UV_FIXED_SCALE = 65_536.0F;
     private static final int UV_FIXED_ONE = 0xffff;
     public static final int CONTROL_ALPHA_CUTOUT = 1;
@@ -82,6 +83,41 @@ public final class PrimitivePacking {
     public static int packTintControl(int packedTint, int control) {
         requireValidControl(control);
         return (packedTint & 0x00ff_ffff) | (control & 0xff) << 24;
+    }
+
+    /**
+     * Keeps an exact source alpha beside the local MediumId until the renderer resolves TintId.
+     * Bit 16 distinguishes new alpha-bearing records from legacy opaque records; bits 17..23 are
+     * reserved so malformed CPU records cannot alias a valid source identity.
+     */
+    public static int packSourceMaterialIdentity(int mediumId, int packedRgba) {
+        if (mediumId < 0 || mediumId > 0xffff) {
+            throw new IllegalArgumentException("Source MediumId exceeds its exact u16 domain");
+        }
+        return mediumId | SOURCE_TINT_ALPHA_PRESENT | packedRgba & 0xff00_0000;
+    }
+
+    public static int unpackSourceMediumId(int identity) {
+        if ((identity & 0x00fe_0000) != 0) {
+            throw new IllegalArgumentException("Source material identity uses reserved bits");
+        }
+        return identity & 0xffff;
+    }
+
+    public static int unpackSourceTintAlpha(int identity) {
+        if ((identity & 0x00fe_0000) != 0) {
+            throw new IllegalArgumentException("Source material identity uses reserved bits");
+        }
+        return (identity & SOURCE_TINT_ALPHA_PRESENT) != 0
+                ? identity & 0xff00_0000
+                : 0xff00_0000;
+    }
+
+    static int retainSourceTintAlpha(int identity) {
+        unpackSourceMediumId(identity);
+        return (identity & SOURCE_TINT_ALPHA_PRESENT) != 0
+                ? identity & (SOURCE_TINT_ALPHA_PRESENT | 0xff00_0000)
+                : 0;
     }
 
     public static int unpackControl(int packedTint, int packedFlagsEmitter) {
