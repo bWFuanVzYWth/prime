@@ -89,9 +89,11 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
         IgnoreHit();
         return;
     }
-    PrimitiveRecord primitive = primePrimitive(section);
-    uint primaryMaterialCoreWord = primePrimitiveMaterialCoreWord(primitive);
     bool targetSection = InstanceID() == primeShadowPayload.targetEmitter.x;
+    if (GeometryIndex() == 0u && !targetSection) {
+        return;
+    }
+    PrimitiveRecord primitive = primePrimitive(section);
     if (targetSection
             && primePrimitiveEmitterIndex(primitive)
                     == primeShadowPayload.targetEmitter.y) {
@@ -102,6 +104,7 @@ public void primePhase(in BuiltInTriangleIntersectionAttributes attributes)
     if (GeometryIndex() == 0u) {
         return;
     }
+    uint primaryMaterialCoreWord = primePrimitiveMaterialCoreWord(primitive);
     PrimeSurfaceRelation relation = primeSurfaceRelation(section, primitive);
     PrimeHitTriangle hit = primeHitTriangle(section, barycentrics);
     float3 outwardNormal = hit.geometricNormal;

@@ -201,7 +201,6 @@ $env:Path = "$env:JAVA_HOME\bin;$env:VULKAN_SDK\Bin;$env:Path"
 ### 维护记录
 
 - [TODO](docs/TODO.md)
-- [阶段 3 准入检查表](docs/阶段3准入账本.md)
 
 ### 历史记录
 

@@ -98,9 +98,9 @@ shader 只消费 renderer 生命周期稳定的 `TextureId`、sprite-local UV �
 更新，再以满足误差合同的页面 encoding 上传。生产 shader 不得依赖 Minecraft atlas、在 encoded
 sRGB 上过滤或逐 hit 执行 sRGB/色域转换；alpha/coverage、normal 和 optical code 是独立非颜色
 语义。物理格式可以按信息需求使用整数、UNORM、float 或受支持压缩格式，不要求所有通道 f32。
-仍存在的 atlas/sRGB view/逐 hit 色域矩阵只是迁移基线，可以保留但不得扩大；当前
-迁移和优化边界以[阶段 3 准入检查表](docs/阶段3准入账本.md)为准。历史调查和旧实现
-快照不能反向定义当前规范。
+仍存在的 atlas/sRGB view/逐 hit 色域矩阵只是迁移基线，可以保留但不得扩大；当前迁移和优化
+边界以[渲染核心数据 IR](docs/渲染核心数据IR.md)与专项契约为准。历史调查和旧实现快照不能
+反向定义当前规范。
 
 `TextureId` 按 `SpriteId` 单调分配且不得因资源 reload 重编号或复用；新 generation 发布前必须
 上传完整 catalog。大资源包可以优化 packing、mip、上传和临时数据，但不得按可见性、引用或

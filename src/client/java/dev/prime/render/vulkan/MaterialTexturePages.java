@@ -2,6 +2,7 @@ package dev.prime.render.vulkan;
 
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.infrastructure.ResourceCleanup;
+import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.terrain.LabPbrAtlasFrame;
 import dev.prime.render.terrain.LabPbrMaterialSet;
 import java.nio.ByteBuffer;
@@ -513,7 +514,8 @@ public final class MaterialTexturePages implements AutoCloseable {
         for (LabPbrAtlasFrame.Sprite sprite : source.sprites()) {
             maximumTextureId = Math.max(maximumTextureId, sprite.textureId());
         }
-        long byteSize = Math.multiplyExact((long) maximumTextureId + 1L, 32L);
+        long byteSize = Math.multiplyExact(
+                (long) maximumTextureId + 1L, ShaderAbi.TEXTURE_RECORD_SIZE);
         VulkanBuffer result = this.context.createBuffer(
                 byteSize,
                 VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -522,47 +524,31 @@ public final class MaterialTexturePages implements AutoCloseable {
         long target = result.mappedAddress();
         MemoryUtil.memSet(target, 0, byteSize);
         for (LabPbrAtlasFrame.Sprite sprite : source.sprites()) {
-            long record = target + (long) sprite.textureId() * 32L;
+            long record = target + (long) sprite.textureId() * ShaderAbi.TEXTURE_RECORD_SIZE;
             TexturePageLayout.Placement baseColor =
                     baseColorLayout.placement(sprite.textureId());
             if (baseColor == null) {
                 throw new IllegalStateException("Base-color texture has no page placement");
             }
-            putPackedExtent(
-                    record,
-                    0,
-                    baseColor.contentX(),
-                    baseColor.contentY());
-            putPackedExtent(record, 4, sprite.contentWidth(), sprite.contentHeight());
             TexturePageLayout.Placement normal = normalLayout.placement(sprite.textureId());
             TexturePageLayout.Placement specular = opticalLayout.placement(sprite.textureId());
-            putPackedExtent(
-                    record,
-                    8,
-                    normal == null ? 0 : normal.contentX(),
-                    normal == null ? 0 : normal.contentY());
-            putPackedExtent(
-                    record,
-                    12,
-                    specular == null ? 0 : specular.contentX(),
-                    specular == null ? 0 : specular.contentY());
-            int normalPage = normal == null ? 0xff : normal.page();
-            int specularPage = specular == null ? 0xff : specular.page();
             int normalMip = normal == null
                     ? 0
                     : textureMipLimit(sprite, normalPages.get(normal.page()).image);
             int specularMip = specular == null
                     ? 0
                     : textureMipLimit(sprite, opticalPages.get(specular.page()).image);
-            MemoryUtil.memPutInt(
-                    record + 16L,
-                    normalPage | specularPage << 8 | normalMip << 16 | specularMip << 24);
-            int baseColorPage = baseColor.page();
             int baseColorMip = textureMipLimit(
                     sprite, baseColorPages.get(baseColor.page()).image);
-            MemoryUtil.memPutInt(record + 20L, baseColorMip | baseColorPage << 8);
-            MemoryUtil.memPutInt(record + 24L, 0);
-            MemoryUtil.memPutInt(record + 28L, 0);
+            writeTextureRecord(
+                    record,
+                    sprite,
+                    baseColor,
+                    normal,
+                    specular,
+                    baseColorMip,
+                    normalMip,
+                    specularMip);
         }
         result.flush(0L, byteSize);
         return result;
@@ -610,6 +596,47 @@ public final class MaterialTexturePages implements AutoCloseable {
                             page.bytesPerPixel));
         }
         return result;
+    }
+
+    static void writeTextureRecord(
+            long record,
+            LabPbrAtlasFrame.Sprite sprite,
+            TexturePageLayout.Placement baseColor,
+            TexturePageLayout.Placement normal,
+            TexturePageLayout.Placement optical,
+            int baseColorMip,
+            int normalMip,
+            int opticalMip) {
+        putPackedExtent(
+                record,
+                ShaderAbi.TEXTURE_BASE_ORIGIN_OFFSET,
+                baseColor.contentX(),
+                baseColor.contentY());
+        putPackedExtent(
+                record,
+                ShaderAbi.TEXTURE_FRAME_EXTENT_OFFSET,
+                sprite.contentWidth(),
+                sprite.contentHeight());
+        MemoryUtil.memPutInt(
+                record + ShaderAbi.TEXTURE_BASE_INFO_OFFSET,
+                baseColorMip | baseColor.page() << 8);
+        putPackedExtent(
+                record,
+                ShaderAbi.TEXTURE_NORMAL_ORIGIN_OFFSET,
+                normal == null ? 0 : normal.contentX(),
+                normal == null ? 0 : normal.contentY());
+        int normalPage = normal == null ? 0xff : normal.page();
+        int opticalPage = optical == null ? 0xff : optical.page();
+        MemoryUtil.memPutInt(
+                record + ShaderAbi.TEXTURE_AUXILIARY_INFO_OFFSET,
+                normalPage | opticalPage << 8 | normalMip << 16 | opticalMip << 24);
+        putPackedExtent(
+                record,
+                ShaderAbi.TEXTURE_OPTICAL_ORIGIN_OFFSET,
+                optical == null ? 0 : optical.contentX(),
+                optical == null ? 0 : optical.contentY());
+        MemoryUtil.memPutInt(record + 24L, 0);
+        MemoryUtil.memPutInt(record + 28L, 0);
     }
 
     private static void fillColorPage(

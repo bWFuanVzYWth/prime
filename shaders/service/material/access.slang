@@ -6,13 +6,13 @@ import "prime_abi_types.slang";
 import "prime_material_core_abi.slang";
 import "math/packed_geometry.slang";
 
-// Reviewed binding in shaders/abi.json. This stays with static albedo access so opacity-only
-// entries do not see the independently bound normal and optical page arrays.
+// Binding reviewed in abi.json. Keep static albedo here so opacity-only entries cannot see the
+// independently bound normal and optical page arrays.
 [[vk::binding(18, 0)]]
 public ByteAddressBuffer primeTextureRecords;
 
-// Opacity-only paths load only texture/recipe word zero. Medium and combined access live in the
-// hit-only medium accessor so entries that do not consume medium cannot see that source.
+// Opacity-only paths load texture/recipe word zero. Medium and combined access stay in the
+// hit-only accessor, outside entries that do not consume medium.
 [[vk::binding(52, 0)]]
 public ByteAddressBuffer primeMaterialCoreRecords;
 
@@ -20,6 +20,8 @@ public ByteAddressBuffer primeMaterialCoreRecords;
 // an exact 0..255 coverage code carried in f16, so filtering preserves linear coverage semantics.
 [[vk::binding(51, 0)]]
 public Sampler2D<float4> primeBaseColorPages[64];
+
+public static const uint PRIME_TEXTURE_RECORD_SIZE = 32u;
 
 public float4 primeSampleSceneTexture(uint index, float2 uv, float lod)
 {
@@ -47,7 +49,6 @@ public int2 primeSceneTextureExtent(uint index) {
     return primeSceneTextureDimensions(index).extent;
 }
 
-static const uint PRIME_TEXTURE_RECORD_SIZE = 32u;
 static const uint PRIME_MISSING_MATERIAL_PAGE = 0xffu;
 
 public uint primeTextureRecordWord(uint textureId, uint byteOffset) {
@@ -64,7 +65,7 @@ public int2 primeTextureFrameExtent(uint textureId) {
 }
 
 public int primeTextureMaximumMip(uint textureId) {
-    return int(primeTextureRecordWord(textureId, 20u) & 0xffu);
+    return int(primeTextureRecordWord(textureId, 8u) & 0xffu);
 }
 
 public uint primePrimitiveMaterialId(PrimitiveRecord primitive) {
@@ -91,7 +92,7 @@ public uint primeMaterialRecipeControl(uint materialId) {
 }
 
 public uint primeTextureBaseColorPage(uint textureId) {
-    return (primeTextureRecordWord(textureId, 20u) >> 8u) & 0xffu;
+    return (primeTextureRecordWord(textureId, 8u) >> 8u) & 0xffu;
 }
 
 public float2 primeTranslatedUv(
@@ -101,20 +102,21 @@ public float2 primeTranslatedUv(
 }
 
 public float4 primeSampleStaticAlbedo(uint textureId, float2 uv, float lod) {
-    uint page = primeTextureBaseColorPage(textureId);
+    uint3 rect = primeTextureRecords.Load3(textureId * PRIME_TEXTURE_RECORD_SIZE);
+    uint info = rect.z;
+    uint page = info >> 8u & 0xffu;
     uint width;
     uint height;
     uint levels;
     primeBaseColorPages[NonUniformResourceIndex(page)].GetDimensions(
             0, width, height, levels);
-    uint2 rect = primeTextureRecords.Load2(textureId * PRIME_TEXTURE_RECORD_SIZE);
     float4 sample = primeBaseColorPages[NonUniformResourceIndex(page)].SampleLevel(
             primeTranslatedUv(
                     rect.x,
                     int2(rect.y & 0xffffu, rect.y >> 16u),
                     int2(width, height),
                     uv),
-            min(lod, float(primeTextureMaximumMip(textureId))));
+            min(lod, float(info & 0xffu)));
     return float4(sample.rgb, sample.a / 255.0);
 }
 
@@ -212,10 +214,10 @@ public float2 primePrimitiveMaterialReferenceUv(PrimitiveRecord primitive) {
 public float primeEvaluateOpacity(
         PrimitiveRecord primitive, uint textureId, float2 uv) {
     if ((primitive.flagsEmitter & PRIME_DYNAMIC_TEXTURE_FLAG) == 0u) {
-        uint page = primeTextureBaseColorPage(textureId);
-        uint packedOrigin = primeTextureRecordWord(textureId, 0u);
-        int2 origin = int2(packedOrigin & 0xffffu, packedOrigin >> 16u);
-        int2 extent = primeTextureFrameExtent(textureId);
+        uint3 rect = primeTextureRecords.Load3(textureId * PRIME_TEXTURE_RECORD_SIZE);
+        uint page = rect.z >> 8u & 0xffu;
+        int2 origin = int2(rect.x & 0xffffu, rect.x >> 16u);
+        int2 extent = int2(rect.y & 0xffffu, rect.y >> 16u);
         int2 texel = origin + clamp(
                 int2(floor(uv * float2(extent))),
                 int2(0),

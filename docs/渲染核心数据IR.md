@@ -1,8 +1,7 @@
 # 渲染核心数据 IR
 
-本文是 Prime 常用渲染数据的规范来源，只记录长期约束和已冻结的编码。当前进度与未决项
-见[跨阶段实施检查表](阶段3准入账本.md)；测量数字、旧实现和迁移过程见
-[阶段 2 编码精度初始预算](阶段2编码精度初始预算.md)与
+本文是 Prime 常用渲染数据的规范来源，只记录长期约束和已冻结的编码。未完成工作见
+[TODO](TODO.md)；测量数字、旧实现和迁移过程见[阶段 2 编码精度初始预算](阶段2编码精度初始预算.md)与
 [渲染数据标准化调查报告](渲染数据标准化调查报告.md)。历史记录不能反向定义当前规范。
 
 ## 1. 核心原则
@@ -17,6 +16,8 @@
   不能定义 core 的坐标或图像语义。
 - 与帧和路径无关的变换尽量前移到 CPU 捕获、场景翻译或资源构建边界。
 - 约束优先由类型、schema、生成 accessor、所有权和状态机表达，不依赖通道位置的人工记忆。
+- 阶段编号不再构成实施门槛；规范、正确性、测试、布局和性能改造可以组合，但每项仍须独立
+  声明不变量、oracle、收益假设和回退边界。
 
 物理 `VkFormat`、stride、descriptor 编号和 native wire layout 只有在本文或专项子规范中
 明确冻结时才是契约。SDK handle、GPU address 和 descriptor index 始终只是 binding/interop，
@@ -236,6 +237,12 @@ backend target alias 仍属可替换编码。在新门禁通过前保留当前�
 - CPU/GPU 参考值、最坏误差、边界、NaN/Inf、分支和统计分布；
 - alias/liveness、generation publish/retire、resize/reload/cancel 和 backend switch；
 - 生产 Shader 源码闭包、窄加载、寄存器生存期与真实 NVIDIA GPU 性能。
+
+当前仍缺少误差或性能证据的边界如下：transport radiance、throughput、PDF、extinction、optical
+depth 和 path distance 不得有损收窄；任意斜面、掠角、Fresnel/TIR 与 guide 未建立角误差合同前，
+不得恢复通用方向压缩；依赖 register、occupancy 或 cache 取舍的最终布局必须由 Nsight/逐 pass
+数据决定。RR+FG 透射 motion 在拥有独立 f32 visible-history owner 前保持 invalid，不以近似 motion
+伪造历史有效性。
 
 专项规范分工如下：
 

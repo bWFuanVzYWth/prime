@@ -4,10 +4,9 @@
 
 ## 渲染核心数据 IR
 
-- 规范与主要阶段 2 正确性迁移已完成。以[阶段 3 准入检查表](阶段3准入账本.md)为当前任务边界：
-  可提前开始 wavefront 存活期/布局、材质表热路径、NVIDIA top-left producer 和 backend 资源 alias；
-  没有误差合同的 transport 连续量不得压窄。
-- 规范只在[渲染核心数据 IR](渲染核心数据IR.md)更新；历史调查和精度推导不作当前计划。
+- 继续收敛 wavefront 存活期/布局、材质表热路径、NVIDIA top-left producer 和 backend 资源 alias；
+  没有误差合同的 transport 连续量不得压窄，规范只在[渲染核心数据 IR](渲染核心数据IR.md)更新。
+- starmap 紧凑格式和离线转码延后；恢复前重新测量固定显存、启动 staging 与热采样成本。
 
 ## Shader 编译边界
 

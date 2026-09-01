@@ -44,6 +44,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		def fsrContract = schema.fsrContract
 		def wavefrontContract = schema.realtimeWavefrontContract
 		def offlineWavefrontContract = schema.offlineWavefrontContract
+		def textureRecordContract = schema.textureRecordContract
 		def materialCoreContract = schema.materialCoreContract
 
 		if (primitive.size != 32 || section.size != 96 || lightNode.size != 32
@@ -64,6 +65,13 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| schema.sharedDescriptors.tintSamples != 50
 				|| schema.sharedDescriptors.baseColorPages != 51
 				|| schema.sharedDescriptors.materialCoreRecords != 52
+				|| textureRecordContract.recordSize != 32
+				|| textureRecordContract.baseOriginOffset != 0
+				|| textureRecordContract.frameExtentOffset != 4
+				|| textureRecordContract.baseInfoOffset != 8
+				|| textureRecordContract.normalOriginOffset != 12
+				|| textureRecordContract.auxiliaryInfoOffset != 16
+				|| textureRecordContract.opticalOriginOffset != 20
 				|| materialCoreContract.recordSize != 8
 				|| !materialCoreContract.textureIdMask.toString().equalsIgnoreCase('0xffff')
 				|| materialCoreContract.recipeControlShift != 16
@@ -342,6 +350,13 @@ public final class ShaderAbi {
     public static final int PUSH_CONSTANT_SIZE = ${push.size};
     public static final int NRD_MOTION_PUSH_CONSTANT_SIZE = ${nrdMotionPush.size};
     public static final int SUN_SHADOW_QUERY_CONSTANT_SIZE = ${sunShadowQuery.size};
+    public static final int TEXTURE_RECORD_SIZE = ${textureRecordContract.recordSize};
+    public static final int TEXTURE_BASE_ORIGIN_OFFSET = ${textureRecordContract.baseOriginOffset};
+    public static final int TEXTURE_FRAME_EXTENT_OFFSET = ${textureRecordContract.frameExtentOffset};
+    public static final int TEXTURE_BASE_INFO_OFFSET = ${textureRecordContract.baseInfoOffset};
+    public static final int TEXTURE_NORMAL_ORIGIN_OFFSET = ${textureRecordContract.normalOriginOffset};
+    public static final int TEXTURE_AUXILIARY_INFO_OFFSET = ${textureRecordContract.auxiliaryInfoOffset};
+    public static final int TEXTURE_OPTICAL_ORIGIN_OFFSET = ${textureRecordContract.opticalOriginOffset};
     public static final int MATERIAL_CORE_RECORD_SIZE = ${materialCoreContract.recordSize};
     public static final int MATERIAL_CORE_TEXTURE_ID_MASK = ${materialCoreContract.textureIdMask};
     public static final int MATERIAL_CORE_RECIPE_CONTROL_SHIFT = ${materialCoreContract.recipeControlShift};

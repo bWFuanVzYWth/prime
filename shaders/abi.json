@@ -281,6 +281,15 @@
   "sceneTextureCount": 64,
   "materialPageCount": 16,
   "baseColorPageCount": 64,
+  "textureRecordContract": {
+    "recordSize": 32,
+    "baseOriginOffset": 0,
+    "frameExtentOffset": 4,
+    "baseInfoOffset": 8,
+    "normalOriginOffset": 12,
+    "auxiliaryInfoOffset": 16,
+    "opticalOriginOffset": 20
+  },
   "materialCoreContract": {
     "recordSize": 8,
     "textureIdMask": "0xffff",

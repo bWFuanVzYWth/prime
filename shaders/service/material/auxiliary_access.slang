@@ -3,15 +3,16 @@ module "service/material/auxiliary_access.slang";
 
 import "service/material/access.slang";
 
-// Reviewed bindings in shaders/abi.json. Only full material evaluation imports the auxiliary
-// arrays, keeping opacity-only hit programs isolated from normal and optical resources.
+// Only full material evaluation imports these arrays; opacity entries cannot see them.
 [[vk::binding(19, 0)]]
 public Sampler2D<float4> primeMaterialNormalPages[16];
 [[vk::binding(49, 0)]]
 public Sampler2D<float4> primeMaterialOpticalPages[16];
 
 public float4 primeSampleMaterialNormal(uint textureId, float2 uv, float lod) {
-    uint pages = primeTextureRecordWord(textureId, 16u);
+    uint2 channel = primeTextureRecords.Load2(
+            textureId * PRIME_TEXTURE_RECORD_SIZE + 12u);
+    uint pages = channel.y;
     uint page = pages & 0xffu;
     uint width;
     uint height;
@@ -19,7 +20,7 @@ public float4 primeSampleMaterialNormal(uint textureId, float2 uv, float lod) {
     primeMaterialNormalPages[NonUniformResourceIndex(page)].GetDimensions(
             0, width, height, levels);
     float2 translated = primeTranslatedUv(
-            primeTextureRecordWord(textureId, 8u),
+            channel.x,
             primeTextureFrameExtent(textureId),
             int2(width, height),
             uv);
@@ -28,14 +29,16 @@ public float4 primeSampleMaterialNormal(uint textureId, float2 uv, float lod) {
 }
 
 public float4 primeSampleMaterialOptical(uint textureId, float2 uv, float lod) {
-    uint pages = primeTextureRecordWord(textureId, 16u);
+    uint2 channel = primeTextureRecords.Load2(
+            textureId * PRIME_TEXTURE_RECORD_SIZE + 16u);
+    uint pages = channel.x;
     uint page = (pages >> 8u) & 0xffu;
     uint width;
     uint height;
     uint levels;
     primeMaterialOpticalPages[NonUniformResourceIndex(page)].GetDimensions(
             0, width, height, levels);
-    uint packedOrigin = primeTextureRecordWord(textureId, 12u);
+    uint packedOrigin = channel.y;
     int2 extent = primeTextureFrameExtent(textureId);
     float2 translated = primeTranslatedUv(
             packedOrigin,

@@ -151,6 +151,66 @@ final class MaterialTexturePagesTest {
     }
 
     @Test
+    void textureRecordGroupsEachChannelHotFieldsWithoutChangingItsExactCodes() {
+        LabPbrAtlasFrame.Sprite sprite = new LabPbrAtlasFrame.Sprite(
+                7, 0, 0, 31, 17, 2, null, null, null, -1);
+        TexturePageLayout.Placement base =
+                new TexturePageLayout.Placement(5, 64, 128, sprite);
+        TexturePageLayout.Placement normal =
+                new TexturePageLayout.Placement(6, 256, 512, sprite);
+        TexturePageLayout.Placement optical =
+                new TexturePageLayout.Placement(7, 1024, 2048, sprite);
+        ByteBuffer bytes = MemoryUtil.memAlloc(32);
+        try {
+            MaterialTexturePages.writeTextureRecord(
+                    MemoryUtil.memAddress(bytes), sprite, base, normal, optical, 4, 3, 2);
+
+            assertArrayEquals(
+                    new int[] {
+                        66 | 130 << 16,
+                        31 | 17 << 16,
+                        4 | 5 << 8,
+                        258 | 514 << 16,
+                        6 | 7 << 8 | 3 << 16 | 2 << 24,
+                        1026 | 2050 << 16,
+                        0,
+                        0
+                    },
+                    new int[] {
+                        bytes.getInt(0),
+                        bytes.getInt(4),
+                        bytes.getInt(8),
+                        bytes.getInt(12),
+                        bytes.getInt(16),
+                        bytes.getInt(20),
+                        bytes.getInt(24),
+                        bytes.getInt(28)
+                    });
+        } finally {
+            MemoryUtil.memFree(bytes);
+        }
+    }
+
+    @Test
+    void textureRecordUsesExactMissingAuxiliaryPageCodes() {
+        LabPbrAtlasFrame.Sprite sprite = new LabPbrAtlasFrame.Sprite(
+                1, 0, 0, 1, 1, 0, null, null, null, -1);
+        TexturePageLayout.Placement base =
+                new TexturePageLayout.Placement(0, 0, 0, sprite);
+        ByteBuffer bytes = MemoryUtil.memAlloc(32);
+        try {
+            MaterialTexturePages.writeTextureRecord(
+                    MemoryUtil.memAddress(bytes), sprite, base, null, null, 0, 0, 0);
+
+            assertEquals(0x0000_ffff, bytes.getInt(16));
+            assertEquals(0, bytes.getInt(12));
+            assertEquals(0, bytes.getInt(20));
+        } finally {
+            MemoryUtil.memFree(bytes);
+        }
+    }
+
+    @Test
     void animatedAuxiliaryMapsUseBaseFrameIndicesAndInterpolationProgress() {
         LabPbrAtlasFrame.MaterialSource source = LabPbrAtlasFrame.MaterialSource.create(
                 new int[] {0xff000000, 0xffff0000},
