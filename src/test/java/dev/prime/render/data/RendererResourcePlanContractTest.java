@@ -24,7 +24,17 @@ final class RendererResourcePlanContractTest {
                         + ShaderAbi.WAVEFRONT_AREA_RECORD_SIZE
                         + ShaderAbi.WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL * Integer.BYTES,
                 realtime.renderBytesPerPixel());
-        assertEquals(624, realtime.renderBytesPerPixel());
+        assertEquals(600, realtime.renderBytesPerPixel());
+        assertEquals(
+                ShaderAbi.WAVEFRONT_AREA_GUIDE_RECORD_SIZE
+                        + ShaderAbi.WAVEFRONT_SURFACE_RECORD_SIZE
+                                * ShaderAbi.WAVEFRONT_PATH_SLOTS_PER_PIXEL
+                        + Math.max(
+                                ShaderAbi.WAVEFRONT_DETACHED_GUIDE_RECORD_SIZE,
+                                ShaderAbi.WAVEFRONT_STAGED_LIGHT_RECORD_SIZE
+                                        * ShaderAbi.WAVEFRONT_PATH_SLOTS_PER_PIXEL),
+                ShaderAbi.WAVEFRONT_AREA_RECORD_SIZE,
+                "detached guide must alias the later staged-light region");
         assertEquals(
                 ShaderAbi.OFFLINE_WAVEFRONT_PATH_RECORD_SIZE
                         + ShaderAbi.OFFLINE_WAVEFRONT_STAGE_RECORD_SIZE

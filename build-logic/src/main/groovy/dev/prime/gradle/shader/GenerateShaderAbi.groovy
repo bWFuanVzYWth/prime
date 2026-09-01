@@ -143,11 +143,18 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| wavefrontContract.etaScaleOffset != 108
 				|| !wavefrontContract.pathControlReservedMask.toString().equalsIgnoreCase('0x00ffff00')
 				|| wavefrontContract.pathSlotsPerPixel != 2
-				|| wavefrontContract.areaRecordSize != 296
+				|| wavefrontContract.areaGuideRecordSize != 32
+				|| wavefrontContract.stagedLightRecordSize != 12
+				|| wavefrontContract.detachedGuideRecordSize != 40
+				|| wavefrontContract.areaRecordSize != 272
 				|| wavefrontContract.areaRecordSize
-						!= 32 + (wavefrontSurfaceRecord.size + 12)
+						!= wavefrontContract.areaGuideRecordSize
+								+ wavefrontSurfaceRecord.size
 								* wavefrontContract.pathSlotsPerPixel
-								+ 40
+								+ Math.max(
+										wavefrontContract.stagedLightRecordSize
+												* wavefrontContract.pathSlotsPerPixel,
+										wavefrontContract.detachedGuideRecordSize)
 				|| wavefrontContract.queueEntriesPerPixel != 2
 				|| wavefrontContract.queueStorageEntriesPerPixel != 10
 				|| wavefrontContract.queueCount != 7
@@ -403,6 +410,9 @@ public final class ShaderAbi {
     public static final int WAVEFRONT_ETA_SCALE_OFFSET = ${wavefrontContract.etaScaleOffset};
     public static final int WAVEFRONT_PATH_CONTROL_RESERVED_MASK = ${wavefrontContract.pathControlReservedMask};
     public static final int WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${wavefrontContract.pathSlotsPerPixel};
+    public static final int WAVEFRONT_AREA_GUIDE_RECORD_SIZE = ${wavefrontContract.areaGuideRecordSize};
+    public static final int WAVEFRONT_STAGED_LIGHT_RECORD_SIZE = ${wavefrontContract.stagedLightRecordSize};
+    public static final int WAVEFRONT_DETACHED_GUIDE_RECORD_SIZE = ${wavefrontContract.detachedGuideRecordSize};
     public static final int OFFLINE_WAVEFRONT_PATH_RECORD_SIZE = ${offlineWavefrontContract.pathRecordSize};
     public static final int OFFLINE_WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${offlineWavefrontContract.pathSlotsPerPixel};
     public static final int OFFLINE_WAVEFRONT_SURFACE_RECORD_SIZE = ${offlineWavefrontContract.surfaceRecordSize};

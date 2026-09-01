@@ -20,9 +20,10 @@ public static const uint PRIME_DETACHED_GUIDE_RECORD_WORDS = 10u;
 
 uint primeDetachedGuideRecordWord(uint2 pixel) {
     uint pixelCount = primeWavefrontPixelCount();
-    uint precedingWords = pixelCount
-            * (PRIME_WAVEFRONT_AREA_RECORD_SIZE / 4u
-                    - PRIME_DETACHED_GUIDE_RECORD_WORDS);
+    // Detached guide and later staged-light records own this phase region in sequence.
+    uint precedingWords = pixelCount * PRIME_WAVEFRONT_AREA_GUIDE_WORDS
+            + pixelCount * PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL
+                    * (PRIME_WAVEFRONT_SURFACE_RECORD_SIZE / 4u);
     return precedingWords
             + primeWavefrontIndex(pixel) * PRIME_DETACHED_GUIDE_RECORD_WORDS;
 }
