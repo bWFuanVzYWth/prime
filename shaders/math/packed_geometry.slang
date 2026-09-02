@@ -216,6 +216,18 @@ public uint primePackOctahedralUnitVector(float3 value)
     return packSnorm2x16(clamp(normal.xy, float2(-1.0), float2(1.0)));
 }
 
+public bool primeDecodeTexturePageExtent(uint extentCode, out int2 extent)
+{
+    if (extentCode == 0xffffu) {
+        extent = int2(0);
+        return false;
+    }
+    uint width = (extentCode & 0xfffu) + 1u;
+    uint heightCode = extentCode >> 12u & 0xfu;
+    extent = int2(width, heightCode == 0xfu ? width : 1u << heightCode);
+    return true;
+}
+
 public uint primeMediumId(uint packedIdentity)
 {
     return packedIdentity & 0xffffu;

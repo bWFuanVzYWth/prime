@@ -80,6 +80,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				|| textureRecordContract.normalOriginOffset != 12
 				|| textureRecordContract.auxiliaryInfoOffset != 16
 				|| textureRecordContract.opticalOriginOffset != 20
+				|| textureRecordContract.auxiliaryExtentOffset != 24
 				|| materialCoreContract.recordSize != 8
 				|| !materialCoreContract.textureIdMask.toString().equalsIgnoreCase('0xffff')
 				|| materialCoreContract.recipeControlShift != 16
@@ -376,6 +377,7 @@ public final class ShaderAbi {
     public static final int TEXTURE_NORMAL_ORIGIN_OFFSET = ${textureRecordContract.normalOriginOffset};
     public static final int TEXTURE_AUXILIARY_INFO_OFFSET = ${textureRecordContract.auxiliaryInfoOffset};
     public static final int TEXTURE_OPTICAL_ORIGIN_OFFSET = ${textureRecordContract.opticalOriginOffset};
+    public static final int TEXTURE_AUXILIARY_EXTENT_OFFSET = ${textureRecordContract.auxiliaryExtentOffset};
     public static final int MATERIAL_CORE_RECORD_SIZE = ${materialCoreContract.recordSize};
     public static final int MATERIAL_CORE_TEXTURE_ID_MASK = ${materialCoreContract.textureIdMask};
     public static final int MATERIAL_CORE_RECIPE_CONTROL_SHIFT = ${materialCoreContract.recipeControlShift};

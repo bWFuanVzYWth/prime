@@ -131,7 +131,7 @@ final class RendererResourcePlanContractTest {
         assertEquals("GuideSurface", guideSurface.semantic());
         assertEquals("rgba32f-baseline", guideSurface.encoding());
         assertEquals(
-                "realtime.normalRoughness|realtime.reflectionNormalRoughness",
+                "realtime.normalRoughness|realtime.reflectionNormalRoughness|rr.normalRoughness",
                 guideSurface.descriptorOrOffset());
         assertEquals("transport-reconstruction-boundary", guideSurface.conversion().owner());
         assertEquals(List.of("trace", "reconstruction-prepare", "reconstruction"),

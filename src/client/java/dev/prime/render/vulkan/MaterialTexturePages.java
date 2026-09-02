@@ -532,6 +532,12 @@ public final class MaterialTexturePages implements AutoCloseable {
             }
             TexturePageLayout.Placement normal = normalLayout.placement(sprite.textureId());
             TexturePageLayout.Placement specular = opticalLayout.placement(sprite.textureId());
+            TexturePageLayout.Page normalPage = normal == null
+                    ? null
+                    : normalLayout.pages().get(normal.page());
+            TexturePageLayout.Page opticalPage = specular == null
+                    ? null
+                    : opticalLayout.pages().get(specular.page());
             int normalMip = normal == null
                     ? 0
                     : textureMipLimit(sprite, normalPages.get(normal.page()).image);
@@ -548,7 +554,9 @@ public final class MaterialTexturePages implements AutoCloseable {
                     baseColor,
                     baseColorPage,
                     normal,
+                    normalPage,
                     specular,
+                    opticalPage,
                     baseColorMip,
                     normalMip,
                     specularMip);
@@ -607,7 +615,9 @@ public final class MaterialTexturePages implements AutoCloseable {
             TexturePageLayout.Placement baseColor,
             TexturePageLayout.Page baseColorPage,
             TexturePageLayout.Placement normal,
+            TexturePageLayout.Page normalPage,
             TexturePageLayout.Placement optical,
+            TexturePageLayout.Page opticalPage,
             int baseColorMip,
             int normalMip,
             int opticalMip) {
@@ -632,17 +642,28 @@ public final class MaterialTexturePages implements AutoCloseable {
                 ShaderAbi.TEXTURE_NORMAL_ORIGIN_OFFSET,
                 normal == null ? 0 : normal.contentX(),
                 normal == null ? 0 : normal.contentY());
-        int normalPage = normal == null ? 0xff : normal.page();
-        int opticalPage = optical == null ? 0xff : optical.page();
+        int normalPageIndex = normal == null ? 0xff : normal.page();
+        int opticalPageIndex = optical == null ? 0xff : optical.page();
         MemoryUtil.memPutInt(
                 record + ShaderAbi.TEXTURE_AUXILIARY_INFO_OFFSET,
-                normalPage | opticalPage << 8 | normalMip << 16 | opticalMip << 24);
+                normalPageIndex
+                        | opticalPageIndex << 8
+                        | normalMip << 16
+                        | opticalMip << 24);
         putPackedExtent(
                 record,
                 ShaderAbi.TEXTURE_OPTICAL_ORIGIN_OFFSET,
                 optical == null ? 0 : optical.contentX(),
                 optical == null ? 0 : optical.contentY());
-        MemoryUtil.memPutInt(record + 24L, 0);
+        int normalExtentCode = normalPage == null
+                ? ShaderAbi.TEXTURE_PAGE_EXTENT_QUERY_CODE
+                : pageExtentCode(normalPage);
+        int opticalExtentCode = opticalPage == null
+                ? ShaderAbi.TEXTURE_PAGE_EXTENT_QUERY_CODE
+                : pageExtentCode(opticalPage);
+        MemoryUtil.memPutInt(
+                record + ShaderAbi.TEXTURE_AUXILIARY_EXTENT_OFFSET,
+                normalExtentCode | opticalExtentCode << 16);
         MemoryUtil.memPutInt(record + 28L, 0);
     }
 

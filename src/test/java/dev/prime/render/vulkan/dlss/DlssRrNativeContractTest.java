@@ -26,6 +26,7 @@ final class DlssRrNativeContractTest {
 
     @Test
     void ngxReceivesTheDeclaredLinearHdrGuideFormats() {
+        assertEquals(17, DlssRrPreparePass.IMAGE_COUNT);
         assertEquals(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, DlssRrTargets.COLOR_FORMAT);
         assertEquals(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, DlssRrTargets.ALBEDO_FORMAT);
         assertEquals(

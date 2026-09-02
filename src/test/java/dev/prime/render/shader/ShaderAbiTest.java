@@ -71,6 +71,7 @@ final class ShaderAbiTest {
         assertEquals(12, ShaderAbi.TEXTURE_NORMAL_ORIGIN_OFFSET);
         assertEquals(16, ShaderAbi.TEXTURE_AUXILIARY_INFO_OFFSET);
         assertEquals(20, ShaderAbi.TEXTURE_OPTICAL_ORIGIN_OFFSET);
+        assertEquals(24, ShaderAbi.TEXTURE_AUXILIARY_EXTENT_OFFSET);
         assertEquals(8, ShaderAbi.MATERIAL_CORE_RECORD_SIZE);
         assertEquals(0xffff, ShaderAbi.MATERIAL_CORE_TEXTURE_ID_MASK);
         assertEquals(16, ShaderAbi.MATERIAL_CORE_RECIPE_CONTROL_SHIFT);

@@ -47,6 +47,7 @@ public int2 primeSceneTextureExtent(uint index) {
 }
 
 static const uint PRIME_MISSING_MATERIAL_PAGE = 0xffu;
+public static const uint PRIME_TEXTURE_AUXILIARY_EXTENT_OFFSET = 24u;
 
 public uint primeTextureRecordWord(uint textureId, uint byteOffset) {
     return primeTextureRecords.Load(textureId * PRIME_TEXTURE_RECORD_SIZE + byteOffset);
@@ -104,11 +105,7 @@ public float4 primeSampleStaticAlbedo(uint textureId, float2 uv, float lod) {
     uint page = info >> 8u & 0xffu;
     uint extentCode = info >> 16u;
     int2 backingExtent;
-    if (extentCode != 0xffffu) {
-        uint width = (extentCode & 0xfffu) + 1u;
-        uint heightCode = extentCode >> 12u & 0xfu;
-        backingExtent = int2(width, heightCode == 0xfu ? width : 1u << heightCode);
-    } else {
+    if (!primeDecodeTexturePageExtent(extentCode, backingExtent)) {
         uint width;
         uint height;
         uint levels;

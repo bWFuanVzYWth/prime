@@ -296,7 +296,8 @@
     "pageExtentQueryCode": "0xffff",
     "normalOriginOffset": 12,
     "auxiliaryInfoOffset": 16,
-    "opticalOriginOffset": 20
+    "opticalOriginOffset": 20,
+    "auxiliaryExtentOffset": 24
   },
   "materialCoreContract": {
     "recordSize": 8,

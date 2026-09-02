@@ -471,10 +471,10 @@
       "usage": ["storage", "sampled"],
       "access": "trace-read-write-then-reconstruction-read",
       "sampling": "point",
-      "descriptorOrOffset": "realtime.normalRoughness|realtime.reflectionNormalRoughness",
+      "descriptorOrOffset": "realtime.normalRoughness|realtime.reflectionNormalRoughness|rr.normalRoughness",
       "lifetime": {"owner": "realtime-wavefront-then-raw-frame", "generation": "frame", "firstWrite": "trace", "consumers": ["trace", "reconstruction-prepare", "reconstruction"], "lastRead": "reconstruction", "aliasGroup": "none", "retire": "frame-retire"},
       "conversion": {"producer": "surface-split-and-realtime-output-resolve", "sourceSemantic": "branch-guide-surface", "owner": "transport-reconstruction-boundary", "targetSemantic": "GuideSurface", "backendBoundary": "nrd-or-rr"},
-      "verification": {"artifactChecks": "rgba32f-format-and-reflection-binding", "behaviorOracle": "branch-guide-lifetime-and-final-overwrite", "numericOrImageThreshold": "lossless-f32", "benchmark": "minus-16-bytes-per-path-slot"}
+      "verification": {"artifactChecks": "rgba32f-format-and-reflection-binding", "behaviorOracle": "branch-guide-lifetime-final-overwrite-and-direct-rr-consumption", "numericOrImageThreshold": "lossless-f32", "benchmark": "minus-16-bytes-per-path-slot-and-rr-render-pixel"}
     },
     {
       "id": "visible-history-position",
@@ -618,7 +618,7 @@
       "items": [
         {"id": "noisy-diffuse", "semantic": "noisy-diffuse-radiance", "debugLabel": "Prime RR noisy diffuse", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "noisy-specular", "semantic": "noisy-specular-radiance", "debugLabel": "Prime RR noisy specular", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
-        {"id": "source-normal", "semantic": "source-world-normal-roughness", "debugLabel": "Prime RR source world normal and roughness", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 1, "fixedBytes": 0},
+        {"id": "normal", "semantic": "rr-world-normal-roughness", "debugLabel": "Prime RR world normal and roughness", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "view-z", "semantic": "linear-view-z", "debugLabel": "Prime RR linear view Z", "extentSource": "render", "bytesPerElement": 4, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "transport-scratch-input-color", "semantic": "transport-scratch-then-rr-input-radiance", "debugLabel": "Prime RR transport scratch / input color", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "motion", "semantic": "visible-motion-uv", "debugLabel": "Prime RR canonical visible motion", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
@@ -627,7 +627,7 @@
         {"id": "primary-position", "semantic": "primary-world-position", "debugLabel": "Prime RR primary position", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "sun-lighting", "semantic": "unshadowed-sun-lighting", "debugLabel": "Prime RR sun lighting", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "sun-penumbra-hit-distance", "semantic": "sun-penumbra-then-specular-hit-distance", "debugLabel": "Prime RR sun penumbra / specular hit distance", "extentSource": "render", "bytesPerElement": 2, "elementsPerPixel": 1, "fixedBytes": 0},
-        {"id": "normal", "semantic": "rr-world-normal-roughness", "debugLabel": "Prime RR world normal and roughness", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 1, "fixedBytes": 0},
+        {"id": "reflection-normal", "semantic": "reflection-guide-surface", "debugLabel": "Prime RR reflection guide surface", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "specular-motion", "semantic": "reflection-motion-uv", "debugLabel": "Prime RR reflection motion", "extentSource": "render", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "reflection-position", "semantic": "reflection-previous-position", "debugLabel": "Prime RR reflection previous virtual position", "extentSource": "render", "bytesPerElement": 16, "elementsPerPixel": 1, "fixedBytes": 0},
         {"id": "output", "semantic": "linear-rec2020-radiance", "debugLabel": "Prime RR linear HDR output", "extentSource": "display", "bytesPerElement": 8, "elementsPerPixel": 1, "fixedBytes": 0},

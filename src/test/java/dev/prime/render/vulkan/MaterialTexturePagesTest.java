@@ -168,7 +168,9 @@ final class MaterialTexturePagesTest {
                     base,
                     new TexturePageLayout.Page(4096, 2048),
                     normal,
+                    new TexturePageLayout.Page(2048, 1024),
                     optical,
+                    new TexturePageLayout.Page(3000, 3000),
                     4,
                     3,
                     2);
@@ -181,7 +183,7 @@ final class MaterialTexturePagesTest {
                         258 | 514 << 16,
                         6 | 7 << 8 | 3 << 16 | 2 << 24,
                         1026 | 2050 << 16,
-                        0,
+                        0xfbb7_a7ff,
                         0
                     },
                     new int[] {
@@ -214,6 +216,8 @@ final class MaterialTexturePagesTest {
                     new TexturePageLayout.Page(1, 1),
                     null,
                     null,
+                    null,
+                    null,
                     0,
                     0,
                     0);
@@ -221,6 +225,7 @@ final class MaterialTexturePagesTest {
             assertEquals(0x0000_ffff, bytes.getInt(16));
             assertEquals(0, bytes.getInt(12));
             assertEquals(0, bytes.getInt(20));
+            assertEquals(0xffff_ffff, bytes.getInt(24));
         } finally {
             MemoryUtil.memFree(bytes);
         }
@@ -232,6 +237,10 @@ final class MaterialTexturePagesTest {
                 1, 0, 0, 1, 1, 0, null, null, null, -1);
         TexturePageLayout.Placement base =
                 new TexturePageLayout.Placement(0, 0, 0, sprite);
+        TexturePageLayout.Placement normal =
+                new TexturePageLayout.Placement(0, 0, 0, sprite);
+        TexturePageLayout.Placement optical =
+                new TexturePageLayout.Placement(0, 0, 0, sprite);
         ByteBuffer bytes = MemoryUtil.memAlloc(32);
         try {
             MaterialTexturePages.writeTextureRecord(
@@ -239,13 +248,16 @@ final class MaterialTexturePagesTest {
                     sprite,
                     base,
                     new TexturePageLayout.Page(8192, 4096),
-                    null,
-                    null,
+                    normal,
+                    new TexturePageLayout.Page(8192, 4096),
+                    optical,
+                    new TexturePageLayout.Page(4097, 2048),
                     0,
                     0,
                     0);
 
             assertEquals(0xffff, bytes.getInt(8) >>> 16);
+            assertEquals(0xffff_ffff, bytes.getInt(24));
         } finally {
             MemoryUtil.memFree(bytes);
         }
@@ -264,6 +276,8 @@ final class MaterialTexturePagesTest {
                     sprite,
                     base,
                     new TexturePageLayout.Page(3000, 3000),
+                    null,
+                    null,
                     null,
                     null,
                     0,

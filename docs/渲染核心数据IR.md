@@ -187,7 +187,10 @@ abandon 不得读取旧 generation。debug view 不得延长生产资源生命�
 
 RR render targets 中 ray-tracing `transportScratch` 在 `rr_prepare` 后成为 `inputColor`，
 `sunPenumbra` 成为 `specularHitDistance`。两组分别共享 RGBA16F/R16F image；ray tracing 与 prepare
-之间的 compute barrier 是 owner 转换边界，诊断捕获必须在覆盖前完成。
+之间的 compute barrier 是 owner 转换边界，诊断捕获必须在覆盖前完成。raygen 已把世界法线和
+线性粗糙度规范化并限制到合法范围，RR/NGX 直接消费同一张 RGBA32F guide，不再由 prepare
+重复归一化或复制。独立的 RGBA32F reflection guide 仍是 wavefront 双身份状态，不能与主 guide
+合并；prepare 不再把它误作主法线输出。
 
 Reconstruction IR 至少区分：
 

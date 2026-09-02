@@ -6,6 +6,7 @@ import "model/material/transparent.slang";
 import "policy/transport/transparent_nee.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/material/normal_mapping.slang";
+import "math/packed_geometry.slang";
 
 static const uint PRIME_MATERIAL_INPUT_WORDS = 3;
 static const uint PRIME_MATERIAL_WITNESS_WORDS = 10;
@@ -33,6 +34,17 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint packedSpecular = control.w;
 
     uint mask = 0;
+    int2 decodedExtent;
+    if (!primeDecodeTexturePageExtent(0u, decodedExtent)
+            || any(decodedExtent != int2(1, 1))
+            || !primeDecodeTexturePageExtent(0xbfffu, decodedExtent)
+            || any(decodedExtent != int2(4096, 2048))
+            || !primeDecodeTexturePageExtent(0xfbb7u, decodedExtent)
+            || any(decodedExtent != int2(3000, 3000))
+            || primeDecodeTexturePageExtent(0xffffu, decodedExtent)
+            || any(decodedExtent != int2(0))) {
+        mask |= PRIME_TEST_FAILURE_IDENTITY;
+    }
     PrimeLabPbrSample decoded = primeDecodeLabPbr(packedNormal, packedSpecular, flags);
     PrimeCanonicalOptics canonical = primeAdaptLabPbrSpecular(
             unpackUnorm4x8ToFloat(packedSpecular));

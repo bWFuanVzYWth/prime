@@ -40,7 +40,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     private final VulkanImage sunLighting;
     private final VulkanImage sunPenumbra;
     private final VulkanImage inputColor;
-    private final VulkanImage normalRoughness;
+    private final VulkanImage reflectionNormalRoughness;
     private final VulkanImage specularMotion;
     private final VulkanImage specularHitDistance;
     private final VulkanImage reflectionPosition;
@@ -63,7 +63,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
         this.sunLighting = images.get(9);
         this.sunPenumbra = images.get(10);
         this.inputColor = this.transportScratch;
-        this.normalRoughness = images.get(11);
+        this.reflectionNormalRoughness = images.get(11);
         this.specularMotion = images.get(12);
         this.specularHitDistance = this.sunPenumbra;
         this.reflectionPosition = images.get(13);
@@ -87,7 +87,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
                     VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "Prime RR noisy specular");
             add(context, images, renderWidth, renderHeight,
                     VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
-                    "Prime RR source world normal and roughness");
+                    "Prime RR world normal and roughness");
             add(context, images, renderWidth, renderHeight,
                     LINEAR_DEPTH_FORMAT, "Prime RR linear view Z");
             add(context, images, renderWidth, renderHeight,
@@ -107,7 +107,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
                     VK12.VK_FORMAT_R16_SFLOAT,
                     "Prime RR sun penumbra / specular hit distance");
             add(context, images, renderWidth, renderHeight,
-                    NORMAL_ROUGHNESS_FORMAT, "Prime RR world normal and roughness");
+                    NORMAL_ROUGHNESS_FORMAT, "Prime RR reflection guide surface");
             add(context, images, renderWidth, renderHeight,
                     SPECULAR_MOTION_FORMAT, "Prime RR reflection motion");
             add(context, images, renderWidth, renderHeight,
@@ -188,7 +188,9 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     @Override public VulkanImage reconstructionMotion() { return this.motion; }
     @Override public VulkanImage material() { return this.material; }
     @Override public VulkanImage specularMaterial() { return this.specularMaterial; }
-    @Override public VulkanImage reflectionNormalRoughness() { return this.normalRoughness; }
+    @Override public VulkanImage reflectionNormalRoughness() {
+        return this.reflectionNormalRoughness;
+    }
     @Override public VulkanImage reconstructionControl() { return this.reconstructionControl; }
     @Override public VulkanImage primaryPosition() { return this.primaryPosition; }
     @Override public VulkanImage reflectionPosition() { return this.reflectionPosition; }
@@ -197,7 +199,7 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
 
     public VulkanImage inputColor() { return this.inputColor; }
     public VulkanImage motion() { return this.motion; }
-    public VulkanImage rrNormalRoughness() { return this.normalRoughness; }
+    public VulkanImage rrNormalRoughness() { return this.sourceNormalRoughness; }
     public VulkanImage specularMotion() { return this.specularMotion; }
     public VulkanImage specularHitDistance() { return this.specularHitDistance; }
     public VulkanImage rrOutput() { return this.rrOutput; }

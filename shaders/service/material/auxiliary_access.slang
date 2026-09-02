@@ -2,6 +2,7 @@
 module "service/material/auxiliary_access.slang";
 
 import "service/material/access.slang";
+import "math/packed_geometry.slang";
 
 // Only full material evaluation imports these arrays; opacity entries cannot see them.
 [[vk::binding(19, 0)]]
@@ -14,36 +15,46 @@ public float4 primeSampleMaterialNormal(uint textureId, float2 uv, float lod) {
             textureId * PRIME_TEXTURE_RECORD_SIZE + 12u);
     uint pages = channel.y;
     uint page = pages & 0xffu;
-    uint width;
-    uint height;
-    uint levels;
-    primeMaterialNormalPages[NonUniformResourceIndex(page)].GetDimensions(
-            0, width, height, levels);
+    uint extentCodes = primeTextureRecordWord(
+            textureId, PRIME_TEXTURE_AUXILIARY_EXTENT_OFFSET);
+    int2 backingExtent;
+    if (!primeDecodeTexturePageExtent(extentCodes & 0xffffu, backingExtent)) {
+        uint width;
+        uint height;
+        uint levels;
+        primeMaterialNormalPages[NonUniformResourceIndex(page)].GetDimensions(
+                0, width, height, levels);
+        backingExtent = int2(width, height);
+    }
     float2 translated = primeTranslatedUv(
             channel.x,
             primeTextureFrameExtent(textureId),
-            int2(width, height),
+            backingExtent,
             uv);
     return primeMaterialNormalPages[NonUniformResourceIndex(page)].SampleLevel(
             translated, min(lod, float((pages >> 16u) & 0xffu)));
 }
 
 public float4 primeSampleMaterialOptical(uint textureId, float2 uv, float lod) {
-    uint2 channel = primeTextureRecords.Load2(
+    uint3 channel = primeTextureRecords.Load3(
             textureId * PRIME_TEXTURE_RECORD_SIZE + 16u);
     uint pages = channel.x;
     uint page = (pages >> 8u) & 0xffu;
-    uint width;
-    uint height;
-    uint levels;
-    primeMaterialOpticalPages[NonUniformResourceIndex(page)].GetDimensions(
-            0, width, height, levels);
+    int2 backingExtent;
+    if (!primeDecodeTexturePageExtent(channel.z >> 16u, backingExtent)) {
+        uint width;
+        uint height;
+        uint levels;
+        primeMaterialOpticalPages[NonUniformResourceIndex(page)].GetDimensions(
+                0, width, height, levels);
+        backingExtent = int2(width, height);
+    }
     uint packedOrigin = channel.y;
     int2 extent = primeTextureFrameExtent(textureId);
     float2 translated = primeTranslatedUv(
             packedOrigin,
             extent,
-            int2(width, height),
+            backingExtent,
             uv);
     float4 filtered = primeMaterialOpticalPages[NonUniformResourceIndex(page)].SampleLevel(
             translated, min(lod, float((pages >> 24u) & 0xffu)));

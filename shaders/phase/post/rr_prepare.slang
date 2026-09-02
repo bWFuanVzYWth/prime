@@ -12,21 +12,19 @@ import "service/reconstruct/nrd/common.slang";
 [[vk::binding(1, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> rrNoisySpecular;
 [[vk::binding(2, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> rrDiffuseMaterial;
 [[vk::binding(3, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> rrSpecularMaterial;
-[[vk::binding(4, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> rrSourceNormalRoughness;
-[[vk::binding(5, 0)]] [[vk::image_format("r32f")]] writeonly RWTexture2D<float4> rrLinearViewZ;
-[[vk::binding(6, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> rrPrimaryPosition;
-[[vk::binding(7, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> rrSunLighting;
-[[vk::binding(8, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> rrStableRadiance;
-[[vk::binding(9, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture3D<float4> rrAerialRadiance;
-[[vk::binding(10, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture3D<float4> rrAerialTransmittance;
-[[vk::binding(11, 0)]] [[vk::image_format("rgba16f")]] writeonly RWTexture2D<float4> rrInputColor;
-[[vk::binding(12, 0)]] [[vk::image_format("rg32f")]] writeonly RWTexture2D<float4> rrMotion;
-[[vk::binding(13, 0)]] [[vk::image_format("rgba32f")]] writeonly RWTexture2D<float4> rrNormalRoughness;
-[[vk::binding(14, 0)]] [[vk::image_format("rg32f")]] writeonly RWTexture2D<float4> rrSpecularMotion;
-[[vk::binding(15, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> rrReflectionPreviousVirtualPosition;
-[[vk::binding(16, 0)]] [[vk::image_format("r16f")]] writeonly RWTexture2D<float4> rrSpecularHitDistance;
-[[vk::binding(17, 0)]] [[vk::image_format("r16f")]] writeonly RWTexture2D<float4> rrResponsivity;
-[[vk::binding(18, 0)]] [[vk::image_format("r8ui")]] readonly RWTexture2D<uint> rrReconstructionControl;
+[[vk::binding(4, 0)]] [[vk::image_format("r32f")]] writeonly RWTexture2D<float4> rrLinearViewZ;
+[[vk::binding(5, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> rrPrimaryPosition;
+[[vk::binding(6, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> rrSunLighting;
+[[vk::binding(7, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> rrStableRadiance;
+[[vk::binding(8, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture3D<float4> rrAerialRadiance;
+[[vk::binding(9, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture3D<float4> rrAerialTransmittance;
+[[vk::binding(10, 0)]] [[vk::image_format("rgba16f")]] writeonly RWTexture2D<float4> rrInputColor;
+[[vk::binding(11, 0)]] [[vk::image_format("rg32f")]] writeonly RWTexture2D<float4> rrMotion;
+[[vk::binding(12, 0)]] [[vk::image_format("rg32f")]] writeonly RWTexture2D<float4> rrSpecularMotion;
+[[vk::binding(13, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> rrReflectionPreviousVirtualPosition;
+[[vk::binding(14, 0)]] [[vk::image_format("r16f")]] writeonly RWTexture2D<float4> rrSpecularHitDistance;
+[[vk::binding(15, 0)]] [[vk::image_format("r16f")]] writeonly RWTexture2D<float4> rrResponsivity;
+[[vk::binding(16, 0)]] [[vk::image_format("r8ui")]] readonly RWTexture2D<uint> rrReconstructionControl;
 
 struct PrimeRrPreparePushConstants {
     float4x4 currentClipToWorld;
@@ -165,8 +163,6 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupI
         // Raygen already writes finite surface albedos. Only sky needs the SDK's neutral fallback.
         primeImageStore(rrDiffuseMaterial, pixel, float4(float3(0.5), material.a));
         primeImageStore(rrSpecularMaterial, pixel, float4(float3(0.5), specularMaterial.a));
-        primeWriteImageStore(rrNormalRoughness, pixel, float4(
-                0.0, 0.0, 1.0, PRIME_DEFAULT_REFERENCE_LINEAR_ROUGHNESS));
         primeWriteImageStore(rrLinearViewZ, pixel, float4(PRIME_RR_SKY_VIEW_Z));
         float2 currentSampleUv =
                 (float2(pixel) + float2(0.5) + rrPush.currentJitterPixels)
@@ -187,11 +183,6 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupI
         return;
     }
 
-    float3 normal;
-    float roughness;
-    primeNrdReadNormalRoughness(
-            primeReadonlyImageLoad(rrSourceNormalRoughness, pixel), normal, roughness);
-    primeWriteImageStore(rrNormalRoughness, pixel, float4(normal, roughness));
     // The transmitted PSR and visible reflection interface can have different roughness.
     float reflectionRoughness = specularMaterial.a;
     float4 noisyDiffuse = primeReadonlyImageLoad(rrNoisyDiffuse, pixel);
