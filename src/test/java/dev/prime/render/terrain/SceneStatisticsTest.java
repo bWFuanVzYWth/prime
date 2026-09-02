@@ -47,33 +47,6 @@ final class SceneStatisticsTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new TerrainScene.SceneStatistics(0, 0L, 0L, 0, -1));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new TerrainScene.SceneStatistics(
-                        0,
-                        0L,
-                        0L,
-                        0,
-                        0,
-                        TextureTintUsage.EMPTY,
-                        MaterialTableCandidate.EMPTY,
-                        3L,
-                        4L));
-    }
-
-    @Test
-    void tintIdStatisticsRejectImpossibleRegistrySnapshots() {
-        assertEquals(new TerrainScene.TintIdStatistics(1, 0),
-                new TerrainScene.TintIdStatistics(1, 0));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new TerrainScene.TintIdStatistics(0, 0));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new TerrainScene.TintIdStatistics(3, 1));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new TerrainScene.TintIdStatistics(1, 0x1_0000));
     }
 
     @Test

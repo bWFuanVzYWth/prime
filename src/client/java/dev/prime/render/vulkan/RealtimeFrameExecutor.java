@@ -46,8 +46,6 @@ public final class RealtimeFrameExecutor implements Destroyable {
             VulkanImage stableRadiance,
             ImageDiagnosticSelection diagnostics,
             DisplayExposureDiagnostics exposureDiagnostics,
-            RendererDataRangeDiagnostics rangeDiagnostics,
-            RendererSignalRangeDiagnostics signalDiagnostics,
             VulkanGpuTextureView atlasView,
             List<TraceBackend.SceneTexture> sceneTextures,
             long textureRevision,
@@ -57,8 +55,6 @@ public final class RealtimeFrameExecutor implements Destroyable {
         Objects.requireNonNull(processorFrame, "processorFrame");
         long atmosphereFrame = 0L;
         MaterialTexturePages.FrameToken materialFrame = null;
-        RendererDataRangeDiagnostics.Capture rangeCapture = null;
-        RendererSignalRangeDiagnostics.Capture signalCapture = null;
         VulkanFrameSubmission submission =
                 new VulkanFrameSubmission(this.imageInitialization);
         FrameCompletion completion = new FrameCompletion();
@@ -143,34 +139,11 @@ public final class RealtimeFrameExecutor implements Destroyable {
             }
             processor.captureRendererDiagnostic(
                     commandBuffer, this.imageInitialization, diagnostics.renderer());
-            if (signalDiagnostics != null) {
-                signalCapture = signalDiagnostics.record(
-                        commandBuffer, processor.rawFrame());
-                RendererSignalRangeDiagnostics.Capture trackedSignalCapture = signalCapture;
-                completion.onCommit(7, () -> signalDiagnostics.submitted(
-                        trackedSignalCapture));
-                completion.onAbandon(7, failure -> ResourceCleanup.run(
-                        () -> signalDiagnostics.abandon(trackedSignalCapture), failure));
-            }
             processor.record(
                     commandBuffer,
                     processorFrame,
                     plan.reconstruction(),
                     this.imageInitialization);
-            if (rangeDiagnostics != null
-                    && processor.mode()
-                            != dev.prime.render.post.PostProcessingMode.DISABLED) {
-                rangeCapture = rangeDiagnostics.record(
-                        commandBuffer,
-                        processor.rawFrame().viewZ(),
-                        processor.rawFrame().reconstructionMotion(),
-                        plan.reconstructionReset());
-                RendererDataRangeDiagnostics.Capture trackedRangeCapture = rangeCapture;
-                completion.onCommit(6, () -> rangeDiagnostics.submitted(
-                        trackedRangeCapture));
-                completion.onAbandon(6, failure -> ResourceCleanup.run(
-                        () -> rangeDiagnostics.abandon(trackedRangeCapture), failure));
-            }
             processor.presentRendererDiagnostic(commandBuffer, diagnostics.renderer());
             DisplayExposureDiagnostics.Capture exposureCapture = exposureDiagnostics.record(
                     commandBuffer, processor.displayExposureStateBuffer());

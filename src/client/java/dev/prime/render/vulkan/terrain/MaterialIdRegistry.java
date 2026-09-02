@@ -1,7 +1,7 @@
 package dev.prime.render.vulkan.terrain;
 
 import dev.prime.render.terrain.MaterialIdResolver;
-import dev.prime.render.terrain.MaterialTableCandidate;
+import dev.prime.render.terrain.MaterialKey;
 import dev.prime.render.shader.ShaderAbi;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -16,7 +16,7 @@ final class MaterialIdRegistry {
             ShaderAbi.MATERIAL_CORE_RECORD_SIZE);
 
     private final MediumIdRegistry mediumIds;
-    private final Map<MaterialTableCandidate.Key, Integer> ids = new HashMap<>();
+    private final Map<MaterialKey, Integer> ids = new HashMap<>();
     private final int[] coreRecords =
             new int[(MaterialIdResolver.MAX_ID + 1) * CORE_WORDS];
     private int nextId = 1;
@@ -25,7 +25,7 @@ final class MaterialIdRegistry {
         this.mediumIds = Objects.requireNonNull(mediumIds, "mediumIds");
     }
 
-    int resolve(MaterialTableCandidate.Key key) {
+    int resolve(MaterialKey key) {
         Objects.requireNonNull(key, "key");
         Integer existing = this.ids.get(key);
         if (existing != null) {
@@ -47,23 +47,7 @@ final class MaterialIdRegistry {
         return Arrays.copyOf(this.coreRecords, this.nextId * CORE_WORDS);
     }
 
-    Snapshot snapshot() {
-        return new Snapshot(this.ids.size(), this.nextId - 1);
-    }
-
-    record Snapshot(int assignedCount, int highWaterId) {
-        Snapshot {
-            if (assignedCount < 0
-                    || assignedCount > MaterialIdResolver.MAX_ID
-                    || highWaterId < 0
-                    || highWaterId > MaterialIdResolver.MAX_ID
-                    || assignedCount != highWaterId) {
-                throw new IllegalArgumentException("Invalid renderer MaterialId statistics");
-            }
-        }
-    }
-
-    static int encodeCoreWord(MaterialTableCandidate.Key key) {
+    static int encodeCoreWord(MaterialKey key) {
         Objects.requireNonNull(key, "key");
         int textureId = key.textureId();
         int control = key.materialControl();

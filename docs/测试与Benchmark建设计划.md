@@ -301,9 +301,8 @@ encoding、binding、conversion、verification、phase lifetime、alias 和 memo
 
 当前静态账本锁定的显式下界是 realtime wavefront 524 B/render px、offline wavefront
 244 B/render px、unfiltered raw images 95 B/render px、DLSS RR 137 B/render px +
-8 B/display px，以及 Prime 自有 NRD images 291 B/render px。`VulkanContext.memorySnapshot()` 提供
-VMA block/allocation 与 heap budget estimate 的同点快照，用于 resize、reload 和 backend switch
-前后取样；完全由外部 SDK 分配的内存不伪装成 VMA 数据，仍需 SDK 专门归因。
+8 B/display px，以及 Prime 自有 NRD images 291 B/render px。动态显存归因使用外部 profile；完全由
+外部 SDK 分配的内存不能伪装成 Prime VMA 数据。
 
 实时 wavefront 的 524 B/px 由两套 112 B path、264 B phase scratch 和 36 B queue index 组成。
 GPU round-trip 测试逐位验证两项 `MediumId:u16`、两组 f32 extinction 与 f32 `etaScale`；生成 ABI

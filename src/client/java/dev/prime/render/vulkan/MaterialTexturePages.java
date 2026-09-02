@@ -7,11 +7,7 @@ import dev.prime.render.terrain.LabPbrAtlasFrame;
 import dev.prime.render.terrain.LabPbrMaterialSet;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
@@ -33,7 +29,6 @@ import org.lwjgl.vulkan.VkImageMemoryBarrier2;
  * single-frame auxiliary map is intentionally reused for every frame.
  */
 public final class MaterialTexturePages implements AutoCloseable {
-    private static final String MEASUREMENT_ENABLE_PROPERTY = "prime.renderer.measure";
     private static final int BASE_COLOR_BYTES_PER_PIXEL = 8;
     private static final int AUXILIARY_BYTES_PER_PIXEL = 4;
     private static final int NORMAL_DEFAULT_ARGB = 0x008080ff;
@@ -43,7 +38,6 @@ public final class MaterialTexturePages implements AutoCloseable {
     private final StagingArena stagingArena;
     private final ArrayList<AnimationUpdate> animationUpdates = new ArrayList<>();
     private final ArrayList<Copy> animationCopies = new ArrayList<>();
-    private final boolean measurementsEnabled;
     private List<LabPbrAtlasFrame.AnimationSample> animationSamples = List.of();
     private Resources resources;
     private final PendingSubmission<FrameToken> pending = new PendingSubmission<>();
@@ -52,7 +46,6 @@ public final class MaterialTexturePages implements AutoCloseable {
     public MaterialTexturePages(VulkanContext context, StagingArena stagingArena) {
         this.context = context;
         this.stagingArena = stagingArena;
-        this.measurementsEnabled = Boolean.getBoolean(MEASUREMENT_ENABLE_PROPERTY);
     }
 
     public LabPbrMaterialSet ensure(
@@ -105,11 +98,6 @@ public final class MaterialTexturePages implements AutoCloseable {
 
     public VulkanBuffer textureRecords() {
         return requireResources().textureRecords;
-    }
-
-    /** Returns an immutable aggregate only when opt-in renderer measurements were enabled. */
-    public MeasurementSnapshot measurementSnapshot() {
-        return requireResources().measurement;
     }
 
     /** Records the complete generation upload before it can be consumed by a frame. */
@@ -374,8 +362,7 @@ public final class MaterialTexturePages implements AutoCloseable {
                     source,
                     baseColorLayout,
                     normalLayout,
-                    opticalLayout,
-                    this.measurementsEnabled);
+                    opticalLayout);
             PrimeInfo.LOGGER.info(
                     "Translated material storage: {} textures, base={} pages/{} bytes, normal={} pages/{} bytes, optical={} pages/{} bytes, records={} bytes, animation cache={} bytes",
                     source.sprites().size(),
@@ -1245,7 +1232,6 @@ public final class MaterialTexturePages implements AutoCloseable {
         private final VulkanBuffer textureRecords;
         private final LabPbrMaterialSet materials;
         private final List<AnimatedMaterialSprite> animated;
-        private final MeasurementSnapshot measurement;
         private boolean prepared;
         private boolean destroyed;
 
@@ -1260,8 +1246,7 @@ public final class MaterialTexturePages implements AutoCloseable {
                 LabPbrAtlasFrame.Snapshot source,
                 TexturePageLayout.Layout baseColorLayout,
                 TexturePageLayout.Layout normalLayout,
-                TexturePageLayout.Layout opticalLayout,
-                boolean measurementsEnabled) {
+                TexturePageLayout.Layout opticalLayout) {
             this.sourceGeneration = sourceGeneration;
             this.vanillaAtlasView = vanillaAtlasView;
             this.baseColorPages = baseColorPages;
@@ -1310,19 +1295,6 @@ public final class MaterialTexturePages implements AutoCloseable {
                 throw failure;
             }
             this.animated = List.copyOf(animated);
-            this.measurement = measurementsEnabled
-                    ? measure(
-                            sourceGeneration,
-                            source,
-                            baseColorLayout,
-                            normalLayout,
-                            opticalLayout,
-                            baseColorPages,
-                            normalPages,
-                            opticalPages,
-                            textureRecords.size(),
-                            this.animationFrameBytes())
-                    : null;
         }
 
         long animationFrameBytes() {
@@ -1515,261 +1487,4 @@ public final class MaterialTexturePages implements AutoCloseable {
             }
         }
     }
-
-    private static MeasurementSnapshot measure(
-            long sourceGeneration,
-            LabPbrAtlasFrame.Snapshot source,
-            TexturePageLayout.Layout baseColorLayout,
-            TexturePageLayout.Layout normalLayout,
-            TexturePageLayout.Layout opticalLayout,
-            List<PageResource> baseColorPages,
-            List<PageResource> normalPages,
-            List<PageResource> opticalPages,
-            long textureRecordBytes,
-            long animationFrameBytes) {
-        int maximumTextureId = 0;
-        int animatedSprites = 0;
-        int maximumContentWidth = 0;
-        int maximumContentHeight = 0;
-        int maximumPadding = 0;
-        HashMap<Integer, Long> textureMipTexels = new HashMap<>();
-        HashSet<Integer> animatedTextureIds = new HashSet<>();
-        for (LabPbrAtlasFrame.Sprite sprite : source.sprites()) {
-            maximumTextureId = Math.max(maximumTextureId, sprite.textureId());
-            animatedSprites += sprite.animated() ? 1 : 0;
-            maximumContentWidth = Math.max(maximumContentWidth, sprite.contentWidth());
-            maximumContentHeight = Math.max(maximumContentHeight, sprite.contentHeight());
-            maximumPadding = Math.max(maximumPadding, sprite.padding());
-            long mipTexels = 0L;
-            int levels = textureMipLevels(sprite, source.mipLevels());
-            for (int mip = 0; mip < levels; mip++) {
-                mipTexels = Math.addExact(
-                        mipTexels,
-                        Math.multiplyExact(
-                                (long) sprite.mipWidth(mip), sprite.mipHeight(mip)));
-            }
-            textureMipTexels.put(sprite.textureId(), mipTexels);
-            if (sprite.animated()) {
-                animatedTextureIds.add(sprite.textureId());
-            }
-        }
-        return new MeasurementSnapshot(
-                sourceGeneration,
-                source.width(),
-                source.height(),
-                source.mipLevels(),
-                source.sprites().size(),
-                maximumTextureId,
-                Math.max(0, maximumTextureId - source.sprites().size()),
-                animatedSprites,
-                maximumContentWidth,
-                maximumContentHeight,
-                maximumPadding,
-                totalMipBytes(source.width(), source.height(), source.mipLevels()),
-                measureChannel(
-                        source, baseColorLayout, baseColorPages, SourceChannel.BASE_COLOR),
-                measureChannel(source, normalLayout, normalPages, SourceChannel.NORMAL),
-                measureChannel(source, opticalLayout, opticalPages, SourceChannel.OPTICAL),
-                textureRecordBytes,
-                animationFrameBytes,
-                textureMipTexels,
-                animatedTextureIds);
-    }
-
-    private static ChannelMeasurement measureChannel(
-            LabPbrAtlasFrame.Snapshot source,
-            TexturePageLayout.Layout layout,
-            List<PageResource> pages,
-            SourceChannel channel) {
-        int sourceCount = 0;
-        int animatedSourceCount = 0;
-        long sourceTexels = 0L;
-        long occupiedBaseTexels = 0L;
-        int maximumFrameCount = 0;
-        ByteRangeAccumulator alpha = new ByteRangeAccumulator();
-        ByteRangeAccumulator red = new ByteRangeAccumulator();
-        ByteRangeAccumulator green = new ByteRangeAccumulator();
-        ByteRangeAccumulator blue = new ByteRangeAccumulator();
-        int maximumPackedX = 0;
-        int maximumPackedY = 0;
-        for (LabPbrAtlasFrame.Sprite sprite : source.sprites()) {
-            LabPbrAtlasFrame.TextureSource textureSource = switch (channel) {
-                case BASE_COLOR -> sprite.baseColor();
-                case NORMAL -> sprite.normal();
-                case OPTICAL -> sprite.specular();
-            };
-            if (textureSource == null) {
-                continue;
-            }
-            sourceCount++;
-            animatedSourceCount += sprite.animated() && textureSource.frameCount() > 1 ? 1 : 0;
-            sourceTexels = Math.addExact(
-                    sourceTexels,
-                    Math.multiplyExact((long) textureSource.width(), textureSource.height()));
-            maximumFrameCount = Math.max(maximumFrameCount, textureSource.frameCount());
-            for (int pixel : textureSource.pixels()) {
-                alpha.add(pixel >>> 24);
-                red.add(pixel >>> 16 & 0xff);
-                green.add(pixel >>> 8 & 0xff);
-                blue.add(pixel & 0xff);
-            }
-            TexturePageLayout.Placement placement = layout.placement(sprite.textureId());
-            if (placement == null) {
-                throw new IllegalStateException("Measured material source has no page placement");
-            }
-            int outerWidth = Math.addExact(sprite.contentWidth(), 2 * sprite.padding());
-            int outerHeight = Math.addExact(sprite.contentHeight(), 2 * sprite.padding());
-            occupiedBaseTexels = Math.addExact(
-                    occupiedBaseTexels, Math.multiplyExact((long) outerWidth, outerHeight));
-            maximumPackedX = Math.max(
-                    maximumPackedX, Math.addExact(placement.contentX(), sprite.contentWidth()));
-            maximumPackedY = Math.max(
-                    maximumPackedY, Math.addExact(placement.contentY(), sprite.contentHeight()));
-        }
-        long pageBaseTexels = 0L;
-        int maximumPageWidth = 0;
-        int maximumPageHeight = 0;
-        for (PageResource page : pages) {
-            pageBaseTexels = Math.addExact(
-                    pageBaseTexels,
-                    Math.multiplyExact((long) page.image.width(), page.image.height()));
-            maximumPageWidth = Math.max(maximumPageWidth, page.image.width());
-            maximumPageHeight = Math.max(maximumPageHeight, page.image.height());
-        }
-        return new ChannelMeasurement(
-                sourceCount,
-                source.sprites().size() - sourceCount,
-                animatedSourceCount,
-                sourceTexels,
-                maximumFrameCount,
-                pages.size(),
-                pageBytes(pages),
-                pageBaseTexels,
-                occupiedBaseTexels,
-                maximumPageWidth,
-                maximumPageHeight,
-                maximumPackedX,
-                maximumPackedY,
-                alpha.snapshot(),
-                red.snapshot(),
-                green.snapshot(),
-                blue.snapshot());
-    }
-
-    public record MeasurementSnapshot(
-            long sourceGeneration,
-            int atlasWidth,
-            int atlasHeight,
-            int mipLevels,
-            int textureCount,
-            int maximumTextureId,
-            int unusedTextureIdsBelowHighWater,
-            int animatedSpriteCount,
-            int maximumContentWidth,
-            int maximumContentHeight,
-            int maximumPadding,
-            long baseAtlasRgba8Bytes,
-            ChannelMeasurement baseColor,
-            ChannelMeasurement normal,
-            ChannelMeasurement optical,
-            long textureRecordBytes,
-            long animationFrameBytes,
-            Map<Integer, Long> textureMipTexels,
-            Set<Integer> animatedTextureIds) {
-        public MeasurementSnapshot {
-            textureMipTexels = Map.copyOf(textureMipTexels);
-            animatedTextureIds = Set.copyOf(animatedTextureIds);
-        }
-
-        public MeasurementSnapshot(
-                long sourceGeneration,
-                int atlasWidth,
-                int atlasHeight,
-                int mipLevels,
-                int textureCount,
-                int maximumTextureId,
-                int unusedTextureIdsBelowHighWater,
-                int animatedSpriteCount,
-                int maximumContentWidth,
-                int maximumContentHeight,
-                int maximumPadding,
-                long baseAtlasRgba8Bytes,
-                ChannelMeasurement baseColor,
-                ChannelMeasurement normal,
-                ChannelMeasurement optical,
-                long textureRecordBytes,
-                long animationFrameBytes) {
-            this(
-                    sourceGeneration,
-                    atlasWidth,
-                    atlasHeight,
-                    mipLevels,
-                    textureCount,
-                    maximumTextureId,
-                    unusedTextureIdsBelowHighWater,
-                    animatedSpriteCount,
-                    maximumContentWidth,
-                    maximumContentHeight,
-                    maximumPadding,
-                    baseAtlasRgba8Bytes,
-                    baseColor,
-                    normal,
-                    optical,
-                    textureRecordBytes,
-                    animationFrameBytes,
-                    Map.of(),
-                    Set.of());
-        }
-    }
-
-    public record ChannelMeasurement(
-            int sourceCount,
-            int missingCount,
-            int animatedSourceCount,
-            long sourceTexels,
-            int maximumFrameCount,
-            int pageCount,
-            long pageBytes,
-            long pageBaseTexels,
-            long occupiedBaseTexels,
-            int maximumPageWidth,
-            int maximumPageHeight,
-            int maximumPackedX,
-            int maximumPackedY,
-            ByteRange alpha,
-            ByteRange red,
-            ByteRange green,
-            ByteRange blue) {}
-
-    public record ByteRange(int minimum, int maximum, int distinctCount) {}
-
-    private enum SourceChannel {
-        BASE_COLOR,
-        NORMAL,
-        OPTICAL
-    }
-
-    private static final class ByteRangeAccumulator {
-        private final boolean[] seen = new boolean[256];
-        private int minimum = 255;
-        private int maximum;
-        private int distinctCount;
-
-        void add(int value) {
-            int unsigned = value & 0xff;
-            this.minimum = Math.min(this.minimum, unsigned);
-            this.maximum = Math.max(this.maximum, unsigned);
-            if (!this.seen[unsigned]) {
-                this.seen[unsigned] = true;
-                this.distinctCount++;
-            }
-        }
-
-        ByteRange snapshot() {
-            return this.distinctCount == 0
-                    ? new ByteRange(0, 0, 0)
-                    : new ByteRange(this.minimum, this.maximum, this.distinctCount);
-        }
-    }
-
 }

@@ -37,7 +37,6 @@ public final class ClusterSceneTranslator {
         LabPbrMaterialSet materials = input.materials();
         ClusterTranslationSettings settings = input.settings();
         MediumCatalog mediumCatalog = new MediumCatalog();
-        SurfaceTintUsage.Builder tintUsage = SurfaceTintUsage.runtimeBuilder();
 
         SectionClusterMeshBuilder cluster = new SectionClusterMeshBuilder(
                 captured.clusterX(),
@@ -77,13 +76,11 @@ public final class ClusterSceneTranslator {
                             settings,
                             emissionBuildCache,
                             mediumCatalog,
-                            tintUsage,
                             work));
         }
         work.checkpoint();
         return cluster.build()
                 .withMediumCatalog(mediumCatalog.snapshot())
-                .withSurfaceTintUsage(tintUsage.build())
                 .withCompatibilityIssues(boundaries.issues());
     }
 
@@ -93,7 +90,6 @@ public final class ClusterSceneTranslator {
             ClusterTranslationSettings settings,
             java.util.Map<EmissionDistribution.Key, EmissionDistribution> emissionBuildCache,
             MediumCatalog mediumCatalog,
-            SurfaceTintUsage.Builder tintUsage,
             ClusterTranslationWork work) {
         SectionMeshAccumulator accumulator = new SectionMeshAccumulator(
                 materials,
@@ -120,8 +116,6 @@ public final class ClusterSceneTranslator {
             }
             boolean cutout = isCutout(capturedSurface);
             boolean transmissive = isTransmissive(capturedSurface);
-            tintUsage.addPrimary(capturedSurface);
-            addRelationTintUsage(tintUsage, definition);
             surface.set(
                     averageColor(capturedSurface),
                     cutout,
@@ -148,17 +142,6 @@ public final class ClusterSceneTranslator {
             accumulator.addQuad(quad, surface);
         }
         return accumulator.build();
-    }
-
-    private static void addRelationTintUsage(
-            SurfaceTintUsage.Builder usage, SurfaceDefinition definition) {
-        if (definition instanceof SurfaceDefinition.Boundary boundary) {
-            usage.addRelation(boundary.positiveMedium().surface());
-        } else if (definition instanceof SurfaceDefinition.Overlay overlay) {
-            usage.addRelation(overlay.secondary().surface());
-        } else if (definition instanceof SurfaceDefinition.Bilateral bilateral) {
-            usage.addRelation(bilateral.secondary().surface());
-        }
     }
 
     private static boolean hasArea(SectionMeshAccumulator.Quad quad) {

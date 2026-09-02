@@ -23,11 +23,6 @@ record GpuCluster(
         VulkanBuffer lightBuffer,
         VulkanBuffer motionBuffer,
         CompiledClusterLights.Summary lights,
-        TextureTintUsage textureTintUsage,
-        SurfaceTintUsage surfaceTintUsage,
-        MaterialTableCandidate materialTableCandidate,
-        long surfaceRelationSourceBytes,
-        long surfaceRelationGpuBytes,
         boolean dynamic,
         DynamicBufferPool.Lease dynamicBuffers) {
     GpuCluster {
@@ -35,17 +30,6 @@ record GpuCluster(
         voxelInstances = Objects.requireNonNull(
                 voxelInstances, "voxelInstances");
         lights = Objects.requireNonNull(lights, "lights");
-        textureTintUsage = Objects.requireNonNull(textureTintUsage, "textureTintUsage");
-        surfaceTintUsage = Objects.requireNonNull(surfaceTintUsage, "surfaceTintUsage");
-        materialTableCandidate = Objects.requireNonNull(
-                materialTableCandidate, "materialTableCandidate");
-        if (surfaceRelationSourceBytes < 0L
-                || surfaceRelationGpuBytes < 0L
-                || surfaceRelationGpuBytes > surfaceRelationSourceBytes
-                || (surfaceRelationAddress == 0L) != (surfaceRelationGpuBytes == 0L)) {
-            throw new IllegalArgumentException(
-                    "GPU surface-relation storage is inconsistent");
-        }
         if (lightBuffer != null && motionBuffer != null
                 || motionBuffer != null && !dynamic) {
             throw new IllegalArgumentException(
@@ -92,11 +76,6 @@ record GpuCluster(
                 lightBuffer,
                 motionBuffer,
                 lights,
-                TextureTintUsage.EMPTY,
-                SurfaceTintUsage.EMPTY,
-                MaterialTableCandidate.EMPTY,
-                0L,
-                0L,
                 dynamic,
                 null);
     }
@@ -141,11 +120,6 @@ record GpuCluster(
                 lightBuffer,
                 null,
                 lights,
-                TextureTintUsage.EMPTY,
-                SurfaceTintUsage.EMPTY,
-                MaterialTableCandidate.EMPTY,
-                0L,
-                0L,
                 dynamic,
                 null);
     }

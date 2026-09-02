@@ -47,10 +47,6 @@ final class TintSampleTable implements AutoCloseable {
         return this.buffer;
     }
 
-    Snapshot snapshot() {
-        return new Snapshot(this.ids.size(), this.nextId - 1);
-    }
-
     private void write(int tintId, int packedRgba) {
         long offset = Math.multiplyExact((long) tintId, ENTRY_SIZE);
         MemoryUtil.memPutLong(
@@ -70,8 +66,5 @@ final class TintSampleTable implements AutoCloseable {
     @Override
     public void close() {
         this.buffer.destroy();
-    }
-
-    record Snapshot(int assignedCount, int highWaterId) {
     }
 }

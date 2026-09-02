@@ -25,10 +25,6 @@ final class MediumIdRegistry {
         return result;
     }
 
-    Snapshot snapshot() {
-        return new Snapshot(this.ids.size(), this.nextId - 1L);
-    }
-
     int resolve(MediumKey key) {
         Integer existing = this.ids.get(key);
         if (existing != null) {
@@ -42,13 +38,4 @@ final class MediumIdRegistry {
         return assigned;
     }
 
-    record Snapshot(int assignedCount, long highWaterId) {
-        Snapshot {
-            if (assignedCount < 1
-                    || highWaterId < WATER_ID
-                    || highWaterId > MaterialIdResolver.MAX_ID) {
-                throw new IllegalArgumentException("Invalid renderer MediumId statistics");
-            }
-        }
-    }
 }

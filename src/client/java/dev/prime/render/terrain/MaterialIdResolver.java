@@ -4,6 +4,7 @@ import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.ToIntFunction;
+import org.jspecify.annotations.Nullable;
 
 /** Resolves renderer-lifetime MaterialIds and packs exact u16 identity lanes. */
 public final class MaterialIdResolver {
@@ -114,7 +115,7 @@ public final class MaterialIdResolver {
 
     public static Cache cache(
             List<MediumKey> mediumCatalog,
-            ToIntFunction<MaterialTableCandidate.Key> resolver) {
+            ToIntFunction<MaterialKey> resolver) {
         return new Cache(mediumCatalog, resolver);
     }
 
@@ -126,12 +127,12 @@ public final class MaterialIdResolver {
 
     public static final class Cache {
         private final List<MediumKey> mediumCatalog;
-        private final ToIntFunction<MaterialTableCandidate.Key> resolver;
+        private final ToIntFunction<MaterialKey> resolver;
         private final Long2IntOpenHashMap ids = new Long2IntOpenHashMap();
 
         private Cache(
                 List<MediumKey> mediumCatalog,
-                ToIntFunction<MaterialTableCandidate.Key> resolver) {
+                ToIntFunction<MaterialKey> resolver) {
             this.mediumCatalog = List.copyOf(mediumCatalog);
             this.resolver = Objects.requireNonNull(resolver, "resolver");
         }
@@ -163,13 +164,10 @@ public final class MaterialIdResolver {
             }
             return this.resolve(
                     localKey,
-                    Objects.requireNonNull(
-                            MaterialTableCandidate.primitiveKey(
-                                    words,
-                                    base,
-                                    this.mediumCatalog,
-                                    lights),
-                            "eligible primitive material key"));
+                    new MaterialKey(
+                            textureId,
+                            this.medium(localMediumId),
+                            control));
         }
 
         int boundaryId(int[] relation, int base) {
@@ -183,11 +181,13 @@ public final class MaterialIdResolver {
             }
             return this.resolve(
                     localKey,
-                    MaterialTableCandidate.boundaryKey(
-                            relation, base, this.mediumCatalog));
+                    new MaterialKey(
+                            textureId,
+                            this.medium(localMediumId),
+                            control));
         }
 
-        private int resolve(long localKey, MaterialTableCandidate.Key key) {
+        private int resolve(long localKey, MaterialKey key) {
             int materialId = this.resolver.applyAsInt(key);
             requireId(materialId, "MaterialId", false);
             this.ids.put(localKey, materialId);
@@ -204,6 +204,17 @@ public final class MaterialIdResolver {
             return Integer.toUnsignedLong(textureId)
                     | (long) localMediumId << 16
                     | (long) control << 32;
+        }
+
+        private @Nullable MediumKey medium(int localId) {
+            if (localId == 0) {
+                return null;
+            }
+            if (localId < 0 || localId > this.mediumCatalog.size()) {
+                throw new IllegalArgumentException(
+                        "Material primitive references a medium outside its local catalog");
+            }
+            return this.mediumCatalog.get(localId - 1);
         }
     }
 

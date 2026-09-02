@@ -24,7 +24,6 @@ public final class CpuClusterMesh {
     private final List<CpuVoxelMesh> voxelMeshes;
     private final CpuVoxelInstances voxelInstances;
     private final List<MediumKey> mediumCatalog;
-    private final SurfaceTintUsage surfaceTintUsage;
     private final Set<StaticCompatibilityIssue> compatibilityIssues;
 
     private CpuClusterMesh(
@@ -45,7 +44,7 @@ public final class CpuClusterMesh {
                 lights,
                 voxelMeshes,
                 voxelInstances,
-                SurfaceTintUsage.EMPTY,
+                List.of(),
                 Set.of());
     }
 
@@ -58,33 +57,7 @@ public final class CpuClusterMesh {
             CompiledClusterLights lights,
             List<CpuVoxelMesh> voxelMeshes,
             CpuVoxelInstances voxelInstances,
-            SurfaceTintUsage surfaceTintUsage,
-            Set<StaticCompatibilityIssue> compatibilityIssues) {
-        this(
-                segments,
-                opaqueTriangleCount,
-                cutoutTriangleCount,
-                transmissiveTriangleCount,
-                opacityMicromap,
-                lights,
-                voxelMeshes,
-                voxelInstances,
-                List.of(),
-                surfaceTintUsage,
-                compatibilityIssues);
-    }
-
-    private CpuClusterMesh(
-            List<Segment> segments,
-            long opaqueTriangleCount,
-            long cutoutTriangleCount,
-            long transmissiveTriangleCount,
-            OpacityMicromapData opacityMicromap,
-            CompiledClusterLights lights,
-            List<CpuVoxelMesh> voxelMeshes,
-            CpuVoxelInstances voxelInstances,
             List<MediumKey> mediumCatalog,
-            SurfaceTintUsage surfaceTintUsage,
             Set<StaticCompatibilityIssue> compatibilityIssues) {
         this.segments = List.copyOf(segments);
         if (opaqueTriangleCount < 0L
@@ -124,7 +97,6 @@ public final class CpuClusterMesh {
         this.voxelInstances = Objects.requireNonNull(
                 voxelInstances, "voxelInstances");
         this.mediumCatalog = List.copyOf(mediumCatalog);
-        this.surfaceTintUsage = Objects.requireNonNull(surfaceTintUsage, "surfaceTintUsage");
         if (new java.util.HashSet<>(this.mediumCatalog).size()
                 != this.mediumCatalog.size()) {
             throw new IllegalArgumentException(
@@ -354,10 +326,6 @@ public final class CpuClusterMesh {
         return this.compatibilityIssues;
     }
 
-    public SurfaceTintUsage surfaceTintUsage() {
-        return this.surfaceTintUsage;
-    }
-
     CpuClusterMesh withCompatibilityIssues(Set<StaticCompatibilityIssue> issues) {
         Set<StaticCompatibilityIssue> copied = Set.copyOf(issues);
         if (this.compatibilityIssues.equals(copied)) {
@@ -373,7 +341,6 @@ public final class CpuClusterMesh {
                 this.voxelMeshes,
                 this.voxelInstances,
                 this.mediumCatalog,
-                this.surfaceTintUsage,
                 copied);
     }
 
@@ -392,26 +359,6 @@ public final class CpuClusterMesh {
                 this.voxelMeshes,
                 this.voxelInstances,
                 copied,
-                this.surfaceTintUsage,
-                this.compatibilityIssues);
-    }
-
-    CpuClusterMesh withSurfaceTintUsage(SurfaceTintUsage usage) {
-        SurfaceTintUsage checked = Objects.requireNonNull(usage, "usage");
-        if (this.surfaceTintUsage == checked) {
-            return this;
-        }
-        return new CpuClusterMesh(
-                this.segments,
-                this.opaqueTriangleCount,
-                this.cutoutTriangleCount,
-                this.transmissiveTriangleCount,
-                this.opacityMicromap,
-                this.lights,
-                this.voxelMeshes,
-                this.voxelInstances,
-                this.mediumCatalog,
-                checked,
                 this.compatibilityIssues);
     }
 

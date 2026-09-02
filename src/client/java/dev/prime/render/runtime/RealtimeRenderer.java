@@ -21,8 +21,6 @@ import dev.prime.render.vulkan.MaterialTexturePages;
 import dev.prime.render.vulkan.RealtimeFrameExecutor;
 import dev.prime.render.vulkan.RealtimeIntegratorPipeline;
 import dev.prime.render.vulkan.RealtimeRayTracingPipeline;
-import dev.prime.render.vulkan.RendererDataRangeDiagnostics;
-import dev.prime.render.vulkan.RendererSignalRangeDiagnostics;
 import dev.prime.render.vulkan.SunShadowPipeline;
 import dev.prime.render.vulkan.TraceBackend;
 import dev.prime.render.vulkan.VulkanContext;
@@ -43,8 +41,6 @@ final class RealtimeRenderer implements Destroyable {
     private final TraceBackend backend;
     private final RealtimeFrameExecutor executor;
     private final DisplayExposureDiagnostics exposureDiagnostics;
-    private final RendererDataRangeDiagnostics rangeDiagnostics;
-    private final RendererSignalRangeDiagnostics signalDiagnostics;
     private final DlssRrNative.Context ngxContext;
     private final ReconstructionBackendRegistry reconstructionRegistry;
     private RealtimeIntegratorPipeline pipeline;
@@ -65,8 +61,6 @@ final class RealtimeRenderer implements Destroyable {
         this.pipeline = new RealtimeRayTracingPipeline(context, backend);
         this.executor = new RealtimeFrameExecutor(context);
         this.exposureDiagnostics = new DisplayExposureDiagnostics(context);
-        this.rangeDiagnostics = createRangeDiagnostics(context);
-        this.signalDiagnostics = createSignalDiagnostics(context);
     }
 
     RealtimeIntegratorPipeline pipeline() {
@@ -124,9 +118,7 @@ final class RealtimeRenderer implements Destroyable {
                 this.sampleIndex(),
                 this.pipeline.passCount(),
                 this.pipeline.sizedResourceBytes(),
-                this.exposureDiagnostics.latest(),
-                this.rangeDiagnostics == null ? null : this.rangeDiagnostics.latest(),
-                this.signalDiagnostics == null ? null : this.signalDiagnostics.latest());
+                this.exposureDiagnostics.latest());
     }
 
     DisplayExposureDiagnostics.Snapshot exposureDiagnosticSnapshot() {
@@ -349,8 +341,6 @@ final class RealtimeRenderer implements Destroyable {
                 history,
                 input.controls().imageDiagnostics(),
                 this.exposureDiagnostics,
-                this.rangeDiagnostics,
-                this.signalDiagnostics,
                 input.atlasView(),
                 input.sceneTextures(),
                 input.textureRevision(),
@@ -428,39 +418,7 @@ final class RealtimeRenderer implements Destroyable {
             int accumulatedSamples,
             int integratorPassCount,
             long integratorResourceBytes,
-            DisplayExposureDiagnostics.Snapshot exposure,
-            RendererDataRangeDiagnostics.Snapshot ranges,
-            RendererSignalRangeDiagnostics.Snapshot signals) {}
-
-    private static RendererDataRangeDiagnostics createRangeDiagnostics(
-            VulkanContext context) {
-        if (!Boolean.getBoolean(RendererDataMeasurementRecorder.ENABLE_PROPERTY)) {
-            return null;
-        }
-        int interval = (int) Math.max(
-                1L,
-                Math.min(
-                        Long.getLong(
-                                RendererDataRangeDiagnostics.INTERVAL_PROPERTY,
-                                RendererDataRangeDiagnostics.DEFAULT_INTERVAL_FRAMES),
-                        RendererDataRangeDiagnostics.MAX_INTERVAL_FRAMES));
-        return new RendererDataRangeDiagnostics(context, interval);
-    }
-
-    private static RendererSignalRangeDiagnostics createSignalDiagnostics(
-            VulkanContext context) {
-        if (!Boolean.getBoolean(RendererDataMeasurementRecorder.ENABLE_PROPERTY)) {
-            return null;
-        }
-        int interval = (int) Math.max(
-                1L,
-                Math.min(
-                        Long.getLong(
-                                RendererDataRangeDiagnostics.INTERVAL_PROPERTY,
-                                RendererDataRangeDiagnostics.DEFAULT_INTERVAL_FRAMES),
-                        RendererDataRangeDiagnostics.MAX_INTERVAL_FRAMES));
-        return new RendererSignalRangeDiagnostics(context, interval);
-    }
+            DisplayExposureDiagnostics.Snapshot exposure) {}
 
     void releaseSizedResourcesAfterIdle() {
         VulkanReconstructionResources current = this.resources;
@@ -506,8 +464,6 @@ final class RealtimeRenderer implements Destroyable {
         RuntimeException failure = null;
         failure = ResourceCleanup.destroy(this.executor, failure);
         failure = ResourceCleanup.destroy(this.exposureDiagnostics, failure);
-        failure = ResourceCleanup.destroy(this.rangeDiagnostics, failure);
-        failure = ResourceCleanup.destroy(this.signalDiagnostics, failure);
         failure = ResourceCleanup.destroy(this.resources, failure);
         failure = ResourceCleanup.destroy(this.pipeline, failure);
         if (this.ngxContext != null) {

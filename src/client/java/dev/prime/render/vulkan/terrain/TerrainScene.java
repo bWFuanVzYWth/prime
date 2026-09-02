@@ -44,8 +44,6 @@ public final class TerrainScene implements AutoCloseable {
     private final MaterialIdRegistry materialIds = new MaterialIdRegistry(this.mediumIds);
     private final VulkanBuffer materialCoreRecords;
     private final TintSampleTable tintSamples;
-    private final boolean measurementsEnabled = Boolean.getBoolean(
-            SurfaceTintUsage.MEASUREMENT_ENABLE_PROPERTY);
     private final BlasCompactionScheduler compactionScheduler =
             new BlasCompactionScheduler();
     private Long2ObjectOpenHashMap<GpuCluster> resident = new Long2ObjectOpenHashMap<>();
@@ -621,24 +619,6 @@ public final class TerrainScene implements AutoCloseable {
                 snapshot.completedCount());
     }
 
-    /** Renderer-lifetime exact-medium allocation totals for opt-in data measurements. */
-    public MediumIdStatistics mediumIdStatistics() {
-        MediumIdRegistry.Snapshot snapshot = this.mediumIds.snapshot();
-        return new MediumIdStatistics(snapshot.assignedCount(), snapshot.highWaterId());
-    }
-
-    /** Renderer-lifetime exact-material allocation totals for migration measurements. */
-    public MaterialIdStatistics materialIdStatistics() {
-        MaterialIdRegistry.Snapshot snapshot = this.materialIds.snapshot();
-        return new MaterialIdStatistics(snapshot.assignedCount(), snapshot.highWaterId());
-    }
-
-    /** Renderer-lifetime exact-tint allocation totals for opt-in data measurements. */
-    public TintIdStatistics tintIdStatistics() {
-        TintSampleTable.Snapshot snapshot = this.tintSamples.snapshot();
-        return new TintIdStatistics(snapshot.assignedCount(), snapshot.highWaterId());
-    }
-
     public static boolean requiresWorldLightUpload(
             boolean rebuildWorldLights, CpuWorldLightTree.Result worldLightTree) {
         return rebuildWorldLights && !worldLightTree.isEmpty();
@@ -993,18 +973,7 @@ public final class TerrainScene implements AutoCloseable {
         int tlasInstances = 0;
         long uniqueTriangles = 0L;
         long instancedTriangles = 0L;
-        long surfaceRelationSourceBytes = 0L;
-        long surfaceRelationGpuBytes = 0L;
         int areaLightEmitters = 0;
-        ArrayList<TextureTintUsage> textureTintUsage = this.measurementsEnabled
-                ? new ArrayList<>(finalClusters.size())
-                : null;
-        ArrayList<SurfaceTintUsage> surfaceTintUsage = this.measurementsEnabled
-                ? new ArrayList<>(finalClusters.size())
-                : null;
-        ArrayList<MaterialTableCandidate> materialTableCandidates = this.measurementsEnabled
-                ? new ArrayList<>(finalClusters.size())
-                : null;
         IdentityHashMap<PreparedBlas, Boolean> uniqueBlases = new IdentityHashMap<>();
         for (var entry : this.resident.long2ObjectEntrySet()) {
             if (removedKeys.contains(entry.getLongKey())) {
@@ -1027,17 +996,8 @@ public final class TerrainScene implements AutoCloseable {
             cluster.forEachBlas(blas -> uniqueBlases.put(blas, Boolean.TRUE));
             instancedTriangles = Math.addExact(
                     instancedTriangles, cluster.instancedTriangleCount());
-            surfaceRelationSourceBytes = Math.addExact(
-                    surfaceRelationSourceBytes, cluster.surfaceRelationSourceBytes());
-            surfaceRelationGpuBytes = Math.addExact(
-                    surfaceRelationGpuBytes, cluster.surfaceRelationGpuBytes());
             areaLightEmitters = Math.addExact(
                     areaLightEmitters, cluster.lights().emitterCount());
-            if (textureTintUsage != null) {
-                textureTintUsage.add(cluster.textureTintUsage());
-                surfaceTintUsage.add(cluster.surfaceTintUsage());
-                materialTableCandidates.add(cluster.materialTableCandidate());
-            }
         }
         for (PreparedBlas blas : uniqueBlases.keySet()) {
             uniqueTriangles = Math.addExact(
@@ -1053,18 +1013,7 @@ public final class TerrainScene implements AutoCloseable {
                 uniqueTriangles,
                 instancedTriangles,
                 areaLightEmitters,
-                replacementWorldLightTree.nodeCount(),
-                textureTintUsage == null
-                        ? TextureTintUsage.EMPTY
-                        : TextureTintUsage.combine(textureTintUsage),
-                surfaceTintUsage == null
-                        ? SurfaceTintUsage.EMPTY
-                        : SurfaceTintUsage.combine(surfaceTintUsage),
-                materialTableCandidates == null
-                        ? MaterialTableCandidate.EMPTY
-                        : MaterialTableCandidate.combine(materialTableCandidates),
-                surfaceRelationSourceBytes,
-                surfaceRelationGpuBytes);
+                replacementWorldLightTree.nodeCount());
 
         TopLevelAccelerationStructure previousTlas = this.currentTlas;
         VulkanBuffer previousWorldLights = replaceWorldLights ? this.currentWorldLights : null;
@@ -1375,17 +1324,6 @@ public final class TerrainScene implements AutoCloseable {
                     lights,
                     motion,
                     lightSummary,
-                    this.measurementsEnabled
-                            ? TextureTintUsage.measure(mesh)
-                            : TextureTintUsage.EMPTY,
-                    this.measurementsEnabled
-                            ? mesh.surfaceTintUsage()
-                            : SurfaceTintUsage.EMPTY,
-                    this.measurementsEnabled
-                            ? MaterialTableCandidate.measure(mesh)
-                            : MaterialTableCandidate.EMPTY,
-                    mesh.surfaceRelationBytes(),
-                    relationEncoding.byteSize(),
                     upload.dynamic(),
                     dynamicBuffers);
         } catch (RuntimeException exception) {
@@ -1753,145 +1691,15 @@ public final class TerrainScene implements AutoCloseable {
             long uniqueBlasTriangleCount,
             long instancedTriangleCount,
             int areaLightEmitterCount,
-            int topLevelLightTreeNodeCount,
-            TextureTintUsage textureTintUsage,
-            SurfaceTintUsage surfaceTintUsage,
-            MaterialTableCandidate materialTableCandidate,
-            long surfaceRelationSourceBytes,
-            long surfaceRelationGpuBytes) {
-        static final SceneStatistics EMPTY =
-                new SceneStatistics(
-                        0,
-                        0L,
-                        0L,
-                        0,
-                        0,
-                        TextureTintUsage.EMPTY,
-                        SurfaceTintUsage.EMPTY,
-                        MaterialTableCandidate.EMPTY,
-                        0L,
-                        0L);
-
-        public SceneStatistics(
-                int tlasInstanceCount,
-                long uniqueBlasTriangleCount,
-                long instancedTriangleCount,
-                int areaLightEmitterCount,
-                int topLevelLightTreeNodeCount,
-                TextureTintUsage textureTintUsage,
-                MaterialTableCandidate materialTableCandidate,
-                long surfaceRelationSourceBytes,
-                long surfaceRelationGpuBytes) {
-            this(
-                    tlasInstanceCount,
-                    uniqueBlasTriangleCount,
-                    instancedTriangleCount,
-                    areaLightEmitterCount,
-                    topLevelLightTreeNodeCount,
-                    textureTintUsage,
-                    SurfaceTintUsage.EMPTY,
-                    materialTableCandidate,
-                    surfaceRelationSourceBytes,
-                    surfaceRelationGpuBytes);
-        }
-
-        public SceneStatistics(
-                int tlasInstanceCount,
-                long uniqueBlasTriangleCount,
-                long instancedTriangleCount,
-                int areaLightEmitterCount,
-                int topLevelLightTreeNodeCount,
-                TextureTintUsage textureTintUsage,
-                MaterialTableCandidate materialTableCandidate) {
-            this(
-                    tlasInstanceCount,
-                    uniqueBlasTriangleCount,
-                    instancedTriangleCount,
-                    areaLightEmitterCount,
-                    topLevelLightTreeNodeCount,
-                    textureTintUsage,
-                    SurfaceTintUsage.EMPTY,
-                    materialTableCandidate,
-                    0L,
-                    0L);
-        }
-
-        public SceneStatistics(
-                int tlasInstanceCount,
-                long uniqueBlasTriangleCount,
-                long instancedTriangleCount,
-                int areaLightEmitterCount,
-                int topLevelLightTreeNodeCount,
-                TextureTintUsage textureTintUsage,
-                SurfaceTintUsage surfaceTintUsage,
-                MaterialTableCandidate materialTableCandidate) {
-            this(
-                    tlasInstanceCount,
-                    uniqueBlasTriangleCount,
-                    instancedTriangleCount,
-                    areaLightEmitterCount,
-                    topLevelLightTreeNodeCount,
-                    textureTintUsage,
-                    surfaceTintUsage,
-                    materialTableCandidate,
-                    0L,
-                    0L);
-        }
-
-        public SceneStatistics(
-                int tlasInstanceCount,
-                long uniqueBlasTriangleCount,
-                long instancedTriangleCount,
-                int areaLightEmitterCount,
-                int topLevelLightTreeNodeCount,
-                TextureTintUsage textureTintUsage) {
-            this(
-                    tlasInstanceCount,
-                    uniqueBlasTriangleCount,
-                    instancedTriangleCount,
-                    areaLightEmitterCount,
-                    topLevelLightTreeNodeCount,
-                    textureTintUsage,
-                    SurfaceTintUsage.EMPTY,
-                    MaterialTableCandidate.EMPTY,
-                    0L,
-                    0L);
-        }
-
-        public SceneStatistics(
-                int tlasInstanceCount,
-                long uniqueBlasTriangleCount,
-                long instancedTriangleCount,
-                int areaLightEmitterCount,
-                int topLevelLightTreeNodeCount) {
-            this(
-                    tlasInstanceCount,
-                    uniqueBlasTriangleCount,
-                    instancedTriangleCount,
-                    areaLightEmitterCount,
-                    topLevelLightTreeNodeCount,
-                    TextureTintUsage.EMPTY,
-                    SurfaceTintUsage.EMPTY,
-                    MaterialTableCandidate.EMPTY,
-                    0L,
-                    0L);
-        }
+            int topLevelLightTreeNodeCount) {
+        static final SceneStatistics EMPTY = new SceneStatistics(0, 0L, 0L, 0, 0);
 
         public SceneStatistics {
-            textureTintUsage = java.util.Objects.requireNonNull(
-                    textureTintUsage, "textureTintUsage");
-            surfaceTintUsage = java.util.Objects.requireNonNull(
-                    surfaceTintUsage, "surfaceTintUsage");
-            materialTableCandidate = java.util.Objects.requireNonNull(
-                    materialTableCandidate, "materialTableCandidate");
             if (tlasInstanceCount < 0
                     || uniqueBlasTriangleCount < 0L
                     || instancedTriangleCount < 0L
                     || areaLightEmitterCount < 0
-                    || topLevelLightTreeNodeCount < 0
-                    || surfaceRelationSourceBytes < 0L
-                    || surfaceRelationGpuBytes < 0L
-                    || surfaceRelationGpuBytes > surfaceRelationSourceBytes) {
+                    || topLevelLightTreeNodeCount < 0) {
                 throw new IllegalArgumentException(
                         "Resident scene statistics must be non-negative");
             }
@@ -1927,53 +1735,6 @@ public final class TerrainScene implements AutoCloseable {
 
         public boolean present() {
             return this.buffer != 0L;
-        }
-    }
-
-    public record MediumIdStatistics(int assignedCount, long highWaterId) {
-        public MediumIdStatistics {
-            if (assignedCount < 1 || highWaterId < MediumIdRegistry.WATER_ID
-                    || highWaterId > MaterialIdResolver.MAX_ID) {
-                throw new IllegalArgumentException("Invalid renderer MediumId statistics");
-            }
-        }
-    }
-
-    public record MaterialIdStatistics(int assignedCount, int highWaterId) {
-        public MaterialIdStatistics {
-            if (assignedCount < 0
-                    || assignedCount > MaterialIdResolver.MAX_ID
-                    || highWaterId < 0
-                    || highWaterId > MaterialIdResolver.MAX_ID
-                    || assignedCount != highWaterId) {
-                throw new IllegalArgumentException("Invalid renderer MaterialId statistics");
-            }
-        }
-    }
-
-    public record TintIdStatistics(int assignedCount, int highWaterId) {
-        public TintIdStatistics {
-            if (assignedCount < 1
-                    || assignedCount > TintSampleTable.MAX_TINT_ID + 1
-                    || highWaterId < 0
-                    || highWaterId > TintSampleTable.MAX_TINT_ID
-                    || assignedCount != highWaterId + 1) {
-                throw new IllegalArgumentException("Invalid renderer TintId statistics");
-            }
-        }
-
-        public int entryBytes() {
-            return TintSampleTable.ENTRY_SIZE;
-        }
-
-        public long activeSampleBytes() {
-            return Math.multiplyExact((long) this.assignedCount, this.entryBytes());
-        }
-
-        public long reservedSampleBytes() {
-            return Math.multiplyExact(
-                    (long) TintSampleTable.MAX_TINT_ID + 1L,
-                    this.entryBytes());
         }
     }
 
