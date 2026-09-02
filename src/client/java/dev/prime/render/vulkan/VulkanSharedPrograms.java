@@ -2,6 +2,7 @@ package dev.prime.render.vulkan;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
 import java.nio.LongBuffer;
+import java.util.Arrays;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
@@ -12,7 +13,7 @@ import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
 
 /** Size-independent programs shared by extent-scoped descriptor and image resources. */
-final class VulkanSharedPrograms implements AutoCloseable {
+public final class VulkanSharedPrograms implements AutoCloseable {
     private static final int SAMPLED_IMAGE = VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     private static final int STORAGE_IMAGE = VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     private static final int STORAGE_BUFFER = VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -162,7 +163,7 @@ final class VulkanSharedPrograms implements AutoCloseable {
         }
     }
 
-    static final class SharedComputeProgram implements Destroyable {
+    public static final class SharedComputeProgram implements Destroyable {
         private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
 
         private final VulkanContext context;
@@ -182,7 +183,7 @@ final class VulkanSharedPrograms implements AutoCloseable {
             this.pipelines = pipelines;
         }
 
-        static SharedComputeProgram create(VulkanContext context, String label, int pushSize,
+        public static SharedComputeProgram create(VulkanContext context, String label, int pushSize,
             int[] descriptorTypes, String[] shaderResources) {
             if (pushSize < 0 || (pushSize & 3) != 0) {
                 throw new IllegalArgumentException(
@@ -253,6 +254,22 @@ final class VulkanSharedPrograms implements AutoCloseable {
             }
         }
 
+        public static SharedComputeProgram createStorageImages(
+                VulkanContext context,
+                String label,
+                int pushSize,
+                int imageCount,
+                String shaderResource) {
+            int[] descriptorTypes = new int[imageCount];
+            Arrays.fill(descriptorTypes, STORAGE_IMAGE);
+            return create(
+                    context,
+                    label,
+                    pushSize,
+                    descriptorTypes,
+                    new String[] {shaderResource});
+        }
+
         SharedComputeProgram retain() {
             if (this.destroyed) {
                 throw new IllegalStateException("Cannot retain a destroyed compute program");
@@ -261,7 +278,7 @@ final class VulkanSharedPrograms implements AutoCloseable {
             return this;
         }
 
-        void release() {
+        public void release() {
             if (this.references <= 0) {
                 throw new IllegalStateException("Compute program reference underflow");
             }
@@ -271,15 +288,15 @@ final class VulkanSharedPrograms implements AutoCloseable {
             }
         }
 
-        long descriptorSetLayout() {
+        public long descriptorSetLayout() {
             return this.descriptorSetLayout;
         }
 
-        long pipelineLayout() {
+        public long pipelineLayout() {
             return this.pipelineLayout;
         }
 
-        long pipeline(int index) {
+        public long pipeline(int index) {
             return this.pipelines[index];
         }
 

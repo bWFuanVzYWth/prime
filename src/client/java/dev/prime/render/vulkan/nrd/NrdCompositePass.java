@@ -5,47 +5,29 @@ import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.render.vulkan.AtmospherePipeline;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanDescriptors;
+import dev.prime.render.vulkan.VulkanDescriptors.StorageImageSet;
 import dev.prime.render.vulkan.VulkanImage;
-import dev.prime.render.vulkan.VulkanShaderModules;
+import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.LongBuffer;
+import java.util.List;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
-import org.lwjgl.vulkan.VkDescriptorImageInfo;
-import org.lwjgl.vulkan.VkDescriptorPoolSize;
-import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
-import org.lwjgl.vulkan.VkPushConstantRange;
-import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 final class NrdCompositePass implements Destroyable {
     private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
     private static final int BINDING_COUNT = 28;
     private static final int PUSH_SIZE = NrdCompositeConstants.SIZE;
-    private final VulkanContext context;
-    private final long descriptorSetLayout;
-    private final long descriptorPool;
-    private final long descriptorSet;
-    private final long pipelineLayout;
-    private final long pipeline;
+    private final SharedComputeProgram program;
+    private final StorageImageSet descriptors;
     private boolean destroyed;
 
     private NrdCompositePass(
-            VulkanContext context,
-            long descriptorSetLayout,
-            long descriptorPool,
-            long descriptorSet,
-            long pipelineLayout,
-            long pipeline) {
-        this.context = context;
-        this.descriptorSetLayout = descriptorSetLayout;
-        this.descriptorPool = descriptorPool;
-        this.descriptorSet = descriptorSet;
-        this.pipelineLayout = pipelineLayout;
-        this.pipeline = pipeline;
+            SharedComputeProgram program,
+            StorageImageSet descriptors) {
+        this.program = program;
+        this.descriptors = descriptors;
     }
 
     static NrdCompositePass create(
@@ -54,77 +36,16 @@ final class NrdCompositePass implements Destroyable {
             VulkanImage stableAccumulation,
             NrdImages images,
             AtmospherePipeline atmosphere) {
-        long descriptorSetLayout = 0L;
-        long descriptorPool = 0L;
-        long descriptorSet = 0L;
-        long pipelineLayout = 0L;
-        long pipeline = 0L;
+        SharedComputeProgram program = null;
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkDescriptorSetLayoutBinding.Buffer bindings =
-                    VkDescriptorSetLayoutBinding.calloc(BINDING_COUNT, stack);
-            for (int index = 0; index < BINDING_COUNT; index++) {
-                bindings.get(index)
-                        .binding(index)
-                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .descriptorCount(1)
-                        .stageFlags(COMPUTE_STAGE);
-            }
-            descriptorSetLayout = VulkanDescriptors.createSetLayout(
+            program = SharedComputeProgram.createStorageImages(
                     context,
-                    stack,
-                    bindings,
-                    "create Prime NRD composite descriptor layout");
+                    "Prime NRD composite",
+                    PUSH_SIZE,
+                    BINDING_COUNT,
+                    GeneratedShaderPrograms.resource("nrd_composite"));
 
-            VkPushConstantRange.Buffer pushRange = VkPushConstantRange.calloc(1, stack)
-                    .stageFlags(COMPUTE_STAGE)
-                    .offset(0)
-                    .size(PUSH_SIZE);
-            pipelineLayout = VulkanDescriptors.createPipelineLayout(
-                    context,
-                    stack,
-                    descriptorSetLayout,
-                    pushRange,
-                    "create Prime NRD composite pipeline layout");
-
-            LongBuffer pointer = stack.mallocLong(1);
-            long shaderModule = VulkanShaderModules.create(
-                    context, stack, GeneratedShaderPrograms.resource("nrd_composite"));
-            try {
-                VkPipelineShaderStageCreateInfo stage = VkPipelineShaderStageCreateInfo.calloc(stack)
-                        .sType$Default()
-                        .stage(COMPUTE_STAGE)
-                        .module(shaderModule)
-                        .pName(stack.UTF8("main"));
-                VkComputePipelineCreateInfo.Buffer pipelineInfo = VkComputePipelineCreateInfo.calloc(1, stack);
-                pipelineInfo.get(0)
-                        .sType$Default()
-                        .stage(stage)
-                        .layout(pipelineLayout);
-                pointer.clear();
-                context.createComputePipeline(
-                        pipelineInfo, pointer, "Prime NRD composite");
-                pipeline = pointer.get(0);
-            } finally {
-                VK12.vkDestroyShaderModule(context.vkDevice(), shaderModule, null);
-            }
-
-            VkDescriptorPoolSize.Buffer poolSize = VkDescriptorPoolSize.calloc(1, stack)
-                    .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                    .descriptorCount(BINDING_COUNT);
-            descriptorPool = VulkanDescriptors.createPool(
-                    context,
-                    stack,
-                    1,
-                    poolSize,
-                    "create Prime NRD composite descriptor pool");
-            descriptorSet = VulkanDescriptors.allocateSet(
-                    context,
-                    stack,
-                    descriptorPool,
-                    descriptorSetLayout,
-                    "allocate Prime NRD composite descriptor set");
-
-            VulkanImage[] descriptorImages = new VulkanImage[] {
+            List<VulkanImage> descriptorImages = List.of(
                 output,
                 images.denoisedDiffuse,
                 images.denoisedSpecular,
@@ -152,45 +73,19 @@ final class NrdCompositePass implements Destroyable {
                 images.reflectionNormalRoughness,
                 images.reflectionViewZ,
                 images.reflectionPosition,
-                images.displayPosition
-            };
-            VkDescriptorImageInfo.Buffer imageInfos =
-                    VkDescriptorImageInfo.calloc(BINDING_COUNT, stack);
-            VkWriteDescriptorSet.Buffer writes =
-                    VkWriteDescriptorSet.calloc(BINDING_COUNT, stack);
-            for (int index = 0; index < BINDING_COUNT; index++) {
-                imageInfos.get(index)
-                        .imageView(descriptorImages[index].view())
-                        .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                writes.get(index)
-                        .sType$Default()
-                        .dstSet(descriptorSet)
-                        .dstBinding(index)
-                        .descriptorCount(1)
-                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(
-                                imageInfos.get(index).address(), 1));
-            }
-            VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
-            return new NrdCompositePass(
+                images.displayPosition);
+            StorageImageSet descriptors = VulkanDescriptors.bindStorageImages(
                     context,
-                    descriptorSetLayout,
-                    descriptorPool,
-                    descriptorSet,
-                    pipelineLayout,
-                    pipeline);
+                    stack,
+                    program.descriptorSetLayout(),
+                    descriptorImages,
+                    "Prime NRD composite");
+            return new NrdCompositePass(
+                    program,
+                    descriptors);
         } catch (RuntimeException exception) {
-            if (descriptorPool != 0L) {
-                VK12.vkDestroyDescriptorPool(context.vkDevice(), descriptorPool, null);
-            }
-            if (pipeline != 0L) {
-                VK12.vkDestroyPipeline(context.vkDevice(), pipeline, null);
-            }
-            if (pipelineLayout != 0L) {
-                VK12.vkDestroyPipelineLayout(context.vkDevice(), pipelineLayout, null);
-            }
-            if (descriptorSetLayout != 0L) {
-                VK12.vkDestroyDescriptorSetLayout(context.vkDevice(), descriptorSetLayout, null);
+            if (program != null) {
+                program.release();
             }
             throw exception;
         }
@@ -207,13 +102,15 @@ final class NrdCompositePass implements Destroyable {
             float epipoleY) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VK12.vkCmdBindPipeline(
-                    commandBuffer, VK12.VK_PIPELINE_BIND_POINT_COMPUTE, this.pipeline);
+                    commandBuffer,
+                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
+                    this.program.pipeline(0));
             VK12.vkCmdBindDescriptorSets(
                     commandBuffer,
                     VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.pipelineLayout,
+                    this.program.pipelineLayout(),
                     0,
-                    stack.longs(this.descriptorSet),
+                    stack.longs(this.descriptors.handle()),
                     null);
             ByteBuffer push = stack.calloc(PUSH_SIZE).order(ByteOrder.nativeOrder());
             NrdCompositeConstants.write(
@@ -227,7 +124,7 @@ final class NrdCompositePass implements Destroyable {
                     epipoleY);
             VK12.vkCmdPushConstants(
                     commandBuffer,
-                    this.pipelineLayout,
+                    this.program.pipelineLayout(),
                     COMPUTE_STAGE,
                     0,
                     push);
@@ -239,10 +136,8 @@ final class NrdCompositePass implements Destroyable {
     public void destroy() {
         if (!this.destroyed) {
             this.destroyed = true;
-            VK12.vkDestroyDescriptorPool(this.context.vkDevice(), this.descriptorPool, null);
-            VK12.vkDestroyPipeline(this.context.vkDevice(), this.pipeline, null);
-            VK12.vkDestroyPipelineLayout(this.context.vkDevice(), this.pipelineLayout, null);
-            VK12.vkDestroyDescriptorSetLayout(this.context.vkDevice(), this.descriptorSetLayout, null);
+            this.descriptors.destroy();
+            this.program.release();
         }
     }
 }

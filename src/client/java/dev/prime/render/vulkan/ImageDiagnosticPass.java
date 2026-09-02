@@ -1,6 +1,7 @@
 package dev.prime.render.vulkan;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
+import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.LongBuffer;
@@ -9,13 +10,9 @@ import java.util.Objects;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorImageInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
 import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
-import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
-import org.lwjgl.vulkan.VkPushConstantRange;
 import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /** Diagnostic-only image projection. It is absent from every production shader descriptor set. */
@@ -39,30 +36,24 @@ public final class ImageDiagnosticPass implements Destroyable {
     private static final int CLEAR = 1;
 
     private final VulkanContext context;
-    private final long descriptorSetLayout;
+    private final SharedComputeProgram program;
     private final long descriptorPool;
     private final long[] descriptorSets;
-    private final long pipelineLayout;
-    private final long pipeline;
     private final VulkanImage[] sources;
     private final VulkanImage output;
     private boolean destroyed;
 
     private ImageDiagnosticPass(
             VulkanContext context,
-            long descriptorSetLayout,
+            SharedComputeProgram program,
             long descriptorPool,
             long[] descriptorSets,
-            long pipelineLayout,
-            long pipeline,
             VulkanImage[] sources,
             VulkanImage output) {
         this.context = context;
-        this.descriptorSetLayout = descriptorSetLayout;
+        this.program = program;
         this.descriptorPool = descriptorPool;
         this.descriptorSets = descriptorSets;
-        this.pipelineLayout = pipelineLayout;
-        this.pipeline = pipeline;
         this.sources = sources;
         this.output = output;
     }
@@ -97,36 +88,18 @@ public final class ImageDiagnosticPass implements Destroyable {
         }
         VulkanImage[] ownedSources = sources.clone();
         for (VulkanImage source : ownedSources) Objects.requireNonNull(source, "source");
-        long setLayout = 0L;
+        SharedComputeProgram program = null;
         long descriptorPool = 0L;
-        long pipelineLayout = 0L;
-        long pipeline = 0L;
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkDescriptorSetLayoutBinding.Buffer bindings =
-                    VkDescriptorSetLayoutBinding.calloc(2, stack);
-            bindings.get(0).binding(0).descriptorType(VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
-                    .descriptorCount(1).stageFlags(COMPUTE_STAGE);
-            bindings.get(1).binding(1).descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                    .descriptorCount(1).stageFlags(COMPUTE_STAGE);
-            setLayout = VulkanDescriptors.createSetLayout(
-                    context, stack, bindings, "create image-diagnostic descriptor layout");
-            VkPushConstantRange.Buffer pushRange = VkPushConstantRange.calloc(1, stack)
-                    .stageFlags(COMPUTE_STAGE).offset(0).size(PUSH_SIZE);
-            pipelineLayout = VulkanDescriptors.createPipelineLayout(
-                    context, stack, setLayout, pushRange,
-                    "create image-diagnostic pipeline layout");
-            long shader = VulkanShaderModules.create(context, stack, shaderResource);
-            try {
-                VkPipelineShaderStageCreateInfo stage = VkPipelineShaderStageCreateInfo.calloc(stack)
-                        .sType$Default().stage(COMPUTE_STAGE).module(shader).pName(stack.UTF8("main"));
-                VkComputePipelineCreateInfo.Buffer info = VkComputePipelineCreateInfo.calloc(1, stack);
-                info.get(0).sType$Default().stage(stage).layout(pipelineLayout);
-                LongBuffer pointer = stack.mallocLong(1);
-                context.createComputePipeline(info, pointer, "image diagnostics");
-                pipeline = pointer.get(0);
-            } finally {
-                VK12.vkDestroyShaderModule(context.vkDevice(), shader, null);
-            }
+            program = SharedComputeProgram.create(
+                    context,
+                    "image diagnostics",
+                    PUSH_SIZE,
+                    new int[] {
+                        VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                    },
+                    new String[] {shaderResource});
             VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(2, stack);
             poolSizes.get(0).type(VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
                     .descriptorCount(ownedSources.length);
@@ -136,7 +109,9 @@ public final class ImageDiagnosticPass implements Destroyable {
                     context, stack, ownedSources.length, poolSizes,
                     "create image-diagnostic descriptor pool");
             LongBuffer layouts = stack.mallocLong(ownedSources.length);
-            for (int index = 0; index < ownedSources.length; index++) layouts.put(setLayout);
+            for (int index = 0; index < ownedSources.length; index++) {
+                layouts.put(program.descriptorSetLayout());
+            }
             layouts.flip();
             LongBuffer pointers = stack.mallocLong(ownedSources.length);
             VulkanContext.check(
@@ -169,13 +144,10 @@ public final class ImageDiagnosticPass implements Destroyable {
             }
             VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
             return new ImageDiagnosticPass(
-                    context, setLayout, descriptorPool, descriptorSets,
-                    pipelineLayout, pipeline, ownedSources, output);
+                    context, program, descriptorPool, descriptorSets, ownedSources, output);
         } catch (RuntimeException exception) {
             if (descriptorPool != 0L) VK12.vkDestroyDescriptorPool(context.vkDevice(), descriptorPool, null);
-            if (pipeline != 0L) VK12.vkDestroyPipeline(context.vkDevice(), pipeline, null);
-            if (pipelineLayout != 0L) VK12.vkDestroyPipelineLayout(context.vkDevice(), pipelineLayout, null);
-            if (setLayout != 0L) VK12.vkDestroyDescriptorSetLayout(context.vkDevice(), setLayout, null);
+            if (program != null) program.release();
             throw exception;
         }
     }
@@ -260,12 +232,17 @@ public final class ImageDiagnosticPass implements Destroyable {
             push.putInt(32, view.presentation);
             push.putInt(36, clear ? CLEAR : 0);
             VK12.vkCmdBindPipeline(
-                    commandBuffer, VK12.VK_PIPELINE_BIND_POINT_COMPUTE, this.pipeline);
+                    commandBuffer,
+                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
+                    this.program.pipeline(0));
             VK12.vkCmdBindDescriptorSets(
                     commandBuffer, VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.pipelineLayout, 0, stack.longs(this.descriptorSets[view.source]), null);
+                    this.program.pipelineLayout(),
+                    0,
+                    stack.longs(this.descriptorSets[view.source]),
+                    null);
             VK12.vkCmdPushConstants(
-                    commandBuffer, this.pipelineLayout, COMPUTE_STAGE, 0, push);
+                    commandBuffer, this.program.pipelineLayout(), COMPUTE_STAGE, 0, push);
             VK12.vkCmdDispatch(
                     commandBuffer,
                     DispatchMath.divideRoundUp(width, LOCAL_SIZE),
@@ -279,9 +256,7 @@ public final class ImageDiagnosticPass implements Destroyable {
         if (this.destroyed) return;
         this.destroyed = true;
         VK12.vkDestroyDescriptorPool(this.context.vkDevice(), this.descriptorPool, null);
-        VK12.vkDestroyPipeline(this.context.vkDevice(), this.pipeline, null);
-        VK12.vkDestroyPipelineLayout(this.context.vkDevice(), this.pipelineLayout, null);
-        VK12.vkDestroyDescriptorSetLayout(this.context.vkDevice(), this.descriptorSetLayout, null);
+        this.program.release();
     }
 
     public record View(int source, int presentation) {}
