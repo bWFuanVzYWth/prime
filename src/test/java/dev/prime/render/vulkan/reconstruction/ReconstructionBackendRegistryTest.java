@@ -8,18 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionExtent;
 import dev.prime.render.post.ReconstructionQualityMode;
-import dev.prime.render.post.SubpixelJitter;
-import dev.prime.render.post.TransparentGuideMode;
-import java.util.EnumMap;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 final class ReconstructionBackendRegistryTest {
     @Test
-    void selectsRequestedBuiltInBackendAndItsExtent() {
+    void selectsRequestedBuiltInModeAndItsExtent() {
         Reporter reporter = new Reporter();
-        StubBackend dlss = backend(PostProcessingMode.DLSS_RR, 1280, 720);
-        ReconstructionBackendRegistry registry = registry(dlss, reporter);
+        ReconstructionBackendRegistry registry = registry(
+                new StubDlss(new ReconstructionExtent(1280, 720)), reporter);
 
         ResolvedReconstruction resolved = registry.resolve(
                 PostProcessingMode.DLSS_RR,
@@ -36,10 +32,10 @@ final class ReconstructionBackendRegistryTest {
     }
 
     @Test
-    void unavailableDlssFallsBackWithoutChangingTheRequestedProduct() {
+    void unavailableDlssFallsBackAndReportsOnlyOnce() {
         Reporter reporter = new Reporter();
-        StubBackend dlss = backend(PostProcessingMode.DLSS_RR, 1280, 720);
-        dlss.capability = ReconstructionBackend.Capability.unsupported("missing capability");
+        StubDlss dlss = new StubDlss(new ReconstructionExtent(1280, 720));
+        dlss.unavailableReason = "missing capability";
         ReconstructionBackendRegistry registry = registry(dlss, reporter);
 
         ResolvedReconstruction first = registry.resolve(
@@ -62,11 +58,11 @@ final class ReconstructionBackendRegistryTest {
     }
 
     @Test
-    void queryAndFeatureFailuresUseTheSameSingleDlssFallbackPath() {
+    void queryAndFeatureFailuresShareTheSingleDlssFallbackPath() {
         Reporter queryReporter = new Reporter();
-        StubBackend queryDlss = backend(PostProcessingMode.DLSS_RR, 1280, 720);
-        queryDlss.queryFailure = new IllegalStateException("query");
-        ReconstructionBackendRegistry queryRegistry = registry(queryDlss, queryReporter);
+        StubDlss query = new StubDlss(new ReconstructionExtent(1280, 720));
+        query.failure = new IllegalStateException("query");
+        ReconstructionBackendRegistry queryRegistry = registry(query, queryReporter);
         assertEquals(
                 PostProcessingMode.NRD_FSR,
                 queryRegistry.resolve(
@@ -79,7 +75,7 @@ final class ReconstructionBackendRegistryTest {
 
         Reporter createReporter = new Reporter();
         ReconstructionBackendRegistry createRegistry = registry(
-                backend(PostProcessingMode.DLSS_RR, 1280, 720), createReporter);
+                new StubDlss(new ReconstructionExtent(1280, 720)), createReporter);
         ResolvedReconstruction selected = createRegistry.resolve(
                 PostProcessingMode.DLSS_RR,
                 ReconstructionQualityMode.BALANCED,
@@ -89,50 +85,41 @@ final class ReconstructionBackendRegistryTest {
                 selected, new IllegalStateException("feature"));
         assertEquals(PostProcessingMode.NRD_FSR, fallback.effectiveMode());
         assertEquals(1, createReporter.failed);
-        createRegistry.recoverCreationFailure(
-                selected, new IllegalStateException("feature again"));
+        createRegistry.recoverCreationFailure(selected, new IllegalStateException("again"));
         assertEquals(1, createReporter.failed);
     }
 
     @Test
-    void nrdAndNoisyFailuresRemainFailFast() {
+    void nativeModesDoNotEnterDlssFallback() {
         Reporter reporter = new Reporter();
-        StubBackend nrd = backend(PostProcessingMode.NRD_FSR, 1280, 720);
-        nrd.queryFailure = new IllegalStateException("nrd failed");
-        Map<PostProcessingMode, ReconstructionBackend> backends = backends(
-                backend(PostProcessingMode.DLSS_RR, 1280, 720), nrd);
-        ReconstructionBackendRegistry registry =
-                new ReconstructionBackendRegistry(backends, reporter);
+        ReconstructionBackendRegistry registry = registry(
+                new StubDlss(new ReconstructionExtent(1280, 720)), reporter);
+        ResolvedReconstruction nrd = registry.resolve(
+                PostProcessingMode.NRD_FSR,
+                ReconstructionQualityMode.QUALITY,
+                1920,
+                1080);
+        ResolvedReconstruction noisy = registry.resolve(
+                PostProcessingMode.DISABLED,
+                ReconstructionQualityMode.QUALITY,
+                1920,
+                1080);
 
+        assertEquals(PostProcessingMode.NRD_FSR, nrd.effectiveMode());
+        assertEquals(PostProcessingMode.DISABLED, noisy.effectiveMode());
         assertThrows(
-                IllegalStateException.class,
+                IllegalArgumentException.class,
                 () -> registry.resolve(
                         PostProcessingMode.NRD_FSR,
                         ReconstructionQualityMode.QUALITY,
-                        1920,
+                        0,
                         1080));
         assertEquals(0, reporter.total());
     }
 
     private static ReconstructionBackendRegistry registry(
-            StubBackend dlss, Reporter reporter) {
-        return new ReconstructionBackendRegistry(
-                backends(dlss, backend(PostProcessingMode.NRD_FSR, 960, 540)),
-                reporter);
-    }
-
-    private static Map<PostProcessingMode, ReconstructionBackend> backends(
-            StubBackend dlss, StubBackend nrd) {
-        EnumMap<PostProcessingMode, ReconstructionBackend> values =
-                new EnumMap<>(PostProcessingMode.class);
-        values.put(PostProcessingMode.DLSS_RR, dlss);
-        values.put(PostProcessingMode.NRD_FSR, nrd);
-        values.put(PostProcessingMode.DISABLED, backend(PostProcessingMode.DISABLED, 1920, 1080));
-        return values;
-    }
-
-    private static StubBackend backend(PostProcessingMode mode, int width, int height) {
-        return new StubBackend(mode, new ReconstructionExtent(width, height));
+            StubDlss dlss, Reporter reporter) {
+        return new ReconstructionBackendRegistry(dlss, reporter);
     }
 
     private static final class Reporter
@@ -140,75 +127,30 @@ final class ReconstructionBackendRegistryTest {
         private int unavailable;
         private int failed;
 
-        @Override
-        public void unavailable(String reason) {
-            this.unavailable++;
-        }
-
-        @Override
-        public void failed(String operation, RuntimeException exception) {
-            this.failed++;
-        }
-
-        int total() {
-            return this.unavailable + this.failed;
-        }
+        @Override public void unavailable(String reason) { this.unavailable++; }
+        @Override public void failed(String operation, RuntimeException exception) { this.failed++; }
+        int total() { return this.unavailable + this.failed; }
     }
 
-    private static final class StubBackend implements ReconstructionBackend {
-        private final PostProcessingMode mode;
+    private static final class StubDlss
+            implements ReconstructionBackendRegistry.DlssExtentResolver {
         private final ReconstructionExtent extent;
-        private Capability capability = Capability.supported();
-        private RuntimeException queryFailure;
+        private String unavailableReason;
+        private RuntimeException failure;
 
-        private StubBackend(PostProcessingMode mode, ReconstructionExtent extent) {
-            this.mode = mode;
+        private StubDlss(ReconstructionExtent extent) {
             this.extent = extent;
         }
 
-        @Override public PostProcessingMode mode() { return this.mode; }
-        @Override public Capability capability() { return this.capability; }
+        @Override public String unavailableReason() { return this.unavailableReason; }
 
         @Override
         public ReconstructionExtent renderExtent(
                 ReconstructionQualityMode quality, int displayWidth, int displayHeight) {
-            if (this.queryFailure != null) {
-                throw this.queryFailure;
+            if (this.failure != null) {
+                throw this.failure;
             }
             return this.extent;
-        }
-
-        @Override
-        public PostProcessingMode fallbackMode() {
-            return this.mode == PostProcessingMode.DLSS_RR
-                    ? PostProcessingMode.NRD_FSR
-                    : null;
-        }
-
-        @Override
-        public TransparentGuideMode transparentGuideMode() {
-            return switch (this.mode) {
-                case NRD_FSR -> TransparentGuideMode.REFLECTION_AND_TRANSMISSION;
-                case DLSS_RR -> TransparentGuideMode.TRANSMISSION_ONLY;
-                case DISABLED -> TransparentGuideMode.DISABLED;
-            };
-        }
-
-        @Override
-        public SubpixelJitter jitter(ReconstructionQualityMode quality, int frameIndex) {
-            return new SubpixelJitter(0.0F, 0.0F);
-        }
-
-        @Override
-        public int jitterPhase(ReconstructionQualityMode quality, int frameIndex) {
-            return 1;
-        }
-
-        @Override public String executionLabel() { return this.mode.id(); }
-
-        @Override
-        public VulkanReconstructionProcessor create(CreateInput input) {
-            throw new UnsupportedOperationException();
         }
     }
 }

@@ -5,60 +5,37 @@ import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionExtent;
 import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.vulkan.AtmospherePipeline;
+import dev.prime.render.vulkan.NoisyPostProcessor;
+import dev.prime.render.vulkan.NrdFsrPostProcessor;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.dlss.DlssRrBootstrap;
 import dev.prime.render.vulkan.dlss.DlssRrNative;
-import java.util.EnumMap;
-import java.util.Map;
+import dev.prime.render.vulkan.dlss.DlssRrPostProcessor;
 import java.util.Objects;
+import java.util.Optional;
 
-/** Render-thread-owned closed registry for Prime's built-in reconstruction products. */
+/** Resolves Prime's three fixed reconstruction products and owns DLSS fallback policy. */
 public final class ReconstructionBackendRegistry {
     private final VulkanContext context;
-    private final Map<PostProcessingMode, ReconstructionBackend> backends;
+    private final DlssRrNative.Context ngxContext;
+    private final DlssExtentResolver dlss;
     private final FailureReporter failureReporter;
     private boolean dlssFallbackReported;
 
     public ReconstructionBackendRegistry(
             VulkanContext context, DlssRrNative.Context ngxContext) {
-        this(context, builtIns(ngxContext), new DefaultFailureReporter());
-    }
-
-    ReconstructionBackendRegistry(
-            VulkanContext context,
-            Map<PostProcessingMode, ReconstructionBackend> backends,
-            FailureReporter failureReporter) {
         this.context = Objects.requireNonNull(context, "context");
-        EnumMap<PostProcessingMode, ReconstructionBackend> copy =
-                new EnumMap<>(PostProcessingMode.class);
-        copy.putAll(backends);
-        for (PostProcessingMode mode : PostProcessingMode.values()) {
-            ReconstructionBackend backend = copy.get(mode);
-            if (backend == null || backend.mode() != mode) {
-                throw new IllegalArgumentException(
-                        "Missing or mismatched built-in reconstruction backend " + mode);
-            }
-        }
-        this.backends = Map.copyOf(copy);
-        this.failureReporter = Objects.requireNonNull(failureReporter, "failureReporter");
+        this.ngxContext = ngxContext;
+        this.dlss = new NativeDlssExtentResolver(ngxContext);
+        this.failureReporter = new DefaultFailureReporter();
     }
 
     ReconstructionBackendRegistry(
-            Map<PostProcessingMode, ReconstructionBackend> backends,
-            FailureReporter failureReporter) {
+            DlssExtentResolver dlss, FailureReporter failureReporter) {
         this.context = null;
-        EnumMap<PostProcessingMode, ReconstructionBackend> copy =
-                new EnumMap<>(PostProcessingMode.class);
-        copy.putAll(backends);
-        for (PostProcessingMode mode : PostProcessingMode.values()) {
-            ReconstructionBackend backend = copy.get(mode);
-            if (backend == null || backend.mode() != mode) {
-                throw new IllegalArgumentException(
-                        "Missing or mismatched built-in reconstruction backend " + mode);
-            }
-        }
-        this.backends = Map.copyOf(copy);
+        this.ngxContext = null;
+        this.dlss = Objects.requireNonNull(dlss, "dlss");
         this.failureReporter = Objects.requireNonNull(failureReporter, "failureReporter");
     }
 
@@ -70,36 +47,30 @@ public final class ReconstructionBackendRegistry {
         Objects.requireNonNull(requestedMode, "requestedMode");
         Objects.requireNonNull(quality, "quality");
         ReconstructionExtent display = new ReconstructionExtent(displayWidth, displayHeight);
-        ReconstructionBackend requested = this.backends.get(requestedMode);
-        ReconstructionBackend.Capability capability = requested.capability();
-        if (!capability.available()) {
-            return this.fallback(
-                    requestedMode,
-                    quality,
-                    display,
-                    requested,
-                    capability.unavailableReason(),
-                    null);
+        if (requestedMode == PostProcessingMode.DLSS_RR) {
+            String unavailable = this.dlss.unavailableReason();
+            if (unavailable != null) {
+                return this.fallback(quality, display, unavailable, null);
+            }
         }
         try {
-            ReconstructionExtent render = requested.renderExtent(
-                    quality, displayWidth, displayHeight);
+            ReconstructionExtent render = switch (requestedMode) {
+                case NRD_FSR -> quality.renderExtent(displayWidth, displayHeight);
+                case DLSS_RR -> this.dlss.renderExtent(quality, displayWidth, displayHeight);
+                case DISABLED -> display;
+            };
             return new ResolvedReconstruction(
                     requestedMode,
                     requestedMode,
                     quality,
                     render,
                     display,
-                    requested,
-                    java.util.Optional.empty());
+                    Optional.empty());
         } catch (RuntimeException exception) {
-            return this.fallback(
-                    requestedMode,
-                    quality,
-                    display,
-                    requested,
-                    "optimal-size query failed",
-                    exception);
+            if (requestedMode != PostProcessingMode.DLSS_RR) {
+                throw exception;
+            }
+            return this.fallback(quality, display, "optimal-size query failed", exception);
         }
     }
 
@@ -123,94 +94,149 @@ public final class ReconstructionBackendRegistry {
         }
 
         try {
-            VulkanReconstructionProcessor processor = selection.backend().create(
-                    new ReconstructionBackend.CreateInput(
-                            this.context,
-                            atmosphere,
-                            stableRadiance,
-                            output,
-                            selection));
+            VulkanReconstructionProcessor processor = this.createProcessor(
+                    atmosphere, stableRadiance, output, selection);
             return new VulkanReconstructionResources(
                     output, stableRadiance, processor, selection);
         } catch (RuntimeException exception) {
             RuntimeException failure = VulkanReconstructionResources.destroy(
                     stableRadiance, exception);
             failure = VulkanReconstructionResources.destroy(output, failure);
-            if (selection.backend().fallbackMode() == null) {
+            if (selection.effectiveMode() != PostProcessingMode.DLSS_RR) {
                 throw failure;
             }
-            ResolvedReconstruction fallback = this.recoverCreationFailure(
-                    selection, exception);
-            return this.createResources(atmosphere, fallback);
+            return this.createResources(
+                    atmosphere, this.recoverCreationFailure(selection, exception));
         }
+    }
+
+    private VulkanReconstructionProcessor createProcessor(
+            AtmospherePipeline atmosphere,
+            VulkanImage stableRadiance,
+            VulkanImage output,
+            ResolvedReconstruction selection) {
+        int width = selection.extent().width();
+        int height = selection.extent().height();
+        return switch (selection.effectiveMode()) {
+            case NRD_FSR -> NrdFsrPostProcessor.create(
+                    this.context,
+                    atmosphere,
+                    stableRadiance,
+                    output,
+                    width,
+                    height,
+                    output.width(),
+                    output.height(),
+                    selection.quality());
+            case DLSS_RR -> {
+                if (this.ngxContext == null) {
+                    throw new IllegalStateException(
+                            "DLSS RR was selected without an initialized NGX context");
+                }
+                yield DlssRrPostProcessor.create(
+                        this.context,
+                        this.ngxContext,
+                        atmosphere,
+                        stableRadiance,
+                        output,
+                        width,
+                        height,
+                        output.width(),
+                        output.height(),
+                        selection.quality());
+            }
+            case DISABLED -> NoisyPostProcessor.create(
+                    this.context,
+                    atmosphere,
+                    stableRadiance,
+                    output,
+                    width,
+                    height,
+                    selection.quality());
+        };
     }
 
     ResolvedReconstruction recoverCreationFailure(
             ResolvedReconstruction selection, RuntimeException exception) {
         return this.fallback(
-                selection.requestedMode(),
                 selection.quality(),
                 selection.displayExtent(),
-                selection.backend(),
                 "feature creation failed",
                 exception);
     }
 
     private ResolvedReconstruction fallback(
-            PostProcessingMode requestedMode,
             ReconstructionQualityMode quality,
             ReconstructionExtent display,
-            ReconstructionBackend failed,
             String reason,
             RuntimeException exception) {
-        PostProcessingMode fallbackMode = failed.fallbackMode();
-        if (fallbackMode == null) {
-            if (exception != null) {
-                throw exception;
-            }
-            throw new IllegalStateException(
-                    failed.mode() + " reconstruction backend is unavailable: " + reason);
-        }
         if (!this.dlssFallbackReported) {
-            if (exception != null) {
-                this.failureReporter.failed(reason, exception);
-            } else {
+            if (exception == null) {
                 this.failureReporter.unavailable(reason);
+            } else {
+                this.failureReporter.failed(reason, exception);
             }
+            this.dlssFallbackReported = true;
         }
-        this.dlssFallbackReported = true;
-        ReconstructionBackend fallback = this.backends.get(fallbackMode);
-        ReconstructionBackend.Capability capability = fallback.capability();
-        if (!capability.available()) {
-            throw new IllegalStateException(
-                    fallbackMode + " fallback is unavailable: " + capability.unavailableReason());
-        }
-        ReconstructionExtent render = fallback.renderExtent(
-                quality, display.width(), display.height());
         return new ResolvedReconstruction(
-                requestedMode,
-                fallbackMode,
+                PostProcessingMode.DLSS_RR,
+                PostProcessingMode.NRD_FSR,
                 quality,
-                render,
+                quality.renderExtent(display.width(), display.height()),
                 display,
-                fallback,
-                java.util.Optional.of(reason));
+                Optional.of(reason));
     }
 
-    private static Map<PostProcessingMode, ReconstructionBackend> builtIns(
-            DlssRrNative.Context ngxContext) {
-        EnumMap<PostProcessingMode, ReconstructionBackend> values =
-                new EnumMap<>(PostProcessingMode.class);
-        values.put(PostProcessingMode.NRD_FSR, new NrdFsrBackend());
-        values.put(PostProcessingMode.DLSS_RR, new DlssRrBackend(ngxContext));
-        values.put(PostProcessingMode.DISABLED, new NoisyBackend());
-        return values;
+    interface DlssExtentResolver {
+        /** Null means supported; otherwise contains the stable user-facing failure reason. */
+        String unavailableReason();
+
+        ReconstructionExtent renderExtent(
+                ReconstructionQualityMode quality, int displayWidth, int displayHeight);
     }
 
     interface FailureReporter {
         void unavailable(String reason);
 
         void failed(String operation, RuntimeException exception);
+    }
+
+    private static final class NativeDlssExtentResolver implements DlssExtentResolver {
+        private final DlssRrNative.Context context;
+        private DlssRrNative.OptimalSettings optimal;
+        private ReconstructionQualityMode quality;
+        private int displayWidth;
+        private int displayHeight;
+
+        private NativeDlssExtentResolver(DlssRrNative.Context context) {
+            this.context = context;
+        }
+
+        @Override
+        public String unavailableReason() {
+            return this.context != null && DlssRrBootstrap.deviceReady()
+                    ? null
+                    : DlssRrBootstrap.unavailableReason();
+        }
+
+        @Override
+        public ReconstructionExtent renderExtent(
+                ReconstructionQualityMode quality, int displayWidth, int displayHeight) {
+            if (this.context == null) {
+                throw new IllegalStateException("DLSS RR is unavailable");
+            }
+            if (this.optimal == null
+                    || this.displayWidth != displayWidth
+                    || this.displayHeight != displayHeight
+                    || this.quality != quality) {
+                this.optimal = this.context.optimalSettings(displayWidth, displayHeight, quality);
+                this.displayWidth = displayWidth;
+                this.displayHeight = displayHeight;
+                this.quality = quality;
+            }
+            return new ReconstructionExtent(
+                    this.optimal.renderWidth(), this.optimal.renderHeight());
+        }
     }
 
     private static final class DefaultFailureReporter implements FailureReporter {

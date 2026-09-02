@@ -18,6 +18,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
 import org.lwjgl.vulkan.VK12;
@@ -192,7 +193,9 @@ final class TracePipelinesContractTest {
                 offline.moduleResource(5));
     }
 
-    static void realtimeTailAdmissionSeesOnlyCompactPathAndQueueStorage() throws IOException {
+    @Test
+    @Tag("artifact")
+    void realtimeTailAdmissionSeesOnlyCompactPathAndQueueStorage() throws IOException {
         Set<Integer> expected = Set.of(
                 ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
                 ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE);
@@ -215,7 +218,9 @@ final class TracePipelinesContractTest {
         assertThrows(IllegalArgumentException.class, () -> RaygenSchedule.single("", 0));
     }
 
-    static void imageDiagnosticsUseOneIsolatedSourceAndTargetLayout() throws IOException {
+    @Test
+    @Tag("artifact")
+    void imageDiagnosticsUseOneIsolatedSourceAndTargetLayout() throws IOException {
         assertEquals(
                 Set.of(0, 1),
                 descriptorBindings(List.of("image_diagnostic_rgba8.comp.spv"), 0));
@@ -224,7 +229,9 @@ final class TracePipelinesContractTest {
                 descriptorBindings(List.of("image_diagnostic_rgba16.comp.spv"), 0));
     }
 
-    static void realtimePrimaryPrefixDoesNotPublishPersistentPaths() throws IOException {
+    @Test
+    @Tag("artifact")
+    void realtimePrimaryPrefixDoesNotPublishPersistentPaths() throws IOException {
         for (String suffix : List.of("", "_ser")) {
             Set<Integer> camera = descriptorBindings(
                     List.of(wavefrontShader(
@@ -247,13 +254,17 @@ final class TracePipelinesContractTest {
         }
     }
 
-    static void streamlineInputPreparationHasOneNarrowDescriptorLayout() throws IOException {
+    @Test
+    @Tag("artifact")
+    void streamlineInputPreparationHasOneNarrowDescriptorLayout() throws IOException {
         assertEquals(
                 Set.of(0, 1, 2, 3, 4),
                 descriptorBindings(List.of("streamline_input.comp.spv"), 0));
     }
 
-    static void setOneAbiDoesNotCrossRendererBoundary() throws IOException {
+    @Test
+    @Tag("artifact")
+    void setOneAbiDoesNotCrossRendererBoundary() throws IOException {
         for (String suffix : List.of("", "_ser")) {
             Set<Integer> realtime = descriptorBindings(
                     List.of(
@@ -301,7 +312,9 @@ final class TracePipelinesContractTest {
         }
     }
 
-    static void realtimeStbnDoesNotEnterTheOfflineShaderClosure() throws IOException {
+    @Test
+    @Tag("artifact")
+    void realtimeStbnDoesNotEnterTheOfflineShaderClosure() throws IOException {
         for (String suffix : List.of("", "_ser")) {
             Set<Integer> realtime = descriptorBindings(
                     List.of(wavefrontShader("realtime", "fixed_direct", suffix)),
@@ -323,7 +336,9 @@ final class TracePipelinesContractTest {
         }
     }
 
-    static void canonicalBaseColorDescriptorUsesTheGeneratedPageCapacity()
+    @Test
+    @Tag("artifact")
+    void canonicalBaseColorDescriptorUsesTheGeneratedPageCapacity()
             throws IOException {
         assertEquals(
                 ShaderAbi.BASE_COLOR_PAGE_COUNT,
@@ -341,7 +356,9 @@ final class TracePipelinesContractTest {
                 .contains(ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES));
     }
 
-    static void optimizedModulesPreservePayloadAbi() throws IOException {
+    @Test
+    @Tag("artifact")
+    void optimizedModulesPreservePayloadAbi() throws IOException {
         String tracePayload = "struct(vec3(f32),f32,vec3(f32),"
                 + "u32,u32,u32,f32,f32,vec3(f32),f32,u32,u32,u32,u32,"
                 + "vec3(f32),u32,vec3(f32),u32)";
@@ -462,7 +479,9 @@ final class TracePipelinesContractTest {
         }
     }
 
-    static void serReorderedPublishersDoNotReuseProducerSubgroups() throws IOException {
+    @Test
+    @Tag("artifact")
+    void serReorderedPublishersDoNotReuseProducerSubgroups() throws IOException {
         Set<Integer> cameraTrace = parse(
                 wavefrontShader("realtime", "camera_trace", "_ser")).opcodes;
         assertFalse(cameraTrace.contains(OP_GROUP_NON_UNIFORM_ELECT));
@@ -478,7 +497,9 @@ final class TracePipelinesContractTest {
         assertTrue(primary.contains(OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT));
     }
 
-    static void fixedStagesCompactOnlyAtLandingAndScatter()
+    @Test
+    @Tag("artifact")
+    void fixedStagesCompactOnlyAtLandingAndScatter()
             throws IOException {
         Set<Integer> landing = parse(wavefrontShader(
                 "realtime", "landing_scatter", "_ser")).opcodes;
@@ -508,7 +529,9 @@ final class TracePipelinesContractTest {
         }
     }
 
-    static void offlineStagesCompactOnlyAtScatter() throws IOException {
+    @Test
+    @Tag("artifact")
+    void offlineStagesCompactOnlyAtScatter() throws IOException {
         Set<Integer> scatter = parse(
                 wavefrontShader("offline", "scatter", "_ser")).opcodes;
         assertTrue(scatter.contains(OP_GROUP_NON_UNIFORM_ELECT));
@@ -585,7 +608,9 @@ final class TracePipelinesContractTest {
         assertThrows(IndexOutOfBoundsException.class, () -> TraceProgram.shadowAnyHitResource(3));
     }
 
-    static void compiledPathRecordsUseIndependentStrides() throws IOException {
+    @Test
+    @Tag("artifact")
+    void compiledPathRecordsUseIndependentStrides() throws IOException {
         for (String suffix : List.of("", "_ser")) {
             assertRecordStride(
                     wavefrontShader("realtime", "delta_walk", suffix),
