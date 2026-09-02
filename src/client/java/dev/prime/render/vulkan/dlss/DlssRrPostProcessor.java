@@ -1,12 +1,8 @@
 package dev.prime.render.vulkan.dlss;
 
-import dev.prime.render.FrameCamera;
-import dev.prime.render.DisplaySettings;
 import dev.prime.infrastructure.ResourceCleanup;
-import dev.prime.render.SunDirection;
 import dev.prime.render.diagnostic.RrInputView;
 import dev.prime.render.diagnostic.RendererImageView;
-import dev.prime.render.diagnostic.RrResponsivity;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionFrame;
 import dev.prime.render.post.ReconstructionFrameParameters;
@@ -25,7 +21,6 @@ import dev.prime.render.vulkan.RendererImageDebugPass;
 import dev.prime.render.post.nrd.NrdCameraTransform;
 import dev.prime.render.vulkan.reconstruction.ReconstructionDebugSettings;
 import dev.prime.render.vulkan.reconstruction.VulkanReconstructionProcessor;
-import java.util.Objects;
 import org.joml.Matrix4f;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
@@ -33,7 +28,6 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 /** Prime's complete real-time path-tracing to DLSS Ray Reconstruction frame boundary. */
 public final class DlssRrPostProcessor implements VulkanReconstructionProcessor {
     private final VulkanContext context;
-    private final DlssRrNative.Context ngxContext;
     private final ReconstructionQualityMode quality;
     private final int renderWidth;
     private final int renderHeight;
@@ -54,7 +48,6 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
 
     private DlssRrPostProcessor(
             VulkanContext context,
-            DlssRrNative.Context ngxContext,
             ReconstructionQualityMode quality,
             int renderWidth,
             int renderHeight,
@@ -67,7 +60,6 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
             VulkanImage displayOutput,
             VulkanImage stableRadiance) {
         this.context = context;
-        this.ngxContext = ngxContext;
         this.quality = quality;
         this.renderWidth = renderWidth;
         this.renderHeight = renderHeight;
@@ -117,7 +109,6 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
             context.awaitIdle();
             return new DlssRrPostProcessor(
                     context,
-                    ngxContext,
                     quality,
                     renderWidth,
                     renderHeight,
@@ -162,44 +153,23 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         this.history.requestReset();
     }
 
-    public FrameToken beginFrame(
-            FrameCamera camera,
-            long frameTimeNanos,
-            long sceneRevision,
-            long textureRevision,
-            boolean forceRestart,
-            RrInputView debugView,
-            float responsivity) {
+    @Override
+    public Frame beginFrame(
+            ReconstructionFrameParameters parameters,
+            ReconstructionDebugSettings debugSettings) {
         requireOpen();
-        Objects.requireNonNull(camera, "camera");
-        Objects.requireNonNull(debugView, "debugView");
-        responsivity = RrResponsivity.requireValid(responsivity);
         SubmittedFrame<TemporalReconstructionState.Plan> temporal = this.history.plan(
                 new TemporalReconstructionState.Input(
-                        camera,
-                        frameTimeNanos,
-                        sceneRevision,
-                        forceRestart));
+                        parameters.camera(),
+                        parameters.frameTimeNanos(),
+                        parameters.sceneRevision(),
+                        parameters.forceRestart()));
         SubpixelJitter jitter = DlssRrProfile.jitter(
                 this.quality, temporal.plan().frameIndex());
         return new FrameToken(
                 this,
                 temporal,
                 jitter,
-                debugView,
-                responsivity);
-    }
-
-    @Override
-    public FrameToken beginFrame(
-            ReconstructionFrameParameters parameters,
-            ReconstructionDebugSettings debugSettings) {
-        return this.beginFrame(
-                parameters.camera(),
-                parameters.frameTimeNanos(),
-                parameters.sceneRevision(),
-                parameters.textureRevision(),
-                parameters.forceRestart(),
                 debugSettings.images().rr(),
                 debugSettings.rrResponsivity());
     }
@@ -221,14 +191,16 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         }
     }
 
+    @Override
     public void record(
             VkCommandBuffer commandBuffer,
-            FrameToken token,
-            SunDirection sunDirection,
-            float sunRadianceMultiplier,
-            DisplaySettings.Snapshot display,
+            Frame frame,
+            ReconstructionFrameParameters parameters,
             VulkanImageInitializationBatch initialization) {
         requireOpen();
+        if (!(frame instanceof FrameToken token)) {
+            throw new IllegalArgumentException("DLSS RR received another processor's frame token");
+        }
         if (token.owner != this
                 || token.recorded
                 || token.submitted
@@ -243,8 +215,8 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
                 temporal.camera(),
                 temporal.historyCamera(),
                 token.jitter,
-                sunDirection,
-                sunRadianceMultiplier,
+                parameters.sunDirection(),
+                parameters.sunRadianceMultiplier(),
                 token.responsivity);
         NrdCameraTransform.projectionForNrd(
                 temporal.camera().projection(), this.ngxProjection);
@@ -276,30 +248,12 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
                 temporal.deltaMilliseconds() * 0.001F,
                 temporal.restart(),
                 false,
-                display,
+                parameters.display(),
                 initialization);
         if (token.debugView.active()) {
             allCommandsToCompute(commandBuffer);
             this.debugPass().record(commandBuffer, token.debugView);
         }
-    }
-
-    @Override
-    public void record(
-            VkCommandBuffer commandBuffer,
-            Frame frame,
-            ReconstructionFrameParameters parameters,
-            VulkanImageInitializationBatch initialization) {
-        if (!(frame instanceof FrameToken token)) {
-            throw new IllegalArgumentException("DLSS RR received another processor's frame token");
-        }
-        this.record(
-                commandBuffer,
-                token,
-                parameters.sunDirection(),
-                parameters.sunRadianceMultiplier(),
-                parameters.display(),
-                initialization);
     }
 
     @Override
@@ -341,8 +295,12 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         return this.rendererDebugPass;
     }
 
-    public void submitted(FrameToken token) {
+    @Override
+    public void submitted(Frame frame) {
         requireOpen();
+        if (!(frame instanceof FrameToken token)) {
+            throw new IllegalArgumentException("DLSS RR received another processor's frame token");
+        }
         if (token.owner != this
                 || !token.recorded
                 || token.submitted
@@ -353,31 +311,19 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         this.history.submitted(token.temporal);
     }
 
-    public void abandon(FrameToken token) {
+    @Override
+    public void abandon(Frame frame) {
         requireOpen();
+        if (!(frame instanceof FrameToken token)) {
+            throw new IllegalArgumentException(
+                    "DLSS RR received another processor's frame token");
+        }
         if (token.owner != this || token.submitted || token.abandoned) {
             throw new IllegalArgumentException(
                     "DLSS RR frame token does not belong to this processor");
         }
         token.abandoned = true;
         this.history.abandon(token.temporal);
-    }
-
-    @Override
-    public void submitted(Frame frame) {
-        if (!(frame instanceof FrameToken token)) {
-            throw new IllegalArgumentException("DLSS RR received another processor's frame token");
-        }
-        this.submitted(token);
-    }
-
-    @Override
-    public void abandon(Frame frame) {
-        if (!(frame instanceof FrameToken token)) {
-            throw new IllegalArgumentException(
-                    "DLSS RR received another processor's frame token");
-        }
-        this.abandon(token);
     }
 
     private void requireOpen() {
@@ -400,7 +346,7 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         ResourceCleanup.throwIfFailed(failure);
     }
 
-    public static final class FrameToken implements Frame {
+    private static final class FrameToken implements Frame {
         private final DlssRrPostProcessor owner;
         private final SubmittedFrame<TemporalReconstructionState.Plan> temporal;
         private final SubpixelJitter jitter;

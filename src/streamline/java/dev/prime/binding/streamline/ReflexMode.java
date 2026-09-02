@@ -11,13 +11,4 @@ public enum ReflexMode {
     ReflexMode(int value) {
         this.value = value;
     }
-
-    public static ReflexMode fromValue(int value) {
-        for (ReflexMode mode : values()) {
-            if (mode.value == value) {
-                return mode;
-            }
-        }
-        throw new IllegalArgumentException("Unknown sl::ReflexMode value: " + value);
-    }
 }

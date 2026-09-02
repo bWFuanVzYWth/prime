@@ -28,15 +28,9 @@ public final class DlssgState {
             JAVA_BYTE.withName("dynamicMFGSupported"),
             paddingLayout(7));
 
-    private static final VarHandle ESTIMATED_VRAM_USAGE_IN_BYTES = LAYOUT.varHandle(groupElement("estimatedVRAMUsageInBytes"));
     private static final VarHandle STATUS = LAYOUT.varHandle(groupElement("status"));
     private static final VarHandle MIN_WIDTH_OR_HEIGHT = LAYOUT.varHandle(groupElement("minWidthOrHeight"));
-    private static final VarHandle NUM_FRAMES_ACTUALLY_PRESENTED = LAYOUT.varHandle(groupElement("numFramesActuallyPresented"));
     private static final VarHandle NUM_FRAMES_TO_GENERATE_MAX = LAYOUT.varHandle(groupElement("numFramesToGenerateMax"));
-    private static final VarHandle VSYNC_SUPPORT_AVAILABLE = LAYOUT.varHandle(groupElement("vsyncSupportAvailable"));
-    private static final VarHandle INPUTS_PROCESSING_COMPLETION_FENCE = LAYOUT.varHandle(groupElement("inputsProcessingCompletionFence"));
-    private static final VarHandle LAST_PRESENT_INPUTS_PROCESSING_COMPLETION_FENCE_VALUE = LAYOUT.varHandle(groupElement("lastPresentInputsProcessingCompletionFenceValue"));
-    private static final VarHandle DYNAMIC_MFG_SUPPORTED = LAYOUT.varHandle(groupElement("dynamicMFGSupported"));
 
     private final MemorySegment segment;
 
@@ -50,16 +44,8 @@ public final class DlssgState {
         return new DlssgState(segment);
     }
 
-    public static DlssgState wrap(MemorySegment segment) {
-        return new DlssgState(segment);
-    }
-
     public MemorySegment segment() {
         return this.segment;
-    }
-
-    public long estimatedVRAMUsageInBytes() {
-        return (long) ESTIMATED_VRAM_USAGE_IN_BYTES.get(this.segment, 0L);
     }
 
     /** Raw uint32 mask, see {@link DlssgStatus} */
@@ -71,29 +57,9 @@ public final class DlssgState {
         return (int) MIN_WIDTH_OR_HEIGHT.get(this.segment, 0L);
     }
 
-    public int numFramesActuallyPresented() {
-        return (int) NUM_FRAMES_ACTUALLY_PRESENTED.get(this.segment, 0L);
-    }
-
     /** Upper bound for DlssgOptions.numFramesToGenerate */
     public int numFramesToGenerateMax() {
         return (int) NUM_FRAMES_TO_GENERATE_MAX.get(this.segment, 0L);
     }
 
-    public SlBoolean vsyncSupportAvailable() {
-        return SlBoolean.fromValue((byte) VSYNC_SUPPORT_AVAILABLE.get(this.segment, 0L));
-    }
-
-    /** VkFence handle value; wait on it before modifying tagged inputs on a non-presenting queue */
-    public MemorySegment inputsProcessingCompletionFence() {
-        return (MemorySegment) INPUTS_PROCESSING_COMPLETION_FENCE.get(this.segment, 0L);
-    }
-
-    public long lastPresentInputsProcessingCompletionFenceValue() {
-        return (long) LAST_PRESENT_INPUTS_PROCESSING_COMPLETION_FENCE_VALUE.get(this.segment, 0L);
-    }
-
-    public SlBoolean dynamicMFGSupported() {
-        return SlBoolean.fromValue((byte) DYNAMIC_MFG_SUPPORTED.get(this.segment, 0L));
-    }
 }

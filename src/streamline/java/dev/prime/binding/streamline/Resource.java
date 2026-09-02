@@ -42,8 +42,6 @@ public final class Resource {
     private static final VarHandle NATIVE_FORMAT = LAYOUT.varHandle(groupElement("nativeFormat"));
     private static final VarHandle MIP_LEVELS = LAYOUT.varHandle(groupElement("mipLevels"));
     private static final VarHandle ARRAY_LAYERS = LAYOUT.varHandle(groupElement("arrayLayers"));
-    private static final VarHandle GPU_VIRTUAL_ADDRESS = LAYOUT.varHandle(groupElement("gpuVirtualAddress"));
-    private static final VarHandle FLAGS = LAYOUT.varHandle(groupElement("flags"));
     private static final VarHandle USAGE = LAYOUT.varHandle(groupElement("usage"));
 
     private final MemorySegment segment;
@@ -59,16 +57,8 @@ public final class Resource {
         return new Resource(segment);
     }
 
-    public static Resource wrap(MemorySegment segment) {
-        return new Resource(segment);
-    }
-
     public MemorySegment segment() {
         return this.segment;
-    }
-
-    public ResourceType type() {
-        return ResourceType.fromValue((byte) TYPE.get(this.segment, 0L));
     }
 
     public Resource type(ResourceType value) {
@@ -77,56 +67,32 @@ public final class Resource {
     }
 
     /** VkImage / VkBuffer handle value */
-    public MemorySegment nativeHandle() {
-        return (MemorySegment) NATIVE.get(this.segment, 0L);
-    }
-
     public Resource nativeHandle(MemorySegment value) {
         NATIVE.set(this.segment, 0L, value);
         return this;
     }
 
     /** VkDeviceMemory handle value or null */
-    public MemorySegment memory() {
-        return (MemorySegment) MEMORY.get(this.segment, 0L);
-    }
-
     public Resource memory(MemorySegment value) {
         MEMORY.set(this.segment, 0L, value);
         return this;
     }
 
     /** VkImageView / VkBufferView handle value or null */
-    public MemorySegment view() {
-        return (MemorySegment) VIEW.get(this.segment, 0L);
-    }
-
     public Resource view(MemorySegment value) {
         VIEW.set(this.segment, 0L, value);
         return this;
     }
 
     /** VkImageLayout when tagged resources are actually used */
-    public int state() {
-        return (int) STATE.get(this.segment, 0L);
-    }
-
     public Resource state(int value) {
         STATE.set(this.segment, 0L, value);
         return this;
     }
 
-    public int width() {
-        return (int) WIDTH.get(this.segment, 0L);
-    }
-
     public Resource width(int value) {
         WIDTH.set(this.segment, 0L, value);
         return this;
-    }
-
-    public int height() {
-        return (int) HEIGHT.get(this.segment, 0L);
     }
 
     public Resource height(int value) {
@@ -135,17 +101,9 @@ public final class Resource {
     }
 
     /** VkFormat value */
-    public int nativeFormat() {
-        return (int) NATIVE_FORMAT.get(this.segment, 0L);
-    }
-
     public Resource nativeFormat(int value) {
         NATIVE_FORMAT.set(this.segment, 0L, value);
         return this;
-    }
-
-    public int mipLevels() {
-        return (int) MIP_LEVELS.get(this.segment, 0L);
     }
 
     public Resource mipLevels(int value) {
@@ -153,39 +111,12 @@ public final class Resource {
         return this;
     }
 
-    public int arrayLayers() {
-        return (int) ARRAY_LAYERS.get(this.segment, 0L);
-    }
-
     public Resource arrayLayers(int value) {
         ARRAY_LAYERS.set(this.segment, 0L, value);
         return this;
     }
 
-    public long gpuVirtualAddress() {
-        return (long) GPU_VIRTUAL_ADDRESS.get(this.segment, 0L);
-    }
-
-    public Resource gpuVirtualAddress(long value) {
-        GPU_VIRTUAL_ADDRESS.set(this.segment, 0L, value);
-        return this;
-    }
-
-    /** VkImageCreateFlags */
-    public int flags() {
-        return (int) FLAGS.get(this.segment, 0L);
-    }
-
-    public Resource flags(int value) {
-        FLAGS.set(this.segment, 0L, value);
-        return this;
-    }
-
     /** VkImageUsageFlags */
-    public int usage() {
-        return (int) USAGE.get(this.segment, 0L);
-    }
-
     public Resource usage(int value) {
         USAGE.set(this.segment, 0L, value);
         return this;

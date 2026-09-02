@@ -40,16 +40,8 @@ public final class ReflexOptions {
         return new ReflexOptions(segment);
     }
 
-    public static ReflexOptions wrap(MemorySegment segment) {
-        return new ReflexOptions(segment);
-    }
-
     public MemorySegment segment() {
         return this.segment;
-    }
-
-    public ReflexMode mode() {
-        return ReflexMode.fromValue((int) MODE.get(this.segment, 0L));
     }
 
     public ReflexOptions mode(ReflexMode value) {
@@ -58,27 +50,15 @@ public final class ReflexOptions {
     }
 
     /** Frame limit (FPS cap) in microseconds; 0 disables */
-    public int frameLimitUs() {
-        return (int) FRAME_LIMIT_US.get(this.segment, 0L);
-    }
-
     public ReflexOptions frameLimitUs(int value) {
         FRAME_LIMIT_US.set(this.segment, 0L, value);
         return this;
     }
 
     /** Should only be enabled in specific scenarios; most integrations leave this false */
-    public boolean useMarkersToOptimize() {
-        return (boolean) USE_MARKERS_TO_OPTIMIZE.get(this.segment, 0L);
-    }
-
     public ReflexOptions useMarkersToOptimize(boolean value) {
         USE_MARKERS_TO_OPTIMIZE.set(this.segment, 0L, value);
         return this;
-    }
-
-    public HotKey virtualKey() {
-        return HotKey.fromValue((short) VIRTUAL_KEY.get(this.segment, 0L));
     }
 
     public ReflexOptions virtualKey(HotKey value) {
@@ -87,10 +67,6 @@ public final class ReflexOptions {
     }
 
     /** ThreadID for PCL Stats messages; most integrations leave this 0 */
-    public int idThread() {
-        return (int) ID_THREAD.get(this.segment, 0L);
-    }
-
     public ReflexOptions idThread(int value) {
         ID_THREAD.set(this.segment, 0L, value);
         return this;

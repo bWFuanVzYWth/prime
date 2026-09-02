@@ -88,7 +88,7 @@ public final class DlssgOptions {
         return this;
     }
 
-    /** Raw uint32 mask, see {@link DlssgFlag} */
+    /** Raw sl::DLSSGFlags mask. */
     public DlssgOptions flags(int value) {
         FLAGS.set(this.segment, 0L, value);
         return this;

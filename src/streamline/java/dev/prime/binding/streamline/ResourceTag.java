@@ -6,6 +6,7 @@ import java.lang.foreign.StructLayout;
 import java.lang.invoke.VarHandle;
 
 import static java.lang.foreign.MemoryLayout.PathElement.groupElement;
+import static java.lang.foreign.MemoryLayout.structLayout;
 import static java.lang.foreign.ValueLayout.ADDRESS;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
 
@@ -15,7 +16,11 @@ public final class ResourceTag {
             ADDRESS.withName("resource"),
             JAVA_INT.withName("type"),
             JAVA_INT.withName("lifecycle"),
-            Extent.LAYOUT.withName("extent"));
+            structLayout(
+                    JAVA_INT.withName("top"),
+                    JAVA_INT.withName("left"),
+                    JAVA_INT.withName("width"),
+                    JAVA_INT.withName("height")).withName("extent"));
 
     private static final VarHandle RESOURCE = LAYOUT.varHandle(groupElement("resource"));
     private static final VarHandle TYPE = LAYOUT.varHandle(groupElement("type"));
@@ -31,12 +36,6 @@ public final class ResourceTag {
         this.segment = segment;
     }
 
-    public static ResourceTag allocate(Arena arena) {
-        MemorySegment segment = arena.allocate(LAYOUT);
-        initHeader(segment);
-        return new ResourceTag(segment);
-    }
-
     /** Allocates an array of tags with headers initialized; pass the returned segment to slSetTagForFrame. */
     public static MemorySegment allocateArray(Arena arena, int count) {
         MemorySegment array = arena.allocate(LAYOUT, count);
@@ -44,10 +43,6 @@ public final class ResourceTag {
             initHeader(array.asSlice(i * LAYOUT.byteSize(), LAYOUT.byteSize()));
         }
         return array;
-    }
-
-    public static ResourceTag wrap(MemorySegment segment) {
-        return new ResourceTag(segment);
     }
 
     /** Wraps the i-th element of a tag array. */
@@ -60,26 +55,14 @@ public final class ResourceTag {
     }
 
     /** Pointer to the tagged {@link Resource} struct */
-    public MemorySegment resource() {
-        return (MemorySegment) RESOURCE.get(this.segment, 0L);
-    }
-
     public ResourceTag resource(MemorySegment value) {
         RESOURCE.set(this.segment, 0L, value);
         return this;
     }
 
-    public BufferType type() {
-        return BufferType.fromValue((int) TYPE.get(this.segment, 0L));
-    }
-
     public ResourceTag type(BufferType value) {
         TYPE.set(this.segment, 0L, value.value);
         return this;
-    }
-
-    public ResourceLifecycle lifecycle() {
-        return ResourceLifecycle.fromValue((int) LIFECYCLE.get(this.segment, 0L));
     }
 
     public ResourceTag lifecycle(ResourceLifecycle value) {
@@ -93,22 +76,6 @@ public final class ResourceTag {
         EXTENT_WIDTH.set(this.segment, 0L, width);
         EXTENT_HEIGHT.set(this.segment, 0L, height);
         return this;
-    }
-
-    public int extentTop() {
-        return (int) EXTENT_TOP.get(this.segment, 0L);
-    }
-
-    public int extentLeft() {
-        return (int) EXTENT_LEFT.get(this.segment, 0L);
-    }
-
-    public int extentWidth() {
-        return (int) EXTENT_WIDTH.get(this.segment, 0L);
-    }
-
-    public int extentHeight() {
-        return (int) EXTENT_HEIGHT.get(this.segment, 0L);
     }
 
     private static void initHeader(MemorySegment segment) {
