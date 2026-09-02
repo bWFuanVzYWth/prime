@@ -133,24 +133,14 @@ final class TracePipelinesContractTest {
                     11, 12, 13, 14, 15, 16, 17, 18, 21
                 },
                 RealtimeRayTracingPipeline.nextStepInputImageIndices());
-        assertTrue(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
-                RealtimePrimaryGroups.DELTA_WALK_0));
-        assertTrue(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
-                RealtimePrimaryGroups.GUIDE_DELTA_WALK_0));
-        assertTrue(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
-                RealtimePrimaryGroups.LANDING_DIRECT));
-        assertTrue(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
-                RealtimePrimaryGroups.LANDING_SCATTER));
-        assertTrue(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
-                RealtimeStandardGroups.DIRECT_0));
-        assertTrue(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
-                RealtimeStandardGroups.SCATTER_1));
-        assertFalse(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
-                RealtimePrimaryGroups.LANDING_LIGHT_SELECT));
-        assertFalse(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
-                RealtimeStandardGroups.LIGHT_SELECT_0));
-        assertFalse(RealtimeRayTracingPipeline.standardBarrierPublishesImagesBefore(
-                RealtimeStandardGroups.BRIDGE_TRACE_1));
+        assertArrayEquals(
+                new long[] {7L, 3L, 5L},
+                RealtimeRayTracingPipelineSupport.uniqueImageHandles(
+                        new long[] {7L, 3L, 7L, 5L, 3L}));
+        assertArrayEquals(
+                new long[] {5L, 7L, 3L},
+                RealtimeRayTracingPipelineSupport.selectUniqueImageHandles(
+                        new long[] {7L, 3L, 5L, 7L}, 2, 0, 3, 1));
     }
 
     @Test

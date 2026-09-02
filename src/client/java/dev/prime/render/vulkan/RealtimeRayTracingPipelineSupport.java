@@ -8,6 +8,7 @@ import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.nio.ByteBuffer;
 import java.nio.LongBuffer;
+import java.util.Arrays;
 import java.util.List;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
@@ -38,6 +39,18 @@ abstract class RealtimeRayTracingPipelineSupport implements RealtimeIntegratorPi
             ShaderAbi.WAVEFRONT_QUEUE_COMMAND_STRIDE,
             ShaderAbi.WAVEFRONT_QUEUE_INDEX_SIZE,
             "Realtime");
+
+    /** Barrier resources are physical even when several semantic bindings alias one image. */
+    static long[] uniqueImageHandles(long[] images) {
+        return Arrays.stream(images).distinct().toArray();
+    }
+
+    static long[] selectUniqueImageHandles(long[] images, int... indices) {
+        return Arrays.stream(indices)
+                .mapToLong(index -> images[index])
+                .distinct()
+                .toArray();
+    }
 
     private final VulkanContext context;
     private final TraceBackend backend;
@@ -600,15 +613,15 @@ abstract class RealtimeRayTracingPipelineSupport implements RealtimeIntegratorPi
             this.descriptorSet = descriptorSet;
             this.stableRadiance = stableRadiance;
             this.images = images.clone();
-            this.allImages = allImages.clone();
-            this.primaryDirectInputImages = select(
-                    this.allImages,
+            this.allImages = uniqueImageHandles(allImages);
+            this.primaryDirectInputImages = selectUniqueImageHandles(
+                    allImages,
                     RealtimeRayTracingPipeline.primaryDirectInputImageIndices());
-            this.primaryInputImages = select(
-                    this.allImages,
+            this.primaryInputImages = selectUniqueImageHandles(
+                    allImages,
                     RealtimeRayTracingPipeline.primaryInputImageIndices());
-            this.nextStepInputImages = select(
-                    this.allImages,
+            this.nextStepInputImages = selectUniqueImageHandles(
+                    allImages,
                     RealtimeRayTracingPipeline.nextStepInputImageIndices());
             this.wavefront = wavefront;
         }
@@ -765,14 +778,6 @@ abstract class RealtimeRayTracingPipelineSupport implements RealtimeIntegratorPi
                 signals.sunPenumbra(),
                 signals.reconstructionControl()
             };
-        }
-
-        private static long[] select(long[] values, int... indices) {
-            long[] selected = new long[indices.length];
-            for (int index = 0; index < indices.length; index++) {
-                selected[index] = values[indices[index]];
-            }
-            return selected;
         }
 
         @Override

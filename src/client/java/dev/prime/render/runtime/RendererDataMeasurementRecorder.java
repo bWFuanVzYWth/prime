@@ -113,6 +113,10 @@ final class RendererDataMeasurementRecorder {
                 deviceName);
     }
 
+    boolean enabled() {
+        return this.output != null;
+    }
+
     void recordDynamicMotion(DynamicSceneMotion motion) {
         if (this.output != null) {
             this.latestDynamicMotion = java.util.Objects.requireNonNull(motion, "motion");

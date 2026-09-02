@@ -37,6 +37,7 @@ final class RendererDataMeasurementRecorderTest {
         Path output = this.temporaryDirectory.resolve("measurements/latest.json");
         RendererDataMeasurementRecorder recorder =
                 new RendererDataMeasurementRecorder(output, 1, "test \"gpu\"");
+        assertTrue(recorder.enabled());
         MaterialTexturePages.ByteRange full =
                 new MaterialTexturePages.ByteRange(0, 255, 256);
         MaterialTexturePages.ChannelMeasurement channel =

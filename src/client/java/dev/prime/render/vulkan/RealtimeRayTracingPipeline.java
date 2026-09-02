@@ -36,22 +36,6 @@ public final class RealtimeRayTracingPipeline extends RealtimeRayTracingPipeline
         };
     }
 
-    static boolean standardBarrierPublishesImagesBefore(int group) {
-        return switch (group) {
-            case RealtimePrimaryGroups.DELTA_WALK_0,
-                    RealtimePrimaryGroups.GUIDE_DELTA_WALK_0,
-                    RealtimePrimaryGroups.DELTA_WALK_1,
-                    RealtimePrimaryGroups.GUIDE_DELTA_WALK_1,
-                    RealtimePrimaryGroups.LANDING_DIRECT,
-                    RealtimePrimaryGroups.LANDING_SCATTER,
-                    RealtimeStandardGroups.DIRECT_0,
-                    RealtimeStandardGroups.DIRECT_1,
-                    RealtimeStandardGroups.SCATTER_0,
-                    RealtimeStandardGroups.SCATTER_1 -> true;
-            default -> false;
-        };
-    }
-
     public RealtimeRayTracingPipeline(VulkanContext context, TraceBackend backend) {
         super(
                 context,
@@ -148,15 +132,6 @@ public final class RealtimeRayTracingPipeline extends RealtimeRayTracingPipeline
                 RealtimeStandardGroups.BRANCH_RESOLVE,
                 RealtimeStandardGroups.NOISY_OUTPUT_RESOLVE);
         return dispatchCount(minimumBounces);
-    }
-
-    private void standardBarrierBefore(
-            VkCommandBuffer commandBuffer, MemoryStack stack, int group) {
-        if (standardBarrierPublishesImagesBefore(group)) {
-            this.nextStepBarrier(commandBuffer, stack);
-        } else {
-            this.queueBarrier(commandBuffer, stack);
-        }
     }
 
 }

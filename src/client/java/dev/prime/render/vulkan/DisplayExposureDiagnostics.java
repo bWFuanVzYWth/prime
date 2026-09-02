@@ -16,10 +16,18 @@ public final class DisplayExposureDiagnostics implements Destroyable {
     private final VulkanContext context;
     private volatile VulkanBuffer pendingReadback;
     private volatile Snapshot latest;
+    private volatile boolean enabled;
     private volatile boolean destroyed;
 
     public DisplayExposureDiagnostics(VulkanContext context) {
         this.context = java.util.Objects.requireNonNull(context, "context");
+    }
+
+    public void setEnabled(boolean enabled) {
+        if (this.destroyed) {
+            throw new IllegalStateException("Exposure diagnostics are destroyed");
+        }
+        this.enabled = enabled;
     }
 
     public Capture record(VkCommandBuffer commandBuffer, long sourceBuffer) {
@@ -30,7 +38,7 @@ public final class DisplayExposureDiagnostics implements Destroyable {
         if (sourceBuffer == 0L) {
             throw new IllegalArgumentException("Exposure diagnostic source is null");
         }
-        if (this.pendingReadback != null) {
+        if (!this.enabled || this.pendingReadback != null) {
             return null;
         }
         VulkanBuffer readback = this.context.createReadbackBuffer(
@@ -39,8 +47,17 @@ public final class DisplayExposureDiagnostics implements Destroyable {
                 "Prime automatic-exposure diagnostics");
         this.pendingReadback = readback;
         try {
-            memoryBarrier(commandBuffer);
             try (MemoryStack stack = MemoryStack.stackPush()) {
+                VulkanSync.bufferBarrier(
+                        commandBuffer,
+                        stack,
+                        sourceBuffer,
+                        0L,
+                        STATE_SIZE,
+                        VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                        VK12.VK_ACCESS_SHADER_WRITE_BIT,
+                        VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK12.VK_ACCESS_TRANSFER_READ_BIT);
                 VkBufferCopy.Buffer copy = VkBufferCopy.calloc(1, stack)
                         .srcOffset(0L)
                         .dstOffset(0L)
@@ -105,21 +122,13 @@ public final class DisplayExposureDiagnostics implements Destroyable {
         }
     }
 
-    private static void memoryBarrier(VkCommandBuffer commandBuffer) {
-        VulkanSync.memoryBarrier(
-                commandBuffer,
-                VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                VK12.VK_ACCESS_MEMORY_WRITE_BIT,
-                VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK12.VK_ACCESS_TRANSFER_READ_BIT);
-    }
-
     @Override
     public void destroy() {
         if (this.destroyed) {
             return;
         }
         this.destroyed = true;
+        this.enabled = false;
         VulkanBuffer pending = this.pendingReadback;
         this.pendingReadback = null;
         if (pending != null) {

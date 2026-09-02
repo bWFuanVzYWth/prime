@@ -133,6 +133,10 @@ final class RealtimeRenderer implements Destroyable {
         return this.exposureDiagnostics.latest();
     }
 
+    void setExposureDiagnosticsEnabled(boolean enabled) {
+        this.exposureDiagnostics.setEnabled(enabled);
+    }
+
     boolean ensureResources(
             AtmospherePipeline atmosphere,
             MaterialTexturePages materialTextures,

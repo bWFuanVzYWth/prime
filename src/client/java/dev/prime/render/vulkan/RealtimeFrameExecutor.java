@@ -57,7 +57,6 @@ public final class RealtimeFrameExecutor implements Destroyable {
         Objects.requireNonNull(processorFrame, "processorFrame");
         long atmosphereFrame = 0L;
         MaterialTexturePages.FrameToken materialFrame = null;
-        DisplayExposureDiagnostics.Capture exposureCapture = null;
         RendererDataRangeDiagnostics.Capture rangeCapture = null;
         RendererSignalRangeDiagnostics.Capture signalCapture = null;
         VulkanFrameSubmission submission =
@@ -173,13 +172,14 @@ public final class RealtimeFrameExecutor implements Destroyable {
                         () -> rangeDiagnostics.abandon(trackedRangeCapture), failure));
             }
             processor.presentRendererDiagnostic(commandBuffer, diagnostics.renderer());
-            exposureCapture = exposureDiagnostics.record(
+            DisplayExposureDiagnostics.Capture exposureCapture = exposureDiagnostics.record(
                     commandBuffer, processor.displayExposureStateBuffer());
-            DisplayExposureDiagnostics.Capture trackedExposureCapture = exposureCapture;
-            completion.onCommit(1, () -> exposureDiagnostics.submitted(
-                    trackedExposureCapture));
-            completion.onAbandon(5, failure -> ResourceCleanup.run(
-                    () -> exposureDiagnostics.abandon(trackedExposureCapture), failure));
+            if (exposureCapture != null) {
+                completion.onCommit(1, () -> exposureDiagnostics.submitted(
+                        exposureCapture));
+                completion.onAbandon(5, failure -> ResourceCleanup.run(
+                        () -> exposureDiagnostics.abandon(exposureCapture), failure));
+            }
             VulkanImageTransitions.finishAtlasRead(
                     commandBuffer, atlasView.texture());
             VulkanImageTransitions.finishSceneTextureReads(

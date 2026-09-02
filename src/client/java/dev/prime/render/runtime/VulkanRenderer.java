@@ -354,6 +354,9 @@ public final class VulkanRenderer implements AutoCloseable {
             RenderTarget mainTarget,
             BlockAtlasFrame atlas,
             RendererSettings settings) {
+        this.realtimeRenderer.setExposureDiagnosticsEnabled(
+                this.frameControls.rendererDiagnostics()
+                        || this.dataMeasurements.enabled());
         TerrainScene.ResidentSceneView scene = this.terrain.residentScene();
         FrameCamera frameCamera = this.camera;
         AstronomyState frameAstronomy = this.astronomyState;
@@ -378,18 +381,20 @@ public final class VulkanRenderer implements AutoCloseable {
                         atlas.textureRevision(),
                         this.sceneTextures));
         this.debugLines = this.withRendererDiagnostics(settings);
-        RealtimeRenderer.DiagnosticSnapshot diagnostic =
-                this.realtimeRenderer.diagnosticSnapshot();
-        if (diagnostic != null) {
-            this.dataMeasurements.recordFrame(
-                    this.context,
-                    this.materialTextures.measurementSnapshot(),
-                    scene.statistics(),
-                    this.terrain.mediumIdStatistics(),
-                    this.terrain.materialIdStatistics(),
-                    this.terrain.tintIdStatistics(),
-                    frameCamera,
-                    diagnostic);
+        if (this.dataMeasurements.enabled()) {
+            RealtimeRenderer.DiagnosticSnapshot diagnostic =
+                    this.realtimeRenderer.diagnosticSnapshot();
+            if (diagnostic != null) {
+                this.dataMeasurements.recordFrame(
+                        this.context,
+                        this.materialTextures.measurementSnapshot(),
+                        scene.statistics(),
+                        this.terrain.mediumIdStatistics(),
+                        this.terrain.materialIdStatistics(),
+                        this.terrain.tintIdStatistics(),
+                        frameCamera,
+                        diagnostic);
+            }
         }
         if (this.realtimeRenderer.hasSizedResources()) {
             this.modeLifecycle = this.modeLifecycle.allocateRealtimeSized();

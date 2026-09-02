@@ -223,7 +223,7 @@ final class AutoExposurePass implements Destroyable {
             VK12.vkCmdDispatch(
                     commandBuffer, this.dispatchX, this.dispatchY, 1);
 
-            computeBarrier(commandBuffer);
+            computeBarrier(commandBuffer, this.histogram);
             VK12.vkCmdBindPipeline(
                     commandBuffer,
                     VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -242,7 +242,7 @@ final class AutoExposurePass implements Destroyable {
                     updatePush);
             VK12.vkCmdDispatch(commandBuffer, 1, 1, 1);
         }
-        computeBarrier(commandBuffer);
+        computeBarrier(commandBuffer, this.exposureState);
     }
 
     private static void writesToCompute(VkCommandBuffer commandBuffer) {
@@ -255,14 +255,18 @@ final class AutoExposurePass implements Destroyable {
                         | VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
 
-    private static void computeBarrier(VkCommandBuffer commandBuffer) {
-        VulkanSync.memoryBarrier(
-                commandBuffer,
-                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                VK12.VK_ACCESS_SHADER_WRITE_BIT,
-                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                VK12.VK_ACCESS_SHADER_READ_BIT
-                        | VK12.VK_ACCESS_SHADER_WRITE_BIT);
+    private static void computeBarrier(
+            VkCommandBuffer commandBuffer, VulkanBuffer buffer) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VulkanSync.bufferBarrier(
+                    commandBuffer,
+                    stack,
+                    buffer,
+                    VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    VK12.VK_ACCESS_SHADER_WRITE_BIT,
+                    VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    VK12.VK_ACCESS_SHADER_READ_BIT);
+        }
     }
 
     @Override
