@@ -1,5 +1,9 @@
 def licenseArchiveSuffix = project.name
+def streamlineOutput = sourceSets.getByName('streamline').output
+def streamlineOutputRoots = streamlineOutput.files.collect { it.absoluteFile }
 jar {
+	dependsOn tasks.named('streamlineClasses')
+	from(streamlineOutput)
 	from('LICENSE') {
 		rename { "${it}_${licenseArchiveSuffix}" }
 	}
@@ -13,10 +17,11 @@ def shaderProgramManifestFile = file('shaders/programs.json')
 def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 	group = 'verification'
 	description = 'Verifies that the distributable jar contains every runtime dependency.'
-	dependsOn tasks.named('jar')
+	dependsOn tasks.named('jar'), tasks.named('streamlineClasses')
 	def archiveProvider = tasks.named('jar', Jar).flatMap { it.archiveFile }
 	inputs.file(archiveProvider)
 	inputs.file(shaderProgramManifestFile)
+	inputs.files(streamlineOutput)
 
 	doLast {
 		def archive = archiveProvider.get().asFile
@@ -33,6 +38,25 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 		}
 		if (!duplicateNames.isEmpty()) {
 			throw new GradleException("Distribution jar contains duplicate entries: ${duplicateNames}")
+		}
+
+		def requiredStreamlineEntries = new LinkedHashSet<String>()
+		streamlineOutputRoots.findAll { it.isDirectory() }.each { outputRoot ->
+			def paths = java.nio.file.Files.walk(outputRoot.toPath())
+			try {
+				paths.filter { java.nio.file.Files.isRegularFile(it) }.forEach { outputPath ->
+					requiredStreamlineEntries.add(
+							outputRoot.toPath()
+									.relativize(outputPath)
+									.toString()
+									.replace(File.separator, '/'))
+				}
+			} finally {
+				paths.close()
+			}
+		}
+		if (requiredStreamlineEntries.isEmpty()) {
+			throw new GradleException('Streamline runtime output is empty')
 		}
 
 		def shaderManifest = new groovy.json.JsonSlurper().parse(shaderProgramManifestFile)
@@ -69,7 +93,7 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 			'prime/natives/windows-x86_64/sl.dlss_g.dll',
 			'prime/natives/windows-x86_64/NvLowLatencyVk.dll',
 			'prime/shaders/manifest.sha256'
-		] + requiredShaders
+		] + requiredShaders + requiredStreamlineEntries
 		def missing = required.findAll { !names.contains(it) }
 		if (!missing.isEmpty()) {
 			throw new GradleException("Distribution jar is missing runtime entries: ${missing}")
