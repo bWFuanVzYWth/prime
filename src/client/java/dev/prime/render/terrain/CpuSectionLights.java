@@ -74,8 +74,7 @@ public final class CpuSectionLights {
         long emitterOffset = alignUp(
                 ShaderAbi.SECTION_LIGHT_HEADER_SIZE
                         + (long) this.tree.nodeCount() * ShaderAbi.LIGHT_NODE_SIZE
-                        + (long) this.tree.clusterCount() * ShaderAbi.LIGHT_LEAF_SIZE
-                        + (long) this.tree.entryCount() * ShaderAbi.LIGHT_LEAF_ENTRY_SIZE,
+                        + (long) this.tree.leafCount() * ShaderAbi.LIGHT_LEAF_SIZE,
                 16L);
         return emitterOffset + (long) this.emitters.size * ShaderAbi.LIGHT_EMITTER_SIZE
                 + (long) this.distributions.size()
@@ -89,30 +88,28 @@ public final class CpuSectionLights {
         }
         int headerWords = ShaderAbi.SECTION_LIGHT_HEADER_SIZE / Integer.BYTES;
         int nodeWords = this.tree.nodeCount() * (ShaderAbi.LIGHT_NODE_SIZE / Integer.BYTES);
-        int leafWords = this.tree.clusterCount()
+        int leafWords = this.tree.leafCount()
                 * (ShaderAbi.LIGHT_LEAF_SIZE / Integer.BYTES);
-        int entryWords = this.tree.entryCount()
-                * (ShaderAbi.LIGHT_LEAF_ENTRY_SIZE / Integer.BYTES);
         int emitterWords = ShaderAbi.LIGHT_EMITTER_SIZE / Integer.BYTES;
         int cellWords = ShaderAbi.LIGHT_CELL_SIZE / Integer.BYTES;
         int cellCount = this.distributions.size() * EmissionDistribution.CELL_COUNT;
         int nodeStart = headerWords;
         int leafStart = nodeStart + nodeWords;
-        int entryStart = leafStart + leafWords;
+        int leafEnd = leafStart + leafWords;
         int emitterStart = (int) (alignUp(
-                        (long) (entryStart + entryWords) * Integer.BYTES,
+                        (long) leafEnd * Integer.BYTES,
                         16L)
                 / Integer.BYTES);
         int cellStart = emitterStart + this.emitters.size * emitterWords;
         int[] result = new int[cellStart + cellCount * cellWords];
         putLong(result, 0, bufferAddress + (long) nodeStart * Integer.BYTES);
         putLong(result, 2, bufferAddress + (long) leafStart * Integer.BYTES);
-        putLong(result, 4, bufferAddress + (long) entryStart * Integer.BYTES);
+        putLong(result, 4, bufferAddress + (long) leafEnd * Integer.BYTES);
         putLong(result, 6, bufferAddress + (long) emitterStart * Integer.BYTES);
         putLong(result, 8, bufferAddress + (long) cellStart * Integer.BYTES);
         result[10] = 0;
         result[11] = this.emitters.size;
-        this.tree.packInto(result, nodeStart, leafStart, entryStart);
+        this.tree.packInto(result, nodeStart, leafStart);
 
         for (int index = 0; index < this.emitters.size; index++) {
             int floatBase = index * EMITTER_FLOATS;

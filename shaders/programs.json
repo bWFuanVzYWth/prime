@@ -383,10 +383,15 @@
         "-DPRIME_ENABLE_SUBGROUP_QUEUE=1"
       ]
     },
-    "shadow_rahit": {
-      "source": "shaders/entry/hit/shadow.anyhit.slang",
+    "shadow_opaque_rahit": {
+      "source": "shaders/entry/hit/shadow_opaque.anyhit.slang",
       "stage": "anyhit",
-      "resource": "shadow.rahit.spv"
+      "resource": "shadow_opaque.rahit.spv"
+    },
+    "shadow_nonopaque_rahit": {
+      "source": "shaders/entry/hit/shadow_nonopaque.anyhit.slang",
+      "stage": "anyhit",
+      "resource": "shadow_nonopaque.rahit.spv"
     },
     "shadow_rchit": {
       "source": "shaders/entry/hit/shadow.closesthit.slang",

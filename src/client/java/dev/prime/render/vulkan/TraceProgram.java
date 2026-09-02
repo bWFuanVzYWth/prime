@@ -18,16 +18,28 @@ import org.lwjgl.vulkan.VkRayTracingShaderGroupCreateInfoKHR;
 final class TraceProgram implements Destroyable {
     static final int MISS_GROUP_COUNT = 2;
     static final int HIT_GROUP_COUNT = 6;
-    private static final int FIXED_MODULE_COUNT = 6;
+    static final int GEOMETRY_CLASS_COUNT = 3;
+    private static final int FIXED_MODULE_COUNT = 7;
+    private static final int SHADOW_ANY_HIT_MODULE_BASE = 4;
     private static final String[] FIXED_RESOURCES = {
         GeneratedShaderPrograms.resource("world_rmiss"),
         GeneratedShaderPrograms.resource("shadow_rmiss"),
         GeneratedShaderPrograms.resource("world_rchit"),
         GeneratedShaderPrograms.resource("world_rahit"),
-        GeneratedShaderPrograms.resource("shadow_rahit"),
+        GeneratedShaderPrograms.resource("shadow_opaque_rahit"),
+        GeneratedShaderPrograms.resource("shadow_nonopaque_rahit"),
         GeneratedShaderPrograms.resource("shadow_rchit")
     };
     private static final int RECORD_DATA_SIZE = Integer.BYTES;
+
+    static String shadowAnyHitResource(int geometryClass) {
+        return FIXED_RESOURCES[shadowAnyHitModule(geometryClass)];
+    }
+
+    private static int shadowAnyHitModule(int geometryClass) {
+        java.util.Objects.checkIndex(geometryClass, GEOMETRY_CLASS_COUNT);
+        return SHADOW_ANY_HIT_MODULE_BASE + (geometryClass == 0 ? 0 : 1);
+    }
 
     private final VulkanContext context;
     final long pipeline;
@@ -157,8 +169,8 @@ final class TraceProgram implements Destroyable {
             int shadowMissStage = missStage + 1;
             int closestHitStage = missStage + 2;
             int anyHitStage = missStage + 3;
-            int shadowAnyHitStage = missStage + 4;
-            int shadowClosestHitStage = missStage + 5;
+            int shadowAnyHitStageBase = missStage + SHADOW_ANY_HIT_MODULE_BASE;
+            int shadowClosestHitStage = missStage + 6;
             VkPipelineShaderStageCreateInfo.Buffer stages =
                     VkPipelineShaderStageCreateInfo.calloc(
                             raygenStageCount + FIXED_MODULE_COUNT, stack);
@@ -169,7 +181,9 @@ final class TraceProgram implements Destroyable {
                     stageFlag = KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR;
                 } else if (index <= shadowMissStage) {
                     stageFlag = KHRRayTracingPipeline.VK_SHADER_STAGE_MISS_BIT_KHR;
-                } else if (index == anyHitStage || index == shadowAnyHitStage) {
+                } else if (index == anyHitStage
+                        || index >= shadowAnyHitStageBase
+                                && index < shadowAnyHitStageBase + 2) {
                     stageFlag = KHRRayTracingPipeline.VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
                 } else {
                     stageFlag = KHRRayTracingPipeline.VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
@@ -196,14 +210,14 @@ final class TraceProgram implements Destroyable {
                     anyHitStage);
             triangleGroup(groups.get(hitBase + 1), closestHitStage, anyHitStage);
             triangleGroup(groups.get(hitBase + 2), closestHitStage, anyHitStage);
-            triangleGroup(
-                    groups.get(hitBase + 3),
-                    shadowClosestHitStage,
-                    shadowAnyHitStage);
-            triangleGroup(
-                    groups.get(hitBase + 4), shadowClosestHitStage, shadowAnyHitStage);
-            triangleGroup(
-                    groups.get(hitBase + 5), shadowClosestHitStage, shadowAnyHitStage);
+            for (int geometryClass = 0;
+                    geometryClass < GEOMETRY_CLASS_COUNT;
+                    geometryClass++) {
+                triangleGroup(
+                        groups.get(hitBase + GEOMETRY_CLASS_COUNT + geometryClass),
+                        shadowClosestHitStage,
+                        missStage + shadowAnyHitModule(geometryClass));
+            }
 
             VkRayTracingPipelineCreateInfoKHR.Buffer createInfo =
                     VkRayTracingPipelineCreateInfoKHR.calloc(1, stack);

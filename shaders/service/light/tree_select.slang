@@ -27,7 +27,6 @@ LightTreePick primeInvalidLightTreePick() {
 LightTreePick primePickLightTree(
         LightNode* nodes,
         LightLeaf* leaves,
-        LightLeafEntry* entries,
         SectionRecord* sections,
         uint64_t emitterAddress,
         uint entryLimit,
@@ -45,13 +44,9 @@ LightTreePick primePickLightTree(
         if ((childOrLeaf & PRIME_LIGHT_LEAF_FLAG) != 0u) {
             uint leafIndex = childOrLeaf & PRIME_LIGHT_INDEX_MASK;
             LightLeaf leaf = leaves[leafIndex];
-            if (leaf.entryCount != 1u) {
-                return primeInvalidLightTreePick();
-            }
-            LightLeafEntry entry = entries[leaf.firstEntry];
-            if (entry.index >= entryLimit) return primeInvalidLightTreePick();
+            if (leaf.index >= entryLimit) return primeInvalidLightTreePick();
             LightTreePick result;
-            result.index = entry.index;
+            result.index = leaf.index;
             result.pdf = pdf;
             result.remapped = remapped;
             result.valid = 1u;
@@ -66,7 +61,6 @@ LightTreePick primePickLightTree(
         if (!primeLoadLightChildMetrics(
                     nodes,
                     leaves,
-                    entries,
                     sections,
                     emitterAddress,
                     entryLimit,
@@ -79,7 +73,6 @@ LightTreePick primePickLightTree(
                 || !primeLoadLightChildMetrics(
                     nodes,
                     leaves,
-                    entries,
                     sections,
                     emitterAddress,
                     entryLimit,
@@ -128,12 +121,9 @@ public AreaLightSelection primeSelectAreaLight(
     }
     LightNode* worldNodes = primeWorldLightNodes(worldNodeAddress);
     LightLeaf* worldLeaves = (LightLeaf*)worldLeafAddress;
-    LightLeafEntry* worldEntries = (LightLeafEntry*)(
-            worldLeafAddress + uint64_t(worldLeafCount) * uint64_t(PRIME_LIGHT_LEAF_SIZE));
     LightTreePick worldPick = primePickLightTree(
             worldNodes,
             worldLeaves,
-            worldEntries,
             sections,
             uint64_t(0),
             PRIME_NO_LIGHT_INDEX,
@@ -153,7 +143,6 @@ public AreaLightSelection primeSelectAreaLight(
     LightTreePick sectionPick = primePickLightTree(
             (LightNode*)sectionBuffer[0].nodeAddress,
             (LightLeaf*)sectionBuffer[0].leafAddress,
-            (LightLeafEntry*)sectionBuffer[0].entryAddress,
             sections,
             sectionBuffer[0].emitterAddress,
             sectionBuffer[0].emitterCount,

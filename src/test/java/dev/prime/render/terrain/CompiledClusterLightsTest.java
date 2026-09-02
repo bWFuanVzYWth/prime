@@ -190,9 +190,9 @@ final class CompiledClusterLightsTest {
         relative[HEADER_WORDS + NODE_DIRECTION_WORD] = LightDirection.FULL;
         relative[HEADER_WORDS + NODE_CHILD_WORD] = CpuLightTree.LEAF_FLAG;
         relative[20] = 0;
-        relative[21] = 1;
+        relative[21] = Float.floatToRawIntBits(1.0F);
         relative[22] = 0;
-        relative[23] = Float.floatToRawIntBits(1.0F);
+        relative[23] = 0;
         populateEmitter(relative, 24);
         relative[48] = 0;
         relative[49] = 0;

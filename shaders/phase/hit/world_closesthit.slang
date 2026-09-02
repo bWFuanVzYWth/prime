@@ -13,6 +13,7 @@ import "service/material/normal_mapping.slang";
 import "service/material/surface.slang";
 
 import "service/trace/hit.slang";
+import "service/trace/identity.slang";
 import "contract/path.slang";
 
 layout(location = 0) rayPayloadInEXT TracePayload primePayload;

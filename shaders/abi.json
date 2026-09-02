@@ -44,13 +44,6 @@
     "lightLeaf": {
       "size": 8,
       "fields": [
-        { "name": "firstEntry", "type": "uint", "offset": 0 },
-        { "name": "entryCount", "type": "uint", "offset": 4 }
-      ]
-    },
-    "lightLeafEntry": {
-      "size": 8,
-      "fields": [
         { "name": "index", "type": "uint", "offset": 0 },
         { "name": "power", "type": "float", "offset": 4 }
       ]
@@ -80,7 +73,7 @@
       "fields": [
         { "name": "nodeAddress", "type": "uint64_t", "offset": 0 },
         { "name": "leafAddress", "type": "uint64_t", "offset": 8 },
-        { "name": "entryAddress", "type": "uint64_t", "offset": 16 },
+        { "name": "leafEndAddress", "type": "uint64_t", "offset": 16 },
         { "name": "emitterAddress", "type": "uint64_t", "offset": 24 },
         { "name": "cellAddress", "type": "uint64_t", "offset": 32 },
         { "name": "root", "type": "uint", "offset": 40 },

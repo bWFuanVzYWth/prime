@@ -344,9 +344,11 @@ final class TracePipelinesContractTest {
         assertEquals(
                 ShaderAbi.BASE_COLOR_PAGE_COUNT,
                 descriptorArrayLength(
-                        "shadow.rahit.spv",
+                        "shadow_nonopaque.rahit.spv",
                         0,
                         ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES));
+        assertFalse(descriptorBindings(List.of("shadow_opaque.rahit.spv"), 0)
+                .contains(ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES));
     }
 
     static void optimizedModulesPreservePayloadAbi() throws IOException {
@@ -361,7 +363,10 @@ final class TracePipelinesContractTest {
                     payloadShapes(shader, STORAGE_INCOMING_RAY_PAYLOAD));
         }
         for (String shader : List.of(
-                "shadow.rmiss.spv", "shadow.rchit.spv", "shadow.rahit.spv")) {
+                "shadow.rmiss.spv",
+                "shadow.rchit.spv",
+                "shadow_opaque.rahit.spv",
+                "shadow_nonopaque.rahit.spv")) {
             assertEquals(
                     Set.of(shadowPayload),
                     payloadShapes(shader, STORAGE_INCOMING_RAY_PAYLOAD));
@@ -572,6 +577,22 @@ final class TracePipelinesContractTest {
         assertEquals(8, TraceProgram.deferredWorkerCount(32, 8));
         assertEquals(32, TraceProgram.deferredWorkerCount(-1, 32));
         assertEquals(1, TraceProgram.deferredWorkerCount(8, 0));
+    }
+
+    @Test
+    void shadowHitGroupsUseOpaqueAndNonOpaqueAnyHitPrograms() {
+        assertEquals(3, TraceProgram.GEOMETRY_CLASS_COUNT);
+        assertEquals(
+                GeneratedShaderPrograms.resource("shadow_opaque_rahit"),
+                TraceProgram.shadowAnyHitResource(0));
+        assertEquals(
+                GeneratedShaderPrograms.resource("shadow_nonopaque_rahit"),
+                TraceProgram.shadowAnyHitResource(1));
+        assertEquals(
+                GeneratedShaderPrograms.resource("shadow_nonopaque_rahit"),
+                TraceProgram.shadowAnyHitResource(2));
+        assertThrows(IndexOutOfBoundsException.class, () -> TraceProgram.shadowAnyHitResource(-1));
+        assertThrows(IndexOutOfBoundsException.class, () -> TraceProgram.shadowAnyHitResource(3));
     }
 
     static void compiledPathRecordsUseIndependentStrides() throws IOException {

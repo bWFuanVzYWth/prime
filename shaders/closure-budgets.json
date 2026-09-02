@@ -21,9 +21,13 @@
       "maxFiles": 5,
       "maxBytes": 33861
     },
-    "entry/hit/shadow.anyhit.slang": {
-      "maxFiles": 19,
-      "maxBytes": 75043
+    "entry/hit/shadow_opaque.anyhit.slang": {
+      "maxFiles": 8,
+      "maxBytes": 24042
+    },
+    "entry/hit/shadow_nonopaque.anyhit.slang": {
+      "maxFiles": 20,
+      "maxBytes": 75500
     },
     "entry/hit/shadow.closesthit.slang": {
       "maxFiles": 3,
@@ -34,11 +38,11 @@
       "maxBytes": 859
     },
     "entry/hit/world.anyhit.slang": {
-      "maxFiles": 11,
+      "maxFiles": 12,
       "maxBytes": 56150
     },
     "entry/hit/world.closesthit.slang": {
-      "maxFiles": 23,
+      "maxFiles": 24,
       "maxBytes": 105308
     },
     "entry/hit/world.miss.slang": {

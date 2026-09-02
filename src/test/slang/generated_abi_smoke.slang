@@ -4,7 +4,6 @@ import "prime_abi_types.slang";
 [[vk::binding(1, 0)]] StructuredBuffer<SectionRecord> sectionRecords;
 [[vk::binding(2, 0)]] StructuredBuffer<LightNode> lightNodes;
 [[vk::binding(3, 0)]] StructuredBuffer<LightLeaf> lightLeaves;
-[[vk::binding(4, 0)]] StructuredBuffer<LightLeafEntry> lightLeafEntries;
 [[vk::binding(5, 0)]] StructuredBuffer<LightEmitter> lightEmitters;
 [[vk::binding(6, 0)]] StructuredBuffer<LightCell> lightCells;
 [[vk::binding(7, 0)]] StructuredBuffer<SectionLightHeader> sectionLightHeaders;
@@ -29,8 +28,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     value ^= uint(((SectionRecord*)primePush.sectionTableAddress)[index]
             .surfaceRelationAddress);
     value ^= lightNodes[index].directionChildReserved.z;
-    value ^= lightLeaves[index].entryCount;
-    value ^= asuint(lightLeafEntries[index].power);
+    value ^= lightLeaves[index].index;
+    value ^= asuint(lightLeaves[index].power);
     value ^= lightEmitters[index].metadata.w;
     value ^= asuint(lightCells[index].probabilityMass);
     value ^= sectionLightHeaders[index].emitterCount;

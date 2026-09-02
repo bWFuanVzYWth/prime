@@ -104,23 +104,23 @@ public float2 primeEmitterMetrics(
 
 public float2 primeLoadEmitterMetrics(
         LightEmitter* emitters,
-        LightLeafEntry entry,
+        LightLeaf leaf,
         float3 point,
         float3 receiverNormal) {
     return primeEmitterMetrics(
-            emitters[entry.index],
-            entry.power,
+            emitters[leaf.index],
+            leaf.power,
             point,
             receiverNormal);
 }
 
 bool primeLoadWorldLeafEntryMetrics(
         SectionRecord* sections,
-        LightLeafEntry entry,
+        LightLeaf leaf,
         float3 point,
         float3 receiverNormal,
         out float2 metrics) {
-    SectionRecord section = sections[entry.index];
+    SectionRecord section = sections[leaf.index];
     if (section.lightAddress == uint64_t(0)) {
         metrics = float2(0.0);
         return false;
@@ -143,7 +143,6 @@ bool primeLoadWorldLeafEntryMetrics(
 public bool primeLoadLightChildMetrics(
         LightNode* nodes,
         LightLeaf* leaves,
-        LightLeafEntry* entries,
         SectionRecord* sections,
         uint64_t emitterAddress,
         uint entryLimit,
@@ -159,16 +158,14 @@ public bool primeLoadLightChildMetrics(
         return true;
     }
     LightLeaf leaf = leaves[childOrLeaf & PRIME_LIGHT_INDEX_MASK];
-    if (leaf.entryCount != 1u) return false;
-    LightLeafEntry entry = entries[leaf.firstEntry];
-    if (entry.index >= entryLimit) return false;
+    if (leaf.index >= entryLimit) return false;
     if (leafMode == PRIME_LIGHT_LEAF_WORLD) {
         return primeLoadWorldLeafEntryMetrics(
-                sections, entry, point, receiverNormal, metrics);
+                sections, leaf, point, receiverNormal, metrics);
     }
     if (leafMode == PRIME_LIGHT_LEAF_EMITTER) {
         metrics = primeLoadEmitterMetrics(
-                (LightEmitter*)emitterAddress, entry, point, receiverNormal);
+                (LightEmitter*)emitterAddress, leaf, point, receiverNormal);
         return true;
     }
     return false;

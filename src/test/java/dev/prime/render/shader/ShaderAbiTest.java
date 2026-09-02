@@ -13,7 +13,6 @@ final class ShaderAbiTest {
         assertEquals(64, ShaderAbi.SECTION_INSTANCE_TINT_OFFSET);
         assertEquals(32, ShaderAbi.LIGHT_NODE_SIZE);
         assertEquals(8, ShaderAbi.LIGHT_LEAF_SIZE);
-        assertEquals(8, ShaderAbi.LIGHT_LEAF_ENTRY_SIZE);
         assertEquals(96, ShaderAbi.LIGHT_EMITTER_SIZE);
         assertEquals(12, ShaderAbi.LIGHT_CELL_SIZE);
         assertEquals(48, ShaderAbi.SECTION_LIGHT_HEADER_SIZE);
@@ -237,10 +236,8 @@ final class ShaderAbiTest {
         assertEquals(88, ShaderAbi.SECTION_POSITION_ADDRESS_OFFSET);
         assertEquals(0, ShaderAbi.LIGHT_NODE_CENTROID_POWER_OFFSET);
         assertEquals(16, ShaderAbi.LIGHT_NODE_DIRECTION_CHILD_RESERVED_OFFSET);
-        assertEquals(0, ShaderAbi.LIGHT_LEAF_FIRST_ENTRY_OFFSET);
-        assertEquals(4, ShaderAbi.LIGHT_LEAF_ENTRY_COUNT_OFFSET);
-        assertEquals(0, ShaderAbi.LIGHT_LEAF_ENTRY_INDEX_OFFSET);
-        assertEquals(4, ShaderAbi.LIGHT_LEAF_ENTRY_POWER_OFFSET);
+        assertEquals(0, ShaderAbi.LIGHT_LEAF_INDEX_OFFSET);
+        assertEquals(4, ShaderAbi.LIGHT_LEAF_POWER_OFFSET);
         assertEquals(0, ShaderAbi.LIGHT_EMITTER_CORNER_AREA_OFFSET);
         assertEquals(48, ShaderAbi.LIGHT_EMITTER_NORMAL_OFFSET);
         assertEquals(60, ShaderAbi.LIGHT_EMITTER_RELATION_OFFSET_OFFSET);
@@ -251,7 +248,7 @@ final class ShaderAbiTest {
         assertEquals(4, ShaderAbi.LIGHT_CELL_ALIAS_GEOMETRY_OFFSET);
         assertEquals(0, ShaderAbi.SECTION_LIGHT_HEADER_NODE_ADDRESS_OFFSET);
         assertEquals(8, ShaderAbi.SECTION_LIGHT_HEADER_LEAF_ADDRESS_OFFSET);
-        assertEquals(16, ShaderAbi.SECTION_LIGHT_HEADER_ENTRY_ADDRESS_OFFSET);
+        assertEquals(16, ShaderAbi.SECTION_LIGHT_HEADER_LEAF_END_ADDRESS_OFFSET);
         assertEquals(24, ShaderAbi.SECTION_LIGHT_HEADER_EMITTER_ADDRESS_OFFSET);
         assertEquals(32, ShaderAbi.SECTION_LIGHT_HEADER_CELL_ADDRESS_OFFSET);
         assertEquals(40, ShaderAbi.SECTION_LIGHT_HEADER_ROOT_OFFSET);

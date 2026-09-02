@@ -24,7 +24,6 @@ public final class CpuLightTree {
     private static final double SAOH_DEPTH_QUALITY_BAND = 1.02;
     private static final int WORDS_PER_NODE = 8;
     private static final int WORDS_PER_LEAF = 2;
-    private static final int WORDS_PER_ENTRY = 2;
     private CpuLightTree() {
     }
 
@@ -51,7 +50,7 @@ public final class CpuLightTree {
             throw new IllegalArgumentException("Negative light leaf index capacity");
         }
         Nodes nodes = new Nodes(leaves.size * 2 - 1);
-        LeafClusters clusters = new LeafClusters(leaves.size);
+        TerminalLeaves terminals = new TerminalLeaves(leaves.size);
         int[] leafNodes = new int[indexCapacity];
         int[] leafPaths = new int[indexCapacity];
         Arrays.fill(leafNodes, NO_INDEX);
@@ -66,11 +65,11 @@ public final class CpuLightTree {
                 0,
                 0,
                 nodes,
-                clusters,
+                terminals,
                 leafNodes,
                 leafPaths,
                 workspace);
-        return new Result(nodes, clusters, leafNodes, leafPaths);
+        return new Result(nodes, terminals, leafNodes, leafPaths);
     }
 
     /**
@@ -88,7 +87,7 @@ public final class CpuLightTree {
             int trail,
             int depth,
             Nodes nodes,
-            LeafClusters clusters,
+            TerminalLeaves terminals,
             int[] leafNodes,
             int[] leafPaths,
             Workspace workspace) {
@@ -103,7 +102,7 @@ public final class CpuLightTree {
                     "Light tree range of " + count + " exceeds packed path capacity " + capacity);
         }
         if (count == 1) {
-            int leaf = clusters.add(leaves, start, end);
+            int leaf = terminals.add(leaves, start, end);
             nodes.firstChildOrLeaf[nodeIndex] = leaf;
             nodes.direction[nodeIndex] = aggregateDirection(leaves, start, end);
             int packedPath = packPath(trail, depth);
@@ -144,7 +143,7 @@ public final class CpuLightTree {
                 trail,
                 depth + 1,
                 nodes,
-                clusters,
+                terminals,
                 leafNodes,
                 leafPaths,
                 workspace);
@@ -156,7 +155,7 @@ public final class CpuLightTree {
                 trail | (1 << depth),
                 depth + 1,
                 nodes,
-                clusters,
+                terminals,
                 leafNodes,
                 leafPaths,
                 workspace);
@@ -436,14 +435,14 @@ public final class CpuLightTree {
 
     static final class Result {
         private final Nodes nodes;
-        private final LeafClusters clusters;
+        private final TerminalLeaves terminals;
         private final int[] leafNodes;
         private final int[] leafPaths;
 
         private Result(
-                Nodes nodes, LeafClusters clusters, int[] leafNodes, int[] leafPaths) {
+                Nodes nodes, TerminalLeaves terminals, int[] leafNodes, int[] leafPaths) {
             this.nodes = nodes;
-            this.clusters = clusters;
+            this.terminals = terminals;
             this.leafNodes = leafNodes;
             this.leafPaths = leafPaths;
         }
@@ -479,23 +478,15 @@ public final class CpuLightTree {
         }
 
         int[] packLeaves() {
-            return this.clusters.packLeaves();
+            return this.terminals.pack();
         }
 
-        int[] packEntries() {
-            return this.clusters.packEntries();
-        }
-
-        void packInto(
-                int[] target,
-                int nodeWordOffset,
-                int leafWordOffset,
-                int entryWordOffset) {
+        void packInto(int[] target, int nodeWordOffset, int leafWordOffset) {
             int nodeCursor = nodeWordOffset;
             for (int node = 0; node < this.nodes.size; node++) {
                 nodeCursor = packNode(target, nodeCursor, node);
             }
-            this.clusters.packInto(target, leafWordOffset, entryWordOffset);
+            this.terminals.packInto(target, leafWordOffset);
         }
 
         private int packNode(int[] target, int cursor, int node) {
@@ -549,28 +540,19 @@ public final class CpuLightTree {
             return this.nodes.size;
         }
 
-        int clusterCount() {
-            return this.clusters.leafCount;
-        }
-
-        int entryCount() {
-            return this.clusters.entryCount;
+        int leafCount() {
+            return this.terminals.size;
         }
     }
 
-    private static final class LeafClusters {
-        private final int[] firstEntry;
-        private final int[] entryCountByLeaf;
-        private final int[] entryIndex;
-        private final float[] entryPower;
-        private int leafCount;
-        private int entryCount;
+    private static final class TerminalLeaves {
+        private final int[] index;
+        private final float[] power;
+        private int size;
 
-        private LeafClusters(int capacity) {
-            this.firstEntry = new int[capacity];
-            this.entryCountByLeaf = new int[capacity];
-            this.entryIndex = new int[capacity];
-            this.entryPower = new float[capacity];
+        private TerminalLeaves(int capacity) {
+            this.index = new int[capacity];
+            this.power = new float[capacity];
         }
 
         private int add(Leaves leaves, int start, int end) {
@@ -578,47 +560,23 @@ public final class CpuLightTree {
             if (count != LIGHTS_PER_LEAF) {
                 throw new IllegalStateException("Invalid singleton light leaf size " + count);
             }
-            int leaf = this.leafCount++;
-            this.firstEntry[leaf] = this.entryCount;
-            this.entryCountByLeaf[leaf] = count;
-            for (int slot = start; slot < end; slot++) {
-                this.entryIndex[this.entryCount] = leaves.index[slot];
-                this.entryPower[this.entryCount] = leaves.power[slot];
-                this.entryCount++;
-            }
+            int leaf = this.size++;
+            this.index[leaf] = leaves.index[start];
+            this.power[leaf] = leaves.power[start];
             return leaf;
         }
 
-        private int[] packLeaves() {
-            int[] result = new int[this.leafCount * WORDS_PER_LEAF];
-            packLeavesInto(result, 0);
+        private int[] pack() {
+            int[] result = new int[this.size * WORDS_PER_LEAF];
+            packInto(result, 0);
             return result;
         }
 
-        private int[] packEntries() {
-            int[] result = new int[this.entryCount * WORDS_PER_ENTRY];
-            packEntriesInto(result, 0);
-            return result;
-        }
-
-        private void packInto(int[] target, int leafOffset, int entryOffset) {
-            packLeavesInto(target, leafOffset);
-            packEntriesInto(target, entryOffset);
-        }
-
-        private void packLeavesInto(int[] target, int offset) {
+        private void packInto(int[] target, int offset) {
             int cursor = offset;
-            for (int leaf = 0; leaf < this.leafCount; leaf++) {
-                target[cursor++] = this.firstEntry[leaf];
-                target[cursor++] = this.entryCountByLeaf[leaf];
-            }
-        }
-
-        private void packEntriesInto(int[] target, int offset) {
-            int cursor = offset;
-            for (int entry = 0; entry < this.entryCount; entry++) {
-                target[cursor++] = this.entryIndex[entry];
-                target[cursor++] = Float.floatToRawIntBits(this.entryPower[entry]);
+            for (int leaf = 0; leaf < this.size; leaf++) {
+                target[cursor++] = this.index[leaf];
+                target[cursor++] = Float.floatToRawIntBits(this.power[leaf]);
             }
         }
     }

@@ -89,13 +89,9 @@ public LightEvaluation primeEvaluateAreaLight(
     }
     LightNode* worldNodes = primeWorldLightNodes(worldNodeAddress);
     LightLeaf* worldLeaves = (LightLeaf*)worldLeafAddress;
-    LightLeafEntry* worldEntries = (LightLeafEntry*)(
-            worldLeafAddress
-                    + uint64_t(worldLeafCount) * uint64_t(PRIME_LIGHT_LEAF_SIZE));
     float worldPdf = primeLightTreeSelectionPdf(
             worldNodes,
             worldLeaves,
-            worldEntries,
             sections,
             uint64_t(0),
             PRIME_NO_LIGHT_INDEX,
@@ -108,7 +104,6 @@ public LightEvaluation primeEvaluateAreaLight(
     float sectionPdf = primeLightTreeSelectionPdf(
             (LightNode*)sectionBuffer[0].nodeAddress,
             (LightLeaf*)sectionBuffer[0].leafAddress,
-            (LightLeafEntry*)sectionBuffer[0].entryAddress,
             sections,
             sectionBuffer[0].emitterAddress,
             sectionBuffer[0].emitterCount,

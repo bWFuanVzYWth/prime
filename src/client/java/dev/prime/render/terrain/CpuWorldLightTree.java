@@ -94,12 +94,10 @@ public final class CpuWorldLightTree {
         private static Result forTree(CpuLightTree.Result tree, int clusterCount) {
             int nodeWordCount = tree.nodeCount()
                     * (ShaderAbi.LIGHT_NODE_SIZE / Integer.BYTES);
-            int leafWordCount = tree.clusterCount()
+            int leafWordCount = tree.leafCount()
                     * (ShaderAbi.LIGHT_LEAF_SIZE / Integer.BYTES);
-            int entryWordCount = tree.entryCount()
-                    * (ShaderAbi.LIGHT_LEAF_ENTRY_SIZE / Integer.BYTES);
             return new Result(
-                    new int[nodeWordCount + leafWordCount + entryWordCount],
+                    new int[nodeWordCount + leafWordCount],
                     nodeWordCount,
                     leafWordCount,
                     clusterCount);
@@ -113,8 +111,7 @@ public final class CpuWorldLightTree {
             tree.packInto(
                     this.packedWords,
                     0,
-                    this.nodeWordCount,
-                    this.nodeWordCount + this.leafWordCount);
+                    this.nodeWordCount);
         }
 
         public boolean isEmpty() {
@@ -127,10 +124,6 @@ public final class CpuWorldLightTree {
 
         public long leafByteOffset() {
             return (long) this.nodeWordCount * Integer.BYTES;
-        }
-
-        public long entryByteOffset() {
-            return (long) (this.nodeWordCount + this.leafWordCount) * Integer.BYTES;
         }
 
         public int nodeCount() {

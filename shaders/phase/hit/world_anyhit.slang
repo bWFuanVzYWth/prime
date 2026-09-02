@@ -7,6 +7,7 @@ import "math/packed_geometry.slang";
 import "model/material/defaults.slang";
 import "service/material/access.slang";
 import "service/trace/hit.slang";
+import "service/trace/identity.slang";
 
 layout(location = 0) rayPayloadInEXT TracePayload primePayload;
 

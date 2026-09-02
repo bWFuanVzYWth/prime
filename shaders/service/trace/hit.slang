@@ -9,6 +9,7 @@ import "math/packed_geometry.slang";
 import "model/material/defaults.slang";
 import "model/material/medium_boundary.slang";
 import "service/material/access.slang";
+import "service/trace/identity.slang";
 
 import "contract/path.slang";
 
@@ -53,31 +54,8 @@ public uint primePrimitiveRecipeControl(
                     | (inlineControl & PRIME_RECIPE_TANGENT_NEGATIVE));
 }
 
-public SectionRecord primeSection() {
-    return ((SectionRecord*)primePush.sectionTableAddress)[InstanceID()];
-}
-
-uint primeLocalPrimitiveIndex(SectionRecord section) {
-    // BLAS geometries and the primitive buffer share one semantic order:
-    // opaque, alpha-tested cutout, then transmissive. Macro rectangles occupy adjacent triangle
-    // pairs at each geometry tail, where both triangles share one projected-UV primitive record.
-    uint macroBase = GeometryIndex() == 0
-            ? section.opaqueMacroTriangleBase
-            : (GeometryIndex() == 1
-                    ? section.cutoutMacroTriangleBase
-                    : section.transmissiveMacroTriangleBase);
-    return PrimitiveIndex() < macroBase
-            ? PrimitiveIndex()
-            : macroBase + ((PrimitiveIndex() - macroBase) >> 1u);
-}
-
 public PrimitiveRecord primePrimitive(SectionRecord section) {
-    uint base = GeometryIndex() == 0
-            ? 0u
-            : (GeometryIndex() == 1 ? section.cutoutBase : section.transmissiveBase);
-    uint primitiveIndex = primeLocalPrimitiveIndex(section);
-    PrimitiveRecord primitive =
-            ((PrimitiveRecord*)section.primitiveAddress)[base + primitiveIndex];
+    PrimitiveRecord primitive = primeRawPrimitive(section);
     // Baked material primitives may lerp an untinted base with a tinted overlay in one BLAS.
     // Their instance tint is applied after per-primitive color selection in material.slang.
     if ((section.instanceTint & 0x80000000u) != 0u
@@ -91,38 +69,6 @@ public PrimitiveRecord primePrimitive(SectionRecord section) {
         }
     }
     return primitive;
-}
-
-public uint primeGlobalPrimitiveIndex(SectionRecord section) {
-    uint base = GeometryIndex() == 0
-            ? 0u
-            : (GeometryIndex() == 1 ? section.cutoutBase : section.transmissiveBase);
-    return base + primeLocalPrimitiveIndex(section);
-}
-
-public uint primeGlobalPrimitiveIndexFromTriangle(
-        SectionRecord section, uint triangleIndex) {
-    uint opaquePrimitiveCount = section.cutoutBase;
-    uint cutoutPrimitiveCount = section.transmissiveBase - section.cutoutBase;
-    return primeGlobalPrimitiveIndexFromTriangleValue(
-            triangleIndex,
-            opaquePrimitiveCount,
-            cutoutPrimitiveCount,
-            section.opaqueMacroTriangleBase,
-            section.cutoutMacroTriangleBase,
-            section.transmissiveMacroTriangleBase);
-}
-
-public uint primeGlobalTriangleIndex(SectionRecord section) {
-    uint opaquePrimitiveCount = section.cutoutBase;
-    uint cutoutPrimitiveCount = section.transmissiveBase - section.cutoutBase;
-    return primeGlobalTriangleIndexValue(
-            GeometryIndex(),
-            PrimitiveIndex(),
-            opaquePrimitiveCount,
-            cutoutPrimitiveCount,
-            section.opaqueMacroTriangleBase,
-            section.cutoutMacroTriangleBase);
 }
 
 public struct PrimeHitTriangle {
@@ -164,15 +110,6 @@ public PrimeHitTriangle primeHitTriangle(
     normal /= normalScale;
     result.geometricNormal = normalize(normal);
     return result;
-}
-
-public uint primePrimitiveEmitterIndex(PrimitiveRecord primitive) {
-    uint encodedEmitter = (primitive.flagsEmitter & 4u) != 0u
-            ? primitive.flagsEmitter >> 3u & 0x00ffffffu
-            : 0u;
-    return encodedEmitter == 0u
-            ? PRIME_NO_PRIMITIVE_INDEX
-            : encodedEmitter - 1u;
 }
 
 public uint primePrimitiveTextureId(

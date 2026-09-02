@@ -22,7 +22,6 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		def section = schema.structs.sectionRecord
 		def lightNode = schema.structs.lightNode
 		def lightLeaf = schema.structs.lightLeaf
-		def lightLeafEntry = schema.structs.lightLeafEntry
 		def lightEmitter = schema.structs.lightEmitter
 		def lightCell = schema.structs.lightCell
 		def sectionLightHeader = schema.structs.sectionLightHeader
@@ -48,7 +47,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		def materialCoreContract = schema.materialCoreContract
 
 		if (primitive.size != 32 || section.size != 96 || lightNode.size != 32
-				|| lightLeaf.size != 8 || lightLeafEntry.size != 8
+				|| lightLeaf.size != 8
 				|| lightEmitter.size != 96 || lightCell.size != 12
 				|| sectionLightHeader.size != 48
 				|| integrator.size != 32 || pathState.size != 80 || tracePayload.size != 112
@@ -273,7 +272,6 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		validateStruct('SectionRecord', section)
 		validateStruct('LightNode', lightNode)
 		validateStruct('LightLeaf', lightLeaf)
-		validateStruct('LightLeafEntry', lightLeafEntry)
 		validateStruct('LightEmitter', lightEmitter)
 		validateStruct('LightCell', lightCell)
 		validateStruct('SectionLightHeader', sectionLightHeader)
@@ -295,7 +293,6 @@ abstract class GenerateShaderAbi extends DefaultTask {
 			SECTION: section,
 			LIGHT_NODE: lightNode,
 			LIGHT_LEAF: lightLeaf,
-			LIGHT_LEAF_ENTRY: lightLeafEntry,
 			LIGHT_EMITTER: lightEmitter,
 			LIGHT_CELL: lightCell,
 			SECTION_LIGHT_HEADER: sectionLightHeader,
@@ -350,7 +347,6 @@ public final class ShaderAbi {
     public static final int SECTION_RECORD_SIZE = ${section.size};
     public static final int LIGHT_NODE_SIZE = ${lightNode.size};
     public static final int LIGHT_LEAF_SIZE = ${lightLeaf.size};
-    public static final int LIGHT_LEAF_ENTRY_SIZE = ${lightLeafEntry.size};
     public static final int LIGHT_EMITTER_SIZE = ${lightEmitter.size};
     public static final int LIGHT_CELL_SIZE = ${lightCell.size};
     public static final int SECTION_LIGHT_HEADER_SIZE = ${sectionLightHeader.size};
@@ -602,7 +598,6 @@ static const uint PRIME_PRIMITIVE_RECORD_SIZE = ${primitive.size};
 static const uint PRIME_SECTION_RECORD_SIZE = ${section.size};
 static const uint PRIME_LIGHT_NODE_SIZE = ${lightNode.size};
 static const uint PRIME_LIGHT_LEAF_SIZE = ${lightLeaf.size};
-static const uint PRIME_LIGHT_LEAF_ENTRY_SIZE = ${lightLeafEntry.size};
 static const uint PRIME_LIGHT_EMITTER_SIZE = ${lightEmitter.size};
 static const uint PRIME_LIGHT_CELL_SIZE = ${lightCell.size};
 static const uint PRIME_SECTION_LIGHT_HEADER_SIZE = ${sectionLightHeader.size};
@@ -688,11 +683,6 @@ ${slangStructFields(lightNode)}
 public struct LightLeaf
 {
 ${slangStructFields(lightLeaf)}
-};
-
-public struct LightLeafEntry
-{
-${slangStructFields(lightLeafEntry)}
 };
 
 public struct LightEmitter

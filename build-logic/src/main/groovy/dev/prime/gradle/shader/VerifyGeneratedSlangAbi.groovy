@@ -84,7 +84,6 @@ abstract class VerifyGeneratedSlangAbi extends DefaultTask {
 				sectionRecord: 'SectionRecord',
 				lightNode: 'LightNode',
 				lightLeaf: 'LightLeaf',
-				lightLeafEntry: 'LightLeafEntry',
 				lightEmitter: 'LightEmitter',
 				lightCell: 'LightCell',
 				sectionLightHeader: 'SectionLightHeader',

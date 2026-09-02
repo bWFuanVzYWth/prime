@@ -12,7 +12,6 @@ static const uint PRIME_LIGHT_PATH_TRAIL_MASK = 0x07ffffffu;
 public float primeLightTreeSelectionPdf(
         LightNode* nodes,
         LightLeaf* leaves,
-        LightLeafEntry* entries,
         SectionRecord* sections,
         uint64_t emitterAddress,
         uint entryLimit,
@@ -48,7 +47,6 @@ public float primeLightTreeSelectionPdf(
         if (!primeLoadLightChildMetrics(
                     nodes,
                     leaves,
-                    entries,
                     sections,
                     emitterAddress,
                     entryLimit,
@@ -61,7 +59,6 @@ public float primeLightTreeSelectionPdf(
                 || !primeLoadLightChildMetrics(
                     nodes,
                     leaves,
-                    entries,
                     sections,
                     emitterAddress,
                     entryLimit,
@@ -84,7 +81,5 @@ public float primeLightTreeSelectionPdf(
     uint childOrLeaf = primeLoadLightNodeChildOrLeaf(nodes, nodeIndex);
     if ((childOrLeaf & PRIME_LIGHT_LEAF_FLAG) == 0u) return 0.0;
     LightLeaf leaf = leaves[childOrLeaf & PRIME_LIGHT_INDEX_MASK];
-    if (leaf.entryCount != 1u) return 0.0;
-    LightLeafEntry entry = entries[leaf.firstEntry];
-    return entry.index == expectedIndex && entry.index < entryLimit ? pdf : 0.0;
+    return leaf.index == expectedIndex && leaf.index < entryLimit ? pdf : 0.0;
 }

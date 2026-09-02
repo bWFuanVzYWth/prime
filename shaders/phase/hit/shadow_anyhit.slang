@@ -15,6 +15,7 @@ import "service/material/static_color.slang";
 import "model/material/transparent.slang";
 
 import "service/trace/hit.slang";
+import "service/trace/identity.slang";
 import "contract/trace/shadow_payload.slang";
 
 layout(location = 1) rayPayloadInEXT PrimeShadowPayload primeShadowPayload;
