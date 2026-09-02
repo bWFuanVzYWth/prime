@@ -90,10 +90,6 @@ public final class Constants {
         return constants;
     }
 
-    public static Constants wrap(MemorySegment segment) {
-        return new Constants(segment);
-    }
-
     public MemorySegment segment() {
         return this.segment;
     }
@@ -106,32 +102,16 @@ public final class Constants {
         return this.matrix(CAMERA_VIEW_TO_CLIP, rowMajor);
     }
 
-    public float[] clipToCameraView() {
-        return this.matrix(CLIP_TO_CAMERA_VIEW);
-    }
-
     public Constants clipToCameraView(float[] rowMajor) {
         return this.matrix(CLIP_TO_CAMERA_VIEW, rowMajor);
-    }
-
-    public float[] clipToLensClip() {
-        return this.matrix(CLIP_TO_LENS_CLIP);
     }
 
     public Constants clipToLensClip(float[] rowMajor) {
         return this.matrix(CLIP_TO_LENS_CLIP, rowMajor);
     }
 
-    public float[] clipToPrevClip() {
-        return this.matrix(CLIP_TO_PREV_CLIP);
-    }
-
     public Constants clipToPrevClip(float[] rowMajor) {
         return this.matrix(CLIP_TO_PREV_CLIP, rowMajor);
-    }
-
-    public float[] prevClipToClip() {
-        return this.matrix(PREV_CLIP_TO_CLIP);
     }
 
     public Constants prevClipToClip(float[] rowMajor) {
@@ -152,10 +132,6 @@ public final class Constants {
 
     public Constants mvecScale(float x, float y) {
         return this.floats(MVEC_SCALE, x, y);
-    }
-
-    public float[] cameraPinholeOffset() {
-        return this.floats(CAMERA_PINHOLE_OFFSET, 2);
     }
 
     public Constants cameraPinholeOffset(float x, float y) {
@@ -212,17 +188,9 @@ public final class Constants {
         return this;
     }
 
-    public float cameraFOV() {
-        return (float) CAMERA_FOV.get(this.segment, 0L);
-    }
-
     public Constants cameraFOV(float value) {
         CAMERA_FOV.set(this.segment, 0L, value);
         return this;
-    }
-
-    public float cameraAspectRatio() {
-        return (float) CAMERA_ASPECT_RATIO.get(this.segment, 0L);
     }
 
     public Constants cameraAspectRatio(float value) {
@@ -257,10 +225,6 @@ public final class Constants {
         return this;
     }
 
-    public SlBoolean motionVectors3D() {
-        return SlBoolean.fromValue((byte) MOTION_VECTORS_3D.get(this.segment, 0L));
-    }
-
     public Constants motionVectors3D(SlBoolean value) {
         MOTION_VECTORS_3D.set(this.segment, 0L, value.value);
         return this;
@@ -275,17 +239,9 @@ public final class Constants {
         return this;
     }
 
-    public SlBoolean orthographicProjection() {
-        return SlBoolean.fromValue((byte) ORTHOGRAPHIC_PROJECTION.get(this.segment, 0L));
-    }
-
     public Constants orthographicProjection(SlBoolean value) {
         ORTHOGRAPHIC_PROJECTION.set(this.segment, 0L, value.value);
         return this;
-    }
-
-    public SlBoolean motionVectorsDilated() {
-        return SlBoolean.fromValue((byte) MOTION_VECTORS_DILATED.get(this.segment, 0L));
     }
 
     public Constants motionVectorsDilated(SlBoolean value) {
@@ -300,10 +256,6 @@ public final class Constants {
     public Constants motionVectorsJittered(SlBoolean value) {
         MOTION_VECTORS_JITTERED.set(this.segment, 0L, value.value);
         return this;
-    }
-
-    public float minRelativeLinearDepthObjectSeparation() {
-        return (float) MIN_RELATIVE_LINEAR_DEPTH_OBJECT_SEPARATION.get(this.segment, 0L);
     }
 
     public Constants minRelativeLinearDepthObjectSeparation(float value) {

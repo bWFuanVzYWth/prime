@@ -54,7 +54,6 @@ public final class DlssgOptions {
     private static final VarHandle DEPTH_BUFFER_FORMAT = LAYOUT.varHandle(groupElement("depthBufferFormat"));
     private static final VarHandle HUD_LESS_BUFFER_FORMAT = LAYOUT.varHandle(groupElement("hudLessBufferFormat"));
     private static final VarHandle UI_BUFFER_FORMAT = LAYOUT.varHandle(groupElement("uiBufferFormat"));
-    private static final VarHandle ON_ERROR_CALLBACK = LAYOUT.varHandle(groupElement("onErrorCallback"));
     private static final VarHandle RESERVED_15 = LAYOUT.varHandle(groupElement("reserved15"));
     private static final VarHandle QUEUE_PARALLELISM_MODE = LAYOUT.varHandle(groupElement("queueParallelismMode"));
     private static final VarHandle ENABLE_USER_INTERFACE_RECOMPOSITION = LAYOUT.varHandle(groupElement("enableUserInterfaceRecomposition"));
@@ -74,16 +73,8 @@ public final class DlssgOptions {
         return new DlssgOptions(segment);
     }
 
-    public static DlssgOptions wrap(MemorySegment segment) {
-        return new DlssgOptions(segment);
-    }
-
     public MemorySegment segment() {
         return this.segment;
-    }
-
-    public DlssgMode mode() {
-        return DlssgMode.fromValue((int) MODE.get(this.segment, 0L));
     }
 
     public DlssgOptions mode(DlssgMode value) {
@@ -92,27 +83,15 @@ public final class DlssgOptions {
     }
 
     /** 1 = 2x frame multiplier, 2 = 3x, 3 = 4x; cannot exceed DlssgState.numFramesToGenerateMax */
-    public int numFramesToGenerate() {
-        return (int) NUM_FRAMES_TO_GENERATE.get(this.segment, 0L);
-    }
-
     public DlssgOptions numFramesToGenerate(int value) {
         NUM_FRAMES_TO_GENERATE.set(this.segment, 0L, value);
         return this;
     }
 
     /** Raw uint32 mask, see {@link DlssgFlag} */
-    public int flags() {
-        return (int) FLAGS.get(this.segment, 0L);
-    }
-
     public DlssgOptions flags(int value) {
         FLAGS.set(this.segment, 0L, value);
         return this;
-    }
-
-    public int dynamicResWidth() {
-        return (int) DYNAMIC_RES_WIDTH.get(this.segment, 0L);
     }
 
     public DlssgOptions dynamicResWidth(int value) {
@@ -120,17 +99,9 @@ public final class DlssgOptions {
         return this;
     }
 
-    public int dynamicResHeight() {
-        return (int) DYNAMIC_RES_HEIGHT.get(this.segment, 0L);
-    }
-
     public DlssgOptions dynamicResHeight(int value) {
         DYNAMIC_RES_HEIGHT.set(this.segment, 0L, value);
         return this;
-    }
-
-    public int numBackBuffers() {
-        return (int) NUM_BACK_BUFFERS.get(this.segment, 0L);
     }
 
     public DlssgOptions numBackBuffers(int value) {
@@ -138,17 +109,9 @@ public final class DlssgOptions {
         return this;
     }
 
-    public int mvecDepthWidth() {
-        return (int) MVEC_DEPTH_WIDTH.get(this.segment, 0L);
-    }
-
     public DlssgOptions mvecDepthWidth(int value) {
         MVEC_DEPTH_WIDTH.set(this.segment, 0L, value);
         return this;
-    }
-
-    public int mvecDepthHeight() {
-        return (int) MVEC_DEPTH_HEIGHT.get(this.segment, 0L);
     }
 
     public DlssgOptions mvecDepthHeight(int value) {
@@ -156,17 +119,9 @@ public final class DlssgOptions {
         return this;
     }
 
-    public int colorWidth() {
-        return (int) COLOR_WIDTH.get(this.segment, 0L);
-    }
-
     public DlssgOptions colorWidth(int value) {
         COLOR_WIDTH.set(this.segment, 0L, value);
         return this;
-    }
-
-    public int colorHeight() {
-        return (int) COLOR_HEIGHT.get(this.segment, 0L);
     }
 
     public DlssgOptions colorHeight(int value) {
@@ -175,76 +130,39 @@ public final class DlssgOptions {
     }
 
     /** VkFormat of the swap-chain back buffers */
-    public int colorBufferFormat() {
-        return (int) COLOR_BUFFER_FORMAT.get(this.segment, 0L);
-    }
-
     public DlssgOptions colorBufferFormat(int value) {
         COLOR_BUFFER_FORMAT.set(this.segment, 0L, value);
         return this;
     }
 
     /** VkFormat of the motion vectors buffer */
-    public int mvecBufferFormat() {
-        return (int) MVEC_BUFFER_FORMAT.get(this.segment, 0L);
-    }
-
     public DlssgOptions mvecBufferFormat(int value) {
         MVEC_BUFFER_FORMAT.set(this.segment, 0L, value);
         return this;
     }
 
     /** VkFormat of the depth buffer */
-    public int depthBufferFormat() {
-        return (int) DEPTH_BUFFER_FORMAT.get(this.segment, 0L);
-    }
-
     public DlssgOptions depthBufferFormat(int value) {
         DEPTH_BUFFER_FORMAT.set(this.segment, 0L, value);
         return this;
     }
 
     /** VkFormat of the HUD-less color buffer */
-    public int hudLessBufferFormat() {
-        return (int) HUD_LESS_BUFFER_FORMAT.get(this.segment, 0L);
-    }
-
     public DlssgOptions hudLessBufferFormat(int value) {
         HUD_LESS_BUFFER_FORMAT.set(this.segment, 0L, value);
         return this;
     }
 
     /** VkFormat of the UI color & alpha buffer */
-    public int uiBufferFormat() {
-        return (int) UI_BUFFER_FORMAT.get(this.segment, 0L);
-    }
-
     public DlssgOptions uiBufferFormat(int value) {
         UI_BUFFER_FORMAT.set(this.segment, 0L, value);
         return this;
     }
 
     /** PFunOnAPIErrorCallback function pointer or null */
-    public MemorySegment onErrorCallback() {
-        return (MemorySegment) ON_ERROR_CALLBACK.get(this.segment, 0L);
-    }
-
-    public DlssgOptions onErrorCallback(MemorySegment value) {
-        ON_ERROR_CALLBACK.set(this.segment, 0L, value);
-        return this;
-    }
-
-    public DlssgQueueParallelismMode queueParallelismMode() {
-        return DlssgQueueParallelismMode.fromValue((int) QUEUE_PARALLELISM_MODE.get(this.segment, 0L));
-    }
-
     public DlssgOptions queueParallelismMode(DlssgQueueParallelismMode value) {
         QUEUE_PARALLELISM_MODE.set(this.segment, 0L, value.value);
         return this;
-    }
-
-    public SlBoolean enableUserInterfaceRecomposition() {
-        return SlBoolean.fromValue((byte) ENABLE_USER_INTERFACE_RECOMPOSITION.get(this.segment, 0L));
     }
 
     public DlssgOptions enableUserInterfaceRecomposition(SlBoolean value) {
@@ -253,10 +171,6 @@ public final class DlssgOptions {
     }
 
     /** Target frame rate for dynamic frame generation; 0 auto-detects the display refresh rate */
-    public float dynamicTargetFrameRate() {
-        return (float) DYNAMIC_TARGET_FRAME_RATE.get(this.segment, 0L);
-    }
-
     public DlssgOptions dynamicTargetFrameRate(float value) {
         DYNAMIC_TARGET_FRAME_RATE.set(this.segment, 0L, value);
         return this;

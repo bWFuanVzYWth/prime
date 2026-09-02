@@ -10,7 +10,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 import static java.lang.foreign.ValueLayout.ADDRESS;
-import static java.lang.foreign.ValueLayout.JAVA_BOOLEAN;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
@@ -28,12 +27,6 @@ public final class Streamline implements AutoCloseable {
 
     private static final FunctionDescriptor INIT_DESC = FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG);
     private static final FunctionDescriptor SHUTDOWN_DESC = FunctionDescriptor.of(JAVA_INT);
-    private static final FunctionDescriptor SET_VULKAN_INFO_DESC = FunctionDescriptor.of(JAVA_INT, ADDRESS);
-    private static final FunctionDescriptor IS_FEATURE_SUPPORTED_DESC = FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS);
-    private static final FunctionDescriptor IS_FEATURE_LOADED_DESC = FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS);
-    private static final FunctionDescriptor SET_FEATURE_LOADED_DESC = FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_BOOLEAN);
-    private static final FunctionDescriptor GET_FEATURE_REQUIREMENTS_DESC = FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS);
-    private static final FunctionDescriptor GET_FEATURE_VERSION_DESC = FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS);
     private static final FunctionDescriptor GET_NEW_FRAME_TOKEN_DESC = FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS);
     private static final FunctionDescriptor SET_CONSTANTS_DESC = FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS);
     private static final FunctionDescriptor SET_TAG_FOR_FRAME_DESC = FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_INT, ADDRESS);
@@ -46,12 +39,6 @@ public final class Streamline implements AutoCloseable {
     private final Linker linker;
     private final MethodHandle slInit;
     private final MethodHandle slShutdown;
-    private final MethodHandle slSetVulkanInfo;
-    private final MethodHandle slIsFeatureSupported;
-    private final MethodHandle slIsFeatureLoaded;
-    private final MethodHandle slSetFeatureLoaded;
-    private final MethodHandle slGetFeatureRequirements;
-    private final MethodHandle slGetFeatureVersion;
     private final MethodHandle slGetNewFrameToken;
     private final MethodHandle slSetConstants;
     private final MethodHandle slSetTagForFrame;
@@ -65,12 +52,6 @@ public final class Streamline implements AutoCloseable {
         this.linker = linker;
         this.slInit = downcall(linker, lookup, "slInit", INIT_DESC);
         this.slShutdown = downcall(linker, lookup, "slShutdown", SHUTDOWN_DESC);
-        this.slSetVulkanInfo = downcall(linker, lookup, "slSetVulkanInfo", SET_VULKAN_INFO_DESC);
-        this.slIsFeatureSupported = downcall(linker, lookup, "slIsFeatureSupported", IS_FEATURE_SUPPORTED_DESC);
-        this.slIsFeatureLoaded = downcall(linker, lookup, "slIsFeatureLoaded", IS_FEATURE_LOADED_DESC);
-        this.slSetFeatureLoaded = downcall(linker, lookup, "slSetFeatureLoaded", SET_FEATURE_LOADED_DESC);
-        this.slGetFeatureRequirements = downcall(linker, lookup, "slGetFeatureRequirements", GET_FEATURE_REQUIREMENTS_DESC);
-        this.slGetFeatureVersion = downcall(linker, lookup, "slGetFeatureVersion", GET_FEATURE_VERSION_DESC);
         this.slGetNewFrameToken = downcall(linker, lookup, "slGetNewFrameToken", GET_NEW_FRAME_TOKEN_DESC);
         this.slSetConstants = downcall(linker, lookup, "slSetConstants", SET_CONSTANTS_DESC);
         this.slSetTagForFrame = downcall(linker, lookup, "slSetTagForFrame", SET_TAG_FOR_FRAME_DESC);
@@ -106,54 +87,6 @@ public final class Streamline implements AutoCloseable {
     public int shutdown() {
         try {
             return (int) this.slShutdown.invokeExact();
-        } catch (Throwable t) {
-            throw new RuntimeException(t);
-        }
-    }
-
-    public int setVulkanInfo(VulkanInfo info) {
-        try {
-            return (int) this.slSetVulkanInfo.invokeExact(info.segment());
-        } catch (Throwable t) {
-            throw new RuntimeException(t);
-        }
-    }
-
-    public int isFeatureSupported(int featureId, AdapterInfo adapterInfo) {
-        try {
-            return (int) this.slIsFeatureSupported.invokeExact(featureId, adapterInfo.segment());
-        } catch (Throwable t) {
-            throw new RuntimeException(t);
-        }
-    }
-
-    public int isFeatureLoaded(int featureId, MemorySegment loadedOut) {
-        try {
-            return (int) this.slIsFeatureLoaded.invokeExact(featureId, loadedOut);
-        } catch (Throwable t) {
-            throw new RuntimeException(t);
-        }
-    }
-
-    public int setFeatureLoaded(int featureId, boolean loaded) {
-        try {
-            return (int) this.slSetFeatureLoaded.invokeExact(featureId, loaded);
-        } catch (Throwable t) {
-            throw new RuntimeException(t);
-        }
-    }
-
-    public int getFeatureRequirements(int featureId, FeatureRequirements requirementsOut) {
-        try {
-            return (int) this.slGetFeatureRequirements.invokeExact(featureId, requirementsOut.segment());
-        } catch (Throwable t) {
-            throw new RuntimeException(t);
-        }
-    }
-
-    public int getFeatureVersion(int featureId, FeatureVersion versionOut) {
-        try {
-            return (int) this.slGetFeatureVersion.invokeExact(featureId, versionOut.segment());
         } catch (Throwable t) {
             throw new RuntimeException(t);
         }
