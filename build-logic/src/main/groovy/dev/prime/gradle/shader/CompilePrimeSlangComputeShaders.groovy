@@ -164,9 +164,7 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 			new java.util.concurrent.Semaphore(processLimit, true)
 		}
 		def compilationUnits = []
-		def aliases = []
 		def expectedOutputs = new TreeSet<String>()
-		int totalCompilationUnits = 0
 		sources.each { source ->
 			def stages = [
 					'compute': [slang: 'compute', legacy: 'comp'],
@@ -182,65 +180,13 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 			def stage = stages[suffix]
 			def stem = source.name.substring(
 					0, source.name.length() - ".${suffix}.slang".length())
-			def allWavefrontVariants = source.name.startsWith('realtime_wavefront_')
-					|| source.name.startsWith('offline_wavefront_')
-					? [
-							[name: '', definitions: []],
-							[name: '_ser', definitions: [
-									'-DPRIME_ENABLE_SER=1',
-									'-DPRIME_ENABLE_SUBGROUP_QUEUE=1'
-							]]
-					]
-					: [[name: '', definitions: []]]
-			// Several execution-mode names are ABI compatibility aliases, not distinct programs.
-			// Publish the same validated bytes instead of asking Slang and the driver to optimize
-			// unreachable mode code repeatedly. The map is backed by stripped-SPIR-V comparisons;
-			// update it only when a mode becomes reachable from the corresponding entry point.
-			def wavefrontVariantPlan = [
-					'realtime_wavefront_camera_trace':
-							[compile: ['', '_ser'], alias: [:]],
-					'realtime_wavefront_visible_direct':
-							[compile: [''], alias: ['_ser': '']],
-					'realtime_wavefront_noisy_output_resolve':
-							[compile: [''], alias: ['_ser': '']],
-					'offline_wavefront_camera_trace':
-							[compile: ['', '_ser'], alias: [:]],
-					'offline_wavefront_bridge_trace':
-							[compile: ['', '_ser'], alias: [:]],
-					'offline_wavefront_light_select':
-							[compile: [''], alias: ['_ser': '']],
-					'offline_wavefront_direct':
-							[compile: ['', '_ser'], alias: [:]],
-					'offline_wavefront_scatter':
-							[compile: ['', '_ser'], alias: [:]],
-					'offline_wavefront_sample_resolve':
-							[compile: [''], alias: ['_ser': '']]
-			][stem]
-			def variants = wavefrontVariantPlan == null
-					? allWavefrontVariants
-					: allWavefrontVariants.findAll {
-						wavefrontVariantPlan.compile.contains(it.name)
-					}
-			wavefrontVariantPlan?.alias?.each { aliasName, compiledName ->
-				expectedOutputs.add(
-						"${stem}${aliasName}.${stage.legacy}.spv".toString())
-				aliases.add([
-						from: "${stem}${compiledName}.${stage.legacy}.spv".toString(),
-						to: "${stem}${aliasName}.${stage.legacy}.spv".toString()
-				])
+			def outputName = "${stem}.${stage.legacy}.spv".toString()
+			expectedOutputs.add(outputName)
+			def output = new File(scratch, outputName)
+			if (!requiresCompilation(source, new File(published, outputName))) {
+				return
 			}
-			variants.each { variant ->
-				totalCompilationUnits++
-				def outputName =
-						"${stem}${variant.name}.${stage.legacy}.spv".toString()
-				expectedOutputs.add(outputName)
-				def output = new File(
-						scratch,
-						outputName)
-				if (!requiresCompilation(source, new File(published, outputName))) {
-					return
-				}
-				compilationUnits.add({
+			compilationUnits.add({
 					def arguments = [
 					compiler,
 					source.absolutePath,
@@ -274,7 +220,6 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 					'-warnings-as-errors', 'all',
 						'-O2', debugLevel.get()
 					]
-					arguments.addAll(variant.definitions)
 					includes.each { include ->
 						arguments.addAll(['-I', include.absolutePath])
 					}
@@ -296,14 +241,13 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 					}
 					return null
 				} as java.util.concurrent.Callable<Void>)
-			}
 		}
 
 		def compilerCount = compilationUnits.empty ? 0 : Math.min(
 				compilationUnits.size(),
 				Math.min(maxCompilerProcesses.get(), Runtime.runtime.availableProcessors()))
 		logger.lifecycle(
-				"Compiling ${compilationUnits.size()} of ${totalCompilationUnits} Slang unit(s) with "
+				"Compiling ${compilationUnits.size()} of ${sources.size()} Slang unit(s) with "
 						+ "${compilerCount} process(es)")
 		if (!compilationUnits.empty) {
 			def compilerPool = java.util.concurrent.Executors.newFixedThreadPool(compilerCount)
@@ -332,12 +276,6 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 		scratch.listFiles().each { source ->
 			java.nio.file.Files.move(
 					source.toPath(), new File(published, source.name).toPath(),
-					java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-		}
-		aliases.each { alias ->
-			java.nio.file.Files.copy(
-					new File(published, alias.from).toPath(),
-					new File(published, alias.to).toPath(),
 					java.nio.file.StandardCopyOption.REPLACE_EXISTING)
 		}
 		def manifestName = 'manifest.sha256'
