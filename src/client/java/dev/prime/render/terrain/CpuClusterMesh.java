@@ -130,44 +130,6 @@ public final class CpuClusterMesh {
         }
     }
 
-    static CpuClusterMesh fromEncoded(
-            List<Segment> segments,
-            long opaqueTriangleCount,
-            long cutoutTriangleCount,
-            long transmissiveTriangleCount,
-            OpacityMicromapData opacityMicromap,
-            CompiledClusterLights lights) {
-        return fromEncoded(
-                segments,
-                opaqueTriangleCount,
-                cutoutTriangleCount,
-                transmissiveTriangleCount,
-                opacityMicromap,
-                lights,
-                List.of(),
-                CpuVoxelInstances.EMPTY);
-    }
-
-    static CpuClusterMesh fromEncoded(
-            List<Segment> segments,
-            long opaqueTriangleCount,
-            long cutoutTriangleCount,
-            long transmissiveTriangleCount,
-            OpacityMicromapData opacityMicromap,
-            CompiledClusterLights lights,
-            List<CpuVoxelMesh> voxelMeshes,
-            CpuVoxelInstances voxelInstances) {
-        return new CpuClusterMesh(
-                segments,
-                opaqueTriangleCount,
-                cutoutTriangleCount,
-                transmissiveTriangleCount,
-                opacityMicromap,
-                lights,
-                voxelMeshes,
-                voxelInstances);
-    }
-
     public static CpuClusterMesh fromSegments(List<CpuSectionMesh> meshes) {
         return fromSegments(meshes, List.of(), CpuVoxelInstances.EMPTY);
     }

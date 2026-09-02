@@ -182,23 +182,16 @@ final class OpacityMicromapDataTest {
     }
 
     @Test
-    void encodedMappingsRejectInvalidBlockReferences() {
+    void uploadValidationRejectsMutatedBlockReferences() {
+        OpacityMicromapData data = OpacityMicromapData.fullyUnknown(1);
+        data.triangleIndices()[0] = 0;
         assertThrows(
                 IllegalArgumentException.class,
-                () -> OpacityMicromapData.fromEncoded(
-                        new byte[0],
-                        new int[0],
-                        new int[0],
-                        new int[0],
-                        new int[] {0}));
+                data::requireValidTriangleIndices);
+        data.triangleIndices()[0] = Integer.MIN_VALUE;
         assertThrows(
                 IllegalArgumentException.class,
-                () -> OpacityMicromapData.fromEncoded(
-                        new byte[0],
-                        new int[0],
-                        new int[0],
-                        new int[0],
-                        new int[] {Integer.MIN_VALUE}));
+                data::requireValidTriangleIndices);
     }
 
     private static int texel(float coordinate) {

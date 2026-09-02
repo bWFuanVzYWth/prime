@@ -76,21 +76,6 @@ public final class OpacityMicromapData {
         this.triangleIndices = triangleIndices;
     }
 
-    static OpacityMicromapData fromEncoded(
-            byte[] blocks,
-            int[] blockOffsets,
-            int[] blockFormats,
-            int[] blockSubdivisionLevels,
-            int[] triangleIndices) {
-        requireValidTriangleIndices(triangleIndices, blockFormats.length);
-        return new OpacityMicromapData(
-                blocks.clone(),
-                blockOffsets.clone(),
-                blockFormats.clone(),
-                blockSubdivisionLevels.clone(),
-                triangleIndices.clone());
-    }
-
     /** Borrowed read-only packed block storage. */
     public byte[] blocks() {
         return this.blocks;

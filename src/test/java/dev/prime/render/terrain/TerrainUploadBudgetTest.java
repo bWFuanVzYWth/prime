@@ -40,13 +40,8 @@ final class TerrainUploadBudgetTest {
                 0,
                 0,
                 OpacityMicromapData.EMPTY);
-        CpuClusterMesh mesh = CpuClusterMesh.fromEncoded(
+        CpuClusterMesh mesh = CpuClusterMesh.fromSegments(
                 List.of(),
-                0L,
-                0L,
-                0L,
-                OpacityMicromapData.EMPTY,
-                CompiledClusterLights.EMPTY,
                 List.of(voxelMesh),
                 new CpuVoxelInstances(
                         new int[] {0},
