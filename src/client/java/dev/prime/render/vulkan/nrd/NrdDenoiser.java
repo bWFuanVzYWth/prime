@@ -649,14 +649,6 @@ public final class NrdDenoiser implements Destroyable {
             return this.planned.plan().historyCamera();
         }
 
-        public float currentJitterX() {
-            return this.planned.plan().input().cameraJitterX();
-        }
-
-        public float currentJitterY() {
-            return this.planned.plan().input().cameraJitterY();
-        }
-
         public float historyJitterX() {
             return this.planned.plan().historyJitterX();
         }

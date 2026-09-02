@@ -447,27 +447,6 @@ public final class CpuLightTree {
             this.leafPaths = leafPaths;
         }
 
-        int leafCapacity() {
-            return this.leafNodes.length;
-        }
-
-        double treeCost() {
-            double cost = 0.0;
-            for (int node = 0; node < this.nodes.size; node++) {
-                if (this.nodes.secondChild[node] != NO_INDEX) {
-                    cost += (double) surfaceArea(
-                                    this.nodes.minX[node],
-                                    this.nodes.minY[node],
-                                    this.nodes.minZ[node],
-                                    this.nodes.maxX[node],
-                                    this.nodes.maxY[node],
-                                    this.nodes.maxZ[node])
-                            * this.nodes.power[node];
-                }
-            }
-            return cost;
-        }
-
         int[] packNodes() {
             int[] result = new int[this.nodes.size * WORDS_PER_NODE];
             int cursor = 0;
@@ -648,30 +627,6 @@ public final class CpuLightTree {
                     power,
                     index,
                     direction);
-        }
-
-        void addInactive(
-                float minX,
-                float minY,
-                float minZ,
-                float maxX,
-                float maxY,
-                float maxZ,
-                int index) {
-            validateBounds(minX, minY, minZ, maxX, maxY, maxZ);
-            append(
-                    minX,
-                    minY,
-                    minZ,
-                    maxX,
-                    maxY,
-                    maxZ,
-                    (minX + maxX) * 0.5F,
-                    (minY + maxY) * 0.5F,
-                    (minZ + maxZ) * 0.5F,
-                    0.0F,
-                    index,
-                    LightDirection.full());
         }
 
         void add(

@@ -8,8 +8,6 @@ import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkDescriptorPoolCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
 import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
-import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorImageInfo;
 import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
@@ -18,24 +16,6 @@ import org.lwjgl.vulkan.VkWriteDescriptorSet;
 /** Checked creation of the single-set descriptor layouts used by Prime compute passes. */
 public final class VulkanDescriptors {
     private VulkanDescriptors() {
-    }
-
-    public static long createSetLayout(
-            VulkanContext context,
-            MemoryStack stack,
-            VkDescriptorSetLayoutBinding.Buffer bindings,
-            String operation) {
-        LongBuffer pointer = stack.mallocLong(1);
-        VulkanContext.check(
-                VK12.vkCreateDescriptorSetLayout(
-                        context.vkDevice(),
-                        VkDescriptorSetLayoutCreateInfo.calloc(stack)
-                                .sType$Default()
-                                .pBindings(bindings),
-                        null,
-                        pointer),
-                operation);
-        return pointer.get(0);
     }
 
     public static long createPipelineLayout(

@@ -426,8 +426,6 @@ public final class VulkanContext implements AutoCloseable {
                     null), "create " + label + " image");
             long image = imagePointer.get(0);
             long view = 0L;
-            long[] mipViews = new long[mipLevels];
-            int createdMipViews = 0;
             try {
                 VkImageViewCreateInfo viewCreateInfo = VkImageViewCreateInfo.calloc(stack)
                         .sType$Default()
@@ -445,34 +443,6 @@ public final class VulkanContext implements AutoCloseable {
                         VK12.vkCreateImageView(this.device.vkDevice(), viewCreateInfo, null, viewPointer),
                         "create " + label + " view");
                 view = viewPointer.get(0);
-                if (mipLevels == 1) {
-                    mipViews[0] = view;
-                }
-                for (int level = 0; level < (mipLevels == 1 ? 0 : mipLevels); level++) {
-                    VkImageViewCreateInfo mipViewCreateInfo = VkImageViewCreateInfo.calloc(stack)
-                            .sType$Default()
-                            .image(image)
-                            .viewType(VK12.VK_IMAGE_VIEW_TYPE_2D)
-                            .format(format);
-                    mipViewCreateInfo.subresourceRange()
-                            .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                            .baseMipLevel(level)
-                            .levelCount(1)
-                            .baseArrayLayer(0)
-                            .layerCount(1);
-                    viewPointer.clear();
-                    check(
-                            VK12.vkCreateImageView(
-                                    this.device.vkDevice(), mipViewCreateInfo, null, viewPointer),
-                            "create " + label + " mip " + level + " view");
-                    mipViews[level] = viewPointer.get(0);
-                    createdMipViews++;
-                    this.device.instance().debug().setObjectName(
-                            this.device.vkDevice(),
-                            VK12.VK_OBJECT_TYPE_IMAGE_VIEW,
-                            mipViews[level],
-                            label + " mip " + level + " view");
-                }
                 this.device.instance().debug().setObjectName(
                         this.device.vkDevice(), VK12.VK_OBJECT_TYPE_IMAGE, image, label);
                 this.device.instance().debug().setObjectName(
@@ -483,16 +453,13 @@ public final class VulkanContext implements AutoCloseable {
                         image,
                         allocationPointer.get(0),
                         view,
-                        mipViews,
+                        mipLevels,
                         format,
                         usage,
                         width,
                         height,
                         depth);
             } catch (RuntimeException exception) {
-                for (int level = createdMipViews - 1; level >= 0; level--) {
-                    VK12.vkDestroyImageView(this.device.vkDevice(), mipViews[level], null);
-                }
                 if (view != 0L) {
                     VK12.vkDestroyImageView(this.device.vkDevice(), view, null);
                 }

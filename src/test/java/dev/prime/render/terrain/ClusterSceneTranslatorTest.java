@@ -946,20 +946,6 @@ final class ClusterSceneTranslatorTest {
         }
     }
 
-    private static void assertFrontFaceOnly(CpuClusterMesh cluster) {
-        for (CpuClusterMesh.Segment segment : cluster.segments()) {
-            int[] primitives = segment.primitiveRecords();
-            for (int record = 0;
-                    record < primitives.length;
-                    record += CpuSectionMesh.PRIMITIVE_WORDS) {
-                int flags = PrimitivePacking.unpackControl(
-                        primitives[record + 3], primitives[record + 5]);
-                assertTrue(
-                        (flags & PrimitivePacking.CONTROL_FRONT_FACE_ONLY) != 0);
-            }
-        }
-    }
-
     private static void assertTwoSided(CpuClusterMesh cluster) {
         for (CpuClusterMesh.Segment segment : cluster.segments()) {
             int[] primitives = segment.primitiveRecords();

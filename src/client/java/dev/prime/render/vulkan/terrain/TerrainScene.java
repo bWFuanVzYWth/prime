@@ -633,10 +633,6 @@ public final class TerrainScene implements AutoCloseable {
         this.resetRevision++;
     }
 
-    public int residentCount() {
-        return this.resident.size() + (this.dynamicResident == null ? 0 : 1);
-    }
-
     public long[] residentStaticKeys() {
         return this.resident.keySet().toLongArray();
     }

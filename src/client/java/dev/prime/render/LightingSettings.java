@@ -35,11 +35,6 @@ public final class LightingSettings {
         return (float) Math.pow(2.0, quarterSteps / (double) QUARTER_STEPS_PER_EV);
     }
 
-    public static float starExposureValue(int quarterSteps) {
-        requireValidStar(quarterSteps);
-        return quarterSteps / (float) QUARTER_STEPS_PER_EV;
-    }
-
     private static void requireValid(int quarterSteps) {
         if (quarterSteps < MINIMUM_QUARTER_STEPS
                 || quarterSteps > MAXIMUM_QUARTER_STEPS) {

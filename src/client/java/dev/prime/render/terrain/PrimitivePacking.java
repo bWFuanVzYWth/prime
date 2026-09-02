@@ -221,12 +221,6 @@ public final class PrimitivePacking {
         return fixed == UV_FIXED_ONE ? 1.0F : fixed / UV_FIXED_SCALE;
     }
 
-    static int upgradeHalfUv(int packed) {
-        return packUv(
-                Float.float16ToFloat((short) packed),
-                Float.float16ToFloat((short) (packed >>> 16)));
-    }
-
     private static int packUv(float coordinate) {
         if (!(coordinate >= 0.0F && coordinate <= 1.0F)
                 || !Float.isFinite(coordinate)) {

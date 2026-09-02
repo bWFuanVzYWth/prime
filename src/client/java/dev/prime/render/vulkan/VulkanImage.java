@@ -11,7 +11,7 @@ public final class VulkanImage implements Destroyable {
     private final long image;
     private final long allocation;
     private final long view;
-    private final long[] mipViews;
+    private final int mipLevels;
     private final int format;
     private final int usage;
     private final int width;
@@ -26,7 +26,7 @@ public final class VulkanImage implements Destroyable {
             long image,
             long allocation,
             long view,
-            long[] mipViews,
+            int mipLevels,
             int format,
             int usage,
             int width,
@@ -37,7 +37,7 @@ public final class VulkanImage implements Destroyable {
         this.image = image;
         this.allocation = allocation;
         this.view = view;
-        this.mipViews = mipViews.clone();
+        this.mipLevels = mipLevels;
         this.format = format;
         this.usage = usage;
         this.width = width;
@@ -54,12 +54,7 @@ public final class VulkanImage implements Destroyable {
     }
 
     public int mipLevels() {
-        return this.mipViews.length;
-    }
-
-    /** Returns a storage view containing exactly one mip level. */
-    public long mipView(int level) {
-        return this.mipViews[level];
+        return this.mipLevels;
     }
 
     public int width() {
@@ -94,11 +89,6 @@ public final class VulkanImage implements Destroyable {
     public void destroy() {
         if (!this.destroyed) {
             this.destroyed = true;
-            for (int level = this.mipViews.length - 1; level >= 0; level--) {
-                if (this.mipViews[level] != this.view) {
-                    VK12.vkDestroyImageView(this.device, this.mipViews[level], null);
-                }
-            }
             VK12.vkDestroyImageView(this.device, this.view, null);
             Vma.vmaDestroyImage(this.allocator, this.image, this.allocation);
         }
