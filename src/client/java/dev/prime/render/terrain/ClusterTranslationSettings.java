@@ -1,20 +1,13 @@
 package dev.prime.render.terrain;
 
-/**
- * Explicit policy inputs for one captured-cluster translation.
- *
- * @param suppressFluidFaceAgainstFullCollision replay-v1 compatibility field; proven full
- *     collision is now an unconditional translation invariant
- */
+/** Explicit policy inputs for one captured-cluster translation. */
 public record ClusterTranslationSettings(
         boolean buildOpacityMicromap,
         int segmentTriangleTarget,
         int maxOpacity2StateSubdivisionLevel,
         int maxOpacity4StateSubdivisionLevel,
         boolean voxelSurfacesEnabled,
-        float voxelSurfaceMaximumHeight,
-        boolean closeCoveredFluidGap,
-        boolean suppressFluidFaceAgainstFullCollision) {
+        float voxelSurfaceMaximumHeight) {
     public ClusterTranslationSettings {
         if (segmentTriangleTarget < 2 || (segmentTriangleTarget & 1) != 0) {
             throw new IllegalArgumentException(
@@ -37,17 +30,13 @@ public record ClusterTranslationSettings(
             int segmentTriangleTarget,
             int maxOpacityMicromapSubdivisionLevel,
             boolean voxelSurfacesEnabled,
-            float voxelSurfaceMaximumHeight,
-            boolean closeCoveredFluidGap,
-            boolean suppressFluidFaceAgainstFullCollision) {
+            float voxelSurfaceMaximumHeight) {
         this(
                 buildOpacityMicromap,
                 segmentTriangleTarget,
                 maxOpacityMicromapSubdivisionLevel,
                 maxOpacityMicromapSubdivisionLevel,
                 voxelSurfacesEnabled,
-                voxelSurfaceMaximumHeight,
-                closeCoveredFluidGap,
-                suppressFluidFaceAgainstFullCollision);
+                voxelSurfaceMaximumHeight);
     }
 }

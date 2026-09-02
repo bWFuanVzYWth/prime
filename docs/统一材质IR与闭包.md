@@ -48,7 +48,7 @@ alpha cutout，negative tangent 必须确有 normal texture。albedo alpha 始�
 | 10 | 保留，必须为 0 |
 | 11..14 | builtin material class |
 
-CPU 翻译/replay 记录不扩容：逻辑位 0..7 写入 `tint.a`，8..10 写入
+CPU 翻译记录不扩容：逻辑位 0..7 写入 `tint.a`，8..10 写入
 `flagsEmitter[0..2]`，11..14 写入 `flagsEmitter[27..30]`。Vulkan 上传为非零 `MaterialId` 清除其中
 immutable recipe/builtin，只保留 tangent handedness、front-face 与 emitter/relation payload；Shader
 从 material core 恢复 recipe。其他代码不得解释这些物理位置。
@@ -74,9 +74,8 @@ offset+1，静态 emitter 保存 `emitterIndex + 1`，dynamic 保存 6-bit scene
 texture 上限为 64，CPU/Vulkan 编码边界负责验证。overlay/bilateral 使用通用 relation，不再占用
 该 payload 保存复合颜色或第二份材质语义。
 
-cluster 编码仅是测试源码集内的当前格式回放工具，用于证明 CPU scene compiler 的完整上传
-输入可稳定往返；它不是持久化 API，也不承诺跨版本读取。dynamic primitive 只存在于帧内，
-不会进入该测试编码。
+CPU scene compiler 的输出由直接语义、性质与上传边界测试验证，不再复制一套测试专用编码模型。
+dynamic primitive 只存在于帧内。
 
 ## Canonical shader IR
 

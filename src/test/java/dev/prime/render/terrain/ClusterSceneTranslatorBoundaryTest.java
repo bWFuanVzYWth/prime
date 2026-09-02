@@ -18,9 +18,7 @@ final class ClusterSceneTranslatorBoundaryTest {
                 TerrainMemoryBudget.TARGET_SEGMENT_TRIANGLES,
                 OpacityMicromapData.SUBDIVISION_LEVEL + 2,
                 true,
-                VoxelSurfaceSettings.BASE_HEIGHT,
-                false,
-                false);
+                VoxelSurfaceSettings.BASE_HEIGHT);
 
         CapturedCluster capturedArgument = missingArgument == 0 ? null : captured;
         LabPbrMaterialSet materialsArgument =
@@ -107,7 +105,6 @@ final class ClusterSceneTranslatorBoundaryTest {
     }
 
     private static ClusterTranslationSettings settings() {
-        return new ClusterTranslationSettings(
-                false, 64, 2, 2, false, 0.0F, false, false);
+        return new ClusterTranslationSettings(false, 64, 2, 2, false, 0.0F);
     }
 }

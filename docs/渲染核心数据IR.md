@@ -150,7 +150,7 @@ descriptor carrier 在纹理求值结束即死亡，不进入 `PrimeMaterialSamp
 `PrimitiveRecord` 保持 32 B。table-backed identity 为 `TintId:u16 | MaterialId:u16`，只内联 UV、方向、
 变化几何控制、emitter/relation payload 等 triangle-specific 事实；dynamic/baked ID 0 保留显式兼容编码。
 GPU surface relation 使用 cluster-local tail-only 存储：boundary 3 words，overlay/bilateral 7 words。普通图元的
-24-bit word offset+1 和 emitter 的具名 `relationOffset` 都在上传边界验证；CPU/replay 保留独立的
+24-bit word offset+1 和 emitter 的具名 `relationOffset` 都在上传边界验证；CPU mesh 保留独立的
 5/9-word 语义记录。
 
 medium 匹配始终只比较 `MediumId`；extinction、IOR 和 phase 参数只参与数值计算。emitter class、

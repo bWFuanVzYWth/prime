@@ -168,14 +168,6 @@ final class TransparentBoundaryResolverTest {
             assertEquals(
                     CpuSectionMesh.SURFACE_RELATION_BOUNDARY,
                     records[7] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
-            CompiledCluster decoded = CompiledClusterCodec.decode(
-                    CompiledClusterCodec.encode(
-                            new CompiledCluster(0L, 0, 0, 0, mesh)));
-            assertEquals(48L, decoded.mesh().surfaceRelationBytes());
-            assertEquals(mesh.mediumCatalog(), decoded.mesh().mediumCatalog());
-            assertArrayEquals(
-                    records,
-                    decoded.mesh().segments().getFirst().surfaceRelationRecords());
         }
     }
 
@@ -691,8 +683,6 @@ final class TransparentBoundaryResolverTest {
                         segmentTriangleTarget,
                         OpacityMicromapData.SUBDIVISION_LEVEL + 2,
                         false,
-                        VoxelSurfaceSettings.BASE_HEIGHT,
-                        false,
-                        false));
+                        VoxelSurfaceSettings.BASE_HEIGHT));
     }
 }

@@ -264,8 +264,7 @@ public final class ClusterTranslationBenchmarkCorpus {
     }
 
     private static ClusterTranslationSettings settings() {
-        return new ClusterTranslationSettings(
-                false, 512, 2, 2, false, 0.0F, false, false);
+        return new ClusterTranslationSettings(false, 512, 2, 2, false, 0.0F);
     }
 
     private static CapturedSprite sprite(String path, int textureId) {

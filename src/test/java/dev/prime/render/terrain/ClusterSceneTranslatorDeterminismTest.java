@@ -26,8 +26,8 @@ final class ClusterSceneTranslatorDeterminismTest {
             reverse.add(1, 0, 0, section);
             reverse.add(0, 0, 0, section);
 
-            CpuClusterMesh first = ClusterSceneTranslatorTest.translate(forward.build(), false);
-            CpuClusterMesh second = ClusterSceneTranslatorTest.translate(reverse.build(), false);
+            CpuClusterMesh first = ClusterSceneTranslatorTest.translate(forward.build());
+            CpuClusterMesh second = ClusterSceneTranslatorTest.translate(reverse.build());
 
             assertArrayEquals(
                     first.voxelInstances().meshIndices(),

@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 final class FluidQuadTranslationTest {
     @Test
-    void fullCollisionSuppressionIsIndependentOfTheLegacyPolicyFlag() {
+    void fullCollisionSuppressesTheInternalRasterPair() {
         try (SectionMeshAccumulatorTest.TestSprite water =
                 new SectionMeshAccumulatorTest.TestSprite("captured_water")) {
             water.fill(0xff40_80c0);
@@ -25,11 +25,9 @@ final class FluidQuadTranslationTest {
             section.add(rasterBack, surface);
             CapturedSectionGeometry captured = section.build();
 
-            CpuClusterMesh translated = translate(captured, false);
-            CpuClusterMesh suppressed = translate(captured, true);
+            CpuClusterMesh translated = translate(captured);
 
             assertEquals(0L, translated.transmissiveTriangleCount());
-            assertEquals(0L, suppressed.transmissiveTriangleCount());
         }
     }
 
@@ -49,13 +47,11 @@ final class FluidQuadTranslationTest {
             section.add(rasterBack, surface);
             CapturedSectionGeometry captured = section.build();
 
-            CpuClusterMesh cluster = translate(captured, false);
-            CpuClusterMesh suppressed = translate(captured, true);
+            CpuClusterMesh cluster = translate(captured);
 
             assertEquals(0L, cluster.transmissiveTriangleCount());
             assertEquals(0L, cluster.opaqueTriangleCount());
             assertEquals(0, cluster.lights().emitterCount());
-            assertEquals(0L, suppressed.transmissiveTriangleCount());
         }
     }
 
@@ -74,7 +70,7 @@ final class FluidQuadTranslationTest {
             section.add(top, surface);
             section.add(rasterBack, surface);
 
-            CpuClusterMesh cluster = translate(section.build(), false);
+            CpuClusterMesh cluster = translate(section.build());
 
             assertEquals(2L, cluster.transmissiveTriangleCount());
             assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
@@ -90,7 +86,7 @@ final class FluidQuadTranslationTest {
                     new CapturedSectionGeometry.Builder();
             section.add(slopedTop(), fluidSurface(water, 0, true, 0));
 
-            CpuClusterMesh cluster = translate(section.build(), false);
+            CpuClusterMesh cluster = translate(section.build());
 
             assertEquals(2L, cluster.transmissiveTriangleCount());
             assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
@@ -111,7 +107,7 @@ final class FluidQuadTranslationTest {
             section.add(top, surface);
             section.add(rasterBack, surface);
 
-            CpuClusterMesh cluster = translate(section.build(), false);
+            CpuClusterMesh cluster = translate(section.build());
 
             assertEquals(2L, cluster.opaqueTriangleCount());
             assertEquals(0L, cluster.transmissiveTriangleCount());
@@ -131,7 +127,7 @@ final class FluidQuadTranslationTest {
                     new CapturedSectionGeometry.Builder();
             section.add(bottom(), fluidSurface(water, 0, true, 0));
 
-            CpuClusterMesh cluster = translate(section.build(), false);
+            CpuClusterMesh cluster = translate(section.build());
 
             assertEquals(2L, cluster.transmissiveTriangleCount());
             assertAllTriangleNormalsHaveYSign(cluster, -1.0F);
@@ -282,8 +278,7 @@ final class FluidQuadTranslationTest {
                         0, 0, 0, false, collisionMask));
     }
 
-    private static CpuClusterMesh translate(
-            CapturedSectionGeometry section, boolean suppressFluidFace) {
+    private static CpuClusterMesh translate(CapturedSectionGeometry section) {
         CapturedCluster.Builder captured = new CapturedCluster.Builder(0, 0, 0);
         captured.add(0, 0, 0, section);
         return ClusterSceneTranslator.translate(
@@ -294,9 +289,7 @@ final class FluidQuadTranslationTest {
                         TerrainMemoryBudget.TARGET_SEGMENT_TRIANGLES,
                         OpacityMicromapData.SUBDIVISION_LEVEL + 2,
                         true,
-                        VoxelSurfaceSettings.BASE_HEIGHT,
-                        false,
-                        suppressFluidFace));
+                        VoxelSurfaceSettings.BASE_HEIGHT));
     }
 
     private static void assertAllTriangleNormalsHaveYSign(

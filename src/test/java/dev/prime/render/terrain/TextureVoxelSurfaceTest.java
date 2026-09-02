@@ -10,7 +10,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import net.minecraft.core.SectionPos;
 import org.junit.jupiter.api.Test;
 
 final class TextureVoxelSurfaceTest {
@@ -265,9 +264,7 @@ final class TextureVoxelSurfaceTest {
                             TerrainMemoryBudget.TARGET_SEGMENT_TRIANGLES,
                             OpacityMicromapData.SUBDIVISION_LEVEL + 2,
                             true,
-                            VoxelSurfaceSettings.BASE_HEIGHT,
-                            false,
-                            false));
+                            VoxelSurfaceSettings.BASE_HEIGHT));
 
             assertEquals(1, cluster.voxelMeshes().size());
             assertEquals(1, cluster.voxelInstances().count());
@@ -360,50 +357,6 @@ final class TextureVoxelSurfaceTest {
         assertEquals(0.0F, minimumAxis(stepped.positions(), 1));
         assertEquals(1.0F / 16.0F, maximumAxis(stepped.positions(), 1));
         assertNondegenerate(stepped.positions());
-    }
-
-    @Test
-    void compiledClusterRoundTripPreservesReusableMeshesAndInstances() {
-        CpuVoxelMesh voxelMesh = TextureVoxelMeshBuilder.buildOpaqueHeightField(
-                1, new int[] {0xffff_ffff}, 2, 1);
-        float[] positions = voxelMesh.positions();
-        int[] primitives = voxelMesh.primitiveRecords();
-        CpuVoxelInstances instances = new CpuVoxelInstances(
-                new int[] {0, 0},
-                new int[] {0x0012_3456, 0x00ab_cdef},
-                new float[] {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F});
-        CpuClusterMesh mesh = CpuClusterMesh.fromEncoded(
-                List.of(),
-                0L,
-                0L,
-                0L,
-                OpacityMicromapData.EMPTY,
-                CompiledClusterLights.EMPTY,
-                List.of(voxelMesh),
-                instances);
-        CompiledCluster source = new CompiledCluster(
-                SectionPos.asLong(0, 0, 0), 0, 0, 0, mesh);
-
-        CompiledCluster decoded =
-                CompiledClusterCodec.decode(CompiledClusterCodec.encode(source));
-
-        assertEquals(1, decoded.mesh().voxelMeshes().size());
-        assertEquals(2, decoded.mesh().voxelInstances().count());
-        assertArrayEquals(
-                instances.meshIndices(),
-                decoded.mesh().voxelInstances().meshIndices());
-        assertArrayEquals(
-                instances.packedTints(),
-                decoded.mesh().voxelInstances().packedTints());
-        assertArrayEquals(
-                instances.translations(),
-                decoded.mesh().voxelInstances().translations());
-        assertArrayEquals(
-                positions,
-                decoded.mesh().voxelMeshes().getFirst().positions());
-        assertArrayEquals(
-                primitives,
-                decoded.mesh().voxelMeshes().getFirst().primitiveRecords());
     }
 
     private static void assertBakedMaterial(

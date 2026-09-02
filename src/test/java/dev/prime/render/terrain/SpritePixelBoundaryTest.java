@@ -1,6 +1,5 @@
 package dev.prime.render.terrain;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -341,10 +340,8 @@ final class SpritePixelBoundaryTest {
         assertTrue(pixels.readCount > 0);
         int readsAtLeaseClose = pixels.readCount;
         pixels.active = false;
-        CompiledCluster compiled = new CompiledCluster(0L, 0, 0, 0, mesh);
-
-        assertDoesNotThrow(() -> CompiledClusterCodec.decode(
-                CompiledClusterCodec.encode(compiled)));
+        mesh.segments().forEach(segment -> segment.primitiveRecords());
+        mesh.voxelMeshes().forEach(voxel -> voxel.primitiveRecords());
         assertEquals(readsAtLeaseClose, pixels.readCount);
     }
 
@@ -436,9 +433,7 @@ final class SpritePixelBoundaryTest {
                         TerrainMemoryBudget.TARGET_SEGMENT_TRIANGLES,
                         OpacityMicromapData.SUBDIVISION_LEVEL + 2,
                         true,
-                        VoxelSurfaceSettings.BASE_HEIGHT,
-                        false,
-                        false));
+                        VoxelSurfaceSettings.BASE_HEIGHT));
     }
 
     private static CapturedSprite sprite(

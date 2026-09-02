@@ -156,8 +156,8 @@ material/celestial、reconstruction/exposure 和 sampling parity 分组，各组
 `ClusterSceneTranslatorTest`、`ClusterSceneTranslatorDeterminismTest` 和
 `ClusterSceneTranslatorBoundaryTest` 分别覆盖翻译语义、确定性回放和入口错误边界。
 
-terrain fixture 继续放在被测 package 内访问 package-private API。`CompiledClusterCodec` 只表示
-测试回放格式，不提升为生产序列化 API。
+terrain fixture 继续放在被测 package 内访问 package-private API；翻译结果直接按公开语义和拥有的
+数组验证，不再维护一套仅供测试使用的序列化协议。
 
 ### P0/P1 正确性补强
 
@@ -175,7 +175,7 @@ terrain fixture 继续放在被测 package 内访问 package-private API。`Comp
 - `DynamicSceneCapture` 固定新帧丢弃未完成 session、element scope 顺序、错误嵌套、空帧 origin 和
   compatibility witness。
 
-### 翻译层 P0 回放与语义门禁
+### 翻译层语义与取消门禁
 
 `ClusterTranslationInput` 是一次翻译的不可变输入边界，统一携带 fixed-slot `CapturedCluster`、
 资源 epoch 内的 `LabPbrMaterialSet` 和全部 `ClusterTranslationSettings`。原有三参数入口保留；
@@ -184,53 +184,14 @@ terrain fixture 继续放在被测 package 内访问 package-private API。`Comp
 立即用同一 input 重试；overlay pairing、boundary cell、coalesce 和 mesh build 分别有中止与
 重放测试。
 
-`ClusterTranslationReplay` v1 是诊断格式，不是长期生产序列化 API。它使用 GZIP 二进制，带固定
-magic、version 和 translation ABI ID，保存 64 个 section slot、quad/peer/surface/block/fluid
-facts、去重 sprite 与可用像素、实际引用的 LabPBR 子集以及所有 settings。解码后的数据硬限制为
-256 MiB；错误 magic、旧版本、截断、非法枚举、越界计数和尾随解码数据都会明确失败。仓库内的
-最小 v1 固定资源保证兼容读取，codec round-trip 还要求输入行为和重新编码一致。
-
-现场 recorder 默认完全关闭。只有 JVM 参数 `-Dprime.translation.replay=true` 才启用；关闭时不会
-查询 game directory，也不会访问文件系统。启用后的设置为：
-
-```powershell
-$env:JAVA_TOOL_OPTIONS = "-Dprime.translation.replay=true -Dprime.translation.replay.minMillis=250 -Dprime.translation.replay.maxFiles=32"
-.\gradlew.bat runClient
-```
-
-`minMillis` 只筛选成功翻译；失败和取消不受慢例阈值影响。`maxFiles` 每次 compiler 生命周期最多
-保留 8 个，允许调整但硬上限为 32。上面的现场采样命令显式使用 32；采样结束后可用
-`Remove-Item Env:JAVA_TOOL_OPTIONS` 清除当前 PowerShell 会话中的设置。文件写入
-`${gameDir}/prime-translation-replays/`，先完成临时 GZIP，再原子发布为
-`<outcome>-<sequence>-<sha256>.ptr.gz`；文件名不含 cluster 坐标。导出错误只警告一次，不改变
-渲染结果。
-
-名额不再由所有结果先到先得，而是按结果隔离并在各自范围内循环替换。`maxFiles=32` 时保留最近
-20 个慢成功、4 个取消和 8 个失败；普通慢例不会占用失败名额，后遇到的异常也不会因启动阶段
-已经写满而丢失。默认 `maxFiles=8` 时对应 5/1/2。很小的自定义上限优先保留失败：上限 1 只
-记录失败，上限 2 记录一个慢成功和一个失败。文件序号表示结果类别内的循环槽位，不表示全局
-发生顺序。
-
-自动 recorder 只能识别抛出的失败、取消和耗时异常，无法自行判断“画面看起来不对”。遇到视觉
-错误时，应尽量停在问题附近，将 `minMillis` 临时改为 `0` 后重新启动并短距离复现；看到问题后
-及时退出客户端并复制整个 replay 目录，避免继续跑图让同类别的新输入轮换掉现场。一般性能采样
-仍使用 250 ms，避免初始化附近的大量普通输入淹没有价值的样本。
-
-Replay 内容包含真实场景几何、block 坐标、sprite resource ID、纹理像素和使用到的材质通道，
-可能暴露服务器建筑、资源包或私有资源信息。提交 issue 或加入仓库前必须由用户检查、按需裁剪
-或取得分享授权；“文件名不含坐标”不等于内容匿名。
-
-导入经人工确认的用户 replay 时：
-
-1. 将原始 `.ptr.gz` 放入 `src/test/resources/replays/`，保留格式版本和来源说明，但不要把用户身份、
-   服务器地址或绝对路径写入文件名；
-2. 用 `ClusterTranslationReplay.read` 解码，先重现原失败，再为期望行为增加普通 JUnit 回归断言；
-3. 能由独立 cell oracle 表达的场景同时加入语义比较；最小化后的反例优先保留，原始大文件只在
-   它证明额外风险时保留；
-4. 验证同一 input 重复翻译字节一致，并运行完整 `test`。
+早期 P0 曾提供现场 replay 格式和 opt-in recorder，用一次性的 32/76 输入 corpus 完成热点定位与
+最终 BLAS 三角形审计。该格式从一开始就不是生产 API，仓库也没有保留现场 corpus；相关结论已由
+独立 cell oracle、确定性、取消、epsilon 边界、fluid 与完整 mesh 行为测试承接，因此不再让一次性
+codec、隐私协议和录制分支成为生产与测试的永久维护面。新现场问题应最小化为直接行为 fixture；
+只有现有门禁无法表达且确实需要批量采集时，才按当次问题建立临时采样工具。
 
 P0 本身未改变 `resolveExactOverlays`、boundary partition、`coalesce` 或 mesh builder 算法。完成上述
-门禁后，首轮 P1 使用一次性的 32 个默认世界 replay 定位并改造了常见 CPU 热点：overlay 先按
+门禁后，首轮 P1 使用一次性的 32 个默认世界输入定位并改造了常见 CPU 热点：overlay 先按
 边长为两倍 epsilon 的三轴空间格筛选、最终仍执行原精确谓词并保留最早输入匹配；`coalesce` 只比较
 candidate/definition 身份相同的独立组；64×64 merge grid 用行 bitset 跳过空 cell；发光纹理分布在
 单次 cluster 翻译内复用。所有状态仍为 invocation-local，primitive、surface relation、TextureId、
@@ -238,10 +199,10 @@ payload 和 SPIR-V ABI 均未改变。
 
 同一 JVM 预热后的临时 corpus 测量中，32 个输入的累计翻译时间由约 4.88 s 降至 1.75 s，单输入
 中位数由 135 ms 降至 53 ms，p95 由 348 ms 降至 89 ms，最慢输入由 526 ms 降至 92 ms。该数据
-只证明本次优化方向，既不是 JMH 结果也不是回归阈值；现场 replay 不纳入仓库，可随时用新采样
-替换。保留优化仍以独立语义 canonicalizer、epsilon 边界、取消检查和完整 mesh 确定性为门禁。
+只证明本次优化方向，既不是 JMH 结果也不是回归阈值。保留优化仍以独立语义 canonicalizer、
+epsilon 边界、取消检查和完整 mesh 确定性为门禁。
 
-随后用一次性的 76 个默认世界 replay 审计最终提交给 BLAS 的三角形：在 3,520,272 个三角形中，
+随后用一次性的 76 个默认世界输入审计最终提交给 BLAS 的三角形：在 3,520,272 个三角形中，
 完全重合对和距离不超过 `0.0011` 的平行近重合对均为 0。生产实现不使用这个审计阈值；归并只由
 精确共面事实、材质关系、完整碰撞事实，以及 vanilla 已知的 `0.002 / 16` inner-face 或 `0.001`
 fluid inset 契约驱动。该 corpus 仍不纳入长期资源，后续可用新现场采样重新验证。
@@ -251,7 +212,7 @@ fluid inset 契约驱动。该 corpus 仍不纳入长期资源，后续可用新
 
 阶段 2 第一批数据迁移为翻译结果增加 invocation-local medium catalog，并在 Vulkan 上传边界映射为
 renderer-lifetime `MediumId`。测试覆盖 family/TextureId/tint/water 身份划分、local→renderer
-remap、不复用、primitive merge 保留、boundary 两端、codec v17 回放、非法 local ID 拒绝，以及
+remap、不复用、primitive merge 保留、boundary 两端、非法 local ID 拒绝，以及
 SPIR-V trace/shadow payload shape。Shader property 进一步覆盖任意 u32 ID、全部 8-bit IOR source
 code、跨 dispatch f32 extinction、guide-control 位合并、offline surface round-trip 和 shadow
 ID match/mismatch；identity 测试不得退回 extinction epsilon 比较。

@@ -95,14 +95,6 @@ final class ClusterSceneTranslatorTest {
             assertEquals(0L, cluster.opaqueTriangleCount());
             assertEquals(0L, cluster.cutoutTriangleCount());
 
-            CompiledCluster compiled =
-                    new CompiledCluster(0L, 0, 0, 0, cluster);
-            CompiledCluster decoded =
-                    CompiledClusterCodec.decode(
-                            CompiledClusterCodec.encode(compiled));
-            assertEquals(
-                    CompiledClusterFingerprint.sha256Hex(compiled),
-                    CompiledClusterFingerprint.sha256Hex(decoded));
         }
     }
 
@@ -164,7 +156,7 @@ final class ClusterSceneTranslatorTest {
             CapturedSectionGeometry captured = section.build();
 
             CpuClusterMesh detailed = translate(captured);
-            CpuClusterMesh ordinary = translate(captured, false, false);
+            CpuClusterMesh ordinary = translate(captured, false);
 
             assertEquals(2, detailed.voxelInstances().count());
             assertEquals(0, ordinary.voxelInstances().count());
@@ -247,7 +239,7 @@ final class ClusterSceneTranslatorTest {
                         0xff70_d050
                     });
 
-            CpuClusterMesh cluster = translate(section, false, false);
+            CpuClusterMesh cluster = translate(section, false);
 
             assertEquals(2L, cluster.opaqueTriangleCount());
             assertEquals(0L, cluster.cutoutTriangleCount());
@@ -280,13 +272,6 @@ final class ClusterSceneTranslatorTest {
                 assertTrue((relation[0] >> 8
                         & PrimitivePacking.CONTROL_ALPHA_CUTOUT) != 0);
             }
-            CompiledCluster compiled =
-                    new CompiledCluster(0L, 0, 0, 0, cluster);
-            CompiledCluster decoded = CompiledClusterCodec.decode(
-                    CompiledClusterCodec.encode(compiled));
-            assertEquals(
-                    CompiledClusterFingerprint.sha256Hex(compiled),
-                    CompiledClusterFingerprint.sha256Hex(decoded));
         }
     }
 
@@ -479,7 +464,7 @@ final class ClusterSceneTranslatorTest {
             section.add(front, surface);
             section.add(back, surface);
 
-            CpuClusterMesh mesh = translate(section.build(), false, false);
+            CpuClusterMesh mesh = translate(section.build(), false);
 
             assertEquals(2L, mesh.opaqueTriangleCount());
             assertEquals(2, mesh.lights().emitterCount());
@@ -508,7 +493,7 @@ final class ClusterSceneTranslatorTest {
             section.add(glowFront, ownedCutoutSurface(glow, 15));
             section.add(rasterBack(glowFront), ownedCutoutSurface(glow, 15));
 
-            CpuClusterMesh mesh = translate(section.build(), false, true);
+            CpuClusterMesh mesh = translate(section.build(), true);
 
             assertEquals(2L, mesh.cutoutTriangleCount());
             assertEquals(2, mesh.lights().emitterCount());
@@ -591,7 +576,7 @@ final class ClusterSceneTranslatorTest {
                     0,
                     overlay.sprite()));
 
-            CpuClusterMesh mesh = translate(section.build(), false, true);
+            CpuClusterMesh mesh = translate(section.build(), true);
 
             assertEquals(2L, mesh.opaqueTriangleCount());
             assertEquals(0L, mesh.cutoutTriangleCount());
@@ -627,7 +612,7 @@ final class ClusterSceneTranslatorTest {
                     overlay.sprite(),
                     new CapturedSectionGeometry.BlockFacts(0, 0, 0)));
 
-            CpuClusterMesh mesh = translate(section.build(), false, true);
+            CpuClusterMesh mesh = translate(section.build(), true);
 
             assertEquals(2L, mesh.cutoutTriangleCount());
             assertEquals(0L, mesh.opaqueTriangleCount());
@@ -711,7 +696,7 @@ final class ClusterSceneTranslatorTest {
 
             java.util.List<TwoSidedQuadReducer.ResolvedQuad> resolved =
                     TwoSidedQuadReducer.resolve(captured.quads());
-            CpuClusterMesh cluster = translate(captured, false, false);
+            CpuClusterMesh cluster = translate(captured, false);
 
             assertEquals(1, resolved.size());
             assertEquals(
@@ -1006,32 +991,23 @@ final class ClusterSceneTranslatorTest {
     }
 
     private static CpuClusterMesh translate(CapturedSectionGeometry section) {
-        return translate(section, false);
-    }
-
-    private static CpuClusterMesh translate(
-            CapturedSectionGeometry section, boolean suppressFluidFace) {
-        return translate(section, suppressFluidFace, true);
+        return translate(section, true);
     }
 
     private static CpuClusterMesh translate(
             CapturedSectionGeometry section,
-            boolean suppressFluidFace,
             boolean voxelSurfacesEnabled) {
         CapturedCluster.Builder captured = new CapturedCluster.Builder(0, 0, 0);
         captured.add(0, 0, 0, section);
-        return translate(
-                captured.build(), suppressFluidFace, voxelSurfacesEnabled);
+        return translate(captured.build(), voxelSurfacesEnabled);
     }
 
-    static CpuClusterMesh translate(
-            CapturedCluster captured, boolean suppressFluidFace) {
-        return translate(captured, suppressFluidFace, true);
+    static CpuClusterMesh translate(CapturedCluster captured) {
+        return translate(captured, true);
     }
 
     private static CpuClusterMesh translate(
             CapturedCluster captured,
-            boolean suppressFluidFace,
             boolean voxelSurfacesEnabled) {
         return ClusterSceneTranslator.translate(
                 captured,
@@ -1041,8 +1017,6 @@ final class ClusterSceneTranslatorTest {
                         TerrainMemoryBudget.TARGET_SEGMENT_TRIANGLES,
                         OpacityMicromapData.SUBDIVISION_LEVEL + 2,
                         voxelSurfacesEnabled,
-                        VoxelSurfaceSettings.BASE_HEIGHT,
-                        false,
-                        suppressFluidFace));
+                        VoxelSurfaceSettings.BASE_HEIGHT));
     }
 }

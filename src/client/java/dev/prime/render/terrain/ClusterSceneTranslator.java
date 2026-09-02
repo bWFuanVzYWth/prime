@@ -208,14 +208,6 @@ public final class ClusterSceneTranslator {
             SectionMeshAccumulator.Quad quad,
             CapturedSectionGeometry.FluidFacts fluid,
             ClusterTranslationSettings settings) {
-        if (settings.closeCoveredFluidGap() && fluid.fullCeiling()) {
-            for (int vertex = 0; vertex < 4; vertex++) {
-                if (quad.y[vertex] > fluid.localY() + 0.5F) {
-                    quad.y[vertex] = fluid.localY() + 1.0F;
-                }
-            }
-        }
-
         float edgeOneX = quad.x[1] - quad.x[0];
         float edgeOneY = quad.y[1] - quad.y[0];
         float edgeOneZ = quad.z[1] - quad.z[0];
