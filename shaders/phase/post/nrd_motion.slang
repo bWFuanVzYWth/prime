@@ -7,6 +7,7 @@ import "model/material/defaults.slang";
 import "service/reconstruct/fsr_input.slang";
 import "service/reconstruct/nrd/common.slang";
 import "prime_nrd_motion_contract.slang";
+import "prime_coordinate_contract.slang";
 
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] writeonly RWTexture2D<float4> primeMotion;
 [[vk::binding(1, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float4> primeViewZ;
@@ -40,7 +41,7 @@ static const uint PRIME_MOTION_HISTORY_VALID = 0x08u;
 static const uint PRIME_MOTION_VECTOR_VALID = 0x10u;
 
 float3 primeMotionRayDirection(float2 screenUv) {
-    float2 clipXY = screenUv * float2(2.0, -2.0) + float2(-1.0, 1.0);
+    float2 clipXY = primeCanonicalUvToClip(screenUv);
     float4 nearPoint = primeMotionPush.currentClipToWorld * float4(clipXY, 1.0, 1.0);
     float4 farPoint = primeMotionPush.currentClipToWorld * float4(clipXY, 0.0, 1.0);
     return normalize(farPoint.xyz / farPoint.w - nearPoint.xyz / nearPoint.w);
@@ -194,13 +195,13 @@ void primePrepareBranch(
             && !any(isnan(previousClip)) && !any(isinf(previousClip));
     float2 previousUv = float2(0.0);
     if (validPreviousClip) {
-        previousUv = previousClip.xy / previousClip.w
-                * float2(0.5, -0.5) + float2(0.5);
+        previousUv = primeCanonicalClipToUv(previousClip.xy / previousClip.w);
         validPreviousClip = !any(isnan(previousUv)) && !any(isinf(previousUv));
     }
     if (validPreviousClip) {
         primeStoreMotion(pixel, reflection, float4(primeNrdSanitizeMotion(float3(
-                (previousUv - currentSampleUv) * float2(extent),
+                primeCanonicalVisibleMotionUv(previousUv, currentSampleUv)
+                        * float2(extent),
                 directional ? 0.0 : previousClip.w - currentViewZ)), 0.0));
     } else {
         primeStoreMotion(pixel, reflection, float4(0.0));
@@ -261,8 +262,8 @@ bool primePrepareFsrGuide(
                 && previousClip.w > 1.0e-6
                 && !any(isnan(previousClip)) && !any(isinf(previousClip));
         if (valid) {
-            float2 previousUv = previousClip.xy / previousClip.w
-                    * float2(0.5, -0.5) + float2(0.5);
+            float2 previousUv = primeCanonicalClipToUv(
+                    previousClip.xy / previousClip.w);
             valid = !any(isnan(previousUv)) && !any(isinf(previousUv));
             if (valid) {
                 motion = primeFsrNormalizedMotion(previousUv, currentSampleUv);
@@ -282,8 +283,8 @@ bool primePrepareFsrGuide(
             && previousClip.w > 1.0e-6
             && !any(isnan(previousClip)) && !any(isinf(previousClip));
     if (valid) {
-        float2 previousUv = previousClip.xy / previousClip.w
-                * float2(0.5, -0.5) + float2(0.5);
+        float2 previousUv = primeCanonicalClipToUv(
+                previousClip.xy / previousClip.w);
         valid = !any(isnan(previousUv)) && !any(isinf(previousUv));
         if (valid) {
             motion = primeFsrNormalizedMotion(previousUv, currentSampleUv);

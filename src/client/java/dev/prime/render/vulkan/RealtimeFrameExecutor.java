@@ -25,7 +25,7 @@ public final class RealtimeFrameExecutor implements Destroyable {
     private final VulkanContext context;
     private final VulkanImageInitializationBatch imageInitialization =
             new VulkanImageInitializationBatch();
-    private StreamlineInputFlipPass streamlineInputs;
+    private StreamlineInputPass streamlineInputs;
     private boolean destroyed;
 
     public RealtimeFrameExecutor(VulkanContext context) {
@@ -132,13 +132,12 @@ public final class RealtimeFrameExecutor implements Destroyable {
                     processor.displayHeight(),
                     output.format(),
                     0);
-            StreamlineInputFlipPass frameGenerationInputs = null;
+            StreamlineInputPass frameGenerationInputs = null;
             if (prepareFrameGeneration) {
                 frameGenerationInputs = this.ensureStreamlineInputs(
                         processor.rawFrame().viewZ(),
                         processor.rawFrame().visibleHistoryPosition(),
                         processor.rawFrame().reconstructionControl(),
-                        output,
                         processor.rawFrame().hasExactTransmissiveVisibleHistory());
                 prepareFrameGeneration = StreamlineFrameGeneration.recordInputs(
                         commandBuffer, frameGenerationInputs);
@@ -192,8 +191,8 @@ public final class RealtimeFrameExecutor implements Destroyable {
                     processor.displayWidth(),
                     processor.displayHeight());
             if (prepareFrameGeneration) {
-                frameGenerationInputs.recordColor(commandBuffer);
-                if (StreamlineFrameGeneration.prepare(commandBuffer, frameGenerationInputs)) {
+                if (StreamlineFrameGeneration.prepare(
+                        commandBuffer, frameGenerationInputs, output)) {
                     int frameGenerationIndex = StreamlineReflex.currentFrameIndex();
                     completion.onCommit(5, () -> StreamlineFrameGeneration.submitted(
                             frameGenerationIndex));
@@ -217,28 +216,25 @@ public final class RealtimeFrameExecutor implements Destroyable {
         }
     }
 
-    private StreamlineInputFlipPass ensureStreamlineInputs(
+    private StreamlineInputPass ensureStreamlineInputs(
             VulkanImage depth,
             VulkanImage visibleHistoryPosition,
             VulkanImage control,
-            VulkanImage color,
             boolean exactTransmissiveHistory) {
-        StreamlineInputFlipPass current = this.streamlineInputs;
+        StreamlineInputPass current = this.streamlineInputs;
         if (current != null && current.matches(
                 depth,
                 visibleHistoryPosition,
                 control,
-                color,
                 exactTransmissiveHistory)) {
             return current;
         }
-        StreamlineInputFlipPass replacement =
-                StreamlineInputFlipPass.create(
+        StreamlineInputPass replacement =
+                StreamlineInputPass.create(
                         this.context,
                         depth,
                         visibleHistoryPosition,
                         control,
-                        color,
                         exactTransmissiveHistory);
         this.streamlineInputs = replacement;
         if (current != null) {
@@ -256,7 +252,7 @@ public final class RealtimeFrameExecutor implements Destroyable {
     @Override
     public void destroy() {
         if (this.destroyed) return;
-        StreamlineInputFlipPass current = this.streamlineInputs;
+        StreamlineInputPass current = this.streamlineInputs;
         this.streamlineInputs = null;
         this.destroyed = true;
         if (current != null) current.destroy();

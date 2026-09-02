@@ -19,7 +19,7 @@ import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.FrameCamera;
 import dev.prime.render.post.SubpixelJitter;
 import dev.prime.render.vulkan.RawWavefrontFrame;
-import dev.prime.render.vulkan.StreamlineInputFlipPass;
+import dev.prime.render.vulkan.StreamlineInputPass;
 import dev.prime.render.vulkan.VulkanImage;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -185,7 +185,7 @@ public final class StreamlineFrameGeneration {
 
     /** Captures visible guides before a reconstruction backend reuses their raw scratch images. */
     public static synchronized boolean recordInputs(
-            VkCommandBuffer commandBuffer, StreamlineInputFlipPass inputs) {
+            VkCommandBuffer commandBuffer, StreamlineInputPass inputs) {
         Frame current = frame;
         if (current == null
                 || inputs == null
@@ -207,14 +207,22 @@ public final class StreamlineFrameGeneration {
     }
 
     public static synchronized boolean prepare(
-            VkCommandBuffer commandBuffer, StreamlineInputFlipPass flippedInputs) {
+            VkCommandBuffer commandBuffer,
+            StreamlineInputPass inputs,
+            VulkanImage color) {
         Frame current = frame;
         if (current == null
-                || flippedInputs == null
+                || inputs == null
+                || color == null
                 || current.logicalFrameIndex != currentFrameIndex()) {
             return false;
         }
         try (Arena callArena = Arena.ofConfined()) {
+            if (color.width() != current.colorWidth
+                    || color.height() != current.colorHeight) {
+                throw new IllegalArgumentException(
+                        "Streamline HUD-less color differs from the published frame");
+            }
             ViewportHandle viewport = ViewportHandle.allocate(callArena).value(VIEWPORT);
             Constants constants = Constants.allocate(callArena);
             FrameHistory history = frameHistory(current);
@@ -223,17 +231,16 @@ public final class StreamlineFrameGeneration {
                             history.previous,
                             current.jitter,
                             history.reset,
-                            flippedInputs.motion().width(),
-                            flippedInputs.motion().height())
+                            inputs.motion().width(),
+                            inputs.motion().height())
                     .write(constants);
             if (streamline.setConstants(
                     constants, currentToken, viewport)
                     != Streamline.RESULT_OK) {
                 return fail("set-constants", "slSetConstants failed", null);
             }
-            VulkanImage depth = flippedInputs.depth();
-            VulkanImage motion = flippedInputs.motion();
-            VulkanImage color = flippedInputs.color();
+            VulkanImage depth = inputs.depth();
+            VulkanImage motion = inputs.motion();
             MemorySegment tags = ResourceTag.allocateArray(callArena, 3);
             tag(ResourceTag.wrap(tags, 0), depth, BufferType.DEPTH, callArena);
             tag(ResourceTag.wrap(tags, 1), motion, BufferType.MOTION_VECTORS, callArena);

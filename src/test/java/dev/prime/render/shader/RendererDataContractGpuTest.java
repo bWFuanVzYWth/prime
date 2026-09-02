@@ -74,7 +74,7 @@ final class RendererDataContractGpuTest {
                 System.getProperty("prime.test.slangShaderDirectory"),
                 "prime_renderer_data_contract.comp.spv");
 
-        ByteBuffer output = runner.dispatch(shader, input, 7 * 4 * Float.BYTES, 1);
+        ByteBuffer output = runner.dispatch(shader, input, 8 * 4 * Float.BYTES, 1);
         double[] uv = RendererDataContracts.sampleUv(pixelX, pixelY, width, height);
         double[] clip = RendererDataContracts.uvToClip(uv[0], uv[1]);
         double[] projectionJitter =
@@ -112,6 +112,8 @@ final class RendererDataContractGpuTest {
         assertEquals(rec2020[0], value(output, 6, 0), 2.0e-6);
         assertEquals(rec2020[1], value(output, 6, 1), 2.0e-6);
         assertEquals(rec2020[2], value(output, 6, 2), 2.0e-6);
+        assertEquals(uv[0], value(output, 7, 0), 3.0e-7);
+        assertEquals(uv[1], value(output, 7, 1), 3.0e-7);
     }
 
     private static float value(ByteBuffer output, int entry, int component) {

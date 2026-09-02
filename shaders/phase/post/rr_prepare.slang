@@ -7,6 +7,7 @@ import "model/atmosphere/sky.slang";
 import "model/atmosphere/epipolar.slang";
 import "model/material/defaults.slang";
 import "service/reconstruct/nrd/common.slang";
+import "prime_coordinate_contract.slang";
 
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> rrNoisyDiffuse;
 [[vk::binding(1, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> rrNoisySpecular;
@@ -45,7 +46,7 @@ static const uint PRIME_RR_HISTORY_VALID = 0x08u;
 groupshared AtmEpipolarRange rrEpipolarRange;
 
 float3 rrRayDirection(float2 screenUv) {
-    float2 clipXY = screenUv * float2(2.0, -2.0) + float2(-1.0, 1.0);
+    float2 clipXY = primeCanonicalUvToClip(screenUv);
     float4 nearPoint = rrPush.currentClipToWorld * float4(clipXY, 1.0, 1.0);
     float4 farPoint = rrPush.currentClipToWorld * float4(clipXY, 0.0, 1.0);
     return normalize(farPoint.xyz / farPoint.w - nearPoint.xyz / nearPoint.w);
@@ -68,11 +69,11 @@ bool rrPreviousMotion(
         return false;
     }
     float2 previousNdc = previousClip.xy / previousClip.w;
-    float2 previousUv = previousNdc * float2(0.5, -0.5) + float2(0.5);
+    float2 previousUv = primeCanonicalClipToUv(previousNdc);
     // NGX receives current-frame to previous-frame motion without jitter in normalized UV units.
     // Static geometry projects back to currentSampleUv, so its vector is zero. The bridge supplies
     // renderWidth/renderHeight as MV scales to convert actual camera motion to pixel space.
-    motion = previousUv - currentSampleUv;
+    motion = primeCanonicalVisibleMotionUv(previousUv, currentSampleUv);
     if (any(isnan(motion)) || any(isinf(motion))) {
         motion = float2(0.0);
         return false;

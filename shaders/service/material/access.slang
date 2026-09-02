@@ -99,9 +99,20 @@ public float2 primeTranslatedUv(
     return (origin + uv * float2(extent)) / float2(backingExtent);
 }
 
-public float4 primeSampleStaticAlbedo(uint textureId, float2 uv, float lod) {
-    uint3 rect = primeTextureRecords.Load3(textureId * PRIME_TEXTURE_RECORD_SIZE);
-    uint info = rect.z;
+public struct PrimeBaseTextureRecord {
+    public uint3 words;
+};
+
+public PrimeBaseTextureRecord primeLoadBaseTextureRecord(uint textureId) {
+    PrimeBaseTextureRecord record;
+    record.words = primeTextureRecords.Load3(
+            textureId * PRIME_TEXTURE_RECORD_SIZE);
+    return record;
+}
+
+public float4 primeSampleStaticAlbedo(
+        PrimeBaseTextureRecord record, float2 uv, float lod) {
+    uint info = record.words.z;
     uint page = info >> 8u & 0xffu;
     uint extentCode = info >> 16u;
     int2 backingExtent;
@@ -115,12 +126,17 @@ public float4 primeSampleStaticAlbedo(uint textureId, float2 uv, float lod) {
     }
     float4 sample = primeBaseColorPages[NonUniformResourceIndex(page)].SampleLevel(
             primeTranslatedUv(
-                    rect.x,
-                    int2(rect.y & 0xffffu, rect.y >> 16u),
+                    record.words.x,
+                    int2(record.words.y & 0xffffu, record.words.y >> 16u),
                     backingExtent,
                     uv),
             min(lod, float(info & 0xffu)));
     return float4(sample.rgb, sample.a / 255.0);
+}
+
+public float4 primeSampleStaticAlbedo(uint textureId, float2 uv, float lod) {
+    return primeSampleStaticAlbedo(
+            primeLoadBaseTextureRecord(textureId), uv, lod);
 }
 
 float4 primeLoadSceneTexture(uint index, int2 texel)

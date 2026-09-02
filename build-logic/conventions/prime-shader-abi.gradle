@@ -358,7 +358,8 @@ def verifyCompiledShaderTestManifest = tasks.register('verifyCompiledShaderTestM
 
 def productionShaderIncludes = [
 		file('shaders'),
-		shaderAbiSlangRoot.get().asFile
+		shaderAbiSlangRoot.get().asFile,
+		rendererDataSlangRoot.get().asFile
 ]
 def productionShaderDebug = providers.gradleProperty('primeShaderFullDebug')
 		.map { value -> value.toBoolean() ? '-g2' : '-g1' }
@@ -377,9 +378,9 @@ def verifyShaderArchitecture = tasks.register(
 		'verifyShaderArchitecture', primeShaderTaskTypes.verifyArchitecture) {
 	group = 'verification'
 	description = 'Verifies the manifest and production Slang visibility graph.'
-	dependsOn generateShaderAbi
+	dependsOn generateShaderAbi, generateRendererDataContracts
 	shaderDirectory = shaderSourceRoot
-	includeDirectories.from(shaderAbiSlangRoot)
+	includeDirectories.from(shaderAbiSlangRoot, rendererDataSlangRoot)
 	programManifest = shaderProgramManifest
 	closureBudget = layout.projectDirectory.file('shaders/closure-budgets.json')
 	reportFile = shaderArchitectureReport
@@ -401,7 +402,7 @@ programManifest.artifacts.each { String id, artifact ->
 			taskName, primeShaderTaskTypes.compileProgram) {
 		group = 'build'
 		description = "Compiles the ${id} production Slang artifact."
-		dependsOn generateShaderAbi, verifyRoboCuteReference,
+		dependsOn generateShaderAbi, generateRendererDataContracts, verifyRoboCuteReference,
 				verifyShaderArchitecture, 'verifySlangToolchain'
 		usesService compilerGate
 		sourceFile = source

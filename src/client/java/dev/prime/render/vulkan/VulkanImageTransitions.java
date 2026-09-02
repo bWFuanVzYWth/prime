@@ -85,10 +85,10 @@ public final class VulkanImageTransitions {
                 ? VK12.VK_IMAGE_LAYOUT_GENERAL
                 : VK12.VK_IMAGE_LAYOUT_UNDEFINED;
         long sourceStage = initialized
-                ? VK12.VK_PIPELINE_STAGE_TRANSFER_BIT
+                ? VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
                 : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
         long sourceAccess = initialized
-                ? VK12.VK_ACCESS_TRANSFER_READ_BIT
+                ? VK12.VK_ACCESS_MEMORY_READ_BIT
                 : 0L;
         imageBarrier(
                 commandBuffer,
@@ -188,8 +188,8 @@ public final class VulkanImageTransitions {
                     VK12.VK_IMAGE_LAYOUT_GENERAL,
                     VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
                     VK12.VK_ACCESS_TRANSFER_READ_BIT,
-                    VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                    VK12.VK_ACCESS_SHADER_WRITE_BIT);
+                    VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                    VK12.VK_ACCESS_MEMORY_READ_BIT);
             fillImageBarrier(
                     barriers.get(1),
                     destination.vkImage(),

@@ -65,4 +65,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             float4(canonicalBase, 0.75), continuousTint);
     primeRendererDataOutput.values[6] = float4(
             primeInlineSrgbTintColor(encodedSrgb), 1.0);
+    primeRendererDataOutput.values[7] = float4(
+            primeCanonicalClipToUv(primeCanonicalUvToClip(sampleUv)),
+            0.0,
+            0.0);
 }

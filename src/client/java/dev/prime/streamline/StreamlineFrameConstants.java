@@ -116,8 +116,8 @@ final class StreamlineFrameConstants {
                 || !Float.isFinite(aspectRatio)) {
             throw new IllegalArgumentException("Streamline common constants are not finite");
         }
-        // Prime's resource flip changes sample displacement (x,y) to (x,-y). Streamline wants
-        // projection displacement, the inverse of sample displacement.
+        // Streamline consumes Prime's canonical top-left resources. Its jitter is projection
+        // displacement, the component-wise inverse of the ray sample displacement.
         return new StreamlineFrameConstants(
                 rowMajor(projection),
                 rowMajor(inverseProjection),
@@ -125,7 +125,7 @@ final class StreamlineFrameConstants {
                 rowMajor(currentClipToPreviousClip),
                 rowMajor(previousClipToCurrentClip),
                 -sampleJitter.x(),
-                sampleJitter.y(),
+                -sampleJitter.y(),
                 motionWidth,
                 motionHeight,
                 position,

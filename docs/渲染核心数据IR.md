@@ -76,12 +76,18 @@ umbrella module 扩大生产 Shader 编译闭包。
 ## 4. 坐标、相机与深度
 
 - 图像原点在左上，`x` 向右、`y` 向下；像素中心为 `(x+0.5,y+0.5)`。
-- `ImageUv = pixel / extent`；`clip.x = 2u-1`，`clip.y = 1-2v`；Vulkan depth range 为 `[0,1]`。
+- `SampleUv = (pixel+0.5)/extent`；`clip.x = 2u-1`，`clip.y = 1-2v`；Vulkan depth range 为 `[0,1]`。
 - `SampleJitterPixels` 是相对像素中心的采样位移，`ProjectionJitterPixels = -SampleJitterPixels`。
 - 核心矩阵使用列向量和 column-major，名称必须表达方向，如 `currentWorldToClip`。
 - current/previous 重建矩阵不含 temporal jitter；camera cut/reset 由显式控制位表达。
 - `VisibleMotionUv = previousUv - currentSampleUv`，是 normalized UV 中的 current-to-previous，不含 jitter。
 - NVIDIA interop 用 render extent 把 `VisibleMotionUv` 解释为像素运动；其他符号/单位只在各自 adapter 转换。
+
+当前 trace、atmosphere、重建 guide 和输出图像已经直接使用上述 top-left 契约；生成的
+`prime_coordinate_contract.slang` 是生产依赖叶，不再只作测试 oracle。NRD、RR 与 Streamline 使用
+未翻转的 Minecraft projection，Streamline 直接标记 Prime HUD-less color，guide pass 只派生
+reversed depth 与 motion。Minecraft 主目标仍是 bottom-up，因此最终 SDR blit、HDR/UI 合成和
+UI-alpha 提取是显式 presentation/interop adapter；核心阶段不得再引入 Y 翻转。
 
 `LinearViewZ`、`ReversedInfiniteDeviceDepth`、`HitDistance` 和 `OpticalPathLength` 是四个不可互换的语义。
 无效性优先使用独立 mask/control；SDK 强制的 sentinel 只存在于 interop。CPU 可用 double 保存绝对
@@ -136,6 +142,10 @@ word1 = MediumId:u16  | reserved:u16
 必须整项加载，也不允许将完整材质状态延长到后续 wavefront 阶段。冷 companion data 只在
 exact availability 命中时条件读取。派生 roughness/IOR 在寄存器中从权威 source code/table 展开为
 f32，不按 triangle 持久化高精度副本。
+
+同一命中的 base texture 读取已包含 frame extent；normal/optical 采样在当前材质求值内复用该
+exact word。两个 auxiliary 通道同时存在时可一次加载共享的 16 B 相邻区，单通道保持窄加载；
+descriptor carrier 在纹理求值结束即死亡，不进入 `PrimeMaterialSample` 或跨 dispatch 状态。
 
 `PrimitiveRecord` 保持 32 B。table-backed identity 为 `TintId:u16 | MaterialId:u16`，只内联 UV、方向、
 变化几何控制、emitter/relation payload 等 triangle-specific 事实；dynamic/baked ID 0 保留显式兼容编码。

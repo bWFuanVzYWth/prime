@@ -18,15 +18,16 @@ final class NrdCameraTransformTest {
     private static final Vector3f STATIC_WORLD_POINT = new Vector3f(0.0F, 0.0F, -10.0F);
 
     @Test
-    void nrdProjectionNamesTheSameImageRowsAsPrime() {
+    void reconstructionProjectionNamesTopLeftRowsWithoutAnAdapterFlip() {
         Matrix4f nrdProjection = NrdCameraTransform.projectionForNrd(PROJECTION);
         Vector2f upperInPrimeImage = NrdCameraTransform.screenUv(
-                nrdProjection, new Vector3f(0.0F, -1.0F, -10.0F));
-        Vector2f lowerInPrimeImage = NrdCameraTransform.screenUv(
                 nrdProjection, new Vector3f(0.0F, 1.0F, -10.0F));
+        Vector2f lowerInPrimeImage = NrdCameraTransform.screenUv(
+                nrdProjection, new Vector3f(0.0F, -1.0F, -10.0F));
 
         assertTrue(upperInPrimeImage.y < 0.5F);
         assertTrue(lowerInPrimeImage.y > 0.5F);
+        assertEquals(PROJECTION, nrdProjection);
     }
 
     @Test
@@ -41,8 +42,8 @@ final class NrdCameraTransformTest {
 
         FrameCamera movedUp = camera(new Matrix4f(), 0.0, 1.0, 0.0);
         Motion upwardMotion = motion(previous, movedUp);
-        assertTrue(upwardMotion.currentUv.y < upwardMotion.previousUv.y);
-        assertTrue(upwardMotion.vector.y > 0.0F);
+        assertTrue(upwardMotion.currentUv.y > upwardMotion.previousUv.y);
+        assertTrue(upwardMotion.vector.y < 0.0F);
         assertReprojectsStaticPoint(previous, movedUp);
     }
 
@@ -60,8 +61,8 @@ final class NrdCameraTransformTest {
         FrameCamera pitched = camera(
                 new Matrix4f().rotateX((float) Math.toRadians(9.0)), 0.0, 0.0, 0.0);
         Motion pitchMotion = motion(previous, pitched);
-        assertTrue(pitchMotion.currentUv.y > pitchMotion.previousUv.y);
-        assertTrue(pitchMotion.vector.y < 0.0F);
+        assertTrue(pitchMotion.currentUv.y < pitchMotion.previousUv.y);
+        assertTrue(pitchMotion.vector.y > 0.0F);
         assertReprojectsStaticPoint(previous, pitched);
     }
 

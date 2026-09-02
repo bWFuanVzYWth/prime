@@ -23,8 +23,8 @@ import org.joml.Vector3f;
  * atmospheric altitude. {@code inverseViewProjection} remains the inverse of the exact Mojang
  * transform, so ray directions are bit-for-bit based on the matrix used for world rendering.
  * JOML, GLSL and NRD all use column vectors and column-major storage; no transpose is applied.
- * Minecraft Vulkan depth is [0, 1] reversed-Z (near=1, far=0), and its internal target maps image
- * row zero to NDC y=-1 before the presentation flip.
+ * Minecraft Vulkan depth is [0, 1] reversed-Z (near=1, far=0). Prime core images map row zero to
+ * NDC y=+1; the presentation boundary flips once when writing Minecraft's bottom-up target.
  */
 public final class FrameCamera {
     private static final ThreadLocal<Scratch> SCRATCH = ThreadLocal.withInitial(Scratch::new);

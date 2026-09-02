@@ -32,6 +32,20 @@ final class RendererCoordinateColorContractTest {
                 new double[] {0.0, 0.0},
                 RendererDataContracts.uvToClip(0.5, 0.5),
                 0.0);
+        assertArrayEquals(
+                new double[] {0.0, 0.0},
+                RendererDataContracts.clipToUv(-1.0, 1.0),
+                0.0);
+        assertArrayEquals(
+                new double[] {1.0, 1.0},
+                RendererDataContracts.clipToUv(1.0, -1.0),
+                0.0);
+        double[] sampleUv = RendererDataContracts.sampleUv(733, 419, 1920, 1080);
+        double[] clip = RendererDataContracts.uvToClip(sampleUv[0], sampleUv[1]);
+        assertArrayEquals(
+                sampleUv,
+                RendererDataContracts.clipToUv(clip[0], clip[1]),
+                1.0e-16);
         assertThrows(
                 IllegalArgumentException.class,
                 () -> RendererDataContracts.sampleUv(1920, 0, 1920, 1080));

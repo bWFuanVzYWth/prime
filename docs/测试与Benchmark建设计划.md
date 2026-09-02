@@ -2,7 +2,7 @@
 
 ## 目标与当前阶段
 
-Prime 已进入 renderer data IR 阶段 1。benchmark 只回答“有多快”，不能证明优化后“仍然正确”；
+Prime 正在跨阶段迁移 renderer data IR。benchmark 只回答“有多快”，不能证明优化后“仍然正确”；
 因此 Java JMH 与 Vulkan timestamp 测量都必须先经过行为、编码摘要、ABI 和资源生命周期门禁。
 当前已经为翻译层建立典型/极端 JMH corpus，并为规范坐标/色彩叶建立首个 Vulkan timestamp
 基线；完整生产 frame/pass 的长期门槛仍需在对应数据迁移前逐项接入。
@@ -145,7 +145,7 @@ Lavapipe 门禁上 assumption skip。
 | GPU 数学与采样 | `shaderTest` | compact OpenPBR、transport、BSDF、材质/天体、重建/曝光、ZSobol parity 与统计 |
 | Vulkan host 生命周期 | `shaderTest` | validated instance/device、buffer/image、descriptor、dispatch、readback、幂等释放 |
 | Vulkan RT 生命周期 | `rayTracingTest` | BLAS/TLAS、host→AS→trace→readback barrier、SBT、hit/miss/any-hit/closest-hit、硬件重心与幂等释放 |
-| Streamline / DLSS-G 边界 | `test` + `artifactTest` + `shaderTest` | row-major common constants、相机历史重投影、运行时 status/min-size、真实 reversed depth、top-left motion、窄 descriptor 闭包与发行 DLL；NVIDIA fake-swapchain device-lost 仍按高风险上游缺陷隔离 |
+| Streamline / DLSS-G 边界 | `test` + `artifactTest` + `shaderTest` | row-major common constants、相机历史重投影、projection jitter、真实 reversed depth、规范 top-left motion、直接 HUD-less color、窄 descriptor 闭包与发行 DLL；NVIDIA fake-swapchain device-lost 仍按高风险上游缺陷隔离 |
 | 发行和架构 | `check` | Shader ABI、ray payload、依赖闭包、资源和发行 JAR |
 
 NRD、FSR 和 DLSS 测试已按 JVM contract、artifact packaging、native execution 分层。
@@ -295,8 +295,8 @@ encoding、binding、conversion、verification、phase lifetime、alias 和 memo
 
 - Java `RendererDataContracts`：坐标/色彩 oracle、semantic/encoding/binding 类型、资源计划和
   benchmark 元数据；
-- 两个窄 Slang 叶模块 `prime_coordinate_contract.slang` 与 `prime_color_contract.slang`；它们不
-  通过 umbrella import 扩大生产 entry 闭包；
+- 两个窄 Slang 叶模块 `prime_coordinate_contract.slang` 与 `prime_color_contract.slang`；坐标叶已
+  进入需要坐标变换的生产 entry，color 叶继续作为迁移 oracle；两者都不通过 umbrella import 扩大闭包；
 - `build/reports/renderer-data/memory-ledger.csv`：render/display 每像素字节与固定开销。
 
 当前静态账本锁定的显式下界是 realtime wavefront 524 B/render px、offline wavefront

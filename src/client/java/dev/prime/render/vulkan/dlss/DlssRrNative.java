@@ -2,6 +2,7 @@ package dev.prime.render.vulkan.dlss;
 
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.post.ReconstructionQualityMode;
+import dev.prime.render.post.SubpixelJitter;
 import dev.prime.render.vulkan.natives.NativeLibrary;
 import dev.prime.render.vulkan.natives.NativeLibraries;
 import dev.prime.render.vulkan.VulkanContext;
@@ -393,8 +394,10 @@ public final class DlssRrNative {
                 description.putLong(8, commandBuffer.address());
                 description.putInt(16, evaluation.renderWidth());
                 description.putInt(20, evaluation.renderHeight());
-                description.putFloat(24, ngxJitterOffset(evaluation.sampleJitterX()));
-                description.putFloat(28, ngxJitterOffset(evaluation.sampleJitterY()));
+                description.putFloat(
+                        24, ngxJitterOffset(evaluation.sampleJitter().x()));
+                description.putFloat(
+                        28, ngxJitterOffset(evaluation.sampleJitter().y()));
                 description.putFloat(32, evaluation.motionScaleX());
                 description.putFloat(36, evaluation.motionScaleY());
                 description.putInt(40, evaluation.reset() ? 1 : 0);
@@ -447,8 +450,7 @@ public final class DlssRrNative {
     record Evaluation(
             int renderWidth,
             int renderHeight,
-            float sampleJitterX,
-            float sampleJitterY,
+            SubpixelJitter sampleJitter,
             float motionScaleX,
             float motionScaleY,
             boolean reset,
@@ -469,12 +471,7 @@ public final class DlssRrNative {
             if (renderWidth <= 0 || renderHeight <= 0) {
                 throw new IllegalArgumentException("DLSS RR render dimensions must be positive");
             }
-            if (!Float.isFinite(sampleJitterX)
-                    || !Float.isFinite(sampleJitterY)
-                    || Math.abs(sampleJitterX) > 0.5F
-                    || Math.abs(sampleJitterY) > 0.5F) {
-                throw new IllegalArgumentException("DLSS RR sample jitter must be finite pixel offsets");
-            }
+            sampleJitter = Objects.requireNonNull(sampleJitter, "sample jitter");
             if (motionScaleX != renderWidth || motionScaleY != renderHeight) {
                 throw new IllegalArgumentException("DLSS RR motion scale must match the render extent");
             }

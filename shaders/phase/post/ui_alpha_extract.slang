@@ -16,5 +16,10 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 pixel = dispatchThreadId.xy;
     if (any(pixel >= primeUiAlphaExtractPush.extent)) return;
-    primeUiAlpha.Store(pixel, saturate(primeMainColor.Load(int3(pixel, 0)).a));
+    uint2 minecraftPixel = uint2(
+            pixel.x,
+            primeUiAlphaExtractPush.extent.y - 1u - pixel.y);
+    primeUiAlpha.Store(
+            pixel,
+            saturate(primeMainColor.Load(int3(minecraftPixel, 0)).a));
 }

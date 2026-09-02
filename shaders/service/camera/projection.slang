@@ -3,6 +3,7 @@ module "service/camera/projection.slang";
 
 import "prime_abi.slang";
 import "prime_abi_types.slang";
+import "prime_coordinate_contract.slang";
 import "policy/runtime/config.slang";
 import "math/sampling.slang";
 
@@ -52,7 +53,7 @@ public float2 primeRealtimeCameraSample(uint2 launchIndex) {
 
 public float3 primeCameraRayDirection(uint2 pixel, float2 cameraSample) {
     float2 uv = (float2(pixel) + cameraSample) / float2(primePush.outputExtent);
-    float2 ndc = float2(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0);
+    float2 ndc = primeCanonicalUvToClip(uv);
     float4 nearPoint = primePush.inverseViewProjection
             * float4(ndc, 1.0, 1.0);
     float4 farPoint = primePush.inverseViewProjection

@@ -4,6 +4,7 @@ module "phase/atmosphere/atmosphere_aerial_transmittance.slang";
 import "model/atmosphere/sky.slang";
 import "service/image/access.slang";
 import "prime_abi_types.slang";
+import "prime_coordinate_contract.slang";
 
 public static const uint PRIME_PHASE_GROUP_SIZE_X = PRIME_ATMOSPHERE_AERIAL_DEPTH;
 
@@ -28,7 +29,7 @@ groupshared float aerialMaximumDistance;
 
 float3 aerialDirection(int2 coordinate, int2 dimensions) {
     float2 uv = (float2(coordinate) + float2(0.5)) / float2(dimensions);
-    float2 ndc = uv * 2.0 - 1.0;
+    float2 ndc = primeCanonicalUvToClip(uv);
     float4 nearPoint = atmospherePush.inverseViewProjection
             * float4(ndc, 1.0, 1.0);
     float4 farPoint = atmospherePush.inverseViewProjection

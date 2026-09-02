@@ -51,8 +51,15 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    float3 hdr = primeExtendedSrgbEotf(primeHdrImage.Load(int3(pixel, 0)).rgb);
-    float3 baseline = primeSdrBaseline.Load(int3(pixel, 0)).rgb;
+    // Vanilla UI remains in Minecraft's bottom-up target. Prime HDR and SDR baseline images are
+    // canonical top-left, while this pass deliberately preserves a bottom-up output for the
+    // existing swapchain presentation blit.
+    uint2 primePixel = uint2(
+            pixel.x,
+            primeHdrPresentPush.extent.y - 1u - pixel.y);
+    float3 hdr = primeExtendedSrgbEotf(
+            primeHdrImage.Load(int3(primePixel, 0)).rgb);
+    float3 baseline = primeSdrBaseline.Load(int3(primePixel, 0)).rgb;
     float coverage = clamp(uiComposite.a, 0.0, 1.0);
     float3 encodedUiPremultiplied = max(
             uiComposite.rgb - baseline * (1.0 - coverage),

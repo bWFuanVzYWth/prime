@@ -253,8 +253,7 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
                 new DlssRrNative.Evaluation(
                         this.renderWidth,
                         this.renderHeight,
-                        token.jitter.x(),
-                        token.jitter.y(),
+                        token.jitter,
                         this.renderWidth,
                         this.renderHeight,
                         temporal.restart(),

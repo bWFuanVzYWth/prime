@@ -43,8 +43,7 @@ final class StreamlineFrameConstantsTest {
             double[] canonicalJitter =
                     RendererDataContracts.projectionJitterPixels(0.25, -0.375);
             assertEquals(canonicalJitter[0], constants.jitterOffset()[0], 0.0);
-            // The transitional full-frame Streamline input flip reverses image Y once more.
-            assertEquals(-canonicalJitter[1], constants.jitterOffset()[1], 0.0);
+            assertEquals(canonicalJitter[1], constants.jitterOffset()[1], 0.0);
             assertEquals(1280.0F, constants.mvecScale()[0]);
             assertEquals(720.0F, constants.mvecScale()[1]);
             assertEquals(12.0F, constants.cameraPos()[0]);

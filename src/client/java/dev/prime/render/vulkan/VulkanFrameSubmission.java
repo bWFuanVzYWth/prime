@@ -6,7 +6,9 @@ import dev.prime.infrastructure.ResourceCleanup;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkImageCopy;
+import org.lwjgl.vulkan.VkImageBlit;
+import org.lwjgl.vulkan.VkImageSubresourceLayers;
+import org.lwjgl.vulkan.VkOffset3D;
 
 /** Common command ownership and image-initialization boundary for one renderer frame. */
 final class VulkanFrameSubmission {
@@ -31,25 +33,35 @@ final class VulkanFrameSubmission {
             int height) {
         VulkanImageTransitions.prepareImagesForCopy(commandBuffer, output, mainColor);
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkImageCopy.Buffer copy = VkImageCopy.calloc(1, stack);
-            copy.get(0).srcSubresource()
+            VkOffset3D.Buffer sourceOffsets = VkOffset3D.calloc(2, stack);
+            sourceOffsets.get(0).set(0, 0, 0);
+            sourceOffsets.get(1).set(width, height, 1);
+            VkOffset3D.Buffer destinationOffsets = VkOffset3D.calloc(2, stack);
+            destinationOffsets.get(0).set(0, height, 0);
+            destinationOffsets.get(1).set(width, 0, 1);
+            VkImageSubresourceLayers sourceLayers = VkImageSubresourceLayers.calloc(stack)
                     .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
                     .mipLevel(0)
                     .baseArrayLayer(0)
                     .layerCount(1);
-            copy.get(0).dstSubresource()
+            VkImageSubresourceLayers destinationLayers = VkImageSubresourceLayers.calloc(stack)
                     .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
                     .mipLevel(0)
                     .baseArrayLayer(0)
                     .layerCount(1);
-            copy.get(0).extent().set(width, height, 1);
-            VK12.vkCmdCopyImage(
+            VkImageBlit.Buffer blit = VkImageBlit.calloc(1, stack)
+                    .srcSubresource(sourceLayers)
+                    .srcOffsets(sourceOffsets)
+                    .dstSubresource(destinationLayers)
+                    .dstOffsets(destinationOffsets);
+            VK12.vkCmdBlitImage(
                     commandBuffer,
                     output.image(),
                     VK12.VK_IMAGE_LAYOUT_GENERAL,
                     mainColor.vkImage(),
                     VK12.VK_IMAGE_LAYOUT_GENERAL,
-                    copy);
+                    blit,
+                    VK12.VK_FILTER_NEAREST);
         }
         VulkanImageTransitions.finishImageCopy(commandBuffer, output, mainColor);
     }

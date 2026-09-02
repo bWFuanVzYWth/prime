@@ -89,8 +89,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
             mask |= PRIME_TEST_FAILURE_IDENTITY;
         }
     } else if (kind == 5u) {
-        actual.xy = primeStreamlineTopLeftMotion(values.xy);
-        expected.xy = float2(values.x, -values.y);
+        actual.xy = primeStreamlineCanonicalMotion(values.xy);
+        expected.xy = values.xy;
         if (!primeTestClose(actual.x, expected.x, 0.0, 0.0)
                 || !primeTestClose(actual.y, expected.y, 0.0, 0.0)) {
             mask |= PRIME_TEST_FAILURE_IDENTITY;

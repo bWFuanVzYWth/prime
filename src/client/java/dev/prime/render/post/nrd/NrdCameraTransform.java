@@ -8,14 +8,12 @@ import org.joml.Vector3fc;
 import org.joml.Vector4f;
 
 /**
- * The single coordinate-system boundary between Minecraft/JOML and NRD.
+ * Camera-relative transforms for Prime's top-left reconstruction images.
  *
  * <p>Both APIs store column-major matrices and multiply column vectors. Minecraft's internal
- * Vulkan image, however, maps image row zero to clip {@code y = -1}, while NRD's D3D-style screen
- * helper maps texture {@code y = 0} to clip {@code y = +1}. Prime left-multiplies every projection
- * passed to NRD by {@code diag(1, -1, 1, 1)}. The two flips then cancel, so an NRD screen UV names
- * the same image row as a Prime raygen UV. This is not a presentation flip and must not be moved to
- * the final copy.
+ * presentation target remains bottom-up, but Prime raygen and reconstruction images map row zero
+ * to clip {@code y = +1}. NRD, NGX and Streamline therefore consume the unmodified Minecraft
+ * projection. Vertical conversion remains only in explicit Minecraft presentation/UI adapters.
  *
  * <p>World positions are camera-relative for floating-point precision. A position relative to the
  * current effective pinhole is transformed into the previous view by adding
@@ -30,12 +28,7 @@ public final class NrdCameraTransform {
     }
 
     public static Matrix4f projectionForNrd(Matrix4fc minecraftProjection, Matrix4f result) {
-        result.set(minecraftProjection);
-        return result
-                .m01(-result.m01())
-                .m11(-result.m11())
-                .m21(-result.m21())
-                .m31(-result.m31());
+        return result.set(minecraftProjection);
     }
 
     public static Matrix4f currentClipToWorld(FrameCamera current) {

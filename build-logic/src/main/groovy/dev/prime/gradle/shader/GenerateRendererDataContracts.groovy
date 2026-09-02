@@ -310,6 +310,10 @@ public final class RendererDataContracts {
         return new double[] {2.0 * u - 1.0, 1.0 - 2.0 * v};
     }
 
+    public static double[] clipToUv(double x, double y) {
+        return new double[] {0.5 * x + 0.5, -0.5 * y + 0.5};
+    }
+
     public static double[] projectionJitterPixels(double sampleX, double sampleY) {
         return new double[] {-sampleX, -sampleY};
     }
@@ -425,7 +429,7 @@ public final class RendererDataContracts {
         return '''#language slang 2026
 module "prime_coordinate_contract.slang";
 
-// Generated contract leaf. Production adapters migrate only after the stage-1 oracles pass.
+// Generated contract leaf shared by production and its independent behavior oracles.
 public static const float2 PRIME_PIXEL_CENTER_OFFSET = float2(0.5, 0.5);
 
 public float2 primeCanonicalSampleUv(uint2 pixel, uint2 extent)
@@ -436,6 +440,11 @@ public float2 primeCanonicalSampleUv(uint2 pixel, uint2 extent)
 public float2 primeCanonicalUvToClip(float2 uv)
 {
     return float2(2.0 * uv.x - 1.0, 1.0 - 2.0 * uv.y);
+}
+
+public float2 primeCanonicalClipToUv(float2 clip)
+{
+    return float2(0.5 * clip.x + 0.5, -0.5 * clip.y + 0.5);
 }
 
 public float2 primeCanonicalProjectionJitterPixels(float2 sampleJitterPixels)

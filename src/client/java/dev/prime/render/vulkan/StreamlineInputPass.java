@@ -18,8 +18,8 @@ import org.lwjgl.vulkan.VkDescriptorImageInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
 import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
-/** Builds persistent NVIDIA-coordinate visible depth, motion and color inputs for Streamline. */
-public final class StreamlineInputFlipPass implements Destroyable {
+/** Builds Streamline depth and motion without changing Prime's top-left image coordinates. */
+public final class StreamlineInputPass implements Destroyable {
     private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
     private static final int LOCAL_SIZE = 8;
     private static final int PUSH_SIZE = ShaderAbi.NRD_MOTION_PUSH_CONSTANT_SIZE;
@@ -31,10 +31,8 @@ public final class StreamlineInputFlipPass implements Destroyable {
     private final VulkanImage sourceDepth;
     private final VulkanImage sourceVisibleHistoryPosition;
     private final VulkanImage sourceControl;
-    private final VulkanImage sourceColor;
     private final VulkanImage depth;
     private final VulkanImage motion;
-    private final VulkanImage color;
     private final long descriptorPool;
     private final long descriptorSet;
     private final boolean exactTransmissiveHistory;
@@ -42,19 +40,16 @@ public final class StreamlineInputFlipPass implements Destroyable {
     private final Matrix4f previousWorldToClip = new Matrix4f();
     private final Matrix4f worldToViewScratch = new Matrix4f();
     private boolean guidesInitialized;
-    private boolean colorInitialized;
     private boolean destroyed;
 
-    private StreamlineInputFlipPass(
+    private StreamlineInputPass(
             VulkanContext context,
             SharedComputeProgram program,
             VulkanImage sourceDepth,
             VulkanImage sourceVisibleHistoryPosition,
             VulkanImage sourceControl,
-            VulkanImage sourceColor,
             VulkanImage depth,
             VulkanImage motion,
-            VulkanImage color,
             long descriptorPool,
             long descriptorSet,
             boolean exactTransmissiveHistory) {
@@ -63,27 +58,23 @@ public final class StreamlineInputFlipPass implements Destroyable {
         this.sourceDepth = sourceDepth;
         this.sourceVisibleHistoryPosition = sourceVisibleHistoryPosition;
         this.sourceControl = sourceControl;
-        this.sourceColor = sourceColor;
         this.depth = depth;
         this.motion = motion;
-        this.color = color;
         this.descriptorPool = descriptorPool;
         this.descriptorSet = descriptorSet;
         this.exactTransmissiveHistory = exactTransmissiveHistory;
     }
 
-    public static StreamlineInputFlipPass create(
+    public static StreamlineInputPass create(
             VulkanContext context,
             VulkanImage depth,
             VulkanImage visibleHistoryPosition,
             VulkanImage control,
-            VulkanImage color,
             boolean exactTransmissiveHistory) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(depth, "depth");
         Objects.requireNonNull(visibleHistoryPosition, "visible history position");
         Objects.requireNonNull(control, "control");
-        Objects.requireNonNull(color, "color");
         if (depth.width() != visibleHistoryPosition.width()
                 || depth.height() != visibleHistoryPosition.height()
                 || depth.width() != control.width()
@@ -102,28 +93,24 @@ public final class StreamlineInputFlipPass implements Destroyable {
                 || control.format() != VK12.VK_FORMAT_R8_UINT) {
             throw new IllegalArgumentException("Streamline guide formats violate their contract");
         }
-        requireTransferSource(color, "color");
-
         SharedComputeProgram program = null;
-        VulkanImage flippedDepth = null;
-        VulkanImage flippedMotion = null;
-        VulkanImage flippedColor = null;
+        VulkanImage streamlineDepth = null;
+        VulkanImage streamlineMotion = null;
         long descriptorPool = 0L;
         try {
             program = context.acquireStreamlineInputProgram();
-            flippedDepth = context.createImage2D(
+            streamlineDepth = context.createImage2D(
                     depth.width(),
                     depth.height(),
                     VK12.VK_FORMAT_R32_SFLOAT,
                     VK12.VK_IMAGE_USAGE_STORAGE_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT,
                     "Prime Streamline reversed depth");
-            flippedMotion = context.createImage2D(
+            streamlineMotion = context.createImage2D(
                     visibleHistoryPosition.width(),
                     visibleHistoryPosition.height(),
                     VK12.VK_FORMAT_R32G32_SFLOAT,
                     VK12.VK_IMAGE_USAGE_STORAGE_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT,
                     "Prime Streamline top-left motion");
-            flippedColor = createColorDestination(context, color);
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 VkDescriptorPoolSize.Buffer sizes = VkDescriptorPoolSize.calloc(2, stack);
                 sizes.get(0)
@@ -150,8 +137,8 @@ public final class StreamlineInputFlipPass implements Destroyable {
                         .imageView(visibleHistoryPosition.view())
                         .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
                 infos.get(2).imageView(control.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                infos.get(3).imageView(flippedDepth.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                infos.get(4).imageView(flippedMotion.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
+                infos.get(3).imageView(streamlineDepth.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
+                infos.get(4).imageView(streamlineMotion.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
                 VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(5, stack);
                 for (int binding = 0; binding < 5; binding++) {
                     writes.get(binding)
@@ -166,16 +153,14 @@ public final class StreamlineInputFlipPass implements Destroyable {
                                     infos.get(binding).address(), 1));
                 }
                 VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
-                return new StreamlineInputFlipPass(
+                return new StreamlineInputPass(
                         context,
                         program,
                         depth,
                         visibleHistoryPosition,
                         control,
-                        color,
-                        flippedDepth,
-                        flippedMotion,
-                        flippedColor,
+                        streamlineDepth,
+                        streamlineMotion,
                         descriptorPool,
                         descriptorSet,
                         exactTransmissiveHistory);
@@ -184,11 +169,14 @@ public final class StreamlineInputFlipPass implements Destroyable {
             if (descriptorPool != 0L) {
                 VK12.vkDestroyDescriptorPool(context.vkDevice(), descriptorPool, null);
             }
-            ResourceCleanup.destroy(flippedColor, exception);
-            ResourceCleanup.destroy(flippedMotion, exception);
-            ResourceCleanup.destroy(flippedDepth, exception);
-            if (program != null) program.release();
-            throw exception;
+            RuntimeException failure = ResourceCleanup.destroy(
+                    streamlineMotion, exception);
+            failure = ResourceCleanup.destroy(streamlineDepth, failure);
+            SharedComputeProgram acquiredProgram = program;
+            if (acquiredProgram != null) {
+                failure = ResourceCleanup.run(acquiredProgram::release, failure);
+            }
+            throw failure;
         }
     }
 
@@ -200,20 +188,14 @@ public final class StreamlineInputFlipPass implements Destroyable {
         return this.motion;
     }
 
-    public VulkanImage color() {
-        return this.color;
-    }
-
     public boolean matches(
             VulkanImage depth,
             VulkanImage visibleHistoryPosition,
             VulkanImage control,
-            VulkanImage color,
             boolean exactTransmissiveHistory) {
         return this.sourceDepth == depth
                 && this.sourceVisibleHistoryPosition == visibleHistoryPosition
                 && this.sourceControl == control
-                && this.sourceColor == color
                 && this.exactTransmissiveHistory == exactTransmissiveHistory;
     }
 
@@ -277,29 +259,6 @@ public final class StreamlineInputFlipPass implements Destroyable {
                 VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                 VK12.VK_ACCESS_MEMORY_READ_BIT);
         this.guidesInitialized = true;
-    }
-
-    public void recordColor(VkCommandBuffer commandBuffer) {
-        requireOpen();
-        recordColorFlip(commandBuffer, this.sourceColor, this.color);
-        this.colorInitialized = true;
-    }
-
-    private static VulkanImage createColorDestination(
-            VulkanContext context, VulkanImage source) {
-        return context.createImage2D(
-                source.width(),
-                source.height(),
-                source.format(),
-                VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT,
-                "Prime Streamline flipped HUD-less color");
-    }
-
-    private static void requireTransferSource(VulkanImage image, String name) {
-        if ((image.usage() & VK12.VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0) {
-            throw new IllegalArgumentException(
-                    "Streamline " + name + " image is missing transfer-source usage");
-        }
     }
 
     private static void prepareSampledSource(
@@ -369,75 +328,9 @@ public final class StreamlineInputFlipPass implements Destroyable {
                 VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
 
-    private void recordColorFlip(
-            VkCommandBuffer commandBuffer, VulkanImage source, VulkanImage destination) {
-        VulkanSync.imageBarrier(
-                commandBuffer,
-                source.image(),
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                VK12.VK_ACCESS_MEMORY_READ_BIT | VK12.VK_ACCESS_MEMORY_WRITE_BIT,
-                VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK12.VK_ACCESS_TRANSFER_READ_BIT);
-        VulkanSync.imageBarrier(
-                commandBuffer,
-                destination.image(),
-                this.colorInitialized
-                        ? VK12.VK_IMAGE_LAYOUT_GENERAL
-                        : VK12.VK_IMAGE_LAYOUT_UNDEFINED,
-                VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                this.colorInitialized
-                        ? VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
-                        : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                this.colorInitialized ? VK12.VK_ACCESS_MEMORY_READ_BIT : 0L,
-                VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK12.VK_ACCESS_TRANSFER_WRITE_BIT);
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            var sourceOffsets = org.lwjgl.vulkan.VkOffset3D.calloc(2, stack);
-            sourceOffsets.get(0).set(0, source.height(), 0);
-            sourceOffsets.get(1).set(source.width(), 0, 1);
-            var destinationOffsets = org.lwjgl.vulkan.VkOffset3D.calloc(2, stack);
-            destinationOffsets.get(0).set(0, 0, 0);
-            destinationOffsets.get(1).set(destination.width(), destination.height(), 1);
-            var sourceLayers = org.lwjgl.vulkan.VkImageSubresourceLayers.calloc(stack)
-                    .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                    .mipLevel(0)
-                    .baseArrayLayer(0)
-                    .layerCount(1);
-            var destinationLayers = org.lwjgl.vulkan.VkImageSubresourceLayers.calloc(stack)
-                    .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                    .mipLevel(0)
-                    .baseArrayLayer(0)
-                    .layerCount(1);
-            var blit = org.lwjgl.vulkan.VkImageBlit.calloc(1, stack)
-                    .srcSubresource(sourceLayers)
-                    .srcOffsets(sourceOffsets)
-                    .dstSubresource(destinationLayers)
-                    .dstOffsets(destinationOffsets);
-            VK12.vkCmdBlitImage(
-                    commandBuffer,
-                    source.image(),
-                    VK12.VK_IMAGE_LAYOUT_GENERAL,
-                    destination.image(),
-                    VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    blit,
-                    VK12.VK_FILTER_NEAREST);
-        }
-        VulkanSync.imageBarrier(
-                commandBuffer,
-                destination.image(),
-                VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
-                VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                VK12.VK_ACCESS_MEMORY_READ_BIT);
-    }
-
     private void requireOpen() {
         if (this.destroyed) {
-            throw new IllegalStateException("Streamline input flip pass is destroyed");
+            throw new IllegalStateException("Streamline input pass is destroyed");
         }
     }
 
@@ -447,7 +340,6 @@ public final class StreamlineInputFlipPass implements Destroyable {
         this.destroyed = true;
         VK12.vkDestroyDescriptorPool(this.context.vkDevice(), this.descriptorPool, null);
         this.program.release();
-        this.color.destroy();
         this.motion.destroy();
         this.depth.destroy();
     }

@@ -3,13 +3,14 @@ module "service/reconstruct/streamline_input.slang";
 
 import "service/reconstruct/fsr_input.slang";
 import "service/reconstruct/nrd/common.slang";
+import "prime_coordinate_contract.slang";
 
 public float primeStreamlineReversedDepth(float viewZ) {
     return primeFsrReversedInfiniteDepth(viewZ);
 }
 
-public float2 primeStreamlineTopLeftMotion(float2 sourceMotion) {
-    return float2(sourceMotion.x, -sourceMotion.y);
+public float2 primeStreamlineCanonicalMotion(float2 canonicalMotion) {
+    return canonicalMotion;
 }
 
 public bool primeStreamlineHistoryValid(
@@ -64,7 +65,6 @@ public bool primeStreamlinePreviousUv(float4 previousClip, out float2 previousUv
     if (!(previousClip.w > 1.0e-6) || !primeNrdIsFinite(previousClip)) {
         return false;
     }
-    previousUv = previousClip.xy / previousClip.w
-            * float2(0.5, -0.5) + float2(0.5);
+    previousUv = primeCanonicalClipToUv(previousClip.xy / previousClip.w);
     return primeNrdIsFinite(previousUv);
 }

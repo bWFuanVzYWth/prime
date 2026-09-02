@@ -2,6 +2,7 @@
 module "phase/post/streamline_input.slang";
 
 import "service/reconstruct/streamline_input.slang";
+import "prime_coordinate_contract.slang";
 
 struct PrimeStreamlineInputPushConstants
 {
@@ -35,7 +36,7 @@ static const uint PRIME_STREAMLINE_MATERIAL_CLASS_TRANSMISSIVE = 2u;
 
 float3 primeStreamlineRayDirection(float2 screenUv)
 {
-    float2 clipXY = screenUv * float2(2.0, -2.0) + float2(-1.0, 1.0);
+    float2 clipXY = primeCanonicalUvToClip(screenUv);
     float4 nearPoint = primeStreamlineInputPush.currentClipToWorld
             * float4(clipXY, 1.0, 1.0);
     float4 farPoint = primeStreamlineInputPush.currentClipToWorld
@@ -56,17 +57,14 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint2 extent;
     primeStreamlineDepth.GetDimensions(extent.x, extent.y);
     if (any(pixel >= extent)) return;
-    uint2 sourcePixel = uint2(
-            pixel.x,
-            extent.y - 1u - pixel.y);
-    uint control = primeStreamlineReconstructionControl[sourcePixel];
+    uint control = primeStreamlineReconstructionControl[pixel];
     bool surfaceValid = (control & PRIME_STREAMLINE_SURFACE_VALID) != 0u;
     bool historyValid = primeStreamlineHistoryValid(
             control,
             PRIME_STREAMLINE_HISTORY_VALID,
             primeStreamlineInputPush.historyValid != 0u);
-    float viewZ = primeStreamlineViewZ.Load(int3(sourcePixel, 0));
-    float2 currentSampleUv = (float2(sourcePixel) + float2(0.5)
+    float viewZ = primeStreamlineViewZ.Load(int3(pixel, 0));
+    float2 currentSampleUv = (float2(pixel) + float2(0.5)
             + primeStreamlineInputPush.currentJitterPixels) / float2(extent);
     float3 rayDirection = primeStreamlineRayDirection(currentSampleUv);
     float3 target = rayDirection;
@@ -87,13 +85,15 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID)
                             || primeStreamlineInputPush.transmissiveHistoryExact != 0u,
                     currentPosition,
                     primeStreamlineHistoryPosition.Load(
-                            int3(sourcePixel, 0)).xyz,
+                            int3(pixel, 0)).xyz,
                     target);
         }
     }
     float2 previousUv;
     valid = valid && primeStreamlinePreviousUv(target, directional, previousUv);
-    float2 motion = valid ? previousUv - currentSampleUv : float2(0.0);
+    float2 motion = valid
+            ? primeCanonicalVisibleMotionUv(previousUv, currentSampleUv)
+            : float2(0.0);
     if (any(isnan(motion)) || any(isinf(motion))) {
         motion = float2(0.0);
         valid = false;
@@ -101,8 +101,8 @@ public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID)
     primeStreamlineDepth.Store(
             pixel,
             surfaceValid ? primeStreamlineReversedDepth(viewZ) : 0.0);
-    primeStreamlineMotion.Store(pixel, primeStreamlineTopLeftMotion(motion));
-    primeStreamlineReconstructionControl[sourcePixel] = valid
+    primeStreamlineMotion.Store(pixel, primeStreamlineCanonicalMotion(motion));
+    primeStreamlineReconstructionControl[pixel] = valid
             ? control | PRIME_STREAMLINE_MOTION_VALID
             : control & ~PRIME_STREAMLINE_MOTION_VALID;
 }

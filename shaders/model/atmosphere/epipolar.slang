@@ -1,6 +1,8 @@
 #language slang 2026
 module "model/atmosphere/epipolar.slang";
 
+import "prime_coordinate_contract.slang";
+
 public static const float ATM_EPIPOLAR_LIMIT = 16384.0;
 public static const float ATM_EPIPOLAR_EPSILON = 1.0e-6;
 
@@ -307,7 +309,7 @@ public float4 atmSampleEpipolarWithRange(
     uint depth;
     source.GetDimensions(width, height, depth);
     int3 dimensions = int3(width, height, depth);
-    float2 screenNdc = screenUv * 2.0 - 1.0;
+    float2 screenNdc = primeCanonicalUvToClip(screenUv);
     const float twoPi = 6.28318530717958647692;
     float sliceCoordinate = atmEpipolarRangeCoordinate(
             range, epipoleNdc, screenNdc)
