@@ -1,4 +1,5 @@
 def licenseArchiveSuffix = project.name
+def shaderManifestType = primeShaderManifestType
 def streamlineOutput = sourceSets.getByName('streamline').output
 def streamlineOutputRoots = streamlineOutput.files.collect { it.absoluteFile }
 jar {
@@ -59,7 +60,8 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 			throw new GradleException('Streamline runtime output is empty')
 		}
 
-		def shaderManifest = new groovy.json.JsonSlurper().parse(shaderProgramManifestFile)
+		def shaderManifest = shaderManifestType.read(
+				shaderProgramManifestFile)
 		def requiredShaders = shaderManifest.artifacts.values().collect {
 			"prime/shaders/${it.resource}".toString()
 		}.sort()

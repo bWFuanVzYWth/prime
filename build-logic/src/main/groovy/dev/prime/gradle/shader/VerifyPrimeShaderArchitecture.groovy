@@ -254,7 +254,7 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
         }
         graph.keySet().each { visit(it) }
 
-        def manifest = new JsonSlurper().parse(programManifest.get().asFile)
+        def manifest = PrimeShaderManifest.read(programManifest.get().asFile)
         def manifestSources = manifest.artifacts.values().collect { artifact ->
             pathKey(new File(shaderRoot.parentFile, artifact.source))
         }.toSet()

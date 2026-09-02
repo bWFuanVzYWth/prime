@@ -1,6 +1,5 @@
 package dev.prime.gradle.shader
 
-import groovy.json.JsonSlurper
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
@@ -28,7 +27,7 @@ abstract class GeneratePrimeShaderPrograms extends DefaultTask {
 
     @TaskAction
     void generate() {
-        def manifest = new JsonSlurper().parse(manifestFile.get().asFile)
+        def manifest = PrimeShaderManifest.read(manifestFile.get().asFile)
         def artifacts = manifest.artifacts
         def source = new StringBuilder('''package dev.prime.render.vulkan;
 

@@ -1,0 +1,79 @@
+package dev.prime.gradle.shader
+
+import groovy.json.JsonSlurper
+import org.gradle.api.GradleException
+
+/** Expands the concise source/variant declarations into the build's artifact model. */
+final class PrimeShaderManifest {
+    private static final Map<String, List<String>> STAGES = [
+            '.compute.slang': ['compute', 'comp'],
+            '.raygeneration.slang': ['raygeneration', 'rgen'],
+            '.miss.slang': ['miss', 'rmiss'],
+            '.closesthit.slang': ['closesthit', 'rchit'],
+            '.anyhit.slang': ['anyhit', 'rahit']]
+    private static final List<String> SER_DEFINITIONS = [
+            '-DPRIME_ENABLE_SER=1',
+            '-DPRIME_ENABLE_SUBGROUP_QUEUE=1']
+
+    private PrimeShaderManifest() {}
+
+    static Map read(File file) {
+        def compact = new JsonSlurper().parse(file)
+        if (compact.schema != 2) {
+            throw new GradleException("Unsupported shader program schema ${compact.schema}")
+        }
+        def artifacts = new LinkedHashMap<String, Map>()
+        compact.artifacts.each { String id, declaration ->
+            def entry = declaration instanceof CharSequence
+                    ? declaration.toString()
+                    : declaration.entry?.toString()
+            if (entry == null) {
+                throw new GradleException("Shader artifact ${id} has no entry")
+            }
+            def stage = STAGES.find { suffix, ignored -> entry.endsWith(suffix) }
+            if (stage == null) {
+                throw new GradleException("Shader artifact ${id} has an unknown stage: ${entry}")
+            }
+            addArtifact(artifacts, id, entry, stage.value, [])
+            if (!(declaration instanceof CharSequence) && declaration.ser == true) {
+                addArtifact(artifacts, id + '_ser', entry, stage.value, SER_DEFINITIONS)
+            }
+        }
+        def schedules = new LinkedHashMap<String, Map>()
+        compact.schedules.each { String id, schedule ->
+            (schedule.variants ?: [null]).each { variant ->
+                def modules = schedule.modules.collect { module ->
+                    def variantId = variant == 'ser' ? module + '_ser' : module
+                    artifacts.containsKey(variantId) ? variantId : module
+                }
+                def groups = schedule.groups.collect { group ->
+                    if (!(group instanceof List) || group.size() != 2) {
+                        throw new GradleException("Shader schedule ${id} has an invalid group")
+                    }
+                    [module: group[0], control: group[1]]
+                }
+                schedules[variant == null ? id : id + '.' + variant] =
+                        [modules: modules, groups: groups]
+            }
+        }
+        return [schema: compact.schema, artifacts: artifacts, schedules: schedules]
+    }
+
+    private static void addArtifact(
+            Map<String, Map> artifacts,
+            String id,
+            String entry,
+            List<String> stage,
+            List<String> definitions) {
+        String legacyStage = stage[1]
+        String suffix = '_' + legacyStage
+        String resourceStem = id.endsWith(suffix)
+                ? id.substring(0, id.length() - suffix.length())
+                : id
+        artifacts[id] = [
+                source: 'shaders/' + entry,
+                stage: stage[0],
+                resource: resourceStem + '.' + legacyStage + '.spv',
+                definitions: definitions]
+    }
+}

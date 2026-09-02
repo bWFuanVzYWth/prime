@@ -5,6 +5,7 @@ import dev.prime.gradle.shader.CompilePrimeSlangProgram
 import dev.prime.gradle.shader.AssemblePrimeSlangPrograms
 import dev.prime.gradle.shader.GeneratePrimeShaderPrograms
 import dev.prime.gradle.shader.PrimeShaderDependencyClosure
+import dev.prime.gradle.shader.PrimeShaderManifest
 import dev.prime.gradle.shader.PrimeSlangCompilerGate
 import dev.prime.gradle.shader.GenerateShaderAbi
 import dev.prime.gradle.shader.PrepareNsightCapture
@@ -18,6 +19,7 @@ import org.gradle.api.Project
 final class PrimeShaderAbiPlugin implements Plugin<Project> {
     @Override
     void apply(Project project) {
+        project.extensions.extraProperties.set('primeShaderManifestType', PrimeShaderManifest)
         project.extensions.extraProperties.set('primeShaderTaskTypes', [
                 generateAbi: GenerateShaderAbi,
                 compileSlang: CompilePrimeSlangComputeShaders,
