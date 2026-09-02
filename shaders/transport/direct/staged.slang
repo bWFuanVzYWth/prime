@@ -34,28 +34,3 @@ public struct PrimeFixedSecondaryAreaNee : IPrimeSecondaryAreaNee {
         return float3(0.0);
     }
 }
-
-public struct PrimeNoSecondaryAreaNee : IPrimeSecondaryAreaNee {
-    bool enabled() { return false; }
-    PrimeDirectLightingSplit estimatePrimary(
-            inout PrimeIntegratorContext context,
-            SurfaceInteraction surface,
-            float3 viewDirection,
-            PrimePreparedSampleBase preparedSample,
-            PrimeOpenPbrVolumeStack volumeStack,
-            bool conditionalTransparentBranch) {
-        PrimeDirectLightingSplit result;
-        result.diffuse = float3(0.0);
-        result.specular = float3(0.0);
-        result.direction = float3(0.0);
-        return result;
-    }
-    float3 estimate(
-            inout PrimeIntegratorContext context,
-            SurfaceInteraction surface,
-            float3 viewDirection,
-            PrimePreparedSampleBase preparedSample,
-            PrimeOpenPbrVolumeStack volumeStack) {
-        return float3(0.0);
-    }
-}

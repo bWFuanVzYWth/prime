@@ -16,11 +16,6 @@ public struct PrimeOpenPbrSample {
     public float3 wo;
 };
 
-public struct PrimeOpenPbrEval {
-    public PrimeOpenPbrThroughput throughput;
-    public float pdf;
-};
-
 public struct PrimeOpenPbrFloatPair { public float first; public float second; };
 public struct PrimeOpenPbrVecPair { public float3 first; public float3 second; };
 

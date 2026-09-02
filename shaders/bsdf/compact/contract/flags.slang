@@ -29,8 +29,6 @@ public static const uint PRIME_OPENPBR_FLAG_TRANSMISSION =
 public static const uint PRIME_OPENPBR_FLAG_ALL =
         PRIME_OPENPBR_FLAG_REFLECTION | PRIME_OPENPBR_FLAG_TRANSMISSION;
 
-public static const uint PRIME_OPENPBR_DETAIL_DEFAULT = 0u;
-public static const uint PRIME_OPENPBR_DETAIL_INDIRECT_DIFFUSE = 2u;
 public static const uint PRIME_OPENPBR_DIFFRACTION_RECTANGULAR = 1u;
 public static const uint PRIME_OPENPBR_MAX_VOLUME_STACK_SIZE = 2u;
 

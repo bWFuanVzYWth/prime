@@ -176,22 +176,6 @@ public float primeLightReceiverCosineBoundWithInverse(
     return bound;
 }
 
-public float primeLightReceiverCosineBound(
-        float3 boundsMin,
-        float3 boundsMax,
-        float3 point,
-        float3 receiverNormal,
-        float distanceSquared) {
-    float inverseDistance = distanceSquared > 0.0 ? rsqrt(distanceSquared) : 0.0;
-    return primeLightReceiverCosineBoundWithInverse(
-            boundsMin,
-            boundsMax,
-            point,
-            receiverNormal,
-            distanceSquared,
-            inverseDistance);
-}
-
 public float primeLightReceiverCosineEstimate(
         float3 directionToLight,
         float3 receiverNormal) {

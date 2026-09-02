@@ -7,7 +7,6 @@ public static const uint PRIME_MATERIAL_FAMILY_DIELECTRIC = 1;
 public static const uint PRIME_MATERIAL_FAMILY_FOLIAGE = 2;
 public static const uint PRIME_MATERIAL_MEDIUM_SHIFT = 2;
 public static const uint PRIME_MATERIAL_MEDIUM_MASK = 3 << PRIME_MATERIAL_MEDIUM_SHIFT;
-public static const uint PRIME_MATERIAL_MEDIUM_NONE = 0;
 public static const uint PRIME_MATERIAL_MEDIUM_COLORLESS_GLASS = 1 << PRIME_MATERIAL_MEDIUM_SHIFT;
 public static const uint PRIME_MATERIAL_MEDIUM_STAINED_GLASS = 2 << PRIME_MATERIAL_MEDIUM_SHIFT;
 public static const uint PRIME_MATERIAL_MEDIUM_WATER = 3 << PRIME_MATERIAL_MEDIUM_SHIFT;
@@ -41,11 +40,6 @@ public static const float PRIME_BUILTIN_ROUGHNESS[13] = {
     0.9, 0.82, 0.48, 0.96, 0.72, 0.98, 0.62,
     0.28, 0.90, 0.38, 0.30, 0.34, 0.78
 };
-
-public float primeDefaultLinearRoughness()
-{
-    return PRIME_DEFAULT_REFERENCE_LINEAR_ROUGHNESS;
-}
 
 public float primeBuiltinRoughness(
         uint materialClass,

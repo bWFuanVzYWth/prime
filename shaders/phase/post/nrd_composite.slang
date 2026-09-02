@@ -377,10 +377,6 @@ float3 primeCompositeRadiance(
     return primeNrdClampRadiance(radiance, PRIME_NRD_FP16_MAX);
 }
 
-float3 primeCompositeSh0Color(float4 sh0) {
-    return primeNrdSgExtractColor(primeNrdUnpackSg(sh0, float3(0.0)));
-}
-
 public void primePhase(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 {
     if (groupIndex == 0u) {

@@ -22,15 +22,6 @@ public PrimeResolvedSample primeResolveOrdinarySample(PrimeOrdinarySample ordina
     return result;
 }
 
-public float3 primeResolveIntegrationRadiance(PrimeResolvedSample result) {
-    return result.radiance.diffuse
-            + result.radiance.specular
-            + result.reflectionDiffuseRadiance
-            + result.reflectionSpecularRadiance
-            + result.radiance.stable
-            + result.radiance.unshadowedSun * result.radiance.sunVisibility;
-}
-
 public bool primeRrUsesReflectionPrimaryGuide(
         PrimeResolvedSample result,
         float reflectionVirtualPositionKind) {

@@ -6,10 +6,6 @@ import "prime_abi_types.slang";
 import "math/packed_geometry.slang";
 import "service/material/access.slang";
 
-public uint2 primeMaterialCoreWords(uint materialId) {
-    return primeMaterialCoreRecords.Load2(materialId * PRIME_MATERIAL_CORE_RECORD_SIZE);
-}
-
 public uint primeMaterialMediumId(uint materialId) {
     return primeMaterialCoreRecords.Load(
             materialId * PRIME_MATERIAL_CORE_RECORD_SIZE

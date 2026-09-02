@@ -34,7 +34,6 @@ public SurfaceInteraction primeMissSurfaceInteraction(uint2 sourcePrimitive) {
     surface.adjacentInterfaceControl = 0u;
     return surface;
 }
-
 public void primeResetSurfacePayload(uint2 sourcePrimitive) {
     primeSurfacePayload.t = 0.0;
     primeSurfacePayload.geometricNormal = float3(0.0, 1.0, 0.0);
@@ -168,24 +167,4 @@ public SurfaceInteraction primeTraceSurface(
         float3 origin, float3 direction, uint2 sourcePrimitive) {
     return primeTraceSurfaceClassified(
             PrimeSurfaceTracePolicy(), origin, direction, sourcePrimitive, 0u);
-}
-
-public SurfaceInteraction primeTraceSurfaceWithoutReorder(
-        float3 origin, float3 direction) {
-    return primeTraceSurfaceClassified(
-            PrimeScalarSurfaceTracePolicy(),
-            origin,
-            direction,
-            uint2(PRIME_NO_PRIMITIVE_INDEX),
-            0u);
-}
-
-public SurfaceInteraction primeTraceSurfaceWithoutReorder(
-        float3 origin, float3 direction, uint2 sourcePrimitive) {
-    return primeTraceSurfaceClassified(
-            PrimeScalarSurfaceTracePolicy(),
-            origin,
-            direction,
-            sourcePrimitive,
-            0u);
 }

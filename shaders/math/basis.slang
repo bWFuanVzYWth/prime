@@ -9,7 +9,6 @@ public void primeBasis(float3 normal, out float3 tangent, out float3 bitangent)
     tangent = normalize(cross(helper, normal));
     bitangent = cross(normal, tangent);
 }
-
 public float3 primeLocalToWorld(float3 localDirection, float3 normal)
 {
     float3 tangent;
@@ -19,15 +18,4 @@ public float3 primeLocalToWorld(float3 localDirection, float3 normal)
             tangent * localDirection.x
                     + bitangent * localDirection.y
                     + normal * localDirection.z);
-}
-
-public float3 primeWorldToLocal(float3 worldDirection, float3 normal)
-{
-    float3 tangent;
-    float3 bitangent;
-    primeBasis(normal, tangent, bitangent);
-    return float3(
-            dot(worldDirection, tangent),
-            dot(worldDirection, bitangent),
-            dot(worldDirection, normal));
 }

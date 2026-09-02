@@ -23,25 +23,6 @@ public uint primePackWavefrontPathControl(PathState path) {
                     << PRIME_WAVEFRONT_PATH_FLAGS_SHIFT);
 }
 
-public bool primeWavefrontActive(PrimeWavefrontTransportRecord record) {
-    uint denoiserControl =
-            asuint(record.rayDirectionAndDenoiserControl.w);
-    return (denoiserControl & PRIME_WAVEFRONT_ACTIVE_MASK) != 0u;
-}
-
-public PrimeWavefrontTransportRecord primeWavefrontWithActive(
-        PrimeWavefrontTransportRecord record, bool enabled) {
-    uint denoiserControl =
-            asuint(record.rayDirectionAndDenoiserControl.w);
-    if (enabled) {
-        denoiserControl |= PRIME_WAVEFRONT_ACTIVE_MASK;
-    } else {
-        denoiserControl &= ~PRIME_WAVEFRONT_ACTIVE_MASK;
-    }
-    record.rayDirectionAndDenoiserControl.w = asfloat(denoiserControl);
-    return record;
-}
-
 public PrimeWavefrontTransportRecord primeWavefrontWithQueuedPsrControl(
         PrimeWavefrontTransportRecord record,
         uint control) {
@@ -64,11 +45,6 @@ public PrimeWavefrontTransportRecord primeWavefrontWithGuideFallback(
 
 static const uint PRIME_WAVEFRONT_GUIDE_TRANSITIONS_SHIFT = 8u;
 static const uint PRIME_WAVEFRONT_GUIDE_TRANSITIONS_MASK = 0x7fu;
-
-public uint primeWavefrontGuideTransitions(uint guideControl) {
-    return (guideControl >> PRIME_WAVEFRONT_GUIDE_TRANSITIONS_SHIFT)
-            & PRIME_WAVEFRONT_GUIDE_TRANSITIONS_MASK;
-}
 
 public PrimeWavefrontTransportRecord primeWavefrontWithGuideTransitions(
         PrimeWavefrontTransportRecord record,

@@ -2,8 +2,6 @@
 module "math/sun_shadow_hierarchy.slang";
 
 public static const int PRIME_SUN_SHADOW_RESOLUTION = 512;
-public static const int PRIME_SUN_SHADOW_HIERARCHY_LEVELS = 10;
-
 public int primeSunShadowHierarchyResolution(int level)
 {
     return PRIME_SUN_SHADOW_RESOLUTION >> level;

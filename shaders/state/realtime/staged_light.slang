@@ -11,7 +11,6 @@ public struct PrimeStagedLightSelection {
     public AreaLightSelection area;
 };
 
-public static const uint PRIME_STAGED_LIGHT_SELECTION_WORDS = 3u;
 static const float PRIME_STAGED_LIGHT_HIT_ONLY = -2.0;
 
 public PrimeStagedLightSelection primeDisabledStagedLightSelection() {

@@ -4,7 +4,6 @@ module "math/sampling.slang";
 import "prime_abi_types.slang";
 
 public static const uint PRIME_SAMPLE_EFFECT_CAMERA = 0;
-public static const uint PRIME_SAMPLE_EFFECT_DIRECT_STARS = 1;
 public static const uint PRIME_SAMPLE_EFFECT_DIRECT_SUN = 2;
 public static const uint PRIME_SAMPLE_EFFECT_SCATTER_BSDF = 3;
 public static const uint PRIME_SAMPLE_EFFECT_RUSSIAN_ROULETTE = 4;

@@ -80,19 +80,6 @@ public uint primePrimitiveTintId(PrimitiveRecord primitive) {
             : primitive.identity & 0xffffu;
 }
 
-public uint primeMaterialTextureId(uint materialId) {
-    return primeMaterialCoreWord(materialId) & PRIME_MATERIAL_CORE_TEXTURE_ID_MASK;
-}
-
-public uint primeMaterialRecipeControl(uint materialId) {
-    return (primeMaterialCoreWord(materialId) >> PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT)
-            & PRIME_MATERIAL_CORE_RECIPE_CONTROL_MASK;
-}
-
-public uint primeTextureBaseColorPage(uint textureId) {
-    return (primeTextureRecordWord(textureId, 8u) >> 8u) & 0xffu;
-}
-
 public float2 primeTranslatedUv(
         uint packedOrigin, int2 extent, int2 backingExtent, float2 uv) {
     float2 origin = float2(packedOrigin & 0xffffu, packedOrigin >> 16u);
@@ -152,7 +139,6 @@ public static const uint PRIME_RECIPE_ANIMATED = 1u << 1u;
 public static const uint PRIME_RECIPE_SCATTERING_SHIFT = 2u;
 public static const uint PRIME_RECIPE_SCATTERING_MASK =
         3u << PRIME_RECIPE_SCATTERING_SHIFT;
-public static const uint PRIME_RECIPE_OPAQUE = 0u;
 public static const uint PRIME_RECIPE_DIELECTRIC_SOLID =
         1u << PRIME_RECIPE_SCATTERING_SHIFT;
 public static const uint PRIME_RECIPE_DIELECTRIC_THIN =
