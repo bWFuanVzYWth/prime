@@ -1,7 +1,7 @@
 #language slang 2026
 module "model/atmosphere/epipolar.slang";
 
-import "prime_coordinate_contract.slang";
+import "contract/coordinate.slang";
 
 public static const float ATM_EPIPOLAR_LIMIT = 16384.0;
 public static const float ATM_EPIPOLAR_EPSILON = 1.0e-6;

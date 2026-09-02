@@ -7,7 +7,7 @@ import "model/material/defaults.slang";
 import "service/reconstruct/fsr_input.slang";
 import "service/reconstruct/nrd/common.slang";
 import "prime_nrd_motion_contract.slang";
-import "prime_coordinate_contract.slang";
+import "contract/coordinate.slang";
 
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] writeonly RWTexture2D<float4> primeMotion;
 [[vk::binding(1, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float4> primeViewZ;

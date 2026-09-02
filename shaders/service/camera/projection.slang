@@ -3,7 +3,7 @@ module "service/camera/projection.slang";
 
 import "prime_abi.slang";
 import "prime_abi_types.slang";
-import "prime_coordinate_contract.slang";
+import "contract/coordinate.slang";
 import "policy/runtime/config.slang";
 import "math/sampling.slang";
 

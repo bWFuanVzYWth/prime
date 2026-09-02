@@ -83,8 +83,8 @@ umbrella module 扩大生产 Shader 编译闭包。
 - `VisibleMotionUv = previousUv - currentSampleUv`，是 normalized UV 中的 current-to-previous，不含 jitter。
 - NVIDIA interop 用 render extent 把 `VisibleMotionUv` 解释为像素运动；其他符号/单位只在各自 adapter 转换。
 
-当前 trace、atmosphere、重建 guide 和输出图像已经直接使用上述 top-left 契约；生成的
-`prime_coordinate_contract.slang` 是生产依赖叶，不再只作测试 oracle。NRD、RR 与 Streamline 使用
+当前 trace、atmosphere、重建 guide 和输出图像已经直接使用上述 top-left 契约；
+`shaders/contract/coordinate.slang` 是唯一生产坐标叶。NRD、RR 与 Streamline 使用
 未翻转的 Minecraft projection，Streamline 直接标记 Prime HUD-less color，guide pass 只派生
 reversed depth 与 motion。Minecraft 主目标仍是 bottom-up，因此最终 SDR blit、HDR/UI 合成和
 UI-alpha 提取是显式 presentation/interop adapter；核心阶段不得再引入 Y 翻转。

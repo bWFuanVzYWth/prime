@@ -4,7 +4,6 @@ import dev.prime.gradle.shader.CompilePrimeSlangComputeShaders
 import dev.prime.gradle.shader.CompilePrimeSlangProgram
 import dev.prime.gradle.shader.AssemblePrimeSlangPrograms
 import dev.prime.gradle.shader.GeneratePrimeShaderPrograms
-import dev.prime.gradle.shader.GenerateRendererDataContracts
 import dev.prime.gradle.shader.PrimeShaderDependencyClosure
 import dev.prime.gradle.shader.PrimeSlangCompilerGate
 import dev.prime.gradle.shader.GenerateShaderAbi
@@ -21,7 +20,6 @@ final class PrimeShaderAbiPlugin implements Plugin<Project> {
     void apply(Project project) {
         project.extensions.extraProperties.set('primeShaderTaskTypes', [
                 generateAbi: GenerateShaderAbi,
-                generateRendererData: GenerateRendererDataContracts,
                 compileSlang: CompilePrimeSlangComputeShaders,
                 compileProgram: CompilePrimeSlangProgram,
                 assemblePrograms: AssemblePrimeSlangPrograms,

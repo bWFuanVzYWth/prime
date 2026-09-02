@@ -249,45 +249,23 @@ validation 报告；发行构建产物继续单独保存。
 显式运行缺扩展或 validation layer 时直接失败。接入稳定 RT CI runner 后应把其 JUnit 和
 validation 报告纳入同一制品保留规则。
 
-## 阶段 1 数据合同与测量入口
+## 数据合同与测量入口
 
-规范的机器来源是 `shaders/renderer-data.json`。`generateRendererDataContracts` 会先验证 semantic、
-encoding、binding、conversion、verification、phase lifetime、alias 和 memory plan，再生成：
+当前规范由[渲染核心数据 IR](渲染核心数据IR.md)及专项契约描述；实际 record、offset、descriptor
+与容量只在 `shaders/abi.json` 中生成。早期 `renderer-data.json` 将同一文档复制为未被生产消费的
+Java 对象、静态账本和自证测试，完成迁移调查后已删除。生产坐标公式现在由窄叶模块
+`shaders/contract/coordinate.slang` 直接拥有，颜色转换由 `CanonicalColorEncoding` 拥有。
 
-- Java `RendererDataContracts`：坐标/色彩 oracle、semantic/encoding/binding 类型、资源计划和
-  benchmark 元数据；
-- 两个窄 Slang 叶模块 `prime_coordinate_contract.slang` 与 `prime_color_contract.slang`；坐标叶已
-  进入需要坐标变换的生产 entry，color 叶继续作为迁移 oracle；两者都不通过 umbrella import 扩大闭包；
-- `build/reports/renderer-data/memory-ledger.csv`：render/display 每像素字节与固定开销。
+实时 wavefront 当前是 524 B/render px，offline wavefront 是 244 B/render px；布局关系由实际
+`ShaderAbi` 与 GPU round-trip 门禁约束。完整图像、AS 和外部 SDK 显存以实机 profile 为准，不能
+由重复抄写的静态 JSON 冒充真实分配数据。
 
-当前静态账本锁定的显式下界是 realtime wavefront 524 B/render px、offline wavefront
-244 B/render px、unfiltered raw images 95 B/render px、DLSS RR 137 B/render px +
-8 B/display px，以及 Prime 自有 NRD images 291 B/render px。动态显存归因使用外部 profile；完全由
-外部 SDK 分配的内存不能伪装成 Prime VMA 数据。
-
-实时 wavefront 的 524 B/px 由两套 112 B path、264 B phase scratch 和 36 B queue index 组成。
-GPU round-trip 测试逐位验证两项 `MediumId:u16`、两组 f32 extinction 与 f32 `etaScale`；生成 ABI
-另约束 16 B area guide、24 B staged record 中 selection/receiver-normal 的偏移、detached-guide
-alias 上界，以及 guide/area queue index 的阶段复用。
-
-可重复测量命令：
-
-```powershell
-.\gradlew.bat translationBenchmark
-.\gradlew.bat rendererDataGpuBenchmark
-```
-
-前者运行 JMH 1.37，输出 `build/reports/benchmarks/translation.json`。典型 corpus 是 4×4×4
+`./gradlew.bat translationBenchmark` 运行 JMH 1.37，输出
+`build/reports/benchmarks/translation.json`。典型 corpus 是 4×4×4
 section 的常见 opaque/overlay/transparent/fluid 混合；极端 corpus 含 1024 个原子 boundary cell。
 每次 fork 在计时前都校验 triangle/primitive/byte count 与完整编码 SHA-256。2026-08-31 的本机
 初始样本（JDK 25.0.2，2 forks）为典型约 0.318 ms/op、极端约 1.665 ms/op；它只作为本机比较
 起点，不是跨机器阈值。
-
-后者在 validation layer 下对 1280×720 的规范坐标/linear Rec.2020 转换 kernel 使用 Vulkan
-timestamp，输出 GPU、driver、Vulkan API、timestamp period、extent 和原始样本到
-`build/reports/benchmarks/renderer-data-gpu.json`。该项证明 timestamp 基础设施和规范 Slang 叶
-可测；短任务仍受 GPU 时钟状态影响，原始样本必须保留，且它不等同于完整 RR/NRD/Streamline
-adapter pass 成本。
 
 ## 已知缺口
 

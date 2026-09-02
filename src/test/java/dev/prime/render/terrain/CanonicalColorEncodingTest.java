@@ -3,7 +3,6 @@ package dev.prime.render.terrain;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.prime.render.data.RendererDataContracts;
 import org.junit.jupiter.api.Test;
 
 final class CanonicalColorEncodingTest {
@@ -27,8 +26,12 @@ final class CanonicalColorEncodingTest {
     @Test
     void everySourceCodeUsesTheRendererSrgbContract() {
         for (int code = 0; code < 256; code++) {
+            double encoded = code / 255.0;
+            float expected = (float) (encoded <= 0.04045
+                    ? encoded / 12.92
+                    : StrictMath.pow((encoded + 0.055) / 1.055, 2.4));
             assertEquals(
-                    (float) RendererDataContracts.decodeSrgb(code / 255.0),
+                    expected,
                     CanonicalColorEncoding.decodeSrgb8(code));
         }
     }

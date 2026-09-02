@@ -2,7 +2,7 @@
 module "phase/post/streamline_input.slang";
 
 import "service/reconstruct/streamline_input.slang";
-import "prime_coordinate_contract.slang";
+import "contract/coordinate.slang";
 
 struct PrimeStreamlineInputPushConstants
 {

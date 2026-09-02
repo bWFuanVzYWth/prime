@@ -4,7 +4,7 @@ module "phase/atmosphere/atmosphere_aerial_transmittance.slang";
 import "model/atmosphere/sky.slang";
 import "service/image/access.slang";
 import "prime_abi_types.slang";
-import "prime_coordinate_contract.slang";
+import "contract/coordinate.slang";
 
 public static const uint PRIME_PHASE_GROUP_SIZE_X = PRIME_ATMOSPHERE_AERIAL_DEPTH;
 

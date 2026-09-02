@@ -3,7 +3,7 @@ module "service/reconstruct/streamline_input.slang";
 
 import "service/reconstruct/fsr_input.slang";
 import "service/reconstruct/nrd/common.slang";
-import "prime_coordinate_contract.slang";
+import "contract/coordinate.slang";
 
 public float primeStreamlineReversedDepth(float viewZ) {
     return primeFsrReversedInfiniteDepth(viewZ);

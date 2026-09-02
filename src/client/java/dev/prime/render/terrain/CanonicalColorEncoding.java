@@ -1,13 +1,14 @@
 package dev.prime.render.terrain;
 
-import dev.prime.render.data.RendererDataContracts;
-
 /** Source-faithful RGB8/tint translation into the renderer's linear Rec.2020 material domain. */
 public final class CanonicalColorEncoding {
     /** Audited maximum absolute error for one source-color page decode plus one tint operator. */
     public static final float MAXIMUM_REFLECTANCE_ERROR = 1.0F / 2048.0F;
-    private static final double[][] SRGB_TO_REC2020 = copyMatrix(
-            RendererDataContracts.LINEAR_SRGB_TO_LINEAR_REC2020);
+    private static final double[][] SRGB_TO_REC2020 = {
+        {0.6274039, 0.3292830, 0.0433131},
+        {0.0690973, 0.9195404, 0.0113623},
+        {0.0163914, 0.0880133, 0.8955953}
+    };
     private static final double[][] REC2020_TO_SRGB = inverse(SRGB_TO_REC2020);
     private static final float[] SRGB8_TO_LINEAR = createSrgb8ToLinear();
 
@@ -158,21 +159,10 @@ public final class CanonicalColorEncoding {
     private static float[] createSrgb8ToLinear() {
         float[] result = new float[256];
         for (int code = 0; code < result.length; code++) {
-            result[code] = (float) RendererDataContracts.decodeSrgb(code / 255.0);
-        }
-        return result;
-    }
-
-    private static double[][] copyMatrix(double[][] source) {
-        if (source.length != 3) {
-            throw new IllegalStateException("Renderer color matrix must be 3x3");
-        }
-        double[][] result = new double[3][3];
-        for (int row = 0; row < 3; row++) {
-            if (source[row].length != 3) {
-                throw new IllegalStateException("Renderer color matrix must be 3x3");
-            }
-            System.arraycopy(source[row], 0, result[row], 0, 3);
+            double encoded = code / 255.0;
+            result[code] = (float) (encoded <= 0.04045
+                    ? encoded / 12.92
+                    : Math.pow((encoded + 0.055) / 1.055, 2.4));
         }
         return result;
     }

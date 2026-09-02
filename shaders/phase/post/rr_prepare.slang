@@ -7,7 +7,7 @@ import "model/atmosphere/sky.slang";
 import "model/atmosphere/epipolar.slang";
 import "model/material/defaults.slang";
 import "service/reconstruct/nrd/common.slang";
-import "prime_coordinate_contract.slang";
+import "contract/coordinate.slang";
 
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> rrNoisyDiffuse;
 [[vk::binding(1, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> rrNoisySpecular;
