@@ -13,7 +13,6 @@ import org.lwjgl.vulkan.VkOffset3D;
 /** Common command ownership and image-initialization boundary for one renderer frame. */
 final class VulkanFrameSubmission {
     private final VulkanImageInitializationBatch imageInitialization;
-    private final MinecraftHostSubmission hostSubmission = new MinecraftHostSubmission();
     private boolean initializationActive;
 
     VulkanFrameSubmission(VulkanImageInitializationBatch imageInitialization) {
@@ -73,7 +72,6 @@ final class VulkanFrameSubmission {
         VulkanContext.check(
                 VK12.vkEndCommandBuffer(commandBuffer), endOperation);
         encoder.execute(commandBuffer);
-        this.hostSubmission.acceptedByMinecraftHostSubmission();
     }
 
     void submitted() {
@@ -86,9 +84,5 @@ final class VulkanFrameSubmission {
             return failure;
         }
         return ResourceCleanup.run(this.imageInitialization::abandon, failure);
-    }
-
-    boolean wasAcceptedByMinecraftHostSubmission() {
-        return this.hostSubmission.wasAcceptedByMinecraftHostSubmission();
     }
 }

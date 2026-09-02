@@ -28,7 +28,7 @@ final class BsdfLookupTable implements Destroyable {
 
     private final VulkanContext context;
     private final VulkanImage transmissionGgxEnergy;
-    private final VulkanBuffer upload;
+    private VulkanBuffer upload;
     private final long sampler;
     private boolean prepared;
     private boolean pending;
@@ -169,6 +169,8 @@ final class BsdfLookupTable implements Destroyable {
             throw new IllegalStateException(
                     "BSDF lookup upload is not pending submission");
         }
+        this.context.defer(this.upload);
+        this.upload = null;
         this.prepared = true;
         this.pending = false;
     }
@@ -239,7 +241,10 @@ final class BsdfLookupTable implements Destroyable {
         if (!this.destroyed) {
             this.destroyed = true;
             VK12.vkDestroySampler(this.context.vkDevice(), this.sampler, null);
-            this.upload.destroy();
+            if (this.upload != null) {
+                this.upload.destroy();
+                this.upload = null;
+            }
             this.transmissionGgxEnergy.destroy();
         }
     }

@@ -9,7 +9,6 @@ import dev.prime.render.RendererSettings;
 import dev.prime.render.diagnostic.NrdInputView;
 import dev.prime.render.diagnostic.RendererImageView;
 import dev.prime.render.diagnostic.RrInputView;
-import dev.prime.render.runtime.RendererFrameSettings;
 import dev.prime.render.runtime.RendererLifecycle;
 import dev.prime.render.runtime.RuntimeDiagnostics;
 import dev.prime.render.runtime.RuntimeState;
@@ -30,10 +29,10 @@ import org.lwjgl.glfw.GLFW;
 public final class PrimeRuntime {
     private static final PrimeRuntime INSTANCE = new PrimeRuntime();
     private final RendererLifecycle lifecycle = new RendererLifecycle();
-    private final RendererFrameSettings frameSettings = new RendererFrameSettings();
     private final TerrainOwnership terrain = new TerrainOwnership();
     private final SessionController session = new SessionController();
     private final RuntimeDiagnostics diagnostics = new RuntimeDiagnostics();
+    private RendererSettings frameSettings;
 
     private PrimeRuntime() {
     }
@@ -44,7 +43,7 @@ public final class PrimeRuntime {
 
     public void initialize(RendererSettings settings) {
         this.lifecycle.initialize(settings);
-        this.frameSettings.beginFrame(settings);
+        this.frameSettings = java.util.Objects.requireNonNull(settings, "settings");
     }
 
     public RuntimeState state() {
@@ -72,7 +71,7 @@ public final class PrimeRuntime {
 
     public void beginFrame(Minecraft minecraft, RendererSettings settings) {
         HdrPresentation.beginFrame();
-        this.frameSettings.beginFrame(settings);
+        this.frameSettings = java.util.Objects.requireNonNull(settings, "settings");
         this.lifecycle.retireFailed(minecraft, this.terrain);
         if (!this.lifecycle.initialized()) {
             return;
@@ -132,7 +131,7 @@ public final class PrimeRuntime {
             double z,
             float sunAngleRadians) {
         VulkanRenderer activeRenderer = this.lifecycle.renderer();
-        RendererSettings settings = this.frameSettings.forCamera();
+        RendererSettings settings = this.frameSettings;
         if (activeRenderer != null
                 && settings != null
                 && this.lifecycle.state() != RuntimeState.FAILED) {
@@ -150,7 +149,7 @@ public final class PrimeRuntime {
 
     public void renderWorld(RenderTarget mainTarget) {
         VulkanRenderer activeRenderer = this.lifecycle.renderer();
-        RendererSettings settings = this.frameSettings.forRender();
+        RendererSettings settings = this.frameSettings;
         if (activeRenderer == null
                 || settings == null
                 || this.lifecycle.state() != RuntimeState.ACTIVE) {
@@ -360,7 +359,7 @@ public final class PrimeRuntime {
 
     public void shutdown() {
         this.session.restoreDefaults();
-        this.frameSettings.clear();
+        this.frameSettings = null;
         this.lifecycle.shutdown();
     }
 

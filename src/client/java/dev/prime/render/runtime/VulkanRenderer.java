@@ -68,7 +68,6 @@ public final class VulkanRenderer implements AutoCloseable {
     private String shaderFingerprint;
     private SessionControls frameControls = SessionControls.defaults();
     private List<String> debugLines = List.of();
-    private RendererModeLifecycle modeLifecycle = RendererModeLifecycle.initial();
     private boolean screenshotRequestRejected;
     private volatile boolean acceptsResourceReloadEffects = true;
     private boolean closed;
@@ -252,7 +251,6 @@ public final class VulkanRenderer implements AutoCloseable {
         }
         if (this.screenshotActive()) {
             if (this.offlineRenderer.updateProjection(baseProjection)) {
-                this.modeLifecycle = this.modeLifecycle.releaseOfflineSized();
                 PrimeInfo.LOGGER.info(
                         "Restarted Prime offline accumulation for a new aspect ratio");
             }
@@ -335,9 +333,6 @@ public final class VulkanRenderer implements AutoCloseable {
                             atlas.sampler(),
                             atlas.textureRevision()));
             if (sessionValid) {
-                if (this.offlineRenderer.hasSizedResources()) {
-                    this.modeLifecycle = this.modeLifecycle.allocateOfflineSized();
-                }
                 this.debugLines = this.withRendererDiagnostics(settings);
                 return;
             }
@@ -376,9 +371,6 @@ public final class VulkanRenderer implements AutoCloseable {
                         atlas.textureRevision(),
                         this.sceneTextures));
         this.debugLines = this.withRendererDiagnostics(settings);
-        if (this.realtimeRenderer.hasSizedResources()) {
-            this.modeLifecycle = this.modeLifecycle.allocateRealtimeSized();
-        }
     }
 
     private List<String> withRendererDiagnostics(RendererSettings settings) {
@@ -582,9 +574,6 @@ public final class VulkanRenderer implements AutoCloseable {
             this.context.awaitIdle();
             this.context.drainDeferredAfterIdle();
             this.realtimeRenderer.releaseSizedResourcesAfterIdle();
-            this.modeLifecycle = this.modeLifecycle
-                    .releaseRealtimeSized()
-                    .enterOffline();
             this.pendingOfflineSession = null;
             this.offlineRenderer.begin(pending);
             PrimeInfo.LOGGER.info(
@@ -637,9 +626,6 @@ public final class VulkanRenderer implements AutoCloseable {
         this.context.awaitIdle();
         this.context.drainDeferredAfterIdle();
         this.offlineRenderer.stopAfterIdle();
-        this.modeLifecycle = this.modeLifecycle
-                .releaseOfflineSized()
-                .exitOffline();
         // Dirty notifications continue to accumulate while uploads are paused. A full resync on
         // exit also covers animation-driven or external changes that do not expose a precise
         // block range, without invalidating the frozen screenshot while it is converging.
