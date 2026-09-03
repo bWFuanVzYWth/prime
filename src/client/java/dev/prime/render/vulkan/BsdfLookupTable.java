@@ -112,7 +112,7 @@ final class BsdfLookupTable implements Destroyable {
                 throw new IllegalStateException(
                         "BSDF lookup image is initialized without committed upload state");
             }
-            VulkanImageTransitions.imageBarrier(
+            VulkanSync.imageBarrier(
                     commandBuffer,
                     this.transmissionGgxEnergy.image(),
                     VK12.VK_IMAGE_LAYOUT_UNDEFINED,
@@ -138,7 +138,7 @@ final class BsdfLookupTable implements Destroyable {
                     VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     copy);
 
-            VulkanImageTransitions.imageBarrier(
+            VulkanSync.imageBarrier(
                     commandBuffer,
                     this.transmissionGgxEnergy.image(),
                     VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,

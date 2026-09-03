@@ -12,12 +12,9 @@ import java.util.ArrayList;
 import java.util.List;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
-import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkClearColorValue;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkDependencyInfo;
-import org.lwjgl.vulkan.VkImageMemoryBarrier2;
 import org.lwjgl.vulkan.VkImageSubresourceRange;
 
 /**
@@ -693,35 +690,14 @@ final class SunShadowClipmap implements Destroyable {
             VkCommandBuffer commandBuffer,
             VulkanImage[] images,
             boolean initialized) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkImageMemoryBarrier2.Buffer barriers =
-                    VkImageMemoryBarrier2.calloc(images.length, stack);
-            for (int index = 0; index < images.length; index++) {
-                barriers.get(index)
-                        .sType$Default()
-                        .srcStageMask(initialized ? COMPUTE_AND_RAY_STAGES : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT)
-                        .srcAccessMask(initialized
-                                ? VK12.VK_ACCESS_SHADER_READ_BIT
-                                        | VK12.VK_ACCESS_SHADER_WRITE_BIT
-                                : 0L)
-                        .dstStageMask(VK12.VK_PIPELINE_STAGE_TRANSFER_BIT)
-                        .dstAccessMask(VK12.VK_ACCESS_TRANSFER_WRITE_BIT)
-                        .oldLayout(initialized
-                                ? VK12.VK_IMAGE_LAYOUT_GENERAL
-                                : VK12.VK_IMAGE_LAYOUT_UNDEFINED)
-                        .newLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                        .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .image(images[index].image());
-                barriers.get(index).subresourceRange()
-                        .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                        .baseMipLevel(0)
-                        .levelCount(1)
-                        .baseArrayLayer(0)
-                        .layerCount(1);
-            }
-            issueBarrier(commandBuffer, stack, barriers);
-        }
+        VulkanSync.imageBarriers(commandBuffer, images,
+                initialized ? VK12.VK_IMAGE_LAYOUT_GENERAL : VK12.VK_IMAGE_LAYOUT_UNDEFINED,
+                VK12.VK_IMAGE_LAYOUT_GENERAL,
+                initialized ? COMPUTE_AND_RAY_STAGES : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                initialized
+                        ? VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT
+                        : 0L,
+                VK12.VK_PIPELINE_STAGE_TRANSFER_BIT, VK12.VK_ACCESS_TRANSFER_WRITE_BIT);
     }
 
     private static void clearImages(
@@ -752,132 +728,38 @@ final class SunShadowClipmap implements Destroyable {
 
     private static void transferWriteToShaderAccess(
             VkCommandBuffer commandBuffer, VulkanImage[] images) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkImageMemoryBarrier2.Buffer barriers =
-                    VkImageMemoryBarrier2.calloc(images.length, stack);
-            for (int index = 0; index < images.length; index++) {
-                barriers.get(index)
-                        .sType$Default()
-                        .srcStageMask(VK12.VK_PIPELINE_STAGE_TRANSFER_BIT)
-                        .srcAccessMask(VK12.VK_ACCESS_TRANSFER_WRITE_BIT)
-                        .dstStageMask(COMPUTE_AND_RAY_STAGES)
-                        .dstAccessMask(
-                                VK12.VK_ACCESS_SHADER_READ_BIT
-                                        | VK12.VK_ACCESS_SHADER_WRITE_BIT)
-                        .oldLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                        .newLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                        .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .image(images[index].image());
-                barriers.get(index).subresourceRange()
-                        .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                        .baseMipLevel(0)
-                        .levelCount(1)
-                        .baseArrayLayer(0)
-                        .layerCount(1);
-            }
-            issueBarrier(commandBuffer, stack, barriers);
-        }
+        VulkanSync.imageBarriers(commandBuffer, images,
+                VK12.VK_IMAGE_LAYOUT_GENERAL, VK12.VK_IMAGE_LAYOUT_GENERAL,
+                VK12.VK_PIPELINE_STAGE_TRANSFER_BIT, VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
+                COMPUTE_AND_RAY_STAGES,
+                VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
 
     private void rayWriteToShaderRead(VkCommandBuffer commandBuffer) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkImageMemoryBarrier2.Buffer barriers =
-                    VkImageMemoryBarrier2.calloc(this.depths.length, stack);
-            for (int index = 0; index < this.depths.length; index++) {
-                barriers.get(index)
-                        .sType$Default()
-                        .srcStageMask(
-                                KHRRayTracingPipeline
-                                        .VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR)
-                        .srcAccessMask(VK12.VK_ACCESS_SHADER_WRITE_BIT)
-                        .dstStageMask(COMPUTE_AND_RAY_STAGES)
-                        .dstAccessMask(VK12.VK_ACCESS_SHADER_READ_BIT)
-                        .oldLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                        .newLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                        .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .image(this.depths[index].image());
-                barriers.get(index).subresourceRange()
-                        .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                        .baseMipLevel(0)
-                        .levelCount(1)
-                        .baseArrayLayer(0)
-                        .layerCount(1);
-            }
-            issueBarrier(commandBuffer, stack, barriers);
-        }
+        VulkanSync.imageBarriers(commandBuffer, this.depths,
+                VK12.VK_IMAGE_LAYOUT_GENERAL, VK12.VK_IMAGE_LAYOUT_GENERAL,
+                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                VK12.VK_ACCESS_SHADER_WRITE_BIT, COMPUTE_AND_RAY_STAGES,
+                VK12.VK_ACCESS_SHADER_READ_BIT);
     }
 
     private static void rayWriteToRayWrite(
             VkCommandBuffer commandBuffer, VulkanImage image) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkImageMemoryBarrier2.Buffer barriers =
-                    VkImageMemoryBarrier2.calloc(1, stack);
-            VkImageMemoryBarrier2 barrier = barriers.get(0)
-                    .sType$Default()
-                    .srcStageMask(
-                            KHRRayTracingPipeline
-                                    .VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR)
-                    .srcAccessMask(VK12.VK_ACCESS_SHADER_WRITE_BIT)
-                    .dstStageMask(
-                            KHRRayTracingPipeline
-                                    .VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR)
-                    .dstAccessMask(VK12.VK_ACCESS_SHADER_WRITE_BIT)
-                    .oldLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                    .newLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                    .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                    .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                    .image(image.image());
-            barrier.subresourceRange()
-                    .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                    .baseMipLevel(0)
-                    .levelCount(1)
-                    .baseArrayLayer(0)
-                    .layerCount(1);
-            issueBarrier(commandBuffer, stack, barriers);
-        }
+        VulkanSync.imageBarrier(commandBuffer, image.image(),
+                VK12.VK_IMAGE_LAYOUT_GENERAL, VK12.VK_IMAGE_LAYOUT_GENERAL,
+                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                VK12.VK_ACCESS_SHADER_WRITE_BIT,
+                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
 
     private void shaderAccessToRayWrite(VkCommandBuffer commandBuffer) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkImageMemoryBarrier2.Buffer barriers =
-                    VkImageMemoryBarrier2.calloc(this.depths.length, stack);
-            for (int index = 0; index < this.depths.length; index++) {
-                barriers.get(index)
-                        .sType$Default()
-                        .srcStageMask(COMPUTE_AND_RAY_STAGES)
-                        .srcAccessMask(
-                                VK12.VK_ACCESS_SHADER_READ_BIT
-                                        | VK12.VK_ACCESS_SHADER_WRITE_BIT)
-                        .dstStageMask(
-                                KHRRayTracingPipeline
-                                        .VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR)
-                        .dstAccessMask(VK12.VK_ACCESS_SHADER_WRITE_BIT)
-                        .oldLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                        .newLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                        .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .image(this.depths[index].image());
-                barriers.get(index).subresourceRange()
-                        .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                        .baseMipLevel(0)
-                        .levelCount(1)
-                        .baseArrayLayer(0)
-                        .layerCount(1);
-            }
-            issueBarrier(commandBuffer, stack, barriers);
-        }
-    }
-
-    private static void issueBarrier(
-            VkCommandBuffer commandBuffer,
-            MemoryStack stack,
-            VkImageMemoryBarrier2.Buffer barriers) {
-        VkDependencyInfo dependency = VkDependencyInfo.calloc(stack)
-                .sType$Default()
-                .pImageMemoryBarriers(barriers);
-        KHRSynchronization2.vkCmdPipelineBarrier2KHR(commandBuffer, dependency);
+        VulkanSync.imageBarriers(commandBuffer, this.depths,
+                VK12.VK_IMAGE_LAYOUT_GENERAL, VK12.VK_IMAGE_LAYOUT_GENERAL,
+                COMPUTE_AND_RAY_STAGES,
+                VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT,
+                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
 
     private static void startBank(

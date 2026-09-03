@@ -5,12 +5,9 @@ import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.RawWavefrontFrame;
 import dev.prime.render.vulkan.VulkanImageInitializationBatch;
-import org.lwjgl.system.MemoryStack;
+import dev.prime.render.vulkan.VulkanSync;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
-import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK12;
-import org.lwjgl.vulkan.VkDependencyInfo;
-import org.lwjgl.vulkan.VkImageMemoryBarrier2;
 
 /** Owns every raw path-trace signal and concrete NGX image for one RR feature extent. */
 public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
@@ -67,42 +64,12 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     public void prepareForRayTrace(
             org.lwjgl.vulkan.VkCommandBuffer commandBuffer,
             VulkanImageInitializationBatch initialization) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkImageMemoryBarrier2.Buffer barriers = VkImageMemoryBarrier2.calloc(this.owned.length, stack);
-            for (int index = 0; index < this.owned.length; index++) {
-                VulkanImage image = this.owned[index];
-                boolean initialized = initialization.prepare(image);
-                barriers.get(index)
-                        .sType$Default()
-                        .srcStageMask(initialized
-                                ? VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
-                                : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT)
-                        .srcAccessMask(initialized
-                                ? VK12.VK_ACCESS_MEMORY_READ_BIT | VK12.VK_ACCESS_MEMORY_WRITE_BIT
-                                : 0L)
-                        .dstStageMask(
-                                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
-                                        | VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
-                        .dstAccessMask(VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT)
-                        .oldLayout(initialized
-                                ? VK12.VK_IMAGE_LAYOUT_GENERAL
-                                : VK12.VK_IMAGE_LAYOUT_UNDEFINED)
-                        .newLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                        .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .image(image.image());
-                barriers.get(index).subresourceRange()
-                        .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                        .baseMipLevel(0)
-                        .levelCount(1)
-                        .baseArrayLayer(0)
-                        .layerCount(1);
-            }
-            VkDependencyInfo dependency = VkDependencyInfo.calloc(stack)
-                    .sType$Default()
-                    .pImageMemoryBarriers(barriers);
-            KHRSynchronization2.vkCmdPipelineBarrier2KHR(commandBuffer, dependency);
-        }
+        VulkanSync.prepareImages(commandBuffer, initialization, this.owned,
+                VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                VK12.VK_ACCESS_MEMORY_READ_BIT | VK12.VK_ACCESS_MEMORY_WRITE_BIT,
+                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                        | VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
 
     @Override public VulkanImage noisyDiffuse() { return image(Role.NOISY_DIFFUSE); }

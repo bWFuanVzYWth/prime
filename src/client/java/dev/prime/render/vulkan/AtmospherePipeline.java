@@ -18,16 +18,13 @@ import java.util.zip.GZIPInputStream;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
-import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
-import org.lwjgl.vulkan.VkDependencyInfo;
 import org.lwjgl.vulkan.VkDescriptorBufferInfo;
 import org.lwjgl.vulkan.VkDescriptorImageInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkImageMemoryBarrier2;
 import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
 import org.lwjgl.vulkan.VkWriteDescriptorSet;
@@ -599,22 +596,11 @@ public final class AtmospherePipeline implements Destroyable {
     }
 
     private void transitionAllToGeneral(VkCommandBuffer commandBuffer) {
-        VulkanImage[] images = this.initialImages;
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkImageMemoryBarrier2.Buffer barriers = VkImageMemoryBarrier2.calloc(images.length, stack);
-            for (int index = 0; index < images.length; index++) {
-                fillBarrier(
-                        barriers.get(index),
-                        images[index],
-                        VK12.VK_IMAGE_LAYOUT_UNDEFINED,
-                        VK12.VK_IMAGE_LAYOUT_GENERAL,
-                        VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                        0L,
-                        VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
-            }
-            issueBarrier(commandBuffer, stack, barriers);
-        }
+        VulkanSync.imageBarriers(commandBuffer, this.initialImages,
+                VK12.VK_IMAGE_LAYOUT_UNDEFINED, VK12.VK_IMAGE_LAYOUT_GENERAL,
+                VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0L,
+                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
 
     private long nextFrameToken() {
@@ -635,83 +621,25 @@ public final class AtmospherePipeline implements Destroyable {
     private static void shaderReadToComputeWriteBarrier(
             VkCommandBuffer commandBuffer,
             VulkanImage[] images) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkImageMemoryBarrier2.Buffer barriers = VkImageMemoryBarrier2.calloc(images.length, stack);
-            for (int index = 0; index < images.length; index++) {
-                fillBarrier(
-                        barriers.get(index),
-                        images[index],
-                        VK12.VK_IMAGE_LAYOUT_GENERAL,
-                        VK12.VK_IMAGE_LAYOUT_GENERAL,
-                        // Raygen reads all atmosphere tables; the post-NRD composite also reads
-                        // aerial volumes. A new atmosphere dispatch must wait for both consumers
-                        // from the previous submission before overwriting either image.
-                        KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
-                                | VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK12.VK_ACCESS_SHADER_READ_BIT,
-                        VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK12.VK_ACCESS_SHADER_WRITE_BIT);
-            }
-            issueBarrier(commandBuffer, stack, barriers);
-        }
+        // Raygen and the post-NRD composite read these before the next atmosphere write.
+        VulkanSync.imageBarriers(commandBuffer, images,
+                VK12.VK_IMAGE_LAYOUT_GENERAL, VK12.VK_IMAGE_LAYOUT_GENERAL,
+                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                        | VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK12.VK_ACCESS_SHADER_READ_BIT,
+                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
 
     private static void computeWriteBarrier(
             VkCommandBuffer commandBuffer,
             VulkanImage[] images,
             long destinationStage) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkImageMemoryBarrier2.Buffer barriers = VkImageMemoryBarrier2.calloc(images.length, stack);
-            for (int index = 0; index < images.length; index++) {
-                fillBarrier(
-                        barriers.get(index),
-                        images[index],
-                        VK12.VK_IMAGE_LAYOUT_GENERAL,
-                        VK12.VK_IMAGE_LAYOUT_GENERAL,
-                        VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK12.VK_ACCESS_SHADER_WRITE_BIT,
-                        destinationStage,
-                        VK12.VK_ACCESS_SHADER_READ_BIT);
-            }
-            issueBarrier(commandBuffer, stack, barriers);
-        }
-    }
-
-    private static void issueBarrier(
-            VkCommandBuffer commandBuffer,
-            MemoryStack stack,
-            VkImageMemoryBarrier2.Buffer barriers) {
-        VkDependencyInfo dependency = VkDependencyInfo.calloc(stack)
-                .sType$Default()
-                .pImageMemoryBarriers(barriers);
-        KHRSynchronization2.vkCmdPipelineBarrier2KHR(commandBuffer, dependency);
-    }
-
-    private static void fillBarrier(
-            VkImageMemoryBarrier2 barrier,
-            VulkanImage image,
-            int oldLayout,
-            int newLayout,
-            long sourceStage,
-            long sourceAccess,
-            long destinationStage,
-            long destinationAccess) {
-        barrier.sType$Default()
-                .srcStageMask(sourceStage)
-                .srcAccessMask(sourceAccess)
-                .dstStageMask(destinationStage)
-                .dstAccessMask(destinationAccess)
-                .oldLayout(oldLayout)
-                .newLayout(newLayout)
-                .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                .image(image.image());
-        barrier.subresourceRange()
-                .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                .baseMipLevel(0)
-                .levelCount(1)
-                .baseArrayLayer(0)
-                .layerCount(1);
+        VulkanSync.imageBarriers(commandBuffer, images,
+                VK12.VK_IMAGE_LAYOUT_GENERAL, VK12.VK_IMAGE_LAYOUT_GENERAL,
+                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK12.VK_ACCESS_SHADER_WRITE_BIT,
+                destinationStage, VK12.VK_ACCESS_SHADER_READ_BIT);
     }
 
     private static ByteBuffer createPushConstants(

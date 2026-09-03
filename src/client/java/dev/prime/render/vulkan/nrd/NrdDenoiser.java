@@ -28,13 +28,10 @@ import org.joml.Matrix4f;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
-import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
-import org.lwjgl.vulkan.VkDependencyInfo;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkImageMemoryBarrier2;
 import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
 import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
@@ -229,34 +226,12 @@ public final class NrdDenoiser implements Destroyable {
             VkCommandBuffer commandBuffer,
             VulkanImageInitializationBatch initialization) {
         this.requireOpen();
-        VulkanImage[] allImages = this.images.allImages();
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkImageMemoryBarrier2.Buffer barriers = VkImageMemoryBarrier2.calloc(allImages.length, stack);
-            for (int index = 0; index < allImages.length; index++) {
-                VulkanImage image = allImages[index];
-                boolean initialized = initialization.prepare(image);
-                barriers.get(index)
-                        .sType$Default()
-                        .srcStageMask(initialized ? VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT)
-                        .srcAccessMask(initialized ? VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT : 0L)
-                        .dstStageMask(
-                                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
-                                        | VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
-                        .dstAccessMask(VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT)
-                        .oldLayout(initialized ? VK12.VK_IMAGE_LAYOUT_GENERAL : VK12.VK_IMAGE_LAYOUT_UNDEFINED)
-                        .newLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                        .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .image(image.image());
-                barriers.get(index).subresourceRange()
-                        .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                        .baseMipLevel(0)
-                        .levelCount(1)
-                        .baseArrayLayer(0)
-                        .layerCount(1);
-            }
-            issueImageBarrier(commandBuffer, stack, barriers);
-        }
+        VulkanSync.prepareImages(commandBuffer, initialization, this.images.allImages(),
+                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT,
+                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                        | VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
 
     /** Records only Prime's raygen-to-NRD adapter and returns its typed output boundary. */
@@ -585,16 +560,6 @@ public final class NrdDenoiser implements Destroyable {
                 VK12.VK_ACCESS_SHADER_WRITE_BIT,
                 VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                 VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
-    }
-
-    private static void issueImageBarrier(
-            VkCommandBuffer commandBuffer,
-            MemoryStack stack,
-            VkImageMemoryBarrier2.Buffer barriers) {
-        VkDependencyInfo dependency = VkDependencyInfo.calloc(stack)
-                .sType$Default()
-                .pImageMemoryBarriers(barriers);
-        KHRSynchronization2.vkCmdPipelineBarrier2KHR(commandBuffer, dependency);
     }
 
     /** One command-stream version after input preparation and before native reconstruction. */

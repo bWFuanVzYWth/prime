@@ -116,7 +116,7 @@ public final class StarmapTexture implements Destroyable {
             for (VulkanBuffer upload : pending) {
                 upload.flush(0L, upload.size());
             }
-            VulkanImageTransitions.imageBarrier(
+            VulkanSync.imageBarrier(
                     commandBuffer,
                     this.image.image(),
                     VK12.VK_IMAGE_LAYOUT_UNDEFINED,
@@ -144,7 +144,7 @@ public final class StarmapTexture implements Destroyable {
                         copy);
             }
 
-            VulkanImageTransitions.imageBarrier(
+            VulkanSync.imageBarrier(
                     commandBuffer,
                     this.image.image(),
                     VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
