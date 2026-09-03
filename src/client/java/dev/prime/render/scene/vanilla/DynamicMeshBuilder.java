@@ -7,6 +7,8 @@ import dev.prime.render.terrain.CpuSectionLights;
 import dev.prime.render.terrain.CpuSectionMesh;
 import dev.prime.render.terrain.OpacityMicromapData;
 import dev.prime.render.terrain.PrimitivePacking;
+import it.unimi.dsi.fastutil.floats.FloatArrayList;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -25,8 +27,8 @@ final class DynamicMeshBuilder {
     private final double offsetX;
     private final double offsetY;
     private final double offsetZ;
-    private final FloatWords positions = new FloatWords();
-    private final IntWords primitives = new IntWords();
+    private final FloatArrayList positions = new FloatArrayList(1024);
+    private final IntArrayList primitives = new IntArrayList(1024);
     private final ArrayList<DynamicSceneFrame.MotionSegment> motionSegments =
             new ArrayList<>();
     private final EnumSet<DynamicSceneFrame.CompatibilityIssue> compatibilityIssues =
@@ -44,7 +46,7 @@ final class DynamicMeshBuilder {
             throw new IllegalStateException("Nested dynamic motion object capture");
         }
         this.openMotionObject = new OpenMotionObject(
-                element, key, this.positions.size / 9);
+                element, key, this.positions.size() / 9);
     }
 
     void endMotionObject(VanillaSceneBoundary.Element element, long key) {
@@ -54,7 +56,7 @@ final class DynamicMeshBuilder {
                     "Dynamic motion object capture closed out of order");
         }
         this.openMotionObject = null;
-        int triangleCount = this.positions.size / 9 - object.firstTriangle;
+        int triangleCount = this.positions.size() / 9 - object.firstTriangle;
         if (triangleCount > 0) {
             this.motionSegments.add(new DynamicSceneFrame.MotionSegment(
                     element, key, object.firstTriangle, triangleCount));
@@ -102,10 +104,10 @@ final class DynamicMeshBuilder {
             throw new IllegalStateException(
                     "Dynamic mesh was built inside a motion object");
         }
-        int triangleCount = this.positions.size / 9;
+        int triangleCount = this.positions.size() / 9;
         CpuSectionMesh section = new CpuSectionMesh(
-                this.positions.toArray(),
-                this.primitives.toArray(),
+                this.positions.toFloatArray(),
+                this.primitives.toIntArray(),
                 0,
                 triangleCount,
                 0,
@@ -197,9 +199,15 @@ final class DynamicMeshBuilder {
             crossZ = -crossZ;
         }
 
-        this.positions.add(firstX, firstY, firstZ);
-        this.positions.add(secondX, secondY, secondZ);
-        this.positions.add(thirdX, thirdY, thirdZ);
+        this.positions.add(firstX);
+        this.positions.add(firstY);
+        this.positions.add(firstZ);
+        this.positions.add(secondX);
+        this.positions.add(secondY);
+        this.positions.add(secondZ);
+        this.positions.add(thirdX);
+        this.positions.add(thirdY);
+        this.positions.add(thirdZ);
         int uv0 = bakedMaterial
                 ? PrimitivePacking.packConstantUv(0.0F)
                 : PrimitivePacking.packUv(first.u, first.v);
@@ -231,25 +239,27 @@ final class DynamicMeshBuilder {
         boolean visibleEmission = fullBright(first.light)
                 && fullBright(second.light)
                 && fullBright(third.light);
-        this.primitives.add(uv0, uv1, uv2, tint);
-        this.primitives.add(
-                0,
-                PrimitivePacking.packDynamicControl(
-                        flags, textureIndex, visibleEmission, redAlpha),
-                bakedMaterial
-                        ? PrimitivePacking.CONSTANT_UV_DENSITY
-                        : PrimitivePacking.packUvDensity(
-                                edgeOneX,
-                                edgeOneY,
-                                edgeOneZ,
-                                edgeTwoX,
-                                edgeTwoY,
-                                edgeTwoZ,
-                                second.u - first.u,
-                                second.v - first.v,
-                                third.u - first.u,
-                                third.v - first.v),
-                (int) tangent);
+        this.primitives.add(uv0);
+        this.primitives.add(uv1);
+        this.primitives.add(uv2);
+        this.primitives.add(tint);
+        this.primitives.add(0);
+        this.primitives.add(PrimitivePacking.packDynamicControl(
+                flags, textureIndex, visibleEmission, redAlpha));
+        this.primitives.add(bakedMaterial
+                ? PrimitivePacking.CONSTANT_UV_DENSITY
+                : PrimitivePacking.packUvDensity(
+                        edgeOneX,
+                        edgeOneY,
+                        edgeOneZ,
+                        edgeTwoX,
+                        edgeTwoY,
+                        edgeTwoZ,
+                        second.u - first.u,
+                        second.v - first.v,
+                        third.u - first.u,
+                        third.v - first.v));
+        this.primitives.add((int) tangent);
     }
 
     private static boolean fullBright(int light) {
@@ -553,52 +563,4 @@ final class DynamicMeshBuilder {
         }
     }
 
-    private static final class FloatWords {
-        private float[] values = new float[1024];
-        private int size;
-
-        private void add(float first, float second, float third) {
-            this.ensure(3);
-            this.values[this.size++] = first;
-            this.values[this.size++] = second;
-            this.values[this.size++] = third;
-        }
-
-        private void ensure(int count) {
-            int required = Math.addExact(this.size, count);
-            if (required > this.values.length) {
-                this.values = java.util.Arrays.copyOf(
-                        this.values, Math.max(required, this.values.length * 2));
-            }
-        }
-
-        private float[] toArray() {
-            return java.util.Arrays.copyOf(this.values, this.size);
-        }
-    }
-
-    private static final class IntWords {
-        private int[] values = new int[1024];
-        private int size;
-
-        private void add(int first, int second, int third, int fourth) {
-            this.ensure(4);
-            this.values[this.size++] = first;
-            this.values[this.size++] = second;
-            this.values[this.size++] = third;
-            this.values[this.size++] = fourth;
-        }
-
-        private void ensure(int count) {
-            int required = Math.addExact(this.size, count);
-            if (required > this.values.length) {
-                this.values = java.util.Arrays.copyOf(
-                        this.values, Math.max(required, this.values.length * 2));
-            }
-        }
-
-        private int[] toArray() {
-            return java.util.Arrays.copyOf(this.values, this.size);
-        }
-    }
 }

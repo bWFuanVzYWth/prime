@@ -3,8 +3,9 @@ package dev.prime.render.terrain;
 import dev.prime.render.scene.CapturedSprite;
 import dev.prime.render.scene.CapturedSectionGeometry;
 import dev.prime.render.material.BuiltinMaterialClass;
+import it.unimi.dsi.fastutil.floats.FloatArrayList;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -484,24 +485,24 @@ public final class SectionMeshAccumulator {
     }
 
     private static float[] concatenate(
-            FloatArrayBuilder first, FloatArrayBuilder second, FloatArrayBuilder third) {
-        int secondOffset = first.size;
-        int thirdOffset = Math.addExact(secondOffset, second.size);
-        float[] result = new float[Math.addExact(thirdOffset, third.size)];
-        System.arraycopy(first.values, 0, result, 0, first.size);
-        System.arraycopy(second.values, 0, result, secondOffset, second.size);
-        System.arraycopy(third.values, 0, result, thirdOffset, third.size);
+            FloatArrayList first, FloatArrayList second, FloatArrayList third) {
+        int secondOffset = first.size();
+        int thirdOffset = Math.addExact(secondOffset, second.size());
+        float[] result = new float[Math.addExact(thirdOffset, third.size())];
+        System.arraycopy(first.elements(), 0, result, 0, first.size());
+        System.arraycopy(second.elements(), 0, result, secondOffset, second.size());
+        System.arraycopy(third.elements(), 0, result, thirdOffset, third.size());
         return result;
     }
 
     private static int[] concatenate(
-            IntArrayBuilder first, IntArrayBuilder second, IntArrayBuilder third) {
-        int secondOffset = first.size;
-        int thirdOffset = Math.addExact(secondOffset, second.size);
-        int[] result = new int[Math.addExact(thirdOffset, third.size)];
-        System.arraycopy(first.values, 0, result, 0, first.size);
-        System.arraycopy(second.values, 0, result, secondOffset, second.size);
-        System.arraycopy(third.values, 0, result, thirdOffset, third.size);
+            IntArrayList first, IntArrayList second, IntArrayList third) {
+        int secondOffset = first.size();
+        int thirdOffset = Math.addExact(secondOffset, second.size());
+        int[] result = new int[Math.addExact(thirdOffset, third.size())];
+        System.arraycopy(first.elements(), 0, result, 0, first.size());
+        System.arraycopy(second.elements(), 0, result, secondOffset, second.size());
+        System.arraycopy(third.elements(), 0, result, thirdOffset, third.size());
         return result;
     }
 
@@ -632,33 +633,9 @@ public final class SectionMeshAccumulator {
     }
 
     private static final class MeshBuilder {
-        private final FloatArrayBuilder positions = new FloatArrayBuilder();
-        private final IntArrayBuilder primitives = new IntArrayBuilder();
+        private final FloatArrayList positions = new FloatArrayList(1024);
+        private final IntArrayList primitives = new IntArrayList(1024);
         private final ArrayList<int[]> relations = new ArrayList<>();
         private int triangleCount;
-    }
-
-    private static final class FloatArrayBuilder {
-        private float[] values = new float[1024];
-        private int size;
-
-        private void add(float value) {
-            if (this.size == this.values.length) {
-                this.values = Arrays.copyOf(this.values, this.values.length * 2);
-            }
-            this.values[this.size++] = value;
-        }
-    }
-
-    private static final class IntArrayBuilder {
-        private int[] values = new int[1024];
-        private int size;
-
-        private void add(int value) {
-            if (this.size == this.values.length) {
-                this.values = Arrays.copyOf(this.values, this.values.length * 2);
-            }
-            this.values[this.size++] = value;
-        }
     }
 }

@@ -2,8 +2,9 @@ package dev.prime.render.terrain;
 
 import dev.prime.render.scene.CapturedSprite;
 import dev.prime.render.scene.SpritePixelView;
+import it.unimi.dsi.fastutil.floats.FloatArrayList;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -710,8 +711,8 @@ final class TextureVoxelMeshBuilder {
         private final boolean cutout;
         private final boolean transmissive;
         private final boolean cutoutGeometry;
-        private final FloatBuilder positions = new FloatBuilder();
-        private final IntBuilder primitives = new IntBuilder();
+        private final FloatArrayList positions = new FloatArrayList(4096);
+        private final IntArrayList primitives = new IntArrayList(4096);
         private final OpacityMicromapData.Builder opacityMicromap;
         private int triangleCount;
 
@@ -811,9 +812,9 @@ final class TextureVoxelMeshBuilder {
                 float[] second,
                 float[] third,
                 MaterialSample material) {
-            this.positions.add(first);
-            this.positions.add(second);
-            this.positions.add(third);
+            this.positions.addElements(this.positions.size(), first);
+            this.positions.addElements(this.positions.size(), second);
+            this.positions.addElements(this.positions.size(), third);
             int firstMaterialWord = material.baked()
                     ? material.packedLabPbrNormal
                     : PrimitivePacking.packConstantUv(material.localU);
@@ -875,8 +876,8 @@ final class TextureVoxelMeshBuilder {
                             ? OpacityMicromapData.fullyUnknown(this.triangleCount)
                             : this.opacityMicromap.build());
             return new CpuVoxelMesh(
-                    this.positions.build(),
-                    this.primitives.build(),
+                    this.positions.toFloatArray(),
+                    this.primitives.toIntArray(),
                     this.transmissive || this.cutoutGeometry ? 0 : this.triangleCount,
                     this.cutoutGeometry ? this.triangleCount : 0,
                     this.transmissive ? this.triangleCount : 0,
@@ -910,43 +911,4 @@ final class TextureVoxelMeshBuilder {
                 + first[2] * second[2];
     }
 
-    private static final class FloatBuilder {
-        private float[] values = new float[4096];
-        private int size;
-
-        void add(float[] value) {
-            this.ensure(3);
-            this.values[this.size++] = value[0];
-            this.values[this.size++] = value[1];
-            this.values[this.size++] = value[2];
-        }
-
-        float[] build() {
-            return Arrays.copyOf(this.values, this.size);
-        }
-
-        private void ensure(int count) {
-            if (this.size + count > this.values.length) {
-                this.values = Arrays.copyOf(
-                        this.values,
-                        Math.max(this.values.length * 2, this.size + count));
-            }
-        }
-    }
-
-    private static final class IntBuilder {
-        private int[] values = new int[4096];
-        private int size;
-
-        void add(int value) {
-            if (this.size == this.values.length) {
-                this.values = Arrays.copyOf(this.values, this.values.length * 2);
-            }
-            this.values[this.size++] = value;
-        }
-
-        int[] build() {
-            return Arrays.copyOf(this.values, this.size);
-        }
-    }
 }

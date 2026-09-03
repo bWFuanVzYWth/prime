@@ -1,5 +1,7 @@
 package dev.prime.render.terrain;
 
+import it.unimi.dsi.fastutil.floats.FloatArrayList;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -322,12 +324,12 @@ final class MergedFaceMeshBuilder {
     }
 
     private static final class Segment {
-        private final FloatBuilder opaquePositions = new FloatBuilder();
-        private final IntBuilder opaquePrimitives = new IntBuilder();
-        private final FloatBuilder cutoutPositions = new FloatBuilder();
-        private final IntBuilder cutoutPrimitives = new IntBuilder();
-        private final FloatBuilder transmissivePositions = new FloatBuilder();
-        private final IntBuilder transmissivePrimitives = new IntBuilder();
+        private final FloatArrayList opaquePositions = new FloatArrayList(1024);
+        private final IntArrayList opaquePrimitives = new IntArrayList(1024);
+        private final FloatArrayList cutoutPositions = new FloatArrayList(1024);
+        private final IntArrayList cutoutPrimitives = new IntArrayList(1024);
+        private final FloatArrayList transmissivePositions = new FloatArrayList(1024);
+        private final IntArrayList transmissivePrimitives = new IntArrayList(1024);
         private final ArrayList<int[]> opaqueRelations = new ArrayList<>();
         private final ArrayList<int[]> cutoutRelations = new ArrayList<>();
         private final ArrayList<int[]> transmissiveRelations = new ArrayList<>();
@@ -352,17 +354,17 @@ final class MergedFaceMeshBuilder {
 
         void add(MergeFace face, int u, int v, int width, int height) {
             float[][] corners = corners(face, u, v, width, height);
-            FloatBuilder positions = face.transmissive()
+            FloatArrayList positions = face.transmissive()
                     ? this.transmissivePositions
                     : (face.cutout() ? this.cutoutPositions : this.opaquePositions);
-            IntBuilder primitives = face.transmissive()
+            IntArrayList primitives = face.transmissive()
                     ? this.transmissivePrimitives
                     : (face.cutout() ? this.cutoutPrimitives : this.opaquePrimitives);
             addTriangle(positions, corners[0], corners[1], corners[2]);
             addTriangle(positions, corners[0], corners[2], corners[3]);
             // Repeated/projected UVs make both triangles of the rectangle semantically identical.
             // The shader maps this adjacent pair back to this single record.
-            primitives.add(face.primitive());
+            primitives.addElements(primitives.size(), face.primitive());
             if (face.transmissive()) {
                 this.transmissiveTriangles += 2;
                 this.transmissiveRelations.add(null);
@@ -385,15 +387,15 @@ final class MergedFaceMeshBuilder {
         void addComposite(MergeFace base, MergeFace overlay) {
             float[][] corners = corners(base, base.cellU(), base.cellV(), 1, 1);
             boolean cutoutGeometry = base.cutout() || base.transmissive();
-            FloatBuilder positions = cutoutGeometry
+            FloatArrayList positions = cutoutGeometry
                     ? this.cutoutPositions
                     : this.opaquePositions;
-            IntBuilder primitives = cutoutGeometry
+            IntArrayList primitives = cutoutGeometry
                     ? this.cutoutPrimitives
                     : this.opaquePrimitives;
             addTriangle(positions, corners[0], corners[1], corners[2]);
             addTriangle(positions, corners[0], corners[2], corners[3]);
-            primitives.add(overlay.primitive());
+            primitives.addElements(primitives.size(), overlay.primitive());
             int[] relation = new int[1 + CpuSectionMesh.PRIMITIVE_WORDS];
             int overlayFlags = PrimitivePacking.unpackControl(
                     overlay.primitive()[3], overlay.primitive()[5]);
@@ -501,32 +503,32 @@ final class MergedFaceMeshBuilder {
         }
 
         private static void addTriangle(
-                FloatBuilder positions,
+                FloatArrayList positions,
                 float[] first,
                 float[] second,
                 float[] third) {
-            positions.add(first);
-            positions.add(second);
-            positions.add(third);
+            positions.addElements(positions.size(), first);
+            positions.addElements(positions.size(), second);
+            positions.addElements(positions.size(), third);
         }
 
         private static float[] concatenate(
-                FloatBuilder first, FloatBuilder second, FloatBuilder third) {
+                FloatArrayList first, FloatArrayList second, FloatArrayList third) {
             float[] result = Arrays.copyOf(
-                    first.values, first.size + second.size + third.size);
-            System.arraycopy(second.values, 0, result, first.size, second.size);
+                    first.elements(), first.size() + second.size() + third.size());
+            System.arraycopy(second.elements(), 0, result, first.size(), second.size());
             System.arraycopy(
-                    third.values, 0, result, first.size + second.size, third.size);
+                    third.elements(), 0, result, first.size() + second.size(), third.size());
             return result;
         }
 
         private static int[] concatenate(
-                IntBuilder first, IntBuilder second, IntBuilder third) {
+                IntArrayList first, IntArrayList second, IntArrayList third) {
             int[] result = Arrays.copyOf(
-                    first.values, first.size + second.size + third.size);
-            System.arraycopy(second.values, 0, result, first.size, second.size);
+                    first.elements(), first.size() + second.size() + third.size());
+            System.arraycopy(second.elements(), 0, result, first.size(), second.size());
             System.arraycopy(
-                    third.values, 0, result, first.size + second.size, third.size);
+                    third.elements(), 0, result, first.size() + second.size(), third.size());
             return result;
         }
     }
@@ -621,37 +623,4 @@ final class MergedFaceMeshBuilder {
                 new RectangleDecomposition64.Scratch();
     }
 
-    private static final class FloatBuilder {
-        private float[] values = new float[1024];
-        private int size;
-
-        void add(float[] vector) {
-            this.ensure(3);
-            this.values[this.size++] = vector[0];
-            this.values[this.size++] = vector[1];
-            this.values[this.size++] = vector[2];
-        }
-
-        private void ensure(int count) {
-            if (this.size + count > this.values.length) {
-                this.values = Arrays.copyOf(
-                        this.values, Math.max(this.values.length * 2, this.size + count));
-            }
-        }
-    }
-
-    private static final class IntBuilder {
-        private int[] values = new int[1024];
-        private int size;
-
-        void add(int[] record) {
-            if (this.size + record.length > this.values.length) {
-                this.values = Arrays.copyOf(
-                        this.values,
-                        Math.max(this.values.length * 2, this.size + record.length));
-            }
-            System.arraycopy(record, 0, this.values, this.size, record.length);
-            this.size += record.length;
-        }
-    }
 }
