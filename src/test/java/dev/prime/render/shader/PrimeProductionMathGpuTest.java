@@ -6,11 +6,12 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.SplittableRandom;
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+@Tag("gpu-shader")
+@ExtendWith(ShaderComputeExtension.class)
 final class PrimeProductionMathGpuTest {
     private static final int CASES_PER_KIND = 8_192;
     private static final long TRANSPORT_SEED = 0x71A4_5A09_D522_0101L;
@@ -35,107 +36,10 @@ final class PrimeProductionMathGpuTest {
         0x7fc0_0001,
         0xbf80_0000
     };
+    private static ShaderComputeRunner runner;
 
-    @Nested
-    @Tag("gpu-shader")
-    @ExtendWith(ShaderComputeExtension.class)
-    final class Transport {
-        private static ShaderComputeRunner runner;
-
-        @Test
-        void integratorAndLightTransportMathKeepsItsNumericalContracts() throws IOException {
-            assertIntegratorAndLightTransportMath(runner);
-        }
-
-        @Test
-        void realtimeEtaScaleAndPathControlStayBitExactAcrossDispatchStorage()
-                throws IOException {
-            assertRealtimeState(runner);
-        }
-
-        @Test
-        void queuedPsrMatchesTheExplicitDeltaChain() throws IOException {
-            assertQueuedPsr(runner);
-        }
-    }
-
-    @Nested
-    @Tag("gpu-shader")
-    @ExtendWith(ShaderComputeExtension.class)
-    final class Bsdf {
-        private static ShaderComputeRunner runner;
-
-        @Test
-        void bsdfAndMediumBoundaryContractsHoldAcrossTheInputDomain() throws IOException {
-            assertBsdfAndMediumBoundaryContracts(runner);
-        }
-
-        @Test
-        void projectedSolidAngleSamplingStaysInsideTheClippedTriangle() throws IOException {
-            assertProjectedSolidAngleSampling(runner);
-        }
-    }
-
-    @Nested
-    @Tag("gpu-shader")
-    @ExtendWith(ShaderComputeExtension.class)
-    final class MaterialAndCelestial {
-        private static ShaderComputeRunner runner;
-
-        @Test
-        void celestialFramePreservesPolesEquatorialCoordinatesAndDailyRotation()
-                throws IOException {
-            assertCelestialFrame(runner);
-        }
-
-        @Test
-        void labPbrDecodeTranslationAndFresnelCoverTheIntegerTransportDomain()
-                throws IOException {
-            assertLabPbrDecodeTranslationAndFresnel(runner);
-        }
-    }
-
-    @Nested
-    @Tag("gpu-shader")
-    @ExtendWith(ShaderComputeExtension.class)
-    final class ReconstructionAndExposure {
-        private static ShaderComputeRunner runner;
-
-        @Test
-        void nrdPackingDemodulationSanitizationAndReJitterContractsHold() throws IOException {
-            assertNrdContracts(runner);
-        }
-
-        @Test
-        void fsrMasksKeepFoliageLockedAndUseSoftTransparencyHistory() throws IOException {
-            assertFsrMasks(runner);
-        }
-
-        @Test
-        void fsrDepthAndMotionStayInsideTheDeclaredInputDomains() throws IOException {
-            assertFsrDepthAndMotion(runner);
-        }
-
-        @Test
-        void exposureAndDisplayCurvesUseTheProductionContract() throws IOException {
-            assertExposureAndDisplayCurves(runner);
-        }
-    }
-
-    @Nested
-    @Tag("gpu-shader")
-    @ExtendWith(ShaderComputeExtension.class)
-    final class SamplingParity {
-        private static ShaderComputeRunner runner;
-
-        @Test
-        void samplingIsDeterministicAndProducesUnitIntervalValues() throws IOException {
-            assertSamplingParity(runner);
-        }
-    }
-
-    private static void assertIntegratorAndLightTransportMath(ShaderComputeRunner runner)
-            throws IOException {
+    @Test
+    void integratorAndLightTransportMathKeepsItsNumericalContracts() throws IOException {
         int kinds = 22;
         int inputWords = 6;
         ShaderPropertyBatch.assertProperties(
@@ -148,7 +52,8 @@ final class PrimeProductionMathGpuTest {
                 TRANSPORT_SEED);
     }
 
-    private static void assertRealtimeState(ShaderComputeRunner runner) throws IOException {
+    @Test
+    void realtimeEtaScaleAndPathControlStayBitExactAcrossDispatchStorage() throws IOException {
         int cases = 2 * CASES_PER_KIND;
         int inputWords = 2;
         var input = ShaderTestBuffer.inputWriter(cases, inputWords);
@@ -185,8 +90,8 @@ final class PrimeProductionMathGpuTest {
                 REALTIME_STATE_SEED);
     }
 
-    private static void assertBsdfAndMediumBoundaryContracts(ShaderComputeRunner runner)
-            throws IOException {
+    @Test
+    void bsdfAndMediumBoundaryContractsHoldAcrossTheInputDomain() throws IOException {
         int kinds = 4;
         int inputWords = 4;
         int outputWords = 5;
@@ -203,8 +108,8 @@ final class PrimeProductionMathGpuTest {
 
     }
 
-    private static void assertCelestialFrame(ShaderComputeRunner runner)
-            throws IOException {
+    @Test
+    void celestialFramePreservesPolesEquatorialCoordinatesAndDailyRotation() throws IOException {
         int kinds = 5;
         int inputWords = 2;
         ShaderPropertyBatch.assertProperties(
@@ -217,8 +122,8 @@ final class PrimeProductionMathGpuTest {
                 CELESTIAL_SEED);
     }
 
-    private static void assertLabPbrDecodeTranslationAndFresnel(ShaderComputeRunner runner)
-            throws IOException {
+    @Test
+    void labPbrDecodeTranslationAndFresnelCoverTheIntegerTransportDomain() throws IOException {
         int kinds = 2;
         int inputWords = 3;
         ShaderPropertyBatch.assertProperties(
@@ -231,7 +136,8 @@ final class PrimeProductionMathGpuTest {
                 MATERIAL_SEED);
     }
 
-    private static void assertNrdContracts(ShaderComputeRunner runner) throws IOException {
+    @Test
+    void nrdPackingDemodulationSanitizationAndReJitterContractsHold() throws IOException {
         int kinds = 10;
         int inputWords = 4;
         ShaderPropertyBatch.assertProperties(
@@ -244,8 +150,8 @@ final class PrimeProductionMathGpuTest {
                 NRD_SEED);
     }
 
-    private static void assertFsrMasks(ShaderComputeRunner runner)
-            throws IOException {
+    @Test
+    void fsrMasksKeepFoliageLockedAndUseSoftTransparencyHistory() throws IOException {
         int cases = 1 << 10;
         int inputWords = 3;
         var input = ShaderTestBuffer.inputWriter(cases, inputWords);
@@ -263,7 +169,8 @@ final class PrimeProductionMathGpuTest {
                 FSR_SEED);
     }
 
-    private static void assertFsrDepthAndMotion(ShaderComputeRunner runner) throws IOException {
+    @Test
+    void fsrDepthAndMotionStayInsideTheDeclaredInputDomains() throws IOException {
         int kinds = 9;
         int inputWords = 3;
         ByteBuffer input = fsrGuideCases(kinds, inputWords);
@@ -277,8 +184,8 @@ final class PrimeProductionMathGpuTest {
                 FSR_SEED);
     }
 
-    private static void assertExposureAndDisplayCurves(ShaderComputeRunner runner)
-            throws IOException {
+    @Test
+    void exposureAndDisplayCurvesUseTheProductionContract() throws IOException {
         int kinds = 9;
         int inputWords = 2;
         ShaderPropertyBatch.assertProperties(
@@ -395,7 +302,8 @@ final class PrimeProductionMathGpuTest {
         return input.buffer();
     }
 
-    private static void assertQueuedPsr(ShaderComputeRunner runner) throws IOException {
+    @Test
+    void queuedPsrMatchesTheExplicitDeltaChain() throws IOException {
         int inputWords = 21;
         ShaderPropertyBatch.assertProperties(
                 runner,
@@ -810,8 +718,8 @@ final class PrimeProductionMathGpuTest {
         return input.buffer();
     }
 
-    private static void assertProjectedSolidAngleSampling(ShaderComputeRunner runner)
-            throws IOException {
+    @Test
+    void projectedSolidAngleSamplingStaysInsideTheClippedTriangle() throws IOException {
         int kinds = 6;
         int inputWords = 7;
         ShaderPropertyBatch.assertProperties(
@@ -1553,7 +1461,8 @@ final class PrimeProductionMathGpuTest {
         return input.buffer();
     }
 
-    private static void assertSamplingParity(ShaderComputeRunner runner) throws IOException {
+    @Test
+    void samplingIsDeterministicAndProducesUnitIntervalValues() throws IOException {
         int cases = 1 << 15;
         int inputWords = 2;
         int outputWords = 4;
