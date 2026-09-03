@@ -131,70 +131,6 @@ public final class CpuClusterMesh {
         return this.segments;
     }
 
-    public long opaqueTriangleCount() {
-        return this.triangleLayout.opaqueTriangleCount();
-    }
-
-    public long cutoutTriangleCount() {
-        return this.triangleLayout.cutoutTriangleCount();
-    }
-
-    public long transmissiveTriangleCount() {
-        return this.triangleLayout.transmissiveTriangleCount();
-    }
-
-    public long opaqueMacroTriangleCount() {
-        return this.triangleLayout.opaqueMacroTriangleCount();
-    }
-
-    public long cutoutMacroTriangleCount() {
-        return this.triangleLayout.cutoutMacroTriangleCount();
-    }
-
-    public long transmissiveMacroTriangleCount() {
-        return this.triangleLayout.transmissiveMacroTriangleCount();
-    }
-
-    public long opaquePrimitiveCount() {
-        return this.triangleLayout.opaquePrimitiveCount();
-    }
-
-    public long cutoutPrimitiveCount() {
-        return this.triangleLayout.cutoutPrimitiveCount();
-    }
-
-    public long transmissivePrimitiveCount() {
-        return this.triangleLayout.transmissivePrimitiveCount();
-    }
-
-    public long primitiveCount() {
-        return this.triangleLayout.primitiveCount();
-    }
-
-    public long cutoutPrimitiveBase() {
-        return this.triangleLayout.cutoutPrimitiveBase();
-    }
-
-    public long transmissivePrimitiveBase() {
-        return this.triangleLayout.transmissivePrimitiveBase();
-    }
-
-    public long opaqueMacroTriangleBase() {
-        return this.triangleLayout.opaqueMacroTriangleBase();
-    }
-
-    public long cutoutMacroTriangleBase() {
-        return this.triangleLayout.cutoutMacroTriangleBase();
-    }
-
-    public long transmissiveMacroTriangleBase() {
-        return this.triangleLayout.transmissiveMacroTriangleBase();
-    }
-
-    public long triangleCount() {
-        return this.triangleLayout.triangleCount();
-    }
-
     public TriangleLayout triangleLayout() {
         return this.triangleLayout;
     }
@@ -260,12 +196,13 @@ public final class CpuClusterMesh {
 
     public long positionBytes() {
         return Math.multiplyExact(
-                this.triangleCount(), 9L * Float.BYTES);
+                this.triangleLayout.triangleCount(), 9L * Float.BYTES);
     }
 
     public long primitiveBytes() {
         return Math.multiplyExact(
-                this.primitiveCount(), (long) CpuSectionMesh.PRIMITIVE_WORDS * Integer.BYTES);
+                this.triangleLayout.primitiveCount(),
+                (long) CpuSectionMesh.PRIMITIVE_WORDS * Integer.BYTES);
     }
 
     public boolean hasSurfaceRelations() {
@@ -296,7 +233,7 @@ public final class CpuClusterMesh {
             return 0L;
         }
         return Math.multiplyExact(
-                Math.addExact(this.primitiveCount(), tailWords), Integer.BYTES);
+                Math.addExact(this.triangleLayout.primitiveCount(), tailWords), Integer.BYTES);
     }
 
     /** Global primitive-order relation table used by the single cluster BLAS section record. */
@@ -422,6 +359,7 @@ public final class CpuClusterMesh {
         public int transmissivePrimitiveCount() {
             return Math.toIntExact(this.triangleLayout.transmissivePrimitiveCount());
         }
+
     }
 
     private static void requireMacroTail(List<Segment> segments, int category) {

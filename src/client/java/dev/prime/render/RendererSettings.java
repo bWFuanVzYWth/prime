@@ -41,10 +41,6 @@ public record RendererSettings(
         }
     }
 
-    public float voxelTextureSurfaceMaximumHeight() {
-        return VoxelSurfaceSettings.maximumHeight(this.voxelTextureSurfaceStrengthSteps);
-    }
-
     public boolean usesResourceNormals() {
         return this.surfaceDetailMode.usesResourceNormals();
     }

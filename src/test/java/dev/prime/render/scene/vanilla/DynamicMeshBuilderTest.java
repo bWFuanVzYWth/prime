@@ -29,8 +29,8 @@ final class DynamicMeshBuilderTest {
         DynamicSceneFrame frame = builder.build(0, 0, 0, List.of());
         CpuClusterMesh mesh = frame.mesh();
 
-        assertEquals(2L, mesh.triangleCount());
-        assertEquals(2L, mesh.cutoutTriangleCount());
+        assertEquals(2L, mesh.triangleLayout().triangleCount());
+        assertEquals(2L, mesh.triangleLayout().cutoutTriangleCount());
         assertTrue(mesh.lights().isEmpty());
         assertFalse(mesh.opacityMicromap().isEmpty());
 
@@ -118,7 +118,7 @@ final class DynamicMeshBuilderTest {
 
         DynamicSceneFrame frame = builder.build(0, 0, 0, List.of());
 
-        assertEquals(2L, frame.mesh().triangleCount());
+        assertEquals(2L, frame.mesh().triangleLayout().triangleCount());
     }
 
     @Test

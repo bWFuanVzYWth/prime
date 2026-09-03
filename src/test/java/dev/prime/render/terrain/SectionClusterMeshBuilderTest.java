@@ -66,7 +66,7 @@ final class SectionClusterMeshBuilderTest {
         assertEquals(9, cluster.segments().size());
         assertEquals(
                 (long) trianglesPerSection * sectionCount,
-                cluster.triangleCount());
+                cluster.triangleLayout().triangleCount());
         assertEquals(
                 section.byteSize() * sectionCount,
                 cluster.positionBytes() + cluster.primitiveBytes());
@@ -93,13 +93,13 @@ final class SectionClusterMeshBuilderTest {
         builder.add(1, 0, 0, right.build());
         CpuClusterMesh cluster = builder.build();
 
-        assertEquals(2, cluster.triangleCount());
+        assertEquals(2, cluster.triangleLayout().triangleCount());
         CpuClusterMesh.Segment segment = cluster.segments().getFirst();
         assertEquals(2, segment.opaqueTriangleCount());
         assertEquals(2, segment.opaqueMacroTriangleCount());
         assertEquals(CpuSectionMesh.PRIMITIVE_WORDS, segment.primitiveRecords().length);
         assertEquals(32L, cluster.primitiveBytes());
-        assertEquals(0L, cluster.opaqueMacroTriangleBase());
+        assertEquals(0L, cluster.triangleLayout().opaqueMacroTriangleBase());
         assertArrayEquals(
                 new float[] {
                     15, 2, 3, 17, 2, 3, 17, 3, 3,
@@ -126,7 +126,7 @@ final class SectionClusterMeshBuilderTest {
         assertEquals(3, segment.opaqueTriangleCount());
         assertEquals(2, segment.opaqueMacroTriangleCount());
         assertEquals(2, segment.opaquePrimitiveCount());
-        assertEquals(1L, cluster.opaqueMacroTriangleBase());
+        assertEquals(1L, cluster.triangleLayout().opaqueMacroTriangleBase());
         assertEquals(2L * 32L, cluster.primitiveBytes());
     }
 
@@ -148,7 +148,7 @@ final class SectionClusterMeshBuilderTest {
         builder.add(0, 0, 0, accumulator.build());
         CpuClusterMesh cluster = builder.build();
 
-        assertEquals(2, cluster.triangleCount());
+        assertEquals(2, cluster.triangleLayout().triangleCount());
         assertArrayEquals(
                 new float[] {
                     0, 0, plane, 2, 0, plane, 2, 1, plane,
@@ -174,7 +174,7 @@ final class SectionClusterMeshBuilderTest {
         builder.add(0, 0, 0, accumulator.build());
         CpuClusterMesh cluster = builder.build();
 
-        assertEquals(2, cluster.triangleCount());
+        assertEquals(2, cluster.triangleLayout().triangleCount());
         assertEquals(2, cluster.segments().getFirst().cutoutTriangleCount());
         assertEquals(2, cluster.segments().getFirst().cutoutMacroTriangleCount());
         assertEquals(
@@ -217,7 +217,7 @@ final class SectionClusterMeshBuilderTest {
         builder.add(0, 0, 0, accumulator.build());
         CpuClusterMesh cluster = builder.build();
 
-        assertEquals(6, cluster.triangleCount());
+        assertEquals(6, cluster.triangleLayout().triangleCount());
     }
 
     @Test
@@ -237,7 +237,7 @@ final class SectionClusterMeshBuilderTest {
         SectionClusterMeshBuilder builder = new SectionClusterMeshBuilder(0, 0, 0);
         builder.add(0, 0, 0, accumulator.build());
 
-        assertEquals(2, builder.build().triangleCount());
+        assertEquals(2, builder.build().triangleLayout().triangleCount());
     }
 
     @Test
@@ -258,8 +258,8 @@ final class SectionClusterMeshBuilderTest {
         builder.add(0, 0, 0, accumulator.build());
         CpuClusterMesh cluster = builder.build();
 
-        assertEquals(4, cluster.triangleCount());
-        assertEquals(4, cluster.opaqueTriangleCount());
+        assertEquals(4, cluster.triangleLayout().triangleCount());
+        assertEquals(4, cluster.triangleLayout().opaqueTriangleCount());
     }
 
     @Test
@@ -281,8 +281,8 @@ final class SectionClusterMeshBuilderTest {
         builder.add(0, 0, 0, accumulator.build());
         CpuClusterMesh cluster = builder.build();
 
-        assertEquals(4, cluster.triangleCount());
-        assertEquals(4, cluster.opaqueTriangleCount());
+        assertEquals(4, cluster.triangleLayout().triangleCount());
+        assertEquals(4, cluster.triangleLayout().opaqueTriangleCount());
     }
 
     @Test
@@ -301,11 +301,11 @@ final class SectionClusterMeshBuilderTest {
         builder.add(0, 0, 0, accumulator.build());
         CpuClusterMesh cluster = builder.build();
 
-        assertEquals(2, cluster.triangleCount());
-        assertEquals(0, cluster.opaqueTriangleCount());
-        assertEquals(0, cluster.cutoutTriangleCount());
-        assertEquals(2, cluster.transmissiveTriangleCount());
-        assertEquals(2, cluster.transmissiveMacroTriangleCount());
+        assertEquals(2, cluster.triangleLayout().triangleCount());
+        assertEquals(0, cluster.triangleLayout().opaqueTriangleCount());
+        assertEquals(0, cluster.triangleLayout().cutoutTriangleCount());
+        assertEquals(2, cluster.triangleLayout().transmissiveTriangleCount());
+        assertEquals(2, cluster.triangleLayout().transmissiveMacroTriangleCount());
         int[] primitives = cluster.segments().getFirst().primitiveRecords();
         int flags = PrimitivePacking.unpackControl(primitives[3], primitives[5]);
         assertTrue(PrimitivePacking.isTransmissive(flags));

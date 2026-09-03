@@ -26,7 +26,7 @@ final class FluidQuadTranslationTest {
 
         CpuClusterMesh translated = translate(captured);
 
-        assertEquals(0L, translated.transmissiveTriangleCount());
+        assertEquals(0L, translated.triangleLayout().transmissiveTriangleCount());
     }
 
     @Test
@@ -46,8 +46,8 @@ final class FluidQuadTranslationTest {
 
         CpuClusterMesh cluster = translate(captured);
 
-        assertEquals(0L, cluster.transmissiveTriangleCount());
-        assertEquals(0L, cluster.opaqueTriangleCount());
+        assertEquals(0L, cluster.triangleLayout().transmissiveTriangleCount());
+        assertEquals(0L, cluster.triangleLayout().opaqueTriangleCount());
         assertEquals(0, cluster.lights().emitterCount());
     }
 
@@ -67,7 +67,7 @@ final class FluidQuadTranslationTest {
 
         CpuClusterMesh cluster = translate(section.build());
 
-        assertEquals(2L, cluster.transmissiveTriangleCount());
+        assertEquals(2L, cluster.triangleLayout().transmissiveTriangleCount());
         assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
     }
 
@@ -81,7 +81,7 @@ final class FluidQuadTranslationTest {
 
         CpuClusterMesh cluster = translate(section.build());
 
-        assertEquals(2L, cluster.transmissiveTriangleCount());
+        assertEquals(2L, cluster.triangleLayout().transmissiveTriangleCount());
         assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
     }
 
@@ -100,8 +100,8 @@ final class FluidQuadTranslationTest {
 
         CpuClusterMesh cluster = translate(section.build());
 
-        assertEquals(2L, cluster.opaqueTriangleCount());
-        assertEquals(0L, cluster.transmissiveTriangleCount());
+        assertEquals(2L, cluster.triangleLayout().opaqueTriangleCount());
+        assertEquals(0L, cluster.triangleLayout().transmissiveTriangleCount());
         assertEquals(2, cluster.lights().emitterCount());
         assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
         assertAllPrimitivesReferenceEmitters(cluster);
@@ -118,7 +118,7 @@ final class FluidQuadTranslationTest {
 
         CpuClusterMesh cluster = translate(section.build());
 
-        assertEquals(2L, cluster.transmissiveTriangleCount());
+        assertEquals(2L, cluster.triangleLayout().transmissiveTriangleCount());
         assertAllTriangleNormalsHaveYSign(cluster, -1.0F);
     }
 

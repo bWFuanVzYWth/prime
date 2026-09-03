@@ -282,7 +282,7 @@ final class SpritePixelBoundaryTest {
 
         assertTrue(cluster.voxelMeshes().isEmpty());
         assertEquals(0, cluster.voxelInstances().count());
-        assertEquals(2L, cluster.opaqueTriangleCount());
+        assertEquals(2L, cluster.triangleLayout().opaqueTriangleCount());
     }
 
     @Test

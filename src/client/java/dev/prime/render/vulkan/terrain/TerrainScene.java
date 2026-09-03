@@ -1148,6 +1148,7 @@ public final class TerrainScene implements AutoCloseable {
             StagingArena.Batch stagingBatch,
             VkCommandBuffer commandBuffer) {
         CpuClusterMesh mesh = upload.mesh();
+        TriangleLayout triangleLayout = mesh.triangleLayout();
         PreparedBlas.CompactionPolicy compactionPolicy =
                 compactionPolicy(upload.dynamic());
         VulkanBuffer positions = null;
@@ -1162,8 +1163,8 @@ public final class TerrainScene implements AutoCloseable {
         ArrayList<PreparedBlas> voxelBlases =
                 new ArrayList<>(mesh.voxelMeshes().size());
         try {
-            if (mesh.triangleCount() != 0L) {
-                int primitiveCount = Math.toIntExact(mesh.primitiveCount());
+            if (triangleLayout.triangleCount() != 0L) {
+                int primitiveCount = Math.toIntExact(triangleLayout.primitiveCount());
                 int[] mediumMap = this.mediumIds.resolve(mesh.mediumCatalog());
                 MaterialIdResolver.Cache materialCache = MaterialIdResolver.cache(
                         mesh.mediumCatalog(), this.materialIds::resolve);
@@ -1279,7 +1280,7 @@ public final class TerrainScene implements AutoCloseable {
                                 this.tintSamples::resolve,
                                 label)));
             }
-            if (upload.dynamic() && mesh.triangleCount() != 0L) {
+            if (upload.dynamic() && triangleLayout.triangleCount() != 0L) {
                 copyBuffer(
                         commandBuffer,
                         stagingBatch.write(
@@ -1404,28 +1405,34 @@ public final class TerrainScene implements AutoCloseable {
             GpuSurfaceRelationTable.Encoding relationEncoding,
             VulkanBuffer positions,
             VulkanBuffer primitives) {
+        TriangleLayout triangleLayout = mesh.triangleLayout();
         long[] positionCursors = new long[] {
             0L,
-            Math.multiplyExact(mesh.opaqueTriangleCount(), 9L * Float.BYTES),
+            Math.multiplyExact(triangleLayout.opaqueTriangleCount(), 9L * Float.BYTES),
             Math.multiplyExact(
-                    Math.addExact(mesh.opaqueTriangleCount(), mesh.cutoutTriangleCount()),
+                    Math.addExact(
+                            triangleLayout.opaqueTriangleCount(),
+                            triangleLayout.cutoutTriangleCount()),
                     9L * Float.BYTES)
         };
         long[] primitiveCursors = new long[] {
             0L,
             Math.multiplyExact(
-                    mesh.opaquePrimitiveCount(),
+                    triangleLayout.opaquePrimitiveCount(),
                     (long) CpuSectionMesh.PRIMITIVE_WORDS * Integer.BYTES),
             Math.multiplyExact(
-                    Math.addExact(mesh.opaquePrimitiveCount(), mesh.cutoutPrimitiveCount()),
+                    Math.addExact(
+                            triangleLayout.opaquePrimitiveCount(),
+                            triangleLayout.cutoutPrimitiveCount()),
                     (long) CpuSectionMesh.PRIMITIVE_WORDS * Integer.BYTES)
         };
         int[] relationCursors = new int[] {
             0,
-            Math.toIntExact(mesh.opaquePrimitiveCount()),
+            Math.toIntExact(triangleLayout.opaquePrimitiveCount()),
             Math.toIntExact(
                     Math.addExact(
-                            mesh.opaquePrimitiveCount(), mesh.cutoutPrimitiveCount()))
+                            triangleLayout.opaquePrimitiveCount(),
+                            triangleLayout.cutoutPrimitiveCount()))
         };
         for (CpuClusterMesh.Segment segment : mesh.segments()) {
             int[] primitiveRecords = MediumIdResolver.primitiveRecords(

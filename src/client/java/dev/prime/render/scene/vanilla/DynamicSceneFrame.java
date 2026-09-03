@@ -37,7 +37,7 @@ public record DynamicSceneFrame(
             Objects.requireNonNull(segment, "motion segment");
             if (segment.firstTriangle() < previousEnd
                     || (long) segment.firstTriangle() + segment.triangleCount()
-                            > mesh.triangleCount()) {
+                            > mesh.triangleLayout().triangleCount()) {
                 throw new IllegalArgumentException(
                         "Dynamic motion segments must be ordered, disjoint, and inside the mesh");
             }

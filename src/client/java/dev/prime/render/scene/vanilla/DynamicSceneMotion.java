@@ -15,7 +15,7 @@ public record DynamicSceneMotion(
     public DynamicSceneMotion {
         Objects.requireNonNull(frame, "frame");
         Objects.requireNonNull(previousPositions, "previousPositions");
-        if (previousPositions.length != frame.mesh().triangleCount() * 9L) {
+        if (previousPositions.length != frame.mesh().triangleLayout().triangleCount() * 9L) {
             throw new IllegalArgumentException(
                     "Previous dynamic positions do not match the current mesh");
         }

@@ -31,7 +31,7 @@ public record CompiledCluster(
             throw new IllegalArgumentException(
                     "Compiled cluster key must identify an aligned cluster");
         }
-        long expectedMotionWords = dynamic ? mesh.triangleCount() * 9L : 0L;
+        long expectedMotionWords = dynamic ? mesh.triangleLayout().triangleCount() * 9L : 0L;
         if (motionPositions.length != expectedMotionWords) {
             throw new IllegalArgumentException(
                     "Dynamic motion payload does not match the compiled cluster");

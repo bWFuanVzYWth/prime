@@ -45,7 +45,7 @@ final class DynamicSceneCaptureTest {
                         redAlpha));
         DynamicSceneFrame frame = builder.build(0, 0, 0, java.util.List.of());
 
-        assertEquals(2L, frame.mesh().triangleCount());
+        assertEquals(2L, frame.mesh().triangleLayout().triangleCount());
         int packed = frame.mesh().segments().getFirst().primitiveRecords()[5];
         assertTrue(dev.prime.render.terrain.PrimitivePacking.usesDynamicRedAlpha(packed));
     }

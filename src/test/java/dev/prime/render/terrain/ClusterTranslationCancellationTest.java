@@ -237,7 +237,7 @@ final class ClusterTranslationCancellationTest {
     }
 
     private static void assertMeshEquals(CpuClusterMesh expected, CpuClusterMesh actual) {
-        assertEquals(expected.triangleCount(), actual.triangleCount());
+        assertEquals(expected.triangleLayout(), actual.triangleLayout());
         assertEquals(expected.segments().size(), actual.segments().size());
         for (int index = 0; index < expected.segments().size(); index++) {
             CpuClusterMesh.Segment left = expected.segments().get(index);

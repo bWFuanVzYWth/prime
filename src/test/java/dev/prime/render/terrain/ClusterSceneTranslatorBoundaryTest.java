@@ -55,7 +55,7 @@ final class ClusterSceneTranslatorBoundaryTest {
         TestSprite sprite = new TestSprite("zero_area");
         CpuClusterMesh result = translate(zeroAreaQuad(), surface(sprite, 15));
 
-        assertEquals(0L, result.triangleCount());
+        assertEquals(0L, result.triangleLayout().triangleCount());
         assertEquals(0L, result.surfaceRelationBytes());
         assertEquals(0, result.lights().emitterCount());
     }

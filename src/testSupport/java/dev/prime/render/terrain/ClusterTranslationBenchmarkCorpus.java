@@ -51,12 +51,13 @@ public final class ClusterTranslationBenchmarkCorpus {
     public static Fingerprint fingerprint(CpuClusterMesh mesh) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            update(digest, mesh.opaqueTriangleCount());
-            update(digest, mesh.cutoutTriangleCount());
-            update(digest, mesh.transmissiveTriangleCount());
-            update(digest, mesh.opaqueMacroTriangleCount());
-            update(digest, mesh.cutoutMacroTriangleCount());
-            update(digest, mesh.transmissiveMacroTriangleCount());
+            TriangleLayout layout = mesh.triangleLayout();
+            update(digest, layout.opaqueTriangleCount());
+            update(digest, layout.cutoutTriangleCount());
+            update(digest, layout.transmissiveTriangleCount());
+            update(digest, layout.opaqueMacroTriangleCount());
+            update(digest, layout.cutoutMacroTriangleCount());
+            update(digest, layout.transmissiveMacroTriangleCount());
             update(digest, mesh.segments().size());
             for (CpuClusterMesh.Segment segment : mesh.segments()) {
                 update(digest, segment.opaqueTriangleCount());
@@ -74,8 +75,8 @@ public final class ClusterTranslationBenchmarkCorpus {
             }
             return new Fingerprint(
                     HexFormat.of().formatHex(digest.digest()),
-                    mesh.triangleCount(),
-                    mesh.primitiveCount(),
+                    layout.triangleCount(),
+                    layout.primitiveCount(),
                     mesh.byteSize());
         } catch (NoSuchAlgorithmException exception) {
             throw new AssertionError("SHA-256 is required by Java", exception);
