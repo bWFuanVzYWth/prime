@@ -71,20 +71,12 @@ public final class PrimeConfig {
                 rendererRevision);
     }
 
-    public static int additionalSpecularBounces() {
-        return data.additionalSpecularBounces;
-    }
-
     public static void setAdditionalSpecularBounces(int value) {
         value = SpecularBounceSettings.validateCount(value);
         if (value != data.additionalSpecularBounces) {
             data.additionalSpecularBounces = value;
             rendererChanged();
         }
-    }
-
-    public static int minimumBounces() {
-        return data.minimumBounces;
     }
 
     public static void setMinimumBounces(int value) {
@@ -95,20 +87,12 @@ public final class PrimeConfig {
         }
     }
 
-    public static int maximumBounces() {
-        return data.maximumBounces;
-    }
-
     public static void setMaximumBounces(int value) {
         value = MaximumBounceSettings.validateCount(value);
         if (value != data.maximumBounces) {
             data.maximumBounces = value;
             rendererChanged();
         }
-    }
-
-    public static int terrainWorkerPercentage() {
-        return data.terrainWorkerPercentage;
     }
 
     public static void setTerrainWorkerPercentage(int value) {

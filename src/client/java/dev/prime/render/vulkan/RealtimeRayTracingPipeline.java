@@ -567,14 +567,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
     public void destroy() {
         if (!this.destroyed) {
             this.destroyed = true;
-            if (this.bindings != null) {
-                this.bindings.destroy();
-                this.bindings = null;
-            }
-            if (this.wavefront != null) {
-                this.wavefront.destroy();
-                this.wavefront = null;
-            }
+            this.releaseSizedResourcesAfterIdle();
             this.program.destroy();
             VK12.vkDestroyDescriptorSetLayout(
                     this.context.vkDevice(), this.descriptorSetLayout, null);

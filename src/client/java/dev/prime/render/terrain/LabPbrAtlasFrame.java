@@ -373,10 +373,6 @@ public record LabPbrAtlasFrame(
             output[3] = (float) coverage / count;
         }
 
-        private static int clamp(int value, int minimum, int maximum) {
-            return Math.max(minimum, Math.min(maximum, value));
-        }
-
         @FunctionalInterface
         public interface ArgbReader {
             int argb(int x, int y);
@@ -641,10 +637,6 @@ public record LabPbrAtlasFrame(
             return alpha << 24 | red << 16 | (current & 0x0000_ffff);
         }
 
-        private static int clamp(int value, int minimum, int maximum) {
-            return Math.max(minimum, Math.min(maximum, value));
-        }
-
         private static int encodeSnorm(double value) {
             return encodeUnorm(value * 0.5 + 0.5);
         }
@@ -702,5 +694,9 @@ public record LabPbrAtlasFrame(
             return (a - alpha * alpha * inverseHyperbolicTangent)
                     / (a * a * a);
         }
+    }
+
+    private static int clamp(int value, int minimum, int maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
     }
 }

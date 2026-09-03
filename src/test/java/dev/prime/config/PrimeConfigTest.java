@@ -146,23 +146,15 @@ final class PrimeConfigTest {
         PrimeConfig.restoreDefaults();
 
         assertEquals(revision + 1L, PrimeConfig.rendererSettings().revision());
-        assertEquals(MaximumBounceSettings.DEFAULT_COUNT, PrimeConfig.maximumBounces());
         assertEquals(
                 MaximumBounceSettings.DEFAULT_COUNT,
                 PrimeConfig.rendererSettings().maximumBounces());
-        assertEquals(SpecularBounceSettings.DEFAULT_COUNT, PrimeConfig.additionalSpecularBounces());
         assertEquals(
                 SpecularBounceSettings.DEFAULT_COUNT,
                 PrimeConfig.rendererSettings().additionalSpecularBounces());
         assertEquals(
                 MinimumBounceSettings.DEFAULT_COUNT,
-                PrimeConfig.minimumBounces());
-        assertEquals(
-                MinimumBounceSettings.DEFAULT_COUNT,
                 PrimeConfig.rendererSettings().minimumBounces());
-        assertEquals(
-                TerrainWorkerSettings.DEFAULT_PERCENTAGE,
-                PrimeConfig.terrainWorkerPercentage());
         assertEquals(
                 TerrainWorkerSettings.DEFAULT_PERCENTAGE,
                 PrimeConfig.rendererSettings().terrainWorkerPercentage());
@@ -175,7 +167,7 @@ final class PrimeConfigTest {
 
     @Test
     void terrainWorkerShareDoesNotInvalidateTemporalRendering() {
-        int previousPercentage = PrimeConfig.terrainWorkerPercentage();
+        int previousPercentage = PrimeConfig.rendererSettings().terrainWorkerPercentage();
         long previousRevision = PrimeConfig.rendererSettings().revision();
         int replacement = previousPercentage == TerrainWorkerSettings.MAXIMUM_PERCENTAGE
                 ? TerrainWorkerSettings.DEFAULT_PERCENTAGE
