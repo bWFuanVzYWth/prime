@@ -280,7 +280,6 @@ final class RealtimeRenderer implements Destroyable {
                 input.camera(),
                 System.nanoTime(),
                 input.scene().resetRevision(),
-                input.textureRevision(),
                 sampleFrame.reset(),
                 input.astronomy().sunDirection(),
                 settings.lighting(),
@@ -395,7 +394,6 @@ final class RealtimeRenderer implements Destroyable {
             MaterialTexturePages materialTextures,
             VulkanGpuTextureView atlasView,
             VulkanGpuSampler atlasSampler,
-            long textureRevision,
             List<TraceBackend.SceneTexture> sceneTextures) {
         RenderInput {
             Objects.requireNonNull(mainTarget, "mainTarget");

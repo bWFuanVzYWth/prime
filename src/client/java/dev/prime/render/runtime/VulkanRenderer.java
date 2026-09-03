@@ -368,7 +368,6 @@ public final class VulkanRenderer implements AutoCloseable {
                         this.materialTextures,
                         atlas.view(),
                         atlas.sampler(),
-                        atlas.textureRevision(),
                         this.sceneTextures));
         this.debugLines = this.withRendererDiagnostics(settings);
     }

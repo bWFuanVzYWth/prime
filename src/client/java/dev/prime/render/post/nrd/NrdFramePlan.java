@@ -2,6 +2,10 @@ package dev.prime.render.post.nrd;
 
 import dev.prime.render.FrameCamera;
 import dev.prime.render.FrameTime;
+import dev.prime.render.SunDirection;
+import dev.prime.render.post.ReconstructionQualityMode;
+import dev.prime.render.post.SubpixelJitter;
+import dev.prime.render.post.TemporalReconstructionState;
 import java.util.Objects;
 
 /**
@@ -10,21 +14,21 @@ import java.util.Objects;
  * <p>The plan contains no native instance, Vulkan handle or mutable backend token.
  */
 public record NrdFramePlan(
-        NrdFrameInput input,
+        FrameCamera camera,
         FrameCamera historyCamera,
-        float historyJitterX,
-        float historyJitterY,
+        SubpixelJitter jitter,
+        SubpixelJitter historyJitter,
         int frameIndex,
         boolean restart,
-        float deltaMilliseconds) {
+        float deltaMilliseconds,
+        SunDirection sunDirection) {
     public NrdFramePlan {
-        Objects.requireNonNull(input, "input");
+        Objects.requireNonNull(camera, "camera");
         Objects.requireNonNull(historyCamera, "historyCamera");
-        if (!Float.isFinite(historyJitterX)
-                || !Float.isFinite(historyJitterY)
-                || Math.abs(historyJitterX) > 0.5F
-                || Math.abs(historyJitterY) > 0.5F
-                || !Float.isFinite(deltaMilliseconds)
+        Objects.requireNonNull(jitter, "jitter");
+        Objects.requireNonNull(historyJitter, "historyJitter");
+        Objects.requireNonNull(sunDirection, "sunDirection");
+        if (!Float.isFinite(deltaMilliseconds)
                 || deltaMilliseconds < 0.0F
                 || deltaMilliseconds
                         > FrameTime.MAXIMUM_DELTA_MILLISECONDS) {
@@ -35,5 +39,26 @@ public record NrdFramePlan(
             throw new IllegalArgumentException(
                     "NRD planned frame index must be non-negative");
         }
+    }
+
+    public static NrdFramePlan from(
+            TemporalReconstructionState.Plan temporal,
+            SubpixelJitter jitter,
+            ReconstructionQualityMode quality,
+            SunDirection sunDirection) {
+        Objects.requireNonNull(temporal, "temporal");
+        Objects.requireNonNull(quality, "quality");
+        SubpixelJitter historyJitter = temporal.restart()
+                ? jitter
+                : quality.jitter(Math.subtractExact(temporal.frameIndex(), 1));
+        return new NrdFramePlan(
+                temporal.camera(),
+                temporal.historyCamera(),
+                jitter,
+                historyJitter,
+                temporal.frameIndex(),
+                temporal.restart(),
+                temporal.deltaMilliseconds(),
+                sunDirection);
     }
 }

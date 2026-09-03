@@ -2,9 +2,7 @@ package dev.prime.render.vulkan.nrd;
 
 import dev.prime.render.vulkan.GeneratedShaderPrograms;
 import dev.prime.render.post.nrd.NrdCameraTransform;
-import dev.prime.render.post.nrd.NrdFrameInput;
 import dev.prime.render.post.nrd.NrdFramePlan;
-import dev.prime.render.post.SubmittedFrame;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.render.AerialEpipolarMapping;
@@ -261,33 +259,26 @@ public final class NrdDenoiser implements Destroyable {
         }
     }
 
-    /**
-     * Records only Prime's raygen-to-NRD adapter and returns its typed output boundary.
-     *
-     * <p>The returned state is not history until {@link #submitted(FrameToken)} is called.
-     */
+    /** Records only Prime's raygen-to-NRD adapter and returns its typed output boundary. */
     public PreparedFrame prepareInputs(
             VkCommandBuffer commandBuffer,
-            SubmittedFrame<NrdFramePlan> frame) {
+            NrdFramePlan plan) {
         this.requireOpen();
         Objects.requireNonNull(commandBuffer, "commandBuffer");
-        // Preparation may fail after commands are emitted. Never retry one semantic version.
-        NrdFramePlan plan = Objects.requireNonNull(frame, "frame")
-                .claimForExecution();
-        NrdFrameInput input = plan.input();
+        Objects.requireNonNull(plan, "plan");
         rayTraceToComputeBarrier(commandBuffer);
         PreparedNrdFrame prepared = this.inputPreparationPipeline.record(
                 commandBuffer,
-                input.camera(),
+                plan.camera(),
                 plan.historyCamera(),
                 this.width,
                 this.height,
-                input.cameraJitterX(),
-                input.cameraJitterY(),
+                plan.jitter().x(),
+                plan.jitter().y(),
                 this.preparedFrame);
         return new PreparedFrame(
                 this,
-                frame,
+                plan,
                 prepared);
     }
 
@@ -305,22 +296,21 @@ public final class NrdDenoiser implements Destroyable {
         // A failure can occur after commands or native state have been emitted. Never allow the
         // same logical version to be recorded into another command buffer.
         frame.consumed = true;
-        NrdFramePlan plan = frame.planned.plan();
-        NrdFrameInput input = plan.input();
+        NrdFramePlan plan = frame.plan;
         this.nativeInstance.setFrameSettings(createFrameSettings(
-                input.camera(),
+                plan.camera(),
                 plan.historyCamera(),
-                input.cameraJitterX(),
-                input.cameraJitterY(),
-                plan.historyJitterX(),
-                plan.historyJitterY(),
+                plan.jitter().x(),
+                plan.jitter().y(),
+                plan.historyJitter().x(),
+                plan.historyJitter().y(),
                 this.width,
                 this.height,
                 plan.frameIndex(),
                 plan.restart(),
                 plan.deltaMilliseconds(),
                 false,
-                input.sunDirection()));
+                plan.sunDirection()));
         NrdNative.DispatchList dispatches = this.nativeInstance.getDispatches();
         NrdFrameBindings bindings = this.bindingPool.acquire(dispatches.size());
         try {
@@ -355,21 +345,20 @@ public final class NrdDenoiser implements Destroyable {
             computeToComputeBarrier(commandBuffer);
             AerialEpipolarMapping.Epipole epipole =
                     this.atmosphere.aerialEpipole(
-                            input.camera(),
-                            input.sunDirection());
+                            plan.camera(),
+                            plan.sunDirection());
             this.composite.record(
                     commandBuffer,
                     this.width,
                     this.height,
                     sunRadianceMultiplier,
-                    input.cameraJitterX(),
-                    input.cameraJitterY(),
+                    plan.jitter().x(),
+                    plan.jitter().y(),
                     epipole.x(),
                     epipole.y());
             return new FrameToken(
                     this,
-                    bindings,
-                    frame.planned);
+                    bindings);
         } catch (RuntimeException exception) {
             this.bindingPool.recycle(bindings);
             throw exception;
@@ -377,14 +366,13 @@ public final class NrdDenoiser implements Destroyable {
     }
 
     /** Must be called immediately after the command buffer containing {@code token} is submitted. */
-    public SubmittedFrame<NrdFramePlan> submitted(FrameToken token) {
+    public void submitted(FrameToken token) {
         this.requireOpen();
         if (token.owner != this || token.submitted || token.abandoned) {
             throw new IllegalArgumentException("NRD frame token does not belong to this submission");
         }
         token.submitted = true;
         this.context.afterSubmission(() -> this.bindingPool.recycle(token.bindings));
-        return token.planned;
     }
 
     /** Returns bindings for reconstruction commands that were recorded but never submitted. */
@@ -612,71 +600,35 @@ public final class NrdDenoiser implements Destroyable {
     /** One command-stream version after input preparation and before native reconstruction. */
     public static final class PreparedFrame {
         private final NrdDenoiser owner;
-        private final SubmittedFrame<NrdFramePlan> planned;
+        private final NrdFramePlan plan;
         private final PreparedNrdFrame inputs;
         private boolean consumed;
 
         private PreparedFrame(
                 NrdDenoiser owner,
-                SubmittedFrame<NrdFramePlan> planned,
+                NrdFramePlan plan,
                 PreparedNrdFrame inputs) {
             this.owner = owner;
-            this.planned = planned;
+            this.plan = plan;
             this.inputs = inputs;
         }
 
         public PreparedNrdFrame inputs() {
             return this.inputs;
         }
-
-        public FrameCamera camera() {
-            return this.planned.plan().input().camera();
-        }
-
-        public FrameCamera historyCamera() {
-            return this.planned.plan().historyCamera();
-        }
-
-        public float historyJitterX() {
-            return this.planned.plan().historyJitterX();
-        }
-
-        public float historyJitterY() {
-            return this.planned.plan().historyJitterY();
-        }
-
-        public int frameIndex() {
-            return this.planned.plan().frameIndex();
-        }
-
-        public boolean restart() {
-            return this.planned.plan().restart();
-        }
-
-        public float deltaMilliseconds() {
-            return this.planned.plan().deltaMilliseconds();
-        }
-
-        public SunDirection sunDirection() {
-            return this.planned.plan().input().sunDirection();
-        }
-
     }
 
     public static final class FrameToken {
         private final NrdDenoiser owner;
         private final NrdFrameBindings bindings;
-        private final SubmittedFrame<NrdFramePlan> planned;
         private boolean submitted;
         private boolean abandoned;
 
         private FrameToken(
                 NrdDenoiser owner,
-                NrdFrameBindings bindings,
-                SubmittedFrame<NrdFramePlan> planned) {
+                NrdFrameBindings bindings) {
             this.owner = owner;
             this.bindings = bindings;
-            this.planned = planned;
         }
     }
 

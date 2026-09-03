@@ -11,7 +11,6 @@ public record ReconstructionFrameParameters(
         FrameCamera camera,
         long frameTimeNanos,
         long sceneRevision,
-        long textureRevision,
         boolean forceRestart,
         SunDirection sunDirection,
         LightingSettings.Snapshot lighting,

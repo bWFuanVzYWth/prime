@@ -161,7 +161,6 @@ public final class Fsr3Upscaler implements Destroyable {
             FrameCamera camera,
             long frameTimeNanos,
             long sceneResetRevision,
-            long textureRevision,
             boolean forceRestart) {
         this.requireOpen();
         Objects.requireNonNull(camera, "camera");
@@ -360,6 +359,10 @@ public final class Fsr3Upscaler implements Destroyable {
 
         public boolean cameraCut() {
             return this.temporal.plan().cameraCut();
+        }
+
+        public TemporalReconstructionState.Plan temporalPlan() {
+            return this.temporal.plan();
         }
     }
 }

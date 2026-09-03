@@ -7,11 +7,8 @@ import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionFrame;
 import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.post.ReconstructionQualityMode;
-import dev.prime.render.post.SubmittedFrame;
 import dev.prime.render.vulkan.fsr.Fsr3Upscaler;
 import dev.prime.render.vulkan.nrd.NrdDenoiser;
-import dev.prime.render.post.nrd.NrdFrameHistory;
-import dev.prime.render.post.nrd.NrdFrameInput;
 import dev.prime.render.post.nrd.NrdFramePlan;
 import dev.prime.render.vulkan.reconstruction.ReconstructionDebugSettings;
 import dev.prime.render.vulkan.reconstruction.VulkanReconstructionProcessor;
@@ -32,7 +29,6 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
     private final int displayHeight;
     private final VulkanImage sceneColor;
     private final NrdDenoiser denoiser;
-    private final NrdFrameHistory nrdHistory = new NrdFrameHistory();
     private final Fsr3Upscaler upscaler;
     private final VulkanImage displayOutput;
     private final VulkanImage stableRadiance;
@@ -149,25 +145,10 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
                 parameters.camera(),
                 parameters.frameTimeNanos(),
                 parameters.sceneRevision(),
-                parameters.textureRevision(),
                 parameters.forceRestart());
-        try {
-            SubmittedFrame<NrdFramePlan> nrd = this.nrdHistory.plan(
-                    new NrdFrameInput(
-                            parameters.camera(),
-                            parameters.frameTimeNanos(),
-                            parameters.sceneRevision(),
-                            parameters.textureRevision(),
-                            parameters.sunDirection(),
-                            fsr.jitter().x(),
-                            fsr.jitter().y(),
-                            fsr.reset()));
-            return new FrameToken(
-                    this, fsr, nrd, debugSettings);
-        } catch (RuntimeException exception) {
-            throw ResourceCleanup.run(
-                    () -> this.upscaler.abandon(fsr), exception);
-        }
+        NrdFramePlan nrd = NrdFramePlan.from(
+                fsr.temporalPlan(), fsr.jitter(), this.quality, parameters.sunDirection());
+        return new FrameToken(this, fsr, nrd, debugSettings);
     }
 
     @Override
@@ -221,8 +202,12 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
             ReconstructionFrameParameters parameters,
             VulkanImageInitializationBatch initialization) {
         FrameToken token = requireFrame(frame);
+        if (token.recorded) {
+            throw new IllegalArgumentException("NRD-FSR frame was already recorded");
+        }
+        token.recorded = true;
         // Recording can fail after emitting commands; such a token must never be retried into the
-        // same or another command buffer. The child SubmittedFrame claims are authoritative.
+        // same or another command buffer.
         token.nrdPrepared =
                 this.denoiser.prepareInputs(commandBuffer, token.nrdPlan);
         token.nrd = this.denoiser.recordReconstruction(
@@ -254,16 +239,10 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
             throw new IllegalArgumentException("NRD-FSR frame was not recorded exactly once");
         }
         RuntimeException failure = null;
-        SubmittedFrame<NrdFramePlan> submittedNrd = null;
         try {
-            submittedNrd = this.denoiser.submitted(token.nrd);
+            this.denoiser.submitted(token.nrd);
         } catch (RuntimeException exception) {
             failure = exception;
-        }
-        if (submittedNrd != null) {
-            SubmittedFrame<NrdFramePlan> committedNrd = submittedNrd;
-            failure = ResourceCleanup.run(
-                    () -> this.nrdHistory.submitted(committedNrd), failure);
         }
         failure = ResourceCleanup.run(
                 () -> this.upscaler.submitted(token.fsr), failure);
@@ -279,8 +258,6 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
             failure = ResourceCleanup.run(
                     () -> this.denoiser.abandon(token.nrd), failure);
         }
-        failure = ResourceCleanup.run(
-                () -> this.nrdHistory.abandon(token.nrdPlan), failure);
         failure = ResourceCleanup.run(
                 () -> this.upscaler.abandon(token.fsr), failure);
         ResourceCleanup.throwIfFailed(failure);
@@ -341,16 +318,17 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
     public static final class FrameToken implements Frame {
         private final NrdFsrPostProcessor owner;
         private final Fsr3Upscaler.FrameToken fsr;
-        private final SubmittedFrame<NrdFramePlan> nrdPlan;
+        private final NrdFramePlan nrdPlan;
         private final ReconstructionDebugSettings debugSettings;
         private final ReconstructionFrame semantic;
+        private boolean recorded;
         private NrdDenoiser.PreparedFrame nrdPrepared;
         private NrdDenoiser.FrameToken nrd;
 
         private FrameToken(
                 NrdFsrPostProcessor owner,
                 Fsr3Upscaler.FrameToken fsr,
-                SubmittedFrame<NrdFramePlan> nrdPlan,
+                NrdFramePlan nrdPlan,
                 ReconstructionDebugSettings debugSettings) {
             this.owner = owner;
             this.fsr = fsr;
