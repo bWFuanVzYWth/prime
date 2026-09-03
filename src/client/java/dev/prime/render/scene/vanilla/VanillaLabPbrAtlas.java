@@ -238,7 +238,7 @@ public final class VanillaLabPbrAtlas {
         return new SpriteId(identifier.getNamespace(), identifier.getPath());
     }
 
-    private static LabPbrMaterialMap.Pixels materialPixels(
+    private static LabPbrAtlasFrame.MaterialSource materialPixels(
             LabPbrAtlasFrame.MaterialSource source,
             int baseFrameWidth,
             int baseFrameHeight,
@@ -271,9 +271,10 @@ public final class VanillaLabPbrAtlas {
                 }
             }
         }
-        return new LabPbrMaterialMap.Pixels(
+        return new LabPbrAtlasFrame.MaterialSource(
                 normalized,
                 width,
+                rows * baseFrameHeight,
                 baseFrameWidth,
                 baseFrameHeight,
                 source.columns(),

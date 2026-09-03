@@ -84,9 +84,9 @@ final class LabPbrMaterialSetTest {
 
     private static LabPbrMaterialMap material(int value) {
         return new LabPbrMaterialMap(
-                new LabPbrMaterialMap.Pixels(
-                        new int[] {value}, 1, 1, 1, 1, 1),
-                new LabPbrMaterialMap.Pixels(
-                        new int[] {value}, 1, 1, 1, 1, 1));
+                new LabPbrAtlasFrame.MaterialSource(
+                        new int[] {value}, 1, 1, 1, 1, 1, 1),
+                new LabPbrAtlasFrame.MaterialSource(
+                        new int[] {value}, 1, 1, 1, 1, 1, 1));
     }
 }

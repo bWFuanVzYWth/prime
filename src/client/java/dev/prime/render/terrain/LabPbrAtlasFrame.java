@@ -1,5 +1,6 @@
 package dev.prime.render.terrain;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -693,6 +694,19 @@ public record LabPbrAtlasFrame(
                     0.5 * Math.log((1.0 + a) / (1.0 - a));
             return (a - alpha * alpha * inverseHyperbolicTangent)
                     / (a * a * a);
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return this == other
+                    || other instanceof MaterialSource source
+                            && this.layout.equals(source.layout)
+                            && Arrays.equals(this.pixels, source.pixels);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * this.layout.hashCode() + Arrays.hashCode(this.pixels);
         }
     }
 

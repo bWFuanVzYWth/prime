@@ -78,10 +78,10 @@ final class MaterialRecipeResolverTest {
         LabPbrHeightMap height = LabPbrHeightMap.fromNormal(
                 new int[] {0x028080ff}, 1, 1, 1, 1, 1, 1);
         LabPbrMaterialMap material = new LabPbrMaterialMap(
-                new LabPbrMaterialMap.Pixels(
-                        new int[] {0xff8080ff}, 1, 1, 1, 1, 1),
-                new LabPbrMaterialMap.Pixels(
-                        new int[] {0xff000400}, 1, 1, 1, 1, 1));
+                new LabPbrAtlasFrame.MaterialSource(
+                        new int[] {0xff8080ff}, 1, 1, 1, 1, 1, 1),
+                new LabPbrAtlasFrame.MaterialSource(
+                        new int[] {0xff000400}, 1, 1, 1, 1, 1, 1));
         LabPbrMaterialSet source = new LabPbrMaterialSet(
                 Map.of(),
                 Set.of(ID),

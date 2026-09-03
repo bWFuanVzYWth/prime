@@ -184,15 +184,15 @@ final class TextureVoxelSurfaceTest {
         LabPbrHeightMap baseHeight = LabPbrHeightMap.fromNormal(
                 baseNormal, 16, 16, 16, 16, 1, 1);
         LabPbrMaterialMap baseMaterial = new LabPbrMaterialMap(
-                new LabPbrMaterialMap.Pixels(
-                        baseNormal, 16, 16, 16, 1, 1),
-                new LabPbrMaterialMap.Pixels(
-                        baseSpecular, 16, 16, 16, 1, 1));
+                new LabPbrAtlasFrame.MaterialSource(
+                        baseNormal, 16, 16, 16, 16, 1, 1),
+                new LabPbrAtlasFrame.MaterialSource(
+                        baseSpecular, 16, 16, 16, 16, 1, 1));
         LabPbrMaterialMap overlayMaterial = new LabPbrMaterialMap(
-                new LabPbrMaterialMap.Pixels(
-                        overlayNormal, 16, 16, 16, 1, 1),
-                new LabPbrMaterialMap.Pixels(
-                        overlaySpecular, 16, 16, 16, 1, 1));
+                new LabPbrAtlasFrame.MaterialSource(
+                        overlayNormal, 16, 16, 16, 16, 1, 1),
+                new LabPbrAtlasFrame.MaterialSource(
+                        overlaySpecular, 16, 16, 16, 16, 1, 1));
         LabPbrMaterialSet materials = new LabPbrMaterialSet(
                 Map.of(),
                 Set.of(
