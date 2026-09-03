@@ -12,7 +12,7 @@ import java.util.Set;
  * representation deliberately avoids joining them into another full-size CPU mesh.
  */
 public final class CpuClusterMesh {
-    private final List<Segment> segments;
+    private final List<CpuMeshSegment> segments;
     private final TriangleLayout triangleLayout;
     private final OpacityMicromapData opacityMicromap;
     private final CompiledClusterLights lights;
@@ -22,7 +22,7 @@ public final class CpuClusterMesh {
     private final Set<StaticCompatibilityIssue> compatibilityIssues;
 
     private CpuClusterMesh(
-            List<Segment> segments,
+            List<CpuMeshSegment> segments,
             OpacityMicromapData opacityMicromap,
             CompiledClusterLights lights,
             List<CpuVoxelMesh> voxelMeshes,
@@ -38,7 +38,7 @@ public final class CpuClusterMesh {
     }
 
     private CpuClusterMesh(
-            List<Segment> segments,
+            List<CpuMeshSegment> segments,
             OpacityMicromapData opacityMicromap,
             CompiledClusterLights lights,
             List<CpuVoxelMesh> voxelMeshes,
@@ -47,7 +47,7 @@ public final class CpuClusterMesh {
         Set<StaticCompatibilityIssue> compatibilityIssues) {
         this.segments = List.copyOf(segments);
         TriangleLayout combined = TriangleLayout.triangles(0L, 0L, 0L);
-        for (Segment segment : this.segments) {
+        for (CpuMeshSegment segment : this.segments) {
             combined = combined.plus(segment.triangleLayout());
         }
         Objects.requireNonNull(opacityMicromap, "opacityMicromap");
@@ -92,18 +92,14 @@ public final class CpuClusterMesh {
             List<CpuSectionMesh> meshes,
             List<CpuVoxelMesh> voxelMeshes,
             CpuVoxelInstances voxelInstances) {
-        ArrayList<Segment> segments = new ArrayList<>(meshes.size());
+        ArrayList<CpuMeshSegment> segments = new ArrayList<>(meshes.size());
         ArrayList<CpuSectionLights.Translated> lightSources = new ArrayList<>();
         OpacityMicromapData.Builder opacityMicromap = new OpacityMicromapData.Builder();
         for (CpuSectionMesh mesh : meshes) {
             if (mesh.isEmpty()) {
                 continue;
             }
-            segments.add(new Segment(
-                    mesh.positions(),
-                    mesh.primitiveRecords(),
-                    mesh.surfaceRelationRecords(),
-                    mesh.triangleLayout()));
+            segments.add(mesh.geometry());
             opacityMicromap.append(mesh.opacityMicromap());
             if (!mesh.lights().isEmpty()) {
                 lightSources.add(new CpuSectionLights.Translated(
@@ -127,7 +123,7 @@ public final class CpuClusterMesh {
                 CpuVoxelInstances.EMPTY);
     }
 
-    public List<Segment> segments() {
+    public List<CpuMeshSegment> segments() {
         return this.segments;
     }
 
@@ -206,7 +202,7 @@ public final class CpuClusterMesh {
     }
 
     public boolean hasSurfaceRelations() {
-        for (Segment segment : this.segments) {
+        for (CpuMeshSegment segment : this.segments) {
             if (segment.surfaceRelationRecords().length != 0) {
                 return true;
             }
@@ -217,7 +213,7 @@ public final class CpuClusterMesh {
     public long surfaceRelationBytes() {
         long tailWords = 0L;
         boolean any = false;
-        for (Segment segment : this.segments) {
+        for (CpuMeshSegment segment : this.segments) {
             int[] records = segment.surfaceRelationRecords();
             if (records.length == 0) {
                 continue;
@@ -241,7 +237,7 @@ public final class CpuClusterMesh {
         ArrayList<int[]> opaque = new ArrayList<>();
         ArrayList<int[]> cutout = new ArrayList<>();
         ArrayList<int[]> transmissive = new ArrayList<>();
-        for (Segment segment : this.segments) {
+        for (CpuMeshSegment segment : this.segments) {
             int primitiveCount = segment.opaquePrimitiveCount()
                     + segment.cutoutPrimitiveCount()
                     + segment.transmissivePrimitiveCount();
@@ -290,81 +286,9 @@ public final class CpuClusterMesh {
         return result;
     }
 
-    /**
-     * An ownership-transferred CPU storage segment; segmentation does not create another BLAS or
-     * TLAS instance.
-     */
-    public record Segment(
-            float[] positions,
-            int[] primitiveRecords,
-            int[] surfaceRelationRecords,
-            TriangleLayout triangleLayout) {
-        public Segment {
-            positions = Objects.requireNonNull(positions, "positions");
-            primitiveRecords = Objects.requireNonNull(
-                    primitiveRecords, "primitiveRecords");
-            surfaceRelationRecords = Objects.requireNonNull(
-                    surfaceRelationRecords, "surfaceRelationRecords");
-            triangleLayout = Objects.requireNonNull(triangleLayout, "triangleLayout");
-            if (positions.length
-                            != Math.multiplyExact(
-                                    Math.toIntExact(triangleLayout.triangleCount()), 9)
-                    || primitiveRecords.length
-                            != Math.multiplyExact(
-                                    Math.toIntExact(triangleLayout.primitiveCount()),
-                                    CpuSectionMesh.PRIMITIVE_WORDS)) {
-                throw new IllegalArgumentException("Invalid cluster mesh segment");
-            }
-            SurfaceRelationTable.validate(
-                    surfaceRelationRecords,
-                    Math.toIntExact(triangleLayout.primitiveCount()));
-        }
-
-        public int triangleCount() {
-            return Math.toIntExact(this.triangleLayout.triangleCount());
-        }
-
-        public int opaqueTriangleCount() {
-            return Math.toIntExact(this.triangleLayout.opaqueTriangleCount());
-        }
-
-        public int cutoutTriangleCount() {
-            return Math.toIntExact(this.triangleLayout.cutoutTriangleCount());
-        }
-
-        public int transmissiveTriangleCount() {
-            return Math.toIntExact(this.triangleLayout.transmissiveTriangleCount());
-        }
-
-        public int opaqueMacroTriangleCount() {
-            return Math.toIntExact(this.triangleLayout.opaqueMacroTriangleCount());
-        }
-
-        public int cutoutMacroTriangleCount() {
-            return Math.toIntExact(this.triangleLayout.cutoutMacroTriangleCount());
-        }
-
-        public int transmissiveMacroTriangleCount() {
-            return Math.toIntExact(this.triangleLayout.transmissiveMacroTriangleCount());
-        }
-
-        public int opaquePrimitiveCount() {
-            return Math.toIntExact(this.triangleLayout.opaquePrimitiveCount());
-        }
-
-        public int cutoutPrimitiveCount() {
-            return Math.toIntExact(this.triangleLayout.cutoutPrimitiveCount());
-        }
-
-        public int transmissivePrimitiveCount() {
-            return Math.toIntExact(this.triangleLayout.transmissivePrimitiveCount());
-        }
-
-    }
-
-    private static void requireMacroTail(List<Segment> segments, int category) {
+    private static void requireMacroTail(List<CpuMeshSegment> segments, int category) {
         boolean macroStarted = false;
-        for (Segment segment : segments) {
+        for (CpuMeshSegment segment : segments) {
             int triangleCount = switch (category) {
                 case 0 -> segment.opaqueTriangleCount();
                 case 1 -> segment.cutoutTriangleCount();

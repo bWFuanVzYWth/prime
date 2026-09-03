@@ -18,7 +18,7 @@ public final class GpuSurfaceRelationTable {
             return 0L;
         }
         long words = 0L;
-        for (CpuClusterMesh.Segment segment : mesh.segments()) {
+        for (CpuMeshSegment segment : mesh.segments()) {
             int[] table = segment.surfaceRelationRecords();
             if (table.length == 0) {
                 continue;

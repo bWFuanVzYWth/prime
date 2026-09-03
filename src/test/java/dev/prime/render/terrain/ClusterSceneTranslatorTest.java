@@ -214,7 +214,7 @@ final class ClusterSceneTranslatorTest {
         assertEquals(0L, cluster.triangleLayout().cutoutTriangleCount());
         assertEquals(0, cluster.voxelMeshes().size());
         assertEquals(0, cluster.voxelInstances().count());
-        CpuClusterMesh.Segment segment = cluster.segments().getFirst();
+        CpuMeshSegment segment = cluster.segments().getFirst();
         assertEquals(2, segment.opaqueTriangleCount());
         int[] primitives = segment.primitiveRecords();
         for (int record = 0;
@@ -422,7 +422,7 @@ final class ClusterSceneTranslatorTest {
 
         assertEquals(2L, mesh.triangleLayout().opaqueTriangleCount());
         assertEquals(2, mesh.lights().emitterCount());
-        CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+        CpuMeshSegment segment = mesh.segments().getFirst();
         int[] relation = SurfaceRelationTable.record(
                 segment.surfaceRelationRecords(), segment.opaquePrimitiveCount(), 0);
         assertEquals(
@@ -448,7 +448,7 @@ final class ClusterSceneTranslatorTest {
 
         assertEquals(2L, mesh.triangleLayout().cutoutTriangleCount());
         assertEquals(2, mesh.lights().emitterCount());
-        CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+        CpuMeshSegment segment = mesh.segments().getFirst();
         int[] relation = SurfaceRelationTable.record(
                 segment.surfaceRelationRecords(), segment.cutoutPrimitiveCount(), 0);
         assertEquals(
@@ -521,7 +521,7 @@ final class ClusterSceneTranslatorTest {
         assertEquals(2L, mesh.triangleLayout().opaqueTriangleCount());
         assertEquals(0L, mesh.triangleLayout().cutoutTriangleCount());
         assertEquals(0, mesh.voxelInstances().count());
-        CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+        CpuMeshSegment segment = mesh.segments().getFirst();
         int[] relation = SurfaceRelationTable.record(
                 segment.surfaceRelationRecords(), segment.opaquePrimitiveCount(), 0);
         assertEquals(
@@ -549,7 +549,7 @@ final class ClusterSceneTranslatorTest {
         assertEquals(2L, mesh.triangleLayout().cutoutTriangleCount());
         assertEquals(0L, mesh.triangleLayout().opaqueTriangleCount());
         assertEquals(0, mesh.voxelInstances().count());
-        CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+        CpuMeshSegment segment = mesh.segments().getFirst();
         int[] relation = SurfaceRelationTable.record(
                 segment.surfaceRelationRecords(), segment.cutoutPrimitiveCount(), 0);
         assertEquals(
@@ -636,7 +636,7 @@ final class ClusterSceneTranslatorTest {
     }
 
     private static void assertBilateral(CpuClusterMesh cluster) {
-        CpuClusterMesh.Segment segment = cluster.segments().getFirst();
+        CpuMeshSegment segment = cluster.segments().getFirst();
         int primitiveCount = segment.opaquePrimitiveCount()
                 + segment.cutoutPrimitiveCount()
                 + segment.transmissivePrimitiveCount();
@@ -860,7 +860,7 @@ final class ClusterSceneTranslatorTest {
     }
 
     private static void assertTwoSided(CpuClusterMesh cluster) {
-        for (CpuClusterMesh.Segment segment : cluster.segments()) {
+        for (CpuMeshSegment segment : cluster.segments()) {
             int[] primitives = segment.primitiveRecords();
             for (int record = 0;
                     record < primitives.length;

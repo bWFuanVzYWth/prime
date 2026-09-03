@@ -240,8 +240,8 @@ final class ClusterTranslationCancellationTest {
         assertEquals(expected.triangleLayout(), actual.triangleLayout());
         assertEquals(expected.segments().size(), actual.segments().size());
         for (int index = 0; index < expected.segments().size(); index++) {
-            CpuClusterMesh.Segment left = expected.segments().get(index);
-            CpuClusterMesh.Segment right = actual.segments().get(index);
+            CpuMeshSegment left = expected.segments().get(index);
+            CpuMeshSegment right = actual.segments().get(index);
             org.junit.jupiter.api.Assertions.assertArrayEquals(left.positions(), right.positions());
             org.junit.jupiter.api.Assertions.assertArrayEquals(
                     left.primitiveRecords(), right.primitiveRecords());

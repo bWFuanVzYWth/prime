@@ -55,6 +55,6 @@ public final class TerrainMemoryBudget {
                                         - Math.min(next.byteSize(), TARGET_SEGMENT_BYTES)
                         || currentTriangles
                                 > triangleTarget
-                                        - Math.min(next.triangleCount(), triangleTarget));
+                                        - Math.min(next.geometry().triangleCount(), triangleTarget));
     }
 }

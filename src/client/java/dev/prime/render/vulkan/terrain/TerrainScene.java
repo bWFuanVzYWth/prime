@@ -1434,7 +1434,7 @@ public final class TerrainScene implements AutoCloseable {
                             triangleLayout.opaquePrimitiveCount(),
                             triangleLayout.cutoutPrimitiveCount()))
         };
-        for (CpuClusterMesh.Segment segment : mesh.segments()) {
+        for (CpuMeshSegment segment : mesh.segments()) {
             int[] primitiveRecords = MediumIdResolver.primitiveRecords(
                     segment.primitiveRecords(), localToRendererMediumId);
             primitiveRecords = MaterialIdResolver.primitiveRecords(

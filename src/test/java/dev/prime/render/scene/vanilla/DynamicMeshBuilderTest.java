@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.mojang.blaze3d.PrimitiveTopology;
 import dev.prime.render.terrain.CpuClusterMesh;
+import dev.prime.render.terrain.CpuMeshSegment;
 import dev.prime.render.terrain.PrimitivePacking;
 import java.util.List;
 import net.minecraft.util.LightCoordsUtil;
@@ -34,7 +35,7 @@ final class DynamicMeshBuilderTest {
         assertTrue(mesh.lights().isEmpty());
         assertFalse(mesh.opacityMicromap().isEmpty());
 
-        CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+        CpuMeshSegment segment = mesh.segments().getFirst();
         assertEquals(10.0F, segment.positions()[0]);
         assertEquals(20.0F, segment.positions()[1]);
         assertEquals(30.0F, segment.positions()[2]);
@@ -62,7 +63,7 @@ final class DynamicMeshBuilderTest {
         vertexNormal(sink, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, -1.0F);
         sink.finish();
 
-        CpuClusterMesh.Segment segment = builder.build(0, 0, 0, List.of())
+        CpuMeshSegment segment = builder.build(0, 0, 0, List.of())
                 .mesh()
                 .segments()
                 .getFirst();

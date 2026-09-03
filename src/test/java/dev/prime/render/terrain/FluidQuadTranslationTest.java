@@ -278,7 +278,7 @@ final class FluidQuadTranslationTest {
 
     private static void assertAllTriangleNormalsHaveYSign(
             CpuClusterMesh cluster, float expectedSign) {
-        for (CpuClusterMesh.Segment segment : cluster.segments()) {
+        for (CpuMeshSegment segment : cluster.segments()) {
             float[] positions = segment.positions();
             for (int triangle = 0; triangle < segment.triangleCount(); triangle++) {
                 int offset = triangle * 9;
@@ -306,7 +306,7 @@ final class FluidQuadTranslationTest {
 
     private static void assertAllPrimitivesReferenceEmitters(
             CpuClusterMesh cluster) {
-        for (CpuClusterMesh.Segment segment : cluster.segments()) {
+        for (CpuMeshSegment segment : cluster.segments()) {
             int[] primitives = segment.primitiveRecords();
             for (int triangle = 0; triangle < segment.triangleCount(); triangle++) {
                 int packedFlagsEmitter =

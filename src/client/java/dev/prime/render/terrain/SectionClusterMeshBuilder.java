@@ -127,6 +127,7 @@ final class SectionClusterMeshBuilder {
     }
 
     private void addPart(int sectionX, int sectionY, int sectionZ, CpuSectionMesh mesh) {
+        CpuMeshSegment geometry = mesh.geometry();
         int triangleCount = Math.addExact(
                 Math.addExact(this.opaqueTriangleCount, this.cutoutTriangleCount),
                 this.transmissiveTriangleCount);
@@ -136,16 +137,16 @@ final class SectionClusterMeshBuilder {
         }
         requireMacroTail(
                 this.opaqueMacroTriangleCount,
-                mesh.opaqueTriangleCount(),
-                mesh.opaqueMacroTriangleCount());
+                geometry.opaqueTriangleCount(),
+                geometry.opaqueMacroTriangleCount());
         requireMacroTail(
                 this.cutoutMacroTriangleCount,
-                mesh.cutoutTriangleCount(),
-                mesh.cutoutMacroTriangleCount());
+                geometry.cutoutTriangleCount(),
+                geometry.cutoutMacroTriangleCount());
         requireMacroTail(
                 this.transmissiveMacroTriangleCount,
-                mesh.transmissiveTriangleCount(),
-                mesh.transmissiveMacroTriangleCount());
+                geometry.transmissiveTriangleCount(),
+                geometry.transmissiveMacroTriangleCount());
         int lightOffset = this.totalEmitterCount;
         this.entries.add(new Entry(
                 sectionX,
@@ -154,18 +155,18 @@ final class SectionClusterMeshBuilder {
                 mesh,
                 lightOffset));
         this.opaqueTriangleCount = Math.addExact(
-                this.opaqueTriangleCount, mesh.opaqueTriangleCount());
+                this.opaqueTriangleCount, geometry.opaqueTriangleCount());
         this.cutoutTriangleCount = Math.addExact(
-                this.cutoutTriangleCount, mesh.cutoutTriangleCount());
+                this.cutoutTriangleCount, geometry.cutoutTriangleCount());
         this.transmissiveTriangleCount = Math.addExact(
-                this.transmissiveTriangleCount, mesh.transmissiveTriangleCount());
+                this.transmissiveTriangleCount, geometry.transmissiveTriangleCount());
         this.opaqueMacroTriangleCount = Math.addExact(
-                this.opaqueMacroTriangleCount, mesh.opaqueMacroTriangleCount());
+                this.opaqueMacroTriangleCount, geometry.opaqueMacroTriangleCount());
         this.cutoutMacroTriangleCount = Math.addExact(
-                this.cutoutMacroTriangleCount, mesh.cutoutMacroTriangleCount());
+                this.cutoutMacroTriangleCount, geometry.cutoutMacroTriangleCount());
         this.transmissiveMacroTriangleCount = Math.addExact(
                 this.transmissiveMacroTriangleCount,
-                mesh.transmissiveMacroTriangleCount());
+                geometry.transmissiveMacroTriangleCount());
         this.emitterCount = Math.addExact(this.emitterCount, mesh.lights().emitterCount());
         this.totalEmitterCount = Math.addExact(
                 this.totalEmitterCount, mesh.lights().emitterCount());
@@ -258,24 +259,25 @@ final class SectionClusterMeshBuilder {
         for (Entry entry : this.entries) {
             this.work.step();
             CpuSectionMesh mesh = entry.mesh;
+            CpuMeshSegment geometry = mesh.geometry();
             float translateX = (entry.sectionX - this.clusterX) * 16.0F;
             float translateY = (entry.sectionY - this.clusterY) * 16.0F;
             float translateZ = (entry.sectionZ - this.clusterZ) * 16.0F;
             int opaquePositionWords = Math.multiplyExact(
-                    mesh.opaqueTriangleCount(), POSITION_WORDS_PER_TRIANGLE);
+                    geometry.opaqueTriangleCount(), POSITION_WORDS_PER_TRIANGLE);
             int cutoutPositionWords = Math.multiplyExact(
-                    mesh.cutoutTriangleCount(), POSITION_WORDS_PER_TRIANGLE);
+                    geometry.cutoutTriangleCount(), POSITION_WORDS_PER_TRIANGLE);
             int transmissivePositionWords = Math.multiplyExact(
-                    mesh.transmissiveTriangleCount(), POSITION_WORDS_PER_TRIANGLE);
+                    geometry.transmissiveTriangleCount(), POSITION_WORDS_PER_TRIANGLE);
             int opaquePrimitiveWords = Math.multiplyExact(
-                    mesh.opaquePrimitiveCount(), PRIMITIVE_WORDS_PER_TRIANGLE);
+                    geometry.opaquePrimitiveCount(), PRIMITIVE_WORDS_PER_TRIANGLE);
             int cutoutPrimitiveWords = Math.multiplyExact(
-                    mesh.cutoutPrimitiveCount(), PRIMITIVE_WORDS_PER_TRIANGLE);
+                    geometry.cutoutPrimitiveCount(), PRIMITIVE_WORDS_PER_TRIANGLE);
             int transmissivePrimitiveWords = Math.multiplyExact(
-                    mesh.transmissivePrimitiveCount(), PRIMITIVE_WORDS_PER_TRIANGLE);
+                    geometry.transmissivePrimitiveCount(), PRIMITIVE_WORDS_PER_TRIANGLE);
 
             copyTranslatedPositions(
-                    mesh.positions(),
+                    geometry.positions(),
                     0,
                     positions,
                     opaquePositionCursor,
@@ -285,7 +287,7 @@ final class SectionClusterMeshBuilder {
                     translateZ,
                     this.work);
             copyTranslatedPositions(
-                    mesh.positions(),
+                    geometry.positions(),
                     opaquePositionWords,
                     positions,
                     cutoutPositionCursor,
@@ -295,7 +297,7 @@ final class SectionClusterMeshBuilder {
                     translateZ,
                     this.work);
             copyPrimitives(
-                    mesh.primitiveRecords(),
+                    geometry.primitiveRecords(),
                     0,
                     primitives,
                     opaquePrimitiveCursor,
@@ -303,7 +305,7 @@ final class SectionClusterMeshBuilder {
                     entry.lightOffset,
                     this.work);
             copyPrimitives(
-                    mesh.primitiveRecords(),
+                    geometry.primitiveRecords(),
                     opaquePrimitiveWords,
                     primitives,
                     cutoutPrimitiveCursor,
@@ -311,7 +313,7 @@ final class SectionClusterMeshBuilder {
                     entry.lightOffset,
                     this.work);
             copyTranslatedPositions(
-                    mesh.positions(),
+                    geometry.positions(),
                     opaquePositionWords + cutoutPositionWords,
                     positions,
                     transmissivePositionCursor,
@@ -321,32 +323,32 @@ final class SectionClusterMeshBuilder {
                     translateZ,
                     this.work);
             copyPrimitives(
-                    mesh.primitiveRecords(),
+                    geometry.primitiveRecords(),
                     opaquePrimitiveWords + cutoutPrimitiveWords,
                     primitives,
                     transmissivePrimitiveCursor,
                     transmissivePrimitiveWords,
                     entry.lightOffset,
                     this.work);
-            int sourcePrimitiveCount = mesh.primitiveCount();
+            int sourcePrimitiveCount = geometry.primitiveCount();
             SurfaceRelationTable.appendRange(
                     opaqueRelations,
-                    mesh.surfaceRelationRecords(),
+                    geometry.surfaceRelationRecords(),
                     sourcePrimitiveCount,
                     0,
-                    mesh.opaquePrimitiveCount());
+                    geometry.opaquePrimitiveCount());
             SurfaceRelationTable.appendRange(
                     cutoutRelations,
-                    mesh.surfaceRelationRecords(),
+                    geometry.surfaceRelationRecords(),
                     sourcePrimitiveCount,
-                    mesh.opaquePrimitiveCount(),
-                    mesh.cutoutPrimitiveCount());
+                    geometry.opaquePrimitiveCount(),
+                    geometry.cutoutPrimitiveCount());
             SurfaceRelationTable.appendRange(
                     transmissiveRelations,
-                    mesh.surfaceRelationRecords(),
+                    geometry.surfaceRelationRecords(),
                     sourcePrimitiveCount,
-                    mesh.opaquePrimitiveCount() + mesh.cutoutPrimitiveCount(),
-                    mesh.transmissivePrimitiveCount());
+                    geometry.opaquePrimitiveCount() + geometry.cutoutPrimitiveCount(),
+                    geometry.transmissivePrimitiveCount());
 
             opaquePositionCursor += opaquePositionWords;
             opaquePrimitiveCursor += opaquePrimitiveWords;

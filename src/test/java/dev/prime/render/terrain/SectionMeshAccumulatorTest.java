@@ -47,7 +47,7 @@ final class SectionMeshAccumulatorTest {
         assertEquals(0, PrimitivePacking.unpackSourceMediumId(
                 geometry.mergeFaces().getFirst().primitive()[4]));
         assertEquals(1, geometry.meshes().size());
-        assertEquals(4, geometry.meshes().getFirst().opaqueTriangleCount());
+        assertEquals(4, geometry.meshes().getFirst().geometry().opaqueTriangleCount());
         assertTrue(Float.intBitsToFloat(
                 geometry.mergeFaces().getFirst().primitive()[6]) < 0.0F);
     }
@@ -71,7 +71,8 @@ final class SectionMeshAccumulatorTest {
         assertEquals(73, PrimitivePacking.unpackSourceMediumId(
                 geometry.mergeFaces().getFirst().primitive()[4]));
         assertEquals(1, geometry.meshes().size());
-        assertEquals(2, geometry.meshes().getFirst().transmissiveTriangleCount());
+        assertEquals(
+                2, geometry.meshes().getFirst().geometry().transmissiveTriangleCount());
     }
 
     @Test
@@ -95,7 +96,7 @@ final class SectionMeshAccumulatorTest {
         assertTrue(geometry.mergeFaces().isEmpty());
         assertEquals(1, geometry.meshes().size());
         CpuSectionMesh mesh = geometry.meshes().getFirst();
-        assertEquals(2, mesh.opaqueTriangleCount());
+        assertEquals(2, mesh.geometry().opaqueTriangleCount());
         assertEquals(2, mesh.lights().emitterCount());
     }
 
@@ -171,17 +172,17 @@ final class SectionMeshAccumulatorTest {
         accumulator.addQuad(quad, surface);
         CpuSectionMesh mesh = accumulator.build().meshes().getFirst();
 
-        assertEquals(2, mesh.opaqueTriangleCount());
-        for (int triangle = 0; triangle < mesh.triangleCount(); triangle++) {
+        assertEquals(2, mesh.geometry().opaqueTriangleCount());
+        for (int triangle = 0; triangle < mesh.geometry().triangleCount(); triangle++) {
             int position = triangle * 9;
-            float[] positions = mesh.positions();
+            float[] positions = mesh.geometry().positions();
             float edgeOneX = positions[position + 3] - positions[position];
             float edgeOneY = positions[position + 4] - positions[position + 1];
             float edgeTwoX = positions[position + 6] - positions[position];
             float edgeTwoY = positions[position + 7] - positions[position + 1];
             assertTrue(edgeOneX * edgeTwoY - edgeOneY * edgeTwoX < 0.0F);
             assertEquals(0, PrimitivePacking.unpackSourceMediumId(
-                    mesh.primitiveRecords()[
+                    mesh.geometry().primitiveRecords()[
                             triangle * CpuSectionMesh.PRIMITIVE_WORDS + 4]));
         }
     }

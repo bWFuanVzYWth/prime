@@ -1,6 +1,7 @@
 package dev.prime.render.vulkan.terrain;
 
 import dev.prime.render.terrain.CpuClusterMesh;
+import dev.prime.render.terrain.CpuMeshSegment;
 import dev.prime.render.terrain.CpuSectionMesh;
 import dev.prime.render.terrain.CpuVoxelMesh;
 import dev.prime.render.terrain.GpuSurfaceRelationTable;
@@ -18,7 +19,7 @@ public final class ClusterStagingLayout {
             return cursor;
         }
         long result = cursor;
-        for (CpuClusterMesh.Segment segment : mesh.segments()) {
+        for (CpuMeshSegment segment : mesh.segments()) {
             result = segmentEndOffset(result, segment.opaqueTriangleCount(), segment.opaquePrimitiveCount());
             result = segmentEndOffset(result, segment.cutoutTriangleCount(), segment.cutoutPrimitiveCount());
             result = segmentEndOffset(result, segment.transmissiveTriangleCount(), segment.transmissivePrimitiveCount());

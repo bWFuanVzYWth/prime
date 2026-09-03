@@ -271,7 +271,7 @@ final class TransparentBoundaryResolverTest {
 
         assertEquals(2L, mesh.triangleLayout().opaqueTriangleCount());
         assertEquals(0L, mesh.triangleLayout().cutoutTriangleCount());
-        CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+        CpuMeshSegment segment = mesh.segments().getFirst();
         int[] relation = SurfaceRelationTable.record(
                 segment.surfaceRelationRecords(),
                 segment.opaquePrimitiveCount(),
@@ -362,7 +362,7 @@ final class TransparentBoundaryResolverTest {
 
         assertEquals(2L, mesh.triangleLayout().cutoutTriangleCount());
         assertEquals(0L, mesh.triangleLayout().transmissiveTriangleCount());
-        CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+        CpuMeshSegment segment = mesh.segments().getFirst();
         int[] relation = SurfaceRelationTable.record(
                 segment.surfaceRelationRecords(), segment.cutoutPrimitiveCount(), 0);
         assertEquals(
@@ -499,7 +499,7 @@ final class TransparentBoundaryResolverTest {
 
     private static float projectedArea(CpuClusterMesh mesh) {
         float area = 0.0F;
-        for (CpuClusterMesh.Segment segment : mesh.segments()) {
+        for (CpuMeshSegment segment : mesh.segments()) {
             float[] positions = segment.positions();
             int first = 9 * (segment.opaqueTriangleCount() + segment.cutoutTriangleCount());
             for (int offset = first; offset < positions.length; offset += 9) {

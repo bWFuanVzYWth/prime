@@ -18,7 +18,7 @@ final class SectionClusterMeshBuilderTest {
 
         CpuClusterMesh cluster = builder.build();
         assertEquals(1, cluster.segments().size());
-        CpuClusterMesh.Segment result = cluster.segments().getFirst();
+        CpuMeshSegment result = cluster.segments().getFirst();
         assertEquals(2, result.opaqueTriangleCount());
         assertEquals(2, result.cutoutTriangleCount());
         assertEquals(2, result.transmissiveTriangleCount());
@@ -94,7 +94,7 @@ final class SectionClusterMeshBuilderTest {
         CpuClusterMesh cluster = builder.build();
 
         assertEquals(2, cluster.triangleLayout().triangleCount());
-        CpuClusterMesh.Segment segment = cluster.segments().getFirst();
+        CpuMeshSegment segment = cluster.segments().getFirst();
         assertEquals(2, segment.opaqueTriangleCount());
         assertEquals(2, segment.opaqueMacroTriangleCount());
         assertEquals(CpuSectionMesh.PRIMITIVE_WORDS, segment.primitiveRecords().length);
@@ -121,7 +121,7 @@ final class SectionClusterMeshBuilderTest {
         builder.add(1, 0, 0, accumulator.build());
 
         CpuClusterMesh cluster = builder.build();
-        CpuClusterMesh.Segment segment = cluster.segments().getFirst();
+        CpuMeshSegment segment = cluster.segments().getFirst();
 
         assertEquals(3, segment.opaqueTriangleCount());
         assertEquals(2, segment.opaqueMacroTriangleCount());

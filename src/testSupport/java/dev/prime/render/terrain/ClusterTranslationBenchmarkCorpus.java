@@ -59,7 +59,7 @@ public final class ClusterTranslationBenchmarkCorpus {
             update(digest, layout.cutoutMacroTriangleCount());
             update(digest, layout.transmissiveMacroTriangleCount());
             update(digest, mesh.segments().size());
-            for (CpuClusterMesh.Segment segment : mesh.segments()) {
+            for (CpuMeshSegment segment : mesh.segments()) {
                 update(digest, segment.opaqueTriangleCount());
                 update(digest, segment.cutoutTriangleCount());
                 update(digest, segment.transmissiveTriangleCount());
