@@ -2,6 +2,7 @@ package dev.prime.render.vulkan;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.infrastructure.PrimeInfo;
+import dev.prime.render.shader.ShaderAbi;
 import java.nio.ByteBuffer;
 import java.nio.LongBuffer;
 import org.lwjgl.system.MemoryStack;
@@ -11,11 +12,18 @@ import org.lwjgl.vulkan.KHRDeferredHostOperations;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
+import org.lwjgl.vulkan.VkCommandBuffer;
+import org.lwjgl.vulkan.VkPushConstantRange;
 import org.lwjgl.vulkan.VkRayTracingPipelineCreateInfoKHR;
 import org.lwjgl.vulkan.VkRayTracingShaderGroupCreateInfoKHR;
 
 /** Shared construction and SBT ownership for independent Prime ray-tracing programs. */
 final class TraceProgram implements Destroyable {
+    private static final int ALL_RT_STAGES =
+            KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR
+                    | KHRRayTracingPipeline.VK_SHADER_STAGE_MISS_BIT_KHR
+                    | KHRRayTracingPipeline.VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
+                    | KHRRayTracingPipeline.VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
     static final int MISS_GROUP_COUNT = 2;
     static final int HIT_GROUP_COUNT = 6;
     static final int GEOMETRY_CLASS_COUNT = 3;
@@ -43,6 +51,7 @@ final class TraceProgram implements Destroyable {
 
     private final VulkanContext context;
     final long pipeline;
+    private final long pipelineLayout;
     private final VulkanBuffer shaderBindingTable;
     private final int raygenGroupCount;
     private final long raygenAddress;
@@ -55,11 +64,13 @@ final class TraceProgram implements Destroyable {
     private TraceProgram(
             VulkanContext context,
             long pipeline,
+            long pipelineLayout,
             VulkanBuffer shaderBindingTable,
             int raygenGroupCount,
             ShaderBindingTableLayout layout) {
         this.context = context;
         this.pipeline = pipeline;
+        this.pipelineLayout = pipelineLayout;
         this.shaderBindingTable = shaderBindingTable;
         this.raygenGroupCount = raygenGroupCount;
         this.raygenAddress = shaderBindingTable.deviceAddress() + layout.raygenOffset();
@@ -71,15 +82,27 @@ final class TraceProgram implements Destroyable {
 
     static TraceProgram create(
             VulkanContext context,
-            long pipelineLayout,
             RaygenSchedule raygenSchedule,
             String pipelineName,
-            String sbtName) {
+            String sbtName,
+            long... descriptorSetLayouts) {
         java.util.Objects.requireNonNull(raygenSchedule, "raygenSchedule");
         try (MemoryStack stack = MemoryStack.stackPush()) {
+            long pipelineLayout = 0L;
             long pipeline = 0L;
             VulkanBuffer sbt = null;
             try {
+                VkPushConstantRange.Buffer range = VkPushConstantRange.calloc(1, stack);
+                range.get(0)
+                        .stageFlags(ALL_RT_STAGES)
+                        .offset(0)
+                        .size(ShaderAbi.PUSH_CONSTANT_SIZE);
+                pipelineLayout = VulkanDescriptors.createPipelineLayout(
+                        context,
+                        stack,
+                        stack.longs(descriptorSetLayouts),
+                        range,
+                        "create " + pipelineName + " layout");
                 pipeline = createPipeline(
                         context,
                         stack,
@@ -124,7 +147,8 @@ final class TraceProgram implements Destroyable {
                         handleSize,
                         layout,
                         raygenSchedule);
-                return new TraceProgram(context, pipeline, sbt, raygenGroups, layout);
+                return new TraceProgram(
+                        context, pipeline, pipelineLayout, sbt, raygenGroups, layout);
             } catch (RuntimeException exception) {
                 if (sbt != null) {
                     sbt.destroy();
@@ -132,9 +156,37 @@ final class TraceProgram implements Destroyable {
                 if (pipeline != 0L) {
                     VK12.vkDestroyPipeline(context.vkDevice(), pipeline, null);
                 }
+                if (pipelineLayout != 0L) {
+                    VK12.vkDestroyPipelineLayout(
+                            context.vkDevice(), pipelineLayout, null);
+                }
                 throw exception;
             }
         }
+    }
+
+    void bind(
+            VkCommandBuffer commandBuffer,
+            MemoryStack stack,
+            ByteBuffer pushConstants,
+            long... descriptorSets) {
+        VK12.vkCmdBindPipeline(
+                commandBuffer,
+                KHRRayTracingPipeline.VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                this.pipeline);
+        VK12.vkCmdBindDescriptorSets(
+                commandBuffer,
+                KHRRayTracingPipeline.VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                this.pipelineLayout,
+                0,
+                stack.longs(descriptorSets),
+                null);
+        VK12.vkCmdPushConstants(
+                commandBuffer,
+                this.pipelineLayout,
+                ALL_RT_STAGES,
+                0,
+                pushConstants);
     }
 
     long raygenAddress(int group) {
@@ -432,6 +484,8 @@ final class TraceProgram implements Destroyable {
             this.destroyed = true;
             this.shaderBindingTable.destroy();
             VK12.vkDestroyPipeline(this.context.vkDevice(), this.pipeline, null);
+            VK12.vkDestroyPipelineLayout(
+                    this.context.vkDevice(), this.pipelineLayout, null);
         }
     }
 }

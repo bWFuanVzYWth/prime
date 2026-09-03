@@ -45,7 +45,6 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
     private final VulkanContext context;
     private final TraceBackend backend;
     private final long descriptorSetLayout;
-    private final long pipelineLayout;
     private final TraceProgram program;
     private VulkanBuffer wavefront;
     private OutputBindings bindings;
@@ -80,36 +79,26 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         this.context = context;
         this.backend = java.util.Objects.requireNonNull(backend, "backend");
         long setLayout = 0L;
-        long layout = 0L;
         TraceProgram traceProgram = null;
         try {
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 setLayout = createDescriptorSetLayout(context, stack);
-                layout = TracePipelineLayouts.create(
-                        context,
-                        stack,
-                        backend.bindings().descriptorSetLayout(),
-                        setLayout,
-                        "realtime");
             }
             traceProgram = TraceProgram.create(
                     context,
-                    layout,
                     RealtimeStandardGroups.standardSchedule(
                             context.capabilities().wavefrontShaderSuffix()),
                     "Prime realtime ray tracing pipeline",
-                    "Prime realtime shader binding table");
+                    "Prime realtime shader binding table",
+                    backend.bindings().descriptorSetLayout(),
+                    setLayout);
             this.descriptorSetLayout = setLayout;
-            this.pipelineLayout = layout;
             this.program = traceProgram;
             this.lastRecordedPassCount = dispatchCount(
                     dev.prime.render.MinimumBounceSettings.MAXIMUM_COUNT);
         } catch (RuntimeException exception) {
             if (traceProgram != null) {
                 traceProgram.destroy();
-            }
-            if (layout != 0L) {
-                VK12.vkDestroyPipelineLayout(context.vkDevice(), layout, null);
             }
             if (setLayout != 0L) {
                 VK12.vkDestroyDescriptorSetLayout(context.vkDevice(), setLayout, null);
@@ -325,23 +314,12 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         if (this.bindings == null) {
             throw new IllegalStateException("Realtime descriptors have not been initialized");
         }
-        VK12.vkCmdBindPipeline(
+        this.program.bind(
                 commandBuffer,
-                KHRRayTracingPipeline.VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                this.program.pipeline);
-        VK12.vkCmdBindDescriptorSets(
-                commandBuffer,
-                KHRRayTracingPipeline.VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-                this.pipelineLayout,
-                0,
-                stack.longs(this.backend.bindings().descriptorSet(), this.bindings.descriptorSet),
-                null);
-        VK12.vkCmdPushConstants(
-                commandBuffer,
-                this.pipelineLayout,
-                TracePipelineLayouts.ALL_RT_STAGES,
-                0,
-                pushConstants);
+                stack,
+                pushConstants,
+                this.backend.bindings().descriptorSet(),
+                this.bindings.descriptorSet);
     }
 
     private void traceDirect(
@@ -604,7 +582,6 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 this.wavefront = null;
             }
             this.program.destroy();
-            VK12.vkDestroyPipelineLayout(this.context.vkDevice(), this.pipelineLayout, null);
             VK12.vkDestroyDescriptorSetLayout(
                     this.context.vkDevice(), this.descriptorSetLayout, null);
         }
