@@ -871,52 +871,48 @@ public final class MaterialTexturePages implements AutoCloseable {
         if (images.isEmpty()) {
             return;
         }
+        long sourceStage = toTransfer
+                ? (initialized
+                        ? KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                        : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT)
+                : VK12.VK_PIPELINE_STAGE_TRANSFER_BIT;
+        long sourceAccess = toTransfer && initialized
+                ? VK12.VK_ACCESS_SHADER_READ_BIT
+                : toTransfer ? 0L : VK12.VK_ACCESS_TRANSFER_WRITE_BIT;
+        long destinationStage = toTransfer
+                ? VK12.VK_PIPELINE_STAGE_TRANSFER_BIT
+                : KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+        long destinationAccess = toTransfer
+                ? VK12.VK_ACCESS_TRANSFER_WRITE_BIT
+                : VK12.VK_ACCESS_SHADER_READ_BIT;
+        int oldLayout = toTransfer
+                ? (initialized
+                        ? VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                        : VK12.VK_IMAGE_LAYOUT_UNDEFINED)
+                : VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        int newLayout = toTransfer
+                ? VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                : VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkImageMemoryBarrier2.Buffer barriers =
                     VkImageMemoryBarrier2.calloc(images.size(), stack);
             for (int index = 0; index < images.size(); index++) {
                 VulkanImage image = images.get(index);
-                fillBarrier(
-                        barriers.get(index), image, image.mipLevels(),
-                        initialized,
-                        toTransfer);
+                VulkanSync.setImageBarrier(
+                        barriers.get(index),
+                        image.image(),
+                        oldLayout,
+                        newLayout,
+                        sourceStage,
+                        sourceAccess,
+                        destinationStage,
+                        destinationAccess,
+                        image.mipLevels());
             }
             KHRSynchronization2.vkCmdPipelineBarrier2KHR(
                     commandBuffer,
                     VkDependencyInfo.calloc(stack).sType$Default().pImageMemoryBarriers(barriers));
         }
-    }
-
-    private static void fillBarrier(
-            VkImageMemoryBarrier2 barrier,
-            VulkanImage image,
-            int mipLevels,
-            boolean initialized,
-            boolean toTransfer) {
-        barrier.sType$Default()
-                .srcStageMask(toTransfer
-                        ? (initialized ? KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT)
-                        : VK12.VK_PIPELINE_STAGE_TRANSFER_BIT)
-                .srcAccessMask(toTransfer && initialized ? VK12.VK_ACCESS_SHADER_READ_BIT : toTransfer ? 0L : VK12.VK_ACCESS_TRANSFER_WRITE_BIT)
-                .dstStageMask(toTransfer
-                        ? VK12.VK_PIPELINE_STAGE_TRANSFER_BIT
-                        : KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR)
-                .dstAccessMask(toTransfer ? VK12.VK_ACCESS_TRANSFER_WRITE_BIT : VK12.VK_ACCESS_SHADER_READ_BIT)
-                .oldLayout(toTransfer
-                        ? (initialized ? VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK12.VK_IMAGE_LAYOUT_UNDEFINED)
-                        : VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
-                .newLayout(toTransfer
-                        ? VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-                        : VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-                .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                .image(image.image());
-        barrier.subresourceRange()
-                .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                .baseMipLevel(0)
-                .levelCount(mipLevels)
-                .baseArrayLayer(0)
-                .layerCount(1);
     }
 
     static long totalMipBytes(int width, int height, int mipLevels) {

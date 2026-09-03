@@ -80,23 +80,10 @@ public final class VulkanImageTransitions {
             VkCommandBuffer commandBuffer,
             VulkanImageInitializationBatch initialization,
             VulkanImage image) {
-        boolean initialized = initialization.prepare(image);
-        int oldLayout = initialized
-                ? VK12.VK_IMAGE_LAYOUT_GENERAL
-                : VK12.VK_IMAGE_LAYOUT_UNDEFINED;
-        long sourceStage = initialized
-                ? VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
-                : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        long sourceAccess = initialized
-                ? VK12.VK_ACCESS_MEMORY_READ_BIT
-                : 0L;
-        VulkanSync.imageBarrier(
-                commandBuffer,
-                image.image(),
-                oldLayout,
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                sourceStage,
-                sourceAccess,
+        VulkanSync.prepareImage(
+                commandBuffer, initialization, image,
+                VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                VK12.VK_ACCESS_MEMORY_READ_BIT,
                 VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                 VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
@@ -105,25 +92,12 @@ public final class VulkanImageTransitions {
             VkCommandBuffer commandBuffer,
             VulkanImageInitializationBatch initialization,
             VulkanImage image) {
-        boolean initialized = initialization.prepare(image);
-        int oldLayout = initialized
-                ? VK12.VK_IMAGE_LAYOUT_GENERAL
-                : VK12.VK_IMAGE_LAYOUT_UNDEFINED;
-        long sourceStage = initialized
-                // Stable radiance is written by raygen and read by NRD composite across frames.
-                ? KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
-                        | VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-                : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        long sourceAccess = initialized
-                ? VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT
-                : 0L;
-        VulkanSync.imageBarrier(
-                commandBuffer,
-                image.image(),
-                oldLayout,
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                sourceStage,
-                sourceAccess,
+        // Stable radiance is written by raygen and read by NRD composite across frames.
+        VulkanSync.prepareImage(
+                commandBuffer, initialization, image,
+                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                        | VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT,
                 KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                 VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }

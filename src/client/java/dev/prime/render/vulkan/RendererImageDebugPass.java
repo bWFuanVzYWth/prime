@@ -4,12 +4,8 @@ import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.RendererImageView;
 import java.util.List;
-import org.lwjgl.system.MemoryStack;
-import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkDependencyInfo;
-import org.lwjgl.vulkan.VkImageMemoryBarrier2;
 
 /** Captures renderer-owned images before reconstruction aliases them, using one lazy atlas. */
 public final class RendererImageDebugPass implements Destroyable {
@@ -132,33 +128,11 @@ public final class RendererImageDebugPass implements Destroyable {
     private void prepareScratch(
             VkCommandBuffer commandBuffer,
             VulkanImageInitializationBatch initialization) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            boolean initialized = initialization.prepare(this.scratch);
-            VkImageMemoryBarrier2.Buffer barrier = VkImageMemoryBarrier2.calloc(1, stack);
-            barrier.get(0).sType$Default()
-                    .srcStageMask(initialized
-                            ? VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-                            : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT)
-                    .srcAccessMask(initialized
-                            ? VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT
-                            : 0L)
-                    .dstStageMask(VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
-                    .dstAccessMask(VK12.VK_ACCESS_SHADER_WRITE_BIT)
-                    .oldLayout(initialized
-                            ? VK12.VK_IMAGE_LAYOUT_GENERAL
-                            : VK12.VK_IMAGE_LAYOUT_UNDEFINED)
-                    .newLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                    .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                    .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                    .image(this.scratch.image());
-            barrier.get(0).subresourceRange()
-                    .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                    .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1);
-            KHRSynchronization2.vkCmdPipelineBarrier2KHR(
-                    commandBuffer,
-                    VkDependencyInfo.calloc(stack).sType$Default()
-                            .pImageMemoryBarriers(barrier));
-        }
+        VulkanSync.prepareImage(commandBuffer, initialization, this.scratch,
+                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT,
+                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
 
     private static ImageDiagnosticPass.View descriptor(RendererImageView view) {

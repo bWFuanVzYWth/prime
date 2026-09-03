@@ -12,12 +12,8 @@ import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.VulkanImageInitializationBatch;
 import dev.prime.render.vulkan.VulkanSync;
 import java.util.Objects;
-import org.lwjgl.system.MemoryStack;
-import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkDependencyInfo;
-import org.lwjgl.vulkan.VkImageMemoryBarrier2;
 
 /**
  * FidelityFX FSR upscaling through AMD's signed Vulkan DLL.
@@ -223,30 +219,11 @@ public final class Fsr3Upscaler implements Destroyable {
         if (initialization.prepare(this.linearOutput)) {
             return;
         }
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkImageMemoryBarrier2.Buffer barrier = VkImageMemoryBarrier2.calloc(1, stack);
-            barrier.get(0)
-                    .sType$Default()
-                    .srcStageMask(VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT)
-                    .srcAccessMask(0L)
-                    .dstStageMask(VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
-                    .dstAccessMask(VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT)
-                    .oldLayout(VK12.VK_IMAGE_LAYOUT_UNDEFINED)
-                    .newLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                    .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                    .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                    .image(this.linearOutput.image());
-            barrier.get(0).subresourceRange()
-                    .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                    .baseMipLevel(0)
-                    .levelCount(1)
-                    .baseArrayLayer(0)
-                    .layerCount(1);
-            VkDependencyInfo dependency = VkDependencyInfo.calloc(stack)
-                    .sType$Default()
-                    .pImageMemoryBarriers(barrier);
-            KHRSynchronization2.vkCmdPipelineBarrier2KHR(commandBuffer, dependency);
-        }
+        VulkanSync.imageBarrier(commandBuffer, this.linearOutput.image(),
+                VK12.VK_IMAGE_LAYOUT_UNDEFINED, VK12.VK_IMAGE_LAYOUT_GENERAL,
+                VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0L,
+                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
 
     private static void computeBarrier(VkCommandBuffer commandBuffer) {

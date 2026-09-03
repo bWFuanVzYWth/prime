@@ -90,25 +90,17 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
                         && index == Role.LINEAR_OUTPUT.ordinal();
                 long destinationStages = destinationStages(
                         this.hasLinearOutput, linearOutput);
-                barriers.get(index).sType$Default()
-                        .srcStageMask(initialized
+                VulkanSync.setImageBarrier(barriers.get(index), image.image(),
+                        initialized ? VK12.VK_IMAGE_LAYOUT_GENERAL : VK12.VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK12.VK_IMAGE_LAYOUT_GENERAL,
+                        initialized
                                 ? VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
-                                : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT)
-                        .srcAccessMask(initialized
+                                : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        initialized
                                 ? VK12.VK_ACCESS_MEMORY_READ_BIT | VK12.VK_ACCESS_MEMORY_WRITE_BIT
-                                : 0L)
-                        .dstStageMask(destinationStages)
-                        .dstAccessMask(VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT)
-                        .oldLayout(initialized
-                                ? VK12.VK_IMAGE_LAYOUT_GENERAL
-                                : VK12.VK_IMAGE_LAYOUT_UNDEFINED)
-                        .newLayout(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                        .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                        .image(image.image());
-                barriers.get(index).subresourceRange()
-                        .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                        .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1);
+                                : 0L,
+                        destinationStages,
+                        VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
             }
             KHRSynchronization2.vkCmdPipelineBarrier2KHR(
                     commandBuffer,

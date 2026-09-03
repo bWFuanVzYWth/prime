@@ -126,6 +126,23 @@ public final class VulkanSync {
         }
     }
 
+    public static void prepareImage(
+            VkCommandBuffer commandBuffer,
+            VulkanImageInitializationBatch initialization,
+            VulkanImage image,
+            long initializedSourceStage,
+            long initializedSourceAccess,
+            long destinationStage,
+            long destinationAccess) {
+        boolean initialized = initialization.prepare(image);
+        imageBarrier(commandBuffer, image.image(),
+                initialized ? VK12.VK_IMAGE_LAYOUT_GENERAL : VK12.VK_IMAGE_LAYOUT_UNDEFINED,
+                VK12.VK_IMAGE_LAYOUT_GENERAL,
+                initialized ? initializedSourceStage : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                initialized ? initializedSourceAccess : 0L,
+                destinationStage, destinationAccess);
+    }
+
     public static void bufferBarrier(
             VkCommandBuffer commandBuffer,
             MemoryStack stack,
@@ -238,6 +255,20 @@ public final class VulkanSync {
             long sourceAccess,
             long destinationStage,
             long destinationAccess) {
+        setImageBarrier(barrier, image, oldLayout, newLayout,
+                sourceStage, sourceAccess, destinationStage, destinationAccess, 1);
+    }
+
+    static void setImageBarrier(
+            VkImageMemoryBarrier2 barrier,
+            long image,
+            int oldLayout,
+            int newLayout,
+            long sourceStage,
+            long sourceAccess,
+            long destinationStage,
+            long destinationAccess,
+            int levelCount) {
         barrier.sType$Default()
                 .srcStageMask(sourceStage)
                 .srcAccessMask(sourceAccess)
@@ -250,7 +281,7 @@ public final class VulkanSync {
                 .image(image);
         barrier.subresourceRange()
                 .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1);
+                .baseMipLevel(0).levelCount(levelCount).baseArrayLayer(0).layerCount(1);
     }
 
     private static void setBufferBarrier(
