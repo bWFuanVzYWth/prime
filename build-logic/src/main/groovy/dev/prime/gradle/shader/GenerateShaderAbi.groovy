@@ -18,21 +18,6 @@ abstract class GenerateShaderAbi extends DefaultTask {
 	@TaskAction
 	void generate() {
 		def schema = new groovy.json.JsonSlurper().parse(schemaFile.get().asFile)
-		def primitive = schema.structs.primitiveRecord
-		def section = schema.structs.sectionRecord
-		def lightNode = schema.structs.lightNode
-		def lightLeaf = schema.structs.lightLeaf
-		def lightEmitter = schema.structs.lightEmitter
-		def lightCell = schema.structs.lightCell
-		def sectionLightHeader = schema.structs.sectionLightHeader
-		def integrator = schema.structs.integratorRecord
-		def pathState = schema.structs.pathState
-		def tracePayload = schema.structs.tracePayload
-		def surfaceInteraction = schema.structs.surfaceInteraction
-		def wavefrontSurfaceRecord = schema.structs.wavefrontSurfaceRecord
-		def push = schema.structs.pushConstants
-		def nrdMotionPush = schema.structs.nrdMotionPushConstants
-		def sunShadowQuery = schema.structs.sunShadowQueryConstants
 		def colorContract = schema.colorContract
 		def emissionContract = schema.emissionContract
 		def atmosphereContract = schema.atmosphereContract
@@ -85,53 +70,51 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				throw new GradleException("${name} must have size ${cursor}, found ${definition.size}")
 			}
 		}
-		validateStruct('PrimitiveRecord', primitive)
-		validateStruct('SectionRecord', section)
-		validateStruct('LightNode', lightNode)
-		validateStruct('LightLeaf', lightLeaf)
-		validateStruct('LightEmitter', lightEmitter)
-		validateStruct('LightCell', lightCell)
-		validateStruct('SectionLightHeader', sectionLightHeader)
-		validateStruct('IntegratorRecord', integrator)
-		validateStruct('PathState', pathState)
-		validateStruct('TracePayload', tracePayload)
-		validateStruct('SurfaceInteraction', surfaceInteraction)
-		validateStruct('WavefrontSurfaceRecord', wavefrontSurfaceRecord)
-		validateStruct('PushConstants', push)
-		validateStruct('NrdMotionPushConstants', nrdMotionPush)
-		validateStruct('SunShadowQueryConstants', sunShadowQuery)
+		def abiStructs = [
+			PRIMITIVE_RECORD: ['PrimitiveRecord', schema.structs.primitiveRecord],
+			SECTION_RECORD: ['SectionRecord', schema.structs.sectionRecord],
+			LIGHT_NODE: ['LightNode', schema.structs.lightNode],
+			LIGHT_LEAF: ['LightLeaf', schema.structs.lightLeaf],
+			LIGHT_EMITTER: ['LightEmitter', schema.structs.lightEmitter],
+			LIGHT_CELL: ['LightCell', schema.structs.lightCell],
+			SECTION_LIGHT_HEADER: ['SectionLightHeader', schema.structs.sectionLightHeader],
+			INTEGRATOR_RECORD: ['IntegratorRecord', schema.structs.integratorRecord],
+			PATH_STATE: ['PathState', schema.structs.pathState],
+			TRACE_PAYLOAD: ['TracePayload', schema.structs.tracePayload],
+			SURFACE_INTERACTION: ['SurfaceInteraction', schema.structs.surfaceInteraction],
+			WAVEFRONT_SURFACE_RECORD: ['WavefrontSurfaceRecord', schema.structs.wavefrontSurfaceRecord],
+			PUSH_CONSTANT: ['PushConstants', schema.structs.pushConstants],
+			NRD_MOTION_PUSH_CONSTANT: ['NrdMotionPushConstants', schema.structs.nrdMotionPushConstants],
+			SUN_SHADOW_QUERY_CONSTANT: ['SunShadowQueryConstants', schema.structs.sunShadowQueryConstants]
+		]
+		abiStructs.values().each { name, definition -> validateStruct(name, definition) }
 
 		def constantName = { String value ->
 			value.replaceAll('([a-z0-9])([A-Z])', '$1_$2').toUpperCase(java.util.Locale.ROOT)
 		}
 		def javaOffsets = new StringBuilder()
-		[
-			PRIMITIVE: primitive,
-			SECTION: section,
-			LIGHT_NODE: lightNode,
-			LIGHT_LEAF: lightLeaf,
-			LIGHT_EMITTER: lightEmitter,
-			LIGHT_CELL: lightCell,
-			SECTION_LIGHT_HEADER: sectionLightHeader,
-			INTEGRATOR: integrator,
-			PATH_STATE: pathState,
-			TRACE_PAYLOAD: tracePayload,
-			SURFACE: surfaceInteraction,
-			WAVEFRONT_SURFACE: wavefrontSurfaceRecord,
-			PUSH: push,
-			NRD_MOTION_PUSH: nrdMotionPush,
-			SUN_SHADOW_QUERY: sunShadowQuery
-		].each { prefix, definition ->
+		def offsetPrefixes = [
+			PRIMITIVE: 'PRIMITIVE_RECORD',
+			SECTION: 'SECTION_RECORD',
+			LIGHT_NODE: 'LIGHT_NODE',
+			LIGHT_LEAF: 'LIGHT_LEAF',
+			LIGHT_EMITTER: 'LIGHT_EMITTER',
+			LIGHT_CELL: 'LIGHT_CELL',
+			SECTION_LIGHT_HEADER: 'SECTION_LIGHT_HEADER',
+			INTEGRATOR: 'INTEGRATOR_RECORD',
+			PATH_STATE: 'PATH_STATE',
+			TRACE_PAYLOAD: 'TRACE_PAYLOAD',
+			SURFACE: 'SURFACE_INTERACTION',
+			WAVEFRONT_SURFACE: 'WAVEFRONT_SURFACE_RECORD',
+			PUSH: 'PUSH_CONSTANT',
+			NRD_MOTION_PUSH: 'NRD_MOTION_PUSH_CONSTANT',
+			SUN_SHADOW_QUERY: 'SUN_SHADOW_QUERY_CONSTANT']
+		offsetPrefixes.each { prefix, structName ->
+			def definition = abiStructs[structName][1]
 			definition.fields.each { field ->
 				javaOffsets.append("    public static final int ${prefix}_${constantName(field.name)}_OFFSET = ${field.offset};\n")
 			}
 		}
-		def glslStructFields = { def definition ->
-			definition.fields.collect { field -> "    ${field.type} ${field.name};" }.join('\n')
-		}
-		def glslPushFields = push.fields.collect { field ->
-			"    layout(offset = ${field.offset}) ${field.type} ${field.name};"
-		}.join('\n')
 		def slangTypes = [
 			float: 'float',
 			uint: 'uint',
@@ -152,6 +135,212 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				return "    public ${type} ${field.name};"
 			}.join('\n')
 		}
+		def javaLiteral = { value ->
+			if (value instanceof CharSequence) {
+				return value.startsWith('0x') ? value : "\"${value}\""
+			}
+			return value instanceof BigDecimal || value instanceof Double || value instanceof Float
+					? "${value}f"
+					: value.toString()
+		}
+		def javaConstants = new StringBuilder()
+		def appendJava = { String prefix, Map values, Map renames = [:], Map transforms = [:] ->
+			values.each { name, value ->
+				String renamed = renames.getOrDefault(name, constantName(name))
+				String javaName = prefix.isEmpty() ? renamed : "${prefix}_${renamed}"
+				def transformed = transforms.containsKey(name) ? transforms[name](value) : value
+				boolean stringValue = transformed instanceof CharSequence
+						&& !transformed.startsWith('0x')
+				javaConstants.append(
+						"    public static final ${stringValue ? 'String' : transformed instanceof BigDecimal || transformed instanceof Double || transformed instanceof Float ? 'float' : 'int'} ${javaName} = ${javaLiteral(transformed)};\n")
+			}
+		}
+		abiStructs.each { prefix, pair ->
+			appendJava('', [("${prefix}_SIZE".toString()): pair[1].size])
+		}
+		appendJava('TEXTURE', textureRecordContract)
+		appendJava('MATERIAL_CORE', materialCoreContract)
+		def shadowDescriptorNames = (0..9).collectEntries {
+			[("sunShadowDepth${it}".toString()): "SUN_SHADOW_DEPTH_${it}".toString()]
+		}
+		appendJava('DESCRIPTOR', schema.sharedDescriptors, shadowDescriptorNames)
+		appendJava('DESCRIPTOR', schema.realtimeDescriptors,
+				[nrdMaterialClass: 'RECONSTRUCTION_CONTROL'])
+		appendJava('OFFLINE_DESCRIPTOR', schema.offlineDescriptors)
+		appendJava('', [
+			sceneTextureCount: schema.sceneTextureCount,
+			materialPageCount: schema.materialPageCount,
+			baseColorPageCount: schema.baseColorPageCount])
+		appendJava('WAVEFRONT', wavefrontContract, [
+			traceQueue0: 'TRACE_QUEUE_0',
+			traceQueue1: 'TRACE_QUEUE_1',
+			transparentTraceQueue0: 'TRANSPARENT_TRACE_QUEUE_0',
+			transparentTraceQueue1: 'TRANSPARENT_TRACE_QUEUE_1'])
+		appendJava('OFFLINE_WAVEFRONT', offlineWavefrontContract.findAll {
+			it.key != 'activeMask'
+		})
+		appendJava('PATH', schema.pathControl.findAll {
+			!(it.key in ['maximumBounces', 'russianRouletteStart'])
+		})
+		appendJava('', [
+			maximumBounces: schema.pathControl.maximumBounces,
+			russianRouletteStart: schema.pathControl.russianRouletteStart,
+			cutoutAlphaThreshold: schema.cutoutAlphaThreshold])
+		appendJava('', colorContract, [
+			workingSpace: 'WORKING_COLOR_SPACE',
+			textureEncoding: 'TEXTURE_COLOR_ENCODING',
+			displayEncoding: 'DISPLAY_COLOR_ENCODING'])
+		appendJava('', emissionContract, [level15BlockIntensity: 'LEVEL_15_BLOCK_INTENSITY'])
+		appendJava('NRD', nrdContract)
+		appendJava('FSR', fsrContract)
+		appendJava('ATMOSPHERE', atmosphereContract, [:], [
+			worldUnitScaleKm: { it * atmosphereContract.worldToAtmosphereScale },
+			aerialMaxDistanceKm: { it * atmosphereContract.worldToAtmosphereScale }])
+		appendJava('ASTRONOMY', astronomyContract)
+		appendJava('STARMAP', starmapContract)
+		appendJava('REALTIME_STBN', realtimeStbnContract)
+		def slangConstants = { String prefix, Map values,
+				Map renames = [:], Map types = [:], Map transforms = [:] ->
+			values.collect { name, value ->
+				String renamed = renames.getOrDefault(name, constantName(name))
+				String slangName = prefix.isEmpty() ? renamed : "${prefix}_${renamed}"
+				def transformed = transforms.containsKey(name) ? transforms[name](value) : value
+				String type = types.getOrDefault(
+						name,
+						transformed instanceof BigDecimal
+								|| transformed instanceof Double
+								|| transformed instanceof Float ? 'float' : 'uint')
+				String separator = transformed.toString().startsWith('\n') ? '' : ' '
+				"public static const ${type} PRIME_${slangName} =${separator}${transformed};"
+			}.join('\n')
+		}
+		def slangTypeConstants = new StringBuilder()
+		def appendSlangTypes = { String prefix, Map values,
+				Map renames = [:], Map types = [:], Map transforms = [:] ->
+			slangTypeConstants.append(
+					slangConstants(prefix, values, renames, types, transforms)).append('\n')
+		}
+		def slangImages = { Map descriptors, int set, Map images ->
+			images.collect { binding, image ->
+				String access = image.size() > 4 ? "${image[4]} " : ''
+				"[[vk::binding(${descriptors[binding]}, ${set})]] [[vk::image_format(\"${image[3]}\")]]\n" +
+						"public ${access}${image[0]}<${image[1]}> ${image[2]};"
+			}.join('\n')
+		}
+		abiStructs.findAll { it.key != 'WAVEFRONT_SURFACE_RECORD' }.each { prefix, pair ->
+			appendSlangTypes('', [("${prefix}_SIZE".toString()): pair[1].size])
+		}
+		appendSlangTypes('', [sceneTextureCount: schema.sceneTextureCount],
+				[sceneTextureCount: 'SCENE_TEXTURE_COUNT'])
+		appendSlangTypes('DESCRIPTOR', [
+			transmissionGgxEnergy: schema.sharedDescriptors.transmissionGgxEnergy])
+		appendSlangTypes('PATH', schema.pathControl.findAll {
+			!(it.key in ['historyValidMask', 'maximumBounces', 'russianRouletteStart'])
+		}, [:], [
+			latitudeBias: 'int',
+			evQuarterBias: 'int',
+			materialRoughnessStepsPerUnit: 'float',
+			starEvQuarterBias: 'int'])
+		appendSlangTypes('', [
+			maximumBounces: schema.pathControl.maximumBounces,
+			russianRouletteStart: schema.pathControl.russianRouletteStart,
+			cutoutAlphaThreshold: schema.cutoutAlphaThreshold,
+			level15BlockIntensity: emissionContract.level15BlockIntensity,
+			displayExposure: colorContract.displayExposure], [
+			level15BlockIntensity: 'LEVEL_15_BLOCK_INTENSITY'])
+		appendSlangTypes('ASTRONOMY', [axialTiltRadians: astronomyContract.axialTiltDegrees],
+				[:], [axialTiltRadians: 'float'],
+				[axialTiltRadians: { "\n        ${it} * 0.017453292519943295" }])
+		appendSlangTypes('ATMOSPHERE', atmosphereContract.findAll {
+			it.key != 'spectralModel'
+		}, [:], [:], [
+			worldUnitScaleKm: { it * atmosphereContract.worldToAtmosphereScale },
+			aerialMaxDistanceKm: { it * atmosphereContract.worldToAtmosphereScale }])
+		appendSlangTypes('STARMAP', starmapContract.findAll {
+			it.key != 'sourceSha256'
+		})
+		def slangStructs = abiStructs.findAll {
+			it.key != 'WAVEFRONT_SURFACE_RECORD'
+		}.collect { prefix, pair ->
+			String name = prefix == 'PUSH_CONSTANT' ? 'PrimePushConstants' : pair[0]
+			"public struct ${name}\n{\n${slangStructFields(pair[1])}\n};"
+		}.join('\n\n')
+		def environmentImages = slangImages(schema.sharedDescriptors, 0, [
+			skyView: ['RWTexture2D', 'float4', 'primeSkyView', 'rgba16f', 'readonly'],
+			transmittanceLow: ['RWTexture2D', 'float4', 'primeTransmittanceLow', 'rgba16f', 'readonly'],
+			transmittanceHigh: ['RWTexture2D', 'float4', 'primeTransmittanceHigh', 'rgba16f', 'readonly'],
+			aerialRadiance: ['RWTexture3D', 'float4', 'primeAerialRadiance', 'rgba16f', 'readonly'],
+			aerialTransmittance: ['RWTexture3D', 'float4', 'primeAerialTransmittance', 'rgba16f', 'readonly']])
+		def sunShadowImages = slangImages(schema.sharedDescriptors, 0,
+				(0..9).collectEntries {
+					[("sunShadowDepth${it}".toString()):
+							['RWTexture2D', 'float', "primeSunShadowDepth${it}".toString(), 'r32f']]
+				})
+		def realtimeImages = slangImages(schema.realtimeDescriptors, 1, [
+			stableRadiance: ['RWTexture2D', 'float4', 'primeStableRadiance', 'rgba32f'],
+			nrdNoisyDiffuse: ['RWTexture2D', 'float4', 'primeNrdNoisyDiffuse', 'rgba16f'],
+			nrdNoisySpecular: ['RWTexture2D', 'float4', 'primeNrdNoisySpecular', 'rgba16f'],
+			nrdNormalRoughness: ['RWTexture2D', 'float4', 'primeNrdNormalRoughness', 'rgba32f'],
+			nrdViewZ: ['RWTexture2D', 'float', 'primeNrdViewZ', 'r32f'],
+			wavefrontTransportMetadata: ['RWTexture2D', 'float4', 'primeWavefrontTransportMetadata', 'rgba16f'],
+			nrdMaterial: ['RWTexture2D', 'float4', 'primeNrdMaterial', 'rgba16f'],
+			nrdSpecularMaterial: ['RWTexture2D', 'float4', 'primeNrdSpecularMaterial', 'rgba16f'],
+			nrdMaterialClass: ['RWTexture2D', 'uint', 'primeReconstructionControl', 'r8ui'],
+			nrdPrimaryPosition: ['RWTexture2D', 'float4', 'primeNrdPrimaryPosition', 'rgba32f'],
+			nrdSunLighting: ['RWTexture2D', 'float4', 'primeNrdSunLighting', 'rgba16f'],
+			nrdSunPenumbra: ['RWTexture2D', 'float', 'primeNrdSunPenumbra', 'r16f'],
+			nrdDiffuseDirection: ['RWTexture2D', 'float4', 'primeNrdDiffuseDirection', 'rgba16f'],
+			nrdSpecularDirection: ['RWTexture2D', 'float4', 'primeNrdSpecularDirection', 'rgba16f'],
+			nrdReflectionNoisyDiffuse: ['RWTexture2D', 'float4', 'primeNrdReflectionNoisyDiffuse', 'rgba16f'],
+			nrdReflectionNoisySpecular: ['RWTexture2D', 'float4', 'primeNrdReflectionNoisySpecular', 'rgba16f'],
+			nrdReflectionNormalRoughness: ['RWTexture2D', 'float4', 'primeNrdReflectionNormalRoughness', 'rgba32f'],
+			nrdReflectionMaterial: ['RWTexture2D', 'float4', 'primeNrdReflectionMaterial', 'rgba16f'],
+			nrdReflectionSpecularMaterial: ['RWTexture2D', 'float4', 'primeNrdReflectionSpecularMaterial', 'rgba16f'],
+			nrdReflectionPosition: ['RWTexture2D', 'float4', 'primeNrdReflectionPosition', 'rgba32f'],
+			nrdReflectionDiffuseDirection: ['RWTexture2D', 'float4', 'primeNrdReflectionDiffuseDirection', 'rgba16f'],
+			nrdReflectionSpecularDirection: ['RWTexture2D', 'float4', 'primeNrdReflectionSpecularDirection', 'rgba16f'],
+			nrdDisplayPosition: ['RWTexture2D', 'float4', 'primeNrdDisplayPosition', 'rgba32f']])
+		def realtimeConstants = slangConstants('', [rendererDescriptorSet: 1],
+				[rendererDescriptorSet: 'RENDERER_DESCRIPTOR_SET']) + '\n' +
+				slangConstants('DESCRIPTOR', [
+					wavefrontPaths: schema.realtimeDescriptors.wavefrontPaths,
+					wavefrontQueue: schema.realtimeDescriptors.wavefrontQueue]) + '\n' +
+				slangConstants('WAVEFRONT', wavefrontContract.findAll {
+					it.key in ['pathRecordSize', 'etaScaleOffset', 'pathControlReservedMask',
+							'pathSlotsPerPixel', 'areaGuideRecordSize']
+				}, [
+					traceQueue0: 'TRACE_QUEUE_0',
+					traceQueue1: 'TRACE_QUEUE_1',
+					transparentTraceQueue0: 'TRANSPARENT_TRACE_QUEUE_0',
+					transparentTraceQueue1: 'TRANSPARENT_TRACE_QUEUE_1']) + '\n' +
+				slangConstants('WAVEFRONT', [
+					surfaceRecordSize: abiStructs.WAVEFRONT_SURFACE_RECORD[1].size]) + '\n' +
+				slangConstants('WAVEFRONT', wavefrontContract.findAll {
+					!(it.key in ['pathRecordSize', 'etaScaleOffset', 'pathControlReservedMask',
+							'pathSlotsPerPixel', 'areaGuideRecordSize'])
+				}, [
+					traceQueue0: 'TRACE_QUEUE_0',
+					traceQueue1: 'TRACE_QUEUE_1',
+					transparentTraceQueue0: 'TRANSPARENT_TRACE_QUEUE_0',
+					transparentTraceQueue1: 'TRANSPARENT_TRACE_QUEUE_1'])
+		def offlineConstants = slangConstants('', [rendererDescriptorSet: 1],
+				[rendererDescriptorSet: 'RENDERER_DESCRIPTOR_SET']) + '\n' +
+				slangConstants('DESCRIPTOR', schema.offlineDescriptors.findAll {
+					it.key != 'runningMean'
+				}) + '\n' +
+				slangConstants('WAVEFRONT', offlineWavefrontContract.findAll {
+					it.key in ['pathRecordSize', 'pathSlotsPerPixel']
+				}) + '\n' +
+				slangConstants('OFFLINE', offlineWavefrontContract.findAll {
+					it.key in ['surfaceRecordSize', 'stagedLightRecordSize', 'stageRecordSize']
+				}, [
+					surfaceRecordSize: 'WAVEFRONT_SURFACE_RECORD_SIZE',
+					stagedLightRecordSize: 'STAGED_LIGHT_RECORD_SIZE',
+					stageRecordSize: 'WAVEFRONT_STAGE_RECORD_SIZE']) + '\n' +
+				slangConstants('WAVEFRONT', offlineWavefrontContract.findAll {
+					it.key in ['queueEntriesPerPixel', 'queueStorageEntriesPerPixel',
+							'queueCount', 'queueCommandStride', 'queueIndexSize', 'activeMask']
+				})
 
 		def javaPackageDir = new File(javaOutputDirectory.get().asFile, 'dev/prime/render/shader')
 		javaPackageDir.mkdirs()
@@ -160,219 +349,7 @@ package dev.prime.render.shader;
 
 /** Generated from shaders/abi.json. Do not edit by hand. */
 public final class ShaderAbi {
-    public static final int PRIMITIVE_RECORD_SIZE = ${primitive.size};
-    public static final int SECTION_RECORD_SIZE = ${section.size};
-    public static final int LIGHT_NODE_SIZE = ${lightNode.size};
-    public static final int LIGHT_LEAF_SIZE = ${lightLeaf.size};
-    public static final int LIGHT_EMITTER_SIZE = ${lightEmitter.size};
-    public static final int LIGHT_CELL_SIZE = ${lightCell.size};
-    public static final int SECTION_LIGHT_HEADER_SIZE = ${sectionLightHeader.size};
-    public static final int INTEGRATOR_RECORD_SIZE = ${integrator.size};
-    public static final int PATH_STATE_SIZE = ${pathState.size};
-    public static final int TRACE_PAYLOAD_SIZE = ${tracePayload.size};
-    public static final int SURFACE_INTERACTION_SIZE = ${surfaceInteraction.size};
-    public static final int WAVEFRONT_SURFACE_RECORD_SIZE = ${wavefrontSurfaceRecord.size};
-    public static final int PUSH_CONSTANT_SIZE = ${push.size};
-    public static final int NRD_MOTION_PUSH_CONSTANT_SIZE = ${nrdMotionPush.size};
-    public static final int SUN_SHADOW_QUERY_CONSTANT_SIZE = ${sunShadowQuery.size};
-    public static final int TEXTURE_RECORD_SIZE = ${textureRecordContract.recordSize};
-    public static final int TEXTURE_BASE_ORIGIN_OFFSET = ${textureRecordContract.baseOriginOffset};
-    public static final int TEXTURE_FRAME_EXTENT_OFFSET = ${textureRecordContract.frameExtentOffset};
-    public static final int TEXTURE_BASE_INFO_OFFSET = ${textureRecordContract.baseInfoOffset};
-    public static final int TEXTURE_BASE_MIP_MASK = ${textureRecordContract.baseMipMask};
-    public static final int TEXTURE_BASE_PAGE_SHIFT = ${textureRecordContract.basePageShift};
-    public static final int TEXTURE_PAGE_EXTENT_CODE_SHIFT = ${textureRecordContract.pageExtentCodeShift};
-    public static final int TEXTURE_PAGE_WIDTH_MINUS_ONE_MASK = ${textureRecordContract.pageWidthMinusOneMask};
-    public static final int TEXTURE_PAGE_HEIGHT_LOG2_SHIFT = ${textureRecordContract.pageHeightLog2Shift};
-    public static final int TEXTURE_PAGE_HEIGHT_LOG2_MASK = ${textureRecordContract.pageHeightLog2Mask};
-    public static final int TEXTURE_PAGE_HEIGHT_SAME_AS_WIDTH_CODE = ${textureRecordContract.pageHeightSameAsWidthCode};
-    public static final int TEXTURE_PAGE_EXTENT_QUERY_CODE = ${textureRecordContract.pageExtentQueryCode};
-    public static final int TEXTURE_NORMAL_ORIGIN_OFFSET = ${textureRecordContract.normalOriginOffset};
-    public static final int TEXTURE_AUXILIARY_INFO_OFFSET = ${textureRecordContract.auxiliaryInfoOffset};
-    public static final int TEXTURE_OPTICAL_ORIGIN_OFFSET = ${textureRecordContract.opticalOriginOffset};
-    public static final int TEXTURE_AUXILIARY_EXTENT_OFFSET = ${textureRecordContract.auxiliaryExtentOffset};
-    public static final int MATERIAL_CORE_RECORD_SIZE = ${materialCoreContract.recordSize};
-    public static final int MATERIAL_CORE_TEXTURE_ID_MASK = ${materialCoreContract.textureIdMask};
-    public static final int MATERIAL_CORE_RECIPE_CONTROL_SHIFT = ${materialCoreContract.recipeControlShift};
-    public static final int MATERIAL_CORE_RECIPE_CONTROL_MASK = ${materialCoreContract.recipeControlMask};
-    public static final int MATERIAL_CORE_MEDIUM_ID_OFFSET = ${materialCoreContract.mediumIdOffset};
-    public static final int MATERIAL_CORE_MEDIUM_ID_MASK = ${materialCoreContract.mediumIdMask};
-    public static final int DESCRIPTOR_TLAS = ${schema.sharedDescriptors.tlas};
-    public static final int DESCRIPTOR_BLOCK_ATLAS = ${schema.sharedDescriptors.blockAtlas};
-    public static final int DESCRIPTOR_STABLE_RADIANCE = ${schema.realtimeDescriptors.stableRadiance};
-    public static final int DESCRIPTOR_SKY_VIEW = ${schema.sharedDescriptors.skyView};
-    public static final int DESCRIPTOR_TRANSMITTANCE_LOW = ${schema.sharedDescriptors.transmittanceLow};
-    public static final int DESCRIPTOR_TRANSMITTANCE_HIGH = ${schema.sharedDescriptors.transmittanceHigh};
-    public static final int DESCRIPTOR_AERIAL_RADIANCE = ${schema.sharedDescriptors.aerialRadiance};
-    public static final int DESCRIPTOR_AERIAL_TRANSMITTANCE = ${schema.sharedDescriptors.aerialTransmittance};
-    public static final int DESCRIPTOR_NRD_NOISY_DIFFUSE = ${schema.realtimeDescriptors.nrdNoisyDiffuse};
-    public static final int DESCRIPTOR_NRD_NORMAL_ROUGHNESS = ${schema.realtimeDescriptors.nrdNormalRoughness};
-    public static final int DESCRIPTOR_NRD_VIEW_Z = ${schema.realtimeDescriptors.nrdViewZ};
-    public static final int DESCRIPTOR_WAVEFRONT_TRANSPORT_METADATA = ${schema.realtimeDescriptors.wavefrontTransportMetadata};
-    public static final int DESCRIPTOR_NRD_MATERIAL = ${schema.realtimeDescriptors.nrdMaterial};
-    public static final int DESCRIPTOR_NRD_PRIMARY_POSITION = ${schema.realtimeDescriptors.nrdPrimaryPosition};
-    public static final int DESCRIPTOR_NRD_NOISY_SPECULAR = ${schema.realtimeDescriptors.nrdNoisySpecular};
-    public static final int DESCRIPTOR_NRD_SPECULAR_MATERIAL = ${schema.realtimeDescriptors.nrdSpecularMaterial};
-    public static final int DESCRIPTOR_RECONSTRUCTION_CONTROL = ${schema.realtimeDescriptors.nrdMaterialClass};
-    public static final int DESCRIPTOR_TRANSMISSION_GGX_ENERGY = ${schema.sharedDescriptors.transmissionGgxEnergy};
-    public static final int DESCRIPTOR_TEXTURE_RECORDS = ${schema.sharedDescriptors.textureRecords};
-    public static final int DESCRIPTOR_MATERIAL_NORMAL_PAGES = ${schema.sharedDescriptors.materialNormalPages};
-    public static final int DESCRIPTOR_MATERIAL_OPTICAL_PAGES = ${schema.sharedDescriptors.materialOpticalPages};
-    public static final int DESCRIPTOR_TINT_SAMPLES = ${schema.sharedDescriptors.tintSamples};
-    public static final int DESCRIPTOR_BASE_COLOR_PAGES = ${schema.sharedDescriptors.baseColorPages};
-    public static final int DESCRIPTOR_MATERIAL_CORE_RECORDS = ${schema.sharedDescriptors.materialCoreRecords};
-    public static final int DESCRIPTOR_NRD_SUN_LIGHTING = ${schema.realtimeDescriptors.nrdSunLighting};
-    public static final int DESCRIPTOR_NRD_SUN_PENUMBRA = ${schema.realtimeDescriptors.nrdSunPenumbra};
-    public static final int DESCRIPTOR_NRD_DIFFUSE_DIRECTION = ${schema.realtimeDescriptors.nrdDiffuseDirection};
-    public static final int DESCRIPTOR_NRD_SPECULAR_DIRECTION = ${schema.realtimeDescriptors.nrdSpecularDirection};
-    public static final int DESCRIPTOR_NRD_REFLECTION_NOISY_DIFFUSE = ${schema.realtimeDescriptors.nrdReflectionNoisyDiffuse};
-    public static final int DESCRIPTOR_NRD_REFLECTION_NOISY_SPECULAR = ${schema.realtimeDescriptors.nrdReflectionNoisySpecular};
-    public static final int DESCRIPTOR_NRD_REFLECTION_NORMAL_ROUGHNESS = ${schema.realtimeDescriptors.nrdReflectionNormalRoughness};
-    public static final int DESCRIPTOR_NRD_REFLECTION_MATERIAL = ${schema.realtimeDescriptors.nrdReflectionMaterial};
-    public static final int DESCRIPTOR_NRD_REFLECTION_SPECULAR_MATERIAL = ${schema.realtimeDescriptors.nrdReflectionSpecularMaterial};
-    public static final int DESCRIPTOR_NRD_REFLECTION_POSITION = ${schema.realtimeDescriptors.nrdReflectionPosition};
-    public static final int DESCRIPTOR_NRD_REFLECTION_DIFFUSE_DIRECTION = ${schema.realtimeDescriptors.nrdReflectionDiffuseDirection};
-    public static final int DESCRIPTOR_NRD_REFLECTION_SPECULAR_DIRECTION = ${schema.realtimeDescriptors.nrdReflectionSpecularDirection};
-    public static final int DESCRIPTOR_NRD_DISPLAY_POSITION = ${schema.realtimeDescriptors.nrdDisplayPosition};
-    public static final int DESCRIPTOR_STARMAP = ${schema.sharedDescriptors.starmap};
-    public static final int DESCRIPTOR_REALTIME_STBN = ${schema.sharedDescriptors.realtimeStbn};
-    public static final int DESCRIPTOR_WAVEFRONT_PATHS = ${schema.realtimeDescriptors.wavefrontPaths};
-    public static final int DESCRIPTOR_WAVEFRONT_QUEUE = ${schema.realtimeDescriptors.wavefrontQueue};
-    public static final int OFFLINE_DESCRIPTOR_RUNNING_MEAN = ${schema.offlineDescriptors.runningMean};
-    public static final int OFFLINE_DESCRIPTOR_WAVEFRONT_PATHS = ${schema.offlineDescriptors.wavefrontPaths};
-    public static final int OFFLINE_DESCRIPTOR_WAVEFRONT_QUEUE = ${schema.offlineDescriptors.wavefrontQueue};
-    public static final int DESCRIPTOR_SUN_SHADOW_DEPTH_0 = ${schema.sharedDescriptors.sunShadowDepth0};
-    public static final int DESCRIPTOR_SUN_SHADOW_DEPTH_1 = ${schema.sharedDescriptors.sunShadowDepth1};
-    public static final int DESCRIPTOR_SUN_SHADOW_DEPTH_2 = ${schema.sharedDescriptors.sunShadowDepth2};
-    public static final int DESCRIPTOR_SUN_SHADOW_DEPTH_3 = ${schema.sharedDescriptors.sunShadowDepth3};
-    public static final int DESCRIPTOR_SUN_SHADOW_DEPTH_4 = ${schema.sharedDescriptors.sunShadowDepth4};
-    public static final int DESCRIPTOR_SUN_SHADOW_DEPTH_5 = ${schema.sharedDescriptors.sunShadowDepth5};
-    public static final int DESCRIPTOR_SUN_SHADOW_DEPTH_6 = ${schema.sharedDescriptors.sunShadowDepth6};
-    public static final int DESCRIPTOR_SUN_SHADOW_DEPTH_7 = ${schema.sharedDescriptors.sunShadowDepth7};
-    public static final int DESCRIPTOR_SUN_SHADOW_DEPTH_8 = ${schema.sharedDescriptors.sunShadowDepth8};
-    public static final int DESCRIPTOR_SUN_SHADOW_DEPTH_9 = ${schema.sharedDescriptors.sunShadowDepth9};
-    public static final int DESCRIPTOR_SUN_SHADOW_QUERY = ${schema.sharedDescriptors.sunShadowQuery};
-    public static final int SCENE_TEXTURE_COUNT = ${schema.sceneTextureCount};
-    public static final int MATERIAL_PAGE_COUNT = ${schema.materialPageCount};
-    public static final int BASE_COLOR_PAGE_COUNT = ${schema.baseColorPageCount};
-    public static final int WAVEFRONT_PATH_RECORD_SIZE = ${wavefrontContract.pathRecordSize};
-    public static final int WAVEFRONT_ETA_SCALE_OFFSET = ${wavefrontContract.etaScaleOffset};
-    public static final int WAVEFRONT_PATH_CONTROL_RESERVED_MASK = ${wavefrontContract.pathControlReservedMask};
-    public static final int WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${wavefrontContract.pathSlotsPerPixel};
-    public static final int WAVEFRONT_AREA_GUIDE_RECORD_SIZE = ${wavefrontContract.areaGuideRecordSize};
-    public static final int WAVEFRONT_STAGED_LIGHT_RECORD_SIZE = ${wavefrontContract.stagedLightRecordSize};
-    public static final int WAVEFRONT_STAGED_RECEIVER_NORMAL_OFFSET = ${wavefrontContract.stagedReceiverNormalOffset};
-    public static final int WAVEFRONT_DETACHED_GUIDE_RECORD_SIZE = ${wavefrontContract.detachedGuideRecordSize};
-    public static final int OFFLINE_WAVEFRONT_PATH_RECORD_SIZE = ${offlineWavefrontContract.pathRecordSize};
-    public static final int OFFLINE_WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${offlineWavefrontContract.pathSlotsPerPixel};
-    public static final int OFFLINE_WAVEFRONT_SURFACE_RECORD_SIZE = ${offlineWavefrontContract.surfaceRecordSize};
-    public static final int OFFLINE_WAVEFRONT_STAGED_LIGHT_RECORD_SIZE = ${offlineWavefrontContract.stagedLightRecordSize};
-    public static final int OFFLINE_WAVEFRONT_STAGE_RECORD_SIZE = ${offlineWavefrontContract.stageRecordSize};
-    public static final int OFFLINE_WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL = ${offlineWavefrontContract.queueEntriesPerPixel};
-    public static final int OFFLINE_WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL = ${offlineWavefrontContract.queueStorageEntriesPerPixel};
-    public static final int OFFLINE_WAVEFRONT_QUEUE_COUNT = ${offlineWavefrontContract.queueCount};
-    public static final int OFFLINE_WAVEFRONT_QUEUE_COMMAND_STRIDE = ${offlineWavefrontContract.queueCommandStride};
-    public static final int OFFLINE_WAVEFRONT_QUEUE_INDEX_SIZE = ${offlineWavefrontContract.queueIndexSize};
-    public static final int WAVEFRONT_AREA_RECORD_SIZE = ${wavefrontContract.areaRecordSize};
-    public static final int WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL = ${wavefrontContract.queueEntriesPerPixel};
-    public static final int WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL = ${wavefrontContract.queueStorageEntriesPerPixel};
-    public static final int WAVEFRONT_QUEUE_COUNT = ${wavefrontContract.queueCount};
-    public static final int WAVEFRONT_TRACE_QUEUE_0 = ${wavefrontContract.traceQueue0};
-    public static final int WAVEFRONT_TRACE_QUEUE_1 = ${wavefrontContract.traceQueue1};
-    public static final int WAVEFRONT_PRIMARY_QUEUE = ${wavefrontContract.primaryQueue};
-    public static final int WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0 = ${wavefrontContract.transparentTraceQueue0};
-    public static final int WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1 = ${wavefrontContract.transparentTraceQueue1};
-    public static final int WAVEFRONT_AREA_QUEUE = ${wavefrontContract.areaQueue};
-    public static final int WAVEFRONT_TRANSPARENT_RESOLVE_QUEUE = ${wavefrontContract.transparentResolveQueue};
-    public static final int WAVEFRONT_GUIDE_QUEUE = ${wavefrontContract.guideQueue};
-    public static final int WAVEFRONT_QUEUE_COMMAND_STRIDE = ${wavefrontContract.queueCommandStride};
-    public static final int WAVEFRONT_QUEUE_INDEX_SIZE = ${wavefrontContract.queueIndexSize};
-    public static final int WAVEFRONT_ACTIVE_MASK = ${wavefrontContract.activeMask};
-    public static final int PATH_SAMPLE_INDEX_MASK = ${schema.pathControl.sampleIndexMask};
-    public static final int PATH_SOLAR_LONGITUDE_SHIFT = ${schema.pathControl.solarLongitudeShift};
-    public static final int PATH_SOLAR_LONGITUDE_MASK = ${schema.pathControl.solarLongitudeMask};
-    public static final int PATH_SEAMLESS_GLASS_MASK = ${schema.pathControl.seamlessGlassMask};
-    public static final int PATH_AIR_GAP_MASK = ${schema.pathControl.airGapMask};
-    public static final int PATH_VANILLA_PBR_PRESETS_MASK = ${schema.pathControl.vanillaPbrPresetsMask};
-    public static final int PATH_TRANSPARENT_NEE_UNBIASED_MASK = ${schema.pathControl.transparentNeeUnbiasedMask};
-    public static final int PATH_SAMPLE_EPOCH_MASK = ${schema.pathControl.sampleEpochMask};
-    public static final int PATH_HISTORY_VALID_MASK = ${schema.pathControl.historyValidMask};
-    public static final int PATH_MAXIMUM_BOUNCES_MASK = ${schema.pathControl.maximumBouncesMask};
-    public static final int PATH_LATITUDE_SHIFT = ${schema.pathControl.latitudeShift};
-    public static final int PATH_LATITUDE_MASK = ${schema.pathControl.latitudeMask};
-    public static final int PATH_LATITUDE_BIAS = ${schema.pathControl.latitudeBias};
-    public static final int PATH_CAMERA_IN_WATER_MASK = ${schema.pathControl.cameraInWaterMask};
-    public static final int PATH_JITTER_PHASE_MASK = ${schema.pathControl.jitterPhaseMask};
-    public static final int PATH_TRANSPARENT_GUIDE_MODE_SHIFT = ${schema.pathControl.transparentGuideModeShift};
-    public static final int PATH_TRANSPARENT_GUIDE_MODE_MASK = ${schema.pathControl.transparentGuideModeMask};
-    public static final int PATH_TRANSPARENT_GUIDE_MODE_NRD = ${schema.pathControl.transparentGuideModeNrd};
-    public static final int PATH_TRANSPARENT_GUIDE_MODE_DLSS_RR = ${schema.pathControl.transparentGuideModeDlssRr};
-    public static final int PATH_TRANSPARENT_GUIDE_MODE_DISABLED = ${schema.pathControl.transparentGuideModeDisabled};
-    public static final int PATH_SUN_EV_QUARTER_SHIFT = ${schema.pathControl.sunEvQuarterShift};
-    public static final int PATH_BLOCK_LIGHT_EV_QUARTER_SHIFT = ${schema.pathControl.blockLightEvQuarterShift};
-    public static final int PATH_EV_QUARTER_MASK = ${schema.pathControl.evQuarterMask};
-    public static final int PATH_EV_QUARTER_BIAS = ${schema.pathControl.evQuarterBias};
-    public static final int PATH_MATERIAL_ROUGHNESS_SHIFT = ${schema.pathControl.materialRoughnessShift};
-    public static final int PATH_MATERIAL_ROUGHNESS_MASK = ${schema.pathControl.materialRoughnessMask};
-    public static final int PATH_MATERIAL_ROUGHNESS_STEPS_PER_UNIT = ${schema.pathControl.materialRoughnessStepsPerUnit};
-    public static final int PATH_SH_INPUT_MASK = ${schema.pathControl.shInputMask};
-    public static final int PATH_STAR_EV_QUARTER_SHIFT = ${schema.pathControl.starEvQuarterShift};
-    public static final int PATH_STAR_EV_QUARTER_MASK = ${schema.pathControl.starEvQuarterMask};
-    public static final int PATH_STAR_EV_QUARTER_BIAS = ${schema.pathControl.starEvQuarterBias};
-    public static final int MAXIMUM_BOUNCES = ${schema.pathControl.maximumBounces};
-    public static final int RUSSIAN_ROULETTE_START = ${schema.pathControl.russianRouletteStart};
-    public static final float CUTOUT_ALPHA_THRESHOLD = ${schema.cutoutAlphaThreshold}f;
-    public static final String WORKING_COLOR_SPACE = "${colorContract.workingSpace}";
-    public static final String TEXTURE_COLOR_ENCODING = "${colorContract.textureEncoding}";
-    public static final String DISPLAY_COLOR_ENCODING = "${colorContract.displayEncoding}";
-    public static final String DISPLAY_COLOR_SPACE = "${colorContract.displayColorSpace}";
-    public static final float DISPLAY_EXPOSURE = ${colorContract.displayExposure}f;
-    public static final float LEVEL_15_BLOCK_INTENSITY = ${emissionContract.level15BlockIntensity}f;
-    public static final String NRD_VERSION = "${nrdContract.version}";
-    public static final String NRD_DENOISER = "${nrdContract.denoiser}";
-    public static final String NRD_NORMAL_ENCODING = "${nrdContract.normalEncoding}";
-    public static final String NRD_ROUGHNESS_ENCODING = "${nrdContract.roughnessEncoding}";
-    public static final String NRD_MOTION_SPACE = "${nrdContract.motionSpace}";
-    public static final String NRD_SIGNAL_SPACE = "${nrdContract.signalSpace}";
-    public static final String FSR_VERSION = "${fsrContract.version}";
-    public static final String FSR_MOTION_SPACE = "${fsrContract.motionSpace}";
-    public static final String FSR_DEPTH_SPACE = "${fsrContract.depthSpace}";
-    public static final float FSR_NEAR_PLANE = ${fsrContract.nearPlane}f;
-    public static final float FSR_VIEW_SPACE_TO_METERS_FACTOR = ${fsrContract.viewSpaceToMetersFactor}f;
-    public static final String ATMOSPHERE_SPECTRAL_MODEL = "${atmosphereContract.spectralModel}";
-    public static final float ATMOSPHERE_WORLD_TO_ATMOSPHERE_SCALE = ${atmosphereContract.worldToAtmosphereScale}f;
-    public static final float ATMOSPHERE_BOTTOM_RADIUS_KM = ${atmosphereContract.bottomRadiusKm}f;
-    public static final float ATMOSPHERE_TOP_RADIUS_KM = ${atmosphereContract.topRadiusKm}f;
-    public static final float ATMOSPHERE_WORLD_SEA_LEVEL_Y = ${atmosphereContract.worldSeaLevelY}f;
-    public static final float ATMOSPHERE_WORLD_UNIT_SCALE_KM = ${atmosphereContract.worldUnitScaleKm * atmosphereContract.worldToAtmosphereScale}f;
-    public static final float ATMOSPHERE_SPACE_SUN_INTENSITY = ${atmosphereContract.spaceSunIntensity}f;
-    public static final float ATMOSPHERE_SUN_ANGULAR_RADIUS_RADIANS = ${atmosphereContract.sunAngularRadiusRadians}f;
-    public static final float ATMOSPHERE_AERIAL_MAX_DISTANCE_KM = ${atmosphereContract.aerialMaxDistanceKm * atmosphereContract.worldToAtmosphereScale}f;
-    public static final int ATMOSPHERE_AERIAL_WIDTH = ${atmosphereContract.aerialWidth};
-    public static final int ATMOSPHERE_AERIAL_HEIGHT = ${atmosphereContract.aerialHeight};
-    public static final int ATMOSPHERE_AERIAL_EPIPOLAR_SAMPLES = ${atmosphereContract.aerialEpipolarSamples};
-    public static final int ATMOSPHERE_AERIAL_EPIPOLAR_SLICES = ${atmosphereContract.aerialEpipolarSlices};
-    public static final int ATMOSPHERE_AERIAL_DEPTH = ${atmosphereContract.aerialDepth};
-    public static final int ATMOSPHERE_AERIAL_SEGMENT_SAMPLES = ${atmosphereContract.aerialSegmentSamples};
-    public static final float ASTRONOMY_AXIAL_TILT_DEGREES = ${astronomyContract.axialTiltDegrees}f;
-    public static final int ASTRONOMY_MINIMUM_LATITUDE_DEGREES = ${astronomyContract.minimumLatitudeDegrees};
-    public static final int ASTRONOMY_MAXIMUM_LATITUDE_DEGREES = ${astronomyContract.maximumLatitudeDegrees};
-    public static final int ASTRONOMY_DEFAULT_LATITUDE_DEGREES = ${astronomyContract.defaultLatitudeDegrees};
-    public static final int ASTRONOMY_MINIMUM_SOLAR_LONGITUDE_DEGREES = ${astronomyContract.minimumSolarLongitudeDegrees};
-    public static final int ASTRONOMY_MAXIMUM_SOLAR_LONGITUDE_DEGREES = ${astronomyContract.maximumSolarLongitudeDegrees};
-    public static final int ASTRONOMY_DEFAULT_SOLAR_LONGITUDE_DEGREES = ${astronomyContract.defaultSolarLongitudeDegrees};
-    public static final int STARMAP_WIDTH = ${starmapContract.width};
-    public static final int STARMAP_HEIGHT = ${starmapContract.height};
-    public static final float STARMAP_BASE_RADIANCE_SCALE = ${starmapContract.baseRadianceScale}f;
-    public static final String STARMAP_SOURCE_SHA256 = "${starmapContract.sourceSha256}";
-    public static final int REALTIME_STBN_WIDTH = ${realtimeStbnContract.width};
-    public static final int REALTIME_STBN_HEIGHT = ${realtimeStbnContract.height};
-    public static final int REALTIME_STBN_DEPTH = ${realtimeStbnContract.depth};
-    public static final int REALTIME_STBN_BANK_COUNT = ${realtimeStbnContract.bankCount};
-    public static final int REALTIME_STBN_CHANNELS = ${realtimeStbnContract.channels};
-    public static final int REALTIME_STBN_CHANNEL_BITS = ${realtimeStbnContract.channelBits};
-    public static final String REALTIME_STBN_RESOURCE_SHA256 = "${realtimeStbnContract.resourceSha256}";
-${javaOffsets}
+${javaConstants}${javaOffsets}
 
     private ShaderAbi() {
     }
@@ -387,12 +364,7 @@ ${javaOffsets}
 module "prime_material_core_abi.slang";
 
 // Generated from shaders/abi.json. Do not edit by hand.
-public static const uint PRIME_MATERIAL_CORE_RECORD_SIZE = ${materialCoreContract.recordSize};
-public static const uint PRIME_MATERIAL_CORE_TEXTURE_ID_MASK = ${materialCoreContract.textureIdMask};
-public static const uint PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT = ${materialCoreContract.recipeControlShift};
-public static const uint PRIME_MATERIAL_CORE_RECIPE_CONTROL_MASK = ${materialCoreContract.recipeControlMask};
-public static const uint PRIME_MATERIAL_CORE_MEDIUM_ID_OFFSET = ${materialCoreContract.mediumIdOffset};
-public static const uint PRIME_MATERIAL_CORE_MEDIUM_ID_MASK = ${materialCoreContract.mediumIdMask};
+${slangConstants('MATERIAL_CORE', materialCoreContract)}
 """
 		new File(slangDir, 'prime_abi_bindings.slang').text = """\
 #language slang 2026
@@ -411,148 +383,10 @@ public static const uint PRIME_REALTIME_STBN_BANK_COUNT = ${realtimeStbnContract
 module "prime_abi_types.slang";
 
 // Generated from shaders/abi.json. Do not edit by hand.
-static const uint PRIME_PRIMITIVE_RECORD_SIZE = ${primitive.size};
-static const uint PRIME_SECTION_RECORD_SIZE = ${section.size};
-static const uint PRIME_LIGHT_NODE_SIZE = ${lightNode.size};
-static const uint PRIME_LIGHT_LEAF_SIZE = ${lightLeaf.size};
-static const uint PRIME_LIGHT_EMITTER_SIZE = ${lightEmitter.size};
-static const uint PRIME_LIGHT_CELL_SIZE = ${lightCell.size};
-static const uint PRIME_SECTION_LIGHT_HEADER_SIZE = ${sectionLightHeader.size};
-static const uint PRIME_INTEGRATOR_RECORD_SIZE = ${integrator.size};
-static const uint PRIME_PATH_STATE_SIZE = ${pathState.size};
-static const uint PRIME_TRACE_PAYLOAD_SIZE = ${tracePayload.size};
-static const uint PRIME_SURFACE_INTERACTION_SIZE = ${surfaceInteraction.size};
-static const uint PRIME_PUSH_CONSTANT_SIZE = ${push.size};
-static const uint PRIME_NRD_MOTION_PUSH_CONSTANT_SIZE = ${nrdMotionPush.size};
-static const uint PRIME_SUN_SHADOW_QUERY_CONSTANT_SIZE = ${sunShadowQuery.size};
-static const uint PRIME_SCENE_TEXTURE_COUNT = ${schema.sceneTextureCount};
-static const uint PRIME_DESCRIPTOR_TRANSMISSION_GGX_ENERGY = ${schema.sharedDescriptors.transmissionGgxEnergy};
-static const uint PRIME_PATH_SAMPLE_INDEX_MASK = ${schema.pathControl.sampleIndexMask};
-static const uint PRIME_PATH_SOLAR_LONGITUDE_SHIFT = ${schema.pathControl.solarLongitudeShift};
-static const uint PRIME_PATH_SOLAR_LONGITUDE_MASK = ${schema.pathControl.solarLongitudeMask};
-static const uint PRIME_PATH_SEAMLESS_GLASS_MASK = ${schema.pathControl.seamlessGlassMask};
-static const uint PRIME_PATH_AIR_GAP_MASK = ${schema.pathControl.airGapMask};
-static const uint PRIME_PATH_VANILLA_PBR_PRESETS_MASK = ${schema.pathControl.vanillaPbrPresetsMask};
-static const uint PRIME_PATH_TRANSPARENT_NEE_UNBIASED_MASK = ${schema.pathControl.transparentNeeUnbiasedMask};
-static const uint PRIME_PATH_SAMPLE_EPOCH_MASK = ${schema.pathControl.sampleEpochMask};
-static const uint PRIME_PATH_MAXIMUM_BOUNCES_MASK = ${schema.pathControl.maximumBouncesMask};
-static const uint PRIME_PATH_LATITUDE_SHIFT = ${schema.pathControl.latitudeShift};
-static const uint PRIME_PATH_LATITUDE_MASK = ${schema.pathControl.latitudeMask};
-static const int PRIME_PATH_LATITUDE_BIAS = ${schema.pathControl.latitudeBias};
-static const uint PRIME_PATH_CAMERA_IN_WATER_MASK = ${schema.pathControl.cameraInWaterMask};
-static const uint PRIME_PATH_JITTER_PHASE_MASK = ${schema.pathControl.jitterPhaseMask};
-static const uint PRIME_PATH_TRANSPARENT_GUIDE_MODE_SHIFT = ${schema.pathControl.transparentGuideModeShift};
-static const uint PRIME_PATH_TRANSPARENT_GUIDE_MODE_MASK = ${schema.pathControl.transparentGuideModeMask};
-static const uint PRIME_PATH_TRANSPARENT_GUIDE_MODE_NRD = ${schema.pathControl.transparentGuideModeNrd};
-static const uint PRIME_PATH_TRANSPARENT_GUIDE_MODE_DLSS_RR = ${schema.pathControl.transparentGuideModeDlssRr};
-static const uint PRIME_PATH_TRANSPARENT_GUIDE_MODE_DISABLED = ${schema.pathControl.transparentGuideModeDisabled};
-static const uint PRIME_PATH_SUN_EV_QUARTER_SHIFT = ${schema.pathControl.sunEvQuarterShift};
-static const uint PRIME_PATH_BLOCK_LIGHT_EV_QUARTER_SHIFT = ${schema.pathControl.blockLightEvQuarterShift};
-static const uint PRIME_PATH_EV_QUARTER_MASK = ${schema.pathControl.evQuarterMask};
-static const int PRIME_PATH_EV_QUARTER_BIAS = ${schema.pathControl.evQuarterBias};
-static const uint PRIME_PATH_MATERIAL_ROUGHNESS_SHIFT = ${schema.pathControl.materialRoughnessShift};
-static const uint PRIME_PATH_MATERIAL_ROUGHNESS_MASK = ${schema.pathControl.materialRoughnessMask};
-static const float PRIME_PATH_MATERIAL_ROUGHNESS_STEPS_PER_UNIT = ${schema.pathControl.materialRoughnessStepsPerUnit};
-static const uint PRIME_PATH_SH_INPUT_MASK = ${schema.pathControl.shInputMask};
-static const uint PRIME_PATH_STAR_EV_QUARTER_SHIFT = ${schema.pathControl.starEvQuarterShift};
-static const uint PRIME_PATH_STAR_EV_QUARTER_MASK = ${schema.pathControl.starEvQuarterMask};
-static const int PRIME_PATH_STAR_EV_QUARTER_BIAS = ${schema.pathControl.starEvQuarterBias};
-static const uint PRIME_MAXIMUM_BOUNCES = ${schema.pathControl.maximumBounces};
-static const uint PRIME_RUSSIAN_ROULETTE_START = ${schema.pathControl.russianRouletteStart};
-static const float PRIME_CUTOUT_ALPHA_THRESHOLD = ${schema.cutoutAlphaThreshold};
-static const float PRIME_LEVEL_15_BLOCK_INTENSITY = ${emissionContract.level15BlockIntensity};
-static const float PRIME_DISPLAY_EXPOSURE = ${colorContract.displayExposure};
-static const float PRIME_ASTRONOMY_AXIAL_TILT_RADIANS =
-        ${astronomyContract.axialTiltDegrees} * 0.017453292519943295;
-static const float PRIME_ATMOSPHERE_WORLD_TO_ATMOSPHERE_SCALE = ${atmosphereContract.worldToAtmosphereScale};
-static const float PRIME_ATMOSPHERE_BOTTOM_RADIUS_KM = ${atmosphereContract.bottomRadiusKm};
-static const float PRIME_ATMOSPHERE_TOP_RADIUS_KM = ${atmosphereContract.topRadiusKm};
-static const float PRIME_ATMOSPHERE_WORLD_SEA_LEVEL_Y = ${atmosphereContract.worldSeaLevelY};
-static const float PRIME_ATMOSPHERE_WORLD_UNIT_SCALE_KM = ${atmosphereContract.worldUnitScaleKm * atmosphereContract.worldToAtmosphereScale};
-static const float PRIME_ATMOSPHERE_SPACE_SUN_INTENSITY = ${atmosphereContract.spaceSunIntensity};
-static const float PRIME_ATMOSPHERE_SUN_ANGULAR_RADIUS_RADIANS = ${atmosphereContract.sunAngularRadiusRadians};
-static const float PRIME_ATMOSPHERE_AERIAL_MAX_DISTANCE_KM = ${atmosphereContract.aerialMaxDistanceKm * atmosphereContract.worldToAtmosphereScale};
-static const uint PRIME_ATMOSPHERE_AERIAL_WIDTH = ${atmosphereContract.aerialWidth};
-static const uint PRIME_ATMOSPHERE_AERIAL_HEIGHT = ${atmosphereContract.aerialHeight};
-static const uint PRIME_ATMOSPHERE_AERIAL_EPIPOLAR_SAMPLES = ${atmosphereContract.aerialEpipolarSamples};
-static const uint PRIME_ATMOSPHERE_AERIAL_EPIPOLAR_SLICES = ${atmosphereContract.aerialEpipolarSlices};
-static const uint PRIME_ATMOSPHERE_AERIAL_DEPTH = ${atmosphereContract.aerialDepth};
-static const uint PRIME_ATMOSPHERE_AERIAL_SEGMENT_SAMPLES = ${atmosphereContract.aerialSegmentSamples};
-static const uint PRIME_STARMAP_WIDTH = ${starmapContract.width};
-static const uint PRIME_STARMAP_HEIGHT = ${starmapContract.height};
-static const float PRIME_STARMAP_BASE_RADIANCE_SCALE = ${starmapContract.baseRadianceScale};
+${slangTypeConstants}
+${slangStructs}
 
-public struct PrimitiveRecord
-{
-${slangStructFields(primitive)}
-};
-
-public struct SectionRecord
-{
-${slangStructFields(section)}
-};
-
-public struct LightNode
-{
-${slangStructFields(lightNode)}
-};
-
-public struct LightLeaf
-{
-${slangStructFields(lightLeaf)}
-};
-
-public struct LightEmitter
-{
-${slangStructFields(lightEmitter)}
-};
-
-public struct LightCell
-{
-${slangStructFields(lightCell)}
-};
-
-public struct SectionLightHeader
-{
-${slangStructFields(sectionLightHeader)}
-};
-
-public struct IntegratorRecord
-{
-${slangStructFields(integrator)}
-};
-
-public struct PathState
-{
-${slangStructFields(pathState)}
-};
-
-public struct TracePayload
-{
-${slangStructFields(tracePayload)}
-};
-
-public struct SurfaceInteraction
-{
-${slangStructFields(surfaceInteraction)}
-};
-
-public struct PrimePushConstants
-{
-${slangStructFields(push)}
-};
-
-public struct NrdMotionPushConstants
-{
-${slangStructFields(nrdMotionPush)}
-};
-
-public struct SunShadowQueryConstants
-{
-${slangStructFields(sunShadowQuery)}
-};
-
-""".replace('static const ', 'public static const ')
+"""
 		new File(slangDir, 'prime_abi.slang').text = """\
 #language slang 2026
 module "prime_abi.slang";
@@ -569,36 +403,8 @@ public RaytracingAccelerationStructure primeScene;
 [[vk::binding(${schema.sharedDescriptors.blockAtlas}, 0)]]
 public Sampler2D<float4> primeSceneTextures[PRIME_SCENE_TEXTURE_COUNT];
 
-[[vk::binding(${schema.sharedDescriptors.skyView}, 0)]] [[vk::image_format("rgba16f")]]
-public readonly RWTexture2D<float4> primeSkyView;
-[[vk::binding(${schema.sharedDescriptors.transmittanceLow}, 0)]] [[vk::image_format("rgba16f")]]
-public readonly RWTexture2D<float4> primeTransmittanceLow;
-[[vk::binding(${schema.sharedDescriptors.transmittanceHigh}, 0)]] [[vk::image_format("rgba16f")]]
-public readonly RWTexture2D<float4> primeTransmittanceHigh;
-[[vk::binding(${schema.sharedDescriptors.aerialRadiance}, 0)]] [[vk::image_format("rgba16f")]]
-public readonly RWTexture3D<float4> primeAerialRadiance;
-[[vk::binding(${schema.sharedDescriptors.aerialTransmittance}, 0)]] [[vk::image_format("rgba16f")]]
-public readonly RWTexture3D<float4> primeAerialTransmittance;
-[[vk::binding(${schema.sharedDescriptors.sunShadowDepth0}, 0)]] [[vk::image_format("r32f")]]
-public RWTexture2D<float> primeSunShadowDepth0;
-[[vk::binding(${schema.sharedDescriptors.sunShadowDepth1}, 0)]] [[vk::image_format("r32f")]]
-public RWTexture2D<float> primeSunShadowDepth1;
-[[vk::binding(${schema.sharedDescriptors.sunShadowDepth2}, 0)]] [[vk::image_format("r32f")]]
-public RWTexture2D<float> primeSunShadowDepth2;
-[[vk::binding(${schema.sharedDescriptors.sunShadowDepth3}, 0)]] [[vk::image_format("r32f")]]
-public RWTexture2D<float> primeSunShadowDepth3;
-[[vk::binding(${schema.sharedDescriptors.sunShadowDepth4}, 0)]] [[vk::image_format("r32f")]]
-public RWTexture2D<float> primeSunShadowDepth4;
-[[vk::binding(${schema.sharedDescriptors.sunShadowDepth5}, 0)]] [[vk::image_format("r32f")]]
-public RWTexture2D<float> primeSunShadowDepth5;
-[[vk::binding(${schema.sharedDescriptors.sunShadowDepth6}, 0)]] [[vk::image_format("r32f")]]
-public RWTexture2D<float> primeSunShadowDepth6;
-[[vk::binding(${schema.sharedDescriptors.sunShadowDepth7}, 0)]] [[vk::image_format("r32f")]]
-public RWTexture2D<float> primeSunShadowDepth7;
-[[vk::binding(${schema.sharedDescriptors.sunShadowDepth8}, 0)]] [[vk::image_format("r32f")]]
-public RWTexture2D<float> primeSunShadowDepth8;
-[[vk::binding(${schema.sharedDescriptors.sunShadowDepth9}, 0)]] [[vk::image_format("r32f")]]
-public RWTexture2D<float> primeSunShadowDepth9;
+${environmentImages}
+${sunShadowImages}
 [[vk::binding(${schema.sharedDescriptors.starmap}, 0)]]
 public Sampler2D<float4> primeStarmap;
 """
@@ -625,33 +431,7 @@ module "prime_realtime_abi.slang";
 
 import "prime_abi_types.slang";
 
-public static const uint PRIME_RENDERER_DESCRIPTOR_SET = 1;
-public static const uint PRIME_DESCRIPTOR_WAVEFRONT_PATHS = ${schema.realtimeDescriptors.wavefrontPaths};
-public static const uint PRIME_DESCRIPTOR_WAVEFRONT_QUEUE = ${schema.realtimeDescriptors.wavefrontQueue};
-public static const uint PRIME_WAVEFRONT_PATH_RECORD_SIZE = ${wavefrontContract.pathRecordSize};
-public static const uint PRIME_WAVEFRONT_ETA_SCALE_OFFSET = ${wavefrontContract.etaScaleOffset};
-public static const uint PRIME_WAVEFRONT_PATH_CONTROL_RESERVED_MASK = ${wavefrontContract.pathControlReservedMask};
-public static const uint PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${wavefrontContract.pathSlotsPerPixel};
-public static const uint PRIME_WAVEFRONT_AREA_GUIDE_RECORD_SIZE = ${wavefrontContract.areaGuideRecordSize};
-public static const uint PRIME_WAVEFRONT_SURFACE_RECORD_SIZE = ${wavefrontSurfaceRecord.size};
-public static const uint PRIME_WAVEFRONT_STAGED_LIGHT_RECORD_SIZE = ${wavefrontContract.stagedLightRecordSize};
-public static const uint PRIME_WAVEFRONT_STAGED_RECEIVER_NORMAL_OFFSET = ${wavefrontContract.stagedReceiverNormalOffset};
-public static const uint PRIME_WAVEFRONT_DETACHED_GUIDE_RECORD_SIZE = ${wavefrontContract.detachedGuideRecordSize};
-public static const uint PRIME_WAVEFRONT_AREA_RECORD_SIZE = ${wavefrontContract.areaRecordSize};
-public static const uint PRIME_WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL = ${wavefrontContract.queueEntriesPerPixel};
-public static const uint PRIME_WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL = ${wavefrontContract.queueStorageEntriesPerPixel};
-public static const uint PRIME_WAVEFRONT_QUEUE_COUNT = ${wavefrontContract.queueCount};
-public static const uint PRIME_WAVEFRONT_TRACE_QUEUE_0 = ${wavefrontContract.traceQueue0};
-public static const uint PRIME_WAVEFRONT_TRACE_QUEUE_1 = ${wavefrontContract.traceQueue1};
-public static const uint PRIME_WAVEFRONT_PRIMARY_QUEUE = ${wavefrontContract.primaryQueue};
-public static const uint PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0 = ${wavefrontContract.transparentTraceQueue0};
-public static const uint PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1 = ${wavefrontContract.transparentTraceQueue1};
-public static const uint PRIME_WAVEFRONT_AREA_QUEUE = ${wavefrontContract.areaQueue};
-public static const uint PRIME_WAVEFRONT_TRANSPARENT_RESOLVE_QUEUE = ${wavefrontContract.transparentResolveQueue};
-public static const uint PRIME_WAVEFRONT_GUIDE_QUEUE = ${wavefrontContract.guideQueue};
-public static const uint PRIME_WAVEFRONT_QUEUE_COMMAND_STRIDE = ${wavefrontContract.queueCommandStride};
-public static const uint PRIME_WAVEFRONT_QUEUE_INDEX_SIZE = ${wavefrontContract.queueIndexSize};
-public static const uint PRIME_WAVEFRONT_ACTIVE_MASK = ${wavefrontContract.activeMask};
+${realtimeConstants}
 
 public uint primeRealtimeQueueCapacity(uint pixelCount, uint queue) {
     bool wide = queue == PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0
@@ -681,52 +461,7 @@ public uint primeRealtimeQueueWord(uint pixelCount, uint queue, uint entry) {
     return base + slot * pixelCount + entry;
 }
 
-[[vk::binding(${schema.realtimeDescriptors.stableRadiance}, 1)]] [[vk::image_format("rgba32f")]]
-public RWTexture2D<float4> primeStableRadiance;
-[[vk::binding(${schema.realtimeDescriptors.nrdNoisyDiffuse}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdNoisyDiffuse;
-[[vk::binding(${schema.realtimeDescriptors.nrdNoisySpecular}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdNoisySpecular;
-[[vk::binding(${schema.realtimeDescriptors.nrdNormalRoughness}, 1)]] [[vk::image_format("rgba32f")]]
-public RWTexture2D<float4> primeNrdNormalRoughness;
-[[vk::binding(${schema.realtimeDescriptors.nrdViewZ}, 1)]] [[vk::image_format("r32f")]]
-public RWTexture2D<float> primeNrdViewZ;
-[[vk::binding(${schema.realtimeDescriptors.wavefrontTransportMetadata}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeWavefrontTransportMetadata;
-[[vk::binding(${schema.realtimeDescriptors.nrdMaterial}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdMaterial;
-[[vk::binding(${schema.realtimeDescriptors.nrdSpecularMaterial}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdSpecularMaterial;
-[[vk::binding(${schema.realtimeDescriptors.nrdMaterialClass}, 1)]] [[vk::image_format("r8ui")]]
-public RWTexture2D<uint> primeReconstructionControl;
-[[vk::binding(${schema.realtimeDescriptors.nrdPrimaryPosition}, 1)]] [[vk::image_format("rgba32f")]]
-public RWTexture2D<float4> primeNrdPrimaryPosition;
-[[vk::binding(${schema.realtimeDescriptors.nrdSunLighting}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdSunLighting;
-[[vk::binding(${schema.realtimeDescriptors.nrdSunPenumbra}, 1)]] [[vk::image_format("r16f")]]
-public RWTexture2D<float> primeNrdSunPenumbra;
-[[vk::binding(${schema.realtimeDescriptors.nrdDiffuseDirection}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdDiffuseDirection;
-[[vk::binding(${schema.realtimeDescriptors.nrdSpecularDirection}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdSpecularDirection;
-[[vk::binding(${schema.realtimeDescriptors.nrdReflectionNoisyDiffuse}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdReflectionNoisyDiffuse;
-[[vk::binding(${schema.realtimeDescriptors.nrdReflectionNoisySpecular}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdReflectionNoisySpecular;
-[[vk::binding(${schema.realtimeDescriptors.nrdReflectionNormalRoughness}, 1)]] [[vk::image_format("rgba32f")]]
-public RWTexture2D<float4> primeNrdReflectionNormalRoughness;
-[[vk::binding(${schema.realtimeDescriptors.nrdReflectionMaterial}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdReflectionMaterial;
-[[vk::binding(${schema.realtimeDescriptors.nrdReflectionSpecularMaterial}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdReflectionSpecularMaterial;
-[[vk::binding(${schema.realtimeDescriptors.nrdReflectionPosition}, 1)]] [[vk::image_format("rgba32f")]]
-public RWTexture2D<float4> primeNrdReflectionPosition;
-[[vk::binding(${schema.realtimeDescriptors.nrdReflectionDiffuseDirection}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdReflectionDiffuseDirection;
-[[vk::binding(${schema.realtimeDescriptors.nrdReflectionSpecularDirection}, 1)]] [[vk::image_format("rgba16f")]]
-public RWTexture2D<float4> primeNrdReflectionSpecularDirection;
-[[vk::binding(${schema.realtimeDescriptors.nrdDisplayPosition}, 1)]] [[vk::image_format("rgba32f")]]
-public RWTexture2D<float4> primeNrdDisplayPosition;
+${realtimeImages}
 
 public float4 primeImageLoad(RWTexture2D<float4> image, int2 coordinate)
 {
@@ -770,20 +505,7 @@ module "prime_offline_abi.slang";
 
 import "prime_abi_types.slang";
 
-public static const uint PRIME_RENDERER_DESCRIPTOR_SET = 1;
-public static const uint PRIME_DESCRIPTOR_WAVEFRONT_PATHS = ${schema.offlineDescriptors.wavefrontPaths};
-public static const uint PRIME_DESCRIPTOR_WAVEFRONT_QUEUE = ${schema.offlineDescriptors.wavefrontQueue};
-public static const uint PRIME_WAVEFRONT_PATH_RECORD_SIZE = ${offlineWavefrontContract.pathRecordSize};
-public static const uint PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL = ${offlineWavefrontContract.pathSlotsPerPixel};
-public static const uint PRIME_OFFLINE_WAVEFRONT_SURFACE_RECORD_SIZE = ${offlineWavefrontContract.surfaceRecordSize};
-public static const uint PRIME_OFFLINE_STAGED_LIGHT_RECORD_SIZE = ${offlineWavefrontContract.stagedLightRecordSize};
-public static const uint PRIME_OFFLINE_WAVEFRONT_STAGE_RECORD_SIZE = ${offlineWavefrontContract.stageRecordSize};
-public static const uint PRIME_WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL = ${offlineWavefrontContract.queueEntriesPerPixel};
-public static const uint PRIME_WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL = ${offlineWavefrontContract.queueStorageEntriesPerPixel};
-public static const uint PRIME_WAVEFRONT_QUEUE_COUNT = ${offlineWavefrontContract.queueCount};
-public static const uint PRIME_WAVEFRONT_QUEUE_COMMAND_STRIDE = ${offlineWavefrontContract.queueCommandStride};
-public static const uint PRIME_WAVEFRONT_QUEUE_INDEX_SIZE = ${offlineWavefrontContract.queueIndexSize};
-public static const uint PRIME_WAVEFRONT_ACTIVE_MASK = ${offlineWavefrontContract.activeMask};
+${offlineConstants}
 
 public struct PrimeOfflineTransportRecord {
     public uint4 physicalOriginAndPreviousBsdfPdf;
