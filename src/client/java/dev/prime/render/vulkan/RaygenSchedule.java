@@ -1,49 +1,42 @@
 package dev.prime.render.vulkan;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 /** Immutable ray-generation module, group, and shader-record contract. */
 final class RaygenSchedule {
-    record Group(int module, int control) {}
-
     private final List<String> modules;
-    private final List<Group> groups;
+    private final int[] groupModules;
+    private final int[] controls;
 
-    RaygenSchedule(List<String> modules, List<Group> groups) {
+    private RaygenSchedule(List<String> modules, int[] groupModules, int[] controls) {
         this.modules = List.copyOf(Objects.requireNonNull(modules, "modules"));
-        this.groups = List.copyOf(Objects.requireNonNull(groups, "groups"));
-        if (this.modules.isEmpty() || this.groups.isEmpty()) {
+        this.groupModules = Objects.requireNonNull(groupModules, "groupModules").clone();
+        this.controls = Objects.requireNonNull(controls, "controls").clone();
+        if (this.modules.isEmpty() || this.groupModules.length == 0) {
             throw new IllegalArgumentException("Raygen schedule cannot be empty");
+        }
+        if (this.groupModules.length != this.controls.length) {
+            throw new IllegalArgumentException("Raygen group metadata length mismatch");
         }
         for (String module : this.modules) {
             if (module == null || module.isBlank()) {
                 throw new IllegalArgumentException("Raygen module resource cannot be blank");
             }
         }
-        for (Group group : this.groups) {
-            if (group.module() < 0 || group.module() >= this.modules.size()) {
+        for (int module : this.groupModules) {
+            if (module < 0 || module >= this.modules.size()) {
                 throw new IllegalArgumentException("Raygen group references an invalid module");
             }
         }
     }
 
     static RaygenSchedule of(List<String> modules, int[] groupModules, int[] controls) {
-        Objects.requireNonNull(groupModules, "groupModules");
-        Objects.requireNonNull(controls, "controls");
-        if (groupModules.length != controls.length) {
-            throw new IllegalArgumentException("Raygen group metadata length mismatch");
-        }
-        List<Group> groups = new ArrayList<>(groupModules.length);
-        for (int index = 0; index < groupModules.length; index++) {
-            groups.add(new Group(groupModules[index], controls[index]));
-        }
-        return new RaygenSchedule(modules, groups);
+        return new RaygenSchedule(modules, groupModules, controls);
     }
 
     static RaygenSchedule single(String module, int control) {
-        return new RaygenSchedule(List.of(module), List.of(new Group(0, control)));
+        return new RaygenSchedule(List.of(module), new int[] {0}, new int[] {control});
     }
 
     int moduleCount() {
@@ -51,7 +44,7 @@ final class RaygenSchedule {
     }
 
     int groupCount() {
-        return this.groups.size();
+        return this.groupModules.length;
     }
 
     String moduleResource(int module) {
@@ -59,10 +52,10 @@ final class RaygenSchedule {
     }
 
     int module(int group) {
-        return this.groups.get(group).module();
+        return this.groupModules[group];
     }
 
     int control(int group) {
-        return this.groups.get(group).control();
+        return this.controls[group];
     }
 }

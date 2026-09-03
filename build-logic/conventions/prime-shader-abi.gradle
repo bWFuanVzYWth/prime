@@ -3,6 +3,10 @@ def shaderAbiSlangRoot = layout.buildDirectory.dir('generated/sources/shaderAbi/
 def shaderProgramJavaRoot = layout.buildDirectory.dir('generated/sources/shaderPrograms/java')
 def compiledSlangShaderRoot = layout.buildDirectory.dir('generated/resources/shaders')
 def compiledSlangTestShaderRoot = layout.buildDirectory.dir('generated/testSlangShaders')
+def robocuteProductionLut = file(
+		'src/client/resources/prime/bsdf/trans_ggx.bytes.gz.b64')
+def robocuteAuthorityLut = file(
+		'third_party/robocute/author-bsdf-hotfix-2026-07-24/trans_ggx.bytes')
 
 def verifyRoboCuteReference = tasks.register('verifyRoboCuteReference') {
 	group = 'verification'
@@ -15,6 +19,7 @@ def verifyRoboCuteReference = tasks.register('verifyRoboCuteReference') {
 	}
 	inputs.file(lockFile)
 	inputs.files(authorityOverlayFiles)
+	inputs.file(robocuteProductionLut)
 
 	doLast {
 		def lock = new groovy.json.JsonSlurper().parse(lockFile)
@@ -40,6 +45,16 @@ def verifyRoboCuteReference = tasks.register('verifyRoboCuteReference') {
 				throw new GradleException(
 						"RoboCute author hotfix changed: ${source.name}")
 			}
+		}
+		def productionLut = new java.util.zip.GZIPInputStream(
+				new java.io.ByteArrayInputStream(
+						robocuteProductionLut.text.decodeBase64()))
+				.withCloseable { it.readAllBytes() }
+		if (!java.util.Arrays.equals(
+				productionLut,
+				robocuteAuthorityLut.bytes)) {
+			throw new GradleException(
+					'Production transmission GGX LUT differs from the approved author overlay')
 		}
 	}
 }

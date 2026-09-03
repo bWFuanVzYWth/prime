@@ -15,6 +15,19 @@ jar {
 
 def distributionVersion = providers.provider { project.version.toString() }
 def shaderProgramManifestFile = file('shaders/programs.json')
+def nativeRuntimeNames = [
+		'prime_nrd.dll',
+		'amd_fidelityfx_vk.dll',
+		'prime_dlss_rr.dll',
+		'nvngx_dlssd.dll',
+		'nvngx_dlssg.dll',
+		'sl.common.dll',
+		'sl.interposer.dll',
+		'sl.pcl.dll',
+		'sl.reflex.dll',
+		'sl.dlss_g.dll',
+		'NvLowLatencyVk.dll'
+]
 def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 	group = 'verification'
 	description = 'Verifies that the distributable jar contains every runtime dependency.'
@@ -83,19 +96,10 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 			'prime/starmap/starmap_2020_8k_1.rgba16f.gz',
 			'prime/starmap/starmap_2020_8k_2.rgba16f.gz',
 			'prime/starmap/starmap_2020_8k_3.rgba16f.gz',
-			'prime/natives/windows-x86_64/prime_nrd.dll',
-			'prime/natives/windows-x86_64/amd_fidelityfx_vk.dll',
-			'prime/natives/windows-x86_64/prime_dlss_rr.dll',
-			'prime/natives/windows-x86_64/nvngx_dlssd.dll',
-			'prime/natives/windows-x86_64/nvngx_dlssg.dll',
-			'prime/natives/windows-x86_64/sl.common.dll',
-			'prime/natives/windows-x86_64/sl.interposer.dll',
-			'prime/natives/windows-x86_64/sl.pcl.dll',
-			'prime/natives/windows-x86_64/sl.reflex.dll',
-			'prime/natives/windows-x86_64/sl.dlss_g.dll',
-			'prime/natives/windows-x86_64/NvLowLatencyVk.dll',
 			'prime/shaders/manifest.sha256'
-		] + requiredShaders + requiredStreamlineEntries
+		] + nativeRuntimeNames.collect {
+			"prime/natives/windows-x86_64/${it}".toString()
+		} + requiredShaders + requiredStreamlineEntries
 		def missing = required.findAll { !names.contains(it) }
 		if (!missing.isEmpty()) {
 			throw new GradleException("Distribution jar is missing runtime entries: ${missing}")
@@ -135,36 +139,15 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 								+ "expected ${expectedFabricDependencies}, found ${fabricDependencies}")
 			}
 
-			def nativeInput = zip.getInputStream(zip.getEntry('prime/natives/windows-x86_64/prime_nrd.dll'))
-			def nativeHeader = nativeInput.withCloseable { it.readNBytes(2) }
-			if (nativeHeader.length != 2 || nativeHeader[0] != (byte) 'M' || nativeHeader[1] != (byte) 'Z') {
-				throw new GradleException('Bundled NRD bridge is not a Windows PE image')
-			}
-			def fsrNativeInput = zip.getInputStream(
-					zip.getEntry('prime/natives/windows-x86_64/amd_fidelityfx_vk.dll'))
-			def fsrNativeHeader = fsrNativeInput.withCloseable { it.readNBytes(2) }
-			if (fsrNativeHeader.length != 2
-					|| fsrNativeHeader[0] != (byte) 'M'
-					|| fsrNativeHeader[1] != (byte) 'Z') {
-				throw new GradleException('Bundled FidelityFX library is not a Windows PE image')
-			}
-			[
-					'prime/natives/windows-x86_64/prime_dlss_rr.dll',
-					'prime/natives/windows-x86_64/nvngx_dlssd.dll',
-					'prime/natives/windows-x86_64/nvngx_dlssg.dll',
-					'prime/natives/windows-x86_64/sl.common.dll',
-					'prime/natives/windows-x86_64/sl.interposer.dll',
-					'prime/natives/windows-x86_64/sl.pcl.dll',
-					'prime/natives/windows-x86_64/sl.reflex.dll',
-					'prime/natives/windows-x86_64/sl.dlss_g.dll',
-					'prime/natives/windows-x86_64/NvLowLatencyVk.dll'
-			].each { rrNativeName ->
-				def rrNativeInput = zip.getInputStream(zip.getEntry(rrNativeName))
-				def rrNativeHeader = rrNativeInput.withCloseable { it.readNBytes(2) }
-				if (rrNativeHeader.length != 2
-						|| rrNativeHeader[0] != (byte) 'M'
-						|| rrNativeHeader[1] != (byte) 'Z') {
-					throw new GradleException("Bundled NVIDIA runtime is not a Windows PE image: ${rrNativeName}")
+			nativeRuntimeNames.each { nativeName ->
+				def entryName = "prime/natives/windows-x86_64/${nativeName}".toString()
+				def input = zip.getInputStream(zip.getEntry(entryName))
+				def header = input.withCloseable { it.readNBytes(2) }
+				if (header.length != 2
+						|| header[0] != (byte) 'M'
+						|| header[1] != (byte) 'Z') {
+					throw new GradleException(
+							"Bundled native runtime is not a Windows PE image: ${entryName}")
 				}
 			}
 
