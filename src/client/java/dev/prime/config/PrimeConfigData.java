@@ -15,113 +15,42 @@ import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.terrain.TerrainWorkerSettings;
 import dev.prime.render.terrain.VoxelSurfaceSettings;
-import java.util.Objects;
 
 /** Client-thread-owned state transferred to and from the properties codec. */
 final class PrimeConfigData {
-    boolean pathTracingEnabled;
-    int additionalSpecularBounces;
-    int minimumBounces;
-    int maximumBounces;
-    int terrainWorkerPercentage;
-    SurfaceDetailMode surfaceDetailMode;
-    int voxelTextureSurfaceStrengthSteps;
-    PostProcessingMode postProcessingMode;
-    ReconstructionQualityMode reconstructionQuality;
-    AstronomySettings astronomy;
-    LightingSettings.Snapshot lighting;
-    DisplaySettings.Snapshot display;
-    MaterialSettings.Snapshot material;
+    boolean pathTracingEnabled = true;
+    int additionalSpecularBounces = SpecularBounceSettings.DEFAULT_COUNT;
+    int minimumBounces = MinimumBounceSettings.DEFAULT_COUNT;
+    int maximumBounces = MaximumBounceSettings.DEFAULT_COUNT;
+    int terrainWorkerPercentage = TerrainWorkerSettings.DEFAULT_PERCENTAGE;
+    SurfaceDetailMode surfaceDetailMode = SurfaceDetailMode.DEFAULT;
+    int voxelTextureSurfaceStrengthSteps = VoxelSurfaceSettings.DEFAULT_STEPS;
+    PostProcessingMode postProcessingMode = PostProcessingMode.DEFAULT;
+    ReconstructionQualityMode reconstructionQuality = ReconstructionQualityMode.DEFAULT;
+    AstronomySettings astronomy = AstronomySettings.defaults();
+    LightingSettings.Snapshot lighting = new LightingSettings.Snapshot(
+            LightingSettings.DEFAULT_SUN_QUARTER_STEPS,
+            LightingSettings.DEFAULT_STAR_QUARTER_STEPS,
+            LightingSettings.DEFAULT_BLOCK_LIGHT_QUARTER_STEPS,
+            TransparentNeeMode.DEFAULT,
+            0L);
+    DisplaySettings.Snapshot display = new DisplaySettings.Snapshot(
+            DisplaySettings.DEFAULT_FINAL_EXPOSURE_QUARTER_STEPS,
+            DisplaySettings.DEFAULT_AUTO_EXPOSURE_COMPENSATION_STEPS);
+    MaterialSettings.Snapshot material = new MaterialSettings.Snapshot(
+            MaterialSettings.DEFAULT_ROUGHNESS_STEPS,
+            MaterialSettings.DEFAULT_SEAMLESS_GLASS,
+            MaterialSettings.DEFAULT_AIR_GAP,
+            MaterialSettings.DEFAULT_VANILLA_PBR_PRESETS,
+            0L);
     boolean hdrEnabled;
-    int referenceWhiteNits;
-    ReflexMode reflexMode;
+    int referenceWhiteNits = HdrOutput.AUTOMATIC_REFERENCE_WHITE_NITS;
+    ReflexMode reflexMode = ReflexMode.OFF;
     boolean dlssFrameGenerationEnabled;
-    int dlssFrameGenerationMultiplier;
-    boolean dlssFrameGenerationUiRecomposition;
-
-    PrimeConfigData(
-            boolean pathTracingEnabled,
-            int additionalSpecularBounces,
-            int minimumBounces,
-            int maximumBounces,
-            int terrainWorkerPercentage,
-            SurfaceDetailMode surfaceDetailMode,
-            int voxelTextureSurfaceStrengthSteps,
-            PostProcessingMode postProcessingMode,
-            ReconstructionQualityMode reconstructionQuality,
-            AstronomySettings astronomy,
-            LightingSettings.Snapshot lighting,
-            DisplaySettings.Snapshot display,
-            MaterialSettings.Snapshot material,
-            boolean hdrEnabled,
-            int referenceWhiteNits,
-            ReflexMode reflexMode,
-            boolean dlssFrameGenerationEnabled,
-            int dlssFrameGenerationMultiplier,
-            boolean dlssFrameGenerationUiRecomposition) {
-        this.pathTracingEnabled = pathTracingEnabled;
-        this.additionalSpecularBounces =
-                SpecularBounceSettings.validateCount(additionalSpecularBounces);
-        this.minimumBounces = MinimumBounceSettings.validateCount(minimumBounces);
-        this.maximumBounces = MaximumBounceSettings.validateCount(maximumBounces);
-        this.terrainWorkerPercentage =
-                TerrainWorkerSettings.validatePercentage(terrainWorkerPercentage);
-        this.surfaceDetailMode = Objects.requireNonNull(surfaceDetailMode, "surfaceDetailMode");
-        this.voxelTextureSurfaceStrengthSteps = voxelTextureSurfaceStrengthSteps;
-        VoxelSurfaceSettings.maximumHeight(voxelTextureSurfaceStrengthSteps);
-        this.postProcessingMode = Objects.requireNonNull(postProcessingMode, "postProcessingMode");
-        if (postProcessingMode == PostProcessingMode.DISABLED) {
-            throw new IllegalArgumentException("Raw output is a non-persistent session diagnostic");
-        }
-        this.reconstructionQuality =
-                Objects.requireNonNull(reconstructionQuality, "reconstructionQuality");
-        this.astronomy = Objects.requireNonNull(astronomy, "astronomy");
-        this.lighting = Objects.requireNonNull(lighting, "lighting");
-        this.display = Objects.requireNonNull(display, "display");
-        this.material = Objects.requireNonNull(material, "material");
-        this.hdrEnabled = hdrEnabled;
-        this.referenceWhiteNits = HdrOutput.validateReferenceWhiteNits(referenceWhiteNits);
-        this.reflexMode = Objects.requireNonNull(reflexMode, "reflexMode");
-        this.dlssFrameGenerationEnabled = dlssFrameGenerationEnabled;
-        if (dlssFrameGenerationMultiplier < 2) {
-            throw new IllegalArgumentException("DLSS frame generation multiplier must be at least 2");
-        }
-        this.dlssFrameGenerationMultiplier = dlssFrameGenerationMultiplier;
-        this.dlssFrameGenerationUiRecomposition = dlssFrameGenerationUiRecomposition;
-    }
+    int dlssFrameGenerationMultiplier = 2;
+    boolean dlssFrameGenerationUiRecomposition = true;
 
     static PrimeConfigData defaults() {
-        return new PrimeConfigData(
-                true,
-                SpecularBounceSettings.DEFAULT_COUNT,
-                MinimumBounceSettings.DEFAULT_COUNT,
-                MaximumBounceSettings.DEFAULT_COUNT,
-                TerrainWorkerSettings.DEFAULT_PERCENTAGE,
-                SurfaceDetailMode.DEFAULT,
-                VoxelSurfaceSettings.DEFAULT_STEPS,
-                PostProcessingMode.DEFAULT,
-                ReconstructionQualityMode.DEFAULT,
-                AstronomySettings.defaults(),
-                new LightingSettings.Snapshot(
-                        LightingSettings.DEFAULT_SUN_QUARTER_STEPS,
-                        LightingSettings.DEFAULT_STAR_QUARTER_STEPS,
-                        LightingSettings.DEFAULT_BLOCK_LIGHT_QUARTER_STEPS,
-                        TransparentNeeMode.DEFAULT,
-                        0L),
-                new DisplaySettings.Snapshot(
-                        DisplaySettings.DEFAULT_FINAL_EXPOSURE_QUARTER_STEPS,
-                        DisplaySettings.DEFAULT_AUTO_EXPOSURE_COMPENSATION_STEPS),
-                new MaterialSettings.Snapshot(
-                        MaterialSettings.DEFAULT_ROUGHNESS_STEPS,
-                        MaterialSettings.DEFAULT_SEAMLESS_GLASS,
-                        MaterialSettings.DEFAULT_AIR_GAP,
-                        MaterialSettings.DEFAULT_VANILLA_PBR_PRESETS,
-                        0L),
-                false,
-                HdrOutput.AUTOMATIC_REFERENCE_WHITE_NITS,
-                ReflexMode.OFF,
-                false,
-                2,
-                true);
+        return new PrimeConfigData();
     }
 }

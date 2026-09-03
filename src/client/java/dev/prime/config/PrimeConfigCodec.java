@@ -74,175 +74,110 @@ final class PrimeConfigCodec {
 
     static DecodeResult decode(Properties properties) {
         Reader reader = new Reader(properties);
-        PrimeConfigData defaults = PrimeConfigData.defaults();
-        boolean pathTracing = reader.value(
-                PATH_TRACING_ENABLED_KEY,
-                defaults.pathTracingEnabled,
-                PrimeConfigCodec::parseBoolean,
-                "path-tracing switch");
-        int additionalSpecularBounces = reader.migratedValue(
-                ADDITIONAL_SPECULAR_BOUNCES_KEY,
-                LEGACY_SPECULAR_BOUNCES_KEY,
-                defaults.additionalSpecularBounces,
+        PrimeConfigData data = PrimeConfigData.defaults();
+        data.pathTracingEnabled = reader.value(
+                PATH_TRACING_ENABLED_KEY, data.pathTracingEnabled,
+                PrimeConfigCodec::parseBoolean, "path-tracing switch");
+        data.additionalSpecularBounces = reader.migratedValue(
+                ADDITIONAL_SPECULAR_BOUNCES_KEY, LEGACY_SPECULAR_BOUNCES_KEY,
+                data.additionalSpecularBounces,
                 PrimeConfigCodec::parseAdditionalSpecularBounces,
                 "additional specular bounce count");
-        int minimumBounces = reader.migratedValue(
-                MINIMUM_BOUNCES_KEY,
-                LEGACY_MINIMUM_BOUNCES_KEY,
-                defaults.minimumBounces,
-                PrimeConfigCodec::parseMinimumBounces,
+        data.minimumBounces = reader.migratedValue(
+                MINIMUM_BOUNCES_KEY, LEGACY_MINIMUM_BOUNCES_KEY,
+                data.minimumBounces, PrimeConfigCodec::parseMinimumBounces,
                 "minimum bounce count");
-        int maximumBounces = reader.migratedValue(
-                MAXIMUM_BOUNCES_KEY,
-                LEGACY_MAXIMUM_BOUNCES_KEY,
-                defaults.maximumBounces,
-                PrimeConfigCodec::parseMaximumBounces,
+        data.maximumBounces = reader.migratedValue(
+                MAXIMUM_BOUNCES_KEY, LEGACY_MAXIMUM_BOUNCES_KEY,
+                data.maximumBounces, PrimeConfigCodec::parseMaximumBounces,
                 "maximum bounce count");
-        int terrainWorkers = reader.value(
-                TERRAIN_WORKER_PERCENTAGE_KEY,
-                defaults.terrainWorkerPercentage,
+        data.terrainWorkerPercentage = reader.value(
+                TERRAIN_WORKER_PERCENTAGE_KEY, data.terrainWorkerPercentage,
                 PrimeConfigCodec::parseTerrainWorkerPercentage,
                 "terrain worker percentage");
-        SurfaceDetailMode surfaceDetail = reader.value(
-                SURFACE_DETAIL_MODE_KEY,
-                defaults.surfaceDetailMode,
-                PrimeConfigCodec::parseSurfaceDetailMode,
-                "surface-detail mode");
-        int voxelStrength = reader.value(
+        data.surfaceDetailMode = reader.value(
+                SURFACE_DETAIL_MODE_KEY, data.surfaceDetailMode,
+                PrimeConfigCodec::parseSurfaceDetailMode, "surface-detail mode");
+        data.voxelTextureSurfaceStrengthSteps = reader.value(
                 VOXEL_TEXTURE_SURFACE_STRENGTH_KEY,
-                defaults.voxelTextureSurfaceStrengthSteps,
+                data.voxelTextureSurfaceStrengthSteps,
                 PrimeConfigCodec::parseVoxelSurfaceStrengthSteps,
                 "voxel-surface strength");
-        PostProcessingMode mode = reader.value(
-                MODE_KEY,
-                defaults.postProcessingMode,
-                PrimeConfigCodec::parsePersistentMode,
-                "post-processing mode");
-        ReconstructionQualityMode quality = reader.value(
-                QUALITY_KEY,
-                defaults.reconstructionQuality,
-                PrimeConfigCodec::parseQuality,
-                "reconstruction quality");
-        int latitude = reader.value(
-                LATITUDE_DEGREES_KEY,
-                defaults.astronomy.latitudeDegrees(),
-                PrimeConfigCodec::parseLatitudeDegrees,
-                "observer latitude");
-        int longitude = reader.value(
-                SOLAR_LONGITUDE_DEGREES_KEY,
-                defaults.astronomy.solarLongitudeDegrees(),
-                PrimeConfigCodec::parseSolarLongitudeDegrees,
-                "solar longitude");
-        int sun = reader.value(
-                SUN_EV_KEY,
-                defaults.lighting.sunQuarterSteps(),
-                PrimeConfigCodec::parseEvQuarterSteps,
-                "sun exposure");
-        int stars = reader.value(
-                STAR_EV_KEY,
-                defaults.lighting.starQuarterSteps(),
-                PrimeConfigCodec::parseStarEvQuarterSteps,
-                "star exposure");
-        int blockLights = reader.value(
-                BLOCK_LIGHT_EV_KEY,
-                defaults.lighting.blockLightQuarterSteps(),
-                PrimeConfigCodec::parseEvQuarterSteps,
-                "block-light exposure");
-        TransparentNeeMode transparentNeeMode = reader.value(
-                TRANSPARENT_NEE_MODE_KEY,
-                defaults.lighting.transparentNeeMode(),
-                PrimeConfigCodec::parseTransparentNeeMode,
-                "transparent NEE mode");
-        int finalExposure = reader.value(
-                FINAL_EXPOSURE_EV_KEY,
-                defaults.display.finalExposureQuarterSteps(),
-                PrimeConfigCodec::parseFinalExposureQuarterSteps,
-                "final exposure");
-        boolean hdr = reader.value(
-                HDR_ENABLED_KEY,
-                defaults.hdrEnabled,
-                PrimeConfigCodec::parseBoolean,
-                "HDR switch");
-        int referenceWhite = reader.value(
-                REFERENCE_WHITE_NITS_KEY,
-                defaults.referenceWhiteNits,
-                PrimeConfigCodec::parseReferenceWhiteNits,
-                "HDR reference white");
-        int exposureCompensation = reader.value(
-                AUTO_EXPOSURE_COMPENSATION_KEY,
-                defaults.display.autoExposureCompensationSteps(),
-                PrimeConfigCodec::parseAutoExposureCompensationSteps,
-                "auto-exposure compensation");
-        int roughness = reader.value(
-                DEFAULT_ROUGHNESS_KEY,
-                defaults.material.roughnessSteps(),
-                PrimeConfigCodec::parseRoughnessSteps,
-                "default material roughness");
-        boolean seamlessGlass = reader.value(
-                SEAMLESS_GLASS_KEY,
-                defaults.material.seamlessGlass(),
-                PrimeConfigCodec::parseBoolean,
-                "seamless-glass switch");
-        boolean airGap = reader.value(
-                AIR_GAP_KEY,
-                defaults.material.airGap(),
-                PrimeConfigCodec::parseBoolean,
-                "air-gap switch");
-        boolean vanillaPbrPresets = reader.value(
-                VANILLA_PBR_PRESETS_KEY,
-                defaults.material.vanillaPbrPresets(),
-                PrimeConfigCodec::parseBoolean,
-                "vanilla-PBR preset switch");
-        ReflexMode reflexMode = reader.value(
-                REFLEX_MODE_KEY,
-                defaults.reflexMode,
-                PrimeConfigCodec::parseReflexMode,
-                "Reflex mode");
-        boolean dlssFrameGenerationEnabled = reader.value(
-                DLSS_FRAME_GENERATION_ENABLED_KEY,
-                defaults.dlssFrameGenerationEnabled,
-                PrimeConfigCodec::parseBoolean,
-                "DLSS frame-generation switch");
-        int dlssFrameGenerationMultiplier = reader.value(
+        data.postProcessingMode = reader.value(
+                MODE_KEY, data.postProcessingMode,
+                PrimeConfigCodec::parsePersistentMode, "post-processing mode");
+        data.reconstructionQuality = reader.value(
+                QUALITY_KEY, data.reconstructionQuality,
+                PrimeConfigCodec::parseQuality, "reconstruction quality");
+        data.astronomy = new AstronomySettings(
+                reader.value(
+                        LATITUDE_DEGREES_KEY, data.astronomy.latitudeDegrees(),
+                        PrimeConfigCodec::parseLatitudeDegrees, "observer latitude"),
+                reader.value(
+                        SOLAR_LONGITUDE_DEGREES_KEY, data.astronomy.solarLongitudeDegrees(),
+                        PrimeConfigCodec::parseSolarLongitudeDegrees, "solar longitude"));
+        data.lighting = new LightingSettings.Snapshot(
+                reader.value(
+                        SUN_EV_KEY, data.lighting.sunQuarterSteps(),
+                        PrimeConfigCodec::parseEvQuarterSteps, "sun exposure"),
+                reader.value(
+                        STAR_EV_KEY, data.lighting.starQuarterSteps(),
+                        PrimeConfigCodec::parseStarEvQuarterSteps, "star exposure"),
+                reader.value(
+                        BLOCK_LIGHT_EV_KEY, data.lighting.blockLightQuarterSteps(),
+                        PrimeConfigCodec::parseEvQuarterSteps, "block-light exposure"),
+                reader.value(
+                        TRANSPARENT_NEE_MODE_KEY, data.lighting.transparentNeeMode(),
+                        PrimeConfigCodec::parseTransparentNeeMode, "transparent NEE mode"),
+                0L);
+        data.display = new DisplaySettings.Snapshot(
+                reader.value(
+                        FINAL_EXPOSURE_EV_KEY, data.display.finalExposureQuarterSteps(),
+                        PrimeConfigCodec::parseFinalExposureQuarterSteps, "final exposure"),
+                reader.value(
+                        AUTO_EXPOSURE_COMPENSATION_KEY,
+                        data.display.autoExposureCompensationSteps(),
+                        PrimeConfigCodec::parseAutoExposureCompensationSteps,
+                        "auto-exposure compensation"));
+        data.hdrEnabled = reader.value(
+                HDR_ENABLED_KEY, data.hdrEnabled,
+                PrimeConfigCodec::parseBoolean, "HDR switch");
+        data.referenceWhiteNits = reader.value(
+                REFERENCE_WHITE_NITS_KEY, data.referenceWhiteNits,
+                PrimeConfigCodec::parseReferenceWhiteNits, "HDR reference white");
+        data.material = new MaterialSettings.Snapshot(
+                reader.value(
+                        DEFAULT_ROUGHNESS_KEY, data.material.roughnessSteps(),
+                        PrimeConfigCodec::parseRoughnessSteps, "default material roughness"),
+                reader.value(
+                        SEAMLESS_GLASS_KEY, data.material.seamlessGlass(),
+                        PrimeConfigCodec::parseBoolean, "seamless-glass switch"),
+                reader.value(
+                        AIR_GAP_KEY, data.material.airGap(),
+                        PrimeConfigCodec::parseBoolean, "air-gap switch"),
+                reader.value(
+                        VANILLA_PBR_PRESETS_KEY, data.material.vanillaPbrPresets(),
+                        PrimeConfigCodec::parseBoolean, "vanilla-PBR preset switch"),
+                0L);
+        data.reflexMode = reader.value(
+                REFLEX_MODE_KEY, data.reflexMode,
+                PrimeConfigCodec::parseReflexMode, "Reflex mode");
+        data.dlssFrameGenerationEnabled = reader.value(
+                DLSS_FRAME_GENERATION_ENABLED_KEY, data.dlssFrameGenerationEnabled,
+                PrimeConfigCodec::parseBoolean, "DLSS frame-generation switch");
+        data.dlssFrameGenerationMultiplier = reader.value(
                 DLSS_FRAME_GENERATION_MULTIPLIER_KEY,
-                defaults.dlssFrameGenerationMultiplier,
+                data.dlssFrameGenerationMultiplier,
                 PrimeConfigCodec::parseDlssFrameGenerationMultiplier,
                 "DLSS frame-generation multiplier");
-        boolean dlssFrameGenerationUiRecomposition = reader.value(
+        data.dlssFrameGenerationUiRecomposition = reader.value(
                 DLSS_FRAME_GENERATION_UI_RECOMPOSITION_KEY,
-                defaults.dlssFrameGenerationUiRecomposition,
+                data.dlssFrameGenerationUiRecomposition,
                 PrimeConfigCodec::parseBoolean,
                 "DLSS frame-generation UI recomposition switch");
 
         reader.rewriteNeeded |= !properties.stringPropertyNames().equals(CURRENT_KEYS);
-        return new DecodeResult(
-                new PrimeConfigData(
-                        pathTracing,
-                        additionalSpecularBounces,
-                        minimumBounces,
-                        maximumBounces,
-                        terrainWorkers,
-                        surfaceDetail,
-                        voxelStrength,
-                        mode,
-                        quality,
-                        new AstronomySettings(latitude, longitude),
-                        new LightingSettings.Snapshot(
-                                sun, stars, blockLights, transparentNeeMode, 0L),
-                        new DisplaySettings.Snapshot(finalExposure, exposureCompensation),
-                        new MaterialSettings.Snapshot(
-                                roughness,
-                                seamlessGlass,
-                                airGap,
-                                vanillaPbrPresets,
-                                0L),
-                        hdr,
-                        referenceWhite,
-                        reflexMode,
-                        dlssFrameGenerationEnabled,
-                        dlssFrameGenerationMultiplier,
-                        dlssFrameGenerationUiRecomposition),
-                reader.rewriteNeeded);
+        return new DecodeResult(data, reader.rewriteNeeded);
     }
 
     static String encode(PrimeConfigData data) {
