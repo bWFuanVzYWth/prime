@@ -53,11 +53,12 @@ public final class PrimeVideoOptions {
 
     public static OptionSet create(Runnable diagnosticChanged) {
         PrimeRuntime runtime = PrimeRuntime.instance();
+        RendererSettings settings = PrimeConfig.rendererSettings();
         return new OptionSet(
                 new Rendering(
                         booleanOption(
                                 "prime.options.path_tracing",
-                                PrimeConfig.settings().pathTracingEnabled(),
+                                settings.pathTracingEnabled(),
                                 PrimeVideoOptions::setPathTracingEnabled),
                         integerOption(
                                 "prime.options.additional_specular_bounces",
@@ -95,13 +96,13 @@ public final class PrimeVideoOptions {
                                                 id -> SurfaceDetailMode.findById(id)
                                                         .orElse(SurfaceDetailMode.DEFAULT),
                                                 SurfaceDetailMode::id)),
-                                PrimeConfig.settings().surfaceDetailMode(),
+                                settings.surfaceDetailMode(),
                                 (caption, mode) -> Component.translatable(
                                         "prime.options.material.surface_detail." + mode.id()),
                                 PrimeVideoOptions::setSurfaceDetailMode),
                         integerOption(
                                 "prime.options.material.displacement_height",
-                                PrimeConfig.settings().voxelTextureSurfaceStrengthSteps(),
+                                settings.voxelTextureSurfaceStrengthSteps(),
                                 VoxelSurfaceSettings.MINIMUM_STEPS,
                                 VoxelSurfaceSettings.MAXIMUM_STEPS,
                                 "%",
@@ -117,7 +118,7 @@ public final class PrimeVideoOptions {
                                         Codec.STRING.xmap(
                                                 PostProcessingMode::fromId,
                                                 PostProcessingMode::id)),
-                                PrimeConfig.settings().postProcessingMode(),
+                                settings.postProcessingMode(),
                                 (caption, mode) -> Component.translatable(
                                         "prime.options.post_processing.mode." + mode.id()),
                                 PrimeConfig::setPostProcessingMode),
@@ -128,7 +129,7 @@ public final class PrimeVideoOptions {
                                         Codec.STRING.xmap(
                                                 ReconstructionQualityMode::fromId,
                                                 ReconstructionQualityMode::id)),
-                                PrimeConfig.settings().reconstructionQuality(),
+                                settings.reconstructionQuality(),
                                 (caption, mode) -> Options.genericValueLabel(
                                         caption,
                                         Component.translatable(
@@ -139,7 +140,7 @@ public final class PrimeVideoOptions {
                 new Lighting(
                         intOption(
                                 "prime.options.astronomy.latitude",
-                                PrimeConfig.settings().astronomy().latitudeDegrees(),
+                                settings.astronomy().latitudeDegrees(),
                                 AstronomySettings.MINIMUM_LATITUDE_DEGREES,
                                 AstronomySettings.MAXIMUM_LATITUDE_DEGREES,
                                 (caption, value) -> Options.genericValueLabel(
@@ -147,7 +148,7 @@ public final class PrimeVideoOptions {
                                 PrimeConfig::setLatitudeDegrees),
                         intOption(
                                 "prime.options.astronomy.season",
-                                PrimeConfig.settings().astronomy().solarLongitudeDegrees(),
+                                settings.astronomy().solarLongitudeDegrees(),
                                 AstronomySettings.MINIMUM_SOLAR_LONGITUDE_DEGREES,
                                 AstronomySettings.MAXIMUM_SOLAR_LONGITUDE_DEGREES,
                                 (caption, value) -> Options.genericValueLabel(
@@ -155,19 +156,19 @@ public final class PrimeVideoOptions {
                                 PrimeConfig::setSolarLongitudeDegrees),
                         exposureOption(
                                 "prime.options.lighting.sun_ev",
-                                PrimeConfig.settings().sunQuarterSteps(),
+                                settings.lighting().sunQuarterSteps(),
                                 LightingSettings.MINIMUM_QUARTER_STEPS,
                                 LightingSettings.MAXIMUM_QUARTER_STEPS,
                                 PrimeConfig::setSunQuarterSteps),
                         exposureOption(
                                 "prime.options.lighting.star_ev",
-                                PrimeConfig.settings().starQuarterSteps(),
+                                settings.lighting().starQuarterSteps(),
                                 LightingSettings.MINIMUM_STAR_QUARTER_STEPS,
                                 LightingSettings.MAXIMUM_STAR_QUARTER_STEPS,
                                 PrimeConfig::setStarQuarterSteps),
                         exposureOption(
                                 "prime.options.lighting.block_light_ev",
-                                PrimeConfig.settings().blockLightQuarterSteps(),
+                                settings.lighting().blockLightQuarterSteps(),
                                 LightingSettings.MINIMUM_QUARTER_STEPS,
                                 LightingSettings.MAXIMUM_QUARTER_STEPS,
                                 PrimeConfig::setBlockLightQuarterSteps),
@@ -178,7 +179,7 @@ public final class PrimeVideoOptions {
                                         Codec.STRING.xmap(
                                                 TransparentNeeMode::fromId,
                                                 TransparentNeeMode::id)),
-                                PrimeConfig.settings().transparentNeeMode(),
+                                settings.lighting().transparentNeeMode(),
                                 (caption, mode) -> Component.translatable(
                                         "prime.options.lighting.transparent_nee_mode."
                                                 + mode.id()),
@@ -188,21 +189,21 @@ public final class PrimeVideoOptions {
                         referenceWhiteNits(),
                         integerOption(
                                 "prime.options.display.auto_exposure_compensation",
-                                PrimeConfig.settings().autoExposureCompensationSteps(),
+                                settings.display().autoExposureCompensationSteps(),
                                 DisplaySettings.MINIMUM_AUTO_EXPOSURE_COMPENSATION_STEPS,
                                 DisplaySettings.MAXIMUM_AUTO_EXPOSURE_COMPENSATION_STEPS,
                                 "%",
                                 PrimeConfig::setAutoExposureCompensationSteps),
                         exposureOption(
                                 "prime.options.display.final_exposure_ev",
-                                PrimeConfig.settings().finalExposureQuarterSteps(),
+                                settings.display().finalExposureQuarterSteps(),
                                 DisplaySettings.MINIMUM_FINAL_EXPOSURE_QUARTER_STEPS,
                                 DisplaySettings.MAXIMUM_FINAL_EXPOSURE_QUARTER_STEPS,
                                 PrimeConfig::setFinalExposureQuarterSteps)),
                 new Material(
                         intOption(
                                 "prime.options.material.default_roughness",
-                                PrimeConfig.settings().defaultRoughnessSteps(),
+                                settings.material().roughnessSteps(),
                                 MaterialSettings.MINIMUM_ROUGHNESS_STEPS,
                                 MaterialSettings.MAXIMUM_ROUGHNESS_STEPS,
                                 (caption, value) -> Options.genericValueLabel(
@@ -210,15 +211,15 @@ public final class PrimeVideoOptions {
                                 PrimeConfig::setDefaultRoughnessSteps),
                         booleanOption(
                                 "prime.options.material.seamless_glass",
-                                PrimeConfig.settings().seamlessGlass(),
+                                settings.material().seamlessGlass(),
                                 PrimeConfig::setSeamlessGlass),
                         booleanOption(
                                 "prime.options.material.air_gap",
-                                PrimeConfig.settings().airGap(),
+                                settings.material().airGap(),
                                 PrimeConfig::setAirGap),
                         booleanOption(
                                 "prime.options.material.vanilla_pbr_presets",
-                                PrimeConfig.settings().vanillaPbrPresets(),
+                                settings.material().vanillaPbrPresets(),
                                 PrimeConfig::setVanillaPbrPresets)),
                 new Diagnostics(
                         booleanOption(

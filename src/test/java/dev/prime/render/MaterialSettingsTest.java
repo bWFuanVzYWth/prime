@@ -1,11 +1,9 @@
 package dev.prime.render;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import dev.prime.config.PrimeSettings;
 import org.junit.jupiter.api.Test;
 
 final class MaterialSettingsTest {
@@ -15,62 +13,6 @@ final class MaterialSettingsTest {
         assertEquals(0.90F,
                 MaterialSettings.linearRoughness(MaterialSettings.DEFAULT_ROUGHNESS_STEPS),
                 1.0e-7F);
-    }
-
-    @Test
-    void roughnessUsesExactHundredthStepsAndRevisionChangesOnlyWithTheValue() {
-        PrimeSettings first = PrimeSettings.defaults().withDefaultRoughnessSteps(37);
-        assertEquals(37, first.material().roughnessSteps());
-        assertEquals(0.37F, first.material().linearRoughness(), 1.0e-7F);
-        assertEquals(first, first.withDefaultRoughnessSteps(37));
-
-        PrimeSettings second = first.withDefaultRoughnessSteps(38);
-        assertEquals(first.materialRevision() + 1L, second.materialRevision());
-        assertThrows(IllegalArgumentException.class,
-                () -> first.withDefaultRoughnessSteps(-1));
-        assertThrows(IllegalArgumentException.class,
-                () -> first.withDefaultRoughnessSteps(101));
-    }
-
-    @Test
-    void seamlessGlassIsOnByDefaultAndOwnsMaterialRevision() {
-        PrimeSettings defaults = PrimeSettings.defaults();
-        assertTrue(MaterialSettings.DEFAULT_SEAMLESS_GLASS);
-        assertTrue(defaults.material().seamlessGlass());
-
-        PrimeSettings bordered = defaults.withSeamlessGlass(false);
-        assertFalse(bordered.material().seamlessGlass());
-        assertEquals(defaults.materialRevision() + 1L, bordered.materialRevision());
-        assertEquals(bordered, bordered.withSeamlessGlass(false));
-        assertFalse(bordered.withSunQuarterSteps(1).material().seamlessGlass());
-    }
-
-    @Test
-    void airGapIsOnByDefaultAndOwnsMaterialRevision() {
-        PrimeSettings defaults = PrimeSettings.defaults();
-        assertTrue(MaterialSettings.DEFAULT_AIR_GAP);
-        assertTrue(defaults.material().airGap());
-
-        PrimeSettings directBoundary = defaults.withAirGap(false);
-        assertFalse(directBoundary.material().airGap());
-        assertEquals(
-                defaults.materialRevision() + 1L,
-                directBoundary.materialRevision());
-        assertEquals(directBoundary, directBoundary.withAirGap(false));
-        assertFalse(directBoundary.withSunQuarterSteps(1).material().airGap());
-    }
-
-    @Test
-    void vanillaPresetsAreOnByDefaultAndOwnMaterialRevision() {
-        PrimeSettings defaults = PrimeSettings.defaults();
-        assertTrue(MaterialSettings.DEFAULT_VANILLA_PBR_PRESETS);
-        assertTrue(defaults.material().vanillaPbrPresets());
-
-        PrimeSettings disabled = defaults.withVanillaPbrPresets(false);
-        assertFalse(disabled.material().vanillaPbrPresets());
-        assertEquals(defaults.materialRevision() + 1L, disabled.materialRevision());
-        assertEquals(disabled, disabled.withVanillaPbrPresets(false));
-        assertFalse(disabled.withSunQuarterSteps(1).material().vanillaPbrPresets());
     }
 
     @Test

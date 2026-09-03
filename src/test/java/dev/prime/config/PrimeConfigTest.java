@@ -9,6 +9,7 @@ import dev.prime.render.AstronomySettings;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.MaximumBounceSettings;
 import dev.prime.render.MinimumBounceSettings;
+import dev.prime.render.RendererSettings;
 import dev.prime.render.SpecularBounceSettings;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.TransparentNeeMode;
@@ -46,7 +47,7 @@ final class PrimeConfigTest {
         assertTrue(missing.rewriteNeeded());
         assertEquals(
                 TransparentNeeMode.STRAIGHT_APPROXIMATION,
-                missing.data().settings().transparentNeeMode());
+                missing.data().lighting.transparentNeeMode());
         assertTrue(PrimeConfigCodec.encode(missing.data()).contains(
                 "lighting.transparent_nee_mode=straight_approximation\n"));
 
@@ -55,30 +56,16 @@ final class PrimeConfigTest {
         assertTrue(invalid.rewriteNeeded());
         assertEquals(
                 TransparentNeeMode.STRAIGHT_APPROXIMATION,
-                invalid.data().settings().transparentNeeMode());
+                invalid.data().lighting.transparentNeeMode());
         assertThrows(
                 IllegalArgumentException.class,
                 () -> PrimeConfigCodec.parseTransparentNeeMode("mnee"));
     }
 
     @Test
-    void transparentNeeModeChangeAdvancesOnlyTheLightingRevision() {
-        PrimeSettings initial = PrimeSettings.defaults();
-
-        PrimeSettings changed = initial.withTransparentNeeMode(
-                TransparentNeeMode.UNBIASED_BSDF_ONLY);
-
-        assertEquals(initial.lightingRevision() + 1L, changed.lightingRevision());
-        assertEquals(
-                TransparentNeeMode.UNBIASED_BSDF_ONLY,
-                changed.transparentNeeMode());
-        assertEquals(changed, changed.withTransparentNeeMode(
-                TransparentNeeMode.UNBIASED_BSDF_ONLY));
-    }
-
-    @Test
     void liveTransparentNeeModeChangeInvalidatesAccumulation() {
-        TransparentNeeMode previous = PrimeConfig.settings().transparentNeeMode();
+        TransparentNeeMode previous =
+                PrimeConfig.rendererSettings().lighting().transparentNeeMode();
         long previousRevision = PrimeConfig.rendererSettings().revision();
         TransparentNeeMode replacement = previous == TransparentNeeMode.STRAIGHT_APPROXIMATION
                 ? TransparentNeeMode.UNBIASED_BSDF_ONLY
@@ -86,7 +73,9 @@ final class PrimeConfigTest {
         try {
             PrimeConfig.setTransparentNeeMode(replacement);
 
-            assertEquals(replacement, PrimeConfig.settings().transparentNeeMode());
+            assertEquals(
+                    replacement,
+                    PrimeConfig.rendererSettings().lighting().transparentNeeMode());
             assertEquals(previousRevision + 1L, PrimeConfig.rendererSettings().revision());
         } finally {
             PrimeConfig.setTransparentNeeMode(previous);
@@ -120,9 +109,9 @@ final class PrimeConfigTest {
         String encoded = PrimeConfigCodec.encode(decoded.data());
 
         assertTrue(decoded.rewriteNeeded());
-        assertEquals(13, decoded.data().additionalSpecularBounces());
-        assertEquals(6, decoded.data().minimumBounces());
-        assertEquals(21, decoded.data().maximumBounces());
+        assertEquals(13, decoded.data().additionalSpecularBounces);
+        assertEquals(6, decoded.data().minimumBounces);
+        assertEquals(21, decoded.data().maximumBounces);
         assertTrue(encoded.contains("renderer.additional_specular_bounces=13\n"));
         assertTrue(encoded.contains("renderer.minimum_bounces=6\n"));
         assertTrue(encoded.contains("renderer.maximum_bounces=21\n"));
@@ -288,8 +277,7 @@ final class PrimeConfigTest {
         assertEquals(PostProcessingMode.DLSS_RR, PostProcessingMode.fromId("future_backend"));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> PrimeSettings.defaults()
-                        .withPostProcessingMode(PostProcessingMode.DISABLED));
+                () -> PrimeConfig.setPostProcessingMode(PostProcessingMode.DISABLED));
         assertEquals(ReconstructionQualityMode.PERFORMANCE, ReconstructionQualityMode.DEFAULT);
         assertEquals(
                 ReconstructionQualityMode.PERFORMANCE,
@@ -310,12 +298,9 @@ final class PrimeConfigTest {
         assertTrue(serialized.contains("terrain.worker_percentage=50\n"));
         assertTrue(serialized.contains("material.surface_detail=normal\n"));
         assertTrue(serialized.contains("material.displacement_height=1\n"));
-        assertEquals(
-                SurfaceDetailMode.RESOURCE_NORMAL,
-                PrimeSettings.defaults().surfaceDetailMode());
-        assertEquals(
-                100,
-                PrimeSettings.defaults().voxelTextureSurfaceStrengthSteps());
+        PrimeConfigData defaults = PrimeConfigData.defaults();
+        assertEquals(SurfaceDetailMode.RESOURCE_NORMAL, defaults.surfaceDetailMode);
+        assertEquals(100, defaults.voxelTextureSurfaceStrengthSteps);
         assertTrue(serialized.contains("astronomy.latitude_degrees=30\n"));
         assertTrue(serialized.contains("astronomy.solar_longitude_degrees=0\n"));
         assertTrue(serialized.contains("lighting.star_ev=0\n"));
@@ -330,10 +315,10 @@ final class PrimeConfigTest {
         assertTrue(serialized.contains("material.vanilla_pbr_presets=true\n"));
         assertTrue(serialized.contains(
                 "streamline.dlss_frame_generation_ui_recomposition=true\n"));
-        assertTrue(PrimeConfigData.defaults().dlssFrameGenerationUiRecomposition());
-        assertTrue(PrimeSettings.defaults().seamlessGlass());
-        assertTrue(PrimeSettings.defaults().airGap());
-        assertTrue(PrimeSettings.defaults().vanillaPbrPresets());
+        assertTrue(defaults.dlssFrameGenerationUiRecomposition);
+        assertTrue(defaults.material.seamlessGlass());
+        assertTrue(defaults.material.airGap());
+        assertTrue(defaults.material.vanillaPbrPresets());
     }
 
     @Test
@@ -403,6 +388,27 @@ final class PrimeConfigTest {
                     IllegalArgumentException.class,
                     () -> parser.applyAsInt(encoded),
                     encoded);
+        }
+    }
+
+    @Test
+    void lightingAndMaterialChangesAdvanceTheirOwnedRevisions() {
+        RendererSettings initial = PrimeConfig.rendererSettings();
+        int latitude = initial.astronomy().latitudeDegrees() == 30 ? -30 : 30;
+        int roughness = initial.material().roughnessSteps() == 37 ? 38 : 37;
+        try {
+            PrimeConfig.setLatitudeDegrees(latitude);
+            RendererSettings relit = PrimeConfig.rendererSettings();
+            assertEquals(initial.lighting().revision() + 1L, relit.lighting().revision());
+            assertEquals(initial.material().revision(), relit.material().revision());
+
+            PrimeConfig.setDefaultRoughnessSteps(roughness);
+            RendererSettings rematerialed = PrimeConfig.rendererSettings();
+            assertEquals(relit.lighting().revision(), rematerialed.lighting().revision());
+            assertEquals(relit.material().revision() + 1L, rematerialed.material().revision());
+        } finally {
+            PrimeConfig.setLatitudeDegrees(initial.astronomy().latitudeDegrees());
+            PrimeConfig.setDefaultRoughnessSteps(initial.material().roughnessSteps());
         }
     }
 }

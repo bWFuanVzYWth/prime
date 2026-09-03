@@ -23,24 +23,11 @@ import java.util.Objects;
 
 /** Client-thread owner of Prime's live settings and renderer revision. */
 public final class PrimeConfig {
-    // Fabric initializes and mutates video options on the client thread. One immutable snapshot
-    // keeps every renderer read coherent without a shared lock or independently mutable globals.
-    private static PrimeSettings settings = PrimeSettings.defaults();
-    private static int additionalSpecularBounces = SpecularBounceSettings.DEFAULT_COUNT;
-    private static int minimumBounces = MinimumBounceSettings.DEFAULT_COUNT;
-    private static int maximumBounces = MaximumBounceSettings.DEFAULT_COUNT;
-    private static int terrainWorkerPercentage = TerrainWorkerSettings.DEFAULT_PERCENTAGE;
-    private static boolean hdrEnabled;
-    private static int referenceWhiteNits = HdrOutput.AUTOMATIC_REFERENCE_WHITE_NITS;
-    private static ReflexMode reflexMode = ReflexMode.OFF;
-    private static boolean dlssFrameGenerationEnabled;
-    private static int dlssFrameGenerationMultiplier = 2;
-    private static boolean dlssFrameGenerationUiRecomposition = true;
+    private static PrimeConfigData data = PrimeConfigData.defaults();
     private static long rendererRevision;
     private static boolean dirty;
 
-    private PrimeConfig() {
-    }
+    private PrimeConfig() {}
 
     public static void load() {
         Path path = PrimeConfigFile.path();
@@ -54,289 +41,353 @@ public final class PrimeConfig {
                 rewriteNeeded = decoded.rewriteNeeded();
             } catch (IOException | IllegalArgumentException exception) {
                 PrimeInfo.LOGGER.warn(
-                        "Could not read {}; using the default Prime settings",
-                        path,
-                        exception);
+                        "Could not read {}; using the default Prime settings", path, exception);
                 rewriteNeeded = true;
             }
         }
-        applyLoaded(loaded, rewriteNeeded);
+        data = loaded;
+        HdrOutput.setRequested(data.hdrEnabled);
+        HdrOutput.setReferenceWhiteNits(data.referenceWhiteNits);
+        rendererRevision = 0L;
+        dirty = rewriteNeeded;
         PrimeConfigCodec.log(loaded);
     }
 
-    private static void applyLoaded(PrimeConfigData loaded, boolean rewriteNeeded) {
-        settings = loaded.settings();
-        additionalSpecularBounces = loaded.additionalSpecularBounces();
-        minimumBounces = loaded.minimumBounces();
-        maximumBounces = loaded.maximumBounces();
-        terrainWorkerPercentage = loaded.terrainWorkerPercentage();
-        hdrEnabled = loaded.hdrEnabled();
-        HdrOutput.setRequested(hdrEnabled);
-        referenceWhiteNits = loaded.referenceWhiteNits();
-        HdrOutput.setReferenceWhiteNits(referenceWhiteNits);
-        reflexMode = loaded.reflexMode();
-        dlssFrameGenerationEnabled = loaded.dlssFrameGenerationEnabled();
-        dlssFrameGenerationMultiplier = loaded.dlssFrameGenerationMultiplier();
-        dlssFrameGenerationUiRecomposition = loaded.dlssFrameGenerationUiRecomposition();
-        rendererRevision = 0L;
-        dirty = rewriteNeeded;
-    }
-
-    public static PrimeSettings settings() {
-        return settings;
-    }
-
     public static RendererSettings rendererSettings() {
-        PrimeSettings current = settings;
-        long revision = rendererRevision;
-        return rendererSettings(current, revision);
-    }
-
-    static RendererSettings rendererSettings(PrimeSettings current, long revision) {
         return new RendererSettings(
-                current.pathTracingEnabled(),
-                current.surfaceDetailMode(),
-                current.voxelTextureSurfaceStrengthSteps(),
-                current.postProcessingMode(),
-                current.reconstructionQuality(),
-                current.astronomy(),
-                current.lighting(),
-                current.material(),
-                current.display(),
-                additionalSpecularBounces,
-                minimumBounces,
-                maximumBounces,
-                terrainWorkerPercentage,
-                revision);
-    }
-
-    public static void setPathTracingEnabled(boolean enabled) {
-        update(settings.withPathTracingEnabled(enabled));
+                data.pathTracingEnabled,
+                data.surfaceDetailMode,
+                data.voxelTextureSurfaceStrengthSteps,
+                data.postProcessingMode,
+                data.reconstructionQuality,
+                data.astronomy,
+                data.lighting,
+                data.material,
+                data.display,
+                data.additionalSpecularBounces,
+                data.minimumBounces,
+                data.maximumBounces,
+                data.terrainWorkerPercentage,
+                rendererRevision);
     }
 
     public static int additionalSpecularBounces() {
-        return additionalSpecularBounces;
+        return data.additionalSpecularBounces;
     }
 
-    public static void setAdditionalSpecularBounces(int bounces) {
-        int replacement = SpecularBounceSettings.validateCount(bounces);
-        if (replacement != additionalSpecularBounces) {
-            additionalSpecularBounces = replacement;
-            rendererRevision = Math.incrementExact(rendererRevision);
-            dirty = true;
+    public static void setAdditionalSpecularBounces(int value) {
+        value = SpecularBounceSettings.validateCount(value);
+        if (value != data.additionalSpecularBounces) {
+            data.additionalSpecularBounces = value;
+            rendererChanged();
         }
     }
 
     public static int minimumBounces() {
-        return minimumBounces;
+        return data.minimumBounces;
     }
 
-    public static void setMinimumBounces(int bounces) {
-        int replacement = MinimumBounceSettings.validateCount(bounces);
-        if (replacement != minimumBounces) {
-            minimumBounces = replacement;
-            rendererRevision = Math.incrementExact(rendererRevision);
-            dirty = true;
+    public static void setMinimumBounces(int value) {
+        value = MinimumBounceSettings.validateCount(value);
+        if (value != data.minimumBounces) {
+            data.minimumBounces = value;
+            rendererChanged();
         }
     }
 
     public static int maximumBounces() {
-        return maximumBounces;
+        return data.maximumBounces;
     }
 
-    public static void setMaximumBounces(int bounces) {
-        int replacement = MaximumBounceSettings.validateCount(bounces);
-        if (replacement != maximumBounces) {
-            maximumBounces = replacement;
-            rendererRevision = Math.incrementExact(rendererRevision);
-            dirty = true;
+    public static void setMaximumBounces(int value) {
+        value = MaximumBounceSettings.validateCount(value);
+        if (value != data.maximumBounces) {
+            data.maximumBounces = value;
+            rendererChanged();
         }
     }
 
     public static int terrainWorkerPercentage() {
-        return terrainWorkerPercentage;
+        return data.terrainWorkerPercentage;
+    }
+
+    public static void setTerrainWorkerPercentage(int value) {
+        value = TerrainWorkerSettings.validatePercentage(value);
+        if (value != data.terrainWorkerPercentage) {
+            data.terrainWorkerPercentage = value;
+            dirty = true;
+        }
     }
 
     public static boolean hdrEnabled() {
-        return hdrEnabled;
+        return data.hdrEnabled;
     }
 
-    public static void setHdrEnabled(boolean enabled) {
-        if (enabled != hdrEnabled) {
-            hdrEnabled = enabled;
-            HdrOutput.setRequested(enabled);
+    public static void setHdrEnabled(boolean value) {
+        if (value != data.hdrEnabled) {
+            data.hdrEnabled = value;
+            HdrOutput.setRequested(value);
             dirty = true;
         }
     }
 
     public static int referenceWhiteNits() {
-        return referenceWhiteNits;
+        return data.referenceWhiteNits;
     }
 
     public static void setReferenceWhiteNits(int value) {
-        int replacement = HdrOutput.validateReferenceWhiteNits(value);
-        if (replacement != referenceWhiteNits) {
-            referenceWhiteNits = replacement;
-            HdrOutput.setReferenceWhiteNits(replacement);
+        value = HdrOutput.validateReferenceWhiteNits(value);
+        if (value != data.referenceWhiteNits) {
+            data.referenceWhiteNits = value;
+            HdrOutput.setReferenceWhiteNits(value);
             dirty = true;
         }
     }
 
     public static ReflexMode reflexMode() {
-        return reflexMode;
+        return data.reflexMode;
     }
 
-    public static void setReflexMode(ReflexMode mode) {
-        Objects.requireNonNull(mode, "mode");
-        if (mode != reflexMode) {
-            reflexMode = mode;
+    public static void setReflexMode(ReflexMode value) {
+        Objects.requireNonNull(value, "value");
+        if (value != data.reflexMode) {
+            data.reflexMode = value;
             dirty = true;
         }
     }
 
     public static boolean dlssFrameGenerationEnabled() {
-        return dlssFrameGenerationEnabled;
+        return data.dlssFrameGenerationEnabled;
     }
 
-    public static void setDlssFrameGenerationEnabled(boolean enabled) {
-        if (enabled != dlssFrameGenerationEnabled) {
-            dlssFrameGenerationEnabled = enabled;
+    public static void setDlssFrameGenerationEnabled(boolean value) {
+        if (value != data.dlssFrameGenerationEnabled) {
+            data.dlssFrameGenerationEnabled = value;
             dirty = true;
         }
     }
 
     public static int dlssFrameGenerationMultiplier() {
-        return dlssFrameGenerationMultiplier;
+        return data.dlssFrameGenerationMultiplier;
     }
 
-    public static void setDlssFrameGenerationMultiplier(int multiplier) {
-        if (multiplier < 2) {
+    public static void setDlssFrameGenerationMultiplier(int value) {
+        if (value < 2) {
             throw new IllegalArgumentException("DLSS frame generation multiplier must be at least 2");
         }
-        if (multiplier != dlssFrameGenerationMultiplier) {
-            dlssFrameGenerationMultiplier = multiplier;
+        if (value != data.dlssFrameGenerationMultiplier) {
+            data.dlssFrameGenerationMultiplier = value;
             dirty = true;
         }
     }
 
     public static boolean dlssFrameGenerationUiRecomposition() {
-        return dlssFrameGenerationUiRecomposition;
+        return data.dlssFrameGenerationUiRecomposition;
     }
 
-    public static void setDlssFrameGenerationUiRecomposition(boolean enabled) {
-        if (enabled != dlssFrameGenerationUiRecomposition) {
-            dlssFrameGenerationUiRecomposition = enabled;
+    public static void setDlssFrameGenerationUiRecomposition(boolean value) {
+        if (value != data.dlssFrameGenerationUiRecomposition) {
+            data.dlssFrameGenerationUiRecomposition = value;
             dirty = true;
         }
     }
 
-    public static void setTerrainWorkerPercentage(int percentage) {
-        int replacement = TerrainWorkerSettings.validatePercentage(percentage);
-        if (replacement != terrainWorkerPercentage) {
-            terrainWorkerPercentage = replacement;
-            dirty = true;
+    public static void setPathTracingEnabled(boolean value) {
+        if (value != data.pathTracingEnabled) {
+            data.pathTracingEnabled = value;
+            rendererChanged();
         }
     }
 
-    public static void setSurfaceDetailMode(SurfaceDetailMode mode) {
-        update(settings.withSurfaceDetailMode(mode));
+    public static void setSurfaceDetailMode(SurfaceDetailMode value) {
+        Objects.requireNonNull(value, "value");
+        if (value != data.surfaceDetailMode) {
+            data.surfaceDetailMode = value;
+            rendererChanged();
+        }
     }
 
-    public static void setVoxelTextureSurfaceStrengthSteps(int steps) {
-        update(settings.withVoxelTextureSurfaceStrengthSteps(steps));
+    public static void setVoxelTextureSurfaceStrengthSteps(int value) {
+        VoxelSurfaceSettings.maximumHeight(value);
+        if (value != data.voxelTextureSurfaceStrengthSteps) {
+            data.voxelTextureSurfaceStrengthSteps = value;
+            rendererChanged();
+        }
     }
 
-    public static void setPostProcessingMode(PostProcessingMode mode) {
-        update(settings.withPostProcessingMode(mode));
+    public static void setPostProcessingMode(PostProcessingMode value) {
+        Objects.requireNonNull(value, "value");
+        if (value == PostProcessingMode.DISABLED) {
+            throw new IllegalArgumentException("Raw output is a non-persistent session diagnostic");
+        }
+        if (value != data.postProcessingMode) {
+            data.postProcessingMode = value;
+            rendererChanged();
+        }
     }
 
-    public static void setReconstructionQualityMode(ReconstructionQualityMode mode) {
-        update(settings.withReconstructionQuality(mode));
+    public static void setReconstructionQualityMode(ReconstructionQualityMode value) {
+        Objects.requireNonNull(value, "value");
+        if (value != data.reconstructionQuality) {
+            data.reconstructionQuality = value;
+            rendererChanged();
+        }
     }
 
-    public static void setLatitudeDegrees(int degrees) {
-        update(settings.withLatitudeDegrees(degrees));
+    public static void setLatitudeDegrees(int value) {
+        AstronomySettings replacement = data.astronomy.withLatitudeDegrees(value);
+        if (replacement != data.astronomy) {
+            data.astronomy = replacement;
+            advanceLightingRevision();
+        }
     }
 
-    public static void setSolarLongitudeDegrees(int degrees) {
-        update(settings.withSolarLongitudeDegrees(degrees));
+    public static void setSolarLongitudeDegrees(int value) {
+        AstronomySettings replacement = data.astronomy.withSolarLongitudeDegrees(value);
+        if (replacement != data.astronomy) {
+            data.astronomy = replacement;
+            advanceLightingRevision();
+        }
     }
 
-    public static void setSunQuarterSteps(int quarterSteps) {
-        update(settings.withSunQuarterSteps(quarterSteps));
+    public static void setSunQuarterSteps(int value) {
+        LightingSettings.linearMultiplier(value);
+        if (value != data.lighting.sunQuarterSteps()) {
+            setLighting(new LightingSettings.Snapshot(
+                    value,
+                    data.lighting.starQuarterSteps(),
+                    data.lighting.blockLightQuarterSteps(),
+                    data.lighting.transparentNeeMode(),
+                    Math.incrementExact(data.lighting.revision())));
+        }
     }
 
-    public static void setStarQuarterSteps(int quarterSteps) {
-        update(settings.withStarQuarterSteps(quarterSteps));
+    public static void setStarQuarterSteps(int value) {
+        LightingSettings.starLinearMultiplier(value);
+        if (value != data.lighting.starQuarterSteps()) {
+            setLighting(new LightingSettings.Snapshot(
+                    data.lighting.sunQuarterSteps(),
+                    value,
+                    data.lighting.blockLightQuarterSteps(),
+                    data.lighting.transparentNeeMode(),
+                    Math.incrementExact(data.lighting.revision())));
+        }
     }
 
-    public static void setBlockLightQuarterSteps(int quarterSteps) {
-        update(settings.withBlockLightQuarterSteps(quarterSteps));
+    public static void setBlockLightQuarterSteps(int value) {
+        LightingSettings.linearMultiplier(value);
+        if (value != data.lighting.blockLightQuarterSteps()) {
+            setLighting(new LightingSettings.Snapshot(
+                    data.lighting.sunQuarterSteps(),
+                    data.lighting.starQuarterSteps(),
+                    value,
+                    data.lighting.transparentNeeMode(),
+                    Math.incrementExact(data.lighting.revision())));
+        }
     }
 
-    public static void setTransparentNeeMode(TransparentNeeMode mode) {
-        update(settings.withTransparentNeeMode(mode));
+    public static void setTransparentNeeMode(TransparentNeeMode value) {
+        Objects.requireNonNull(value, "value");
+        if (value != data.lighting.transparentNeeMode()) {
+            setLighting(new LightingSettings.Snapshot(
+                    data.lighting.sunQuarterSteps(),
+                    data.lighting.starQuarterSteps(),
+                    data.lighting.blockLightQuarterSteps(),
+                    value,
+                    Math.incrementExact(data.lighting.revision())));
+        }
     }
 
-    public static void setFinalExposureQuarterSteps(int quarterSteps) {
-        update(settings.withFinalExposureQuarterSteps(quarterSteps));
+    public static void setFinalExposureQuarterSteps(int value) {
+        if (value != data.display.finalExposureQuarterSteps()) {
+            data.display = new DisplaySettings.Snapshot(
+                    value, data.display.autoExposureCompensationSteps());
+            rendererChanged();
+        }
     }
 
-    public static void setAutoExposureCompensationSteps(int steps) {
-        update(settings.withAutoExposureCompensationSteps(steps));
+    public static void setAutoExposureCompensationSteps(int value) {
+        if (value != data.display.autoExposureCompensationSteps()) {
+            data.display = new DisplaySettings.Snapshot(
+                    data.display.finalExposureQuarterSteps(), value);
+            rendererChanged();
+        }
     }
 
-    public static void setDefaultRoughnessSteps(int steps) {
-        update(settings.withDefaultRoughnessSteps(steps));
+    public static void setDefaultRoughnessSteps(int value) {
+        MaterialSettings.linearRoughness(value);
+        if (value != data.material.roughnessSteps()) {
+            setMaterial(new MaterialSettings.Snapshot(
+                    value,
+                    data.material.seamlessGlass(),
+                    data.material.airGap(),
+                    data.material.vanillaPbrPresets(),
+                    Math.incrementExact(data.material.revision())));
+        }
     }
 
-    public static void setSeamlessGlass(boolean enabled) {
-        update(settings.withSeamlessGlass(enabled));
+    public static void setSeamlessGlass(boolean value) {
+        if (value != data.material.seamlessGlass()) {
+            setMaterial(new MaterialSettings.Snapshot(
+                    data.material.roughnessSteps(),
+                    value,
+                    data.material.airGap(),
+                    data.material.vanillaPbrPresets(),
+                    Math.incrementExact(data.material.revision())));
+        }
     }
 
-    public static void setAirGap(boolean enabled) {
-        update(settings.withAirGap(enabled));
+    public static void setAirGap(boolean value) {
+        if (value != data.material.airGap()) {
+            setMaterial(new MaterialSettings.Snapshot(
+                    data.material.roughnessSteps(),
+                    data.material.seamlessGlass(),
+                    value,
+                    data.material.vanillaPbrPresets(),
+                    Math.incrementExact(data.material.revision())));
+        }
     }
 
-    public static void setVanillaPbrPresets(boolean enabled) {
-        update(settings.withVanillaPbrPresets(enabled));
+    public static void setVanillaPbrPresets(boolean value) {
+        if (value != data.material.vanillaPbrPresets()) {
+            setMaterial(new MaterialSettings.Snapshot(
+                    data.material.roughnessSteps(),
+                    data.material.seamlessGlass(),
+                    data.material.airGap(),
+                    value,
+                    Math.incrementExact(data.material.revision())));
+        }
     }
 
     public static void restoreDefaults() {
-        update(restoredDefaults(settings));
-        setAdditionalSpecularBounces(SpecularBounceSettings.DEFAULT_COUNT);
-        setMinimumBounces(MinimumBounceSettings.DEFAULT_COUNT);
-        setMaximumBounces(MaximumBounceSettings.DEFAULT_COUNT);
-        setTerrainWorkerPercentage(TerrainWorkerSettings.DEFAULT_PERCENTAGE);
-        setHdrEnabled(false);
-        setReferenceWhiteNits(HdrOutput.AUTOMATIC_REFERENCE_WHITE_NITS);
-        setReflexMode(ReflexMode.OFF);
-        setDlssFrameGenerationEnabled(false);
-        setDlssFrameGenerationMultiplier(2);
-        setDlssFrameGenerationUiRecomposition(true);
-    }
-
-    static PrimeSettings restoredDefaults(PrimeSettings current) {
-        return current
-                .withPathTracingEnabled(true)
-                .withSurfaceDetailMode(SurfaceDetailMode.DEFAULT)
-                .withVoxelTextureSurfaceStrengthSteps(VoxelSurfaceSettings.DEFAULT_STEPS)
-                .withPostProcessingMode(PostProcessingMode.DEFAULT)
-                .withReconstructionQuality(ReconstructionQualityMode.DEFAULT)
-                .withLatitudeDegrees(AstronomySettings.DEFAULT_LATITUDE_DEGREES)
-                .withSolarLongitudeDegrees(AstronomySettings.DEFAULT_SOLAR_LONGITUDE_DEGREES)
-                .withSunQuarterSteps(LightingSettings.DEFAULT_SUN_QUARTER_STEPS)
-                .withStarQuarterSteps(LightingSettings.DEFAULT_STAR_QUARTER_STEPS)
-                .withBlockLightQuarterSteps(LightingSettings.DEFAULT_BLOCK_LIGHT_QUARTER_STEPS)
-                .withTransparentNeeMode(TransparentNeeMode.DEFAULT)
-                .withFinalExposureQuarterSteps(
-                        DisplaySettings.DEFAULT_FINAL_EXPOSURE_QUARTER_STEPS)
-                .withAutoExposureCompensationSteps(
-                        DisplaySettings.DEFAULT_AUTO_EXPOSURE_COMPENSATION_STEPS)
-                .withDefaultRoughnessSteps(MaterialSettings.DEFAULT_ROUGHNESS_STEPS)
-                .withSeamlessGlass(MaterialSettings.DEFAULT_SEAMLESS_GLASS)
-                .withAirGap(MaterialSettings.DEFAULT_AIR_GAP)
-                .withVanillaPbrPresets(MaterialSettings.DEFAULT_VANILLA_PBR_PRESETS);
+        PrimeConfigData defaults = PrimeConfigData.defaults();
+        setPathTracingEnabled(defaults.pathTracingEnabled);
+        setAdditionalSpecularBounces(defaults.additionalSpecularBounces);
+        setMinimumBounces(defaults.minimumBounces);
+        setMaximumBounces(defaults.maximumBounces);
+        setTerrainWorkerPercentage(defaults.terrainWorkerPercentage);
+        setSurfaceDetailMode(defaults.surfaceDetailMode);
+        setVoxelTextureSurfaceStrengthSteps(defaults.voxelTextureSurfaceStrengthSteps);
+        setPostProcessingMode(defaults.postProcessingMode);
+        setReconstructionQualityMode(defaults.reconstructionQuality);
+        setLatitudeDegrees(defaults.astronomy.latitudeDegrees());
+        setSolarLongitudeDegrees(defaults.astronomy.solarLongitudeDegrees());
+        setSunQuarterSteps(defaults.lighting.sunQuarterSteps());
+        setStarQuarterSteps(defaults.lighting.starQuarterSteps());
+        setBlockLightQuarterSteps(defaults.lighting.blockLightQuarterSteps());
+        setTransparentNeeMode(defaults.lighting.transparentNeeMode());
+        setFinalExposureQuarterSteps(defaults.display.finalExposureQuarterSteps());
+        setAutoExposureCompensationSteps(defaults.display.autoExposureCompensationSteps());
+        setDefaultRoughnessSteps(defaults.material.roughnessSteps());
+        setSeamlessGlass(defaults.material.seamlessGlass());
+        setAirGap(defaults.material.airGap());
+        setVanillaPbrPresets(defaults.material.vanillaPbrPresets());
+        setHdrEnabled(defaults.hdrEnabled);
+        setReferenceWhiteNits(defaults.referenceWhiteNits);
+        setReflexMode(defaults.reflexMode);
+        setDlssFrameGenerationEnabled(defaults.dlssFrameGenerationEnabled);
+        setDlssFrameGenerationMultiplier(defaults.dlssFrameGenerationMultiplier);
+        setDlssFrameGenerationUiRecomposition(defaults.dlssFrameGenerationUiRecomposition);
     }
 
     public static void save() {
@@ -353,29 +404,31 @@ public final class PrimeConfig {
     }
 
     static String serializedContents() {
-        return PrimeConfigCodec.encode(currentData());
+        return PrimeConfigCodec.encode(data);
     }
 
-    private static PrimeConfigData currentData() {
-        return new PrimeConfigData(
-                settings,
-                additionalSpecularBounces,
-                minimumBounces,
-                maximumBounces,
-                terrainWorkerPercentage,
-                hdrEnabled,
-                referenceWhiteNits,
-                reflexMode,
-                dlssFrameGenerationEnabled,
-                dlssFrameGenerationMultiplier,
-                dlssFrameGenerationUiRecomposition);
+    private static void advanceLightingRevision() {
+        data.lighting = new LightingSettings.Snapshot(
+                data.lighting.sunQuarterSteps(),
+                data.lighting.starQuarterSteps(),
+                data.lighting.blockLightQuarterSteps(),
+                data.lighting.transparentNeeMode(),
+                Math.incrementExact(data.lighting.revision()));
+        rendererChanged();
     }
 
-    private static void update(PrimeSettings replacement) {
-        if (replacement != settings) {
-            settings = replacement;
-            rendererRevision = Math.incrementExact(rendererRevision);
-            dirty = true;
-        }
+    private static void setLighting(LightingSettings.Snapshot value) {
+        data.lighting = value;
+        rendererChanged();
+    }
+
+    private static void setMaterial(MaterialSettings.Snapshot value) {
+        data.material = value;
+        rendererChanged();
+    }
+
+    private static void rendererChanged() {
+        rendererRevision = Math.incrementExact(rendererRevision);
+        dirty = true;
     }
 }

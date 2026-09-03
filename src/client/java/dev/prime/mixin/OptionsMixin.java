@@ -42,7 +42,7 @@ public abstract class OptionsMixin {
     private int prime$routeRequestedViewDistance(int configuredDistance) {
         return ViewDistanceLimits.requestedDistance(
                 configuredDistance,
-                PrimeConfig.settings().pathTracingEnabled(),
+                PrimeConfig.rendererSettings().pathTracingEnabled(),
                 this.minecraft.isLocalServer());
     }
 }

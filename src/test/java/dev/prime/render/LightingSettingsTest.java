@@ -2,9 +2,6 @@ package dev.prime.render;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
-import dev.prime.config.PrimeSettings;
 import org.junit.jupiter.api.Test;
 
 final class LightingSettingsTest {
@@ -30,36 +27,6 @@ final class LightingSettingsTest {
     }
 
     @Test
-    void changingEitherControlAdvancesTheSharedLightingRevision() {
-        PrimeSettings defaults = PrimeSettings.defaults();
-        assertEquals(AstronomySettings.defaults(), defaults.astronomy());
-        PrimeSettings latitude = defaults.withLatitudeDegrees(-30);
-        assertTrue(
-                latitude.lightingRevision()
-                        > defaults.lightingRevision());
-        PrimeSettings season =
-                latitude.withSolarLongitudeDegrees(180);
-        assertTrue(
-                season.lightingRevision()
-                        > latitude.lightingRevision());
-        assertEquals(-30, season.astronomy().latitudeDegrees());
-        assertEquals(180, season.astronomy().solarLongitudeDegrees());
-        assertEquals(season, season.withSolarLongitudeDegrees(180));
-
-        PrimeSettings sun = season.withSunQuarterSteps(1);
-        assertTrue(sun.lightingRevision() > season.lightingRevision());
-        assertEquals(sun, sun.withSunQuarterSteps(1));
-
-        PrimeSettings stars = sun.withStarQuarterSteps(2);
-        assertTrue(stars.lightingRevision() > sun.lightingRevision());
-        PrimeSettings block = stars.withBlockLightQuarterSteps(-1);
-        assertTrue(block.lightingRevision() > stars.lightingRevision());
-        assertEquals(1, block.lighting().sunQuarterSteps());
-        assertEquals(2, block.lighting().starQuarterSteps());
-        assertEquals(-1, block.lighting().blockLightQuarterSteps());
-    }
-
-    @Test
     void snapshotDerivesLinearValuesFromItsCanonicalSteps() {
         LightingSettings.Snapshot snapshot =
                 new LightingSettings.Snapshot(4, -8, 12, 3L);
@@ -75,16 +42,4 @@ final class LightingSettingsTest {
                 () -> new LightingSettings.Snapshot(0, 0, 0, -1L));
     }
 
-    @Test
-    void finalExposureDoesNotAdvanceLightingOrMaterialRevisions() {
-        PrimeSettings defaults = PrimeSettings.defaults();
-        PrimeSettings changed = defaults.withFinalExposureQuarterSteps(3);
-
-        assertEquals(defaults.lightingRevision(), changed.lightingRevision());
-        assertEquals(defaults.materialRevision(), changed.materialRevision());
-        assertEquals(3, changed.display().finalExposureQuarterSteps());
-        assertEquals(
-                DisplaySettings.finalExposureMultiplier(3),
-                changed.display().finalExposureMultiplier());
-    }
 }

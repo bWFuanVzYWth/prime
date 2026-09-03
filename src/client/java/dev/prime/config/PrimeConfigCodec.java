@@ -75,170 +75,167 @@ final class PrimeConfigCodec {
     static DecodeResult decode(Properties properties) {
         Reader reader = new Reader(properties);
         PrimeConfigData defaults = PrimeConfigData.defaults();
-        PrimeSettings defaultSettings = defaults.settings();
         boolean pathTracing = reader.value(
                 PATH_TRACING_ENABLED_KEY,
-                defaultSettings.pathTracingEnabled(),
+                defaults.pathTracingEnabled,
                 PrimeConfigCodec::parseBoolean,
                 "path-tracing switch");
         int additionalSpecularBounces = reader.migratedValue(
                 ADDITIONAL_SPECULAR_BOUNCES_KEY,
                 LEGACY_SPECULAR_BOUNCES_KEY,
-                defaults.additionalSpecularBounces(),
+                defaults.additionalSpecularBounces,
                 PrimeConfigCodec::parseAdditionalSpecularBounces,
                 "additional specular bounce count");
         int minimumBounces = reader.migratedValue(
                 MINIMUM_BOUNCES_KEY,
                 LEGACY_MINIMUM_BOUNCES_KEY,
-                defaults.minimumBounces(),
+                defaults.minimumBounces,
                 PrimeConfigCodec::parseMinimumBounces,
                 "minimum bounce count");
         int maximumBounces = reader.migratedValue(
                 MAXIMUM_BOUNCES_KEY,
                 LEGACY_MAXIMUM_BOUNCES_KEY,
-                defaults.maximumBounces(),
+                defaults.maximumBounces,
                 PrimeConfigCodec::parseMaximumBounces,
                 "maximum bounce count");
         int terrainWorkers = reader.value(
                 TERRAIN_WORKER_PERCENTAGE_KEY,
-                defaults.terrainWorkerPercentage(),
+                defaults.terrainWorkerPercentage,
                 PrimeConfigCodec::parseTerrainWorkerPercentage,
                 "terrain worker percentage");
         SurfaceDetailMode surfaceDetail = reader.value(
                 SURFACE_DETAIL_MODE_KEY,
-                defaultSettings.surfaceDetailMode(),
+                defaults.surfaceDetailMode,
                 PrimeConfigCodec::parseSurfaceDetailMode,
                 "surface-detail mode");
         int voxelStrength = reader.value(
                 VOXEL_TEXTURE_SURFACE_STRENGTH_KEY,
-                defaultSettings.voxelTextureSurfaceStrengthSteps(),
+                defaults.voxelTextureSurfaceStrengthSteps,
                 PrimeConfigCodec::parseVoxelSurfaceStrengthSteps,
                 "voxel-surface strength");
         PostProcessingMode mode = reader.value(
                 MODE_KEY,
-                defaultSettings.postProcessingMode(),
+                defaults.postProcessingMode,
                 PrimeConfigCodec::parsePersistentMode,
                 "post-processing mode");
         ReconstructionQualityMode quality = reader.value(
                 QUALITY_KEY,
-                defaultSettings.reconstructionQuality(),
+                defaults.reconstructionQuality,
                 PrimeConfigCodec::parseQuality,
                 "reconstruction quality");
         int latitude = reader.value(
                 LATITUDE_DEGREES_KEY,
-                defaultSettings.astronomy().latitudeDegrees(),
+                defaults.astronomy.latitudeDegrees(),
                 PrimeConfigCodec::parseLatitudeDegrees,
                 "observer latitude");
         int longitude = reader.value(
                 SOLAR_LONGITUDE_DEGREES_KEY,
-                defaultSettings.astronomy().solarLongitudeDegrees(),
+                defaults.astronomy.solarLongitudeDegrees(),
                 PrimeConfigCodec::parseSolarLongitudeDegrees,
                 "solar longitude");
         int sun = reader.value(
                 SUN_EV_KEY,
-                defaultSettings.sunQuarterSteps(),
+                defaults.lighting.sunQuarterSteps(),
                 PrimeConfigCodec::parseEvQuarterSteps,
                 "sun exposure");
         int stars = reader.value(
                 STAR_EV_KEY,
-                defaultSettings.starQuarterSteps(),
+                defaults.lighting.starQuarterSteps(),
                 PrimeConfigCodec::parseStarEvQuarterSteps,
                 "star exposure");
         int blockLights = reader.value(
                 BLOCK_LIGHT_EV_KEY,
-                defaultSettings.blockLightQuarterSteps(),
+                defaults.lighting.blockLightQuarterSteps(),
                 PrimeConfigCodec::parseEvQuarterSteps,
                 "block-light exposure");
         TransparentNeeMode transparentNeeMode = reader.value(
                 TRANSPARENT_NEE_MODE_KEY,
-                defaultSettings.transparentNeeMode(),
+                defaults.lighting.transparentNeeMode(),
                 PrimeConfigCodec::parseTransparentNeeMode,
                 "transparent NEE mode");
         int finalExposure = reader.value(
                 FINAL_EXPOSURE_EV_KEY,
-                defaultSettings.finalExposureQuarterSteps(),
+                defaults.display.finalExposureQuarterSteps(),
                 PrimeConfigCodec::parseFinalExposureQuarterSteps,
                 "final exposure");
         boolean hdr = reader.value(
                 HDR_ENABLED_KEY,
-                defaults.hdrEnabled(),
+                defaults.hdrEnabled,
                 PrimeConfigCodec::parseBoolean,
                 "HDR switch");
         int referenceWhite = reader.value(
                 REFERENCE_WHITE_NITS_KEY,
-                defaults.referenceWhiteNits(),
+                defaults.referenceWhiteNits,
                 PrimeConfigCodec::parseReferenceWhiteNits,
                 "HDR reference white");
         int exposureCompensation = reader.value(
                 AUTO_EXPOSURE_COMPENSATION_KEY,
-                defaultSettings.autoExposureCompensationSteps(),
+                defaults.display.autoExposureCompensationSteps(),
                 PrimeConfigCodec::parseAutoExposureCompensationSteps,
                 "auto-exposure compensation");
         int roughness = reader.value(
                 DEFAULT_ROUGHNESS_KEY,
-                defaultSettings.defaultRoughnessSteps(),
+                defaults.material.roughnessSteps(),
                 PrimeConfigCodec::parseRoughnessSteps,
                 "default material roughness");
         boolean seamlessGlass = reader.value(
                 SEAMLESS_GLASS_KEY,
-                defaultSettings.seamlessGlass(),
+                defaults.material.seamlessGlass(),
                 PrimeConfigCodec::parseBoolean,
                 "seamless-glass switch");
         boolean airGap = reader.value(
                 AIR_GAP_KEY,
-                defaultSettings.airGap(),
+                defaults.material.airGap(),
                 PrimeConfigCodec::parseBoolean,
                 "air-gap switch");
         boolean vanillaPbrPresets = reader.value(
                 VANILLA_PBR_PRESETS_KEY,
-                defaultSettings.vanillaPbrPresets(),
+                defaults.material.vanillaPbrPresets(),
                 PrimeConfigCodec::parseBoolean,
                 "vanilla-PBR preset switch");
         ReflexMode reflexMode = reader.value(
                 REFLEX_MODE_KEY,
-                defaults.reflexMode(),
+                defaults.reflexMode,
                 PrimeConfigCodec::parseReflexMode,
                 "Reflex mode");
         boolean dlssFrameGenerationEnabled = reader.value(
                 DLSS_FRAME_GENERATION_ENABLED_KEY,
-                defaults.dlssFrameGenerationEnabled(),
+                defaults.dlssFrameGenerationEnabled,
                 PrimeConfigCodec::parseBoolean,
                 "DLSS frame-generation switch");
         int dlssFrameGenerationMultiplier = reader.value(
                 DLSS_FRAME_GENERATION_MULTIPLIER_KEY,
-                defaults.dlssFrameGenerationMultiplier(),
+                defaults.dlssFrameGenerationMultiplier,
                 PrimeConfigCodec::parseDlssFrameGenerationMultiplier,
                 "DLSS frame-generation multiplier");
         boolean dlssFrameGenerationUiRecomposition = reader.value(
                 DLSS_FRAME_GENERATION_UI_RECOMPOSITION_KEY,
-                defaults.dlssFrameGenerationUiRecomposition(),
+                defaults.dlssFrameGenerationUiRecomposition,
                 PrimeConfigCodec::parseBoolean,
                 "DLSS frame-generation UI recomposition switch");
 
-        PrimeSettings settings = new PrimeSettings(
-                pathTracing,
-                surfaceDetail,
-                voxelStrength,
-                mode,
-                quality,
-                new AstronomySettings(latitude, longitude),
-                new LightingSettings.Snapshot(
-                        sun, stars, blockLights, transparentNeeMode, 0L),
-                new DisplaySettings.Snapshot(finalExposure, exposureCompensation),
-                new MaterialSettings.Snapshot(
-                        roughness,
-                        seamlessGlass,
-                        airGap,
-                        vanillaPbrPresets,
-                        0L));
         reader.rewriteNeeded |= !properties.stringPropertyNames().equals(CURRENT_KEYS);
         return new DecodeResult(
                 new PrimeConfigData(
-                        settings,
+                        pathTracing,
                         additionalSpecularBounces,
                         minimumBounces,
                         maximumBounces,
                         terrainWorkers,
+                        surfaceDetail,
+                        voxelStrength,
+                        mode,
+                        quality,
+                        new AstronomySettings(latitude, longitude),
+                        new LightingSettings.Snapshot(
+                                sun, stars, blockLights, transparentNeeMode, 0L),
+                        new DisplaySettings.Snapshot(finalExposure, exposureCompensation),
+                        new MaterialSettings.Snapshot(
+                                roughness,
+                                seamlessGlass,
+                                airGap,
+                                vanillaPbrPresets,
+                                0L),
                         hdr,
                         referenceWhite,
                         reflexMode,
@@ -249,79 +246,77 @@ final class PrimeConfigCodec {
     }
 
     static String encode(PrimeConfigData data) {
-        PrimeSettings settings = data.settings();
-        return PATH_TRACING_ENABLED_KEY + "=" + settings.pathTracingEnabled() + "\n"
+        return PATH_TRACING_ENABLED_KEY + "=" + data.pathTracingEnabled + "\n"
                 + ADDITIONAL_SPECULAR_BOUNCES_KEY + "="
-                + data.additionalSpecularBounces() + "\n"
-                + MINIMUM_BOUNCES_KEY + "=" + data.minimumBounces() + "\n"
-                + MAXIMUM_BOUNCES_KEY + "=" + data.maximumBounces() + "\n"
+                + data.additionalSpecularBounces + "\n"
+                + MINIMUM_BOUNCES_KEY + "=" + data.minimumBounces + "\n"
+                + MAXIMUM_BOUNCES_KEY + "=" + data.maximumBounces + "\n"
                 + TERRAIN_WORKER_PERCENTAGE_KEY + "="
-                + data.terrainWorkerPercentage() + "\n"
+                + data.terrainWorkerPercentage + "\n"
                 + SURFACE_DETAIL_MODE_KEY + "="
-                + settings.surfaceDetailMode().id() + "\n"
+                + data.surfaceDetailMode.id() + "\n"
                 + VOXEL_TEXTURE_SURFACE_STRENGTH_KEY + "="
-                + formatVoxelSurfaceStrength(settings.voxelTextureSurfaceStrengthSteps()) + "\n"
-                + MODE_KEY + "=" + settings.postProcessingMode().id() + "\n"
-                + QUALITY_KEY + "=" + settings.reconstructionQuality().id() + "\n"
-                + LATITUDE_DEGREES_KEY + "=" + settings.astronomy().latitudeDegrees() + "\n"
+                + formatVoxelSurfaceStrength(data.voxelTextureSurfaceStrengthSteps) + "\n"
+                + MODE_KEY + "=" + data.postProcessingMode.id() + "\n"
+                + QUALITY_KEY + "=" + data.reconstructionQuality.id() + "\n"
+                + LATITUDE_DEGREES_KEY + "=" + data.astronomy.latitudeDegrees() + "\n"
                 + SOLAR_LONGITUDE_DEGREES_KEY + "="
-                + settings.astronomy().solarLongitudeDegrees() + "\n"
-                + SUN_EV_KEY + "=" + formatEv(settings.sunQuarterSteps()) + "\n"
-                + STAR_EV_KEY + "=" + formatStarEv(settings.starQuarterSteps()) + "\n"
-                + BLOCK_LIGHT_EV_KEY + "=" + formatEv(settings.blockLightQuarterSteps()) + "\n"
-                + TRANSPARENT_NEE_MODE_KEY + "=" + settings.transparentNeeMode().id() + "\n"
+                + data.astronomy.solarLongitudeDegrees() + "\n"
+                + SUN_EV_KEY + "=" + formatEv(data.lighting.sunQuarterSteps()) + "\n"
+                + STAR_EV_KEY + "=" + formatStarEv(data.lighting.starQuarterSteps()) + "\n"
+                + BLOCK_LIGHT_EV_KEY + "=" + formatEv(data.lighting.blockLightQuarterSteps()) + "\n"
+                + TRANSPARENT_NEE_MODE_KEY + "=" + data.lighting.transparentNeeMode().id() + "\n"
                 + FINAL_EXPOSURE_EV_KEY + "="
-                + formatFinalExposure(settings.finalExposureQuarterSteps()) + "\n"
-                + HDR_ENABLED_KEY + "=" + data.hdrEnabled() + "\n"
-                + REFERENCE_WHITE_NITS_KEY + "=" + data.referenceWhiteNits() + "\n"
+                + formatFinalExposure(data.display.finalExposureQuarterSteps()) + "\n"
+                + HDR_ENABLED_KEY + "=" + data.hdrEnabled + "\n"
+                + REFERENCE_WHITE_NITS_KEY + "=" + data.referenceWhiteNits + "\n"
                 + AUTO_EXPOSURE_COMPENSATION_KEY + "="
-                + formatAutoExposureCompensation(settings.autoExposureCompensationSteps()) + "\n"
+                + formatAutoExposureCompensation(data.display.autoExposureCompensationSteps()) + "\n"
                 + DEFAULT_ROUGHNESS_KEY + "="
-                + formatRoughness(settings.defaultRoughnessSteps()) + "\n"
-                + SEAMLESS_GLASS_KEY + "=" + settings.seamlessGlass() + "\n"
-                + AIR_GAP_KEY + "=" + settings.airGap() + "\n"
-                + VANILLA_PBR_PRESETS_KEY + "=" + settings.vanillaPbrPresets() + "\n"
-                + REFLEX_MODE_KEY + "=" + data.reflexMode().name().toLowerCase(Locale.ROOT) + "\n"
-                + DLSS_FRAME_GENERATION_ENABLED_KEY + "=" + data.dlssFrameGenerationEnabled() + "\n"
-                + DLSS_FRAME_GENERATION_MULTIPLIER_KEY + "=" + data.dlssFrameGenerationMultiplier() + "\n"
+                + formatRoughness(data.material.roughnessSteps()) + "\n"
+                + SEAMLESS_GLASS_KEY + "=" + data.material.seamlessGlass() + "\n"
+                + AIR_GAP_KEY + "=" + data.material.airGap() + "\n"
+                + VANILLA_PBR_PRESETS_KEY + "=" + data.material.vanillaPbrPresets() + "\n"
+                + REFLEX_MODE_KEY + "=" + data.reflexMode.name().toLowerCase(Locale.ROOT) + "\n"
+                + DLSS_FRAME_GENERATION_ENABLED_KEY + "=" + data.dlssFrameGenerationEnabled + "\n"
+                + DLSS_FRAME_GENERATION_MULTIPLIER_KEY + "=" + data.dlssFrameGenerationMultiplier + "\n"
                 + DLSS_FRAME_GENERATION_UI_RECOMPOSITION_KEY + "="
-                + data.dlssFrameGenerationUiRecomposition() + "\n";
+                + data.dlssFrameGenerationUiRecomposition + "\n";
     }
 
     static void log(PrimeConfigData data) {
-        PrimeSettings settings = data.settings();
         PrimeInfo.LOGGER.info(
                 "Prime settings: path tracing {}, additional specular bounces {}, minimum bounces {}, maximum bounces {}, terrain workers {}%, surface detail {} at {}x displacement height, post-processing {} quality {} (NRD-FSR {}x), latitude {} degrees, solar longitude {} degrees, sun {} EV, stars {} EV, block lights {} EV, transparent NEE {}, final exposure {} EV, HDR {}, reference white {}, auto-exposure compensation {}, default roughness {}, seamless glass {}, air gap {}, vanilla PBR presets {}, Reflex {}, DLSS frame generation {}, multiplier {}x, UI recomposition {}",
-                settings.pathTracingEnabled() ? "enabled" : "disabled",
-                data.additionalSpecularBounces(),
-                data.minimumBounces(),
-                data.maximumBounces(),
-                data.terrainWorkerPercentage(),
-                settings.surfaceDetailMode().id(),
-                formatVoxelSurfaceStrength(settings.voxelTextureSurfaceStrengthSteps()),
-                settings.postProcessingMode().id(),
-                settings.reconstructionQuality().id(),
-                settings.reconstructionQuality().upscaleRatio(),
-                settings.astronomy().latitudeDegrees(),
-                settings.astronomy().solarLongitudeDegrees(),
-                formatEv(settings.sunQuarterSteps()),
-                formatStarEv(settings.starQuarterSteps()),
-                formatEv(settings.blockLightQuarterSteps()),
-                settings.transparentNeeMode().id(),
-                formatFinalExposure(settings.finalExposureQuarterSteps()),
-                data.hdrEnabled() ? "enabled" : "disabled",
-                data.referenceWhiteNits() == HdrOutput.AUTOMATIC_REFERENCE_WHITE_NITS
+                data.pathTracingEnabled ? "enabled" : "disabled",
+                data.additionalSpecularBounces,
+                data.minimumBounces,
+                data.maximumBounces,
+                data.terrainWorkerPercentage,
+                data.surfaceDetailMode.id(),
+                formatVoxelSurfaceStrength(data.voxelTextureSurfaceStrengthSteps),
+                data.postProcessingMode.id(),
+                data.reconstructionQuality.id(),
+                data.reconstructionQuality.upscaleRatio(),
+                data.astronomy.latitudeDegrees(),
+                data.astronomy.solarLongitudeDegrees(),
+                formatEv(data.lighting.sunQuarterSteps()),
+                formatStarEv(data.lighting.starQuarterSteps()),
+                formatEv(data.lighting.blockLightQuarterSteps()),
+                data.lighting.transparentNeeMode().id(),
+                formatFinalExposure(data.display.finalExposureQuarterSteps()),
+                data.hdrEnabled ? "enabled" : "disabled",
+                data.referenceWhiteNits == HdrOutput.AUTOMATIC_REFERENCE_WHITE_NITS
                         ? "automatic"
-                        : data.referenceWhiteNits() + " nits",
-                formatAutoExposureCompensation(settings.autoExposureCompensationSteps()),
-                formatRoughness(settings.defaultRoughnessSteps()),
-                settings.seamlessGlass() ? "enabled" : "disabled",
-                settings.airGap() ? "enabled" : "disabled",
-                settings.vanillaPbrPresets() ? "enabled" : "disabled",
-                data.reflexMode().name().toLowerCase(Locale.ROOT),
-                data.dlssFrameGenerationEnabled() ? "enabled" : "disabled",
-                data.dlssFrameGenerationMultiplier(),
-                data.dlssFrameGenerationUiRecomposition() ? "enabled" : "disabled");
+                        : data.referenceWhiteNits + " nits",
+                formatAutoExposureCompensation(data.display.autoExposureCompensationSteps()),
+                formatRoughness(data.material.roughnessSteps()),
+                data.material.seamlessGlass() ? "enabled" : "disabled",
+                data.material.airGap() ? "enabled" : "disabled",
+                data.material.vanillaPbrPresets() ? "enabled" : "disabled",
+                data.reflexMode.name().toLowerCase(Locale.ROOT),
+                data.dlssFrameGenerationEnabled ? "enabled" : "disabled",
+                data.dlssFrameGenerationMultiplier,
+                data.dlssFrameGenerationUiRecomposition ? "enabled" : "disabled");
     }
 
     static ReflexMode parseReflexMode(String value) {
