@@ -4,7 +4,7 @@ import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.render.AerialEpipolarMapping;
 import dev.prime.render.FrameCamera;
 import dev.prime.render.SunDirection;
-import dev.prime.render.vulkan.VulkanDescriptors.StorageImageSet;
+import dev.prime.render.vulkan.VulkanDescriptors.BoundSet;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -22,7 +22,7 @@ final class NoisyCompositePass implements Destroyable {
             GeneratedShaderPrograms.resource("noisy_composite");
 
     private final SharedComputeProgram program;
-    private final StorageImageSet descriptors;
+    private final BoundSet descriptors;
     private final AtmospherePipeline atmosphere;
     private final int width;
     private final int height;
@@ -30,7 +30,7 @@ final class NoisyCompositePass implements Destroyable {
 
     private NoisyCompositePass(
             SharedComputeProgram program,
-            StorageImageSet descriptors,
+            BoundSet descriptors,
             AtmospherePipeline atmosphere,
             int width,
             int height) {
@@ -63,7 +63,7 @@ final class NoisyCompositePass implements Destroyable {
                     PUSH_SIZE,
                     IMAGE_COUNT,
                     SHADER);
-            StorageImageSet descriptors = VulkanDescriptors.bindStorageImages(
+            BoundSet descriptors = VulkanDescriptors.bindStorageImages(
                     context,
                     stack,
                     program.descriptorSetLayout(),

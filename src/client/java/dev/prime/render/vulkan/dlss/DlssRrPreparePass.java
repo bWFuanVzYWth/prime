@@ -8,7 +8,7 @@ import dev.prime.render.post.SubpixelJitter;
 import dev.prime.render.vulkan.AtmospherePipeline;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanDescriptors;
-import dev.prime.render.vulkan.VulkanDescriptors.StorageImageSet;
+import dev.prime.render.vulkan.VulkanDescriptors.BoundSet;
 import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.DispatchMath;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
@@ -31,7 +31,7 @@ final class DlssRrPreparePass implements Destroyable {
     private static final String SHADER = GeneratedShaderPrograms.resource("rr_prepare");
 
     private final SharedComputeProgram program;
-    private final StorageImageSet descriptors;
+    private final BoundSet descriptors;
     private final AtmospherePipeline atmosphere;
     private final int dispatchX;
     private final int dispatchY;
@@ -41,7 +41,7 @@ final class DlssRrPreparePass implements Destroyable {
 
     private DlssRrPreparePass(
             SharedComputeProgram program,
-            StorageImageSet descriptors,
+            BoundSet descriptors,
             AtmospherePipeline atmosphere,
             int width,
             int height) {
@@ -83,7 +83,7 @@ final class DlssRrPreparePass implements Destroyable {
                     DlssRrPrepareConstants.SIZE,
                     IMAGE_COUNT,
                     SHADER);
-            StorageImageSet descriptors = VulkanDescriptors.bindStorageImages(
+            BoundSet descriptors = VulkanDescriptors.bindStorageImages(
                     context,
                     stack,
                     program.descriptorSetLayout(),

@@ -5,16 +5,13 @@ import dev.prime.render.DisplaySettings;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.ReinhardGamutOutput;
 import dev.prime.infrastructure.ResourceCleanup;
+import dev.prime.render.vulkan.VulkanDescriptors.BoundSet;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkDescriptorBufferInfo;
-import org.lwjgl.vulkan.VkDescriptorImageInfo;
-import org.lwjgl.vulkan.VkDescriptorPoolSize;
-import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /** Prime's common linear Rec.2020 HDR to selectable sRGB Rec.709 display boundary. */
 public final class DisplayTransformPass implements Destroyable {
@@ -22,34 +19,28 @@ public final class DisplayTransformPass implements Destroyable {
     private static final int PUSH_SIZE = 20;
     private static final int LOCAL_SIZE = 8;
 
-    private final VulkanContext context;
     private final SharedComputeProgram program;
     private final AutoExposurePass autoExposure;
     private final VulkanBuffer exposureState;
     private final VulkanImage hdrOutput;
-    private final long descriptorPool;
-    private final long descriptorSet;
+    private final BoundSet descriptors;
     private final int width;
     private final int height;
     private boolean destroyed;
 
     private DisplayTransformPass(
-            VulkanContext context,
             SharedComputeProgram program,
             AutoExposurePass autoExposure,
             VulkanBuffer exposureState,
             VulkanImage hdrOutput,
-            long descriptorPool,
-            long descriptorSet,
+            BoundSet descriptors,
             int width,
             int height) {
-        this.context = context;
         this.program = program;
         this.autoExposure = autoExposure;
         this.exposureState = exposureState;
         this.hdrOutput = hdrOutput;
-        this.descriptorPool = descriptorPool;
-        this.descriptorSet = descriptorSet;
+        this.descriptors = descriptors;
         this.width = width;
         this.height = height;
     }
@@ -100,7 +91,7 @@ public final class DisplayTransformPass implements Destroyable {
                 && frozenExposure.size() < AutoExposurePass.EXPOSURE_STATE_SIZE) {
             throw new IllegalArgumentException("Frozen exposure state is incomplete");
         }
-        long descriptorPool = 0L;
+        BoundSet descriptors = null;
         VulkanImage hdrOutput = null;
         AutoExposurePass autoExposure = frozenExposure == null
                 ? AutoExposurePass.create(
@@ -124,64 +115,35 @@ public final class DisplayTransformPass implements Destroyable {
                     "Prime HDR display output");
             program = context.acquireDisplayTransformProgram();
             try (MemoryStack stack = MemoryStack.stackPush()) {
-                VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(3, stack);
-                poolSizes.get(0).type(VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE).descriptorCount(1);
-                poolSizes.get(1).type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE).descriptorCount(2);
-                poolSizes.get(2).type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(1);
-                descriptorPool = VulkanDescriptors.createPool(
+                descriptors = VulkanDescriptors.bind(
                         context,
                         stack,
-                        1,
-                        poolSizes,
-                        "create common display-transform descriptor pool");
-                long descriptorSet = VulkanDescriptors.allocateSet(
-                        context,
-                        stack,
-                        descriptorPool,
                         program.descriptorSetLayout(),
-                        "allocate common display-transform descriptor set");
-                VkDescriptorImageInfo.Buffer imageInfos = VkDescriptorImageInfo.calloc(3, stack);
-                imageInfos.get(0).imageView(linearInput.view())
-                        .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                imageInfos.get(1).imageView(displayOutput.view())
-                        .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                imageInfos.get(2).imageView(hdrOutput.view())
-                        .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                VkDescriptorBufferInfo.Buffer exposureInfo =
-                        VkDescriptorBufferInfo.calloc(1, stack);
-                exposureInfo.get(0)
-                        .buffer(exposureState.handle())
-                        .offset(0L)
-                        .range(AutoExposurePass.EXPOSURE_STATE_SIZE);
-                VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(4, stack);
-                VulkanDescriptors.writeImage(
-                        writes.get(0), descriptorSet, 0,
-                        VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, imageInfos.get(0));
-                VulkanDescriptors.writeImage(
-                        writes.get(1), descriptorSet, 1,
-                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, imageInfos.get(1));
-                VulkanDescriptors.writeBuffer(
-                        writes.get(2), descriptorSet, 2,
-                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, exposureInfo.get(0));
-                VulkanDescriptors.writeImage(
-                        writes.get(3), descriptorSet, 3,
-                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, imageInfos.get(2));
-                VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
+                        "display-transform",
+                        VulkanDescriptors.image(
+                                0, VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                linearInput.view(), VK12.VK_IMAGE_LAYOUT_GENERAL),
+                        VulkanDescriptors.image(
+                                1, VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                displayOutput.view(), VK12.VK_IMAGE_LAYOUT_GENERAL),
+                        VulkanDescriptors.buffer(
+                                2, VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                exposureState.handle(), 0L,
+                                AutoExposurePass.EXPOSURE_STATE_SIZE),
+                        VulkanDescriptors.image(
+                                3, VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                hdrOutput.view(), VK12.VK_IMAGE_LAYOUT_GENERAL));
                 return new DisplayTransformPass(
-                        context,
                         program,
                         autoExposure,
                         exposureState,
                         hdrOutput,
-                        descriptorPool,
-                        descriptorSet,
+                        descriptors,
                         displayOutput.width(),
                         displayOutput.height());
             }
         } catch (RuntimeException exception) {
-            if (descriptorPool != 0L) {
-                VK12.vkDestroyDescriptorPool(context.vkDevice(), descriptorPool, null);
-            }
+            ResourceCleanup.destroy(descriptors, exception);
             if (program != null) {
                 program.release();
             }
@@ -257,7 +219,7 @@ public final class DisplayTransformPass implements Destroyable {
                     VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
                     this.program.pipelineLayout(),
                     0,
-                    stack.longs(this.descriptorSet),
+                    stack.longs(this.descriptors.handle()),
                     null);
             VK12.vkCmdPushConstants(
                     commandBuffer, this.program.pipelineLayout(), COMPUTE_STAGE, 0, push);
@@ -273,7 +235,7 @@ public final class DisplayTransformPass implements Destroyable {
     public void destroy() {
         if (this.destroyed) return;
         this.destroyed = true;
-        VK12.vkDestroyDescriptorPool(this.context.vkDevice(), this.descriptorPool, null);
+        this.descriptors.destroy();
         this.program.release();
         this.hdrOutput.destroy();
         if (this.autoExposure != null) {

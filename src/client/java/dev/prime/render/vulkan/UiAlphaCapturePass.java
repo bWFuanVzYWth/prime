@@ -3,6 +3,7 @@ package dev.prime.render.vulkan;
 import com.mojang.blaze3d.vulkan.Destroyable;
 import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
 import dev.prime.infrastructure.ResourceCleanup;
+import dev.prime.render.vulkan.VulkanDescriptors.BoundSet;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -10,9 +11,6 @@ import java.util.Objects;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkDescriptorImageInfo;
-import org.lwjgl.vulkan.VkDescriptorPoolSize;
-import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /** Extracts Minecraft's post-UI alpha into a Streamline UI_ALPHA image. */
 public final class UiAlphaCapturePass implements Destroyable {
@@ -20,14 +18,11 @@ public final class UiAlphaCapturePass implements Destroyable {
     private static final int LOCAL_SIZE = 8;
     private static final int PUSH_SIZE = 8;
 
-    private final VulkanContext context;
     private final SharedComputeProgram clearProgram;
     private final SharedComputeProgram extractProgram;
     private final VulkanImage alpha;
-    private final long clearDescriptorPool;
-    private final long clearDescriptorSet;
-    private final long extractDescriptorPool;
-    private final long extractDescriptorSet;
+    private final BoundSet clearDescriptors;
+    private final BoundSet extractDescriptors;
     private final int width;
     private final int height;
     private final long sourceImage;
@@ -36,26 +31,20 @@ public final class UiAlphaCapturePass implements Destroyable {
     private boolean destroyed;
 
     private UiAlphaCapturePass(
-            VulkanContext context,
             SharedComputeProgram clearProgram,
             SharedComputeProgram extractProgram,
             VulkanImage alpha,
-            long clearDescriptorPool,
-            long clearDescriptorSet,
-            long extractDescriptorPool,
-            long extractDescriptorSet,
+            BoundSet clearDescriptors,
+            BoundSet extractDescriptors,
             int width,
             int height,
             long sourceImage,
             long sourceView) {
-        this.context = context;
         this.clearProgram = clearProgram;
         this.extractProgram = extractProgram;
         this.alpha = alpha;
-        this.clearDescriptorPool = clearDescriptorPool;
-        this.clearDescriptorSet = clearDescriptorSet;
-        this.extractDescriptorPool = extractDescriptorPool;
-        this.extractDescriptorSet = extractDescriptorSet;
+        this.clearDescriptors = clearDescriptors;
+        this.extractDescriptors = extractDescriptors;
         this.width = width;
         this.height = height;
         this.sourceImage = sourceImage;
@@ -75,8 +64,8 @@ public final class UiAlphaCapturePass implements Destroyable {
         SharedComputeProgram clearProgram = null;
         SharedComputeProgram extractProgram = null;
         VulkanImage alpha = null;
-        long clearPool = 0L;
-        long extractPool = 0L;
+        BoundSet clearDescriptors = null;
+        BoundSet extractDescriptors = null;
         try {
             clearProgram = context.acquireUiAlphaClearProgram();
             extractProgram = context.acquireUiAlphaExtractProgram();
@@ -87,73 +76,33 @@ public final class UiAlphaCapturePass implements Destroyable {
                     VK12.VK_IMAGE_USAGE_STORAGE_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT,
                     "Prime UI alpha");
             try (MemoryStack stack = MemoryStack.stackPush()) {
-                VkDescriptorPoolSize.Buffer clearSizes = VkDescriptorPoolSize.calloc(1, stack)
-                        .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .descriptorCount(1);
-                clearPool = VulkanDescriptors.createPool(
-                        context, stack, 1, clearSizes,
-                        "create UI alpha clear descriptor pool");
-                long clearSet = VulkanDescriptors.allocateSet(
-                        context, stack, clearPool, clearProgram.descriptorSetLayout(),
-                        "allocate UI alpha clear descriptor set");
-                VkDescriptorImageInfo clearInfo = VkDescriptorImageInfo.calloc(stack)
-                        .imageView(sourceView)
-                        .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                VkWriteDescriptorSet.Buffer clearWrites = VkWriteDescriptorSet.calloc(1, stack);
-                VulkanDescriptors.writeImage(
-                        clearWrites.get(0), clearSet, 0,
-                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, clearInfo);
-                VK12.vkUpdateDescriptorSets(context.vkDevice(), clearWrites, null);
-
-                VkDescriptorPoolSize.Buffer extractSizes = VkDescriptorPoolSize.calloc(2, stack);
-                extractSizes.get(0)
-                        .type(VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
-                        .descriptorCount(1);
-                extractSizes.get(1)
-                        .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .descriptorCount(1);
-                extractPool = VulkanDescriptors.createPool(
-                        context, stack, 1, extractSizes,
-                        "create UI alpha extraction descriptor pool");
-                long extractSet = VulkanDescriptors.allocateSet(
-                        context, stack, extractPool, extractProgram.descriptorSetLayout(),
-                        "allocate UI alpha extraction descriptor set");
-                VkDescriptorImageInfo.Buffer extractInfos = VkDescriptorImageInfo.calloc(2, stack);
-                extractInfos.get(0)
-                        .imageView(sourceView)
-                        .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                extractInfos.get(1)
-                        .imageView(alpha.view())
-                        .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                VkWriteDescriptorSet.Buffer extractWrites = VkWriteDescriptorSet.calloc(2, stack);
-                VulkanDescriptors.writeImage(
-                        extractWrites.get(0), extractSet, 0,
-                        VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, extractInfos.get(0));
-                VulkanDescriptors.writeImage(
-                        extractWrites.get(1), extractSet, 1,
-                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, extractInfos.get(1));
-                VK12.vkUpdateDescriptorSets(context.vkDevice(), extractWrites, null);
+                clearDescriptors = VulkanDescriptors.bind(
+                        context, stack, clearProgram.descriptorSetLayout(), "UI alpha clear",
+                        VulkanDescriptors.image(
+                                0, VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                sourceView, VK12.VK_IMAGE_LAYOUT_GENERAL));
+                extractDescriptors = VulkanDescriptors.bind(
+                        context, stack, extractProgram.descriptorSetLayout(), "UI alpha extraction",
+                        VulkanDescriptors.image(
+                                0, VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                sourceView, VK12.VK_IMAGE_LAYOUT_GENERAL),
+                        VulkanDescriptors.image(
+                                1, VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                alpha.view(), VK12.VK_IMAGE_LAYOUT_GENERAL));
                 return new UiAlphaCapturePass(
-                        context,
                         clearProgram,
                         extractProgram,
                         alpha,
-                        clearPool,
-                        clearSet,
-                        extractPool,
-                        extractSet,
+                        clearDescriptors,
+                        extractDescriptors,
                         width,
                         height,
                         sourceImage,
                         sourceView);
             }
         } catch (RuntimeException exception) {
-            if (extractPool != 0L) {
-                VK12.vkDestroyDescriptorPool(context.vkDevice(), extractPool, null);
-            }
-            if (clearPool != 0L) {
-                VK12.vkDestroyDescriptorPool(context.vkDevice(), clearPool, null);
-            }
+            ResourceCleanup.destroy(extractDescriptors, exception);
+            ResourceCleanup.destroy(clearDescriptors, exception);
             ResourceCleanup.destroy(alpha, exception);
             if (extractProgram != null) extractProgram.release();
             if (clearProgram != null) clearProgram.release();
@@ -183,7 +132,7 @@ public final class UiAlphaCapturePass implements Destroyable {
                 VK12.VK_ACCESS_MEMORY_WRITE_BIT,
                 COMPUTE_STAGE,
                 VK12.VK_ACCESS_SHADER_WRITE_BIT);
-        record(commandBuffer, this.clearProgram, this.clearDescriptorSet);
+        record(commandBuffer, this.clearProgram, this.clearDescriptors.handle());
         VulkanSync.imageBarrier(
                 commandBuffer,
                 this.sourceImage,
@@ -218,7 +167,7 @@ public final class UiAlphaCapturePass implements Destroyable {
                 this.alphaInitialized ? VK12.VK_ACCESS_SHADER_WRITE_BIT : 0L,
                 COMPUTE_STAGE,
                 VK12.VK_ACCESS_SHADER_WRITE_BIT);
-        record(commandBuffer, this.extractProgram, this.extractDescriptorSet);
+        record(commandBuffer, this.extractProgram, this.extractDescriptors.handle());
         VulkanSync.memoryBarrier(
                 commandBuffer,
                 COMPUTE_STAGE,
@@ -262,8 +211,8 @@ public final class UiAlphaCapturePass implements Destroyable {
     public void destroy() {
         if (this.destroyed) return;
         this.destroyed = true;
-        VK12.vkDestroyDescriptorPool(this.context.vkDevice(), this.clearDescriptorPool, null);
-        VK12.vkDestroyDescriptorPool(this.context.vkDevice(), this.extractDescriptorPool, null);
+        this.extractDescriptors.destroy();
+        this.clearDescriptors.destroy();
         this.clearProgram.release();
         this.extractProgram.release();
         this.alpha.destroy();

@@ -2,7 +2,10 @@ package dev.prime.render.vulkan;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
 import java.nio.LongBuffer;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkDescriptorBufferInfo;
@@ -16,7 +19,7 @@ import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
 import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
-/** Checked creation of the single-set descriptor layouts used by Prime compute passes. */
+/** Checked creation and binding of Prime's Vulkan descriptor resources. */
 public final class VulkanDescriptors {
     private VulkanDescriptors() {
     }
@@ -158,7 +161,7 @@ public final class VulkanDescriptors {
                 .pBufferInfo(VkDescriptorBufferInfo.create(info.address(), 1));
     }
 
-    public static StorageImageSet bindStorageImages(
+    public static BoundSet bindStorageImages(
             VulkanContext context,
             MemoryStack stack,
             long setLayout,
@@ -167,32 +170,93 @@ public final class VulkanDescriptors {
         if (images.isEmpty()) {
             throw new IllegalArgumentException("A storage-image set cannot be empty");
         }
+        Binding[] bindings = new Binding[images.size()];
+        for (int index = 0; index < images.size(); index++) {
+            bindings[index] = image(
+                    index,
+                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                    images.get(index).view(),
+                    VK12.VK_IMAGE_LAYOUT_GENERAL);
+        }
+        return bind(context, stack, setLayout, label, bindings);
+    }
+
+    public static ImageBinding image(
+            int binding, int type, long view, int layout) {
+        return new ImageBinding(binding, type, view, layout);
+    }
+
+    public static BufferBinding buffer(
+            int binding, int type, long buffer, long offset, long range) {
+        return new BufferBinding(binding, type, buffer, offset, range);
+    }
+
+    /** Allocates, writes and owns one immutable descriptor set and its private pool. */
+    public static BoundSet bind(
+            VulkanContext context,
+            MemoryStack stack,
+            long setLayout,
+            String label,
+            Binding... bindings) {
+        if (bindings.length == 0) {
+            throw new IllegalArgumentException("A descriptor set cannot be empty");
+        }
+        Map<Integer, Integer> typeCounts = new LinkedHashMap<>();
+        HashSet<Integer> numbers = new HashSet<>();
+        int imageCount = 0;
+        int bufferCount = 0;
+        for (Binding binding : bindings) {
+            if (!numbers.add(binding.binding())) {
+                throw new IllegalArgumentException("Duplicate descriptor binding");
+            }
+            typeCounts.merge(binding.type(), 1, Math::addExact);
+            if (binding instanceof ImageBinding) {
+                imageCount++;
+            } else if (binding instanceof BufferBinding) {
+                bufferCount++;
+            } else {
+                throw new IllegalArgumentException("Unknown descriptor binding type");
+            }
+        }
         long pool = 0L;
         try {
-            VkDescriptorPoolSize.Buffer poolSize = VkDescriptorPoolSize.calloc(1, stack)
-                    .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                    .descriptorCount(images.size());
+            VkDescriptorPoolSize.Buffer poolSizes =
+                    VkDescriptorPoolSize.calloc(typeCounts.size(), stack);
+            int poolIndex = 0;
+            for (Map.Entry<Integer, Integer> entry : typeCounts.entrySet()) {
+                poolSizes.get(poolIndex++)
+                        .type(entry.getKey())
+                        .descriptorCount(entry.getValue());
+            }
             pool = createPool(
-                    context, stack, 1, poolSize, "create " + label + " descriptor pool");
+                    context, stack, 1, poolSizes, "create " + label + " descriptor pool");
             long set = allocateSet(
                     context, stack, pool, setLayout, "allocate " + label + " descriptor set");
             VkDescriptorImageInfo.Buffer infos =
-                    VkDescriptorImageInfo.calloc(images.size(), stack);
+                    VkDescriptorImageInfo.calloc(imageCount, stack);
+            VkDescriptorBufferInfo.Buffer bufferInfos =
+                    VkDescriptorBufferInfo.calloc(bufferCount, stack);
             VkWriteDescriptorSet.Buffer writes =
-                    VkWriteDescriptorSet.calloc(images.size(), stack);
-            for (int binding = 0; binding < images.size(); binding++) {
-                infos.get(binding)
-                        .imageView(images.get(binding).view())
-                        .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                writeImage(
-                        writes.get(binding),
-                        set,
-                        binding,
-                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                        infos.get(binding));
+                    VkWriteDescriptorSet.calloc(bindings.length, stack);
+            int imageIndex = 0;
+            int bufferIndex = 0;
+            for (int index = 0; index < bindings.length; index++) {
+                Binding binding = bindings[index];
+                if (binding instanceof ImageBinding image) {
+                    VkDescriptorImageInfo info = infos.get(imageIndex++);
+                    info.imageView(image.view())
+                            .imageLayout(image.layout());
+                    writeImage(writes.get(index), set, image.binding(), image.type(), info);
+                } else if (binding instanceof BufferBinding buffer) {
+                    VkDescriptorBufferInfo info = bufferInfos.get(bufferIndex++);
+                    info.buffer(buffer.buffer())
+                            .offset(buffer.offset())
+                            .range(buffer.range());
+                    writeBuffer(writes.get(index), set, buffer.binding(), buffer.type(), info);
+                }
             }
             VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
-            return new StorageImageSet(context, pool, set);
+            return new BoundSet(context, pool, set);
         } catch (RuntimeException exception) {
             if (pool != 0L) {
                 VK12.vkDestroyDescriptorPool(context.vkDevice(), pool, null);
@@ -201,12 +265,24 @@ public final class VulkanDescriptors {
         }
     }
 
-    public static final class StorageImageSet implements Destroyable {
+    public sealed interface Binding permits ImageBinding, BufferBinding {
+        int binding();
+        int type();
+    }
+
+    public record ImageBinding(
+            int binding, int type, long view, int layout) implements Binding {}
+
+    public record BufferBinding(
+            int binding, int type, long buffer, long offset, long range) implements Binding {}
+
+    public static final class BoundSet implements Destroyable {
         private final VulkanContext context;
         private final long pool;
         private final long set;
+        private boolean destroyed;
 
-        private StorageImageSet(VulkanContext context, long pool, long set) {
+        private BoundSet(VulkanContext context, long pool, long set) {
             this.context = context;
             this.pool = pool;
             this.set = set;
@@ -218,7 +294,10 @@ public final class VulkanDescriptors {
 
         @Override
         public void destroy() {
-            VK12.vkDestroyDescriptorPool(this.context.vkDevice(), this.pool, null);
+            if (!this.destroyed) {
+                this.destroyed = true;
+                VK12.vkDestroyDescriptorPool(this.context.vkDevice(), this.pool, null);
+            }
         }
     }
 }

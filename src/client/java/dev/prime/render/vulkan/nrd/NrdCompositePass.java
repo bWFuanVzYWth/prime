@@ -5,7 +5,7 @@ import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.render.vulkan.AtmospherePipeline;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanDescriptors;
-import dev.prime.render.vulkan.VulkanDescriptors.StorageImageSet;
+import dev.prime.render.vulkan.VulkanDescriptors.BoundSet;
 import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
 import java.nio.ByteBuffer;
@@ -20,12 +20,12 @@ final class NrdCompositePass implements Destroyable {
     private static final int BINDING_COUNT = 28;
     private static final int PUSH_SIZE = NrdCompositeConstants.SIZE;
     private final SharedComputeProgram program;
-    private final StorageImageSet descriptors;
+    private final BoundSet descriptors;
     private boolean destroyed;
 
     private NrdCompositePass(
             SharedComputeProgram program,
-            StorageImageSet descriptors) {
+            BoundSet descriptors) {
         this.program = program;
         this.descriptors = descriptors;
     }
@@ -74,7 +74,7 @@ final class NrdCompositePass implements Destroyable {
                 images.reflectionViewZ(),
                 images.reflectionPosition(),
                 images.displayPosition());
-            StorageImageSet descriptors = VulkanDescriptors.bindStorageImages(
+            BoundSet descriptors = VulkanDescriptors.bindStorageImages(
                     context,
                     stack,
                     program.descriptorSetLayout(),

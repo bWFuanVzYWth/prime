@@ -6,7 +6,7 @@ import dev.prime.render.post.nrd.NrdCameraTransform;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanDescriptors;
-import dev.prime.render.vulkan.VulkanDescriptors.StorageImageSet;
+import dev.prime.render.vulkan.VulkanDescriptors.BoundSet;
 import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
 import java.nio.ByteBuffer;
@@ -22,7 +22,7 @@ final class NrdInputPreparationPass implements Destroyable {
     private static final int BINDING_COUNT = NrdDenoiser.MOTION_BINDING_COUNT;
     private static final int PUSH_SIZE = ShaderAbi.NRD_MOTION_PUSH_CONSTANT_SIZE;
     private final SharedComputeProgram program;
-    private final StorageImageSet descriptors;
+    private final BoundSet descriptors;
     private final Matrix4f currentClipToWorld = new Matrix4f();
     private final Matrix4f previousWorldToClip = new Matrix4f();
     private final Matrix4f worldToViewScratch = new Matrix4f();
@@ -30,7 +30,7 @@ final class NrdInputPreparationPass implements Destroyable {
 
     private NrdInputPreparationPass(
             SharedComputeProgram program,
-            StorageImageSet descriptors) {
+            BoundSet descriptors) {
         this.program = program;
         this.descriptors = descriptors;
     }
@@ -80,7 +80,7 @@ final class NrdInputPreparationPass implements Destroyable {
                     images.motion(),
                     images.fsrMotion(),
                     images.reconstructionControl());
-            StorageImageSet descriptors = VulkanDescriptors.bindStorageImages(
+            BoundSet descriptors = VulkanDescriptors.bindStorageImages(
                     context,
                     stack,
                     program.descriptorSetLayout(),

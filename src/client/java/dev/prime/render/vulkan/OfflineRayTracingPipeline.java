@@ -5,6 +5,7 @@ import com.mojang.blaze3d.vulkan.VulkanGpuSampler;
 import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
 import dev.prime.render.IntegratorFrameInput;
 import dev.prime.render.shader.ShaderAbi;
+import dev.prime.render.vulkan.VulkanDescriptors.BoundSet;
 import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -12,11 +13,7 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkDescriptorBufferInfo;
-import org.lwjgl.vulkan.VkDescriptorImageInfo;
-import org.lwjgl.vulkan.VkDescriptorPoolSize;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /** Offline-only full-path pipeline with a four-stage per-bounce wavefront. */
 public final class OfflineRayTracingPipeline implements Destroyable {
@@ -366,22 +363,17 @@ public final class OfflineRayTracingPipeline implements Destroyable {
     }
 
     private static final class Bindings implements Destroyable {
-        private final VulkanContext context;
-        private final long descriptorPool;
+        private final BoundSet descriptors;
         private final long descriptorSet;
         private final long runningMean;
         private final long wavefront;
-        private boolean destroyed;
 
         private Bindings(
-                VulkanContext context,
-                long descriptorPool,
-                long descriptorSet,
+                BoundSet descriptors,
                 long runningMean,
                 long wavefront) {
-            this.context = context;
-            this.descriptorPool = descriptorPool;
-            this.descriptorSet = descriptorSet;
+            this.descriptors = descriptors;
+            this.descriptorSet = descriptors.handle();
             this.runningMean = runningMean;
             this.wavefront = wavefront;
         }
@@ -393,56 +385,23 @@ public final class OfflineRayTracingPipeline implements Destroyable {
                 VulkanBuffer wavefront,
                 long queueOffset) {
             try (MemoryStack stack = MemoryStack.stackPush()) {
-                VkDescriptorPoolSize.Buffer sizes = VkDescriptorPoolSize.calloc(2, stack);
-                sizes.get(0).type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE).descriptorCount(1);
-                sizes.get(1).type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(2);
-                long pool = VulkanDescriptors.createPool(
-                        context,
-                        stack,
-                        1,
-                        sizes,
-                        "create offline trace descriptor pool");
-                try {
-                    long set = VulkanDescriptors.allocateSet(
-                            context,
-                            stack,
-                            pool,
-                            layout,
-                            "allocate offline trace descriptor set");
-                    VkDescriptorImageInfo imageInfo = VkDescriptorImageInfo.calloc(stack)
-                            .imageView(runningMean.view())
-                            .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                    VkDescriptorBufferInfo.Buffer bufferInfos =
-                            VkDescriptorBufferInfo.calloc(2, stack);
-                    bufferInfos.get(0)
-                            .buffer(wavefront.handle())
-                            .offset(0L)
-                            .range(queueOffset);
-                    bufferInfos.get(1)
-                            .buffer(wavefront.handle())
-                            .offset(queueOffset)
-                            .range(wavefront.size() - queueOffset);
-                    VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(3, stack);
-                    VulkanDescriptors.writeImage(
-                            writes.get(0), set, ShaderAbi.OFFLINE_DESCRIPTOR_RUNNING_MEAN,
-                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, imageInfo);
-                    VulkanDescriptors.writeBuffer(
-                            writes.get(1), set, ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_PATHS,
-                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, bufferInfos.get(0));
-                    VulkanDescriptors.writeBuffer(
-                            writes.get(2), set, ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_QUEUE,
-                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, bufferInfos.get(1));
-                    VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
-                    return new Bindings(
-                            context,
-                            pool,
-                            set,
-                            runningMean.view(),
-                            wavefront.handle());
-                } catch (RuntimeException exception) {
-                    VK12.vkDestroyDescriptorPool(context.vkDevice(), pool, null);
-                    throw exception;
-                }
+                BoundSet descriptors = VulkanDescriptors.bind(
+                        context, stack, layout, "offline trace",
+                        VulkanDescriptors.image(
+                                ShaderAbi.OFFLINE_DESCRIPTOR_RUNNING_MEAN,
+                                VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                runningMean.view(), VK12.VK_IMAGE_LAYOUT_GENERAL),
+                        VulkanDescriptors.buffer(
+                                ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_PATHS,
+                                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                wavefront.handle(), 0L, queueOffset),
+                        VulkanDescriptors.buffer(
+                                ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_QUEUE,
+                                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                wavefront.handle(), queueOffset,
+                                wavefront.size() - queueOffset));
+                return new Bindings(
+                        descriptors, runningMean.view(), wavefront.handle());
             }
         }
 
@@ -453,11 +412,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
 
         @Override
         public void destroy() {
-            if (!this.destroyed) {
-                this.destroyed = true;
-                VK12.vkDestroyDescriptorPool(
-                        this.context.vkDevice(), this.descriptorPool, null);
-            }
+            this.descriptors.destroy();
         }
     }
 }

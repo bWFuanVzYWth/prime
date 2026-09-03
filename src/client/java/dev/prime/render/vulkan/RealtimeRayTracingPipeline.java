@@ -13,11 +13,7 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkDescriptorBufferInfo;
-import org.lwjgl.vulkan.VkDescriptorImageInfo;
-import org.lwjgl.vulkan.VkDescriptorPoolSize;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /** Realtime ray-tracing pipeline and its wavefront resources. */
 public final class RealtimeRayTracingPipeline implements Destroyable {
@@ -615,8 +611,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
     }
 
     private static final class OutputBindings implements Destroyable {
-        private final VulkanContext context;
-        private final long descriptorPool;
+        private final VulkanDescriptors.BoundSet descriptors;
         private final long descriptorSet;
         private final long stableRadiance;
         private final long[] images;
@@ -625,19 +620,15 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         private final long[] primaryInputImages;
         private final long[] nextStepInputImages;
         private final long wavefront;
-        private boolean destroyed;
 
         private OutputBindings(
-                VulkanContext context,
-                long descriptorPool,
-                long descriptorSet,
+                VulkanDescriptors.BoundSet descriptors,
                 long stableRadiance,
                 long[] images,
                 long[] allImages,
                 long wavefront) {
-            this.context = context;
-            this.descriptorPool = descriptorPool;
-            this.descriptorSet = descriptorSet;
+            this.descriptors = descriptors;
+            this.descriptorSet = descriptors.handle();
             this.stableRadiance = stableRadiance;
             this.images = images.clone();
             this.allImages = uniqueImageHandles(allImages);
@@ -661,81 +652,45 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 VulkanBuffer wavefront,
                 long queueOffset) {
             try (MemoryStack stack = MemoryStack.stackPush()) {
-                VkDescriptorPoolSize.Buffer sizes =
-                        VkDescriptorPoolSize.calloc(2, stack);
-                sizes.get(0)
-                        .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .descriptorCount(STORAGE_IMAGE_DESCRIPTOR_COUNT);
-                sizes.get(1)
-                        .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                        .descriptorCount(2);
-                long pool = VulkanDescriptors.createPool(
+                VulkanImage[] images = outputImages(stableRadiance, signals);
+                long[] views = new long[images.length];
+                long[] imageHandles = new long[images.length];
+                int[] imageBindings = imageBindings();
+                VulkanDescriptors.Binding[] bindings =
+                        new VulkanDescriptors.Binding[images.length + 2];
+                for (int index = 0; index < images.length; index++) {
+                    views[index] = images[index].view();
+                    imageHandles[index] = images[index].image();
+                    bindings[index] = VulkanDescriptors.image(
+                            imageBindings[index],
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                            views[index],
+                            VK12.VK_IMAGE_LAYOUT_GENERAL);
+                }
+                bindings[images.length] = VulkanDescriptors.buffer(
+                        ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                        wavefront.handle(),
+                        0L,
+                        queueOffset);
+                bindings[images.length + 1] = VulkanDescriptors.buffer(
+                        ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                        wavefront.handle(),
+                        queueOffset,
+                        wavefront.size() - queueOffset);
+                VulkanDescriptors.BoundSet descriptors = VulkanDescriptors.bind(
                         context,
                         stack,
-                        1,
-                        sizes,
-                        "create realtime trace descriptor pool");
-                try {
-                    long set = VulkanDescriptors.allocateSet(
-                            context,
-                            stack,
-                            pool,
-                            layout,
-                            "allocate realtime trace descriptor set");
-                    VulkanImage[] images = outputImages(stableRadiance, signals);
-                    long[] views = new long[images.length];
-                    long[] imageHandles = new long[images.length];
-                    VkDescriptorImageInfo.Buffer imageInfos =
-                            VkDescriptorImageInfo.calloc(images.length, stack);
-                    for (int index = 0; index < images.length; index++) {
-                        views[index] = images[index].view();
-                        imageHandles[index] = images[index].image();
-                        imageInfos.get(index)
-                                .imageView(views[index])
-                                .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                    }
-                    VkDescriptorBufferInfo.Buffer bufferInfos =
-                            VkDescriptorBufferInfo.calloc(2, stack);
-                    bufferInfos.get(0)
-                            .buffer(wavefront.handle())
-                            .offset(0L)
-                            .range(queueOffset);
-                    bufferInfos.get(1)
-                            .buffer(wavefront.handle())
-                            .offset(queueOffset)
-                            .range(wavefront.size() - queueOffset);
-                    int[] imageBindings = imageBindings();
-                    VkWriteDescriptorSet.Buffer writes =
-                            VkWriteDescriptorSet.calloc(imageBindings.length + 2, stack);
-                    for (int index = 0; index < imageBindings.length; index++) {
-                        VulkanDescriptors.writeImage(
-                                writes.get(index), set, imageBindings[index],
-                                VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                                imageInfos.get(index));
-                    }
-                    VulkanDescriptors.writeBuffer(
-                            writes.get(imageBindings.length), set,
-                            ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
-                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                            bufferInfos.get(0));
-                    VulkanDescriptors.writeBuffer(
-                            writes.get(imageBindings.length + 1), set,
-                            ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE,
-                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                            bufferInfos.get(1));
-                    VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
-                    return new OutputBindings(
-                            context,
-                            pool,
-                            set,
-                            stableRadiance.view(),
-                            views,
-                            imageHandles,
-                            wavefront.handle());
-                } catch (RuntimeException exception) {
-                    VK12.vkDestroyDescriptorPool(context.vkDevice(), pool, null);
-                    throw exception;
-                }
+                        layout,
+                        "realtime trace",
+                        bindings);
+                return new OutputBindings(
+                        descriptors,
+                        stableRadiance.view(),
+                        views,
+                        imageHandles,
+                        wavefront.handle());
             }
         }
 
@@ -790,11 +745,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
 
         @Override
         public void destroy() {
-            if (!this.destroyed) {
-                this.destroyed = true;
-                VK12.vkDestroyDescriptorPool(
-                        this.context.vkDevice(), this.descriptorPool, null);
-            }
+            this.descriptors.destroy();
         }
     }
 
