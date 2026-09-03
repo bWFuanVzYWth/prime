@@ -12,10 +12,6 @@ final class OfflineGroups {
     static final int DIRECT_1 = 7;
     static final int SCATTER_1 = 8;
     static final int SAMPLE_RESOLVE = 9;
-    static final int GROUP_COUNT = 10;
-    static final int MODULE_COUNT = 6;
-    private static final int[] MODULES = {0, 1, 2, 3, 4, 1, 2, 3, 4, 5};
-    private static final int[] CONTROLS = {0, 0, 0, 0, 0, 1, 1, 1, 1, 0};
 
     private OfflineGroups() {
     }
@@ -27,14 +23,6 @@ final class OfflineGroups {
             default -> throw new IllegalArgumentException("Unknown wavefront shader suffix: " + suffix);
         };
         return GeneratedShaderPrograms.schedule("offline." + mode);
-    }
-
-    static int module(int group) {
-        return MODULES[group];
-    }
-
-    static int control(int group) {
-        return CONTROLS[group];
     }
 
     static int bridgeTrace(int queue) {

@@ -28,18 +28,12 @@ public final class CpuClusterMesh {
 
     private CpuClusterMesh(
             List<Segment> segments,
-            long opaqueTriangleCount,
-            long cutoutTriangleCount,
-            long transmissiveTriangleCount,
             OpacityMicromapData opacityMicromap,
             CompiledClusterLights lights,
             List<CpuVoxelMesh> voxelMeshes,
             CpuVoxelInstances voxelInstances) {
         this(
                 segments,
-                opaqueTriangleCount,
-                cutoutTriangleCount,
-                transmissiveTriangleCount,
                 opacityMicromap,
                 lights,
                 voxelMeshes,
@@ -50,9 +44,6 @@ public final class CpuClusterMesh {
 
     private CpuClusterMesh(
             List<Segment> segments,
-            long opaqueTriangleCount,
-            long cutoutTriangleCount,
-            long transmissiveTriangleCount,
             OpacityMicromapData opacityMicromap,
             CompiledClusterLights lights,
             List<CpuVoxelMesh> voxelMeshes,
@@ -60,11 +51,6 @@ public final class CpuClusterMesh {
             List<MediumKey> mediumCatalog,
             Set<StaticCompatibilityIssue> compatibilityIssues) {
         this.segments = List.copyOf(segments);
-        if (opaqueTriangleCount < 0L
-                || cutoutTriangleCount < 0L
-                || transmissiveTriangleCount < 0L) {
-            throw new IllegalArgumentException("Cluster triangle counts must not be negative");
-        }
         long segmentOpaque = 0L;
         long segmentCutout = 0L;
         long segmentTransmissive = 0L;
@@ -85,12 +71,6 @@ public final class CpuClusterMesh {
             segmentTransmissiveMacro = Math.addExact(
                     segmentTransmissiveMacro, segment.transmissiveMacroTriangleCount());
         }
-        if (segmentOpaque != opaqueTriangleCount
-                || segmentCutout != cutoutTriangleCount
-                || segmentTransmissive != transmissiveTriangleCount) {
-            throw new IllegalArgumentException(
-                    "Cluster segments disagree with aggregate triangle counts");
-        }
         Objects.requireNonNull(opacityMicromap, "opacityMicromap");
         Objects.requireNonNull(lights, "lights");
         this.voxelMeshes = List.copyOf(voxelMeshes);
@@ -103,13 +83,13 @@ public final class CpuClusterMesh {
                     "Cluster medium catalog contains duplicate identities");
         }
         this.compatibilityIssues = Set.copyOf(compatibilityIssues);
-        if (opacityMicromap.triangleCount() != cutoutTriangleCount) {
+        if (opacityMicromap.triangleCount() != segmentCutout) {
             throw new IllegalArgumentException(
                     "Cluster opacity micromap does not match cutout geometry");
         }
-        this.opaqueTriangleCount = opaqueTriangleCount;
-        this.cutoutTriangleCount = cutoutTriangleCount;
-        this.transmissiveTriangleCount = transmissiveTriangleCount;
+        this.opaqueTriangleCount = segmentOpaque;
+        this.cutoutTriangleCount = segmentCutout;
+        this.transmissiveTriangleCount = segmentTransmissive;
         this.opaqueMacroTriangleCount = segmentOpaqueMacro;
         this.cutoutMacroTriangleCount = segmentCutoutMacro;
         this.transmissiveMacroTriangleCount = segmentTransmissiveMacro;
@@ -141,9 +121,6 @@ public final class CpuClusterMesh {
         ArrayList<Segment> segments = new ArrayList<>(meshes.size());
         ArrayList<CpuSectionLights.Translated> lightSources = new ArrayList<>();
         OpacityMicromapData.Builder opacityMicromap = new OpacityMicromapData.Builder();
-        long opaque = 0L;
-        long cutout = 0L;
-        long transmissive = 0L;
         for (CpuSectionMesh mesh : meshes) {
             if (mesh.isEmpty()) {
                 continue;
@@ -158,9 +135,6 @@ public final class CpuClusterMesh {
                     mesh.opaqueMacroTriangleCount(),
                     mesh.cutoutMacroTriangleCount(),
                     mesh.transmissiveMacroTriangleCount()));
-            opaque = Math.addExact(opaque, mesh.opaqueTriangleCount());
-            cutout = Math.addExact(cutout, mesh.cutoutTriangleCount());
-            transmissive = Math.addExact(transmissive, mesh.transmissiveTriangleCount());
             opacityMicromap.append(mesh.opacityMicromap());
             if (!mesh.lights().isEmpty()) {
                 lightSources.add(new CpuSectionLights.Translated(
@@ -169,9 +143,6 @@ public final class CpuClusterMesh {
         }
         return new CpuClusterMesh(
                 segments,
-                opaque,
-                cutout,
-                transmissive,
                 opacityMicromap.build(),
                 CompiledClusterLights.compile(CpuSectionLights.merge(lightSources)),
                 voxelMeshes,
@@ -181,9 +152,6 @@ public final class CpuClusterMesh {
     public static CpuClusterMesh empty() {
         return new CpuClusterMesh(
                 List.of(),
-                0L,
-                0L,
-                0L,
                 OpacityMicromapData.EMPTY,
                 CompiledClusterLights.EMPTY,
                 List.of(),
@@ -295,9 +263,6 @@ public final class CpuClusterMesh {
         }
         return new CpuClusterMesh(
                 this.segments,
-                this.opaqueTriangleCount,
-                this.cutoutTriangleCount,
-                this.transmissiveTriangleCount,
                 this.opacityMicromap,
                 this.lights,
                 this.voxelMeshes,
@@ -313,9 +278,6 @@ public final class CpuClusterMesh {
         }
         return new CpuClusterMesh(
                 this.segments,
-                this.opaqueTriangleCount,
-                this.cutoutTriangleCount,
-                this.transmissiveTriangleCount,
                 this.opacityMicromap,
                 this.lights,
                 this.voxelMeshes,

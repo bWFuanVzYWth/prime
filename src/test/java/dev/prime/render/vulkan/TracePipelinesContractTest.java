@@ -64,8 +64,6 @@ final class TracePipelinesContractTest {
 
     @Test
     void realtimeAndOfflineHaveIndependentSchedulesAndDescriptors() {
-        assertEquals(23, RealtimeStandardGroups.GROUP_COUNT);
-        assertEquals(16, RealtimeStandardGroups.MODULE_COUNT);
         assertEquals(14, RealtimeRayTracingPipeline.dispatchCount(1));
         assertEquals(18, RealtimeRayTracingPipeline.dispatchCount(2));
         assertEquals(42, RealtimeRayTracingPipeline.dispatchCount(8));
@@ -77,8 +75,6 @@ final class TracePipelinesContractTest {
                 () -> RealtimeRayTracingPipeline.dispatchCount(9));
         assertEquals(25, RealtimeRayTracingPipeline.DESCRIPTOR_BINDING_COUNT);
 
-        assertEquals(10, OfflineGroups.GROUP_COUNT);
-        assertEquals(6, OfflineGroups.MODULE_COUNT);
         assertEquals(49, OfflineRayTracingPipeline.dispatchCount(12));
         assertEquals(5, OfflineRayTracingPipeline.dispatchCount(1));
         assertEquals(257, OfflineRayTracingPipeline.dispatchCount(64));
@@ -90,13 +86,16 @@ final class TracePipelinesContractTest {
                 () -> OfflineRayTracingPipeline.dispatchCount(65));
         assertEquals(3, OfflineRayTracingPipeline.DESCRIPTOR_BINDING_COUNT);
 
+        RaygenSchedule realtime = RealtimeStandardGroups.standardSchedule(".rgen.spv");
+        assertEquals(23, realtime.groupCount());
+        assertEquals(16, realtime.moduleCount());
         assertEquals(List.of(
                         0, 1, 2, 3, 4, 3, 4, 5, 6, 7,
                         8, 9, 10, 11, 8, 9, 10, 11,
                         12, 12, 13, 14, 15),
                 java.util.stream.IntStream
-                .range(0, RealtimeStandardGroups.GROUP_COUNT)
-                .map(RealtimeStandardGroups::module)
+                .range(0, realtime.groupCount())
+                .map(realtime::module)
                 .boxed()
                 .toList());
         assertEquals(List.of(
@@ -104,18 +103,21 @@ final class TracePipelinesContractTest {
                         0, 0, 0, 0, 1, 1, 1, 1,
                         0, 1, 0, 0, 0),
                 java.util.stream.IntStream
-                .range(0, RealtimeStandardGroups.GROUP_COUNT)
-                .map(RealtimeStandardGroups::control)
+                .range(0, realtime.groupCount())
+                .map(realtime::control)
                 .boxed()
                 .toList());
+        RaygenSchedule offline = OfflineGroups.schedule(".rgen.spv");
+        assertEquals(10, offline.groupCount());
+        assertEquals(6, offline.moduleCount());
         assertEquals(List.of(0, 1, 2, 3, 4, 1, 2, 3, 4, 5), java.util.stream.IntStream
-                .range(0, OfflineGroups.GROUP_COUNT)
-                .map(OfflineGroups::module)
+                .range(0, offline.groupCount())
+                .map(offline::module)
                 .boxed()
                 .toList());
         assertEquals(List.of(0, 0, 0, 0, 0, 1, 1, 1, 1, 0), java.util.stream.IntStream
-                .range(0, OfflineGroups.GROUP_COUNT)
-                .map(OfflineGroups::control)
+                .range(0, offline.groupCount())
+                .map(offline::control)
                 .boxed()
                 .toList());
     }
@@ -147,8 +149,8 @@ final class TracePipelinesContractTest {
     @Test
     void realtimeScheduleKeepsItsDeclaredGroupsAndResources() {
         RaygenSchedule realtime = RealtimeStandardGroups.standardSchedule("_ser.rgen.spv");
-        assertEquals(RealtimeStandardGroups.MODULE_COUNT, realtime.moduleCount());
-        assertEquals(RealtimeStandardGroups.GROUP_COUNT, realtime.groupCount());
+        assertEquals(16, realtime.moduleCount());
+        assertEquals(23, realtime.groupCount());
         assertEquals(
                 "/prime/shaders/realtime_wavefront_surface_split_ser.rgen.spv",
                 realtime.moduleResource(2));
@@ -169,8 +171,8 @@ final class TracePipelinesContractTest {
     @Test
     void offlineScheduleKeepsItsFourStageGroupsAndResources() {
         RaygenSchedule offline = OfflineGroups.schedule("_ser.rgen.spv");
-        assertEquals(OfflineGroups.MODULE_COUNT, offline.moduleCount());
-        assertEquals(OfflineGroups.GROUP_COUNT, offline.groupCount());
+        assertEquals(6, offline.moduleCount());
+        assertEquals(10, offline.groupCount());
         assertEquals(
                 "/prime/shaders/offline_wavefront_camera_trace_ser.rgen.spv",
                 offline.moduleResource(0));
