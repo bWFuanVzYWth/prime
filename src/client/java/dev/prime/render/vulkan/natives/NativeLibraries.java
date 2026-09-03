@@ -19,61 +19,40 @@ import java.util.function.Function;
 public final class NativeLibraries {
     private static final String EXTRACTED_PATH_PROPERTY = "prime.native.libraryDirectory";
     public static final String BUNDLED_NATIVE_PATH = "/prime/natives/";
-    private static final List<String> WINDOWS_RUNTIME_FILES = List.of(
-            "prime_dlss_rr.dll",
-            "nvngx_dlssd.dll",
-            "prime_nrd.dll",
-            "amd_fidelityfx_vk.dll",
-            "sl.common.dll",
-            "sl.interposer.dll",
-            "sl.pcl.dll",
-            "sl.reflex.dll",
-            "sl.dlss_g.dll",
-            "nvngx_dlssg.dll",
-            "NvLowLatencyVk.dll");
-
-    public static final NativeLibrary NATIVE_DLSSRR_BRIDGE;
-    public static final NativeLibrary NATIVE_DLSSRR_FEATURE;
-    public static final NativeLibrary NATIVE_NRD;
-    public static final NativeLibrary NATIVE_FFXFSR;
-
-    public static final NativeLibrary NATIVE_STREAMLINE_COMMON;
-    public static final NativeLibrary NATIVE_STREAMLINE_INTERPOSER;
-    public static final NativeLibrary NATIVE_STREAMLINE_PCL;
-    public static final NativeLibrary NATIVE_STREAMLINE_REFLEX;
-    public static final NativeLibrary NATIVE_STREAMLINE_DLSSG;
-    public static final NativeLibrary NATIVE_STREAMLINE_DLSSG_FEATURE;
-    public static final NativeLibrary NATIVE_STREAMLINE_LOWLATENCY_FEATURE;
-
-
-    static {
-        if (isWindowsX64()) {
-            NATIVE_DLSSRR_BRIDGE = createLibrary("prime_dlss_rr.dll", "Prime DLSS RR Bridge");
-            NATIVE_DLSSRR_FEATURE = createLibrary("nvngx_dlssd.dll", "DLSS RR Feature");
-            NATIVE_NRD = createLibrary("prime_nrd.dll", "Prime NRD Library");
-            NATIVE_FFXFSR = createLibrary("amd_fidelityfx_vk.dll", "FidelityFX Library");
-            NATIVE_STREAMLINE_COMMON = createLibrary("sl.common.dll", "Streamline SDK Common");
-            NATIVE_STREAMLINE_INTERPOSER = createLibrary("sl.interposer.dll", "Streamline SDK Interposer");
-            NATIVE_STREAMLINE_PCL = createLibrary("sl.pcl.dll", "Streamline SDK PCL Plugin");
-            NATIVE_STREAMLINE_REFLEX = createLibrary("sl.reflex.dll", "Streamline SDK Reflex Plugin");
-            NATIVE_STREAMLINE_DLSSG = createLibrary("sl.dlss_g.dll", "Streamline SDK DLSS-FG Plugin");
-            NATIVE_STREAMLINE_DLSSG_FEATURE = createLibrary("nvngx_dlssg.dll", "DLSS FG Feature");
-            NATIVE_STREAMLINE_LOWLATENCY_FEATURE = createLibrary("NvLowLatencyVk.dll", "Reflex Low Latency Feature");
-        } else {
-            // TODO
-            NATIVE_DLSSRR_BRIDGE = null;
-            NATIVE_DLSSRR_FEATURE = null;
-            NATIVE_NRD = null;
-            NATIVE_FFXFSR = null;
-            NATIVE_STREAMLINE_COMMON = null;
-            NATIVE_STREAMLINE_INTERPOSER = null;
-            NATIVE_STREAMLINE_PCL = null;
-            NATIVE_STREAMLINE_REFLEX = null;
-            NATIVE_STREAMLINE_DLSSG = null;
-            NATIVE_STREAMLINE_DLSSG_FEATURE = null;
-            NATIVE_STREAMLINE_LOWLATENCY_FEATURE = null;
-        }
-    }
+    public static final NativeLibrary NATIVE_DLSSRR_BRIDGE =
+            createLibrary("prime_dlss_rr.dll", "Prime DLSS RR Bridge");
+    public static final NativeLibrary NATIVE_DLSSRR_FEATURE =
+            createLibrary("nvngx_dlssd.dll", "DLSS RR Feature");
+    public static final NativeLibrary NATIVE_NRD =
+            createLibrary("prime_nrd.dll", "Prime NRD Library");
+    public static final NativeLibrary NATIVE_FFXFSR =
+            createLibrary("amd_fidelityfx_vk.dll", "FidelityFX Library");
+    public static final NativeLibrary NATIVE_STREAMLINE_COMMON =
+            createLibrary("sl.common.dll", "Streamline SDK Common");
+    public static final NativeLibrary NATIVE_STREAMLINE_INTERPOSER =
+            createLibrary("sl.interposer.dll", "Streamline SDK Interposer");
+    public static final NativeLibrary NATIVE_STREAMLINE_PCL =
+            createLibrary("sl.pcl.dll", "Streamline SDK PCL Plugin");
+    public static final NativeLibrary NATIVE_STREAMLINE_REFLEX =
+            createLibrary("sl.reflex.dll", "Streamline SDK Reflex Plugin");
+    public static final NativeLibrary NATIVE_STREAMLINE_DLSSG =
+            createLibrary("sl.dlss_g.dll", "Streamline SDK DLSS-FG Plugin");
+    public static final NativeLibrary NATIVE_STREAMLINE_DLSSG_FEATURE =
+            createLibrary("nvngx_dlssg.dll", "DLSS FG Feature");
+    public static final NativeLibrary NATIVE_STREAMLINE_LOWLATENCY_FEATURE =
+            createLibrary("NvLowLatencyVk.dll", "Reflex Low Latency Feature");
+    private static final List<NativeLibrary> WINDOWS_RUNTIME = List.of(
+            NATIVE_DLSSRR_BRIDGE,
+            NATIVE_DLSSRR_FEATURE,
+            NATIVE_NRD,
+            NATIVE_FFXFSR,
+            NATIVE_STREAMLINE_COMMON,
+            NATIVE_STREAMLINE_INTERPOSER,
+            NATIVE_STREAMLINE_PCL,
+            NATIVE_STREAMLINE_REFLEX,
+            NATIVE_STREAMLINE_DLSSG,
+            NATIVE_STREAMLINE_DLSSG_FEATURE,
+            NATIVE_STREAMLINE_LOWLATENCY_FEATURE);
 
     private NativeLibraries() {
 
@@ -198,10 +177,13 @@ public final class NativeLibraries {
                 return root.resolve("unsupported-platform").toAbsolutePath();
             }
             String resourceRoot = getBundledNativePath();
+            List<String> names = WINDOWS_RUNTIME.stream()
+                    .map(NativeLibrary::fileName)
+                    .toList();
             return contentAddressedDirectory(
                     root,
                     "windows-x86_64",
-                    WINDOWS_RUNTIME_FILES,
+                    names,
                     name -> NativeLibraries.class.getResourceAsStream(resourceRoot + name));
         }
     }

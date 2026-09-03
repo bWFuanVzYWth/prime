@@ -75,9 +75,9 @@ final class TwoSidedQuadReducer {
         Objects.requireNonNull(work, "work");
         work.checkpoint();
         boolean[] removed = new boolean[quads.size()];
-        int[] exactPeer = new int[quads.size()];
-        int[] exactOffset = new int[quads.size()];
-        Arrays.fill(exactPeer, -1);
+        int[] peer = new int[quads.size()];
+        int[] reverseOffset = new int[quads.size()];
+        Arrays.fill(peer, -1);
         Map<PositionSet, ArrayList<Integer>> pending = new HashMap<>();
         for (int index = 0; index < quads.size(); index++) {
             work.step();
@@ -137,8 +137,8 @@ final class TwoSidedQuadReducer {
             int pairedIndex = candidates.remove(match);
             removed[index] = true;
             if (quad.surface().lightEmission() != 0) {
-                exactPeer[pairedIndex] = index;
-                exactOffset[pairedIndex] = reverseOffset(quads.get(pairedIndex), quad);
+                peer[pairedIndex] = index;
+                reverseOffset[pairedIndex] = reverseOffset(quads.get(pairedIndex), quad);
             }
         }
 
@@ -186,15 +186,13 @@ final class TwoSidedQuadReducer {
             }
             if (quad.surface().lightEmission() != 0) {
                 CapturedSectionGeometry.Quad retained = quads.get(retainedIndex);
-                CapturedSectionGeometry.Quad peer = quads.get(removedIndex);
-                exactPeer[retainedIndex] = removedIndex;
-                exactOffset[retainedIndex] = authoredInnerShellReverseOffset(retained, peer);
+                CapturedSectionGeometry.Quad removedQuad = quads.get(removedIndex);
+                peer[retainedIndex] = removedIndex;
+                reverseOffset[retainedIndex] = authoredInnerShellReverseOffset(
+                        retained, removedQuad);
             }
         }
 
-        int[] bilateralPeer = new int[quads.size()];
-        int[] bilateralOffset = new int[quads.size()];
-        Arrays.fill(bilateralPeer, -1);
         pending.clear();
         for (int index = 0; index < quads.size(); index++) {
             work.step();
@@ -227,10 +225,10 @@ final class TwoSidedQuadReducer {
                 continue;
             }
             int pairedIndex = candidates.remove(match);
-            int reverseOffset = reverseOffset(quads.get(pairedIndex), quad);
+            int offset = reverseOffset(quads.get(pairedIndex), quad);
             removed[index] = true;
-            bilateralPeer[pairedIndex] = index;
-            bilateralOffset[pairedIndex] = reverseOffset;
+            peer[pairedIndex] = index;
+            reverseOffset[pairedIndex] = offset;
         }
 
         ArrayList<ResolvedQuad> result =
@@ -245,21 +243,15 @@ final class TwoSidedQuadReducer {
                 }
                 SurfaceDefinition.MaterialBinding primary =
                         SurfaceDefinition.MaterialBinding.of(quad, primaryTopology);
-                int peer = bilateralPeer[index];
-                if (peer < 0) {
-                    peer = exactPeer[index];
-                    if (peer >= 0) {
-                        bilateralOffset[index] = exactOffset[index];
-                    }
-                }
-                SurfaceDefinition definition = peer < 0
+                int pairedIndex = peer[index];
+                SurfaceDefinition definition = pairedIndex < 0
                         ? SurfaceDefinition.single(primary)
                         : SurfaceDefinition.bilateral(
                                 primary,
                                 bindingInPrimaryOrder(
-                                        quads.get(peer),
-                                        bilateralOffset[index],
-                                        topology.get(quads.get(peer))));
+                                        quads.get(pairedIndex),
+                                        reverseOffset[index],
+                                        topology.get(quads.get(pairedIndex))));
                 result.add(new ResolvedQuad(quad, definition));
             }
         }

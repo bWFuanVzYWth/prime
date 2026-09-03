@@ -2,6 +2,7 @@ package dev.prime.render.vulkan.dlss;
 
 import com.mojang.blaze3d.vulkan.VulkanPhysicalDevice;
 import dev.prime.infrastructure.PrimeInfo;
+import dev.prime.render.vulkan.natives.NativeLibraries;
 import dev.prime.render.vulkan.VulkanContext;
 import java.nio.IntBuffer;
 import java.util.Collection;
@@ -28,7 +29,7 @@ public final class DlssRrBootstrap {
             enabledExtensions.addAll(state.instanceExtensions());
             return;
         }
-        if (!DlssRrNative.isSupportedPlatform()) {
+        if (!NativeLibraries.isWindowsX64()) {
             disable("DLSS RR currently supports Windows x86-64 only", null);
             return;
         }

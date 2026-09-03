@@ -39,6 +39,10 @@ public final class NativeLibrary {
         return target;
     }
 
+    String fileName() {
+        return this.fileName;
+    }
+
     private InputStream openBundled() {
         InputStream input = NativeLibrary.class.getResourceAsStream(this.bundledPath);
         if (input == null) {

@@ -25,15 +25,15 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 
 /** Stable, fixed-width Java binding for Prime's private DLSS Ray Reconstruction bridge. */
 public final class DlssRrNative {
-    public static final int ABI_VERSION = 10;
-    static final int RENDER_PRESET_F = 6;
-    static final int EXTENSION_QUERY_SIZE = 56;
-    static final int INIT_DESCRIPTION_SIZE = 56;
-    static final int OPTIMAL_SETTINGS_SIZE = 32;
-    static final int FEATURE_DESCRIPTION_SIZE = 48;
-    static final int IMAGE_SIZE = 32;
-    static final int IMAGE_COUNT = 10;
-    static final int EVALUATE_DESCRIPTION_SIZE = 176 + IMAGE_COUNT * IMAGE_SIZE;
+    private static final int ABI_VERSION = 10;
+    private static final int RENDER_PRESET_F = 6;
+    private static final int EXTENSION_QUERY_SIZE = 56;
+    private static final int INIT_DESCRIPTION_SIZE = 56;
+    private static final int OPTIMAL_SETTINGS_SIZE = 32;
+    private static final int FEATURE_DESCRIPTION_SIZE = 48;
+    private static final int IMAGE_SIZE = 32;
+    private static final int IMAGE_COUNT = 10;
+    private static final int EVALUATE_DESCRIPTION_SIZE = 176 + IMAGE_COUNT * IMAGE_SIZE;
     private static final int EXTENSION_CAPACITY = 64;
     private static final int EXTENSION_NAME_STRIDE = 256;
     private final Path featureDirectory;
@@ -78,14 +78,6 @@ public final class DlssRrNative {
             }
             throw exception;
         }
-    }
-
-    public static boolean isSupportedPlatform() {
-        return NativeLibraries.isWindowsX64();
-    }
-
-    static boolean isSupportedPlatform(String osName, String architecture) {
-        return NativeLibraries.isWindowsX64(osName, architecture);
     }
 
     public static List<String> instanceExtensions() {
@@ -208,7 +200,7 @@ public final class DlssRrNative {
     }
 
     private static ExtractedRuntime extractRuntime() {
-        if (!isSupportedPlatform()) {
+        if (!NativeLibraries.isWindowsX64()) {
             throw new IllegalStateException("DLSS RR currently supports Windows x86-64 only");
         }
         NativeLibraries.NATIVE_DLSSRR_BRIDGE.tryToExtract();

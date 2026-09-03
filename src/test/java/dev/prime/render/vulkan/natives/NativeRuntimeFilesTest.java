@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -23,6 +24,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 final class NativeRuntimeFilesTest {
+    @Test
+    void platformDetectionAcceptsOnlyWindowsX64() {
+        assertTrue(NativeLibraries.isWindowsX64("Windows 11", "amd64"));
+        assertTrue(NativeLibraries.isWindowsX64("WINDOWS 10", "x86_64"));
+        assertFalse(NativeLibraries.isWindowsX64("Windows 11", "aarch64"));
+        assertFalse(NativeLibraries.isWindowsX64("Linux", "amd64"));
+    }
+
     @Test
     void publishRepairsAStaleRuntimeAndRemainsIdempotent(@TempDir Path directory)
             throws Exception {

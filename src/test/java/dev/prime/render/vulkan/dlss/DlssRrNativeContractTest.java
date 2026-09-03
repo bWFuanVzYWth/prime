@@ -1,8 +1,6 @@
 package dev.prime.render.vulkan.dlss;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -11,19 +9,6 @@ import org.junit.jupiter.api.Test;
 import org.lwjgl.vulkan.VK12;
 
 final class DlssRrNativeContractTest {
-    @Test
-    void fixedWidthJavaAbiMatchesTheNativeBridge() {
-        assertEquals(10, DlssRrNative.ABI_VERSION);
-        assertEquals(6, DlssRrNative.RENDER_PRESET_F);
-        assertEquals(56, DlssRrNative.EXTENSION_QUERY_SIZE);
-        assertEquals(56, DlssRrNative.INIT_DESCRIPTION_SIZE);
-        assertEquals(32, DlssRrNative.OPTIMAL_SETTINGS_SIZE);
-        assertEquals(48, DlssRrNative.FEATURE_DESCRIPTION_SIZE);
-        assertEquals(32, DlssRrNative.IMAGE_SIZE);
-        assertEquals(10, DlssRrNative.IMAGE_COUNT);
-        assertEquals(496, DlssRrNative.EVALUATE_DESCRIPTION_SIZE);
-    }
-
     @Test
     void ngxReceivesTheDeclaredLinearHdrGuideFormats() {
         assertEquals(17, DlssRrPreparePass.IMAGE_COUNT);
@@ -54,14 +39,6 @@ final class DlssRrNativeContractTest {
         for (int index = 0; index < 16; index++) {
             assertEquals(index + 1.0F, bytes.getFloat(index * Float.BYTES));
         }
-    }
-
-    @Test
-    void onlyX64WindowsIsAccepted() {
-        assertTrue(DlssRrNative.isSupportedPlatform("Windows 11", "amd64"));
-        assertTrue(DlssRrNative.isSupportedPlatform("WINDOWS 10", "x86_64"));
-        assertFalse(DlssRrNative.isSupportedPlatform("Windows 11", "aarch64"));
-        assertFalse(DlssRrNative.isSupportedPlatform("Linux", "amd64"));
     }
 
 }

@@ -133,14 +133,6 @@ public final class NrdNative {
         }
     }
 
-    static boolean isSupportedPlatform() {
-        return NativeLibraries.isWindowsX64();
-    }
-
-    static boolean isSupportedPlatform(String osName, String architecture) {
-        return NativeLibraries.isWindowsX64(osName, architecture);
-    }
-
     private Description readDescription(MemoryStack stack, long handle) {
         ByteBuffer output = stack.calloc(DESCRIPTION_SIZE).order(ByteOrder.nativeOrder());
         checkResult(

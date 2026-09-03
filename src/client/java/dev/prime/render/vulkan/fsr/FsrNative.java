@@ -309,14 +309,6 @@ final class FsrNative {
         };
     }
 
-    static boolean isSupportedPlatform() {
-        return NativeLibraries.isWindowsX64();
-    }
-
-    static boolean isSupportedPlatform(String osName, String architecture) {
-        return NativeLibraries.isWindowsX64(osName, architecture);
-    }
-
     private static long requireFunction(SharedLibrary library, String name) {
         return NativeLibraries.requireFunction(
                 library, name, "The FidelityFX native library");
