@@ -77,10 +77,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
             VulkanGpuTextureView atlasView,
             VulkanGpuSampler atlasSampler,
             List<TraceBackend.SceneTexture> sceneTextures,
-            List<VulkanImage> materialBaseColorPages,
-            List<VulkanImage> materialNormalPages,
-            List<VulkanImage> materialOpticalPages,
-            VulkanBuffer textureRecords,
+            MaterialTexturePages.Binding materialTextures,
             TerrainScene.MaterialCoreBinding materialCore,
             TerrainScene.TintSampleBinding tintSamples,
             AtmospherePipeline atmosphere) {
@@ -89,10 +86,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
                 atlasView,
                 atlasSampler,
                 sceneTextures,
-                materialBaseColorPages,
-                materialNormalPages,
-                materialOpticalPages,
-                textureRecords,
+                materialTextures,
                 materialCore,
                 tintSamples,
                 atmosphere);

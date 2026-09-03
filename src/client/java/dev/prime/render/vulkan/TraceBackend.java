@@ -105,10 +105,7 @@ public final class TraceBackend implements Destroyable {
             VulkanGpuTextureView atlasView,
             VulkanGpuSampler atlasSampler,
             List<SceneTexture> sceneTextures,
-            List<VulkanImage> materialBaseColorPages,
-            List<VulkanImage> materialNormalPages,
-            List<VulkanImage> materialOpticalPages,
-            VulkanBuffer textureRecords,
+            MaterialTexturePages.Binding materialTextures,
             TerrainScene.MaterialCoreBinding materialCore,
             TerrainScene.TintSampleBinding tintSamples,
             AtmospherePipeline atmosphere) {
@@ -124,10 +121,7 @@ public final class TraceBackend implements Destroyable {
                         SrgbTextureView.imageView(atlasView),
                         atlasSampler.vkSampler(),
                         sceneTextures,
-                        materialBaseColorPages,
-                        materialNormalPages,
-                        materialOpticalPages,
-                        textureRecords.handle(),
+                        materialTextures,
                         materialCore,
                         tintSamples,
                         atmosphere)) {
@@ -140,10 +134,7 @@ public final class TraceBackend implements Destroyable {
                 atlasView,
                 atlasSampler,
                 sceneTextures,
-                materialBaseColorPages,
-                materialNormalPages,
-                materialOpticalPages,
-                textureRecords,
+                materialTextures,
                 materialCore,
                 tintSamples,
                 atmosphere,
@@ -378,10 +369,7 @@ public final class TraceBackend implements Destroyable {
         private final long atlasView;
         private final long atlasSampler;
         private final List<SceneTexture> sceneTextures;
-        private final List<Long> baseColorPages;
-        private final List<Long> normalPages;
-        private final List<Long> opticalPages;
-        private final long textureRecords;
+        private final MaterialTexturePages.Binding materialTextures;
         private final TerrainScene.MaterialCoreBinding materialCore;
         private final TerrainScene.TintSampleBinding tintSamples;
         private final long skyView;
@@ -401,10 +389,7 @@ public final class TraceBackend implements Destroyable {
                 long atlasView,
                 long atlasSampler,
                 List<SceneTexture> sceneTextures,
-                List<VulkanImage> baseColorPages,
-                List<VulkanImage> normalPages,
-                List<VulkanImage> opticalPages,
-                long textureRecords,
+                MaterialTexturePages.Binding materialTextures,
                 TerrainScene.MaterialCoreBinding materialCore,
                 TerrainScene.TintSampleBinding tintSamples,
                 AtmospherePipeline atmosphere,
@@ -416,10 +401,7 @@ public final class TraceBackend implements Destroyable {
             this.atlasView = atlasView;
             this.atlasSampler = atlasSampler;
             this.sceneTextures = List.copyOf(sceneTextures);
-            this.baseColorPages = pageViews(baseColorPages);
-            this.normalPages = pageViews(normalPages);
-            this.opticalPages = pageViews(opticalPages);
-            this.textureRecords = textureRecords;
+            this.materialTextures = materialTextures;
             this.materialCore = materialCore;
             this.tintSamples = tintSamples;
             this.skyView = atmosphere.skyView().view();
@@ -438,16 +420,17 @@ public final class TraceBackend implements Destroyable {
                 VulkanGpuTextureView atlasView,
                 VulkanGpuSampler atlasSampler,
                 List<SceneTexture> sceneTextures,
-                List<VulkanImage> baseColorPages,
-                List<VulkanImage> normalPages,
-                List<VulkanImage> opticalPages,
-                VulkanBuffer textureRecords,
+                MaterialTexturePages.Binding materialTextures,
                 TerrainScene.MaterialCoreBinding materialCore,
                 TerrainScene.TintSampleBinding tintSamples,
                 AtmospherePipeline atmosphere,
                 StaticSampledTexture bsdfLookup,
                 StaticSampledTexture starmap,
                 RealtimeStbnTable realtimeStbn) {
+            List<VulkanImage> baseColorPages = materialTextures.baseColorPages();
+            List<VulkanImage> normalPages = materialTextures.normalPages();
+            List<VulkanImage> opticalPages = materialTextures.opticalPages();
+            VulkanBuffer textureRecords = materialTextures.textureRecords();
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 VkDescriptorPoolSize.Buffer sizes = VkDescriptorPoolSize.calloc(5, stack);
                 sizes.get(0)
@@ -688,10 +671,7 @@ public final class TraceBackend implements Destroyable {
                             atlasColorView,
                             atlasSampler.vkSampler(),
                             sceneTextures,
-                            baseColorPages,
-                            normalPages,
-                            opticalPages,
-                            textureRecords.handle(),
+                            materialTextures,
                             materialCore,
                             tintSamples,
                             atmosphere,
@@ -708,10 +688,7 @@ public final class TraceBackend implements Destroyable {
                 long candidateAtlasView,
                 long candidateAtlasSampler,
                 List<SceneTexture> candidateSceneTextures,
-                List<VulkanImage> candidateBaseColorPages,
-                List<VulkanImage> candidateNormalPages,
-                List<VulkanImage> candidateOpticalPages,
-                long candidateTextureRecords,
+                MaterialTexturePages.Binding candidateMaterialTextures,
                 TerrainScene.MaterialCoreBinding candidateMaterialCore,
                 TerrainScene.TintSampleBinding candidateTintSamples,
                 AtmospherePipeline atmosphere) {
@@ -719,10 +696,7 @@ public final class TraceBackend implements Destroyable {
                     || this.atlasView != candidateAtlasView
                     || this.atlasSampler != candidateAtlasSampler
                     || !this.sceneTextures.equals(candidateSceneTextures)
-                    || !matchesPageViews(this.baseColorPages, candidateBaseColorPages)
-                    || !matchesPageViews(this.normalPages, candidateNormalPages)
-                    || !matchesPageViews(this.opticalPages, candidateOpticalPages)
-                    || this.textureRecords != candidateTextureRecords
+                    || this.materialTextures != candidateMaterialTextures
                     || !this.materialCore.equals(candidateMaterialCore)
                     || !this.tintSamples.equals(candidateTintSamples)
                     || this.skyView != atmosphere.skyView().view()
@@ -742,23 +716,6 @@ public final class TraceBackend implements Destroyable {
                             != atmosphere.sunShadowDepth(bank, cascade).view()) {
                         return false;
                     }
-                }
-            }
-            return true;
-        }
-
-        private static List<Long> pageViews(List<VulkanImage> pages) {
-            return pages.stream().map(VulkanImage::view).toList();
-        }
-
-        private static boolean matchesPageViews(
-                List<Long> expected, List<VulkanImage> candidate) {
-            if (expected.size() != candidate.size()) {
-                return false;
-            }
-            for (int index = 0; index < expected.size(); index++) {
-                if (expected.get(index).longValue() != candidate.get(index).view()) {
-                    return false;
                 }
             }
             return true;

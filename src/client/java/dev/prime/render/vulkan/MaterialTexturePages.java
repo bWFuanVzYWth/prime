@@ -8,6 +8,7 @@ import dev.prime.render.terrain.LabPbrMaterialSet;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
@@ -132,20 +133,8 @@ public final class MaterialTexturePages implements AutoCloseable {
         return requireResources().sourceGeneration;
     }
 
-    public List<VulkanImage> normalPages() {
-        return requireResources().images(Channel.NORMAL);
-    }
-
-    public List<VulkanImage> baseColorPages() {
-        return requireResources().images(Channel.BASE_COLOR);
-    }
-
-    public List<VulkanImage> opticalPages() {
-        return requireResources().images(Channel.OPTICAL);
-    }
-
-    public VulkanBuffer textureRecords() {
-        return requireResources().textureRecords;
+    public Binding binding() {
+        return requireResources().binding;
     }
 
     /** Records the complete generation upload before it can be consumed by a frame. */
@@ -973,6 +962,19 @@ public final class MaterialTexturePages implements AutoCloseable {
         }
     }
 
+    public record Binding(
+            List<VulkanImage> baseColorPages,
+            List<VulkanImage> normalPages,
+            List<VulkanImage> opticalPages,
+            VulkanBuffer textureRecords) {
+        public Binding {
+            baseColorPages = List.copyOf(baseColorPages);
+            normalPages = List.copyOf(normalPages);
+            opticalPages = List.copyOf(opticalPages);
+            Objects.requireNonNull(textureRecords, "textureRecords");
+        }
+    }
+
     private record Copy(
             VulkanImage image,
             long buffer,
@@ -1116,9 +1118,9 @@ public final class MaterialTexturePages implements AutoCloseable {
         private final long vanillaAtlasView;
         private final List<List<PageResource>> pages;
         private final List<PageResource> allPages;
-        private final List<List<VulkanImage>> images;
         private final List<VulkanImage> allImages;
         private final VulkanBuffer textureRecords;
+        private final Binding binding;
         private final LabPbrMaterialSet materials;
         private final List<AnimatedMaterialSprite> animated;
         private boolean prepared;
@@ -1140,9 +1142,14 @@ public final class MaterialTexturePages implements AutoCloseable {
                 allPages.addAll(channel);
             }
             this.allPages = List.copyOf(allPages);
-            this.images = this.pages.stream().map(Resources::images).toList();
+            List<List<VulkanImage>> images = this.pages.stream().map(Resources::images).toList();
             this.allImages = images(this.allPages);
             this.textureRecords = textureRecords;
+            this.binding = new Binding(
+                    images.get(Channel.BASE_COLOR.ordinal()),
+                    images.get(Channel.NORMAL.ordinal()),
+                    images.get(Channel.OPTICAL.ordinal()),
+                    textureRecords);
             this.materials = materials;
             ArrayList<AnimatedMaterialSprite> animated = new ArrayList<>();
             try {
@@ -1180,10 +1187,6 @@ public final class MaterialTexturePages implements AutoCloseable {
 
         List<PageResource> pages(Channel channel) {
             return this.pages.get(channel.ordinal());
-        }
-
-        List<VulkanImage> images(Channel channel) {
-            return this.images.get(channel.ordinal());
         }
 
         List<PageResource> allPages() {
