@@ -36,26 +36,15 @@ final class ClusterSceneTranslatorTest {
                 CapturedSectionGeometry.Surface.uniform(
                         -1,
                         CapturedSectionGeometry.Layer.TRANSLUCENT,
-                        false,
-                        false,
-                        false,
-                        false,
-                        false,
-                        true,
-                        false,
+                        CapturedSectionGeometry.Surface.MERGEABLE,
                         0,
                         sprite.sprite());
         CapturedSectionGeometry.Surface alphaCut =
                 CapturedSectionGeometry.Surface.uniform(
                         -1,
                         CapturedSectionGeometry.Layer.TRANSLUCENT,
-                        true,
-                        false,
-                        false,
-                        false,
-                        false,
-                        true,
-                        false,
+                        CapturedSectionGeometry.Surface.ALPHA_CUT_OVERRIDE
+                                | CapturedSectionGeometry.Surface.MERGEABLE,
                         0,
                         sprite.sprite());
 
@@ -422,13 +411,7 @@ final class ClusterSceneTranslatorTest {
         CapturedSectionGeometry.Surface surface = CapturedSectionGeometry.Surface.uniform(
                 -1,
                 CapturedSectionGeometry.Layer.OPAQUE,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
+                0,
                 15,
                 flame.sprite(),
                 new CapturedSectionGeometry.BlockFacts(0, 0, 0));
@@ -527,13 +510,9 @@ final class ClusterSceneTranslatorTest {
         section.add(overlayQuad, CapturedSectionGeometry.Surface.uniform(
                 -1,
                 CapturedSectionGeometry.Layer.CUTOUT,
-                false,
-                false,
-                true,
-                false,
-                false,
-                true,
-                true,
+                CapturedSectionGeometry.Surface.ANIMATED
+                        | CapturedSectionGeometry.Surface.MERGEABLE
+                        | CapturedSectionGeometry.Surface.RASTER_OVERLAY,
                 0,
                 overlay.sprite()));
 
@@ -559,13 +538,8 @@ final class ClusterSceneTranslatorTest {
         section.add(face(0.5F), CapturedSectionGeometry.Surface.uniform(
                 -1,
                 CapturedSectionGeometry.Layer.CUTOUT,
-                false,
-                false,
-                false,
-                false,
-                false,
-                true,
-                true,
+                CapturedSectionGeometry.Surface.MERGEABLE
+                        | CapturedSectionGeometry.Surface.RASTER_OVERLAY,
                 0,
                 overlay.sprite(),
                 new CapturedSectionGeometry.BlockFacts(0, 0, 0)));
@@ -696,16 +670,13 @@ final class ClusterSceneTranslatorTest {
                 overlayColors[2],
                 overlayColors[3],
                 CapturedSectionGeometry.Layer.CUTOUT,
-                false,
-                false,
-                false,
-                false,
-                false,
-                true,
-                true,
+                CapturedSectionGeometry.Surface.MERGEABLE
+                        | CapturedSectionGeometry.Surface.RASTER_OVERLAY,
                 0,
                 overlay.sprite(),
-                null));
+                null,
+                null,
+                dev.prime.render.material.BuiltinMaterialClass.DEFAULT));
         for (int vertex = 0; vertex < 4; vertex++) {
             baseQuad.z[vertex] = plane + 7.0F;
             overlayQuad.z[vertex] = plane + 7.0F;
@@ -736,13 +707,8 @@ final class ClusterSceneTranslatorTest {
                 cutout
                         ? CapturedSectionGeometry.Layer.CUTOUT
                         : CapturedSectionGeometry.Layer.OPAQUE,
-                false,
-                false,
-                false,
-                false,
-                false,
-                true,
-                rasterOverlay,
+                CapturedSectionGeometry.Surface.MERGEABLE
+                        | (rasterOverlay ? CapturedSectionGeometry.Surface.RASTER_OVERLAY : 0),
                 0,
                 sprite.sprite());
     }
@@ -757,13 +723,7 @@ final class ClusterSceneTranslatorTest {
         return CapturedSectionGeometry.Surface.uniform(
                 -1,
                 CapturedSectionGeometry.Layer.CUTOUT,
-                false,
-                false,
-                false,
-                false,
-                false,
-                true,
-                false,
+                CapturedSectionGeometry.Surface.MERGEABLE,
                 lightEmission,
                 sprite.sprite(),
                 new CapturedSectionGeometry.BlockFacts(0, 0, 0));
@@ -918,13 +878,8 @@ final class ClusterSceneTranslatorTest {
         return CapturedSectionGeometry.Surface.uniform(
                 0xff80_c060,
                 CapturedSectionGeometry.Layer.CUTOUT,
-                false,
-                true,
-                false,
-                false,
-                false,
-                true,
-                false,
+                CapturedSectionGeometry.Surface.COLLISION_EMPTY
+                        | CapturedSectionGeometry.Surface.MERGEABLE,
                 0,
                 sprite.sprite());
     }

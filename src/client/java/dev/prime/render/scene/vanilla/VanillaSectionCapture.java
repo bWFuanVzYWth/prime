@@ -1,6 +1,7 @@
 package dev.prime.render.scene.vanilla;
 
 import com.mojang.blaze3d.vertex.MeshData;
+import dev.prime.render.material.BuiltinMaterialClass;
 import dev.prime.render.scene.CapturedSectionGeometry;
 import dev.prime.render.scene.CapturedSprite;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
@@ -370,13 +371,14 @@ public final class VanillaSectionCapture implements AutoCloseable {
         this.geometry.add(quad, CapturedSectionGeometry.Surface.uniform(
                 tint,
                 captureLayer(layer),
-                alphaCutOverride,
-                needsCollision && this.blockCollisionEmpty,
-                sprite.contents().isAnimated(),
-                false,
-                foliage,
-                this.blockMergeable,
-                rasterOverlay,
+                (alphaCutOverride ? CapturedSectionGeometry.Surface.ALPHA_CUT_OVERRIDE : 0)
+                        | (needsCollision && this.blockCollisionEmpty
+                                ? CapturedSectionGeometry.Surface.COLLISION_EMPTY : 0)
+                        | (sprite.contents().isAnimated()
+                                ? CapturedSectionGeometry.Surface.ANIMATED : 0)
+                        | (foliage ? CapturedSectionGeometry.Surface.FOLIAGE : 0)
+                        | (this.blockMergeable ? CapturedSectionGeometry.Surface.MERGEABLE : 0)
+                        | (rasterOverlay ? CapturedSectionGeometry.Surface.RASTER_OVERLAY : 0),
                 Math.max(state.getLightEmission(), bakedQuad.materialInfo().lightEmission()),
                 capturedSprite,
                 new CapturedSectionGeometry.BlockFacts(
@@ -496,13 +498,13 @@ public final class VanillaSectionCapture implements AutoCloseable {
                 colors[2],
                 colors[3],
                 captureLayer(layer),
-                alphaCutOverride,
-                collisionEmpty,
-                source.animated() || sprite.contents().isAnimated(),
-                false,
-                foliage,
-                this.fabricMergeable,
-                rasterOverlay,
+                (alphaCutOverride ? CapturedSectionGeometry.Surface.ALPHA_CUT_OVERRIDE : 0)
+                        | (collisionEmpty ? CapturedSectionGeometry.Surface.COLLISION_EMPTY : 0)
+                        | (source.animated() || sprite.contents().isAnimated()
+                                ? CapturedSectionGeometry.Surface.ANIMATED : 0)
+                        | (foliage ? CapturedSectionGeometry.Surface.FOLIAGE : 0)
+                        | (this.fabricMergeable ? CapturedSectionGeometry.Surface.MERGEABLE : 0)
+                        | (rasterOverlay ? CapturedSectionGeometry.Surface.RASTER_OVERLAY : 0),
                 Math.max(state.getLightEmission(), source.emissive() ? 15 : 0),
                 capturedSprite,
                 null,
@@ -604,13 +606,13 @@ public final class VanillaSectionCapture implements AutoCloseable {
         this.geometry.addPeer(quad, CapturedSectionGeometry.Surface.uniform(
                 tint,
                 captureLayer(layer),
-                alphaCutOverride,
-                collisionEmpty,
-                sprite.contents().isAnimated(),
-                false,
-                foliage,
-                true,
-                rasterOverlay,
+                (alphaCutOverride ? CapturedSectionGeometry.Surface.ALPHA_CUT_OVERRIDE : 0)
+                        | (collisionEmpty ? CapturedSectionGeometry.Surface.COLLISION_EMPTY : 0)
+                        | (sprite.contents().isAnimated()
+                                ? CapturedSectionGeometry.Surface.ANIMATED : 0)
+                        | (foliage ? CapturedSectionGeometry.Surface.FOLIAGE : 0)
+                        | CapturedSectionGeometry.Surface.MERGEABLE
+                        | (rasterOverlay ? CapturedSectionGeometry.Surface.RASTER_OVERLAY : 0),
                 Math.max(state.getLightEmission(), bakedQuad.materialInfo().lightEmission()),
                 capturedSprite,
                 new CapturedSectionGeometry.BlockFacts(
@@ -902,13 +904,8 @@ public final class VanillaSectionCapture implements AutoCloseable {
                     this.transmissive
                             ? CapturedSectionGeometry.Layer.TRANSLUCENT
                             : CapturedSectionGeometry.Layer.OPAQUE,
-                    false,
-                    false,
-                    animated,
-                    this.water,
-                    false,
-                    false,
-                    false,
+                    (animated ? CapturedSectionGeometry.Surface.ANIMATED : 0)
+                            | (this.water ? CapturedSectionGeometry.Surface.WATER : 0),
                     this.lightEmission,
                     this.owner.spriteResolver.resolve(sprite),
                     new CapturedSectionGeometry.FluidFacts(
@@ -920,7 +917,8 @@ public final class VanillaSectionCapture implements AutoCloseable {
                     new CapturedSectionGeometry.BlockFacts(
                             (this.owner.sectionX << 4) + this.localX,
                             (this.owner.sectionY << 4) + this.localY,
-                            (this.owner.sectionZ << 4) + this.localZ)));
+                            (this.owner.sectionZ << 4) + this.localZ),
+                    BuiltinMaterialClass.DEFAULT));
         }
 
         private TextureAtlasSprite selectSprite() {

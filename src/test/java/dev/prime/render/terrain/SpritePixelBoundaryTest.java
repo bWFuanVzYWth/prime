@@ -414,13 +414,8 @@ final class SpritePixelBoundaryTest {
                 CapturedSectionGeometry.Surface.uniform(
                         -1,
                         layer,
-                        false,
-                        false,
-                        sprite.animated(),
-                        false,
-                        false,
-                        true,
-                        false,
+                        (sprite.animated() ? CapturedSectionGeometry.Surface.ANIMATED : 0)
+                                | CapturedSectionGeometry.Surface.MERGEABLE,
                         0,
                         sprite));
         CapturedCluster.Builder cluster = new CapturedCluster.Builder(0, 0, 0);

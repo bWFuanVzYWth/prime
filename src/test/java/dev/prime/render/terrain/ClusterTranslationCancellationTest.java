@@ -252,13 +252,8 @@ final class ClusterTranslationCancellationTest {
         return CapturedSectionGeometry.Surface.uniform(
                 color,
                 layer,
-                false,
-                false,
-                false,
-                false,
-                false,
-                true,
-                rasterOverlay,
+                CapturedSectionGeometry.Surface.MERGEABLE
+                        | (rasterOverlay ? CapturedSectionGeometry.Surface.RASTER_OVERLAY : 0),
                 0,
                 sprite,
                 block);

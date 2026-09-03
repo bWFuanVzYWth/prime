@@ -124,13 +124,7 @@ final class MediumIdentityTest {
         return CapturedSectionGeometry.Surface.uniform(
                 tint,
                 CapturedSectionGeometry.Layer.TRANSLUCENT,
-                false,
-                false,
-                false,
-                false,
-                false,
-                true,
-                false,
+                CapturedSectionGeometry.Surface.MERGEABLE,
                 0,
                 sprite.sprite(),
                 new CapturedSectionGeometry.BlockFacts(0, 0, 0, mediumFamily));

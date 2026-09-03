@@ -253,17 +253,13 @@ final class FluidQuadTranslationTest {
                 water
                         ? CapturedSectionGeometry.Layer.TRANSLUCENT
                         : CapturedSectionGeometry.Layer.OPAQUE,
-                false,
-                false,
-                false,
-                water,
-                false,
-                false,
-                false,
+                water ? CapturedSectionGeometry.Surface.WATER : 0,
                 lightEmission,
                 sprite.sprite(),
                 new CapturedSectionGeometry.FluidFacts(
-                        0, 0, 0, false, collisionMask));
+                        0, 0, 0, false, collisionMask),
+                null,
+                dev.prime.render.material.BuiltinMaterialClass.DEFAULT);
     }
 
     private static CpuClusterMesh translate(CapturedSectionGeometry section) {

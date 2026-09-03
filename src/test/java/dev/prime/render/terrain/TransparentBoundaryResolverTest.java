@@ -450,13 +450,8 @@ final class TransparentBoundaryResolverTest {
                 opaque
                         ? CapturedSectionGeometry.Layer.OPAQUE
                         : CapturedSectionGeometry.Layer.TRANSLUCENT,
-                false,
-                collisionEmpty,
-                false,
-                false,
-                false,
-                true,
-                false,
+                (collisionEmpty ? CapturedSectionGeometry.Surface.COLLISION_EMPTY : 0)
+                        | CapturedSectionGeometry.Surface.MERGEABLE,
                 0,
                 sprite.sprite(),
                 new CapturedSectionGeometry.BlockFacts(x, y, z, mediumFamily));
@@ -467,13 +462,7 @@ final class TransparentBoundaryResolverTest {
         return CapturedSectionGeometry.Surface.uniform(
                 -1,
                 CapturedSectionGeometry.Layer.CUTOUT,
-                false,
-                false,
-                false,
-                false,
-                false,
-                true,
-                false,
+                CapturedSectionGeometry.Surface.MERGEABLE,
                 0,
                 sprite.sprite(),
                 new CapturedSectionGeometry.BlockFacts(x, y, z));
@@ -484,13 +473,8 @@ final class TransparentBoundaryResolverTest {
         return CapturedSectionGeometry.Surface.uniform(
                 -1,
                 CapturedSectionGeometry.Layer.CUTOUT,
-                false,
-                false,
-                true,
-                false,
-                false,
-                true,
-                false,
+                CapturedSectionGeometry.Surface.ANIMATED
+                        | CapturedSectionGeometry.Surface.MERGEABLE,
                 15,
                 sprite.sprite(),
                 new CapturedSectionGeometry.BlockFacts(x, y, z));
@@ -504,17 +488,13 @@ final class TransparentBoundaryResolverTest {
                 -1,
                 -1,
                 CapturedSectionGeometry.Layer.TRANSLUCENT,
-                false,
-                false,
-                true,
-                true,
-                false,
-                false,
-                false,
+                CapturedSectionGeometry.Surface.ANIMATED
+                        | CapturedSectionGeometry.Surface.WATER,
                 0,
                 sprite.sprite(),
                 new CapturedSectionGeometry.FluidFacts(x, y, z, false, 0),
-                new CapturedSectionGeometry.BlockFacts(x, y, z));
+                new CapturedSectionGeometry.BlockFacts(x, y, z),
+                dev.prime.render.material.BuiltinMaterialClass.DEFAULT);
     }
 
     private static float projectedArea(CpuClusterMesh mesh) {

@@ -113,99 +113,32 @@ public final class CapturedSectionGeometry {
             int color2,
             int color3,
             Layer layer,
-            boolean alphaCutOverride,
-            boolean collisionEmpty,
-            boolean animated,
-            boolean water,
-            boolean foliage,
-            boolean mergeable,
-            boolean rasterOverlay,
+            int flags,
             int lightEmission,
             CapturedSprite sprite,
             FluidFacts fluid,
             BlockFacts block,
             BuiltinMaterialClass builtinMaterialClass) {
+        public static final int ALPHA_CUT_OVERRIDE = 1;
+        public static final int COLLISION_EMPTY = 1 << 1;
+        public static final int ANIMATED = 1 << 2;
+        public static final int WATER = 1 << 3;
+        public static final int FOLIAGE = 1 << 4;
+        public static final int MERGEABLE = 1 << 5;
+        public static final int RASTER_OVERLAY = 1 << 6;
+        private static final int ALL_FLAGS = (1 << 7) - 1;
+
         public Surface {
             Objects.requireNonNull(layer, "layer");
             Objects.requireNonNull(sprite, "sprite");
             Objects.requireNonNull(builtinMaterialClass, "builtinMaterialClass");
+            if ((flags & ~ALL_FLAGS) != 0) {
+                throw new IllegalArgumentException("Unknown captured surface flags");
+            }
             if (lightEmission < 0 || lightEmission > 15) {
                 throw new IllegalArgumentException(
                         "Captured light emission must be in [0, 15]");
             }
-        }
-
-        public Surface(
-                int color0,
-                int color1,
-                int color2,
-                int color3,
-                Layer layer,
-                boolean alphaCutOverride,
-                boolean collisionEmpty,
-                boolean animated,
-                boolean water,
-                boolean foliage,
-                boolean mergeable,
-                boolean rasterOverlay,
-                int lightEmission,
-                CapturedSprite sprite,
-                FluidFacts fluid,
-                BlockFacts block) {
-            this(
-                    color0,
-                    color1,
-                    color2,
-                    color3,
-                    layer,
-                    alphaCutOverride,
-                    collisionEmpty,
-                    animated,
-                    water,
-                    foliage,
-                    mergeable,
-                    rasterOverlay,
-                    lightEmission,
-                    sprite,
-                    fluid,
-                    block,
-                    BuiltinMaterialClass.DEFAULT);
-        }
-
-        public Surface(
-                int color0,
-                int color1,
-                int color2,
-                int color3,
-                Layer layer,
-                boolean alphaCutOverride,
-                boolean collisionEmpty,
-                boolean animated,
-                boolean water,
-                boolean foliage,
-                boolean mergeable,
-                boolean rasterOverlay,
-                int lightEmission,
-                CapturedSprite sprite,
-                FluidFacts fluid) {
-            this(
-                    color0,
-                    color1,
-                    color2,
-                    color3,
-                    layer,
-                    alphaCutOverride,
-                    collisionEmpty,
-                    animated,
-                    water,
-                    foliage,
-                    mergeable,
-                    rasterOverlay,
-                    lightEmission,
-                    sprite,
-                    fluid,
-                    null,
-                    BuiltinMaterialClass.DEFAULT);
         }
 
         public int color(int vertex) {
@@ -218,16 +151,18 @@ public final class CapturedSectionGeometry {
             };
         }
 
+        public boolean alphaCutOverride() { return (this.flags & ALPHA_CUT_OVERRIDE) != 0; }
+        public boolean collisionEmpty() { return (this.flags & COLLISION_EMPTY) != 0; }
+        public boolean animated() { return (this.flags & ANIMATED) != 0; }
+        public boolean water() { return (this.flags & WATER) != 0; }
+        public boolean foliage() { return (this.flags & FOLIAGE) != 0; }
+        public boolean mergeable() { return (this.flags & MERGEABLE) != 0; }
+        public boolean rasterOverlay() { return (this.flags & RASTER_OVERLAY) != 0; }
+
         public static Surface uniform(
                 int color,
                 Layer layer,
-                boolean alphaCutOverride,
-                boolean collisionEmpty,
-                boolean animated,
-                boolean water,
-                boolean foliage,
-                boolean mergeable,
-                boolean rasterOverlay,
+                int flags,
                 int lightEmission,
                 CapturedSprite sprite) {
             return new Surface(
@@ -236,13 +171,7 @@ public final class CapturedSectionGeometry {
                     color,
                     color,
                     layer,
-                    alphaCutOverride,
-                    collisionEmpty,
-                    animated,
-                    water,
-                    foliage,
-                    mergeable,
-                    rasterOverlay,
+                    flags,
                     lightEmission,
                     sprite,
                     null,
@@ -253,26 +182,14 @@ public final class CapturedSectionGeometry {
         public static Surface uniform(
                 int color,
                 Layer layer,
-                boolean alphaCutOverride,
-                boolean collisionEmpty,
-                boolean animated,
-                boolean water,
-                boolean foliage,
-                boolean mergeable,
-                boolean rasterOverlay,
+                int flags,
                 int lightEmission,
                 CapturedSprite sprite,
                 BlockFacts block) {
             return uniform(
                     color,
                     layer,
-                    alphaCutOverride,
-                    collisionEmpty,
-                    animated,
-                    water,
-                    foliage,
-                    mergeable,
-                    rasterOverlay,
+                    flags,
                     lightEmission,
                     sprite,
                     block,
@@ -282,13 +199,7 @@ public final class CapturedSectionGeometry {
         public static Surface uniform(
                 int color,
                 Layer layer,
-                boolean alphaCutOverride,
-                boolean collisionEmpty,
-                boolean animated,
-                boolean water,
-                boolean foliage,
-                boolean mergeable,
-                boolean rasterOverlay,
+                int flags,
                 int lightEmission,
                 CapturedSprite sprite,
                 BlockFacts block,
@@ -299,13 +210,7 @@ public final class CapturedSectionGeometry {
                     color,
                     color,
                     layer,
-                    alphaCutOverride,
-                    collisionEmpty,
-                    animated,
-                    water,
-                    foliage,
-                    mergeable,
-                    rasterOverlay,
+                    flags,
                     lightEmission,
                     sprite,
                     null,

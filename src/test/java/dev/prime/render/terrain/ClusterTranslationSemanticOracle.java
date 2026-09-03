@@ -504,13 +504,7 @@ final class ClusterTranslationSemanticOracle {
                 face.kind() == Kind.OPAQUE
                         ? CapturedSectionGeometry.Layer.OPAQUE
                         : CapturedSectionGeometry.Layer.TRANSLUCENT,
-                false,
-                false,
-                false,
-                false,
-                false,
-                true,
-                false,
+                CapturedSectionGeometry.Surface.MERGEABLE,
                 0,
                 SPRITES[face.sprite()],
                 new CapturedSectionGeometry.BlockFacts(

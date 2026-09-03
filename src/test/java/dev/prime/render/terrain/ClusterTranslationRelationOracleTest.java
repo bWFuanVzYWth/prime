@@ -292,13 +292,9 @@ final class ClusterTranslationRelationOracleTest {
         return CapturedSectionGeometry.Surface.uniform(
                 0xff80_a0c0,
                 layer,
-                false,
-                false,
-                animated,
-                false,
-                false,
-                true,
-                rasterOverlay,
+                (animated ? CapturedSectionGeometry.Surface.ANIMATED : 0)
+                        | CapturedSectionGeometry.Surface.MERGEABLE
+                        | (rasterOverlay ? CapturedSectionGeometry.Surface.RASTER_OVERLAY : 0),
                 emission,
                 sprite,
                 block);

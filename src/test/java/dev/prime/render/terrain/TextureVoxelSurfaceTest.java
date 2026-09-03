@@ -228,13 +228,7 @@ final class TextureVoxelSurfaceTest {
                 CapturedSectionGeometry.Surface.uniform(
                         -1,
                         CapturedSectionGeometry.Layer.OPAQUE,
-                        false,
-                        false,
-                        false,
-                        false,
-                        false,
-                        true,
-                        false,
+                        CapturedSectionGeometry.Surface.MERGEABLE,
                         0,
                         baseSprite.sprite()));
         section.add(
@@ -242,13 +236,8 @@ final class TextureVoxelSurfaceTest {
                 CapturedSectionGeometry.Surface.uniform(
                         overlayTint,
                         CapturedSectionGeometry.Layer.CUTOUT,
-                        false,
-                        false,
-                        false,
-                        false,
-                        false,
-                        true,
-                        true,
+                        CapturedSectionGeometry.Surface.MERGEABLE
+                                | CapturedSectionGeometry.Surface.RASTER_OVERLAY,
                         0,
                         overlaySprite.sprite()));
         CapturedCluster.Builder captured =

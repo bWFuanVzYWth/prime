@@ -201,17 +201,13 @@ public final class ClusterTranslationBenchmarkCorpus {
                 0xff40_80c0,
                 0xff40_80c0,
                 CapturedSectionGeometry.Layer.TRANSLUCENT,
-                false,
-                false,
-                false,
-                true,
-                false,
-                true,
-                false,
+                CapturedSectionGeometry.Surface.WATER
+                        | CapturedSectionGeometry.Surface.MERGEABLE,
                 0,
                 MEDIUM_A,
                 new CapturedSectionGeometry.FluidFacts(0, 0, 0, false, 0),
-                null);
+                null,
+                dev.prime.render.material.BuiltinMaterialClass.DEFAULT);
     }
 
     private static CapturedSectionGeometry.Surface surface(
@@ -222,13 +218,8 @@ public final class ClusterTranslationBenchmarkCorpus {
         return CapturedSectionGeometry.Surface.uniform(
                 0xff80_a0c0,
                 layer,
-                false,
-                false,
-                false,
-                false,
-                false,
-                true,
-                rasterOverlay,
+                CapturedSectionGeometry.Surface.MERGEABLE
+                        | (rasterOverlay ? CapturedSectionGeometry.Surface.RASTER_OVERLAY : 0),
                 0,
                 sprite,
                 block);

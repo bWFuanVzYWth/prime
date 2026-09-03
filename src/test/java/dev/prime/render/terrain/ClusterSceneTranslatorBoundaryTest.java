@@ -89,13 +89,7 @@ final class ClusterSceneTranslatorBoundaryTest {
         return CapturedSectionGeometry.Surface.uniform(
                 0xffff_ffff,
                 CapturedSectionGeometry.Layer.OPAQUE,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
+                0,
                 emission,
                 sprite.sprite());
     }
