@@ -51,7 +51,8 @@ final class NoisyCompositePass implements Destroyable {
                 atmosphere.aerialRadiance(),
                 atmosphere.aerialTransmittance(),
                 signals.linearOutput());
-        SharedComputeProgram program = context.acquireNoisyCompositeProgram();
+        SharedComputeProgram program = context.acquireSharedProgram(
+                VulkanSharedPrograms.Program.NOISY_COMPOSITE);
         try (MemoryStack stack = MemoryStack.stackPush()) {
             BoundSet descriptors = VulkanDescriptors.bindStorageImages(
                     context,

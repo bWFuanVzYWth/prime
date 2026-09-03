@@ -9,6 +9,7 @@ import dev.prime.render.vulkan.VulkanDescriptors;
 import dev.prime.render.vulkan.VulkanDescriptors.BoundSet;
 import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
+import dev.prime.render.vulkan.VulkanSharedPrograms.Program;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.List;
@@ -36,7 +37,8 @@ final class NrdInputPreparationPass implements Destroyable {
             VulkanContext context,
             NrdImages images,
             String debugPrefix) {
-        SharedComputeProgram program = context.acquireNrdMotionProgram();
+        SharedComputeProgram program = context.acquireSharedProgram(
+                Program.NRD_MOTION);
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VulkanImage[] descriptorImages = new VulkanImage[] {
                 images.motion(),

@@ -18,7 +18,7 @@ public final class VulkanSharedPrograms implements AutoCloseable {
     private static final int SAMPLED_IMAGE = VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     private static final int STORAGE_IMAGE = VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     private static final int STORAGE_BUFFER = VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    private enum Program {
+    public enum Program {
         DISPLAY_TRANSFORM("common display-transform", 28, true,
                 new int[] {SAMPLED_IMAGE, STORAGE_IMAGE, STORAGE_BUFFER, STORAGE_IMAGE},
                 "fsr_display"),
@@ -82,53 +82,13 @@ public final class VulkanSharedPrograms implements AutoCloseable {
         }
     }
 
-    SharedComputeProgram acquireDisplayTransform() {
-        return acquire(Program.DISPLAY_TRANSFORM);
-    }
-
-    SharedComputeProgram acquireAutoExposure() {
-        return acquire(Program.AUTO_EXPOSURE);
-    }
-
-    SharedComputeProgram acquireHdrPresent() {
-        return acquire(Program.HDR_PRESENT);
-    }
-
-    SharedComputeProgram acquireUiAlphaClear() {
-        return acquire(Program.UI_ALPHA_CLEAR);
-    }
-
-    SharedComputeProgram acquireUiAlphaExtract() {
-        return acquire(Program.UI_ALPHA_EXTRACT);
-    }
-
-    SharedComputeProgram acquireStreamlineInput() {
-        return acquire(Program.STREAMLINE_INPUT);
-    }
-
-    SharedComputeProgram acquireNoisyComposite() {
-        return acquire(Program.NOISY_COMPOSITE);
-    }
-
-    SharedComputeProgram acquireNrdMotion() {
-        return acquire(Program.NRD_MOTION);
-    }
-
-    SharedComputeProgram acquireNrdComposite() {
-        return acquire(Program.NRD_COMPOSITE);
-    }
-
-    SharedComputeProgram acquireRrPrepare() {
-        return acquire(Program.RR_PREPARE);
-    }
-
     private static int[] storageImages(int count) {
         int[] descriptorTypes = new int[count];
         Arrays.fill(descriptorTypes, STORAGE_IMAGE);
         return descriptorTypes;
     }
 
-    private SharedComputeProgram acquire(Program program) {
+    SharedComputeProgram acquire(Program program) {
         requireOpen();
         int index = program.ordinal();
         if (this.programs[index] == null) {

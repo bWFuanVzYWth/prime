@@ -112,7 +112,8 @@ public final class DisplayTransformPass implements Destroyable {
                     VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
                     VK12.VK_IMAGE_USAGE_STORAGE_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT,
                     "Prime HDR display output");
-            program = context.acquireDisplayTransformProgram();
+            program = context.acquireSharedProgram(
+                    VulkanSharedPrograms.Program.DISPLAY_TRANSFORM);
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 descriptors = VulkanDescriptors.bind(
                         context,

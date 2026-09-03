@@ -56,7 +56,8 @@ final class AutoExposurePass implements Destroyable {
             VulkanImage albedo,
             VulkanImage reconstructionControl,
             boolean accumulatedMetering) {
-        SharedComputeProgram program = context.acquireAutoExposureProgram();
+        SharedComputeProgram program = context.acquireSharedProgram(
+                VulkanSharedPrograms.Program.AUTO_EXPOSURE);
         VulkanBuffer histogram = null;
         VulkanBuffer exposureState = null;
         BoundSet descriptors = null;

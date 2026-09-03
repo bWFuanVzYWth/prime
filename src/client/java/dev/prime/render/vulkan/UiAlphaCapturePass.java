@@ -67,8 +67,10 @@ public final class UiAlphaCapturePass implements Destroyable {
         BoundSet clearDescriptors = null;
         BoundSet extractDescriptors = null;
         try {
-            clearProgram = context.acquireUiAlphaClearProgram();
-            extractProgram = context.acquireUiAlphaExtractProgram();
+            clearProgram = context.acquireSharedProgram(
+                    VulkanSharedPrograms.Program.UI_ALPHA_CLEAR);
+            extractProgram = context.acquireSharedProgram(
+                    VulkanSharedPrograms.Program.UI_ALPHA_EXTRACT);
             alpha = context.createImage2D(
                     width,
                     height,

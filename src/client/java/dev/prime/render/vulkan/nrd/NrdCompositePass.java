@@ -7,6 +7,7 @@ import dev.prime.render.vulkan.VulkanDescriptors;
 import dev.prime.render.vulkan.VulkanDescriptors.BoundSet;
 import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
+import dev.prime.render.vulkan.VulkanSharedPrograms.Program;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.List;
@@ -32,7 +33,8 @@ final class NrdCompositePass implements Destroyable {
             VulkanImage stableAccumulation,
             NrdImages images,
             AtmospherePipeline atmosphere) {
-        SharedComputeProgram program = context.acquireNrdCompositeProgram();
+        SharedComputeProgram program = context.acquireSharedProgram(
+                Program.NRD_COMPOSITE);
         try (MemoryStack stack = MemoryStack.stackPush()) {
             List<VulkanImage> descriptorImages = List.of(
                 output,

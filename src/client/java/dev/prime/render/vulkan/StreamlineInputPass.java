@@ -90,7 +90,8 @@ public final class StreamlineInputPass implements Destroyable {
         VulkanImage streamlineMotion = null;
         BoundSet descriptors = null;
         try {
-            program = context.acquireStreamlineInputProgram();
+            program = context.acquireSharedProgram(
+                    VulkanSharedPrograms.Program.STREAMLINE_INPUT);
             streamlineDepth = context.createImage2D(
                     depth.width(),
                     depth.height(),

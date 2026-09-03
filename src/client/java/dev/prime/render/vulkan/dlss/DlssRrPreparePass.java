@@ -11,6 +11,7 @@ import dev.prime.render.vulkan.VulkanDescriptors.BoundSet;
 import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.DispatchMath;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
+import dev.prime.render.vulkan.VulkanSharedPrograms.Program;
 import dev.prime.render.vulkan.VulkanSync;
 import dev.prime.render.post.nrd.NrdCameraTransform;
 import java.nio.ByteBuffer;
@@ -72,7 +73,8 @@ final class DlssRrPreparePass implements Destroyable {
                 targets.specularHitDistance(),
                 targets.responsivity(),
                 targets.reconstructionControl());
-        SharedComputeProgram program = context.acquireRrPrepareProgram();
+        SharedComputeProgram program = context.acquireSharedProgram(
+                Program.RR_PREPARE);
         try (MemoryStack stack = MemoryStack.stackPush()) {
             BoundSet descriptors = VulkanDescriptors.bindStorageImages(
                     context,

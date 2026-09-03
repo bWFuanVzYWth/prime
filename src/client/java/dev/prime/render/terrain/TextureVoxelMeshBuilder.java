@@ -743,9 +743,8 @@ final class TextureVoxelMeshBuilder {
                 this.point(maximumU, maximumV, height),
                 this.point(minimumU, maximumV, height)
             };
-            float[] normal = new float[3];
-            normal[this.key.planeAxis] = this.key.normalSign;
-            this.addQuad(corners, normal, material);
+            this.addQuad(
+                    corners, this.key.planeAxis, this.key.normalSign, material);
         }
 
         void addWall(
@@ -776,12 +775,10 @@ final class TextureVoxelMeshBuilder {
                     this.point(minimumAlong, plane, maximumHeight)
                 };
             }
-            float[] normal = new float[3];
             int axis = projectedAxis == 0
                     ? MergeFace.projectedAxisU(this.key.planeAxis)
                     : MergeFace.projectedAxisV(this.key.planeAxis);
-            normal[axis] = outwardSign;
-            this.addQuad(corners, normal, material);
+            this.addQuad(corners, axis, outwardSign, material);
         }
 
         private float[] point(float u, float v, float height) {
@@ -794,11 +791,17 @@ final class TextureVoxelMeshBuilder {
         }
 
         private void addQuad(
-                float[][] corners, float[] outward, MaterialSample material) {
-            float[] edgeOne = subtract(corners[1], corners[0]);
-            float[] edgeTwo = subtract(corners[2], corners[0]);
-            float[] cross = cross(edgeOne, edgeTwo);
-            if (dot(cross, outward) < 0.0F) {
+                float[][] corners,
+                int normalAxis,
+                int normalSign,
+                MaterialSample material) {
+            int firstAxis = (normalAxis + 1) % 3;
+            int secondAxis = (normalAxis + 2) % 3;
+            float cross = (corners[1][firstAxis] - corners[0][firstAxis])
+                            * (corners[2][secondAxis] - corners[0][secondAxis])
+                    - (corners[1][secondAxis] - corners[0][secondAxis])
+                            * (corners[2][firstAxis] - corners[0][firstAxis]);
+            if (cross * normalSign < 0.0F) {
                 float[] swap = corners[1];
                 corners[1] = corners[3];
                 corners[3] = swap;
@@ -821,23 +824,26 @@ final class TextureVoxelMeshBuilder {
             int secondMaterialWord = material.baked()
                     ? material.packedLabPbrSpecular
                     : PrimitivePacking.packConstantUv(material.localV);
-            float[] edgeOne = subtract(second, first);
-            float[] edgeTwo = subtract(third, first);
-            float[] normal = cross(edgeOne, edgeTwo);
+            float edgeOneX = second[0] - first[0];
+            float edgeOneY = second[1] - first[1];
+            float edgeOneZ = second[2] - first[2];
+            float edgeTwoX = third[0] - first[0];
+            float edgeTwoY = third[1] - first[1];
+            float edgeTwoZ = third[2] - first[2];
             long tangent = PrimitivePacking.packTriangleTangent(
-                    edgeOne[0],
-                    edgeOne[1],
-                    edgeOne[2],
-                    edgeTwo[0],
-                    edgeTwo[1],
-                    edgeTwo[2],
+                    edgeOneX,
+                    edgeOneY,
+                    edgeOneZ,
+                    edgeTwoX,
+                    edgeTwoY,
+                    edgeTwoZ,
                     0.0F,
                     0.0F,
                     0.0F,
                     0.0F,
-                    normal[0],
-                    normal[1],
-                    normal[2]);
+                    edgeOneY * edgeTwoZ - edgeOneZ * edgeTwoY,
+                    edgeOneZ * edgeTwoX - edgeOneX * edgeTwoZ,
+                    edgeOneX * edgeTwoY - edgeOneY * edgeTwoX);
             int flags = material.flags;
             if ((tangent & 0x1_0000_0000L) != 0L
                     && (flags & PrimitivePacking.CONTROL_NORMAL_TEXTURE) != 0) {
@@ -888,28 +894,6 @@ final class TextureVoxelMeshBuilder {
 
     private static float clampUnit(float value) {
         return Math.max(0.0F, Math.min(Math.nextDown(1.0F), value));
-    }
-
-    private static float[] subtract(float[] first, float[] second) {
-        return new float[] {
-            first[0] - second[0],
-            first[1] - second[1],
-            first[2] - second[2]
-        };
-    }
-
-    private static float[] cross(float[] first, float[] second) {
-        return new float[] {
-            first[1] * second[2] - first[2] * second[1],
-            first[2] * second[0] - first[0] * second[2],
-            first[0] * second[1] - first[1] * second[0]
-        };
-    }
-
-    private static float dot(float[] first, float[] second) {
-        return first[0] * second[0]
-                + first[1] * second[1]
-                + first[2] * second[2];
     }
 
 }

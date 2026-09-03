@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vulkan.VulkanDevice;
 import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
+import dev.prime.render.vulkan.VulkanSharedPrograms.Program;
 import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -105,54 +106,9 @@ public final class VulkanContext implements AutoCloseable {
         return this.pipelineCache.openSession();
     }
 
-    SharedComputeProgram acquireDisplayTransformProgram() {
+    public SharedComputeProgram acquireSharedProgram(Program program) {
         requireOpen();
-        return this.sharedPrograms.acquireDisplayTransform();
-    }
-
-    SharedComputeProgram acquireAutoExposureProgram() {
-        requireOpen();
-        return this.sharedPrograms.acquireAutoExposure();
-    }
-
-    SharedComputeProgram acquireHdrPresentProgram() {
-        requireOpen();
-        return this.sharedPrograms.acquireHdrPresent();
-    }
-
-    SharedComputeProgram acquireUiAlphaExtractProgram() {
-        requireOpen();
-        return this.sharedPrograms.acquireUiAlphaExtract();
-    }
-
-    SharedComputeProgram acquireUiAlphaClearProgram() {
-        requireOpen();
-        return this.sharedPrograms.acquireUiAlphaClear();
-    }
-
-    SharedComputeProgram acquireStreamlineInputProgram() {
-        requireOpen();
-        return this.sharedPrograms.acquireStreamlineInput();
-    }
-
-    SharedComputeProgram acquireNoisyCompositeProgram() {
-        requireOpen();
-        return this.sharedPrograms.acquireNoisyComposite();
-    }
-
-    public SharedComputeProgram acquireNrdMotionProgram() {
-        requireOpen();
-        return this.sharedPrograms.acquireNrdMotion();
-    }
-
-    public SharedComputeProgram acquireNrdCompositeProgram() {
-        requireOpen();
-        return this.sharedPrograms.acquireNrdComposite();
-    }
-
-    public SharedComputeProgram acquireRrPrepareProgram() {
-        requireOpen();
-        return this.sharedPrograms.acquireRrPrepare();
+        return this.sharedPrograms.acquire(program);
     }
 
     public VulkanImage recordHdrPresentation(
