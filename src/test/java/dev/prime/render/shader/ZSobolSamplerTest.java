@@ -10,9 +10,7 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
 final class ZSobolSamplerTest {
     private static final int CASE_COUNT = 4_096;
@@ -39,10 +37,7 @@ final class ZSobolSamplerTest {
         0x8000_8000, 0xc000_c000, 0xa000_a000, 0xf000_f000
     };
     @Nested
-    @Tag("gpu-shader")
-    @ExtendWith(ShaderComputeExtension.class)
-    final class Parity {
-        private static ShaderComputeRunner runner;
+    final class Parity extends GpuShaderTest {
 
         @Test
         void shaderMatchesPrimeZOrderFastOwenReference() throws IOException {
@@ -331,10 +326,7 @@ final class ZSobolSamplerTest {
     }
 
     @Nested
-    @Tag("gpu-shader")
-    @ExtendWith(ShaderComputeExtension.class)
-    final class Distribution {
-        private static ShaderComputeRunner runner;
+    final class Distribution extends GpuShaderTest {
 
         @Test
         void shaderFloatTemporalPrefixesStayWithinOneBoundaryRoundingEvent()

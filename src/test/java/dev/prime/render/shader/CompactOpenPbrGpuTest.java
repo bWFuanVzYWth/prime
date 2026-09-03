@@ -9,13 +9,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-@Tag("gpu-shader")
-@ExtendWith(ShaderComputeExtension.class)
-final class CompactOpenPbrGpuTest {
+final class CompactOpenPbrGpuTest extends GpuShaderTest {
     private static final long OPAQUE_SEED = 0x0BE7_5B12_F0A4_0111L;
     private static final int OPAQUE_CASES_PER_KIND = 8_192;
     private static final int OPAQUE_KIND_COUNT = 3;
@@ -63,10 +59,8 @@ final class CompactOpenPbrGpuTest {
         0.0F, Math.nextUp(0.0F), 0.15F, 0.5F, Math.nextDown(1.0F)
     };
 
-    private static ShaderComputeRunner runner;
-
     @BeforeAll
-    static void bindTransmissionGgxEnergy() throws IOException {
+    void bindTransmissionGgxEnergy() throws IOException {
         RoboCuteTestResources.bindTransmissionGgxEnergy(runner);
     }
 

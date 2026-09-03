@@ -4,13 +4,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-@Tag("gpu-shader")
-@ExtendWith(ShaderComputeExtension.class)
-final class PrimeNumericalGpuTest {
+final class PrimeNumericalGpuTest extends GpuShaderTest {
     private static final long SEED = 0x4E55_4D45_5249_4301L;
     private static final int INPUT_WORDS = 2;
     private static final int WITNESS_WORDS = 4;
@@ -58,8 +54,6 @@ final class PrimeNumericalGpuTest {
         {0x0000_0000, 0x0000_0000, 0x7fc0_0001},
         {0x3f80_0001, 0x0000_0000, 0x0000_0000}
     };
-
-    private static ShaderComputeRunner runner;
 
     @Test
     void productionClassifiersRecognizeEveryNonFiniteSignAndNumericDomain()

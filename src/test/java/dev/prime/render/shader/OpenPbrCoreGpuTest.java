@@ -5,13 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.SplittableRandom;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-@Tag("gpu-shader")
-@ExtendWith(ShaderComputeExtension.class)
-final class OpenPbrCoreGpuTest {
+final class OpenPbrCoreGpuTest extends GpuShaderTest {
     private static final long SEED = 0x5985_E989_254B_4685L;
     private static final int INPUT_WORDS = 4;
     private static final int WITNESS_WORDS = 8;
@@ -60,8 +56,6 @@ final class OpenPbrCoreGpuTest {
         1.5F,
         2.4F
     };
-
-    private static ShaderComputeRunner runner;
 
     @Test
     void commonFresnelAndMicrofacetPropertiesHoldAcrossGpuSweep() throws IOException {

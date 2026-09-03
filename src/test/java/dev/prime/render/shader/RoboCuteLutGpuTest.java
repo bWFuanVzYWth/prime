@@ -5,21 +5,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-@Tag("gpu-shader")
-@ExtendWith(ShaderComputeExtension.class)
-final class RoboCuteLutGpuTest {
+final class RoboCuteLutGpuTest extends GpuShaderTest {
     private static final int CASE_COUNT = RoboCuteTestResources.GGX_LUT_WIDTH
             * RoboCuteTestResources.GGX_LUT_HEIGHT
             * RoboCuteTestResources.GGX_LUT_DEPTH;
-    private static ShaderComputeRunner runner;
-    private static ByteBuffer lut;
+    private ByteBuffer lut;
 
     @BeforeAll
-    static void bindTransmissionGgxEnergy() throws IOException {
+    void bindTransmissionGgxEnergy() throws IOException {
         lut = RoboCuteTestResources.bindTransmissionGgxEnergy(runner);
     }
 

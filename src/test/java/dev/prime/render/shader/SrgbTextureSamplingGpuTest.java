@@ -5,14 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-@Tag("gpu-shader")
-@ExtendWith(ShaderComputeExtension.class)
-final class SrgbTextureSamplingGpuTest {
-    private static ShaderComputeRunner runner;
+final class SrgbTextureSamplingGpuTest extends GpuShaderTest {
 
     @Test
     void srgbViewFiltersRgbInLinearLightWhileUnormKeepsDataAndAlphaRaw()

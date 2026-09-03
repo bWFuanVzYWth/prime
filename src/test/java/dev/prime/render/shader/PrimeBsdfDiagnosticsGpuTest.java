@@ -2,20 +2,14 @@ package dev.prime.render.shader;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-@Tag("gpu-shader")
-@ExtendWith(ShaderComputeExtension.class)
-final class PrimeBsdfDiagnosticsGpuTest {
+final class PrimeBsdfDiagnosticsGpuTest extends GpuShaderTest {
     private static final long SEED = 0x4253_4446_4449_4147L;
     private static final int INPUT_WORDS = 1;
     private static final int WITNESS_WORDS = 2;
     private static final int NONNEGATIVE_FIELD = 2;
     private static final int DIRECTION_FIELD = 5;
-
-    private static ShaderComputeRunner runner;
 
     @Test
     void rejectedAdapterSamplesPreserveTheirFirstRawDiagnostic() throws IOException {

@@ -6,13 +6,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.SplittableRandom;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-@Tag("gpu-shader")
-@ExtendWith(ShaderComputeExtension.class)
-final class PrimeProductionMathGpuTest {
+final class PrimeProductionMathGpuTest extends GpuShaderTest {
     private static final int CASES_PER_KIND = 8_192;
     private static final long TRANSPORT_SEED = 0x71A4_5A09_D522_0101L;
     private static final long REALTIME_STATE_SEED = 0x4554_4153_5445_0001L;
@@ -36,8 +32,6 @@ final class PrimeProductionMathGpuTest {
         0x7fc0_0001,
         0xbf80_0000
     };
-    private static ShaderComputeRunner runner;
-
     @Test
     void integratorAndLightTransportMathKeepsItsNumericalContracts() throws IOException {
         int kinds = 22;

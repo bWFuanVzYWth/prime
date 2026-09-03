@@ -4,22 +4,16 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-@Tag("gpu-shader")
-@ExtendWith(ShaderComputeExtension.class)
-final class OpenPbrTransmissionSlabGpuTest {
+final class OpenPbrTransmissionSlabGpuTest extends GpuShaderTest {
     private static final int CASE_COUNT = 8_192;
     private static final int INPUT_WORDS = 1;
     private static final int WITNESS_WORDS = 8;
     private static final long SEED = 0x51AB_1FACE_0000_001L;
 
-    private static ShaderComputeRunner runner;
-
     @BeforeAll
-    static void bindTransmissionGgxEnergy() throws IOException {
+    void bindTransmissionGgxEnergy() throws IOException {
         RoboCuteTestResources.bindTransmissionGgxEnergy(runner);
     }
 

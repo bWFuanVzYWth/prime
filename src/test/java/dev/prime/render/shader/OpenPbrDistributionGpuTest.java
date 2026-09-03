@@ -7,13 +7,9 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-@Tag("gpu-shader")
-@ExtendWith(ShaderComputeExtension.class)
-final class OpenPbrDistributionGpuTest {
+final class OpenPbrDistributionGpuTest extends GpuShaderTest {
     private static final int SAMPLE_COUNT = 262_144;
     private static final int GRID_Z = 256;
     private static final int GRID_PHI = 512;
@@ -65,10 +61,8 @@ final class OpenPbrDistributionGpuTest {
                 new float[] {0.9F, 0.8F, 0.7F})
     };
 
-    private static ShaderComputeRunner runner;
-
     @BeforeAll
-    static void prepareResources() throws IOException {
+    void prepareResources() throws IOException {
         RoboCuteTestResources.bindTransmissionGgxEnergy(runner);
     }
 
@@ -79,7 +73,7 @@ final class OpenPbrDistributionGpuTest {
         }
     }
 
-    private static void verifyConfiguration(
+    private void verifyConfiguration(
             Configuration configuration, int seed)
             throws IOException {
         ByteBuffer sampled = dispatch(configuration, SAMPLE_MODE, SAMPLE_COUNT, seed);
@@ -258,7 +252,7 @@ final class OpenPbrDistributionGpuTest {
         }
     }
 
-    private static ByteBuffer dispatch(
+    private ByteBuffer dispatch(
             Configuration configuration,
             int mode,
             int invocationCount,

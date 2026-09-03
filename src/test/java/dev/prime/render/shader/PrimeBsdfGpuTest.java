@@ -6,13 +6,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-@Tag("gpu-shader")
-@ExtendWith(ShaderComputeExtension.class)
-final class PrimeBsdfGpuTest {
+final class PrimeBsdfGpuTest extends GpuShaderTest {
     private static final long SEED = 0xA11D_4A7A_26B5_DF31L;
     private static final int INPUT_WORDS = 7;
     private static final int WITNESS_WORDS = 12;
@@ -46,10 +42,8 @@ final class PrimeBsdfGpuTest {
     };
     private static final int[] SUBSURFACE = {0, 1, 64, 65, 128, 254, 255};
 
-    private static ShaderComputeRunner runner;
-
     @BeforeAll
-    static void bindTransmissionGgxEnergy() throws IOException {
+    void bindTransmissionGgxEnergy() throws IOException {
         RoboCuteTestResources.bindTransmissionGgxEnergy(runner);
     }
 
@@ -73,7 +67,7 @@ final class PrimeBsdfGpuTest {
         assertProperties(input, CASES_PER_KIND);
     }
 
-    private static void assertProperties(ByteBuffer input, int caseCount) throws IOException {
+    private void assertProperties(ByteBuffer input, int caseCount) throws IOException {
         ShaderPropertyBatch.assertProperties(
                 runner,
                 "prime_bsdf_properties.comp.spv",

@@ -8,14 +8,9 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-@Tag("gpu-shader")
-@ExtendWith(ShaderComputeExtension.class)
-final class AtmosphereGpuTest {
-    private static ShaderComputeRunner runner;
+final class AtmosphereGpuTest extends GpuShaderTest {
 
     @Test
     void profilesEveryShadowLeafAndKeepsInvalidDirectionsShadowed() throws IOException {
