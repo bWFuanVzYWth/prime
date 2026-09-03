@@ -185,10 +185,7 @@ public final class Fsr3Upscaler implements Destroyable {
             DisplaySettings.Snapshot display,
             VulkanImageInitializationBatch initialization) {
         this.requireOpen();
-        if (token.owner != this
-                || token.recorded
-                || token.submitted
-                || token.abandoned) {
+        if (token.owner != this) {
             throw new IllegalArgumentException("FSR frame token does not belong to this recording");
         }
         TemporalReconstructionState.Plan plannedTemporal =
@@ -202,7 +199,6 @@ public final class Fsr3Upscaler implements Destroyable {
                 token.jitter,
                 plannedTemporal.deltaMilliseconds(),
                 plannedTemporal.restart());
-        token.recorded = true;
         TemporalReconstructionState.Plan temporal =
                 token.temporal.claimForExecution();
         if (temporal != plannedTemporal) {
@@ -242,23 +238,18 @@ public final class Fsr3Upscaler implements Destroyable {
     /** Must be called immediately after the command buffer containing {@code token} is submitted. */
     public void submitted(FrameToken token) {
         this.requireOpen();
-        if (token.owner != this
-                || !token.recorded
-                || token.submitted
-                || token.abandoned) {
+        if (token.owner != this) {
             throw new IllegalArgumentException("FSR frame token does not belong to this submission");
         }
-        token.submitted = true;
         this.history.submitted(token.temporal);
     }
 
     public void abandon(FrameToken token) {
         this.requireOpen();
-        if (token.owner != this || token.submitted || token.abandoned) {
+        if (token.owner != this) {
             throw new IllegalArgumentException(
                     "FSR frame token does not belong to this upscaler");
         }
-        token.abandoned = true;
         this.history.abandon(token.temporal);
     }
 
@@ -345,9 +336,6 @@ public final class Fsr3Upscaler implements Destroyable {
         private final Fsr3Upscaler owner;
         private final SubmittedFrame<TemporalReconstructionState.Plan> temporal;
         private final SubpixelJitter jitter;
-        private boolean recorded;
-        private boolean submitted;
-        private boolean abandoned;
 
         private FrameToken(
                 Fsr3Upscaler owner,

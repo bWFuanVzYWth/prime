@@ -154,7 +154,6 @@ public final class NoisyPostProcessor implements VulkanReconstructionProcessor {
             ReconstructionFrameParameters parameters,
             VulkanImageInitializationBatch initialization) {
         FrameToken token = requireFrame(frame);
-        token.recorded = true;
         TemporalReconstructionState.Plan temporal =
                 token.temporal.claimForExecution();
         this.composite.record(
@@ -194,14 +193,10 @@ public final class NoisyPostProcessor implements VulkanReconstructionProcessor {
     public void submitted(Frame frame) {
         requireOpen();
         if (!(frame instanceof FrameToken token)
-                || token.owner != this
-                || !token.recorded
-                || token.submitted
-                || token.abandoned) {
+                || token.owner != this) {
             throw new IllegalArgumentException(
                     "Noisy frame was not recorded exactly once by this processor");
         }
-        token.submitted = true;
         this.history.submitted(token.temporal);
     }
 
@@ -209,23 +204,17 @@ public final class NoisyPostProcessor implements VulkanReconstructionProcessor {
     public void abandon(Frame frame) {
         requireOpen();
         if (!(frame instanceof FrameToken token)
-                || token.owner != this
-                || token.submitted
-                || token.abandoned) {
+                || token.owner != this) {
             throw new IllegalArgumentException(
                     "Noisy frame token does not belong to this processor");
         }
-        token.abandoned = true;
         this.history.abandon(token.temporal);
     }
 
     private FrameToken requireFrame(Frame frame) {
         requireOpen();
         if (!(frame instanceof FrameToken token)
-                || token.owner != this
-                || token.submitted
-                || token.abandoned
-                || token.recorded) {
+                || token.owner != this) {
             throw new IllegalArgumentException("Noisy frame token does not belong to this processor");
         }
         return token;
@@ -251,9 +240,6 @@ public final class NoisyPostProcessor implements VulkanReconstructionProcessor {
         private final NoisyPostProcessor owner;
         private final SubmittedFrame<TemporalReconstructionState.Plan> temporal;
         private final ReconstructionFrame semantic;
-        private boolean recorded;
-        private boolean submitted;
-        private boolean abandoned;
 
         private FrameToken(
                 NoisyPostProcessor owner,

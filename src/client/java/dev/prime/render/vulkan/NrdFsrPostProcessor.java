@@ -221,12 +221,8 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
             ReconstructionFrameParameters parameters,
             VulkanImageInitializationBatch initialization) {
         FrameToken token = requireFrame(frame);
-        if (token.recorded) {
-            throw new IllegalArgumentException("NRD-FSR frame was already recorded");
-        }
         // Recording can fail after emitting commands; such a token must never be retried into the
-        // same or another command buffer.
-        token.recorded = true;
+        // same or another command buffer. The child SubmittedFrame claims are authoritative.
         token.nrdPrepared =
                 this.denoiser.prepareInputs(commandBuffer, token.nrdPlan);
         token.nrd = this.denoiser.recordReconstruction(
@@ -254,10 +250,9 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
     public void submitted(Frame frame) {
         requireOpen();
         FrameToken token = requireFrame(frame);
-        if (!token.recorded || token.submitted || token.nrd == null) {
+        if (token.nrd == null) {
             throw new IllegalArgumentException("NRD-FSR frame was not recorded exactly once");
         }
-        token.submitted = true;
         RuntimeException failure = null;
         SubmittedFrame<NrdFramePlan> submittedNrd = null;
         try {
@@ -279,7 +274,6 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
     public void abandon(Frame frame) {
         requireOpen();
         FrameToken token = requireFrame(frame);
-        token.abandoned = true;
         RuntimeException failure = null;
         if (token.nrd != null) {
             failure = ResourceCleanup.run(
@@ -293,10 +287,7 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
     }
 
     private FrameToken requireFrame(Frame frame) {
-        if (!(frame instanceof FrameToken token)
-                || token.owner != this
-                || token.submitted
-                || token.abandoned) {
+        if (!(frame instanceof FrameToken token) || token.owner != this) {
             throw new IllegalArgumentException("NRD-FSR frame token does not belong to this processor");
         }
         return token;
@@ -360,9 +351,6 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
         private final ReconstructionFrame semantic;
         private NrdDenoiser.PreparedFrame nrdPrepared;
         private NrdDenoiser.FrameToken nrd;
-        private boolean recorded;
-        private boolean submitted;
-        private boolean abandoned;
 
         private FrameToken(
                 NrdFsrPostProcessor owner,

@@ -201,13 +201,9 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         if (!(frame instanceof FrameToken token)) {
             throw new IllegalArgumentException("DLSS RR received another processor's frame token");
         }
-        if (token.owner != this
-                || token.recorded
-                || token.submitted
-                || token.abandoned) {
+        if (token.owner != this) {
             throw new IllegalArgumentException("DLSS RR frame token does not belong to this recording");
         }
-        token.recorded = true;
         TemporalReconstructionState.Plan temporal =
                 token.temporal.claimForExecution();
         this.preparePass.record(
@@ -301,13 +297,9 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         if (!(frame instanceof FrameToken token)) {
             throw new IllegalArgumentException("DLSS RR received another processor's frame token");
         }
-        if (token.owner != this
-                || !token.recorded
-                || token.submitted
-                || token.abandoned) {
+        if (token.owner != this) {
             throw new IllegalArgumentException("DLSS RR frame token does not belong to this submission");
         }
-        token.submitted = true;
         this.history.submitted(token.temporal);
     }
 
@@ -318,11 +310,10 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
             throw new IllegalArgumentException(
                     "DLSS RR received another processor's frame token");
         }
-        if (token.owner != this || token.submitted || token.abandoned) {
+        if (token.owner != this) {
             throw new IllegalArgumentException(
                     "DLSS RR frame token does not belong to this processor");
         }
-        token.abandoned = true;
         this.history.abandon(token.temporal);
     }
 
@@ -353,9 +344,6 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         private final ReconstructionFrame semantic;
         private final RrInputView debugView;
         private final float responsivity;
-        private boolean recorded;
-        private boolean submitted;
-        private boolean abandoned;
 
         private FrameToken(
                 DlssRrPostProcessor owner,
