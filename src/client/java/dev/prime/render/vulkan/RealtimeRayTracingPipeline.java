@@ -52,7 +52,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
     private boolean destroyed;
 
     static int dispatchCount(int minimumBounces) {
-        dev.prime.render.MinimumBounceSettings.validateCount(minimumBounces);
+        dev.prime.render.BounceSettings.validateFixedCount(minimumBounces);
         // Landing owns the primary-surface bounce. Every additional minimum bounce has four
         // narrow stages; the register tail replaces all remaining dispatches.
         return 4 * (minimumBounces - 1) + 13;
@@ -95,7 +95,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
             this.descriptorSetLayout = setLayout;
             this.program = traceProgram;
             this.lastRecordedPassCount = dispatchCount(
-                    dev.prime.render.MinimumBounceSettings.MAXIMUM_COUNT);
+                    dev.prime.render.BounceSettings.MAXIMUM_FIXED_COUNT);
         } catch (RuntimeException exception) {
             if (traceProgram != null) {
                 traceProgram.destroy();

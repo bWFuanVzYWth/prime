@@ -32,9 +32,9 @@ public record RendererSettings(
         display = Objects.requireNonNull(display, "display");
         surfaceDetailMode = Objects.requireNonNull(surfaceDetailMode, "surfaceDetailMode");
         VoxelSurfaceSettings.maximumHeight(voxelTextureSurfaceStrengthSteps);
-        SpecularBounceSettings.validateCount(additionalSpecularBounces);
-        MinimumBounceSettings.validateCount(minimumBounces);
-        MaximumBounceSettings.validateCount(maximumBounces);
+        BounceSettings.validateCount(additionalSpecularBounces);
+        BounceSettings.validateFixedCount(minimumBounces);
+        BounceSettings.validateCount(maximumBounces);
         TerrainWorkerSettings.validatePercentage(terrainWorkerPercentage);
         if (revision < 0L) {
             throw new IllegalArgumentException("Renderer settings revision must not be negative");

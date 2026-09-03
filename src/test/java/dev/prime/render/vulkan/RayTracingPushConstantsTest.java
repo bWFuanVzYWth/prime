@@ -11,9 +11,8 @@ import dev.prime.render.IntegratorFrameInput;
 import dev.prime.render.IntegratorSettings;
 import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
-import dev.prime.render.MinimumBounceSettings;
+import dev.prime.render.BounceSettings;
 import dev.prime.render.RayConeParameters;
-import dev.prime.render.SpecularBounceSettings;
 import dev.prime.render.SunDirection;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionQualityMode;
@@ -183,8 +182,8 @@ final class RayTracingPushConstantsTest {
                 new RayConeParameters(
                         Float.float16ToFloat((short) 0x5678),
                         Float.float16ToFloat((short) 0x1234)),
-                SpecularBounceSettings.DEFAULT_COUNT,
-                MinimumBounceSettings.DEFAULT_COUNT,
+                BounceSettings.DEFAULT_COUNT,
+                BounceSettings.DEFAULT_FIXED_COUNT,
                 4,
                 sampleIndex,
                 19,

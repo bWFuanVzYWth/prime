@@ -71,9 +71,9 @@ public record IntegratorFrameInput(
                 astronomy.settings(),
                 cameraInWater,
                 transparentGuideMode);
-        SpecularBounceSettings.validateCount(additionalSpecularBounces);
-        MinimumBounceSettings.validateCount(minimumBounces);
-        MaximumBounceSettings.validateCount(maximumBounces);
+        BounceSettings.validateCount(additionalSpecularBounces);
+        BounceSettings.validateFixedCount(minimumBounces);
+        BounceSettings.validateCount(maximumBounces);
         IntegratorSettings.packMaterialLightingControl(
                 lighting.sunQuarterSteps(),
                 lighting.starQuarterSteps(),

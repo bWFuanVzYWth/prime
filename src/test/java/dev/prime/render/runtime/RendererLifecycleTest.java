@@ -10,10 +10,8 @@ import dev.prime.render.AstronomySettings;
 import dev.prime.render.DisplaySettings;
 import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
-import dev.prime.render.MaximumBounceSettings;
-import dev.prime.render.MinimumBounceSettings;
+import dev.prime.render.BounceSettings;
 import dev.prime.render.RendererSettings;
-import dev.prime.render.SpecularBounceSettings;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionQualityMode;
@@ -100,9 +98,9 @@ final class RendererLifecycleTest {
                 new DisplaySettings.Snapshot(
                         DisplaySettings.DEFAULT_FINAL_EXPOSURE_QUARTER_STEPS,
                         DisplaySettings.DEFAULT_AUTO_EXPOSURE_COMPENSATION_STEPS),
-                SpecularBounceSettings.DEFAULT_COUNT,
-                MinimumBounceSettings.DEFAULT_COUNT,
-                MaximumBounceSettings.DEFAULT_COUNT,
+                BounceSettings.DEFAULT_COUNT,
+                BounceSettings.DEFAULT_FIXED_COUNT,
+                BounceSettings.DEFAULT_COUNT,
                 TerrainWorkerSettings.DEFAULT_PERCENTAGE,
                 0L);
     }

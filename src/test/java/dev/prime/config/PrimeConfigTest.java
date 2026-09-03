@@ -7,10 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.prime.render.AstronomySettings;
 import dev.prime.render.HdrOutput;
-import dev.prime.render.MaximumBounceSettings;
-import dev.prime.render.MinimumBounceSettings;
+import dev.prime.render.BounceSettings;
 import dev.prime.render.RendererSettings;
-import dev.prime.render.SpecularBounceSettings;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.TransparentNeeMode;
 import dev.prime.render.post.PostProcessingMode;
@@ -134,9 +132,9 @@ final class PrimeConfigTest {
 
     @Test
     void restoreDefaultsIncludesStandaloneSchedulingSettings() {
-        PrimeConfig.setMaximumBounces(MaximumBounceSettings.MAXIMUM_COUNT);
-        PrimeConfig.setAdditionalSpecularBounces(SpecularBounceSettings.MAXIMUM_COUNT);
-        PrimeConfig.setMinimumBounces(MinimumBounceSettings.MAXIMUM_COUNT);
+        PrimeConfig.setMaximumBounces(BounceSettings.MAXIMUM_COUNT);
+        PrimeConfig.setAdditionalSpecularBounces(BounceSettings.MAXIMUM_COUNT);
+        PrimeConfig.setMinimumBounces(BounceSettings.MAXIMUM_FIXED_COUNT);
         PrimeConfig.setTerrainWorkerPercentage(TerrainWorkerSettings.MAXIMUM_PERCENTAGE);
         PrimeConfig.setHdrEnabled(true);
         PrimeConfig.setReferenceWhiteNits(400);
@@ -147,13 +145,13 @@ final class PrimeConfigTest {
 
         assertEquals(revision + 1L, PrimeConfig.rendererSettings().revision());
         assertEquals(
-                MaximumBounceSettings.DEFAULT_COUNT,
+                BounceSettings.DEFAULT_COUNT,
                 PrimeConfig.rendererSettings().maximumBounces());
         assertEquals(
-                SpecularBounceSettings.DEFAULT_COUNT,
+                BounceSettings.DEFAULT_COUNT,
                 PrimeConfig.rendererSettings().additionalSpecularBounces());
         assertEquals(
-                MinimumBounceSettings.DEFAULT_COUNT,
+                BounceSettings.DEFAULT_FIXED_COUNT,
                 PrimeConfig.rendererSettings().minimumBounces());
         assertEquals(
                 TerrainWorkerSettings.DEFAULT_PERCENTAGE,

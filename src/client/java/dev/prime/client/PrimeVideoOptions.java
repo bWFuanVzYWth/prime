@@ -11,10 +11,8 @@ import dev.prime.render.DisplaySettings;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
-import dev.prime.render.MaximumBounceSettings;
-import dev.prime.render.MinimumBounceSettings;
+import dev.prime.render.BounceSettings;
 import dev.prime.render.RendererSettings;
-import dev.prime.render.SpecularBounceSettings;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.TransparentNeeMode;
 import dev.prime.render.diagnostic.NrdInputView;
@@ -114,22 +112,22 @@ public final class PrimeVideoOptions {
                                 big(integerOption(
                                 "prime.options.additional_specular_bounces",
                                 settings.additionalSpecularBounces(),
-                                SpecularBounceSettings.MINIMUM_COUNT,
-                                SpecularBounceSettings.MAXIMUM_COUNT,
+                                BounceSettings.MINIMUM_COUNT,
+                                BounceSettings.MAXIMUM_COUNT,
                                 "",
                                 PrimeConfig::setAdditionalSpecularBounces)),
                                 big(integerOption(
                                 "prime.options.minimum_bounces",
                                 settings.minimumBounces(),
-                                MinimumBounceSettings.MINIMUM_COUNT,
-                                MinimumBounceSettings.MAXIMUM_COUNT,
+                                BounceSettings.MINIMUM_COUNT,
+                                BounceSettings.MAXIMUM_FIXED_COUNT,
                                 "",
                                 PrimeConfig::setMinimumBounces)),
                                 big(integerOption(
                                 "prime.options.maximum_bounces",
                                 settings.maximumBounces(),
-                                MaximumBounceSettings.MINIMUM_COUNT,
-                                MaximumBounceSettings.MAXIMUM_COUNT,
+                                BounceSettings.MINIMUM_COUNT,
+                                BounceSettings.MAXIMUM_COUNT,
                                 "",
                                 PrimeConfig::setMaximumBounces)),
                                 big(integerOption(

@@ -18,7 +18,7 @@ import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
 /** Offline-only full-path pipeline with a four-stage per-bounce wavefront. */
 public final class OfflineRayTracingPipeline implements Destroyable {
     static int dispatchCount(int maximumBounces) {
-        dev.prime.render.MaximumBounceSettings.validateCount(maximumBounces);
+        dev.prime.render.BounceSettings.validateCount(maximumBounces);
         return 4 * maximumBounces + 1;
     }
     static final int DESCRIPTOR_BINDING_COUNT = 3;

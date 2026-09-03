@@ -7,9 +7,7 @@ import dev.prime.render.DisplaySettings;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
-import dev.prime.render.MaximumBounceSettings;
-import dev.prime.render.MinimumBounceSettings;
-import dev.prime.render.SpecularBounceSettings;
+import dev.prime.render.BounceSettings;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.TransparentNeeMode;
 import dev.prime.render.post.PostProcessingMode;
@@ -311,21 +309,21 @@ final class PrimeConfigCodec {
     static int parseMaximumBounces(String value) {
         return parseInteger(
                 value,
-                MaximumBounceSettings::validateCount,
+                BounceSettings::validateCount,
                 "Maximum bounce count must be an integer");
     }
 
     static int parseAdditionalSpecularBounces(String value) {
         return parseInteger(
                 value,
-                SpecularBounceSettings::validateCount,
+                BounceSettings::validateCount,
                 "Additional specular bounce count must be an integer");
     }
 
     static int parseMinimumBounces(String value) {
         return parseInteger(
                 value,
-                MinimumBounceSettings::validateCount,
+                BounceSettings::validateFixedCount,
                 "Minimum bounce count must be an integer");
     }
 

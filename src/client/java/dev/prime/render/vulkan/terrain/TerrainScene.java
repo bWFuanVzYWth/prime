@@ -122,23 +122,13 @@ public final class TerrainScene implements AutoCloseable {
             double cameraX,
             double cameraY,
             double cameraZ) {
-        List<CompiledCluster> uploads;
-        if (dynamicUpload == null) {
-            uploads = staticUploads;
-        } else if (staticUploads.isEmpty()) {
-            uploads = List.of(dynamicUpload);
-        } else {
-            ArrayList<CompiledCluster> combined =
-                    new ArrayList<>(staticUploads.size() + 1);
-            combined.addAll(staticUploads);
-            combined.add(dynamicUpload);
-            uploads = combined;
-        }
+        List<CompiledCluster> uploads = dynamicUpload == null
+                ? staticUploads
+                : List.of(dynamicUpload);
         // Dynamic capture is the frame clock: replace and rebuild BLAS/TLAS without a dirty check.
-        boolean contentChanged = replaceDynamic
-                || this.hasActualContentChange(staticUploads, evictions);
         boolean staticContentChanged =
                 this.hasActualStaticContentChange(staticUploads, evictions);
+        boolean contentChanged = replaceDynamic || staticContentChanged;
         LongOpenHashSet removedKeys = removedKeys(staticUploads, evictions);
         List<TerrainOccluderChange> occluderChanges = staticContentChanged
                 ? this.occluderChanges(staticUploads, evictions)
@@ -743,22 +733,6 @@ public final class TerrainScene implements AutoCloseable {
                     Math.addExact(1, dynamicUpload.mesh().voxelInstances().count()));
         }
         return count;
-    }
-
-    private boolean hasActualContentChange(
-            List<CompiledCluster> uploads,
-            long[] evictions) {
-        for (long key : evictions) {
-            if (this.resident.containsKey(key)) {
-                return true;
-            }
-        }
-        for (CompiledCluster upload : uploads) {
-            if (!upload.isEmpty() || this.resident.containsKey(upload.key())) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private List<TerrainOccluderChange> occluderChanges(

@@ -7,10 +7,8 @@ import dev.prime.render.DisplaySettings;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
-import dev.prime.render.MaximumBounceSettings;
-import dev.prime.render.MinimumBounceSettings;
+import dev.prime.render.BounceSettings;
 import dev.prime.render.RendererSettings;
-import dev.prime.render.SpecularBounceSettings;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.TransparentNeeMode;
 import dev.prime.render.post.PostProcessingMode;
@@ -72,7 +70,7 @@ public final class PrimeConfig {
     }
 
     public static void setAdditionalSpecularBounces(int value) {
-        value = SpecularBounceSettings.validateCount(value);
+        value = BounceSettings.validateCount(value);
         if (value != data.additionalSpecularBounces) {
             data.additionalSpecularBounces = value;
             rendererChanged();
@@ -80,7 +78,7 @@ public final class PrimeConfig {
     }
 
     public static void setMinimumBounces(int value) {
-        value = MinimumBounceSettings.validateCount(value);
+        value = BounceSettings.validateFixedCount(value);
         if (value != data.minimumBounces) {
             data.minimumBounces = value;
             rendererChanged();
@@ -88,7 +86,7 @@ public final class PrimeConfig {
     }
 
     public static void setMaximumBounces(int value) {
-        value = MaximumBounceSettings.validateCount(value);
+        value = BounceSettings.validateCount(value);
         if (value != data.maximumBounces) {
             data.maximumBounces = value;
             rendererChanged();

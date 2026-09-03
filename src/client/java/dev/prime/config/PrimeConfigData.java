@@ -6,9 +6,7 @@ import dev.prime.render.DisplaySettings;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
-import dev.prime.render.MaximumBounceSettings;
-import dev.prime.render.MinimumBounceSettings;
-import dev.prime.render.SpecularBounceSettings;
+import dev.prime.render.BounceSettings;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.TransparentNeeMode;
 import dev.prime.render.post.PostProcessingMode;
@@ -19,9 +17,9 @@ import dev.prime.render.terrain.VoxelSurfaceSettings;
 /** Client-thread-owned state transferred to and from the properties codec. */
 final class PrimeConfigData {
     boolean pathTracingEnabled = true;
-    int additionalSpecularBounces = SpecularBounceSettings.DEFAULT_COUNT;
-    int minimumBounces = MinimumBounceSettings.DEFAULT_COUNT;
-    int maximumBounces = MaximumBounceSettings.DEFAULT_COUNT;
+    int additionalSpecularBounces = BounceSettings.DEFAULT_COUNT;
+    int minimumBounces = BounceSettings.DEFAULT_FIXED_COUNT;
+    int maximumBounces = BounceSettings.DEFAULT_COUNT;
     int terrainWorkerPercentage = TerrainWorkerSettings.DEFAULT_PERCENTAGE;
     SurfaceDetailMode surfaceDetailMode = SurfaceDetailMode.DEFAULT;
     int voxelTextureSurfaceStrengthSteps = VoxelSurfaceSettings.DEFAULT_STEPS;
