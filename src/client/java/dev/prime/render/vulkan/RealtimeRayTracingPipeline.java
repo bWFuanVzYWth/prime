@@ -214,7 +214,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         int minimumBounces = input.minimumBounces();
         boolean sourceOne = false;
         for (int round = 1; round < minimumBounces; round++) {
-            this.queueBarrier(commandBuffer, stack);
+            WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
             int sourceQueue = sourceOne
                     ? ShaderAbi.WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1
                     : ShaderAbi.WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0;
@@ -224,7 +224,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                     RealtimeStandardGroups.bridgeTrace(sourceOne),
                     commandOffset,
                     sourceQueue);
-            this.queueBarrier(commandBuffer, stack);
+            WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
             this.traceQueued(
                     commandBuffer,
                     stack,
@@ -416,11 +416,6 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 ShaderAbi.WAVEFRONT_QUEUE_COUNT,
                 ShaderAbi.WAVEFRONT_QUEUE_COMMAND_STRIDE,
                 additionalSpecularBounces);
-    }
-
-    private void queueBarrier(
-            VkCommandBuffer commandBuffer, MemoryStack stack) {
-        WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
     }
 
     private void primaryDirectInputBarrier(

@@ -217,37 +217,8 @@ final class PrimeConfigCodec {
 
     static void log(PrimeConfigData data) {
         PrimeInfo.LOGGER.info(
-                "Prime settings: path tracing {}, additional specular bounces {}, minimum bounces {}, maximum bounces {}, terrain workers {}%, surface detail {} at {}x displacement height, post-processing {} quality {} (NRD-FSR {}x), latitude {} degrees, solar longitude {} degrees, sun {} EV, stars {} EV, block lights {} EV, transparent NEE {}, final exposure {} EV, HDR {}, reference white {}, auto-exposure compensation {}, default roughness {}, seamless glass {}, air gap {}, vanilla PBR presets {}, Reflex {}, DLSS frame generation {}, multiplier {}x, UI recomposition {}",
-                data.pathTracingEnabled ? "enabled" : "disabled",
-                data.additionalSpecularBounces,
-                data.minimumBounces,
-                data.maximumBounces,
-                data.terrainWorkerPercentage,
-                data.surfaceDetailMode.id(),
-                formatVoxelSurfaceStrength(data.voxelTextureSurfaceStrengthSteps),
-                data.postProcessingMode.id(),
-                data.reconstructionQuality.id(),
-                data.reconstructionQuality.upscaleRatio(),
-                data.astronomy.latitudeDegrees(),
-                data.astronomy.solarLongitudeDegrees(),
-                formatEv(data.lighting.sunQuarterSteps()),
-                formatEv(data.lighting.starQuarterSteps()),
-                formatEv(data.lighting.blockLightQuarterSteps()),
-                data.lighting.transparentNeeMode().id(),
-                formatFinalExposure(data.display.finalExposureQuarterSteps()),
-                data.hdrEnabled ? "enabled" : "disabled",
-                data.referenceWhiteNits == HdrOutput.AUTOMATIC_REFERENCE_WHITE_NITS
-                        ? "automatic"
-                        : data.referenceWhiteNits + " nits",
-                formatAutoExposureCompensation(data.display.autoExposureCompensationSteps()),
-                formatRoughness(data.material.roughnessSteps()),
-                data.material.seamlessGlass() ? "enabled" : "disabled",
-                data.material.airGap() ? "enabled" : "disabled",
-                data.material.vanillaPbrPresets() ? "enabled" : "disabled",
-                data.reflexMode.name().toLowerCase(Locale.ROOT),
-                data.dlssFrameGenerationEnabled ? "enabled" : "disabled",
-                data.dlssFrameGenerationMultiplier,
-                data.dlssFrameGenerationUiRecomposition ? "enabled" : "disabled");
+                "Prime settings:\n{}",
+                encode(data).stripTrailing().indent(2));
     }
 
     static ReflexMode parseReflexMode(String value) {
