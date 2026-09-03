@@ -14,7 +14,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 
 /** Extracts Minecraft's post-UI alpha into a Streamline UI_ALPHA image. */
 public final class UiAlphaCapturePass implements Destroyable {
-    private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
+    private static final int COMPUTE_STAGE = VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
     private static final int LOCAL_SIZE = 8;
     private static final int PUSH_SIZE = 8;
 

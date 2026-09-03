@@ -22,7 +22,7 @@ import org.lwjgl.vulkan.VkMemoryBarrier2;
 
 /** Builds Streamline depth and motion without changing Prime's top-left image coordinates. */
 public final class StreamlineInputPass implements Destroyable {
-    private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
+    private static final int COMPUTE_STAGE = VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
     private static final int LOCAL_SIZE = 8;
     private static final int PUSH_SIZE = ShaderAbi.NRD_MOTION_PUSH_CONSTANT_SIZE;
     private static final int HISTORY_VALID_OFFSET = 136;
