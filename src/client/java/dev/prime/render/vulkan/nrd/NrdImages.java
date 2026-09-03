@@ -13,126 +13,19 @@ final class NrdImages implements Destroyable {
             VK12.VK_IMAGE_USAGE_STORAGE_BIT
                     | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
                     | VK12.VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    final VulkanImage noisyDiffuse;
-    final VulkanImage noisySpecular;
-    final VulkanImage noisyDiffuseSh1;
-    final VulkanImage noisySpecularSh1;
-    final VulkanImage normalRoughness;
-    final VulkanImage viewZ;
-    final VulkanImage motion;
-    final VulkanImage fsrMotion;
-    final VulkanImage fsrDepth;
-    final VulkanImage material;
-    final VulkanImage specularMaterial;
-    final VulkanImage reconstructionControl;
-    final VulkanImage primaryPosition;
-    final VulkanImage sunLighting;
-    final VulkanImage sunPenumbra;
-    final VulkanImage sunShadow;
-    final VulkanImage denoisedDiffuse;
-    final VulkanImage denoisedSpecular;
-    final VulkanImage denoisedDiffuseSh1;
-    final VulkanImage denoisedSpecularSh1;
-    final VulkanImage reflectionNoisyDiffuse;
-    final VulkanImage reflectionNoisySpecular;
-    final VulkanImage reflectionNoisyDiffuseSh1;
-    final VulkanImage reflectionNoisySpecularSh1;
-    final VulkanImage reflectionNormalRoughness;
-    final VulkanImage reflectionViewZ;
-    final VulkanImage reflectionMotion;
-    final VulkanImage reflectionMaterial;
-    final VulkanImage reflectionSpecularMaterial;
-    final VulkanImage reflectionPosition;
-    final VulkanImage reflectionDenoisedDiffuse;
-    final VulkanImage reflectionDenoisedSpecular;
-    final VulkanImage reflectionDenoisedDiffuseSh1;
-    final VulkanImage reflectionDenoisedSpecularSh1;
-    final VulkanImage displayPosition;
-    final VulkanImage fsrReactiveMask;
-    final VulkanImage fsrTransparencyCompositionMask;
+
+    private final VulkanImage[] images;
     final VulkanImage[] permanentPool;
     final VulkanImage[] transientPool;
-    final VulkanImage[] ownedImages;
+    private final VulkanImage[] ownedImages;
     private boolean destroyed;
 
     private NrdImages(
-            VulkanImage noisyDiffuse,
-            VulkanImage noisySpecular,
-            VulkanImage noisyDiffuseSh1,
-            VulkanImage noisySpecularSh1,
-            VulkanImage normalRoughness,
-            VulkanImage viewZ,
-            VulkanImage motion,
-            VulkanImage fsrMotion,
-            VulkanImage fsrDepth,
-            VulkanImage material,
-            VulkanImage specularMaterial,
-            VulkanImage reconstructionControl,
-            VulkanImage primaryPosition,
-            VulkanImage sunLighting,
-            VulkanImage sunPenumbra,
-            VulkanImage sunShadow,
-            VulkanImage denoisedDiffuse,
-            VulkanImage denoisedSpecular,
-            VulkanImage denoisedDiffuseSh1,
-            VulkanImage denoisedSpecularSh1,
-            VulkanImage reflectionNoisyDiffuse,
-            VulkanImage reflectionNoisySpecular,
-            VulkanImage reflectionNoisyDiffuseSh1,
-            VulkanImage reflectionNoisySpecularSh1,
-            VulkanImage reflectionNormalRoughness,
-            VulkanImage reflectionViewZ,
-            VulkanImage reflectionMotion,
-            VulkanImage reflectionMaterial,
-            VulkanImage reflectionSpecularMaterial,
-            VulkanImage reflectionPosition,
-            VulkanImage reflectionDenoisedDiffuse,
-            VulkanImage reflectionDenoisedSpecular,
-            VulkanImage reflectionDenoisedDiffuseSh1,
-            VulkanImage reflectionDenoisedSpecularSh1,
-            VulkanImage displayPosition,
-            VulkanImage fsrReactiveMask,
-            VulkanImage fsrTransparencyCompositionMask,
+            VulkanImage[] images,
             VulkanImage[] permanentPool,
             VulkanImage[] transientPool,
             VulkanImage[] ownedImages) {
-        this.noisyDiffuse = noisyDiffuse;
-        this.noisySpecular = noisySpecular;
-        this.noisyDiffuseSh1 = noisyDiffuseSh1;
-        this.noisySpecularSh1 = noisySpecularSh1;
-        this.normalRoughness = normalRoughness;
-        this.viewZ = viewZ;
-        this.motion = motion;
-        this.fsrMotion = fsrMotion;
-        this.fsrDepth = fsrDepth;
-        this.material = material;
-        this.specularMaterial = specularMaterial;
-        this.reconstructionControl = reconstructionControl;
-        this.primaryPosition = primaryPosition;
-        this.sunLighting = sunLighting;
-        this.sunPenumbra = sunPenumbra;
-        this.sunShadow = sunShadow;
-        this.denoisedDiffuse = denoisedDiffuse;
-        this.denoisedSpecular = denoisedSpecular;
-        this.denoisedDiffuseSh1 = denoisedDiffuseSh1;
-        this.denoisedSpecularSh1 = denoisedSpecularSh1;
-        this.reflectionNoisyDiffuse = reflectionNoisyDiffuse;
-        this.reflectionNoisySpecular = reflectionNoisySpecular;
-        this.reflectionNoisyDiffuseSh1 = reflectionNoisyDiffuseSh1;
-        this.reflectionNoisySpecularSh1 = reflectionNoisySpecularSh1;
-        this.reflectionNormalRoughness = reflectionNormalRoughness;
-        this.reflectionViewZ = reflectionViewZ;
-        this.reflectionMotion = reflectionMotion;
-        this.reflectionMaterial = reflectionMaterial;
-        this.reflectionSpecularMaterial = reflectionSpecularMaterial;
-        this.reflectionPosition = reflectionPosition;
-        this.reflectionDenoisedDiffuse = reflectionDenoisedDiffuse;
-        this.reflectionDenoisedSpecular = reflectionDenoisedSpecular;
-        this.reflectionDenoisedDiffuseSh1 = reflectionDenoisedDiffuseSh1;
-        this.reflectionDenoisedSpecularSh1 = reflectionDenoisedSpecularSh1;
-        this.displayPosition = displayPosition;
-        this.fsrReactiveMask = fsrReactiveMask;
-        this.fsrTransparencyCompositionMask = fsrTransparencyCompositionMask;
+        this.images = images;
         this.permanentPool = permanentPool;
         this.transientPool = transientPool;
         this.ownedImages = ownedImages;
@@ -146,153 +39,28 @@ final class NrdImages implements Destroyable {
             String debugPrefix) {
         ArrayList<VulkanImage> created = new ArrayList<>();
         try {
-            VulkanImage noisy = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT, debugPrefix + " noisy diffuse");
-            VulkanImage noisySpecular = createImage(
-                    context,
-                    created,
-                    width,
-                    height,
-                    VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " noisy specular");
-            VulkanImage noisyDiffuseSh1 = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " noisy diffuse SH1");
-            VulkanImage noisySpecularSh1 = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " noisy specular SH1");
-            VulkanImage normal = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
-                    debugPrefix + " normal roughness");
-            VulkanImage viewZ = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R32_SFLOAT, debugPrefix + " view Z");
-            VulkanImage motion = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT, debugPrefix + " 2.5D screen motion");
-            VulkanImage fsrMotion = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT, debugPrefix + " visible-surface FSR motion");
-            VulkanImage fsrDepth = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R32_SFLOAT, debugPrefix + " FSR depth");
-            VulkanImage material = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT, debugPrefix + " material metadata");
-            VulkanImage specularMaterial = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT, debugPrefix + " specular material or virtual guide");
-            VulkanImage reconstructionControl = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R8_UINT,
-                    debugPrefix + " reconstruction control");
-            VulkanImage primaryPosition = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R32G32B32A32_SFLOAT, debugPrefix + " primary or virtual position");
-            VulkanImage sunLighting = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT, debugPrefix + " unshadowed sun lighting");
-            VulkanImage sunPenumbra = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16_SFLOAT, debugPrefix + " noisy sun penumbra");
-            VulkanImage sunShadow = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16_SFLOAT, debugPrefix + " SIGMA sun shadow");
-            VulkanImage denoised = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT, debugPrefix + " denoised diffuse");
-            VulkanImage denoisedSpecular = createImage(
-                    context,
-                    created,
-                    width,
-                    height,
-                    VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " denoised specular");
-            VulkanImage denoisedDiffuseSh1 = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " denoised diffuse SH1");
-            VulkanImage denoisedSpecularSh1 = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " denoised specular SH1");
-            VulkanImage reflectionNoisyDiffuse = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " reflection noisy diffuse");
-            VulkanImage reflectionNoisySpecular = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " reflection noisy specular");
-            VulkanImage reflectionNoisyDiffuseSh1 = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " reflection noisy diffuse SH1");
-            VulkanImage reflectionNoisySpecularSh1 = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " reflection noisy specular SH1");
-            VulkanImage reflectionNormalRoughness = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
-                    debugPrefix + " reflection normal roughness");
-            VulkanImage reflectionViewZ = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R32_SFLOAT,
-                    debugPrefix + " reflection view Z");
-            VulkanImage reflectionMotion = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " reflection 2.5D motion");
-            VulkanImage reflectionMaterial = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " reflection material");
-            VulkanImage reflectionSpecularMaterial = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " reflection specular material");
-            VulkanImage reflectionPosition = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
-                    debugPrefix + " reflection virtual position");
-            VulkanImage reflectionDenoisedDiffuse = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " reflection denoised diffuse");
-            VulkanImage reflectionDenoisedSpecular = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " reflection denoised specular");
-            VulkanImage reflectionDenoisedDiffuseSh1 = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " reflection denoised diffuse SH1");
-            VulkanImage reflectionDenoisedSpecularSh1 = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    debugPrefix + " reflection denoised specular SH1");
-            VulkanImage displayPosition = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
-                    debugPrefix + " visible primary position");
-            VulkanImage fsrReactiveMask = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R8_UNORM, debugPrefix + " FSR reactive mask");
-            VulkanImage fsrTransparencyCompositionMask = createImage(
-                    context, created, width, height, VK12.VK_FORMAT_R8_UNORM, debugPrefix + " FSR transparency mask");
+            Role[] roles = Role.values();
+            VulkanImage[] images = new VulkanImage[roles.length];
+            for (Role role : roles) {
+                images[role.ordinal()] = createImage(
+                        context, created, width, height, role.format, debugPrefix + role.label);
+            }
             VulkanImage[] permanent = createPool(
-                    context, created, width, height, description.permanentPool(), debugPrefix + " permanent");
+                    context,
+                    created,
+                    width,
+                    height,
+                    description.permanentPool(),
+                    debugPrefix + " permanent");
             VulkanImage[] transientImages = createPool(
-                    context, created, width, height, description.transientPool(), debugPrefix + " transient");
+                    context,
+                    created,
+                    width,
+                    height,
+                    description.transientPool(),
+                    debugPrefix + " transient");
             return new NrdImages(
-                    noisy,
-                    noisySpecular,
-                    noisyDiffuseSh1,
-                    noisySpecularSh1,
-                    normal,
-                    viewZ,
-                    motion,
-                    fsrMotion,
-                    fsrDepth,
-                    material,
-                    specularMaterial,
-                    reconstructionControl,
-                    primaryPosition,
-                    sunLighting,
-                    sunPenumbra,
-                    sunShadow,
-                    denoised,
-                    denoisedSpecular,
-                    denoisedDiffuseSh1,
-                    denoisedSpecularSh1,
-                    reflectionNoisyDiffuse,
-                    reflectionNoisySpecular,
-                    reflectionNoisyDiffuseSh1,
-                    reflectionNoisySpecularSh1,
-                    reflectionNormalRoughness,
-                    reflectionViewZ,
-                    reflectionMotion,
-                    reflectionMaterial,
-                    reflectionSpecularMaterial,
-                    reflectionPosition,
-                    reflectionDenoisedDiffuse,
-                    reflectionDenoisedSpecular,
-                    reflectionDenoisedDiffuseSh1,
-                    reflectionDenoisedSpecularSh1,
-                    displayPosition,
-                    fsrReactiveMask,
-                    fsrTransparencyCompositionMask,
+                    images,
                     permanent,
                     transientImages,
                     created.toArray(VulkanImage[]::new));
@@ -302,6 +70,54 @@ final class NrdImages implements Destroyable {
             }
             throw exception;
         }
+    }
+
+    VulkanImage get(Role role) {
+        return this.images[role.ordinal()];
+    }
+
+    VulkanImage noisyDiffuse() { return get(Role.NOISY_DIFFUSE); }
+    VulkanImage noisySpecular() { return get(Role.NOISY_SPECULAR); }
+    VulkanImage noisyDiffuseSh1() { return get(Role.NOISY_DIFFUSE_SH1); }
+    VulkanImage noisySpecularSh1() { return get(Role.NOISY_SPECULAR_SH1); }
+    VulkanImage normalRoughness() { return get(Role.NORMAL_ROUGHNESS); }
+    VulkanImage viewZ() { return get(Role.VIEW_Z); }
+    VulkanImage motion() { return get(Role.MOTION); }
+    VulkanImage fsrMotion() { return get(Role.FSR_MOTION); }
+    VulkanImage fsrDepth() { return get(Role.FSR_DEPTH); }
+    VulkanImage material() { return get(Role.MATERIAL); }
+    VulkanImage specularMaterial() { return get(Role.SPECULAR_MATERIAL); }
+    VulkanImage reconstructionControl() { return get(Role.RECONSTRUCTION_CONTROL); }
+    VulkanImage primaryPosition() { return get(Role.PRIMARY_POSITION); }
+    VulkanImage sunLighting() { return get(Role.SUN_LIGHTING); }
+    VulkanImage sunPenumbra() { return get(Role.SUN_PENUMBRA); }
+    VulkanImage sunShadow() { return get(Role.SUN_SHADOW); }
+    VulkanImage denoisedDiffuse() { return get(Role.DENOISED_DIFFUSE); }
+    VulkanImage denoisedSpecular() { return get(Role.DENOISED_SPECULAR); }
+    VulkanImage denoisedDiffuseSh1() { return get(Role.DENOISED_DIFFUSE_SH1); }
+    VulkanImage denoisedSpecularSh1() { return get(Role.DENOISED_SPECULAR_SH1); }
+    VulkanImage reflectionNoisyDiffuse() { return get(Role.REFLECTION_NOISY_DIFFUSE); }
+    VulkanImage reflectionNoisySpecular() { return get(Role.REFLECTION_NOISY_SPECULAR); }
+    VulkanImage reflectionNoisyDiffuseSh1() { return get(Role.REFLECTION_NOISY_DIFFUSE_SH1); }
+    VulkanImage reflectionNoisySpecularSh1() { return get(Role.REFLECTION_NOISY_SPECULAR_SH1); }
+    VulkanImage reflectionNormalRoughness() { return get(Role.REFLECTION_NORMAL_ROUGHNESS); }
+    VulkanImage reflectionViewZ() { return get(Role.REFLECTION_VIEW_Z); }
+    VulkanImage reflectionMotion() { return get(Role.REFLECTION_MOTION); }
+    VulkanImage reflectionMaterial() { return get(Role.REFLECTION_MATERIAL); }
+    VulkanImage reflectionSpecularMaterial() { return get(Role.REFLECTION_SPECULAR_MATERIAL); }
+    VulkanImage reflectionPosition() { return get(Role.REFLECTION_POSITION); }
+    VulkanImage reflectionDenoisedDiffuse() { return get(Role.REFLECTION_DENOISED_DIFFUSE); }
+    VulkanImage reflectionDenoisedSpecular() { return get(Role.REFLECTION_DENOISED_SPECULAR); }
+    VulkanImage reflectionDenoisedDiffuseSh1() { return get(Role.REFLECTION_DENOISED_DIFFUSE_SH1); }
+    VulkanImage reflectionDenoisedSpecularSh1() { return get(Role.REFLECTION_DENOISED_SPECULAR_SH1); }
+    VulkanImage displayPosition() { return get(Role.DISPLAY_POSITION); }
+    VulkanImage fsrReactiveMask() { return get(Role.FSR_REACTIVE_MASK); }
+    VulkanImage fsrTransparencyCompositionMask() {
+        return get(Role.FSR_TRANSPARENCY_COMPOSITION_MASK);
+    }
+
+    VulkanImage[] allImages() {
+        return this.ownedImages;
     }
 
     private static VulkanImage[] createPool(
@@ -343,19 +159,76 @@ final class NrdImages implements Destroyable {
         return image;
     }
 
-    VulkanImage[] allImages() {
-        return this.ownedImages;
-    }
-
     @Override
     public void destroy() {
         if (this.destroyed) {
             return;
         }
         this.destroyed = true;
-        VulkanImage[] owned = this.allImages();
-        for (int index = owned.length - 1; index >= 0; index--) {
-            owned[index].destroy();
+        for (int index = this.ownedImages.length - 1; index >= 0; index--) {
+            this.ownedImages[index].destroy();
+        }
+    }
+
+    enum Role {
+        NOISY_DIFFUSE(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " noisy diffuse"),
+        NOISY_SPECULAR(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " noisy specular"),
+        NOISY_DIFFUSE_SH1(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " noisy diffuse SH1"),
+        NOISY_SPECULAR_SH1(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " noisy specular SH1"),
+        NORMAL_ROUGHNESS(VK12.VK_FORMAT_R32G32B32A32_SFLOAT, " normal roughness"),
+        VIEW_Z(VK12.VK_FORMAT_R32_SFLOAT, " view Z"),
+        MOTION(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " 2.5D screen motion"),
+        FSR_MOTION(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " visible-surface FSR motion"),
+        FSR_DEPTH(VK12.VK_FORMAT_R32_SFLOAT, " FSR depth"),
+        MATERIAL(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " material metadata"),
+        SPECULAR_MATERIAL(
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " specular material or virtual guide"),
+        RECONSTRUCTION_CONTROL(VK12.VK_FORMAT_R8_UINT, " reconstruction control"),
+        PRIMARY_POSITION(VK12.VK_FORMAT_R32G32B32A32_SFLOAT, " primary or virtual position"),
+        SUN_LIGHTING(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " unshadowed sun lighting"),
+        SUN_PENUMBRA(VK12.VK_FORMAT_R16_SFLOAT, " noisy sun penumbra"),
+        SUN_SHADOW(VK12.VK_FORMAT_R16_SFLOAT, " SIGMA sun shadow"),
+        DENOISED_DIFFUSE(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " denoised diffuse"),
+        DENOISED_SPECULAR(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " denoised specular"),
+        DENOISED_DIFFUSE_SH1(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " denoised diffuse SH1"),
+        DENOISED_SPECULAR_SH1(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " denoised specular SH1"),
+        REFLECTION_NOISY_DIFFUSE(
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " reflection noisy diffuse"),
+        REFLECTION_NOISY_SPECULAR(
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " reflection noisy specular"),
+        REFLECTION_NOISY_DIFFUSE_SH1(
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " reflection noisy diffuse SH1"),
+        REFLECTION_NOISY_SPECULAR_SH1(
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " reflection noisy specular SH1"),
+        REFLECTION_NORMAL_ROUGHNESS(
+                VK12.VK_FORMAT_R32G32B32A32_SFLOAT, " reflection normal roughness"),
+        REFLECTION_VIEW_Z(VK12.VK_FORMAT_R32_SFLOAT, " reflection view Z"),
+        REFLECTION_MOTION(
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " reflection 2.5D motion"),
+        REFLECTION_MATERIAL(
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " reflection material"),
+        REFLECTION_SPECULAR_MATERIAL(
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " reflection specular material"),
+        REFLECTION_POSITION(
+                VK12.VK_FORMAT_R32G32B32A32_SFLOAT, " reflection virtual position"),
+        REFLECTION_DENOISED_DIFFUSE(
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " reflection denoised diffuse"),
+        REFLECTION_DENOISED_SPECULAR(
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " reflection denoised specular"),
+        REFLECTION_DENOISED_DIFFUSE_SH1(
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " reflection denoised diffuse SH1"),
+        REFLECTION_DENOISED_SPECULAR_SH1(
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT, " reflection denoised specular SH1"),
+        DISPLAY_POSITION(VK12.VK_FORMAT_R32G32B32A32_SFLOAT, " visible primary position"),
+        FSR_REACTIVE_MASK(VK12.VK_FORMAT_R8_UNORM, " FSR reactive mask"),
+        FSR_TRANSPARENCY_COMPOSITION_MASK(VK12.VK_FORMAT_R8_UNORM, " FSR transparency mask");
+
+        private final int format;
+        private final String label;
+
+        Role(int format, String label) {
+            this.format = format;
+            this.label = label;
         }
     }
 
@@ -409,5 +282,4 @@ final class NrdImages implements Destroyable {
                     "Unsupported NRD texture format " + nrdFormat);
         };
     }
-
 }

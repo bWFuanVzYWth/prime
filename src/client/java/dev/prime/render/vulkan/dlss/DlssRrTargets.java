@@ -5,7 +5,6 @@ import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.RawWavefrontFrame;
 import dev.prime.render.vulkan.VulkanImageInitializationBatch;
-import java.util.ArrayList;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
 import org.lwjgl.vulkan.KHRSynchronization2;
@@ -28,49 +27,11 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
                     | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
                     | VK12.VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
-    private final VulkanImage noisyDiffuse;
-    private final VulkanImage noisySpecular;
-    private final VulkanImage sourceNormalRoughness;
-    private final VulkanImage linearViewZ;
-    private final VulkanImage transportScratch;
-    private final VulkanImage motion;
-    private final VulkanImage material;
-    private final VulkanImage specularMaterial;
-    private final VulkanImage primaryPosition;
-    private final VulkanImage sunLighting;
-    private final VulkanImage sunPenumbra;
-    private final VulkanImage inputColor;
-    private final VulkanImage reflectionNormalRoughness;
-    private final VulkanImage specularMotion;
-    private final VulkanImage specularHitDistance;
-    private final VulkanImage reflectionPosition;
-    private final VulkanImage rrOutput;
-    private final VulkanImage responsivity;
-    private final VulkanImage reconstructionControl;
     private final VulkanImage[] owned;
     private boolean destroyed;
 
-    private DlssRrTargets(ArrayList<VulkanImage> images) {
-        this.noisyDiffuse = images.get(0);
-        this.noisySpecular = images.get(1);
-        this.sourceNormalRoughness = images.get(2);
-        this.linearViewZ = images.get(3);
-        this.transportScratch = images.get(4);
-        this.motion = images.get(5);
-        this.material = images.get(6);
-        this.specularMaterial = images.get(7);
-        this.primaryPosition = images.get(8);
-        this.sunLighting = images.get(9);
-        this.sunPenumbra = images.get(10);
-        this.inputColor = this.transportScratch;
-        this.reflectionNormalRoughness = images.get(11);
-        this.specularMotion = images.get(12);
-        this.specularHitDistance = this.sunPenumbra;
-        this.reflectionPosition = images.get(13);
-        this.rrOutput = images.get(14);
-        this.responsivity = images.get(15);
-        this.reconstructionControl = images.get(16);
-        this.owned = images.toArray(VulkanImage[]::new);
+    private DlssRrTargets(VulkanImage[] owned) {
+        this.owned = owned;
     }
 
     public static DlssRrTargets create(
@@ -79,63 +40,27 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
             int renderHeight,
             int displayWidth,
             int displayHeight) {
-        ArrayList<VulkanImage> images = new ArrayList<>();
+        Role[] roles = Role.values();
+        VulkanImage[] images = new VulkanImage[roles.length];
+        int created = 0;
         try {
-            add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "Prime RR noisy diffuse");
-            add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "Prime RR noisy specular");
-            add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
-                    "Prime RR world normal and roughness");
-            add(context, images, renderWidth, renderHeight,
-                    LINEAR_DEPTH_FORMAT, "Prime RR linear view Z");
-            add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    "Prime RR transport scratch / input color");
-            add(context, images, renderWidth, renderHeight,
-                    MOTION_FORMAT, "Prime RR canonical visible motion");
-            add(context, images, renderWidth, renderHeight,
-                    ALBEDO_FORMAT, "Prime RR diffuse albedo and distance");
-            add(context, images, renderWidth, renderHeight,
-                    ALBEDO_FORMAT, "Prime RR specular albedo and material flags");
-            add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_R32G32B32A32_SFLOAT, "Prime RR primary position");
-            add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "Prime RR sun lighting");
-            add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_R16_SFLOAT,
-                    "Prime RR sun penumbra / specular hit distance");
-            add(context, images, renderWidth, renderHeight,
-                    NORMAL_ROUGHNESS_FORMAT, "Prime RR reflection guide surface");
-            add(context, images, renderWidth, renderHeight,
-                    SPECULAR_MOTION_FORMAT, "Prime RR reflection motion");
-            add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
-                    "Prime RR reflection previous virtual position");
-            add(context, images, displayWidth, displayHeight,
-                    COLOR_FORMAT, "Prime RR linear HDR output");
-            add(context, images, renderWidth, renderHeight,
-                    RESPONSIVITY_FORMAT, "Prime RR responsivity");
-            add(context, images, renderWidth, renderHeight,
-                    VK12.VK_FORMAT_R8_UINT, "Prime RR reconstruction control");
+            for (Role role : roles) {
+                int width = role.displayExtent ? displayWidth : renderWidth;
+                int height = role.displayExtent ? displayHeight : renderHeight;
+                images[created++] = context.createImage2D(
+                        width, height, role.format, USAGE, role.label);
+            }
             return new DlssRrTargets(images);
         } catch (RuntimeException exception) {
-            for (int index = images.size() - 1; index >= 0; index--) {
-                images.get(index).destroy();
+            for (int index = created - 1; index >= 0; index--) {
+                images[index].destroy();
             }
             throw exception;
         }
     }
 
-    private static void add(
-            VulkanContext context,
-            ArrayList<VulkanImage> images,
-            int width,
-            int height,
-            int format,
-            String label) {
-        images.add(context.createImage2D(width, height, format, USAGE, label));
+    private VulkanImage image(Role role) {
+        return this.owned[role.ordinal()];
     }
 
     /** Transitions the exact RR resource set to its lifetime-stable GENERAL layout. */
@@ -180,30 +105,30 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
         }
     }
 
-    @Override public VulkanImage noisyDiffuse() { return this.noisyDiffuse; }
-    @Override public VulkanImage noisySpecular() { return this.noisySpecular; }
-    @Override public VulkanImage normalRoughness() { return this.sourceNormalRoughness; }
-    @Override public VulkanImage viewZ() { return this.linearViewZ; }
-    @Override public VulkanImage transportScratch() { return this.transportScratch; }
-    @Override public VulkanImage reconstructionMotion() { return this.motion; }
-    @Override public VulkanImage material() { return this.material; }
-    @Override public VulkanImage specularMaterial() { return this.specularMaterial; }
+    @Override public VulkanImage noisyDiffuse() { return image(Role.NOISY_DIFFUSE); }
+    @Override public VulkanImage noisySpecular() { return image(Role.NOISY_SPECULAR); }
+    @Override public VulkanImage normalRoughness() { return image(Role.NORMAL_ROUGHNESS); }
+    @Override public VulkanImage viewZ() { return image(Role.VIEW_Z); }
+    @Override public VulkanImage transportScratch() { return image(Role.TRANSPORT_SCRATCH); }
+    @Override public VulkanImage reconstructionMotion() { return image(Role.MOTION); }
+    @Override public VulkanImage material() { return image(Role.MATERIAL); }
+    @Override public VulkanImage specularMaterial() { return image(Role.SPECULAR_MATERIAL); }
     @Override public VulkanImage reflectionNormalRoughness() {
-        return this.reflectionNormalRoughness;
+        return image(Role.REFLECTION_NORMAL_ROUGHNESS);
     }
-    @Override public VulkanImage reconstructionControl() { return this.reconstructionControl; }
-    @Override public VulkanImage primaryPosition() { return this.primaryPosition; }
-    @Override public VulkanImage reflectionPosition() { return this.reflectionPosition; }
-    @Override public VulkanImage sunLighting() { return this.sunLighting; }
-    @Override public VulkanImage sunPenumbra() { return this.sunPenumbra; }
+    @Override public VulkanImage reconstructionControl() { return image(Role.RECONSTRUCTION_CONTROL); }
+    @Override public VulkanImage primaryPosition() { return image(Role.PRIMARY_POSITION); }
+    @Override public VulkanImage reflectionPosition() { return image(Role.REFLECTION_POSITION); }
+    @Override public VulkanImage sunLighting() { return image(Role.SUN_LIGHTING); }
+    @Override public VulkanImage sunPenumbra() { return image(Role.SUN_PENUMBRA); }
 
-    public VulkanImage inputColor() { return this.inputColor; }
-    public VulkanImage motion() { return this.motion; }
-    public VulkanImage rrNormalRoughness() { return this.sourceNormalRoughness; }
-    public VulkanImage specularMotion() { return this.specularMotion; }
-    public VulkanImage specularHitDistance() { return this.specularHitDistance; }
-    public VulkanImage rrOutput() { return this.rrOutput; }
-    public VulkanImage responsivity() { return this.responsivity; }
+    public VulkanImage inputColor() { return image(Role.TRANSPORT_SCRATCH); }
+    public VulkanImage motion() { return image(Role.MOTION); }
+    public VulkanImage rrNormalRoughness() { return image(Role.NORMAL_ROUGHNESS); }
+    public VulkanImage specularMotion() { return image(Role.SPECULAR_MOTION); }
+    public VulkanImage specularHitDistance() { return image(Role.SUN_PENUMBRA); }
+    public VulkanImage rrOutput() { return image(Role.OUTPUT); }
+    public VulkanImage responsivity() { return image(Role.RESPONSIVITY); }
 
     @Override
     public void destroy() {
@@ -213,6 +138,43 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
         this.destroyed = true;
         for (int index = this.owned.length - 1; index >= 0; index--) {
             this.owned[index].destroy();
+        }
+    }
+
+    private enum Role {
+        NOISY_DIFFUSE(COLOR_FORMAT, "Prime RR noisy diffuse"),
+        NOISY_SPECULAR(COLOR_FORMAT, "Prime RR noisy specular"),
+        NORMAL_ROUGHNESS(NORMAL_ROUGHNESS_FORMAT, "Prime RR world normal and roughness"),
+        VIEW_Z(LINEAR_DEPTH_FORMAT, "Prime RR linear view Z"),
+        TRANSPORT_SCRATCH(COLOR_FORMAT, "Prime RR transport scratch / input color"),
+        MOTION(MOTION_FORMAT, "Prime RR canonical visible motion"),
+        MATERIAL(ALBEDO_FORMAT, "Prime RR diffuse albedo and distance"),
+        SPECULAR_MATERIAL(ALBEDO_FORMAT, "Prime RR specular albedo and material flags"),
+        PRIMARY_POSITION(VK12.VK_FORMAT_R32G32B32A32_SFLOAT, "Prime RR primary position"),
+        SUN_LIGHTING(COLOR_FORMAT, "Prime RR sun lighting"),
+        SUN_PENUMBRA(SPECULAR_HIT_DISTANCE_FORMAT,
+                "Prime RR sun penumbra / specular hit distance"),
+        REFLECTION_NORMAL_ROUGHNESS(NORMAL_ROUGHNESS_FORMAT,
+                "Prime RR reflection guide surface"),
+        SPECULAR_MOTION(SPECULAR_MOTION_FORMAT, "Prime RR reflection motion"),
+        REFLECTION_POSITION(VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
+                "Prime RR reflection previous virtual position"),
+        OUTPUT(COLOR_FORMAT, "Prime RR linear HDR output", true),
+        RESPONSIVITY(RESPONSIVITY_FORMAT, "Prime RR responsivity"),
+        RECONSTRUCTION_CONTROL(VK12.VK_FORMAT_R8_UINT, "Prime RR reconstruction control");
+
+        final int format;
+        final String label;
+        final boolean displayExtent;
+
+        Role(int format, String label) {
+            this(format, label, false);
+        }
+
+        Role(int format, String label, boolean displayExtent) {
+            this.format = format;
+            this.label = label;
+            this.displayExtent = displayExtent;
         }
     }
 }

@@ -99,24 +99,24 @@ public final class NrdDenoiser implements Destroyable {
         this.rawFrame = new RawSignals(images);
         this.preparedFrame = new PreparedNrdFrame(
                 new PreparedNrdFrame.Branch(
-                        images.motion,
-                        images.normalRoughness,
-                        images.viewZ,
-                        images.noisyDiffuse,
-                        images.noisySpecular,
-                        images.noisyDiffuseSh1,
-                        images.noisySpecularSh1),
+                        images.motion(),
+                        images.normalRoughness(),
+                        images.viewZ(),
+                        images.noisyDiffuse(),
+                        images.noisySpecular(),
+                        images.noisyDiffuseSh1(),
+                        images.noisySpecularSh1()),
                 new PreparedNrdFrame.Branch(
-                        images.reflectionMotion,
-                        images.reflectionNormalRoughness,
-                        images.reflectionViewZ,
-                        images.reflectionNoisyDiffuse,
-                        images.reflectionNoisySpecular,
-                        images.reflectionNoisyDiffuseSh1,
-                        images.reflectionNoisySpecularSh1),
-                images.sunPenumbra,
-                images.fsrDepth,
-                images.fsrMotion);
+                        images.reflectionMotion(),
+                        images.reflectionNormalRoughness(),
+                        images.reflectionViewZ(),
+                        images.reflectionNoisyDiffuse(),
+                        images.reflectionNoisySpecular(),
+                        images.reflectionNoisyDiffuseSh1(),
+                        images.reflectionNoisySpecularSh1()),
+                images.sunPenumbra(),
+                images.fsrDepth(),
+                images.fsrMotion());
         this.atmosphere = atmosphere;
         this.nearestSampler = nearestSampler;
         this.linearSampler = linearSampler;
@@ -205,19 +205,19 @@ public final class NrdDenoiser implements Destroyable {
     }
 
     public VulkanImage fsrMotion() {
-        return this.images.fsrMotion;
+        return this.images.fsrMotion();
     }
 
     public VulkanImage fsrDepth() {
-        return this.images.fsrDepth;
+        return this.images.fsrDepth();
     }
 
     public VulkanImage fsrReactiveMask() {
-        return this.images.fsrReactiveMask;
+        return this.images.fsrReactiveMask();
     }
 
     public VulkanImage fsrTransparencyCompositionMask() {
-        return this.images.fsrTransparencyCompositionMask;
+        return this.images.fsrTransparencyCompositionMask();
     }
 
     /**
@@ -404,13 +404,13 @@ public final class NrdDenoiser implements Destroyable {
                     NrdNative.RESOURCE_IN_SPEC_SH1,
                     NrdNative.RESOURCE_IN_PENUMBRA ->
                     prepared.resolveInput(resourceType, identifier);
-            case NrdNative.RESOURCE_OUT_DIFF_RADIANCE_HITDIST -> reflection ? this.images.reflectionDenoisedDiffuse : this.images.denoisedDiffuse;
-            case NrdNative.RESOURCE_OUT_SPEC_RADIANCE_HITDIST -> reflection ? this.images.reflectionDenoisedSpecular : this.images.denoisedSpecular;
-            case NrdNative.RESOURCE_OUT_DIFF_SH0 -> reflection ? this.images.reflectionDenoisedDiffuse : this.images.denoisedDiffuse;
-            case NrdNative.RESOURCE_OUT_DIFF_SH1 -> reflection ? this.images.reflectionDenoisedDiffuseSh1 : this.images.denoisedDiffuseSh1;
-            case NrdNative.RESOURCE_OUT_SPEC_SH0 -> reflection ? this.images.reflectionDenoisedSpecular : this.images.denoisedSpecular;
-            case NrdNative.RESOURCE_OUT_SPEC_SH1 -> reflection ? this.images.reflectionDenoisedSpecularSh1 : this.images.denoisedSpecularSh1;
-            case NrdNative.RESOURCE_OUT_SHADOW_TRANSLUCENCY -> this.images.sunShadow;
+            case NrdNative.RESOURCE_OUT_DIFF_RADIANCE_HITDIST -> reflection ? this.images.reflectionDenoisedDiffuse() : this.images.denoisedDiffuse();
+            case NrdNative.RESOURCE_OUT_SPEC_RADIANCE_HITDIST -> reflection ? this.images.reflectionDenoisedSpecular() : this.images.denoisedSpecular();
+            case NrdNative.RESOURCE_OUT_DIFF_SH0 -> reflection ? this.images.reflectionDenoisedDiffuse() : this.images.denoisedDiffuse();
+            case NrdNative.RESOURCE_OUT_DIFF_SH1 -> reflection ? this.images.reflectionDenoisedDiffuseSh1() : this.images.denoisedDiffuseSh1();
+            case NrdNative.RESOURCE_OUT_SPEC_SH0 -> reflection ? this.images.reflectionDenoisedSpecular() : this.images.denoisedSpecular();
+            case NrdNative.RESOURCE_OUT_SPEC_SH1 -> reflection ? this.images.reflectionDenoisedSpecularSh1() : this.images.denoisedSpecularSh1();
+            case NrdNative.RESOURCE_OUT_SHADOW_TRANSLUCENCY -> this.images.sunShadow();
             case NrdNative.RESOURCE_TRANSIENT_POOL -> checkedPoolImage(
                     this.images.transientPool, indexInPool, "transient");
             case NrdNative.RESOURCE_PERMANENT_POOL -> checkedPoolImage(
@@ -640,49 +640,49 @@ public final class NrdDenoiser implements Destroyable {
             this.images = images;
         }
 
-        @Override public VulkanImage noisyDiffuse() { return this.images.noisyDiffuse; }
-        @Override public VulkanImage noisySpecular() { return this.images.noisySpecular; }
-        @Override public VulkanImage diffuseDirection() { return this.images.noisyDiffuseSh1; }
-        @Override public VulkanImage specularDirection() { return this.images.noisySpecularSh1; }
-        @Override public VulkanImage normalRoughness() { return this.images.normalRoughness; }
-        @Override public VulkanImage viewZ() { return this.images.viewZ; }
-        @Override public VulkanImage transportScratch() { return this.images.fsrMotion; }
-        @Override public VulkanImage reconstructionMotion() { return this.images.fsrMotion; }
-        @Override public VulkanImage material() { return this.images.material; }
-        @Override public VulkanImage specularMaterial() { return this.images.specularMaterial; }
+        @Override public VulkanImage noisyDiffuse() { return this.images.noisyDiffuse(); }
+        @Override public VulkanImage noisySpecular() { return this.images.noisySpecular(); }
+        @Override public VulkanImage diffuseDirection() { return this.images.noisyDiffuseSh1(); }
+        @Override public VulkanImage specularDirection() { return this.images.noisySpecularSh1(); }
+        @Override public VulkanImage normalRoughness() { return this.images.normalRoughness(); }
+        @Override public VulkanImage viewZ() { return this.images.viewZ(); }
+        @Override public VulkanImage transportScratch() { return this.images.fsrMotion(); }
+        @Override public VulkanImage reconstructionMotion() { return this.images.fsrMotion(); }
+        @Override public VulkanImage material() { return this.images.material(); }
+        @Override public VulkanImage specularMaterial() { return this.images.specularMaterial(); }
         @Override public VulkanImage reconstructionControl() {
-            return this.images.reconstructionControl;
+            return this.images.reconstructionControl();
         }
-        @Override public VulkanImage primaryPosition() { return this.images.primaryPosition; }
-        @Override public VulkanImage sunLighting() { return this.images.sunLighting; }
-        @Override public VulkanImage sunPenumbra() { return this.images.sunPenumbra; }
+        @Override public VulkanImage primaryPosition() { return this.images.primaryPosition(); }
+        @Override public VulkanImage sunLighting() { return this.images.sunLighting(); }
+        @Override public VulkanImage sunPenumbra() { return this.images.sunPenumbra(); }
         @Override public VulkanImage reflectionNoisyDiffuse() {
-            return this.images.reflectionNoisyDiffuse;
+            return this.images.reflectionNoisyDiffuse();
         }
         @Override public VulkanImage reflectionNoisySpecular() {
-            return this.images.reflectionNoisySpecular;
+            return this.images.reflectionNoisySpecular();
         }
         @Override public VulkanImage reflectionNormalRoughness() {
-            return this.images.reflectionNormalRoughness;
+            return this.images.reflectionNormalRoughness();
         }
         @Override public VulkanImage reflectionMaterial() {
-            return this.images.reflectionMaterial;
+            return this.images.reflectionMaterial();
         }
         @Override public VulkanImage reflectionSpecularMaterial() {
-            return this.images.reflectionSpecularMaterial;
+            return this.images.reflectionSpecularMaterial();
         }
         @Override public VulkanImage reflectionPosition() {
-            return this.images.reflectionPosition;
+            return this.images.reflectionPosition();
         }
         @Override public VulkanImage reflectionDiffuseDirection() {
-            return this.images.reflectionNoisyDiffuseSh1;
+            return this.images.reflectionNoisyDiffuseSh1();
         }
         @Override public VulkanImage reflectionSpecularDirection() {
-            return this.images.reflectionNoisySpecularSh1;
+            return this.images.reflectionNoisySpecularSh1();
         }
-        @Override public VulkanImage displayPosition() { return this.images.displayPosition; }
+        @Override public VulkanImage displayPosition() { return this.images.displayPosition(); }
         @Override public VulkanImage visibleHistoryPosition() {
-            return this.images.displayPosition;
+            return this.images.displayPosition();
         }
         @Override public boolean hasExactTransmissiveVisibleHistory() { return true; }
         @Override public boolean usesShInputs() { return true; }
