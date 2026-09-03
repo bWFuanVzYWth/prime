@@ -1,61 +1,169 @@
 package dev.prime.render.vulkan.reconstruction;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
+import dev.prime.infrastructure.ResourceCleanup;
+import dev.prime.render.diagnostic.RendererImageView;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.post.ReconstructionQualityMode;
-import dev.prime.render.diagnostic.RendererImageView;
+import dev.prime.render.post.SubmittedFrame;
 import dev.prime.render.vulkan.RawWavefrontFrame;
+import dev.prime.render.vulkan.RendererImageDebugPass;
+import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.VulkanImageInitializationBatch;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
 /** Vulkan command, image, frame-token and lifetime boundary of a reconstruction backend. */
-public interface VulkanReconstructionProcessor extends Destroyable {
-    PostProcessingMode mode();
+public abstract class VulkanReconstructionProcessor implements Destroyable {
+    private final VulkanContext context;
+    private final PostProcessingMode mode;
+    private final ReconstructionQualityMode quality;
+    private final int renderWidth;
+    private final int renderHeight;
+    private final int displayWidth;
+    private final int displayHeight;
+    private final VulkanImage stableRadiance;
+    private final VulkanImage displayOutput;
+    private RendererImageDebugPass rendererDebugPass;
+    private boolean destroyed;
 
-    ReconstructionQualityMode quality();
+    protected VulkanReconstructionProcessor(
+            VulkanContext context,
+            PostProcessingMode mode,
+            ReconstructionQualityMode quality,
+            int renderWidth,
+            int renderHeight,
+            int displayWidth,
+            int displayHeight,
+            VulkanImage stableRadiance,
+            VulkanImage displayOutput) {
+        this.context = context;
+        this.mode = mode;
+        this.quality = quality;
+        this.renderWidth = renderWidth;
+        this.renderHeight = renderHeight;
+        this.displayWidth = displayWidth;
+        this.displayHeight = displayHeight;
+        this.stableRadiance = stableRadiance;
+        this.displayOutput = displayOutput;
+    }
 
-    int renderWidth();
+    public final PostProcessingMode mode() { return this.mode; }
+    public final ReconstructionQualityMode quality() { return this.quality; }
+    public final int renderWidth() { return this.renderWidth; }
+    public final int renderHeight() { return this.renderHeight; }
+    public final int displayWidth() { return this.displayWidth; }
+    public final int displayHeight() { return this.displayHeight; }
 
-    int renderHeight();
+    protected final VulkanContext context() { return this.context; }
+    protected final VulkanImage displayOutput() { return this.displayOutput; }
 
-    int displayWidth();
+    protected final Frame newSubmittedFrame(ReconstructionFrameParameters parameters) {
+        return new SubmittedFrameToken(this, parameters);
+    }
 
-    int displayHeight();
+    protected final ReconstructionFrameParameters claimSubmittedFrame(Frame frame) {
+        return requireSubmittedFrame(frame).parameters.claimForExecution();
+    }
 
-    RawWavefrontFrame rawFrame();
+    protected final void submittedFrame(Frame frame) {
+        requireSubmittedFrame(frame).parameters.submitted();
+    }
 
-    VulkanImage linearHdrOutput();
+    protected final void abandonSubmittedFrame(Frame frame) {
+        requireSubmittedFrame(frame).parameters.abandon();
+    }
 
-    VulkanImage hdrDisplayOutput();
+    private SubmittedFrameToken requireSubmittedFrame(Frame frame) {
+        requireOpen();
+        if (!(frame instanceof SubmittedFrameToken token) || token.owner != this) {
+            throw new IllegalArgumentException(
+                    "Frame token does not belong to this reconstruction processor");
+        }
+        return token;
+    }
 
-    long displayExposureStateBuffer();
+    public abstract RawWavefrontFrame rawFrame();
 
-    Frame beginFrame(
+    public abstract VulkanImage linearHdrOutput();
+
+    public abstract VulkanImage hdrDisplayOutput();
+
+    public abstract long displayExposureStateBuffer();
+
+    public abstract Frame beginFrame(
             ReconstructionFrameParameters parameters,
             ReconstructionDebugSettings debugSettings);
 
-    void prepareForRayTrace(
+    public abstract void prepareForRayTrace(
             VkCommandBuffer commandBuffer,
             VulkanImageInitializationBatch initialization);
 
-    void captureRendererDiagnostic(
+    public final void captureRendererDiagnostic(
             VkCommandBuffer commandBuffer,
             VulkanImageInitializationBatch initialization,
-            RendererImageView view);
+            RendererImageView view) {
+        if (view.active() && view != RendererImageView.DENOISED_OUTPUT) {
+            rendererDebugPass().capture(commandBuffer, initialization, view);
+        }
+    }
 
-    void record(
+    public abstract void record(
             VkCommandBuffer commandBuffer,
             Frame frame,
             VulkanImageInitializationBatch initialization);
 
-    void presentRendererDiagnostic(
-            VkCommandBuffer commandBuffer, RendererImageView view);
+    public final void presentRendererDiagnostic(
+            VkCommandBuffer commandBuffer, RendererImageView view) {
+        if (view.active()) rendererDebugPass().present(commandBuffer, view);
+    }
 
-    void abandon(Frame frame);
+    public abstract void abandon(Frame frame);
 
-    void submitted(Frame frame);
+    public abstract void submitted(Frame frame);
 
-    interface Frame { }
+    private RendererImageDebugPass rendererDebugPass() {
+        if (this.rendererDebugPass == null) {
+            this.rendererDebugPass = RendererImageDebugPass.create(
+                    this.context,
+                    rawFrame(),
+                    this.stableRadiance,
+                    linearHdrOutput(),
+                    this.displayOutput,
+                    hdrDisplayOutput());
+        }
+        return this.rendererDebugPass;
+    }
+
+    protected final void requireOpen() {
+        if (this.destroyed) {
+            throw new IllegalStateException("Reconstruction processor is destroyed");
+        }
+    }
+
+    protected final boolean destroyed() { return this.destroyed; }
+
+    protected final RuntimeException destroyRendererDiagnostic(RuntimeException failure) {
+        return ResourceCleanup.destroy(this.rendererDebugPass, failure);
+    }
+
+    protected final void finishDestroy(RuntimeException failure) {
+        this.destroyed = true;
+        ResourceCleanup.throwIfFailed(failure);
+    }
+
+    public interface Frame { }
+
+    protected static class SubmittedFrameToken implements Frame {
+        private final VulkanReconstructionProcessor owner;
+        private final SubmittedFrame<ReconstructionFrameParameters> parameters;
+
+        protected SubmittedFrameToken(
+                VulkanReconstructionProcessor owner,
+                ReconstructionFrameParameters parameters) {
+            this.owner = owner;
+            this.parameters = new SubmittedFrame<>(parameters);
+        }
+    }
 }

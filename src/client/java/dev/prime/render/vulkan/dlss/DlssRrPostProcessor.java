@@ -2,18 +2,15 @@ package dev.prime.render.vulkan.dlss;
 
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.RrInputView;
-import dev.prime.render.diagnostic.RendererImageView;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.post.ReconstructionQualityMode;
-import dev.prime.render.post.SubmittedFrame;
 import dev.prime.render.vulkan.AtmospherePipeline;
 import dev.prime.render.vulkan.DisplayTransformPass;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.VulkanImageInitializationBatch;
 import dev.prime.render.vulkan.VulkanSync;
-import dev.prime.render.vulkan.RendererImageDebugPass;
 import dev.prime.render.post.nrd.NrdCameraTransform;
 import dev.prime.render.vulkan.reconstruction.ReconstructionDebugSettings;
 import dev.prime.render.vulkan.reconstruction.VulkanReconstructionProcessor;
@@ -22,23 +19,13 @@ import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
 /** Prime's complete real-time path-tracing to DLSS Ray Reconstruction frame boundary. */
-public final class DlssRrPostProcessor implements VulkanReconstructionProcessor {
-    private final VulkanContext context;
-    private final ReconstructionQualityMode quality;
-    private final int renderWidth;
-    private final int renderHeight;
-    private final int displayWidth;
-    private final int displayHeight;
+public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
     private final DlssRrTargets targets;
     private final DlssRrPreparePass preparePass;
     private final DlssRrNative.Feature feature;
     private final DisplayTransformPass displayTransform;
-    private final VulkanImage displayOutput;
-    private final VulkanImage stableRadiance;
     private DlssRrDebugPass debugPass;
-    private RendererImageDebugPass rendererDebugPass;
     private final Matrix4f ngxProjection = new Matrix4f();
-    private boolean destroyed;
 
     private DlssRrPostProcessor(
             VulkanContext context,
@@ -53,18 +40,20 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
             DisplayTransformPass displayTransform,
             VulkanImage displayOutput,
             VulkanImage stableRadiance) {
-        this.context = context;
-        this.quality = quality;
-        this.renderWidth = renderWidth;
-        this.renderHeight = renderHeight;
-        this.displayWidth = displayWidth;
-        this.displayHeight = displayHeight;
+        super(
+                context,
+                PostProcessingMode.DLSS_RR,
+                quality,
+                renderWidth,
+                renderHeight,
+                displayWidth,
+                displayHeight,
+                stableRadiance,
+                displayOutput);
         this.targets = targets;
         this.preparePass = preparePass;
         this.feature = feature;
         this.displayTransform = displayTransform;
-        this.displayOutput = displayOutput;
-        this.stableRadiance = stableRadiance;
     }
 
     public static DlssRrPostProcessor create(
@@ -124,7 +113,6 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         }
     }
 
-    @Override public PostProcessingMode mode() { return PostProcessingMode.DLSS_RR; }
     @Override public DlssRrTargets rawFrame() { return this.targets; }
     @Override public VulkanImage linearHdrOutput() { return this.targets.rrOutput(); }
     @Override public VulkanImage hdrDisplayOutput() { return this.displayTransform.hdrOutput(); }
@@ -132,24 +120,13 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         return this.displayTransform.exposureState().handle();
     }
     @Override
-    public ReconstructionQualityMode quality() { return this.quality; }
-    @Override
-    public int renderWidth() { return this.renderWidth; }
-    @Override
-    public int renderHeight() { return this.renderHeight; }
-    @Override
-    public int displayWidth() { return this.displayWidth; }
-    @Override
-    public int displayHeight() { return this.displayHeight; }
-
-    @Override
     public Frame beginFrame(
             ReconstructionFrameParameters parameters,
             ReconstructionDebugSettings debugSettings) {
         requireOpen();
         return new FrameToken(
                 this,
-                new SubmittedFrame<>(parameters),
+                parameters,
                 debugSettings.images().rr(),
                 debugSettings.rrResponsivity());
     }
@@ -162,16 +139,6 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
     }
 
     @Override
-    public void captureRendererDiagnostic(
-            VkCommandBuffer commandBuffer,
-            VulkanImageInitializationBatch initialization,
-            RendererImageView view) {
-        if (view.active() && view != RendererImageView.DENOISED_OUTPUT) {
-            this.rendererDebugPass().capture(commandBuffer, initialization, view);
-        }
-    }
-
-    @Override
     public void record(
             VkCommandBuffer commandBuffer,
             Frame frame,
@@ -180,10 +147,7 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         if (!(frame instanceof FrameToken token)) {
             throw new IllegalArgumentException("DLSS RR received another processor's frame token");
         }
-        if (token.owner != this) {
-            throw new IllegalArgumentException("DLSS RR frame token does not belong to this recording");
-        }
-        ReconstructionFrameParameters parameters = token.parameters.claimForExecution();
+        ReconstructionFrameParameters parameters = claimSubmittedFrame(token);
         this.preparePass.record(
                 commandBuffer,
                 parameters.camera(),
@@ -197,11 +161,11 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         this.feature.evaluate(
                 commandBuffer,
                 new DlssRrNative.Evaluation(
-                        this.renderWidth,
-                        this.renderHeight,
+                        renderWidth(),
+                        renderHeight(),
                         parameters.jitter(),
-                        this.renderWidth,
-                        this.renderHeight,
+                        renderWidth(),
+                        renderHeight(),
                         parameters.reset(),
                         parameters.deltaMilliseconds(),
                         parameters.camera().viewRotation(),
@@ -230,12 +194,6 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         }
     }
 
-    @Override
-    public void presentRendererDiagnostic(
-            VkCommandBuffer commandBuffer, RendererImageView view) {
-        if (view.active()) this.rendererDebugPass().present(commandBuffer, view);
-    }
-
     private static void allCommandsToCompute(VkCommandBuffer commandBuffer) {
         VulkanSync.memoryBarrier(
                 commandBuffer,
@@ -248,86 +206,49 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
     private DlssRrDebugPass debugPass() {
         if (this.debugPass == null) {
             this.debugPass = DlssRrDebugPass.create(
-                    this.context,
+                    context(),
                     this.targets,
-                    this.displayOutput,
+                    displayOutput(),
                     this.displayTransform.hdrOutput());
         }
         return this.debugPass;
     }
 
-    private RendererImageDebugPass rendererDebugPass() {
-        if (this.rendererDebugPass == null) {
-            this.rendererDebugPass = RendererImageDebugPass.create(
-                    this.context,
-                    this.targets,
-                    this.stableRadiance,
-                    this.targets.rrOutput(),
-                    this.displayOutput,
-                    this.displayTransform.hdrOutput());
-        }
-        return this.rendererDebugPass;
-    }
-
     @Override
     public void submitted(Frame frame) {
-        requireOpen();
-        if (!(frame instanceof FrameToken token)) {
-            throw new IllegalArgumentException("DLSS RR received another processor's frame token");
-        }
-        if (token.owner != this) {
-            throw new IllegalArgumentException("DLSS RR frame token does not belong to this submission");
-        }
-        token.parameters.submitted();
+        submittedFrame(frame);
     }
 
     @Override
     public void abandon(Frame frame) {
-        requireOpen();
-        if (!(frame instanceof FrameToken token)) {
-            throw new IllegalArgumentException(
-                    "DLSS RR received another processor's frame token");
-        }
-        if (token.owner != this) {
-            throw new IllegalArgumentException(
-                    "DLSS RR frame token does not belong to this processor");
-        }
-        token.parameters.abandon();
-    }
-
-    private void requireOpen() {
-        if (this.destroyed) throw new IllegalStateException("DLSS RR post-processor is destroyed");
+        abandonSubmittedFrame(frame);
     }
 
     @Override
     public void destroy() {
-        if (this.destroyed) return;
+        if (destroyed()) return;
         // Do not make a failed wait terminal: no child handle is safe to release until all NGX
         // work has retired, and a later caller must be able to retry this ownership boundary.
-        this.context.awaitIdle();
+        context().awaitIdle();
         RuntimeException failure = ResourceCleanup.close(this.feature, null);
-        failure = ResourceCleanup.destroy(this.rendererDebugPass, failure);
+        failure = destroyRendererDiagnostic(failure);
         failure = ResourceCleanup.destroy(this.debugPass, failure);
         failure = ResourceCleanup.destroy(this.displayTransform, failure);
         failure = ResourceCleanup.destroy(this.preparePass, failure);
         failure = ResourceCleanup.destroy(this.targets, failure);
-        this.destroyed = true;
-        ResourceCleanup.throwIfFailed(failure);
+        finishDestroy(failure);
     }
 
-    private static final class FrameToken implements Frame {
-        private final DlssRrPostProcessor owner;
-        private final SubmittedFrame<ReconstructionFrameParameters> parameters;
+    private static final class FrameToken extends SubmittedFrameToken {
         private final RrInputView debugView;
         private final float responsivity;
 
         private FrameToken(
                 DlssRrPostProcessor owner,
-                SubmittedFrame<ReconstructionFrameParameters> parameters,
+                ReconstructionFrameParameters parameters,
                 RrInputView debugView,
                 float responsivity) {
-            this.owner = owner;
-            this.parameters = parameters;
+            super(owner, parameters);
             this.debugView = debugView;
             this.responsivity = responsivity;
         }

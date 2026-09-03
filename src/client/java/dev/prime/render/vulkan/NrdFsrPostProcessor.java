@@ -2,7 +2,6 @@ package dev.prime.render.vulkan;
 
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.NrdInputView;
-import dev.prime.render.diagnostic.RendererImageView;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.post.ReconstructionQualityMode;
@@ -15,21 +14,11 @@ import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
 /** Existing REBLUR/SIGMA + FidelityFX FSR 3.1.4 implementation of the shared boundary. */
-public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor {
-    private final VulkanContext context;
-    private final ReconstructionQualityMode quality;
-    private final int renderWidth;
-    private final int renderHeight;
-    private final int displayWidth;
-    private final int displayHeight;
+public final class NrdFsrPostProcessor extends VulkanReconstructionProcessor {
     private final VulkanImage sceneColor;
     private final NrdDenoiser denoiser;
     private final Fsr3Upscaler upscaler;
-    private final VulkanImage displayOutput;
-    private final VulkanImage stableRadiance;
     private NrdInputDebugPass nrdDebugPresent;
-    private RendererImageDebugPass rendererDebugPass;
-    private boolean destroyed;
 
     private NrdFsrPostProcessor(
             VulkanContext context,
@@ -43,17 +32,19 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
             Fsr3Upscaler upscaler,
             VulkanImage displayOutput,
             VulkanImage stableRadiance) {
-        this.context = context;
-        this.quality = quality;
-        this.renderWidth = renderWidth;
-        this.renderHeight = renderHeight;
-        this.displayWidth = displayWidth;
-        this.displayHeight = displayHeight;
+        super(
+                context,
+                PostProcessingMode.NRD_FSR,
+                quality,
+                renderWidth,
+                renderHeight,
+                displayWidth,
+                displayHeight,
+                stableRadiance,
+                displayOutput);
         this.sceneColor = sceneColor;
         this.denoiser = denoiser;
         this.upscaler = upscaler;
-        this.displayOutput = displayOutput;
-        this.stableRadiance = stableRadiance;
     }
 
     public static NrdFsrPostProcessor create(
@@ -111,12 +102,6 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
         }
     }
 
-    @Override public PostProcessingMode mode() { return PostProcessingMode.NRD_FSR; }
-    @Override public ReconstructionQualityMode quality() { return this.quality; }
-    @Override public int renderWidth() { return this.renderWidth; }
-    @Override public int renderHeight() { return this.renderHeight; }
-    @Override public int displayWidth() { return this.displayWidth; }
-    @Override public int displayHeight() { return this.displayHeight; }
     @Override public RawWavefrontFrame rawFrame() { return this.denoiser.rawFrame(); }
     @Override public VulkanImage linearHdrOutput() { return this.upscaler.linearOutput(); }
     @Override public VulkanImage hdrDisplayOutput() { return this.upscaler.hdrDisplayOutput(); }
@@ -130,7 +115,7 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
             ReconstructionDebugSettings debugSettings) {
         requireOpen();
         Fsr3Upscaler.FrameToken fsr = this.upscaler.beginFrame(parameters);
-        NrdFramePlan nrd = NrdFramePlan.from(parameters, this.quality);
+        NrdFramePlan nrd = NrdFramePlan.from(parameters, quality());
         return new FrameToken(this, fsr, nrd, debugSettings);
     }
 
@@ -145,16 +130,6 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
                 VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                 VK12.VK_ACCESS_SHADER_WRITE_BIT);
         this.denoiser.prepareForRayTrace(commandBuffer, initialization);
-    }
-
-    @Override
-    public void captureRendererDiagnostic(
-            VkCommandBuffer commandBuffer,
-            VulkanImageInitializationBatch initialization,
-            RendererImageView view) {
-        if (view.active() && view != RendererImageView.DENOISED_OUTPUT) {
-            this.rendererDebugPass().capture(commandBuffer, initialization, view);
-        }
     }
 
     @Override
@@ -183,12 +158,6 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
         if (diagnostic.active()) {
             this.nrdDebugPresent(token.nrdPrepared.inputs()).record(commandBuffer, diagnostic);
         }
-    }
-
-    @Override
-    public void presentRendererDiagnostic(
-            VkCommandBuffer commandBuffer, RendererImageView view) {
-        if (view.active()) this.rendererDebugPass().present(commandBuffer, view);
     }
 
     @Override
@@ -230,49 +199,29 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
         return token;
     }
 
-    private void requireOpen() {
-        if (this.destroyed) {
-            throw new IllegalStateException("NRD-FSR post-processor is destroyed");
-        }
-    }
-
     private NrdInputDebugPass nrdDebugPresent(
             dev.prime.render.vulkan.nrd.PreparedNrdFrame prepared) {
         if (this.nrdDebugPresent == null) {
             this.nrdDebugPresent = NrdInputDebugPass.create(
-                    this.context,
+                    context(),
                     this.sceneColor,
                     prepared,
-                    this.displayOutput,
+                    displayOutput(),
                     this.upscaler.hdrDisplayOutput());
         }
         return this.nrdDebugPresent;
     }
 
-    private RendererImageDebugPass rendererDebugPass() {
-        if (this.rendererDebugPass == null) {
-            this.rendererDebugPass = RendererImageDebugPass.create(
-                    this.context,
-                    this.denoiser.rawFrame(),
-                    this.stableRadiance,
-                    this.upscaler.linearOutput(),
-                    this.displayOutput,
-                    this.upscaler.hdrDisplayOutput());
-        }
-        return this.rendererDebugPass;
-    }
-
     @Override
     public void destroy() {
-        if (this.destroyed) return;
+        if (destroyed()) return;
         RuntimeException failure = null;
-        failure = ResourceCleanup.destroy(this.rendererDebugPass, failure);
+        failure = destroyRendererDiagnostic(failure);
         failure = ResourceCleanup.destroy(this.nrdDebugPresent, failure);
         failure = ResourceCleanup.destroy(this.upscaler, failure);
         failure = ResourceCleanup.destroy(this.denoiser, failure);
         failure = ResourceCleanup.destroy(this.sceneColor, failure);
-        this.destroyed = true;
-        ResourceCleanup.throwIfFailed(failure);
+        finishDestroy(failure);
     }
 
     public static final class FrameToken implements Frame {
