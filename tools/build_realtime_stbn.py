@@ -158,6 +158,50 @@ def verify_frame_sets(initial: np.ndarray, optimized: np.ndarray, bank: int) -> 
             raise RuntimeError(f"FAST changed bank {bank} frame {frame}'s point set")
 
 
+def verify_quality(codes: np.ndarray) -> None:
+    """Validate the distribution properties that justify the immutable artifact."""
+    vectors = codes.transpose(0, 4, 1, 2, 3).reshape(BANK_COUNT * 2, -1)
+    correlations = np.corrcoef(vectors)
+    for first_bank in range(BANK_COUNT):
+        for second_bank in range(first_bank + 1, BANK_COUNT):
+            block = correlations[
+                first_bank * 2:(first_bank + 1) * 2,
+                second_bank * 2:(second_bank + 1) * 2]
+            maximum = np.max(np.abs(block))
+            if maximum >= 0.01:
+                raise RuntimeError(
+                    f"bank {first_bank}/{second_bank} correlation is {maximum}")
+
+    y_frequency = np.minimum(np.arange(HEIGHT), HEIGHT - np.arange(HEIGHT))
+    x_frequency = np.minimum(np.arange(WIDTH), WIDTH - np.arange(WIDTH))
+    radius_squared = y_frequency[:, None] ** 2 + x_frequency[None, :] ** 2
+    spatial_low = (radius_squared >= 1) & (radius_squared < 8 ** 2)
+    spatial_high = (radius_squared >= 24 ** 2) & (radius_squared < 48 ** 2)
+    spatial_low_power = []
+    spatial_high_power = []
+    temporal_low_power = []
+    temporal_high_power = []
+    for threshold in (16_384, 32_768, 49_152):
+        probability = threshold / 65_536.0
+        spatial_error = (codes[:, ::8] < threshold).astype(np.float64) - probability
+        spatial_power = np.abs(np.fft.fft2(spatial_error, axes=(2, 3))) ** 2
+        spatial_low_power.append(spatial_power[:, :, spatial_low, :])
+        spatial_high_power.append(spatial_power[:, :, spatial_high, :])
+
+        temporal_error = (codes[:, :, ::4, ::4] < threshold).astype(np.float64) \
+            - probability
+        temporal_power = np.abs(np.fft.fft(temporal_error, axis=1)) ** 2
+        temporal_low_power.append(temporal_power[:, 1:5])
+        temporal_high_power.append(temporal_power[:, 16:32])
+
+    spatial_ratio = np.mean(spatial_low_power) / np.mean(spatial_high_power)
+    temporal_ratio = np.mean(temporal_low_power) / np.mean(temporal_high_power)
+    if spatial_ratio >= 0.30:
+        raise RuntimeError(f"spatial low/high power ratio is {spatial_ratio}")
+    if temporal_ratio >= 0.50:
+        raise RuntimeError(f"temporal low/high power ratio is {temporal_ratio}")
+
+
 def run_fast(
         executable: Path,
         init: Path,
@@ -190,6 +234,7 @@ def build(arguments: argparse.Namespace) -> None:
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     temporary_output = arguments.output.with_name(arguments.output.name + ".tmp")
 
+    banks = []
     with temporary_output.open("wb") as packed:
         for bank in range(BANK_COUNT):
             print(f"Building realtime STBN bank {bank + 1}/{BANK_COUNT}", flush=True)
@@ -208,11 +253,13 @@ def build(arguments: argparse.Namespace) -> None:
             optimized = quantize_fast_output(read_fast_exr(exr_path))
             verify_frame_sets(initial, optimized, bank)
             verify_initializer(optimized, bank)
+            banks.append(optimized)
             packed.write(optimized.astype("<u2", copy=False).tobytes(order="C"))
             if not arguments.keep_work:
                 init_path.unlink()
                 exr_path.unlink()
 
+    verify_quality(np.stack(banks))
     expected_size = BANK_COUNT * POINT_COUNT * 2 * np.dtype("<u2").itemsize
     actual_size = temporary_output.stat().st_size
     if actual_size != expected_size:
