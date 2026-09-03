@@ -5,6 +5,7 @@ import java.nio.LongBuffer;
 import java.util.List;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
+import org.lwjgl.vulkan.VkDescriptorBufferInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
 import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
@@ -107,6 +108,56 @@ public final class VulkanDescriptors {
         return pointer.get(0);
     }
 
+    public static void layoutBinding(
+            VkDescriptorSetLayoutBinding binding,
+            int number,
+            int type,
+            int count,
+            int stages) {
+        binding.binding(number)
+                .descriptorType(type)
+                .descriptorCount(count)
+                .stageFlags(stages);
+    }
+
+    public static void writeImage(
+            VkWriteDescriptorSet write,
+            long set,
+            int binding,
+            int type,
+            VkDescriptorImageInfo info) {
+        writeImages(write, set, binding, type, info, 1);
+    }
+
+    public static void writeImages(
+            VkWriteDescriptorSet write,
+            long set,
+            int binding,
+            int type,
+            VkDescriptorImageInfo first,
+            int count) {
+        write.sType$Default()
+                .dstSet(set)
+                .dstBinding(binding)
+                .descriptorCount(count)
+                .descriptorType(type)
+                .pImageInfo(VkDescriptorImageInfo.create(first.address(), count));
+    }
+
+    public static void writeBuffer(
+            VkWriteDescriptorSet write,
+            long set,
+            int binding,
+            int type,
+            VkDescriptorBufferInfo info) {
+        write.sType$Default()
+                .dstSet(set)
+                .dstBinding(binding)
+                .descriptorCount(1)
+                .descriptorType(type)
+                .pBufferInfo(VkDescriptorBufferInfo.create(info.address(), 1));
+    }
+
     public static StorageImageSet bindStorageImages(
             VulkanContext context,
             MemoryStack stack,
@@ -133,13 +184,12 @@ public final class VulkanDescriptors {
                 infos.get(binding)
                         .imageView(images.get(binding).view())
                         .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                writes.get(binding)
-                        .sType$Default()
-                        .dstSet(set)
-                        .dstBinding(binding)
-                        .descriptorCount(1)
-                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(infos.get(binding).address(), 1));
+                writeImage(
+                        writes.get(binding),
+                        set,
+                        binding,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                        infos.get(binding));
             }
             VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
             return new StorageImageSet(context, pool, set);

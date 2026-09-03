@@ -25,7 +25,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
         return 4 * maximumBounces + 1;
     }
     static final int DESCRIPTOR_BINDING_COUNT = 3;
-    private static final WavefrontLayout WAVEFRONT_LAYOUT = new WavefrontLayout(
+    static final WavefrontLayout LAYOUT = new WavefrontLayout(
             ShaderAbi.OFFLINE_WAVEFRONT_PATH_SLOTS_PER_PIXEL,
             ShaderAbi.OFFLINE_WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL,
             ShaderAbi.OFFLINE_WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL,
@@ -112,9 +112,9 @@ public final class OfflineRayTracingPipeline implements Destroyable {
                 atmosphere);
         int width = runningMean.width();
         int height = runningMean.height();
-        long requiredBytes = wavefrontBytes(width, height);
-        validateRanges(width, height, this.context.maxStorageBufferRange());
-        validateDispatch(
+        long requiredBytes = LAYOUT.wavefrontBytes(width, height);
+        LAYOUT.validateRanges(width, height, this.context.maxStorageBufferRange());
+        LAYOUT.validateDispatch(
                 width,
                 height,
                 this.context.capabilities().maxRayDispatchInvocationCount());
@@ -140,7 +140,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
                     this.descriptorSetLayout,
                     runningMean,
                     candidate,
-                    queueOffset(width, height));
+                    LAYOUT.queueOffset(width, height));
         } catch (RuntimeException exception) {
             if (replaces) {
                 candidate.destroy();
@@ -177,7 +177,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
             TerrainScene.ResidentSceneView scene) {
         int width = input.width();
         int height = input.height();
-        if (this.wavefront == null || this.wavefront.size() != wavefrontBytes(width, height)) {
+        if (this.wavefront == null || this.wavefront.size() != LAYOUT.wavefrontBytes(width, height)) {
             throw new IllegalStateException("Offline wavefront extent mismatch");
         }
         if (!this.backend.bindings().ready()) {
@@ -185,7 +185,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
         }
         try (MemoryStack stack = MemoryStack.stackPush()) {
             this.bind(commandBuffer, stack, RayTracingPushConstants.encode(stack, input, scene));
-            long commandOffset = queueCommandOffset(width, height);
+            long commandOffset = LAYOUT.queueCommandOffset(width, height);
             this.initializeQueues(commandBuffer, stack, commandOffset);
             this.trace(
                     commandBuffer,
@@ -323,49 +323,22 @@ public final class OfflineRayTracingPipeline implements Destroyable {
         WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
     }
 
-    static long wavefrontBytes(int width, int height) {
-        return WAVEFRONT_LAYOUT.wavefrontBytes(width, height);
-    }
-
-    static long queueOffset(int width, int height) {
-        return WAVEFRONT_LAYOUT.queueOffset(width, height);
-    }
-
-    static long queueBytes(int width, int height) {
-        return WAVEFRONT_LAYOUT.queueBytes(width, height);
-    }
-
-    static long queueCommandOffset(int width, int height) {
-        return WAVEFRONT_LAYOUT.queueCommandOffset(width, height);
-    }
-
-    static void validateRanges(int width, int height, long maximumRange) {
-        WAVEFRONT_LAYOUT.validateRanges(width, height, maximumRange);
-    }
-
-    static void validateDispatch(int width, int height, int maximumInvocations) {
-        WAVEFRONT_LAYOUT.validateDispatch(width, height, maximumInvocations);
-    }
-
     private static long createDescriptorSetLayout(
             VulkanContext context, MemoryStack stack) {
         VkDescriptorSetLayoutBinding.Buffer bindings =
                 VkDescriptorSetLayoutBinding.calloc(DESCRIPTOR_BINDING_COUNT, stack);
-        bindings.get(0)
-                .binding(ShaderAbi.OFFLINE_DESCRIPTOR_RUNNING_MEAN)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                .descriptorCount(1)
-                .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
-        bindings.get(1)
-                .binding(ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_PATHS)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                .descriptorCount(1)
-                .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
-        bindings.get(2)
-                .binding(ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_QUEUE)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                .descriptorCount(1)
-                .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(0), ShaderAbi.OFFLINE_DESCRIPTOR_RUNNING_MEAN,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(1), ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_PATHS,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(2), ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_QUEUE,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
         return VulkanDescriptors.createSetLayout(
                 context,
                 stack,
@@ -450,30 +423,15 @@ public final class OfflineRayTracingPipeline implements Destroyable {
                             .offset(queueOffset)
                             .range(wavefront.size() - queueOffset);
                     VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(3, stack);
-                    writes.get(0)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.OFFLINE_DESCRIPTOR_RUNNING_MEAN)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                            .pImageInfo(VkDescriptorImageInfo.create(
-                                    imageInfo.address(), 1));
-                    writes.get(1)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_PATHS)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                            .pBufferInfo(VkDescriptorBufferInfo.create(
-                                    bufferInfos.get(0).address(), 1));
-                    writes.get(2)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_QUEUE)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                            .pBufferInfo(VkDescriptorBufferInfo.create(
-                                    bufferInfos.get(1).address(), 1));
+                    VulkanDescriptors.writeImage(
+                            writes.get(0), set, ShaderAbi.OFFLINE_DESCRIPTOR_RUNNING_MEAN,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, imageInfo);
+                    VulkanDescriptors.writeBuffer(
+                            writes.get(1), set, ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_PATHS,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, bufferInfos.get(0));
+                    VulkanDescriptors.writeBuffer(
+                            writes.get(2), set, ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_QUEUE,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, bufferInfos.get(1));
                     VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
                     return new Bindings(
                             context,

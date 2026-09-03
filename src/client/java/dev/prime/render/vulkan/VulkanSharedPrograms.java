@@ -172,11 +172,9 @@ public final class VulkanSharedPrograms implements AutoCloseable {
                 VkDescriptorSetLayoutBinding.Buffer bindings =
                     VkDescriptorSetLayoutBinding.calloc(descriptorTypes.length, stack);
                 for (int binding = 0; binding < descriptorTypes.length; binding++) {
-                    bindings.get(binding)
-                        .binding(binding)
-                        .descriptorType(descriptorTypes[binding])
-                        .descriptorCount(1)
-                        .stageFlags(COMPUTE_STAGE);
+                    VulkanDescriptors.layoutBinding(
+                            bindings.get(binding), binding,
+                            descriptorTypes[binding], 1, COMPUTE_STAGE);
                 }
                 descriptorSetLayout = VulkanDescriptors.createSetLayout(
                     context, stack, bindings, "create " + label + " descriptor layout");

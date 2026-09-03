@@ -257,16 +257,14 @@ public final class TraceBackend implements Destroyable {
         VkDescriptorSetLayoutBinding.Buffer bindings =
                 VkDescriptorSetLayoutBinding.calloc(BINDING_COUNT, stack);
         int cursor = 0;
-        bindings.get(cursor++)
-                .binding(ShaderAbi.DESCRIPTOR_TLAS)
-                .descriptorType(KHRAccelerationStructure.VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
-                .descriptorCount(1)
-                .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
-        bindings.get(cursor++)
-                .binding(ShaderAbi.DESCRIPTOR_BLOCK_ATLAS)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                .descriptorCount(ShaderAbi.SCENE_TEXTURE_COUNT)
-                .stageFlags(ALL_RT_STAGES);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor++), ShaderAbi.DESCRIPTOR_TLAS,
+                KHRAccelerationStructure.VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+                1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor++), ShaderAbi.DESCRIPTOR_BLOCK_ATLAS,
+                VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                ShaderAbi.SCENE_TEXTURE_COUNT, ALL_RT_STAGES);
         int[] storageBindings = new int[] {
             ShaderAbi.DESCRIPTOR_SKY_VIEW,
             ShaderAbi.DESCRIPTOR_TRANSMITTANCE_LOW,
@@ -275,70 +273,55 @@ public final class TraceBackend implements Destroyable {
             ShaderAbi.DESCRIPTOR_AERIAL_TRANSMITTANCE
         };
         for (int binding : storageBindings) {
-            bindings.get(cursor++)
-                    .binding(binding)
-                    .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                    .descriptorCount(1)
-                    .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+            VulkanDescriptors.layoutBinding(
+                    bindings.get(cursor++), binding,
+                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                    1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
         }
         int[] sampledBindings = new int[] {
             ShaderAbi.DESCRIPTOR_TRANSMISSION_GGX_ENERGY,
             ShaderAbi.DESCRIPTOR_STARMAP
         };
         for (int binding : sampledBindings) {
-            bindings.get(cursor++)
-                    .binding(binding)
-                    .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                    .descriptorCount(1)
-                    .stageFlags(ALL_RT_STAGES);
+            VulkanDescriptors.layoutBinding(
+                    bindings.get(cursor++), binding,
+                    VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, ALL_RT_STAGES);
         }
-        bindings.get(cursor++)
-                .binding(ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                .descriptorCount(ShaderAbi.BASE_COLOR_PAGE_COUNT)
-                .stageFlags(ALL_RT_STAGES);
-        bindings.get(cursor++)
-                .binding(ShaderAbi.DESCRIPTOR_MATERIAL_NORMAL_PAGES)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                .descriptorCount(ShaderAbi.MATERIAL_PAGE_COUNT)
-                .stageFlags(ALL_RT_STAGES);
-        bindings.get(cursor++)
-                .binding(ShaderAbi.DESCRIPTOR_MATERIAL_OPTICAL_PAGES)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                .descriptorCount(ShaderAbi.MATERIAL_PAGE_COUNT)
-                .stageFlags(ALL_RT_STAGES);
-        bindings.get(cursor++)
-                .binding(ShaderAbi.DESCRIPTOR_TEXTURE_RECORDS)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                .descriptorCount(1)
-                .stageFlags(ALL_RT_STAGES);
-        bindings.get(cursor++)
-                .binding(ShaderAbi.DESCRIPTOR_MATERIAL_CORE_RECORDS)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                .descriptorCount(1)
-                .stageFlags(ALL_RT_STAGES);
-        bindings.get(cursor++)
-                .binding(ShaderAbi.DESCRIPTOR_TINT_SAMPLES)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                .descriptorCount(1)
-                .stageFlags(ALL_RT_STAGES);
-        bindings.get(cursor++)
-                .binding(ShaderAbi.DESCRIPTOR_REALTIME_STBN)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                .descriptorCount(1)
-                .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor++), ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES,
+                VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                ShaderAbi.BASE_COLOR_PAGE_COUNT, ALL_RT_STAGES);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor++), ShaderAbi.DESCRIPTOR_MATERIAL_NORMAL_PAGES,
+                VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                ShaderAbi.MATERIAL_PAGE_COUNT, ALL_RT_STAGES);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor++), ShaderAbi.DESCRIPTOR_MATERIAL_OPTICAL_PAGES,
+                VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                ShaderAbi.MATERIAL_PAGE_COUNT, ALL_RT_STAGES);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor++), ShaderAbi.DESCRIPTOR_TEXTURE_RECORDS,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, ALL_RT_STAGES);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor++), ShaderAbi.DESCRIPTOR_MATERIAL_CORE_RECORDS,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, ALL_RT_STAGES);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor++), ShaderAbi.DESCRIPTOR_TINT_SAMPLES,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, ALL_RT_STAGES);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor++), ShaderAbi.DESCRIPTOR_REALTIME_STBN,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
         for (int binding : sunShadowBindings()) {
-            bindings.get(cursor++)
-                    .binding(binding)
-                    .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                    .descriptorCount(1)
-                    .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+            VulkanDescriptors.layoutBinding(
+                    bindings.get(cursor++), binding,
+                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                    1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
         }
-        bindings.get(cursor)
-                .binding(ShaderAbi.DESCRIPTOR_SUN_SHADOW_QUERY)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-                .descriptorCount(1)
-                .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor), ShaderAbi.DESCRIPTOR_SUN_SHADOW_QUERY,
+                VK12.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
         return VulkanDescriptors.createSetLayout(
                 context,
                 stack,
@@ -633,14 +616,10 @@ public final class TraceBackend implements Destroyable {
                             .dstBinding(ShaderAbi.DESCRIPTOR_TLAS)
                             .descriptorCount(1)
                             .descriptorType(KHRAccelerationStructure.VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR);
-                    writes.get(write++)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_BLOCK_ATLAS)
-                            .descriptorCount(ShaderAbi.SCENE_TEXTURE_COUNT)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                            .pImageInfo(VkDescriptorImageInfo.create(
-                                    infos.get(0).address(), ShaderAbi.SCENE_TEXTURE_COUNT));
+                    VulkanDescriptors.writeImages(
+                            writes.get(write++), set, ShaderAbi.DESCRIPTOR_BLOCK_ATLAS,
+                            VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                            infos.get(0), ShaderAbi.SCENE_TEXTURE_COUNT);
                     int[] atmosphereBindings = new int[] {
                         ShaderAbi.DESCRIPTOR_SKY_VIEW,
                         ShaderAbi.DESCRIPTOR_TRANSMITTANCE_LOW,
@@ -649,109 +628,57 @@ public final class TraceBackend implements Destroyable {
                         ShaderAbi.DESCRIPTOR_AERIAL_TRANSMITTANCE
                     };
                     for (int index = 0; index < atmosphereBindings.length; index++) {
-                        writes.get(write++)
-                                .sType$Default()
-                                .dstSet(set)
-                                .dstBinding(atmosphereBindings[index])
-                                .descriptorCount(1)
-                                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                .pImageInfo(VkDescriptorImageInfo.create(
-                                        infos.get(atmosphereStart + index).address(), 1));
+                        VulkanDescriptors.writeImage(
+                                writes.get(write++), set, atmosphereBindings[index],
+                                VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                infos.get(atmosphereStart + index));
                     }
-                    writes.get(write++)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_TRANSMISSION_GGX_ENERGY)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                            .pImageInfo(VkDescriptorImageInfo.create(
-                                    infos.get(sampledStart).address(), 1));
-                    writes.get(write++)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_MATERIAL_NORMAL_PAGES)
-                            .descriptorCount(ShaderAbi.MATERIAL_PAGE_COUNT)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                            .pImageInfo(VkDescriptorImageInfo.create(
-                                    infos.get(normalStart).address(),
-                                    ShaderAbi.MATERIAL_PAGE_COUNT));
-                    writes.get(write++)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_MATERIAL_OPTICAL_PAGES)
-                            .descriptorCount(ShaderAbi.MATERIAL_PAGE_COUNT)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                            .pImageInfo(VkDescriptorImageInfo.create(
-                                    infos.get(opticalStart).address(),
-                                    ShaderAbi.MATERIAL_PAGE_COUNT));
-                    writes.get(write++)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_STARMAP)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                            .pImageInfo(VkDescriptorImageInfo.create(
-                                    infos.get(starmapIndex).address(), 1));
-                    writes.get(write++)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_TEXTURE_RECORDS)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                            .pBufferInfo(VkDescriptorBufferInfo.create(
-                                    textureRecordInfo.address(), 1));
-                    writes.get(write++)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_MATERIAL_CORE_RECORDS)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                            .pBufferInfo(VkDescriptorBufferInfo.create(
-                                    materialCoreInfo.address(), 1));
-                    writes.get(write++)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES)
-                            .descriptorCount(ShaderAbi.BASE_COLOR_PAGE_COUNT)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                            .pImageInfo(VkDescriptorImageInfo.create(
-                                    infos.get(baseColorStart).address(),
-                                    ShaderAbi.BASE_COLOR_PAGE_COUNT));
-                    writes.get(write++)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_REALTIME_STBN)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                            .pBufferInfo(VkDescriptorBufferInfo.create(
-                                    stbnInfo.address(), 1));
-                    writes.get(write++)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_TINT_SAMPLES)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                            .pBufferInfo(VkDescriptorBufferInfo.create(
-                                    tintSampleInfo.address(), 1));
+                    VulkanDescriptors.writeImage(
+                            writes.get(write++), set,
+                            ShaderAbi.DESCRIPTOR_TRANSMISSION_GGX_ENERGY,
+                            VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                            infos.get(sampledStart));
+                    VulkanDescriptors.writeImages(
+                            writes.get(write++), set,
+                            ShaderAbi.DESCRIPTOR_MATERIAL_NORMAL_PAGES,
+                            VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                            infos.get(normalStart), ShaderAbi.MATERIAL_PAGE_COUNT);
+                    VulkanDescriptors.writeImages(
+                            writes.get(write++), set,
+                            ShaderAbi.DESCRIPTOR_MATERIAL_OPTICAL_PAGES,
+                            VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                            infos.get(opticalStart), ShaderAbi.MATERIAL_PAGE_COUNT);
+                    VulkanDescriptors.writeImage(
+                            writes.get(write++), set, ShaderAbi.DESCRIPTOR_STARMAP,
+                            VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                            infos.get(starmapIndex));
+                    VulkanDescriptors.writeBuffer(
+                            writes.get(write++), set, ShaderAbi.DESCRIPTOR_TEXTURE_RECORDS,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, textureRecordInfo);
+                    VulkanDescriptors.writeBuffer(
+                            writes.get(write++), set,
+                            ShaderAbi.DESCRIPTOR_MATERIAL_CORE_RECORDS,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, materialCoreInfo);
+                    VulkanDescriptors.writeImages(
+                            writes.get(write++), set, ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES,
+                            VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                            infos.get(baseColorStart), ShaderAbi.BASE_COLOR_PAGE_COUNT);
+                    VulkanDescriptors.writeBuffer(
+                            writes.get(write++), set, ShaderAbi.DESCRIPTOR_REALTIME_STBN,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, stbnInfo);
+                    VulkanDescriptors.writeBuffer(
+                            writes.get(write++), set, ShaderAbi.DESCRIPTOR_TINT_SAMPLES,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, tintSampleInfo);
                     int[] shadowBindings = sunShadowBindings();
                     for (int index = 0; index < shadowBindings.length; index++) {
-                        writes.get(write++)
-                                .sType$Default()
-                                .dstSet(set)
-                                .dstBinding(shadowBindings[index])
-                                .descriptorCount(1)
-                                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                .pImageInfo(VkDescriptorImageInfo.create(
-                                        infos.get(shadowStart + index).address(), 1));
+                        VulkanDescriptors.writeImage(
+                                writes.get(write++), set, shadowBindings[index],
+                                VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                infos.get(shadowStart + index));
                     }
-                    writes.get(write)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_SUN_SHADOW_QUERY)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-                            .pBufferInfo(VkDescriptorBufferInfo.create(
-                                    queryInfo.address(), 1));
+                    VulkanDescriptors.writeBuffer(
+                            writes.get(write), set, ShaderAbi.DESCRIPTOR_SUN_SHADOW_QUERY,
+                            VK12.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, queryInfo);
                     VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
                     return new SceneBindings(
                             context,

@@ -448,32 +448,32 @@ final class TracePipelinesContractTest {
     @Test
     void wavefrontBackingHasDeclaredFourKSize() {
         assertEquals(4_346_265_712L,
-                RealtimeRayTracingPipeline.wavefrontBytes(3840, 2160));
+                RealtimeRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
         assertEquals(2_023_833_632L,
-                OfflineRayTracingPipeline.wavefrontBytes(3840, 2160));
+                OfflineRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
         assertEquals(962_150_432L,
-                OfflineRayTracingPipeline.queueBytes(3840, 2160));
+                OfflineRayTracingPipeline.LAYOUT.queueBytes(3840, 2160));
         assertEquals(1_957_478_400L,
-                OfflineRayTracingPipeline.queueCommandOffset(3840, 2160));
+                OfflineRayTracingPipeline.LAYOUT.queueCommandOffset(3840, 2160));
         assertEquals(
                 1930.0781555175781,
-                OfflineRayTracingPipeline.wavefrontBytes(3840, 2160)
+                OfflineRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160)
                         / (1024.0 * 1024.0));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> OfflineRayTracingPipeline.wavefrontBytes(0, 2160));
+                () -> OfflineRayTracingPipeline.LAYOUT.wavefrontBytes(0, 2160));
         assertThrows(
                 ArithmeticException.class,
-                () -> RealtimeRayTracingPipeline.wavefrontBytes(
+                () -> RealtimeRayTracingPipeline.LAYOUT.wavefrontBytes(
                         Integer.MAX_VALUE, Integer.MAX_VALUE));
-        RealtimeRayTracingPipeline.validateRanges(3840, 2160, 0xffff_ffffL);
-        OfflineRayTracingPipeline.validateRanges(3840, 2160, 0xffff_ffffL);
+        RealtimeRayTracingPipeline.LAYOUT.validateRanges(3840, 2160, 0xffff_ffffL);
+        OfflineRayTracingPipeline.LAYOUT.validateRanges(3840, 2160, 0xffff_ffffL);
         assertThrows(
                 IllegalStateException.class,
-                () -> RealtimeRayTracingPipeline.validateDispatch(
+                () -> RealtimeRayTracingPipeline.LAYOUT.validateDispatch(
                         3840, 2160, 3840 * 2160));
-        RealtimeRayTracingPipeline.validateDispatch(3840, 2160, 2 * 3840 * 2160);
-        OfflineRayTracingPipeline.validateDispatch(3840, 2160, 1 << 24);
+        RealtimeRayTracingPipeline.LAYOUT.validateDispatch(3840, 2160, 2 * 3840 * 2160);
+        OfflineRayTracingPipeline.LAYOUT.validateDispatch(3840, 2160, 1 << 24);
     }
 
     @Test

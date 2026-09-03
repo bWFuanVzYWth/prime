@@ -154,18 +154,18 @@ public final class DisplayTransformPass implements Destroyable {
                         .offset(0L)
                         .range(AutoExposurePass.EXPOSURE_STATE_SIZE);
                 VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(4, stack);
-                writes.get(0).sType$Default().dstSet(descriptorSet).dstBinding(0)
-                        .descriptorCount(1).descriptorType(VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(imageInfos.get(0).address(), 1));
-                writes.get(1).sType$Default().dstSet(descriptorSet).dstBinding(1)
-                        .descriptorCount(1).descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(imageInfos.get(1).address(), 1));
-                writes.get(2).sType$Default().dstSet(descriptorSet).dstBinding(2)
-                        .descriptorCount(1).descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                        .pBufferInfo(exposureInfo);
-                writes.get(3).sType$Default().dstSet(descriptorSet).dstBinding(3)
-                        .descriptorCount(1).descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(imageInfos.get(2).address(), 1));
+                VulkanDescriptors.writeImage(
+                        writes.get(0), descriptorSet, 0,
+                        VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, imageInfos.get(0));
+                VulkanDescriptors.writeImage(
+                        writes.get(1), descriptorSet, 1,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, imageInfos.get(1));
+                VulkanDescriptors.writeBuffer(
+                        writes.get(2), descriptorSet, 2,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, exposureInfo.get(0));
+                VulkanDescriptors.writeImage(
+                        writes.get(3), descriptorSet, 3,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, imageInfos.get(2));
                 VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
                 return new DisplayTransformPass(
                         context,

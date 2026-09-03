@@ -100,13 +100,9 @@ public final class UiAlphaCapturePass implements Destroyable {
                         .imageView(sourceView)
                         .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
                 VkWriteDescriptorSet.Buffer clearWrites = VkWriteDescriptorSet.calloc(1, stack);
-                clearWrites.get(0)
-                        .sType$Default()
-                        .dstSet(clearSet)
-                        .dstBinding(0)
-                        .descriptorCount(1)
-                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(clearInfo.address(), 1));
+                VulkanDescriptors.writeImage(
+                        clearWrites.get(0), clearSet, 0,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, clearInfo);
                 VK12.vkUpdateDescriptorSets(context.vkDevice(), clearWrites, null);
 
                 VkDescriptorPoolSize.Buffer extractSizes = VkDescriptorPoolSize.calloc(2, stack);
@@ -130,20 +126,12 @@ public final class UiAlphaCapturePass implements Destroyable {
                         .imageView(alpha.view())
                         .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
                 VkWriteDescriptorSet.Buffer extractWrites = VkWriteDescriptorSet.calloc(2, stack);
-                extractWrites.get(0)
-                        .sType$Default()
-                        .dstSet(extractSet)
-                        .dstBinding(0)
-                        .descriptorCount(1)
-                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(extractInfos.get(0).address(), 1));
-                extractWrites.get(1)
-                        .sType$Default()
-                        .dstSet(extractSet)
-                        .dstBinding(1)
-                        .descriptorCount(1)
-                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(extractInfos.get(1).address(), 1));
+                VulkanDescriptors.writeImage(
+                        extractWrites.get(0), extractSet, 0,
+                        VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, extractInfos.get(0));
+                VulkanDescriptors.writeImage(
+                        extractWrites.get(1), extractSet, 1,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, extractInfos.get(1));
                 VK12.vkUpdateDescriptorSets(context.vkDevice(), extractWrites, null);
                 return new UiAlphaCapturePass(
                         context,

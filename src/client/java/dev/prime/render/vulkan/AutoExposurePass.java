@@ -121,24 +121,19 @@ final class AutoExposurePass implements Destroyable {
                         .offset(0L).range(EXPOSURE_STATE_SIZE);
                 VkWriteDescriptorSet.Buffer writes =
                         VkWriteDescriptorSet.calloc(5, stack);
-                writes.get(0).sType$Default()
-                        .dstSet(descriptorSet).dstBinding(0).descriptorCount(1)
-                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(
-                                imageInfo.get(0).address(), 1));
+                VulkanDescriptors.writeImage(
+                        writes.get(0), descriptorSet, 0,
+                        VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, imageInfo.get(0));
                 for (int binding = 1; binding < 3; binding++) {
-                    writes.get(binding).sType$Default()
-                            .dstSet(descriptorSet).dstBinding(binding).descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                            .pImageInfo(VkDescriptorImageInfo.create(
-                                    imageInfo.get(binding).address(), 1));
+                    VulkanDescriptors.writeImage(
+                            writes.get(binding), descriptorSet, binding,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, imageInfo.get(binding));
                 }
                 for (int binding = 3; binding < 5; binding++) {
-                    writes.get(binding).sType$Default()
-                            .dstSet(descriptorSet).dstBinding(binding).descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                            .pBufferInfo(VkDescriptorBufferInfo.create(
-                                    bufferInfos.get(binding - 3).address(), 1));
+                    VulkanDescriptors.writeBuffer(
+                            writes.get(binding), descriptorSet, binding,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                            bufferInfos.get(binding - 3));
                 }
                 VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
                 return new AutoExposurePass(

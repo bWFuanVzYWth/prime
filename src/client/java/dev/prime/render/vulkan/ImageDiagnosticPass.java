@@ -132,15 +132,12 @@ public final class ImageDiagnosticPass implements Destroyable {
                         .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
                 imageInfos.get(index * 2 + 1).imageView(output.view())
                         .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                writes.get(index * 2).sType$Default().dstSet(descriptorSets[index]).dstBinding(0)
-                        .descriptorCount(1).descriptorType(VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(
-                                imageInfos.get(index * 2).address(), 1));
-                writes.get(index * 2 + 1).sType$Default()
-                        .dstSet(descriptorSets[index]).dstBinding(1)
-                        .descriptorCount(1).descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(
-                                imageInfos.get(index * 2 + 1).address(), 1));
+                VulkanDescriptors.writeImage(
+                        writes.get(index * 2), descriptorSets[index], 0,
+                        VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, imageInfos.get(index * 2));
+                VulkanDescriptors.writeImage(
+                        writes.get(index * 2 + 1), descriptorSets[index], 1,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, imageInfos.get(index * 2 + 1));
             }
             VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
             return new ImageDiagnosticPass(

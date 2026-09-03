@@ -23,7 +23,7 @@ import org.lwjgl.vulkan.VkWriteDescriptorSet;
 public final class RealtimeRayTracingPipeline implements Destroyable {
     private static final int STORAGE_IMAGE_DESCRIPTOR_COUNT = imageBindings().length;
     static final int DESCRIPTOR_BINDING_COUNT = STORAGE_IMAGE_DESCRIPTOR_COUNT + 2;
-    private static final WavefrontLayout WAVEFRONT_LAYOUT = new WavefrontLayout(
+    static final WavefrontLayout LAYOUT = new WavefrontLayout(
             ShaderAbi.WAVEFRONT_PATH_SLOTS_PER_PIXEL,
             ShaderAbi.WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL,
             ShaderAbi.WAVEFRONT_QUEUE_STORAGE_ENTRIES_PER_PIXEL,
@@ -158,9 +158,9 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 atmosphere);
         int width = signals.noisyDiffuse().width();
         int height = signals.noisyDiffuse().height();
-        long requiredBytes = wavefrontBytes(width, height);
-        validateRanges(width, height, this.context.maxStorageBufferRange());
-        validateDispatch(
+        long requiredBytes = LAYOUT.wavefrontBytes(width, height);
+        LAYOUT.validateRanges(width, height, this.context.maxStorageBufferRange());
+        LAYOUT.validateDispatch(
                 width,
                 height,
                 this.context.capabilities().maxRayDispatchInvocationCount());
@@ -190,7 +190,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                     stableRadiance,
                     signals,
                     candidate,
-                    queueOffset(width, height));
+                    LAYOUT.queueOffset(width, height));
         } catch (RuntimeException exception) {
             if (replaces) {
                 candidate.destroy();
@@ -228,7 +228,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         int width = input.width();
         int height = input.height();
         if (this.wavefront == null
-                || this.wavefront.size() != wavefrontBytes(width, height)) {
+                || this.wavefront.size() != LAYOUT.wavefrontBytes(width, height)) {
             throw new IllegalStateException("Realtime wavefront extent mismatch");
         }
         if (!this.backend.bindings().ready()) {
@@ -236,7 +236,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         }
         try (MemoryStack stack = MemoryStack.stackPush()) {
             ByteBuffer pushConstants = RayTracingPushConstants.encode(stack, input, scene);
-            long commandOffset = queueCommandOffset(width, height);
+            long commandOffset = LAYOUT.queueCommandOffset(width, height);
             this.bind(commandBuffer, stack, pushConstants);
             this.initializeQueues(
                     commandBuffer, stack, commandOffset, input.additionalSpecularBounces());
@@ -540,30 +540,6 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 destinationAccess);
     }
 
-    static long wavefrontBytes(int width, int height) {
-        return WAVEFRONT_LAYOUT.wavefrontBytes(width, height);
-    }
-
-    static long queueOffset(int width, int height) {
-        return WAVEFRONT_LAYOUT.queueOffset(width, height);
-    }
-
-    static long queueBytes(int width, int height) {
-        return WAVEFRONT_LAYOUT.queueBytes(width, height);
-    }
-
-    static long queueCommandOffset(int width, int height) {
-        return WAVEFRONT_LAYOUT.queueCommandOffset(width, height);
-    }
-
-    static void validateRanges(int width, int height, long maximumRange) {
-        WAVEFRONT_LAYOUT.validateRanges(width, height, maximumRange);
-    }
-
-    static void validateDispatch(int width, int height, int maximumInvocations) {
-        WAVEFRONT_LAYOUT.validateDispatch(width, height, maximumInvocations);
-    }
-
     private static long createDescriptorSetLayout(
             VulkanContext context, MemoryStack stack) {
         VkDescriptorSetLayoutBinding.Buffer bindings =
@@ -571,22 +547,19 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         int cursor = 0;
         int[] imageBindings = imageBindings();
         for (int binding : imageBindings) {
-            bindings.get(cursor++)
-                    .binding(binding)
-                    .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                    .descriptorCount(1)
-                    .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+            VulkanDescriptors.layoutBinding(
+                    bindings.get(cursor++), binding,
+                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                    1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
         }
-        bindings.get(cursor++)
-                .binding(ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                .descriptorCount(1)
-                .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
-        bindings.get(cursor)
-                .binding(ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                .descriptorCount(1)
-                .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor++), ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor), ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
         return VulkanDescriptors.createSetLayout(
                 context,
                 stack,
@@ -735,31 +708,21 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                     VkWriteDescriptorSet.Buffer writes =
                             VkWriteDescriptorSet.calloc(imageBindings.length + 2, stack);
                     for (int index = 0; index < imageBindings.length; index++) {
-                        writes.get(index)
-                                .sType$Default()
-                                .dstSet(set)
-                                .dstBinding(imageBindings[index])
-                                .descriptorCount(1)
-                                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                                .pImageInfo(VkDescriptorImageInfo.create(
-                                        imageInfos.get(index).address(), 1));
+                        VulkanDescriptors.writeImage(
+                                writes.get(index), set, imageBindings[index],
+                                VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                imageInfos.get(index));
                     }
-                    writes.get(imageBindings.length)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                            .pBufferInfo(VkDescriptorBufferInfo.create(
-                                    bufferInfos.get(0).address(), 1));
-                    writes.get(imageBindings.length + 1)
-                            .sType$Default()
-                            .dstSet(set)
-                            .dstBinding(ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                            .pBufferInfo(VkDescriptorBufferInfo.create(
-                                    bufferInfos.get(1).address(), 1));
+                    VulkanDescriptors.writeBuffer(
+                            writes.get(imageBindings.length), set,
+                            ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                            bufferInfos.get(0));
+                    VulkanDescriptors.writeBuffer(
+                            writes.get(imageBindings.length + 1), set,
+                            ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                            bufferInfos.get(1));
                     VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
                     return new OutputBindings(
                             context,

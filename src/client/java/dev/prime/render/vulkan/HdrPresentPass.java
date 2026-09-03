@@ -190,13 +190,9 @@ final class HdrPresentPass implements Destroyable {
                 int type = binding == 3
                         ? VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
                         : VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-                writes.get(binding)
-                        .sType$Default()
-                        .dstSet(this.descriptorSet)
-                        .dstBinding(binding)
-                        .descriptorCount(1)
-                        .descriptorType(type)
-                        .pImageInfo(VkDescriptorImageInfo.create(images.get(binding).address(), 1));
+                VulkanDescriptors.writeImage(
+                        writes.get(binding), this.descriptorSet, binding,
+                        type, images.get(binding));
             }
             VK12.vkUpdateDescriptorSets(this.context.vkDevice(), writes, null);
         }

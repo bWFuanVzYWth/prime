@@ -232,14 +232,11 @@ final class NrdFrameBindings implements Destroyable {
                     .buffer(this.constantBuffer.handle())
                     .offset(constantOffset)
                     .range(constantDataSize);
-            writes.get(writeIndex++)
-                    .sType$Default()
-                    .dstSet(this.constantsDescriptorSets[dispatchIndex])
-                    .dstBinding(denoiser.description.constantBufferOffset()
-                            + denoiser.description.constantBufferRegisterIndex())
-                    .descriptorCount(1)
-                    .descriptorType(VK12.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-                    .pBufferInfo(bufferInfo);
+            VulkanDescriptors.writeBuffer(
+                    writes.get(writeIndex++), this.constantsDescriptorSets[dispatchIndex],
+                    denoiser.description.constantBufferOffset()
+                            + denoiser.description.constantBufferRegisterIndex(),
+                    VK12.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, bufferInfo.get(0));
         }
         int textureIndex = 0;
         int storageIndex = 0;
@@ -271,14 +268,9 @@ final class NrdFrameBindings implements Destroyable {
             imageInfos.get(resourceIndex)
                     .imageView(image.view())
                     .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-            writes.get(writeIndex++)
-                    .sType$Default()
-                    .dstSet(this.resourceDescriptorSets[dispatchIndex])
-                    .dstBinding(binding)
-                    .descriptorCount(1)
-                    .descriptorType(descriptorType)
-                    .pImageInfo(VkDescriptorImageInfo.create(
-                            imageInfos.get(resourceIndex).address(), 1));
+            VulkanDescriptors.writeImage(
+                    writes.get(writeIndex++), this.resourceDescriptorSets[dispatchIndex],
+                    binding, descriptorType, imageInfos.get(resourceIndex));
         }
         VK12.vkUpdateDescriptorSets(denoiser.context.vkDevice(), writes, null);
     }

@@ -694,34 +694,27 @@ public final class AtmospherePipeline implements Destroyable {
     private static long createDescriptorSetLayout(VulkanContext context, MemoryStack stack) {
         VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(BINDING_COUNT, stack);
         for (int index = 0; index < IMAGE_COUNT; index++) {
-            bindings.get(index)
-                    .binding(index)
-                    .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                    .descriptorCount(1)
-                    .stageFlags(COMPUTE_STAGE);
+            VulkanDescriptors.layoutBinding(
+                    bindings.get(index), index,
+                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, COMPUTE_STAGE);
         }
-        bindings.get(PHASE_LUT_BINDING)
-                .binding(PHASE_LUT_BINDING)
-                .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                .descriptorCount(1)
-                .stageFlags(COMPUTE_STAGE);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(PHASE_LUT_BINDING), PHASE_LUT_BINDING,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, COMPUTE_STAGE);
         for (int index = 0;
                 index < SunShadowClipmap.BANK_COUNT * SunShadowClipmap.CASCADE_COUNT;
                 index++) {
-            bindings.get(SUN_SHADOW_BINDING + index)
-                    .binding(SUN_SHADOW_BINDING + index)
-                    .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                    .descriptorCount(1)
-                    .stageFlags(COMPUTE_STAGE);
+            VulkanDescriptors.layoutBinding(
+                    bindings.get(SUN_SHADOW_BINDING + index), SUN_SHADOW_BINDING + index,
+                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, COMPUTE_STAGE);
         }
         for (int cascade = 0;
                 cascade < SUN_SHADOW_HIERARCHY_COUNT;
                 cascade++) {
-            bindings.get(SUN_SHADOW_HIERARCHY_BINDING + cascade)
-                    .binding(SUN_SHADOW_HIERARCHY_BINDING + cascade)
-                    .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                    .descriptorCount(1)
-                    .stageFlags(COMPUTE_STAGE);
+            VulkanDescriptors.layoutBinding(
+                    bindings.get(SUN_SHADOW_HIERARCHY_BINDING + cascade),
+                    SUN_SHADOW_HIERARCHY_BINDING + cascade,
+                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, COMPUTE_STAGE);
         }
         return VulkanDescriptors.createSetLayout(
                 context,
@@ -844,25 +837,17 @@ public final class AtmospherePipeline implements Destroyable {
                 imageInfos.get(index)
                         .imageView(images[index].view())
                         .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                writes.get(index)
-                        .sType$Default()
-                        .dstSet(descriptorSet)
-                        .dstBinding(index)
-                        .descriptorCount(1)
-                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(imageInfos.get(index).address(), 1));
+                VulkanDescriptors.writeImage(
+                        writes.get(index), descriptorSet, index,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, imageInfos.get(index));
             }
             VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack)
                             .buffer(phaseLut.handle())
                             .offset(0L)
                             .range(phaseLut.size());
-            writes.get(PHASE_LUT_BINDING)
-                    .sType$Default()
-                    .dstSet(descriptorSet)
-                    .dstBinding(PHASE_LUT_BINDING)
-                    .descriptorCount(1)
-                    .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                    .pBufferInfo(bufferInfo);
+            VulkanDescriptors.writeBuffer(
+                    writes.get(PHASE_LUT_BINDING), descriptorSet, PHASE_LUT_BINDING,
+                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, bufferInfo.get(0));
             for (int bank = 0; bank < SunShadowClipmap.BANK_COUNT; bank++) {
                 for (int cascade = 0;
                         cascade < SunShadowClipmap.CASCADE_COUNT;
@@ -872,14 +857,11 @@ public final class AtmospherePipeline implements Destroyable {
                     imageInfos.get(descriptorIndex)
                             .imageView(sunShadow.depth(bank, cascade).view())
                             .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                    writes.get(SUN_SHADOW_BINDING + index)
-                            .sType$Default()
-                            .dstSet(descriptorSet)
-                            .dstBinding(SUN_SHADOW_BINDING + index)
-                            .descriptorCount(1)
-                            .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                            .pImageInfo(VkDescriptorImageInfo.create(
-                                    imageInfos.get(descriptorIndex).address(), 1));
+                    VulkanDescriptors.writeImage(
+                            writes.get(SUN_SHADOW_BINDING + index), descriptorSet,
+                            SUN_SHADOW_BINDING + index,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                            imageInfos.get(descriptorIndex));
                 }
             }
             for (int cascade = 0;
@@ -889,14 +871,11 @@ public final class AtmospherePipeline implements Destroyable {
                 imageInfos.get(descriptorIndex)
                         .imageView(sunShadowHierarchies[cascade].view())
                         .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                writes.get(SUN_SHADOW_HIERARCHY_BINDING + cascade)
-                        .sType$Default()
-                        .dstSet(descriptorSet)
-                        .dstBinding(SUN_SHADOW_HIERARCHY_BINDING + cascade)
-                        .descriptorCount(1)
-                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .pImageInfo(VkDescriptorImageInfo.create(
-                                imageInfos.get(descriptorIndex).address(), 1));
+                VulkanDescriptors.writeImage(
+                        writes.get(SUN_SHADOW_HIERARCHY_BINDING + cascade), descriptorSet,
+                        SUN_SHADOW_HIERARCHY_BINDING + cascade,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                        imageInfos.get(descriptorIndex));
             }
             VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
             return new DescriptorAllocation(pool, descriptorSet);

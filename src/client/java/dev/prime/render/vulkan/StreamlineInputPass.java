@@ -141,16 +141,12 @@ public final class StreamlineInputPass implements Destroyable {
                 infos.get(4).imageView(streamlineMotion.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
                 VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(5, stack);
                 for (int binding = 0; binding < 5; binding++) {
-                    writes.get(binding)
-                            .sType$Default()
-                            .dstSet(descriptorSet)
-                            .dstBinding(binding)
-                            .descriptorCount(1)
-                            .descriptorType(binding < 2
+                    VulkanDescriptors.writeImage(
+                            writes.get(binding), descriptorSet, binding,
+                            binding < 2
                                     ? VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-                                    : VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                            .pImageInfo(VkDescriptorImageInfo.create(
-                                    infos.get(binding).address(), 1));
+                                    : VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                            infos.get(binding));
                 }
                 VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
                 return new StreamlineInputPass(

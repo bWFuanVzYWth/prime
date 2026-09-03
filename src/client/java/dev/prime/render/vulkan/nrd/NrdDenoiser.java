@@ -796,11 +796,9 @@ public final class NrdDenoiser implements Destroyable {
                 } else {
                     throw new IllegalStateException("Unknown NRD descriptor range type " + range.descriptorType());
                 }
-                bindings.get(bindingIndex++)
-                        .binding(binding)
-                        .descriptorType(descriptorType)
-                        .descriptorCount(1)
-                        .stageFlags(COMPUTE_STAGE);
+                VulkanDescriptors.layoutBinding(
+                        bindings.get(bindingIndex++), binding,
+                        descriptorType, 1, COMPUTE_STAGE);
             }
         }
         return VulkanDescriptors.createSetLayout(
@@ -826,22 +824,21 @@ public final class NrdDenoiser implements Destroyable {
             throw new IllegalStateException("Prime expects NRD's nearest and linear samplers");
         }
         for (int samplerIndex = 0; samplerIndex < description.samplers().size(); samplerIndex++) {
+            int binding = description.samplerOffset()
+                    + description.samplersBaseRegisterIndex()
+                    + samplerIndex;
+            VulkanDescriptors.layoutBinding(
+                    bindings.get(bindingIndex), binding,
+                    VK12.VK_DESCRIPTOR_TYPE_SAMPLER, 1, COMPUTE_STAGE);
             bindings.get(bindingIndex++)
-                    .binding(description.samplerOffset()
-                            + description.samplersBaseRegisterIndex()
-                            + samplerIndex)
-                    .descriptorType(VK12.VK_DESCRIPTOR_TYPE_SAMPLER)
-                    .descriptorCount(1)
-                    .stageFlags(COMPUTE_STAGE)
                     .pImmutableSamplers(stack.longs(immutableSamplers[samplerIndex]));
         }
         if (pipeline.hasConstantData()) {
-            bindings.get(bindingIndex)
-                    .binding(description.constantBufferOffset()
-                            + description.constantBufferRegisterIndex())
-                    .descriptorType(VK12.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-                    .descriptorCount(1)
-                    .stageFlags(COMPUTE_STAGE);
+            VulkanDescriptors.layoutBinding(
+                    bindings.get(bindingIndex),
+                    description.constantBufferOffset()
+                            + description.constantBufferRegisterIndex(),
+                    VK12.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, COMPUTE_STAGE);
         }
         return VulkanDescriptors.createSetLayout(
                 context,
