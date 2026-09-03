@@ -310,7 +310,7 @@ public final class TerrainScene implements AutoCloseable {
                 boolean hasOpacityMicromapBuild = replacements.stream()
                         .anyMatch(cluster -> cluster.hasOpacityMicromapBuild(
                                 this.voxelBlasPool));
-                memoryBarrier(
+                VulkanSync.memoryBarrier(
                         commandBuffer,
                         VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
                         VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -333,7 +333,7 @@ public final class TerrainScene implements AutoCloseable {
                     // operations. The BLAS is allowed to consume the micromap only after its
                     // implementation-owned data is visible; this dependency must remain even
                     // though both commands currently share one transient command buffer.
-                    memoryBarrier(
+                    VulkanSync.memoryBarrier(
                             commandBuffer,
                             EXTOpacityMicromap.VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT,
                             EXTOpacityMicromap.VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT,
@@ -345,7 +345,7 @@ public final class TerrainScene implements AutoCloseable {
                     cluster.recordBuild(this.voxelBlasPool, commandBuffer);
                 }
                 if (!replacements.isEmpty()) {
-                    memoryBarrier(
+                    VulkanSync.memoryBarrier(
                             commandBuffer,
                             KHRAccelerationStructure.VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                             KHRAccelerationStructure.VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
@@ -368,7 +368,7 @@ public final class TerrainScene implements AutoCloseable {
                         nextOriginX,
                         nextOriginY,
                         nextOriginZ);
-                memoryBarrier(
+                VulkanSync.memoryBarrier(
                         commandBuffer,
                         VK12.VK_PIPELINE_STAGE_HOST_BIT,
                         VK12.VK_ACCESS_HOST_WRITE_BIT,
@@ -377,7 +377,7 @@ public final class TerrainScene implements AutoCloseable {
                         KHRAccelerationStructure.VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR
                                 | VK12.VK_ACCESS_SHADER_READ_BIT);
                 replacementTlas.recordBuild(commandBuffer);
-                memoryBarrier(
+                VulkanSync.memoryBarrier(
                         commandBuffer,
                         KHRAccelerationStructure.VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                         KHRAccelerationStructure.VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
@@ -488,7 +488,7 @@ public final class TerrainScene implements AutoCloseable {
             for (PreparedBlas.Compaction compaction : batch.compactions()) {
                 compaction.recordCopy(commandBuffer);
             }
-            memoryBarrier(
+            VulkanSync.memoryBarrier(
                     commandBuffer,
                     KHRAccelerationStructure.VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                     KHRAccelerationStructure.VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
@@ -504,7 +504,7 @@ public final class TerrainScene implements AutoCloseable {
                     this.originX,
                     this.originY,
                     this.originZ);
-            memoryBarrier(
+            VulkanSync.memoryBarrier(
                     commandBuffer,
                     VK12.VK_PIPELINE_STAGE_HOST_BIT,
                     VK12.VK_ACCESS_HOST_WRITE_BIT,
@@ -513,7 +513,7 @@ public final class TerrainScene implements AutoCloseable {
                     KHRAccelerationStructure.VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR
                             | VK12.VK_ACCESS_SHADER_READ_BIT);
             replacementTlas.recordBuild(commandBuffer);
-            memoryBarrier(
+            VulkanSync.memoryBarrier(
                     commandBuffer,
                     KHRAccelerationStructure.VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                     KHRAccelerationStructure.VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
@@ -1501,20 +1501,6 @@ public final class TerrainScene implements AutoCloseable {
                     .size(source.size());
             VK12.vkCmdCopyBuffer(commandBuffer, source.buffer(), destination.handle(), copy);
         }
-    }
-
-    private static void memoryBarrier(
-            VkCommandBuffer commandBuffer,
-            long sourceStage,
-            long sourceAccess,
-            long destinationStage,
-            long destinationAccess) {
-        VulkanSync.memoryBarrier(
-                commandBuffer,
-                sourceStage,
-                sourceAccess,
-                destinationStage,
-                destinationAccess);
     }
 
     public static PreparedBlas.CompactionPolicy compactionPolicy(boolean dynamic) {

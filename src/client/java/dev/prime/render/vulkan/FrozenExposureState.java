@@ -54,7 +54,7 @@ public final class FrozenExposureState implements Destroyable {
             var encoder = context.commandEncoder();
             VkCommandBuffer commandBuffer =
                     encoder.allocateAndBeginTransientCommandBuffer();
-            memoryBarrier(
+            VulkanSync.memoryBarrier(
                     commandBuffer,
                     VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                     VK12.VK_ACCESS_MEMORY_WRITE_BIT,
@@ -70,7 +70,7 @@ public final class FrozenExposureState implements Destroyable {
                 VK12.vkCmdCopyBuffer(
                         commandBuffer, sourceBuffer, readback.handle(), copy);
             }
-            memoryBarrier(
+            VulkanSync.memoryBarrier(
                     commandBuffer,
                     VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
                     VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -135,20 +135,6 @@ public final class FrozenExposureState implements Destroyable {
             readback.destroy();
             this.ready = true;
         }
-    }
-
-    private static void memoryBarrier(
-            VkCommandBuffer commandBuffer,
-            long sourceStage,
-            long sourceAccess,
-            long destinationStage,
-            long destinationAccess) {
-        VulkanSync.memoryBarrier(
-                commandBuffer,
-                sourceStage,
-                sourceAccess,
-                destinationStage,
-                destinationAccess);
     }
 
     @Override
