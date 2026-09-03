@@ -122,7 +122,7 @@ final class PrimeConfigCodec {
                         PrimeConfigCodec::parseEvQuarterSteps, "sun exposure"),
                 reader.value(
                         STAR_EV_KEY, data.lighting.starQuarterSteps(),
-                        PrimeConfigCodec::parseStarEvQuarterSteps, "star exposure"),
+                        PrimeConfigCodec::parseEvQuarterSteps, "star exposure"),
                 reader.value(
                         BLOCK_LIGHT_EV_KEY, data.lighting.blockLightQuarterSteps(),
                         PrimeConfigCodec::parseEvQuarterSteps, "block-light exposure"),
@@ -196,7 +196,7 @@ final class PrimeConfigCodec {
                 + SOLAR_LONGITUDE_DEGREES_KEY + "="
                 + data.astronomy.solarLongitudeDegrees() + "\n"
                 + SUN_EV_KEY + "=" + formatEv(data.lighting.sunQuarterSteps()) + "\n"
-                + STAR_EV_KEY + "=" + formatStarEv(data.lighting.starQuarterSteps()) + "\n"
+                + STAR_EV_KEY + "=" + formatEv(data.lighting.starQuarterSteps()) + "\n"
                 + BLOCK_LIGHT_EV_KEY + "=" + formatEv(data.lighting.blockLightQuarterSteps()) + "\n"
                 + TRANSPARENT_NEE_MODE_KEY + "=" + data.lighting.transparentNeeMode().id() + "\n"
                 + FINAL_EXPOSURE_EV_KEY + "="
@@ -233,7 +233,7 @@ final class PrimeConfigCodec {
                 data.astronomy.latitudeDegrees(),
                 data.astronomy.solarLongitudeDegrees(),
                 formatEv(data.lighting.sunQuarterSteps()),
-                formatStarEv(data.lighting.starQuarterSteps()),
+                formatEv(data.lighting.starQuarterSteps()),
                 formatEv(data.lighting.blockLightQuarterSteps()),
                 data.lighting.transparentNeeMode().id(),
                 formatFinalExposure(data.display.finalExposureQuarterSteps()),
@@ -382,21 +382,6 @@ final class PrimeConfigCodec {
                 quarterSteps,
                 LightingSettings.QUARTER_STEPS_PER_EV,
                 LightingSettings::linearMultiplier);
-    }
-
-    static int parseStarEvQuarterSteps(String value) {
-        return parseSteps(
-                value,
-                LightingSettings.QUARTER_STEPS_PER_EV,
-                LightingSettings::starLinearMultiplier,
-                "Star EV must be an exact 0.25-EV step");
-    }
-
-    static String formatStarEv(int quarterSteps) {
-        return formatSteps(
-                quarterSteps,
-                LightingSettings.QUARTER_STEPS_PER_EV,
-                LightingSettings::starLinearMultiplier);
     }
 
     static int parseFinalExposureQuarterSteps(String value) {

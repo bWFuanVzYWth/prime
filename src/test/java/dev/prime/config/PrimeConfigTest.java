@@ -239,12 +239,6 @@ final class PrimeConfigTest {
                 Map.of(0, "0", 5, "1.25"),
                 "0.1", "8.25");
         assertStepCodec(
-                PrimeConfigCodec::parseStarEvQuarterSteps,
-                PrimeConfigCodec::formatStarEv,
-                Map.of("8", 32),
-                Map.of(32, "8"),
-                "8.25");
-        assertStepCodec(
                 PrimeConfigCodec::parseFinalExposureQuarterSteps,
                 PrimeConfigCodec::formatFinalExposure,
                 Map.of("-8", -32, "0", 0, "1.25", 5, "8", 32),

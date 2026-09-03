@@ -91,7 +91,7 @@ public final class IntegratorSettings {
             int blockLightQuarterSteps,
             int materialRoughnessSteps,
             boolean shInput) {
-        LightingSettings.starLinearMultiplier(starQuarterSteps);
+        LightingSettings.linearMultiplier(starQuarterSteps);
         if (materialRoughnessSteps < MaterialSettings.MINIMUM_ROUGHNESS_STEPS
                 || materialRoughnessSteps > MaterialSettings.MAXIMUM_ROUGHNESS_STEPS
                 || (materialRoughnessSteps & ~ShaderAbi.PATH_MATERIAL_ROUGHNESS_MASK) != 0) {

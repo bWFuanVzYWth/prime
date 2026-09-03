@@ -15,15 +15,9 @@ final class LightingSettingsTest {
         assertEquals(256.0F, LightingSettings.linearMultiplier(32));
         assertEquals(1.0F / 256.0F, LightingSettings.linearMultiplier(-32));
         assertEquals((float) Math.pow(2.0, 0.25), LightingSettings.linearMultiplier(1));
-        assertEquals(1.0F, LightingSettings.starLinearMultiplier(0));
-        assertEquals(
-                256.0F,
-                LightingSettings.starLinearMultiplier(32));
         assertThrows(IllegalArgumentException.class,
                 () -> LightingSettings.linearMultiplier(
                         LightingSettings.MAXIMUM_QUARTER_STEPS + 1));
-        assertThrows(IllegalArgumentException.class,
-                () -> LightingSettings.starLinearMultiplier(33));
     }
 
     @Test

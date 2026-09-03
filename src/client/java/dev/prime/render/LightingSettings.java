@@ -11,8 +11,6 @@ public final class LightingSettings {
     public static final int QUARTER_STEPS_PER_EV = 4;
     public static final int MINIMUM_QUARTER_STEPS = -32;
     public static final int MAXIMUM_QUARTER_STEPS = 32;
-    public static final int MINIMUM_STAR_QUARTER_STEPS = -32;
-    public static final int MAXIMUM_STAR_QUARTER_STEPS = 32;
     public static final int DEFAULT_SUN_QUARTER_STEPS = 0;
     public static final int DEFAULT_STAR_QUARTER_STEPS = 0;
     public static final int DEFAULT_BLOCK_LIGHT_QUARTER_STEPS = 0;
@@ -30,11 +28,6 @@ public final class LightingSettings {
         return quarterSteps / (float) QUARTER_STEPS_PER_EV;
     }
 
-    public static float starLinearMultiplier(int quarterSteps) {
-        requireValidStar(quarterSteps);
-        return (float) Math.pow(2.0, quarterSteps / (double) QUARTER_STEPS_PER_EV);
-    }
-
     private static void requireValid(int quarterSteps) {
         if (quarterSteps < MINIMUM_QUARTER_STEPS
                 || quarterSteps > MAXIMUM_QUARTER_STEPS) {
@@ -50,17 +43,6 @@ public final class LightingSettings {
         return quarterSteps / (float) QUARTER_STEPS_PER_EV;
     }
 
-    private static void requireValidStar(int quarterSteps) {
-        if (quarterSteps < MINIMUM_STAR_QUARTER_STEPS
-                || quarterSteps > MAXIMUM_STAR_QUARTER_STEPS) {
-            throw new IllegalArgumentException(
-                    "Star EV must be between "
-                            + exposureValueUnchecked(MINIMUM_STAR_QUARTER_STEPS)
-                            + " and "
-                            + exposureValueUnchecked(MAXIMUM_STAR_QUARTER_STEPS));
-        }
-    }
-
     public record Snapshot(
             int sunQuarterSteps,
             int starQuarterSteps,
@@ -68,7 +50,7 @@ public final class LightingSettings {
             TransparentNeeMode transparentNeeMode) {
         public Snapshot {
             requireValid(sunQuarterSteps);
-            requireValidStar(starQuarterSteps);
+            requireValid(starQuarterSteps);
             requireValid(blockLightQuarterSteps);
             java.util.Objects.requireNonNull(transparentNeeMode, "transparentNeeMode");
         }
@@ -89,7 +71,7 @@ public final class LightingSettings {
         }
 
         public float starMultiplier() {
-            return starLinearMultiplier(this.starQuarterSteps);
+            return linearMultiplier(this.starQuarterSteps);
         }
 
         public float blockLightMultiplier() {

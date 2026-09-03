@@ -262,7 +262,7 @@ public final class PrimeConfig {
     }
 
     public static void setStarQuarterSteps(int value) {
-        LightingSettings.starLinearMultiplier(value);
+        LightingSettings.linearMultiplier(value);
         if (value != data.lighting.starQuarterSteps()) {
             setLighting(new LightingSettings.Snapshot(
                     data.lighting.sunQuarterSteps(),

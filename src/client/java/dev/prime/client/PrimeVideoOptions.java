@@ -210,8 +210,8 @@ public final class PrimeVideoOptions {
                                 big(exposureOption(
                                 "prime.options.lighting.star_ev",
                                 settings.lighting().starQuarterSteps(),
-                                LightingSettings.MINIMUM_STAR_QUARTER_STEPS,
-                                LightingSettings.MAXIMUM_STAR_QUARTER_STEPS,
+                                LightingSettings.MINIMUM_QUARTER_STEPS,
+                                LightingSettings.MAXIMUM_QUARTER_STEPS,
                                 PrimeConfig::setStarQuarterSteps)),
                                 big(exposureOption(
                                 "prime.options.lighting.block_light_ev",
