@@ -20,21 +20,17 @@ Prime 正在跨阶段迁移 renderer data IR。benchmark 只回答“有多快�
 
 ## 清单与基线
 
-改造前基线为 147 个测试源文件、573 个 JUnit 测试：529 个 JVM 测试和 44 个 Vulkan Shader
-测试。当前仓库有 177 个测试/测试设施 Java 源文件；五个分层任务合计执行 662 个 invocation：
-610 个 JVM、12 个 artifact、3 个 Windows native、36 个 Vulkan compute 和 1 个 Vulkan RT。
-除四个 JetCheck
-性质测试和翻译入口错误边界外，P0/P1 补强增加了真实 RT 生命周期、提交事务、纹理/terrain
-generation、Renderer 生命周期、动态捕获会话和确定性并发测试。原有行为断言全部保留，其中
+测试按 JVM、artifact、Windows native 和 Vulkan compute 四个环境分层。
+P0/P1 补强覆盖提交事务、纹理/terrain generation、Renderer 生命周期、动态捕获会话和确定性
+并发。原有行为断言全部保留，其中
 8 个不需要 GPU 的 ZSobol 映射/分层测试从 Shader 层移入 JVM 层。错误边界测试有三个参数化
 case。最近的 Streamline 补强增加 common constants、运行时门禁、native 发布、发行资源和
 生产 Shader 输入转换测试；各任务仍为零跳过。
 
 `src/test/slang/programs.json` 是测试 Shader 的权威清单：
 
-- 42 个 Slang entry；
-- 35 个 `runtime` entry：31 个 compute entry 由 `shaderTest` dispatch，raygen、miss、any-hit
-  和 closest-hit 由 `rayTracingTest` 组成真实 trace pipeline；
+- 39 个 Slang entry；
+- 32 个 `runtime` compute entry 由 `shaderTest` dispatch；
 - 7 个 `compile-only` entry，只验证独立编译闭包；
 - entry 源文件、声明的 SPIR-V 名称和实际编译产物必须一一对应。
 
@@ -46,11 +42,10 @@ case。最近的 Streamline 补强增加 common constants、运行时门禁、na
 
 | 任务 | 观察对象 | 环境契约 | 是否属于默认门禁 |
 | --- | --- | --- | --- |
-| `test` | 610 个纯 Java 行为、数学性质和状态机测试 | 不编译 Shader、不加载原生库、不需要 Vulkan；排除 `artifact`、`native`、`gpu-shader`、`gpu-ray-tracing` 标签 | 是 |
+| `test` | 纯 Java 行为、数学性质和状态机测试 | 不编译 Shader、不加载原生库、不需要 Vulkan；排除 `artifact`、`native`、`gpu-shader` 标签 | 是 |
 | `artifactTest` | 12 个生产 SPIR-V、manifest、descriptor/payload ABI、资源和桥接 DLL 打包测试 | 允许编译生产 Shader；无运行环境跳过 | 是，由 `check` 调用 |
 | `nativeTest` | 3 个 NRD、FSR、DLSS Windows x64 原生桥执行测试 | 只支持 Windows x64；显式运行于其他平台会直接失败 | 否，由 Windows CI 显式调用 |
 | `shaderTest` | 36 个 Vulkan compute/Shader 行为、数学性质和资源生命周期测试 | 必须有 Vulkan 1.2 compute device 和 `VK_LAYER_KHRONOS_validation`；缺失时直接失败 | 否，由 Linux GPU/Lavapipe CI 显式调用 |
-| `rayTracingTest` | 1 个真实 BLAS/TLAS、SBT、raygen/miss/any-hit/closest-hit、readback 和释放测试 | 必须有 Vulkan 1.2 RT device、acceleration structure/ray tracing pipeline 扩展和 validation layer；缺失时直接失败 | 否，由 RT 硬件环境显式调用 |
 
 `check` 依赖 `test`、`artifactTest`、生产 Shader 编译、Shader ABI、ray payload、架构和
 发行物检查，但不隐式执行 GPU 或 Windows 原生测试。`jacocoTestReport` 聚合 `test` 与
@@ -63,7 +58,6 @@ case。最近的 Streamline 补强增加 common constants、运行时门禁、na
 ./gradlew artifactTest
 ./gradlew nativeTest
 ./gradlew shaderTest
-./gradlew rayTracingTest
 ./gradlew clean check shaderTest jacocoTestReport
 ```
 
@@ -121,17 +115,12 @@ GPU 测试共用三层测试专用设施：
 - `ShaderComputeExtension`：统一 required/IDE 语义、每测试类生命周期和字段注入；
 - `ShaderTestContext`：统一测试 Shader 目录和 runner 所有权；
 - `VulkanTestDevice`：集中拥有 instance、physical device、logical device、queue、command
-  pool、debug callback 和释放顺序；RT 模式还显式协商 device address、acceleration structure、
-  deferred host operations 和 ray tracing pipeline；
+  pool、debug callback 和释放顺序；
 - `ShaderComputeRunner`：只负责测试 buffer/image、descriptor、pipeline、dispatch 和 readback。
-- `RayTracingTestRunner`：只负责最小三角形的 BLAS/TLAS build、descriptor、四阶段 RT pipeline、
-  SBT、trace、硬件重心/readback 和完整释放。
 
 `shaderTest` 强制启用 `VK_LAYER_KHRONOS_validation`。debug callback 收到任何 ERROR 都使测试
 失败；每个测试设备的结果写入 `build/reports/vulkan-validation/`。最小生命周期测试覆盖
 instance/device 创建、上传、sampled/storage descriptor 绑定、dispatch、readback 和重复释放。
-`rayTracingTest` 使用同一 validation/debug/report 契约，但单独要求 RT 硬件，不能在不支持 RT 的
-Lavapipe 门禁上 assumption skip。
 
 ## 测试职责与风险覆盖
 
@@ -144,7 +133,6 @@ Lavapipe 门禁上 assumption skip。
 | 原生执行 | `nativeTest` | NRD、FSR、DLSS bridge 的真实 Windows x64 调用 |
 | GPU 数学与采样 | `shaderTest` | compact OpenPBR、transport、BSDF、材质/天体、重建/曝光、ZSobol parity 与统计 |
 | Vulkan host 生命周期 | `shaderTest` | validated instance/device、buffer/image、descriptor、dispatch、readback、幂等释放 |
-| Vulkan RT 生命周期 | `rayTracingTest` | BLAS/TLAS、host→AS→trace→readback barrier、SBT、hit/miss/any-hit/closest-hit、硬件重心与幂等释放 |
 | Streamline / DLSS-G 边界 | `test` + `artifactTest` + `shaderTest` | row-major common constants、相机历史重投影、projection jitter、真实 reversed depth、规范 top-left motion、直接 HUD-less color、窄 descriptor 闭包与发行 DLL；NVIDIA fake-swapchain device-lost 仍按高风险上游缺陷隔离 |
 | 发行和架构 | `check` | Shader ABI、ray payload、依赖闭包、资源和发行 JAR |
 
@@ -245,10 +233,6 @@ Linux CI 使用 Ubuntu、Lavapipe 和 Vulkan validation layers，运行：
 Windows x64 CI 独立运行 `nativeTest`。CI 始终保存 JUnit、JaCoCo、Shader 清单/架构和 Vulkan
 validation 报告；发行构建产物继续单独保存。
 
-`rayTracingTest` 不能由无 RT 能力的 Lavapipe 伪造，通过 RT-capable 本地或自托管环境显式运行；
-显式运行缺扩展或 validation layer 时直接失败。接入稳定 RT CI runner 后应把其 JUnit 和
-validation 报告纳入同一制品保留规则。
-
 ## 数据合同与测量入口
 
 当前规范由[渲染核心数据 IR](渲染核心数据IR.md)及专项契约描述；实际 record、offset、descriptor
@@ -272,8 +256,8 @@ section 的常见 opaque/overlay/transparent/fluid 混合；极端 corpus 含 10
 本阶段明确不建设：
 
 - 完整 Fabric 客户端启动与资源 reload 集成测试；
-- 完整生产 ray-tracing frame；当前只执行最小 BLAS/TLAS 四阶段 trace，并已覆盖 executor 的
-  CPU 提交/回滚协议，尚未执行完整生产 descriptor/queue/history 组合；
+- 完整生产 ray-tracing frame；当前覆盖 executor 的 CPU 提交/回滚协议，但尚未执行完整生产
+  descriptor/queue/history 组合；
 - 图像回归及多 GPU/driver 差分；
 - 完整生产 frame 的逐 pass timestamp、register/spill/occupancy 与 cache 指标；
 - 外部 DLSS/Streamline native pool 的可靠显存归因；
@@ -291,9 +275,8 @@ section 的常见 opaque/overlay/transparent/fluid 混合；极端 corpus 含 10
 3. 有与风险匹配的数学性质、状态转换、ABI 或资源所有权断言；
 4. 有固定 seed 的扩展 corpus 和失败重放方法；
 5. 优化前 fixture/公开结果已经固定；
-6. 跨模块边界有行为测试；compute GPU 热点必须通过真实 `shaderTest`，RT/AS/SBT 热点还必须
-   通过 `rayTracingTest`；
-7. `test`、`artifactTest` 及该路径对应的 `nativeTest`/`shaderTest`/`rayTracingTest` 全部通过。
+6. 跨模块边界有行为测试；compute GPU 热点必须通过真实 `shaderTest`；
+7. `test`、`artifactTest` 及该路径对应的 `nativeTest`/`shaderTest` 全部通过。
 
 Java benchmark 使用 JMH，GPU benchmark 使用 Vulkan timestamp query，并分开报告 setup、
 command recording、submission、GPU 执行、同步和 readback。benchmark 不在测量区间编译

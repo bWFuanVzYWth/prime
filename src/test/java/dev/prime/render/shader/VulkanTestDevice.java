@@ -10,9 +10,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.EXTDebugUtils;
-import org.lwjgl.vulkan.KHRAccelerationStructure;
-import org.lwjgl.vulkan.KHRDeferredHostOperations;
-import org.lwjgl.vulkan.KHRRayTracingPipeline;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkApplicationInfo;
@@ -23,17 +20,12 @@ import org.lwjgl.vulkan.VkDebugUtilsMessengerCreateInfoEXT;
 import org.lwjgl.vulkan.VkDevice;
 import org.lwjgl.vulkan.VkDeviceCreateInfo;
 import org.lwjgl.vulkan.VkDeviceQueueCreateInfo;
-import org.lwjgl.vulkan.VkExtensionProperties;
 import org.lwjgl.vulkan.VkInstance;
 import org.lwjgl.vulkan.VkInstanceCreateInfo;
 import org.lwjgl.vulkan.VkLayerProperties;
 import org.lwjgl.vulkan.VkPhysicalDevice;
-import org.lwjgl.vulkan.VkPhysicalDeviceAccelerationStructureFeaturesKHR;
-import org.lwjgl.vulkan.VkPhysicalDeviceBufferDeviceAddressFeatures;
 import org.lwjgl.vulkan.VkPhysicalDeviceFeatures;
-import org.lwjgl.vulkan.VkPhysicalDeviceFeatures2;
 import org.lwjgl.vulkan.VkPhysicalDeviceProperties;
-import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingPipelineFeaturesKHR;
 import org.lwjgl.vulkan.VkQueue;
 import org.lwjgl.vulkan.VkQueueFamilyProperties;
 
@@ -74,16 +66,6 @@ final class VulkanTestDevice implements AutoCloseable {
     }
 
     static VulkanTestDevice open() throws ShaderComputeRunner.UnavailableException {
-        return open(false);
-    }
-
-    static VulkanTestDevice openRayTracing()
-            throws ShaderComputeRunner.UnavailableException {
-        return open(true);
-    }
-
-    private static VulkanTestDevice open(boolean requireRayTracing)
-            throws ShaderComputeRunner.UnavailableException {
         VkInstance instance = null;
         VkDevice device = null;
         long commandPool = 0L;
@@ -159,7 +141,7 @@ final class VulkanTestDevice implements AutoCloseable {
                 debugMessenger = debugHandle.get(0);
             }
 
-            SelectedDevice selected = selectDevice(instance, stack, requireRayTracing);
+            SelectedDevice selected = selectDevice(instance, stack);
             VkDeviceQueueCreateInfo.Buffer queueInfo = VkDeviceQueueCreateInfo.calloc(1, stack);
             queueInfo.get(0)
                     .sType$Default()
@@ -170,31 +152,6 @@ final class VulkanTestDevice implements AutoCloseable {
                     .pQueueCreateInfos(queueInfo)
                     .pEnabledFeatures(VkPhysicalDeviceFeatures.calloc(stack)
                             .shaderInt64(true));
-            if (requireRayTracing) {
-                VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddress =
-                        VkPhysicalDeviceBufferDeviceAddressFeatures.calloc(stack)
-                                .sType$Default()
-                                .bufferDeviceAddress(true);
-                VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructure =
-                        VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack)
-                                .sType$Default()
-                                .accelerationStructure(true);
-                VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingPipeline =
-                        VkPhysicalDeviceRayTracingPipelineFeaturesKHR.calloc(stack)
-                                .sType$Default()
-                                .rayTracingPipeline(true);
-                bufferDeviceAddress.pNext(accelerationStructure.address());
-                accelerationStructure.pNext(rayTracingPipeline.address());
-                deviceInfo
-                        .pNext(bufferDeviceAddress.address())
-                        .ppEnabledExtensionNames(stack.pointers(
-                                stack.UTF8(KHRDeferredHostOperations
-                                        .VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME),
-                                stack.UTF8(KHRAccelerationStructure
-                                        .VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
-                                stack.UTF8(KHRRayTracingPipeline
-                                        .VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)));
-            }
             pointer.clear();
             result = VK12.vkCreateDevice(selected.physicalDevice(), deviceInfo, null, pointer);
             if (result != VK12.VK_SUCCESS) {
@@ -313,8 +270,7 @@ final class VulkanTestDevice implements AutoCloseable {
 
     private static SelectedDevice selectDevice(
             VkInstance instance,
-            MemoryStack stack,
-            boolean requireRayTracing)
+            MemoryStack stack)
             throws ShaderComputeRunner.UnavailableException {
         IntBuffer count = stack.ints(0);
         int result = VK12.vkEnumeratePhysicalDevices(instance, count, null);
@@ -341,9 +297,6 @@ final class VulkanTestDevice implements AutoCloseable {
             if (!features.shaderInt64()) {
                 continue;
             }
-            if (requireRayTracing && !supportsRayTracing(physicalDevice, stack)) {
-                continue;
-            }
             count.put(0, 0);
             VK12.vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, count, null);
             VkQueueFamilyProperties.Buffer queueProperties =
@@ -359,61 +312,7 @@ final class VulkanTestDevice implements AutoCloseable {
             }
         }
         throw new ShaderComputeRunner.UnavailableException(
-                requireRayTracing
-                        ? "No Vulkan 1.2 device with acceleration structures and ray tracing is available"
-                        : "No Vulkan 1.2 compute queue with shaderInt64 is available");
-    }
-
-    private static boolean supportsRayTracing(
-            VkPhysicalDevice physicalDevice,
-            MemoryStack stack) {
-        IntBuffer count = stack.ints(0);
-        int result = VK12.vkEnumerateDeviceExtensionProperties(
-                physicalDevice, (java.nio.ByteBuffer) null, count, null);
-        if (result != VK12.VK_SUCCESS) {
-            return false;
-        }
-        boolean deferredHostOperations = false;
-        boolean accelerationStructure = false;
-        boolean rayTracingPipeline = false;
-        VkExtensionProperties.Buffer extensions = VkExtensionProperties.calloc(count.get(0));
-        try {
-            result = VK12.vkEnumerateDeviceExtensionProperties(
-                    physicalDevice, (java.nio.ByteBuffer) null, count, extensions);
-            if (result != VK12.VK_SUCCESS) {
-                return false;
-            }
-            for (int index = 0; index < extensions.remaining(); index++) {
-                String name = extensions.get(index).extensionNameString();
-                deferredHostOperations |= KHRDeferredHostOperations
-                        .VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME.equals(name);
-                accelerationStructure |= KHRAccelerationStructure
-                        .VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME.equals(name);
-                rayTracingPipeline |= KHRRayTracingPipeline
-                        .VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME.equals(name);
-            }
-        } finally {
-            extensions.free();
-        }
-        if (!deferredHostOperations || !accelerationStructure || !rayTracingPipeline) {
-            return false;
-        }
-
-        VkPhysicalDeviceFeatures2 features =
-                VkPhysicalDeviceFeatures2.calloc(stack).sType$Default();
-        VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddress =
-                VkPhysicalDeviceBufferDeviceAddressFeatures.calloc(stack).sType$Default();
-        VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration =
-                VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack).sType$Default();
-        VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracing =
-                VkPhysicalDeviceRayTracingPipelineFeaturesKHR.calloc(stack).sType$Default();
-        features.pNext(bufferDeviceAddress.address());
-        bufferDeviceAddress.pNext(acceleration.address());
-        acceleration.pNext(rayTracing.address());
-        VK12.vkGetPhysicalDeviceFeatures2(physicalDevice, features);
-        return bufferDeviceAddress.bufferDeviceAddress()
-                && acceleration.accelerationStructure()
-                && rayTracing.rayTracingPipeline();
+                "No Vulkan 1.2 compute queue with shaderInt64 is available");
     }
 
     private static void closePartial(

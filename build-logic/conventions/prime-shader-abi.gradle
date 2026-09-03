@@ -511,7 +511,7 @@ tasks.withType(Test).configureEach {
 
 tasks.named('test') {
 	useJUnitPlatform {
-		excludeTags 'artifact', 'native', 'gpu-shader', 'gpu-ray-tracing'
+		excludeTags 'artifact', 'native', 'gpu-shader'
 	}
 }
 
@@ -567,27 +567,6 @@ tasks.register('shaderTest', Test) {
 		includeTags 'gpu-shader'
 	}
 	systemProperty 'prime.shaderTests.required', 'true'
-	systemProperty 'prime.shaderValidation.required', 'true'
-	systemProperty 'prime.vulkanValidationReportDirectory',
-			layout.buildDirectory.dir('reports/vulkan-validation').get().asFile.absolutePath
-	outputs.upToDateWhen { false }
-	doFirst {
-		systemProperty 'prime.test.slangShaderDirectory',
-				new File(compiledSlangTestShaderRoot.get().asFile, 'prime/shaders').absolutePath
-	}
-}
-
-tasks.register('rayTracingTest', Test) {
-	group = 'verification'
-	description = 'Runs validated BLAS/TLAS and ray-pipeline lifecycle tests on a ray-tracing device.'
-	dependsOn 'verifyCompiledShaderTestManifest'
-	inputs.dir(compiledSlangTestShaderRoot)
-	testClassesDirs = sourceSets.test.output.classesDirs
-	classpath = sourceSets.test.runtimeClasspath
-	useJUnitPlatform {
-		includeTags 'gpu-ray-tracing'
-	}
-	systemProperty 'prime.rayTracingTests.required', 'true'
 	systemProperty 'prime.shaderValidation.required', 'true'
 	systemProperty 'prime.vulkanValidationReportDirectory',
 			layout.buildDirectory.dir('reports/vulkan-validation').get().asFile.absolutePath
