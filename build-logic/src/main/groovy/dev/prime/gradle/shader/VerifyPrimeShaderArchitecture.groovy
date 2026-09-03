@@ -231,23 +231,7 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
             }
         }
 
-        def state = new HashMap<String, Integer>()
-        def stack = []
-        Closure<Void> visit
-        visit = { String source ->
-            if (state[source] == 1) {
-                int start = stack.indexOf(source)
-                throw new GradleException(
-                        "Shader dependency cycle: ${(stack.subList(start, stack.size()) + source).join(' -> ')}")
-            }
-            if (state[source] == 2) return
-            state[source] = 1
-            stack.add(source)
-            (graph[source] ?: Collections.emptySet()).each { visit(it) }
-            stack.remove(stack.size() - 1)
-            state[source] = 2
-        }
-        graph.keySet().each { visit(it) }
+        PrimeShaderDependencyGraph.requireAcyclic(graph)
 
         def manifest = PrimeShaderManifest.read(programManifest.get().asFile)
         def manifestSources = manifest.artifacts.values().collect { artifact ->
@@ -285,21 +269,9 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
             }
         }
 
-        def closureFor = { String root ->
-            def closure = new TreeSet<String>()
-            def pending = new ArrayDeque<String>()
-            pending.add(root)
-            while (!pending.empty) {
-                def current = pending.removeLast()
-                if (closure.add(current)) {
-                    (graph[current] ?: Collections.emptySet()).each { pending.add(it) }
-                }
-            }
-            return closure
-        }
         def closures = productionEntries.collectEntries { entry ->
             def entryPath = pathKey(entry)
-            [(entryPath): closureFor(entryPath)]
+            [(entryPath): PrimeShaderDependencyGraph.paths(entryPath, graph)]
         }
         def normalizedSourceBytes = { String path ->
             new File(path).getText('UTF-8')

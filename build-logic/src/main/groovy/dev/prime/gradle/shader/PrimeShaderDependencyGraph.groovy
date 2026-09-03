@@ -69,7 +69,7 @@ abstract class PrimeShaderDependencyGraph
         return graph
     }
 
-    private static void requireAcyclic(Map<String, Set<String>> graph) {
+    static void requireAcyclic(Map<String, Set<String>> graph) {
         def state = new HashMap<String, Integer>()
         def stack = []
         Closure<Void> visit
@@ -90,9 +90,12 @@ abstract class PrimeShaderDependencyGraph
     }
 
     static Set<String> paths(File source, Map<String, Set<String>> graph) {
-        def root = source.canonicalPath
+        return paths(source.canonicalPath, graph)
+    }
+
+    static Set<String> paths(String root, Map<String, Set<String>> graph) {
         if (!graph.containsKey(root)) {
-            throw new GradleException("Shader entry is outside its include roots: ${source}")
+            throw new GradleException("Shader entry is outside its include roots: ${root}")
         }
         def closure = new TreeSet<String>()
         def pending = new ArrayDeque<String>()
