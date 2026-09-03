@@ -21,25 +21,7 @@ public final class VulkanSync {
             long destinationStage,
             long destinationAccess) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            memoryBarrier(
-                    commandBuffer,
-                    stack,
-                    sourceStage,
-                    sourceAccess,
-                    destinationStage,
-                    destinationAccess);
-        }
-    }
-
-    private static void memoryBarrier(
-            VkCommandBuffer commandBuffer,
-            MemoryStack stack,
-            long sourceStage,
-            long sourceAccess,
-            long destinationStage,
-            long destinationAccess) {
-        try (MemoryStack frame = stack.push()) {
-            VkMemoryBarrier2.Buffer barrier = VkMemoryBarrier2.calloc(1, frame);
+            VkMemoryBarrier2.Buffer barrier = VkMemoryBarrier2.calloc(1, stack);
             barrier.get(0).sType$Default()
                     .srcStageMask(sourceStage)
                     .srcAccessMask(sourceAccess)
@@ -47,7 +29,7 @@ public final class VulkanSync {
                     .dstAccessMask(destinationAccess);
             KHRSynchronization2.vkCmdPipelineBarrier2KHR(
                     commandBuffer,
-                    VkDependencyInfo.calloc(frame)
+                    VkDependencyInfo.calloc(stack)
                             .sType$Default()
                             .pMemoryBarriers(barrier));
         }
