@@ -64,34 +64,10 @@ final class PrimeConfigCodec {
             "streamline.dlss_frame_generation_multiplier";
     private static final String DLSS_FRAME_GENERATION_UI_RECOMPOSITION_KEY =
             "streamline.dlss_frame_generation_ui_recomposition";
-    private static final Set<String> CURRENT_KEYS = Set.of(
-            PATH_TRACING_ENABLED_KEY,
-            ADDITIONAL_SPECULAR_BOUNCES_KEY,
-            MINIMUM_BOUNCES_KEY,
-            MAXIMUM_BOUNCES_KEY,
-            TERRAIN_WORKER_PERCENTAGE_KEY,
-            SURFACE_DETAIL_MODE_KEY,
-            VOXEL_TEXTURE_SURFACE_STRENGTH_KEY,
-            MODE_KEY,
-            QUALITY_KEY,
-            SUN_EV_KEY,
-            STAR_EV_KEY,
-            BLOCK_LIGHT_EV_KEY,
-            TRANSPARENT_NEE_MODE_KEY,
-            LATITUDE_DEGREES_KEY,
-            SOLAR_LONGITUDE_DEGREES_KEY,
-            FINAL_EXPOSURE_EV_KEY,
-            HDR_ENABLED_KEY,
-            AUTO_EXPOSURE_COMPENSATION_KEY,
-            REFERENCE_WHITE_NITS_KEY,
-            DEFAULT_ROUGHNESS_KEY,
-            SEAMLESS_GLASS_KEY,
-            AIR_GAP_KEY,
-            VANILLA_PBR_PRESETS_KEY,
-            REFLEX_MODE_KEY,
-            DLSS_FRAME_GENERATION_ENABLED_KEY,
-            DLSS_FRAME_GENERATION_MULTIPLIER_KEY,
-            DLSS_FRAME_GENERATION_UI_RECOMPOSITION_KEY);
+    private static final Set<String> CURRENT_KEYS = Set.copyOf(
+            encode(PrimeConfigData.defaults()).lines()
+                    .map(line -> line.substring(0, line.indexOf('=')))
+                    .toList());
 
     private PrimeConfigCodec() {
     }

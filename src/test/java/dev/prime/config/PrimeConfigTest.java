@@ -16,7 +16,10 @@ import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.terrain.TerrainWorkerSettings;
 import java.io.StringReader;
+import java.util.Map;
 import java.util.Properties;
+import java.util.function.IntFunction;
+import java.util.function.ToIntFunction;
 import org.junit.jupiter.api.Test;
 
 final class PrimeConfigTest {
@@ -226,112 +229,56 @@ final class PrimeConfigTest {
     }
 
     @Test
-    void persistedAstronomyAcceptsOnlyIntegerDegreesInRange() {
-        assertEquals(-90, PrimeConfigCodec.parseLatitudeDegrees("-90"));
-        assertEquals(30, PrimeConfigCodec.parseLatitudeDegrees("30"));
-        assertEquals(90, PrimeConfigCodec.parseLatitudeDegrees("90"));
-        assertEquals(0, PrimeConfigCodec.parseSolarLongitudeDegrees("0"));
-        assertEquals(359, PrimeConfigCodec.parseSolarLongitudeDegrees("359"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseLatitudeDegrees("-91"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseLatitudeDegrees("30.5"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseSolarLongitudeDegrees("-1"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseSolarLongitudeDegrees("360"));
-    }
+    void persistedNumericSettingsUseExactRepresentableStepsAndRanges() {
+        assertIntegerCodec(
+                PrimeConfigCodec::parseLatitudeDegrees,
+                Map.of("-90", -90, "30", 30, "90", 90),
+                "-91", "30.5");
+        assertIntegerCodec(
+                PrimeConfigCodec::parseSolarLongitudeDegrees,
+                Map.of("0", 0, "359", 359),
+                "-1", "360");
+        assertIntegerCodec(
+                PrimeConfigCodec::parseReferenceWhiteNits,
+                Map.of("0", 0, "400", 400, "10000", 10_000),
+                "-1", "400.0", "10001");
 
-    @Test
-    void persistedEvAcceptsOnlyExactQuarterStopsInRange() {
-        assertEquals(5, PrimeConfigCodec.parseEvQuarterSteps("1.25"));
-        assertEquals(-32, PrimeConfigCodec.parseEvQuarterSteps("-8"));
-        assertEquals(32, PrimeConfigCodec.parseEvQuarterSteps("8"));
-        assertEquals("1.25", PrimeConfigCodec.formatEv(5));
-        assertEquals("0", PrimeConfigCodec.formatEv(0));
-        assertThrows(IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseEvQuarterSteps("0.1"));
-        assertThrows(IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseEvQuarterSteps("8.25"));
-        assertEquals(32, PrimeConfigCodec.parseStarEvQuarterSteps("8"));
-        assertEquals("8", PrimeConfigCodec.formatStarEv(32));
-        assertThrows(IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseStarEvQuarterSteps("8.25"));
-    }
-
-    @Test
-    void persistedAutoExposureCompensationAcceptsOnlyExactHundredthsInRange() {
-        assertEquals(0, PrimeConfigCodec.parseAutoExposureCompensationSteps("0"));
-        assertEquals(50, PrimeConfigCodec.parseAutoExposureCompensationSteps("0.5"));
-        assertEquals(100, PrimeConfigCodec.parseAutoExposureCompensationSteps("1"));
-        assertEquals("0.5", PrimeConfigCodec.formatAutoExposureCompensation(50));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseAutoExposureCompensationSteps("0.505"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseAutoExposureCompensationSteps("1.01"));
-    }
-
-    @Test
-    void persistedReferenceWhiteAcceptsAutomaticOrIntegerNits() {
-        assertEquals(0, PrimeConfigCodec.parseReferenceWhiteNits("0"));
-        assertEquals(400, PrimeConfigCodec.parseReferenceWhiteNits("400"));
-        assertEquals(10_000, PrimeConfigCodec.parseReferenceWhiteNits("10000"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseReferenceWhiteNits("-1"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseReferenceWhiteNits("400.0"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseReferenceWhiteNits("10001"));
-    }
-
-    @Test
-    void persistedFinalExposureAcceptsOnlyExactQuarterStopsInRange() {
-        assertEquals(5, PrimeConfigCodec.parseFinalExposureQuarterSteps("1.25"));
-        assertEquals(-32, PrimeConfigCodec.parseFinalExposureQuarterSteps("-8"));
-        assertEquals(32, PrimeConfigCodec.parseFinalExposureQuarterSteps("8"));
-        assertEquals("1.25", PrimeConfigCodec.formatFinalExposure(5));
-        assertEquals("0", PrimeConfigCodec.formatFinalExposure(0));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseFinalExposureQuarterSteps("0.1"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseFinalExposureQuarterSteps("8.25"));
-    }
-
-    @Test
-    void persistedDefaultRoughnessAcceptsOnlyExactHundredths() {
-        assertEquals(0, PrimeConfigCodec.parseRoughnessSteps("0"));
-        assertEquals(80, PrimeConfigCodec.parseRoughnessSteps("0.8"));
-        assertEquals(100, PrimeConfigCodec.parseRoughnessSteps("1"));
-        assertEquals("0.8", PrimeConfigCodec.formatRoughness(80));
-        assertThrows(IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseRoughnessSteps("0.805"));
-        assertThrows(IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseRoughnessSteps("1.01"));
-    }
-
-    @Test
-    void persistedVoxelSurfaceStrengthAcceptsExactPercentSteps() {
-        assertEquals(0, PrimeConfigCodec.parseVoxelSurfaceStrengthSteps("0"));
-        assertEquals(100, PrimeConfigCodec.parseVoxelSurfaceStrengthSteps("1"));
-        assertEquals(200, PrimeConfigCodec.parseVoxelSurfaceStrengthSteps("2"));
-        assertEquals("1", PrimeConfigCodec.formatVoxelSurfaceStrength(100));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseVoxelSurfaceStrengthSteps("1.005"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseVoxelSurfaceStrengthSteps("2.01"));
+        assertStepCodec(
+                PrimeConfigCodec::parseEvQuarterSteps,
+                PrimeConfigCodec::formatEv,
+                Map.of("-8", -32, "0", 0, "1.25", 5, "8", 32),
+                Map.of(0, "0", 5, "1.25"),
+                "0.1", "8.25");
+        assertStepCodec(
+                PrimeConfigCodec::parseStarEvQuarterSteps,
+                PrimeConfigCodec::formatStarEv,
+                Map.of("8", 32),
+                Map.of(32, "8"),
+                "8.25");
+        assertStepCodec(
+                PrimeConfigCodec::parseFinalExposureQuarterSteps,
+                PrimeConfigCodec::formatFinalExposure,
+                Map.of("-8", -32, "0", 0, "1.25", 5, "8", 32),
+                Map.of(0, "0", 5, "1.25"),
+                "0.1", "8.25");
+        assertStepCodec(
+                PrimeConfigCodec::parseAutoExposureCompensationSteps,
+                PrimeConfigCodec::formatAutoExposureCompensation,
+                Map.of("0", 0, "0.5", 50, "1", 100),
+                Map.of(50, "0.5"),
+                "0.505", "1.01");
+        assertStepCodec(
+                PrimeConfigCodec::parseRoughnessSteps,
+                PrimeConfigCodec::formatRoughness,
+                Map.of("0", 0, "0.8", 80, "1", 100),
+                Map.of(80, "0.8"),
+                "0.805", "1.01");
+        assertStepCodec(
+                PrimeConfigCodec::parseVoxelSurfaceStrengthSteps,
+                PrimeConfigCodec::formatVoxelSurfaceStrength,
+                Map.of("0", 0, "1", 100, "2", 200),
+                Map.of(100, "1"),
+                "1.005", "2.01");
     }
 
     @Test
@@ -406,65 +353,23 @@ final class PrimeConfigTest {
     }
 
     @Test
-    void maximumBouncesAcceptsOnlyTheSharedRuntimeRange() {
-        assertEquals(1, PrimeConfigCodec.parseMaximumBounces("1"));
-        assertEquals(64, PrimeConfigCodec.parseMaximumBounces("64"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseMaximumBounces("0"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseMaximumBounces("65"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseMaximumBounces("12.0"));
-    }
-
-    @Test
-    void additionalSpecularBouncesAcceptsOnlyItsRuntimeRange() {
-        assertEquals(1, PrimeConfigCodec.parseAdditionalSpecularBounces("1"));
-        assertEquals(8, PrimeConfigCodec.parseAdditionalSpecularBounces("8"));
-        assertEquals(64, PrimeConfigCodec.parseAdditionalSpecularBounces("64"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseAdditionalSpecularBounces("0"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseAdditionalSpecularBounces("65"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseAdditionalSpecularBounces("8.0"));
-    }
-
-    @Test
-    void minimumBouncesAcceptOnlyTheFixedRuntimeRange() {
-        assertEquals(1, PrimeConfigCodec.parseMinimumBounces("1"));
-        assertEquals(8, PrimeConfigCodec.parseMinimumBounces("8"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseMinimumBounces("0"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseMinimumBounces("9"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseMinimumBounces("2.0"));
-    }
-
-    @Test
-    void terrainWorkerPercentageAcceptsOnlyIntegerPercentages() {
-        assertEquals(1, PrimeConfigCodec.parseTerrainWorkerPercentage("1"));
-        assertEquals(50, PrimeConfigCodec.parseTerrainWorkerPercentage("50"));
-        assertEquals(100, PrimeConfigCodec.parseTerrainWorkerPercentage("100"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseTerrainWorkerPercentage("0"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseTerrainWorkerPercentage("101"));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> PrimeConfigCodec.parseTerrainWorkerPercentage("50.0"));
+    void persistedIntegerSettingsUseTheirRuntimeRanges() {
+        assertIntegerCodec(
+                PrimeConfigCodec::parseMaximumBounces,
+                Map.of("1", 1, "64", 64),
+                "0", "65", "12.0");
+        assertIntegerCodec(
+                PrimeConfigCodec::parseAdditionalSpecularBounces,
+                Map.of("1", 1, "8", 8, "64", 64),
+                "0", "65", "8.0");
+        assertIntegerCodec(
+                PrimeConfigCodec::parseMinimumBounces,
+                Map.of("1", 1, "8", 8),
+                "0", "9", "2.0");
+        assertIntegerCodec(
+                PrimeConfigCodec::parseTerrainWorkerPercentage,
+                Map.of("1", 1, "50", 50, "100", 100),
+                "0", "101", "50.0");
     }
 
     @Test
@@ -475,5 +380,29 @@ final class PrimeConfigTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> PrimeConfigCodec.parseBoolean("enabled"));
+    }
+
+    private static void assertStepCodec(
+            ToIntFunction<String> parser,
+            IntFunction<String> formatter,
+            Map<String, Integer> parsed,
+            Map<Integer, String> formatted,
+            String... invalid) {
+        assertIntegerCodec(parser, parsed, invalid);
+        formatted.forEach((steps, encoded) -> assertEquals(encoded, formatter.apply(steps)));
+    }
+
+    private static void assertIntegerCodec(
+            ToIntFunction<String> parser,
+            Map<String, Integer> valid,
+            String... invalid) {
+        valid.forEach((encoded, expected) -> assertEquals(
+                expected.intValue(), parser.applyAsInt(encoded), encoded));
+        for (String encoded : invalid) {
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> parser.applyAsInt(encoded),
+                    encoded);
+        }
     }
 }
