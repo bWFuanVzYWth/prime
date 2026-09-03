@@ -206,7 +206,7 @@ public final class ClusterTranslationBenchmarkCorpus {
                         | CapturedSectionGeometry.Surface.MERGEABLE,
                 0,
                 MEDIUM_A,
-                new CapturedSectionGeometry.FluidFacts(0, 0, 0, 0),
+                new CapturedSectionGeometry.FluidFacts(0),
                 null,
                 dev.prime.render.material.BuiltinMaterialClass.DEFAULT);
     }

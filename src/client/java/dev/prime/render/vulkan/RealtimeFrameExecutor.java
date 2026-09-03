@@ -91,10 +91,8 @@ public final class RealtimeFrameExecutor implements Destroyable {
                     commandBuffer, this.imageInitialization, stableRadiance);
             processor.prepareForRayTrace(
                     commandBuffer, this.imageInitialization);
-            VulkanImageTransitions.prepareAtlasForTrace(
-                    commandBuffer, atlasView.texture());
-            VulkanImageTransitions.prepareSceneTexturesForTrace(
-                    commandBuffer, sceneTextures);
+            VulkanImageTransitions.prepareTraceTextures(
+                    commandBuffer, atlasView.texture(), sceneTextures);
             MaterialTexturePages.FrameToken materialFrame =
                     materialTextures.prepareAnimations(commandBuffer);
             completion.onCommit(4, () -> materialTextures.submitted(materialFrame));
@@ -148,10 +146,8 @@ public final class RealtimeFrameExecutor implements Destroyable {
                 completion.onAbandon(5, failure -> ResourceCleanup.run(
                         () -> exposureDiagnostics.abandon(exposureCapture), failure));
             }
-            VulkanImageTransitions.finishAtlasRead(
-                    commandBuffer, atlasView.texture());
-            VulkanImageTransitions.finishSceneTextureReads(
-                    commandBuffer, sceneTextures);
+            VulkanImageTransitions.finishTraceTextureReads(
+                    commandBuffer, atlasView.texture(), sceneTextures);
             submission.copyToMinecraft(
                     commandBuffer,
                     output,

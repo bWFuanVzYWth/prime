@@ -243,18 +243,8 @@ public final class CapturedSectionGeometry {
     }
 
     /** World-query facts needed to translate one raw fluid quad without retaining the world. */
-    public record FluidFacts(
-            int localX,
-            int localY,
-            int localZ,
-            int occlusionMask) {
+    public record FluidFacts(int occlusionMask) {
         public FluidFacts {
-            if (localX < 0 || localX > 15
-                    || localY < 0 || localY > 15
-                    || localZ < 0 || localZ > 15) {
-                throw new IllegalArgumentException(
-                        "Captured fluid owner must use Section-local block coordinates");
-            }
             if ((occlusionMask & ~0x3f) != 0) {
                 throw new IllegalArgumentException(
                         "Captured fluid occlusion mask exceeds six directions");

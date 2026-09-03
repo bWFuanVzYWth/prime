@@ -520,7 +520,7 @@ final class TransparentBoundaryResolverTest {
                         | (water ? CapturedSectionGeometry.Surface.WATER : 0),
                 lightEmission,
                 sprite.sprite(),
-                new CapturedSectionGeometry.FluidFacts(x, y, z, 0),
+                new CapturedSectionGeometry.FluidFacts(0),
                 new CapturedSectionGeometry.BlockFacts(x, y, z),
                 dev.prime.render.material.BuiltinMaterialClass.DEFAULT);
     }

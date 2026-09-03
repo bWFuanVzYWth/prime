@@ -8,71 +8,83 @@ import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDependencyInfo;
+import org.lwjgl.vulkan.VkImageBlit;
 import org.lwjgl.vulkan.VkImageMemoryBarrier2;
+import org.lwjgl.vulkan.VkImageSubresourceLayers;
+import org.lwjgl.vulkan.VkOffset3D;
 
 /** Prime's centralized Vulkan image availability, visibility and layout transitions. */
 public final class VulkanImageTransitions {
     private VulkanImageTransitions() {
     }
 
-    public static void prepareAtlasForTrace(
-            VkCommandBuffer commandBuffer, VulkanGpuTexture atlas) {
+    public static void prepareTraceTextures(
+            VkCommandBuffer commandBuffer,
+            VulkanGpuTexture atlas,
+            List<TraceBackend.SceneTexture> textures) {
         // Minecraft updates animated atlas regions in place and keeps the image in GENERAL.
         // Queue order alone is not a memory dependency: both halves of this read/write pair are
         // required unless atlas ownership gains an equivalent explicit synchronization protocol.
-        VulkanSync.imageBarrier(
+        traceTextureBarriers(
                 commandBuffer,
-                atlas.vkImage(),
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
+                atlas,
+                textures,
                 VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                 VK12.VK_ACCESS_MEMORY_WRITE_BIT,
                 KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                 VK12.VK_ACCESS_SHADER_READ_BIT);
     }
 
-    public static void finishAtlasRead(
-            VkCommandBuffer commandBuffer, VulkanGpuTexture atlas) {
-        VulkanSync.imageBarrier(
+    public static void finishTraceTextureReads(
+            VkCommandBuffer commandBuffer,
+            VulkanGpuTexture atlas,
+            List<TraceBackend.SceneTexture> textures) {
+        traceTextureBarriers(
                 commandBuffer,
-                atlas.vkImage(),
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
+                atlas,
+                textures,
                 KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                 VK12.VK_ACCESS_SHADER_READ_BIT,
                 VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                 VK12.VK_ACCESS_MEMORY_WRITE_BIT);
     }
 
-    public static void prepareSceneTexturesForTrace(
+    private static void traceTextureBarriers(
             VkCommandBuffer commandBuffer,
-            List<TraceBackend.SceneTexture> textures) {
-        for (TraceBackend.SceneTexture texture : textures) {
-            VulkanSync.imageBarrier(
+            VulkanGpuTexture atlas,
+            List<TraceBackend.SceneTexture> textures,
+            long sourceStage,
+            long sourceAccess,
+            long destinationStage,
+            long destinationAccess) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkImageMemoryBarrier2.Buffer barriers =
+                    VkImageMemoryBarrier2.calloc(textures.size() + 1, stack);
+            VulkanSync.setImageBarrier(
+                    barriers.get(0),
+                    atlas.vkImage(),
+                    VK12.VK_IMAGE_LAYOUT_GENERAL,
+                    VK12.VK_IMAGE_LAYOUT_GENERAL,
+                    sourceStage,
+                    sourceAccess,
+                    destinationStage,
+                    destinationAccess);
+            for (int index = 0; index < textures.size(); index++) {
+                VulkanSync.setImageBarrier(
+                        barriers.get(index + 1),
+                        textures.get(index).image(),
+                        VK12.VK_IMAGE_LAYOUT_GENERAL,
+                        VK12.VK_IMAGE_LAYOUT_GENERAL,
+                        sourceStage,
+                        sourceAccess,
+                        destinationStage,
+                        destinationAccess);
+            }
+            KHRSynchronization2.vkCmdPipelineBarrier2KHR(
                     commandBuffer,
-                    texture.image(),
-                    VK12.VK_IMAGE_LAYOUT_GENERAL,
-                    VK12.VK_IMAGE_LAYOUT_GENERAL,
-                    VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                    VK12.VK_ACCESS_MEMORY_WRITE_BIT,
-                    KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                    VK12.VK_ACCESS_SHADER_READ_BIT);
-        }
-    }
-
-    public static void finishSceneTextureReads(
-            VkCommandBuffer commandBuffer,
-            List<TraceBackend.SceneTexture> textures) {
-        for (TraceBackend.SceneTexture texture : textures) {
-            VulkanSync.imageBarrier(
-                    commandBuffer,
-                    texture.image(),
-                    VK12.VK_IMAGE_LAYOUT_GENERAL,
-                    VK12.VK_IMAGE_LAYOUT_GENERAL,
-                    KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                    VK12.VK_ACCESS_SHADER_READ_BIT,
-                    VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                    VK12.VK_ACCESS_MEMORY_WRITE_BIT);
+                    VkDependencyInfo.calloc(stack)
+                            .sType$Default()
+                            .pImageMemoryBarriers(barriers));
         }
     }
 
@@ -179,6 +191,39 @@ public final class VulkanImageTransitions {
                     VkDependencyInfo.calloc(stack)
                             .sType$Default()
                             .pImageMemoryBarriers(barriers));
+        }
+    }
+
+    public static void blitFlipped(
+            VkCommandBuffer commandBuffer,
+            long source,
+            int sourceLayout,
+            long destination,
+            int destinationLayout,
+            int width,
+            int height) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkOffset3D.Buffer sourceOffsets = VkOffset3D.calloc(2, stack);
+            sourceOffsets.get(1).set(width, height, 1);
+            VkOffset3D.Buffer destinationOffsets = VkOffset3D.calloc(2, stack);
+            destinationOffsets.get(0).set(0, height, 0);
+            destinationOffsets.get(1).set(width, 0, 1);
+            VkImageSubresourceLayers layers = VkImageSubresourceLayers.calloc(stack)
+                    .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
+                    .layerCount(1);
+            VkImageBlit.Buffer blit = VkImageBlit.calloc(1, stack)
+                    .srcSubresource(layers)
+                    .srcOffsets(sourceOffsets)
+                    .dstSubresource(layers)
+                    .dstOffsets(destinationOffsets);
+            VK12.vkCmdBlitImage(
+                    commandBuffer,
+                    source,
+                    sourceLayout,
+                    destination,
+                    destinationLayout,
+                    blit,
+                    VK12.VK_FILTER_NEAREST);
         }
     }
 

@@ -904,11 +904,7 @@ public final class VanillaSectionCapture implements AutoCloseable {
                             | (this.water ? CapturedSectionGeometry.Surface.WATER : 0),
                     this.lightEmission,
                     this.owner.spriteResolver.resolve(sprite),
-                    new CapturedSectionGeometry.FluidFacts(
-                            this.localX,
-                            this.localY,
-                            this.localZ,
-                            this.occlusionMask),
+                    new CapturedSectionGeometry.FluidFacts(this.occlusionMask),
                     new CapturedSectionGeometry.BlockFacts(
                             (this.owner.sectionX << 4) + this.localX,
                             (this.owner.sectionY << 4) + this.localY,

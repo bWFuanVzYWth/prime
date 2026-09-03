@@ -256,8 +256,7 @@ final class FluidQuadTranslationTest {
                 water ? CapturedSectionGeometry.Surface.WATER : 0,
                 lightEmission,
                 sprite.sprite(),
-                new CapturedSectionGeometry.FluidFacts(
-                        0, 0, 0, occlusionMask),
+                new CapturedSectionGeometry.FluidFacts(occlusionMask),
                 null,
                 dev.prime.render.material.BuiltinMaterialClass.DEFAULT);
     }

@@ -70,10 +70,8 @@ public final class OfflineFrameExecutor {
                     commandBuffer, this.imageInitialization, displayOutput);
             VulkanImageTransitions.prepareAccumulationForTrace(
                     commandBuffer, this.imageInitialization, runningMean);
-            VulkanImageTransitions.prepareAtlasForTrace(
-                    commandBuffer, atlasView.texture());
-            VulkanImageTransitions.prepareSceneTexturesForTrace(
-                    commandBuffer, sceneTextures);
+            VulkanImageTransitions.prepareTraceTextures(
+                    commandBuffer, atlasView.texture(), sceneTextures);
             MaterialTexturePages.FrameToken materialFrame =
                     materialTextures.prepareAnimations(commandBuffer);
             completion.onCommit(2, () -> materialTextures.submitted(materialFrame));
@@ -95,10 +93,8 @@ public final class OfflineFrameExecutor {
                     commandBuffer, runningMean);
             display.recordFrozen(
                     commandBuffer, displaySettings, this.imageInitialization);
-            VulkanImageTransitions.finishAtlasRead(
-                    commandBuffer, atlasView.texture());
-            VulkanImageTransitions.finishSceneTextureReads(
-                    commandBuffer, sceneTextures);
+            VulkanImageTransitions.finishTraceTextureReads(
+                    commandBuffer, atlasView.texture(), sceneTextures);
             submission.copyToMinecraft(
                     commandBuffer,
                     displayOutput,

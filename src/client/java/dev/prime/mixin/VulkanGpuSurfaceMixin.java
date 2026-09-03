@@ -15,6 +15,7 @@ import dev.prime.render.HdrOutput;
 import dev.prime.render.vulkan.HdrPresentation;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanImage;
+import dev.prime.render.vulkan.VulkanImageTransitions;
 import dev.prime.streamline.StreamlineFrameGeneration;
 import it.unimi.dsi.fastutil.longs.LongList;
 import java.nio.IntBuffer;
@@ -26,11 +27,8 @@ import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDependencyInfo;
-import org.lwjgl.vulkan.VkImageBlit;
 import org.lwjgl.vulkan.VkImageMemoryBarrier2;
-import org.lwjgl.vulkan.VkImageSubresourceLayers;
 import org.lwjgl.vulkan.VkMemoryBarrier2;
-import org.lwjgl.vulkan.VkOffset3D;
 import org.lwjgl.vulkan.VkSurfaceFormatKHR;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -276,37 +274,14 @@ public abstract class VulkanGpuSurfaceMixin {
             long swapchainImage,
             int width,
             int height) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkOffset3D.Buffer sourceOffsets = VkOffset3D.calloc(2, stack);
-            sourceOffsets.get(0).set(0, 0, 0);
-            sourceOffsets.get(1).set(width, height, 1);
-            VkOffset3D.Buffer destinationOffsets = VkOffset3D.calloc(2, stack);
-            destinationOffsets.get(0).set(0, height, 0);
-            destinationOffsets.get(1).set(width, 0, 1);
-            VkImageSubresourceLayers sourceLayers = VkImageSubresourceLayers.calloc(stack)
-                    .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                    .mipLevel(0)
-                    .baseArrayLayer(0)
-                    .layerCount(1);
-            VkImageSubresourceLayers destinationLayers = VkImageSubresourceLayers.calloc(stack)
-                    .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                    .mipLevel(0)
-                    .baseArrayLayer(0)
-                    .layerCount(1);
-            VkImageBlit.Buffer blit = VkImageBlit.calloc(1, stack)
-                    .srcSubresource(sourceLayers)
-                    .srcOffsets(sourceOffsets)
-                    .dstSubresource(destinationLayers)
-                    .dstOffsets(destinationOffsets);
-            VK12.vkCmdBlitImage(
-                    commandBuffer,
-                    source.image(),
-                    VK12.VK_IMAGE_LAYOUT_GENERAL,
-                    swapchainImage,
-                    VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    blit,
-                    VK12.VK_FILTER_NEAREST);
-        }
+        VulkanImageTransitions.blitFlipped(
+                commandBuffer,
+                source.image(),
+                VK12.VK_IMAGE_LAYOUT_GENERAL,
+                swapchainImage,
+                VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                width,
+                height);
     }
 
     @Unique
