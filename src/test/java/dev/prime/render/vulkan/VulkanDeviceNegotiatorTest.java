@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.prime.render.WavefrontShaderPermutation;
 import dev.prime.render.shader.ShaderAbi;
 import org.junit.jupiter.api.Test;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
@@ -14,13 +13,13 @@ final class VulkanDeviceNegotiatorTest {
     @Test
     void wavefrontShaderPermutationUsesScalarFallbackWithoutSer() {
         assertEquals(".rgen.spv",
-                WavefrontShaderPermutation.suffix(false, false));
+                VulkanCapabilities.wavefrontShaderSuffix(false, false));
         assertEquals(".rgen.spv",
-                WavefrontShaderPermutation.suffix(false, true));
+                VulkanCapabilities.wavefrontShaderSuffix(false, true));
         assertEquals(".rgen.spv",
-                WavefrontShaderPermutation.suffix(true, false));
+                VulkanCapabilities.wavefrontShaderSuffix(true, false));
         assertEquals("_ser.rgen.spv",
-                WavefrontShaderPermutation.suffix(true, true));
+                VulkanCapabilities.wavefrontShaderSuffix(true, true));
     }
 
     @Test

@@ -1,7 +1,5 @@
 package dev.prime.render.vulkan;
 
-import dev.prime.render.WavefrontShaderPermutation;
-
 public record VulkanCapabilities(
         boolean available,
         String deviceName,
@@ -23,9 +21,16 @@ public record VulkanCapabilities(
         boolean fsrFp16Supported) {
 
     public String wavefrontShaderSuffix() {
-        return WavefrontShaderPermutation.suffix(
+        return wavefrontShaderSuffix(
                 this.wavefrontSubgroupSupported,
                 this.invocationReorderSupported);
+    }
+
+    static String wavefrontShaderSuffix(
+            boolean subgroupSupported, boolean invocationReorderSupported) {
+        return subgroupSupported && invocationReorderSupported
+                ? "_ser.rgen.spv"
+                : ".rgen.spv";
     }
 
     public static VulkanCapabilities unavailable(String deviceName, String reason) {

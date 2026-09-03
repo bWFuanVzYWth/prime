@@ -2,7 +2,6 @@ package dev.prime.render.vulkan.terrain;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.infrastructure.ResourceCleanup;
-import dev.prime.render.scene.SceneRevisionView;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.terrain.*;
 import dev.prime.render.vulkan.PreparedBlas;
@@ -1593,7 +1592,7 @@ public final class TerrainScene implements AutoCloseable {
             long resetRevision,
             long occluderRevision,
             List<TerrainOccluderChange> occluderChanges,
-            SceneStatistics statistics) implements SceneRevisionView {
+            SceneStatistics statistics) {
         public ResidentSceneView {
             tintSamples = java.util.Objects.requireNonNull(
                     tintSamples, "tintSamples");
