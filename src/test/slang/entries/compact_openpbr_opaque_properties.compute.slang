@@ -12,6 +12,7 @@ import "bsdf/compact/contract/flags.slang";
 import "bsdf/compact/contract/volume.slang";
 import "bsdf/compact/contract/sample.slang";
 import "bsdf/compact/model/material.slang";
+#include "core/compact_bsdf_test.slang"
 
 static const uint PRIME_COMPACT_INPUT_WORDS = 4u;
 
@@ -25,68 +26,27 @@ struct PrimeCompactTestResult {
     PrimeOpenPbrSampleResult sample;
 };
 
-float primeCompactParam(uint4 encoded[4], uint index) {
-    uint flatIndex = index + 1u;
-    return asfloat(encoded[flatIndex / 4u][flatIndex % 4u]);
-}
-
-float3 primeCompactDirection(float cosineTheta, float phi) {
-    float radius = sqrt(max(0.0, 1.0 - cosineTheta * cosineTheta));
-    return float3(radius * cos(phi), radius * sin(phi), cosineTheta);
-}
-
-PrimeOpenPbrVolumeStack primeCompactEmptyStack() {
-    PrimeOpenPbrVolumeStack stack;
-    PrimeOpenPbrVolume air;
-    air.extinction = float3(0.0);
-    air.albedo = float3(0.0);
-    air.anisotropy = 0.0;
-    air.ior = 1.0;
-    air.mediumId = 0u;
-    air.iorEncoding = 0u;
-    stack.values[0] = air;
-    stack.values[1] = air;
-    stack.count = 0u;
-    return stack;
-}
-
-void primeCompactClassify(inout uint mask, float value) {
-    mask |= primeTestClassify(value);
-}
-
-void primeCompactClassify(inout uint mask, float3 value) {
-    mask |= primeTestClassify(value);
-}
-
-bool primeCompactNonnegative(float value) {
-    return value >= 0.0 && primeTestClassify(value) == 0u;
-}
-
-bool primeCompactNonnegative(float3 value) {
-    return all(value >= float3(0.0)) && primeTestClassify(value) == 0u;
-}
-
 PrimeCompactTestResult primeCompactRun(uint4 encoded[4]) {
     PrimeCompactTestResult result;
     result.mask = 0u;
     result.kind = encoded[0].x;
-    float roughness = primeCompactParam(encoded, 0u);
-    float ior = primeCompactParam(encoded, 1u);
-    float3 wi = primeCompactDirection(
-            primeCompactParam(encoded, 2u), primeCompactParam(encoded, 3u));
-    float3 wo = primeCompactDirection(
-            primeCompactParam(encoded, 4u), primeCompactParam(encoded, 5u));
+    float roughness = primeCompactTestParam(encoded, 0u);
+    float ior = primeCompactTestParam(encoded, 1u);
+    float3 wi = primeCompactTestDirection(
+            primeCompactTestParam(encoded, 2u), primeCompactTestParam(encoded, 3u));
+    float3 wo = primeCompactTestDirection(
+            primeCompactTestParam(encoded, 4u), primeCompactTestParam(encoded, 5u));
     float3 randomValue = float3(
-            primeCompactParam(encoded, 6u),
-            primeCompactParam(encoded, 7u),
-            primeCompactParam(encoded, 8u));
+            primeCompactTestParam(encoded, 6u),
+            primeCompactTestParam(encoded, 7u),
+            primeCompactTestParam(encoded, 8u));
     float3 color = float3(
-            primeCompactParam(encoded, 9u),
-            primeCompactParam(encoded, 10u),
-            primeCompactParam(encoded, 11u));
-    float anisotropy = primeCompactParam(encoded, 12u);
-    float inverseOutsideIor = primeCompactParam(encoded, 13u);
-    float rayT = primeCompactParam(encoded, 14u);
+            primeCompactTestParam(encoded, 9u),
+            primeCompactTestParam(encoded, 10u),
+            primeCompactTestParam(encoded, 11u));
+    float anisotropy = primeCompactTestParam(encoded, 12u);
+    float inverseOutsideIor = primeCompactTestParam(encoded, 13u);
+    float rayT = primeCompactTestParam(encoded, 14u);
 
     PrimeOpenPbrMaterial material = primeCompactMaterialFromMetallic(
             color,
@@ -122,24 +82,24 @@ PrimeCompactTestResult primeCompactRun(uint4 encoded[4]) {
     result.components = primeCompactOpaqueEvaluateComponents(wi, wo, state);
     result.energy = primeCompactOpaqueEnergy(wi, state);
     result.sample = primeCompactOpaqueSample(
-            wi, randomValue, state, primeCompactEmptyStack());
+            wi, randomValue, state, primeCompactTestEmptyStack());
     result.sampledEvaluation.throughput = primeOpenPbrZeroThroughput();
     result.sampledEvaluation.pdf = 0.0;
 
-    primeCompactClassify(result.mask, result.evaluation.throughput.value);
-    primeCompactClassify(result.mask, result.evaluation.pdf);
-    primeCompactClassify(result.mask, result.components.diffuse);
-    primeCompactClassify(result.mask, result.components.specular);
-    primeCompactClassify(result.mask, result.components.pdf);
-    primeCompactClassify(result.mask, result.energy.diffuse);
-    primeCompactClassify(result.mask, result.energy.specular);
-    if (!primeCompactNonnegative(result.evaluation.throughput.value)
-            || !primeCompactNonnegative(result.evaluation.pdf)
-            || !primeCompactNonnegative(result.components.diffuse)
-            || !primeCompactNonnegative(result.components.specular)
-            || !primeCompactNonnegative(result.components.pdf)
-            || !primeCompactNonnegative(result.energy.diffuse)
-            || !primeCompactNonnegative(result.energy.specular)) {
+    primeCompactTestClassify(result.mask, result.evaluation.throughput.value);
+    primeCompactTestClassify(result.mask, result.evaluation.pdf);
+    primeCompactTestClassify(result.mask, result.components.diffuse);
+    primeCompactTestClassify(result.mask, result.components.specular);
+    primeCompactTestClassify(result.mask, result.components.pdf);
+    primeCompactTestClassify(result.mask, result.energy.diffuse);
+    primeCompactTestClassify(result.mask, result.energy.specular);
+    if (!primeCompactTestNonnegative(result.evaluation.throughput.value)
+            || !primeCompactTestNonnegative(result.evaluation.pdf)
+            || !primeCompactTestNonnegative(result.components.diffuse)
+            || !primeCompactTestNonnegative(result.components.specular)
+            || !primeCompactTestNonnegative(result.components.pdf)
+            || !primeCompactTestNonnegative(result.energy.diffuse)
+            || !primeCompactTestNonnegative(result.energy.specular)) {
         result.mask |= PRIME_TEST_FAILURE_RANGE;
     }
     if (!primeTestClose(
@@ -154,12 +114,12 @@ PrimeCompactTestResult primeCompactRun(uint4 encoded[4]) {
 
     uint flags = result.sample.bsdfSample.throughput.flags;
     if (flags != PRIME_OPENPBR_FLAG_NONE) {
-        primeCompactClassify(result.mask, result.sample.bsdfSample.throughput.value);
-        primeCompactClassify(result.mask, result.sample.bsdfSample.pdf);
-        primeCompactClassify(result.mask, result.sample.bsdfSample.eta);
-        primeCompactClassify(result.mask, result.sample.bsdfSample.wo);
-        if (!primeCompactNonnegative(result.sample.bsdfSample.throughput.value)
-                || !primeCompactNonnegative(result.sample.bsdfSample.pdf)
+        primeCompactTestClassify(result.mask, result.sample.bsdfSample.throughput.value);
+        primeCompactTestClassify(result.mask, result.sample.bsdfSample.pdf);
+        primeCompactTestClassify(result.mask, result.sample.bsdfSample.eta);
+        primeCompactTestClassify(result.mask, result.sample.bsdfSample.wo);
+        if (!primeCompactTestNonnegative(result.sample.bsdfSample.throughput.value)
+                || !primeCompactTestNonnegative(result.sample.bsdfSample.pdf)
                 || result.sample.bsdfSample.eta <= 0.0
                 || !primeTestClose(
                         length(result.sample.bsdfSample.wo), 1.0, 2.0e-5, 2.0e-5)) {

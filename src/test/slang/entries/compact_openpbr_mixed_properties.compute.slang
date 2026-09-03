@@ -12,6 +12,7 @@ import "bsdf/compact/contract/flags.slang";
 import "bsdf/compact/contract/volume.slang";
 import "bsdf/compact/contract/sample.slang";
 import "bsdf/compact/model/material.slang";
+#include "core/compact_bsdf_test.slang"
 
 static const uint PRIME_MIXED_INPUT_WORDS = 4u;
 static const uint PRIME_MIXED_WITNESS_WORDS = 10u;
@@ -26,68 +27,27 @@ struct PrimeMixedResult {
     PrimeOpenPbrSampleResult sample;
 };
 
-float primeMixedParam(uint4 encoded[4], uint index) {
-    uint flatIndex = index + 1u;
-    return asfloat(encoded[flatIndex / 4u][flatIndex % 4u]);
-}
-
-float3 primeMixedDirection(float cosineTheta, float phi) {
-    float radius = sqrt(max(0.0, 1.0 - cosineTheta * cosineTheta));
-    return float3(radius * cos(phi), radius * sin(phi), cosineTheta);
-}
-
-PrimeOpenPbrVolumeStack primeMixedEmptyStack() {
-    PrimeOpenPbrVolumeStack stack;
-    PrimeOpenPbrVolume air;
-    air.extinction = float3(0.0);
-    air.albedo = float3(0.0);
-    air.anisotropy = 0.0;
-    air.ior = 1.0;
-    air.mediumId = 0u;
-    air.iorEncoding = 0u;
-    stack.values[0] = air;
-    stack.values[1] = air;
-    stack.count = 0u;
-    return stack;
-}
-
-void primeMixedClassify(inout uint mask, float value) {
-    mask |= primeTestClassify(value);
-}
-
-void primeMixedClassify(inout uint mask, float3 value) {
-    mask |= primeTestClassify(value);
-}
-
-bool primeMixedNonnegative(float value) {
-    return value >= 0.0 && primeTestClassify(value) == 0u;
-}
-
-bool primeMixedNonnegative(float3 value) {
-    return all(value >= float3(0.0)) && primeTestClassify(value) == 0u;
-}
-
 PrimeMixedResult primeMixedRun(uint4 encoded[4]) {
     PrimeMixedResult result;
     result.mask = 0u;
     result.thinWalled = encoded[0].x;
-    float roughness = primeMixedParam(encoded, 0u);
-    float ior = primeMixedParam(encoded, 1u);
-    float3 wi = primeMixedDirection(
-            primeMixedParam(encoded, 2u), primeMixedParam(encoded, 3u));
-    float3 wo = primeMixedDirection(
-            primeMixedParam(encoded, 4u), primeMixedParam(encoded, 5u));
+    float roughness = primeCompactTestParam(encoded, 0u);
+    float ior = primeCompactTestParam(encoded, 1u);
+    float3 wi = primeCompactTestDirection(
+            primeCompactTestParam(encoded, 2u), primeCompactTestParam(encoded, 3u));
+    float3 wo = primeCompactTestDirection(
+            primeCompactTestParam(encoded, 4u), primeCompactTestParam(encoded, 5u));
     float3 randomValue = float3(
-            primeMixedParam(encoded, 6u),
-            primeMixedParam(encoded, 7u),
-            primeMixedParam(encoded, 8u));
+            primeCompactTestParam(encoded, 6u),
+            primeCompactTestParam(encoded, 7u),
+            primeCompactTestParam(encoded, 8u));
     float3 color = float3(
-            primeMixedParam(encoded, 9u),
-            primeMixedParam(encoded, 10u),
-            primeMixedParam(encoded, 11u));
-    float subsurfaceWeight = primeMixedParam(encoded, 12u);
-    float anisotropy = primeMixedParam(encoded, 13u);
-    float inverseOutsideIor = primeMixedParam(encoded, 14u);
+            primeCompactTestParam(encoded, 9u),
+            primeCompactTestParam(encoded, 10u),
+            primeCompactTestParam(encoded, 11u));
+    float subsurfaceWeight = primeCompactTestParam(encoded, 12u);
+    float anisotropy = primeCompactTestParam(encoded, 13u);
+    float inverseOutsideIor = primeCompactTestParam(encoded, 14u);
 
     PrimeOpenPbrMaterial material = primeCompactMaterialFromMetallic(
             color, roughness, 0.0, float3(0.0, 0.0, 1.0));
@@ -182,24 +142,24 @@ PrimeMixedResult primeMixedRun(uint4 encoded[4]) {
         result.mask |= PRIME_TEST_FAILURE_VALUE;
     }
     result.sample = primeCompactOpaqueSample(
-            wi, randomValue, state, primeMixedEmptyStack());
+            wi, randomValue, state, primeCompactTestEmptyStack());
     result.sampledEvaluation.throughput = primeOpenPbrZeroThroughput();
     result.sampledEvaluation.pdf = 0.0;
 
-    primeMixedClassify(result.mask, result.evaluation.throughput.value);
-    primeMixedClassify(result.mask, result.evaluation.pdf);
-    primeMixedClassify(result.mask, result.components.diffuse);
-    primeMixedClassify(result.mask, result.components.specular);
-    primeMixedClassify(result.mask, result.components.pdf);
-    primeMixedClassify(result.mask, result.energy.diffuse);
-    primeMixedClassify(result.mask, result.energy.specular);
-    if (!primeMixedNonnegative(result.evaluation.throughput.value)
-            || !primeMixedNonnegative(result.evaluation.pdf)
-            || !primeMixedNonnegative(result.components.diffuse)
-            || !primeMixedNonnegative(result.components.specular)
-            || !primeMixedNonnegative(result.components.pdf)
-            || !primeMixedNonnegative(result.energy.diffuse)
-            || !primeMixedNonnegative(result.energy.specular)
+    primeCompactTestClassify(result.mask, result.evaluation.throughput.value);
+    primeCompactTestClassify(result.mask, result.evaluation.pdf);
+    primeCompactTestClassify(result.mask, result.components.diffuse);
+    primeCompactTestClassify(result.mask, result.components.specular);
+    primeCompactTestClassify(result.mask, result.components.pdf);
+    primeCompactTestClassify(result.mask, result.energy.diffuse);
+    primeCompactTestClassify(result.mask, result.energy.specular);
+    if (!primeCompactTestNonnegative(result.evaluation.throughput.value)
+            || !primeCompactTestNonnegative(result.evaluation.pdf)
+            || !primeCompactTestNonnegative(result.components.diffuse)
+            || !primeCompactTestNonnegative(result.components.specular)
+            || !primeCompactTestNonnegative(result.components.pdf)
+            || !primeCompactTestNonnegative(result.energy.diffuse)
+            || !primeCompactTestNonnegative(result.energy.specular)
             || any(result.energy.diffuse + result.energy.specular > float3(1.0001))) {
         result.mask |= PRIME_TEST_FAILURE_RANGE;
     }
@@ -215,13 +175,13 @@ PrimeMixedResult primeMixedRun(uint4 encoded[4]) {
 
     uint flags = result.sample.bsdfSample.throughput.flags;
     if (flags != PRIME_OPENPBR_FLAG_NONE) {
-        primeMixedClassify(result.mask, result.sample.bsdfSample.throughput.value);
-        primeMixedClassify(result.mask, result.sample.bsdfSample.pdf);
-        primeMixedClassify(result.mask, result.sample.bsdfSample.eta);
-        primeMixedClassify(result.mask, result.sample.bsdfSample.wo);
-        if (!primeMixedNonnegative(result.sample.bsdfSample.throughput.value)
-                || !primeMixedNonnegative(result.sample.bsdfSample.pdf)
-                || !primeMixedNonnegative(result.sample.bsdfSample.eta)
+        primeCompactTestClassify(result.mask, result.sample.bsdfSample.throughput.value);
+        primeCompactTestClassify(result.mask, result.sample.bsdfSample.pdf);
+        primeCompactTestClassify(result.mask, result.sample.bsdfSample.eta);
+        primeCompactTestClassify(result.mask, result.sample.bsdfSample.wo);
+        if (!primeCompactTestNonnegative(result.sample.bsdfSample.throughput.value)
+                || !primeCompactTestNonnegative(result.sample.bsdfSample.pdf)
+                || !primeCompactTestNonnegative(result.sample.bsdfSample.eta)
                 || !primeTestClose(
                         length(result.sample.bsdfSample.wo), 1.0, 2.0e-5, 2.0e-5)) {
             result.mask |= PRIME_TEST_FAILURE_STATE;
@@ -233,10 +193,10 @@ PrimeMixedResult primeMixedRun(uint4 encoded[4]) {
         }
         result.sampledEvaluation = primeCompactOpaqueEvaluate(
                 wi, result.sample.bsdfSample.wo, state);
-        primeMixedClassify(result.mask, result.sampledEvaluation.throughput.value);
-        primeMixedClassify(result.mask, result.sampledEvaluation.pdf);
-        if (!primeMixedNonnegative(result.sampledEvaluation.throughput.value)
-                || !primeMixedNonnegative(result.sampledEvaluation.pdf)) {
+        primeCompactTestClassify(result.mask, result.sampledEvaluation.throughput.value);
+        primeCompactTestClassify(result.mask, result.sampledEvaluation.pdf);
+        if (!primeCompactTestNonnegative(result.sampledEvaluation.throughput.value)
+                || !primeCompactTestNonnegative(result.sampledEvaluation.pdf)) {
             result.mask |= PRIME_TEST_FAILURE_RANGE;
         }
     }

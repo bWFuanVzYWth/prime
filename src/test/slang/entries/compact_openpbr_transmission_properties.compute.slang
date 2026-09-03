@@ -13,6 +13,7 @@ import "bsdf/compact/contract/volume.slang";
 import "bsdf/compact/contract/sample.slang";
 import "bsdf/compact/model/material.slang";
 import "bsdf/compact/model/volume.slang";
+#include "core/compact_bsdf_test.slang"
 
 static const uint PRIME_COMPACT_TRANSMISSION_INPUT_WORDS = 4u;
 
@@ -25,16 +26,6 @@ struct PrimeCompactTransmissionTestResult {
     PrimeOpenPbrSampleResult sample;
     float3 energy;
 };
-
-float primeCompactTransmissionParam(uint4 encoded[4], uint index) {
-    uint flatIndex = index + 1u;
-    return asfloat(encoded[flatIndex / 4u][flatIndex % 4u]);
-}
-
-float3 primeCompactTransmissionDirection(float cosineTheta, float phi) {
-    float radius = sqrt(max(0.0, 1.0 - cosineTheta * cosineTheta));
-    return float3(radius * cos(phi), radius * sin(phi), cosineTheta);
-}
 
 PrimeOpenPbrVolumeStack primeCompactTransmissionStack(
         bool exiting,
@@ -60,26 +51,6 @@ PrimeOpenPbrVolumeStack primeCompactTransmissionStack(
     return stack;
 }
 
-void primeCompactTransmissionClassify(inout uint mask, float value) {
-    mask |= primeTestClassify(value);
-}
-
-void primeCompactTransmissionClassify(inout uint mask, float2 value) {
-    mask |= primeTestClassify(value);
-}
-
-void primeCompactTransmissionClassify(inout uint mask, float3 value) {
-    mask |= primeTestClassify(value);
-}
-
-bool primeCompactTransmissionNonnegative(float value) {
-    return value >= 0.0 && primeTestClassify(value) == 0u;
-}
-
-bool primeCompactTransmissionNonnegative(float3 value) {
-    return all(value >= float3(0.0)) && primeTestClassify(value) == 0u;
-}
-
 PrimeCompactTransmissionTestResult primeCompactTransmissionRun(uint4 encoded[4]) {
     PrimeCompactTransmissionTestResult result;
     result.mask = 0u;
@@ -93,27 +64,27 @@ PrimeCompactTransmissionTestResult primeCompactTransmissionRun(uint4 encoded[4])
             : samplingMode == 1u
                     ? PRIME_OPENPBR_FLAG_REFLECTION
                     : PRIME_OPENPBR_FLAG_TRANSMISSION;
-    float roughness = primeCompactTransmissionParam(encoded, 0u);
-    float ior = primeCompactTransmissionParam(encoded, 1u);
-    float wiCosine = abs(primeCompactTransmissionParam(encoded, 2u));
+    float roughness = primeCompactTestParam(encoded, 0u);
+    float ior = primeCompactTestParam(encoded, 1u);
+    float wiCosine = abs(primeCompactTestParam(encoded, 2u));
     if (exiting) { wiCosine = -wiCosine; }
-    float3 wi = primeCompactTransmissionDirection(
-            wiCosine, primeCompactTransmissionParam(encoded, 3u));
-    float3 wo = primeCompactTransmissionDirection(
-            primeCompactTransmissionParam(encoded, 4u),
-            primeCompactTransmissionParam(encoded, 5u));
+    float3 wi = primeCompactTestDirection(
+            wiCosine, primeCompactTestParam(encoded, 3u));
+    float3 wo = primeCompactTestDirection(
+            primeCompactTestParam(encoded, 4u),
+            primeCompactTestParam(encoded, 5u));
     float3 randomValue = float3(
-            primeCompactTransmissionParam(encoded, 6u),
-            primeCompactTransmissionParam(encoded, 7u),
-            primeCompactTransmissionParam(encoded, 8u));
+            primeCompactTestParam(encoded, 6u),
+            primeCompactTestParam(encoded, 7u),
+            primeCompactTestParam(encoded, 8u));
     float3 color = float3(
-            primeCompactTransmissionParam(encoded, 9u),
-            primeCompactTransmissionParam(encoded, 10u),
-            primeCompactTransmissionParam(encoded, 11u));
-    float inverseOutsideIor = primeCompactTransmissionParam(encoded, 12u);
-    float rayT = primeCompactTransmissionParam(encoded, 13u);
+            primeCompactTestParam(encoded, 9u),
+            primeCompactTestParam(encoded, 10u),
+            primeCompactTestParam(encoded, 11u));
+    float inverseOutsideIor = primeCompactTestParam(encoded, 12u);
+    float rayT = primeCompactTestParam(encoded, 13u);
     bool thinPhysicalExit = thinWalled
-            && primeCompactTransmissionParam(encoded, 14u) >= 0.5;
+            && primeCompactTestParam(encoded, 14u) >= 0.5;
 
     PrimeOpenPbrMaterial material = primeCompactMaterialFromMetallic(
             float3(1.0), roughness, 0.0, float3(0.0, 0.0, 1.0));
@@ -152,17 +123,17 @@ PrimeCompactTransmissionTestResult primeCompactTransmissionRun(uint4 encoded[4])
     result.sampledEvaluation.throughput = primeOpenPbrZeroThroughput();
     result.sampledEvaluation.pdf = 0.0;
 
-    primeCompactTransmissionClassify(result.mask, state.specularMicrofacet.alpha);
-    primeCompactTransmissionClassify(result.mask, state.transmissionMicrofacet.alpha);
-    primeCompactTransmissionClassify(result.mask, state.specularFresnel.ior);
-    primeCompactTransmissionClassify(result.mask, state.specularFresnel.energyIor);
-    primeCompactTransmissionClassify(result.mask, state.transmissionMultipleScattering);
-    primeCompactTransmissionClassify(result.mask, result.evaluation.throughput.value);
-    primeCompactTransmissionClassify(result.mask, result.evaluation.pdf);
-    primeCompactTransmissionClassify(result.mask, result.energy);
-    if (!primeCompactTransmissionNonnegative(result.evaluation.throughput.value)
-            || !primeCompactTransmissionNonnegative(result.evaluation.pdf)
-            || !primeCompactTransmissionNonnegative(result.energy)
+    primeCompactTestClassify(result.mask, state.specularMicrofacet.alpha);
+    primeCompactTestClassify(result.mask, state.transmissionMicrofacet.alpha);
+    primeCompactTestClassify(result.mask, state.specularFresnel.ior);
+    primeCompactTestClassify(result.mask, state.specularFresnel.energyIor);
+    primeCompactTestClassify(result.mask, state.transmissionMultipleScattering);
+    primeCompactTestClassify(result.mask, result.evaluation.throughput.value);
+    primeCompactTestClassify(result.mask, result.evaluation.pdf);
+    primeCompactTestClassify(result.mask, result.energy);
+    if (!primeCompactTestNonnegative(result.evaluation.throughput.value)
+            || !primeCompactTestNonnegative(result.evaluation.pdf)
+            || !primeCompactTestNonnegative(result.energy)
             || any(result.energy > float3(1.0001))) {
         result.mask |= PRIME_TEST_FAILURE_RANGE;
     }
