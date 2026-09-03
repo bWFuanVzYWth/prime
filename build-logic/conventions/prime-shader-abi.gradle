@@ -166,7 +166,7 @@ def shaderTestEntryFiles = fileTree('src/test/slang/entries') {
 def shaderManifestType = primeShaderManifestType
 def verifyShaderTestManifest = tasks.register('verifyShaderTestManifest') {
 	group = 'verification'
-	description = 'Verifies that every test Slang entry has one declared runtime or compile-only artifact.'
+	description = 'Verifies that every executable test Slang entry has one declared artifact.'
 	inputs.file(shaderTestProgramManifest)
 	inputs.files(shaderTestEntryFiles)
 	outputs.file(shaderTestManifestReport)
@@ -177,19 +177,14 @@ def verifyShaderTestManifest = tasks.register('verifyShaderTestManifest') {
 		}
 		def entries = manifest.programs.collect { program -> program.entry?.toString() }
 		def artifacts = manifest.programs.collect { program -> program.artifact?.toString() }
-		def modes = manifest.programs.collect { program -> program.mode?.toString() }
-		if (entries.any { it == null } || artifacts.any { it == null } || modes.any { it == null }) {
-			throw new GradleException('Every Shader test program requires entry, artifact, and mode')
+		if (entries.any { it == null } || artifacts.any { it == null }) {
+			throw new GradleException('Every Shader test program requires entry and artifact')
 		}
 		if (entries.size() != entries.toSet().size()) {
 			throw new GradleException('Shader test manifest contains duplicate entries')
 		}
 		if (artifacts.size() != artifacts.toSet().size()) {
 			throw new GradleException('Shader test manifest contains duplicate artifacts')
-		}
-		def invalidModes = modes.findAll { !(it in ['runtime', 'compile-only']) }
-		if (!invalidModes.empty) {
-			throw new GradleException("Shader test manifest contains invalid modes: ${invalidModes}")
 		}
 		manifest.programs.each { program ->
 			def stage = shaderManifestType.stage(program.entry.toString())
@@ -209,13 +204,10 @@ def verifyShaderTestManifest = tasks.register('verifyShaderTestManifest') {
 			throw new GradleException(
 					"Shader test manifest entries differ: declared=${declaredEntries}, actual=${actualEntries}")
 		}
-		def runtimeCount = modes.count { it == 'runtime' }
-		def compileOnlyCount = modes.count { it == 'compile-only' }
 		def report = shaderTestManifestReport.get().asFile
 		report.parentFile.mkdirs()
 		report.setText(
-				"runtime=${runtimeCount}${System.lineSeparator()}compile-only=${compileOnlyCount}${System.lineSeparator()}" +
-						manifest.programs.collect { "${it.mode} ${it.entry} -> ${it.artifact}" }.join(System.lineSeparator()) +
+				manifest.programs.collect { "${it.entry} -> ${it.artifact}" }.join(System.lineSeparator()) +
 						System.lineSeparator(),
 				'UTF-8')
 	}
