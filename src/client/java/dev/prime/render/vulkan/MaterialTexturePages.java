@@ -826,7 +826,7 @@ public final class MaterialTexturePages implements AutoCloseable {
             List<Copy> copies,
             StagingArena.Batch batch,
             VulkanImage image,
-            MaterialAnimationFrames frames,
+            TextureAnimationFrames frames,
             LabPbrAtlasFrame.AnimationSample sample,
             int mip) {
         TexturePageLayout.Placement placement = frames.placement();
@@ -851,7 +851,7 @@ public final class MaterialTexturePages implements AutoCloseable {
             List<Copy> copies,
             StagingArena.Batch batch,
             VulkanImage image,
-            ColorAnimationFrames frames,
+            TextureAnimationFrames frames,
             LabPbrAtlasFrame.AnimationSample sample,
             int mip) {
         TexturePageLayout.Placement placement = frames.placement();
@@ -1108,9 +1108,9 @@ public final class MaterialTexturePages implements AutoCloseable {
     private static final class AnimatedMaterialSprite
             implements com.mojang.blaze3d.vulkan.Destroyable {
         private final LabPbrAtlasFrame.Sprite sprite;
-        private final ColorAnimationFrames baseColor;
-        private final MaterialAnimationFrames normal;
-        private final MaterialAnimationFrames specular;
+        private final TextureAnimationFrames baseColor;
+        private final TextureAnimationFrames normal;
+        private final TextureAnimationFrames specular;
         private final int animationIndex;
         private LabPbrAtlasFrame.AnimationSample lastSample;
 
@@ -1122,20 +1122,20 @@ public final class MaterialTexturePages implements AutoCloseable {
                 List<PageResource> baseColorPages,
                 List<PageResource> normalPages,
                 List<PageResource> opticalPages) {
-            ColorAnimationFrames colorFrames = null;
-            MaterialAnimationFrames normalFrames = null;
-            MaterialAnimationFrames specularFrames = null;
+            TextureAnimationFrames colorFrames = null;
+            TextureAnimationFrames normalFrames = null;
+            TextureAnimationFrames specularFrames = null;
             try {
                 if (baseColor != null && source.baseColor().frameCount() > 1) {
                     VulkanImage image = baseColorPages.get(baseColor.page()).image;
-                    colorFrames = ColorAnimationFrames.create(
+                    colorFrames = TextureAnimationFrames.color(
                             baseColor,
                             source.baseColor(),
                             textureMipLevels(source, image.mipLevels()));
                 }
                 if (normal != null && source.normal().frameCount() > 1) {
                     VulkanImage image = normalPages.get(normal.page()).image;
-                    normalFrames = MaterialAnimationFrames.create(
+                    normalFrames = TextureAnimationFrames.material(
                             normal,
                             source.normal(),
                             textureMipLevels(source, image.mipLevels()),
@@ -1143,7 +1143,7 @@ public final class MaterialTexturePages implements AutoCloseable {
                 }
                 if (specular != null && source.specular().frameCount() > 1) {
                     VulkanImage image = opticalPages.get(specular.page()).image;
-                    specularFrames = MaterialAnimationFrames.create(
+                    specularFrames = TextureAnimationFrames.material(
                             specular,
                             source.specular(),
                             textureMipLevels(source, image.mipLevels()),
@@ -1161,9 +1161,9 @@ public final class MaterialTexturePages implements AutoCloseable {
 
         private AnimatedMaterialSprite(
                 LabPbrAtlasFrame.Sprite source,
-                ColorAnimationFrames baseColor,
-                MaterialAnimationFrames normal,
-                MaterialAnimationFrames specular) {
+                TextureAnimationFrames baseColor,
+                TextureAnimationFrames normal,
+                TextureAnimationFrames specular) {
             this.sprite = source;
             this.baseColor = baseColor;
             this.normal = normal;

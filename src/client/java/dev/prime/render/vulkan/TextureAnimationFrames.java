@@ -5,9 +5,11 @@ import dev.prime.render.terrain.CanonicalColorEncoding;
 import dev.prime.render.terrain.LabPbrAtlasFrame;
 import org.lwjgl.system.MemoryUtil;
 
-/** Canonical f32 animation cache; final page quantization occurs only after frame interpolation. */
-final class ColorAnimationFrames implements Destroyable {
+/** Translated mip chains for one animated canonical texture channel. */
+final class TextureAnimationFrames implements Destroyable {
     private final TexturePageLayout.Placement placement;
+    private final boolean color;
+    private final boolean specular;
     private final int frameCount;
     private final int mipLevels;
     private final long frameStride;
@@ -15,21 +17,33 @@ final class ColorAnimationFrames implements Destroyable {
     private final long byteSize;
     private long address;
 
-    static ColorAnimationFrames create(
+    static TextureAnimationFrames color(
             TexturePageLayout.Placement placement,
             LabPbrAtlasFrame.ColorSource source,
             int mipLevels) {
-        return new ColorAnimationFrames(placement, source, mipLevels);
+        return new TextureAnimationFrames(placement, source, mipLevels, true, false);
     }
 
-    private ColorAnimationFrames(
+    static TextureAnimationFrames material(
             TexturePageLayout.Placement placement,
-            LabPbrAtlasFrame.ColorSource source,
-            int mipLevels) {
+            LabPbrAtlasFrame.MaterialSource source,
+            int mipLevels,
+            boolean specular) {
+        return new TextureAnimationFrames(placement, source, mipLevels, false, specular);
+    }
+
+    private TextureAnimationFrames(
+            TexturePageLayout.Placement placement,
+            LabPbrAtlasFrame.TextureSource source,
+            int mipLevels,
+            boolean color,
+            boolean specular) {
         if (mipLevels <= 0) {
-            throw new IllegalArgumentException("Color animation mip count must be positive");
+            throw new IllegalArgumentException("Animation mip count must be positive");
         }
         this.placement = placement;
+        this.color = color;
+        this.specular = specular;
         this.frameCount = source.frameCount();
         this.mipLevels = mipLevels;
         this.mipOffsets = new long[mipLevels];
@@ -42,7 +56,7 @@ final class ColorAnimationFrames implements Destroyable {
                     Math.multiplyExact(
                             Math.multiplyExact(
                                     (long) sprite.mipWidth(mip), sprite.mipHeight(mip)),
-                            4L * Float.BYTES));
+                            color ? 4L * Float.BYTES : 4L));
         }
         this.frameStride = stride;
         this.byteSize = Math.multiplyExact(stride, this.frameCount);
@@ -52,16 +66,30 @@ final class ColorAnimationFrames implements Destroyable {
                 LabPbrAtlasFrame.AnimationSample sample =
                         new LabPbrAtlasFrame.AnimationSample(frame, frame, 0);
                 for (int mip = 0; mip < mipLevels; mip++) {
-                    MaterialTexturePages.writeColorSpriteF32(
-                            this.address + (long) frame * this.frameStride
-                                    + this.mipOffsets[mip],
-                            0L,
-                            sprite.mipWidth(mip),
-                            placement,
-                            source,
-                            sample,
-                            mip,
-                            true);
+                    long target = this.address + (long) frame * this.frameStride
+                            + this.mipOffsets[mip];
+                    if (color) {
+                        MaterialTexturePages.writeColorSpriteF32(
+                                target,
+                                0L,
+                                sprite.mipWidth(mip),
+                                placement,
+                                (LabPbrAtlasFrame.ColorSource) source,
+                                sample,
+                                mip,
+                                true);
+                    } else {
+                        MaterialTexturePages.writeSprite(
+                                target,
+                                0L,
+                                sprite.mipWidth(mip),
+                                placement,
+                                (LabPbrAtlasFrame.MaterialSource) source,
+                                sample,
+                                mip,
+                                true,
+                                specular);
+                    }
                 }
             }
         } catch (RuntimeException | Error failure) {
@@ -85,15 +113,19 @@ final class ColorAnimationFrames implements Destroyable {
 
     void write(long target, LabPbrAtlasFrame.AnimationSample sample, int mip) {
         if (this.address == 0L) {
-            throw new IllegalStateException("Color animation frames are destroyed");
+            throw new IllegalStateException("Animation frames are destroyed");
         }
         if (mip < 0 || mip >= this.mipLevels) {
-            throw new IllegalArgumentException("Color animation mip is out of range");
+            throw new IllegalArgumentException("Animation mip is out of range");
         }
         int current = this.frameIndex(sample.currentFrame());
         int next = this.frameIndex(sample.nextFrame());
         long currentAddress = this.frameAddress(current, mip);
         long nextAddress = this.frameAddress(next, mip);
+        if (!this.color) {
+            this.writeMaterial(target, sample, mip, current, next, currentAddress, nextAddress);
+            return;
+        }
         float nextWeight = current == next ? 0.0F : sample.progressThousandths() / 1000.0F;
         long pixels = this.mipPixels(mip);
         for (long pixel = 0L; pixel < pixels; pixel++) {
@@ -123,6 +155,30 @@ final class ColorAnimationFrames implements Destroyable {
         }
     }
 
+    private void writeMaterial(
+            long target,
+            LabPbrAtlasFrame.AnimationSample sample,
+            int mip,
+            int current,
+            int next,
+            long currentAddress,
+            long nextAddress) {
+        long bytes = this.mipPixels(mip) * 4L;
+        int progress = this.frameCount == 1 ? 0 : sample.progressThousandths();
+        if (progress == 0 || current == next) {
+            MemoryUtil.memCopy(currentAddress, target, bytes);
+            return;
+        }
+        for (long offset = 0L; offset < bytes; offset += 4L) {
+            int blended = LabPbrAtlasFrame.MaterialSource.blendFiltered(
+                    readArgb(currentAddress + offset),
+                    readArgb(nextAddress + offset),
+                    progress,
+                    this.specular);
+            MaterialTexturePages.writeArgb(target, offset, blended);
+        }
+    }
+
     private static float lerp(float current, float next, float nextWeight) {
         return current + (next - current) * nextWeight;
     }
@@ -140,6 +196,13 @@ final class ColorAnimationFrames implements Destroyable {
     private long mipPixels(int mip) {
         LabPbrAtlasFrame.Sprite sprite = this.placement.sprite();
         return (long) sprite.mipWidth(mip) * sprite.mipHeight(mip);
+    }
+
+    private static int readArgb(long address) {
+        return (MemoryUtil.memGetByte(address + 3L) & 0xff) << 24
+                | (MemoryUtil.memGetByte(address) & 0xff) << 16
+                | (MemoryUtil.memGetByte(address + 1L) & 0xff) << 8
+                | MemoryUtil.memGetByte(address + 2L) & 0xff;
     }
 
     @Override

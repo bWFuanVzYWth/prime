@@ -66,7 +66,7 @@ final class MaterialTexturePagesTest {
                 1, 0, 0, 1, 1, 0, source, null, null, 0);
         TexturePageLayout.Placement placement =
                 new TexturePageLayout.Placement(0, 0, 0, sprite);
-        ColorAnimationFrames frames = ColorAnimationFrames.create(placement, source, 1);
+        TextureAnimationFrames frames = TextureAnimationFrames.color(placement, source, 1);
         ByteBuffer target = MemoryUtil.memAlloc(8);
         try {
             long address = MemoryUtil.memAddress(target);
@@ -328,8 +328,8 @@ final class MaterialTexturePagesTest {
                 1, 0, 0, 1, 1, 0, null, null, source, 0);
         TexturePageLayout.Placement placement =
                 new TexturePageLayout.Placement(0, 0, 0, sprite);
-        MaterialAnimationFrames frames =
-                MaterialAnimationFrames.create(placement, source, 1, true);
+        TextureAnimationFrames frames =
+                TextureAnimationFrames.material(placement, source, 1, true);
         ByteBuffer target = MemoryUtil.memAlloc(4);
         try {
             frames.write(
