@@ -142,7 +142,14 @@ final class ClusterTranslationCancellationTest {
         SectionMeshAccumulator accumulator = new SectionMeshAccumulator(
                 LabPbrMaterialSet.EMPTY, false, 1024, 2, 2);
         SectionMeshAccumulator.Surface surface = new SectionMeshAccumulator.Surface().set(
-                -1, false, false, false, false, false, false, true, 0, FIRST);
+                CapturedSectionGeometry.Surface.uniform(
+                        -1,
+                        CapturedSectionGeometry.Layer.OPAQUE,
+                        CapturedSectionGeometry.Surface.MERGEABLE,
+                        0,
+                        FIRST),
+                TransmissiveTopology.NONE,
+                0);
         for (int y = 0; y < 16; y++) {
             for (int x = 0; x < 16; x++) {
                 accumulator.addQuad(

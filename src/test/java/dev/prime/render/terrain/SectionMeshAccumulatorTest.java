@@ -1,32 +1,15 @@
 package dev.prime.render.terrain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import dev.prime.render.scene.CapturedSectionGeometry;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 final class SectionMeshAccumulatorTest {
-    @Test
-    void loweringScratchRetainsAllFourVertexTintValues() {
-        TestSprite sprite = new TestSprite("varying_vertex_tint");
-        SectionMeshAccumulator.Surface surface = opaqueSurface(sprite)
-                .setVertexColors(
-                        0xff20_4020,
-                        0xff40_8040,
-                        0xff20_4020,
-                        0xff40_8040);
-
-        assertEquals(0xff20_4020, surface.vertexColor(0));
-        assertEquals(0xff40_8040, surface.vertexColor(1));
-        assertEquals(0xff20_4020, surface.vertexColor(2));
-        assertEquals(0xff40_8040, surface.vertexColor(3));
-        assertFalse(surface.hasUniformVertexColor());
-    }
-
     @Test
     void buildTransfersOwnershipExactlyOnce() {
         SectionMeshAccumulator accumulator = new SectionMeshAccumulator(
@@ -50,17 +33,13 @@ final class SectionMeshAccumulatorTest {
                 opaqueSurface(sprite));
         accumulator.addQuad(
                 horizontalQuad(5.0F, 5.0F, 7.0F, 1.0F),
-                new SectionMeshAccumulator.Surface().set(
+                surface(
                         -1,
-                        false,
-                        false,
-                        false,
-                        false,
-                        false,
-                        false,
-                        false,
+                        CapturedSectionGeometry.Layer.OPAQUE,
                         0,
-                        sprite.sprite()));
+                        sprite,
+                        TransmissiveTopology.NONE,
+                        0));
 
         CpuSectionGeometry geometry = accumulator.build();
 
@@ -80,7 +59,7 @@ final class SectionMeshAccumulatorTest {
                 LabPbrMaterialSet.EMPTY, false);
         accumulator.addQuad(
                 horizontalQuad(0.0F, 0.0F, 2.0F, 1.0F),
-                transmissiveSurface(sprite, false).setMediumId(73));
+                transmissiveSurface(sprite, false, 73));
         accumulator.addQuad(
                 horizontalQuad(1.0F, 0.0F, 2.0F, 1.0F),
                 transmissiveSurface(sprite, true));
@@ -181,8 +160,13 @@ final class SectionMeshAccumulatorTest {
         SectionMeshAccumulator.Quad quad = horizontalQuad(
                 0.0F, 0.0F, 0.0F, 0.5F);
         quad.normalZ = -1.0F;
-        SectionMeshAccumulator.Surface surface = new SectionMeshAccumulator.Surface().set(
-                -1, false, false, false, false, false, false, false, 0, sprite.sprite());
+        SectionMeshAccumulator.Surface surface = surface(
+                -1,
+                CapturedSectionGeometry.Layer.OPAQUE,
+                0,
+                sprite,
+                TransmissiveTopology.NONE,
+                0);
 
         accumulator.addQuad(quad, surface);
         CpuSectionMesh mesh = accumulator.build().meshes().getFirst();
@@ -230,19 +214,58 @@ final class SectionMeshAccumulatorTest {
     }
 
     static SectionMeshAccumulator.Surface opaqueSurface(TestSprite sprite) {
-        return new SectionMeshAccumulator.Surface().set(
-                -1, false, false, false, false, false, false, true, 0, sprite.sprite());
+        return surface(
+                -1,
+                CapturedSectionGeometry.Layer.OPAQUE,
+                CapturedSectionGeometry.Surface.MERGEABLE,
+                sprite,
+                TransmissiveTopology.NONE,
+                0);
     }
 
     static SectionMeshAccumulator.Surface cutoutSurface(TestSprite sprite) {
-        return new SectionMeshAccumulator.Surface().set(
-                -1, true, false, false, false, false, false, true, 0, sprite.sprite());
+        return surface(
+                -1,
+                CapturedSectionGeometry.Layer.CUTOUT,
+                CapturedSectionGeometry.Surface.MERGEABLE,
+                sprite,
+                TransmissiveTopology.NONE,
+                0);
     }
 
     static SectionMeshAccumulator.Surface transmissiveSurface(
             TestSprite sprite, boolean water) {
+        return transmissiveSurface(sprite, water, 0);
+    }
+
+    private static SectionMeshAccumulator.Surface transmissiveSurface(
+            TestSprite sprite, boolean water, int mediumId) {
+        return surface(
+                -1,
+                CapturedSectionGeometry.Layer.TRANSLUCENT,
+                CapturedSectionGeometry.Surface.MERGEABLE
+                        | (water ? CapturedSectionGeometry.Surface.WATER : 0),
+                sprite,
+                TransmissiveTopology.SOLID,
+                mediumId);
+    }
+
+    private static SectionMeshAccumulator.Surface surface(
+            int color,
+            CapturedSectionGeometry.Layer layer,
+            int flags,
+            TestSprite sprite,
+            TransmissiveTopology topology,
+            int mediumId) {
         return new SectionMeshAccumulator.Surface().set(
-                -1, false, false, true, false, water, false, true, 0, sprite.sprite());
+                CapturedSectionGeometry.Surface.uniform(
+                        color,
+                        layer,
+                        flags,
+                        0,
+                        sprite.sprite()),
+                topology,
+                mediumId);
     }
 
 }

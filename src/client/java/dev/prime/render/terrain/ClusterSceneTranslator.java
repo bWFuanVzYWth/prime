@@ -113,31 +113,8 @@ public final class ClusterSceneTranslator {
             } else if (!hasArea(quad)) {
                 continue;
             }
-            boolean cutout = isCutout(capturedSurface);
-            boolean transmissive = isTransmissive(capturedSurface);
             surface.set(
-                    averageColor(capturedSurface),
-                    cutout,
-                    capturedSurface.animated(),
-                    transmissive,
-                    capturedSurface.foliage()
-                            || definition.primary()
-                                    .transmissiveTopology()
-                                    .thinWalled(),
-                    capturedSurface.water(),
-                    capturedSurface.foliage(),
-                    capturedSurface.mergeable(),
-                    capturedSurface.rasterOverlay(),
-                    capturedSurface.lightEmission(),
-                    capturedSurface.sprite(),
-                    capturedSurface.builtinMaterialClass())
-                    .setVertexColors(
-                            capturedSurface.color0(),
-                            capturedSurface.color1(),
-                            capturedSurface.color2(),
-                            capturedSurface.color3())
-                    .setMediumId(mediumCatalog.resolve(definition.primary()))
-                    .setDefinition(definition);
+                    definition, mediumCatalog.resolve(definition.primary()));
             accumulator.addQuad(quad, surface);
         }
         return accumulator.build();

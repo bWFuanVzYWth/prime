@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.prime.render.scene.CapturedSectionGeometry;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -194,16 +195,14 @@ final class SectionClusterMeshBuilderTest {
         accumulator.addQuad(
                 tinted,
                 new SectionMeshAccumulator.Surface().set(
-                        0xffff0000,
-                        false,
-                        false,
-                        false,
-                        false,
-                        false,
-                        false,
-                        true,
-                        0,
-                        sprite.sprite()));
+                        CapturedSectionGeometry.Surface.uniform(
+                                0xffff0000,
+                                CapturedSectionGeometry.Layer.OPAQUE,
+                                CapturedSectionGeometry.Surface.MERGEABLE,
+                                0,
+                                sprite.sprite()),
+                        TransmissiveTopology.NONE,
+                        0));
         SectionMeshAccumulator.Quad rotated =
                 SectionMeshAccumulatorTest.horizontalQuad(2.0F, 0.0F, 2.0F, 1.0F);
         for (int vertex = 0; vertex < 4; vertex++) {

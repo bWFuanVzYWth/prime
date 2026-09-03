@@ -519,122 +519,21 @@ public final class SectionMeshAccumulator {
 
     /** Mutable per-session scratch for semantics kept outside Minecraft's mesh interfaces. */
     public static final class Surface {
-        private int tint;
-        private int color0;
-        private int color1;
-        private int color2;
-        private int color3;
-        private boolean cutout;
-        private boolean animated;
-        private boolean transmissive;
-        private boolean thinWalled;
-        private boolean water;
-        private boolean foliage;
-        private boolean mergeable;
-        private boolean rasterOverlay;
-        private int lightEmission;
-        private CapturedSprite sprite;
+        private CapturedSectionGeometry.Surface captured;
+        private TransmissiveTopology transmissiveTopology;
         private SurfaceDefinition definition;
-        private BuiltinMaterialClass builtinMaterialClass;
+        private int tint;
         private int mediumId;
 
         public Surface set(
-                int tint,
-                boolean cutout,
-                boolean animated,
-                boolean transmissive,
-                boolean thinWalled,
-                boolean water,
-                boolean foliage,
-                boolean mergeable,
-                int lightEmission,
-                CapturedSprite sprite) {
-            return this.set(
-                    tint,
-                    cutout,
-                    animated,
-                    transmissive,
-                    thinWalled,
-                    water,
-                    foliage,
-                    mergeable,
-                    false,
-                    lightEmission,
-                    sprite,
-                    BuiltinMaterialClass.DEFAULT);
-        }
-
-        public Surface set(
-                int tint,
-                boolean cutout,
-                boolean animated,
-                boolean transmissive,
-                boolean thinWalled,
-                boolean water,
-                boolean foliage,
-                boolean mergeable,
-                boolean rasterOverlay,
-                int lightEmission,
-                CapturedSprite sprite) {
-            return this.set(
-                    tint,
-                    cutout,
-                    animated,
-                    transmissive,
-                    thinWalled,
-                    water,
-                    foliage,
-                    mergeable,
-                    rasterOverlay,
-                    lightEmission,
-                    sprite,
-                    BuiltinMaterialClass.DEFAULT);
-        }
-
-        public Surface set(
-                int tint,
-                boolean cutout,
-                boolean animated,
-                boolean transmissive,
-                boolean thinWalled,
-                boolean water,
-                boolean foliage,
-                boolean mergeable,
-                boolean rasterOverlay,
-                int lightEmission,
-                CapturedSprite sprite,
-                BuiltinMaterialClass builtinMaterialClass) {
-            this.tint = tint;
-            this.color0 = tint;
-            this.color1 = tint;
-            this.color2 = tint;
-            this.color3 = tint;
-            this.cutout = cutout;
-            this.animated = animated;
-            this.transmissive = transmissive;
-            this.thinWalled = thinWalled;
-            this.water = water;
-            this.foliage = foliage;
-            this.mergeable = mergeable;
-            this.rasterOverlay = rasterOverlay;
-            this.lightEmission = lightEmission;
-            this.sprite = Objects.requireNonNull(sprite, "sprite");
-            this.builtinMaterialClass = Objects.requireNonNull(
-                    builtinMaterialClass, "builtinMaterialClass");
+                CapturedSectionGeometry.Surface captured,
+                TransmissiveTopology transmissiveTopology,
+                int mediumId) {
+            this.captured = Objects.requireNonNull(captured, "captured");
+            this.transmissiveTopology = Objects.requireNonNull(
+                    transmissiveTopology, "transmissiveTopology");
             this.definition = null;
-            this.mediumId = 0;
-            return this;
-        }
-
-        Surface setVertexColors(int color0, int color1, int color2, int color3) {
-            this.color0 = color0;
-            this.color1 = color1;
-            this.color2 = color2;
-            this.color3 = color3;
-            return this;
-        }
-
-        Surface setMediumId(int mediumId) {
+            this.tint = ClusterSceneTranslator.averageColor(captured);
             if (mediumId < 0) {
                 throw new IllegalArgumentException("MediumId must not be negative");
             }
@@ -642,33 +541,20 @@ public final class SectionMeshAccumulator {
             return this;
         }
 
-        public Surface setDefinition(SurfaceDefinition definition) {
-            this.definition = Objects.requireNonNull(definition, "definition");
+        Surface set(SurfaceDefinition definition, int mediumId) {
+            Objects.requireNonNull(definition, "definition");
+            SurfaceDefinition.MaterialBinding primary = definition.primary();
+            this.set(primary.surface(), primary.transmissiveTopology(), mediumId);
+            this.definition = definition;
             return this;
         }
 
         private void requireComplete() {
-            Objects.requireNonNull(this.sprite, "surface sprite");
+            Objects.requireNonNull(this.captured, "captured surface");
         }
 
         int tint() {
             return this.tint;
-        }
-
-        boolean hasUniformVertexColor() {
-            return this.color0 == this.color1
-                    && this.color0 == this.color2
-                    && this.color0 == this.color3;
-        }
-
-        int vertexColor(int vertex) {
-            return switch (vertex) {
-                case 0 -> this.color0;
-                case 1 -> this.color1;
-                case 2 -> this.color2;
-                case 3 -> this.color3;
-                default -> throw new IndexOutOfBoundsException(vertex);
-            };
         }
 
         int mediumId() {
@@ -676,47 +562,47 @@ public final class SectionMeshAccumulator {
         }
 
         boolean cutout() {
-            return this.cutout;
+            return ClusterSceneTranslator.isCutout(this.captured);
         }
 
         boolean animated() {
-            return this.animated;
+            return this.captured.animated();
         }
 
         boolean transmissive() {
-            return this.transmissive;
+            return ClusterSceneTranslator.isTransmissive(this.captured);
         }
 
         boolean thinWalled() {
-            return this.thinWalled;
+            return this.captured.foliage() || this.transmissiveTopology.thinWalled();
         }
 
         boolean water() {
-            return this.water;
+            return this.captured.water();
         }
 
         boolean foliage() {
-            return this.foliage;
+            return this.captured.foliage();
         }
 
         boolean mergeable() {
-            return this.mergeable;
+            return this.captured.mergeable();
         }
 
         boolean rasterOverlay() {
-            return this.rasterOverlay;
+            return this.captured.rasterOverlay();
         }
 
         int lightEmission() {
-            return this.lightEmission;
+            return this.captured.lightEmission();
         }
 
         CapturedSprite sprite() {
-            return this.sprite;
+            return this.captured.sprite();
         }
 
         BuiltinMaterialClass builtinMaterialClass() {
-            return this.builtinMaterialClass;
+            return this.captured.builtinMaterialClass();
         }
 
         boolean geometryCutout() {
@@ -725,11 +611,11 @@ public final class SectionMeshAccumulator {
                 return ClusterSceneTranslator.isCutout(secondary)
                         || ClusterSceneTranslator.isTransmissive(secondary);
             }
-            return this.cutout;
+            return this.cutout();
         }
 
         boolean geometryTransmissive() {
-            return this.transmissive;
+            return this.transmissive();
         }
 
         boolean hasSurfaceRelation() {
@@ -738,7 +624,7 @@ public final class SectionMeshAccumulator {
         }
 
         boolean emitterTwoSided() {
-            return (this.cutout
+            return (this.cutout()
                             && (!(this.definition instanceof SurfaceDefinition.Overlay overlay)
                                     || !overlay.positiveOnly()))
                     || this.definition instanceof SurfaceDefinition.Bilateral;
