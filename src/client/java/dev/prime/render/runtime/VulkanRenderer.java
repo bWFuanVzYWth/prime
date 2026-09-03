@@ -914,10 +914,6 @@ public final class VulkanRenderer implements AutoCloseable {
                 && camera.y() < position.getY() + fluid.getHeight(minecraft.level, position);
     }
 
-    private static String hex(long handle) {
-        return "0x" + Long.toUnsignedString(handle, 16);
-    }
-
     /** One block-atlas snapshot is resolved and synchronized at the frame boundary. */
     private record BlockAtlasFrame(
             VulkanGpuTextureView view,

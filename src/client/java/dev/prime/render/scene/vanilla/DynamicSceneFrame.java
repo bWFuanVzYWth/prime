@@ -19,10 +19,6 @@ public record DynamicSceneFrame(
         CpuClusterMesh mesh,
         List<SceneTexture> textures,
         List<MotionSegment> motionSegments,
-        int entityTriangles,
-        int blockEntityTriangles,
-        int particleTriangles,
-        int featureTriangles,
         Set<CompatibilityIssue> compatibilityIssues) {
 
     public DynamicSceneFrame {
@@ -32,23 +28,9 @@ public record DynamicSceneFrame(
         EnumSet<CompatibilityIssue> issues = compatibilityIssues.isEmpty()
                 ? EnumSet.noneOf(CompatibilityIssue.class)
                 : EnumSet.copyOf(compatibilityIssues);
-        if (entityTriangles < 0
-                || blockEntityTriangles < 0
-                || particleTriangles < 0
-                || featureTriangles < 0) {
-            throw new IllegalArgumentException("Dynamic triangle counts must not be negative");
-        }
         if (!mesh.lights().isEmpty()) {
             throw new IllegalArgumentException(
                     "Dynamic geometry must not contain light-tree emitters");
-        }
-        if ((long) entityTriangles
-                        + blockEntityTriangles
-                        + particleTriangles
-                        + featureTriangles
-                != mesh.triangleCount()) {
-            throw new IllegalArgumentException(
-                    "Dynamic element counts do not match the captured mesh");
         }
         int previousEnd = 0;
         for (MotionSegment segment : motionSegments) {

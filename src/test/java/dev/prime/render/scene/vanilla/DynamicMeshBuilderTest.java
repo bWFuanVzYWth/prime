@@ -17,7 +17,6 @@ final class DynamicMeshBuilderTest {
     void capturesQuadForGiWithoutRegisteringVisibleEmissionAsALight() {
         DynamicMeshBuilder builder = new DynamicMeshBuilder(10.0, 20.0, 30.0);
         DynamicMeshBuilder.VertexSink sink = builder.open(
-                VanillaSceneBoundary.Element.BLOCK_ENTITY,
                 PrimitiveTopology.QUADS,
                 7,
                 LightCoordsUtil.FULL_BRIGHT);
@@ -32,10 +31,6 @@ final class DynamicMeshBuilderTest {
 
         assertEquals(2L, mesh.triangleCount());
         assertEquals(2L, mesh.cutoutTriangleCount());
-        assertEquals(2, frame.blockEntityTriangles());
-        assertEquals(0, frame.entityTriangles());
-        assertEquals(0, frame.particleTriangles());
-        assertEquals(0, frame.featureTriangles());
         assertTrue(mesh.lights().isEmpty());
         assertFalse(mesh.opacityMicromap().isEmpty());
 
@@ -59,7 +54,6 @@ final class DynamicMeshBuilderTest {
     void sourceNormalsRepairDynamicTriangleWindingBeforeBlasSubmission() {
         DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
         DynamicMeshBuilder.VertexSink sink = builder.open(
-                VanillaSceneBoundary.Element.ENTITY,
                 PrimitiveTopology.TRIANGLES,
                 1,
                 0);
@@ -86,7 +80,6 @@ final class DynamicMeshBuilderTest {
     void capturesParticleTriangleWithoutInventingEmission() {
         DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
         DynamicMeshBuilder.VertexSink sink = builder.open(
-                VanillaSceneBoundary.Element.PARTICLE,
                 PrimitiveTopology.TRIANGLES,
                 3,
                 0);
@@ -99,8 +92,6 @@ final class DynamicMeshBuilderTest {
         int flagsTexture =
                 frame.mesh().segments().getFirst().primitiveRecords()[5];
 
-        assertEquals(1, frame.particleTriangles());
-        assertEquals(0, frame.featureTriangles());
         assertEquals(3, PrimitivePacking.unpackDynamicTextureIndex(flagsTexture));
         assertFalse(PrimitivePacking.hasVisibleEmission(flagsTexture));
         assertTrue(frame.mesh().lights().isEmpty());
@@ -111,7 +102,6 @@ final class DynamicMeshBuilderTest {
         DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
         builder.beginMotionObject(VanillaSceneBoundary.Element.ENTITY, 17L);
         DynamicMeshBuilder.VertexSink sink = builder.open(
-                VanillaSceneBoundary.Element.ENTITY,
                 PrimitiveTopology.QUADS,
                 2,
                 0);
@@ -129,14 +119,12 @@ final class DynamicMeshBuilderTest {
         DynamicSceneFrame frame = builder.build(0, 0, 0, List.of());
 
         assertEquals(2L, frame.mesh().triangleCount());
-        assertEquals(2, frame.entityTriangles());
     }
 
     @Test
     void capturesTexturelessFeatureAsAnOwnedConstantMaterial() {
         DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
         DynamicMeshBuilder.VertexSink sink = builder.openUntextured(
-                VanillaSceneBoundary.Element.FEATURE,
                 PrimitiveTopology.TRIANGLES,
                 0);
         vertex(sink, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F);
@@ -147,7 +135,6 @@ final class DynamicMeshBuilderTest {
         DynamicSceneFrame frame = builder.build(0, 0, 0, List.of());
         int[] primitive = frame.mesh().segments().getFirst().primitiveRecords();
 
-        assertEquals(1, frame.featureTriangles());
         assertEquals(0, PrimitivePacking.unpackDynamicTextureIndex(primitive[5]));
         assertEquals(PrimitivePacking.CONSTANT_UV_DENSITY, primitive[6]);
         assertEquals(
@@ -160,7 +147,6 @@ final class DynamicMeshBuilderTest {
     void reportsUnsupportedNonTriangleTopology() {
         DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
         DynamicMeshBuilder.VertexSink sink = builder.openUntextured(
-                VanillaSceneBoundary.Element.FEATURE,
                 PrimitiveTopology.LINES,
                 0);
         vertex(sink, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F);
@@ -272,13 +258,11 @@ final class DynamicMeshBuilderTest {
         DynamicMeshBuilder previousBuilder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
         triangle(
                 previousBuilder,
-                VanillaSceneBoundary.Element.PARTICLE,
                 0.0F,
                 0.0F);
         DynamicMeshBuilder currentBuilder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
         triangle(
                 currentBuilder,
-                VanillaSceneBoundary.Element.PARTICLE,
                 4.0F,
                 0.0F);
 
@@ -313,17 +297,15 @@ final class DynamicMeshBuilderTest {
     private static void entity(
             DynamicMeshBuilder builder, long key, float x, float secondU) {
         builder.beginMotionObject(VanillaSceneBoundary.Element.ENTITY, key);
-        triangle(builder, VanillaSceneBoundary.Element.ENTITY, x, secondU);
+        triangle(builder, x, secondU);
         builder.endMotionObject(VanillaSceneBoundary.Element.ENTITY, key);
     }
 
     private static void triangle(
             DynamicMeshBuilder builder,
-            VanillaSceneBoundary.Element element,
             float x,
             float secondU) {
         DynamicMeshBuilder.VertexSink sink = builder.open(
-                element,
                 PrimitiveTopology.TRIANGLES,
                 1,
                 0);

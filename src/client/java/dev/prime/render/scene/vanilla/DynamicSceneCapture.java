@@ -234,7 +234,6 @@ public final class DynamicSceneCapture {
         DynamicMeshBuilder.VertexSink sink = textureIndex < 0
                 ? null
                 : session.builder.open(
-                        session.element,
                         PrimitiveTopology.QUADS,
                         textureIndex,
                         LightCoordsUtil.withBlock(state.lightCoords, 15));
@@ -285,7 +284,7 @@ public final class DynamicSceneCapture {
             return;
         }
         DynamicMeshBuilder.VertexSink sink = session.builder.openUntextured(
-                session.element, PrimitiveTopology.TRIANGLE_STRIP, 0);
+                PrimitiveTopology.TRIANGLE_STRIP, 0);
         Matrix4f pose = new Matrix4f(poseStack.last().pose());
         float dx = (float) (state.end.x - state.start.x);
         float dy = (float) (state.end.y - state.start.y);
@@ -449,7 +448,6 @@ public final class DynamicSceneCapture {
                 continue;
             }
             DynamicMeshBuilder.VertexSink sink = session.builder.open(
-                    session.element,
                     PrimitiveTopology.QUADS,
                     textureIndex,
                     0);
@@ -681,11 +679,9 @@ public final class DynamicSceneCapture {
             }
             return textureIndex == 0
                     ? this.builder.openUntextured(
-                            this.element,
                             renderType.primitiveTopology(),
                             fallbackLight)
                     : this.builder.open(
-                            this.element,
                             renderType.primitiveTopology(),
                             textureIndex,
                             fallbackLight,

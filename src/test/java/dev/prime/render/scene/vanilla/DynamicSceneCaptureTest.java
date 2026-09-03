@@ -39,7 +39,6 @@ final class DynamicSceneCaptureTest {
                 Font.DisplayMode.NORMAL,
                 0,
                 (renderType, lightCoords, redAlpha) -> builder.open(
-                        VanillaSceneBoundary.Element.BLOCK_ENTITY,
                         PrimitiveTopology.QUADS,
                         1,
                         lightCoords,
@@ -47,7 +46,6 @@ final class DynamicSceneCaptureTest {
         DynamicSceneFrame frame = builder.build(0, 0, 0, java.util.List.of());
 
         assertEquals(2L, frame.mesh().triangleCount());
-        assertEquals(2, frame.blockEntityTriangles());
         int packed = frame.mesh().segments().getFirst().primitiveRecords()[5];
         assertTrue(dev.prime.render.terrain.PrimitivePacking.usesDynamicRedAlpha(packed));
     }

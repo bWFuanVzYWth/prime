@@ -116,21 +116,4 @@ final class WorldLightTreeInputTest {
                         power));
     }
 
-    private static WorldLightTreeInput.Entry emptyCluster(int index) {
-        return new WorldLightTreeInput.Entry(
-                index,
-                index,
-                0,
-                0,
-                new CompiledClusterLights.Summary(
-                        0,
-                        0.0F,
-                        0.0F,
-                        0.0F,
-                        0.0F,
-                        0.0F,
-                        0.0F,
-                        0.0F));
-    }
-
 }

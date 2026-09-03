@@ -373,19 +373,6 @@ public final class CpuLightTree {
         return Math.min((int) (scaled * SAH_BIN_COUNT), SAH_BIN_COUNT - 1);
     }
 
-    private static float surfaceArea(
-            float minX,
-            float minY,
-            float minZ,
-            float maxX,
-            float maxY,
-            float maxZ) {
-        float x = Math.max(maxX - minX, 0.0F);
-        float y = Math.max(maxY - minY, 0.0F);
-        float z = Math.max(maxZ - minZ, 0.0F);
-        return 2.0F * (x * y + y * z + z * x);
-    }
-
     private static float quantizedCentroidAxis(
             float center, float minimum, float maximum) {
         if (!(maximum > minimum)) {

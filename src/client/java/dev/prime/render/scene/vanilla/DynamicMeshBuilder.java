@@ -29,8 +29,6 @@ final class DynamicMeshBuilder {
     private final IntWords primitives = new IntWords();
     private final ArrayList<DynamicSceneFrame.MotionSegment> motionSegments =
             new ArrayList<>();
-    private final int[] trianglesByElement =
-            new int[VanillaSceneBoundary.Element.values().length];
     private final EnumSet<DynamicSceneFrame.CompatibilityIssue> compatibilityIssues =
             EnumSet.noneOf(DynamicSceneFrame.CompatibilityIssue.class);
     private OpenMotionObject openMotionObject;
@@ -64,22 +62,19 @@ final class DynamicMeshBuilder {
     }
 
     VertexSink open(
-            VanillaSceneBoundary.Element element,
             PrimitiveTopology topology,
             int textureIndex,
             int fallbackLight) {
-        return this.open(element, topology, textureIndex, fallbackLight, false);
+        return this.open(topology, textureIndex, fallbackLight, false);
     }
 
     VertexSink open(
-            VanillaSceneBoundary.Element element,
             PrimitiveTopology topology,
             int textureIndex,
             int fallbackLight,
             boolean redAlpha) {
         return new VertexSink(
                 this,
-                element,
                 topology,
                 textureIndex,
                 fallbackLight,
@@ -88,11 +83,10 @@ final class DynamicMeshBuilder {
     }
 
     VertexSink openUntextured(
-            VanillaSceneBoundary.Element element,
             PrimitiveTopology topology,
             int fallbackLight) {
         return new VertexSink(
-                this, element, topology, 0, fallbackLight, true, false);
+                this, topology, 0, fallbackLight, true, false);
     }
 
     void report(DynamicSceneFrame.CompatibilityIssue issue) {
@@ -124,15 +118,10 @@ final class DynamicMeshBuilder {
                 CpuClusterMesh.fromSegments(List.of(section)),
                 textures,
                 this.motionSegments,
-                this.trianglesByElement[VanillaSceneBoundary.Element.ENTITY.ordinal()],
-                this.trianglesByElement[VanillaSceneBoundary.Element.BLOCK_ENTITY.ordinal()],
-                this.trianglesByElement[VanillaSceneBoundary.Element.PARTICLE.ordinal()],
-                this.trianglesByElement[VanillaSceneBoundary.Element.FEATURE.ordinal()],
                 this.compatibilityIssues);
     }
 
     private void addTriangle(
-            VanillaSceneBoundary.Element element,
             Vertex first,
             Vertex second,
             Vertex third,
@@ -261,7 +250,6 @@ final class DynamicMeshBuilder {
                                 third.u - first.u,
                                 third.v - first.v),
                 (int) tangent);
-        this.trianglesByElement[element.ordinal()]++;
     }
 
     private static boolean fullBright(int light) {
@@ -283,7 +271,6 @@ final class DynamicMeshBuilder {
 
     static final class VertexSink implements VertexConsumer {
         private final DynamicMeshBuilder owner;
-        private final VanillaSceneBoundary.Element element;
         private final PrimitiveTopology topology;
         private final int textureIndex;
         private final int fallbackLight;
@@ -295,14 +282,12 @@ final class DynamicMeshBuilder {
 
         private VertexSink(
                 DynamicMeshBuilder owner,
-                VanillaSceneBoundary.Element element,
                 PrimitiveTopology topology,
                 int textureIndex,
                 int fallbackLight,
                 boolean bakedMaterial,
                 boolean redAlpha) {
             this.owner = owner;
-            this.element = element;
             this.topology = topology;
             this.textureIndex = textureIndex;
             this.fallbackLight = fallbackLight;
@@ -480,7 +465,6 @@ final class DynamicMeshBuilder {
 
         private void emit(int first, int second, int third) {
             this.owner.addTriangle(
-                    this.element,
                     this.vertices.get(first),
                     this.vertices.get(second),
                     this.vertices.get(third),
