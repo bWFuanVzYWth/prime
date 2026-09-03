@@ -30,38 +30,34 @@ final class ClusterSceneTranslatorBoundaryTest {
 
     @Test
     void rejectsInvalidAttributesEvenWhenTheQuadHasZeroArea() {
-        try (SectionMeshAccumulatorTest.TestSprite sprite =
-                new SectionMeshAccumulatorTest.TestSprite("invalid_zero_area")) {
-            CapturedSectionGeometry.MutableQuad invalidUv = zeroAreaQuad();
-            invalidUv.u[2] = 1.5F;
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> translate(invalidUv, surface(sprite, 0)));
+        TestSprite sprite = new TestSprite("invalid_zero_area");
+        CapturedSectionGeometry.MutableQuad invalidUv = zeroAreaQuad();
+        invalidUv.u[2] = 1.5F;
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> translate(invalidUv, surface(sprite, 0)));
 
-            CapturedSectionGeometry.MutableQuad invalidPosition = zeroAreaQuad();
-            invalidPosition.x[1] = Float.NaN;
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> translate(invalidPosition, surface(sprite, 0)));
+        CapturedSectionGeometry.MutableQuad invalidPosition = zeroAreaQuad();
+        invalidPosition.x[1] = Float.NaN;
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> translate(invalidPosition, surface(sprite, 0)));
 
-            CapturedSectionGeometry.MutableQuad invalidNormal = zeroAreaQuad();
-            invalidNormal.normalZ = Float.POSITIVE_INFINITY;
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> translate(invalidNormal, surface(sprite, 0)));
-        }
+        CapturedSectionGeometry.MutableQuad invalidNormal = zeroAreaQuad();
+        invalidNormal.normalZ = Float.POSITIVE_INFINITY;
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> translate(invalidNormal, surface(sprite, 0)));
     }
 
     @Test
     void zeroAreaNonFluidQuadProducesNoPrimitiveRelationOrEmitter() {
-        try (SectionMeshAccumulatorTest.TestSprite sprite =
-                new SectionMeshAccumulatorTest.TestSprite("zero_area")) {
-            CpuClusterMesh result = translate(zeroAreaQuad(), surface(sprite, 15));
+        TestSprite sprite = new TestSprite("zero_area");
+        CpuClusterMesh result = translate(zeroAreaQuad(), surface(sprite, 15));
 
-            assertEquals(0L, result.triangleCount());
-            assertEquals(0L, result.surfaceRelationBytes());
-            assertEquals(0, result.lights().emitterCount());
-        }
+        assertEquals(0L, result.triangleCount());
+        assertEquals(0L, result.surfaceRelationBytes());
+        assertEquals(0, result.lights().emitterCount());
     }
 
     private static CpuClusterMesh translate(
@@ -89,7 +85,7 @@ final class ClusterSceneTranslatorBoundaryTest {
     }
 
     private static CapturedSectionGeometry.Surface surface(
-            SectionMeshAccumulatorTest.TestSprite sprite, int emission) {
+            TestSprite sprite, int emission) {
         return CapturedSectionGeometry.Surface.uniform(
                 0xffff_ffff,
                 CapturedSectionGeometry.Layer.OPAQUE,

@@ -11,127 +11,115 @@ import org.junit.jupiter.api.Test;
 final class FluidQuadTranslationTest {
     @Test
     void fullCollisionSuppressesTheInternalRasterPair() {
-        try (SectionMeshAccumulatorTest.TestSprite water =
-                new SectionMeshAccumulatorTest.TestSprite("captured_water")) {
-            water.fill(0xff40_80c0);
-            CapturedSectionGeometry.MutableQuad outward = southFace();
-            CapturedSectionGeometry.MutableQuad rasterBack = reversed(outward);
-            int collisionMask = 1 << Direction.SOUTH.ordinal();
-            CapturedSectionGeometry.Surface surface =
-                    fluidSurface(water, collisionMask, true, 0);
-            CapturedSectionGeometry.Builder section =
-                    new CapturedSectionGeometry.Builder();
-            section.add(outward, surface);
-            section.add(rasterBack, surface);
-            CapturedSectionGeometry captured = section.build();
+        TestSprite water = new TestSprite("captured_water");
+        water.fill(0xff40_80c0);
+        CapturedSectionGeometry.MutableQuad outward = southFace();
+        CapturedSectionGeometry.MutableQuad rasterBack = reversed(outward);
+        int collisionMask = 1 << Direction.SOUTH.ordinal();
+        CapturedSectionGeometry.Surface surface =
+                fluidSurface(water, collisionMask, true, 0);
+        CapturedSectionGeometry.Builder section =
+                new CapturedSectionGeometry.Builder();
+        section.add(outward, surface);
+        section.add(rasterBack, surface);
+        CapturedSectionGeometry captured = section.build();
 
-            CpuClusterMesh translated = translate(captured);
+        CpuClusterMesh translated = translate(captured);
 
-            assertEquals(0L, translated.transmissiveTriangleCount());
-        }
+        assertEquals(0L, translated.transmissiveTriangleCount());
     }
 
     @Test
     void fullCollisionAlsoSuppressesASlopedInternalBoundary() {
-        try (SectionMeshAccumulatorTest.TestSprite water =
-                new SectionMeshAccumulatorTest.TestSprite("sloped_water")) {
-            water.fill(0xff40_80c0);
-            CapturedSectionGeometry.MutableQuad top = slopedTop();
-            CapturedSectionGeometry.MutableQuad rasterBack = reversed(top);
-            int collisionMask = 1 << Direction.UP.ordinal();
-            CapturedSectionGeometry.Surface surface =
-                    fluidSurface(water, collisionMask, true, 0);
-            CapturedSectionGeometry.Builder section =
-                    new CapturedSectionGeometry.Builder();
-            section.add(top, surface);
-            section.add(rasterBack, surface);
-            CapturedSectionGeometry captured = section.build();
+        TestSprite water = new TestSprite("sloped_water");
+        water.fill(0xff40_80c0);
+        CapturedSectionGeometry.MutableQuad top = slopedTop();
+        CapturedSectionGeometry.MutableQuad rasterBack = reversed(top);
+        int collisionMask = 1 << Direction.UP.ordinal();
+        CapturedSectionGeometry.Surface surface =
+                fluidSurface(water, collisionMask, true, 0);
+        CapturedSectionGeometry.Builder section =
+                new CapturedSectionGeometry.Builder();
+        section.add(top, surface);
+        section.add(rasterBack, surface);
+        CapturedSectionGeometry captured = section.build();
 
-            CpuClusterMesh cluster = translate(captured);
+        CpuClusterMesh cluster = translate(captured);
 
-            assertEquals(0L, cluster.transmissiveTriangleCount());
-            assertEquals(0L, cluster.opaqueTriangleCount());
-            assertEquals(0, cluster.lights().emitterCount());
-        }
+        assertEquals(0L, cluster.transmissiveTriangleCount());
+        assertEquals(0L, cluster.opaqueTriangleCount());
+        assertEquals(0, cluster.lights().emitterCount());
     }
 
     @Test
     void warpedWaterRasterPairBecomesOneOutwardBoundary() {
-        try (SectionMeshAccumulatorTest.TestSprite water =
-                new SectionMeshAccumulatorTest.TestSprite("warped_water")) {
-            water.fill(0xff40_80c0);
-            CapturedSectionGeometry.MutableQuad top = warpedTop();
-            CapturedSectionGeometry.MutableQuad rasterBack = reversed(top);
-            setGeometricNormal(rasterBack);
-            CapturedSectionGeometry.Builder section =
-                    new CapturedSectionGeometry.Builder();
-            CapturedSectionGeometry.Surface surface =
-                    fluidSurface(water, 0, true, 0);
-            section.add(top, surface);
-            section.add(rasterBack, surface);
+        TestSprite water = new TestSprite("warped_water");
+        water.fill(0xff40_80c0);
+        CapturedSectionGeometry.MutableQuad top = warpedTop();
+        CapturedSectionGeometry.MutableQuad rasterBack = reversed(top);
+        setGeometricNormal(rasterBack);
+        CapturedSectionGeometry.Builder section =
+                new CapturedSectionGeometry.Builder();
+        CapturedSectionGeometry.Surface surface =
+                fluidSurface(water, 0, true, 0);
+        section.add(top, surface);
+        section.add(rasterBack, surface);
 
-            CpuClusterMesh cluster = translate(section.build());
+        CpuClusterMesh cluster = translate(section.build());
 
-            assertEquals(2L, cluster.transmissiveTriangleCount());
-            assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
-        }
+        assertEquals(2L, cluster.transmissiveTriangleCount());
+        assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
     }
 
     @Test
     void shallowSlopedWaterWithoutRasterBackFaceIsNotDiscarded() {
-        try (SectionMeshAccumulatorTest.TestSprite water =
-                new SectionMeshAccumulatorTest.TestSprite("one_sided_sloped_water")) {
-            water.fill(0xff40_80c0);
-            CapturedSectionGeometry.Builder section =
-                    new CapturedSectionGeometry.Builder();
-            section.add(slopedTop(), fluidSurface(water, 0, true, 0));
+        TestSprite water = new TestSprite("one_sided_sloped_water");
+        water.fill(0xff40_80c0);
+        CapturedSectionGeometry.Builder section =
+                new CapturedSectionGeometry.Builder();
+        section.add(slopedTop(), fluidSurface(water, 0, true, 0));
 
-            CpuClusterMesh cluster = translate(section.build());
+        CpuClusterMesh cluster = translate(section.build());
 
-            assertEquals(2L, cluster.transmissiveTriangleCount());
-            assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
-        }
+        assertEquals(2L, cluster.transmissiveTriangleCount());
+        assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
     }
 
     @Test
     void slopedLavaEmitsFromItsAuthoredOuterSide() {
-        try (SectionMeshAccumulatorTest.TestSprite lava =
-                new SectionMeshAccumulatorTest.TestSprite("sloped_lava")) {
-            lava.fill(0xffff_6000);
-            CapturedSectionGeometry.MutableQuad top = slopedTop();
-            CapturedSectionGeometry.MutableQuad rasterBack = reversed(top);
-            CapturedSectionGeometry.Surface surface =
-                    fluidSurface(lava, 0, false, 15);
-            CapturedSectionGeometry.Builder section =
-                    new CapturedSectionGeometry.Builder();
-            section.add(top, surface);
-            section.add(rasterBack, surface);
+        TestSprite lava = new TestSprite("sloped_lava");
+        lava.fill(0xffff_6000);
+        CapturedSectionGeometry.MutableQuad top = slopedTop();
+        CapturedSectionGeometry.MutableQuad rasterBack = reversed(top);
+        CapturedSectionGeometry.Surface surface =
+                fluidSurface(lava, 0, false, 15);
+        CapturedSectionGeometry.Builder section =
+                new CapturedSectionGeometry.Builder();
+        section.add(top, surface);
+        section.add(rasterBack, surface);
 
-            CpuClusterMesh cluster = translate(section.build());
+        CpuClusterMesh cluster = translate(section.build());
 
-            assertEquals(2L, cluster.opaqueTriangleCount());
-            assertEquals(0L, cluster.transmissiveTriangleCount());
-            assertEquals(2, cluster.lights().emitterCount());
-            assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
-            assertAllPrimitivesReferenceEmitters(cluster);
-            assertAllEmitterNormalsHaveYSign(cluster.lights(), 1.0F);
-        }
+        assertEquals(2L, cluster.opaqueTriangleCount());
+        assertEquals(0L, cluster.transmissiveTriangleCount());
+        assertEquals(2, cluster.lights().emitterCount());
+        assertAllTriangleNormalsHaveYSign(cluster, 1.0F);
+        assertAllPrimitivesReferenceEmitters(cluster);
+        assertAllEmitterNormalsHaveYSign(cluster.lights(), 1.0F);
     }
 
     @Test
     void bottomKeepsItsAuthoredDownwardBoundary() {
-        try (SectionMeshAccumulatorTest.TestSprite water =
-                new SectionMeshAccumulatorTest.TestSprite("water_bottom")) {
-            water.fill(0xff40_80c0);
-            CapturedSectionGeometry.Builder section =
-                    new CapturedSectionGeometry.Builder();
-            section.add(bottom(), fluidSurface(water, 0, true, 0));
+        TestSprite water = new TestSprite("water_bottom");
+        water.fill(0xff40_80c0);
+        CapturedSectionGeometry.Builder section =
+                new CapturedSectionGeometry.Builder();
+        section.add(bottom(), fluidSurface(water, 0, true, 0));
 
-            CpuClusterMesh cluster = translate(section.build());
+        CpuClusterMesh cluster = translate(section.build());
 
-            assertEquals(2L, cluster.transmissiveTriangleCount());
-            assertAllTriangleNormalsHaveYSign(cluster, -1.0F);
-        }
+        assertEquals(2L, cluster.transmissiveTriangleCount());
+        assertAllTriangleNormalsHaveYSign(cluster, -1.0F);
     }
 
     private static CapturedSectionGeometry.MutableQuad southFace() {
@@ -253,7 +241,7 @@ final class FluidQuadTranslationTest {
     }
 
     private static CapturedSectionGeometry.Surface fluidSurface(
-            SectionMeshAccumulatorTest.TestSprite sprite,
+            TestSprite sprite,
             int collisionMask,
             boolean water,
             int lightEmission) {

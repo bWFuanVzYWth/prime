@@ -31,255 +31,233 @@ import org.junit.jupiter.api.Test;
 final class ClusterSceneTranslatorTest {
     @Test
     void alphaCutOverrideIsResolvedOnlyInsideClusterTranslation() {
-        try (SectionMeshAccumulatorTest.TestSprite sprite =
-                new SectionMeshAccumulatorTest.TestSprite("alpha_cut_override")) {
-            CapturedSectionGeometry.Surface translucent =
-                    CapturedSectionGeometry.Surface.uniform(
-                            -1,
-                            CapturedSectionGeometry.Layer.TRANSLUCENT,
-                            false,
-                            false,
-                            false,
-                            false,
-                            false,
-                            true,
-                            false,
-                            0,
-                            sprite.sprite());
-            CapturedSectionGeometry.Surface alphaCut =
-                    CapturedSectionGeometry.Surface.uniform(
-                            -1,
-                            CapturedSectionGeometry.Layer.TRANSLUCENT,
-                            true,
-                            false,
-                            false,
-                            false,
-                            false,
-                            true,
-                            false,
-                            0,
-                            sprite.sprite());
+        TestSprite sprite = new TestSprite("alpha_cut_override");
+        CapturedSectionGeometry.Surface translucent =
+                CapturedSectionGeometry.Surface.uniform(
+                        -1,
+                        CapturedSectionGeometry.Layer.TRANSLUCENT,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        true,
+                        false,
+                        0,
+                        sprite.sprite());
+        CapturedSectionGeometry.Surface alphaCut =
+                CapturedSectionGeometry.Surface.uniform(
+                        -1,
+                        CapturedSectionGeometry.Layer.TRANSLUCENT,
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                        true,
+                        false,
+                        0,
+                        sprite.sprite());
 
-            assertFalse(ClusterSceneTranslator.isCutout(translucent));
-            assertTrue(ClusterSceneTranslator.isTransmissive(translucent));
-            assertTrue(ClusterSceneTranslator.isCutout(alphaCut));
-            assertFalse(ClusterSceneTranslator.isTransmissive(alphaCut));
-        }
+        assertFalse(ClusterSceneTranslator.isCutout(translucent));
+        assertTrue(ClusterSceneTranslator.isTransmissive(translucent));
+        assertTrue(ClusterSceneTranslator.isCutout(alphaCut));
+        assertFalse(ClusterSceneTranslator.isTransmissive(alphaCut));
     }
 
     @Test
     void vanillaGrassSideOverlayIsCompositedWithoutMovingItsCapturedPlane() {
-        try (SectionMeshAccumulatorTest.TestSprite base =
-                        new SectionMeshAccumulatorTest.TestSprite("captured_grass_side");
-                SectionMeshAccumulatorTest.TestSprite overlay =
-                        new SectionMeshAccumulatorTest.TestSprite(
-                                "captured_grass_side_overlay")) {
-            base.fill(0xff70_5030);
-            overlay.fill(0);
-            overlay.setPixel(0, 0, 0xff80_c060);
-            int tint = 0xff70_d050;
-            CapturedSectionGeometry section = capturedLayeredFace(
-                    base,
-                    overlay,
-                    3.0F,
-                    new int[] {tint, tint, tint, tint});
+        TestSprite base = new TestSprite("captured_grass_side");
+        TestSprite overlay = new TestSprite("captured_grass_side_overlay");
+        base.fill(0xff70_5030);
+        overlay.fill(0);
+        overlay.setPixel(0, 0, 0xff80_c060);
+        int tint = 0xff70_d050;
+        CapturedSectionGeometry section = capturedLayeredFace(
+                base,
+                overlay,
+                3.0F,
+                new int[] {tint, tint, tint, tint});
 
-            CpuClusterMesh cluster = translate(section);
+        CpuClusterMesh cluster = translate(section);
 
-            assertEquals(1, cluster.voxelMeshes().size());
-            assertEquals(1, cluster.voxelInstances().count());
-            assertEquals(3.0F, cluster.voxelInstances().translationZ(0), 0.0F);
-            assertEquals(
-                    PrimitivePacking.packTint(tint) & 0x00ff_ffff,
-                    cluster.voxelInstances().packedTint(0));
-            assertEquals(0L, cluster.opaqueTriangleCount());
-            assertEquals(0L, cluster.cutoutTriangleCount());
-
-        }
+        assertEquals(1, cluster.voxelMeshes().size());
+        assertEquals(1, cluster.voxelInstances().count());
+        assertEquals(3.0F, cluster.voxelInstances().translationZ(0), 0.0F);
+        assertEquals(
+                PrimitivePacking.packTint(tint) & 0x00ff_ffff,
+                cluster.voxelInstances().packedTint(0));
+        assertEquals(0L, cluster.opaqueTriangleCount());
+        assertEquals(0L, cluster.cutoutTriangleCount());
     }
 
     @Test
     void fabricVertexColorsAreAveragedOnlyInsideClusterTranslation() {
-        try (SectionMeshAccumulatorTest.TestSprite base =
-                        new SectionMeshAccumulatorTest.TestSprite("fabric_grass_side");
-                SectionMeshAccumulatorTest.TestSprite overlay =
-                        new SectionMeshAccumulatorTest.TestSprite(
-                                "fabric_grass_side_overlay")) {
-            base.fill(0xff60_4020);
-            overlay.fill(0xff40_a040);
-            int[] colors = {
-                0xff20_8040,
-                0xff40_a060,
-                0xff60_c080,
-                0xff80_e0a0
-            };
-            CapturedSectionGeometry section =
-                    capturedLayeredFace(base, overlay, 5.0F, colors);
+        TestSprite base = new TestSprite("fabric_grass_side");
+        TestSprite overlay = new TestSprite("fabric_grass_side_overlay");
+        base.fill(0xff60_4020);
+        overlay.fill(0xff40_a040);
+        int[] colors = {
+            0xff20_8040,
+            0xff40_a060,
+            0xff60_c080,
+            0xff80_e0a0
+        };
+        CapturedSectionGeometry section =
+                capturedLayeredFace(base, overlay, 5.0F, colors);
 
-            CpuClusterMesh first = translate(section);
-            CpuClusterMesh second = translate(section);
-            int expected = ClusterSceneTranslator.averageColor(
-                    section.quads().get(1).surface());
+        CpuClusterMesh first = translate(section);
+        CpuClusterMesh second = translate(section);
+        int expected = ClusterSceneTranslator.averageColor(
+                section.quads().get(1).surface());
 
-            assertEquals(1, first.voxelInstances().count());
-            assertEquals(5.0F, first.voxelInstances().translationZ(0), 0.0F);
-            assertEquals(
-                    PrimitivePacking.packTint(expected) & 0x00ff_ffff,
-                    first.voxelInstances().packedTint(0));
-            assertArrayEquals(
-                    first.voxelInstances().packedTints(),
-                    second.voxelInstances().packedTints());
-            assertArrayEquals(
-                    first.voxelInstances().translations(),
-                    second.voxelInstances().translations());
-            assertArrayEquals(
-                    first.voxelMeshes().getFirst().positions(),
-                    second.voxelMeshes().getFirst().positions());
-            assertArrayEquals(
-                    first.voxelMeshes().getFirst().primitiveRecords(),
-                    second.voxelMeshes().getFirst().primitiveRecords());
-        }
+        assertEquals(1, first.voxelInstances().count());
+        assertEquals(5.0F, first.voxelInstances().translationZ(0), 0.0F);
+        assertEquals(
+                PrimitivePacking.packTint(expected) & 0x00ff_ffff,
+                first.voxelInstances().packedTint(0));
+        assertArrayEquals(
+                first.voxelInstances().packedTints(),
+                second.voxelInstances().packedTints());
+        assertArrayEquals(
+                first.voxelInstances().translations(),
+                second.voxelInstances().translations());
+        assertArrayEquals(
+                first.voxelMeshes().getFirst().positions(),
+                second.voxelMeshes().getFirst().positions());
+        assertArrayEquals(
+                first.voxelMeshes().getFirst().primitiveRecords(),
+                second.voxelMeshes().getFirst().primitiveRecords());
     }
 
     @Test
     void coincidentCutoutWithoutRasterOverlayRoleIsNotBakedIntoOpaqueBase() {
-        try (SectionMeshAccumulatorTest.TestSprite base =
-                        new SectionMeshAccumulatorTest.TestSprite("ordinary_base");
-                SectionMeshAccumulatorTest.TestSprite cutout =
-                        new SectionMeshAccumulatorTest.TestSprite("ordinary_cutout")) {
-            base.fill(0xff70_5030);
-            cutout.fill(0xff80_c060);
-            CapturedSectionGeometry.MutableQuad quad = face(1.0F);
-            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
-            section.add(quad, surface(base, -1, false, false));
-            section.add(quad, surface(cutout, -1, true, false));
-            CapturedSectionGeometry captured = section.build();
+        TestSprite base = new TestSprite("ordinary_base");
+        TestSprite cutout = new TestSprite("ordinary_cutout");
+        base.fill(0xff70_5030);
+        cutout.fill(0xff80_c060);
+        CapturedSectionGeometry.MutableQuad quad = face(1.0F);
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        section.add(quad, surface(base, -1, false, false));
+        section.add(quad, surface(cutout, -1, true, false));
+        CapturedSectionGeometry captured = section.build();
 
-            CpuClusterMesh detailed = translate(captured);
-            CpuClusterMesh ordinary = translate(captured, false);
+        CpuClusterMesh detailed = translate(captured);
+        CpuClusterMesh ordinary = translate(captured, false);
 
-            assertEquals(2, detailed.voxelInstances().count());
-            assertEquals(0, ordinary.voxelInstances().count());
-            assertEquals(2L, ordinary.opaqueTriangleCount());
-            assertEquals(2L, ordinary.cutoutTriangleCount());
-        }
+        assertEquals(2, detailed.voxelInstances().count());
+        assertEquals(0, ordinary.voxelInstances().count());
+        assertEquals(2L, ordinary.opaqueTriangleCount());
+        assertEquals(2L, ordinary.cutoutTriangleCount());
     }
 
     @Test
     void rasterFrontBackPairsBecomeOneTwoSidedCrossSheet() {
-        try (SectionMeshAccumulatorTest.TestSprite grass =
-                new SectionMeshAccumulatorTest.TestSprite("modded_cross_grass")) {
-            grass.fill(0xff40_a040);
-            CapturedSectionGeometry.MutableQuad firstPlane =
-                    diagonalFace(false);
-            CapturedSectionGeometry.MutableQuad firstBack =
-                    rasterBack(firstPlane);
-            CapturedSectionGeometry.MutableQuad secondPlane =
-                    diagonalFace(true);
-            CapturedSectionGeometry.MutableQuad secondBack =
-                    rasterBack(secondPlane);
-            CapturedSectionGeometry.Builder section =
-                    new CapturedSectionGeometry.Builder();
-            CapturedSectionGeometry.Surface surface = crossSurface(grass);
-            section.add(firstPlane, surface);
-            section.add(secondPlane, surface);
-            section.add(firstBack, surface);
-            section.add(secondBack, surface);
+        TestSprite grass = new TestSprite("modded_cross_grass");
+        grass.fill(0xff40_a040);
+        CapturedSectionGeometry.MutableQuad firstPlane =
+                diagonalFace(false);
+        CapturedSectionGeometry.MutableQuad firstBack =
+                rasterBack(firstPlane);
+        CapturedSectionGeometry.MutableQuad secondPlane =
+                diagonalFace(true);
+        CapturedSectionGeometry.MutableQuad secondBack =
+                rasterBack(secondPlane);
+        CapturedSectionGeometry.Builder section =
+                new CapturedSectionGeometry.Builder();
+        CapturedSectionGeometry.Surface surface = crossSurface(grass);
+        section.add(firstPlane, surface);
+        section.add(secondPlane, surface);
+        section.add(firstBack, surface);
+        section.add(secondBack, surface);
 
-            CpuClusterMesh cluster = translate(section.build());
+        CpuClusterMesh cluster = translate(section.build());
 
-            assertEquals(4L, cluster.cutoutTriangleCount());
-            assertEquals(0L, cluster.opaqueTriangleCount());
-            assertEquals(0L, cluster.transmissiveTriangleCount());
-            int[] primitives = cluster.segments().getFirst().primitiveRecords();
-            assertEquals(
-                    PrimitivePacking.packUv(
-                            firstPlane.u[0], firstPlane.v[0]),
-                    primitives[0]);
-            assertEquals(
-                    PrimitivePacking.packUv(
-                            firstPlane.u[1], firstPlane.v[1]),
-                    primitives[1]);
-            assertEquals(
-                    PrimitivePacking.packUv(
-                            firstPlane.u[2], firstPlane.v[2]),
-                    primitives[2]);
-            assertEquals(0, PrimitivePacking.unpackSourceMediumId(primitives[4]));
-            float[] positions = cluster.segments().getFirst().positions();
-            float edgeOneX = positions[3] - positions[0];
-            float edgeOneZ = positions[5] - positions[2];
-            float edgeTwoY = positions[7] - positions[1];
-            float edgeTwoZ = positions[8] - positions[2];
-            float normalX = -edgeOneZ * edgeTwoY;
-            float normalZ = edgeOneX * edgeTwoY;
-            assertTrue(normalX < 0.0F && normalZ > 0.0F);
-            assertTwoSided(cluster);
-        }
+        assertEquals(4L, cluster.cutoutTriangleCount());
+        assertEquals(0L, cluster.opaqueTriangleCount());
+        assertEquals(0L, cluster.transmissiveTriangleCount());
+        int[] primitives = cluster.segments().getFirst().primitiveRecords();
+        assertEquals(
+                PrimitivePacking.packUv(
+                        firstPlane.u[0], firstPlane.v[0]),
+                primitives[0]);
+        assertEquals(
+                PrimitivePacking.packUv(
+                        firstPlane.u[1], firstPlane.v[1]),
+                primitives[1]);
+        assertEquals(
+                PrimitivePacking.packUv(
+                        firstPlane.u[2], firstPlane.v[2]),
+                primitives[2]);
+        assertEquals(0, PrimitivePacking.unpackSourceMediumId(primitives[4]));
+        float[] positions = cluster.segments().getFirst().positions();
+        float edgeOneX = positions[3] - positions[0];
+        float edgeOneZ = positions[5] - positions[2];
+        float edgeTwoY = positions[7] - positions[1];
+        float edgeTwoZ = positions[8] - positions[2];
+        float normalX = -edgeOneZ * edgeTwoY;
+        float normalZ = edgeOneX * edgeTwoY;
+        assertTrue(normalX < 0.0F && normalZ > 0.0F);
+        assertTwoSided(cluster);
     }
 
     @Test
     void grassSideOverlayBecomesOneSurfaceRelationWhenReliefIsDisabled() {
-        try (SectionMeshAccumulatorTest.TestSprite base =
-                        new SectionMeshAccumulatorTest.TestSprite(
-                                "flat_grass_side", 32, 16, 0, 0);
-                SectionMeshAccumulatorTest.TestSprite overlay =
-                        new SectionMeshAccumulatorTest.TestSprite(
-                                "flat_grass_side_overlay", 32, 16, 16, 0)) {
-            base.fill(0xff70_5030);
-            overlay.fill(0);
-            overlay.setPixel(0, 0, 0xff80_c060);
-            CapturedSectionGeometry section = capturedLayeredFace(
-                    base,
-                    overlay,
-                    4.0F,
-                    new int[] {
-                        0xff70_d050,
-                        0xff70_d050,
-                        0xff70_d050,
-                        0xff70_d050
-                    });
+        TestSprite base = new TestSprite("flat_grass_side");
+        TestSprite overlay = new TestSprite("flat_grass_side_overlay");
+        base.fill(0xff70_5030);
+        overlay.fill(0);
+        overlay.setPixel(0, 0, 0xff80_c060);
+        CapturedSectionGeometry section = capturedLayeredFace(
+                base,
+                overlay,
+                4.0F,
+                new int[] {
+                    0xff70_d050,
+                    0xff70_d050,
+                    0xff70_d050,
+                    0xff70_d050
+                });
 
-            CpuClusterMesh cluster = translate(section, false);
+        CpuClusterMesh cluster = translate(section, false);
 
-            assertEquals(2L, cluster.opaqueTriangleCount());
-            assertEquals(0L, cluster.cutoutTriangleCount());
-            assertEquals(0, cluster.voxelMeshes().size());
-            assertEquals(0, cluster.voxelInstances().count());
-            CpuClusterMesh.Segment segment = cluster.segments().getFirst();
-            assertEquals(2, segment.opaqueTriangleCount());
-            int[] primitives = segment.primitiveRecords();
-            for (int record = 0;
-                    record < primitives.length;
-                    record += CpuSectionMesh.PRIMITIVE_WORDS) {
-                int flags = PrimitivePacking.unpackControl(
-                        primitives[record + 3], primitives[record + 5]);
-                assertEquals(
-                        PrimitivePacking.NO_EMITTER_INDEX,
-                        PrimitivePacking.unpackEmitterIndex(
-                                primitives[record + 5]));
-            }
-            assertEquals(80L, cluster.surfaceRelationBytes());
-            int primitiveCount = segment.opaquePrimitiveCount();
-            for (int primitive = 0; primitive < primitiveCount; primitive++) {
-                int[] relation = SurfaceRelationTable.record(
-                        segment.surfaceRelationRecords(),
-                        primitiveCount,
-                        primitive);
-                assertEquals(
-                        CpuSectionMesh.SURFACE_RELATION_OVERLAY,
-                        relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
-                assertEquals(0, PrimitivePacking.unpackSourceMediumId(relation[5]));
-                assertTrue((relation[0] >> 8
-                        & PrimitivePacking.CONTROL_ALPHA_CUTOUT) != 0);
-            }
+        assertEquals(2L, cluster.opaqueTriangleCount());
+        assertEquals(0L, cluster.cutoutTriangleCount());
+        assertEquals(0, cluster.voxelMeshes().size());
+        assertEquals(0, cluster.voxelInstances().count());
+        CpuClusterMesh.Segment segment = cluster.segments().getFirst();
+        assertEquals(2, segment.opaqueTriangleCount());
+        int[] primitives = segment.primitiveRecords();
+        for (int record = 0;
+                record < primitives.length;
+                record += CpuSectionMesh.PRIMITIVE_WORDS) {
+            int flags = PrimitivePacking.unpackControl(
+                    primitives[record + 3], primitives[record + 5]);
+            assertEquals(
+                    PrimitivePacking.NO_EMITTER_INDEX,
+                    PrimitivePacking.unpackEmitterIndex(
+                            primitives[record + 5]));
+        }
+        assertEquals(80L, cluster.surfaceRelationBytes());
+        int primitiveCount = segment.opaquePrimitiveCount();
+        for (int primitive = 0; primitive < primitiveCount; primitive++) {
+            int[] relation = SurfaceRelationTable.record(
+                    segment.surfaceRelationRecords(),
+                    primitiveCount,
+                    primitive);
+            assertEquals(
+                    CpuSectionMesh.SURFACE_RELATION_OVERLAY,
+                    relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
+            assertEquals(0, PrimitivePacking.unpackSourceMediumId(relation[5]));
+            assertTrue((relation[0] >> 8
+                    & PrimitivePacking.CONTROL_ALPHA_CUTOUT) != 0);
         }
     }
 
     @Test
     void vanillaFaceBakeryCrossPairMeetsReductionContract() {
-        try (FaceBakerySprite bakedSprite = new FaceBakerySprite();
-                SectionMeshAccumulatorTest.TestSprite grass =
-                        new SectionMeshAccumulatorTest.TestSprite("vanilla_cross")) {
+        TestSprite grass = new TestSprite("vanilla_cross");
+        try (FaceBakerySprite bakedSprite = new FaceBakerySprite()) {
             BakedQuad.MaterialInfo material = new BakedQuad.MaterialInfo(
                     bakedSprite,
                     ChunkSectionLayer.CUTOUT,
@@ -371,275 +349,250 @@ final class ClusterSceneTranslatorTest {
 
     @Test
     void oppositeCutoutQuadsWithDifferentTextureDomainBecomeBilateral() {
-        try (SectionMeshAccumulatorTest.TestSprite grass =
-                new SectionMeshAccumulatorTest.TestSprite("directional_cross")) {
-            grass.fill(0xff40_a040);
-            CapturedSectionGeometry.MutableQuad front =
-                    diagonalFace(false);
-            CapturedSectionGeometry.MutableQuad back = rasterBack(front);
-            back.u[0] = 0.25F;
-            CapturedSectionGeometry.Builder section =
-                    new CapturedSectionGeometry.Builder();
-            CapturedSectionGeometry.Surface surface = crossSurface(grass);
-            section.add(front, surface);
-            section.add(back, surface);
+        TestSprite grass = new TestSprite("directional_cross");
+        grass.fill(0xff40_a040);
+        CapturedSectionGeometry.MutableQuad front =
+                diagonalFace(false);
+        CapturedSectionGeometry.MutableQuad back = rasterBack(front);
+        back.u[0] = 0.25F;
+        CapturedSectionGeometry.Builder section =
+                new CapturedSectionGeometry.Builder();
+        CapturedSectionGeometry.Surface surface = crossSurface(grass);
+        section.add(front, surface);
+        section.add(back, surface);
 
-            CpuClusterMesh cluster = translate(section.build());
+        CpuClusterMesh cluster = translate(section.build());
 
-            assertEquals(2L, cluster.cutoutTriangleCount());
-            assertBilateral(cluster);
-            assertEquals(0, cluster.opacityMicromap().blockCount());
-            for (int index : cluster.opacityMicromap().triangleIndices()) {
-                assertTrue(index < 0);
-            }
+        assertEquals(2L, cluster.cutoutTriangleCount());
+        assertBilateral(cluster);
+        assertEquals(0, cluster.opacityMicromap().blockCount());
+        for (int index : cluster.opacityMicromap().triangleIndices()) {
+            assertTrue(index < 0);
         }
     }
 
     @Test
     void exactOpaqueRasterBackIsAlsoOnePhysicalFace() {
-        try (SectionMeshAccumulatorTest.TestSprite stone =
-                new SectionMeshAccumulatorTest.TestSprite("opaque_raster_back")) {
-            CapturedSectionGeometry.MutableQuad front = face(0.5F);
-            CapturedSectionGeometry.MutableQuad back = rasterBack(front);
-            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
-            CapturedSectionGeometry.Surface surface = surface(stone, -1, false, false);
-            section.add(front, surface);
-            section.add(back, surface);
-            CapturedSectionGeometry captured = section.build();
+        TestSprite stone = new TestSprite("opaque_raster_back");
+        CapturedSectionGeometry.MutableQuad front = face(0.5F);
+        CapturedSectionGeometry.MutableQuad back = rasterBack(front);
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        CapturedSectionGeometry.Surface surface = surface(stone, -1, false, false);
+        section.add(front, surface);
+        section.add(back, surface);
+        CapturedSectionGeometry captured = section.build();
 
-            java.util.List<TwoSidedQuadReducer.ResolvedQuad> resolved =
-                    TwoSidedQuadReducer.resolve(captured.quads());
+        java.util.List<TwoSidedQuadReducer.ResolvedQuad> resolved =
+                TwoSidedQuadReducer.resolve(captured.quads());
 
-            assertEquals(1, resolved.size());
-            assertSame(captured.quads().getFirst(), resolved.getFirst().quad());
-            assertEquals(
-                    SurfaceDefinition.InterfaceMode.SINGLE,
-                    resolved.getFirst().definition().interfaceMode());
-        }
+        assertEquals(1, resolved.size());
+        assertSame(captured.quads().getFirst(), resolved.getFirst().quad());
+        assertEquals(
+                SurfaceDefinition.InterfaceMode.SINGLE,
+                resolved.getFirst().definition().interfaceMode());
     }
 
     @Test
     void identicalSameWindingRasterFacesArePublishedOnce() {
-        try (SectionMeshAccumulatorTest.TestSprite flowers =
-                new SectionMeshAccumulatorTest.TestSprite("identical_raster_faces")) {
-            CapturedSectionGeometry.MutableQuad first = face(0.5F);
-            CapturedSectionGeometry.MutableQuad duplicate = face(0.5F);
-            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
-            CapturedSectionGeometry.Surface surface = ownedCutoutSurface(flowers);
-            section.add(first, surface);
-            section.add(rasterBack(first), surface);
-            section.add(duplicate, surface);
-            section.add(rasterBack(duplicate), surface);
-            CapturedSectionGeometry captured = section.build();
+        TestSprite flowers = new TestSprite("identical_raster_faces");
+        CapturedSectionGeometry.MutableQuad first = face(0.5F);
+        CapturedSectionGeometry.MutableQuad duplicate = face(0.5F);
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        CapturedSectionGeometry.Surface surface = ownedCutoutSurface(flowers);
+        section.add(first, surface);
+        section.add(rasterBack(first), surface);
+        section.add(duplicate, surface);
+        section.add(rasterBack(duplicate), surface);
+        CapturedSectionGeometry captured = section.build();
 
-            java.util.List<TwoSidedQuadReducer.ResolvedQuad> resolved =
-                    TwoSidedQuadReducer.resolve(captured.quads());
+        java.util.List<TwoSidedQuadReducer.ResolvedQuad> resolved =
+                TwoSidedQuadReducer.resolve(captured.quads());
 
-            assertEquals(1, resolved.size());
-            assertSame(captured.quads().getFirst(), resolved.getFirst().quad());
-        }
+        assertEquals(1, resolved.size());
+        assertSame(captured.quads().getFirst(), resolved.getFirst().quad());
     }
 
     @Test
     void emissiveOpaqueRasterPairBecomesOneTwoSidedEmitter() {
-        try (SectionMeshAccumulatorTest.TestSprite flame =
-                new SectionMeshAccumulatorTest.TestSprite("emissive_raster_pair")) {
-            flame.fill(0xffff_c040);
-            CapturedSectionGeometry.MutableQuad front = face(0.5F);
-            CapturedSectionGeometry.MutableQuad back = rasterBack(front);
-            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
-            CapturedSectionGeometry.Surface surface = CapturedSectionGeometry.Surface.uniform(
-                    -1,
-                    CapturedSectionGeometry.Layer.OPAQUE,
-                    false,
-                    false,
-                    false,
-                    false,
-                    false,
-                    false,
-                    false,
-                    15,
-                    flame.sprite(),
-                    new CapturedSectionGeometry.BlockFacts(0, 0, 0));
-            section.add(front, surface);
-            section.add(back, surface);
+        TestSprite flame = new TestSprite("emissive_raster_pair");
+        flame.fill(0xffff_c040);
+        CapturedSectionGeometry.MutableQuad front = face(0.5F);
+        CapturedSectionGeometry.MutableQuad back = rasterBack(front);
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        CapturedSectionGeometry.Surface surface = CapturedSectionGeometry.Surface.uniform(
+                -1,
+                CapturedSectionGeometry.Layer.OPAQUE,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                15,
+                flame.sprite(),
+                new CapturedSectionGeometry.BlockFacts(0, 0, 0));
+        section.add(front, surface);
+        section.add(back, surface);
 
-            CpuClusterMesh mesh = translate(section.build(), false);
+        CpuClusterMesh mesh = translate(section.build(), false);
 
-            assertEquals(2L, mesh.opaqueTriangleCount());
-            assertEquals(2, mesh.lights().emitterCount());
-            CpuClusterMesh.Segment segment = mesh.segments().getFirst();
-            int[] relation = SurfaceRelationTable.record(
-                    segment.surfaceRelationRecords(), segment.opaquePrimitiveCount(), 0);
-            assertEquals(
-                    CpuSectionMesh.SURFACE_RELATION_BILATERAL,
-                    relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
-        }
+        assertEquals(2L, mesh.opaqueTriangleCount());
+        assertEquals(2, mesh.lights().emitterCount());
+        CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+        int[] relation = SurfaceRelationTable.record(
+                segment.surfaceRelationRecords(), segment.opaquePrimitiveCount(), 0);
+        assertEquals(
+                CpuSectionMesh.SURFACE_RELATION_BILATERAL,
+                relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
     }
 
     @Test
     void exactEmissiveCutoutLayerCompositesWithItsBaseSheet() {
-        try (SectionMeshAccumulatorTest.TestSprite base =
-                        new SectionMeshAccumulatorTest.TestSprite("emissive_layer_base");
-                SectionMeshAccumulatorTest.TestSprite glow =
-                        new SectionMeshAccumulatorTest.TestSprite("emissive_layer_glow")) {
-            base.fill(0xff40_8020);
-            glow.fill(0xffff_e080);
-            CapturedSectionGeometry.MutableQuad baseFront = diagonalFace(false);
-            CapturedSectionGeometry.MutableQuad glowFront = diagonalFace(false);
-            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
-            section.add(baseFront, ownedCutoutSurface(base, 0));
-            section.add(rasterBack(baseFront), ownedCutoutSurface(base, 0));
-            section.add(glowFront, ownedCutoutSurface(glow, 15));
-            section.add(rasterBack(glowFront), ownedCutoutSurface(glow, 15));
+        TestSprite base = new TestSprite("emissive_layer_base");
+        TestSprite glow = new TestSprite("emissive_layer_glow");
+        base.fill(0xff40_8020);
+        glow.fill(0xffff_e080);
+        CapturedSectionGeometry.MutableQuad baseFront = diagonalFace(false);
+        CapturedSectionGeometry.MutableQuad glowFront = diagonalFace(false);
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        section.add(baseFront, ownedCutoutSurface(base, 0));
+        section.add(rasterBack(baseFront), ownedCutoutSurface(base, 0));
+        section.add(glowFront, ownedCutoutSurface(glow, 15));
+        section.add(rasterBack(glowFront), ownedCutoutSurface(glow, 15));
 
-            CpuClusterMesh mesh = translate(section.build(), true);
+        CpuClusterMesh mesh = translate(section.build(), true);
 
-            assertEquals(2L, mesh.cutoutTriangleCount());
-            assertEquals(2, mesh.lights().emitterCount());
-            CpuClusterMesh.Segment segment = mesh.segments().getFirst();
-            int[] relation = SurfaceRelationTable.record(
-                    segment.surfaceRelationRecords(), segment.cutoutPrimitiveCount(), 0);
-            assertEquals(
-                    CpuSectionMesh.SURFACE_RELATION_OVERLAY,
-                    relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
-        }
+        assertEquals(2L, mesh.cutoutTriangleCount());
+        assertEquals(2, mesh.lights().emitterCount());
+        CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+        int[] relation = SurfaceRelationTable.record(
+                segment.surfaceRelationRecords(), segment.cutoutPrimitiveCount(), 0);
+        assertEquals(
+                CpuSectionMesh.SURFACE_RELATION_OVERLAY,
+                relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
     }
 
     @Test
     void vanillaAuthoredInnerFaceShellKeepsOnlyItsOuterFace() {
-        try (SectionMeshAccumulatorTest.TestSprite cage =
-                new SectionMeshAccumulatorTest.TestSprite("inner_face_shell")) {
-            CapturedSectionGeometry.MutableQuad outer = face(0.0F);
-            CapturedSectionGeometry.MutableQuad inner = rasterBack(outer);
-            float inset = 0.002F / 16.0F;
-            for (int vertex = 0; vertex < 4; vertex++) {
-                inner.x[vertex] = inner.x[vertex] < 0.5F ? inset : 1.0F - inset;
-                inner.y[vertex] = inner.y[vertex] < 0.5F ? inset : 1.0F - inset;
-                inner.z[vertex] = inset;
-            }
-            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
-            CapturedSectionGeometry.Surface surface = ownedCutoutSurface(cage);
-            section.add(inner, surface);
-            section.add(outer, surface);
-            CapturedSectionGeometry captured = section.build();
-
-            java.util.List<TwoSidedQuadReducer.ResolvedQuad> resolved =
-                    TwoSidedQuadReducer.resolve(captured.quads());
-
-            assertEquals(1, resolved.size());
-            assertSame(captured.quads().get(1), resolved.getFirst().quad());
+        TestSprite cage = new TestSprite("inner_face_shell");
+        CapturedSectionGeometry.MutableQuad outer = face(0.0F);
+        CapturedSectionGeometry.MutableQuad inner = rasterBack(outer);
+        float inset = 0.002F / 16.0F;
+        for (int vertex = 0; vertex < 4; vertex++) {
+            inner.x[vertex] = inner.x[vertex] < 0.5F ? inset : 1.0F - inset;
+            inner.y[vertex] = inner.y[vertex] < 0.5F ? inset : 1.0F - inset;
+            inner.z[vertex] = inset;
         }
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        CapturedSectionGeometry.Surface surface = ownedCutoutSurface(cage);
+        section.add(inner, surface);
+        section.add(outer, surface);
+        CapturedSectionGeometry captured = section.build();
+
+        java.util.List<TwoSidedQuadReducer.ResolvedQuad> resolved =
+                TwoSidedQuadReducer.resolve(captured.quads());
+
+        assertEquals(1, resolved.size());
+        assertSame(captured.quads().get(1), resolved.getFirst().quad());
     }
 
     @Test
     void arbitraryThinShellIsNotTreatedAsVanillaInnerFaces() {
-        try (SectionMeshAccumulatorTest.TestSprite cage =
-                new SectionMeshAccumulatorTest.TestSprite("unrecognized_thin_shell")) {
-            CapturedSectionGeometry.MutableQuad outer = face(0.0F);
-            CapturedSectionGeometry.MutableQuad inner = rasterBack(outer);
-            float inset = 0.0002F;
-            for (int vertex = 0; vertex < 4; vertex++) {
-                inner.x[vertex] = inner.x[vertex] < 0.5F ? inset : 1.0F - inset;
-                inner.y[vertex] = inner.y[vertex] < 0.5F ? inset : 1.0F - inset;
-                inner.z[vertex] = inset;
-            }
-            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
-            CapturedSectionGeometry.Surface surface = ownedCutoutSurface(cage);
-            section.add(outer, surface);
-            section.add(inner, surface);
-
-            assertEquals(2, TwoSidedQuadReducer.resolve(section.build().quads()).size());
+        TestSprite cage = new TestSprite("unrecognized_thin_shell");
+        CapturedSectionGeometry.MutableQuad outer = face(0.0F);
+        CapturedSectionGeometry.MutableQuad inner = rasterBack(outer);
+        float inset = 0.0002F;
+        for (int vertex = 0; vertex < 4; vertex++) {
+            inner.x[vertex] = inner.x[vertex] < 0.5F ? inset : 1.0F - inset;
+            inner.y[vertex] = inner.y[vertex] < 0.5F ? inset : 1.0F - inset;
+            inner.z[vertex] = inset;
         }
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        CapturedSectionGeometry.Surface surface = ownedCutoutSurface(cage);
+        section.add(outer, surface);
+        section.add(inner, surface);
+
+        assertEquals(2, TwoSidedQuadReducer.resolve(section.build().quads()).size());
     }
 
     @Test
     void unsupportedVoxelOverlayFallsBackToOneLayeredPlane() {
-        try (SectionMeshAccumulatorTest.TestSprite base =
-                        new SectionMeshAccumulatorTest.TestSprite("voxel_fallback_base");
-                SectionMeshAccumulatorTest.TestSprite overlay =
-                        new SectionMeshAccumulatorTest.TestSprite("voxel_fallback_overlay")) {
-            CapturedSectionGeometry.MutableQuad baseQuad = face(0.5F);
-            CapturedSectionGeometry.MutableQuad overlayQuad = face(0.5F);
-            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
-            section.add(baseQuad, surface(base, -1, false, false));
-            section.add(overlayQuad, CapturedSectionGeometry.Surface.uniform(
-                    -1,
-                    CapturedSectionGeometry.Layer.CUTOUT,
-                    false,
-                    false,
-                    true,
-                    false,
-                    false,
-                    true,
-                    true,
-                    0,
-                    overlay.sprite()));
+        TestSprite base = new TestSprite("voxel_fallback_base");
+        TestSprite overlay = new TestSprite("voxel_fallback_overlay");
+        CapturedSectionGeometry.MutableQuad baseQuad = face(0.5F);
+        CapturedSectionGeometry.MutableQuad overlayQuad = face(0.5F);
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        section.add(baseQuad, surface(base, -1, false, false));
+        section.add(overlayQuad, CapturedSectionGeometry.Surface.uniform(
+                -1,
+                CapturedSectionGeometry.Layer.CUTOUT,
+                false,
+                false,
+                true,
+                false,
+                false,
+                true,
+                true,
+                0,
+                overlay.sprite()));
 
-            CpuClusterMesh mesh = translate(section.build(), true);
+        CpuClusterMesh mesh = translate(section.build(), true);
 
-            assertEquals(2L, mesh.opaqueTriangleCount());
-            assertEquals(0L, mesh.cutoutTriangleCount());
-            assertEquals(0, mesh.voxelInstances().count());
-            CpuClusterMesh.Segment segment = mesh.segments().getFirst();
-            int[] relation = SurfaceRelationTable.record(
-                    segment.surfaceRelationRecords(), segment.opaquePrimitiveCount(), 0);
-            assertEquals(
-                    CpuSectionMesh.SURFACE_RELATION_OVERLAY,
-                    relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
-        }
+        assertEquals(2L, mesh.opaqueTriangleCount());
+        assertEquals(0L, mesh.cutoutTriangleCount());
+        assertEquals(0, mesh.voxelInstances().count());
+        CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+        int[] relation = SurfaceRelationTable.record(
+                segment.surfaceRelationRecords(), segment.opaquePrimitiveCount(), 0);
+        assertEquals(
+                CpuSectionMesh.SURFACE_RELATION_OVERLAY,
+                relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
     }
 
     @Test
     void cutoutVoxelOverlayFallbackRetainsBothCoverageDomainsOnOnePlane() {
-        try (SectionMeshAccumulatorTest.TestSprite base =
-                        new SectionMeshAccumulatorTest.TestSprite("cutout_fallback_base");
-                SectionMeshAccumulatorTest.TestSprite overlay =
-                        new SectionMeshAccumulatorTest.TestSprite("cutout_fallback_overlay")) {
-            CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
-            section.add(face(0.5F), ownedCutoutSurface(base));
-            section.add(face(0.5F), CapturedSectionGeometry.Surface.uniform(
-                    -1,
-                    CapturedSectionGeometry.Layer.CUTOUT,
-                    false,
-                    false,
-                    false,
-                    false,
-                    false,
-                    true,
-                    true,
-                    0,
-                    overlay.sprite(),
-                    new CapturedSectionGeometry.BlockFacts(0, 0, 0)));
+        TestSprite base = new TestSprite("cutout_fallback_base");
+        TestSprite overlay = new TestSprite("cutout_fallback_overlay");
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        section.add(face(0.5F), ownedCutoutSurface(base));
+        section.add(face(0.5F), CapturedSectionGeometry.Surface.uniform(
+                -1,
+                CapturedSectionGeometry.Layer.CUTOUT,
+                false,
+                false,
+                false,
+                false,
+                false,
+                true,
+                true,
+                0,
+                overlay.sprite(),
+                new CapturedSectionGeometry.BlockFacts(0, 0, 0)));
 
-            CpuClusterMesh mesh = translate(section.build(), true);
+        CpuClusterMesh mesh = translate(section.build(), true);
 
-            assertEquals(2L, mesh.cutoutTriangleCount());
-            assertEquals(0L, mesh.opaqueTriangleCount());
-            assertEquals(0, mesh.voxelInstances().count());
-            CpuClusterMesh.Segment segment = mesh.segments().getFirst();
-            int[] relation = SurfaceRelationTable.record(
-                    segment.surfaceRelationRecords(), segment.cutoutPrimitiveCount(), 0);
-            assertEquals(
-                    CpuSectionMesh.SURFACE_RELATION_OVERLAY,
-                    relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
-            int secondaryFlags = PrimitivePacking.unpackControl(relation[4], relation[6]);
-            assertTrue(PrimitivePacking.isCutout(secondaryFlags));
-            for (int index : mesh.opacityMicromap().triangleIndices()) {
-                assertTrue(index < 0);
-            }
+        assertEquals(2L, mesh.cutoutTriangleCount());
+        assertEquals(0L, mesh.opaqueTriangleCount());
+        assertEquals(0, mesh.voxelInstances().count());
+        CpuClusterMesh.Segment segment = mesh.segments().getFirst();
+        int[] relation = SurfaceRelationTable.record(
+                segment.surfaceRelationRecords(), segment.cutoutPrimitiveCount(), 0);
+        assertEquals(
+                CpuSectionMesh.SURFACE_RELATION_OVERLAY,
+                relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
+        int secondaryFlags = PrimitivePacking.unpackControl(relation[4], relation[6]);
+        assertTrue(PrimitivePacking.isCutout(secondaryFlags));
+        for (int index : mesh.opacityMicromap().triangleIndices()) {
+            assertTrue(index < 0);
         }
     }
 
     @Test
     void vanillaSunflowerDiscKeepsDistinctDirectionalMaterialsWithoutHitCompetition() {
-        try (FaceBakerySprite bakedSprite = new FaceBakerySprite();
-                SectionMeshAccumulatorTest.TestSprite front =
-                        new SectionMeshAccumulatorTest.TestSprite(
-                                "sunflower_front");
-                SectionMeshAccumulatorTest.TestSprite back =
-                        new SectionMeshAccumulatorTest.TestSprite(
-                                "sunflower_back")) {
+        TestSprite front = new TestSprite("sunflower_front");
+        TestSprite back = new TestSprite("sunflower_back");
+        try (FaceBakerySprite bakedSprite = new FaceBakerySprite()) {
             front.fill(0xffff_c040);
             back.fill(0xff60_5020);
             BakedQuad.MaterialInfo frontMaterial = new BakedQuad.MaterialInfo(
@@ -727,8 +680,8 @@ final class ClusterSceneTranslatorTest {
     }
 
     static CapturedSectionGeometry capturedLayeredFace(
-            SectionMeshAccumulatorTest.TestSprite base,
-            SectionMeshAccumulatorTest.TestSprite overlay,
+            TestSprite base,
+            TestSprite overlay,
             float plane,
             int[] overlayColors) {
         CapturedSectionGeometry.MutableQuad baseQuad = face(plane);
@@ -762,7 +715,7 @@ final class ClusterSceneTranslatorTest {
 
     private static void setSpriteUv(
             CapturedSectionGeometry.MutableQuad quad,
-            SectionMeshAccumulatorTest.TestSprite sprite) {
+            TestSprite sprite) {
         quad.u[0] = 0.0F;
         quad.v[0] = 0.0F;
         quad.u[1] = 1.0F;
@@ -774,7 +727,7 @@ final class ClusterSceneTranslatorTest {
     }
 
     private static CapturedSectionGeometry.Surface surface(
-            SectionMeshAccumulatorTest.TestSprite sprite,
+            TestSprite sprite,
             int color,
             boolean cutout,
             boolean rasterOverlay) {
@@ -795,12 +748,12 @@ final class ClusterSceneTranslatorTest {
     }
 
     private static CapturedSectionGeometry.Surface ownedCutoutSurface(
-            SectionMeshAccumulatorTest.TestSprite sprite) {
+            TestSprite sprite) {
         return ownedCutoutSurface(sprite, 0);
     }
 
     private static CapturedSectionGeometry.Surface ownedCutoutSurface(
-            SectionMeshAccumulatorTest.TestSprite sprite, int lightEmission) {
+            TestSprite sprite, int lightEmission) {
         return CapturedSectionGeometry.Surface.uniform(
                 -1,
                 CapturedSectionGeometry.Layer.CUTOUT,
@@ -961,7 +914,7 @@ final class ClusterSceneTranslatorTest {
     }
 
     private static CapturedSectionGeometry.Surface crossSurface(
-            SectionMeshAccumulatorTest.TestSprite sprite) {
+            TestSprite sprite) {
         return CapturedSectionGeometry.Surface.uniform(
                 0xff80_c060,
                 CapturedSectionGeometry.Layer.CUTOUT,

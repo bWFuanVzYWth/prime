@@ -16,41 +16,37 @@ final class MediumIdentityTest {
 
     @Test
     void catalogUsesExactTransitiveSourceIdentityAndKeepsParametersSeparate() {
-        try (SectionMeshAccumulatorTest.TestSprite glass =
-                        new SectionMeshAccumulatorTest.TestSprite("medium_glass", 11);
-                SectionMeshAccumulatorTest.TestSprite pane =
-                        new SectionMeshAccumulatorTest.TestSprite("medium_pane", 12);
-                SectionMeshAccumulatorTest.TestSprite other =
-                        new SectionMeshAccumulatorTest.TestSprite("medium_other", 13)) {
-            CapturedSectionGeometry.Surface familyGlass = surface(glass, 0xff80a0c0, 7);
-            CapturedSectionGeometry.Surface familyPane = surface(pane, 0xff80a0c0, 7);
-            CapturedSectionGeometry.Surface otherFamily = surface(glass, 0xff80a0c0, 8);
-            CapturedSectionGeometry.Surface textureGlass = surface(glass, 0xff80a0c0, 0);
-            CapturedSectionGeometry.Surface sameTexture = surface(glass, 0xff80a0c0, 0);
-            CapturedSectionGeometry.Surface otherTexture = surface(other, 0xff80a0c0, 0);
-            CapturedSectionGeometry.Surface otherTint = surface(glass, 0xff80a0c1, 0);
+        TestSprite glass = new TestSprite("medium_glass", 11);
+        TestSprite pane = new TestSprite("medium_pane", 12);
+        TestSprite other = new TestSprite("medium_other", 13);
+        CapturedSectionGeometry.Surface familyGlass = surface(glass, 0xff80a0c0, 7);
+        CapturedSectionGeometry.Surface familyPane = surface(pane, 0xff80a0c0, 7);
+        CapturedSectionGeometry.Surface otherFamily = surface(glass, 0xff80a0c0, 8);
+        CapturedSectionGeometry.Surface textureGlass = surface(glass, 0xff80a0c0, 0);
+        CapturedSectionGeometry.Surface sameTexture = surface(glass, 0xff80a0c0, 0);
+        CapturedSectionGeometry.Surface otherTexture = surface(other, 0xff80a0c0, 0);
+        CapturedSectionGeometry.Surface otherTint = surface(glass, 0xff80a0c1, 0);
 
-            MediumCatalog catalog = new MediumCatalog();
-            int familyId = catalog.resolve(binding(familyGlass, TransmissiveTopology.SOLID));
-            assertEquals(
-                    familyId,
-                    catalog.resolve(binding(familyPane, TransmissiveTopology.SOLID)));
-            assertNotEquals(
-                    familyId,
-                    catalog.resolve(binding(otherFamily, TransmissiveTopology.SOLID)));
-            int textureId = catalog.resolve(binding(textureGlass, TransmissiveTopology.SOLID));
-            assertEquals(
-                    textureId,
-                    catalog.resolve(binding(sameTexture, TransmissiveTopology.SOLID)));
-            assertNotEquals(
-                    textureId,
-                    catalog.resolve(binding(otherTexture, TransmissiveTopology.SOLID)));
-            assertNotEquals(
-                    textureId,
-                    catalog.resolve(binding(otherTint, TransmissiveTopology.SOLID)));
-            assertNotEquals(familyId, textureId);
-            assertEquals(0, catalog.resolve(binding(textureGlass, TransmissiveTopology.THIN_SHEET)));
-        }
+        MediumCatalog catalog = new MediumCatalog();
+        int familyId = catalog.resolve(binding(familyGlass, TransmissiveTopology.SOLID));
+        assertEquals(
+                familyId,
+                catalog.resolve(binding(familyPane, TransmissiveTopology.SOLID)));
+        assertNotEquals(
+                familyId,
+                catalog.resolve(binding(otherFamily, TransmissiveTopology.SOLID)));
+        int textureId = catalog.resolve(binding(textureGlass, TransmissiveTopology.SOLID));
+        assertEquals(
+                textureId,
+                catalog.resolve(binding(sameTexture, TransmissiveTopology.SOLID)));
+        assertNotEquals(
+                textureId,
+                catalog.resolve(binding(otherTexture, TransmissiveTopology.SOLID)));
+        assertNotEquals(
+                textureId,
+                catalog.resolve(binding(otherTint, TransmissiveTopology.SOLID)));
+        assertNotEquals(familyId, textureId);
+        assertEquals(0, catalog.resolve(binding(textureGlass, TransmissiveTopology.THIN_SHEET)));
     }
 
     @Test
@@ -122,7 +118,7 @@ final class MediumIdentityTest {
     }
 
     private static CapturedSectionGeometry.Surface surface(
-            SectionMeshAccumulatorTest.TestSprite sprite,
+            TestSprite sprite,
             int tint,
             int mediumFamily) {
         return CapturedSectionGeometry.Surface.uniform(
