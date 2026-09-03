@@ -5,9 +5,8 @@ import java.util.Arrays;
 /**
  * Fixed-capacity chord matching backend for {@link RectangleDecomposition64}.
  *
- * <p>This is a mechanical Java port of the conflict-graph, greedy, and iterative
- * Hopcroft-Karp path in voxel_engine's rectangle_decomposition crate at
- * 3e13182214aa3bdf71d4769ca6b1078671a7842c.
+ * <p>The conflict graph and iterative Hopcroft-Karp path are derived from voxel_engine's
+ * rectangle_decomposition crate at 3e13182214aa3bdf71d4769ca6b1078671a7842c.
  */
 final class RectangleMatching64 {
     private static final int AXIS_LIMIT = 64;
@@ -21,10 +20,8 @@ final class RectangleMatching64 {
     private RectangleMatching64() {}
 
     static final class Scratch {
-        private final int[] rightKeys = new int[MAX_CHORDS];
         private final int[] nextOffsets = new int[MAX_CHORDS];
         private final int[] edgeBuffer = new int[MAX_CONFLICT_EDGES];
-        private final byte[] rightDegrees = new byte[MAX_CHORDS];
         private final int[] adjacencyOffsets = new int[MAX_CHORDS + 1];
         private final int[] adjacencyEdges = new int[MAX_CONFLICT_EDGES];
         private final char[] horizontalGrid = new char[GRID_POINTS];
@@ -41,12 +38,6 @@ final class RectangleMatching64 {
         private final char[] touchedLefts = new char[MAX_CHORDS];
         private final boolean[] reachableLeft = new boolean[MAX_CHORDS];
         private final boolean[] reachableRight = new boolean[MAX_CHORDS];
-        private final int[] transposeOffsets = new int[MAX_CHORDS + 1];
-        private final char[] transposeEdges = new char[MAX_CONFLICT_EDGES];
-        private final int[] writeOffsets = new int[MAX_CHORDS];
-        private final char[] rightOrder = new char[MAX_CHORDS];
-        private final int[] rightDegreeCounts = new int[AXIS_LENGTH];
-        private final int[] leftDegreeCounts = new int[AXIS_LENGTH];
         private final int[] dfsLeftStack = new int[MAX_CHORDS];
         private final int[] dfsEdgeStack = new int[MAX_CHORDS];
 
@@ -128,7 +119,6 @@ final class RectangleMatching64 {
                 int rightSize) {
             this.resetGrid();
             this.edgeCount = 0;
-            Arrays.fill(this.rightDegrees, 0, rightSize, (byte) 0);
 
             for (int index = 0; index < leftSize; index++) {
                 int chord = RectangleDecomposition64.chord(
@@ -172,16 +162,14 @@ final class RectangleMatching64 {
                     }
                     int left = this.horizontalGrid[slot];
                     this.edgeBuffer[this.edgeCount++] = left << 16 | index;
-                    this.rightDegrees[index] =
-                            (byte) (Byte.toUnsignedInt(this.rightDegrees[index]) + 1);
                     active &= active - 1L;
                 }
             }
 
-            this.buildAdjacency(leftSize, rightSize);
+            this.buildAdjacency(leftSize);
         }
 
-        private void buildAdjacency(int leftSize, int rightSize) {
+        private void buildAdjacency(int leftSize) {
             Arrays.fill(this.adjacencyOffsets, 0, leftSize + 1, 0);
             for (int index = 0; index < this.edgeCount; index++) {
                 int left = this.edgeBuffer[index] >>> 16;
@@ -198,45 +186,6 @@ final class RectangleMatching64 {
                 this.adjacencyEdges[this.nextOffsets[left]++] = edge & 0xffff;
             }
 
-            for (int right = 0; right < rightSize; right++) {
-                this.rightKeys[right] =
-                        Byte.toUnsignedInt(this.rightDegrees[right]) << 16 | right;
-            }
-            for (int left = 0; left < leftSize; left++) {
-                this.sortNeighbors(
-                        this.adjacencyOffsets[left],
-                        this.adjacencyOffsets[left + 1]);
-            }
-        }
-
-        private void sortNeighbors(int start, int end) {
-            int length = end - start;
-            if (length <= 1) {
-                return;
-            }
-            if (length <= 48) {
-                for (int index = start + 1; index < end; index++) {
-                    int value = this.adjacencyEdges[index];
-                    int key = this.rightKeys[value];
-                    int cursor = index;
-                    while (cursor > start
-                            && this.rightKeys[this.adjacencyEdges[cursor - 1]] > key) {
-                        this.adjacencyEdges[cursor] = this.adjacencyEdges[cursor - 1];
-                        cursor--;
-                    }
-                    this.adjacencyEdges[cursor] = value;
-                }
-                return;
-            }
-
-            for (int index = start; index < end; index++) {
-                this.adjacencyEdges[index] =
-                        this.rightKeys[this.adjacencyEdges[index]];
-            }
-            Arrays.sort(this.adjacencyEdges, start, end);
-            for (int index = start; index < end; index++) {
-                this.adjacencyEdges[index] &= 0xffff;
-            }
         }
 
         private void resetGrid() {
@@ -252,8 +201,6 @@ final class RectangleMatching64 {
         private void hopcroftKarp(int leftSize, int rightSize) {
             Arrays.fill(this.pairLeft, 0, leftSize, UNMATCHED);
             Arrays.fill(this.pairRight, 0, rightSize, UNMATCHED);
-            this.greedyInitialize(leftSize, rightSize);
-            this.greedyAugmentLengthThree(leftSize);
 
             Arrays.fill(this.distance, 0, leftSize, UNMATCHED);
             Arrays.fill(this.reachableLeft, 0, leftSize, false);
@@ -264,7 +211,6 @@ final class RectangleMatching64 {
                     this.unmatchedLefts[unmatchedCount++] = (char) left;
                 }
             }
-            this.sortUnmatchedLeftsByDegree(unmatchedCount);
             int touchedCount = 0;
 
             while (unmatchedCount != 0) {
@@ -342,151 +288,6 @@ final class RectangleMatching64 {
                 }
                 unmatchedCount = retained;
             }
-        }
-
-        private void greedyInitialize(int leftSize, int rightSize) {
-            for (int left = 0; left < leftSize; left++) {
-                int start = this.adjacencyOffsets[left];
-                if (this.adjacencyOffsets[left + 1] - start != 1) {
-                    continue;
-                }
-                int right = this.adjacencyEdges[start];
-                if (this.pairRight[right] == UNMATCHED) {
-                    this.pairLeft[left] = (char) right;
-                    this.pairRight[right] = (char) left;
-                }
-            }
-
-            Arrays.fill(this.transposeOffsets, 0, rightSize + 1, 0);
-            for (int right = 0; right < rightSize; right++) {
-                this.transposeOffsets[right + 1] =
-                        this.transposeOffsets[right]
-                                + Byte.toUnsignedInt(this.rightDegrees[right]);
-            }
-            System.arraycopy(
-                    this.transposeOffsets, 0, this.writeOffsets, 0, rightSize);
-            for (int left = 0; left < leftSize; left++) {
-                int start = this.adjacencyOffsets[left];
-                int end = this.adjacencyOffsets[left + 1];
-                for (int edge = start; edge < end; edge++) {
-                    int right = this.adjacencyEdges[edge];
-                    this.transposeEdges[this.writeOffsets[right]++] =
-                            (char) left;
-                }
-            }
-
-            this.sortRightOrderByDegree(rightSize);
-            for (int index = 0; index < rightSize; index++) {
-                int right = this.rightOrder[index];
-                if (this.pairRight[right] != UNMATCHED) {
-                    continue;
-                }
-                int start = this.transposeOffsets[right];
-                int end = this.transposeOffsets[right + 1];
-                for (int edge = start; edge < end; edge++) {
-                    int left = this.transposeEdges[edge];
-                    if (this.pairLeft[left] == UNMATCHED) {
-                        this.pairLeft[left] = (char) right;
-                        this.pairRight[right] = (char) left;
-                        break;
-                    }
-                }
-            }
-        }
-
-        private void greedyAugmentLengthThree(int leftSize) {
-            leftLoop:
-            for (int left = 0; left < leftSize; left++) {
-                if (this.pairLeft[left] != UNMATCHED) {
-                    continue;
-                }
-                int start = this.adjacencyOffsets[left];
-                int end = this.adjacencyOffsets[left + 1];
-                for (int edge = start; edge < end; edge++) {
-                    int right = this.adjacencyEdges[edge];
-                    char matchedLeftValue = this.pairRight[right];
-                    if (matchedLeftValue == UNMATCHED) {
-                        this.pairLeft[left] = (char) right;
-                        this.pairRight[right] = (char) left;
-                        break;
-                    }
-
-                    int matchedLeft = matchedLeftValue;
-                    int alternateStart = this.adjacencyOffsets[matchedLeft];
-                    int alternateEnd = this.adjacencyOffsets[matchedLeft + 1];
-                    for (int alternateEdge = alternateStart;
-                            alternateEdge < alternateEnd;
-                            alternateEdge++) {
-                        int alternateRight =
-                                this.adjacencyEdges[alternateEdge];
-                        if (alternateRight == right
-                                || this.pairRight[alternateRight] != UNMATCHED) {
-                            continue;
-                        }
-                        this.pairLeft[matchedLeft] = (char) alternateRight;
-                        this.pairRight[alternateRight] = (char) matchedLeft;
-                        this.pairLeft[left] = (char) right;
-                        this.pairRight[right] = (char) left;
-                        continue leftLoop;
-                    }
-                }
-            }
-        }
-
-        private void sortRightOrderByDegree(int rightSize) {
-            int maxDegree = 0;
-            for (int right = 0; right < rightSize; right++) {
-                maxDegree = Math.max(
-                        maxDegree,
-                        Byte.toUnsignedInt(this.rightDegrees[right]));
-            }
-            Arrays.fill(this.rightDegreeCounts, 0, maxDegree + 1, 0);
-            for (int right = 0; right < rightSize; right++) {
-                this.rightDegreeCounts[
-                        Byte.toUnsignedInt(this.rightDegrees[right])]++;
-            }
-            int offset = 0;
-            for (int degree = 0; degree <= maxDegree; degree++) {
-                int count = this.rightDegreeCounts[degree];
-                this.rightDegreeCounts[degree] = offset;
-                offset += count;
-            }
-            for (int right = 0; right < rightSize; right++) {
-                int degree = Byte.toUnsignedInt(this.rightDegrees[right]);
-                int slot = this.rightDegreeCounts[degree]++;
-                this.rightOrder[slot] = (char) right;
-            }
-        }
-
-        private void sortUnmatchedLeftsByDegree(int unmatchedCount) {
-            int maxDegree = 0;
-            for (int index = 0; index < unmatchedCount; index++) {
-                maxDegree = Math.max(
-                        maxDegree, this.leftDegree(this.unmatchedLefts[index]));
-            }
-            Arrays.fill(this.leftDegreeCounts, 0, maxDegree + 1, 0);
-            for (int index = 0; index < unmatchedCount; index++) {
-                this.leftDegreeCounts[
-                        this.leftDegree(this.unmatchedLefts[index])]++;
-            }
-            int offset = 0;
-            for (int degree = 0; degree <= maxDegree; degree++) {
-                int count = this.leftDegreeCounts[degree];
-                this.leftDegreeCounts[degree] = offset;
-                offset += count;
-            }
-            for (int index = 0; index < unmatchedCount; index++) {
-                char left = this.unmatchedLefts[index];
-                int degree = this.leftDegree(left);
-                int slot = this.leftDegreeCounts[degree]++;
-                this.queue[slot] = left;
-            }
-            System.arraycopy(this.queue, 0, this.unmatchedLefts, 0, unmatchedCount);
-        }
-
-        private int leftDegree(int left) {
-            return this.adjacencyOffsets[left + 1]
-                    - this.adjacencyOffsets[left];
         }
 
         private boolean depthFirstAugment(int startLeft) {
