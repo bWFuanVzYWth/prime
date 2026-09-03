@@ -5,6 +5,7 @@ import dev.prime.gradle.shader.CompilePrimeSlangProgram
 import dev.prime.gradle.shader.AssemblePrimeSlangPrograms
 import dev.prime.gradle.shader.GeneratePrimeShaderPrograms
 import dev.prime.gradle.shader.PrimeShaderDependencyClosure
+import dev.prime.gradle.shader.PrimeShaderDependencyGraph
 import dev.prime.gradle.shader.PrimeShaderManifest
 import dev.prime.gradle.shader.PrimeSlangCompilerGate
 import dev.prime.gradle.shader.GenerateShaderAbi
@@ -27,6 +28,7 @@ final class PrimeShaderAbiPlugin implements Plugin<Project> {
                 assemblePrograms: AssemblePrimeSlangPrograms,
                 generatePrograms: GeneratePrimeShaderPrograms,
                 dependencyClosure: PrimeShaderDependencyClosure,
+                dependencyGraph: PrimeShaderDependencyGraph,
                 compilerGate: PrimeSlangCompilerGate,
                 verifyPayloadAbi: VerifySlangRayPayloadAbi,
                 prepareNsight: PrepareNsightCapture,

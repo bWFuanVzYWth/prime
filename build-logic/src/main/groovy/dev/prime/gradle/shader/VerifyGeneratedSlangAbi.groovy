@@ -27,36 +27,11 @@ abstract class VerifyGeneratedSlangAbi extends DefaultTask {
 	@Input
 	abstract Property<String> getSpirvDisassembler()
 
-	private static String runAndCapture(List<String> arguments) {
-		def command = arguments.collect { it.toString() }
-		def process
-		try {
-			process = new ProcessBuilder(command)
-					.redirectErrorStream(true)
-					.start()
-		} catch (IOException exception) {
-			throw new GradleException("Could not start shader tool: ${command[0]}", exception)
-		}
-		def output = process.inputStream.getText('UTF-8')
-		try {
-			def exitCode = process.waitFor()
-			if (exitCode != 0) {
-				throw new GradleException(
-						"Shader tool failed with exit code ${exitCode}: ${command[0]}\n${output}")
-			}
-		} catch (InterruptedException exception) {
-			process.destroyForcibly()
-			Thread.currentThread().interrupt()
-			throw new GradleException("Shader tool was interrupted: ${command[0]}", exception)
-		}
-		return output.trim()
-	}
-
 	@TaskAction
 	void verify() {
 		def output = new File(temporaryDir, 'generated_abi_smoke.spv')
 		output.parentFile.mkdirs()
-		runAndCapture([
+		PrimeShaderTool.run([
 				slangCompiler.get(),
 				smokeShader.get().asFile.absolutePath,
 				'-I', generatedIncludeDirectory.get().asFile.absolutePath,
@@ -72,12 +47,12 @@ abstract class VerifyGeneratedSlangAbi extends DefaultTask {
 				'-O0', '-g0',
 				'-o', output.absolutePath
 		])
-		runAndCapture([
+		PrimeShaderTool.run([
 				spirvValidator.get(),
 				'--target-env', 'vulkan1.2',
 				output.absolutePath
 		])
-		def assembly = runAndCapture([spirvDisassembler.get(), output.absolutePath])
+		def assembly = PrimeShaderTool.run([spirvDisassembler.get(), output.absolutePath])
 		def schema = new groovy.json.JsonSlurper().parse(schemaFile.get().asFile)
 		def structNames = [
 				primitiveRecord: 'PrimitiveRecord',

@@ -65,63 +65,6 @@ abstract class CompilePrimeSlangProgram extends DefaultTask {
     @OutputFile
     abstract RegularFileProperty getMetricsFile()
 
-    private static String runCommand(List<String> arguments) {
-        def command = arguments.collect { it.toString() }
-        def process = new ProcessBuilder(command).redirectErrorStream(true).start()
-        def output = new ByteArrayOutputStream()
-        def drain = new Thread({ process.inputStream.transferTo(output) }, 'prime-shader-tool-output')
-        drain.start()
-        try {
-            def exitCode = process.waitFor()
-            drain.join()
-            if (exitCode != 0) {
-                throw new GradleException(
-                        "Shader tool failed with exit code ${exitCode}: ${command.join(' ')}"
-                                + System.lineSeparator()
-                                + output.toString(java.nio.charset.StandardCharsets.UTF_8))
-            }
-            return output.toString(java.nio.charset.StandardCharsets.UTF_8)
-        } catch (InterruptedException exception) {
-            process.destroyForcibly()
-            drain.interrupt()
-            Thread.currentThread().interrupt()
-            throw new GradleException("Shader tool was interrupted: ${command.join(' ')}", exception)
-        }
-    }
-
-    private static Set<String> parseDependencies(File depfile) {
-        def text = depfile.getText('UTF-8')
-        int separator = text.indexOf(': ')
-        if (separator < 0) {
-            throw new GradleException("Malformed Slang depfile: ${depfile}")
-        }
-        def dependencies = new TreeSet<String>()
-        def token = new StringBuilder()
-        boolean escaped = false
-        text.substring(separator + 2).each { character ->
-            if (escaped) {
-                token.append(character)
-                escaped = false
-            } else if (character == '\\') {
-                escaped = true
-            } else if (Character.isWhitespace((char) character)) {
-                if (token.length() > 0) {
-                    dependencies.add(new File(token.toString()).toPath()
-                            .toAbsolutePath().normalize().toString())
-                    token.setLength(0)
-                }
-            } else {
-                token.append(character)
-            }
-        }
-        if (escaped) token.append('\\')
-        if (token.length() > 0) {
-            dependencies.add(new File(token.toString()).toPath()
-                    .toAbsolutePath().normalize().toString())
-        }
-        return dependencies
-    }
-
     @TaskAction
     void compile() {
         def output = outputFile.get().asFile
@@ -131,24 +74,8 @@ abstract class CompilePrimeSlangProgram extends DefaultTask {
         depfile.parentFile.mkdirs()
         metrics.parentFile.mkdirs()
 
-        def arguments = [
-                slangCompiler.get(), sourceFile.get().asFile.absolutePath,
-                '-target', 'spirv',
-                '-profile', 'glsl_460',
-                '-capability', 'spirv_1_5',
-                '-capability', 'SPV_KHR_non_semantic_info',
-                '-capability', 'SPV_GOOGLE_user_type',
-                '-capability', 'spvSparseResidency',
-                '-capability', 'spvMinLod',
-                '-capability', 'spvFragmentFullyCoveredEXT',
-                '-capability', 'spvGroupNonUniform',
-                '-capability', 'spvGroupNonUniformBallot',
-                '-capability', 'spvShaderInvocationReorderEXT',
-                '-entry', 'main', '-stage', stage.get(),
-                '-allow-glsl', '-matrix-layout-row-major', '-fvk-use-gl-layout',
-                '-emit-spirv-directly', '-warnings-as-errors', 'all',
-                '-O2', debugLevel.get()
-        ]
+        def arguments = PrimeShaderTool.compileArguments(
+                slangCompiler.get(), sourceFile.get().asFile, stage.get(), debugLevel.get())
         arguments.addAll(definitions.get())
         includeDirectories.files.findAll { it.isDirectory() }.sort { it.absolutePath }.each {
             arguments.addAll(['-I', it.absolutePath])
@@ -156,26 +83,27 @@ abstract class CompilePrimeSlangProgram extends DefaultTask {
         arguments.addAll(['-depfile', depfile.absolutePath, '-o', output.absolutePath])
 
         long started = System.nanoTime()
-        runCommand(arguments)
+        PrimeShaderTool.run(arguments)
         long compiled = System.nanoTime()
+        def compilerDependencies = PrimeShaderTool.dependencies(depfile)
         def declaredDependencies = shaderDependencies.files.collect {
-            it.toPath().toAbsolutePath().normalize().toString()
+            it.canonicalPath
         }.toSet()
-        def compilerDependencies = parseDependencies(depfile)
         if (declaredDependencies != compilerDependencies) {
             throw new GradleException(
                     "Slang dependency closure drift for ${artifactId.get()}; "
                             + "declaredOnly=${declaredDependencies - compilerDependencies}, "
                             + "compilerOnly=${compilerDependencies - declaredDependencies}")
         }
-        runCommand([spirvValidator.get(), '--target-env', 'vulkan1.2', output.absolutePath])
+        PrimeShaderTool.run(
+                [spirvValidator.get(), '--target-env', 'vulkan1.2', output.absolutePath])
         long finished = System.nanoTime()
         metrics.setText(JsonOutput.prettyPrint(JsonOutput.toJson([
                 artifact: artifactId.get(),
                 compileNanoseconds: compiled - started,
                 validationNanoseconds: finished - compiled,
                 outputBytes: output.length(),
-                dependencyCount: shaderDependencies.files.size()
+                dependencyCount: declaredDependencies.size()
         ])) + System.lineSeparator(), 'UTF-8')
     }
 }

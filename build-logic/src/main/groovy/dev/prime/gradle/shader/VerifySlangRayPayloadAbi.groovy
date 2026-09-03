@@ -17,26 +17,6 @@ abstract class VerifySlangRayPayloadAbi extends DefaultTask {
 	@OutputFile
 	abstract RegularFileProperty getReportFile()
 
-	private static String disassemble(String tool, File shader) {
-		def process = new ProcessBuilder(tool, shader.absolutePath)
-				.redirectErrorStream(true)
-				.start()
-		def output = process.inputStream.getText('UTF-8')
-		try {
-			def exitCode = process.waitFor()
-			if (exitCode != 0) {
-				throw new GradleException(
-						"SPIR-V disassembly failed for ${shader.name}:\n${output}")
-			}
-		} catch (InterruptedException exception) {
-			process.destroyForcibly()
-			Thread.currentThread().interrupt()
-			throw new GradleException(
-					"SPIR-V disassembly was interrupted for ${shader.name}", exception)
-		}
-		return output
-	}
-
 	private static Map<String, Integer> payloadLocations(String assembly, String storageClass) {
 		def names = [:]
 		def nameMatcher = java.util.regex.Pattern.compile(
@@ -89,8 +69,8 @@ abstract class VerifySlangRayPayloadAbi extends DefaultTask {
 		def expectedOutgoing = [primeSurfacePayload: 0, primeShadowPayload: 1]
 		def extSerModules = []
 		shaders.each { shader ->
-			def assembly = VerifySlangRayPayloadAbi.disassemble(
-					spirvDisassembler.get(), shader)
+			def assembly = PrimeShaderTool.run(
+					[spirvDisassembler.get(), shader.absolutePath])
 			if (shader.name.endsWith('_ser.rgen.spv')) {
 				if (assembly.contains('SPV_NV_shader_invocation_reorder')
 						|| assembly.contains('OpReorderThreadWithHitObjectNV')) {

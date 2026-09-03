@@ -25,36 +25,11 @@ abstract class VerifySlangToolchain extends DefaultTask {
 	@Input
 	abstract Property<String> getSpirvDisassembler()
 
-	private static String runAndCapture(List<String> arguments) {
-		def command = arguments.collect { it.toString() }
-		def process
-		try {
-			process = new ProcessBuilder(command)
-					.redirectErrorStream(true)
-					.start()
-		} catch (IOException exception) {
-			throw new GradleException("Could not start shader tool: ${command[0]}", exception)
-		}
-		def output = process.inputStream.getText('UTF-8')
-		try {
-			def exitCode = process.waitFor()
-			if (exitCode != 0) {
-				throw new GradleException(
-						"Shader tool failed with exit code ${exitCode}: ${command[0]}\n${output}")
-			}
-		} catch (InterruptedException exception) {
-			process.destroyForcibly()
-			Thread.currentThread().interrupt()
-			throw new GradleException("Shader tool was interrupted: ${command[0]}", exception)
-		}
-		return output.trim()
-	}
-
 	@TaskAction
 	void verify() {
 		def compiler = slangCompiler.get()
 		def expected = expectedVersion.get()
-		def version = runAndCapture([compiler, '-version'])
+		def version = PrimeShaderTool.run([compiler, '-version'])
 		def versionPattern = java.util.regex.Pattern.compile(
 				"(?m)(^|\\s)${java.util.regex.Pattern.quote(expected)}(\\s|\$)")
 		if (!versionPattern.matcher(version).find()) {
@@ -67,7 +42,7 @@ abstract class VerifySlangToolchain extends DefaultTask {
 				.collect { it.trim() }
 				.findAll { !it.empty }
 		def validator = spirvValidator.get()
-		def validatorVersion = runAndCapture([validator, '--version'])
+		def validatorVersion = PrimeShaderTool.run([validator, '--version'])
 		def validatorReported = validatorVersion.readLines().first()
 		if (!expectedSpirvTools.contains(validatorReported)) {
 			throw new GradleException(
@@ -75,7 +50,7 @@ abstract class VerifySlangToolchain extends DefaultTask {
 							+ validatorVersion)
 		}
 		def disassembler = spirvDisassembler.get()
-		def disassemblerVersion = runAndCapture([disassembler, '--version'])
+		def disassemblerVersion = PrimeShaderTool.run([disassembler, '--version'])
 		def disassemblerReported = disassemblerVersion.readLines().first()
 		if (!expectedSpirvTools.contains(disassemblerReported)) {
 			throw new GradleException(
@@ -85,7 +60,7 @@ abstract class VerifySlangToolchain extends DefaultTask {
 
 		def output = new File(temporaryDir, 'toolchain_smoke.spv')
 		output.parentFile.mkdirs()
-		runAndCapture([
+		PrimeShaderTool.run([
 				compiler,
 				smokeShader.get().asFile.absolutePath,
 				'-target', 'spirv',
@@ -102,12 +77,12 @@ abstract class VerifySlangToolchain extends DefaultTask {
 				'-O0', '-g0',
 				'-o', output.absolutePath
 		])
-		runAndCapture([
+		PrimeShaderTool.run([
 				spirvValidator.get(),
 				'--target-env', 'vulkan1.2',
 				output.absolutePath
 		])
-		def assembly = runAndCapture([spirvDisassembler.get(), output.absolutePath])
+		def assembly = PrimeShaderTool.run([spirvDisassembler.get(), output.absolutePath])
 		def abiPatterns = [
 				'(?m)OpMemberDecorate %\\w+ 0 ColMajor$',
 				'(?m)OpMemberDecorate %\\w+ 0 MatrixStride 16$',

@@ -344,6 +344,10 @@ def productionShaderIncludes = [
 		file('shaders'),
 		shaderAbiSlangRoot.get().asFile
 ]
+def dependencyGraph = gradle.sharedServices.registerIfAbsent(
+		'primeShaderDependencyGraph', primeShaderTaskTypes.dependencyGraph) {
+	parameters.includeRoots.from(productionShaderIncludes)
+}
 def productionShaderDebug = providers.gradleProperty('primeShaderFullDebug')
 		.map { value -> value.toBoolean() ? '-g2' : '-g1' }
 		.orElse('-g2')
@@ -390,7 +394,7 @@ programManifest.artifacts.each { String id, artifact ->
 		usesService compilerGate
 		sourceFile = source
 		shaderDependencies.from(objects.newInstance(
-				primeShaderTaskTypes.dependencyClosure, source, productionShaderIncludes))
+				primeShaderTaskTypes.dependencyClosure, source, dependencyGraph))
 		includeDirectories.from(productionShaderIncludes)
 		artifactId = id
 		stage = artifact.stage

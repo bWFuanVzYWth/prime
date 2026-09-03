@@ -40,84 +40,6 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 	@javax.inject.Inject
 	abstract org.gradle.api.file.FileSystemOperations getFileSystemOperations()
 
-	private static void runCommand(List<String> arguments) {
-		def command = arguments.collect { it.toString() }
-		def process = new ProcessBuilder(command).redirectErrorStream(true).start()
-		def output = new java.io.ByteArrayOutputStream()
-		def outputDrain = new Thread({
-			process.inputStream.transferTo(output)
-		}, 'prime-shader-tool-output')
-		outputDrain.start()
-		try {
-			def exitCode = process.waitFor()
-			outputDrain.join()
-			if (exitCode != 0) {
-				throw new GradleException(
-						"Shader tool failed with exit code ${exitCode}: ${command.join(' ')}"
-								+ System.lineSeparator()
-								+ output.toString(java.nio.charset.StandardCharsets.UTF_8))
-			}
-		} catch (InterruptedException exception) {
-			process.destroyForcibly()
-			outputDrain.interrupt()
-			Thread.currentThread().interrupt()
-			throw new GradleException(
-					"Shader tool was interrupted: ${command.join(' ')}", exception)
-		}
-	}
-
-	private static Map<String, Set<String>> dependencyGraph(List<File> includeRoots) {
-		def sources = []
-		includeRoots.each { root ->
-			if (root.isDirectory()) {
-				root.eachFileRecurse(groovy.io.FileType.FILES) { source ->
-					if (source.name.endsWith('.slang') || source.name.endsWith('.h')) {
-						sources.add(source.canonicalFile)
-					}
-				}
-			}
-		}
-		def sourcePaths = sources.collect { it.canonicalPath }.toSet()
-		def dependencyPattern = java.util.regex.Pattern.compile(
-				'(?m)^\\s*(?:#\\s*include\\s+"([^"]+)"|import\\s+"([^"]+)"\\s*;)')
-		def graph = new HashMap<String, Set<String>>()
-		sources.each { source ->
-			def targets = graph.computeIfAbsent(source.canonicalPath) {
-				new HashSet<String>()
-			}
-			def matcher = dependencyPattern.matcher(source.getText('UTF-8'))
-			while (matcher.find()) {
-				def dependencyName = matcher.group(1) ?: matcher.group(2)
-				def candidates = ([new File(source.parentFile, dependencyName)]
-						+ includeRoots.collect { new File(it, dependencyName) })
-						.collect { it.canonicalFile }
-						.findAll { sourcePaths.contains(it.canonicalPath) }
-						.unique { it.canonicalPath }
-				if (candidates.size() != 1) {
-					throw new GradleException(
-							"Cannot resolve unique shader dependency ${dependencyName} from ${source}")
-				}
-				targets.add(candidates.first().canonicalPath)
-			}
-		}
-		return graph
-	}
-
-	private static Set<String> dependencyClosure(
-			File source, Map<String, Set<String>> graph) {
-		def result = new HashSet<String>()
-		def pending = new ArrayDeque<String>()
-		pending.add(source.canonicalPath)
-		while (!pending.empty) {
-			def current = pending.removeLast()
-			if (!result.add(current)) {
-				continue
-			}
-			(graph[current] ?: Collections.emptySet()).each { pending.add(it) }
-		}
-		return result
-	}
-
 	@TaskAction
 	void compile(org.gradle.work.InputChanges inputChanges) {
 		def sources = sourceDirectory.get().asFileTree.matching {
@@ -141,14 +63,14 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 					it.file.canonicalPath
 				}.toSet()
 				: Collections.emptySet()
-		def dependencyGraph = dependencyGraph(includes)
+		def dependencyGraph = PrimeShaderDependencyGraph.graph(includes)
 		def dependencyClosures = new HashMap<String, Set<String>>()
 		Closure<Boolean> requiresCompilation = { File source, File output ->
 			if (!incremental || !output.isFile()) {
 				return true
 			}
 			def dependencies = dependencyClosures.computeIfAbsent(source.canonicalPath) {
-				CompilePrimeSlangComputeShaders.dependencyClosure(source, dependencyGraph)
+				PrimeShaderDependencyGraph.paths(source, dependencyGraph)
 			}
 			return !Collections.disjoint(dependencies, changedPaths)
 		}
@@ -187,39 +109,8 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 				return
 			}
 			compilationUnits.add({
-					def arguments = [
-					compiler,
-					source.absolutePath,
-					'-target', 'spirv',
-					'-profile', 'glsl_460',
-					'-capability', 'spirv_1_5',
-					// Physical pointers and non-uniform sampled-image arrays make Slang
-					// close the glsl_460 profile over these SPIR-V capability aliases. Naming
-					// the closure explicitly keeps warnings-as-errors useful; unused
-					// capabilities are not emitted into the resulting module.
-					'-capability', 'SPV_KHR_non_semantic_info',
-					'-capability', 'SPV_GOOGLE_user_type',
-					'-capability', 'spvSparseResidency',
-					'-capability', 'spvMinLod',
-					'-capability', 'spvFragmentFullyCoveredEXT',
-					'-capability', 'spvGroupNonUniform',
-					'-capability', 'spvGroupNonUniformBallot',
-					// The typed Slang HitObject API lowers to the vendor-neutral EXT dialect.
-					// Naming its capability keeps warnings-as-errors useful without permitting
-					// an accidental fallback to NV-suffixed GLSL intrinsics.
-					'-capability', 'spvShaderInvocationReorderEXT',
-					'-entry', 'main',
-					'-stage', stage.slang,
-					// Explicit ray-payload locations are a cross-stage Vulkan ABI contract. The
-					// Slang compatibility layer exposes location-indexed payload/hit-object
-					// intrinsics while the rest of each translation unit remains ordinary Slang.
-					'-allow-glsl',
-					'-matrix-layout-row-major',
-					'-fvk-use-gl-layout',
-					'-emit-spirv-directly',
-					'-warnings-as-errors', 'all',
-						'-O2', debugLevel.get()
-					]
+					def arguments = PrimeShaderTool.compileArguments(
+							compiler, source, stage.slang, debugLevel.get())
 					includes.each { include ->
 						arguments.addAll(['-I', include.absolutePath])
 					}
@@ -228,8 +119,8 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 					try {
 						compilerGate.acquire()
 						permitAcquired = true
-						CompilePrimeSlangComputeShaders.runCommand(arguments)
-						CompilePrimeSlangComputeShaders.runCommand(
+						PrimeShaderTool.run(arguments)
+						PrimeShaderTool.run(
 								[validator, '--target-env', 'vulkan1.2', output.absolutePath])
 					} catch (InterruptedException exception) {
 						Thread.currentThread().interrupt()
