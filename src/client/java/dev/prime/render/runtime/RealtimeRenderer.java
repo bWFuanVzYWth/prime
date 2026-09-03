@@ -44,8 +44,7 @@ final class RealtimeRenderer implements Destroyable {
     private RealtimeRayTracingPipeline pipeline;
     private VulkanReconstructionResources resources;
     private RealtimeSampleState sampleState = RealtimeSampleState.initial();
-    private MaterialSettings.Snapshot materialSettings;
-    private TransparentNeeMode transparentNeeMode;
+    private long settingsRevision = -1L;
     private boolean destroyed;
 
     RealtimeRenderer(
@@ -231,12 +230,9 @@ final class RealtimeRenderer implements Destroyable {
                 input.atlasView(),
                 input.atlasSampler(),
                 input.sceneTextures());
-        boolean materialChanged = !settings.material().equals(this.materialSettings);
-        this.materialSettings = settings.material();
-        boolean transparentNeeChanged = settings.lighting().transparentNeeMode()
-                != this.transparentNeeMode;
-        this.transparentNeeMode = settings.lighting().transparentNeeMode();
-        boolean reconfigured = resized || materialChanged || transparentNeeChanged;
+        boolean settingsChanged = settings.revision() != this.settingsRevision;
+        this.settingsRevision = settings.revision();
+        boolean reconfigured = resized || settingsChanged;
         VulkanReconstructionResources images = this.resources;
         if (images == null) {
             return;
