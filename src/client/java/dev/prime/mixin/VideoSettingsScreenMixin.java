@@ -3,29 +3,13 @@ package dev.prime.mixin;
 import dev.prime.binding.streamline.ReflexMode;
 import dev.prime.client.PrimeVideoOptions;
 import dev.prime.config.PrimeConfig;
-import dev.prime.render.AstronomySettings;
-import dev.prime.render.DisplaySettings;
 import dev.prime.render.HdrOutput;
-import dev.prime.render.LightingSettings;
-import dev.prime.render.MaterialSettings;
-import dev.prime.render.MaximumBounceSettings;
-import dev.prime.render.MinimumBounceSettings;
 import dev.prime.client.PrimeRuntime;
 import dev.prime.render.RendererSettings;
-import dev.prime.render.SpecularBounceSettings;
-import dev.prime.render.SurfaceDetailMode;
-import dev.prime.render.TransparentNeeMode;
-import dev.prime.render.diagnostic.NrdInputView;
-import dev.prime.render.diagnostic.RendererImageView;
-import dev.prime.render.diagnostic.RrInputView;
-import dev.prime.render.diagnostic.RrResponsivity;
-import dev.prime.render.post.PostProcessingMode;
-import dev.prime.render.post.ReconstructionQualityMode;
-import dev.prime.render.terrain.TerrainWorkerSettings;
-import dev.prime.render.terrain.VoxelSurfaceSettings;
 import dev.prime.streamline.StreamlineFrameGeneration;
 import dev.prime.streamline.StreamlineReflex;
 import java.net.URI;
+import java.util.List;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
@@ -47,20 +31,6 @@ public abstract class VideoSettingsScreenMixin {
             URI.create("https://github.com/bWFuanVzYWth/prime");
     private static final Component PRIME$HEADER =
             Component.translatable("prime.options.header");
-    private static final Component PRIME$RENDERING_HEADER =
-            Component.translatable("prime.options.header.rendering");
-    private static final Component PRIME$LIGHTING_HEADER =
-            Component.translatable("prime.options.header.lighting");
-    private static final Component PRIME$DISPLAY_HEADER =
-            Component.translatable("prime.options.header.display");
-    private static final Component PRIME$MATERIAL_HEADER =
-            Component.translatable("prime.options.header.material");
-    private static final Component PRIME$STREAMLINE_HEADER =
-            Component.translatable("prime.options.header.streamline");
-    private static final Component PRIME$HIGH_RISK_HEADER =
-            Component.translatable("prime.options.header.high_risk");
-    private static final Component PRIME$DIAGNOSTICS_HEADER =
-            Component.translatable("prime.options.header.diagnostics");
     @Unique private PrimeVideoOptions.OptionSet prime$options;
     @Unique private boolean prime$refreshingDiagnostics;
 
@@ -75,54 +45,17 @@ public abstract class VideoSettingsScreenMixin {
                             Component.translatable("prime.options.restore_defaults"),
                             button -> this.prime$restoreDefaults())
                     .build());
-            list.addHeader(PRIME$RENDERING_HEADER);
-            list.addBig(this.prime$options.rendering().pathTracingEnabled());
-            list.addBig(this.prime$options.rendering().screenshotMode());
-            list.addBig(this.prime$options.rendering().additionalSpecularBounces());
-            list.addBig(this.prime$options.rendering().minimumBounces());
-            list.addBig(this.prime$options.rendering().maximumBounces());
-            list.addBig(this.prime$options.rendering().terrainWorkerPercentage());
-            list.addSmall(
-                    this.prime$options.rendering().surfaceDetailMode(),
-                    this.prime$options.rendering().voxelTextureSurfaceStrength());
-            list.addSmall(this.prime$options.rendering().postProcessingMode(), this.prime$options.rendering().qualityMode());
-            list.addBig(this.prime$options.rendering().rrResponsivity());
-            list.addHeader(PRIME$LIGHTING_HEADER);
-            list.addSmall(this.prime$options.lighting().latitude(), this.prime$options.lighting().season());
-            list.addBig(this.prime$options.lighting().sunExposure());
-            list.addBig(this.prime$options.lighting().starExposure());
-            list.addBig(this.prime$options.lighting().blockLightExposure());
-            list.addBig(this.prime$options.lighting().transparentNeeMode());
-            list.addHeader(PRIME$DISPLAY_HEADER);
-            list.addBig(this.prime$options.display().hdr());
-            AbstractWidget hdrWidget = list.findOption(this.prime$options.display().hdr());
-            if (hdrWidget != null) {
-                hdrWidget.active = HdrOutput.capability().supported();
+            for (PrimeVideoOptions.Section section : this.prime$options.sections()) {
+                list.addHeader(Component.translatable(section.titleKey()));
+                for (PrimeVideoOptions.Row row : section.rows()) {
+                    if (row.second() == null) {
+                        list.addBig(row.first());
+                    } else {
+                        list.addSmall(row.first(), row.second());
+                    }
+                }
             }
-            list.addBig(this.prime$options.display().referenceWhiteNits());
-            AbstractWidget referenceWhiteWidget =
-                    list.findOption(this.prime$options.display().referenceWhiteNits());
-            if (referenceWhiteWidget != null) {
-                referenceWhiteWidget.active = HdrOutput.capability().supported();
-            }
-            list.addBig(this.prime$options.display().autoExposureCompensation());
-            list.addBig(this.prime$options.display().finalExposure());
-            list.addHeader(PRIME$MATERIAL_HEADER);
-            list.addSmall(this.prime$options.material().defaultRoughness(), this.prime$options.material().seamlessGlass());
-            list.addSmall(this.prime$options.material().airGap(), this.prime$options.material().vanillaPbrPresets());
-            list.addHeader(PRIME$STREAMLINE_HEADER);
-            list.addBig(this.prime$options.streamline().reflexMode());
-            list.addHeader(PRIME$HIGH_RISK_HEADER);
-            list.addBig(this.prime$options.streamline().dlssFrameGenerationEnabled());
-            list.addBig(this.prime$options.streamline().dlssFrameGenerationMultiplier());
-            list.addBig(this.prime$options.streamline().dlssFrameGenerationUiRecomposition());
-            this.prime$refreshStreamlineAvailability(list);
-            list.addHeader(PRIME$DIAGNOSTICS_HEADER);
-            list.addBig(this.prime$options.diagnostics().rendererDiagnostics());
-            list.addBig(this.prime$options.diagnostics().rawOutput());
-            list.addBig(this.prime$options.diagnostics().rendererImageView());
-            list.addBig(this.prime$options.diagnostics().rrInputView());
-            list.addBig(this.prime$options.diagnostics().nrdInputView());
+            this.prime$refreshAvailability(list);
             list.addBig(Button.builder(
                             Component.translatable("prime.options.open_repository"),
                             ConfirmLinkScreen.confirmLink(
@@ -150,91 +83,33 @@ public abstract class VideoSettingsScreenMixin {
                     current.usesGeometryDisplacement(),
                     current.voxelTextureSurfaceStrengthSteps());
         }
-        this.prime$refresh(this.prime$options.rendering().pathTracingEnabled(), true);
-        this.prime$refresh(
-                this.prime$options.rendering().additionalSpecularBounces(),
-                SpecularBounceSettings.DEFAULT_COUNT);
-        this.prime$refresh(
-                this.prime$options.rendering().minimumBounces(),
-                MinimumBounceSettings.DEFAULT_COUNT);
-        this.prime$refresh(
-                this.prime$options.rendering().maximumBounces(),
-                MaximumBounceSettings.DEFAULT_COUNT);
-        this.prime$refresh(
-                this.prime$options.rendering().terrainWorkerPercentage(),
-                TerrainWorkerSettings.DEFAULT_PERCENTAGE);
-        this.prime$refresh(
-                this.prime$options.rendering().surfaceDetailMode(),
-                SurfaceDetailMode.DEFAULT);
-        this.prime$refresh(
-                this.prime$options.rendering().voxelTextureSurfaceStrength(),
-                VoxelSurfaceSettings.DEFAULT_STEPS);
-        this.prime$refresh(this.prime$options.rendering().screenshotMode(), false);
-        this.prime$refresh(this.prime$options.rendering().postProcessingMode(), PostProcessingMode.DEFAULT);
-        this.prime$refresh(this.prime$options.rendering().qualityMode(), ReconstructionQualityMode.DEFAULT);
-        this.prime$refresh(
-                this.prime$options.rendering().rrResponsivity(),
-                RrResponsivity.DEFAULT);
-        this.prime$refresh(
-                this.prime$options.lighting().latitude(),
-                AstronomySettings.DEFAULT_LATITUDE_DEGREES);
-        this.prime$refresh(
-                this.prime$options.lighting().season(),
-                AstronomySettings.DEFAULT_SOLAR_LONGITUDE_DEGREES);
-        this.prime$refresh(
-                this.prime$options.lighting().sunExposure(),
-                LightingSettings.DEFAULT_SUN_QUARTER_STEPS);
-        this.prime$refresh(
-                this.prime$options.lighting().starExposure(),
-                LightingSettings.DEFAULT_STAR_QUARTER_STEPS);
-        this.prime$refresh(
-                this.prime$options.lighting().blockLightExposure(),
-                LightingSettings.DEFAULT_BLOCK_LIGHT_QUARTER_STEPS);
-        this.prime$refresh(
-                this.prime$options.lighting().transparentNeeMode(),
-                TransparentNeeMode.DEFAULT);
-        this.prime$refresh(
-                this.prime$options.display().finalExposure(),
-                DisplaySettings.DEFAULT_FINAL_EXPOSURE_QUARTER_STEPS);
-        this.prime$refresh(
-                this.prime$options.display().autoExposureCompensation(),
-                DisplaySettings.DEFAULT_AUTO_EXPOSURE_COMPENSATION_STEPS);
-        this.prime$refresh(
-                this.prime$options.display().referenceWhiteNits(),
-                HdrOutput.AUTOMATIC_REFERENCE_WHITE_NITS);
-        this.prime$refresh(this.prime$options.display().hdr(), false);
         OptionsList list = ((OptionsSubScreenAccessor) this).prime$getList();
-        AbstractWidget hdrWidget = list.findOption(this.prime$options.display().hdr());
-        if (hdrWidget != null) {
-            hdrWidget.active = HdrOutput.capability().supported();
+        List<OptionInstance<?>> options = this.prime$options.options();
+        List<OptionInstance<?>> defaults = PrimeVideoOptions.create(() -> {}).options();
+        if (options.size() != defaults.size()) {
+            throw new IllegalStateException("Prime video option layout changed while open");
         }
-        AbstractWidget referenceWhiteWidget =
-                list.findOption(this.prime$options.display().referenceWhiteNits());
-        if (referenceWhiteWidget != null) {
-            referenceWhiteWidget.active = HdrOutput.capability().supported();
+        this.prime$refreshingDiagnostics = true;
+        try {
+            for (int index = 0; index < options.size(); index++) {
+                this.prime$refreshFrom(options.get(index), defaults.get(index));
+            }
+        } finally {
+            this.prime$refreshingDiagnostics = false;
         }
-        this.prime$refresh(
-                this.prime$options.material().defaultRoughness(),
-                MaterialSettings.DEFAULT_ROUGHNESS_STEPS);
-        this.prime$refresh(
-                this.prime$options.material().seamlessGlass(),
-                MaterialSettings.DEFAULT_SEAMLESS_GLASS);
-        this.prime$refresh(this.prime$options.material().airGap(), MaterialSettings.DEFAULT_AIR_GAP);
-        this.prime$refresh(
-                this.prime$options.material().vanillaPbrPresets(),
-                MaterialSettings.DEFAULT_VANILLA_PBR_PRESETS);
-        this.prime$refresh(this.prime$options.diagnostics().rendererDiagnostics(), false);
-        this.prime$refresh(this.prime$options.diagnostics().rawOutput(), false);
-        this.prime$refresh(this.prime$options.diagnostics().rendererImageView(), RendererImageView.OFF);
-        this.prime$refresh(this.prime$options.diagnostics().rrInputView(), RrInputView.OFF);
-        this.prime$refresh(this.prime$options.diagnostics().nrdInputView(), NrdInputView.OFF);
-        this.prime$refresh(this.prime$options.streamline().reflexMode(), ReflexMode.OFF);
-        this.prime$refresh(
-                this.prime$options.streamline().dlssFrameGenerationEnabled(), false);
-        this.prime$refresh(
-                this.prime$options.streamline().dlssFrameGenerationMultiplier(), 2);
-        this.prime$refresh(
-                this.prime$options.streamline().dlssFrameGenerationUiRecomposition(), true);
+        this.prime$refreshAvailability(list);
+    }
+
+    @Unique
+    private void prime$refreshAvailability(OptionsList list) {
+        boolean hdrAvailable = HdrOutput.capability().supported();
+        for (OptionInstance<?> option : List.of(
+                this.prime$options.hdr(), this.prime$options.referenceWhiteNits())) {
+            AbstractWidget widget = list.findOption(option);
+            if (widget != null) {
+                widget.active = hdrAvailable;
+            }
+        }
         this.prime$refreshStreamlineAvailability(list);
     }
 
@@ -284,6 +159,15 @@ public abstract class VideoSettingsScreenMixin {
         } finally {
             this.prime$refreshingDiagnostics = false;
         }
+    }
+
+    @Unique
+    @SuppressWarnings("unchecked")
+    private void prime$refreshFrom(
+            OptionInstance<?> option, OptionInstance<?> source) {
+        this.prime$refresh(
+                (OptionInstance<Object>) option,
+                source.get());
     }
 
     @Unique

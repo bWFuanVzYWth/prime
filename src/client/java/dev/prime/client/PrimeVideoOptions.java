@@ -54,41 +54,92 @@ public final class PrimeVideoOptions {
     public static OptionSet create(Runnable diagnosticChanged) {
         PrimeRuntime runtime = PrimeRuntime.instance();
         RendererSettings settings = PrimeConfig.rendererSettings();
+        OptionInstance<Boolean> hdr = hdr();
+        OptionInstance<Integer> referenceWhite = referenceWhiteNits();
+        Diagnostics diagnostics = new Diagnostics(
+                booleanOption(
+                        "prime.options.debug.renderer_diagnostics",
+                        runtime.rendererDiagnostics(),
+                        runtime::setRendererDiagnostics),
+                booleanOption(
+                        "prime.options.debug.raw_output",
+                        runtime.rawOutput(),
+                        runtime::setRawOutput),
+                diagnosticView(
+                        "prime.options.debug.renderer_image",
+                        RENDERER_IMAGE_VIEWS,
+                        Codec.STRING.xmap(RendererImageView::fromId, RendererImageView::id),
+                        runtime.rendererImageView(),
+                        runtime::setRendererImageView,
+                        RendererImageView::id,
+                        diagnosticChanged),
+                diagnosticView(
+                        "prime.options.debug.rr_input",
+                        RR_INPUT_VIEWS,
+                        Codec.STRING.xmap(RrInputView::fromId, RrInputView::id),
+                        runtime.rrInputView(),
+                        runtime::setRrInputView,
+                        RrInputView::id,
+                        diagnosticChanged),
+                diagnosticView(
+                        "prime.options.debug.nrd_input",
+                        NRD_INPUT_VIEWS,
+                        Codec.STRING.xmap(NrdInputView::fromId, NrdInputView::id),
+                        runtime.nrdInputView(),
+                        runtime::setNrdInputView,
+                        NrdInputView::id,
+                        diagnosticChanged));
+        Streamline streamline = new Streamline(
+                reflexMode(),
+                booleanOption(
+                        "prime.options.streamline.dlss_frame_generation",
+                        PrimeConfig.dlssFrameGenerationEnabled(),
+                        PrimeConfig::setDlssFrameGenerationEnabled),
+                dlssFrameGenerationMultiplier(),
+                booleanOption(
+                        "prime.options.streamline.dlss_frame_generation_ui_recomposition",
+                        PrimeConfig.dlssFrameGenerationUiRecomposition(),
+                        PrimeConfig::setDlssFrameGenerationUiRecomposition));
         return new OptionSet(
-                new Rendering(
-                        booleanOption(
+                List.of(
+                        new Section("prime.options.header.rendering", List.of(
+                                big(booleanOption(
                                 "prime.options.path_tracing",
                                 settings.pathTracingEnabled(),
-                                PrimeVideoOptions::setPathTracingEnabled),
-                        integerOption(
+                                PrimeVideoOptions::setPathTracingEnabled)),
+                                big(booleanOption(
+                                        "prime.options.screenshot_mode",
+                                        runtime.screenshotRequested(),
+                                        runtime::requestScreenshot)),
+                                big(integerOption(
                                 "prime.options.additional_specular_bounces",
                                 PrimeConfig.additionalSpecularBounces(),
                                 SpecularBounceSettings.MINIMUM_COUNT,
                                 SpecularBounceSettings.MAXIMUM_COUNT,
                                 "",
-                                PrimeConfig::setAdditionalSpecularBounces),
-                        integerOption(
+                                PrimeConfig::setAdditionalSpecularBounces)),
+                                big(integerOption(
                                 "prime.options.minimum_bounces",
                                 PrimeConfig.minimumBounces(),
                                 MinimumBounceSettings.MINIMUM_COUNT,
                                 MinimumBounceSettings.MAXIMUM_COUNT,
                                 "",
-                                PrimeConfig::setMinimumBounces),
-                        integerOption(
+                                PrimeConfig::setMinimumBounces)),
+                                big(integerOption(
                                 "prime.options.maximum_bounces",
                                 PrimeConfig.maximumBounces(),
                                 MaximumBounceSettings.MINIMUM_COUNT,
                                 MaximumBounceSettings.MAXIMUM_COUNT,
                                 "",
-                                PrimeConfig::setMaximumBounces),
-                        integerOption(
+                                PrimeConfig::setMaximumBounces)),
+                                big(integerOption(
                                 "prime.options.terrain_worker_percentage",
                                 PrimeConfig.terrainWorkerPercentage(),
                                 TerrainWorkerSettings.MINIMUM_PERCENTAGE,
                                 TerrainWorkerSettings.MAXIMUM_PERCENTAGE,
                                 "%",
-                                PrimeConfig::setTerrainWorkerPercentage),
-                        enumOption(
+                                PrimeConfig::setTerrainWorkerPercentage)),
+                                small(enumOption(
                                 "prime.options.material.surface_detail",
                                 new OptionInstance.Enum<>(
                                         SURFACE_DETAIL_MODES,
@@ -100,18 +151,14 @@ public final class PrimeVideoOptions {
                                 (caption, mode) -> Component.translatable(
                                         "prime.options.material.surface_detail." + mode.id()),
                                 PrimeVideoOptions::setSurfaceDetailMode),
-                        integerOption(
+                                integerOption(
                                 "prime.options.material.displacement_height",
                                 settings.voxelTextureSurfaceStrengthSteps(),
                                 VoxelSurfaceSettings.MINIMUM_STEPS,
                                 VoxelSurfaceSettings.MAXIMUM_STEPS,
                                 "%",
-                                PrimeVideoOptions::setVoxelTextureSurfaceStrengthSteps),
-                        booleanOption(
-                                "prime.options.screenshot_mode",
-                                runtime.screenshotRequested(),
-                                runtime::requestScreenshot),
-                        enumOption(
+                                PrimeVideoOptions::setVoxelTextureSurfaceStrengthSteps)),
+                                small(enumOption(
                                 "prime.options.post_processing.mode",
                                 new OptionInstance.Enum<>(
                                         POST_PROCESSING_MODES,
@@ -122,7 +169,7 @@ public final class PrimeVideoOptions {
                                 (caption, mode) -> Component.translatable(
                                         "prime.options.post_processing.mode." + mode.id()),
                                 PrimeConfig::setPostProcessingMode),
-                        enumOption(
+                                enumOption(
                                 "prime.options.post_processing.quality",
                                 new OptionInstance.SliderableEnum<>(
                                         QUALITY_MODES,
@@ -135,10 +182,10 @@ public final class PrimeVideoOptions {
                                         Component.translatable(
                                                 "prime.options.post_processing.quality."
                                                         + mode.id())),
-                                PrimeConfig::setReconstructionQualityMode),
-                        rrResponsivity()),
-                new Lighting(
-                        intOption(
+                                PrimeConfig::setReconstructionQualityMode)),
+                                big(rrResponsivity()))),
+                        new Section("prime.options.header.lighting", List.of(
+                                small(intOption(
                                 "prime.options.astronomy.latitude",
                                 settings.astronomy().latitudeDegrees(),
                                 AstronomySettings.MINIMUM_LATITUDE_DEGREES,
@@ -146,33 +193,33 @@ public final class PrimeVideoOptions {
                                 (caption, value) -> Options.genericValueLabel(
                                         caption, formatLatitude(value)),
                                 PrimeConfig::setLatitudeDegrees),
-                        intOption(
+                                intOption(
                                 "prime.options.astronomy.season",
                                 settings.astronomy().solarLongitudeDegrees(),
                                 AstronomySettings.MINIMUM_SOLAR_LONGITUDE_DEGREES,
                                 AstronomySettings.MAXIMUM_SOLAR_LONGITUDE_DEGREES,
                                 (caption, value) -> Options.genericValueLabel(
                                         caption, formatSolarLongitude(value)),
-                                PrimeConfig::setSolarLongitudeDegrees),
-                        exposureOption(
+                                PrimeConfig::setSolarLongitudeDegrees)),
+                                big(exposureOption(
                                 "prime.options.lighting.sun_ev",
                                 settings.lighting().sunQuarterSteps(),
                                 LightingSettings.MINIMUM_QUARTER_STEPS,
                                 LightingSettings.MAXIMUM_QUARTER_STEPS,
-                                PrimeConfig::setSunQuarterSteps),
-                        exposureOption(
+                                PrimeConfig::setSunQuarterSteps)),
+                                big(exposureOption(
                                 "prime.options.lighting.star_ev",
                                 settings.lighting().starQuarterSteps(),
                                 LightingSettings.MINIMUM_STAR_QUARTER_STEPS,
                                 LightingSettings.MAXIMUM_STAR_QUARTER_STEPS,
-                                PrimeConfig::setStarQuarterSteps),
-                        exposureOption(
+                                PrimeConfig::setStarQuarterSteps)),
+                                big(exposureOption(
                                 "prime.options.lighting.block_light_ev",
                                 settings.lighting().blockLightQuarterSteps(),
                                 LightingSettings.MINIMUM_QUARTER_STEPS,
                                 LightingSettings.MAXIMUM_QUARTER_STEPS,
-                                PrimeConfig::setBlockLightQuarterSteps),
-                        enumOption(
+                                PrimeConfig::setBlockLightQuarterSteps)),
+                                big(enumOption(
                                 "prime.options.lighting.transparent_nee_mode",
                                 new OptionInstance.Enum<>(
                                         TRANSPARENT_NEE_MODES,
@@ -183,25 +230,25 @@ public final class PrimeVideoOptions {
                                 (caption, mode) -> Component.translatable(
                                         "prime.options.lighting.transparent_nee_mode."
                                                 + mode.id()),
-                                PrimeConfig::setTransparentNeeMode)),
-                new Display(
-                        hdr(),
-                        referenceWhiteNits(),
-                        integerOption(
+                                PrimeConfig::setTransparentNeeMode)))),
+                        new Section("prime.options.header.display", List.of(
+                                big(hdr),
+                                big(referenceWhite),
+                                big(integerOption(
                                 "prime.options.display.auto_exposure_compensation",
                                 settings.display().autoExposureCompensationSteps(),
                                 DisplaySettings.MINIMUM_AUTO_EXPOSURE_COMPENSATION_STEPS,
                                 DisplaySettings.MAXIMUM_AUTO_EXPOSURE_COMPENSATION_STEPS,
                                 "%",
-                                PrimeConfig::setAutoExposureCompensationSteps),
-                        exposureOption(
+                                PrimeConfig::setAutoExposureCompensationSteps)),
+                                big(exposureOption(
                                 "prime.options.display.final_exposure_ev",
                                 settings.display().finalExposureQuarterSteps(),
                                 DisplaySettings.MINIMUM_FINAL_EXPOSURE_QUARTER_STEPS,
                                 DisplaySettings.MAXIMUM_FINAL_EXPOSURE_QUARTER_STEPS,
-                                PrimeConfig::setFinalExposureQuarterSteps)),
-                new Material(
-                        intOption(
+                                PrimeConfig::setFinalExposureQuarterSteps)))),
+                        new Section("prime.options.header.material", List.of(
+                                small(intOption(
                                 "prime.options.material.default_roughness",
                                 settings.material().roughnessSteps(),
                                 MaterialSettings.MINIMUM_ROUGHNESS_STEPS,
@@ -209,64 +256,34 @@ public final class PrimeVideoOptions {
                                 (caption, value) -> Options.genericValueLabel(
                                         caption, Component.literal(formatRoughness(value))),
                                 PrimeConfig::setDefaultRoughnessSteps),
-                        booleanOption(
+                                booleanOption(
                                 "prime.options.material.seamless_glass",
                                 settings.material().seamlessGlass(),
-                                PrimeConfig::setSeamlessGlass),
-                        booleanOption(
+                                PrimeConfig::setSeamlessGlass)),
+                                small(booleanOption(
                                 "prime.options.material.air_gap",
                                 settings.material().airGap(),
                                 PrimeConfig::setAirGap),
-                        booleanOption(
+                                booleanOption(
                                 "prime.options.material.vanilla_pbr_presets",
                                 settings.material().vanillaPbrPresets(),
-                                PrimeConfig::setVanillaPbrPresets)),
-                new Diagnostics(
-                        booleanOption(
-                                "prime.options.debug.renderer_diagnostics",
-                                runtime.rendererDiagnostics(),
-                                runtime::setRendererDiagnostics),
-                        booleanOption(
-                                "prime.options.debug.raw_output",
-                                runtime.rawOutput(),
-                                runtime::setRawOutput),
-                        diagnosticView(
-                                "prime.options.debug.renderer_image",
-                                RENDERER_IMAGE_VIEWS,
-                                Codec.STRING.xmap(
-                                        RendererImageView::fromId,
-                                        RendererImageView::id),
-                                runtime.rendererImageView(),
-                                runtime::setRendererImageView,
-                                RendererImageView::id,
-                                diagnosticChanged),
-                        diagnosticView(
-                                "prime.options.debug.rr_input",
-                                RR_INPUT_VIEWS,
-                                Codec.STRING.xmap(RrInputView::fromId, RrInputView::id),
-                                runtime.rrInputView(),
-                                runtime::setRrInputView,
-                                RrInputView::id,
-                                diagnosticChanged),
-                        diagnosticView(
-                                "prime.options.debug.nrd_input",
-                                NRD_INPUT_VIEWS,
-                                Codec.STRING.xmap(NrdInputView::fromId, NrdInputView::id),
-                                runtime.nrdInputView(),
-                                runtime::setNrdInputView,
-                                NrdInputView::id,
-                                diagnosticChanged)),
-                new Streamline(
-                        reflexMode(),
-                        booleanOption(
-                                "prime.options.streamline.dlss_frame_generation",
-                                PrimeConfig.dlssFrameGenerationEnabled(),
-                                PrimeConfig::setDlssFrameGenerationEnabled),
-                        dlssFrameGenerationMultiplier(),
-                        booleanOption(
-                                "prime.options.streamline.dlss_frame_generation_ui_recomposition",
-                                PrimeConfig.dlssFrameGenerationUiRecomposition(),
-                                PrimeConfig::setDlssFrameGenerationUiRecomposition)));
+                                PrimeConfig::setVanillaPbrPresets)))),
+                        new Section("prime.options.header.streamline", List.of(
+                                big(streamline.reflexMode()))),
+                        new Section("prime.options.header.high_risk", List.of(
+                                big(streamline.dlssFrameGenerationEnabled()),
+                                big(streamline.dlssFrameGenerationMultiplier()),
+                                big(streamline.dlssFrameGenerationUiRecomposition()))),
+                        new Section("prime.options.header.diagnostics", List.of(
+                                big(diagnostics.rendererDiagnostics()),
+                                big(diagnostics.rawOutput()),
+                                big(diagnostics.rendererImageView()),
+                                big(diagnostics.rrInputView()),
+                                big(diagnostics.nrdInputView())))),
+                hdr,
+                referenceWhite,
+                diagnostics,
+                streamline);
     }
 
     private static OptionInstance<Float> rrResponsivity() {
@@ -321,6 +338,14 @@ public final class PrimeVideoOptions {
                 OptionInstance.cachedConstantTooltip(Component.translatable(key + ".tooltip")),
                 initial,
                 listener);
+    }
+
+    private static Row big(OptionInstance<?> option) {
+        return new Row(option, null);
+    }
+
+    private static Row small(OptionInstance<?> first, OptionInstance<?> second) {
+        return new Row(first, second);
     }
 
     private static OptionInstance<Integer> intOption(
@@ -547,50 +572,32 @@ public final class PrimeVideoOptions {
     }
 
     public record OptionSet(
-            Rendering rendering,
-            Lighting lighting,
-            Display display,
-            Material material,
-            Diagnostics diagnostics,
-            Streamline streamline) {
-    }
-
-    public record Rendering(
-            OptionInstance<Boolean> pathTracingEnabled,
-            OptionInstance<Integer> additionalSpecularBounces,
-            OptionInstance<Integer> minimumBounces,
-            OptionInstance<Integer> maximumBounces,
-            OptionInstance<Integer> terrainWorkerPercentage,
-            OptionInstance<SurfaceDetailMode> surfaceDetailMode,
-            OptionInstance<Integer> voxelTextureSurfaceStrength,
-            OptionInstance<Boolean> screenshotMode,
-            OptionInstance<PostProcessingMode> postProcessingMode,
-            OptionInstance<ReconstructionQualityMode> qualityMode,
-            OptionInstance<Float> rrResponsivity) {
-    }
-
-    public record Lighting(
-            OptionInstance<Integer> latitude,
-            OptionInstance<Integer> season,
-            OptionInstance<Integer> sunExposure,
-            OptionInstance<Integer> starExposure,
-            OptionInstance<Integer> blockLightExposure,
-            OptionInstance<TransparentNeeMode> transparentNeeMode) {
-    }
-
-    public record Display(
+            List<Section> sections,
             OptionInstance<Boolean> hdr,
             OptionInstance<Integer> referenceWhiteNits,
-            OptionInstance<Integer> autoExposureCompensation,
-            OptionInstance<Integer> finalExposure) {
+            Diagnostics diagnostics,
+            Streamline streamline) {
+        public OptionSet {
+            sections = List.copyOf(sections);
+        }
+
+        public List<OptionInstance<?>> options() {
+            return this.sections.stream()
+                    .flatMap(section -> section.rows().stream())
+                    .flatMap(row -> row.second() == null
+                            ? java.util.stream.Stream.of(row.first())
+                            : java.util.stream.Stream.of(row.first(), row.second()))
+                    .toList();
+        }
     }
 
-    public record Material(
-            OptionInstance<Integer> defaultRoughness,
-            OptionInstance<Boolean> seamlessGlass,
-            OptionInstance<Boolean> airGap,
-            OptionInstance<Boolean> vanillaPbrPresets) {
+    public record Section(String titleKey, List<Row> rows) {
+        public Section {
+            rows = List.copyOf(rows);
+        }
     }
+
+    public record Row(OptionInstance<?> first, OptionInstance<?> second) {}
 
     public record Diagnostics(
             OptionInstance<Boolean> rendererDiagnostics,
