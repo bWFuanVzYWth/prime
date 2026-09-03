@@ -6,13 +6,14 @@ import dev.prime.PrimeClient;
 import dev.prime.mixin.MinecraftAccessor;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.RendererSettings;
+import dev.prime.render.diagnostic.ImageDiagnosticSelection;
 import dev.prime.render.diagnostic.NrdInputView;
 import dev.prime.render.diagnostic.RendererImageView;
 import dev.prime.render.diagnostic.RrInputView;
+import dev.prime.render.diagnostic.RrResponsivity;
 import dev.prime.render.runtime.RendererLifecycle;
 import dev.prime.render.runtime.RuntimeDiagnostics;
 import dev.prime.render.runtime.RuntimeState;
-import dev.prime.render.runtime.SessionController;
 import dev.prime.render.runtime.SessionControls;
 import dev.prime.render.runtime.TerrainOwnership;
 import dev.prime.render.runtime.VulkanRenderer;
@@ -30,8 +31,14 @@ public final class PrimeRuntime {
     private static final PrimeRuntime INSTANCE = new PrimeRuntime();
     private final RendererLifecycle lifecycle = new RendererLifecycle();
     private final TerrainOwnership terrain = new TerrainOwnership();
-    private final SessionController session = new SessionController();
     private final RuntimeDiagnostics diagnostics = new RuntimeDiagnostics();
+    private boolean screenshotRequested;
+    private boolean rendererDiagnostics;
+    private boolean rawOutput;
+    private ImageDiagnosticSelection imageDiagnostics = ImageDiagnosticSelection.off();
+    private float rrResponsivity = RrResponsivity.DEFAULT;
+    private SessionControls sessionSnapshot = SessionControls.defaults();
+    private boolean previousEscape;
     private RendererSettings frameSettings;
 
     private PrimeRuntime() {
@@ -106,11 +113,12 @@ public final class PrimeRuntime {
             if (currentWorld != null && minecraft.player != null) {
                 this.terrain.acquire(minecraft);
             }
-            SessionControls frameControls = this.session.controls();
+            SessionControls frameControls = this.sessionControls();
             boolean screenshotRequested = activeRenderer.beginFrame(
                     minecraft, frameControls, settings);
             if (screenshotRequested != frameControls.screenshotRequested()) {
-                this.session.requestScreenshot(screenshotRequested);
+                this.screenshotRequested = screenshotRequested;
+                this.sessionSnapshot = null;
             }
             this.lifecycle.observeWorld(
                     currentWorld,
@@ -215,12 +223,12 @@ public final class PrimeRuntime {
                 || minecraft.level == null) {
             return false;
         }
-        this.requestScreenshot(!this.session.controls().screenshotRequested());
+        this.requestScreenshot(!this.screenshotRequested);
         return true;
     }
 
     public boolean screenshotRequested() {
-        return this.session.controls().screenshotRequested();
+        return this.screenshotRequested;
     }
 
     public void pathTracingChanged(boolean enabled) {
@@ -244,7 +252,10 @@ public final class PrimeRuntime {
     }
 
     public void requestScreenshot(boolean enabled) {
-        this.session.requestScreenshot(enabled);
+        if (this.screenshotRequested != enabled) {
+            this.screenshotRequested = enabled;
+            this.sessionSnapshot = null;
+        }
     }
 
     public boolean screenshotActive() {
@@ -253,56 +264,83 @@ public final class PrimeRuntime {
     }
 
     public boolean rendererDiagnostics() {
-        return this.session.controls().rendererDiagnostics();
+        return this.rendererDiagnostics;
     }
 
     public void setRendererDiagnostics(boolean value) {
-        this.session.setRendererDiagnostics(value);
+        if (this.rendererDiagnostics != value) {
+            this.rendererDiagnostics = value;
+            this.sessionSnapshot = null;
+        }
     }
 
     public boolean rawOutput() {
-        return this.session.controls().rawOutput();
+        return this.rawOutput;
     }
 
     public void setRawOutput(boolean value) {
-        this.session.setRawOutput(value);
-        this.requestRealtimeReset();
+        if (this.rawOutput != value) {
+            this.rawOutput = value;
+            this.sessionSnapshot = null;
+            this.requestRealtimeReset();
+        }
     }
 
     public RendererImageView rendererImageView() {
-        return this.session.controls().imageDiagnostics().renderer();
+        return this.imageDiagnostics.renderer();
     }
 
     public void setRendererImageView(RendererImageView value) {
-        this.session.setRendererImageView(value);
+        ImageDiagnosticSelection replacement = this.imageDiagnostics.withRenderer(value);
+        if (replacement != this.imageDiagnostics) {
+            this.imageDiagnostics = replacement;
+            this.sessionSnapshot = null;
+        }
     }
 
     public RrInputView rrInputView() {
-        return this.session.controls().imageDiagnostics().rr();
+        return this.imageDiagnostics.rr();
     }
 
     public void setRrInputView(RrInputView value) {
-        this.session.setRrInputView(value);
+        ImageDiagnosticSelection replacement = this.imageDiagnostics.withRr(value);
+        if (replacement != this.imageDiagnostics) {
+            this.imageDiagnostics = replacement;
+            this.sessionSnapshot = null;
+        }
     }
 
     public float rrResponsivity() {
-        return this.session.controls().rrResponsivity();
+        return this.rrResponsivity;
     }
 
     public void setRrResponsivity(float value) {
-        this.session.setRrResponsivity(value);
+        value = RrResponsivity.requireValid(value);
+        if (this.rrResponsivity != value) {
+            this.rrResponsivity = value;
+            this.sessionSnapshot = null;
+        }
     }
 
     public NrdInputView nrdInputView() {
-        return this.session.controls().imageDiagnostics().nrd();
+        return this.imageDiagnostics.nrd();
     }
 
     public void setNrdInputView(NrdInputView value) {
-        this.session.setNrdInputView(value);
+        ImageDiagnosticSelection replacement = this.imageDiagnostics.withNrd(value);
+        if (replacement != this.imageDiagnostics) {
+            this.imageDiagnostics = replacement;
+            this.sessionSnapshot = null;
+        }
     }
 
     public void restoreSessionDefaults() {
-        this.session.restoreDefaults();
+        this.screenshotRequested = false;
+        this.rendererDiagnostics = false;
+        this.rawOutput = false;
+        this.imageDiagnostics = ImageDiagnosticSelection.off();
+        this.rrResponsivity = RrResponsivity.DEFAULT;
+        this.sessionSnapshot = SessionControls.defaults();
     }
 
     public List<String> debugLines() {
@@ -358,14 +396,14 @@ public final class PrimeRuntime {
     }
 
     public void shutdown() {
-        this.session.restoreDefaults();
+        this.restoreSessionDefaults();
         this.frameSettings = null;
         this.lifecycle.shutdown();
     }
 
     public void fail(Throwable failure) {
         this.lifecycle.fail(failure);
-        this.session.restoreDefaults();
+        this.restoreSessionDefaults();
     }
 
     /** Prevents reuse of histories advanced into a host submission that later failed. */
@@ -378,9 +416,25 @@ public final class PrimeRuntime {
     private void updateSessionShortcuts(Minecraft minecraft) {
         long window = minecraft.getWindow().handle();
         boolean escape = pressed(window, GLFW.GLFW_KEY_ESCAPE);
-        this.session.update(
-                new SessionController.KeyState(escape),
-                this.screenshotActive());
+        if (escape
+                && !this.previousEscape
+                && (this.screenshotRequested || this.screenshotActive())) {
+            this.screenshotRequested = false;
+            this.sessionSnapshot = null;
+        }
+        this.previousEscape = escape;
+    }
+
+    private SessionControls sessionControls() {
+        if (this.sessionSnapshot == null) {
+            this.sessionSnapshot = new SessionControls(
+                    this.screenshotRequested,
+                    this.rendererDiagnostics,
+                    this.rawOutput,
+                    this.imageDiagnostics,
+                    this.rrResponsivity);
+        }
+        return this.sessionSnapshot;
     }
 
     private static boolean pressed(long window, int key) {

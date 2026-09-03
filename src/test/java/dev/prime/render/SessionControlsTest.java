@@ -2,10 +2,9 @@ package dev.prime.render.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.prime.render.diagnostic.ImageDiagnosticSelection;
 import dev.prime.render.diagnostic.NrdInputView;
 import dev.prime.render.diagnostic.RendererImageView;
 import dev.prime.render.diagnostic.RrInputView;
@@ -14,14 +13,15 @@ import org.junit.jupiter.api.Test;
 
 final class SessionControlsTest {
     @Test
-    void transitionsPreserveAnImmutableCoherentSnapshot() {
+    void defaultsAndExplicitSnapshotsAreCoherent() {
         SessionControls defaults = SessionControls.defaults();
-        SessionControls changed = defaults
-                .withScreenshotRequested(true)
-                .withRendererDiagnostics(true)
-                .withRawOutput(true)
-                .withRendererImageView(RendererImageView.NORMAL)
-                .withRrResponsivity(0.25F);
+        SessionControls changed = new SessionControls(
+                true,
+                true,
+                true,
+                new ImageDiagnosticSelection(
+                        RendererImageView.NORMAL, RrInputView.OFF, NrdInputView.OFF),
+                0.25F);
 
         assertFalse(defaults.screenshotRequested());
         assertFalse(defaults.rendererDiagnostics());
@@ -35,27 +35,23 @@ final class SessionControlsTest {
         assertTrue(changed.rawOutput());
         assertEquals(RendererImageView.NORMAL, changed.imageDiagnostics().renderer());
         assertEquals(0.25F, changed.rrResponsivity());
-        assertNotSame(defaults, changed);
-        assertSame(changed, changed.withRendererDiagnostics(true));
-        assertSame(changed, changed.withRawOutput(true));
-        assertSame(changed, changed.withRrResponsivity(0.25F));
     }
 
     @Test
     void selectingOneImageDomainDisablesTheOtherTwo() {
-        SessionControls controls = SessionControls.defaults()
-                .withRendererImageView(RendererImageView.GRID)
-                .withRrInputView(RrInputView.MOTION);
+        ImageDiagnosticSelection controls = ImageDiagnosticSelection.off()
+                .withRenderer(RendererImageView.GRID)
+                .withRr(RrInputView.MOTION);
 
-        assertEquals(RendererImageView.OFF, controls.imageDiagnostics().renderer());
-        assertEquals(RrInputView.MOTION, controls.imageDiagnostics().rr());
-        assertEquals(NrdInputView.OFF, controls.imageDiagnostics().nrd());
+        assertEquals(RendererImageView.OFF, controls.renderer());
+        assertEquals(RrInputView.MOTION, controls.rr());
+        assertEquals(NrdInputView.OFF, controls.nrd());
 
-        controls = controls.withNrdInputView(NrdInputView.PRIMARY_NORMAL_ROUGHNESS);
-        assertEquals(RendererImageView.OFF, controls.imageDiagnostics().renderer());
-        assertEquals(RrInputView.OFF, controls.imageDiagnostics().rr());
+        controls = controls.withNrd(NrdInputView.PRIMARY_NORMAL_ROUGHNESS);
+        assertEquals(RendererImageView.OFF, controls.renderer());
+        assertEquals(RrInputView.OFF, controls.rr());
         assertEquals(
                 NrdInputView.PRIMARY_NORMAL_ROUGHNESS,
-                controls.imageDiagnostics().nrd());
+                controls.nrd());
     }
 }
