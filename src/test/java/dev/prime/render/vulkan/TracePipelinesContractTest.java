@@ -64,8 +64,8 @@ final class TracePipelinesContractTest {
 
     @Test
     void realtimeAndOfflineHaveIndependentSchedulesAndDescriptors() {
-        assertEquals(23, RealtimeRayTracingPipeline.RAYGEN_GROUP_COUNT);
-        assertEquals(16, RealtimeRayTracingPipeline.RAYGEN_MODULE_COUNT);
+        assertEquals(23, RealtimeStandardGroups.GROUP_COUNT);
+        assertEquals(16, RealtimeStandardGroups.MODULE_COUNT);
         assertEquals(14, RealtimeRayTracingPipeline.dispatchCount(1));
         assertEquals(18, RealtimeRayTracingPipeline.dispatchCount(2));
         assertEquals(42, RealtimeRayTracingPipeline.dispatchCount(8));
@@ -77,8 +77,8 @@ final class TracePipelinesContractTest {
                 () -> RealtimeRayTracingPipeline.dispatchCount(9));
         assertEquals(25, RealtimeRayTracingPipeline.DESCRIPTOR_BINDING_COUNT);
 
-        assertEquals(10, OfflineRayTracingPipeline.RAYGEN_GROUP_COUNT);
-        assertEquals(6, OfflineRayTracingPipeline.RAYGEN_MODULE_COUNT);
+        assertEquals(10, OfflineGroups.GROUP_COUNT);
+        assertEquals(6, OfflineGroups.MODULE_COUNT);
         assertEquals(49, OfflineRayTracingPipeline.dispatchCount(12));
         assertEquals(5, OfflineRayTracingPipeline.dispatchCount(1));
         assertEquals(257, OfflineRayTracingPipeline.dispatchCount(64));
@@ -95,8 +95,8 @@ final class TracePipelinesContractTest {
                         8, 9, 10, 11, 8, 9, 10, 11,
                         12, 12, 13, 14, 15),
                 java.util.stream.IntStream
-                .range(0, RealtimeRayTracingPipeline.RAYGEN_GROUP_COUNT)
-                .map(RealtimeRayTracingPipeline::raygenModule)
+                .range(0, RealtimeStandardGroups.GROUP_COUNT)
+                .map(RealtimeStandardGroups::module)
                 .boxed()
                 .toList());
         assertEquals(List.of(
@@ -104,18 +104,18 @@ final class TracePipelinesContractTest {
                         0, 0, 0, 0, 1, 1, 1, 1,
                         0, 1, 0, 0, 0),
                 java.util.stream.IntStream
-                .range(0, RealtimeRayTracingPipeline.RAYGEN_GROUP_COUNT)
-                .map(RealtimeRayTracingPipeline::raygenControl)
+                .range(0, RealtimeStandardGroups.GROUP_COUNT)
+                .map(RealtimeStandardGroups::control)
                 .boxed()
                 .toList());
         assertEquals(List.of(0, 1, 2, 3, 4, 1, 2, 3, 4, 5), java.util.stream.IntStream
-                .range(0, OfflineRayTracingPipeline.RAYGEN_GROUP_COUNT)
-                .map(OfflineRayTracingPipeline::raygenModule)
+                .range(0, OfflineGroups.GROUP_COUNT)
+                .map(OfflineGroups::module)
                 .boxed()
                 .toList());
         assertEquals(List.of(0, 0, 0, 0, 0, 1, 1, 1, 1, 0), java.util.stream.IntStream
-                .range(0, OfflineRayTracingPipeline.RAYGEN_GROUP_COUNT)
-                .map(OfflineRayTracingPipeline::raygenControl)
+                .range(0, OfflineGroups.GROUP_COUNT)
+                .map(OfflineGroups::control)
                 .boxed()
                 .toList());
     }
@@ -164,8 +164,6 @@ final class TracePipelinesContractTest {
         assertEquals(
                 "/prime/shaders/realtime_wavefront_tail_ser.rgen.spv",
                 realtime.moduleResource(13));
-        assertEquals(14, RealtimeRayTracingPipeline.dispatchCount(1));
-        assertEquals(42, RealtimeRayTracingPipeline.dispatchCount(8));
     }
 
     @Test

@@ -21,8 +21,6 @@ import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /** Realtime ray-tracing pipeline and its wavefront resources. */
 public final class RealtimeRayTracingPipeline implements Destroyable {
-    static final int RAYGEN_GROUP_COUNT = RealtimeStandardGroups.GROUP_COUNT;
-    static final int RAYGEN_MODULE_COUNT = RealtimeStandardGroups.MODULE_COUNT;
     private static final int STORAGE_IMAGE_DESCRIPTOR_COUNT = imageBindings().length;
     static final int DESCRIPTOR_BINDING_COUNT = STORAGE_IMAGE_DESCRIPTOR_COUNT + 2;
     private static final WavefrontLayout WAVEFRONT_LAYOUT = new WavefrontLayout(
@@ -544,14 +542,6 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
 
     static long wavefrontBytes(int width, int height) {
         return WAVEFRONT_LAYOUT.wavefrontBytes(width, height);
-    }
-
-    static int raygenModule(int group) {
-        return RealtimeStandardGroups.module(group);
-    }
-
-    static int raygenControl(int group) {
-        return RealtimeStandardGroups.control(group);
     }
 
     static long queueOffset(int width, int height) {

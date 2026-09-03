@@ -20,8 +20,6 @@ import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /** Offline-only full-path pipeline with a four-stage per-bounce wavefront. */
 public final class OfflineRayTracingPipeline implements Destroyable {
-    static final int RAYGEN_GROUP_COUNT = OfflineGroups.GROUP_COUNT;
-    static final int RAYGEN_MODULE_COUNT = OfflineGroups.MODULE_COUNT;
     static int dispatchCount(int maximumBounces) {
         dev.prime.render.MaximumBounceSettings.validateCount(maximumBounces);
         return 4 * maximumBounces + 1;
@@ -327,14 +325,6 @@ public final class OfflineRayTracingPipeline implements Destroyable {
 
     static long wavefrontBytes(int width, int height) {
         return WAVEFRONT_LAYOUT.wavefrontBytes(width, height);
-    }
-
-    static int raygenModule(int group) {
-        return OfflineGroups.module(group);
-    }
-
-    static int raygenControl(int group) {
-        return OfflineGroups.control(group);
     }
 
     static long queueOffset(int width, int height) {
