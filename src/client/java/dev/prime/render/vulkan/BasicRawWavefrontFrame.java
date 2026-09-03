@@ -39,36 +39,25 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
     }
 
     private final VulkanImage[] images;
-    private final boolean hasLinearOutput;
     private boolean destroyed;
 
-    private BasicRawWavefrontFrame(ArrayList<VulkanImage> images, boolean hasLinearOutput) {
+    private BasicRawWavefrontFrame(ArrayList<VulkanImage> images) {
         this.images = images.toArray(VulkanImage[]::new);
-        this.hasLinearOutput = hasLinearOutput;
     }
 
     static BasicRawWavefrontFrame createRealtime(
             VulkanContext context, int width, int height) {
-        return create(
-                context, width, height, "Prime unfiltered", true);
-    }
-
-    private static BasicRawWavefrontFrame create(
-            VulkanContext context,
-            int width,
-            int height,
-            String label,
-            boolean hasLinearOutput) {
         ArrayList<VulkanImage> images = new ArrayList<>();
         try {
             for (Role role : Role.values()) {
-                if (role == Role.LINEAR_OUTPUT && !hasLinearOutput) {
-                    break;
-                }
                 images.add(context.createImage2D(
-                        width, height, role.format, SIGNAL_USAGE, label + " " + role.label));
+                        width,
+                        height,
+                        role.format,
+                        SIGNAL_USAGE,
+                        "Prime unfiltered " + role.label));
             }
-            return new BasicRawWavefrontFrame(images, hasLinearOutput);
+            return new BasicRawWavefrontFrame(images);
         } catch (RuntimeException exception) {
             for (int index = images.size() - 1; index >= 0; index--) {
                 images.get(index).destroy();
@@ -86,10 +75,10 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
             for (int index = 0; index < this.images.length; index++) {
                 VulkanImage image = this.images[index];
                 boolean initialized = initialization.prepare(image);
-                boolean linearOutput = this.hasLinearOutput
-                        && index == Role.LINEAR_OUTPUT.ordinal();
-                long destinationStages = destinationStages(
-                        this.hasLinearOutput, linearOutput);
+                long destinationStages = index == Role.LINEAR_OUTPUT.ordinal()
+                        ? VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                        : KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                                | VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
                 VulkanSync.setImageBarrier(barriers.get(index), image.image(),
                         initialized ? VK12.VK_IMAGE_LAYOUT_GENERAL : VK12.VK_IMAGE_LAYOUT_UNDEFINED,
                         VK12.VK_IMAGE_LAYOUT_GENERAL,
@@ -124,18 +113,6 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
     @Override public VulkanImage sunLighting() { return image(Role.SUN_LIGHTING); }
     @Override public VulkanImage sunPenumbra() { return image(Role.SUN_PENUMBRA); }
     VulkanImage linearOutput() { return image(Role.LINEAR_OUTPUT); }
-
-    static long destinationStages(boolean hasLinearOutput, boolean linearOutput) {
-        if (linearOutput) {
-            if (!hasLinearOutput) {
-                throw new IllegalArgumentException(
-                        "Raw wavefront scratch has no linear output image");
-            }
-            return VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-        }
-        return KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
-                | (hasLinearOutput ? VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : 0L);
-    }
 
     @Override
     public void destroy() {

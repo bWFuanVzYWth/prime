@@ -34,14 +34,51 @@ public final class MaterialTexturePages implements AutoCloseable {
     private static final int NORMAL_DEFAULT_ARGB = 0x008080ff;
     private static final int OPTICAL_DEFAULT_ARGB = 0xff000400;
     private enum Channel {
-        BASE_COLOR(BASE_COLOR_BYTES_PER_PIXEL),
-        NORMAL(AUXILIARY_BYTES_PER_PIXEL),
-        OPTICAL(AUXILIARY_BYTES_PER_PIXEL);
+        BASE_COLOR(
+                BASE_COLOR_BYTES_PER_PIXEL,
+                VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
+                "canonical base-color",
+                0),
+        NORMAL(
+                AUXILIARY_BYTES_PER_PIXEL,
+                VK12.VK_FORMAT_R8G8B8A8_UNORM,
+                "material normal",
+                NORMAL_DEFAULT_ARGB),
+        OPTICAL(
+                AUXILIARY_BYTES_PER_PIXEL,
+                VK12.VK_FORMAT_R8G8B8A8_UNORM,
+                "material optical",
+                OPTICAL_DEFAULT_ARGB);
 
         final int bytesPerPixel;
+        final int format;
+        final String label;
+        final int defaultArgb;
 
-        Channel(int bytesPerPixel) {
+        Channel(int bytesPerPixel, int format, String label, int defaultArgb) {
             this.bytesPerPixel = bytesPerPixel;
+            this.format = format;
+            this.label = label;
+            this.defaultArgb = defaultArgb;
+        }
+
+        TexturePageLayout.Layout pack(LabPbrAtlasFrame.Snapshot source) {
+            return switch (this) {
+                case BASE_COLOR -> TexturePageLayout.packBaseColor(
+                        source.sprites(), source.mipLevels());
+                case NORMAL -> TexturePageLayout.pack(
+                        source.sprites(), LabPbrAtlasFrame.Sprite::normal, source.mipLevels());
+                case OPTICAL -> TexturePageLayout.pack(
+                        source.sprites(), LabPbrAtlasFrame.Sprite::specular, source.mipLevels());
+            };
+        }
+
+        LabPbrAtlasFrame.MaterialSource material(LabPbrAtlasFrame.Sprite sprite) {
+            return switch (this) {
+                case NORMAL -> sprite.normal();
+                case OPTICAL -> sprite.specular();
+                case BASE_COLOR -> null;
+            };
         }
     }
 
@@ -317,43 +354,30 @@ public final class MaterialTexturePages implements AutoCloseable {
                         "Canonical base-color source was retired before page construction");
             }
         }
-        TexturePageLayout.Layout baseColorLayout = TexturePageLayout.packBaseColor(
-                source.sprites(), source.mipLevels());
-        TexturePageLayout.Layout normalLayout = TexturePageLayout.pack(
-                source.sprites(), LabPbrAtlasFrame.Sprite::normal, source.mipLevels());
-        TexturePageLayout.Layout opticalLayout = TexturePageLayout.pack(
-                source.sprites(), LabPbrAtlasFrame.Sprite::specular, source.mipLevels());
-        List<PageResource> baseColorPages = List.of();
-        List<PageResource> normalPages = List.of();
-        List<PageResource> opticalPages = List.of();
+        ArrayList<TexturePageLayout.Layout> layouts = new ArrayList<>(Channel.values().length);
+        ArrayList<List<PageResource>> pages = new ArrayList<>(Channel.values().length);
         VulkanBuffer textureRecords = null;
         Resources resources = null;
         try {
-            baseColorPages = this.buildColorPages(source, baseColorLayout);
-            normalPages = this.buildPages(
-                    source, normalLayout, true, NORMAL_DEFAULT_ARGB);
-            opticalPages = this.buildPages(
-                    source, opticalLayout, false, OPTICAL_DEFAULT_ARGB);
-            textureRecords = this.buildTextureRecords(
-                    source,
-                    baseColorLayout,
-                    normalLayout,
-                    opticalLayout,
-                    baseColorPages,
-                    normalPages,
-                    opticalPages);
+            for (Channel channel : Channel.values()) {
+                TexturePageLayout.Layout layout = channel.pack(source);
+                layouts.add(layout);
+                pages.add(this.buildPages(source, layout, channel));
+            }
+            List<TexturePageLayout.Layout> builtLayouts = List.copyOf(layouts);
+            List<List<PageResource>> builtPages = List.copyOf(pages);
+            textureRecords = this.buildTextureRecords(source, builtLayouts, builtPages);
             resources = new Resources(
                     sourceGeneration,
                     vanillaAtlasView,
-                    baseColorPages,
-                    normalPages,
-                    opticalPages,
+                    builtPages,
                     textureRecords,
                     source.materials(),
                     source,
-                    baseColorLayout,
-                    normalLayout,
-                    opticalLayout);
+                    builtLayouts);
+            List<PageResource> baseColorPages = resources.pages(Channel.BASE_COLOR);
+            List<PageResource> normalPages = resources.pages(Channel.NORMAL);
+            List<PageResource> opticalPages = resources.pages(Channel.OPTICAL);
             PrimeInfo.LOGGER.info(
                     "Translated material storage: {} textures, base={} pages/{} bytes, normal={} pages/{} bytes, optical={} pages/{} bytes, records={} bytes, animation cache={} bytes",
                     source.sprites().size(),
@@ -371,67 +395,17 @@ public final class MaterialTexturePages implements AutoCloseable {
                 throw ResourceCleanup.destroy(resources, exception);
             }
             RuntimeException failure = ResourceCleanup.destroy(textureRecords, exception);
-            failure = destroyPages(opticalPages, failure);
-            failure = destroyPages(normalPages, failure);
-            failure = destroyPages(baseColorPages, failure);
-            throw failure;
-        }
-    }
-
-    private List<PageResource> buildColorPages(
-            LabPbrAtlasFrame.Snapshot source,
-            TexturePageLayout.Layout layout) {
-        ArrayList<PageResource> pages = new ArrayList<>(layout.pages().size());
-        try {
-            int usage = VK12.VK_IMAGE_USAGE_SAMPLED_BIT | VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-            for (int pageIndex = 0; pageIndex < layout.pages().size(); pageIndex++) {
-                int width = layout.pages().get(pageIndex).width();
-                int height = layout.pages().get(pageIndex).height();
-                int mipLevels = Math.min(
-                        source.mipLevels(),
-                        32 - Integer.numberOfLeadingZeros(Math.max(width, height)));
-                VulkanImage image = this.context.createMipmappedImage2D(
-                        width,
-                        height,
-                        mipLevels,
-                        VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                        usage,
-                        "Prime canonical base-color page " + pageIndex);
-                VulkanBuffer upload = null;
-                try {
-                    long byteSize = totalMipBytes(
-                            width, height, mipLevels, BASE_COLOR_BYTES_PER_PIXEL);
-                    upload = this.context.createBuffer(
-                            byteSize,
-                            VK12.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                            true,
-                            "Prime canonical base-color upload " + pageIndex);
-                    fillColorPage(
-                            upload,
-                            width,
-                            height,
-                            mipLevels,
-                            pageIndex,
-                            source.sprites(),
-                            layout);
-                    pages.add(new PageResource(
-                            image, upload, BASE_COLOR_BYTES_PER_PIXEL));
-                } catch (RuntimeException exception) {
-                    RuntimeException failure = ResourceCleanup.destroy(upload, exception);
-                    throw ResourceCleanup.destroy(image, failure);
-                }
+            for (int index = pages.size() - 1; index >= 0; index--) {
+                failure = destroyPages(pages.get(index), failure);
             }
-            return List.copyOf(pages);
-        } catch (RuntimeException exception) {
-            throw destroyPages(pages, exception);
+            throw failure;
         }
     }
 
     private List<PageResource> buildPages(
             LabPbrAtlasFrame.Snapshot source,
             TexturePageLayout.Layout layout,
-            boolean normal,
-            int defaultArgb) {
+            Channel channel) {
         ArrayList<PageResource> pages = new ArrayList<>(layout.pages().size());
         try {
             int usage = VK12.VK_IMAGE_USAGE_SAMPLED_BIT | VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT;
@@ -441,22 +415,22 @@ public final class MaterialTexturePages implements AutoCloseable {
                 int mipLevels = Math.min(
                         source.mipLevels(),
                         32 - Integer.numberOfLeadingZeros(Math.max(width, height)));
-                String channel = normal ? "normal" : "optical";
                 VulkanImage image = this.context.createMipmappedImage2D(
                         width,
                         height,
                         mipLevels,
-                        VK12.VK_FORMAT_R8G8B8A8_UNORM,
+                        channel.format,
                         usage,
-                        "Prime material " + channel + " page " + pageIndex);
+                        "Prime " + channel.label + " page " + pageIndex);
                 VulkanBuffer upload = null;
                 try {
-                    long byteSize = totalMipBytes(width, height, mipLevels);
+                    long byteSize = totalMipBytes(
+                            width, height, mipLevels, channel.bytesPerPixel);
                     upload = this.context.createBuffer(
                             byteSize,
                             VK12.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                             true,
-                            "Prime material " + channel + " page upload " + pageIndex);
+                            "Prime " + channel.label + " page upload " + pageIndex);
                     fillPage(
                             upload,
                             width,
@@ -465,10 +439,9 @@ public final class MaterialTexturePages implements AutoCloseable {
                             pageIndex,
                             source.sprites(),
                             layout,
-                            normal,
-                            defaultArgb);
+                            channel);
                     pages.add(new PageResource(
-                            image, upload, AUXILIARY_BYTES_PER_PIXEL));
+                            image, upload, channel.bytesPerPixel));
                 } catch (RuntimeException exception) {
                     RuntimeException failure = ResourceCleanup.destroy(upload, exception);
                     throw ResourceCleanup.destroy(image, failure);
@@ -482,12 +455,14 @@ public final class MaterialTexturePages implements AutoCloseable {
 
     private VulkanBuffer buildTextureRecords(
             LabPbrAtlasFrame.Snapshot source,
-            TexturePageLayout.Layout baseColorLayout,
-            TexturePageLayout.Layout normalLayout,
-            TexturePageLayout.Layout opticalLayout,
-            List<PageResource> baseColorPages,
-            List<PageResource> normalPages,
-            List<PageResource> opticalPages) {
+            List<TexturePageLayout.Layout> layouts,
+            List<List<PageResource>> pages) {
+        TexturePageLayout.Layout baseColorLayout = layouts.get(Channel.BASE_COLOR.ordinal());
+        TexturePageLayout.Layout normalLayout = layouts.get(Channel.NORMAL.ordinal());
+        TexturePageLayout.Layout opticalLayout = layouts.get(Channel.OPTICAL.ordinal());
+        List<PageResource> baseColorPages = pages.get(Channel.BASE_COLOR.ordinal());
+        List<PageResource> normalPages = pages.get(Channel.NORMAL.ordinal());
+        List<PageResource> opticalPages = pages.get(Channel.OPTICAL.ordinal());
         int maximumTextureId = 0;
         for (LabPbrAtlasFrame.Sprite sprite : source.sprites()) {
             maximumTextureId = Math.max(maximumTextureId, sprite.textureId());
@@ -666,44 +641,6 @@ public final class MaterialTexturePages implements AutoCloseable {
         return ShaderAbi.TEXTURE_PAGE_EXTENT_QUERY_CODE;
     }
 
-    private static void fillColorPage(
-            VulkanBuffer upload,
-            int width,
-            int height,
-            int mipLevels,
-            int pageIndex,
-            List<LabPbrAtlasFrame.Sprite> sprites,
-            TexturePageLayout.Layout layout) {
-        long byteSize = totalMipBytes(
-                width, height, mipLevels, BASE_COLOR_BYTES_PER_PIXEL);
-        long target = upload.mappedAddress();
-        MemoryUtil.memSet(target, 0, byteSize);
-        long mipOffset = 0L;
-        for (int mip = 0; mip < mipLevels; mip++) {
-            int mipWidth = Math.max(1, width >> mip);
-            int mipHeight = Math.max(1, height >> mip);
-            for (LabPbrAtlasFrame.Sprite sprite : sprites) {
-                TexturePageLayout.Placement placement = layout.placement(sprite.textureId());
-                if (placement != null
-                        && placement.page() == pageIndex
-                        && mip < textureMipLevels(sprite, mipLevels)) {
-                    writeColorSpriteRgba16f(
-                            target,
-                            mipOffset,
-                            mipWidth,
-                            placement,
-                            java.util.Objects.requireNonNull(
-                                    sprite.baseColor(), "baseColor"),
-                            LabPbrAtlasFrame.AnimationSample.ZERO,
-                            mip,
-                            false);
-                }
-            }
-            mipOffset += (long) mipWidth * mipHeight * BASE_COLOR_BYTES_PER_PIXEL;
-        }
-        upload.flush(0L, byteSize);
-    }
-
     private static void fillPage(
             VulkanBuffer upload,
             int width,
@@ -712,37 +649,53 @@ public final class MaterialTexturePages implements AutoCloseable {
             int pageIndex,
             List<LabPbrAtlasFrame.Sprite> sprites,
             TexturePageLayout.Layout layout,
-            boolean normal,
-            int defaultArgb) {
+            Channel channel) {
         long byteSize = totalMipBytes(
-                width, height, mipLevels, AUXILIARY_BYTES_PER_PIXEL);
+                width, height, mipLevels, channel.bytesPerPixel);
         long target = upload.mappedAddress();
-        fillArgb(target, byteSize, defaultArgb);
+        if (channel == Channel.BASE_COLOR) {
+            MemoryUtil.memSet(target, 0, byteSize);
+        } else {
+            fillArgb(target, byteSize, channel.defaultArgb);
+        }
         long mipOffset = 0L;
         for (int mip = 0; mip < mipLevels; mip++) {
             int mipWidth = Math.max(1, width >> mip);
             int mipHeight = Math.max(1, height >> mip);
             for (LabPbrAtlasFrame.Sprite sprite : sprites) {
                 TexturePageLayout.Placement placement = layout.placement(sprite.textureId());
-                LabPbrAtlasFrame.MaterialSource material =
-                        normal ? sprite.normal() : sprite.specular();
                 if (placement != null
                         && placement.page() == pageIndex
-                        && material != null
                         && mip < textureMipLevels(sprite, mipLevels)) {
-                    writeSprite(
-                            target,
-                            mipOffset,
-                            mipWidth,
-                            placement,
-                            material,
-                            LabPbrAtlasFrame.AnimationSample.ZERO,
-                            mip,
-                            false,
-                            !normal);
+                    if (channel == Channel.BASE_COLOR) {
+                        writeColorSpriteRgba16f(
+                                target,
+                                mipOffset,
+                                mipWidth,
+                                placement,
+                                java.util.Objects.requireNonNull(
+                                        sprite.baseColor(), "baseColor"),
+                                LabPbrAtlasFrame.AnimationSample.ZERO,
+                                mip,
+                                false);
+                    } else {
+                        LabPbrAtlasFrame.MaterialSource material = channel.material(sprite);
+                        if (material != null) {
+                            writeSprite(
+                                    target,
+                                    mipOffset,
+                                    mipWidth,
+                                    placement,
+                                    material,
+                                    LabPbrAtlasFrame.AnimationSample.ZERO,
+                                    mip,
+                                    false,
+                                    channel == Channel.OPTICAL);
+                        }
+                    }
                 }
             }
-            mipOffset += (long) mipWidth * mipHeight * 4L;
+            mipOffset += (long) mipWidth * mipHeight * channel.bytesPerPixel;
         }
         upload.flush(0L, byteSize);
     }
@@ -1174,20 +1127,15 @@ public final class MaterialTexturePages implements AutoCloseable {
         Resources(
                 long sourceGeneration,
                 long vanillaAtlasView,
-                List<PageResource> baseColorPages,
-                List<PageResource> normalPages,
-                List<PageResource> opticalPages,
+                List<List<PageResource>> pages,
                 VulkanBuffer textureRecords,
                 LabPbrMaterialSet materials,
                 LabPbrAtlasFrame.Snapshot source,
-                TexturePageLayout.Layout baseColorLayout,
-                TexturePageLayout.Layout normalLayout,
-                TexturePageLayout.Layout opticalLayout) {
+                List<TexturePageLayout.Layout> layouts) {
             this.sourceGeneration = sourceGeneration;
             this.vanillaAtlasView = vanillaAtlasView;
-            this.pages = List.of(baseColorPages, normalPages, opticalPages);
-            ArrayList<PageResource> allPages = new ArrayList<>(
-                    baseColorPages.size() + normalPages.size() + opticalPages.size());
+            this.pages = pages;
+            ArrayList<PageResource> allPages = new ArrayList<>();
             for (List<PageResource> channel : this.pages) {
                 allPages.addAll(channel);
             }
@@ -1198,6 +1146,10 @@ public final class MaterialTexturePages implements AutoCloseable {
             this.materials = materials;
             ArrayList<AnimatedMaterialSprite> animated = new ArrayList<>();
             try {
+                TexturePageLayout.Layout baseColorLayout =
+                        layouts.get(Channel.BASE_COLOR.ordinal());
+                TexturePageLayout.Layout normalLayout = layouts.get(Channel.NORMAL.ordinal());
+                TexturePageLayout.Layout opticalLayout = layouts.get(Channel.OPTICAL.ordinal());
                 for (LabPbrAtlasFrame.Sprite sprite : source.sprites()) {
                     TexturePageLayout.Placement baseColor =
                             baseColorLayout.placement(sprite.textureId());
