@@ -4,7 +4,6 @@ import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.NrdInputView;
 import dev.prime.render.diagnostic.RendererImageView;
 import dev.prime.render.post.PostProcessingMode;
-import dev.prime.render.post.ReconstructionFrame;
 import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.vulkan.fsr.Fsr3Upscaler;
@@ -89,7 +88,6 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
                     renderHeight,
                     displayWidth,
                     displayHeight,
-                    quality,
                     sceneColor,
                     denoiser.fsrMotion(),
                     denoiser.fsrDepth(),
@@ -131,23 +129,12 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
     }
 
     @Override
-    public void requestReset() {
-        requireOpen();
-        this.upscaler.requestReset();
-    }
-
-    @Override
     public FrameToken beginFrame(
             ReconstructionFrameParameters parameters,
             ReconstructionDebugSettings debugSettings) {
         requireOpen();
-        Fsr3Upscaler.FrameToken fsr = this.upscaler.beginFrame(
-                parameters.camera(),
-                parameters.frameTimeNanos(),
-                parameters.sceneRevision(),
-                parameters.forceRestart());
-        NrdFramePlan nrd = NrdFramePlan.from(
-                fsr.temporalPlan(), fsr.jitter(), this.quality, parameters.sunDirection());
+        Fsr3Upscaler.FrameToken fsr = this.upscaler.beginFrame(parameters);
+        NrdFramePlan nrd = NrdFramePlan.from(parameters, this.quality);
         return new FrameToken(this, fsr, nrd, debugSettings);
     }
 
@@ -199,7 +186,6 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
     public void record(
             VkCommandBuffer commandBuffer,
             Frame frame,
-            ReconstructionFrameParameters parameters,
             VulkanImageInitializationBatch initialization) {
         FrameToken token = requireFrame(frame);
         if (token.recorded) {
@@ -213,11 +199,10 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
         token.nrd = this.denoiser.recordReconstruction(
                 commandBuffer,
                 token.nrdPrepared,
-                parameters.sunRadianceMultiplier());
+                token.fsr.parameters().sunRadianceMultiplier());
         this.upscaler.record(
                 commandBuffer,
                 token.fsr,
-                parameters.display(),
                 initialization);
         NrdInputView diagnostic = token.debugSettings.images().nrd();
         if (diagnostic.active()) {
@@ -320,7 +305,6 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
         private final Fsr3Upscaler.FrameToken fsr;
         private final NrdFramePlan nrdPlan;
         private final ReconstructionDebugSettings debugSettings;
-        private final ReconstructionFrame semantic;
         private boolean recorded;
         private NrdDenoiser.PreparedFrame nrdPrepared;
         private NrdDenoiser.FrameToken nrd;
@@ -334,12 +318,6 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
             this.fsr = fsr;
             this.nrdPlan = nrdPlan;
             this.debugSettings = debugSettings;
-            this.semantic = new ReconstructionFrame(
-                    fsr.frameIndex(), fsr.jitter(), fsr.reset());
-        }
-
-        @Override public ReconstructionFrame semantic() {
-            return this.semantic;
         }
     }
 }

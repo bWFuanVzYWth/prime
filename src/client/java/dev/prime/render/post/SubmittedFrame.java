@@ -1,12 +1,14 @@
 package dev.prime.render.post;
 
+import java.util.Objects;
+
 /** One device-free temporal version consumed exactly once by device execution. */
 public final class SubmittedFrame<P> {
     private final P plan;
     private State state = State.PLANNED;
 
-    SubmittedFrame(P plan) {
-        this.plan = plan;
+    public SubmittedFrame(P plan) {
+        this.plan = Objects.requireNonNull(plan, "plan");
     }
 
     public P plan() {
@@ -21,14 +23,14 @@ public final class SubmittedFrame<P> {
         return this.plan;
     }
 
-    void submitted() {
+    public void submitted() {
         if (this.state != State.CLAIMED) {
             throw new IllegalArgumentException("Submitted frame was not claimed for execution");
         }
         this.state = State.SUBMITTED;
     }
 
-    void abandon() {
+    public void abandon() {
         if (this.state == State.SUBMITTED || this.state == State.ABANDONED) {
             throw new IllegalArgumentException("Submitted frame was already completed");
         }

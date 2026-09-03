@@ -7,7 +7,6 @@ import dev.prime.render.IntegratorFrameInput;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.ImageDiagnosticSelection;
 import dev.prime.render.post.ReconstructionFrameParameters;
-import dev.prime.render.post.SubpixelJitter;
 import dev.prime.render.vulkan.reconstruction.VulkanReconstructionProcessor;
 import dev.prime.streamline.StreamlineFrameGeneration;
 import dev.prime.streamline.StreamlineReflex;
@@ -42,8 +41,6 @@ public final class RealtimeFrameExecutor implements Destroyable {
             TerrainScene.ResidentSceneView scene,
             IntegratorFrameInput integrator,
             ReconstructionFrameParameters reconstruction,
-            SubpixelJitter jitter,
-            boolean reconstructionReset,
             VulkanReconstructionProcessor processor,
             VulkanReconstructionProcessor.Frame processorFrame,
             VulkanImage output,
@@ -73,7 +70,6 @@ public final class RealtimeFrameExecutor implements Destroyable {
             Objects.requireNonNull(scene, "scene");
             Objects.requireNonNull(integrator, "integrator");
             Objects.requireNonNull(reconstruction, "reconstruction");
-            Objects.requireNonNull(jitter, "jitter");
             Objects.requireNonNull(output, "output");
             Objects.requireNonNull(stableRadiance, "stableRadiance");
             Objects.requireNonNull(diagnostics, "diagnostics");
@@ -119,8 +115,8 @@ public final class RealtimeFrameExecutor implements Destroyable {
             boolean prepareFrameGeneration = StreamlineFrameGeneration.publish(
                     StreamlineReflex.currentFrameIndex(),
                     integrator.camera(),
-                    jitter,
-                    reconstructionReset,
+                    reconstruction.jitter(),
+                    reconstruction.reset(),
                     processor.rawFrame(),
                     output,
                     processor.displayWidth(),
@@ -142,7 +138,6 @@ public final class RealtimeFrameExecutor implements Destroyable {
             processor.record(
                     commandBuffer,
                     processorFrame,
-                    reconstruction,
                     this.imageInitialization);
             processor.presentRendererDiagnostic(commandBuffer, diagnostics.renderer());
             DisplayExposureDiagnostics.Capture exposureCapture = exposureDiagnostics.record(

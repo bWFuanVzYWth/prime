@@ -3,9 +3,9 @@ package dev.prime.render.post.nrd;
 import dev.prime.render.FrameCamera;
 import dev.prime.render.FrameTime;
 import dev.prime.render.SunDirection;
+import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.post.SubpixelJitter;
-import dev.prime.render.post.TemporalReconstructionState;
 import java.util.Objects;
 
 /**
@@ -42,23 +42,21 @@ public record NrdFramePlan(
     }
 
     public static NrdFramePlan from(
-            TemporalReconstructionState.Plan temporal,
-            SubpixelJitter jitter,
-            ReconstructionQualityMode quality,
-            SunDirection sunDirection) {
-        Objects.requireNonNull(temporal, "temporal");
+            ReconstructionFrameParameters frame,
+            ReconstructionQualityMode quality) {
+        Objects.requireNonNull(frame, "frame");
         Objects.requireNonNull(quality, "quality");
-        SubpixelJitter historyJitter = temporal.restart()
-                ? jitter
-                : quality.jitter(Math.subtractExact(temporal.frameIndex(), 1));
+        SubpixelJitter historyJitter = frame.reset()
+                ? frame.jitter()
+                : quality.jitter(Math.subtractExact(frame.frameIndex(), 1));
         return new NrdFramePlan(
-                temporal.camera(),
-                temporal.historyCamera(),
-                jitter,
+                frame.camera(),
+                frame.historyCamera(),
+                frame.jitter(),
                 historyJitter,
-                temporal.frameIndex(),
-                temporal.restart(),
-                temporal.deltaMilliseconds(),
-                sunDirection);
+                frame.frameIndex(),
+                frame.reset(),
+                frame.deltaMilliseconds(),
+                frame.sunDirection());
     }
 }

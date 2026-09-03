@@ -15,12 +15,16 @@ final class RealtimeSampleStateTest {
         RealtimeSampleState.Plan first = state.plan(input(camera, 3L, false));
         assertTrue(first.reset());
         assertEquals(0, first.sampleIndex());
+        assertEquals(0, first.frameIndex());
+        assertEquals(camera, first.historyCamera());
         int epoch = first.epoch();
 
         RealtimeSampleState.Plan second =
                 first.committedState().plan(input(camera, 3L, false));
         assertFalse(second.reset());
         assertEquals(1, second.sampleIndex());
+        assertEquals(1, second.frameIndex());
+        assertEquals(camera, second.historyCamera());
         assertEquals(epoch, second.epoch());
     }
 
@@ -61,6 +65,7 @@ final class RealtimeSampleStateTest {
         RealtimeSampleState.Plan cameraCut =
                 state.plan(input(camera(35.0), 2L, false));
         assertTrue(cameraCut.reset());
+        assertEquals(35.0, cameraCut.historyCamera().x());
         state = cameraCut.committedState();
 
         RealtimeSampleState.Plan forced =
@@ -117,7 +122,25 @@ final class RealtimeSampleStateTest {
         RealtimeSampleState.Plan wrapped = state.plan(input(camera, 1L, false));
         assertFalse(wrapped.reset());
         assertEquals(0, wrapped.sampleIndex());
+        assertEquals(1 << 16, wrapped.frameIndex());
         assertEquals(initialEpoch + 1, wrapped.epoch());
+    }
+
+    @Test
+    void frameTimeUsesOnlyCommittedHistory() {
+        FrameCamera firstCamera = camera(1.0);
+        RealtimeSampleState.Plan first = RealtimeSampleState.initial().plan(
+                new RealtimeSampleState.Input(firstCamera, 1_000_000L, 1L, false));
+        FrameCamera secondCamera = camera(2.0);
+        RealtimeSampleState.Plan second = first.committedState().plan(
+                new RealtimeSampleState.Input(secondCamera, 11_000_000L, 1L, false));
+
+        assertEquals(firstCamera, second.historyCamera());
+        assertEquals(10.0F, second.deltaMilliseconds(), 1.0e-5F);
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> first.committedState().plan(
+                        new RealtimeSampleState.Input(secondCamera, 1L, 1L, false)));
     }
 
     private static RealtimeSampleState commit(
@@ -127,7 +150,7 @@ final class RealtimeSampleStateTest {
 
     private static RealtimeSampleState.Input input(
             FrameCamera camera, long revision, boolean forceReset) {
-        return new RealtimeSampleState.Input(camera, revision, forceReset);
+        return new RealtimeSampleState.Input(camera, 1L, revision, forceReset);
     }
 
     private static FrameCamera camera(double x) {

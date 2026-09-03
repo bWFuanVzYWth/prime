@@ -2,15 +2,10 @@ package dev.prime.render.vulkan;
 
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.RendererImageView;
-import dev.prime.render.post.ReconstructionFrame;
 import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.post.PostProcessingMode;
-import dev.prime.render.post.ReconstructionFrameHistory;
 import dev.prime.render.post.ReconstructionQualityMode;
-import dev.prime.render.post.SubpixelJitter;
 import dev.prime.render.post.SubmittedFrame;
-import dev.prime.render.post.TemporalReconstructionState;
-import dev.prime.render.vulkan.dlss.DlssRrProfile;
 import dev.prime.render.vulkan.reconstruction.ReconstructionDebugSettings;
 import dev.prime.render.vulkan.reconstruction.VulkanReconstructionProcessor;
 import org.lwjgl.vulkan.VkCommandBuffer;
@@ -31,8 +26,6 @@ public final class NoisyPostProcessor implements VulkanReconstructionProcessor {
     private final VulkanImage stableRadiance;
     private final VulkanImage displayOutput;
     private RendererImageDebugPass rendererDebugPass;
-    private final ReconstructionFrameHistory history =
-            new ReconstructionFrameHistory();
     private boolean destroyed;
 
     private NoisyPostProcessor(
@@ -105,28 +98,11 @@ public final class NoisyPostProcessor implements VulkanReconstructionProcessor {
     }
 
     @Override
-    public void requestReset() {
-        requireOpen();
-        this.history.requestReset();
-    }
-
-    @Override
     public Frame beginFrame(
             ReconstructionFrameParameters parameters,
             ReconstructionDebugSettings debugSettings) {
         requireOpen();
-        SubmittedFrame<TemporalReconstructionState.Plan> temporal = this.history.plan(
-                new TemporalReconstructionState.Input(
-                        parameters.camera(),
-                        parameters.frameTimeNanos(),
-                        parameters.sceneRevision(),
-                        parameters.forceRestart()));
-        int index = temporal.plan().frameIndex();
-        return new FrameToken(
-                this,
-                temporal,
-                DlssRrProfile.jitter(this.quality, index),
-                temporal.plan().restart());
+        return new FrameToken(this, new SubmittedFrame<>(parameters));
     }
 
     @Override
@@ -151,11 +127,9 @@ public final class NoisyPostProcessor implements VulkanReconstructionProcessor {
     public void record(
             VkCommandBuffer commandBuffer,
             Frame frame,
-            ReconstructionFrameParameters parameters,
             VulkanImageInitializationBatch initialization) {
         FrameToken token = requireFrame(frame);
-        TemporalReconstructionState.Plan temporal =
-                token.temporal.claimForExecution();
+        ReconstructionFrameParameters parameters = token.parameters.claimForExecution();
         this.composite.record(
                 commandBuffer,
                 parameters.camera(),
@@ -163,8 +137,8 @@ public final class NoisyPostProcessor implements VulkanReconstructionProcessor {
                 parameters.sunRadianceMultiplier());
         this.displayTransform.record(
                 commandBuffer,
-                temporal.deltaMilliseconds() * 0.001F,
-                temporal.restart(),
+                parameters.deltaMilliseconds() * 0.001F,
+                parameters.reset(),
                 false,
                 parameters.display(),
                 initialization);
@@ -197,7 +171,7 @@ public final class NoisyPostProcessor implements VulkanReconstructionProcessor {
             throw new IllegalArgumentException(
                     "Noisy frame was not recorded exactly once by this processor");
         }
-        this.history.submitted(token.temporal);
+        token.parameters.submitted();
     }
 
     @Override
@@ -208,7 +182,7 @@ public final class NoisyPostProcessor implements VulkanReconstructionProcessor {
             throw new IllegalArgumentException(
                     "Noisy frame token does not belong to this processor");
         }
-        this.history.abandon(token.temporal);
+        token.parameters.abandon();
     }
 
     private FrameToken requireFrame(Frame frame) {
@@ -238,20 +212,13 @@ public final class NoisyPostProcessor implements VulkanReconstructionProcessor {
 
     private static final class FrameToken implements Frame {
         private final NoisyPostProcessor owner;
-        private final SubmittedFrame<TemporalReconstructionState.Plan> temporal;
-        private final ReconstructionFrame semantic;
+        private final SubmittedFrame<ReconstructionFrameParameters> parameters;
 
         private FrameToken(
                 NoisyPostProcessor owner,
-                SubmittedFrame<TemporalReconstructionState.Plan> temporal,
-                SubpixelJitter jitter,
-                boolean reset) {
+                SubmittedFrame<ReconstructionFrameParameters> parameters) {
             this.owner = owner;
-            this.temporal = temporal;
-            this.semantic = new ReconstructionFrame(
-                    temporal.plan().frameIndex(), jitter, reset);
+            this.parameters = parameters;
         }
-
-        @Override public ReconstructionFrame semantic() { return this.semantic; }
     }
 }

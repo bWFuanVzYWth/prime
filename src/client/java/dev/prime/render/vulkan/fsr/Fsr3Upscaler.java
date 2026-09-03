@@ -1,15 +1,10 @@
 package dev.prime.render.vulkan.fsr;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
-import dev.prime.render.FrameCamera;
-import dev.prime.render.DisplaySettings;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.fsr.FsrDispatchPlan;
-import dev.prime.render.post.ReconstructionFrameHistory;
-import dev.prime.render.post.ReconstructionQualityMode;
-import dev.prime.render.post.SubpixelJitter;
+import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.post.SubmittedFrame;
-import dev.prime.render.post.TemporalReconstructionState;
 import dev.prime.render.vulkan.DisplayTransformPass;
 import dev.prime.render.vulkan.RawWavefrontFrame;
 import dev.prime.render.vulkan.VulkanContext;
@@ -37,7 +32,6 @@ public final class Fsr3Upscaler implements Destroyable {
     private final int renderHeight;
     private final int displayWidth;
     private final int displayHeight;
-    private final ReconstructionQualityMode qualityMode;
     private final VulkanImage sceneColor;
     private final VulkanImage inputMotion;
     private final VulkanImage inputDepth;
@@ -47,8 +41,6 @@ public final class Fsr3Upscaler implements Destroyable {
     private final FsrNative.Instance nativeInstance;
     private final DisplayTransformPass displayPass;
 
-    private final ReconstructionFrameHistory history =
-            new ReconstructionFrameHistory();
     private boolean destroyed;
 
     private Fsr3Upscaler(
@@ -56,7 +48,6 @@ public final class Fsr3Upscaler implements Destroyable {
             int renderHeight,
             int displayWidth,
             int displayHeight,
-            ReconstructionQualityMode qualityMode,
             VulkanImage sceneColor,
             VulkanImage inputMotion,
             VulkanImage inputDepth,
@@ -69,7 +60,6 @@ public final class Fsr3Upscaler implements Destroyable {
         this.renderHeight = renderHeight;
         this.displayWidth = displayWidth;
         this.displayHeight = displayHeight;
-        this.qualityMode = Objects.requireNonNull(qualityMode, "qualityMode");
         this.sceneColor = sceneColor;
         this.inputMotion = inputMotion;
         this.inputDepth = inputDepth;
@@ -86,7 +76,6 @@ public final class Fsr3Upscaler implements Destroyable {
             int renderHeight,
             int displayWidth,
             int displayHeight,
-            ReconstructionQualityMode qualityMode,
             VulkanImage sceneColor,
             VulkanImage inputMotion,
             VulkanImage inputDepth,
@@ -124,7 +113,6 @@ public final class Fsr3Upscaler implements Destroyable {
                     renderHeight,
                     displayWidth,
                     displayHeight,
-                    qualityMode,
                     sceneColor,
                     inputMotion,
                     inputDepth,
@@ -153,54 +141,31 @@ public final class Fsr3Upscaler implements Destroyable {
         return this.displayPass.exposureState().handle();
     }
 
-    public void requestReset() {
-        this.history.requestReset();
-    }
-
-    public FrameToken beginFrame(
-            FrameCamera camera,
-            long frameTimeNanos,
-            long sceneResetRevision,
-            boolean forceRestart) {
+    public FrameToken beginFrame(ReconstructionFrameParameters parameters) {
         this.requireOpen();
-        Objects.requireNonNull(camera, "camera");
-        SubmittedFrame<TemporalReconstructionState.Plan> temporal = this.history.plan(
-                new TemporalReconstructionState.Input(
-                        camera,
-                        frameTimeNanos,
-                        sceneResetRevision,
-                        forceRestart));
-        SubpixelJitter jitter = this.qualityMode.jitter(
-                temporal.plan().frameIndex());
-        return new FrameToken(
-                this,
-                temporal,
-                jitter);
+        return new FrameToken(this, new SubmittedFrame<>(parameters));
     }
 
     public void record(
             VkCommandBuffer commandBuffer,
             FrameToken token,
-            DisplaySettings.Snapshot display,
             VulkanImageInitializationBatch initialization) {
         this.requireOpen();
         if (token.owner != this) {
             throw new IllegalArgumentException("FSR frame token does not belong to this recording");
         }
-        TemporalReconstructionState.Plan plannedTemporal =
-                token.temporal.plan();
+        ReconstructionFrameParameters planned = token.parameters.plan();
         FsrDispatchPlan dispatchPlan = FsrDispatchPlan.create(
-                plannedTemporal.camera(),
+                planned.camera(),
                 this.renderWidth,
                 this.renderHeight,
                 this.displayWidth,
                 this.displayHeight,
-                token.jitter,
-                plannedTemporal.deltaMilliseconds(),
-                plannedTemporal.restart());
-        TemporalReconstructionState.Plan temporal =
-                token.temporal.claimForExecution();
-        if (temporal != plannedTemporal) {
+                planned.jitter(),
+                planned.deltaMilliseconds(),
+                planned.reset());
+        ReconstructionFrameParameters parameters = token.parameters.claimForExecution();
+        if (parameters != planned) {
             throw new IllegalStateException(
                     "FSR temporal plan changed between planning and execution");
         }
@@ -227,10 +192,10 @@ public final class Fsr3Upscaler implements Destroyable {
         computeBarrier(commandBuffer);
         this.displayPass.record(
                 commandBuffer,
-                temporal.deltaMilliseconds() * 0.001F,
-                temporal.restart(),
+                parameters.deltaMilliseconds() * 0.001F,
+                parameters.reset(),
                 false,
-                display,
+                parameters.display(),
                 initialization);
     }
 
@@ -240,7 +205,7 @@ public final class Fsr3Upscaler implements Destroyable {
         if (token.owner != this) {
             throw new IllegalArgumentException("FSR frame token does not belong to this submission");
         }
-        this.history.submitted(token.temporal);
+        token.parameters.submitted();
     }
 
     public void abandon(FrameToken token) {
@@ -249,7 +214,7 @@ public final class Fsr3Upscaler implements Destroyable {
             throw new IllegalArgumentException(
                     "FSR frame token does not belong to this upscaler");
         }
-        this.history.abandon(token.temporal);
+        token.parameters.abandon();
     }
 
     private void initializeLinearOutput(
@@ -333,36 +298,17 @@ public final class Fsr3Upscaler implements Destroyable {
     /** Immutable temporal inputs chosen before ray generation plus submission bookkeeping. */
     public static final class FrameToken {
         private final Fsr3Upscaler owner;
-        private final SubmittedFrame<TemporalReconstructionState.Plan> temporal;
-        private final SubpixelJitter jitter;
+        private final SubmittedFrame<ReconstructionFrameParameters> parameters;
 
         private FrameToken(
                 Fsr3Upscaler owner,
-                SubmittedFrame<TemporalReconstructionState.Plan> temporal,
-                SubpixelJitter jitter) {
+                SubmittedFrame<ReconstructionFrameParameters> parameters) {
             this.owner = owner;
-            this.temporal = temporal;
-            this.jitter = jitter;
+            this.parameters = parameters;
         }
 
-        public int frameIndex() {
-            return this.temporal.plan().frameIndex();
-        }
-
-        public SubpixelJitter jitter() {
-            return this.jitter;
-        }
-
-        public boolean reset() {
-            return this.temporal.plan().restart();
-        }
-
-        public boolean cameraCut() {
-            return this.temporal.plan().cameraCut();
-        }
-
-        public TemporalReconstructionState.Plan temporalPlan() {
-            return this.temporal.plan();
+        public ReconstructionFrameParameters parameters() {
+            return this.parameters.plan();
         }
     }
 }

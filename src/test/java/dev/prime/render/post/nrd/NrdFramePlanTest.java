@@ -4,10 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 import dev.prime.render.FrameCamera;
+import dev.prime.render.DisplaySettings;
+import dev.prime.render.RealtimeSampleState;
 import dev.prime.render.SunDirection;
+import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.post.SubpixelJitter;
-import dev.prime.render.post.TemporalReconstructionState;
 import org.joml.Matrix4f;
 import org.junit.jupiter.api.Test;
 
@@ -19,11 +21,10 @@ final class NrdFramePlanTest {
     @Test
     void derivesNrdHistoryFromTheSubmittedReconstructionTimeline() {
         FrameCamera firstCamera = camera(0.0);
-        TemporalReconstructionState.Plan first = TemporalReconstructionState.initial().plan(
-                new TemporalReconstructionState.Input(
-                        firstCamera, 1_000_000L, 1L, false));
+        RealtimeSampleState.Plan first = RealtimeSampleState.initial().plan(
+                new RealtimeSampleState.Input(firstCamera, 1_000_000L, 1L, false));
         SubpixelJitter firstJitter = QUALITY.jitter(first.frameIndex());
-        NrdFramePlan reset = NrdFramePlan.from(first, firstJitter, QUALITY, SUN);
+        NrdFramePlan reset = NrdFramePlan.from(parameters(first, firstJitter), QUALITY);
 
         assertSame(firstCamera, reset.camera());
         assertSame(firstCamera, reset.historyCamera());
@@ -31,11 +32,10 @@ final class NrdFramePlanTest {
         assertSame(firstJitter, reset.historyJitter());
 
         FrameCamera secondCamera = camera(1.0);
-        TemporalReconstructionState.Plan second = first.committedState().plan(
-                new TemporalReconstructionState.Input(
-                        secondCamera, 11_000_000L, 1L, false));
+        RealtimeSampleState.Plan second = first.committedState().plan(
+                new RealtimeSampleState.Input(secondCamera, 11_000_000L, 1L, false));
         NrdFramePlan continued = NrdFramePlan.from(
-                second, QUALITY.jitter(second.frameIndex()), QUALITY, SUN);
+                parameters(second, QUALITY.jitter(second.frameIndex())), QUALITY);
 
         assertSame(secondCamera, continued.camera());
         assertSame(firstCamera, continued.historyCamera());
@@ -43,6 +43,20 @@ final class NrdFramePlanTest {
         assertEquals(1, continued.frameIndex());
         assertEquals(10.0F, continued.deltaMilliseconds(), 1.0e-5F);
         assertSame(SUN, continued.sunDirection());
+    }
+
+    private static ReconstructionFrameParameters parameters(
+            RealtimeSampleState.Plan frame, SubpixelJitter jitter) {
+        return new ReconstructionFrameParameters(
+                frame.camera(),
+                frame.historyCamera(),
+                frame.frameIndex(),
+                jitter,
+                frame.reset(),
+                frame.deltaMilliseconds(),
+                SUN,
+                1.0F,
+                new DisplaySettings.Snapshot(0, 0));
     }
 
     private static FrameCamera camera(double x) {

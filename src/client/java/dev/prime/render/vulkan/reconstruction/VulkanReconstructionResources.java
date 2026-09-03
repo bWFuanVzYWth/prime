@@ -47,10 +47,6 @@ public final class VulkanReconstructionResources implements Destroyable {
                 && this.selection.displayExtent().equals(candidate.displayExtent());
     }
 
-    public void requestReset() {
-        this.processor.requestReset();
-    }
-
     @Override
     public void destroy() {
         if (this.destroyed) {

@@ -4,13 +4,9 @@ import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.RrInputView;
 import dev.prime.render.diagnostic.RendererImageView;
 import dev.prime.render.post.PostProcessingMode;
-import dev.prime.render.post.ReconstructionFrame;
 import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.post.ReconstructionQualityMode;
-import dev.prime.render.post.SubpixelJitter;
 import dev.prime.render.post.SubmittedFrame;
-import dev.prime.render.post.TemporalReconstructionState;
-import dev.prime.render.post.ReconstructionFrameHistory;
 import dev.prime.render.vulkan.AtmospherePipeline;
 import dev.prime.render.vulkan.DisplayTransformPass;
 import dev.prime.render.vulkan.VulkanContext;
@@ -42,8 +38,6 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
     private DlssRrDebugPass debugPass;
     private RendererImageDebugPass rendererDebugPass;
     private final Matrix4f ngxProjection = new Matrix4f();
-    private final ReconstructionFrameHistory history =
-            new ReconstructionFrameHistory();
     private boolean destroyed;
 
     private DlssRrPostProcessor(
@@ -148,28 +142,14 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
     @Override
     public int displayHeight() { return this.displayHeight; }
 
-    public void requestReset() {
-        requireOpen();
-        this.history.requestReset();
-    }
-
     @Override
     public Frame beginFrame(
             ReconstructionFrameParameters parameters,
             ReconstructionDebugSettings debugSettings) {
         requireOpen();
-        SubmittedFrame<TemporalReconstructionState.Plan> temporal = this.history.plan(
-                new TemporalReconstructionState.Input(
-                        parameters.camera(),
-                        parameters.frameTimeNanos(),
-                        parameters.sceneRevision(),
-                        parameters.forceRestart()));
-        SubpixelJitter jitter = DlssRrProfile.jitter(
-                this.quality, temporal.plan().frameIndex());
         return new FrameToken(
                 this,
-                temporal,
-                jitter,
+                new SubmittedFrame<>(parameters),
                 debugSettings.images().rr(),
                 debugSettings.rrResponsivity());
     }
@@ -195,7 +175,6 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
     public void record(
             VkCommandBuffer commandBuffer,
             Frame frame,
-            ReconstructionFrameParameters parameters,
             VulkanImageInitializationBatch initialization) {
         requireOpen();
         if (!(frame instanceof FrameToken token)) {
@@ -204,29 +183,28 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         if (token.owner != this) {
             throw new IllegalArgumentException("DLSS RR frame token does not belong to this recording");
         }
-        TemporalReconstructionState.Plan temporal =
-                token.temporal.claimForExecution();
+        ReconstructionFrameParameters parameters = token.parameters.claimForExecution();
         this.preparePass.record(
                 commandBuffer,
-                temporal.camera(),
-                temporal.historyCamera(),
-                token.jitter,
+                parameters.camera(),
+                parameters.historyCamera(),
+                parameters.jitter(),
                 parameters.sunDirection(),
                 parameters.sunRadianceMultiplier(),
                 token.responsivity);
         NrdCameraTransform.projectionForNrd(
-                temporal.camera().projection(), this.ngxProjection);
+                parameters.camera().projection(), this.ngxProjection);
         this.feature.evaluate(
                 commandBuffer,
                 new DlssRrNative.Evaluation(
                         this.renderWidth,
                         this.renderHeight,
-                        token.jitter,
+                        parameters.jitter(),
                         this.renderWidth,
                         this.renderHeight,
-                        temporal.restart(),
-                        temporal.deltaMilliseconds(),
-                        temporal.camera().viewRotation(),
+                        parameters.reset(),
+                        parameters.deltaMilliseconds(),
+                        parameters.camera().viewRotation(),
                         this.ngxProjection,
                         this.targets.material(),
                         this.targets.specularMaterial(),
@@ -241,8 +219,8 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         allCommandsToCompute(commandBuffer);
         this.displayTransform.record(
                 commandBuffer,
-                temporal.deltaMilliseconds() * 0.001F,
-                temporal.restart(),
+                parameters.deltaMilliseconds() * 0.001F,
+                parameters.reset(),
                 false,
                 parameters.display(),
                 initialization);
@@ -300,7 +278,7 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
         if (token.owner != this) {
             throw new IllegalArgumentException("DLSS RR frame token does not belong to this submission");
         }
-        this.history.submitted(token.temporal);
+        token.parameters.submitted();
     }
 
     @Override
@@ -314,7 +292,7 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
             throw new IllegalArgumentException(
                     "DLSS RR frame token does not belong to this processor");
         }
-        this.history.abandon(token.temporal);
+        token.parameters.abandon();
     }
 
     private void requireOpen() {
@@ -339,29 +317,19 @@ public final class DlssRrPostProcessor implements VulkanReconstructionProcessor 
 
     private static final class FrameToken implements Frame {
         private final DlssRrPostProcessor owner;
-        private final SubmittedFrame<TemporalReconstructionState.Plan> temporal;
-        private final SubpixelJitter jitter;
-        private final ReconstructionFrame semantic;
+        private final SubmittedFrame<ReconstructionFrameParameters> parameters;
         private final RrInputView debugView;
         private final float responsivity;
 
         private FrameToken(
                 DlssRrPostProcessor owner,
-                SubmittedFrame<TemporalReconstructionState.Plan> temporal,
-                SubpixelJitter jitter,
+                SubmittedFrame<ReconstructionFrameParameters> parameters,
                 RrInputView debugView,
                 float responsivity) {
             this.owner = owner;
-            this.temporal = temporal;
-            this.jitter = jitter;
-            this.semantic = new ReconstructionFrame(
-                    temporal.plan().frameIndex(), jitter, temporal.plan().restart());
+            this.parameters = parameters;
             this.debugView = debugView;
             this.responsivity = responsivity;
-        }
-
-        @Override public ReconstructionFrame semantic() {
-            return this.semantic;
         }
     }
 }

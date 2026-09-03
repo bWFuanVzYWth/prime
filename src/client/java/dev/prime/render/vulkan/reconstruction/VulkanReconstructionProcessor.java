@@ -2,7 +2,6 @@ package dev.prime.render.vulkan.reconstruction;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.render.post.PostProcessingMode;
-import dev.prime.render.post.ReconstructionFrame;
 import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.diagnostic.RendererImageView;
@@ -33,8 +32,6 @@ public interface VulkanReconstructionProcessor extends Destroyable {
 
     long displayExposureStateBuffer();
 
-    void requestReset();
-
     Frame beginFrame(
             ReconstructionFrameParameters parameters,
             ReconstructionDebugSettings debugSettings);
@@ -51,7 +48,6 @@ public interface VulkanReconstructionProcessor extends Destroyable {
     void record(
             VkCommandBuffer commandBuffer,
             Frame frame,
-            ReconstructionFrameParameters parameters,
             VulkanImageInitializationBatch initialization);
 
     void presentRendererDiagnostic(
@@ -61,7 +57,5 @@ public interface VulkanReconstructionProcessor extends Destroyable {
 
     void submitted(Frame frame);
 
-    interface Frame {
-        ReconstructionFrame semantic();
-    }
+    interface Frame { }
 }

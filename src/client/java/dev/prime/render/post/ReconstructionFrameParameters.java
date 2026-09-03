@@ -2,27 +2,34 @@ package dev.prime.render.post;
 
 import dev.prime.render.DisplaySettings;
 import dev.prime.render.FrameCamera;
-import dev.prime.render.LightingSettings;
+import dev.prime.render.FrameTime;
 import dev.prime.render.SunDirection;
 import java.util.Objects;
 
-/** Backend-neutral semantic input for one temporal reconstruction transition. */
+/** Backend-neutral semantic input fixed by the interactive frame timeline. */
 public record ReconstructionFrameParameters(
         FrameCamera camera,
-        long frameTimeNanos,
-        long sceneRevision,
-        boolean forceRestart,
+        FrameCamera historyCamera,
+        int frameIndex,
+        SubpixelJitter jitter,
+        boolean reset,
+        float deltaMilliseconds,
         SunDirection sunDirection,
-        LightingSettings.Snapshot lighting,
+        float sunRadianceMultiplier,
         DisplaySettings.Snapshot display) {
     public ReconstructionFrameParameters {
         camera = Objects.requireNonNull(camera, "camera");
+        historyCamera = Objects.requireNonNull(historyCamera, "historyCamera");
+        jitter = Objects.requireNonNull(jitter, "jitter");
         sunDirection = Objects.requireNonNull(sunDirection, "sunDirection");
-        lighting = Objects.requireNonNull(lighting, "lighting");
         display = Objects.requireNonNull(display, "display");
-    }
-
-    public float sunRadianceMultiplier() {
-        return this.lighting.sunMultiplier();
+        if (frameIndex < 0
+                || !Float.isFinite(deltaMilliseconds)
+                || deltaMilliseconds < 0.0F
+                || deltaMilliseconds > FrameTime.MAXIMUM_DELTA_MILLISECONDS
+                || !Float.isFinite(sunRadianceMultiplier)
+                || sunRadianceMultiplier < 0.0F) {
+            throw new IllegalArgumentException("Invalid reconstruction temporal frame");
+        }
     }
 }
