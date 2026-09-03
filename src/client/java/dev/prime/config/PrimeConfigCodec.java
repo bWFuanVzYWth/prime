@@ -128,8 +128,7 @@ final class PrimeConfigCodec {
                         PrimeConfigCodec::parseEvQuarterSteps, "block-light exposure"),
                 reader.value(
                         TRANSPARENT_NEE_MODE_KEY, data.lighting.transparentNeeMode(),
-                        PrimeConfigCodec::parseTransparentNeeMode, "transparent NEE mode"),
-                0L);
+                        PrimeConfigCodec::parseTransparentNeeMode, "transparent NEE mode"));
         data.display = new DisplaySettings.Snapshot(
                 reader.value(
                         FINAL_EXPOSURE_EV_KEY, data.display.finalExposureQuarterSteps(),
@@ -157,8 +156,7 @@ final class PrimeConfigCodec {
                         PrimeConfigCodec::parseBoolean, "air-gap switch"),
                 reader.value(
                         VANILLA_PBR_PRESETS_KEY, data.material.vanillaPbrPresets(),
-                        PrimeConfigCodec::parseBoolean, "vanilla-PBR preset switch"),
-                0L);
+                        PrimeConfigCodec::parseBoolean, "vanilla-PBR preset switch"));
         data.reflexMode = reader.value(
                 REFLEX_MODE_KEY, data.reflexMode,
                 PrimeConfigCodec::parseReflexMode, "Reflex mode");

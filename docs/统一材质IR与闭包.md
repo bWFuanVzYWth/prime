@@ -150,7 +150,7 @@ IOR 1.333 和既有吸收参数。
 
 金属建筑块使用 registry-id allowlist；ores、rails、redstone、机器、容器、书架、活塞、灯具
 及其他混合纹理不猜测。逐 sprite `_s` 永远覆盖预设。运行时开关使用 `primePush.path.x` bit
-27；切换只推进 material revision 并清除累积历史，不重建 mesh 或 atlas。
+27；切换只推进 renderer revision 并清除累积历史，不重建 mesh 或 atlas。
 
 ## 命中 ABI 与表面关系
 

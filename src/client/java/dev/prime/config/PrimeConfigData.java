@@ -32,8 +32,7 @@ final class PrimeConfigData {
             LightingSettings.DEFAULT_SUN_QUARTER_STEPS,
             LightingSettings.DEFAULT_STAR_QUARTER_STEPS,
             LightingSettings.DEFAULT_BLOCK_LIGHT_QUARTER_STEPS,
-            TransparentNeeMode.DEFAULT,
-            0L);
+            TransparentNeeMode.DEFAULT);
     DisplaySettings.Snapshot display = new DisplaySettings.Snapshot(
             DisplaySettings.DEFAULT_FINAL_EXPOSURE_QUARTER_STEPS,
             DisplaySettings.DEFAULT_AUTO_EXPOSURE_COMPENSATION_STEPS);
@@ -41,8 +40,7 @@ final class PrimeConfigData {
             MaterialSettings.DEFAULT_ROUGHNESS_STEPS,
             MaterialSettings.DEFAULT_SEAMLESS_GLASS,
             MaterialSettings.DEFAULT_AIR_GAP,
-            MaterialSettings.DEFAULT_VANILLA_PBR_PRESETS,
-            0L);
+            MaterialSettings.DEFAULT_VANILLA_PBR_PRESETS);
     boolean hdrEnabled;
     int referenceWhiteNits = HdrOutput.AUTOMATIC_REFERENCE_WHITE_NITS;
     ReflexMode reflexMode = ReflexMode.OFF;

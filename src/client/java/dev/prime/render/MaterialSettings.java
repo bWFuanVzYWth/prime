@@ -29,45 +29,36 @@ public final class MaterialSettings {
             int roughnessSteps,
             boolean seamlessGlass,
             boolean airGap,
-            boolean vanillaPbrPresets,
-            long revision) {
-        public Snapshot(int roughnessSteps, long revision) {
+            boolean vanillaPbrPresets) {
+        public Snapshot(int roughnessSteps) {
             this(
                     roughnessSteps,
                     DEFAULT_SEAMLESS_GLASS,
                     DEFAULT_AIR_GAP,
-                    DEFAULT_VANILLA_PBR_PRESETS,
-                    revision);
+                    DEFAULT_VANILLA_PBR_PRESETS);
         }
 
-        public Snapshot(int roughnessSteps, boolean seamlessGlass, long revision) {
+        public Snapshot(int roughnessSteps, boolean seamlessGlass) {
             this(
                     roughnessSteps,
                     seamlessGlass,
                     DEFAULT_AIR_GAP,
-                    DEFAULT_VANILLA_PBR_PRESETS,
-                    revision);
+                    DEFAULT_VANILLA_PBR_PRESETS);
         }
 
         public Snapshot(
                 int roughnessSteps,
                 boolean seamlessGlass,
-                boolean airGap,
-                long revision) {
+                boolean airGap) {
             this(
                     roughnessSteps,
                     seamlessGlass,
                     airGap,
-                    DEFAULT_VANILLA_PBR_PRESETS,
-                    revision);
+                    DEFAULT_VANILLA_PBR_PRESETS);
         }
 
         public Snapshot {
             requireValid(roughnessSteps);
-            if (revision < 0L) {
-                throw new IllegalArgumentException(
-                        "Material revision must not be negative");
-            }
         }
 
         public float linearRoughness() {

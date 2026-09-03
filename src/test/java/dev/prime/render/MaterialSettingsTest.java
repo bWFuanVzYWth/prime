@@ -18,7 +18,7 @@ final class MaterialSettingsTest {
     @Test
     void snapshotDerivesLinearRoughnessFromItsCanonicalSteps() {
         MaterialSettings.Snapshot snapshot =
-                new MaterialSettings.Snapshot(37, true, 2L);
+                new MaterialSettings.Snapshot(37, true);
 
         assertEquals(0.37F, snapshot.linearRoughness());
         assertTrue(snapshot.seamlessGlass());
@@ -26,9 +26,6 @@ final class MaterialSettingsTest {
         assertTrue(snapshot.vanillaPbrPresets());
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new MaterialSettings.Snapshot(101, 0L));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new MaterialSettings.Snapshot(0, -1L));
+                () -> new MaterialSettings.Snapshot(101));
     }
 }

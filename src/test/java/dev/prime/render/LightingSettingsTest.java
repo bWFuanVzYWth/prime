@@ -29,17 +29,14 @@ final class LightingSettingsTest {
     @Test
     void snapshotDerivesLinearValuesFromItsCanonicalSteps() {
         LightingSettings.Snapshot snapshot =
-                new LightingSettings.Snapshot(4, -8, 12, 3L);
+                new LightingSettings.Snapshot(4, -8, 12);
 
         assertEquals(2.0F, snapshot.sunMultiplier());
         assertEquals(0.25F, snapshot.starMultiplier());
         assertEquals(8.0F, snapshot.blockLightMultiplier());
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new LightingSettings.Snapshot(33, 0, 0, 0L));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new LightingSettings.Snapshot(0, 0, 0, -1L));
+                () -> new LightingSettings.Snapshot(33, 0, 0));
     }
 
 }

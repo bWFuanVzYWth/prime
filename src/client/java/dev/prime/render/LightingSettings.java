@@ -65,30 +65,23 @@ public final class LightingSettings {
             int sunQuarterSteps,
             int starQuarterSteps,
             int blockLightQuarterSteps,
-            TransparentNeeMode transparentNeeMode,
-            long revision) {
+            TransparentNeeMode transparentNeeMode) {
         public Snapshot {
             requireValid(sunQuarterSteps);
             requireValidStar(starQuarterSteps);
             requireValid(blockLightQuarterSteps);
             java.util.Objects.requireNonNull(transparentNeeMode, "transparentNeeMode");
-            if (revision < 0L) {
-                throw new IllegalArgumentException(
-                        "Lighting revision must not be negative");
-            }
         }
 
         public Snapshot(
                 int sunQuarterSteps,
                 int starQuarterSteps,
-                int blockLightQuarterSteps,
-                long revision) {
+                int blockLightQuarterSteps) {
             this(
                     sunQuarterSteps,
                     starQuarterSteps,
                     blockLightQuarterSteps,
-                    TransparentNeeMode.DEFAULT,
-                    revision);
+                    TransparentNeeMode.DEFAULT);
         }
 
         public float sunMultiplier() {

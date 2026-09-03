@@ -170,9 +170,9 @@ final class RayTracingPushConstantsTest {
                         java.util.List.of(),
                         new TerrainScene.SceneStatistics(0, 0L, 0L, 0, 0));
         LightingSettings.Snapshot lighting =
-                new LightingSettings.Snapshot(4, -8, 12, 7L);
+                new LightingSettings.Snapshot(4, -8, 12);
         MaterialSettings.Snapshot material =
-                new MaterialSettings.Snapshot(90, true, 8L);
+                new MaterialSettings.Snapshot(90, true);
         IntegratorFrameInput input = new IntegratorFrameInput(
                 camera,
                 320,

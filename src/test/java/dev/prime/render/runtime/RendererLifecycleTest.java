@@ -94,11 +94,9 @@ final class RendererLifecycleTest {
                 new LightingSettings.Snapshot(
                         LightingSettings.DEFAULT_SUN_QUARTER_STEPS,
                         LightingSettings.DEFAULT_STAR_QUARTER_STEPS,
-                        LightingSettings.DEFAULT_BLOCK_LIGHT_QUARTER_STEPS,
-                        0L),
+                        LightingSettings.DEFAULT_BLOCK_LIGHT_QUARTER_STEPS),
                 new MaterialSettings.Snapshot(
-                        MaterialSettings.DEFAULT_ROUGHNESS_STEPS,
-                        0L),
+                        MaterialSettings.DEFAULT_ROUGHNESS_STEPS),
                 new DisplaySettings.Snapshot(
                         DisplaySettings.DEFAULT_FINAL_EXPOSURE_QUARTER_STEPS,
                         DisplaySettings.DEFAULT_AUTO_EXPOSURE_COMPENSATION_STEPS),

@@ -238,7 +238,7 @@ public final class PrimeConfig {
         AstronomySettings replacement = data.astronomy.withLatitudeDegrees(value);
         if (replacement != data.astronomy) {
             data.astronomy = replacement;
-            advanceLightingRevision();
+            rendererChanged();
         }
     }
 
@@ -246,7 +246,7 @@ public final class PrimeConfig {
         AstronomySettings replacement = data.astronomy.withSolarLongitudeDegrees(value);
         if (replacement != data.astronomy) {
             data.astronomy = replacement;
-            advanceLightingRevision();
+            rendererChanged();
         }
     }
 
@@ -257,8 +257,7 @@ public final class PrimeConfig {
                     value,
                     data.lighting.starQuarterSteps(),
                     data.lighting.blockLightQuarterSteps(),
-                    data.lighting.transparentNeeMode(),
-                    Math.incrementExact(data.lighting.revision())));
+                    data.lighting.transparentNeeMode()));
         }
     }
 
@@ -269,8 +268,7 @@ public final class PrimeConfig {
                     data.lighting.sunQuarterSteps(),
                     value,
                     data.lighting.blockLightQuarterSteps(),
-                    data.lighting.transparentNeeMode(),
-                    Math.incrementExact(data.lighting.revision())));
+                    data.lighting.transparentNeeMode()));
         }
     }
 
@@ -281,8 +279,7 @@ public final class PrimeConfig {
                     data.lighting.sunQuarterSteps(),
                     data.lighting.starQuarterSteps(),
                     value,
-                    data.lighting.transparentNeeMode(),
-                    Math.incrementExact(data.lighting.revision())));
+                    data.lighting.transparentNeeMode()));
         }
     }
 
@@ -293,8 +290,7 @@ public final class PrimeConfig {
                     data.lighting.sunQuarterSteps(),
                     data.lighting.starQuarterSteps(),
                     data.lighting.blockLightQuarterSteps(),
-                    value,
-                    Math.incrementExact(data.lighting.revision())));
+                    value));
         }
     }
 
@@ -321,8 +317,7 @@ public final class PrimeConfig {
                     value,
                     data.material.seamlessGlass(),
                     data.material.airGap(),
-                    data.material.vanillaPbrPresets(),
-                    Math.incrementExact(data.material.revision())));
+                    data.material.vanillaPbrPresets()));
         }
     }
 
@@ -332,8 +327,7 @@ public final class PrimeConfig {
                     data.material.roughnessSteps(),
                     value,
                     data.material.airGap(),
-                    data.material.vanillaPbrPresets(),
-                    Math.incrementExact(data.material.revision())));
+                    data.material.vanillaPbrPresets()));
         }
     }
 
@@ -343,8 +337,7 @@ public final class PrimeConfig {
                     data.material.roughnessSteps(),
                     data.material.seamlessGlass(),
                     value,
-                    data.material.vanillaPbrPresets(),
-                    Math.incrementExact(data.material.revision())));
+                    data.material.vanillaPbrPresets()));
         }
     }
 
@@ -354,8 +347,7 @@ public final class PrimeConfig {
                     data.material.roughnessSteps(),
                     data.material.seamlessGlass(),
                     data.material.airGap(),
-                    value,
-                    Math.incrementExact(data.material.revision())));
+                    value));
         }
     }
 
@@ -405,16 +397,6 @@ public final class PrimeConfig {
 
     static String serializedContents() {
         return PrimeConfigCodec.encode(data);
-    }
-
-    private static void advanceLightingRevision() {
-        data.lighting = new LightingSettings.Snapshot(
-                data.lighting.sunQuarterSteps(),
-                data.lighting.starQuarterSteps(),
-                data.lighting.blockLightQuarterSteps(),
-                data.lighting.transparentNeeMode(),
-                Math.incrementExact(data.lighting.revision()));
-        rendererChanged();
     }
 
     private static void setLighting(LightingSettings.Snapshot value) {

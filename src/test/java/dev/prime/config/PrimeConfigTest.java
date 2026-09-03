@@ -392,20 +392,20 @@ final class PrimeConfigTest {
     }
 
     @Test
-    void lightingAndMaterialChangesAdvanceTheirOwnedRevisions() {
+    void lightingAndMaterialChangesInvalidateRendererSettings() {
         RendererSettings initial = PrimeConfig.rendererSettings();
         int latitude = initial.astronomy().latitudeDegrees() == 30 ? -30 : 30;
         int roughness = initial.material().roughnessSteps() == 37 ? 38 : 37;
         try {
             PrimeConfig.setLatitudeDegrees(latitude);
             RendererSettings relit = PrimeConfig.rendererSettings();
-            assertEquals(initial.lighting().revision() + 1L, relit.lighting().revision());
-            assertEquals(initial.material().revision(), relit.material().revision());
+            assertEquals(initial.revision() + 1L, relit.revision());
+            assertEquals(initial.material(), relit.material());
 
             PrimeConfig.setDefaultRoughnessSteps(roughness);
             RendererSettings rematerialed = PrimeConfig.rendererSettings();
-            assertEquals(relit.lighting().revision(), rematerialed.lighting().revision());
-            assertEquals(relit.material().revision() + 1L, rematerialed.material().revision());
+            assertEquals(relit.revision() + 1L, rematerialed.revision());
+            assertEquals(relit.lighting(), rematerialed.lighting());
         } finally {
             PrimeConfig.setLatitudeDegrees(initial.astronomy().latitudeDegrees());
             PrimeConfig.setDefaultRoughnessSteps(initial.material().roughnessSteps());
