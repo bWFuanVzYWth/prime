@@ -10,14 +10,14 @@ import org.junit.jupiter.api.Test;
 
 final class FluidQuadTranslationTest {
     @Test
-    void fullCollisionSuppressesTheInternalRasterPair() {
+    void opaqueNeighborSuppressesTheInternalRasterPair() {
         TestSprite water = new TestSprite("captured_water");
         water.fill(0xff40_80c0);
         CapturedSectionGeometry.MutableQuad outward = southFace();
         CapturedSectionGeometry.MutableQuad rasterBack = reversed(outward);
-        int collisionMask = 1 << Direction.SOUTH.ordinal();
+        int occlusionMask = 1 << Direction.SOUTH.ordinal();
         CapturedSectionGeometry.Surface surface =
-                fluidSurface(water, collisionMask, true, 0);
+                fluidSurface(water, occlusionMask, true, 0);
         CapturedSectionGeometry.Builder section =
                 new CapturedSectionGeometry.Builder();
         section.add(outward, surface);
@@ -30,14 +30,14 @@ final class FluidQuadTranslationTest {
     }
 
     @Test
-    void fullCollisionAlsoSuppressesASlopedInternalBoundary() {
+    void opaqueNeighborAlsoSuppressesASlopedInternalBoundary() {
         TestSprite water = new TestSprite("sloped_water");
         water.fill(0xff40_80c0);
         CapturedSectionGeometry.MutableQuad top = slopedTop();
         CapturedSectionGeometry.MutableQuad rasterBack = reversed(top);
-        int collisionMask = 1 << Direction.UP.ordinal();
+        int occlusionMask = 1 << Direction.UP.ordinal();
         CapturedSectionGeometry.Surface surface =
-                fluidSurface(water, collisionMask, true, 0);
+                fluidSurface(water, occlusionMask, true, 0);
         CapturedSectionGeometry.Builder section =
                 new CapturedSectionGeometry.Builder();
         section.add(top, surface);
@@ -242,7 +242,7 @@ final class FluidQuadTranslationTest {
 
     private static CapturedSectionGeometry.Surface fluidSurface(
             TestSprite sprite,
-            int collisionMask,
+            int occlusionMask,
             boolean water,
             int lightEmission) {
         return new CapturedSectionGeometry.Surface(
@@ -257,7 +257,7 @@ final class FluidQuadTranslationTest {
                 lightEmission,
                 sprite.sprite(),
                 new CapturedSectionGeometry.FluidFacts(
-                        0, 0, 0, false, collisionMask),
+                        0, 0, 0, occlusionMask),
                 null,
                 dev.prime.render.material.BuiltinMaterialClass.DEFAULT);
     }

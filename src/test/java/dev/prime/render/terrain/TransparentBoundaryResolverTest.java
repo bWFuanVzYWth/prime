@@ -347,6 +347,27 @@ final class TransparentBoundaryResolverTest {
     }
 
     @Test
+    void glassContactPreservesTheEmissiveLavaBoundary() {
+        TestSprite lava = new TestSprite("inset_lava");
+        TestSprite glass = new TestSprite("inset_lava_glass");
+        lava.fill(0xffff_6000);
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        section.add(
+                xFaceAt(0.999F, 1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                fluidSurface(lava, 0, 0, 0, false, 15));
+        section.add(
+                xFaceAt(1.0F, -1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                surface(glass, 0xffb0_d8f0, false, false, 1, 0, 0, 9));
+
+        CpuClusterMesh mesh = translate(0, section.build());
+
+        assertEquals(2L, mesh.triangleLayout().opaqueTriangleCount());
+        assertEquals(0L, mesh.triangleLayout().transmissiveTriangleCount());
+        assertEquals(2, mesh.lights().emitterCount());
+        assertEquals(1.0F, mesh.segments().getFirst().positions()[0], 0.0F);
+    }
+
+    @Test
     void knownFluidSideInsetCompositesCutoutCoverageOverWater() {
         TestSprite water = new TestSprite("inset_leaf_water");
         TestSprite leaves = new TestSprite("inset_leaves");
@@ -482,17 +503,24 @@ final class TransparentBoundaryResolverTest {
 
     private static CapturedSectionGeometry.Surface fluidSurface(
             TestSprite sprite, int x, int y, int z) {
+        return fluidSurface(sprite, x, y, z, true, 0);
+    }
+
+    private static CapturedSectionGeometry.Surface fluidSurface(
+            TestSprite sprite, int x, int y, int z, boolean water, int lightEmission) {
         return new CapturedSectionGeometry.Surface(
                 -1,
                 -1,
                 -1,
                 -1,
-                CapturedSectionGeometry.Layer.TRANSLUCENT,
+                water
+                        ? CapturedSectionGeometry.Layer.TRANSLUCENT
+                        : CapturedSectionGeometry.Layer.OPAQUE,
                 CapturedSectionGeometry.Surface.ANIMATED
-                        | CapturedSectionGeometry.Surface.WATER,
-                0,
+                        | (water ? CapturedSectionGeometry.Surface.WATER : 0),
+                lightEmission,
                 sprite.sprite(),
-                new CapturedSectionGeometry.FluidFacts(x, y, z, false, 0),
+                new CapturedSectionGeometry.FluidFacts(x, y, z, 0),
                 new CapturedSectionGeometry.BlockFacts(x, y, z),
                 dev.prime.render.material.BuiltinMaterialClass.DEFAULT);
     }

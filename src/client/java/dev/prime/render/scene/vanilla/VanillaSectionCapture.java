@@ -793,8 +793,7 @@ public final class VanillaSectionCapture implements AutoCloseable {
         private final int lightEmission;
         private final boolean transmissive;
         private final boolean water;
-        private final boolean fullCeiling;
-        private final int fullCollisionMask;
+        private final int occlusionMask;
         private final TextureAtlasSprite stillSprite;
         private final TextureAtlasSprite flowingSprite;
         private final TextureAtlasSprite overlaySprite;
@@ -832,20 +831,17 @@ public final class VanillaSectionCapture implements AutoCloseable {
             int worldZ = position.getZ();
             BlockPos.MutableBlockPos neighbor = new BlockPos.MutableBlockPos(
                     worldX, worldY + 1, worldZ);
-            this.fullCeiling = level.getBlockState(neighbor)
-                    .isCollisionShapeFullBlock(level, neighbor);
-            int collisionMask = 0;
+            int mask = 0;
             for (Direction direction : Direction.values()) {
                 neighbor.set(
                         worldX + direction.getStepX(),
                         worldY + direction.getStepY(),
                         worldZ + direction.getStepZ());
-                if (level.getBlockState(neighbor)
-                        .isCollisionShapeFullBlock(level, neighbor)) {
-                    collisionMask |= 1 << direction.ordinal();
+                if (occludesFluid(level.getBlockState(neighbor))) {
+                    mask |= 1 << direction.ordinal();
                 }
             }
-            this.fullCollisionMask = collisionMask;
+            this.occlusionMask = mask;
         }
 
         private void addVertex(float x, float y, float z, float u, float v) {
@@ -912,8 +908,7 @@ public final class VanillaSectionCapture implements AutoCloseable {
                             this.localX,
                             this.localY,
                             this.localZ,
-                            this.fullCeiling,
-                            this.fullCollisionMask),
+                            this.occlusionMask),
                     new CapturedSectionGeometry.BlockFacts(
                             (this.owner.sectionX << 4) + this.localX,
                             (this.owner.sectionY << 4) + this.localY,
@@ -939,6 +934,10 @@ public final class VanillaSectionCapture implements AutoCloseable {
                     && v >= Math.min(sprite.getV0(), sprite.getV1())
                     && v <= Math.max(sprite.getV0(), sprite.getV1());
         }
+    }
+
+    static boolean occludesFluid(BlockState state) {
+        return state.isSolidRender();
     }
 
     private record PeerFaceKey(int x, int y, int z, Direction direction) {

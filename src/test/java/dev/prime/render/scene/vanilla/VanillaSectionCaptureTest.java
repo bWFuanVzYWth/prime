@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import net.minecraft.SharedConstants;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
 import net.minecraft.client.renderer.block.dispatch.SingleVariant;
@@ -12,11 +13,20 @@ import net.minecraft.client.renderer.block.dispatch.WeightedVariants;
 import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.client.resources.model.sprite.Material;
 import net.minecraft.core.Direction;
+import net.minecraft.server.Bootstrap;
 import net.minecraft.util.RandomSource;
 import net.minecraft.util.random.WeightedList;
+import net.minecraft.world.level.block.Blocks;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 final class VanillaSectionCaptureTest {
+    @BeforeAll
+    static void bootstrapRegistries() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
+
     @Test
     void atlasEndpointRoundingIsLoweredToNormalizedLocalUv() {
         float lower = 1537.0F / 2048.0F;
@@ -54,6 +64,12 @@ final class VanillaSectionCaptureTest {
                 true, false, 0, 1.0F));
         assertTrue(VanillaSectionCapture.isRasterOverlay(
                 false, true, -1, 1.0F));
+    }
+
+    @Test
+    void onlyOpaqueFullBlocksOccludeFluidContacts() {
+        assertTrue(VanillaSectionCapture.occludesFluid(Blocks.STONE.defaultBlockState()));
+        assertFalse(VanillaSectionCapture.occludesFluid(Blocks.GLASS.defaultBlockState()));
     }
 
     private static final class EmptyModel implements BlockStateModel {

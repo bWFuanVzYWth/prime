@@ -247,8 +247,7 @@ public final class CapturedSectionGeometry {
             int localX,
             int localY,
             int localZ,
-            boolean fullCeiling,
-            int fullCollisionMask) {
+            int occlusionMask) {
         public FluidFacts {
             if (localX < 0 || localX > 15
                     || localY < 0 || localY > 15
@@ -256,17 +255,17 @@ public final class CapturedSectionGeometry {
                 throw new IllegalArgumentException(
                         "Captured fluid owner must use Section-local block coordinates");
             }
-            if ((fullCollisionMask & ~0x3f) != 0) {
+            if ((occlusionMask & ~0x3f) != 0) {
                 throw new IllegalArgumentException(
-                        "Captured fluid collision mask exceeds six directions");
+                        "Captured fluid occlusion mask exceeds six directions");
             }
         }
 
-        public boolean fullCollision(int directionOrdinal) {
+        public boolean occluded(int directionOrdinal) {
             if (directionOrdinal < 0 || directionOrdinal >= 6) {
                 throw new IndexOutOfBoundsException(directionOrdinal);
             }
-            return (this.fullCollisionMask & 1 << directionOrdinal) != 0;
+            return (this.occlusionMask & 1 << directionOrdinal) != 0;
         }
     }
 
