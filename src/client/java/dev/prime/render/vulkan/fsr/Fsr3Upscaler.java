@@ -182,10 +182,8 @@ public final class Fsr3Upscaler implements Destroyable {
                         this.linearOutput,
                         dispatchPlan));
 
-        // FidelityFX restores imported resources to UNORDERED_ACCESS/GENERAL. Its output writes
-        // still need an execution and memory dependency before Prime's display-transform shader
-        // reads the same image.
-        computeBarrier(commandBuffer);
+        // FidelityFX restores imported resources to UNORDERED_ACCESS/GENERAL. The display pass's
+        // initial all-writes dependency makes its output visible to exposure and presentation.
         this.displayPass.record(
                 commandBuffer,
                 parameters.deltaMilliseconds() * 0.001F,

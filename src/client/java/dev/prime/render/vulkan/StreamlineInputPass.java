@@ -13,8 +13,12 @@ import java.nio.ByteOrder;
 import java.util.Objects;
 import org.joml.Matrix4f;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
+import org.lwjgl.vulkan.VkDependencyInfo;
+import org.lwjgl.vulkan.VkImageMemoryBarrier2;
+import org.lwjgl.vulkan.VkMemoryBarrier2;
 
 /** Builds Streamline depth and motion without changing Prime's top-left image coordinates. */
 public final class StreamlineInputPass implements Destroyable {
@@ -182,11 +186,7 @@ public final class StreamlineInputPass implements Destroyable {
                 previousCamera,
                 this.previousWorldToClip,
                 this.worldToViewScratch);
-        prepareSampledSource(commandBuffer, this.sourceDepth);
-        prepareSampledSource(commandBuffer, this.sourceVisibleHistoryPosition);
-        prepareStorageSource(commandBuffer, this.sourceControl);
-        prepareStorageOutput(commandBuffer, this.depth);
-        prepareStorageOutput(commandBuffer, this.motion);
+        this.prepareImages(commandBuffer);
         try (MemoryStack stack = MemoryStack.stackPush()) {
             ByteBuffer push = stack.malloc(PUSH_SIZE).order(ByteOrder.nativeOrder());
             writeReprojectionConstants(
@@ -213,32 +213,6 @@ public final class StreamlineInputPass implements Destroyable {
         this.guidesInitialized = true;
     }
 
-    private static void prepareSampledSource(
-            VkCommandBuffer commandBuffer, VulkanImage source) {
-        VulkanSync.imageBarrier(
-                commandBuffer,
-                source.image(),
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                VK12.VK_ACCESS_MEMORY_WRITE_BIT,
-                COMPUTE_STAGE,
-                VK12.VK_ACCESS_SHADER_READ_BIT);
-    }
-
-    private static void prepareStorageSource(
-            VkCommandBuffer commandBuffer, VulkanImage source) {
-        VulkanSync.imageBarrier(
-                commandBuffer,
-                source.image(),
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                VK12.VK_ACCESS_MEMORY_WRITE_BIT,
-                COMPUTE_STAGE,
-                VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
-    }
-
     private static void writeReprojectionConstants(
             ByteBuffer target,
             Matrix4f currentClipToWorld,
@@ -261,23 +235,39 @@ public final class StreamlineInputPass implements Destroyable {
                 exactTransmissiveHistory ? 1 : 0);
     }
 
-    private void prepareStorageOutput(
-            VkCommandBuffer commandBuffer, VulkanImage destination) {
-        VulkanSync.imageBarrier(
-                commandBuffer,
-                destination.image(),
-                this.guidesInitialized
-                        ? VK12.VK_IMAGE_LAYOUT_GENERAL
-                        : VK12.VK_IMAGE_LAYOUT_UNDEFINED,
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                this.guidesInitialized
-                        ? VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
-                        : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                this.guidesInitialized
-                        ? VK12.VK_ACCESS_MEMORY_READ_BIT | VK12.VK_ACCESS_MEMORY_WRITE_BIT
-                        : 0L,
-                COMPUTE_STAGE,
-                VK12.VK_ACCESS_SHADER_WRITE_BIT);
+    private void prepareImages(VkCommandBuffer commandBuffer) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkMemoryBarrier2.Buffer sources = VkMemoryBarrier2.calloc(1, stack)
+                    .sType$Default()
+                    .srcStageMask(VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT)
+                    .srcAccessMask(VK12.VK_ACCESS_MEMORY_WRITE_BIT)
+                    .dstStageMask(COMPUTE_STAGE)
+                    .dstAccessMask(
+                            VK12.VK_ACCESS_SHADER_READ_BIT
+                                    | VK12.VK_ACCESS_SHADER_WRITE_BIT);
+            VkImageMemoryBarrier2.Buffer outputs = VkImageMemoryBarrier2.calloc(2, stack);
+            long sourceStage = this.guidesInitialized
+                    ? VK12.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+                    : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            long sourceAccess = this.guidesInitialized
+                    ? VK12.VK_ACCESS_MEMORY_READ_BIT | VK12.VK_ACCESS_MEMORY_WRITE_BIT
+                    : 0L;
+            int oldLayout = this.guidesInitialized
+                    ? VK12.VK_IMAGE_LAYOUT_GENERAL
+                    : VK12.VK_IMAGE_LAYOUT_UNDEFINED;
+            VulkanSync.setImageBarrier(
+                    outputs.get(0), this.depth.image(), oldLayout, VK12.VK_IMAGE_LAYOUT_GENERAL,
+                    sourceStage, sourceAccess, COMPUTE_STAGE, VK12.VK_ACCESS_SHADER_WRITE_BIT);
+            VulkanSync.setImageBarrier(
+                    outputs.get(1), this.motion.image(), oldLayout, VK12.VK_IMAGE_LAYOUT_GENERAL,
+                    sourceStage, sourceAccess, COMPUTE_STAGE, VK12.VK_ACCESS_SHADER_WRITE_BIT);
+            KHRSynchronization2.vkCmdPipelineBarrier2KHR(
+                    commandBuffer,
+                    VkDependencyInfo.calloc(stack)
+                            .sType$Default()
+                            .pMemoryBarriers(sources)
+                            .pImageMemoryBarriers(outputs));
+        }
     }
 
     private void requireOpen() {

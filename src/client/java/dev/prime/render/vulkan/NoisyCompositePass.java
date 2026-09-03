@@ -100,12 +100,6 @@ final class NoisyCompositePass implements Destroyable {
                     (this.width + 7) / 8,
                     (this.height + 7) / 8);
         }
-        VulkanSync.memoryBarrier(
-                commandBuffer,
-                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                VK12.VK_ACCESS_SHADER_WRITE_BIT,
-                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                VK12.VK_ACCESS_SHADER_READ_BIT);
     }
 
     @Override

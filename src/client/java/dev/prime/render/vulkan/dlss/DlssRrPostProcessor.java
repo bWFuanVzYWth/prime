@@ -166,7 +166,6 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
                         this.targets.specularMotion(),
                         this.targets.specularHitDistance(),
                         this.targets.responsivity()));
-        allCommandsToCompute(commandBuffer);
         this.displayTransform.record(
                 commandBuffer,
                 parameters.deltaMilliseconds() * 0.001F,

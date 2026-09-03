@@ -213,8 +213,8 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         this.recordPrimaryPrefix(commandBuffer, stack, commandOffset);
         int minimumBounces = input.minimumBounces();
         boolean sourceOne = false;
-        this.queueBarrier(commandBuffer, stack);
         for (int round = 1; round < minimumBounces; round++) {
+            this.queueBarrier(commandBuffer, stack);
             int sourceQueue = sourceOne
                     ? ShaderAbi.WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1
                     : ShaderAbi.WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0;
@@ -245,7 +245,6 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                     RealtimeStandardGroups.scatter(sourceOne),
                     commandOffset,
                     sourceQueue);
-            this.queueBarrier(commandBuffer, stack);
             sourceOne = !sourceOne;
         }
         int tailSourceQueue = sourceOne
