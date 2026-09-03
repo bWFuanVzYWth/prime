@@ -82,50 +82,8 @@ def generateShaderPrograms = tasks.register(
 	javaOutputDirectory = shaderProgramJavaRoot
 }
 
-def shaderIncludeReport = layout.buildDirectory.file(
-		'reports/prime-shaders/include-graph.txt')
 def shaderSourceRoot = file('shaders')
-def shaderTestIncludeRoot = file('src/test/slang')
 def shaderTestProgramManifest = file('src/test/slang/programs.json')
-def removedShaderReferencePaths = [
-		file('shaders/bsdf/core'),
-		file('shaders/bsdf/adapter/prime_bsdf_specializations.slang')
-]
-def shaderDependencyGraphType = primeShaderTaskTypes.dependencyGraph
-def verifyShaderIncludeGraph = tasks.register('verifyShaderIncludeGraph') {
-	group = 'verification'
-	description = 'Verifies that Prime Slang includes and path imports are resolvable and acyclic.'
-	dependsOn generateShaderAbi
-	inputs.files(
-			fileTree('shaders'),
-			fileTree('src/test/slang'),
-			shaderAbiSlangRoot)
-	outputs.file(shaderIncludeReport)
-
-	doLast {
-		def removedReferencePaths = removedShaderReferencePaths.findAll { it.exists() }
-		if (!removedReferencePaths.empty) {
-			throw new GradleException(
-					"Removed local RoboCute reference code was restored: ${removedReferencePaths}")
-		}
-		def shaderRoot = shaderSourceRoot.canonicalFile
-		def includeRoots = [
-				shaderRoot,
-				shaderTestIncludeRoot,
-				shaderAbiSlangRoot.get().asFile
-		]
-		def graph = shaderDependencyGraphType.graph(includeRoots)
-
-		def report = shaderIncludeReport.get().asFile
-		report.parentFile.mkdirs()
-		report.setText(
-				graph.collectMany { source, targets ->
-					targets.collect { "${source} -> ${it}" }
-				}.join(System.lineSeparator()) + System.lineSeparator(),
-				'UTF-8')
-	}
-}
-
 def defaultSlangCompilerProcesses = providers.provider {
 	def processors = Math.max(1, Runtime.runtime.availableProcessors())
 	long gibibyte = 1024L * 1024L * 1024L
@@ -216,7 +174,7 @@ def verifyShaderTestManifest = tasks.register('verifyShaderTestManifest') {
 def compileSlangTestShaders = tasks.register(
 		'compileSlangTestShaders', primeShaderTaskTypes.compileSlang) {
 	dependsOn generateShaderAbi,
-			verifyRoboCuteReference, verifyShaderIncludeGraph,
+			verifyRoboCuteReference, 'verifyShaderArchitecture',
 			'verifyShaderTestManifest', 'verifySlangToolchain'
 	sourceDirectory = file('src/test/slang/entries')
 	includeDirectories.from(
