@@ -163,6 +163,7 @@ def shaderTestManifestReport = layout.buildDirectory.file(
 def shaderTestEntryFiles = fileTree('src/test/slang/entries') {
 	include '*.slang'
 }
+def shaderManifestType = primeShaderManifestType
 def verifyShaderTestManifest = tasks.register('verifyShaderTestManifest') {
 	group = 'verification'
 	description = 'Verifies that every test Slang entry has one declared runtime or compile-only artifact.'
@@ -191,20 +192,12 @@ def verifyShaderTestManifest = tasks.register('verifyShaderTestManifest') {
 			throw new GradleException("Shader test manifest contains invalid modes: ${invalidModes}")
 		}
 		manifest.programs.each { program ->
-			def expectedArtifact
-			if (program.entry.endsWith('.compute.slang')) {
-				expectedArtifact = program.entry.replace('.compute.slang', '.comp.spv')
-			} else if (program.entry.endsWith('.raygeneration.slang')) {
-				expectedArtifact = program.entry.replace('.raygeneration.slang', '.rgen.spv')
-			} else if (program.entry.endsWith('.miss.slang')) {
-				expectedArtifact = program.entry.replace('.miss.slang', '.rmiss.spv')
-			} else if (program.entry.endsWith('.closesthit.slang')) {
-				expectedArtifact = program.entry.replace('.closesthit.slang', '.rchit.spv')
-			} else if (program.entry.endsWith('.anyhit.slang')) {
-				expectedArtifact = program.entry.replace('.anyhit.slang', '.rahit.spv')
-			} else {
+			def stage = shaderManifestType.stage(program.entry.toString())
+			if (stage == null) {
 				throw new GradleException("Unsupported Shader test entry stage: ${program.entry}")
 			}
+			def stem = program.entry.substring(0, program.entry.length() - stage.key.length())
+			def expectedArtifact = "${stem}.${stage.value[1]}.spv"
 			if (program.artifact != expectedArtifact) {
 				throw new GradleException(
 						"Shader test artifact mismatch for ${program.entry}: expected ${expectedArtifact}, found ${program.artifact}")

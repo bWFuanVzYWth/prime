@@ -88,21 +88,13 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 		def compilationUnits = []
 		def expectedOutputs = new TreeSet<String>()
 		sources.each { source ->
-			def stages = [
-					'compute': [slang: 'compute', legacy: 'comp'],
-					'raygeneration': [slang: 'raygeneration', legacy: 'rgen'],
-					'miss': [slang: 'miss', legacy: 'rmiss'],
-					'closesthit': [slang: 'closesthit', legacy: 'rchit'],
-					'anyhit': [slang: 'anyhit', legacy: 'rahit']
-			]
-			def suffix = stages.keySet().find { source.name.endsWith(".${it}.slang") }
-			if (suffix == null) {
+			def stage = PrimeShaderManifest.stage(source.name)
+			if (stage == null) {
 				throw new GradleException("Unknown Slang stage suffix: ${source}")
 			}
-			def stage = stages[suffix]
 			def stem = source.name.substring(
-					0, source.name.length() - ".${suffix}.slang".length())
-			def outputName = "${stem}.${stage.legacy}.spv".toString()
+					0, source.name.length() - stage.key.length())
+			def outputName = "${stem}.${stage.value[1]}.spv".toString()
 			expectedOutputs.add(outputName)
 			def output = new File(scratch, outputName)
 			if (!requiresCompilation(source, new File(published, outputName))) {
@@ -110,7 +102,7 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 			}
 			compilationUnits.add({
 					def arguments = PrimeShaderTool.compileArguments(
-							compiler, source, stage.slang, debugLevel.get())
+							compiler, source, stage.value[0], debugLevel.get())
 					includes.each { include ->
 						arguments.addAll(['-I', include.absolutePath])
 					}

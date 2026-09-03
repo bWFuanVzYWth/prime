@@ -30,7 +30,7 @@ final class PrimeShaderManifest {
             if (entry == null) {
                 throw new GradleException("Shader artifact ${id} has no entry")
             }
-            def stage = STAGES.find { suffix, ignored -> entry.endsWith(suffix) }
+            def stage = stage(entry)
             if (stage == null) {
                 throw new GradleException("Shader artifact ${id} has an unknown stage: ${entry}")
             }
@@ -57,6 +57,10 @@ final class PrimeShaderManifest {
             }
         }
         return [schema: compact.schema, artifacts: artifacts, schedules: schedules]
+    }
+
+    static Map.Entry<String, List<String>> stage(String entry) {
+        return STAGES.find { suffix, ignored -> entry.endsWith(suffix) }
     }
 
     private static void addArtifact(
