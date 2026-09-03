@@ -364,118 +364,35 @@ final class TracePipelinesContractTest {
                 + "vec3(f32),u32,vec3(f32),u32)";
         String shadowPayload = "struct(vec4(f32),vec4(f32),vec4(f32),vec4(f32),"
                 + "vec2(u32),u32,vec2(u32),vec2(u32))";
-        for (String shader : List.of("world.rmiss.spv", "world.rchit.spv")) {
-            assertEquals(
-                    Set.of(tracePayload),
-                    payloadShapes(shader, STORAGE_INCOMING_RAY_PAYLOAD));
-        }
-        for (String shader : List.of(
-                "shadow.rmiss.spv",
-                "shadow.rchit.spv",
-                "shadow_opaque.rahit.spv",
-                "shadow_nonopaque.rahit.spv")) {
-            assertEquals(
-                    Set.of(shadowPayload),
-                    payloadShapes(shader, STORAGE_INCOMING_RAY_PAYLOAD));
-        }
+        assertPayloadShapes(
+                Set.of(tracePayload), STORAGE_INCOMING_RAY_PAYLOAD,
+                List.of("world.rmiss.spv", "world.rchit.spv"));
+        assertPayloadShapes(
+                Set.of(shadowPayload), STORAGE_INCOMING_RAY_PAYLOAD,
+                List.of(
+                        "shadow.rmiss.spv",
+                        "shadow.rchit.spv",
+                        "shadow_opaque.rahit.spv",
+                        "shadow_nonopaque.rahit.spv"));
         for (String suffix : List.of("", "_ser")) {
-            assertEquals(
-                    Set.of(tracePayload),
-                    payloadShapes(
-                            wavefrontShader("realtime", "camera_trace", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(tracePayload),
-                    payloadShapes(
-                            wavefrontShader("realtime", "delta_walk", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(tracePayload),
-                    payloadShapes(
-                            wavefrontShader("realtime", "guide_delta_walk", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(),
-                    payloadShapes(
-                            wavefrontShader("realtime", "landing_light_select", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(shadowPayload),
-                    payloadShapes(
-                            wavefrontShader("realtime", "landing_direct", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(),
-                    payloadShapes(
-                            wavefrontShader("realtime", "landing_scatter", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(tracePayload),
-                    payloadShapes(
-                            wavefrontShader("realtime", "fixed_bridge_trace", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(),
-                    payloadShapes(
-                            wavefrontShader("realtime", "fixed_light_select", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(shadowPayload),
-                    payloadShapes(
-                            wavefrontShader("realtime", "fixed_direct", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(),
-                    payloadShapes(
-                            wavefrontShader("realtime", "fixed_scatter", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(shadowPayload),
-                    payloadShapes(
-                            wavefrontShader("realtime", "visible_direct", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(tracePayload),
-                    payloadShapes(
-                            wavefrontShader("offline", "camera_trace", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(tracePayload),
-                    payloadShapes(
-                            wavefrontShader("offline", "bridge_trace", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(),
-                    payloadShapes(
-                            wavefrontShader("offline", "light_select", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(shadowPayload),
-                    payloadShapes(
-                            wavefrontShader("offline", "direct", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(),
-                    payloadShapes(
-                            wavefrontShader("offline", "scatter", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(),
-                    payloadShapes(
-                            wavefrontShader(
-                                    "realtime", "branch_resolve", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(),
-                    payloadShapes(
-                            wavefrontShader("realtime", "surface_split", suffix),
-                            STORAGE_RAY_PAYLOAD));
-            assertEquals(
-                    Set.of(),
-                    payloadShapes(
-                            wavefrontShader(
-                                    "realtime", "noisy_output_resolve", suffix),
-                            STORAGE_RAY_PAYLOAD));
+            assertWavefrontPayloadShapes(
+                    Set.of(tracePayload), "realtime", suffix,
+                    "camera_trace", "delta_walk", "guide_delta_walk", "fixed_bridge_trace");
+            assertWavefrontPayloadShapes(
+                    Set.of(shadowPayload), "realtime", suffix,
+                    "landing_direct", "fixed_direct", "visible_direct");
+            assertWavefrontPayloadShapes(
+                    Set.of(), "realtime", suffix,
+                    "surface_split", "landing_light_select", "landing_scatter",
+                    "fixed_light_select", "fixed_scatter", "branch_resolve",
+                    "noisy_output_resolve");
+            assertWavefrontPayloadShapes(
+                    Set.of(tracePayload), "offline", suffix,
+                    "camera_trace", "bridge_trace");
+            assertWavefrontPayloadShapes(
+                    Set.of(shadowPayload), "offline", suffix, "direct");
+            assertWavefrontPayloadShapes(
+                    Set.of(), "offline", suffix, "light_select", "scatter");
         }
     }
 
@@ -484,17 +401,11 @@ final class TracePipelinesContractTest {
     void serReorderedPublishersDoNotReuseProducerSubgroups() throws IOException {
         Set<Integer> cameraTrace = parse(
                 wavefrontShader("realtime", "camera_trace", "_ser")).opcodes;
-        assertFalse(cameraTrace.contains(OP_GROUP_NON_UNIFORM_ELECT));
-        assertFalse(cameraTrace.contains(OP_GROUP_NON_UNIFORM_BROADCAST_FIRST));
-        assertFalse(cameraTrace.contains(OP_GROUP_NON_UNIFORM_BALLOT));
-        assertFalse(cameraTrace.contains(OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT));
+        assertSubgroupCompaction(false, cameraTrace, "camera_trace_ser");
 
         Set<Integer> primary = parse(
                 wavefrontShader("realtime", "surface_split", "_ser")).opcodes;
-        assertTrue(primary.contains(OP_GROUP_NON_UNIFORM_ELECT));
-        assertTrue(primary.contains(OP_GROUP_NON_UNIFORM_BROADCAST_FIRST));
-        assertTrue(primary.contains(OP_GROUP_NON_UNIFORM_BALLOT));
-        assertTrue(primary.contains(OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT));
+        assertSubgroupCompaction(true, primary, "surface_split_ser");
     }
 
     @Test
@@ -503,10 +414,7 @@ final class TracePipelinesContractTest {
             throws IOException {
         Set<Integer> landing = parse(wavefrontShader(
                 "realtime", "landing_scatter", "_ser")).opcodes;
-        assertTrue(landing.contains(OP_GROUP_NON_UNIFORM_ELECT));
-        assertTrue(landing.contains(OP_GROUP_NON_UNIFORM_BROADCAST_FIRST));
-        assertTrue(landing.contains(OP_GROUP_NON_UNIFORM_BALLOT));
-        assertTrue(landing.contains(OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT));
+        assertSubgroupCompaction(true, landing, "landing_scatter_ser");
 
         for (String suffix : List.of("", "_ser")) {
             for (String stage : List.of(
@@ -517,14 +425,7 @@ final class TracePipelinesContractTest {
                     "fixed_direct")) {
                 Set<Integer> opcodes = parse(
                         wavefrontShader("realtime", stage, suffix)).opcodes;
-                assertFalse(opcodes.contains(OP_GROUP_NON_UNIFORM_ELECT),
-                        stage + suffix);
-                assertFalse(opcodes.contains(OP_GROUP_NON_UNIFORM_BROADCAST_FIRST),
-                        stage + suffix);
-                assertFalse(opcodes.contains(OP_GROUP_NON_UNIFORM_BALLOT),
-                        stage + suffix);
-                assertFalse(opcodes.contains(OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT),
-                        stage + suffix);
+                assertSubgroupCompaction(false, opcodes, stage + suffix);
             }
         }
     }
@@ -534,20 +435,14 @@ final class TracePipelinesContractTest {
     void offlineStagesCompactOnlyAtScatter() throws IOException {
         Set<Integer> scatter = parse(
                 wavefrontShader("offline", "scatter", "_ser")).opcodes;
-        assertTrue(scatter.contains(OP_GROUP_NON_UNIFORM_ELECT));
-        assertTrue(scatter.contains(OP_GROUP_NON_UNIFORM_BROADCAST_FIRST));
-        assertTrue(scatter.contains(OP_GROUP_NON_UNIFORM_BALLOT));
-        assertTrue(scatter.contains(OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT));
+        assertSubgroupCompaction(true, scatter, "scatter_ser");
 
         for (String suffix : List.of("", "_ser")) {
             for (String stage : List.of(
                     "camera_trace", "bridge_trace", "light_select", "direct")) {
                 Set<Integer> opcodes = parse(
                         wavefrontShader("offline", stage, suffix)).opcodes;
-                assertFalse(opcodes.contains(OP_GROUP_NON_UNIFORM_ELECT), stage + suffix);
-                assertFalse(opcodes.contains(OP_GROUP_NON_UNIFORM_BROADCAST_FIRST), stage + suffix);
-                assertFalse(opcodes.contains(OP_GROUP_NON_UNIFORM_BALLOT), stage + suffix);
-                assertFalse(opcodes.contains(OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT), stage + suffix);
+                assertSubgroupCompaction(false, opcodes, stage + suffix);
             }
         }
     }
@@ -648,6 +543,37 @@ final class TracePipelinesContractTest {
         return stages.stream()
                 .map(stage -> wavefrontShader(renderer, stage, suffix))
                 .toList();
+    }
+
+    private static void assertWavefrontPayloadShapes(
+            Set<String> expected,
+            String renderer,
+            String suffix,
+            String... stages) throws IOException {
+        assertPayloadShapes(
+                expected,
+                STORAGE_RAY_PAYLOAD,
+                Arrays.stream(stages)
+                        .map(stage -> wavefrontShader(renderer, stage, suffix))
+                        .toList());
+    }
+
+    private static void assertPayloadShapes(
+            Set<String> expected, int storageClass, List<String> shaders) throws IOException {
+        for (String shader : shaders) {
+            assertEquals(expected, payloadShapes(shader, storageClass), shader);
+        }
+    }
+
+    private static void assertSubgroupCompaction(
+            boolean expected, Set<Integer> opcodes, String shader) {
+        for (int opcode : List.of(
+                OP_GROUP_NON_UNIFORM_ELECT,
+                OP_GROUP_NON_UNIFORM_BROADCAST_FIRST,
+                OP_GROUP_NON_UNIFORM_BALLOT,
+                OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT)) {
+            assertEquals(expected, opcodes.contains(opcode), shader);
+        }
     }
 
     private static String wavefrontShader(
