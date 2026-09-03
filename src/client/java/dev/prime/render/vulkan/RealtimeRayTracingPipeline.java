@@ -17,7 +17,11 @@ import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
 
 /** Realtime ray-tracing pipeline and its wavefront resources. */
 public final class RealtimeRayTracingPipeline implements Destroyable {
-    private static final int STORAGE_IMAGE_DESCRIPTOR_COUNT = imageBindings().length;
+    private static final int PRIMARY_DIRECT_INPUT = 1;
+    private static final int PRIMARY_INPUT = 2;
+    private static final int NEXT_STEP_INPUT = 4;
+    private static final ImageBinding[] IMAGE_BINDINGS = ImageBinding.values();
+    private static final int STORAGE_IMAGE_DESCRIPTOR_COUNT = IMAGE_BINDINGS.length;
     static final int DESCRIPTOR_BINDING_COUNT = STORAGE_IMAGE_DESCRIPTOR_COUNT + 2;
     static final WavefrontLayout LAYOUT = new WavefrontLayout(
             ShaderAbi.WAVEFRONT_PATH_SLOTS_PER_PIXEL,
@@ -29,18 +33,6 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
             ShaderAbi.WAVEFRONT_QUEUE_COMMAND_STRIDE,
             ShaderAbi.WAVEFRONT_QUEUE_INDEX_SIZE,
             "Realtime");
-
-    /** Barrier resources are physical even when several semantic bindings alias one image. */
-    static long[] uniqueImageHandles(long[] images) {
-        return Arrays.stream(images).distinct().toArray();
-    }
-
-    static long[] selectUniqueImageHandles(long[] images, int... indices) {
-        return Arrays.stream(indices)
-                .mapToLong(index -> images[index])
-                .distinct()
-                .toArray();
-    }
 
     private final VulkanContext context;
     private final TraceBackend backend;
@@ -56,23 +48,6 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         // Landing owns the primary-surface bounce. Every additional minimum bounce has four
         // narrow stages; the register tail replaces all remaining dispatches.
         return 4 * (minimumBounces - 1) + 13;
-    }
-
-    static int[] primaryDirectInputImageIndices() {
-        return new int[] {1, 2};
-    }
-
-    static int[] primaryInputImageIndices() {
-        return new int[] {0, 1, 2, 4, 6, 7, 8, 9, 10, 20, 21};
-    }
-
-    static int[] nextStepInputImageIndices() {
-        // Guide images participate even when the next stage only writes them: the fallback and
-        // first-owned guide stores require an explicit WAW dependency.
-        return new int[] {
-            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-            11, 12, 13, 14, 15, 16, 17, 18, 21
-        };
     }
 
     public RealtimeRayTracingPipeline(VulkanContext context, TraceBackend backend) {
@@ -507,10 +482,9 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         VkDescriptorSetLayoutBinding.Buffer bindings =
                 VkDescriptorSetLayoutBinding.calloc(DESCRIPTOR_BINDING_COUNT, stack);
         int cursor = 0;
-        int[] imageBindings = imageBindings();
-        for (int binding : imageBindings) {
+        for (ImageBinding binding : IMAGE_BINDINGS) {
             VulkanDescriptors.layoutBinding(
-                    bindings.get(cursor++), binding,
+                    bindings.get(cursor++), binding.descriptor,
                     VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                     1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
         }
@@ -527,34 +501,6 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 stack,
                 bindings,
                 "create realtime trace descriptor layout");
-    }
-
-    private static int[] imageBindings() {
-        return new int[] {
-            ShaderAbi.DESCRIPTOR_STABLE_RADIANCE,
-            ShaderAbi.DESCRIPTOR_NRD_NOISY_DIFFUSE,
-            ShaderAbi.DESCRIPTOR_NRD_NOISY_SPECULAR,
-            ShaderAbi.DESCRIPTOR_NRD_NORMAL_ROUGHNESS,
-            ShaderAbi.DESCRIPTOR_NRD_VIEW_Z,
-            ShaderAbi.DESCRIPTOR_WAVEFRONT_TRANSPORT_METADATA,
-            ShaderAbi.DESCRIPTOR_NRD_MATERIAL,
-            ShaderAbi.DESCRIPTOR_NRD_SPECULAR_MATERIAL,
-            ShaderAbi.DESCRIPTOR_NRD_PRIMARY_POSITION,
-            ShaderAbi.DESCRIPTOR_NRD_DIFFUSE_DIRECTION,
-            ShaderAbi.DESCRIPTOR_NRD_SPECULAR_DIRECTION,
-            ShaderAbi.DESCRIPTOR_NRD_REFLECTION_NOISY_DIFFUSE,
-            ShaderAbi.DESCRIPTOR_NRD_REFLECTION_NOISY_SPECULAR,
-            ShaderAbi.DESCRIPTOR_NRD_REFLECTION_NORMAL_ROUGHNESS,
-            ShaderAbi.DESCRIPTOR_NRD_REFLECTION_MATERIAL,
-            ShaderAbi.DESCRIPTOR_NRD_REFLECTION_SPECULAR_MATERIAL,
-            ShaderAbi.DESCRIPTOR_NRD_REFLECTION_POSITION,
-            ShaderAbi.DESCRIPTOR_NRD_REFLECTION_DIFFUSE_DIRECTION,
-            ShaderAbi.DESCRIPTOR_NRD_REFLECTION_SPECULAR_DIRECTION,
-            ShaderAbi.DESCRIPTOR_NRD_DISPLAY_POSITION,
-            ShaderAbi.DESCRIPTOR_NRD_SUN_LIGHTING,
-            ShaderAbi.DESCRIPTOR_NRD_SUN_PENUMBRA,
-            ShaderAbi.DESCRIPTOR_RECONSTRUCTION_CONTROL
-        };
     }
 
     @Override
@@ -588,17 +534,11 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
             this.descriptors = descriptors;
             this.descriptorSet = descriptors.handle();
             this.stableRadiance = stableRadiance;
-            this.images = images.clone();
-            this.allImages = uniqueImageHandles(allImages);
-            this.primaryDirectInputImages = selectUniqueImageHandles(
-                    allImages,
-                    RealtimeRayTracingPipeline.primaryDirectInputImageIndices());
-            this.primaryInputImages = selectUniqueImageHandles(
-                    allImages,
-                    RealtimeRayTracingPipeline.primaryInputImageIndices());
-            this.nextStepInputImages = selectUniqueImageHandles(
-                    allImages,
-                    RealtimeRayTracingPipeline.nextStepInputImageIndices());
+            this.images = images;
+            this.allImages = Arrays.stream(allImages).distinct().toArray();
+            this.primaryDirectInputImages = phaseImages(allImages, PRIMARY_DIRECT_INPUT);
+            this.primaryInputImages = phaseImages(allImages, PRIMARY_INPUT);
+            this.nextStepInputImages = phaseImages(allImages, NEXT_STEP_INPUT);
             this.wavefront = wavefront;
         }
 
@@ -613,14 +553,13 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 VulkanImage[] images = outputImages(stableRadiance, signals);
                 long[] views = new long[images.length];
                 long[] imageHandles = new long[images.length];
-                int[] imageBindings = imageBindings();
                 VulkanDescriptors.Binding[] bindings =
                         new VulkanDescriptors.Binding[images.length + 2];
                 for (int index = 0; index < images.length; index++) {
                     views[index] = images[index].view();
                     imageHandles[index] = images[index].image();
                     bindings[index] = VulkanDescriptors.image(
-                            imageBindings[index],
+                            IMAGE_BINDINGS[index].descriptor,
                             VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                             views[index],
                             VK12.VK_IMAGE_LAYOUT_GENERAL);
@@ -660,12 +599,9 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                     || this.wavefront != candidateWavefront) {
                 return false;
             }
-            VulkanImage[] candidates = outputImages(candidateStableRadiance, signals);
-            if (this.images.length != candidates.length) {
-                return false;
-            }
-            for (int index = 0; index < candidates.length; index++) {
-                if (this.images[index] != candidates[index].view()) {
+            for (int index = 0; index < IMAGE_BINDINGS.length; index++) {
+                if (this.images[index]
+                        != IMAGE_BINDINGS[index].image(candidateStableRadiance, signals).view()) {
                     return false;
                 }
             }
@@ -674,36 +610,87 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
 
         private static VulkanImage[] outputImages(
                 VulkanImage stableRadiance, RawWavefrontFrame signals) {
-            return new VulkanImage[] {
-                stableRadiance,
-                signals.noisyDiffuse(),
-                signals.noisySpecular(),
-                signals.normalRoughness(),
-                signals.viewZ(),
-                signals.transportScratch(),
-                signals.material(),
-                signals.specularMaterial(),
-                signals.primaryPosition(),
-                signals.diffuseDirection(),
-                signals.specularDirection(),
-                signals.reflectionNoisyDiffuse(),
-                signals.reflectionNoisySpecular(),
-                signals.reflectionNormalRoughness(),
-                signals.reflectionMaterial(),
-                signals.reflectionSpecularMaterial(),
-                signals.reflectionPosition(),
-                signals.reflectionDiffuseDirection(),
-                signals.reflectionSpecularDirection(),
-                signals.displayPosition(),
-                signals.sunLighting(),
-                signals.sunPenumbra(),
-                signals.reconstructionControl()
-            };
+            VulkanImage[] images = new VulkanImage[IMAGE_BINDINGS.length];
+            for (int index = 0; index < images.length; index++) {
+                images[index] = IMAGE_BINDINGS[index].image(stableRadiance, signals);
+            }
+            return images;
+        }
+
+        /** Guide outputs need the WAW dependency even before their first read. */
+        private static long[] phaseImages(long[] images, int phase) {
+            return java.util.stream.IntStream.range(0, IMAGE_BINDINGS.length)
+                    .filter(index -> (IMAGE_BINDINGS[index].phases & phase) != 0)
+                    .mapToLong(index -> images[index])
+                    .distinct()
+                    .toArray();
         }
 
         @Override
         public void destroy() {
             this.descriptors.destroy();
+        }
+    }
+
+    private enum ImageBinding {
+        STABLE(ShaderAbi.DESCRIPTOR_STABLE_RADIANCE, PRIMARY_INPUT | NEXT_STEP_INPUT),
+        NOISY_DIFFUSE(ShaderAbi.DESCRIPTOR_NRD_NOISY_DIFFUSE, PRIMARY_DIRECT_INPUT | PRIMARY_INPUT | NEXT_STEP_INPUT),
+        NOISY_SPECULAR(ShaderAbi.DESCRIPTOR_NRD_NOISY_SPECULAR, PRIMARY_DIRECT_INPUT | PRIMARY_INPUT | NEXT_STEP_INPUT),
+        NORMAL_ROUGHNESS(ShaderAbi.DESCRIPTOR_NRD_NORMAL_ROUGHNESS, NEXT_STEP_INPUT),
+        VIEW_Z(ShaderAbi.DESCRIPTOR_NRD_VIEW_Z, PRIMARY_INPUT | NEXT_STEP_INPUT),
+        TRANSPORT_METADATA(ShaderAbi.DESCRIPTOR_WAVEFRONT_TRANSPORT_METADATA, NEXT_STEP_INPUT),
+        MATERIAL(ShaderAbi.DESCRIPTOR_NRD_MATERIAL, PRIMARY_INPUT | NEXT_STEP_INPUT),
+        SPECULAR_MATERIAL(ShaderAbi.DESCRIPTOR_NRD_SPECULAR_MATERIAL, PRIMARY_INPUT | NEXT_STEP_INPUT),
+        PRIMARY_POSITION(ShaderAbi.DESCRIPTOR_NRD_PRIMARY_POSITION, PRIMARY_INPUT | NEXT_STEP_INPUT),
+        DIFFUSE_DIRECTION(ShaderAbi.DESCRIPTOR_NRD_DIFFUSE_DIRECTION, PRIMARY_INPUT | NEXT_STEP_INPUT),
+        SPECULAR_DIRECTION(ShaderAbi.DESCRIPTOR_NRD_SPECULAR_DIRECTION, PRIMARY_INPUT | NEXT_STEP_INPUT),
+        REFLECTION_NOISY_DIFFUSE(ShaderAbi.DESCRIPTOR_NRD_REFLECTION_NOISY_DIFFUSE, NEXT_STEP_INPUT),
+        REFLECTION_NOISY_SPECULAR(ShaderAbi.DESCRIPTOR_NRD_REFLECTION_NOISY_SPECULAR, NEXT_STEP_INPUT),
+        REFLECTION_NORMAL_ROUGHNESS(ShaderAbi.DESCRIPTOR_NRD_REFLECTION_NORMAL_ROUGHNESS, NEXT_STEP_INPUT),
+        REFLECTION_MATERIAL(ShaderAbi.DESCRIPTOR_NRD_REFLECTION_MATERIAL, NEXT_STEP_INPUT),
+        REFLECTION_SPECULAR_MATERIAL(ShaderAbi.DESCRIPTOR_NRD_REFLECTION_SPECULAR_MATERIAL, NEXT_STEP_INPUT),
+        REFLECTION_POSITION(ShaderAbi.DESCRIPTOR_NRD_REFLECTION_POSITION, NEXT_STEP_INPUT),
+        REFLECTION_DIFFUSE_DIRECTION(ShaderAbi.DESCRIPTOR_NRD_REFLECTION_DIFFUSE_DIRECTION, NEXT_STEP_INPUT),
+        REFLECTION_SPECULAR_DIRECTION(ShaderAbi.DESCRIPTOR_NRD_REFLECTION_SPECULAR_DIRECTION, NEXT_STEP_INPUT),
+        DISPLAY_POSITION(ShaderAbi.DESCRIPTOR_NRD_DISPLAY_POSITION, 0),
+        SUN_LIGHTING(ShaderAbi.DESCRIPTOR_NRD_SUN_LIGHTING, PRIMARY_INPUT),
+        SUN_PENUMBRA(ShaderAbi.DESCRIPTOR_NRD_SUN_PENUMBRA, PRIMARY_INPUT | NEXT_STEP_INPUT),
+        RECONSTRUCTION_CONTROL(ShaderAbi.DESCRIPTOR_RECONSTRUCTION_CONTROL, 0);
+
+        final int descriptor;
+        final int phases;
+
+        ImageBinding(int descriptor, int phases) {
+            this.descriptor = descriptor;
+            this.phases = phases;
+        }
+
+        VulkanImage image(VulkanImage stableRadiance, RawWavefrontFrame raw) {
+            return switch (this) {
+                case STABLE -> stableRadiance;
+                case NOISY_DIFFUSE -> raw.noisyDiffuse();
+                case NOISY_SPECULAR -> raw.noisySpecular();
+                case NORMAL_ROUGHNESS -> raw.normalRoughness();
+                case VIEW_Z -> raw.viewZ();
+                case TRANSPORT_METADATA -> raw.transportScratch();
+                case MATERIAL -> raw.material();
+                case SPECULAR_MATERIAL -> raw.specularMaterial();
+                case PRIMARY_POSITION -> raw.primaryPosition();
+                case DIFFUSE_DIRECTION -> raw.diffuseDirection();
+                case SPECULAR_DIRECTION -> raw.specularDirection();
+                case REFLECTION_NOISY_DIFFUSE -> raw.reflectionNoisyDiffuse();
+                case REFLECTION_NOISY_SPECULAR -> raw.reflectionNoisySpecular();
+                case REFLECTION_NORMAL_ROUGHNESS -> raw.reflectionNormalRoughness();
+                case REFLECTION_MATERIAL -> raw.reflectionMaterial();
+                case REFLECTION_SPECULAR_MATERIAL -> raw.reflectionSpecularMaterial();
+                case REFLECTION_POSITION -> raw.reflectionPosition();
+                case REFLECTION_DIFFUSE_DIRECTION -> raw.reflectionDiffuseDirection();
+                case REFLECTION_SPECULAR_DIRECTION -> raw.reflectionSpecularDirection();
+                case DISPLAY_POSITION -> raw.displayPosition();
+                case SUN_LIGHTING -> raw.sunLighting();
+                case SUN_PENUMBRA -> raw.sunPenumbra();
+                case RECONSTRUCTION_CONTROL -> raw.reconstructionControl();
+            };
         }
     }
 
