@@ -67,7 +67,6 @@ public final class NrdDenoiser implements Destroyable {
     private final NrdImages images;
     private final RawWavefrontFrame rawFrame;
     private final PreparedNrdFrame preparedFrame;
-    private final NrdCompositeFrame compositeFrame;
     private final AtmospherePipeline atmosphere;
     private final long nearestSampler;
     private final long linearSampler;
@@ -87,7 +86,6 @@ public final class NrdDenoiser implements Destroyable {
             int height,
             NrdNative.Instance nativeInstance,
             NrdImages images,
-            VulkanImage output,
             AtmospherePipeline atmosphere,
             long nearestSampler,
             long linearSampler,
@@ -121,10 +119,6 @@ public final class NrdDenoiser implements Destroyable {
                 images.sunPenumbra,
                 images.fsrDepth,
                 images.fsrMotion);
-        this.compositeFrame = new NrdCompositeFrame(
-                output,
-                images.fsrReactiveMask,
-                images.fsrTransparencyCompositionMask);
         this.atmosphere = atmosphere;
         this.nearestSampler = nearestSampler;
         this.linearSampler = linearSampler;
@@ -186,7 +180,6 @@ public final class NrdDenoiser implements Destroyable {
                     height,
                     nativeInstance,
                     images,
-                    output,
                     atmosphere,
                     nearestSampler,
                     linearSampler,
@@ -207,11 +200,6 @@ public final class NrdDenoiser implements Destroyable {
             ResourceCleanup.close(nativeInstance, exception);
             throw exception;
         }
-    }
-
-    public NrdCompositeFrame compositeFrame() {
-        this.requireOpen();
-        return this.compositeFrame;
     }
 
     public RawWavefrontFrame rawFrame() {

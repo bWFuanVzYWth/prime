@@ -56,7 +56,6 @@ final class OfflineSession implements Destroyable {
         this.exposure = Objects.requireNonNull(exposure, "exposure");
     }
 
-    ClientLevel world() { return this.world; }
     TerrainScene.ResidentSceneView scene() { return this.scene; }
     FrameCamera camera() { return this.camera; }
     AstronomyState astronomy() { return this.astronomy; }

@@ -202,29 +202,6 @@ public final class VulkanSync {
         }
     }
 
-    public static void bufferBarriers(
-            VkCommandBuffer commandBuffer,
-            MemoryStack stack,
-            VulkanBuffer[] buffers,
-            long sourceStage,
-            long sourceAccess,
-            long destinationStage,
-            long destinationAccess) {
-        try (MemoryStack frame = stack.push()) {
-            VkBufferMemoryBarrier2.Buffer barriers =
-                    VkBufferMemoryBarrier2.calloc(buffers.length, frame);
-            for (int index = 0; index < buffers.length; index++) {
-                VulkanBuffer buffer = buffers[index];
-                setBufferBarrier(barriers.get(index), buffer.handle(), 0L, buffer.size(),
-                        sourceStage, sourceAccess, destinationStage, destinationAccess);
-            }
-            KHRSynchronization2.vkCmdPipelineBarrier2KHR(
-                    commandBuffer,
-                    VkDependencyInfo.calloc(frame).sType$Default()
-                            .pBufferMemoryBarriers(barriers));
-        }
-    }
-
     private static void setBufferBarrier(
             VkBufferMemoryBarrier2 barrier,
             long buffer,

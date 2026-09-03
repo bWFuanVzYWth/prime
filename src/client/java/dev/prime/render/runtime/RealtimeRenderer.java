@@ -75,10 +75,6 @@ final class RealtimeRenderer implements Destroyable {
         return this.resources;
     }
 
-    DlssRrNative.Context ngxContext() {
-        return this.ngxContext;
-    }
-
     boolean hasSizedResources() {
         return this.resources != null;
     }

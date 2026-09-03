@@ -299,11 +299,6 @@ public final class NrdFsrPostProcessor implements VulkanReconstructionProcessor 
         }
     }
 
-    /** Keeps scene color in GENERAL before NRD's composite writes it. */
-    public VulkanImage sceneColor() {
-        return this.sceneColor;
-    }
-
     private NrdInputDebugPass nrdDebugPresent(
             dev.prime.render.vulkan.nrd.PreparedNrdFrame prepared) {
         if (this.nrdDebugPresent == null) {

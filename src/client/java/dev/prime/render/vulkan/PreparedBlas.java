@@ -567,7 +567,7 @@ public final class PreparedBlas {
         }
     }
 
-    public void destroyPersistentResources() {
+    private void destroyPersistentResources() {
         synchronized (this) {
             this.transition(CompactionEvent.DESTROYED);
         }
