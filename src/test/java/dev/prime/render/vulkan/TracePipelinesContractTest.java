@@ -136,11 +136,11 @@ final class TracePipelinesContractTest {
                 RealtimeRayTracingPipeline.nextStepInputImageIndices());
         assertArrayEquals(
                 new long[] {7L, 3L, 5L},
-                RealtimeRayTracingPipelineSupport.uniqueImageHandles(
+                RealtimeRayTracingPipeline.uniqueImageHandles(
                         new long[] {7L, 3L, 7L, 5L, 3L}));
         assertArrayEquals(
                 new long[] {5L, 7L, 3L},
-                RealtimeRayTracingPipelineSupport.selectUniqueImageHandles(
+                RealtimeRayTracingPipeline.selectUniqueImageHandles(
                         new long[] {7L, 3L, 5L, 7L}, 2, 0, 3, 1));
     }
 

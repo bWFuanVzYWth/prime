@@ -19,7 +19,6 @@ import dev.prime.render.vulkan.AtmospherePipeline;
 import dev.prime.render.vulkan.DisplayExposureDiagnostics;
 import dev.prime.render.vulkan.MaterialTexturePages;
 import dev.prime.render.vulkan.RealtimeFrameExecutor;
-import dev.prime.render.vulkan.RealtimeIntegratorPipeline;
 import dev.prime.render.vulkan.RealtimeRayTracingPipeline;
 import dev.prime.render.vulkan.SunShadowPipeline;
 import dev.prime.render.vulkan.TraceBackend;
@@ -43,7 +42,7 @@ final class RealtimeRenderer implements Destroyable {
     private final DisplayExposureDiagnostics exposureDiagnostics;
     private final DlssRrNative.Context ngxContext;
     private final ReconstructionBackendRegistry reconstructionRegistry;
-    private RealtimeIntegratorPipeline pipeline;
+    private RealtimeRayTracingPipeline pipeline;
     private VulkanReconstructionResources resources;
     private RealtimeSampleState sampleState = RealtimeSampleState.initial();
     private MaterialSettings.Snapshot materialSettings;
@@ -63,7 +62,7 @@ final class RealtimeRenderer implements Destroyable {
         this.exposureDiagnostics = new DisplayExposureDiagnostics(context);
     }
 
-    RealtimeIntegratorPipeline pipeline() {
+    RealtimeRayTracingPipeline pipeline() {
         return this.pipeline;
     }
 
@@ -427,7 +426,7 @@ final class RealtimeRenderer implements Destroyable {
     }
 
     void reload(AtmospherePipeline atmosphere) {
-        RealtimeIntegratorPipeline replacementPipeline = null;
+        RealtimeRayTracingPipeline replacementPipeline = null;
         VulkanReconstructionResources replacementResources = null;
         try {
             replacementPipeline = new RealtimeRayTracingPipeline(this.context, this.backend);
@@ -441,7 +440,7 @@ final class RealtimeRenderer implements Destroyable {
             ResourceCleanup.destroy(replacementPipeline, exception);
             throw exception;
         }
-        RealtimeIntegratorPipeline previousPipeline = this.pipeline;
+        RealtimeRayTracingPipeline previousPipeline = this.pipeline;
         VulkanReconstructionResources previousResources = this.resources;
         this.pipeline = replacementPipeline;
         this.resources = replacementResources;
