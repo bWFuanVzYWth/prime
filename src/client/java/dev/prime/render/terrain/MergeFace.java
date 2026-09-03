@@ -11,72 +11,30 @@ import java.util.Arrays;
  * compatibility and CPU material translation. A negative UV-density word tags the primitive as
  * periodic.
  */
-public final class MergeFace {
+public record MergeFace(
+        int planeAxis,
+        int normalSign,
+        int planeCell,
+        int cellU,
+        int cellV,
+        CapturedSprite sprite,
+        int[] primitive,
+        float uv0U,
+        float uv0V,
+        float uv1U,
+        float uv1V,
+        float uv2U,
+        float uv2V,
+        boolean cutout,
+        boolean transmissive,
+        boolean rasterOverlay,
+        boolean buildOpacityMicromap,
+        LabPbrHeightMap labPbrHeightMap,
+        LabPbrMaterialMap labPbrMaterialMap) {
     private static final int PLANE_GRID_SCALE = 16;
     private static final float POSITION_EPSILON = 1.0E-5F;
     private static final float NORMAL_EPSILON = 1.0E-4F;
     private static final float UV_EPSILON = 2.0E-5F;
-
-    private final int planeAxis;
-    private final int normalSign;
-    private final int planeCell;
-    private final int cellU;
-    private final int cellV;
-    private final CapturedSprite sprite;
-    private final int[] primitive;
-    private final float uv0U;
-    private final float uv0V;
-    private final float uv1U;
-    private final float uv1V;
-    private final float uv2U;
-    private final float uv2V;
-    private final boolean cutout;
-    private final boolean transmissive;
-    private final boolean rasterOverlay;
-    private final boolean buildOpacityMicromap;
-    private final LabPbrHeightMap labPbrHeightMap;
-    private final LabPbrMaterialMap labPbrMaterialMap;
-
-    private MergeFace(
-            int planeAxis,
-            int normalSign,
-            int planeCell,
-            int cellU,
-            int cellV,
-            CapturedSprite sprite,
-            int[] primitive,
-            float uv0U,
-            float uv0V,
-            float uv1U,
-            float uv1V,
-            float uv2U,
-            float uv2V,
-            boolean cutout,
-            boolean transmissive,
-            boolean rasterOverlay,
-            boolean buildOpacityMicromap,
-            LabPbrHeightMap labPbrHeightMap,
-            LabPbrMaterialMap labPbrMaterialMap) {
-        this.planeAxis = planeAxis;
-        this.normalSign = normalSign;
-        this.planeCell = planeCell;
-        this.cellU = cellU;
-        this.cellV = cellV;
-        this.sprite = sprite;
-        this.primitive = primitive;
-        this.uv0U = uv0U;
-        this.uv0V = uv0V;
-        this.uv1U = uv1U;
-        this.uv1V = uv1V;
-        this.uv2U = uv2U;
-        this.uv2V = uv2V;
-        this.cutout = cutout;
-        this.transmissive = transmissive;
-        this.rasterOverlay = rasterOverlay;
-        this.buildOpacityMicromap = buildOpacityMicromap;
-        this.labPbrHeightMap = labPbrHeightMap;
-        this.labPbrMaterialMap = labPbrMaterialMap;
-    }
 
     static MergeFace tryCreate(
             SectionMeshAccumulator.Quad quad,
@@ -275,76 +233,8 @@ public final class MergeFace {
                 this.labPbrMaterialMap);
     }
 
-    int planeAxis() {
-        return this.planeAxis;
-    }
-
-    int normalSign() {
-        return this.normalSign;
-    }
-
     float plane() {
         return this.planeCell / (float) PLANE_GRID_SCALE;
-    }
-
-    int planeCell() {
-        return this.planeCell;
-    }
-
-    int cellU() {
-        return this.cellU;
-    }
-
-    int cellV() {
-        return this.cellV;
-    }
-
-    CapturedSprite sprite() {
-        return this.sprite;
-    }
-
-    int[] primitive() {
-        return this.primitive;
-    }
-
-    float uv0U() {
-        return this.uv0U;
-    }
-
-    float uv0V() {
-        return this.uv0V;
-    }
-
-    float uv1U() {
-        return this.uv1U;
-    }
-
-    float uv1V() {
-        return this.uv1V;
-    }
-
-    float uv2U() {
-        return this.uv2U;
-    }
-
-    float uv2V() {
-        return this.uv2V;
-    }
-
-    boolean cutout() {
-        return this.cutout;
-    }
-
-    boolean transmissive() {
-        return this.transmissive;
-    }
-
-    boolean rasterOverlay() {
-        return this.rasterOverlay;
-    }
-
-    boolean buildOpacityMicromap() {
-        return this.buildOpacityMicromap;
     }
 
     boolean frontFaceOnly() {
@@ -352,14 +242,6 @@ public final class MergeFace {
                         this.primitive[3], this.primitive[5])
                         & PrimitivePacking.CONTROL_FRONT_FACE_ONLY)
                 != 0;
-    }
-
-    LabPbrHeightMap labPbrHeightMap() {
-        return this.labPbrHeightMap;
-    }
-
-    LabPbrMaterialMap labPbrMaterialMap() {
-        return this.labPbrMaterialMap;
     }
 
     boolean sameMaterial(MergeFace other) {
