@@ -83,6 +83,7 @@ final class MaterialRecipeResolverTest {
                 new LabPbrMaterialMap.Pixels(
                         new int[] {0xff000400}, 1, 1, 1, 1, 1));
         LabPbrMaterialSet source = new LabPbrMaterialSet(
+                Map.of(),
                 Set.of(ID),
                 Set.of(ID),
                 Map.of(ID, emission),

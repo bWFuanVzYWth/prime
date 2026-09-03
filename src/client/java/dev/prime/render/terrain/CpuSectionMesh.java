@@ -95,31 +95,6 @@ public record CpuSectionMesh(
             int opaqueTriangleCount,
             int cutoutTriangleCount,
             int transmissiveTriangleCount,
-            int opaqueMacroTriangleCount,
-            int cutoutMacroTriangleCount,
-            int transmissiveMacroTriangleCount,
-            OpacityMicromapData opacityMicromap,
-            CpuSectionLights lights) {
-        this(
-                positions,
-                primitiveRecords,
-                new int[0],
-                opaqueTriangleCount,
-                cutoutTriangleCount,
-                transmissiveTriangleCount,
-                opaqueMacroTriangleCount,
-                cutoutMacroTriangleCount,
-                transmissiveMacroTriangleCount,
-                opacityMicromap,
-                lights);
-    }
-
-    public CpuSectionMesh(
-            float[] positions,
-            int[] primitiveRecords,
-            int opaqueTriangleCount,
-            int cutoutTriangleCount,
-            int transmissiveTriangleCount,
             OpacityMicromapData opacityMicromap,
             CpuSectionLights lights) {
         this(
@@ -134,24 +109,6 @@ public record CpuSectionMesh(
                 0,
                 opacityMicromap,
                 lights);
-    }
-
-    /** Borrowed read-only backing storage; ownership remains with this mesh. */
-    @Override
-    public float[] positions() {
-        return this.positions;
-    }
-
-    /** Borrowed read-only backing storage; ownership remains with this mesh. */
-    @Override
-    public int[] primitiveRecords() {
-        return this.primitiveRecords;
-    }
-
-    /** Borrowed read-only sparse backing storage; empty means every primitive is SINGLE. */
-    @Override
-    public int[] surfaceRelationRecords() {
-        return this.surfaceRelationRecords;
     }
 
     public boolean isEmpty() {

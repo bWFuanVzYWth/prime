@@ -22,14 +22,13 @@ public class ClusterTranslationBenchmark {
     @Param({"typical", "extreme"})
     public String scenario;
 
-    private ClusterTranslationInput input;
+    private ClusterTranslationBenchmarkCorpus.Input input;
 
     @Setup(Level.Trial)
     public void setup() {
         this.input = ClusterTranslationBenchmarkCorpus.input(this.scenario);
         ClusterTranslationBenchmarkCorpus.Fingerprint actual =
-                ClusterTranslationBenchmarkCorpus.fingerprint(
-                        ClusterSceneTranslator.translate(this.input));
+                ClusterTranslationBenchmarkCorpus.fingerprint(this.input.translate());
         if (!ClusterTranslationBenchmarkCorpus.expected(this.scenario).equals(actual)) {
             throw new IllegalStateException(
                     "Translation benchmark correctness baseline drifted: " + actual);
@@ -38,6 +37,6 @@ public class ClusterTranslationBenchmark {
 
     @Benchmark
     public CpuClusterMesh translate() {
-        return ClusterSceneTranslator.translate(this.input);
+        return this.input.translate();
     }
 }

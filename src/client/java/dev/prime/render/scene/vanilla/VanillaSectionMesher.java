@@ -23,7 +23,8 @@ public final class VanillaSectionMesher {
     }
 
     public static CapturedSectionGeometry compile(
-            VanillaSectionCompileInput input,
+            VanillaClusterCompiler.Capture cluster,
+            VanillaSectionSnapshot snapshot,
             SectionBufferBuilderPack builders,
             VanillaSpriteResolver spriteResolver) {
         // AO and the light map affect only raster vertex illumination. Disabling AO here avoids
@@ -31,31 +32,29 @@ public final class VanillaSectionMesher {
         // model selection, culling, UVs, fluid surfaces and render layers still come from vanilla.
         SectionCompiler compiler = new SectionCompiler(
                 false,
-                input.assets().cutoutLeaves(),
-                input.assets().blockModels(),
-                input.assets().fluidModels(),
-                input.assets().blockColors());
+                cluster.assets().cutoutLeaves(),
+                cluster.assets().blockModels(),
+                cluster.assets().fluidModels(),
+                cluster.assets().blockColors());
         SectionPos section = SectionPos.of(
-                input.section().sectionX(),
-                input.section().sectionY(),
-                input.section().sectionZ());
+                snapshot.sectionX(), snapshot.sectionY(), snapshot.sectionZ());
         boolean completed = false;
         try (VanillaSectionCapture capture = VanillaSectionCapture.open(
-                input.section().region(),
-                input.assets().blockModels(),
-                input.assets().blockColors(),
-                input.assets().blockSpriteFinder(),
+                snapshot.region(),
+                cluster.assets().blockModels(),
+                cluster.assets().blockColors(),
+                cluster.assets().blockSpriteFinder(),
                 spriteResolver,
-                input.assets().cutoutLeaves(),
-                input.section().sectionX(),
-                input.section().sectionY(),
-                input.section().sectionZ(),
-                input.clusterX(),
-                input.clusterY(),
-                input.clusterZ())) {
+                cluster.assets().cutoutLeaves(),
+                snapshot.sectionX(),
+                snapshot.sectionY(),
+                snapshot.sectionZ(),
+                cluster.clusterX,
+                cluster.clusterY,
+                cluster.clusterZ)) {
             SectionCompiler.Results results = compiler.compile(
                     section,
-                    input.section().region(),
+                    snapshot.region(),
                     VertexSorting.byDistance(0.0F, 0.0F, 0.0F),
                     builders);
             try {

@@ -6,16 +6,14 @@ import java.util.Objects;
 import java.util.function.IntUnaryOperator;
 
 /** Immutable voxel instance stream after exact source tints have become renderer TintIds. */
-record ResolvedVoxelInstances(int[] meshIndices, int[] tintIds, float[] translations) {
+record ResolvedVoxelInstances(CpuVoxelInstances source, int[] tintIds) {
     static final ResolvedVoxelInstances EMPTY =
-            new ResolvedVoxelInstances(new int[0], new int[0], new float[0]);
+            new ResolvedVoxelInstances(CpuVoxelInstances.EMPTY, new int[0]);
 
     ResolvedVoxelInstances {
-        meshIndices = Objects.requireNonNull(meshIndices, "meshIndices").clone();
+        Objects.requireNonNull(source, "source");
         tintIds = Objects.requireNonNull(tintIds, "tintIds").clone();
-        translations = Objects.requireNonNull(translations, "translations").clone();
-        if (meshIndices.length != tintIds.length
-                || translations.length != Math.multiplyExact(meshIndices.length, 3)) {
+        if (source.count() != tintIds.length) {
             throw new IllegalArgumentException(
                     "Resolved voxel instance arrays have inconsistent lengths");
         }
@@ -32,16 +30,15 @@ record ResolvedVoxelInstances(int[] meshIndices, int[] tintIds, float[] translat
             tintIds[index] = TintIdResolver.resolveOpaquePackedRgb(
                     source.packedTint(index), resolver);
         }
-        return new ResolvedVoxelInstances(
-                source.meshIndices(), tintIds, source.translations());
+        return new ResolvedVoxelInstances(source, tintIds);
     }
 
     int count() {
-        return this.meshIndices.length;
+        return this.source.count();
     }
 
     int meshIndex(int index) {
-        return this.meshIndices[index];
+        return this.source.meshIndex(index);
     }
 
     int tintId(int index) {
@@ -49,14 +46,14 @@ record ResolvedVoxelInstances(int[] meshIndices, int[] tintIds, float[] translat
     }
 
     float translationX(int index) {
-        return this.translations[index * 3];
+        return this.source.translationX(index);
     }
 
     float translationY(int index) {
-        return this.translations[index * 3 + 1];
+        return this.source.translationY(index);
     }
 
     float translationZ(int index) {
-        return this.translations[index * 3 + 2];
+        return this.source.translationZ(index);
     }
 }

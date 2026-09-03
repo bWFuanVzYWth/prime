@@ -480,63 +480,6 @@ public final class CpuClusterMesh {
                                     transmissiveMacroTriangleCount)));
         }
 
-        public Segment(
-                float[] positions,
-                int[] primitiveRecords,
-                int opaqueTriangleCount,
-                int cutoutTriangleCount,
-                int transmissiveTriangleCount,
-                int opaqueMacroTriangleCount,
-                int cutoutMacroTriangleCount,
-                int transmissiveMacroTriangleCount) {
-            this(
-                    positions,
-                    primitiveRecords,
-                    new int[0],
-                    opaqueTriangleCount,
-                    cutoutTriangleCount,
-                    transmissiveTriangleCount,
-                    opaqueMacroTriangleCount,
-                    cutoutMacroTriangleCount,
-                    transmissiveMacroTriangleCount);
-        }
-
-        public Segment(
-                float[] positions,
-                int[] primitiveRecords,
-                int opaqueTriangleCount,
-                int cutoutTriangleCount,
-                int transmissiveTriangleCount) {
-            this(
-                    positions,
-                    primitiveRecords,
-                    new int[0],
-                    opaqueTriangleCount,
-                    cutoutTriangleCount,
-                    transmissiveTriangleCount,
-                    0,
-                    0,
-                    0);
-        }
-
-        /** Borrowed read-only backing storage; ownership remains with this segment. */
-        @Override
-        public float[] positions() {
-            return this.positions;
-        }
-
-        /** Borrowed read-only backing storage; ownership remains with this segment. */
-        @Override
-        public int[] primitiveRecords() {
-            return this.primitiveRecords;
-        }
-
-        /** Borrowed read-only backing storage; empty means every primitive is SINGLE. */
-        @Override
-        public int[] surfaceRelationRecords() {
-            return this.surfaceRelationRecords;
-        }
-
         public int triangleCount() {
             return Math.addExact(
                     Math.addExact(this.opaqueTriangleCount, this.cutoutTriangleCount),

@@ -23,23 +23,6 @@ public record LabPbrMaterialSet(
         this(Map.of(), normalSprites, specularSprites, emissionMaps, Map.of(), Map.of());
     }
 
-    public LabPbrMaterialSet(
-            Set<SpriteId> normalSprites,
-            Set<SpriteId> specularSprites,
-            Map<SpriteId, LabPbrEmissionMap> emissionMaps,
-            Map<SpriteId, LabPbrHeightMap> heightMaps) {
-        this(Map.of(), normalSprites, specularSprites, emissionMaps, heightMaps, Map.of());
-    }
-
-    public LabPbrMaterialSet(
-            Set<SpriteId> normalSprites,
-            Set<SpriteId> specularSprites,
-            Map<SpriteId, LabPbrEmissionMap> emissionMaps,
-            Map<SpriteId, LabPbrHeightMap> heightMaps,
-            Map<SpriteId, LabPbrMaterialMap> materialMaps) {
-        this(Map.of(), normalSprites, specularSprites, emissionMaps, heightMaps, materialMaps);
-    }
-
     public LabPbrMaterialSet {
         textureIds = Map.copyOf(textureIds);
         normalSprites = Set.copyOf(normalSprites);

@@ -36,43 +36,6 @@ final class MergedFaceMeshBuilder {
     private CpuVoxelInstances voxelInstances = CpuVoxelInstances.EMPTY;
 
     MergedFaceMeshBuilder(
-            int segmentTriangleTarget, int maxOpacityMicromapSubdivisionLevel) {
-        this(
-                segmentTriangleTarget,
-                maxOpacityMicromapSubdivisionLevel,
-                false,
-                VoxelSurfaceSettings.BASE_HEIGHT);
-    }
-
-    MergedFaceMeshBuilder(
-            int segmentTriangleTarget,
-            int maxOpacityMicromapSubdivisionLevel,
-            boolean voxelSurfacesEnabled,
-            float voxelSurfaceMaximumHeight) {
-        this(
-                segmentTriangleTarget,
-                maxOpacityMicromapSubdivisionLevel,
-                maxOpacityMicromapSubdivisionLevel,
-                voxelSurfacesEnabled,
-                voxelSurfaceMaximumHeight);
-    }
-
-    MergedFaceMeshBuilder(
-            int segmentTriangleTarget,
-            int maxOpacity2StateSubdivisionLevel,
-            int maxOpacity4StateSubdivisionLevel,
-            boolean voxelSurfacesEnabled,
-            float voxelSurfaceMaximumHeight) {
-        this(
-                segmentTriangleTarget,
-                maxOpacity2StateSubdivisionLevel,
-                maxOpacity4StateSubdivisionLevel,
-                voxelSurfacesEnabled,
-                voxelSurfaceMaximumHeight,
-                new ClusterTranslationWork(ClusterTranslationControl.UNINTERRUPTIBLE));
-    }
-
-    MergedFaceMeshBuilder(
             int segmentTriangleTarget,
             int maxOpacity2StateSubdivisionLevel,
             int maxOpacity4StateSubdivisionLevel,

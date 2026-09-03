@@ -196,6 +196,7 @@ final class TextureVoxelSurfaceTest {
                     new LabPbrMaterialMap.Pixels(
                             overlaySpecular, 16, 16, 16, 1, 1));
             LabPbrMaterialSet materials = new LabPbrMaterialSet(
+                    Map.of(),
                     Set.of(
                             baseSprite.id(),
                             overlaySprite.id()),

@@ -19,23 +19,22 @@ public final class ClusterSceneTranslator {
             LabPbrMaterialSet materials,
             ClusterTranslationSettings settings) {
         return translate(
-                new ClusterTranslationInput(captured, materials, settings),
+                captured,
+                materials,
+                settings,
                 ClusterTranslationControl.UNINTERRUPTIBLE);
     }
 
-    public static CpuClusterMesh translate(ClusterTranslationInput input) {
-        return translate(input, ClusterTranslationControl.UNINTERRUPTIBLE);
-    }
-
     public static CpuClusterMesh translate(
-            ClusterTranslationInput input,
+            CapturedCluster captured,
+            LabPbrMaterialSet materials,
+            ClusterTranslationSettings settings,
             ClusterTranslationControl control) {
-        Objects.requireNonNull(input, "input");
+        Objects.requireNonNull(captured, "captured");
+        Objects.requireNonNull(materials, "materials");
+        Objects.requireNonNull(settings, "settings");
         ClusterTranslationWork work = new ClusterTranslationWork(control);
         work.checkpoint();
-        CapturedCluster captured = input.captured();
-        LabPbrMaterialSet materials = input.materials();
-        ClusterTranslationSettings settings = input.settings();
         MediumCatalog mediumCatalog = new MediumCatalog();
 
         SectionClusterMeshBuilder cluster = new SectionClusterMeshBuilder(

@@ -41,75 +41,9 @@ final class SectionClusterMeshBuilder {
                 clusterZ,
                 TerrainMemoryBudget.TARGET_SEGMENT_TRIANGLES,
                 OpacityMicromapData.SUBDIVISION_LEVEL + 2,
-                false,
-                VoxelSurfaceSettings.BASE_HEIGHT);
-    }
-
-    SectionClusterMeshBuilder(
-            int clusterX, int clusterY, int clusterZ, int segmentTriangleTarget) {
-        this(
-                clusterX,
-                clusterY,
-                clusterZ,
-                segmentTriangleTarget,
                 OpacityMicromapData.SUBDIVISION_LEVEL + 2,
                 false,
-                VoxelSurfaceSettings.BASE_HEIGHT);
-    }
-
-    SectionClusterMeshBuilder(
-            int clusterX,
-            int clusterY,
-            int clusterZ,
-            int segmentTriangleTarget,
-            int maxOpacityMicromapSubdivisionLevel) {
-        this(
-                clusterX,
-                clusterY,
-                clusterZ,
-                segmentTriangleTarget,
-                maxOpacityMicromapSubdivisionLevel,
-                false,
-                VoxelSurfaceSettings.BASE_HEIGHT);
-    }
-
-    SectionClusterMeshBuilder(
-            int clusterX,
-            int clusterY,
-            int clusterZ,
-            int segmentTriangleTarget,
-            int maxOpacityMicromapSubdivisionLevel,
-            boolean voxelSurfacesEnabled,
-            float voxelSurfaceMaximumHeight) {
-        this(
-                clusterX,
-                clusterY,
-                clusterZ,
-                segmentTriangleTarget,
-                maxOpacityMicromapSubdivisionLevel,
-                maxOpacityMicromapSubdivisionLevel,
-                voxelSurfacesEnabled,
-                voxelSurfaceMaximumHeight);
-    }
-
-    SectionClusterMeshBuilder(
-            int clusterX,
-            int clusterY,
-            int clusterZ,
-            int segmentTriangleTarget,
-            int maxOpacity2StateSubdivisionLevel,
-            int maxOpacity4StateSubdivisionLevel,
-            boolean voxelSurfacesEnabled,
-            float voxelSurfaceMaximumHeight) {
-        this(
-                clusterX,
-                clusterY,
-                clusterZ,
-                segmentTriangleTarget,
-                maxOpacity2StateSubdivisionLevel,
-                maxOpacity4StateSubdivisionLevel,
-                voxelSurfacesEnabled,
-                voxelSurfaceMaximumHeight,
+                VoxelSurfaceSettings.BASE_HEIGHT,
                 new ClusterTranslationWork(ClusterTranslationControl.UNINTERRUPTIBLE));
     }
 

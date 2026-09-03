@@ -1307,9 +1307,6 @@ public final class TerrainScene implements AutoCloseable {
             }
             return new GpuCluster(
                     upload.key(),
-                    upload.clusterX(),
-                    upload.clusterY(),
-                    upload.clusterZ(),
                     blas,
                     voxelBlases,
                     ResolvedVoxelInstances.resolve(

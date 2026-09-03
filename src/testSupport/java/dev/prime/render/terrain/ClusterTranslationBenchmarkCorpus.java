@@ -18,11 +18,11 @@ public final class ClusterTranslationBenchmarkCorpus {
 
     private ClusterTranslationBenchmarkCorpus() {}
 
-    public static ClusterTranslationInput input(String id) {
+    public static Input input(String id) {
         return switch (id) {
-            case "typical" -> new ClusterTranslationInput(
+            case "typical" -> new Input(
                     typicalCluster(), LabPbrMaterialSet.EMPTY, settings());
-            case "extreme" -> new ClusterTranslationInput(
+            case "extreme" -> new Input(
                     extremeCluster(), LabPbrMaterialSet.EMPTY, settings());
             default -> throw new IllegalArgumentException("Unknown translation corpus: " + id);
         };
@@ -45,7 +45,7 @@ public final class ClusterTranslationBenchmarkCorpus {
     }
 
     public static Fingerprint translateAndFingerprint(String id) {
-        return fingerprint(ClusterSceneTranslator.translate(input(id)));
+        return fingerprint(input(id).translate());
     }
 
     public static Fingerprint fingerprint(CpuClusterMesh mesh) {
@@ -289,4 +289,13 @@ public final class ClusterTranslationBenchmarkCorpus {
     }
 
     public record Fingerprint(String sha256, long triangles, long primitives, long bytes) {}
+
+    public record Input(
+            CapturedCluster captured,
+            LabPbrMaterialSet materials,
+            ClusterTranslationSettings settings) {
+        public CpuClusterMesh translate() {
+            return ClusterSceneTranslator.translate(captured, materials, settings);
+        }
+    }
 }

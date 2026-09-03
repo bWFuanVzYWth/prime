@@ -43,32 +43,8 @@ public final class SectionMeshAccumulator {
             LabPbrMaterialSet labPbrMaterials, boolean buildOpacityMicromap) {
         this(labPbrMaterials, buildOpacityMicromap,
                 TerrainMemoryBudget.TARGET_SEGMENT_TRIANGLES,
-                OpacityMicromapData.MAX_SUBDIVISION_LEVEL);
-    }
-
-    public SectionMeshAccumulator(
-            LabPbrMaterialSet labPbrMaterials,
-            boolean buildOpacityMicromap,
-            int segmentTriangleTarget) {
-        this(
-                labPbrMaterials,
-                buildOpacityMicromap,
-                segmentTriangleTarget,
                 OpacityMicromapData.MAX_SUBDIVISION_LEVEL,
                 OpacityMicromapData.MAX_SUBDIVISION_LEVEL);
-    }
-
-    public SectionMeshAccumulator(
-            LabPbrMaterialSet labPbrMaterials,
-            boolean buildOpacityMicromap,
-            int segmentTriangleTarget,
-            int maxOpacityMicromapSubdivisionLevel) {
-        this(
-                labPbrMaterials,
-                buildOpacityMicromap,
-                segmentTriangleTarget,
-                maxOpacityMicromapSubdivisionLevel,
-                maxOpacityMicromapSubdivisionLevel);
     }
 
     public SectionMeshAccumulator(
@@ -84,23 +60,6 @@ public final class SectionMeshAccumulator {
                 maxOpacity2StateSubdivisionLevel,
                 maxOpacity4StateSubdivisionLevel,
                 new HashMap<>(),
-                new MediumCatalog());
-    }
-
-    SectionMeshAccumulator(
-            LabPbrMaterialSet labPbrMaterialSet,
-            boolean buildOpacityMicromap,
-            int segmentTriangleTarget,
-            int maxOpacity2StateSubdivisionLevel,
-            int maxOpacity4StateSubdivisionLevel,
-            Map<EmissionDistribution.Key, EmissionDistribution> emissionBuildCache) {
-        this(
-                labPbrMaterialSet,
-                buildOpacityMicromap,
-                segmentTriangleTarget,
-                maxOpacity2StateSubdivisionLevel,
-                maxOpacity4StateSubdivisionLevel,
-                emissionBuildCache,
                 new MediumCatalog());
     }
 

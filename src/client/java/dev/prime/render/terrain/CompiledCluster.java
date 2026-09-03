@@ -11,30 +11,25 @@ import net.minecraft.core.SectionPos;
  */
 public record CompiledCluster(
         long key,
-        int clusterX,
-        int clusterY,
-        int clusterZ,
         CpuClusterMesh mesh,
         boolean dynamic,
         float[] motionPositions) {
+    private static final float[] NO_MOTION = new float[0];
+
     public CompiledCluster(
             long key,
-            int clusterX,
-            int clusterY,
-            int clusterZ,
             CpuClusterMesh mesh) {
-        this(key, clusterX, clusterY, clusterZ, mesh, false, new float[0]);
+        this(key, mesh, false, NO_MOTION);
     }
 
     public CompiledCluster {
         Objects.requireNonNull(mesh, "mesh");
         Objects.requireNonNull(motionPositions, "motionPositions");
-        if (SectionCluster.origin(clusterX) != clusterX
-                || SectionCluster.origin(clusterY) != clusterY
-                || SectionCluster.origin(clusterZ) != clusterZ
-                || key != SectionPos.asLong(clusterX, clusterY, clusterZ)) {
+        if (SectionCluster.origin(SectionPos.x(key)) != SectionPos.x(key)
+                || SectionCluster.origin(SectionPos.y(key)) != SectionPos.y(key)
+                || SectionCluster.origin(SectionPos.z(key)) != SectionPos.z(key)) {
             throw new IllegalArgumentException(
-                    "Compiled cluster key and origin must identify one aligned cluster");
+                    "Compiled cluster key must identify an aligned cluster");
         }
         long expectedMotionWords = dynamic ? mesh.triangleCount() * 9L : 0L;
         if (motionPositions.length != expectedMotionWords) {
@@ -51,19 +46,14 @@ public record CompiledCluster(
             float[] motionPositions) {
         return new CompiledCluster(
                 SectionPos.asLong(clusterX, clusterY, clusterZ),
-                clusterX,
-                clusterY,
-                clusterZ,
                 mesh,
                 true,
                 motionPositions);
     }
 
-    /** Borrowed read-only storage owned by the captured dynamic frame. */
-    @Override
-    public float[] motionPositions() {
-        return this.motionPositions;
-    }
+    public int clusterX() { return SectionPos.x(this.key); }
+    public int clusterY() { return SectionPos.y(this.key); }
+    public int clusterZ() { return SectionPos.z(this.key); }
 
     public boolean isEmpty() {
         return this.mesh.isEmpty();

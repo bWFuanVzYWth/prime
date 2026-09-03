@@ -3,7 +3,6 @@ package dev.prime.render.scene.vanilla;
 import dev.prime.render.scene.CapturedSectionGeometry;
 import dev.prime.render.terrain.CapturedCluster;
 import dev.prime.render.terrain.ClusterSceneTranslator;
-import dev.prime.render.terrain.ClusterTranslationInput;
 import dev.prime.render.terrain.ClusterTranslationSettings;
 import dev.prime.render.terrain.CpuClusterMesh;
 import dev.prime.render.terrain.LabPbrMaterialSet;
@@ -119,18 +118,16 @@ public final class VanillaClusterCompiler implements AutoCloseable {
                 sectionY = snapshot.sectionY();
                 sectionZ = snapshot.sectionZ();
                 CapturedSectionGeometry section = this.interpreter.compileSection(
-                        new VanillaSectionCompileInput(
-                                snapshot,
-                                capture.assets,
-                                capture.clusterX,
-                                capture.clusterY,
-                                capture.clusterZ),
+                        capture,
+                        snapshot,
                         spriteResolver);
                 captured.add(sectionX, sectionY, sectionZ, section);
             }
             stage = Stage.CLUSTER_TRANSLATION;
             return ClusterSceneTranslator.translate(
-                    new ClusterTranslationInput(captured.build(), materials, settings),
+                    captured.build(),
+                    materials,
+                    settings,
                     () -> throwIfCancelled(cancelled));
         } catch (CompilationCancelledException exception) {
             throw exception;
@@ -144,22 +141,6 @@ public final class VanillaClusterCompiler implements AutoCloseable {
         if (cancelled.getAsBoolean()) {
             throw new CompilationCancelledException();
         }
-    }
-
-    public static ClusterTranslationSettings translationSettings(
-            boolean opacityMicromapSupported,
-            int segmentTriangleTarget,
-            int maxOpacity2StateSubdivisionLevel,
-            int maxOpacity4StateSubdivisionLevel,
-            boolean voxelSurfaces,
-            float voxelSurfaceMaximumHeight) {
-        return new ClusterTranslationSettings(
-                opacityMicromapSupported,
-                segmentTriangleTarget,
-                maxOpacity2StateSubdivisionLevel,
-                maxOpacity4StateSubdivisionLevel,
-                voxelSurfaces,
-                voxelSurfaceMaximumHeight);
     }
 
     private static boolean hasCompleteNeighborhood(
@@ -197,9 +178,9 @@ public final class VanillaClusterCompiler implements AutoCloseable {
     }
 
     public static final class Capture {
-        private final int clusterX;
-        private final int clusterY;
-        private final int clusterZ;
+        final int clusterX;
+        final int clusterY;
+        final int clusterZ;
         private final VanillaAssetSnapshot assets;
         private final List<VanillaSectionSnapshot> snapshots;
 
@@ -218,6 +199,10 @@ public final class VanillaClusterCompiler implements AutoCloseable {
 
         public boolean isEmpty() {
             return this.snapshots.isEmpty();
+        }
+
+        VanillaAssetSnapshot assets() {
+            return this.assets;
         }
     }
 

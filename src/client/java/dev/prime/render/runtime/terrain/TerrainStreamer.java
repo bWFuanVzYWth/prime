@@ -465,7 +465,7 @@ public final class TerrainStreamer implements AutoCloseable {
             float voxelSurfaceMaximumHeight = VoxelSurfaceSettings.maximumHeight(
                     this.voxelSurfaceStrengthSteps);
             ClusterTranslationSettings translationSettings =
-                    VanillaClusterCompiler.translationSettings(
+                    new ClusterTranslationSettings(
                             this.opacityMicromapSupported,
                             this.segmentTriangleTarget,
                             this.maxOpacity2StateSubdivisionLevel,
@@ -494,9 +494,6 @@ public final class TerrainStreamer implements AutoCloseable {
                             resourceEpoch.id(),
                             request.key(),
                             request.generation(),
-                            clusterX,
-                            clusterY,
-                            clusterZ,
                             request.priority(),
                             new WorkerSuccess(CpuClusterMesh.empty()));
                     if (this.pipelineState.completeToReady(
@@ -556,9 +553,6 @@ public final class TerrainStreamer implements AutoCloseable {
                             resourceEpoch.id(),
                             request.key(),
                             request.generation(),
-                            clusterX,
-                            clusterY,
-                            clusterZ,
                             request.priority(),
                             workerResult);
                     TerrainStreamer.this.completed.add(completedCluster);
@@ -601,8 +595,9 @@ public final class TerrainStreamer implements AutoCloseable {
                     WorkerFailure failed = (WorkerFailure) result.result();
                     // Retrying the same immutable work cannot repair a deterministic failure.
                     // Escalate once so the runtime performs its defined vanilla fallback.
-                    String cluster = "(" + result.clusterX() + ", "
-                            + result.clusterY() + ", " + result.clusterZ() + ")";
+                    String cluster = "(" + SectionPos.x(result.key()) + ", "
+                            + SectionPos.y(result.key()) + ", "
+                            + SectionPos.z(result.key()) + ")";
                     String message = switch (failed.stage()) {
                         case SETUP -> "Terrain setup failed for cluster " + cluster;
                         case SECTION_COMPILATION -> "Terrain section ("
@@ -651,8 +646,7 @@ public final class TerrainStreamer implements AutoCloseable {
             this.readyForUpload.removeFirst();
             this.pipelineState.consumeReady(next.key(), next.generation());
             uploadBytes = nextEndOffset;
-            uploads.add(new CompiledCluster(
-                    next.key(), next.clusterX(), next.clusterY(), next.clusterZ(), mesh));
+            uploads.add(new CompiledCluster(next.key(), mesh));
             this.uploadResourceGenerations.add(next.resourceGeneration());
         }
         if (this.discardResidentMaterialGeneration) {
@@ -673,9 +667,6 @@ public final class TerrainStreamer implements AutoCloseable {
                         this.uploadResourceGenerations.get(index),
                         upload.key(),
                         this.generations.current(upload.key()),
-                        upload.clusterX(),
-                        upload.clusterY(),
-                        upload.clusterZ(),
                         0,
                         new WorkerSuccess(upload.mesh()));
                 if (this.pipelineState.completeToReady(
@@ -846,9 +837,6 @@ public final class TerrainStreamer implements AutoCloseable {
             long resourceGeneration,
             long key,
             long generation,
-            int clusterX,
-            int clusterY,
-            int clusterZ,
             int priority,
             WorkerResult result) {
 

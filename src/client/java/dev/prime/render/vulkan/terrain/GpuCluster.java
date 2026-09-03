@@ -9,13 +9,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
+import net.minecraft.core.SectionPos;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
 record GpuCluster(
         long key,
-        int clusterX,
-        int clusterY,
-        int clusterZ,
         PreparedBlas blas,
         List<PreparedBlas> voxelBlases,
         ResolvedVoxelInstances voxelInstances,
@@ -44,7 +42,8 @@ record GpuCluster(
             throw new IllegalArgumentException(
                     "GPU voxel meshes and their instances must be present together");
         }
-        for (int meshIndex : voxelInstances.meshIndices()) {
+        for (int index = 0; index < voxelInstances.count(); index++) {
+            int meshIndex = voxelInstances.meshIndex(index);
             if (meshIndex < 0 || meshIndex >= voxelBlases.size()) {
                 throw new IllegalArgumentException(
                         "GPU voxel instance references an invalid BLAS");
@@ -52,77 +51,10 @@ record GpuCluster(
         }
     }
 
-    GpuCluster(
-            long key,
-            int clusterX,
-            int clusterY,
-            int clusterZ,
-            PreparedBlas blas,
-            List<PreparedBlas> voxelBlases,
-            ResolvedVoxelInstances voxelInstances,
-            VulkanBuffer lightBuffer,
-            VulkanBuffer motionBuffer,
-            CompiledClusterLights.Summary lights,
-            boolean dynamic) {
-        this(
-                key,
-                clusterX,
-                clusterY,
-                clusterZ,
-                blas,
-                voxelBlases,
-                voxelInstances,
-                0L,
-                lightBuffer,
-                motionBuffer,
-                lights,
-                dynamic,
-                null);
-    }
+    int clusterX() { return SectionPos.x(this.key); }
+    int clusterY() { return SectionPos.y(this.key); }
+    int clusterZ() { return SectionPos.z(this.key); }
 
-    GpuCluster(
-            long key,
-            int clusterX,
-            int clusterY,
-            int clusterZ,
-            PreparedBlas blas,
-            VulkanBuffer lightBuffer,
-            CompiledClusterLights.Summary lights) {
-        this(
-                key,
-                clusterX,
-                clusterY,
-                clusterZ,
-                blas,
-                lightBuffer,
-                lights,
-                false);
-    }
-
-    GpuCluster(
-            long key,
-            int clusterX,
-            int clusterY,
-            int clusterZ,
-            PreparedBlas blas,
-            VulkanBuffer lightBuffer,
-            CompiledClusterLights.Summary lights,
-            boolean dynamic) {
-        this(
-                key,
-                clusterX,
-                clusterY,
-                clusterZ,
-                blas,
-                List.of(),
-                ResolvedVoxelInstances.EMPTY,
-                0L,
-                lightBuffer,
-                null,
-                lights,
-                dynamic,
-                null);
-    }
     long lightAddress() {
         // Dynamic clusters have no emitters, so this section slot carries the previous-position
         // address consumed only after closest hit has identified a dynamic primitive.
@@ -149,7 +81,8 @@ record GpuCluster(
 
     long instancedTriangleCount() {
         long count = this.blas == null ? 0L : triangleCount(this.blas);
-        for (int meshIndex : this.voxelInstances.meshIndices()) {
+        for (int index = 0; index < this.voxelInstances.count(); index++) {
+            int meshIndex = this.voxelInstances.meshIndex(index);
             count = Math.addExact(
                     count, triangleCount(this.voxelBlases.get(meshIndex)));
         }
