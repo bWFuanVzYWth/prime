@@ -130,13 +130,10 @@ final class MaterialTexturePagesTest {
     }
 
     @Test
-    void atlasAndAnimationBudgetsKeepOffsetsAboveTwoGibibytes() {
+    void atlasBudgetsKeepOffsetsAboveTwoGibibytes() {
         long pageBytes = MaterialTexturePages.totalMipBytes(32_768, 32_768, 16);
-        long animationBytes = MaterialTexturePages.animationEndOffset(
-                0L, 32_768, 32_768, true, true);
 
         assertTrue(pageBytes > Integer.MAX_VALUE);
-        assertEquals(8L * 32_768L * 32_768L, animationBytes);
     }
 
     @Test
