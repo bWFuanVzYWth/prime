@@ -313,14 +313,15 @@ def compileSlangShaders = tasks.register(
 	outputDirectory = compiledSlangShaderRoot
 }
 
-def verifySlangRayPayloadAbi = tasks.register(
-		'verifySlangRayPayloadAbi', primeShaderTaskTypes.verifyPayloadAbi) {
+def verifySlangArtifactAbi = tasks.register(
+		'verifySlangArtifactAbi', primeShaderTaskTypes.verifyArtifactAbi) {
 	group = 'verification'
-	description = 'Verifies explicit cross-stage ray payload locations in production Slang SPIR-V.'
+	description = 'Verifies production SPIR-V payload, descriptor, stride, and subgroup contracts.'
 	dependsOn compileSlangShaders
 	slangDirectory = compiledSlangShaderRoot
+	schemaFile = file('shaders/abi.json')
 	spirvDisassembler = resolveVulkanTool('spirv-dis')
-	reportFile = layout.buildDirectory.file('reports/prime-shaders/ray-payload-abi.txt')
+	reportFile = layout.buildDirectory.file('reports/prime-shaders/artifact-abi.txt')
 }
 
 def javaExecutableName = System.getProperty('os.name')
@@ -415,7 +416,6 @@ tasks.named('check') {
 	dependsOn verifySlangToolchain,
 			verifyGeneratedSlangAbi,
 			compileSlangShaders,
-			verifySlangRayPayloadAbi,
 			'artifactTest',
 			'verifyShaderTestManifest'
 }
@@ -423,7 +423,7 @@ tasks.named('check') {
 tasks.register('artifactTest', Test) {
 	group = 'verification'
 	description = 'Runs deterministic tests over compiled Shader and packaged runtime artifacts.'
-	dependsOn compileSlangShaders
+	dependsOn verifySlangArtifactAbi
 	testClassesDirs = sourceSets.test.output.classesDirs
 	classpath = sourceSets.test.runtimeClasspath + files(compiledSlangShaderRoot)
 	useJUnitPlatform {

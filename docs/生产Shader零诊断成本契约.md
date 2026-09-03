@@ -55,7 +55,7 @@
 ## 验证
 
 - `generateShaderAbi` 锁定生产 descriptor、push constant、ray payload 和 wavefront ABI；
-- `verifyGeneratedSlangAbi`、`verifySlangRayPayloadAbi` 与 SPIR-V descriptor 测试检查编译产物；
+- `verifyGeneratedSlangAbi` 与 `verifySlangArtifactAbi` 检查生成 ABI 和生产 SPIR-V；
 - 图像诊断 shader 的 descriptor set 仅含一个 sampled source 和一个 storage target；
 - 选择状态测试验证三个域互斥；画面 pass 通过全覆盖写入和固定网格算法保证无陈旧像素；
 - OpenPBR、积分器、NRD 与重建的行为测试继续验证诊断重构没有改变生产数学或历史状态。

@@ -43,11 +43,11 @@ case。最近的 Streamline 补强增加 common constants、运行时门禁、na
 | 任务 | 观察对象 | 环境契约 | 是否属于默认门禁 |
 | --- | --- | --- | --- |
 | `test` | 纯 Java 行为、数学性质和状态机测试 | 不编译 Shader、不加载原生库、不需要 Vulkan；排除 `artifact`、`native`、`gpu-shader` 标签 | 是 |
-| `artifactTest` | 12 个生产 SPIR-V、manifest、descriptor/payload ABI、资源和桥接 DLL 打包测试 | 允许编译生产 Shader；无运行环境跳过 | 是，由 `check` 调用 |
+| `artifactTest` | 生产 SPIR-V ABI/闭包统一校验与 pipeline cache 资源测试 | 允许编译生产 Shader；无运行环境跳过 | 是，由 `check` 调用 |
 | `nativeTest` | 3 个 NRD、FSR、DLSS Windows x64 原生桥执行测试 | 只支持 Windows x64；显式运行于其他平台会直接失败 | 否，由 Windows CI 显式调用 |
 | `shaderTest` | 36 个 Vulkan compute/Shader 行为、数学性质和资源生命周期测试 | 必须有 Vulkan 1.2 compute device 和 `VK_LAYER_KHRONOS_validation`；缺失时直接失败 | 否，由 Linux GPU/Lavapipe CI 显式调用 |
 
-`check` 依赖 `test`、`artifactTest`、生产 Shader 编译、Shader ABI、ray payload、架构和
+`check` 依赖 `test`、`artifactTest`、生产 Shader 编译、Shader 产物 ABI、架构和
 发行物检查，但不隐式执行 GPU 或 Windows 原生测试。`jacocoTestReport` 聚合 `test` 与
 `artifactTest` 的 Java 执行数据。
 
@@ -128,17 +128,17 @@ instance/device 创建、上传、sampled/storage descriptor 绑定、dispatch�
 | --- | --- | --- |
 | Java 数学、codec、状态机 | `test` | 边界、确定性、错误处理；矩形、分页、dirty cluster 增加缩减性质测试 |
 | 调度与同步契约 | `test` | trace stage 顺序、barrier、资源依赖、并发元数据边界 |
-| SPIR-V 与生产闭包 | `artifactTest` | descriptor closure、payload、record stride、manifest、独立 stage 闭包 |
+| SPIR-V 与生产闭包 | `verifySlangArtifactAbi` + `artifactTest` | descriptor closure、payload、record stride、subgroup 边界、manifest、独立 stage 闭包 |
 | 原生 ABI 与资源 | `test` + `artifactTest` | Java ABI/platform 判定与 DLL 打包独立验证 |
 | 原生执行 | `nativeTest` | NRD、FSR、DLSS bridge 的真实 Windows x64 调用 |
 | GPU 数学与采样 | `shaderTest` | compact OpenPBR、transport、BSDF、材质/天体、重建/曝光、ZSobol parity 与统计 |
 | Vulkan host 生命周期 | `shaderTest` | validated instance/device、buffer/image、descriptor、dispatch、readback、幂等释放 |
 | Streamline / DLSS-G 边界 | `test` + `artifactTest` + `shaderTest` | row-major common constants、相机历史重投影、projection jitter、真实 reversed depth、规范 top-left motion、直接 HUD-less color、窄 descriptor 闭包与发行 DLL；NVIDIA fake-swapchain device-lost 仍按高风险上游缺陷隔离 |
-| 发行和架构 | `check` | Shader ABI、ray payload、依赖闭包、资源和发行 JAR |
+| 发行和架构 | `check` | Shader 产物 ABI、依赖闭包、资源和发行 JAR |
 
 NRD、FSR 和 DLSS 测试已按 JVM contract、artifact packaging、native execution 分层。
-`TracePipelinesContractTest` 只保留纯调度/同步测试，读取生产 SPIR-V 的断言由独立
-`TracePipelinesArtifactTest` 执行。`PrimeProductionMathGpuTest` 按 transport、BSDF、
+`TracePipelinesContractTest` 只保留纯调度/同步测试；生产 SPIR-V 只反汇编一次，并由
+`verifySlangArtifactAbi` 统一检查。`PrimeProductionMathGpuTest` 按 transport、BSDF、
 material/celestial、reconstruction/exposure 和 sampling parity 分组，各组拥有独立 Vulkan
 生命周期。ZSobol 的纯映射/分层测试运行在 JVM 层，parity 与输出统计测试运行在 Shader 层。
 `ClusterSceneTranslatorTest`、`ClusterSceneTranslatorDeterminismTest` 和

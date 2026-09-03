@@ -1,50 +1,14 @@
 package dev.prime.render.vulkan;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.prime.render.shader.ShaderAbi;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
 import org.lwjgl.vulkan.VK12;
 
 final class TracePipelinesContractTest {
-    private static final int OP_TYPE_INT = 21;
-    private static final int OP_TYPE_FLOAT = 22;
-    private static final int OP_TYPE_VECTOR = 23;
-    private static final int OP_TYPE_ARRAY = 28;
-    private static final int OP_TYPE_RUNTIME_ARRAY = 29;
-    private static final int OP_TYPE_STRUCT = 30;
-    private static final int OP_TYPE_POINTER = 32;
-    private static final int OP_VARIABLE = 59;
-    private static final int OP_CONSTANT = 43;
-    private static final int OP_DECORATE = 71;
-    private static final int OP_GROUP_NON_UNIFORM_ELECT = 333;
-    private static final int OP_GROUP_NON_UNIFORM_BROADCAST_FIRST = 338;
-    private static final int OP_GROUP_NON_UNIFORM_BALLOT = 339;
-    private static final int OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT = 342;
-    private static final int DECORATION_ARRAY_STRIDE = 6;
-    private static final int DECORATION_BINDING = 33;
-    private static final int DECORATION_DESCRIPTOR_SET = 34;
-
-    private static final int STORAGE_BUFFER = 12;
-    private static final int STORAGE_RAY_PAYLOAD = 5338;
-    private static final int STORAGE_INCOMING_RAY_PAYLOAD = 5342;
-
     @Test
     void commandWritesWaitForShaderAndIndirectConsumers() {
         long expectedStages =
@@ -82,8 +46,8 @@ final class TracePipelinesContractTest {
                 () -> OfflineRayTracingPipeline.dispatchCount(65));
         assertEquals(3, OfflineRayTracingPipeline.DESCRIPTOR_BINDING_COUNT);
 
-        RaygenSchedule realtime = GeneratedShaderPrograms.schedule(
-                "realtime.standard", ".rgen.spv");
+        RaygenSchedule realtime =
+                GeneratedShaderPrograms.schedule("realtime.standard", ".rgen.spv");
         assertEquals(22, realtime.groupCount());
         assertEquals(15, realtime.moduleCount());
         RaygenSchedule offline = GeneratedShaderPrograms.schedule("offline", ".rgen.spv");
@@ -93,8 +57,8 @@ final class TracePipelinesContractTest {
 
     @Test
     void realtimeScheduleKeepsItsDeclaredGroupsAndResources() {
-        RaygenSchedule realtime = GeneratedShaderPrograms.schedule(
-                "realtime.standard", "_ser.rgen.spv");
+        RaygenSchedule realtime =
+                GeneratedShaderPrograms.schedule("realtime.standard", "_ser.rgen.spv");
         assertEquals(15, realtime.moduleCount());
         assertEquals(22, realtime.groupCount());
         assertEquals(
@@ -113,8 +77,7 @@ final class TracePipelinesContractTest {
 
     @Test
     void offlineScheduleKeepsItsFourStageGroupsAndResources() {
-        RaygenSchedule offline = GeneratedShaderPrograms.schedule(
-                "offline", "_ser.rgen.spv");
+        RaygenSchedule offline = GeneratedShaderPrograms.schedule("offline", "_ser.rgen.spv");
         assertEquals(6, offline.moduleCount());
         assertEquals(10, offline.groupCount());
         assertEquals(
@@ -139,250 +102,22 @@ final class TracePipelinesContractTest {
 
     @Test
     void raygenScheduleRejectsInvalidParallelMetadataAtItsBoundary() {
-        assertThrows(IllegalArgumentException.class, () -> RaygenSchedule.of(
-                List.of("module"), new int[] {0}, new int[0]));
-        assertThrows(IllegalArgumentException.class, () -> RaygenSchedule.of(
-                List.of("module"), new int[] {1}, new int[] {0}));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RaygenSchedule.of(List.of("module"), new int[] {0}, new int[0]));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> RaygenSchedule.of(List.of("module"), new int[] {1}, new int[] {0}));
         assertThrows(IllegalArgumentException.class, () -> RaygenSchedule.single("", 0));
     }
 
     @Test
-    @Tag("artifact")
-    void imageDiagnosticsUseOneIsolatedSourceAndTargetLayout() throws IOException {
-        assertEquals(
-                Set.of(0, 1),
-                descriptorBindings(List.of("image_diagnostic_rgba8.comp.spv"), 0));
-        assertEquals(
-                Set.of(0, 1),
-                descriptorBindings(List.of("image_diagnostic_rgba16.comp.spv"), 0));
-    }
-
-    @Test
-    @Tag("artifact")
-    void realtimePrimaryPrefixDoesNotPublishPersistentPaths() throws IOException {
-        for (String suffix : List.of("", "_ser")) {
-            Set<Integer> camera = descriptorBindings(
-                    List.of(wavefrontShader(
-                            "realtime", "camera_trace", suffix)),
-                    1);
-            assertTrue(camera.contains(ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE));
-            assertFalse(camera.contains(ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS));
-        }
-        Set<Integer> visibleDirect = descriptorBindings(
-                List.of(wavefrontShader(
-                        "realtime", "visible_direct", "")),
-                1);
-        assertTrue(visibleDirect.contains(ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE));
-        assertFalse(visibleDirect.contains(ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS));
-        for (String suffix : List.of("", "_ser")) {
-            assertTrue(descriptorBindings(
-                    List.of(wavefrontShader(
-                            "realtime", "surface_split", suffix)),
-                    1).contains(ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS));
-        }
-    }
-
-    @Test
-    @Tag("artifact")
-    void streamlineInputPreparationHasOneNarrowDescriptorLayout() throws IOException {
-        assertEquals(
-                Set.of(0, 1, 2, 3, 4),
-                descriptorBindings(List.of("streamline_input.comp.spv"), 0));
-    }
-
-    @Test
-    @Tag("artifact")
-    void setOneAbiDoesNotCrossRendererBoundary() throws IOException {
-        for (String suffix : List.of("", "_ser")) {
-            Set<Integer> realtime = descriptorBindings(
-                    List.of(
-                            wavefrontShader("realtime", "camera_trace", suffix),
-                            wavefrontShader("realtime", "surface_split", suffix),
-                            wavefrontShader("realtime", "delta_walk", suffix),
-                            wavefrontShader("realtime", "guide_delta_walk", suffix),
-                            wavefrontShader("realtime", "landing_light_select", suffix),
-                            wavefrontShader("realtime", "landing_direct", suffix),
-                            wavefrontShader("realtime", "landing_scatter", suffix),
-                            wavefrontShader("realtime", "fixed_bridge_trace", suffix),
-                            wavefrontShader("realtime", "fixed_light_select", suffix),
-                            wavefrontShader("realtime", "fixed_direct", suffix),
-                            wavefrontShader("realtime", "fixed_scatter", suffix),
-                            wavefrontShader("realtime", "tail", suffix),
-                            wavefrontShader(
-                                    "realtime", "branch_resolve", suffix),
-                            wavefrontShader("realtime", "visible_direct", suffix),
-                            wavefrontShader("realtime", "noisy_output_resolve", suffix)),
-                    1);
-            assertTrue(realtime.contains(ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS));
-            assertTrue(realtime.contains(ShaderAbi.DESCRIPTOR_WAVEFRONT_QUEUE));
-            assertTrue(realtime.contains(ShaderAbi.DESCRIPTOR_STABLE_RADIANCE));
-            assertFalse(realtime.contains(ShaderAbi.OFFLINE_DESCRIPTOR_RUNNING_MEAN));
-            assertFalse(realtime.contains(ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_PATHS));
-            assertFalse(realtime.contains(ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_QUEUE));
-
-            Set<Integer> offline = descriptorBindings(
-                    wavefrontShaders(
-                            "offline",
-                            suffix,
-                            List.of(
-                                    "camera_trace",
-                                    "bridge_trace",
-                                    "light_select",
-                                    "direct",
-                                    "scatter",
-                                    "sample_resolve")),
-                    1);
-            assertEquals(Set.of(
-                    ShaderAbi.OFFLINE_DESCRIPTOR_RUNNING_MEAN,
-                    ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_PATHS,
-                    ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_QUEUE), offline);
-        }
-    }
-
-    @Test
-    @Tag("artifact")
-    void realtimeStbnDoesNotEnterTheOfflineShaderClosure() throws IOException {
-        for (String suffix : List.of("", "_ser")) {
-            Set<Integer> realtime = descriptorBindings(
-                    List.of(wavefrontShader("realtime", "fixed_direct", suffix)),
-                    0);
-            assertTrue(realtime.contains(ShaderAbi.DESCRIPTOR_REALTIME_STBN));
-            Set<Integer> offline = descriptorBindings(
-                    wavefrontShaders(
-                            "offline",
-                            suffix,
-                            List.of(
-                                    "camera_trace",
-                                    "bridge_trace",
-                                    "light_select",
-                                    "direct",
-                                    "scatter",
-                                    "sample_resolve")),
-                    0);
-            assertFalse(offline.contains(ShaderAbi.DESCRIPTOR_REALTIME_STBN));
-        }
-    }
-
-    @Test
-    @Tag("artifact")
-    void canonicalBaseColorDescriptorUsesTheGeneratedPageCapacity()
-            throws IOException {
-        assertEquals(
-                ShaderAbi.BASE_COLOR_PAGE_COUNT,
-                descriptorArrayLength(
-                        "world.rchit.spv",
-                        0,
-                        ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES));
-        assertEquals(
-                ShaderAbi.BASE_COLOR_PAGE_COUNT,
-                descriptorArrayLength(
-                        "shadow_nonopaque.rahit.spv",
-                        0,
-                        ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES));
-        assertFalse(descriptorBindings(List.of("shadow_opaque.rahit.spv"), 0)
-                .contains(ShaderAbi.DESCRIPTOR_BASE_COLOR_PAGES));
-    }
-
-    @Test
-    @Tag("artifact")
-    void optimizedModulesPreservePayloadAbi() throws IOException {
-        String tracePayload = "struct(vec3(f32),f32,vec3(f32),"
-                + "u32,u32,u32,f32,f32,vec3(f32),f32,u32,u32,u32,u32,"
-                + "vec3(f32),u32,vec3(f32),u32)";
-        String shadowPayload = "struct(vec4(f32),vec4(f32),vec4(f32),vec4(f32),"
-                + "vec2(u32),u32,vec2(u32),vec2(u32))";
-        assertPayloadShapes(
-                Set.of(tracePayload), STORAGE_INCOMING_RAY_PAYLOAD,
-                List.of("world.rmiss.spv", "world.rchit.spv"));
-        assertPayloadShapes(
-                Set.of(shadowPayload), STORAGE_INCOMING_RAY_PAYLOAD,
-                List.of(
-                        "shadow.rmiss.spv",
-                        "shadow.rchit.spv",
-                        "shadow_opaque.rahit.spv",
-                        "shadow_nonopaque.rahit.spv"));
-        for (String suffix : List.of("", "_ser")) {
-            assertWavefrontPayloadShapes(
-                    Set.of(tracePayload), "realtime", suffix,
-                    "camera_trace", "delta_walk", "guide_delta_walk", "fixed_bridge_trace");
-            assertWavefrontPayloadShapes(
-                    Set.of(shadowPayload), "realtime", suffix,
-                    "landing_direct", "fixed_direct", "visible_direct");
-            assertWavefrontPayloadShapes(
-                    Set.of(), "realtime", suffix,
-                    "surface_split", "landing_light_select", "landing_scatter",
-                    "fixed_light_select", "fixed_scatter", "branch_resolve",
-                    "noisy_output_resolve");
-            assertWavefrontPayloadShapes(
-                    Set.of(tracePayload), "offline", suffix,
-                    "camera_trace", "bridge_trace");
-            assertWavefrontPayloadShapes(
-                    Set.of(shadowPayload), "offline", suffix, "direct");
-            assertWavefrontPayloadShapes(
-                    Set.of(), "offline", suffix, "light_select", "scatter");
-        }
-    }
-
-    @Test
-    @Tag("artifact")
-    void serReorderedPublishersDoNotReuseProducerSubgroups() throws IOException {
-        Set<Integer> cameraTrace = parse(
-                wavefrontShader("realtime", "camera_trace", "_ser")).opcodes;
-        assertSubgroupCompaction(false, cameraTrace, "camera_trace_ser");
-
-        Set<Integer> primary = parse(
-                wavefrontShader("realtime", "surface_split", "_ser")).opcodes;
-        assertSubgroupCompaction(true, primary, "surface_split_ser");
-    }
-
-    @Test
-    @Tag("artifact")
-    void fixedStagesCompactOnlyAtLandingAndScatter()
-            throws IOException {
-        Set<Integer> landing = parse(wavefrontShader(
-                "realtime", "landing_scatter", "_ser")).opcodes;
-        assertSubgroupCompaction(true, landing, "landing_scatter_ser");
-
-        for (String suffix : List.of("", "_ser")) {
-            for (String stage : List.of(
-                    "landing_light_select",
-                    "landing_direct",
-                    "fixed_bridge_trace",
-                    "fixed_light_select",
-                    "fixed_direct")) {
-                Set<Integer> opcodes = parse(
-                        wavefrontShader("realtime", stage, suffix)).opcodes;
-                assertSubgroupCompaction(false, opcodes, stage + suffix);
-            }
-        }
-    }
-
-    @Test
-    @Tag("artifact")
-    void offlineStagesCompactOnlyAtScatter() throws IOException {
-        Set<Integer> scatter = parse(
-                wavefrontShader("offline", "scatter", "_ser")).opcodes;
-        assertSubgroupCompaction(true, scatter, "scatter_ser");
-
-        for (String suffix : List.of("", "_ser")) {
-            for (String stage : List.of(
-                    "camera_trace", "bridge_trace", "light_select", "direct")) {
-                Set<Integer> opcodes = parse(
-                        wavefrontShader("offline", stage, suffix)).opcodes;
-                assertSubgroupCompaction(false, opcodes, stage + suffix);
-            }
-        }
-    }
-
-    @Test
     void wavefrontBackingHasDeclaredFourKSize() {
-        assertEquals(4_346_265_712L,
-                RealtimeRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
-        assertEquals(2_023_833_632L,
-                OfflineRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
-        assertEquals(962_150_432L,
-                OfflineRayTracingPipeline.LAYOUT.queueBytes(3840, 2160));
-        assertEquals(1_957_478_400L,
+        assertEquals(4_346_265_712L, RealtimeRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
+        assertEquals(2_023_833_632L, OfflineRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
+        assertEquals(962_150_432L, OfflineRayTracingPipeline.LAYOUT.queueBytes(3840, 2160));
+        assertEquals(
+                1_957_478_400L,
                 OfflineRayTracingPipeline.LAYOUT.queueCommandOffset(3840, 2160));
         assertEquals(
                 1930.0781555175781,
@@ -429,261 +164,4 @@ final class TracePipelinesContractTest {
         assertThrows(IndexOutOfBoundsException.class, () -> TraceProgram.shadowAnyHitResource(-1));
         assertThrows(IndexOutOfBoundsException.class, () -> TraceProgram.shadowAnyHitResource(3));
     }
-
-    @Test
-    @Tag("artifact")
-    void compiledPathRecordsUseIndependentStrides() throws IOException {
-        for (String suffix : List.of("", "_ser")) {
-            assertRecordStride(
-                    wavefrontShader("realtime", "delta_walk", suffix),
-                    ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
-                    ShaderAbi.WAVEFRONT_PATH_RECORD_SIZE);
-            assertRecordStride(
-                    wavefrontShader("realtime", "guide_delta_walk", suffix),
-                    ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
-                    ShaderAbi.WAVEFRONT_PATH_RECORD_SIZE);
-            assertRecordStride(
-                    wavefrontShader("realtime", "landing_light_select", suffix),
-                    ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
-                    ShaderAbi.WAVEFRONT_PATH_RECORD_SIZE);
-            assertRecordStride(
-                    wavefrontShader("realtime", "landing_direct", suffix),
-                    ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
-                    ShaderAbi.WAVEFRONT_PATH_RECORD_SIZE);
-            assertRecordStride(
-                    wavefrontShader("realtime", "landing_scatter", suffix),
-                    ShaderAbi.DESCRIPTOR_WAVEFRONT_PATHS,
-                    ShaderAbi.WAVEFRONT_PATH_RECORD_SIZE);
-            assertRecordStride(
-                    wavefrontShader("offline", "direct", suffix),
-                    ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_PATHS,
-                    ShaderAbi.OFFLINE_WAVEFRONT_PATH_RECORD_SIZE);
-            assertRecordStride(
-                    wavefrontShader("offline", "scatter", suffix),
-                    ShaderAbi.OFFLINE_DESCRIPTOR_WAVEFRONT_PATHS,
-                    ShaderAbi.OFFLINE_WAVEFRONT_PATH_RECORD_SIZE);
-        }
-    }
-
-    private static List<String> wavefrontShaders(
-            String renderer, String suffix, List<String> stages) {
-        return stages.stream()
-                .map(stage -> wavefrontShader(renderer, stage, suffix))
-                .toList();
-    }
-
-    private static void assertWavefrontPayloadShapes(
-            Set<String> expected,
-            String renderer,
-            String suffix,
-            String... stages) throws IOException {
-        assertPayloadShapes(
-                expected,
-                STORAGE_RAY_PAYLOAD,
-                Arrays.stream(stages)
-                        .map(stage -> wavefrontShader(renderer, stage, suffix))
-                        .toList());
-    }
-
-    private static void assertPayloadShapes(
-            Set<String> expected, int storageClass, List<String> shaders) throws IOException {
-        for (String shader : shaders) {
-            assertEquals(expected, payloadShapes(shader, storageClass), shader);
-        }
-    }
-
-    private static void assertSubgroupCompaction(
-            boolean expected, Set<Integer> opcodes, String shader) {
-        for (int opcode : List.of(
-                OP_GROUP_NON_UNIFORM_ELECT,
-                OP_GROUP_NON_UNIFORM_BROADCAST_FIRST,
-                OP_GROUP_NON_UNIFORM_BALLOT,
-                OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT)) {
-            assertEquals(expected, opcodes.contains(opcode), shader);
-        }
-    }
-
-    private static String wavefrontShader(
-            String renderer, String stage, String suffix) {
-        if ("_ser".equals(suffix)
-                && (("realtime".equals(renderer)
-                                && "noisy_output_resolve".equals(stage))
-                        || ("offline".equals(renderer)
-                                && "sample_resolve".equals(stage))
-                        || ("offline".equals(renderer)
-                                && "light_select".equals(stage))
-                        || ("realtime".equals(renderer) && "visible_direct".equals(stage)))) {
-            suffix = "";
-        }
-        return renderer + "_wavefront_" + stage + suffix + ".rgen.spv";
-    }
-
-    private static void assertRecordStride(
-            String shader, int binding, int expectedStride) throws IOException {
-        Spirv module = parse(shader);
-        Variable paths = module.variables.stream()
-                .filter(variable -> variable.storageClass == STORAGE_BUFFER)
-                .filter(variable -> module.bindings.getOrDefault(variable.identifier, -1)
-                        == binding)
-                .filter(variable -> module.sets.getOrDefault(variable.identifier, -1) == 1)
-                .findFirst()
-                .orElseThrow();
-        Type pointer = module.requireType(paths.type);
-        Type block = module.requireType(pointer.operands[1]);
-        int arrayIdentifier = block.operands[0];
-        assertEquals(expectedStride, module.arrayStrides.get(arrayIdentifier));
-    }
-
-    private static Set<Integer> descriptorBindings(
-            List<String> shaders, int descriptorSet) throws IOException {
-        Set<Integer> result = new HashSet<>();
-        for (String shader : shaders) {
-            Spirv module = parse(shader);
-            for (Variable variable : module.variables) {
-                if (module.sets.getOrDefault(variable.identifier, -1) == descriptorSet) {
-                    Integer binding = module.bindings.get(variable.identifier);
-                    if (binding != null) {
-                        result.add(binding);
-                    }
-                }
-            }
-        }
-        return result;
-    }
-
-    private static Set<String> payloadShapes(String shader, int storageClass)
-            throws IOException {
-        Spirv module = parse(shader);
-        Set<String> result = new HashSet<>();
-        for (Variable variable : module.variables) {
-            if (variable.storageClass != storageClass) {
-                continue;
-            }
-            Type pointer = module.requireType(variable.type);
-            result.add(typeShape(module, pointer.operands[1]));
-        }
-        return result;
-    }
-
-    private static int descriptorArrayLength(
-            String shader, int descriptorSet, int binding) throws IOException {
-        Spirv module = parse(shader);
-        Variable descriptor = module.variables.stream()
-                .filter(variable -> module.sets.getOrDefault(variable.identifier, -1)
-                        == descriptorSet)
-                .filter(variable -> module.bindings.getOrDefault(variable.identifier, -1)
-                        == binding)
-                .findFirst()
-                .orElseThrow();
-        Type pointer = module.requireType(descriptor.type);
-        Type array = module.requireType(pointer.operands[1]);
-        if (array.opcode != OP_TYPE_ARRAY) {
-            throw new IllegalArgumentException("Descriptor is not a fixed-size array");
-        }
-        Integer length = module.constants.get(array.operands[1]);
-        if (length == null) {
-            throw new IllegalArgumentException("Descriptor array has no constant length");
-        }
-        return length;
-    }
-
-    private static Spirv parse(String shader) throws IOException {
-        int[] words = spirvWords(shader);
-        Spirv result = new Spirv();
-        for (int offset = 5; offset < words.length; ) {
-            int instruction = words[offset];
-            int wordCount = instruction >>> 16;
-            int opcode = instruction & 0xffff;
-            if (wordCount <= 0 || offset + wordCount > words.length) {
-                throw new IllegalArgumentException("Malformed SPIR-V instruction");
-            }
-            result.opcodes.add(opcode);
-            if (opcode == OP_TYPE_INT
-                    || opcode == OP_TYPE_FLOAT
-                    || opcode == OP_TYPE_VECTOR
-                    || opcode == OP_TYPE_ARRAY
-                    || opcode == OP_TYPE_RUNTIME_ARRAY
-                    || opcode == OP_TYPE_STRUCT
-                    || opcode == OP_TYPE_POINTER) {
-                result.types.put(
-                        words[offset + 1],
-                        new Type(opcode, Arrays.copyOfRange(
-                                words, offset + 2, offset + wordCount)));
-            } else if (opcode == OP_CONSTANT && wordCount == 4) {
-                result.constants.put(words[offset + 2], words[offset + 3]);
-            } else if (opcode == OP_VARIABLE) {
-                result.variables.add(new Variable(
-                        words[offset + 1], words[offset + 2], words[offset + 3]));
-            } else if (opcode == OP_DECORATE && wordCount >= 4) {
-                int target = words[offset + 1];
-                switch (words[offset + 2]) {
-                    case DECORATION_ARRAY_STRIDE ->
-                            result.arrayStrides.put(target, words[offset + 3]);
-                    case DECORATION_BINDING ->
-                            result.bindings.put(target, words[offset + 3]);
-                    case DECORATION_DESCRIPTOR_SET ->
-                            result.sets.put(target, words[offset + 3]);
-                    default -> { }
-                }
-            }
-            offset += wordCount;
-        }
-        return result;
-    }
-
-    private static int[] spirvWords(String shader) throws IOException {
-        String resource = "/prime/shaders/" + shader;
-        byte[] bytes;
-        try (InputStream input = TracePipelinesContractTest.class
-                .getResourceAsStream(resource)) {
-            if (input == null) {
-                throw new IllegalArgumentException("Missing compiled shader " + resource);
-            }
-            bytes = input.readAllBytes();
-        }
-        int[] words = new int[bytes.length / Integer.BYTES];
-        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(words);
-        if (words.length < 5 || words[0] != 0x0723_0203) {
-            throw new IllegalArgumentException("Malformed SPIR-V header");
-        }
-        return words;
-    }
-
-    private static String typeShape(Spirv module, int identifier) {
-        Type type = module.requireType(identifier);
-        return switch (type.opcode) {
-            case OP_TYPE_INT -> (type.operands[1] == 0 ? "u" : "i") + type.operands[0];
-            case OP_TYPE_FLOAT -> "f" + type.operands[0];
-            case OP_TYPE_VECTOR -> "vec" + type.operands[1]
-                    + "(" + typeShape(module, type.operands[0]) + ")";
-            case OP_TYPE_STRUCT -> "struct("
-                    + Arrays.stream(type.operands)
-                            .mapToObj(member -> typeShape(module, member))
-                            .reduce((left, right) -> left + "," + right)
-                            .orElse("")
-                    + ")";
-            default -> throw new IllegalArgumentException(
-                    "Unsupported SPIR-V type " + type.opcode);
-        };
-    }
-
-    private static final class Spirv {
-        final Map<Integer, Type> types = new HashMap<>();
-        final Map<Integer, Integer> bindings = new HashMap<>();
-        final Map<Integer, Integer> sets = new HashMap<>();
-        final Map<Integer, Integer> constants = new HashMap<>();
-        final Map<Integer, Integer> arrayStrides = new HashMap<>();
-        final List<Variable> variables = new ArrayList<>();
-        final Set<Integer> opcodes = new HashSet<>();
-        Type requireType(int identifier) {
-            Type type = this.types.get(identifier);
-            if (type == null) {
-                throw new IllegalArgumentException("Missing SPIR-V type " + identifier);
-            }
-            return type;
-        }
-    }
-
-    private record Type(int opcode, int[] operands) { }
-    private record Variable(int type, int identifier, int storageClass) { }
 }

@@ -11,7 +11,7 @@ import dev.prime.gradle.shader.PrimeSlangCompilerGate
 import dev.prime.gradle.shader.GenerateShaderAbi
 import dev.prime.gradle.shader.PrepareNsightCapture
 import dev.prime.gradle.shader.VerifyGeneratedSlangAbi
-import dev.prime.gradle.shader.VerifySlangRayPayloadAbi
+import dev.prime.gradle.shader.VerifySlangArtifactAbi
 import dev.prime.gradle.shader.VerifySlangToolchain
 import dev.prime.gradle.shader.VerifyPrimeShaderArchitecture
 import org.gradle.api.Plugin
@@ -30,7 +30,7 @@ final class PrimeShaderAbiPlugin implements Plugin<Project> {
                 dependencyClosure: PrimeShaderDependencyClosure,
                 dependencyGraph: PrimeShaderDependencyGraph,
                 compilerGate: PrimeSlangCompilerGate,
-                verifyPayloadAbi: VerifySlangRayPayloadAbi,
+                verifyArtifactAbi: VerifySlangArtifactAbi,
                 prepareNsight: PrepareNsightCapture,
                 verifyToolchain: VerifySlangToolchain,
                 verifyGeneratedAbi: VerifyGeneratedSlangAbi,
