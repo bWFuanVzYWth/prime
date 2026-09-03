@@ -1,12 +1,10 @@
 package dev.prime.render.terrain;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -59,33 +57,6 @@ final class TintIdResolverTest {
                 ignored -> {
                     throw new AssertionError("dynamic source tint must remain inline");
                 }));
-    }
-
-    @Test
-    void remapsBoundaryAndEmbeddedRelationMaterial() {
-        int[] boundary = {
-            CpuSectionMesh.SURFACE_RELATION_BOUNDARY,
-            PrimitivePacking.packUv(0.5F, 0.5F),
-            0xff11_2233,
-            7,
-            3
-        };
-        int[] bilateral = new int[9];
-        bilateral[0] = CpuSectionMesh.SURFACE_RELATION_BILATERAL;
-        System.arraycopy(primitive(9, 0x0044_5566, 0), 0, bilateral, 1, 8);
-        int[] source = SurfaceRelationTable.encode(List.of(boundary, bilateral));
-
-        int[] result = TintIdResolver.surfaceRelations(
-                source,
-                source,
-                2,
-                packedRgba -> packedRgba == 0xff11_2233 ? 101 : 202);
-
-        assertNotSame(source, result);
-        assertEquals(101, SurfaceRelationTable.record(result, 2, 0)[2]);
-        assertEquals(202, SurfaceRelationTable.record(result, 2, 1)[4]);
-        assertArrayEquals(boundary, SurfaceRelationTable.record(source, 2, 0));
-        assertEquals(0x0044_5566, SurfaceRelationTable.record(source, 2, 1)[4]);
     }
 
     @Test

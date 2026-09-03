@@ -1,6 +1,5 @@
 package dev.prime.render.terrain;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -50,7 +49,7 @@ final class MediumIdentityTest {
     }
 
     @Test
-    void rendererRemapCoversPrimitiveAndBoundaryReferencesWithoutTouchingInput() {
+    void rendererRemapCoversPrimitiveReferencesWithoutTouchingInput() {
         int[] localToRenderer = {0, 0x1020_3040, 0xfedc_ba98};
         int[] primitives = new int[2 * CpuSectionMesh.PRIMITIVE_WORDS];
         int solidFlags = PrimitivePacking.encodeLegacySemantics(
@@ -74,28 +73,6 @@ final class MediumIdentityTest {
                 0xfedc_ba98,
                 remappedPrimitives[
                         CpuSectionMesh.PRIMITIVE_WORDS + PrimitivePacking.MEDIUM_ID_WORD]);
-
-        int[] boundary = {
-            1,
-            CpuSectionMesh.SURFACE_RELATION_BOUNDARY,
-            0,
-            0,
-            1,
-            2
-        };
-        int[] remappedBoundary =
-                MediumIdResolver.surfaceRelations(boundary, 1, localToRenderer);
-        assertArrayEquals(
-                new int[] {
-                    1,
-                    CpuSectionMesh.SURFACE_RELATION_BOUNDARY,
-                    0,
-                    0,
-                    1,
-                    0xfedc_ba98
-                },
-                remappedBoundary);
-        assertEquals(2, boundary[5]);
 
         int[] vacuum = new int[CpuSectionMesh.PRIMITIVE_WORDS];
         assertSame(vacuum, MediumIdResolver.primitiveRecords(vacuum, new int[] {0}));

@@ -1,6 +1,8 @@
 package dev.prime.render.terrain;
 
 import java.util.Arrays;
+import java.util.Objects;
+import java.util.function.IntUnaryOperator;
 
 /** Upload-only relation encoding addressed from existing primitive and emitter payload words. */
 public final class GpuSurfaceRelationTable {
@@ -14,9 +16,6 @@ public final class GpuSurfaceRelationTable {
     }
 
     public static long byteSize(CpuClusterMesh mesh) {
-        if (!mesh.hasSurfaceRelations()) {
-            return 0L;
-        }
         long words = 0L;
         for (CpuMeshSegment segment : mesh.segments()) {
             int[] table = segment.surfaceRelationRecords();
@@ -32,77 +31,112 @@ public final class GpuSurfaceRelationTable {
         return Math.multiplyExact(words, Integer.BYTES);
     }
 
-    public static Encoding encodeResolved(
-            int[] table, int primitiveCount, int emitterCount) {
-        if (primitiveCount < 0 || emitterCount < 0) {
-            throw new IllegalArgumentException("GPU relation counts must be non-negative");
+    public static Encoding encode(
+            CpuClusterMesh mesh,
+            int emitterCount,
+            MaterialIdResolver.Cache materials,
+            IntUnaryOperator tintResolver) {
+        Objects.requireNonNull(mesh, "mesh");
+        Objects.requireNonNull(materials, "materials");
+        Objects.requireNonNull(tintResolver, "tintResolver");
+        if (emitterCount < 0) {
+            throw new IllegalArgumentException("GPU emitter count must be non-negative");
         }
-        if (table.length == 0) {
-            return new Encoding(
-                    new int[0], new int[primitiveCount], new int[emitterCount]);
-        }
-        SurfaceRelationTable.validate(table, primitiveCount);
-        int wordCount = Math.toIntExact(compactTailWords(table, primitiveCount));
-        int[] words = new int[wordCount];
-        int[] primitiveOffsets = new int[primitiveCount];
+        int primitiveCount = Math.toIntExact(mesh.triangleLayout().primitiveCount());
+        Encoding encoding = new Encoding(
+                new int[Math.toIntExact(byteSize(mesh) / Integer.BYTES)],
+                new int[primitiveCount],
+                new int[emitterCount]);
         int cursor = 0;
-        for (int primitive = 0; primitive < primitiveCount; primitive++) {
-            int[] record = SurfaceRelationTable.record(table, primitiveCount, primitive);
-            if (record == null) {
-                continue;
-            }
-            int encodedOffset = Math.addExact(cursor, 1);
-            if (encodedOffset > MAX_ENCODED_OFFSET) {
-                throw new IllegalArgumentException(
-                        "GPU relation tail exceeds its exact 24-bit word offset");
-            }
-            primitiveOffsets[primitive] = encodedOffset;
-            int kind = record[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK;
-            if (kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY) {
-                int identity = record[4];
-                if (MaterialIdResolver.unpackMaterialId(identity) == 0) {
-                    throw new IllegalArgumentException(
-                            "GPU boundary relation requires a resolved MaterialId");
+        int primitive = 0;
+        for (int category = 0; category < 3; category++) {
+            for (CpuMeshSegment segment : mesh.segments()) {
+                int count = primitiveCount(segment, category);
+                int first = firstPrimitive(segment, category);
+                int[] table = segment.surfaceRelationRecords();
+                for (int index = 0; index < count; index++, primitive++) {
+                    int record = table.length == 0 ? 0 : table[first + index];
+                    if (record == 0) {
+                        continue;
+                    }
+                    int encodedOffset = Math.addExact(cursor, 1);
+                    if (encodedOffset > MAX_ENCODED_OFFSET) {
+                        throw new IllegalArgumentException(
+                                "GPU relation tail exceeds its exact 24-bit word offset");
+                    }
+                    encoding.primitiveOffsets[primitive] = encodedOffset;
+                    cursor = encodeRecord(
+                            table,
+                            record,
+                            encoding.words,
+                            cursor,
+                            materials,
+                            tintResolver);
                 }
-                if ((record[2] & ~TintIdResolver.MAX_TINT_ID) != 0) {
-                    throw new IllegalArgumentException(
-                            "GPU boundary relation requires a resolved u16 TintId");
-                }
-                words[cursor] = record[0] & 0xff;
-                words[cursor + 1] = record[1];
-                words[cursor + 2] = MaterialIdResolver.pack(
-                        record[2] & TintIdResolver.MAX_TINT_ID,
-                        MaterialIdResolver.unpackMaterialId(identity));
-                cursor += BOUNDARY_WORDS;
-            } else {
-                int materialId = MaterialIdResolver.unpackMaterialId(
-                        record[1 + PrimitivePacking.MEDIUM_ID_WORD]);
-                if (materialId == 0) {
-                    throw new IllegalArgumentException(
-                            "GPU material relation requires a resolved MaterialId");
-                }
-                if ((record[4] & 0x00ff_0000) != 0) {
-                    throw new IllegalArgumentException(
-                            "GPU material relation requires a resolved u16 TintId");
-                }
-                words[cursor] = record[0]
-                        | ((record[4] & PrimitivePacking.CONTROL_TANGENT_NEGATIVE << 24) != 0
-                                ? MATERIAL_TANGENT_NEGATIVE
-                                : 0);
-                words[cursor + 1] = record[1];
-                words[cursor + 2] = record[2];
-                words[cursor + 3] = record[3];
-                words[cursor + 4] = MaterialIdResolver.pack(
-                        record[4] & TintIdResolver.MAX_TINT_ID, materialId);
-                words[cursor + 5] = record[7];
-                words[cursor + 6] = record[8];
-                cursor += MATERIAL_WORDS;
             }
         }
-        if (cursor != words.length) {
+        if (primitive != primitiveCount || cursor != encoding.words.length) {
             throw new IllegalStateException("GPU relation tail size changed while encoding");
         }
-        return new Encoding(words, primitiveOffsets, new int[emitterCount]);
+        return encoding;
+    }
+
+    private static int encodeRecord(
+            int[] source,
+            int record,
+            int[] target,
+            int cursor,
+            MaterialIdResolver.Cache materials,
+            IntUnaryOperator tintResolver) {
+        int control = source[record];
+        int kind = control & CpuSectionMesh.SURFACE_RELATION_KIND_MASK;
+        if (kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY) {
+            int materialId = materials.boundaryId(source, record);
+            int tintId = TintIdResolver.resolvePackedRgba(
+                    source[record + 2], tintResolver);
+            target[cursor] = control & 0xff;
+            target[cursor + 1] = source[record + 1];
+            target[cursor + 2] = MaterialIdResolver.pack(tintId, materialId);
+            return cursor + BOUNDARY_WORDS;
+        }
+        int material = record + 1;
+        int materialId = materials.primitiveId(
+                source, material, CompiledClusterLights.EMPTY);
+        if (materialId == 0) {
+            throw new IllegalArgumentException(
+                    "GPU surface relation requires a table-backed material");
+        }
+        int packedRgba = source[material + 3] & 0x00ff_ffff
+                | PrimitivePacking.unpackSourceTintAlpha(
+                        source[material + PrimitivePacking.MEDIUM_ID_WORD]);
+        int tintId = TintIdResolver.resolvePackedRgba(packedRgba, tintResolver);
+        target[cursor] = control
+                | ((source[material + 3]
+                                & PrimitivePacking.CONTROL_TANGENT_NEGATIVE << 24)
+                        != 0 ? MATERIAL_TANGENT_NEGATIVE : 0);
+        target[cursor + 1] = source[material];
+        target[cursor + 2] = source[material + 1];
+        target[cursor + 3] = source[material + 2];
+        target[cursor + 4] = MaterialIdResolver.pack(tintId, materialId);
+        target[cursor + 5] = source[material + 6];
+        target[cursor + 6] = source[material + 7];
+        return cursor + MATERIAL_WORDS;
+    }
+
+    private static int firstPrimitive(CpuMeshSegment segment, int category) {
+        return switch (category) {
+            case 0 -> 0;
+            case 1 -> segment.opaquePrimitiveCount();
+            default -> segment.opaquePrimitiveCount() + segment.cutoutPrimitiveCount();
+        };
+    }
+
+    private static int primitiveCount(CpuMeshSegment segment, int category) {
+        return switch (category) {
+            case 0 -> segment.opaquePrimitiveCount();
+            case 1 -> segment.cutoutPrimitiveCount();
+            default -> segment.transmissivePrimitiveCount();
+        };
     }
 
     public static int[] primitiveRecords(

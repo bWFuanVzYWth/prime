@@ -54,51 +54,6 @@ public final class MaterialIdResolver {
         return result;
     }
 
-    public static int[] surfaceRelations(
-            int[] resolvedMediumRelations,
-            int[] localRelations,
-            int primitiveCount,
-            Cache cache) {
-        Objects.requireNonNull(resolvedMediumRelations, "resolvedMediumRelations");
-        Objects.requireNonNull(localRelations, "localRelations");
-        Objects.requireNonNull(cache, "cache");
-        if (resolvedMediumRelations.length != localRelations.length) {
-            throw new IllegalArgumentException(
-                    "MaterialId packing requires matching surface-relation tables");
-        }
-        if (localRelations.length == 0) {
-            return resolvedMediumRelations;
-        }
-        SurfaceRelationTable.validate(localRelations, primitiveCount);
-        int[] result = resolvedMediumRelations.clone();
-        int cursor = primitiveCount;
-        while (cursor < result.length) {
-            int kind = localRelations[cursor] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK;
-            int identityWord;
-            int materialId;
-            if (kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY) {
-                identityWord = cursor + 4;
-                materialId = cache.boundaryId(localRelations, cursor);
-            } else {
-                identityWord = cursor + 1 + PrimitivePacking.MEDIUM_ID_WORD;
-                materialId = cache.primitiveId(
-                        localRelations,
-                        cursor + 1,
-                        CompiledClusterLights.EMPTY);
-                if (materialId == 0) {
-                    throw new IllegalArgumentException(
-                            "Surface relation does not contain a table-backed material");
-                }
-            }
-            result[identityWord] = pack(
-                    PrimitivePacking.unpackSourceMediumId(
-                            resolvedMediumRelations[identityWord]),
-                    materialId);
-            cursor += SurfaceRelationTable.wordsForControl(localRelations[cursor]);
-        }
-        return result;
-    }
-
     public static int pack(int lowIdentity, int materialId) {
         requireId(lowIdentity, "Low identity", true);
         requireId(materialId, "MaterialId", true);

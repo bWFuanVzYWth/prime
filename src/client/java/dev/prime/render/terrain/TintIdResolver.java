@@ -51,45 +51,6 @@ public final class TintIdResolver {
         return result == null ? resolvedRecords : result;
     }
 
-    public static int[] surfaceRelations(
-            int[] resolvedRelations,
-            int[] sourceRelations,
-            int primitiveCount,
-            IntUnaryOperator resolver) {
-        Objects.requireNonNull(resolvedRelations, "resolvedRelations");
-        Objects.requireNonNull(sourceRelations, "sourceRelations");
-        Objects.requireNonNull(resolver, "resolver");
-        if (resolvedRelations.length != sourceRelations.length) {
-            throw new IllegalArgumentException(
-                    "TintId packing requires matching surface-relation tables");
-        }
-        if (resolvedRelations.length == 0) {
-            return resolvedRelations;
-        }
-        SurfaceRelationTable.validate(sourceRelations, primitiveCount);
-        int[] result = resolvedRelations.clone();
-        int cursor = primitiveCount;
-        while (cursor < result.length) {
-            int kind = sourceRelations[cursor] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK;
-            int tintWord = kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY
-                    ? cursor + 2
-                    : cursor + 1 + 3;
-            int packedRgba = sourceRelations[tintWord] & 0x00ff_ffff;
-            if (kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY) {
-                packedRgba |= sourceRelations[tintWord] & 0xff00_0000;
-            } else {
-                packedRgba |= PrimitivePacking.unpackSourceTintAlpha(
-                        sourceRelations[cursor + 1 + PrimitivePacking.MEDIUM_ID_WORD]);
-            }
-            int tintId = resolvePackedRgba(packedRgba, resolver);
-            result[tintWord] = kind == CpuSectionMesh.SURFACE_RELATION_BOUNDARY
-                    ? tintId
-                    : replaceTint(result[tintWord], tintId);
-            cursor += SurfaceRelationTable.wordsForControl(sourceRelations[cursor]);
-        }
-        return result;
-    }
-
     public static int resolvePackedRgba(int packedRgba, IntUnaryOperator resolver) {
         Objects.requireNonNull(resolver, "resolver");
         return requireTintId(resolver.applyAsInt(packedRgba));

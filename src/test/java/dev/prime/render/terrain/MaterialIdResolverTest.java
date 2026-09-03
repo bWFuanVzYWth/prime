@@ -146,31 +146,6 @@ final class MaterialIdResolverTest {
     }
 
     @Test
-    void packsBoundaryRelationIdentityAndPreservesSparseHeader() {
-        int[] boundary = {
-            CpuSectionMesh.SURFACE_RELATION_BOUNDARY | GLASS_CONTROL << 8,
-            PrimitivePacking.packUv(0.5F, 0.5F),
-            0x00ff_ffff,
-            7,
-            1
-        };
-        int[] local = SurfaceRelationTable.encode(List.of(boundary));
-        int[] resolvedMedium = MediumIdResolver.surfaceRelations(
-                local, 1, new int[] {0, 23});
-
-        int[] packed = MaterialIdResolver.surfaceRelations(
-                resolvedMedium,
-                local,
-                1,
-                MaterialIdResolver.cache(List.of(GLASS), key -> 53));
-
-        assertEquals(local[0], packed[0]);
-        int identity = packed[local[0] + 4];
-        assertEquals(23, MaterialIdResolver.unpackMediumId(identity));
-        assertEquals(53, MaterialIdResolver.unpackMaterialId(identity));
-    }
-
-    @Test
     void rejectsReservedOrOverflowingResolvedMaterialIds() {
         int[] local = primitive(7, 1, GLASS_CONTROL);
         int[] resolvedMedium = MediumIdResolver.primitiveRecords(

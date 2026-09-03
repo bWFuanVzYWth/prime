@@ -39,7 +39,7 @@ public final class ClusterTranslationBenchmarkCorpus {
                     "92b06057c5196f0759c07ad21e67f3bad696b9a68a73049ac69f20d41b897fd4",
                     2174L,
                     2111L,
-                    195220L);
+                    194968L);
             default -> throw new IllegalArgumentException("Unknown translation corpus: " + id);
         };
     }

@@ -1131,36 +1131,20 @@ public final class TerrainScene implements AutoCloseable {
         VulkanBuffer motion = null;
         PreparedBlas blas = null;
         DynamicBufferPool.Lease dynamicBuffers = null;
-        GpuSurfaceRelationTable.Encoding relationEncoding =
-                GpuSurfaceRelationTable.encodeResolved(
-                        new int[0], 0, mesh.lights().emitterCount());
+        GpuSurfaceRelationTable.Encoding relationEncoding = null;
         ArrayList<PreparedBlas> voxelBlases =
                 new ArrayList<>(mesh.voxelMeshes().size());
         try {
+            MaterialIdResolver.Cache materialCache = MaterialIdResolver.cache(
+                    mesh.mediumCatalog(), this.materialIds::resolve);
+            IntUnaryOperator tintResolver = this.tintSamples::resolve;
+            relationEncoding = GpuSurfaceRelationTable.encode(
+                    mesh,
+                    mesh.lights().emitterCount(),
+                    materialCache,
+                    tintResolver);
             if (triangleLayout.triangleCount() != 0L) {
-                int primitiveCount = Math.toIntExact(triangleLayout.primitiveCount());
                 int[] mediumMap = this.mediumIds.resolve(mesh.mediumCatalog());
-                MaterialIdResolver.Cache materialCache = MaterialIdResolver.cache(
-                        mesh.mediumCatalog(), this.materialIds::resolve);
-                IntUnaryOperator tintResolver = this.tintSamples::resolve;
-                int[] sourceRelations = mesh.surfaceRelationRecords();
-                int[] relations = sourceRelations;
-                if (relations.length != 0) {
-                    relations = MediumIdResolver.surfaceRelations(
-                            relations, primitiveCount, mediumMap);
-                    relations = MaterialIdResolver.surfaceRelations(
-                            relations,
-                            sourceRelations,
-                            primitiveCount,
-                            materialCache);
-                    relations = TintIdResolver.surfaceRelations(
-                            relations,
-                            sourceRelations,
-                            primitiveCount,
-                            tintResolver);
-                }
-                relationEncoding = GpuSurfaceRelationTable.encodeResolved(
-                        relations, primitiveCount, mesh.lights().emitterCount());
                 long surfaceRelationBytes = relationEncoding.byteSize();
                 long primitiveBytes = Math.addExact(
                         mesh.primitiveBytes(), surfaceRelationBytes);

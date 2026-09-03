@@ -201,71 +201,12 @@ public final class CpuClusterMesh {
                 (long) CpuSectionMesh.PRIMITIVE_WORDS * Integer.BYTES);
     }
 
-    public boolean hasSurfaceRelations() {
-        for (CpuMeshSegment segment : this.segments) {
-            if (segment.surfaceRelationRecords().length != 0) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     public long surfaceRelationBytes() {
-        long tailWords = 0L;
-        boolean any = false;
+        long words = 0L;
         for (CpuMeshSegment segment : this.segments) {
-            int[] records = segment.surfaceRelationRecords();
-            if (records.length == 0) {
-                continue;
-            }
-            any = true;
-            int primitiveCount = segment.opaquePrimitiveCount()
-                    + segment.cutoutPrimitiveCount()
-                    + segment.transmissivePrimitiveCount();
-            tailWords = Math.addExact(
-                    tailWords, (long) records.length - primitiveCount);
+            words = Math.addExact(words, segment.surfaceRelationRecords().length);
         }
-        if (!any) {
-            return 0L;
-        }
-        return Math.multiplyExact(
-                Math.addExact(this.triangleLayout.primitiveCount(), tailWords), Integer.BYTES);
-    }
-
-    /** Global primitive-order relation table used by the single cluster BLAS section record. */
-    public int[] surfaceRelationRecords() {
-        ArrayList<int[]> opaque = new ArrayList<>();
-        ArrayList<int[]> cutout = new ArrayList<>();
-        ArrayList<int[]> transmissive = new ArrayList<>();
-        for (CpuMeshSegment segment : this.segments) {
-            int primitiveCount = segment.opaquePrimitiveCount()
-                    + segment.cutoutPrimitiveCount()
-                    + segment.transmissivePrimitiveCount();
-            SurfaceRelationTable.appendRange(
-                    opaque,
-                    segment.surfaceRelationRecords(),
-                    primitiveCount,
-                    0,
-                    segment.opaquePrimitiveCount());
-            SurfaceRelationTable.appendRange(
-                    cutout,
-                    segment.surfaceRelationRecords(),
-                    primitiveCount,
-                    segment.opaquePrimitiveCount(),
-                    segment.cutoutPrimitiveCount());
-            SurfaceRelationTable.appendRange(
-                    transmissive,
-                    segment.surfaceRelationRecords(),
-                    primitiveCount,
-                    segment.opaquePrimitiveCount() + segment.cutoutPrimitiveCount(),
-                    segment.transmissivePrimitiveCount());
-        }
-        ArrayList<int[]> records = new ArrayList<>(
-                opaque.size() + cutout.size() + transmissive.size());
-        records.addAll(opaque);
-        records.addAll(cutout);
-        records.addAll(transmissive);
-        return SurfaceRelationTable.encode(records);
+        return Math.multiplyExact(words, Integer.BYTES);
     }
 
     public long byteSize() {

@@ -177,7 +177,7 @@ final class TransparentBoundaryResolverTest {
     }
 
     @Test
-    void globalRelationSizeIncludesRelationFreeSegments() {
+    void segmentedRelationSizeCountsOnlyOwnedStorage() {
         TestSprite glass = new TestSprite("segmented_contact_glass");
         TestSprite ice = new TestSprite("segmented_contact_ice");
         TestSprite stone = new TestSprite("segmented_contact_stone");
@@ -202,13 +202,10 @@ final class TransparentBoundaryResolverTest {
 
         assertEquals(2, mesh.segments().size());
         assertEquals(0, mesh.segments().get(1).surfaceRelationRecords().length);
-        int[] globalRecords = mesh.surfaceRelationRecords();
         assertEquals(
-                (long) globalRecords.length * Integer.BYTES,
+                (long) mesh.segments().getFirst().surfaceRelationRecords().length
+                        * Integer.BYTES,
                 mesh.surfaceRelationBytes());
-        assertTrue(mesh.surfaceRelationBytes()
-                > (long) mesh.segments().getFirst().surfaceRelationRecords().length
-                        * Integer.BYTES);
     }
 
     @Test
