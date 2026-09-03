@@ -39,6 +39,7 @@
     "realtime_wavefront_fixed_light_select": {"entry": "entry/realtime/fixed_light_select.raygeneration.slang", "ser": true},
     "realtime_wavefront_fixed_direct": {"entry": "entry/realtime/fixed_direct.raygeneration.slang", "ser": true},
     "realtime_wavefront_fixed_scatter": {"entry": "entry/realtime/fixed_scatter.raygeneration.slang", "ser": true},
+    "realtime_wavefront_tail_admission": {"entry": "entry/realtime/tail_admission.raygeneration.slang", "ser": true},
     "realtime_wavefront_tail": {"entry": "entry/realtime/tail.raygeneration.slang", "ser": true},
     "realtime_wavefront_surface_split": {"entry": "entry/realtime/surface_split.raygeneration.slang", "ser": true},
     "realtime_wavefront_branch_resolve": {"entry": "entry/realtime/branch_resolve.raygeneration.slang", "ser": true},
@@ -72,8 +73,9 @@
         "light_select_1": ["realtime_wavefront_fixed_light_select", 1],
         "direct_1": ["realtime_wavefront_fixed_direct", 1],
         "scatter_1": ["realtime_wavefront_fixed_scatter", 1],
-        "tail_0": ["realtime_wavefront_tail", 0],
-        "tail_1": ["realtime_wavefront_tail", 1],
+        "tail_admission_0": ["realtime_wavefront_tail_admission", 0],
+        "tail_admission_1": ["realtime_wavefront_tail_admission", 1],
+        "tail": ["realtime_wavefront_tail", 0],
         "branch_resolve": ["realtime_wavefront_branch_resolve", 0],
         "noisy_output_resolve": ["realtime_wavefront_noisy_output_resolve", 0]
       }

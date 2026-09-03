@@ -310,11 +310,17 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 				wavefrontShader('realtime', 'visible_direct', '')).descriptorBindings(1)
 		requireBinding(visible, queue, true, 'Visible direct queue')
 		requireBinding(visible, paths, false, 'Visible direct paths')
+		['', '_ser'].each { suffix ->
+			requireEqual([paths, queue] as Set, requireModule(modules,
+					wavefrontShader('realtime', 'tail_admission', suffix)).descriptorBindings(1),
+					"Tail admission descriptors ${suffix}")
+		}
 
 		def realtimeStages = [
 				'camera_trace', 'surface_split', 'delta_walk', 'guide_delta_walk',
 				'landing_light_select', 'landing_direct', 'landing_scatter',
 				'fixed_bridge_trace', 'fixed_light_select', 'fixed_direct', 'fixed_scatter',
+				'tail_admission',
 				'tail', 'branch_resolve', 'visible_direct', 'noisy_output_resolve']
 		def offlineStages = [
 				'camera_trace', 'bridge_trace', 'light_select', 'direct', 'scatter',

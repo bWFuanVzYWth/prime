@@ -24,9 +24,9 @@ final class TracePipelinesContractTest {
 
     @Test
     void realtimeAndOfflineHaveIndependentSchedulesAndDescriptors() {
-        assertEquals(13, RealtimeRayTracingPipeline.dispatchCount(1));
-        assertEquals(17, RealtimeRayTracingPipeline.dispatchCount(2));
-        assertEquals(41, RealtimeRayTracingPipeline.dispatchCount(8));
+        assertEquals(14, RealtimeRayTracingPipeline.dispatchCount(1));
+        assertEquals(18, RealtimeRayTracingPipeline.dispatchCount(2));
+        assertEquals(42, RealtimeRayTracingPipeline.dispatchCount(8));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> RealtimeRayTracingPipeline.dispatchCount(0));
@@ -48,8 +48,8 @@ final class TracePipelinesContractTest {
 
         RaygenSchedule realtime =
                 GeneratedShaderPrograms.schedule("realtime.standard", ".rgen.spv");
-        assertEquals(22, realtime.groupCount());
-        assertEquals(15, realtime.moduleCount());
+        assertEquals(23, realtime.groupCount());
+        assertEquals(16, realtime.moduleCount());
         RaygenSchedule offline = GeneratedShaderPrograms.schedule("offline", ".rgen.spv");
         assertEquals(10, offline.groupCount());
         assertEquals(6, offline.moduleCount());
@@ -59,8 +59,8 @@ final class TracePipelinesContractTest {
     void realtimeScheduleKeepsItsDeclaredGroupsAndResources() {
         RaygenSchedule realtime =
                 GeneratedShaderPrograms.schedule("realtime.standard", "_ser.rgen.spv");
-        assertEquals(15, realtime.moduleCount());
-        assertEquals(22, realtime.groupCount());
+        assertEquals(16, realtime.moduleCount());
+        assertEquals(23, realtime.groupCount());
         assertEquals(
                 "/prime/shaders/realtime_wavefront_surface_split_ser.rgen.spv",
                 realtime.moduleResource(2));
@@ -71,8 +71,11 @@ final class TracePipelinesContractTest {
                 "/prime/shaders/realtime_wavefront_fixed_direct_ser.rgen.spv",
                 realtime.moduleResource(10));
         assertEquals(
-                "/prime/shaders/realtime_wavefront_tail_ser.rgen.spv",
+                "/prime/shaders/realtime_wavefront_tail_admission_ser.rgen.spv",
                 realtime.moduleResource(12));
+        assertEquals(
+                "/prime/shaders/realtime_wavefront_tail_ser.rgen.spv",
+                realtime.moduleResource(13));
     }
 
     @Test
