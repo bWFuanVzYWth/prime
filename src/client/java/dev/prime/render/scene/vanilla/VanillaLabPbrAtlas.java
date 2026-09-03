@@ -121,25 +121,11 @@ public final class VanillaLabPbrAtlas {
             if (supported) {
                 if (normal != null) {
                     normalSprites.add(spriteId);
-                    heightMaps.put(spriteId, LabPbrHeightMap.fromNormal(
-                            normal.pixels(),
-                            normal.width(),
-                            normal.height(),
-                            normal.frameWidth(),
-                            normal.frameHeight(),
-                            normal.columns(),
-                            normal.frameCount()));
+                    heightMaps.put(spriteId, LabPbrHeightMap.fromNormal(normal));
                 }
                 if (specular != null) {
                     specularSprites.add(spriteId);
-                    LabPbrEmissionMap emission = LabPbrEmissionMap.fromSpecular(
-                            specular.pixels(),
-                            specular.width(),
-                            specular.height(),
-                            specular.frameWidth(),
-                            specular.frameHeight(),
-                            specular.columns(),
-                            specular.frameCount());
+                    LabPbrEmissionMap emission = LabPbrEmissionMap.fromSpecular(specular);
                     if (emission != null) {
                         emissionMaps.put(spriteId, emission);
                     }

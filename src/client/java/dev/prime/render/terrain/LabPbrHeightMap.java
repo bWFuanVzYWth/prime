@@ -4,17 +4,16 @@ import java.util.Arrays;
 
 /** Immutable CPU view of the LabPBR normal-map alpha height channel. */
 public final class LabPbrHeightMap {
-    private final byte[] encoded;
-    private final SpriteSheetLayout layout;
+    private final LabPbrAtlasFrame.MaterialSource source;
     private final byte[] frameMinimum;
+    private final int alphaHash;
 
     private LabPbrHeightMap(
-            byte[] encoded,
-            SpriteSheetLayout layout,
+            LabPbrAtlasFrame.MaterialSource source,
             byte[] frameMinimum) {
-        this.encoded = encoded;
-        this.layout = layout;
+        this.source = source;
         this.frameMinimum = frameMinimum;
+        this.alphaHash = source.alphaHashCode();
     }
 
     public static LabPbrHeightMap fromNormal(
@@ -25,33 +24,27 @@ public final class LabPbrHeightMap {
             int frameHeight,
             int columns,
             int frameCount) {
-        if (argb.length != Math.multiplyExact(width, height)) {
-            throw new IllegalArgumentException(
-                    "LabPBR height-map layout does not match its pixels");
-        }
-        SpriteSheetLayout layout = new SpriteSheetLayout(
-                width, height, frameWidth, frameHeight, columns, frameCount);
-        byte[] encoded = new byte[argb.length];
-        for (int index = 0; index < argb.length; index++) {
-            encoded[index] = (byte) (argb[index] >>> 24);
-        }
-        byte[] frameMinimum = new byte[frameCount];
+        return fromNormal(new LabPbrAtlasFrame.MaterialSource(
+                argb, width, height, frameWidth, frameHeight, columns, frameCount));
+    }
+
+    public static LabPbrHeightMap fromNormal(
+            LabPbrAtlasFrame.MaterialSource source) {
+        byte[] frameMinimum = new byte[source.frameCount()];
         Arrays.fill(frameMinimum, (byte) 0xff);
-        for (int frame = 0; frame < frameCount; frame++) {
-            int frameX = layout.frameOriginX(frame);
-            int frameY = layout.frameOriginY(frame);
+        for (int frame = 0; frame < source.frameCount(); frame++) {
+            int frameX = source.frameOriginX(frame);
+            int frameY = source.frameOriginY(frame);
             int minimum = 255;
-            for (int y = 0; y < frameHeight; y++) {
-                for (int x = 0; x < frameWidth; x++) {
-                    minimum = Math.min(
-                            minimum,
-                            Byte.toUnsignedInt(
-                                    encoded[(frameY + y) * width + frameX + x]));
+            for (int y = 0; y < source.frameHeight(); y++) {
+                for (int x = 0; x < source.frameWidth(); x++) {
+                    minimum = Math.min(minimum,
+                            source.argb((frameY + y) * source.width() + frameX + x) >>> 24);
                 }
             }
             frameMinimum[frame] = (byte) minimum;
         }
-        return new LabPbrHeightMap(encoded, layout, frameMinimum);
+        return new LabPbrHeightMap(source, frameMinimum);
     }
 
     /**
@@ -63,9 +56,8 @@ public final class LabPbrHeightMap {
      * the configured maximum.
      */
     float sample(int requestedFrame, float localU, float localV) {
-        int frame = this.layout.frame(requestedFrame);
-        int encodedHeight = Byte.toUnsignedInt(
-                this.encoded[this.layout.index(frame, localU, localV)]);
+        int frame = this.source.frame(requestedFrame);
+        int encodedHeight = this.source.argb(this.source.index(frame, localU, localV)) >>> 24;
         int minimum = Byte.toUnsignedInt(this.frameMinimum[frame]);
         return (encodedHeight - minimum) / 255.0F;
     }
@@ -78,13 +70,12 @@ public final class LabPbrHeightMap {
         if (!(other instanceof LabPbrHeightMap map)) {
             return false;
         }
-        return this.layout.equals(map.layout)
-                && Arrays.equals(this.encoded, map.encoded);
+        return this.alphaHash == map.alphaHash
+                && this.source.alphaEquals(map.source);
     }
 
     @Override
     public int hashCode() {
-        int result = Arrays.hashCode(this.encoded);
-        return 31 * result + this.layout.hashCode();
+        return this.alphaHash;
     }
 }

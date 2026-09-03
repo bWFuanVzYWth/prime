@@ -1,20 +1,17 @@
 package dev.prime.render.terrain;
 
-import java.util.Arrays;
-
 /** Immutable CPU view of the LabPBR specular alpha channel used by light extraction. */
 public final class LabPbrEmissionMap {
-    private final byte[] encoded;
-    private final SpriteSheetLayout layout;
+    private final LabPbrAtlasFrame.MaterialSource source;
     private final boolean hasPositiveEmission;
+    private final int alphaHash;
 
     private LabPbrEmissionMap(
-            byte[] encoded,
-            SpriteSheetLayout layout,
+            LabPbrAtlasFrame.MaterialSource source,
             boolean hasPositiveEmission) {
-        this.encoded = encoded;
-        this.layout = layout;
+        this.source = source;
         this.hasPositiveEmission = hasPositiveEmission;
+        this.alphaHash = source.alphaHashCode();
     }
 
     /** Returns null only when every texel uses LabPBR's 255 "not authored" sentinel. */
@@ -26,22 +23,21 @@ public final class LabPbrEmissionMap {
             int frameHeight,
             int columns,
             int frameCount) {
-        if (argb.length != Math.multiplyExact(width, height)) {
-            throw new IllegalArgumentException("Specular pixel count does not match its dimensions");
-        }
-        SpriteSheetLayout layout = new SpriteSheetLayout(
-                width, height, frameWidth, frameHeight, columns, frameCount);
-        byte[] encoded = new byte[argb.length];
+        return fromSpecular(new LabPbrAtlasFrame.MaterialSource(
+                argb, width, height, frameWidth, frameHeight, columns, frameCount));
+    }
+
+    public static LabPbrEmissionMap fromSpecular(
+            LabPbrAtlasFrame.MaterialSource source) {
         boolean authored = false;
         boolean positive = false;
-        for (int index = 0; index < argb.length; index++) {
-            int alpha = argb[index] >>> 24;
-            encoded[index] = (byte) alpha;
+        for (int index = 0; index < source.width() * source.height(); index++) {
+            int alpha = source.argb(index) >>> 24;
             authored |= alpha < 255;
             positive |= alpha > 0 && alpha < 255;
         }
         return authored
-                ? new LabPbrEmissionMap(encoded, layout, positive)
+                ? new LabPbrEmissionMap(source, positive)
                 : null;
     }
 
@@ -51,8 +47,8 @@ public final class LabPbrEmissionMap {
 
     /** Samples the same clamped source frame and normalized sprite coordinates as the GPU atlas. */
     float sample(int requestedFrame, float localU, float localV) {
-        return decode(Byte.toUnsignedInt(this.encoded[
-                this.layout.index(requestedFrame, localU, localV)]));
+        return decode(this.source.argb(
+                this.source.index(requestedFrame, localU, localV)) >>> 24);
     }
 
     static float decode(int encoded) {
@@ -70,13 +66,12 @@ public final class LabPbrEmissionMap {
         if (!(other instanceof LabPbrEmissionMap map)) {
             return false;
         }
-        return this.layout.equals(map.layout)
-                && Arrays.equals(this.encoded, map.encoded);
+        return this.alphaHash == map.alphaHash
+                && this.source.alphaEquals(map.source);
     }
 
     @Override
     public int hashCode() {
-        int result = Arrays.hashCode(this.encoded);
-        return 31 * result + this.layout.hashCode();
+        return this.alphaHash;
     }
 }
