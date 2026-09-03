@@ -352,34 +352,15 @@ public final class PrimeConfig {
     }
 
     public static void restoreDefaults() {
+        RendererSettings previous = rendererSettings();
         PrimeConfigData defaults = PrimeConfigData.defaults();
-        setPathTracingEnabled(defaults.pathTracingEnabled);
-        setAdditionalSpecularBounces(defaults.additionalSpecularBounces);
-        setMinimumBounces(defaults.minimumBounces);
-        setMaximumBounces(defaults.maximumBounces);
-        setTerrainWorkerPercentage(defaults.terrainWorkerPercentage);
-        setSurfaceDetailMode(defaults.surfaceDetailMode);
-        setVoxelTextureSurfaceStrengthSteps(defaults.voxelTextureSurfaceStrengthSteps);
-        setPostProcessingMode(defaults.postProcessingMode);
-        setReconstructionQualityMode(defaults.reconstructionQuality);
-        setLatitudeDegrees(defaults.astronomy.latitudeDegrees());
-        setSolarLongitudeDegrees(defaults.astronomy.solarLongitudeDegrees());
-        setSunQuarterSteps(defaults.lighting.sunQuarterSteps());
-        setStarQuarterSteps(defaults.lighting.starQuarterSteps());
-        setBlockLightQuarterSteps(defaults.lighting.blockLightQuarterSteps());
-        setTransparentNeeMode(defaults.lighting.transparentNeeMode());
-        setFinalExposureQuarterSteps(defaults.display.finalExposureQuarterSteps());
-        setAutoExposureCompensationSteps(defaults.display.autoExposureCompensationSteps());
-        setDefaultRoughnessSteps(defaults.material.roughnessSteps());
-        setSeamlessGlass(defaults.material.seamlessGlass());
-        setAirGap(defaults.material.airGap());
-        setVanillaPbrPresets(defaults.material.vanillaPbrPresets());
-        setHdrEnabled(defaults.hdrEnabled);
-        setReferenceWhiteNits(defaults.referenceWhiteNits);
-        setReflexMode(defaults.reflexMode);
-        setDlssFrameGenerationEnabled(defaults.dlssFrameGenerationEnabled);
-        setDlssFrameGenerationMultiplier(defaults.dlssFrameGenerationMultiplier);
-        setDlssFrameGenerationUiRecomposition(defaults.dlssFrameGenerationUiRecomposition);
+        data = defaults;
+        HdrOutput.setRequested(defaults.hdrEnabled);
+        HdrOutput.setReferenceWhiteNits(defaults.referenceWhiteNits);
+        if (!previous.equals(rendererSettings())) {
+            rendererRevision = Math.incrementExact(rendererRevision);
+        }
+        dirty = true;
     }
 
     public static void save() {

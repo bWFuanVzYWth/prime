@@ -141,9 +141,11 @@ final class PrimeConfigTest {
         PrimeConfig.setHdrEnabled(true);
         PrimeConfig.setReferenceWhiteNits(400);
         PrimeConfig.setDlssFrameGenerationUiRecomposition(false);
+        long revision = PrimeConfig.rendererSettings().revision();
 
         PrimeConfig.restoreDefaults();
 
+        assertEquals(revision + 1L, PrimeConfig.rendererSettings().revision());
         assertEquals(MaximumBounceSettings.DEFAULT_COUNT, PrimeConfig.maximumBounces());
         assertEquals(
                 MaximumBounceSettings.DEFAULT_COUNT,
