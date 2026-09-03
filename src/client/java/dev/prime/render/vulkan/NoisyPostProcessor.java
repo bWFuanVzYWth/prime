@@ -2,9 +2,8 @@ package dev.prime.render.vulkan;
 
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.post.ReconstructionFrameParameters;
-import dev.prime.render.post.PostProcessingMode;
-import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.vulkan.reconstruction.ReconstructionDebugSettings;
+import dev.prime.render.vulkan.reconstruction.ResolvedReconstruction;
 import dev.prime.render.vulkan.reconstruction.VulkanReconstructionProcessor;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
@@ -20,9 +19,7 @@ public final class NoisyPostProcessor extends VulkanReconstructionProcessor {
 
     private NoisyPostProcessor(
             VulkanContext context,
-            ReconstructionQualityMode quality,
-            int width,
-            int height,
+            ResolvedReconstruction selection,
             BasicRawWavefrontFrame rawFrame,
             NoisyCompositePass composite,
             DisplayTransformPass displayTransform,
@@ -30,12 +27,7 @@ public final class NoisyPostProcessor extends VulkanReconstructionProcessor {
             VulkanImage displayOutput) {
         super(
                 context,
-                PostProcessingMode.DISABLED,
-                quality,
-                width,
-                height,
-                width,
-                height,
+                selection,
                 stableRadiance,
                 displayOutput);
         this.rawFrame = rawFrame;
@@ -48,9 +40,9 @@ public final class NoisyPostProcessor extends VulkanReconstructionProcessor {
             AtmospherePipeline atmosphere,
             VulkanImage stableRadiance,
             VulkanImage displayOutput,
-            int width,
-            int height,
-            ReconstructionQualityMode quality) {
+            ResolvedReconstruction selection) {
+        int width = selection.extent().width();
+        int height = selection.extent().height();
         BasicRawWavefrontFrame rawFrame = null;
         NoisyCompositePass composite = null;
         DisplayTransformPass displayTransform = null;
@@ -62,9 +54,7 @@ public final class NoisyPostProcessor extends VulkanReconstructionProcessor {
                     context, rawFrame.linearOutput(), rawFrame, displayOutput);
             return new NoisyPostProcessor(
                     context,
-                    quality,
-                    width,
-                    height,
+                    selection,
                     rawFrame,
                     composite,
                     displayTransform,
@@ -119,16 +109,6 @@ public final class NoisyPostProcessor extends VulkanReconstructionProcessor {
                 false,
                 parameters.display(),
                 initialization);
-    }
-
-    @Override
-    public void submitted(Frame frame) {
-        submittedFrame(frame);
-    }
-
-    @Override
-    public void abandon(Frame frame) {
-        abandonSubmittedFrame(frame);
     }
 
     @Override

@@ -17,12 +17,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 /** Vulkan command, image, frame-token and lifetime boundary of a reconstruction backend. */
 public abstract class VulkanReconstructionProcessor implements Destroyable {
     private final VulkanContext context;
-    private final PostProcessingMode mode;
-    private final ReconstructionQualityMode quality;
-    private final int renderWidth;
-    private final int renderHeight;
-    private final int displayWidth;
-    private final int displayHeight;
+    private final ResolvedReconstruction selection;
     private final VulkanImage stableRadiance;
     private final VulkanImage displayOutput;
     private RendererImageDebugPass rendererDebugPass;
@@ -30,31 +25,22 @@ public abstract class VulkanReconstructionProcessor implements Destroyable {
 
     protected VulkanReconstructionProcessor(
             VulkanContext context,
-            PostProcessingMode mode,
-            ReconstructionQualityMode quality,
-            int renderWidth,
-            int renderHeight,
-            int displayWidth,
-            int displayHeight,
+            ResolvedReconstruction selection,
             VulkanImage stableRadiance,
             VulkanImage displayOutput) {
         this.context = context;
-        this.mode = mode;
-        this.quality = quality;
-        this.renderWidth = renderWidth;
-        this.renderHeight = renderHeight;
-        this.displayWidth = displayWidth;
-        this.displayHeight = displayHeight;
+        this.selection = selection;
         this.stableRadiance = stableRadiance;
         this.displayOutput = displayOutput;
     }
 
-    public final PostProcessingMode mode() { return this.mode; }
-    public final ReconstructionQualityMode quality() { return this.quality; }
-    public final int renderWidth() { return this.renderWidth; }
-    public final int renderHeight() { return this.renderHeight; }
-    public final int displayWidth() { return this.displayWidth; }
-    public final int displayHeight() { return this.displayHeight; }
+    public final ResolvedReconstruction selection() { return this.selection; }
+    public final PostProcessingMode mode() { return this.selection.effectiveMode(); }
+    public final ReconstructionQualityMode quality() { return this.selection.quality(); }
+    public final int renderWidth() { return this.selection.extent().width(); }
+    public final int renderHeight() { return this.selection.extent().height(); }
+    public final int displayWidth() { return this.selection.displayExtent().width(); }
+    public final int displayHeight() { return this.selection.displayExtent().height(); }
 
     protected final VulkanContext context() { return this.context; }
     protected final VulkanImage displayOutput() { return this.displayOutput; }
@@ -119,9 +105,13 @@ public abstract class VulkanReconstructionProcessor implements Destroyable {
         if (view.active()) rendererDebugPass().present(commandBuffer, view);
     }
 
-    public abstract void abandon(Frame frame);
+    public void abandon(Frame frame) {
+        abandonSubmittedFrame(frame);
+    }
 
-    public abstract void submitted(Frame frame);
+    public void submitted(Frame frame) {
+        submittedFrame(frame);
+    }
 
     private RendererImageDebugPass rendererDebugPass() {
         if (this.rendererDebugPass == null) {

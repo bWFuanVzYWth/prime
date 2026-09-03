@@ -98,7 +98,7 @@ public final class ReconstructionBackendRegistry {
             VulkanReconstructionProcessor processor = this.createProcessor(
                     atmosphere, stableRadiance, output, selection);
             return new VulkanReconstructionResources(
-                    output, stableRadiance, processor, selection);
+                    output, stableRadiance, processor);
         } catch (RuntimeException exception) {
             RuntimeException failure = ResourceCleanup.destroy(stableRadiance, exception);
             failure = ResourceCleanup.destroy(output, failure);
@@ -115,19 +115,13 @@ public final class ReconstructionBackendRegistry {
             VulkanImage stableRadiance,
             VulkanImage output,
             ResolvedReconstruction selection) {
-        int width = selection.extent().width();
-        int height = selection.extent().height();
         return switch (selection.effectiveMode()) {
             case NRD_FSR -> NrdFsrPostProcessor.create(
                     this.context,
                     atmosphere,
                     stableRadiance,
                     output,
-                    width,
-                    height,
-                    output.width(),
-                    output.height(),
-                    selection.quality());
+                    selection);
             case DLSS_RR -> {
                 if (this.ngxContext == null) {
                     throw new IllegalStateException(
@@ -139,20 +133,14 @@ public final class ReconstructionBackendRegistry {
                         atmosphere,
                         stableRadiance,
                         output,
-                        width,
-                        height,
-                        output.width(),
-                        output.height(),
-                        selection.quality());
+                        selection);
             }
             case DISABLED -> NoisyPostProcessor.create(
                     this.context,
                     atmosphere,
                     stableRadiance,
                     output,
-                    width,
-                    height,
-                    selection.quality());
+                    selection);
         };
     }
 

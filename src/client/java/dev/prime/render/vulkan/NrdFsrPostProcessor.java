@@ -2,13 +2,12 @@ package dev.prime.render.vulkan;
 
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.NrdInputView;
-import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionFrameParameters;
-import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.vulkan.fsr.Fsr3Upscaler;
 import dev.prime.render.vulkan.nrd.NrdDenoiser;
 import dev.prime.render.post.nrd.NrdFramePlan;
 import dev.prime.render.vulkan.reconstruction.ReconstructionDebugSettings;
+import dev.prime.render.vulkan.reconstruction.ResolvedReconstruction;
 import dev.prime.render.vulkan.reconstruction.VulkanReconstructionProcessor;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
@@ -22,11 +21,7 @@ public final class NrdFsrPostProcessor extends VulkanReconstructionProcessor {
 
     private NrdFsrPostProcessor(
             VulkanContext context,
-            ReconstructionQualityMode quality,
-            int renderWidth,
-            int renderHeight,
-            int displayWidth,
-            int displayHeight,
+            ResolvedReconstruction selection,
             VulkanImage sceneColor,
             NrdDenoiser denoiser,
             Fsr3Upscaler upscaler,
@@ -34,12 +29,7 @@ public final class NrdFsrPostProcessor extends VulkanReconstructionProcessor {
             VulkanImage stableRadiance) {
         super(
                 context,
-                PostProcessingMode.NRD_FSR,
-                quality,
-                renderWidth,
-                renderHeight,
-                displayWidth,
-                displayHeight,
+                selection,
                 stableRadiance,
                 displayOutput);
         this.sceneColor = sceneColor;
@@ -52,11 +42,11 @@ public final class NrdFsrPostProcessor extends VulkanReconstructionProcessor {
             AtmospherePipeline atmosphere,
             VulkanImage accumulation,
             VulkanImage displayOutput,
-            int renderWidth,
-            int renderHeight,
-            int displayWidth,
-            int displayHeight,
-            ReconstructionQualityMode quality) {
+            ResolvedReconstruction selection) {
+        int renderWidth = selection.extent().width();
+        int renderHeight = selection.extent().height();
+        int displayWidth = selection.displayExtent().width();
+        int displayHeight = selection.displayExtent().height();
         VulkanImage sceneColor = null;
         NrdDenoiser denoiser = null;
         Fsr3Upscaler upscaler = null;
@@ -84,11 +74,7 @@ public final class NrdFsrPostProcessor extends VulkanReconstructionProcessor {
                     displayOutput);
             return new NrdFsrPostProcessor(
                     context,
-                    quality,
-                    renderWidth,
-                    renderHeight,
-                    displayWidth,
-                    displayHeight,
+                    selection,
                     sceneColor,
                     denoiser,
                     upscaler,

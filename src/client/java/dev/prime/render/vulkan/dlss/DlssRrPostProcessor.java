@@ -2,9 +2,7 @@ package dev.prime.render.vulkan.dlss;
 
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.RrInputView;
-import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionFrameParameters;
-import dev.prime.render.post.ReconstructionQualityMode;
 import dev.prime.render.vulkan.AtmospherePipeline;
 import dev.prime.render.vulkan.DisplayTransformPass;
 import dev.prime.render.vulkan.VulkanContext;
@@ -13,6 +11,7 @@ import dev.prime.render.vulkan.VulkanImageInitializationBatch;
 import dev.prime.render.vulkan.VulkanSync;
 import dev.prime.render.post.nrd.NrdCameraTransform;
 import dev.prime.render.vulkan.reconstruction.ReconstructionDebugSettings;
+import dev.prime.render.vulkan.reconstruction.ResolvedReconstruction;
 import dev.prime.render.vulkan.reconstruction.VulkanReconstructionProcessor;
 import org.joml.Matrix4f;
 import org.lwjgl.vulkan.VK12;
@@ -29,11 +28,7 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
 
     private DlssRrPostProcessor(
             VulkanContext context,
-            ReconstructionQualityMode quality,
-            int renderWidth,
-            int renderHeight,
-            int displayWidth,
-            int displayHeight,
+            ResolvedReconstruction selection,
             DlssRrTargets targets,
             DlssRrPreparePass preparePass,
             DlssRrNative.Feature feature,
@@ -42,12 +37,7 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
             VulkanImage stableRadiance) {
         super(
                 context,
-                PostProcessingMode.DLSS_RR,
-                quality,
-                renderWidth,
-                renderHeight,
-                displayWidth,
-                displayHeight,
+                selection,
                 stableRadiance,
                 displayOutput);
         this.targets = targets;
@@ -62,11 +52,11 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
             AtmospherePipeline atmosphere,
             VulkanImage accumulation,
             VulkanImage displayOutput,
-            int renderWidth,
-            int renderHeight,
-            int displayWidth,
-            int displayHeight,
-            ReconstructionQualityMode quality) {
+            ResolvedReconstruction selection) {
+        int renderWidth = selection.extent().width();
+        int renderHeight = selection.extent().height();
+        int displayWidth = selection.displayExtent().width();
+        int displayHeight = selection.displayExtent().height();
         DlssRrTargets targets = null;
         DlssRrPreparePass preparePass = null;
         DlssRrNative.Feature feature = null;
@@ -85,18 +75,14 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
                     renderHeight,
                     displayWidth,
                     displayHeight,
-                    quality);
+                    selection.quality());
             VulkanContext.check(
                     VK12.vkEndCommandBuffer(commandBuffer), "end DLSS RR feature creation command buffer");
             encoder.execute(commandBuffer);
             context.awaitIdle();
             return new DlssRrPostProcessor(
                     context,
-                    quality,
-                    renderWidth,
-                    renderHeight,
-                    displayWidth,
-                    displayHeight,
+                    selection,
                     targets,
                     preparePass,
                     feature,
@@ -212,16 +198,6 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
                     this.displayTransform.hdrOutput());
         }
         return this.debugPass;
-    }
-
-    @Override
-    public void submitted(Frame frame) {
-        submittedFrame(frame);
-    }
-
-    @Override
-    public void abandon(Frame frame) {
-        abandonSubmittedFrame(frame);
     }
 
     @Override

@@ -10,18 +10,15 @@ public final class VulkanReconstructionResources implements Destroyable {
     private final VulkanImage output;
     private final VulkanImage stableRadiance;
     private final VulkanReconstructionProcessor processor;
-    private final ResolvedReconstruction selection;
     private boolean destroyed;
 
     VulkanReconstructionResources(
             VulkanImage output,
             VulkanImage stableRadiance,
-            VulkanReconstructionProcessor processor,
-            ResolvedReconstruction selection) {
+            VulkanReconstructionProcessor processor) {
         this.output = Objects.requireNonNull(output, "output");
         this.stableRadiance = Objects.requireNonNull(stableRadiance, "stableRadiance");
         this.processor = Objects.requireNonNull(processor, "processor");
-        this.selection = Objects.requireNonNull(selection, "selection");
     }
 
     public VulkanImage output() {
@@ -37,15 +34,16 @@ public final class VulkanReconstructionResources implements Destroyable {
     }
 
     public ResolvedReconstruction selection() {
-        return this.selection;
+        return this.processor.selection();
     }
 
     public boolean matches(ResolvedReconstruction candidate) {
-        return this.selection.requestedMode() == candidate.requestedMode()
-                && this.selection.effectiveMode() == candidate.effectiveMode()
-                && this.selection.quality() == candidate.quality()
-                && this.selection.extent().equals(candidate.extent())
-                && this.selection.displayExtent().equals(candidate.displayExtent());
+        ResolvedReconstruction current = this.processor.selection();
+        return current.requestedMode() == candidate.requestedMode()
+                && current.effectiveMode() == candidate.effectiveMode()
+                && current.quality() == candidate.quality()
+                && current.extent().equals(candidate.extent())
+                && current.displayExtent().equals(candidate.displayExtent());
     }
 
     @Override
