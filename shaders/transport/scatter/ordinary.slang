@@ -13,7 +13,6 @@ import "transport/scatter/path_update.slang";
 import "policy/transport/path.slang";
 
 public bool primeRussianRoulette(
-        inout PrimeIntegratorContext context,
         inout PathState path,
         float sampleValue) {
     float survival = primeRussianRouletteSurvival(
@@ -63,7 +62,7 @@ public bool primeAdvanceRealtimePath(
             bounceSample,
             PRIME_SAMPLE_EFFECT_RUSSIAN_ROULETTE,
             PRIME_SAMPLE_DIMENSION_PRIMARY);
-    return primeRussianRoulette(context, path, rouletteSample);
+    return primeRussianRoulette(path, rouletteSample);
 }
 
 public bool primeAdvanceRealtimePath(

@@ -10,11 +10,10 @@ final class RealtimeStandardGroups {
     static final int LIGHT_SELECT_1 = 15;
     static final int DIRECT_1 = 16;
     static final int SCATTER_1 = 17;
-    static final int TAIL_ADMISSION_0 = 18;
-    static final int TAIL_ADMISSION_1 = 19;
-    static final int TAIL = 20;
-    static final int BRANCH_RESOLVE = 21;
-    static final int NOISY_OUTPUT_RESOLVE = 22;
+    static final int TAIL_0 = 18;
+    static final int TAIL_1 = 19;
+    static final int BRANCH_RESOLVE = 20;
+    static final int NOISY_OUTPUT_RESOLVE = 21;
     private RealtimeStandardGroups() {}
 
     static RaygenSchedule standardSchedule(String suffix) {
@@ -45,8 +44,8 @@ final class RealtimeStandardGroups {
         return sourceOne ? SCATTER_1 : SCATTER_0;
     }
 
-    static int tailAdmission(boolean sourceOne) {
-        return sourceOne ? TAIL_ADMISSION_1 : TAIL_ADMISSION_0;
+    static int tail(boolean sourceOne) {
+        return sourceOne ? TAIL_1 : TAIL_0;
     }
 
 }

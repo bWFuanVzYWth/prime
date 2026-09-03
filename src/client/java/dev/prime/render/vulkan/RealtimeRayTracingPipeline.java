@@ -54,8 +54,8 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
     static int dispatchCount(int minimumBounces) {
         dev.prime.render.MinimumBounceSettings.validateCount(minimumBounces);
         // Landing owns the primary-surface bounce. Every additional minimum bounce has four
-        // narrow stages; admission and the register tail replace all remaining dispatches.
-        return 4 * (minimumBounces - 1) + 14;
+        // narrow stages; the register tail replaces all remaining dispatches.
+        return 4 * (minimumBounces - 1) + 13;
     }
 
     static int[] primaryDirectInputImageIndices() {
@@ -276,19 +276,13 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         int tailSourceQueue = sourceOne
                 ? ShaderAbi.WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1
                 : ShaderAbi.WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0;
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                RealtimeStandardGroups.tailAdmission(sourceOne),
-                commandOffset,
-                tailSourceQueue);
         this.nextStepBarrier(commandBuffer, stack);
         this.traceQueued(
                 commandBuffer,
                 stack,
-                RealtimeStandardGroups.TAIL,
+                RealtimeStandardGroups.tail(sourceOne),
                 commandOffset,
-                ShaderAbi.WAVEFRONT_AREA_QUEUE);
+                tailSourceQueue);
         this.resolveInputBarrier(commandBuffer, stack);
         this.recordOutputTail(
                 commandBuffer,

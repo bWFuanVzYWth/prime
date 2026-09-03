@@ -39,7 +39,6 @@
     "realtime_wavefront_fixed_light_select": {"entry": "entry/realtime/fixed_light_select.raygeneration.slang", "ser": true},
     "realtime_wavefront_fixed_direct": {"entry": "entry/realtime/fixed_direct.raygeneration.slang", "ser": true},
     "realtime_wavefront_fixed_scatter": {"entry": "entry/realtime/fixed_scatter.raygeneration.slang", "ser": true},
-    "realtime_wavefront_tail_admission": {"entry": "entry/realtime/tail_admission.raygeneration.slang", "ser": true},
     "realtime_wavefront_tail": {"entry": "entry/realtime/tail.raygeneration.slang", "ser": true},
     "realtime_wavefront_surface_split": {"entry": "entry/realtime/surface_split.raygeneration.slang", "ser": true},
     "realtime_wavefront_branch_resolve": {"entry": "entry/realtime/branch_resolve.raygeneration.slang", "ser": true},
@@ -54,8 +53,8 @@
   "schedules": {
     "realtime.standard": {
       "variants": ["scalar", "ser"],
-      "modules": ["realtime_wavefront_camera_trace", "realtime_wavefront_visible_direct", "realtime_wavefront_surface_split", "realtime_wavefront_delta_walk", "realtime_wavefront_guide_delta_walk", "realtime_wavefront_landing_light_select", "realtime_wavefront_landing_direct", "realtime_wavefront_landing_scatter", "realtime_wavefront_fixed_bridge_trace", "realtime_wavefront_fixed_light_select", "realtime_wavefront_fixed_direct", "realtime_wavefront_fixed_scatter", "realtime_wavefront_tail_admission", "realtime_wavefront_tail", "realtime_wavefront_branch_resolve", "realtime_wavefront_noisy_output_resolve"],
-      "groups": [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [3, 1], [4, 0], [5, 0], [6, 0], [7, 0], [8, 0], [9, 0], [10, 0], [11, 0], [8, 1], [9, 1], [10, 1], [11, 1], [12, 0], [12, 1], [13, 0], [14, 0], [15, 0]]
+      "modules": ["realtime_wavefront_camera_trace", "realtime_wavefront_visible_direct", "realtime_wavefront_surface_split", "realtime_wavefront_delta_walk", "realtime_wavefront_guide_delta_walk", "realtime_wavefront_landing_light_select", "realtime_wavefront_landing_direct", "realtime_wavefront_landing_scatter", "realtime_wavefront_fixed_bridge_trace", "realtime_wavefront_fixed_light_select", "realtime_wavefront_fixed_direct", "realtime_wavefront_fixed_scatter", "realtime_wavefront_tail", "realtime_wavefront_branch_resolve", "realtime_wavefront_noisy_output_resolve"],
+      "groups": [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [3, 1], [4, 0], [5, 0], [6, 0], [7, 0], [8, 0], [9, 0], [10, 0], [11, 0], [8, 1], [9, 1], [10, 1], [11, 1], [12, 0], [12, 1], [13, 0], [14, 0]]
     },
     "offline": {
       "variants": ["scalar", "ser"],
