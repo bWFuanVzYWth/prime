@@ -31,7 +31,6 @@ public void primeSelectFixedLight(uint sourceQueue, uint launchIndex) {
                 surface, path.viewDirection, path.volumeStack, primeUsesAirGap());
         if (primeClosureSupports(
                 closureTraits, PRIME_MEASURE_SOLID_ANGLE)) {
-            selection.area = primeInvalidAreaLightSelection();
             PrimeDirectSampleBase directSample = primeMakeDirectSampleBase(
                     pixel,
                     primeSampleIndex(),

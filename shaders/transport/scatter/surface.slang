@@ -166,8 +166,6 @@ public bool primeIntegrateWavefrontSurface<
     BsdfSample bsdf = scatter.bsdf;
     volumeStack = scatter.volumeStack;
     bool hasScatter = primeHasScatter(bsdf);
-    if (hasScatter) {
-    }
     bool sampledSolidAngle = primeIsSolidAngleSample(bsdf);
     if (!denoiserState.reachedSolidAngle) {
         bool firstDenoiseSurface = !denoiserState.hasPrimarySurface;

@@ -159,16 +159,14 @@ public void primeStoreTransparentBranchIntermediate(
             primeNrdReflectionSpecularMaterial,
             coordinate,
             float4(result.guides.primarySpecularAlbedo, 0.0));
-    if (primeWritesNrdShInputs()) {
-        primeImageStore(
-                primeNrdReflectionDiffuseDirection,
-                coordinate,
-                float4(result.guides.diffuseDirection, 0.0));
-        primeImageStore(
-                primeNrdReflectionSpecularDirection,
-                coordinate,
-                float4(result.guides.specularDirection, 0.0));
-    }
+    primeImageStore(
+            primeNrdReflectionDiffuseDirection,
+            coordinate,
+            float4(result.guides.diffuseDirection, 0.0));
+    primeImageStore(
+            primeNrdReflectionSpecularDirection,
+            coordinate,
+            float4(result.guides.specularDirection, 0.0));
 }
 
 // Active transparent branches keep their immutable guide images resident. Per-vertex transport
@@ -448,23 +446,21 @@ public PrimeTransparentBranchResult primeLoadTransparentBranchIntermediate(
     result.guides.primarySpecularAlbedo = specularMaterial.rgb;
     if (transmissionBranch || rrReflectionPrimaryGuide) {
         result.guides.primaryLinearRoughness = material.w;
-        if (transmissionBranch && primeWritesNrdShInputs()) {
+        if (transmissionBranch && nrdShInputs) {
             result.guides.diffuseDirection = primeRestoreFp16Direction(
                     primeImageLoad(primeNrdDiffuseDirection, coordinate).xyz);
             result.guides.specularDirection = primeRestoreFp16Direction(
                     primeImageLoad(primeNrdSpecularDirection, coordinate).xyz);
         }
     } else if (nrdShInputs) {
-        if (primeWritesNrdShInputs()) {
-            result.guides.diffuseDirection = primeRestoreFp16Direction(
-                    primeImageLoad(
-                            primeNrdReflectionDiffuseDirection,
-                            coordinate).xyz);
-            result.guides.specularDirection = primeRestoreFp16Direction(
-                    primeImageLoad(
-                            primeNrdReflectionSpecularDirection,
-                            coordinate).xyz);
-        }
+        result.guides.diffuseDirection = primeRestoreFp16Direction(
+                primeImageLoad(
+                        primeNrdReflectionDiffuseDirection,
+                        coordinate).xyz);
+        result.guides.specularDirection = primeRestoreFp16Direction(
+                primeImageLoad(
+                        primeNrdReflectionSpecularDirection,
+                        coordinate).xyz);
     }
     uint branch = transmissionBranch ? 0u : 1u;
     uint guidePathIndex = primeWavefrontIndex(pixel, branch);
