@@ -152,26 +152,18 @@ final class PrimeProductionMathGpuTest {
     private static void assertRealtimeState(ShaderComputeRunner runner) throws IOException {
         int cases = 2 * CASES_PER_KIND;
         int inputWords = 2;
-        ByteBuffer input = ShaderTestBuffer.inputs(cases, inputWords);
+        var input = ShaderTestBuffer.inputWriter(cases, inputWords);
         SplittableRandom random = new SplittableRandom(REALTIME_STATE_SEED);
         int[] specialEtaBits = {0x0000_0001, 0x0080_0000, 0x3f80_0000, 0x7f7f_ffff};
         for (int index = 0; index < CASES_PER_KIND; index++) {
-            putInt(input, index, inputWords, 0, 0, 0);
-            putInt(input, index, inputWords, 0, 1, random.nextInt(1 << 16));
-            putInt(input, index, inputWords, 0, 2, random.nextInt(1 << 16));
+            input.putInt(index, 0, 0, 0);
+            input.putInt(index, 0, 1, random.nextInt(1 << 16));
+            input.putInt(index, 0, 2, random.nextInt(1 << 16));
             float etaScale = index < specialEtaBits.length
                     ? Float.intBitsToFloat(specialEtaBits[index])
                     : positiveFloat(random, -125, 120);
             float[] normal = randomUnitVector(random);
-            putVec4(
-                    input,
-                    index,
-                    inputWords,
-                    1,
-                    etaScale,
-                    normal[0],
-                    normal[1],
-                    normal[2]);
+            input.putVec4(index, 1, etaScale, normal[0], normal[1], normal[2]);
         }
         for (int local = 0; local < CASES_PER_KIND; local++) {
             int index = CASES_PER_KIND + local;
@@ -179,15 +171,15 @@ final class PrimeProductionMathGpuTest {
             int queue = local % 7;
             boolean wide = queue == 0 || queue == 2 || queue == 3 || queue == 4;
             int capacity = Math.multiplyExact(pixelCount, wide ? 2 : 1);
-            putInt(input, index, inputWords, 0, 0, 1);
-            putInt(input, index, inputWords, 0, 1, pixelCount);
-            putInt(input, index, inputWords, 0, 2, queue);
-            putInt(input, index, inputWords, 0, 3, random.nextInt(capacity));
+            input.putInt(index, 0, 0, 1);
+            input.putInt(index, 0, 1, pixelCount);
+            input.putInt(index, 0, 2, queue);
+            input.putInt(index, 0, 3, random.nextInt(capacity));
         }
         ShaderPropertyBatch.assertProperties(
                 runner,
                 slangShader("prime_realtime_state_properties.comp.spv"),
-                input,
+                input.buffer(),
                 cases,
                 inputWords,
                 4,
@@ -257,15 +249,15 @@ final class PrimeProductionMathGpuTest {
             throws IOException {
         int cases = 1 << 10;
         int inputWords = 3;
-        ByteBuffer input = ShaderTestBuffer.inputs(cases, inputWords);
+        var input = ShaderTestBuffer.inputWriter(cases, inputWords);
         for (int flags = 0; flags < cases; flags++) {
-            putInt(input, flags, inputWords, 0, 0, 0);
-            putInt(input, flags, inputWords, 0, 1, flags);
+            input.putInt(flags, 0, 0, 0);
+            input.putInt(flags, 0, 1, flags);
         }
         ShaderPropertyBatch.assertProperties(
                 runner,
                 slangShader("prime_fsr_input_properties.comp.spv"),
-                input,
+                input.buffer(),
                 cases,
                 inputWords,
                 5,
@@ -301,13 +293,13 @@ final class PrimeProductionMathGpuTest {
     }
 
     private static ByteBuffer autoExposureCases(int kinds, int inputWords) {
-        ByteBuffer input = ShaderTestBuffer.inputs(CASES_PER_KIND * kinds, inputWords);
+        var input = ShaderTestBuffer.inputWriter(CASES_PER_KIND * kinds, inputWords);
         SplittableRandom random =
                 new SplittableRandom(AUTO_EXPOSURE_SEED);
         for (int kind = 0; kind < kinds; kind++) {
             for (int local = 0; local < CASES_PER_KIND; local++) {
                 int index = kind * CASES_PER_KIND + local;
-                putInt(input, index, inputWords, 0, 0, kind);
+                input.putInt(index, 0, 0, kind);
                 if (kind == 0 || kind == 4) {
                     float minimum =
                             -16.0F + random.nextFloat() * 36.0F;
@@ -325,40 +317,26 @@ final class PrimeProductionMathGpuTest {
                         case 2 -> 1.0F;
                         default -> random.nextFloat();
                     };
-                    putVec4(
-                            input,
-                            index,
-                            inputWords,
-                            1,
-                            measured,
-                            minimum,
-                            maximum,
-                            compensation);
+                    input.putVec4(index, 1, measured, minimum, maximum, compensation);
                 } else if (kind == 1) {
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            inputWords,
                             1,
                             random.nextFloat() * 8.0F - 4.0F,
                             random.nextFloat() * 8.0F - 4.0F,
                             0.0F,
                             0.0F);
                 } else if (kind == 2) {
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            inputWords,
                             1,
                             random.nextFloat() * 1.25F - 0.125F,
                             random.nextFloat() * 2.0F - 0.5F,
                             0.0F,
                             0.0F);
                 } else if (kind == 3) {
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            inputWords,
                             1,
                             random.nextInt(4),
                             random.nextFloat() * 2.0F - 1.0F,
@@ -373,10 +351,8 @@ final class PrimeProductionMathGpuTest {
                         green = local == 3 ? 1.0F : 0.0F;
                         blue = (local & 2) != 0 ? 1.0F : 0.0F;
                     }
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            inputWords,
                             1,
                             red,
                             green,
@@ -389,10 +365,8 @@ final class PrimeProductionMathGpuTest {
                         case 2 -> 0.18F;
                         default -> 0.18F * powerOfTwo(random.nextInt(-8, 11));
                     };
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            inputWords,
                             1,
                             curveInput,
                             0.0F,
@@ -415,11 +389,11 @@ final class PrimeProductionMathGpuTest {
                                 case 2 -> 64.0F;
                                 default -> 10_000.0F;
                             };
-                    putVec4(input, index, inputWords, 1, red, green, blue, auxiliary);
+                    input.putVec4(index, 1, red, green, blue, auxiliary);
                 }
             }
         }
-        return input;
+        return input.buffer();
     }
 
     private static void assertQueuedPsr(ShaderComputeRunner runner) throws IOException {
@@ -435,23 +409,23 @@ final class PrimeProductionMathGpuTest {
     }
 
     private static ByteBuffer bsdfContractCases(int kinds, int words) {
-        ByteBuffer input = ShaderTestBuffer.inputs(CASES_PER_KIND * kinds, words);
+        var input = ShaderTestBuffer.inputWriter(CASES_PER_KIND * kinds, words);
         SplittableRandom random = new SplittableRandom(BSDF_CONTRACT_SEED);
         for (int kind = 0; kind < kinds; kind++) {
             for (int local = 0; local < CASES_PER_KIND; local++) {
                 int index = kind * CASES_PER_KIND + local;
-                putInt(input, index, words, 0, 0, kind);
+                input.putInt(index, 0, 0, kind);
                 if (kind == 0) {
-                    putInt(input, index, words, 0, 1, random.nextInt());
+                    input.putInt(index, 0, 1, random.nextInt());
                 } else if (kind == 1) {
-                    putInt(input, index, words, 0, 1, local & 7);
-                    putInt(input, index, words, 0, 2, random.nextInt());
+                    input.putInt(index, 0, 1, local & 7);
+                    input.putInt(index, 0, 2, random.nextInt());
                 } else if (kind == 2) {
                     float first = contractFloat(random, local, 0);
                     float second = contractFloat(random, local, 1);
                     float third = contractFloat(random, local, 2);
                     float pdf = contractFloat(random, local, 3);
-                    putVec4(input, index, words, 1, first, second, third, pdf);
+                    input.putVec4(index, 1, first, second, third, pdf);
                 } else {
                     float[] direction = randomUnitVector(random);
                     float red = random.nextFloat() * 8.0F;
@@ -471,21 +445,19 @@ final class PrimeProductionMathGpuTest {
                         default -> {
                         }
                     }
-                    putInt(input, index, words, 0, 1, eventFlags);
-                    putVec4(
-                            input,
+                    input.putInt(index, 0, 1, eventFlags);
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             direction[0],
                             direction[1],
                             direction[2],
                             pdf);
-                    putVec4(input, index, words, 2, red, green, blue, relativeEta);
+                    input.putVec4(index, 2, red, green, blue, relativeEta);
                 }
             }
         }
-        return input;
+        return input.buffer();
     }
 
     private static float contractFloat(
@@ -498,66 +470,54 @@ final class PrimeProductionMathGpuTest {
     }
 
     private static ByteBuffer transportCases(int kinds, int words) {
-        ByteBuffer input = ShaderTestBuffer.inputs(CASES_PER_KIND * kinds, words);
+        var input = ShaderTestBuffer.inputWriter(CASES_PER_KIND * kinds, words);
         SplittableRandom random = new SplittableRandom(TRANSPORT_SEED);
         for (int kind = 0; kind < kinds; kind++) {
             for (int local = 0; local < CASES_PER_KIND; local++) {
                 int index = kind * CASES_PER_KIND + local;
-                putInt(input, index, words, 0, 0, kind);
+                input.putInt(index, 0, 0, kind);
                 if (kind == 0) {
                     float denominator = powerOfTwo(random.nextInt(-20, 21));
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             positiveFloat(random, -90, 90),
                             positiveFloat(random, -90, 90),
                             positiveFloat(random, -90, 90),
                             denominator);
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             2,
                             positiveFloat(random, -20, 20),
                             positiveFloat(random, -20, 20),
                             positiveFloat(random, -20, 20),
                             0.0F);
                 } else if (kind == 1) {
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             positiveFloat(random, -60, 60),
                             positiveFloat(random, -60, 60),
                             powerOfTwo(random.nextInt(-20, 21)),
                             0.0F);
                 } else if (kind == 2) {
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             random.nextFloat() * 10.0F,
                             random.nextFloat() * 10.0F,
                             random.nextFloat() * 10.0F,
                             random.nextFloat() * 100.0F);
                 } else if (kind == 3) {
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             random.nextFloat(),
                             random.nextFloat(),
                             random.nextFloat(),
                             0.0625F + random.nextFloat() * 15.9375F);
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             2,
                             random.nextFloat(),
                             0.0F,
@@ -574,10 +534,8 @@ final class PrimeProductionMathGpuTest {
                         case 6 -> 163.0F / 255.0F;
                         default -> 1.0F;
                     };
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             random.nextFloat(),
                             random.nextFloat(),
@@ -596,48 +554,40 @@ final class PrimeProductionMathGpuTest {
                         random.nextFloat() * boundaryRange
                     };
                     Arrays.sort(hits);
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             rayDistance,
                             hits[0],
                             hits[1],
                             hits[2]);
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             2,
                             hits[3],
                             random.nextFloat() * 2.0F,
                             random.nextFloat() * 2.0F,
                             random.nextFloat() * 2.0F);
                 } else if (kind == 7) {
-                    putInt(input, index, words, 0, 1, random.nextInt() | 1);
+                    input.putInt(index, 0, 1, random.nextInt() | 1);
                     int iorEncoding = local == 0 ? 1 << 8 : local & 0xff;
-                    putInt(input, index, words, 0, 2, iorEncoding);
-                    putVec4(
-                            input,
+                    input.putInt(index, 0, 2, iorEncoding);
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             random.nextFloat() * 32.0F,
                             random.nextFloat() * 32.0F,
                             random.nextFloat() * 32.0F,
                             1.0F + random.nextFloat());
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             2,
                             random.nextFloat(),
                             random.nextFloat(),
                             random.nextFloat(),
                             random.nextFloat() * 1.98F - 0.99F);
                 } else if (kind == 8) {
-                    putLightBranchCase(input, index, words, local, random);
+                    putLightBranchCase(input, index, local, random);
                 } else if (kind == 10) {
                     float red = random.nextFloat() * 2.0F;
                     float green = random.nextFloat() * 2.0F;
@@ -645,19 +595,15 @@ final class PrimeProductionMathGpuTest {
                     if (local == 0) {
                         red = green = blue = 0.0F;
                     }
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             red,
                             green,
                             blue,
                             powerOfTwo(random.nextInt(-6, 7)));
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             2,
                             0.5F + random.nextFloat() * 1.5F,
                             0.0F,
@@ -671,17 +617,15 @@ final class PrimeProductionMathGpuTest {
                                     : local == 2
                                             ? new float[] {0.0F, 0.0F, -1.0F}
                                             : randomUnitVector(random);
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             normal[0],
                             normal[1],
                             normal[2],
                             0.0F);
                 } else if (kind == 12) {
-                    putLightEmissionBoundCase(input, index, words, local, random);
+                    putLightEmissionBoundCase(input, index, local, random);
                 } else if (kind == 13) {
                     float[] point = {
                         random.nextFloat() * 128.0F - 64.0F,
@@ -693,28 +637,22 @@ final class PrimeProductionMathGpuTest {
                     float[] receiverNormal = local == 0
                             ? new float[] {0.0F, 0.0F, 0.0F}
                             : randomUnitVector(random);
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             point[0] + direction[0] * distance,
                             point[1] + direction[1] * distance,
                             point[2] + direction[2] * distance,
                             positiveFloat(random, -20, 20));
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             2,
                             point[0],
                             point[1],
                             point[2],
                             local == 1 ? 0.0F : positiveFloat(random, -20, 6));
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             3,
                             receiverNormal[0],
                             receiverNormal[1],
@@ -757,19 +695,19 @@ final class PrimeProductionMathGpuTest {
                     float translationZ = random.nextFloat() * 8192.0F - 4096.0F;
                     float barycentricX = random.nextFloat();
                     float barycentricY = random.nextFloat() * (1.0F - barycentricX);
-                    putVec4(input, index, words, 1,
+                    input.putVec4(index, 1,
                             first[0], first[1], first[2], translationX);
-                    putVec4(input, index, words, 2,
+                    input.putVec4(index, 2,
                             first[0] + firstEdge[0],
                             first[1] + firstEdge[1],
                             first[2] + firstEdge[2],
                             translationY);
-                    putVec4(input, index, words, 3,
+                    input.putVec4(index, 3,
                             first[0] + secondEdge[0],
                             first[1] + secondEdge[1],
                             first[2] + secondEdge[2],
                             translationZ);
-                    putVec4(input, index, words, 4,
+                    input.putVec4(index, 4,
                             barycentricX, barycentricY, 0.0F, 0.0F);
                 } else if (kind == 15) {
                     int opaquePrimitiveCount = random.nextInt(1, 257);
@@ -795,13 +733,13 @@ final class PrimeProductionMathGpuTest {
                     int expectedIndex = primitiveIndex
                             + (geometry == 0 ? 0 : opaqueTriangleCount)
                             + (geometry == 2 ? cutoutTriangleCount : 0);
-                    putInt(input, index, words, 0, 1, geometry);
-                    putInt(input, index, words, 0, 2, primitiveIndex);
-                    putInt(input, index, words, 0, 3, expectedIndex);
-                    putInt(input, index, words, 1, 0, opaquePrimitiveCount);
-                    putInt(input, index, words, 1, 1, cutoutPrimitiveCount);
-                    putInt(input, index, words, 1, 2, opaqueMacroBase);
-                    putInt(input, index, words, 1, 3, cutoutMacroBase);
+                    input.putInt(index, 0, 1, geometry);
+                    input.putInt(index, 0, 2, primitiveIndex);
+                    input.putInt(index, 0, 3, expectedIndex);
+                    input.putInt(index, 1, 0, opaquePrimitiveCount);
+                    input.putInt(index, 1, 1, cutoutPrimitiveCount);
+                    input.putInt(index, 1, 2, opaqueMacroBase);
+                    input.putInt(index, 1, 3, cutoutMacroBase);
                     int macroBase = geometry == 0
                             ? opaqueMacroBase
                             : geometry == 1
@@ -814,62 +752,54 @@ final class PrimeProductionMathGpuTest {
                             ? 0
                             : opaquePrimitiveCount
                                     + (geometry == 1 ? 0 : cutoutPrimitiveCount);
-                    putInt(input, index, words, 2, 0, transmissiveMacroBase);
-                    putInt(input, index, words, 2, 1, expectedPrimitive);
+                    input.putInt(index, 2, 0, transmissiveMacroBase);
+                    input.putInt(index, 2, 1, expectedPrimitive);
                 } else if (kind == 17) {
-                    putLightBranchTargetCase(input, index, words, local, random);
+                    putLightBranchTargetCase(input, index, local, random);
                 } else if (kind == 18) {
-                    putInt(input, index, words, 0, 1, random.nextInt());
-                    putInt(input, index, words, 0, 2, random.nextInt());
-                    putInt(input, index, words, 0, 3, random.nextInt());
+                    input.putInt(index, 0, 1, random.nextInt());
+                    input.putInt(index, 0, 2, random.nextInt());
+                    input.putInt(index, 0, 3, random.nextInt());
                     for (int word = 1; word < words; word++) {
                         for (int component = 0; component < 4; component++) {
-                            putInt(
-                                    input,
-                                    index,
-                                    words,
-                                    word,
-                                    component,
-                                    random.nextInt());
+                            input.putInt(index, word, component, random.nextInt());
                         }
                     }
                 } else if (kind == 19) {
                     int pixelCount = random.nextInt(1, 8_294_401);
                     int queue = local & 1;
                     int entry = random.nextInt(pixelCount);
-                    putInt(input, index, words, 0, 1, pixelCount);
-                    putInt(input, index, words, 0, 2, queue);
-                    putInt(input, index, words, 0, 3, entry);
+                    input.putInt(index, 0, 1, pixelCount);
+                    input.putInt(index, 0, 2, queue);
+                    input.putInt(index, 0, 3, entry);
                 } else if (kind == 20) {
                     int count = local % 3;
                     int firstMediumId = local == 0 ? 0xffff : random.nextInt(1, 0x1_0000);
                     int secondMediumId = local == 1 ? 0xffff : random.nextInt(1, 0x1_0000);
                     int firstIor = local == 2 ? 1 << 8 : random.nextInt(0x100);
                     int secondIor = local == 3 ? 1 << 8 : random.nextInt(0x100);
-                    putInt(input, index, words, 0, 1, firstMediumId);
-                    putInt(input, index, words, 0, 2, secondMediumId);
-                    putInt(input, index, words, 0, 3, count);
-                    putInt(input, index, words, 1, 0, firstIor);
-                    putInt(input, index, words, 1, 1, secondIor);
+                    input.putInt(index, 0, 1, firstMediumId);
+                    input.putInt(index, 0, 2, secondMediumId);
+                    input.putInt(index, 0, 3, count);
+                    input.putInt(index, 1, 0, firstIor);
+                    input.putInt(index, 1, 1, secondIor);
                 } else if (kind == 21) {
                     int count = local % 3;
                     int active = (local & 1) << 2;
                     int bounce = random.nextInt(0x100) << 8;
                     int flags = random.nextInt(4) << 16;
-                    putInt(input, index, words, 0, 1, random.nextInt());
-                    putInt(input, index, words, 0, 2, random.nextInt());
-                    putInt(input, index, words, 0, 3,
+                    input.putInt(index, 0, 1, random.nextInt());
+                    input.putInt(index, 0, 2, random.nextInt());
+                    input.putInt(index, 0, 3,
                             count | active | bounce | flags);
                     for (int word = 1; word < words; word++) {
                         for (int component = 0; component < 4; component++) {
-                            putInt(input, index, words, word, component, random.nextInt());
+                            input.putInt(index, word, component, random.nextInt());
                         }
                     }
                 } else {
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             positiveFloat(random, -20, 20),
                             positiveFloat(random, -20, 20),
@@ -878,7 +808,7 @@ final class PrimeProductionMathGpuTest {
                 }
             }
         }
-        return input;
+        return input.buffer();
     }
 
     private static void assertProjectedSolidAngleSampling(ShaderComputeRunner runner)
@@ -896,7 +826,7 @@ final class PrimeProductionMathGpuTest {
     }
 
     private static ByteBuffer projectedSolidAngleCases(int kinds, int inputWords) {
-        ByteBuffer input = ShaderTestBuffer.inputs(CASES_PER_KIND * kinds, inputWords);
+        var input = ShaderTestBuffer.inputWriter(CASES_PER_KIND * kinds, inputWords);
         SplittableRandom random = new SplittableRandom(PROJECTED_SOLID_ANGLE_SEED);
         for (int kind = 0; kind < kinds; kind++) {
             for (int local = 0; local < CASES_PER_KIND; local++) {
@@ -968,24 +898,24 @@ final class PrimeProductionMathGpuTest {
                 int expectedVertexCount = kind == 5
                         ? -1
                         : kind == 4 ? 0 : kind == 3 ? 4 : 3;
-                putInt(input, index, inputWords, 0, 0, kind);
-                putInt(input, index, inputWords, 0, 1, expectedVertexCount);
-                putVec4(input, index, inputWords, 1,
+                input.putInt(index, 0, 0, kind);
+                input.putInt(index, 0, 1, expectedVertexCount);
+                input.putVec4(index, 1,
                         worldVertices[0][0], worldVertices[0][1], worldVertices[0][2], 0.0F);
-                putVec4(input, index, inputWords, 2,
+                input.putVec4(index, 2,
                         firstEdge[0], firstEdge[1], firstEdge[2], 0.0F);
-                putVec4(input, index, inputWords, 3,
+                input.putVec4(index, 3,
                         secondEdge[0], secondEdge[1], secondEdge[2], 0.0F);
-                putVec4(input, index, inputWords, 4,
+                input.putVec4(index, 4,
                         receiver[0], receiver[1], receiver[2], 0.0F);
-                putVec4(input, index, inputWords, 5,
+                input.putVec4(index, 5,
                         normal[0], normal[1], normal[2], 0.0F);
                 float randomX = 1.0e-6F + random.nextFloat() * (1.0F - 2.0e-6F);
                 float randomY = 1.0e-6F + random.nextFloat() * (1.0F - 2.0e-6F);
-                putVec4(input, index, inputWords, 6, randomX, randomY, 0.0F, 0.0F);
+                input.putVec4(index, 6, randomX, randomY, 0.0F, 0.0F);
             }
         }
-        return input;
+        return input.buffer();
     }
 
     private static float[][] centralProjectedTriangle(
@@ -1052,9 +982,8 @@ final class PrimeProductionMathGpuTest {
     }
 
     private static void putLightBranchTargetCase(
-            ByteBuffer input,
+            ShaderTestBuffer.InputWriter input,
             int index,
-            int words,
             int local,
             SplittableRandom random) {
         for (int child = 0; child < 2; child++) {
@@ -1064,25 +993,11 @@ final class PrimeProductionMathGpuTest {
             }
             float power = positiveFloat(random, -16, 16);
             int component = child * 2;
-            putFloat(
-                    input,
-                    index,
-                    words,
-                    1,
-                    component % 4,
-                    distanceSquared);
-            putFloat(
-                    input,
-                    index,
-                    words,
-                    1,
-                    component % 4 + 1,
-                    power);
+            input.putFloat(index, 1, component % 4, distanceSquared);
+            input.putFloat(index, 1, component % 4 + 1, power);
         }
-        putVec4(
-                input,
+        input.putVec4(
                 index,
-                words,
                 3,
                 powerOfTwo(random.nextInt(-8, 9)),
                 powerOfTwo(random.nextInt(-8, 9)),
@@ -1091,9 +1006,8 @@ final class PrimeProductionMathGpuTest {
     }
 
     private static void putLightEmissionBoundCase(
-            ByteBuffer input,
+            ShaderTestBuffer.InputWriter input,
             int index,
-            int words,
             int local,
             SplittableRandom random) {
         float minX = random.nextFloat() * 16.0F - 8.0F;
@@ -1138,18 +1052,17 @@ final class PrimeProductionMathGpuTest {
             normalZ = normal[2];
             twoSided = 0.0F;
         }
-        putInt(input, index, words, 0, 1, packed);
-        putVec4(input, index, words, 1, minX, minY, minZ, 0.0F);
-        putVec4(input, index, words, 2, maxX, maxY, maxZ, 0.0F);
-        putVec4(input, index, words, 3, pointX, pointY, pointZ, 0.0F);
-        putVec4(input, index, words, 4, lightX, lightY, lightZ, 0.0F);
-        putVec4(input, index, words, 5, normalX, normalY, normalZ, twoSided);
+        input.putInt(index, 0, 1, packed);
+        input.putVec4(index, 1, minX, minY, minZ, 0.0F);
+        input.putVec4(index, 2, maxX, maxY, maxZ, 0.0F);
+        input.putVec4(index, 3, pointX, pointY, pointZ, 0.0F);
+        input.putVec4(index, 4, lightX, lightY, lightZ, 0.0F);
+        input.putVec4(index, 5, normalX, normalY, normalZ, twoSided);
     }
 
     private static void putLightBranchCase(
-            ByteBuffer input,
+            ShaderTestBuffer.InputWriter input,
             int index,
-            int words,
             int local,
             SplittableRandom random) {
         float firstPower = positiveFloat(random, -20, 20);
@@ -1202,51 +1115,42 @@ final class PrimeProductionMathGpuTest {
                 : local == 6
                         ? new float[] {1.0F, 0.0F, 0.0F}
                         : randomUnitVector(random);
-        putFloat(input, index, words, 0, 1, receiverNormal[0]);
-        putFloat(input, index, words, 0, 2, receiverNormal[1]);
-        putFloat(input, index, words, 0, 3, receiverNormal[2]);
-        putVec4(
-                input,
+        input.putFloat(index, 0, 1, receiverNormal[0]);
+        input.putFloat(index, 0, 2, receiverNormal[1]);
+        input.putFloat(index, 0, 3, receiverNormal[2]);
+        input.putVec4(
                 index,
-                words,
                 1,
                 firstX,
                 firstY,
                 firstZ,
                 firstPower);
-        putVec4(
-                input,
+        input.putVec4(
                 index,
-                words,
                 2,
                 firstX + firstExtent,
                 firstY + firstExtent,
                 firstZ + firstExtent,
                 firstSoftening);
-        putVec4(
-                input,
+        input.putVec4(
                 index,
-                words,
                 3,
                 secondX,
                 secondY,
                 secondZ,
                 secondPower);
-        putVec4(
-                input,
+        input.putVec4(
                 index,
-                words,
                 4,
                 secondX + secondExtent,
                 secondY + secondExtent,
                 secondZ + secondExtent,
                 secondSoftening);
-        putVec4(input, index, words, 5, pointX, pointY, pointZ, 0.0F);
+        input.putVec4(index, 5, pointX, pointY, pointZ, 0.0F);
     }
 
     private static ByteBuffer celestialCases(int kinds, int words) {
-        ByteBuffer input =
-                ShaderTestBuffer.inputs(CASES_PER_KIND * kinds, words);
+        var input = ShaderTestBuffer.inputWriter(CASES_PER_KIND * kinds, words);
         SplittableRandom random = new SplittableRandom(CELESTIAL_SEED);
         int[] latitudeBoundaries = {-90, -30, 0, 30, 90};
         int[] longitudeBoundaries = {0, 90, 180, 270, 359};
@@ -1275,13 +1179,11 @@ final class PrimeProductionMathGpuTest {
                 float declination =
                         random.nextFloat() * ((float) Math.PI - 2.0e-3F)
                                 - ((float) Math.PI * 0.5F - 1.0e-3F);
-                putInt(input, index, words, 0, 0, kind);
-                putInt(input, index, words, 0, 1, latitude);
-                putInt(input, index, words, 0, 2, solarLongitude);
-                putVec4(
-                        input,
+                input.putInt(index, 0, 0, kind);
+                input.putInt(index, 0, 1, latitude);
+                input.putInt(index, 0, 2, solarLongitude);
+                input.putVec4(
                         index,
-                        words,
                         1,
                         hourAngle,
                         rightAscension,
@@ -1289,12 +1191,12 @@ final class PrimeProductionMathGpuTest {
                         0.0F);
             }
         }
-        return input;
+        return input.buffer();
     }
 
     private static ByteBuffer materialCases(int kinds, int words) {
         int casesPerKind = 65_536;
-        ByteBuffer input = ShaderTestBuffer.inputs(casesPerKind * kinds, words);
+        var input = ShaderTestBuffer.inputWriter(casesPerKind * kinds, words);
         SplittableRandom random = new SplittableRandom(MATERIAL_SEED);
         for (int kind = 0; kind < kinds; kind++) {
             for (int local = 0; local < casesPerKind; local++) {
@@ -1306,14 +1208,12 @@ final class PrimeProductionMathGpuTest {
                 int specular = kind == 1
                         ? pack(local & 0xff, (local >>> 8) & 0xff, local * 43, local * 89)
                         : pack(local * 17, local * 23, local * 53, local * 97);
-                putInt(input, index, words, 0, 0, kind);
-                putInt(input, index, words, 0, 1, flags);
-                putInt(input, index, words, 0, 2, normal);
-                putInt(input, index, words, 0, 3, specular);
-                putVec4(
-                        input,
+                input.putInt(index, 0, 0, kind);
+                input.putInt(index, 0, 1, flags);
+                input.putInt(index, 0, 2, normal);
+                input.putInt(index, 0, 3, specular);
+                input.putVec4(
                         index,
-                        words,
                         1,
                         random.nextFloat(),
                         random.nextFloat(),
@@ -1331,68 +1231,58 @@ final class PrimeProductionMathGpuTest {
                 int builtinFresnel = builtinId < BuiltinMaterialClass.values().length
                         ? BuiltinMaterialClass.values()[builtinId].fresnelCode()
                         : 0;
-                putInt(input, index, words, 2, 0, local & 0xff);
-                putInt(input, index, words, 2, 1, builtinId);
-                putInt(
-                        input,
+                input.putInt(index, 2, 0, local & 0xff);
+                input.putInt(index, 2, 1, builtinId);
+                input.putInt(
                         index,
-                        words,
                         2,
                         2,
                         Float.floatToRawIntBits(builtinRoughness));
-                putInt(input, index, words, 2, 3, builtinFresnel);
+                input.putInt(index, 2, 3, builtinFresnel);
             }
         }
-        return input;
+        return input.buffer();
     }
 
     private static ByteBuffer nrdCases(int kinds, int words) {
-        ByteBuffer input = ShaderTestBuffer.inputs(CASES_PER_KIND * kinds, words);
+        var input = ShaderTestBuffer.inputWriter(CASES_PER_KIND * kinds, words);
         SplittableRandom random = new SplittableRandom(NRD_SEED);
         for (int kind = 0; kind < kinds; kind++) {
             for (int local = 0; local < CASES_PER_KIND; local++) {
                 int index = kind * CASES_PER_KIND + local;
-                putInt(input, index, words, 0, 0, kind);
-                putInt(input, index, words, 0, 1, local & 0x3ff);
+                input.putInt(index, 0, 0, kind);
+                input.putInt(index, 0, 1, local & 0x3ff);
                 if (kind == 6) {
-                    putInt(input, index, words, 0, 2, (local >> 1) & 0x7ff);
-                    putInt(input, index, words, 0, 3, local & 1);
+                    input.putInt(index, 0, 2, (local >> 1) & 0x7ff);
+                    input.putInt(index, 0, 3, local & 1);
                 }
                 if (kind == 1) {
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             random.nextFloat() * 65_504.0F,
                             random.nextFloat() * 65_504.0F,
                             random.nextFloat() * 65_504.0F,
                             0.0F);
                 } else if (kind == 2) {
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             random.nextFloat() * 2.0F - 1.0F,
                             random.nextFloat() * 2.0F - 1.0F,
                             random.nextFloat() * 2.0F - 1.0F,
                             random.nextFloat() * 3.0F - 1.0F);
-                    putFloat(input, index, words, 2, 0, random.nextFloat() * 3.0F - 1.0F);
+                    input.putFloat(index, 2, 0, random.nextFloat() * 3.0F - 1.0F);
                 } else if (kind == 3) {
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             random.nextFloat() * 65_504.0F,
                             random.nextFloat() * 10_000.0F,
                             random.nextFloat(),
                             0.0F);
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             2,
                             random.nextFloat() * 65_504.0F,
                             random.nextFloat() * 65_504.0F,
@@ -1400,19 +1290,15 @@ final class PrimeProductionMathGpuTest {
                             random.nextFloat() * 65_504.0F);
                 } else if (kind == 4) {
                     float[] guides = {0.0F, Float.MIN_VALUE, 1.0e-20F, 1.0e-6F, 0.1F, 1.0F};
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             random.nextFloat() * 65_504.0F,
                             random.nextFloat() * 65_504.0F,
                             random.nextFloat() * 65_504.0F,
                             0.0F);
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             2,
                             guides[local % guides.length],
                             guides[(local / guides.length) % guides.length],
@@ -1420,18 +1306,16 @@ final class PrimeProductionMathGpuTest {
                             0.0F);
                 } else if (kind == 7) {
                     int optionalDirectionCase = local & 3;
-                    putInt(input, index, words, 0, 1, optionalDirectionCase);
+                    input.putInt(index, 0, 1, optionalDirectionCase);
                     if (optionalDirectionCase == 0) {
-                        putVec4(input, index, words, 1, 0.0F, 0.0F, 0.0F, 0.0F);
+                        input.putVec4(index, 1, 0.0F, 0.0F, 0.0F, 0.0F);
                     } else if (optionalDirectionCase == 1) {
-                        putVec4(input, index, words, 1, 1.0F, 0.0F, 0.0F, 0.0F);
+                        input.putVec4(index, 1, 1.0F, 0.0F, 0.0F, 0.0F);
                     } else if (optionalDirectionCase == 2) {
-                        putVec4(input, index, words, 1, 0.5F, 0.0F, 0.0F, 0.0F);
+                        input.putVec4(index, 1, 0.5F, 0.0F, 0.0F, 0.0F);
                     } else {
-                        putVec4(
-                                input,
+                        input.putVec4(
                                 index,
-                                words,
                                 1,
                                 Float.intBitsToFloat(0x7fc0_0001),
                                 0.0F,
@@ -1440,7 +1324,7 @@ final class PrimeProductionMathGpuTest {
                     }
                 } else if (kind == 8) {
                     int directionCase = local & 3;
-                    putInt(input, index, words, 0, 1, directionCase);
+                    input.putInt(index, 0, 1, directionCase);
                     if (directionCase == 0) {
                         float x;
                         float y;
@@ -1453,24 +1337,20 @@ final class PrimeProductionMathGpuTest {
                             lengthSquared = x * x + y * y + z * z;
                         } while (lengthSquared < 1.0e-12F);
                         float inverseLength = 1.0F / (float) Math.sqrt(lengthSquared);
-                        putVec4(
-                                input,
+                        input.putVec4(
                                 index,
-                                words,
                                 1,
                                 x * inverseLength,
                                 y * inverseLength,
                                 z * inverseLength,
                                 0.0F);
                     } else if (directionCase == 1) {
-                        putVec4(input, index, words, 1, 0.0F, 0.0F, 0.0F, 0.0F);
+                        input.putVec4(index, 1, 0.0F, 0.0F, 0.0F, 0.0F);
                     } else if (directionCase == 2) {
-                        putVec4(input, index, words, 1, 0.5F, 0.0F, 0.0F, 0.0F);
+                        input.putVec4(index, 1, 0.5F, 0.0F, 0.0F, 0.0F);
                     } else {
-                        putVec4(
-                                input,
+                        input.putVec4(
                                 index,
-                                words,
                                 1,
                                 Float.intBitsToFloat(0x7fc0_0001),
                                 0.0F,
@@ -1485,22 +1365,22 @@ final class PrimeProductionMathGpuTest {
                                             % SPECIAL_FLOAT_BITS.length]
                                     : Float.floatToRawIntBits(
                                             random.nextFloat() * 200_000.0F - 50_000.0F);
-                            putInt(input, index, words, word, component, bits);
+                            input.putInt(index, word, component, bits);
                         }
                     }
                 }
             }
         }
-        return input;
+        return input.buffer();
     }
 
     private static ByteBuffer fsrGuideCases(int kinds, int words) {
-        ByteBuffer input = ShaderTestBuffer.inputs(CASES_PER_KIND * kinds, words);
+        var input = ShaderTestBuffer.inputWriter(CASES_PER_KIND * kinds, words);
         SplittableRandom random = new SplittableRandom(FSR_SEED);
         for (int kind = 0; kind < kinds; kind++) {
             for (int local = 0; local < CASES_PER_KIND; local++) {
                 int index = kind * CASES_PER_KIND + local;
-                putInt(input, index, words, 0, 0, kind + 1);
+                input.putInt(index, 0, 0, kind + 1);
                 if (kind == 0) {
                     int bits = local < SPECIAL_FLOAT_BITS.length
                             ? SPECIAL_FLOAT_BITS[local]
@@ -1508,7 +1388,7 @@ final class PrimeProductionMathGpuTest {
                                     (local & 1) == 0
                                             ? positiveFloat(random, -30, 30)
                                             : -positiveFloat(random, -30, 30));
-                    putInt(input, index, words, 1, 0, bits);
+                    input.putInt(index, 1, 0, bits);
                 } else if (kind == 1) {
                     for (int component = 0; component < 4; component++) {
                         int bits = local < SPECIAL_FLOAT_BITS.length
@@ -1516,7 +1396,7 @@ final class PrimeProductionMathGpuTest {
                                         (local + component) % SPECIAL_FLOAT_BITS.length]
                                 : Float.floatToRawIntBits(
                                         random.nextFloat() * 8.0F - 4.0F);
-                        putInt(input, index, words, 1, component, bits);
+                        input.putInt(index, 1, component, bits);
                     }
                 } else if (kind == 2) {
                     for (int component = 0; component < 3; component++) {
@@ -1527,19 +1407,15 @@ final class PrimeProductionMathGpuTest {
                                 : Float.floatToRawIntBits(
                                         random.nextFloat() * 200_000.0F
                                                 - 50_000.0F);
-                        putInt(
-                                input,
+                        input.putInt(
                                 index,
-                                words,
                                 1,
                                 component,
                                 positionBits);
                     }
                     float[] forward = randomUnitVector(random);
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             2,
                             forward[0],
                             forward[1],
@@ -1550,12 +1426,10 @@ final class PrimeProductionMathGpuTest {
                             ? SPECIAL_FLOAT_BITS[local]
                             : Float.floatToRawIntBits(
                                     random.nextFloat() * 4.0F - 1.5F);
-                    putInt(input, index, words, 1, 0, bits);
+                    input.putInt(index, 1, 0, bits);
                 } else if (kind == 4) {
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             random.nextFloat() * 2.0F - 1.0F,
                             random.nextFloat() * 2.0F - 1.0F,
@@ -1569,19 +1443,15 @@ final class PrimeProductionMathGpuTest {
                         viewZ = Float.intBitsToFloat(
                                 SPECIAL_FLOAT_BITS[local % SPECIAL_FLOAT_BITS.length]);
                     }
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             ray[0],
                             ray[1],
                             ray[2],
                             viewZ);
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             2,
                             forward[0],
                             forward[1],
@@ -1595,20 +1465,18 @@ final class PrimeProductionMathGpuTest {
                     } else if ((local & 3) == 1) {
                         control &= ~historyMask;
                     }
-                    putInt(input, index, words, 0, 1, control);
-                    putInt(input, index, words, 0, 2, historyMask);
-                    putInt(input, index, words, 0, 3, (local & 1) == 0 ? 0 : 1);
+                    input.putInt(index, 0, 1, control);
+                    input.putInt(index, 0, 2, historyMask);
+                    input.putInt(index, 0, 3, (local & 1) == 0 ? 0 : 1);
                 } else if (kind == 8) {
                     int materialClass = local & 3;
                     boolean objectMotion = (local & 4) != 0;
-                    putInt(
-                            input,
+                    input.putInt(
                             index,
-                            words,
                             0,
                             1,
                             materialClass | (objectMotion ? 0x20 : 0));
-                    putInt(input, index, words, 0, 2, (local & 8) != 0 ? 1 : 0);
+                    input.putInt(index, 0, 2, (local & 8) != 0 ? 1 : 0);
                     for (int component = 0; component < 3; component++) {
                         int currentBits = local < SPECIAL_FLOAT_BITS.length
                                 ? SPECIAL_FLOAT_BITS[
@@ -1620,14 +1488,12 @@ final class PrimeProductionMathGpuTest {
                                         (local + component + 3) % SPECIAL_FLOAT_BITS.length]
                                 : Float.floatToRawIntBits(
                                         random.nextFloat() * 8_192.0F - 4_096.0F);
-                        putInt(input, index, words, 1, component, currentBits);
-                        putInt(input, index, words, 2, component, historyBits);
+                        input.putInt(index, 1, component, currentBits);
+                        input.putInt(index, 2, component, historyBits);
                     }
                 } else {
-                    putVec4(
-                            input,
+                    input.putVec4(
                             index,
-                            words,
                             1,
                             random.nextFloat() * 8.0F - 4.0F,
                             random.nextFloat() * 8.0F - 4.0F,
@@ -1638,35 +1504,33 @@ final class PrimeProductionMathGpuTest {
                 }
             }
         }
-        return input;
+        return input.buffer();
     }
 
     private static ByteBuffer queuedPsrCases(int words) {
-        ByteBuffer input = ShaderTestBuffer.inputs(CASES_PER_KIND, words);
+        var input = ShaderTestBuffer.inputWriter(CASES_PER_KIND, words);
         SplittableRandom random = new SplittableRandom(QUEUED_PSR_SEED);
         for (int index = 0; index < CASES_PER_KIND; index++) {
             boolean forceOverflow = index == 1 || (index > 1 && random.nextInt(64) == 0);
             int count = forceOverflow ? 8 : index == 0 ? 0 : random.nextInt(9);
             int reflectionMask = random.nextInt(1 << count);
-            putInt(input, index, words, 0, 0, count);
-            putInt(input, index, words, 0, 1, reflectionMask);
-            putInt(input, index, words, 0, 2, forceOverflow ? 1 : 0);
+            input.putInt(index, 0, 0, count);
+            input.putInt(index, 0, 1, reflectionMask);
+            input.putInt(index, 0, 2, forceOverflow ? 1 : 0);
 
             float cameraX = random.nextFloat() * 64.0F - 32.0F;
             float cameraY = random.nextFloat() * 64.0F - 32.0F;
             float cameraZ = random.nextFloat() * 64.0F - 32.0F;
-            putVec4(input, index, words, 1, cameraX, cameraY, cameraZ, 0.0F);
-            putVec4(
-                    input,
+            input.putVec4(index, 1, cameraX, cameraY, cameraZ, 0.0F);
+            input.putVec4(
                     index,
-                    words,
                     2,
                     cameraX + random.nextFloat() * 32.0F - 16.0F,
                     cameraY + random.nextFloat() * 32.0F - 16.0F,
                     cameraZ + random.nextFloat() * 32.0F - 16.0F,
                     0.0F);
-            putRandomUnitVec4(input, index, words, 3, random);
-            putRandomUnitVec4(input, index, words, 4, random);
+            putRandomUnitVec4(input, index, 3, random);
+            putRandomUnitVec4(input, index, 4, random);
 
             float positionX = cameraX;
             float positionY = cameraY;
@@ -1677,36 +1541,34 @@ final class PrimeProductionMathGpuTest {
                 positionX += direction[0] * distance;
                 positionY += direction[1] * distance;
                 positionZ += direction[2] * distance;
-                putVec4(
-                        input,
+                input.putVec4(
                         index,
-                        words,
                         5 + delta,
                         positionX,
                         positionY,
                         positionZ,
                         0.0F);
-                putRandomUnitVec4(input, index, words, 13 + delta, random);
+                putRandomUnitVec4(input, index, 13 + delta, random);
             }
         }
-        return input;
+        return input.buffer();
     }
 
     private static void assertSamplingParity(ShaderComputeRunner runner) throws IOException {
         int cases = 1 << 15;
         int inputWords = 2;
         int outputWords = 4;
-        ByteBuffer input = ShaderTestBuffer.inputs(cases, inputWords);
-        ShaderTestBuffer.setOutputWords(input, outputWords);
+        var input = ShaderTestBuffer.inputWriter(cases, inputWords);
+        ShaderTestBuffer.setOutputWords(input.buffer(), outputWords);
         SplittableRandom random = new SplittableRandom(SAMPLING_SEED);
         for (int index = 0; index < cases; index++) {
             for (int component = 0; component < 4; component++) {
-                putInt(input, index, inputWords, 0, component, random.nextInt());
+                input.putInt(index, 0, component, random.nextInt());
             }
-            putInt(input, index, inputWords, 1, 0, random.nextInt());
-            putInt(input, index, inputWords, 1, 1, random.nextInt());
-            putInt(input, index, inputWords, 1, 2, random.nextInt(6));
-            putInt(input, index, inputWords, 1, 3, random.nextInt(4));
+            input.putInt(index, 1, 0, random.nextInt());
+            input.putInt(index, 1, 1, random.nextInt());
+            input.putInt(index, 1, 2, random.nextInt(6));
+            input.putInt(index, 1, 3, random.nextInt(4));
         }
         int outputBytes = Math.multiplyExact(
                 Math.multiplyExact(cases, outputWords),
@@ -1714,12 +1576,12 @@ final class PrimeProductionMathGpuTest {
         Path shader = slangShader("prime_sampling_parity.comp.spv");
         ByteBuffer first = runner.dispatch(
                 shader,
-                input,
+                input.buffer(),
                 outputBytes,
                 cases);
         ByteBuffer second = runner.dispatch(
                 slangShader("prime_sampling_parity.comp.spv"),
-                input,
+                input.buffer(),
                 outputBytes,
                 cases);
         for (int index = 0; index < cases; index++) {
@@ -1800,55 +1662,12 @@ final class PrimeProductionMathGpuTest {
     }
 
     private static void putRandomUnitVec4(
-            ByteBuffer input,
+            ShaderTestBuffer.InputWriter input,
             int caseIndex,
-            int words,
             int word,
             SplittableRandom random) {
         float[] direction = randomUnitVector(random);
-        putVec4(
-                input,
-                caseIndex,
-                words,
-                word,
-                direction[0],
-                direction[1],
-                direction[2],
-                0.0F);
+        input.putVec4(caseIndex, word, direction[0], direction[1], direction[2], 0.0F);
     }
 
-    private static void putVec4(
-            ByteBuffer input,
-            int caseIndex,
-            int words,
-            int word,
-            float x,
-            float y,
-            float z,
-            float w) {
-        putFloat(input, caseIndex, words, word, 0, x);
-        putFloat(input, caseIndex, words, word, 1, y);
-        putFloat(input, caseIndex, words, word, 2, z);
-        putFloat(input, caseIndex, words, word, 3, w);
-    }
-
-    private static void putFloat(
-            ByteBuffer input,
-            int caseIndex,
-            int words,
-            int word,
-            int component,
-            float value) {
-        ShaderTestBuffer.putFloat(input, caseIndex, words, word, component, value);
-    }
-
-    private static void putInt(
-            ByteBuffer input,
-            int caseIndex,
-            int words,
-            int word,
-            int component,
-            int value) {
-        ShaderTestBuffer.putInt(input, caseIndex, words, word, component, value);
-    }
 }

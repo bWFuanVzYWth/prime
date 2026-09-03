@@ -23,6 +23,10 @@ final class ShaderTestBuffer {
         return buffer;
     }
 
+    static InputWriter inputWriter(int caseCount, int wordsPerCase) {
+        return new InputWriter(inputs(caseCount, wordsPerCase), wordsPerCase);
+    }
+
     static ByteBuffer control(int invocationCount, int configurationWords) {
         if (invocationCount <= 0 || configurationWords < 0) {
             throw new IllegalArgumentException(
@@ -151,5 +155,36 @@ final class ShaderTestBuffer {
         return Math.addExact(
                 Math.multiplyExact(word, WORD_BYTES),
                 Math.multiplyExact(componentIndex, Integer.BYTES));
+    }
+
+    static final class InputWriter {
+        private final ByteBuffer buffer;
+        private final int wordsPerCase;
+
+        private InputWriter(ByteBuffer buffer, int wordsPerCase) {
+            this.buffer = buffer;
+            this.wordsPerCase = wordsPerCase;
+        }
+
+        ByteBuffer buffer() {
+            return buffer;
+        }
+
+        void putFloat(int caseIndex, int wordIndex, int componentIndex, float value) {
+            ShaderTestBuffer.putFloat(
+                    buffer, caseIndex, wordsPerCase, wordIndex, componentIndex, value);
+        }
+
+        void putInt(int caseIndex, int wordIndex, int componentIndex, int value) {
+            ShaderTestBuffer.putInt(
+                    buffer, caseIndex, wordsPerCase, wordIndex, componentIndex, value);
+        }
+
+        void putVec4(int caseIndex, int wordIndex, float x, float y, float z, float w) {
+            putFloat(caseIndex, wordIndex, 0, x);
+            putFloat(caseIndex, wordIndex, 1, y);
+            putFloat(caseIndex, wordIndex, 2, z);
+            putFloat(caseIndex, wordIndex, 3, w);
+        }
     }
 }
