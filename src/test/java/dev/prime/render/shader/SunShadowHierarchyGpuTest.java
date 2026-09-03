@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.file.Path;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,9 +41,7 @@ final class SunShadowHierarchyGpuTest {
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(cases.length)
                 .flip();
-        Path shader = Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"),
-                "sun_shadow_hierarchy_properties.comp.spv");
+        String shader = "sun_shadow_hierarchy_properties.comp.spv";
         ByteBuffer output = runner.dispatch(
                 shader,
                 input,
@@ -56,7 +53,7 @@ final class SunShadowHierarchyGpuTest {
                     expected[index],
                     output.getFloat(index * Float.BYTES),
                     1.0e-5F,
-                    shader.getFileName() + " case " + index);
+                    shader + " case " + index);
         }
     }
 }

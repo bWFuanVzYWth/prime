@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -27,11 +26,8 @@ final class RoboCuteLutGpuTest {
     @Test
     void gpuSamplesEveryAuthoritativeTransmissionGgxTexel() throws IOException {
         ByteBuffer input = ShaderTestBuffer.inputs(CASE_COUNT, 1);
-        Path shader = Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"),
-                "robocute_lut_roundtrip.comp.spv");
         ByteBuffer output = runner.dispatch(
-                shader,
+                "robocute_lut_roundtrip.comp.spv",
                 input,
                 Math.multiplyExact(CASE_COUNT, ShaderTestBuffer.WORD_BYTES),
                 CASE_COUNT);

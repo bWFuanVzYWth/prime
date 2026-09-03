@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -75,12 +74,9 @@ final class PrimeBsdfGpuTest {
     }
 
     private static void assertProperties(ByteBuffer input, int caseCount) throws IOException {
-        Path shader = Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"),
-                "prime_bsdf_properties.comp.spv");
         ShaderPropertyBatch.assertProperties(
                 runner,
-                shader,
+                "prime_bsdf_properties.comp.spv",
                 input,
                 caseCount,
                 INPUT_WORDS,

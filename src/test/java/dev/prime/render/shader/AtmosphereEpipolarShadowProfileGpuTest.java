@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.file.Path;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -73,9 +72,7 @@ final class AtmosphereEpipolarShadowProfileGpuTest {
             }
         }
         input.flip();
-        Path shader = Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"),
-                "atmosphere_epipolar_shadow_profile.comp.spv");
+        String shader = "atmosphere_epipolar_shadow_profile.comp.spv";
 
         ByteBuffer output = runner.dispatch(
                 shader,

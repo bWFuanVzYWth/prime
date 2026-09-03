@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -60,12 +59,9 @@ final class CompactOpenPbrOpaqueGpuTest {
     @Test
     void compactOpaqueSubsetPreservesOpenPbrProperties()
             throws IOException {
-        Path shader = Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"),
-                "compact_openpbr_opaque_properties.comp.spv");
         ShaderPropertyBatch.assertProperties(
                 runner,
-                shader,
+                "compact_openpbr_opaque_properties.comp.spv",
                 createCases(),
                 CASE_COUNT,
                 INPUT_WORDS,
@@ -75,12 +71,9 @@ final class CompactOpenPbrOpaqueGpuTest {
 
     @Test
     void fractionalThinSubsurfacePreservesOpenPbrCompositionProperties() throws IOException {
-        Path shader = Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"),
-                "compact_openpbr_mixed_properties.comp.spv");
         ShaderPropertyBatch.assertProperties(
                 runner,
-                shader,
+                "compact_openpbr_mixed_properties.comp.spv",
                 createMixedCases(),
                 MIXED_CASE_COUNT,
                 INPUT_WORDS,

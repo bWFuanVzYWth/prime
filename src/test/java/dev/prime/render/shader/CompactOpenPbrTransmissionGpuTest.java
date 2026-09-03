@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -54,12 +53,9 @@ final class CompactOpenPbrTransmissionGpuTest {
     @Test
     void compactTransmissionPreservesPropertiesAcrossTopologyAndSamplingFlags()
             throws IOException {
-        Path shader = Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"),
-                "compact_openpbr_transmission_properties.comp.spv");
         ShaderPropertyBatch.assertProperties(
                 runner,
-                shader,
+                "compact_openpbr_transmission_properties.comp.spv",
                 createCases(),
                 CASE_COUNT,
                 INPUT_WORDS,

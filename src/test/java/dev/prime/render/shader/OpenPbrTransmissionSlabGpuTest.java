@@ -2,7 +2,6 @@ package dev.prime.render.shader;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -26,12 +25,9 @@ final class OpenPbrTransmissionSlabGpuTest {
 
     @Test
     void parallelInterfacesPreserveReciprocalEtaDirectionAndTir() throws IOException {
-        Path shader = Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"),
-                "prime_dielectric_slab_properties.comp.spv");
         ShaderPropertyBatch.assertProperties(
                 runner,
-                shader,
+                "prime_dielectric_slab_properties.comp.spv",
                 createCases(),
                 CASE_COUNT,
                 INPUT_WORDS,

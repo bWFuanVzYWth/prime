@@ -16,9 +16,9 @@ final class ShaderComputeExtension implements BeforeAllCallback, AfterAllCallbac
     @Override
     public void beforeAll(ExtensionContext extensionContext) {
         Class<?> testClass = extensionContext.getRequiredTestClass();
-        ShaderTestContext context;
+        ShaderComputeRunner runner;
         try {
-            context = ShaderTestContext.open();
+            runner = ShaderComputeRunner.open();
         } catch (ShaderComputeRunner.UnavailableException | LinkageError exception) {
             if (Boolean.getBoolean("prime.shaderTests.required")) {
                 throw new AssertionError(
@@ -28,55 +28,46 @@ final class ShaderComputeExtension implements BeforeAllCallback, AfterAllCallbac
             throw new TestAbortedException(
                     "Vulkan shader tests unavailable: " + exception.getMessage(), exception);
         }
-        extensionContext.getStore(NAMESPACE).put(testClass, context);
-        inject(testClass, context);
+        extensionContext.getStore(NAMESPACE).put(testClass, runner);
+        inject(testClass, runner);
     }
 
     @Override
     public void afterAll(ExtensionContext extensionContext) throws Exception {
         Class<?> testClass = extensionContext.getRequiredTestClass();
-        ShaderTestContext context = extensionContext
+        ShaderComputeRunner runner = extensionContext
                 .getStore(NAMESPACE)
-                .remove(testClass, ShaderTestContext.class);
+                .remove(testClass, ShaderComputeRunner.class);
         try {
-            if (context != null) {
-                context.close();
+            if (runner != null) {
+                runner.close();
             }
         } finally {
             clear(testClass);
         }
     }
 
-    private static void inject(Class<?> testClass, ShaderTestContext context) {
+    private static void inject(Class<?> testClass, ShaderComputeRunner runner) {
         int injected = 0;
         for (Field field : testClass.getDeclaredFields()) {
-            if (!Modifier.isStatic(field.getModifiers())) {
-                continue;
+            if (Modifier.isStatic(field.getModifiers())
+                    && field.getType() == ShaderComputeRunner.class) {
+                set(field, runner);
+                injected++;
             }
-            Object value;
-            if (field.getType() == ShaderComputeRunner.class) {
-                value = context.runner();
-            } else if (field.getType() == ShaderTestContext.class) {
-                value = context;
-            } else {
-                continue;
-            }
-            set(field, value);
-            injected++;
         }
         if (injected == 0) {
-            context.close();
+            runner.close();
             throw new ExtensionConfigurationException(
                     testClass.getName()
-                            + " must declare a static ShaderComputeRunner or ShaderTestContext field");
+                            + " must declare a static ShaderComputeRunner field");
         }
     }
 
     private static void clear(Class<?> testClass) {
         for (Field field : testClass.getDeclaredFields()) {
             if (Modifier.isStatic(field.getModifiers())
-                    && (field.getType() == ShaderComputeRunner.class
-                            || field.getType() == ShaderTestContext.class)) {
+                    && field.getType() == ShaderComputeRunner.class) {
                 set(field, null);
             }
         }

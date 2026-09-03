@@ -4,7 +4,6 @@ import dev.prime.render.MaterialSettings;
 import dev.prime.render.material.BuiltinMaterialClass;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.Nested;
@@ -141,7 +140,7 @@ final class PrimeProductionMathGpuTest {
         int inputWords = 6;
         ShaderPropertyBatch.assertProperties(
                 runner,
-                slangShader("prime_transport_core_properties.comp.spv"),
+                "prime_transport_core_properties.comp.spv",
                 transportCases(kinds, inputWords),
                 CASES_PER_KIND * kinds,
                 inputWords,
@@ -178,7 +177,7 @@ final class PrimeProductionMathGpuTest {
         }
         ShaderPropertyBatch.assertProperties(
                 runner,
-                slangShader("prime_realtime_state_properties.comp.spv"),
+                "prime_realtime_state_properties.comp.spv",
                 input.buffer(),
                 cases,
                 inputWords,
@@ -195,7 +194,7 @@ final class PrimeProductionMathGpuTest {
         ByteBuffer input = bsdfContractCases(kinds, inputWords);
         ShaderPropertyBatch.assertProperties(
                 runner,
-                slangShader("prime_bsdf_contract_properties.comp.spv"),
+                "prime_bsdf_contract_properties.comp.spv",
                 input,
                 cases,
                 inputWords,
@@ -210,7 +209,7 @@ final class PrimeProductionMathGpuTest {
         int inputWords = 2;
         ShaderPropertyBatch.assertProperties(
                 runner,
-                slangShader("prime_celestial_properties.comp.spv"),
+                "prime_celestial_properties.comp.spv",
                 celestialCases(kinds, inputWords),
                 CASES_PER_KIND * kinds,
                 inputWords,
@@ -224,7 +223,7 @@ final class PrimeProductionMathGpuTest {
         int inputWords = 3;
         ShaderPropertyBatch.assertProperties(
                 runner,
-                slangShader("prime_material_properties.comp.spv"),
+                "prime_material_properties.comp.spv",
                 materialCases(kinds, inputWords),
                 65_536 * kinds,
                 inputWords,
@@ -237,7 +236,7 @@ final class PrimeProductionMathGpuTest {
         int inputWords = 4;
         ShaderPropertyBatch.assertProperties(
                 runner,
-                slangShader("prime_nrd_properties.comp.spv"),
+                "prime_nrd_properties.comp.spv",
                 nrdCases(kinds, inputWords),
                 CASES_PER_KIND * kinds,
                 inputWords,
@@ -256,7 +255,7 @@ final class PrimeProductionMathGpuTest {
         }
         ShaderPropertyBatch.assertProperties(
                 runner,
-                slangShader("prime_fsr_input_properties.comp.spv"),
+                "prime_fsr_input_properties.comp.spv",
                 input.buffer(),
                 cases,
                 inputWords,
@@ -270,7 +269,7 @@ final class PrimeProductionMathGpuTest {
         ByteBuffer input = fsrGuideCases(kinds, inputWords);
         ShaderPropertyBatch.assertProperties(
                 runner,
-                slangShader("prime_fsr_input_properties.comp.spv"),
+                "prime_fsr_input_properties.comp.spv",
                 input,
                 CASES_PER_KIND * kinds,
                 inputWords,
@@ -284,7 +283,7 @@ final class PrimeProductionMathGpuTest {
         int inputWords = 2;
         ShaderPropertyBatch.assertProperties(
                 runner,
-                slangShader("prime_auto_exposure_properties.comp.spv"),
+                "prime_auto_exposure_properties.comp.spv",
                 autoExposureCases(kinds, inputWords),
                 CASES_PER_KIND * kinds,
                 inputWords,
@@ -400,7 +399,7 @@ final class PrimeProductionMathGpuTest {
         int inputWords = 21;
         ShaderPropertyBatch.assertProperties(
                 runner,
-                slangShader("prime_queued_psr_properties.comp.spv"),
+                "prime_queued_psr_properties.comp.spv",
                 queuedPsrCases(inputWords),
                 CASES_PER_KIND,
                 inputWords,
@@ -817,7 +816,7 @@ final class PrimeProductionMathGpuTest {
         int inputWords = 7;
         ShaderPropertyBatch.assertProperties(
                 runner,
-                slangShader("prime_projected_solid_angle_properties.comp.spv"),
+                "prime_projected_solid_angle_properties.comp.spv",
                 projectedSolidAngleCases(kinds, inputWords),
                 CASES_PER_KIND * kinds,
                 inputWords,
@@ -1573,14 +1572,14 @@ final class PrimeProductionMathGpuTest {
         int outputBytes = Math.multiplyExact(
                 Math.multiplyExact(cases, outputWords),
                 ShaderTestBuffer.WORD_BYTES);
-        Path shader = slangShader("prime_sampling_parity.comp.spv");
+        String shader = "prime_sampling_parity.comp.spv";
         ByteBuffer first = runner.dispatch(
                 shader,
                 input.buffer(),
                 outputBytes,
                 cases);
         ByteBuffer second = runner.dispatch(
-                slangShader("prime_sampling_parity.comp.spv"),
+                "prime_sampling_parity.comp.spv",
                 input.buffer(),
                 outputBytes,
                 cases);
@@ -1628,10 +1627,6 @@ final class PrimeProductionMathGpuTest {
                 }
             }
         }
-    }
-
-    private static Path slangShader(String name) {
-        return Path.of(System.getProperty("prime.test.slangShaderDirectory"), name);
     }
 
     private static float positiveFloat(SplittableRandom random, int minimumExponent, int maximumExponent) {

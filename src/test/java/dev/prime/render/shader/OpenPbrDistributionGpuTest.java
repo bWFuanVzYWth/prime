@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
@@ -67,32 +66,24 @@ final class OpenPbrDistributionGpuTest {
     };
 
     private static ShaderComputeRunner runner;
-    private static Path[] shaders;
 
     @BeforeAll
     static void prepareResources() throws IOException {
         RoboCuteTestResources.bindTransmissionGgxEnergy(runner);
-        shaders = new Path[] {
-            Path.of(
-                    System.getProperty("prime.test.slangShaderDirectory"),
-                    "openpbr_distribution_statistics.comp.spv")
-        };
     }
 
     @Test
     void samplingMatchesPdfAndMonteCarloEnergyMatchesQuadrature() throws IOException {
-        for (Path shader : shaders) {
-            for (int index = 0; index < CONFIGURATIONS.length; index++) {
-                verifyConfiguration(shader, CONFIGURATIONS[index], SEED + index * 0x9e37);
-            }
+        for (int index = 0; index < CONFIGURATIONS.length; index++) {
+            verifyConfiguration(CONFIGURATIONS[index], SEED + index * 0x9e37);
         }
     }
 
     private static void verifyConfiguration(
-            Path shader, Configuration configuration, int seed)
+            Configuration configuration, int seed)
             throws IOException {
-        ByteBuffer sampled = dispatch(shader, configuration, SAMPLE_MODE, SAMPLE_COUNT, seed);
-        ByteBuffer integrated = dispatch(shader, configuration, INTEGRATE_MODE, GRID_COUNT, seed);
+        ByteBuffer sampled = dispatch(configuration, SAMPLE_MODE, SAMPLE_COUNT, seed);
+        ByteBuffer integrated = dispatch(configuration, INTEGRATE_MODE, GRID_COUNT, seed);
         double[] expectedProbability = new double[HISTOGRAM_BINS + 1];
         long[] actualCount = new long[HISTOGRAM_BINS + 1];
         double[] integratedEnergy = new double[3];
@@ -268,7 +259,6 @@ final class OpenPbrDistributionGpuTest {
     }
 
     private static ByteBuffer dispatch(
-            Path shader,
             Configuration configuration,
             int mode,
             int invocationCount,
@@ -287,7 +277,7 @@ final class OpenPbrDistributionGpuTest {
         ShaderTestBuffer.putControlFloat(input, 2, 1, configuration.color()[1]);
         ShaderTestBuffer.putControlFloat(input, 2, 2, configuration.color()[2]);
         return runner.dispatch(
-                shader,
+                "openpbr_distribution_statistics.comp.spv",
                 input,
                 Math.multiplyExact(
                         Math.multiplyExact(invocationCount, OUTPUT_WORDS),

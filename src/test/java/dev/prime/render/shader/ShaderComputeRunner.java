@@ -77,11 +77,19 @@ final class ShaderComputeRunner implements AutoCloseable {
         return new ShaderComputeRunner(VulkanTestDevice.open());
     }
 
+    private Path shader(String artifact) {
+        String directory = System.getProperty("prime.test.slangShaderDirectory");
+        if (directory == null || directory.isBlank()) {
+            throw new IllegalStateException("prime.test.slangShaderDirectory is not configured");
+        }
+        return Path.of(directory, artifact);
+    }
+
     ByteBuffer dispatch(
-            Path shaderPath, ByteBuffer input, int outputBytes, int invocationCount)
+            String shaderArtifact, ByteBuffer input, int outputBytes, int invocationCount)
             throws IOException {
         return dispatch(
-                shaderPath,
+                shaderArtifact,
                 input,
                 outputBytes,
                 new Workgroups(Math.max(1, (invocationCount + LOCAL_SIZE - 1) / LOCAL_SIZE), 1, 1),
@@ -89,7 +97,7 @@ final class ShaderComputeRunner implements AutoCloseable {
     }
 
     ByteBuffer dispatch(
-            Path shaderPath,
+            String shaderArtifact,
             ByteBuffer input,
             int outputBytes,
             Workgroups workgroups,
@@ -114,7 +122,7 @@ final class ShaderComputeRunner implements AutoCloseable {
                 MappedBuffer outputBuffer = createMappedBuffer(outputBytes)) {
             inputBuffer.bytes().put(inputData).flip();
             zero(outputBuffer.bytes());
-            dispatch(shaderPath, inputBuffer, outputBuffer, workgroups, pushData);
+            dispatch(shader(shaderArtifact), inputBuffer, outputBuffer, workgroups, pushData);
 
             ByteBuffer result = ByteBuffer.allocateDirect(outputBytes).order(ByteOrder.LITTLE_ENDIAN);
             ByteBuffer mappedOutput = outputBuffer.bytes().duplicate();

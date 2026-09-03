@@ -2,7 +2,6 @@ package dev.prime.render.shader;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,7 +35,7 @@ final class ShaderPropertyBatch {
 
     static void assertProperties(
             ShaderComputeRunner runner,
-            Path shader,
+            String shader,
             ByteBuffer input,
             int caseCount,
             int inputWords,
@@ -128,7 +127,7 @@ final class ShaderPropertyBatch {
 
     private static AssertionError failure(
             ShaderComputeRunner runner,
-            Path shader,
+            String shader,
             ByteBuffer input,
             int caseIndex,
             int inputWords,

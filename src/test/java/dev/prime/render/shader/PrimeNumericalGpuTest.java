@@ -2,7 +2,6 @@ package dev.prime.render.shader;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
@@ -65,9 +64,6 @@ final class PrimeNumericalGpuTest {
     @Test
     void productionClassifiersRecognizeEveryNonFiniteSignAndNumericDomain()
             throws IOException {
-        Path shader = Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"),
-                "prime_numerical_properties.comp.spv");
         List<Case> cases = cases();
         ByteBuffer input = ShaderTestBuffer.inputs(cases.size(), INPUT_WORDS);
         for (int caseIndex = 0; caseIndex < cases.size(); caseIndex++) {
@@ -91,7 +87,7 @@ final class PrimeNumericalGpuTest {
 
         ShaderPropertyBatch.assertProperties(
                 runner,
-                shader,
+                "prime_numerical_properties.comp.spv",
                 input,
                 cases.size(),
                 INPUT_WORDS,

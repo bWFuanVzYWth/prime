@@ -2,7 +2,6 @@ package dev.prime.render.shader;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,12 +41,9 @@ final class PrimeBsdfDiagnosticsGpuTest {
                         cases[caseIndex][component]);
             }
         }
-        Path shader = Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"),
-                "prime_bsdf_diagnostics.comp.spv");
         ShaderPropertyBatch.assertProperties(
                 runner,
-                shader,
+                "prime_bsdf_diagnostics.comp.spv",
                 input,
                 cases.length,
                 INPUT_WORDS,

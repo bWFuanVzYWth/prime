@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.file.Path;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.junit.jupiter.api.Tag;
@@ -71,9 +70,7 @@ final class AtmosphereEpipolarShadowAlignmentGpuTest {
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(cases.length)
                 .flip();
-        Path shader = Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"),
-                "atmosphere_epipolar_shadow_alignment.comp.spv");
+        String shader = "atmosphere_epipolar_shadow_alignment.comp.spv";
 
         ByteBuffer output = runner.dispatch(
                 shader,

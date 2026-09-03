@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.SplittableRandom;
@@ -49,7 +48,7 @@ final class ZSobolSamplerTest {
         void shaderMatchesPrimeZOrderFastOwenReference() throws IOException {
             ByteBuffer input = cases();
             ByteBuffer output = runner.dispatch(
-                    shader("prime_zsobol_parity.comp.spv"),
+                    "prime_zsobol_parity.comp.spv",
                     input,
                     CASE_COUNT * OUTPUT_WORDS * ShaderTestBuffer.WORD_BYTES,
                     CASE_COUNT);
@@ -346,7 +345,7 @@ final class ZSobolSamplerTest {
             int logSampleCount = 16;
             int sampleCount = 1 << logSampleCount;
             ByteBuffer output = runner.dispatch(
-                    shader("prime_zsobol_parity.comp.spv"),
+                    "prime_zsobol_parity.comp.spv",
                     temporalCases(sampleCount),
                     sampleCount * OUTPUT_WORDS * ShaderTestBuffer.WORD_BYTES,
                     sampleCount);
@@ -377,7 +376,7 @@ final class ZSobolSamplerTest {
             };
             for (int[] frame : frames) {
                 ByteBuffer output = runner.dispatch(
-                        shader("prime_zsobol_parity.comp.spv"),
+                        "prime_zsobol_parity.comp.spv",
                         screenCases(frame[0], frame[1]),
                         CASE_COUNT * OUTPUT_WORDS * ShaderTestBuffer.WORD_BYTES,
                         CASE_COUNT);
@@ -836,8 +835,4 @@ final class ZSobolSamplerTest {
         return Math.min(scaled, Math.nextDown(1.0F));
     }
 
-    private static Path shader(String name) {
-        return Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"), name);
-    }
 }

@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -67,12 +66,9 @@ final class OpenPbrCoreGpuTest {
     @Test
     void commonFresnelAndMicrofacetPropertiesHoldAcrossGpuSweep() throws IOException {
         ByteBuffer input = createCases();
-        Path shader = Path.of(
-                System.getProperty("prime.test.slangShaderDirectory"),
-                "openpbr_core_properties.comp.spv");
         ShaderPropertyBatch.assertProperties(
                 runner,
-                shader,
+                "openpbr_core_properties.comp.spv",
                 input,
                 CASE_COUNT,
                 INPUT_WORDS,
