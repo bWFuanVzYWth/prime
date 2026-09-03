@@ -81,10 +81,9 @@
       ]
     },
     "integratorRecord": {
-      "size": 32,
+      "size": 16,
       "fields": [
-        { "name": "sunDirectionIntensity", "type": "vec4", "offset": 0 },
-        { "name": "environmentRadiance", "type": "vec4", "offset": 16 }
+        { "name": "sunDirectionIntensity", "type": "vec4", "offset": 0 }
       ]
     },
     "pathState": {

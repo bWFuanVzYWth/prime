@@ -62,7 +62,6 @@ public void primeEvaluateFixedDirect(
         integrator.sunDirectionIntensity = float4(
                 primePush.sunDirection,
                 ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
-        integrator.environmentRadiance = float4(0.0);
         float3 direct = primeEstimateDirectSun(
                 context,
                 integrator,

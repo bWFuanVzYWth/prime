@@ -55,7 +55,6 @@ public bool primeAdvanceOrdinaryWavefrontRecord<Phase>(
     integrator.sunDirectionIntensity = float4(
             primePush.sunDirection,
             ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
-    integrator.environmentRadiance = float4(0.0);
 
     bool guideWasPending =
             (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) == 0u;
@@ -119,7 +118,6 @@ public bool primeAdvanceTransparentWavefrontRecord<Phase>(
     integrator.sunDirectionIntensity = float4(
             primePush.sunDirection,
             ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
-    integrator.environmentRadiance = float4(0.0);
 
     bool hadGuide =
             (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) != 0u;

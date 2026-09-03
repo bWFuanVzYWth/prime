@@ -41,7 +41,6 @@ public IntegratorRecord primeRealtimeTailIntegrator() {
     integrator.sunDirectionIntensity = float4(
             primePush.sunDirection,
             ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
-    integrator.environmentRadiance = float4(0.0);
     return integrator;
 }
 

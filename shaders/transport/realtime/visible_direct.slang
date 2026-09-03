@@ -100,7 +100,6 @@ public void primeShadeVisibleDirect(
     integrator.sunDirectionIntensity = float4(
             primePush.sunDirection,
             ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
-    integrator.environmentRadiance = float4(0.0);
     PrimePrimarySunSample sun = primeEstimatePrimaryDirectSun(
             context,
             integrator,

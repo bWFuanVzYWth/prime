@@ -33,7 +33,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     value ^= lightEmitters[index].metadata.w;
     value ^= asuint(lightCells[index].probabilityMass);
     value ^= sectionLightHeaders[index].emitterCount;
-    value ^= asuint(integratorRecords[index].environmentRadiance.w);
+    value ^= asuint(integratorRecords[index].sunDirectionIntensity.w);
     value ^= pathStates[index].sampleSeed;
     value ^= tracePayloads[index].adjacentInterfaceControl;
     value ^= surfaceInteractions[index].adjacentInterfaceControl;
