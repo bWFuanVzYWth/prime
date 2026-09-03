@@ -34,8 +34,8 @@ public final class TraceBackend implements Destroyable {
                     | KHRRayTracingPipeline.VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
 
     private final VulkanContext context;
-    private final StarmapTexture starmap;
-    private final BsdfLookupTable bsdfLookup;
+    private final StaticSampledTexture starmap;
+    private final StaticSampledTexture bsdfLookup;
     private final RealtimeStbnTable realtimeStbn;
     private final long descriptorSetLayout;
     private final TraceBindings bindings;
@@ -49,13 +49,13 @@ public final class TraceBackend implements Destroyable {
 
     public TraceBackend(VulkanContext context) {
         this.context = context;
-        StarmapTexture starTexture = null;
-        BsdfLookupTable lookup = null;
+        StaticSampledTexture starTexture = null;
+        StaticSampledTexture lookup = null;
         RealtimeStbnTable stbn = null;
         long layout = 0L;
         try {
-            starTexture = new StarmapTexture(context);
-            lookup = new BsdfLookupTable(context);
+            starTexture = StaticSampledTexture.starmap(context);
+            lookup = StaticSampledTexture.transmissionGgx(context);
             stbn = new RealtimeStbnTable(context);
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 layout = createDescriptorSetLayout(context, stack);
@@ -445,8 +445,8 @@ public final class TraceBackend implements Destroyable {
                 TerrainScene.MaterialCoreBinding materialCore,
                 TerrainScene.TintSampleBinding tintSamples,
                 AtmospherePipeline atmosphere,
-                BsdfLookupTable bsdfLookup,
-                StarmapTexture starmap,
+                StaticSampledTexture bsdfLookup,
+                StaticSampledTexture starmap,
                 RealtimeStbnTable realtimeStbn) {
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 VkDescriptorPoolSize.Buffer sizes = VkDescriptorPoolSize.calloc(5, stack);
@@ -533,7 +533,7 @@ public final class TraceBackend implements Destroyable {
                     }
                     infos.get(sampledStart)
                             .sampler(bsdfLookup.sampler())
-                            .imageView(bsdfLookup.transmissionGgxEnergy().view())
+                            .imageView(bsdfLookup.image().view())
                             .imageLayout(VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
                     for (int index = 0; index < ShaderAbi.BASE_COLOR_PAGE_COUNT; index++) {
                         VulkanImage baseColor = baseColorPages.get(
