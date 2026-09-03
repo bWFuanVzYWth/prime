@@ -1,10 +1,18 @@
 #language slang 2026
 module "entry/realtime/guide_delta_walk.raygeneration.slang";
 
-import "phase/realtime/guide_delta_walk.slang";
+import "prime_realtime_abi.slang";
+import "service/trace/context.slang";
+import "state/realtime/queue.slang";
+import "transport/realtime/guide_delta_walk.slang";
 
 [shader("raygeneration")]
 void main()
 {
-    primePhase();
+    uint launchIndex = DispatchRaysIndex().x;
+    PrimeIntegratorContext context = primeIntegratorContextCreate();
+    if (launchIndex == 0u) {
+        primeResetWavefrontQueue(PRIME_WAVEFRONT_GUIDE_QUEUE);
+    }
+    primeDetachedGuideDeltaWalk(context, launchIndex);
 }

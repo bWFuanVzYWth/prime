@@ -145,11 +145,6 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
             targets.each { targetPath ->
                 def target = new File(targetPath)
                 def targetRelative = shaderRelative(target)
-                if (sourceRelative.startsWith('phase/')
-                        && targetRelative?.startsWith('phase/')) {
-                    throw new GradleException(
-                            "Phase imports another phase: ${sourceRelative} -> ${targetRelative}")
-                }
                 if (sourceRelative.startsWith('state/')
                         && targetRelative?.startsWith('transport/')) {
                     throw new GradleException(
@@ -207,7 +202,7 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
         }
         def allowedRoots = [
                 'bsdf', 'contract', 'entry', 'math', 'model',
-                'phase', 'policy', 'service', 'state', 'transport'] as Set
+                'policy', 'service', 'state', 'transport'] as Set
         sources.findAll { shaderRelative(it) != null }.each { source ->
             def relative = shaderRelative(source)
             def root = relative.contains('/') ? relative.substring(0, relative.indexOf('/')) : ''
@@ -287,26 +282,6 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
                     throw new GradleException(
                             "Schedule ${scheduleId} contains an invalid module index")
                 }
-            }
-        }
-
-        productionEntries.each { entry ->
-            def relative = shaderRoot.toPath().relativize(entry.toPath())
-                    .toString().replace('\\', '/')
-            def entryPath = pathKey(entry)
-            def direct = graph[entryPath] ?: Collections.emptySet()
-            def phaseDependencies = direct.findAll { target ->
-                shaderRoot.toPath().relativize(new File(target).toPath())
-                        .toString().replace('\\', '/').startsWith('phase/')
-            }
-            if (phaseDependencies.size() != 1) {
-                throw new GradleException(
-                        "Production entry ${relative} must select exactly one phase")
-            }
-            def nonPhase = direct.findAll { !phaseDependencies.contains(it) }
-            if (!nonPhase.empty) {
-                throw new GradleException(
-                        "Production entry ${relative} imports more than its phase: ${nonPhase}")
             }
         }
 
