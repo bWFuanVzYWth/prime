@@ -15,10 +15,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 
 /** Sums the raw estimator partitions into native-resolution linear HDR without filtering. */
 final class NoisyCompositePass implements Destroyable {
-    private static final int IMAGE_COUNT = 8;
     private static final int PUSH_SIZE = 24;
-    private static final String SHADER =
-            GeneratedShaderPrograms.resource("noisy_composite");
 
     private final SharedComputeProgram program;
     private final BoundSet descriptors;
@@ -54,14 +51,8 @@ final class NoisyCompositePass implements Destroyable {
                 atmosphere.aerialRadiance(),
                 atmosphere.aerialTransmittance(),
                 signals.linearOutput());
-        SharedComputeProgram program = null;
+        SharedComputeProgram program = context.acquireNoisyCompositeProgram();
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            program = SharedComputeProgram.createStorageImages(
-                    context,
-                    "noisy-composite",
-                    PUSH_SIZE,
-                    IMAGE_COUNT,
-                    SHADER);
             BoundSet descriptors = VulkanDescriptors.bindStorageImages(
                     context,
                     stack,
@@ -75,9 +66,7 @@ final class NoisyCompositePass implements Destroyable {
                     signals.linearOutput().width(),
                     signals.linearOutput().height());
         } catch (RuntimeException exception) {
-            if (program != null) {
-                program.release();
-            }
+            program.release();
             throw exception;
         }
     }

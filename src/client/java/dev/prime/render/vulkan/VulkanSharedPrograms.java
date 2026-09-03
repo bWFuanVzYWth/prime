@@ -39,7 +39,15 @@ public final class VulkanSharedPrograms implements AutoCloseable {
                 new int[] {
                     SAMPLED_IMAGE, SAMPLED_IMAGE, STORAGE_IMAGE, STORAGE_IMAGE, STORAGE_IMAGE
                 },
-                "streamline_input");
+                "streamline_input"),
+        NOISY_COMPOSITE("noisy-composite", 24, false,
+                storageImages(8), "noisy_composite"),
+        NRD_MOTION("Prime NRD motion", ShaderAbi.NRD_MOTION_PUSH_CONSTANT_SIZE, false,
+                storageImages(24), "nrd_motion"),
+        NRD_COMPOSITE("Prime NRD composite", 32, false,
+                storageImages(28), "nrd_composite"),
+        RR_PREPARE("RR prepare", 216, false,
+                storageImages(17), "rr_prepare");
 
         final String label;
         final int pushSize;
@@ -96,6 +104,28 @@ public final class VulkanSharedPrograms implements AutoCloseable {
 
     SharedComputeProgram acquireStreamlineInput() {
         return acquire(Program.STREAMLINE_INPUT);
+    }
+
+    SharedComputeProgram acquireNoisyComposite() {
+        return acquire(Program.NOISY_COMPOSITE);
+    }
+
+    SharedComputeProgram acquireNrdMotion() {
+        return acquire(Program.NRD_MOTION);
+    }
+
+    SharedComputeProgram acquireNrdComposite() {
+        return acquire(Program.NRD_COMPOSITE);
+    }
+
+    SharedComputeProgram acquireRrPrepare() {
+        return acquire(Program.RR_PREPARE);
+    }
+
+    private static int[] storageImages(int count) {
+        int[] descriptorTypes = new int[count];
+        Arrays.fill(descriptorTypes, STORAGE_IMAGE);
+        return descriptorTypes;
     }
 
     private SharedComputeProgram acquire(Program program) {
@@ -215,22 +245,6 @@ public final class VulkanSharedPrograms implements AutoCloseable {
                 }
                 throw exception;
             }
-        }
-
-        public static SharedComputeProgram createStorageImages(
-                VulkanContext context,
-                String label,
-                int pushSize,
-                int imageCount,
-                String shaderResource) {
-            int[] descriptorTypes = new int[imageCount];
-            Arrays.fill(descriptorTypes, STORAGE_IMAGE);
-            return create(
-                    context,
-                    label,
-                    pushSize,
-                    descriptorTypes,
-                    new String[] {shaderResource});
         }
 
         SharedComputeProgram retain() {

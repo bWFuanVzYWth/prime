@@ -17,7 +17,6 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
 final class NrdInputPreparationPass implements Destroyable {
-    private static final int BINDING_COUNT = NrdDenoiser.MOTION_BINDING_COUNT;
     private static final int PUSH_SIZE = ShaderAbi.NRD_MOTION_PUSH_CONSTANT_SIZE;
     private final SharedComputeProgram program;
     private final BoundSet descriptors;
@@ -36,17 +35,9 @@ final class NrdInputPreparationPass implements Destroyable {
     static NrdInputPreparationPass create(
             VulkanContext context,
             NrdImages images,
-            String shaderResource,
             String debugPrefix) {
-        SharedComputeProgram program = null;
+        SharedComputeProgram program = context.acquireNrdMotionProgram();
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            program = SharedComputeProgram.createStorageImages(
-                    context,
-                    debugPrefix + " motion",
-                    PUSH_SIZE,
-                    BINDING_COUNT,
-                    shaderResource);
-
             VulkanImage[] descriptorImages = new VulkanImage[] {
                 images.motion(),
                 images.viewZ(),
@@ -88,9 +79,7 @@ final class NrdInputPreparationPass implements Destroyable {
                     program,
                     descriptors);
         } catch (RuntimeException exception) {
-            if (program != null) {
-                program.release();
-            }
+            program.release();
             throw exception;
         }
     }

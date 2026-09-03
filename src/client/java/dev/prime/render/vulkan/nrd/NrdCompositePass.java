@@ -1,6 +1,5 @@
 package dev.prime.render.vulkan.nrd;
 
-import dev.prime.render.vulkan.GeneratedShaderPrograms;
 import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.render.vulkan.AtmospherePipeline;
 import dev.prime.render.vulkan.VulkanContext;
@@ -15,7 +14,6 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
 final class NrdCompositePass implements Destroyable {
-    private static final int BINDING_COUNT = 28;
     private static final int PUSH_SIZE = NrdCompositeConstants.SIZE;
     private final SharedComputeProgram program;
     private final BoundSet descriptors;
@@ -34,15 +32,8 @@ final class NrdCompositePass implements Destroyable {
             VulkanImage stableAccumulation,
             NrdImages images,
             AtmospherePipeline atmosphere) {
-        SharedComputeProgram program = null;
+        SharedComputeProgram program = context.acquireNrdCompositeProgram();
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            program = SharedComputeProgram.createStorageImages(
-                    context,
-                    "Prime NRD composite",
-                    PUSH_SIZE,
-                    BINDING_COUNT,
-                    GeneratedShaderPrograms.resource("nrd_composite"));
-
             List<VulkanImage> descriptorImages = List.of(
                 output,
                 images.denoisedDiffuse(),
@@ -82,9 +73,7 @@ final class NrdCompositePass implements Destroyable {
                     program,
                     descriptors);
         } catch (RuntimeException exception) {
-            if (program != null) {
-                program.release();
-            }
+            program.release();
             throw exception;
         }
     }

@@ -1,6 +1,5 @@
 package dev.prime.render.vulkan.dlss;
 
-import dev.prime.render.vulkan.GeneratedShaderPrograms;
 import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.render.FrameCamera;
 import dev.prime.render.SunDirection;
@@ -27,7 +26,6 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 final class DlssRrPreparePass implements Destroyable {
     static final int IMAGE_COUNT = 17;
     private static final int LOCAL_SIZE = 8;
-    private static final String SHADER = GeneratedShaderPrograms.resource("rr_prepare");
 
     private final SharedComputeProgram program;
     private final BoundSet descriptors;
@@ -74,14 +72,8 @@ final class DlssRrPreparePass implements Destroyable {
                 targets.specularHitDistance(),
                 targets.responsivity(),
                 targets.reconstructionControl());
-        SharedComputeProgram program = null;
+        SharedComputeProgram program = context.acquireRrPrepareProgram();
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            program = SharedComputeProgram.createStorageImages(
-                    context,
-                    "RR prepare",
-                    DlssRrPrepareConstants.SIZE,
-                    IMAGE_COUNT,
-                    SHADER);
             BoundSet descriptors = VulkanDescriptors.bindStorageImages(
                     context,
                     stack,
@@ -92,7 +84,7 @@ final class DlssRrPreparePass implements Destroyable {
                     program, descriptors,
                     atmosphere, targets.inputColor().width(), targets.inputColor().height());
         } catch (RuntimeException exception) {
-            if (program != null) program.release();
+            program.release();
             throw exception;
         }
     }
