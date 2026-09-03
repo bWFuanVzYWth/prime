@@ -17,7 +17,6 @@ import org.lwjgl.vulkan.VkCommandBuffer;
  * cross-thread mutation or lock participates in exposure adaptation.
  */
 final class AutoExposurePass implements Destroyable {
-    private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
     private static final int PUSH_SIZE = 16;
     private static final int HISTOGRAM_BIN_COUNT = 256;
     private static final int HISTOGRAM_SIZE =
@@ -148,50 +147,26 @@ final class AutoExposurePass implements Destroyable {
                 0);
         writesToCompute(commandBuffer);
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            VK12.vkCmdBindDescriptorSets(
-                    commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipelineLayout(),
-                    0,
-                    stack.longs(this.descriptors.handle()),
-                    null);
-            VK12.vkCmdBindPipeline(
-                    commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipeline(0));
+            this.program.bindDescriptors(
+                    commandBuffer, stack, this.descriptors.handle());
             ByteBuffer histogramPush =
                     stack.malloc(PUSH_SIZE).order(ByteOrder.nativeOrder());
             histogramPush.putInt(0, width);
             histogramPush.putInt(4, height);
             histogramPush.putInt(8, this.accumulatedMetering ? 1 : 0);
             histogramPush.putInt(12, 0);
-            VK12.vkCmdPushConstants(
-                    commandBuffer,
-                    this.program.pipelineLayout(),
-                    COMPUTE_STAGE,
-                    0,
-                    histogramPush);
-            VK12.vkCmdDispatch(
-                    commandBuffer, this.dispatchX, this.dispatchY, 1);
+            this.program.dispatchBound(
+                    commandBuffer, 0, histogramPush, this.dispatchX, this.dispatchY);
 
             computeBarrier(commandBuffer, this.histogram);
-            VK12.vkCmdBindPipeline(
-                    commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipeline(1));
             ByteBuffer updatePush =
                     stack.malloc(PUSH_SIZE).order(ByteOrder.nativeOrder());
             updatePush.putFloat(0, deltaSeconds);
             updatePush.putInt(4, reset ? 1 : 0);
             updatePush.putInt(8, instant ? 1 : 0);
             updatePush.putFloat(12, compensation);
-            VK12.vkCmdPushConstants(
-                    commandBuffer,
-                    this.program.pipelineLayout(),
-                    COMPUTE_STAGE,
-                    0,
-                    updatePush);
-            VK12.vkCmdDispatch(commandBuffer, 1, 1, 1);
+            this.program.dispatchBound(
+                    commandBuffer, 1, updatePush, 1, 1);
         }
         computeBarrier(commandBuffer, this.exposureState);
     }

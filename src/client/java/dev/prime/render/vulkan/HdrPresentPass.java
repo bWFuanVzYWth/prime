@@ -136,28 +136,13 @@ final class HdrPresentPass implements Destroyable {
             push.putInt(4, this.height);
             push.putInt(8, compositePrimeHdr ? 1 : 0);
             push.putFloat(12, scRgbScale);
-            VK12.vkCmdBindPipeline(
+            this.program.dispatch(
                     commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipeline(0));
-            VK12.vkCmdBindDescriptorSets(
-                    commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipelineLayout(),
-                    0,
-                    stack.longs(this.descriptorSet),
-                    null);
-            VK12.vkCmdPushConstants(
-                    commandBuffer,
-                    this.program.pipelineLayout(),
-                    VK12.VK_SHADER_STAGE_COMPUTE_BIT,
-                    0,
-                    push);
-            VK12.vkCmdDispatch(
-                    commandBuffer,
+                    stack,
+                    this.descriptorSet,
+                    push,
                     DispatchMath.divideRoundUp(this.width, LOCAL_SIZE),
-                    DispatchMath.divideRoundUp(this.height, LOCAL_SIZE),
-                    1);
+                    DispatchMath.divideRoundUp(this.height, LOCAL_SIZE));
             VulkanSync.imageBarrier(commandBuffer, this.output.image(),
                     VK12.VK_IMAGE_LAYOUT_GENERAL, VK12.VK_IMAGE_LAYOUT_GENERAL,
                     VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,

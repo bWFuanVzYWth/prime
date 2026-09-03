@@ -17,7 +17,6 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 final class NoisyCompositePass implements Destroyable {
     private static final int IMAGE_COUNT = 8;
     private static final int PUSH_SIZE = 24;
-    private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
     private static final String SHADER =
             GeneratedShaderPrograms.resource("noisy_composite");
 
@@ -103,21 +102,13 @@ final class NoisyCompositePass implements Destroyable {
                     this.atmosphere.aerialEpipole(camera, sunDirection);
             push.putFloat(16, epipole.x());
             push.putFloat(20, epipole.y());
-            VK12.vkCmdBindPipeline(
+            this.program.dispatch(
                     commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipeline(0));
-            VK12.vkCmdBindDescriptorSets(
-                    commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipelineLayout(),
-                    0,
-                    stack.longs(this.descriptors.handle()),
-                    null);
-            VK12.vkCmdPushConstants(
-                    commandBuffer, this.program.pipelineLayout(), COMPUTE_STAGE, 0, push);
-            VK12.vkCmdDispatch(
-                    commandBuffer, (this.width + 7) / 8, (this.height + 7) / 8, 1);
+                    stack,
+                    this.descriptors.handle(),
+                    push,
+                    (this.width + 7) / 8,
+                    (this.height + 7) / 8);
         }
         VulkanSync.memoryBarrier(
                 commandBuffer,

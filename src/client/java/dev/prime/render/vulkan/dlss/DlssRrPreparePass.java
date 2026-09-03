@@ -26,7 +26,6 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 /** Converts raw path-tracing signals into the exact low-resolution image set submitted to NGX. */
 final class DlssRrPreparePass implements Destroyable {
     static final int IMAGE_COUNT = 17;
-    private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
     private static final int LOCAL_SIZE = 8;
     private static final String SHADER = GeneratedShaderPrograms.resource("rr_prepare");
 
@@ -127,20 +126,13 @@ final class DlssRrPreparePass implements Destroyable {
                     responsivity,
                     this.atmosphere.aerialEpipole(camera, sunDirection),
                     currentJitterPixels);
-            VK12.vkCmdBindPipeline(
+            this.program.dispatch(
                     commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipeline(0));
-            VK12.vkCmdBindDescriptorSets(
-                    commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipelineLayout(),
-                    0,
-                    stack.longs(this.descriptors.handle()),
-                    null);
-            VK12.vkCmdPushConstants(
-                    commandBuffer, this.program.pipelineLayout(), COMPUTE_STAGE, 0, push);
-            VK12.vkCmdDispatch(commandBuffer, this.dispatchX, this.dispatchY, 1);
+                    stack,
+                    this.descriptors.handle(),
+                    push,
+                    this.dispatchX,
+                    this.dispatchY);
         }
         VulkanSync.memoryBarrier(
                 commandBuffer,

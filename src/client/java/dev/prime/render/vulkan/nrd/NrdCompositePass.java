@@ -12,11 +12,9 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.List;
 import org.lwjgl.system.MemoryStack;
-import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
 final class NrdCompositePass implements Destroyable {
-    private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
     private static final int BINDING_COUNT = 28;
     private static final int PUSH_SIZE = NrdCompositeConstants.SIZE;
     private final SharedComputeProgram program;
@@ -101,17 +99,6 @@ final class NrdCompositePass implements Destroyable {
             float epipoleX,
             float epipoleY) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            VK12.vkCmdBindPipeline(
-                    commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipeline(0));
-            VK12.vkCmdBindDescriptorSets(
-                    commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipelineLayout(),
-                    0,
-                    stack.longs(this.descriptors.handle()),
-                    null);
             ByteBuffer push = stack.calloc(PUSH_SIZE).order(ByteOrder.nativeOrder());
             NrdCompositeConstants.write(
                     push,
@@ -122,13 +109,13 @@ final class NrdCompositePass implements Destroyable {
                     cameraJitterY,
                     epipoleX,
                     epipoleY);
-            VK12.vkCmdPushConstants(
+            this.program.dispatch(
                     commandBuffer,
-                    this.program.pipelineLayout(),
-                    COMPUTE_STAGE,
-                    0,
-                    push);
-            VK12.vkCmdDispatch(commandBuffer, (width + 7) / 8, (height + 7) / 8, 1);
+                    stack,
+                    this.descriptors.handle(),
+                    push,
+                    (width + 7) / 8,
+                    (height + 7) / 8);
         }
     }
 

@@ -182,22 +182,13 @@ public final class UiAlphaCapturePass implements Destroyable {
             ByteBuffer push = stack.malloc(PUSH_SIZE).order(ByteOrder.nativeOrder());
             push.putInt(0, this.width);
             push.putInt(4, this.height);
-            VK12.vkCmdBindPipeline(
-                    commandBuffer, VK12.VK_PIPELINE_BIND_POINT_COMPUTE, program.pipeline(0));
-            VK12.vkCmdBindDescriptorSets(
+            program.dispatch(
                     commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    program.pipelineLayout(),
-                    0,
-                    stack.longs(descriptorSet),
-                    null);
-            VK12.vkCmdPushConstants(
-                    commandBuffer, program.pipelineLayout(), COMPUTE_STAGE, 0, push);
-            VK12.vkCmdDispatch(
-                    commandBuffer,
+                    stack,
+                    descriptorSet,
+                    push,
                     DispatchMath.divideRoundUp(this.width, LOCAL_SIZE),
-                    DispatchMath.divideRoundUp(this.height, LOCAL_SIZE),
-                    1);
+                    DispatchMath.divideRoundUp(this.height, LOCAL_SIZE));
         }
     }
 

@@ -195,28 +195,13 @@ public final class StreamlineInputPass implements Destroyable {
                     jitter,
                     historyValid,
                     this.exactTransmissiveHistory);
-            VK12.vkCmdBindPipeline(
+            this.program.dispatch(
                     commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipeline(0));
-            VK12.vkCmdBindDescriptorSets(
-                    commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipelineLayout(),
-                    0,
-                    stack.longs(this.descriptors.handle()),
-                    null);
-            VK12.vkCmdPushConstants(
-                    commandBuffer,
-                    this.program.pipelineLayout(),
-                    COMPUTE_STAGE,
-                    0,
-                    push);
-            VK12.vkCmdDispatch(
-                    commandBuffer,
+                    stack,
+                    this.descriptors.handle(),
+                    push,
                     DispatchMath.divideRoundUp(this.depth.width(), LOCAL_SIZE),
-                    DispatchMath.divideRoundUp(this.depth.height(), LOCAL_SIZE),
-                    1);
+                    DispatchMath.divideRoundUp(this.depth.height(), LOCAL_SIZE));
         }
         VulkanSync.memoryBarrier(
                 commandBuffer,

@@ -31,7 +31,6 @@ public final class ImageDiagnosticPass implements Destroyable {
     public static final int VISIBILITY_A = 12;
     public static final int SIGNED = 13;
 
-    private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
     private static final int PUSH_SIZE = 40;
     private static final int LOCAL_SIZE = 8;
     private static final int CLEAR = 1;
@@ -229,23 +228,13 @@ public final class ImageDiagnosticPass implements Destroyable {
             push.putInt(28, height);
             push.putInt(32, view.presentation);
             push.putInt(36, clear ? CLEAR : 0);
-            VK12.vkCmdBindPipeline(
+            this.program.dispatch(
                     commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipeline(0));
-            VK12.vkCmdBindDescriptorSets(
-                    commandBuffer, VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipelineLayout(),
-                    0,
-                    stack.longs(this.descriptorSets[view.source]),
-                    null);
-            VK12.vkCmdPushConstants(
-                    commandBuffer, this.program.pipelineLayout(), COMPUTE_STAGE, 0, push);
-            VK12.vkCmdDispatch(
-                    commandBuffer,
+                    stack,
+                    this.descriptorSets[view.source],
+                    push,
                     DispatchMath.divideRoundUp(width, LOCAL_SIZE),
-                    DispatchMath.divideRoundUp(height, LOCAL_SIZE),
-                    1);
+                    DispatchMath.divideRoundUp(height, LOCAL_SIZE));
         }
     }
 

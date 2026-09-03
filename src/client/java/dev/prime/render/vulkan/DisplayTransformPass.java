@@ -15,7 +15,6 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 
 /** Prime's common linear Rec.2020 HDR to selectable sRGB Rec.709 display boundary. */
 public final class DisplayTransformPass implements Destroyable {
-    private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
     private static final int PUSH_SIZE = 20;
     private static final int LOCAL_SIZE = 8;
 
@@ -210,24 +209,13 @@ public final class DisplayTransformPass implements Destroyable {
             push.putFloat(8, display.finalExposureMultiplier());
             push.putFloat(12, reinhard.outputPeak());
             push.putFloat(16, reinhard.curvePeak());
-            VK12.vkCmdBindPipeline(
+            this.program.dispatch(
                     commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipeline(0));
-            VK12.vkCmdBindDescriptorSets(
-                    commandBuffer,
-                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    this.program.pipelineLayout(),
-                    0,
-                    stack.longs(this.descriptors.handle()),
-                    null);
-            VK12.vkCmdPushConstants(
-                    commandBuffer, this.program.pipelineLayout(), COMPUTE_STAGE, 0, push);
-            VK12.vkCmdDispatch(
-                    commandBuffer,
+                    stack,
+                    this.descriptors.handle(),
+                    push,
                     DispatchMath.divideRoundUp(this.width, LOCAL_SIZE),
-                    DispatchMath.divideRoundUp(this.height, LOCAL_SIZE),
-                    1);
+                    DispatchMath.divideRoundUp(this.height, LOCAL_SIZE));
         }
     }
 

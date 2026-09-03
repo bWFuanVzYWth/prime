@@ -2,11 +2,13 @@ package dev.prime.render.vulkan;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.render.shader.ShaderAbi;
+import java.nio.ByteBuffer;
 import java.nio.LongBuffer;
 import java.util.Arrays;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
+import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
 import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
@@ -253,12 +255,65 @@ public final class VulkanSharedPrograms implements AutoCloseable {
             return this.descriptorSetLayout;
         }
 
-        public long pipelineLayout() {
-            return this.pipelineLayout;
+        public void dispatch(
+                VkCommandBuffer commandBuffer,
+                MemoryStack stack,
+                long descriptorSet,
+                ByteBuffer pushConstants,
+                int groupCountX,
+                int groupCountY) {
+            VK12.vkCmdBindPipeline(
+                    commandBuffer,
+                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
+                    this.pipelines[0]);
+            bindDescriptors(commandBuffer, stack, descriptorSet);
+            pushAndDispatch(
+                    commandBuffer,
+                    pushConstants,
+                    groupCountX,
+                    groupCountY);
         }
 
-        public long pipeline(int index) {
-            return this.pipelines[index];
+        public void bindDescriptors(
+                VkCommandBuffer commandBuffer, MemoryStack stack, long descriptorSet) {
+            VK12.vkCmdBindDescriptorSets(
+                    commandBuffer,
+                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
+                    this.pipelineLayout,
+                    0,
+                    stack.longs(descriptorSet),
+                    null);
+        }
+
+        public void dispatchBound(
+                VkCommandBuffer commandBuffer,
+                int pipelineIndex,
+                ByteBuffer pushConstants,
+                int groupCountX,
+                int groupCountY) {
+            VK12.vkCmdBindPipeline(
+                    commandBuffer,
+                    VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
+                    this.pipelines[pipelineIndex]);
+            pushAndDispatch(
+                    commandBuffer,
+                    pushConstants,
+                    groupCountX,
+                    groupCountY);
+        }
+
+        private void pushAndDispatch(
+                VkCommandBuffer commandBuffer,
+                ByteBuffer pushConstants,
+                int groupCountX,
+                int groupCountY) {
+            VK12.vkCmdPushConstants(
+                    commandBuffer,
+                    this.pipelineLayout,
+                    COMPUTE_STAGE,
+                    0,
+                    pushConstants);
+            VK12.vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
         }
 
         @Override
