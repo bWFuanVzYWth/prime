@@ -3,11 +3,7 @@ package dev.prime.render.vulkan;
 import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.shader.ShaderAbi;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.ByteBuffer;
 import org.lwjgl.system.MemoryStack;
-import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkBufferCopy;
@@ -40,12 +36,11 @@ final class RealtimeStbnTable implements Destroyable {
                             | VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                     false,
                     "Prime realtime STBN");
-            newUpload = context.createBuffer(
+            newUpload = StaticSampledTexture.createUpload(
+                    context,
                     BYTE_SIZE,
-                    VK12.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                    true,
-                    "Prime realtime STBN upload");
-            writeResource(newUpload);
+                    "Prime realtime STBN upload",
+                    RESOURCE);
             this.table = newTable;
             this.upload = newUpload;
         } catch (RuntimeException exception) {
@@ -67,6 +62,7 @@ final class RealtimeStbnTable implements Destroyable {
         }
         this.pending = true;
         try (MemoryStack stack = MemoryStack.stackPush()) {
+            this.upload.flush(0L, BYTE_SIZE);
             VkBufferCopy.Buffer copy = VkBufferCopy.calloc(1, stack)
                     .srcOffset(0L)
                     .dstOffset(0L)
@@ -100,28 +96,6 @@ final class RealtimeStbnTable implements Destroyable {
             throw new IllegalStateException("Realtime STBN upload is not pending submission");
         }
         this.pending = false;
-    }
-
-    private static void writeResource(VulkanBuffer destination) {
-        byte[] bytes;
-        try (InputStream input = RealtimeStbnTable.class.getResourceAsStream(RESOURCE)) {
-            if (input == null) {
-                throw new IllegalStateException("Missing realtime STBN table");
-            }
-            bytes = input.readAllBytes();
-        } catch (IOException exception) {
-            throw new IllegalStateException("Unable to read realtime STBN table", exception);
-        }
-        if (bytes.length != BYTE_SIZE) {
-            throw new IllegalStateException("Unexpected realtime STBN byte size " + bytes.length);
-        }
-        ByteBuffer source = MemoryUtil.memAlloc(bytes.length);
-        try {
-            source.put(bytes).flip();
-            destination.put(0L, source);
-        } finally {
-            MemoryUtil.memFree(source);
-        }
     }
 
     @Override

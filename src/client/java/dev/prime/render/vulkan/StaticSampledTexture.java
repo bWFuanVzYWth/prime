@@ -73,8 +73,7 @@ final class StaticSampledTexture implements Destroyable {
                     context,
                     LUT_BYTES,
                     "Prime transmission GGX energy upload",
-                    "/prime/bsdf/trans_ggx.bytes.gz.b64",
-                    true);
+                    "/prime/bsdf/trans_ggx.bytes.gz.b64");
             sampler = createSampler(
                     context,
                     VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
@@ -110,8 +109,7 @@ final class StaticSampledTexture implements Destroyable {
                         context,
                         STARMAP_STRIPE_BYTES,
                         "Prime starmap stripe " + index + " upload",
-                        "/prime/starmap/starmap_2020_8k_" + index + ".rgba16f.gz",
-                        false);
+                        "/prime/starmap/starmap_2020_8k_" + index + ".rgba16f.gz");
             }
             sampler = createSampler(
                     context,
@@ -222,19 +220,18 @@ final class StaticSampledTexture implements Destroyable {
         this.pending = false;
     }
 
-    private static VulkanBuffer createUpload(
+    static VulkanBuffer createUpload(
             VulkanContext context,
             int byteSize,
             String label,
-            String resource,
-            boolean base64) {
+            String resource) {
         VulkanBuffer upload = context.createBuffer(
                 byteSize,
                 VK12.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                 true,
                 label);
         try {
-            writeResource(upload, byteSize, resource, base64);
+            writeResource(upload, byteSize, resource);
             return upload;
         } catch (RuntimeException exception) {
             upload.destroy();
@@ -245,8 +242,7 @@ final class StaticSampledTexture implements Destroyable {
     private static void writeResource(
             VulkanBuffer destination,
             int expectedBytes,
-            String resource,
-            boolean base64) {
+            String resource) {
         ByteBuffer target = MemoryUtil.memByteBuffer(
                 destination.mappedAddress(), expectedBytes);
         byte[] chunk = new byte[64 * 1024];
@@ -255,29 +251,31 @@ final class StaticSampledTexture implements Destroyable {
             if (encoded == null) {
                 throw new IllegalStateException("Missing static texture resource " + resource);
             }
-            InputStream compressed = base64
+            InputStream decoded = resource.endsWith(".b64")
                     ? Base64.getMimeDecoder().wrap(encoded)
                     : encoded;
-            try (GZIPInputStream decompressed = new GZIPInputStream(compressed)) {
+            try (InputStream input = resource.endsWith(".gz") || resource.endsWith(".gz.b64")
+                    ? new GZIPInputStream(decoded)
+                    : decoded) {
                 int count;
-                while ((count = decompressed.read(chunk)) >= 0) {
+                while ((count = input.read(chunk)) >= 0) {
                     if (count == 0) {
                         continue;
                     }
                     if (count > target.remaining()) {
                         throw new IllegalStateException(
-                                "Static texture resource exceeds its declared size: " + resource);
+                                "Static resource exceeds its declared size: " + resource);
                     }
                     target.put(chunk, 0, count);
                     total += count;
                 }
             }
         } catch (IOException exception) {
-            throw new IllegalStateException("Unable to read static texture " + resource, exception);
+            throw new IllegalStateException("Unable to read static resource " + resource, exception);
         }
         if (total != expectedBytes) {
             throw new IllegalStateException(
-                    "Unexpected static texture size " + total + " for " + resource
+                    "Unexpected static resource size " + total + " for " + resource
                             + ", expected " + expectedBytes);
         }
     }
