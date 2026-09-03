@@ -1177,15 +1177,15 @@ final class TransparentBoundaryResolver {
                     || !surface.mergeable() && surface.fluid() == null) {
                 return null;
             }
-            float[] normal = {quad.normalX(), quad.normalY(), quad.normalZ()};
             int planeAxis = -1;
             for (int axis = 0; axis < 3; axis++) {
-                if (Math.abs(Math.abs(normal[axis]) - 1.0F) <= NORMAL_EPSILON) {
+                float normal = normal(quad, axis);
+                if (Math.abs(Math.abs(normal) - 1.0F) <= NORMAL_EPSILON) {
                     if (planeAxis != -1) {
                         return null;
                     }
                     planeAxis = axis;
-                } else if (Math.abs(normal[axis]) > NORMAL_EPSILON) {
+                } else if (Math.abs(normal) > NORMAL_EPSILON) {
                     return null;
                 }
             }
@@ -1194,19 +1194,21 @@ final class TransparentBoundaryResolver {
             }
             int axisU = projectedAxisU(planeAxis);
             int axisV = projectedAxisV(planeAxis);
-            int[] origin = {originX, originY, originZ};
-            float plane = coordinate(quad, planeAxis, 0) + origin[planeAxis];
+            int planeOrigin = coordinate(originX, originY, originZ, planeAxis);
+            int originU = coordinate(originX, originY, originZ, axisU);
+            int originV = coordinate(originX, originY, originZ, axisV);
+            float plane = coordinate(quad, planeAxis, 0) + planeOrigin;
             float minimumU = Float.POSITIVE_INFINITY;
             float maximumU = Float.NEGATIVE_INFINITY;
             float minimumV = Float.POSITIVE_INFINITY;
             float maximumV = Float.NEGATIVE_INFINITY;
             for (int vertex = 0; vertex < 4; vertex++) {
-                float vertexPlane = coordinate(quad, planeAxis, vertex) + origin[planeAxis];
+                float vertexPlane = coordinate(quad, planeAxis, vertex) + planeOrigin;
                 if (Math.abs(vertexPlane - plane) > POSITION_EPSILON) {
                     return null;
                 }
-                float u = coordinate(quad, axisU, vertex) + origin[axisU];
-                float v = coordinate(quad, axisV, vertex) + origin[axisV];
+                float u = coordinate(quad, axisU, vertex) + originU;
+                float v = coordinate(quad, axisV, vertex) + originV;
                 minimumU = Math.min(minimumU, u);
                 maximumU = Math.max(maximumU, u);
                 minimumV = Math.min(minimumV, v);
@@ -1216,12 +1218,10 @@ final class TransparentBoundaryResolver {
                     || !(maximumV - minimumV > POSITION_EPSILON)) {
                 return null;
             }
-            int normalSign = normal[planeAxis] < 0.0F ? -1 : 1;
-            int[] ownerCoordinates = {owner.x(), owner.y(), owner.z()};
-            int[] clusterWorld = {clusterWorldX, clusterWorldY, clusterWorldZ};
-            float expectedPlane = ownerCoordinates[planeAxis]
+            int normalSign = normal(quad, planeAxis) < 0.0F ? -1 : 1;
+            float expectedPlane = coordinate(owner.x(), owner.y(), owner.z(), planeAxis)
                     + (normalSign > 0 ? 1.0F : 0.0F)
-                    - clusterWorld[planeAxis];
+                    - coordinate(clusterWorldX, clusterWorldY, clusterWorldZ, planeAxis);
             float clusterPlane = plane;
             boolean attachedOverlay = ClusterSceneTranslator.isCutout(surface)
                     && surface.animated()
@@ -1244,8 +1244,8 @@ final class TransparentBoundaryResolver {
                     planeAxis, negativeX, negativeY, negativeZ);
             int[] corners = {-1, -1, -1, -1};
             for (int vertex = 0; vertex < 4; vertex++) {
-                float u = coordinate(quad, axisU, vertex) + origin[axisU];
-                float v = coordinate(quad, axisV, vertex) + origin[axisV];
+                float u = coordinate(quad, axisU, vertex) + originU;
+                float v = coordinate(quad, axisV, vertex) + originV;
                 int highU = near(u, minimumU) ? 0 : (near(u, maximumU) ? 1 : -1);
                 int highV = near(v, minimumV) ? 0 : (near(v, maximumV) ? 1 : -1);
                 if (highU < 0 || highV < 0) {
@@ -1329,33 +1329,13 @@ final class TransparentBoundaryResolver {
                 float sliceMaximumU,
                 float sliceMinimumV,
                 float sliceMaximumV) {
-            float[] u = new float[4];
-            float[] v = new float[4];
-            int[] origin = {this.originX, this.originY, this.originZ};
-            for (int vertex = 0; vertex < 4; vertex++) {
-                float sourceU = coordinate(this.quad, this.axisU, vertex)
-                        + origin[this.axisU];
-                float sourceV = coordinate(this.quad, this.axisV, vertex)
-                        + origin[this.axisV];
-                float worldU = near(sourceU, this.minimumU)
-                        ? sliceMinimumU
-                        : sliceMaximumU;
-                float worldV = near(sourceV, this.minimumV)
-                        ? sliceMinimumV
-                        : sliceMaximumV;
-                float s = (worldU - this.minimumU)
-                        / (this.maximumU - this.minimumU);
-                float t = (worldV - this.minimumV)
-                        / (this.maximumV - this.minimumV);
-                u[vertex] = bilinear(this.cornerU, s, t);
-                v[vertex] = bilinear(this.cornerV, s, t);
-            }
-            return new SurfaceDefinition.MaterialBinding(
+            return this.bindingForGeometrySlice(
+                    this,
                     surface,
-                    new SurfaceDefinition.UvMapping(
-                            u[0], v[0], u[1], v[1],
-                            u[2], v[2], u[3], v[3]),
-                    this.transmissiveTopology);
+                    sliceMinimumU,
+                    sliceMaximumU,
+                    sliceMinimumV,
+                    sliceMaximumV);
         }
 
         private SurfaceDefinition.MaterialBinding bindingForGeometrySlice(
@@ -1367,12 +1347,13 @@ final class TransparentBoundaryResolver {
                 float sliceMaximumV) {
             float[] u = new float[4];
             float[] v = new float[4];
-            int[] geometryOrigin = {geometry.originX, geometry.originY, geometry.originZ};
+            int originU = geometry.origin(geometry.axisU);
+            int originV = geometry.origin(geometry.axisV);
             for (int vertex = 0; vertex < 4; vertex++) {
                 float sourceU = coordinate(geometry.quad, geometry.axisU, vertex)
-                        + geometryOrigin[geometry.axisU];
+                        + originU;
                 float sourceV = coordinate(geometry.quad, geometry.axisV, vertex)
-                        + geometryOrigin[geometry.axisV];
+                        + originV;
                 float worldU = near(sourceU, geometry.minimumU)
                         ? sliceMinimumU
                         : sliceMaximumU;
@@ -1398,12 +1379,12 @@ final class TransparentBoundaryResolver {
                 float sliceMaximumU,
                 float sliceMinimumV,
                 float sliceMaximumV) {
-            int[] origin = {this.originX, this.originY, this.originZ};
+            int planeOrigin = this.origin(this.planeAxis);
+            int originU = this.origin(this.axisU);
+            int originV = this.origin(this.axisV);
             for (int vertex = 0; vertex < 4; vertex++) {
-                float sourceU = coordinate(this.quad, this.axisU, vertex)
-                        + origin[this.axisU];
-                float sourceV = coordinate(this.quad, this.axisV, vertex)
-                        + origin[this.axisV];
+                float sourceU = coordinate(this.quad, this.axisU, vertex) + originU;
+                float sourceV = coordinate(this.quad, this.axisV, vertex) + originV;
                 float worldU = near(sourceU, this.minimumU)
                         ? sliceMinimumU
                         : sliceMaximumU;
@@ -1412,9 +1393,9 @@ final class TransparentBoundaryResolver {
                         : sliceMaximumV;
                 setCoordinate(
                         target, this.planeAxis, vertex,
-                        this.plane - origin[this.planeAxis]);
-                setCoordinate(target, this.axisU, vertex, worldU - origin[this.axisU]);
-                setCoordinate(target, this.axisV, vertex, worldV - origin[this.axisV]);
+                        this.plane - planeOrigin);
+                setCoordinate(target, this.axisU, vertex, worldU - originU);
+                setCoordinate(target, this.axisV, vertex, worldV - originV);
             }
             target.normalX = this.quad.normalX();
             target.normalY = this.quad.normalY();
@@ -1424,6 +1405,10 @@ final class TransparentBoundaryResolver {
         private static float bilinear(float[] corners, float s, float t) {
             return (1.0F - t) * ((1.0F - s) * corners[0] + s * corners[1])
                     + t * ((1.0F - s) * corners[2] + s * corners[3]);
+        }
+
+        private int origin(int axis) {
+            return coordinate(this.originX, this.originY, this.originZ, axis);
         }
 
         private static float minimum(float[] values) {
@@ -1462,6 +1447,14 @@ final class TransparentBoundaryResolver {
             case 1 -> quad.y(vertex);
             default -> quad.z(vertex);
         };
+    }
+
+    private static int coordinate(int x, int y, int z, int axis) {
+        return axis == 0 ? x : axis == 1 ? y : z;
+    }
+
+    private static float normal(CapturedSectionGeometry.Quad quad, int axis) {
+        return axis == 0 ? quad.normalX() : axis == 1 ? quad.normalY() : quad.normalZ();
     }
 
     private static void setCoordinate(
