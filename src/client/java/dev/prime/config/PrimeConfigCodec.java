@@ -21,6 +21,8 @@ import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.IntConsumer;
+import java.util.function.IntUnaryOperator;
 
 /** Scalar codec and validation for the current Prime properties format. */
 final class PrimeConfigCodec {
@@ -393,254 +395,189 @@ final class PrimeConfigCodec {
     }
 
     static int parseDlssFrameGenerationMultiplier(String value) {
-        try {
-            int multiplier = Integer.parseInt(value);
+        return parseInteger(value, multiplier -> {
             if (multiplier < 2) {
                 throw new IllegalArgumentException(
                         "DLSS frame-generation multiplier must be at least 2");
             }
             return multiplier;
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "DLSS frame-generation multiplier must be an integer", exception);
-        }
+        }, "DLSS frame-generation multiplier must be an integer");
     }
 
     static int parseMaximumBounces(String value) {
-        try {
-            return MaximumBounceSettings.validateCount(Integer.parseInt(value));
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "Maximum bounce count must be an integer", exception);
-        }
+        return parseInteger(
+                value,
+                MaximumBounceSettings::validateCount,
+                "Maximum bounce count must be an integer");
     }
 
     static int parseAdditionalSpecularBounces(String value) {
-        try {
-            return SpecularBounceSettings.validateCount(Integer.parseInt(value));
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "Additional specular bounce count must be an integer", exception);
-        }
+        return parseInteger(
+                value,
+                SpecularBounceSettings::validateCount,
+                "Additional specular bounce count must be an integer");
     }
 
     static int parseMinimumBounces(String value) {
-        try {
-            return MinimumBounceSettings.validateCount(Integer.parseInt(value));
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "Minimum bounce count must be an integer", exception);
-        }
+        return parseInteger(
+                value,
+                MinimumBounceSettings::validateCount,
+                "Minimum bounce count must be an integer");
     }
 
     static int parseTerrainWorkerPercentage(String value) {
-        try {
-            return TerrainWorkerSettings.validatePercentage(Integer.parseInt(value));
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "Terrain worker percentage must be an integer", exception);
-        }
+        return parseInteger(
+                value,
+                TerrainWorkerSettings::validatePercentage,
+                "Terrain worker percentage must be an integer");
     }
 
     static int parseLatitudeDegrees(String value) {
-        try {
-            return new AstronomySettings(
-                    Integer.parseInt(value),
-                    AstronomySettings.DEFAULT_SOLAR_LONGITUDE_DEGREES)
-                    .latitudeDegrees();
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "Observer latitude must be an integer degree", exception);
-        }
+        return parseInteger(
+                value,
+                latitude -> new AstronomySettings(
+                        latitude,
+                        AstronomySettings.DEFAULT_SOLAR_LONGITUDE_DEGREES).latitudeDegrees(),
+                "Observer latitude must be an integer degree");
     }
 
     static int parseSolarLongitudeDegrees(String value) {
-        try {
-            return new AstronomySettings(
-                    AstronomySettings.DEFAULT_LATITUDE_DEGREES,
-                    Integer.parseInt(value))
-                    .solarLongitudeDegrees();
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "Solar longitude must be an integer degree", exception);
-        }
-    }
-
-    static AstronomyLoad parseAstronomy(Properties properties) {
-        int latitudeDegrees = AstronomySettings.DEFAULT_LATITUDE_DEGREES;
-        int solarLongitudeDegrees = AstronomySettings.DEFAULT_SOLAR_LONGITUDE_DEGREES;
-        boolean rewriteNeeded = false;
-        String latitude = properties.getProperty(LATITUDE_DEGREES_KEY);
-        if (latitude != null) {
-            try {
-                latitudeDegrees = parseLatitudeDegrees(latitude);
-            } catch (IllegalArgumentException exception) {
-                PrimeInfo.LOGGER.warn(
-                        "Invalid Prime observer latitude '{}'; using {} degrees north",
-                        latitude,
-                        AstronomySettings.DEFAULT_LATITUDE_DEGREES);
-                rewriteNeeded = true;
-            }
-        } else {
-            rewriteNeeded = true;
-        }
-        String solarLongitude = properties.getProperty(SOLAR_LONGITUDE_DEGREES_KEY);
-        if (solarLongitude != null) {
-            try {
-                solarLongitudeDegrees = parseSolarLongitudeDegrees(solarLongitude);
-            } catch (IllegalArgumentException exception) {
-                PrimeInfo.LOGGER.warn(
-                        "Invalid Prime solar longitude '{}'; using the March equinox",
-                        solarLongitude);
-                rewriteNeeded = true;
-            }
-        } else {
-            rewriteNeeded = true;
-        }
-        return new AstronomyLoad(
-                new AstronomySettings(latitudeDegrees, solarLongitudeDegrees),
-                rewriteNeeded);
+        return parseInteger(
+                value,
+                longitude -> new AstronomySettings(
+                        AstronomySettings.DEFAULT_LATITUDE_DEGREES,
+                        longitude).solarLongitudeDegrees(),
+                "Solar longitude must be an integer degree");
     }
 
     static int parseEvQuarterSteps(String value) {
-        try {
-            int quarterSteps = new BigDecimal(value)
-                    .multiply(BigDecimal.valueOf(LightingSettings.QUARTER_STEPS_PER_EV))
-                    .intValueExact();
-            LightingSettings.linearMultiplier(quarterSteps);
-            return quarterSteps;
-        } catch (ArithmeticException | NumberFormatException exception) {
-            throw new IllegalArgumentException("EV must be an exact 0.25-EV step", exception);
-        }
+        return parseSteps(
+                value,
+                LightingSettings.QUARTER_STEPS_PER_EV,
+                LightingSettings::linearMultiplier,
+                "EV must be an exact 0.25-EV step");
     }
 
     static int parseVoxelSurfaceStrengthSteps(String value) {
-        try {
-            int steps = new BigDecimal(value)
-                    .multiply(BigDecimal.valueOf(VoxelSurfaceSettings.STEPS_PER_UNIT))
-                    .intValueExact();
-            VoxelSurfaceSettings.maximumHeight(steps);
-            return steps;
-        } catch (ArithmeticException | NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "Voxel-surface strength must be an exact 0.01 step", exception);
-        }
+        return parseSteps(
+                value,
+                VoxelSurfaceSettings.STEPS_PER_UNIT,
+                VoxelSurfaceSettings::maximumHeight,
+                "Voxel-surface strength must be an exact 0.01 step");
     }
 
     static String formatVoxelSurfaceStrength(int steps) {
-        VoxelSurfaceSettings.maximumHeight(steps);
-        return BigDecimal.valueOf(steps)
-                .divide(BigDecimal.valueOf(VoxelSurfaceSettings.STEPS_PER_UNIT))
-                .toPlainString();
+        return formatSteps(
+                steps,
+                VoxelSurfaceSettings.STEPS_PER_UNIT,
+                VoxelSurfaceSettings::maximumHeight);
     }
 
     static String formatEv(int quarterSteps) {
-        LightingSettings.linearMultiplier(quarterSteps);
-        return BigDecimal.valueOf(quarterSteps)
-                .divide(BigDecimal.valueOf(LightingSettings.QUARTER_STEPS_PER_EV))
-                .toPlainString();
+        return formatSteps(
+                quarterSteps,
+                LightingSettings.QUARTER_STEPS_PER_EV,
+                LightingSettings::linearMultiplier);
     }
 
     static int parseStarEvQuarterSteps(String value) {
-        try {
-            int quarterSteps = new BigDecimal(value)
-                    .multiply(BigDecimal.valueOf(LightingSettings.QUARTER_STEPS_PER_EV))
-                    .intValueExact();
-            LightingSettings.starLinearMultiplier(quarterSteps);
-            return quarterSteps;
-        } catch (ArithmeticException | NumberFormatException exception) {
-            throw new IllegalArgumentException("Star EV must be an exact 0.25-EV step", exception);
-        }
+        return parseSteps(
+                value,
+                LightingSettings.QUARTER_STEPS_PER_EV,
+                LightingSettings::starLinearMultiplier,
+                "Star EV must be an exact 0.25-EV step");
     }
 
     static String formatStarEv(int quarterSteps) {
-        LightingSettings.starLinearMultiplier(quarterSteps);
-        return BigDecimal.valueOf(quarterSteps)
-                .divide(BigDecimal.valueOf(LightingSettings.QUARTER_STEPS_PER_EV))
-                .toPlainString();
+        return formatSteps(
+                quarterSteps,
+                LightingSettings.QUARTER_STEPS_PER_EV,
+                LightingSettings::starLinearMultiplier);
     }
 
     static int parseFinalExposureQuarterSteps(String value) {
-        try {
-            int quarterSteps = new BigDecimal(value)
-                    .multiply(BigDecimal.valueOf(DisplaySettings.QUARTER_STEPS_PER_EV))
-                    .intValueExact();
-            DisplaySettings.finalExposureMultiplier(quarterSteps);
-            return quarterSteps;
-        } catch (ArithmeticException | NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "Final exposure must be an exact 0.25-EV step", exception);
-        }
+        return parseSteps(
+                value,
+                DisplaySettings.QUARTER_STEPS_PER_EV,
+                DisplaySettings::finalExposureMultiplier,
+                "Final exposure must be an exact 0.25-EV step");
     }
 
     static String formatFinalExposure(int quarterSteps) {
-        DisplaySettings.finalExposureMultiplier(quarterSteps);
-        return BigDecimal.valueOf(quarterSteps)
-                .divide(BigDecimal.valueOf(DisplaySettings.QUARTER_STEPS_PER_EV))
-                .toPlainString();
+        return formatSteps(
+                quarterSteps,
+                DisplaySettings.QUARTER_STEPS_PER_EV,
+                DisplaySettings::finalExposureMultiplier);
     }
 
     static int parseAutoExposureCompensationSteps(String value) {
-        try {
-            int steps = parseHundredthSteps(value);
-            DisplaySettings.autoExposureCompensation(steps);
-            return steps;
-        } catch (ArithmeticException | NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "Auto-exposure compensation must be an exact 0.01 step", exception);
-        }
+        return parseSteps(
+                value,
+                DisplaySettings.HUNDREDTH_STEPS_PER_UNIT,
+                DisplaySettings::autoExposureCompensation,
+                "Auto-exposure compensation must be an exact 0.01 step");
     }
 
     static String formatAutoExposureCompensation(int steps) {
-        DisplaySettings.autoExposureCompensation(steps);
-        return formatHundredthSteps(steps);
+        return formatSteps(
+                steps,
+                DisplaySettings.HUNDREDTH_STEPS_PER_UNIT,
+                DisplaySettings::autoExposureCompensation);
     }
 
     static int parseReferenceWhiteNits(String value) {
+        return parseInteger(
+                value,
+                HdrOutput::validateReferenceWhiteNits,
+                "HDR reference white must be an integer number of nits");
+    }
+
+    private static int parseInteger(
+            String value, IntUnaryOperator validator, String error) {
         try {
-            return HdrOutput.validateReferenceWhiteNits(Integer.parseInt(value));
+            return validator.applyAsInt(Integer.parseInt(value));
         } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "HDR reference white must be an integer number of nits", exception);
+            throw new IllegalArgumentException(error, exception);
         }
     }
 
     static int parseRoughnessSteps(String value) {
-        try {
-            int steps = new BigDecimal(value)
-                    .multiply(BigDecimal.valueOf(MaterialSettings.STEPS_PER_UNIT))
-                    .intValueExact();
-            MaterialSettings.linearRoughness(steps);
-            return steps;
-        } catch (ArithmeticException | NumberFormatException exception) {
-            throw new IllegalArgumentException(
-                    "Default material roughness must be an exact 0.01 step", exception);
-        }
+        return parseSteps(
+                value,
+                MaterialSettings.STEPS_PER_UNIT,
+                MaterialSettings::linearRoughness,
+                "Default material roughness must be an exact 0.01 step");
     }
 
     static String formatRoughness(int steps) {
-        MaterialSettings.linearRoughness(steps);
-        return BigDecimal.valueOf(steps)
-                .divide(BigDecimal.valueOf(MaterialSettings.STEPS_PER_UNIT))
-                .toPlainString();
+        return formatSteps(
+                steps,
+                MaterialSettings.STEPS_PER_UNIT,
+                MaterialSettings::linearRoughness);
     }
 
-    private static int parseHundredthSteps(String value) {
-        return new BigDecimal(value)
-                .multiply(BigDecimal.valueOf(DisplaySettings.HUNDREDTH_STEPS_PER_UNIT))
-                .intValueExact();
+    private static int parseSteps(
+            String value, int stepsPerUnit, IntConsumer validator, String error) {
+        try {
+            int steps = new BigDecimal(value)
+                    .multiply(BigDecimal.valueOf(stepsPerUnit))
+                    .intValueExact();
+            validator.accept(steps);
+            return steps;
+        } catch (ArithmeticException | NumberFormatException exception) {
+            throw new IllegalArgumentException(error, exception);
+        }
     }
 
-    private static String formatHundredthSteps(int steps) {
+    private static String formatSteps(
+            int steps, int stepsPerUnit, IntConsumer validator) {
+        validator.accept(steps);
         return BigDecimal.valueOf(steps)
-                .divide(BigDecimal.valueOf(DisplaySettings.HUNDREDTH_STEPS_PER_UNIT))
+                .divide(BigDecimal.valueOf(stepsPerUnit))
                 .toPlainString();
     }
 
     record DecodeResult(PrimeConfigData data, boolean rewriteNeeded) {
-    }
-
-    record AstronomyLoad(AstronomySettings settings, boolean rewriteNeeded) {
     }
 
     private static final class Reader {

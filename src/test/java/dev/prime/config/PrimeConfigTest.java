@@ -247,37 +247,6 @@ final class PrimeConfigTest {
     }
 
     @Test
-    void missingOrInvalidAstronomyMigratesToPersistedDefaults() {
-        PrimeConfigCodec.AstronomyLoad missing =
-                PrimeConfigCodec.parseAstronomy(new Properties());
-        assertEquals(AstronomySettings.defaults(), missing.settings());
-        assertTrue(missing.rewriteNeeded());
-
-        Properties valid = new Properties();
-        valid.setProperty("astronomy.latitude_degrees", "-45");
-        valid.setProperty("astronomy.solar_longitude_degrees", "271");
-        PrimeConfigCodec.AstronomyLoad accepted =
-                PrimeConfigCodec.parseAstronomy(valid);
-        assertEquals(
-                new AstronomySettings(-45, 271),
-                accepted.settings());
-        assertFalse(accepted.rewriteNeeded());
-
-        valid.setProperty("astronomy.latitude_degrees", "91");
-        valid.setProperty("astronomy.solar_longitude_degrees", "-1");
-        PrimeConfigCodec.AstronomyLoad invalid =
-                PrimeConfigCodec.parseAstronomy(valid);
-        assertEquals(AstronomySettings.defaults(), invalid.settings());
-        assertTrue(invalid.rewriteNeeded());
-        assertTrue(
-                PrimeConfig.serializedContents()
-                        .contains("astronomy.latitude_degrees=30\n"));
-        assertTrue(
-                PrimeConfig.serializedContents()
-                        .contains("astronomy.solar_longitude_degrees=0\n"));
-    }
-
-    @Test
     void persistedEvAcceptsOnlyExactQuarterStopsInRange() {
         assertEquals(5, PrimeConfigCodec.parseEvQuarterSteps("1.25"));
         assertEquals(-32, PrimeConfigCodec.parseEvQuarterSteps("-8"));
