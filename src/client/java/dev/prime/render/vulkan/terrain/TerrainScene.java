@@ -1603,80 +1603,6 @@ public final class TerrainScene implements AutoCloseable {
             statistics = java.util.Objects.requireNonNull(statistics, "statistics");
         }
 
-        public ResidentSceneView(
-                long tlas,
-                long sectionTableAddress,
-                TintSampleBinding tintSamples,
-                int originX,
-                int originY,
-                int originZ,
-                long revision,
-                long resetRevision,
-                long occluderRevision,
-                List<TerrainOccluderChange> occluderChanges,
-                SceneStatistics statistics) {
-            this(
-                    tlas,
-                    sectionTableAddress,
-                    tintSamples,
-                    MaterialCoreBinding.EMPTY,
-                    originX,
-                    originY,
-                    originZ,
-                    revision,
-                    resetRevision,
-                    occluderRevision,
-                    occluderChanges,
-                    statistics);
-        }
-
-        public ResidentSceneView(
-                long tlas,
-                long sectionTableAddress,
-                int originX,
-                int originY,
-                int originZ,
-                long revision,
-                long resetRevision,
-                long occluderRevision,
-                List<TerrainOccluderChange> occluderChanges) {
-            this(
-                    tlas,
-                    sectionTableAddress,
-                    TintSampleBinding.EMPTY,
-                    MaterialCoreBinding.EMPTY,
-                    originX,
-                    originY,
-                    originZ,
-                    revision,
-                    resetRevision,
-                    occluderRevision,
-                    occluderChanges,
-                    SceneStatistics.EMPTY);
-        }
-
-        public ResidentSceneView(
-                long tlas,
-                long sectionTableAddress,
-                int originX,
-                int originY,
-                int originZ,
-                long revision,
-                long resetRevision) {
-            this(
-                    tlas,
-                    sectionTableAddress,
-                    TintSampleBinding.EMPTY,
-                    MaterialCoreBinding.EMPTY,
-                    originX,
-                    originY,
-                    originZ,
-                    revision,
-                    resetRevision,
-                    revision,
-                    List.of(),
-                    SceneStatistics.EMPTY);
-        }
     }
 
     public record SceneStatistics(
@@ -1687,16 +1613,6 @@ public final class TerrainScene implements AutoCloseable {
             int topLevelLightTreeNodeCount) {
         static final SceneStatistics EMPTY = new SceneStatistics(0, 0L, 0L, 0, 0);
 
-        public SceneStatistics {
-            if (tlasInstanceCount < 0
-                    || uniqueBlasTriangleCount < 0L
-                    || instancedTriangleCount < 0L
-                    || areaLightEmitterCount < 0
-                    || topLevelLightTreeNodeCount < 0) {
-                throw new IllegalArgumentException(
-                        "Resident scene statistics must be non-negative");
-            }
-        }
     }
 
     /** Stable borrowed descriptor identity owned by this scene's render-thread lifetime. */
