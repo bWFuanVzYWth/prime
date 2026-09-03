@@ -29,7 +29,6 @@
     {"entry": "prime_transport_core_properties.compute.slang", "artifact": "prime_transport_core_properties.comp.spv"},
     {"entry": "prime_zsobol_parity.compute.slang", "artifact": "prime_zsobol_parity.comp.spv"},
     {"entry": "robocute_lut_roundtrip.compute.slang", "artifact": "robocute_lut_roundtrip.comp.spv"},
-    {"entry": "shader_compute_runner_contract.compute.slang", "artifact": "shader_compute_runner_contract.comp.spv"},
     {"entry": "srgb_texture_sampling.compute.slang", "artifact": "srgb_texture_sampling.comp.spv"},
     {"entry": "sun_shadow_hierarchy_properties.compute.slang", "artifact": "sun_shadow_hierarchy_properties.comp.spv"}
   ]

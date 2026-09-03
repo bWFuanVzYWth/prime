@@ -171,34 +171,8 @@ final class ShaderComputeRunner implements AutoCloseable {
                 width,
                 height,
                 depth,
-                VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT,
-                true,
                 source);
-        this.images.add(new ImageBinding(
-                binding,
-                VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                image));
-    }
-
-    void bindStorageImage(
-            int binding, ImageFormat format, int width, int height) {
-        requireOpen();
-        validateImageBinding(binding, ImageDimension.TWO_D, width, height, 1);
-        ImageResource image = createImage(
-                ImageDimension.TWO_D,
-                format,
-                width,
-                height,
-                1,
-                VK12.VK_IMAGE_USAGE_STORAGE_BIT,
-                false,
-                null);
-        this.images.add(new ImageBinding(
-                binding,
-                VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                VK12.VK_IMAGE_LAYOUT_GENERAL,
-                image));
+        this.images.add(new ImageBinding(binding, image));
     }
 
     private ImageResource createImage(
@@ -207,8 +181,6 @@ final class ShaderComputeRunner implements AutoCloseable {
             int width,
             int height,
             int depth,
-            int usage,
-            boolean sampled,
             ByteBuffer pixels) {
         long image = 0L;
         long memory = 0L;
@@ -216,11 +188,9 @@ final class ShaderComputeRunner implements AutoCloseable {
         long sampler = 0L;
         MappedBuffer upload = null;
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            if (pixels != null) {
-                upload = createMappedBuffer(
-                        pixels.remaining(), VK12.VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-                upload.bytes().put(pixels).flip();
-            }
+            upload = createMappedBuffer(
+                    pixels.remaining(), VK12.VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+            upload.bytes().put(pixels).flip();
             LongBuffer handle = stack.mallocLong(1);
             VkImageCreateInfo imageInfo = VkImageCreateInfo.calloc(stack)
                     .sType$Default()
@@ -230,7 +200,8 @@ final class ShaderComputeRunner implements AutoCloseable {
                     .arrayLayers(1)
                     .samples(VK12.VK_SAMPLE_COUNT_1_BIT)
                     .tiling(VK12.VK_IMAGE_TILING_OPTIMAL)
-                    .usage(usage)
+                    .usage(VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                            | VK12.VK_IMAGE_USAGE_SAMPLED_BIT)
                     .sharingMode(VK12.VK_SHARING_MODE_EXCLUSIVE)
                     .initialLayout(VK12.VK_IMAGE_LAYOUT_UNDEFINED);
             imageInfo.extent().set(width, height, depth);
@@ -278,37 +249,27 @@ final class ShaderComputeRunner implements AutoCloseable {
                     "create shader-test image view");
             view = handle.get(0);
 
-            if (sampled) {
-                handle.clear();
-                check(
-                        VK12.vkCreateSampler(
-                                this.device,
-                                VkSamplerCreateInfo.calloc(stack)
-                                        .sType$Default()
-                                        .magFilter(VK12.VK_FILTER_LINEAR)
-                                        .minFilter(VK12.VK_FILTER_LINEAR)
-                                        .mipmapMode(VK12.VK_SAMPLER_MIPMAP_MODE_NEAREST)
-                                        .addressModeU(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
-                                        .addressModeV(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
-                                        .addressModeW(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
-                                        .minLod(0.0F)
-                                        .maxLod(0.0F)
-                                        .maxAnisotropy(1.0F),
-                                null,
-                                handle),
-                        "create shader-test sampler");
-                sampler = handle.get(0);
-            }
+            handle.clear();
+            check(
+                    VK12.vkCreateSampler(
+                            this.device,
+                            VkSamplerCreateInfo.calloc(stack)
+                                    .sType$Default()
+                                    .magFilter(VK12.VK_FILTER_LINEAR)
+                                    .minFilter(VK12.VK_FILTER_LINEAR)
+                                    .mipmapMode(VK12.VK_SAMPLER_MIPMAP_MODE_NEAREST)
+                                    .addressModeU(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                                    .addressModeV(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                                    .addressModeW(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                                    .minLod(0.0F)
+                                    .maxLod(0.0F)
+                                    .maxAnisotropy(1.0F),
+                            null,
+                            handle),
+                    "create shader-test sampler");
+            sampler = handle.get(0);
 
-            prepareImage(
-                    upload,
-                    image,
-                    width,
-                    height,
-                    depth,
-                    sampled
-                            ? VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                            : VK12.VK_IMAGE_LAYOUT_GENERAL);
+            prepareImage(upload, image, width, height, depth);
             ImageResource result =
                     new ImageResource(this.device, image, memory, view, sampler);
             image = 0L;
@@ -380,7 +341,7 @@ final class ShaderComputeRunner implements AutoCloseable {
                 ImageBinding image = this.images.get(index);
                 bindings.get(index + 2)
                         .binding(image.binding())
-                        .descriptorType(image.descriptorType())
+                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                         .descriptorCount(1)
                         .stageFlags(COMPUTE_STAGE);
             }
@@ -435,34 +396,16 @@ final class ShaderComputeRunner implements AutoCloseable {
             VK12.vkDestroyShaderModule(this.device, shaderModule, null);
             shaderModule = 0L;
 
-            int sampledImageCount = 0;
-            int storageImageCount = 0;
-            for (ImageBinding image : this.images) {
-                if (image.descriptorType()
-                        == VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-                    sampledImageCount++;
-                } else {
-                    storageImageCount++;
-                }
-            }
-            int poolTypeCount = 1
-                    + (sampledImageCount == 0 ? 0 : 1)
-                    + (storageImageCount == 0 ? 0 : 1);
+            int poolTypeCount = this.images.isEmpty() ? 1 : 2;
             VkDescriptorPoolSize.Buffer poolSizes =
                     VkDescriptorPoolSize.calloc(poolTypeCount, stack);
             poolSizes.get(0)
                     .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                     .descriptorCount(2);
-            int poolIndex = 1;
-            if (sampledImageCount != 0) {
-                poolSizes.get(poolIndex++)
+            if (!this.images.isEmpty()) {
+                poolSizes.get(1)
                         .type(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                        .descriptorCount(sampledImageCount);
-            }
-            if (storageImageCount != 0) {
-                poolSizes.get(poolIndex)
-                        .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .descriptorCount(storageImageCount);
+                        .descriptorCount(this.images.size());
             }
             handle.clear();
             check(
@@ -524,13 +467,13 @@ final class ShaderComputeRunner implements AutoCloseable {
                 imageInfos.get(index)
                         .sampler(image.resource().sampler())
                         .imageView(image.resource().view())
-                        .imageLayout(image.layout());
+                        .imageLayout(VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
                 writes.get(index + 2)
                         .sType$Default()
                         .dstSet(descriptorSet)
                         .dstBinding(image.binding())
                         .descriptorCount(1)
-                        .descriptorType(image.descriptorType())
+                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                         .pImageInfo(VkDescriptorImageInfo.create(
                                 imageInfos.get(index).address(), 1));
             }
@@ -625,8 +568,7 @@ final class ShaderComputeRunner implements AutoCloseable {
             long image,
             int width,
             int height,
-            int depth,
-            int finalLayout) {
+            int depth) {
         VkCommandBuffer commandBuffer = null;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             PointerBuffer commandPointer = stack.mallocPointer(1);
@@ -651,68 +593,57 @@ final class ShaderComputeRunner implements AutoCloseable {
 
             VkImageMemoryBarrier.Buffer toTransfer =
                     VkImageMemoryBarrier.calloc(1, stack);
-            int intermediateLayout = upload == null
-                    ? finalLayout
-                    : VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            int destinationAccess = upload == null
-                    ? VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT
-                    : VK12.VK_ACCESS_TRANSFER_WRITE_BIT;
             fillImageBarrier(
                     toTransfer.get(0),
                     image,
                     0,
-                    destinationAccess,
+                    VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
                     VK12.VK_IMAGE_LAYOUT_UNDEFINED,
-                    intermediateLayout);
+                    VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
             VK12.vkCmdPipelineBarrier(
                     commandBuffer,
                     VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                    upload == null
-                            ? VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-                            : VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
                     0,
                     null,
                     null,
                     toTransfer);
 
-            if (upload != null) {
-                VkBufferImageCopy.Buffer copy = VkBufferImageCopy.calloc(1, stack);
-                copy.get(0)
-                        .bufferOffset(0L)
-                        .bufferRowLength(0)
-                        .bufferImageHeight(0);
-                copy.get(0).imageSubresource()
-                        .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                        .mipLevel(0)
-                        .baseArrayLayer(0)
-                        .layerCount(1);
-                copy.get(0).imageOffset().set(0, 0, 0);
-                copy.get(0).imageExtent().set(width, height, depth);
-                VK12.vkCmdCopyBufferToImage(
-                        commandBuffer,
-                        upload.buffer(),
-                        image,
-                        VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        copy);
+            VkBufferImageCopy.Buffer copy = VkBufferImageCopy.calloc(1, stack);
+            copy.get(0)
+                    .bufferOffset(0L)
+                    .bufferRowLength(0)
+                    .bufferImageHeight(0);
+            copy.get(0).imageSubresource()
+                    .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
+                    .mipLevel(0)
+                    .baseArrayLayer(0)
+                    .layerCount(1);
+            copy.get(0).imageOffset().set(0, 0, 0);
+            copy.get(0).imageExtent().set(width, height, depth);
+            VK12.vkCmdCopyBufferToImage(
+                    commandBuffer,
+                    upload.buffer(),
+                    image,
+                    VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    copy);
 
-                VkImageMemoryBarrier.Buffer toShader =
-                        VkImageMemoryBarrier.calloc(1, stack);
-                fillImageBarrier(
-                        toShader.get(0),
-                        image,
-                        VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
-                        VK12.VK_ACCESS_SHADER_READ_BIT,
-                        VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        finalLayout);
-                VK12.vkCmdPipelineBarrier(
-                        commandBuffer,
-                        VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        0,
-                        null,
-                        null,
-                        toShader);
-            }
+            VkImageMemoryBarrier.Buffer toShader = VkImageMemoryBarrier.calloc(1, stack);
+            fillImageBarrier(
+                    toShader.get(0),
+                    image,
+                    VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK12.VK_ACCESS_SHADER_READ_BIT,
+                    VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            VK12.vkCmdPipelineBarrier(
+                    commandBuffer,
+                    VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    0,
+                    null,
+                    null,
+                    toShader);
             check(VK12.vkEndCommandBuffer(commandBuffer), "end shader-test image preparation");
 
             VkSubmitInfo.Buffer submit = VkSubmitInfo.calloc(1, stack);
@@ -967,8 +898,7 @@ final class ShaderComputeRunner implements AutoCloseable {
     enum ImageFormat {
         R8G8B8A8_UNORM(VK12.VK_FORMAT_R8G8B8A8_UNORM, 4),
         R8G8B8A8_SRGB(VK12.VK_FORMAT_R8G8B8A8_SRGB, 4),
-        R16G16B16A16_SFLOAT(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, 4 * Short.BYTES),
-        R32G32B32A32_SFLOAT(VK12.VK_FORMAT_R32G32B32A32_SFLOAT, 4 * Float.BYTES);
+        R16G16B16A16_SFLOAT(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, 4 * Short.BYTES);
 
         private final int vkFormat;
         private final int bytesPerPixel;
@@ -1002,11 +932,7 @@ final class ShaderComputeRunner implements AutoCloseable {
         }
     }
 
-    private record ImageBinding(
-            int binding,
-            int descriptorType,
-            int layout,
-            ImageResource resource) {
+    private record ImageBinding(int binding, ImageResource resource) {
     }
 
     private record ImageResource(

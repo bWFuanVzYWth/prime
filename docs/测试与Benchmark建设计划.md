@@ -45,7 +45,7 @@ case。最近的 Streamline 补强增加 common constants、运行时门禁、na
 | `test` | 纯 Java 行为、数学性质和状态机测试 | 不编译 Shader、不加载原生库、不需要 Vulkan；排除 `artifact`、`native`、`gpu-shader` 标签 | 是 |
 | `artifactTest` | 生产 SPIR-V ABI/闭包统一校验与 pipeline cache 资源测试 | 允许编译生产 Shader；无运行环境跳过 | 是，由 `check` 调用 |
 | `nativeTest` | 3 个 NRD、FSR、DLSS Windows x64 原生桥执行测试 | 只支持 Windows x64；显式运行于其他平台会直接失败 | 否，由 Windows CI 显式调用 |
-| `shaderTest` | 36 个 Vulkan compute/Shader 行为、数学性质和资源生命周期测试 | 必须有 Vulkan 1.2 compute device 和 `VK_LAYER_KHRONOS_validation`；缺失时直接失败 | 否，由 Linux GPU/Lavapipe CI 显式调用 |
+| `shaderTest` | 35 个 Vulkan compute/Shader 行为、数学性质和资源生命周期测试 | 必须有 Vulkan 1.2 compute device 和 `VK_LAYER_KHRONOS_validation`；缺失时直接失败 | 否，由 Linux GPU/Lavapipe CI 显式调用 |
 
 `check` 依赖 `test`、`artifactTest`、生产 Shader 编译、Shader 产物 ABI、架构和
 发行物检查，但不隐式执行 GPU 或 Windows 原生测试。`jacocoTestReport` 聚合 `test` 与
