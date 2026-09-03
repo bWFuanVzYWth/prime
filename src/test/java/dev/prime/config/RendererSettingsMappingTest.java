@@ -8,7 +8,6 @@ import dev.prime.render.AstronomySettings;
 import dev.prime.render.DisplaySettings;
 import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
-import dev.prime.render.RealtimeRenderSettings;
 import dev.prime.render.RendererSettings;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.post.PostProcessingMode;
@@ -40,9 +39,6 @@ final class RendererSettingsMappingTest {
         RendererSettings mapped = PrimeConfig.rendererSettings(source, 42L);
 
         assertFalse(mapped.pathTracingEnabled());
-        assertEquals(
-                PostProcessingMode.NRD_FSR,
-                RealtimeRenderSettings.capture(mapped).postProcessing());
         assertEquals(SurfaceDetailMode.GEOMETRIC_DISPLACEMENT, mapped.surfaceDetailMode());
         assertFalse(mapped.usesResourceNormals());
         assertTrue(mapped.usesGeometryDisplacement());

@@ -219,10 +219,10 @@ final class RealtimeRenderer implements Destroyable {
             return;
         }
 
-        RealtimeRenderSettings settings = input.settings();
+        RendererSettings settings = input.settings();
         PostProcessingMode requestedMode = input.controls().rawOutput()
                 ? PostProcessingMode.DISABLED
-                : settings.postProcessing();
+                : settings.postProcessingMode();
         ResolvedReconstruction requestedSelection = this.reconstructionRegistry.resolve(
                 requestedMode,
                 settings.reconstructionQuality(),
@@ -377,7 +377,7 @@ final class RealtimeRenderer implements Destroyable {
             TerrainScene.ResidentSceneView scene,
             FrameCamera camera,
             AstronomyState astronomy,
-            RealtimeRenderSettings settings,
+            RendererSettings settings,
             SessionControls controls,
             boolean cameraInWater,
             AtmospherePipeline atmosphere,

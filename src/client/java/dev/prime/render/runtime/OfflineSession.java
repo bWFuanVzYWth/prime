@@ -17,7 +17,7 @@ final class OfflineSession implements Destroyable {
     private final ClientLevel world;
     private final TerrainScene.ResidentSceneView scene;
     private final AstronomyState astronomy;
-    private final OfflineRenderSettings settings;
+    private final RendererSettings settings;
     private final boolean cameraInWater;
     private final long atlasView;
     private final long atlasSampler;
@@ -33,7 +33,7 @@ final class OfflineSession implements Destroyable {
             TerrainScene.ResidentSceneView scene,
             FrameCamera camera,
             AstronomyState astronomy,
-            OfflineRenderSettings settings,
+            RendererSettings settings,
             boolean cameraInWater,
             long atlasView,
             long atlasSampler,
@@ -59,7 +59,7 @@ final class OfflineSession implements Destroyable {
     TerrainScene.ResidentSceneView scene() { return this.scene; }
     FrameCamera camera() { return this.camera; }
     AstronomyState astronomy() { return this.astronomy; }
-    OfflineRenderSettings settings() { return this.settings; }
+    RendererSettings settings() { return this.settings; }
     boolean cameraInWater() { return this.cameraInWater; }
     long textureRevision() { return this.textureRevision; }
     List<TraceBackend.SceneTexture> sceneTextures() { return this.sceneTextures; }
