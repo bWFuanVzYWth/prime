@@ -25,6 +25,10 @@ abstract class GeneratePrimeShaderPrograms extends DefaultTask {
         return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
     }
 
+    private static String constant(String schedule, String group) {
+        return (schedule + '_' + group).replaceAll('[^A-Za-z0-9]+', '_').toUpperCase()
+    }
+
     @TaskAction
     void generate() {
         def manifest = PrimeShaderManifest.read(manifestFile.get().asFile)
@@ -37,6 +41,23 @@ import java.util.List;
 public final class GeneratedShaderPrograms {
     private GeneratedShaderPrograms() {}
 
+''')
+        def groupConstants = new LinkedHashMap<String, Integer>()
+        manifest.schedules.each { id, schedule ->
+            String topology = id.replaceFirst(/\.(scalar|ser)$/, '')
+            schedule.groups.eachWithIndex { group, index ->
+                String name = GeneratePrimeShaderPrograms.constant(topology, group.name)
+                Integer previous = groupConstants.putIfAbsent(name, index)
+                if (previous != null && previous != index) {
+                    throw new GradleException("Shader group ${name} changes index between variants")
+                }
+            }
+        }
+        groupConstants.each { name, index ->
+            source.append('    static final int ').append(name).append(' = ')
+                    .append(index).append(';\n')
+        }
+        source.append('''
     public static String resource(String id) {
         return switch (id) {
 ''')
@@ -46,6 +67,13 @@ public final class GeneratedShaderPrograms {
         }
         source.append('            default -> throw new IllegalArgumentException("Unknown shader artifact: " + id);\n')
                 .append('        };\n    }\n\n')
+                .append('    static RaygenSchedule schedule(String id, String suffix) {\n')
+                .append('        String variant = switch (suffix) {\n')
+                .append('            case ".rgen.spv" -> "scalar";\n')
+                .append('            case "_ser.rgen.spv" -> "ser";\n')
+                .append('            default -> throw new IllegalArgumentException("Unknown wavefront shader suffix: " + suffix);\n')
+                .append('        };\n')
+                .append('        return schedule(id + "." + variant);\n    }\n\n')
                 .append('    static RaygenSchedule schedule(String id) {\n        return switch (id) {\n')
         manifest.schedules.each { id, schedule ->
             def modules = schedule.modules.collect { artifactId ->

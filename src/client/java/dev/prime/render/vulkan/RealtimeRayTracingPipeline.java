@@ -1,5 +1,7 @@
 package dev.prime.render.vulkan;
 
+import static dev.prime.render.vulkan.GeneratedShaderPrograms.*;
+
 import com.mojang.blaze3d.vulkan.Destroyable;
 import com.mojang.blaze3d.vulkan.VulkanGpuSampler;
 import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
@@ -61,7 +63,8 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
             }
             traceProgram = TraceProgram.create(
                     context,
-                    RealtimeStandardGroups.standardSchedule(
+                    GeneratedShaderPrograms.schedule(
+                            "realtime.standard",
                             context.capabilities().wavefrontShaderSuffix()),
                     "Prime realtime ray tracing pipeline",
                     "Prime realtime shader binding table",
@@ -209,7 +212,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 stack,
                 input.width(),
                 input.height(),
-                RealtimePrimaryGroups.CAMERA_TRACE);
+                REALTIME_STANDARD_CAMERA_TRACE);
         this.recordPrimaryPrefix(commandBuffer, stack, commandOffset);
         int minimumBounces = input.minimumBounces();
         boolean sourceOne = false;
@@ -221,28 +224,40 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
             this.traceQueued(
                     commandBuffer,
                     stack,
-                    RealtimeStandardGroups.bridgeTrace(sourceOne),
+                    queuedGroup(
+                            sourceOne,
+                            REALTIME_STANDARD_BRIDGE_TRACE_0,
+                            REALTIME_STANDARD_BRIDGE_TRACE_1),
                     commandOffset,
                     sourceQueue);
             WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
             this.traceQueued(
                     commandBuffer,
                     stack,
-                    RealtimeStandardGroups.lightSelect(sourceOne),
+                    queuedGroup(
+                            sourceOne,
+                            REALTIME_STANDARD_LIGHT_SELECT_0,
+                            REALTIME_STANDARD_LIGHT_SELECT_1),
                     commandOffset,
                     sourceQueue);
             this.nextStepBarrier(commandBuffer, stack);
             this.traceQueued(
                     commandBuffer,
                     stack,
-                    RealtimeStandardGroups.direct(sourceOne),
+                    queuedGroup(
+                            sourceOne,
+                            REALTIME_STANDARD_DIRECT_0,
+                            REALTIME_STANDARD_DIRECT_1),
                     commandOffset,
                     sourceQueue);
             this.nextStepBarrier(commandBuffer, stack);
             this.traceQueued(
                     commandBuffer,
                     stack,
-                    RealtimeStandardGroups.scatter(sourceOne),
+                    queuedGroup(
+                            sourceOne,
+                            REALTIME_STANDARD_SCATTER_0,
+                            REALTIME_STANDARD_SCATTER_1),
                     commandOffset,
                     sourceQueue);
             sourceOne = !sourceOne;
@@ -254,7 +269,10 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         this.traceQueued(
                 commandBuffer,
                 stack,
-                RealtimeStandardGroups.tail(sourceOne),
+                queuedGroup(
+                        sourceOne,
+                        REALTIME_STANDARD_TAIL_0,
+                        REALTIME_STANDARD_TAIL_1),
                 commandOffset,
                 tailSourceQueue);
         this.resolveInputBarrier(commandBuffer, stack);
@@ -264,8 +282,8 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 commandOffset,
                 input.width(),
                 input.height(),
-                RealtimeStandardGroups.BRANCH_RESOLVE,
-                RealtimeStandardGroups.NOISY_OUTPUT_RESOLVE);
+                REALTIME_STANDARD_BRANCH_RESOLVE,
+                REALTIME_STANDARD_NOISY_OUTPUT_RESOLVE);
         return dispatchCount(minimumBounces);
     }
 
@@ -303,63 +321,63 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         this.traceQueued(
                 commandBuffer,
                 stack,
-                RealtimePrimaryGroups.VISIBLE_DIRECT,
+                REALTIME_STANDARD_VISIBLE_DIRECT,
                 commandOffset,
                 ShaderAbi.WAVEFRONT_AREA_QUEUE);
         this.primaryInputBarrier(commandBuffer, stack);
         this.traceQueued(
                 commandBuffer,
                 stack,
-                RealtimePrimaryGroups.SURFACE_SPLIT,
+                REALTIME_STANDARD_SURFACE_SPLIT,
                 commandOffset,
                 ShaderAbi.WAVEFRONT_PRIMARY_QUEUE);
         this.nextStepBarrier(commandBuffer, stack);
         this.traceQueued(
                 commandBuffer,
                 stack,
-                RealtimePrimaryGroups.DELTA_WALK_0,
+                REALTIME_STANDARD_DELTA_WALK_0,
                 commandOffset,
                 ShaderAbi.WAVEFRONT_TRACE_QUEUE_0);
         this.nextStepBarrier(commandBuffer, stack);
         this.traceQueued(
                 commandBuffer,
                 stack,
-                RealtimePrimaryGroups.GUIDE_DELTA_WALK_0,
+                REALTIME_STANDARD_GUIDE_DELTA_WALK_0,
                 commandOffset,
                 ShaderAbi.WAVEFRONT_GUIDE_QUEUE);
         this.nextStepBarrier(commandBuffer, stack);
         this.traceQueued(
                 commandBuffer,
                 stack,
-                RealtimePrimaryGroups.DELTA_WALK_1,
+                REALTIME_STANDARD_DELTA_WALK_1,
                 commandOffset,
                 ShaderAbi.WAVEFRONT_TRACE_QUEUE_1);
         this.nextStepBarrier(commandBuffer, stack);
         this.traceQueued(
                 commandBuffer,
                 stack,
-                RealtimePrimaryGroups.GUIDE_DELTA_WALK_1,
+                REALTIME_STANDARD_GUIDE_DELTA_WALK_1,
                 commandOffset,
                 ShaderAbi.WAVEFRONT_GUIDE_QUEUE);
         this.nextStepBarrier(commandBuffer, stack);
         this.traceQueued(
                 commandBuffer,
                 stack,
-                RealtimePrimaryGroups.LANDING_LIGHT_SELECT,
+                REALTIME_STANDARD_LANDING_LIGHT_SELECT,
                 commandOffset,
                 ShaderAbi.WAVEFRONT_PRIMARY_QUEUE);
         this.nextStepBarrier(commandBuffer, stack);
         this.traceQueued(
                 commandBuffer,
                 stack,
-                RealtimePrimaryGroups.LANDING_DIRECT,
+                REALTIME_STANDARD_LANDING_DIRECT,
                 commandOffset,
                 ShaderAbi.WAVEFRONT_PRIMARY_QUEUE);
         this.nextStepBarrier(commandBuffer, stack);
         this.traceQueued(
                 commandBuffer,
                 stack,
-                RealtimePrimaryGroups.LANDING_SCATTER,
+                REALTIME_STANDARD_LANDING_SCATTER,
                 commandOffset,
                 ShaderAbi.WAVEFRONT_PRIMARY_QUEUE);
     }
@@ -401,6 +419,10 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 commandOffset,
                 commandQueue,
                 ShaderAbi.WAVEFRONT_QUEUE_COMMAND_STRIDE);
+    }
+
+    private static int queuedGroup(boolean sourceOne, int first, int second) {
+        return sourceOne ? second : first;
     }
 
     private void initializeQueues(

@@ -53,13 +53,45 @@
   "schedules": {
     "realtime.standard": {
       "variants": ["scalar", "ser"],
-      "modules": ["realtime_wavefront_camera_trace", "realtime_wavefront_visible_direct", "realtime_wavefront_surface_split", "realtime_wavefront_delta_walk", "realtime_wavefront_guide_delta_walk", "realtime_wavefront_landing_light_select", "realtime_wavefront_landing_direct", "realtime_wavefront_landing_scatter", "realtime_wavefront_fixed_bridge_trace", "realtime_wavefront_fixed_light_select", "realtime_wavefront_fixed_direct", "realtime_wavefront_fixed_scatter", "realtime_wavefront_tail", "realtime_wavefront_branch_resolve", "realtime_wavefront_noisy_output_resolve"],
-      "groups": [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [3, 1], [4, 0], [5, 0], [6, 0], [7, 0], [8, 0], [9, 0], [10, 0], [11, 0], [8, 1], [9, 1], [10, 1], [11, 1], [12, 0], [12, 1], [13, 0], [14, 0]]
+      "groups": {
+        "camera_trace": ["realtime_wavefront_camera_trace", 0],
+        "visible_direct": ["realtime_wavefront_visible_direct", 0],
+        "surface_split": ["realtime_wavefront_surface_split", 0],
+        "delta_walk_0": ["realtime_wavefront_delta_walk", 0],
+        "guide_delta_walk_0": ["realtime_wavefront_guide_delta_walk", 0],
+        "delta_walk_1": ["realtime_wavefront_delta_walk", 1],
+        "guide_delta_walk_1": ["realtime_wavefront_guide_delta_walk", 0],
+        "landing_light_select": ["realtime_wavefront_landing_light_select", 0],
+        "landing_direct": ["realtime_wavefront_landing_direct", 0],
+        "landing_scatter": ["realtime_wavefront_landing_scatter", 0],
+        "bridge_trace_0": ["realtime_wavefront_fixed_bridge_trace", 0],
+        "light_select_0": ["realtime_wavefront_fixed_light_select", 0],
+        "direct_0": ["realtime_wavefront_fixed_direct", 0],
+        "scatter_0": ["realtime_wavefront_fixed_scatter", 0],
+        "bridge_trace_1": ["realtime_wavefront_fixed_bridge_trace", 1],
+        "light_select_1": ["realtime_wavefront_fixed_light_select", 1],
+        "direct_1": ["realtime_wavefront_fixed_direct", 1],
+        "scatter_1": ["realtime_wavefront_fixed_scatter", 1],
+        "tail_0": ["realtime_wavefront_tail", 0],
+        "tail_1": ["realtime_wavefront_tail", 1],
+        "branch_resolve": ["realtime_wavefront_branch_resolve", 0],
+        "noisy_output_resolve": ["realtime_wavefront_noisy_output_resolve", 0]
+      }
     },
     "offline": {
       "variants": ["scalar", "ser"],
-      "modules": ["offline_wavefront_camera_trace", "offline_wavefront_bridge_trace", "offline_wavefront_light_select", "offline_wavefront_direct", "offline_wavefront_scatter", "offline_wavefront_sample_resolve"],
-      "groups": [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [1, 1], [2, 1], [3, 1], [4, 1], [5, 0]]
+      "groups": {
+        "camera_trace": ["offline_wavefront_camera_trace", 0],
+        "bridge_trace_0": ["offline_wavefront_bridge_trace", 0],
+        "light_select_0": ["offline_wavefront_light_select", 0],
+        "direct_0": ["offline_wavefront_direct", 0],
+        "scatter_0": ["offline_wavefront_scatter", 0],
+        "bridge_trace_1": ["offline_wavefront_bridge_trace", 1],
+        "light_select_1": ["offline_wavefront_light_select", 1],
+        "direct_1": ["offline_wavefront_direct", 1],
+        "scatter_1": ["offline_wavefront_scatter", 1],
+        "sample_resolve": ["offline_wavefront_sample_resolve", 0]
+      }
     }
   }
 }

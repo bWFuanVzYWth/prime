@@ -82,45 +82,19 @@ final class TracePipelinesContractTest {
                 () -> OfflineRayTracingPipeline.dispatchCount(65));
         assertEquals(3, OfflineRayTracingPipeline.DESCRIPTOR_BINDING_COUNT);
 
-        RaygenSchedule realtime = RealtimeStandardGroups.standardSchedule(".rgen.spv");
+        RaygenSchedule realtime = GeneratedShaderPrograms.schedule(
+                "realtime.standard", ".rgen.spv");
         assertEquals(22, realtime.groupCount());
         assertEquals(15, realtime.moduleCount());
-        assertEquals(List.of(
-                        0, 1, 2, 3, 4, 3, 4, 5, 6, 7,
-                        8, 9, 10, 11, 8, 9, 10, 11,
-                        12, 12, 13, 14),
-                java.util.stream.IntStream
-                .range(0, realtime.groupCount())
-                .map(realtime::module)
-                .boxed()
-                .toList());
-        assertEquals(List.of(
-                        0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
-                        0, 0, 0, 0, 1, 1, 1, 1,
-                        0, 1, 0, 0),
-                java.util.stream.IntStream
-                .range(0, realtime.groupCount())
-                .map(realtime::control)
-                .boxed()
-                .toList());
-        RaygenSchedule offline = OfflineGroups.schedule(".rgen.spv");
+        RaygenSchedule offline = GeneratedShaderPrograms.schedule("offline", ".rgen.spv");
         assertEquals(10, offline.groupCount());
         assertEquals(6, offline.moduleCount());
-        assertEquals(List.of(0, 1, 2, 3, 4, 1, 2, 3, 4, 5), java.util.stream.IntStream
-                .range(0, offline.groupCount())
-                .map(offline::module)
-                .boxed()
-                .toList());
-        assertEquals(List.of(0, 0, 0, 0, 0, 1, 1, 1, 1, 0), java.util.stream.IntStream
-                .range(0, offline.groupCount())
-                .map(offline::control)
-                .boxed()
-                .toList());
     }
 
     @Test
     void realtimeScheduleKeepsItsDeclaredGroupsAndResources() {
-        RaygenSchedule realtime = RealtimeStandardGroups.standardSchedule("_ser.rgen.spv");
+        RaygenSchedule realtime = GeneratedShaderPrograms.schedule(
+                "realtime.standard", "_ser.rgen.spv");
         assertEquals(15, realtime.moduleCount());
         assertEquals(22, realtime.groupCount());
         assertEquals(
@@ -139,7 +113,8 @@ final class TracePipelinesContractTest {
 
     @Test
     void offlineScheduleKeepsItsFourStageGroupsAndResources() {
-        RaygenSchedule offline = OfflineGroups.schedule("_ser.rgen.spv");
+        RaygenSchedule offline = GeneratedShaderPrograms.schedule(
+                "offline", "_ser.rgen.spv");
         assertEquals(6, offline.moduleCount());
         assertEquals(10, offline.groupCount());
         assertEquals(

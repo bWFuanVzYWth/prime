@@ -41,16 +41,29 @@ final class PrimeShaderManifest {
         }
         def schedules = new LinkedHashMap<String, Map>()
         compact.schedules.each { String id, schedule ->
+            if (!(schedule.groups instanceof Map) || schedule.groups.isEmpty()) {
+                throw new GradleException("Shader schedule ${id} has no named groups")
+            }
             (schedule.variants ?: [null]).each { variant ->
-                def modules = schedule.modules.collect { module ->
-                    def variantId = variant == 'ser' ? module + '_ser' : module
-                    artifacts.containsKey(variantId) ? variantId : module
-                }
-                def groups = schedule.groups.collect { group ->
+                def modules = []
+                def groups = schedule.groups.collect { String name, group ->
                     if (!(group instanceof List) || group.size() != 2) {
-                        throw new GradleException("Shader schedule ${id} has an invalid group")
+                        throw new GradleException(
+                                "Shader schedule ${id} has an invalid group ${name}")
                     }
-                    [module: group[0], control: group[1]]
+                    String module = group[0]
+                    def variantId = variant == 'ser' ? module + '_ser' : module
+                    String resolved = artifacts.containsKey(variantId) ? variantId : module
+                    if (!artifacts.containsKey(resolved)) {
+                        throw new GradleException(
+                                "Shader schedule ${id} references unknown artifact ${module}")
+                    }
+                    int moduleIndex = modules.indexOf(resolved)
+                    if (moduleIndex < 0) {
+                        moduleIndex = modules.size()
+                        modules.add(resolved)
+                    }
+                    [name: name, module: moduleIndex, control: group[1]]
                 }
                 schedules[variant == null ? id : id + '.' + variant] =
                         [modules: modules, groups: groups]

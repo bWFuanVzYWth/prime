@@ -1,5 +1,7 @@
 package dev.prime.render.vulkan;
 
+import static dev.prime.render.vulkan.GeneratedShaderPrograms.*;
+
 import com.mojang.blaze3d.vulkan.Destroyable;
 import com.mojang.blaze3d.vulkan.VulkanGpuSampler;
 import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
@@ -53,7 +55,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
             String suffix = context.capabilities().wavefrontShaderSuffix();
             traceProgram = TraceProgram.create(
                     context,
-                    OfflineGroups.schedule(suffix),
+                    GeneratedShaderPrograms.schedule("offline", suffix),
                     "Prime offline ray tracing pipeline",
                     "Prime offline shader binding table",
                     backend.bindings().descriptorSetLayout(),
@@ -172,7 +174,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
                     stack,
                     width,
                     height,
-                    OfflineGroups.CAMERA_TRACE);
+                    OFFLINE_CAMERA_TRACE);
             WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
             this.recordShadingRound(commandBuffer, stack, commandOffset, 0);
             int sourceQueue = 1;
@@ -185,7 +187,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
                     stack,
                     width,
                     height,
-                    OfflineGroups.SAMPLE_RESOLVE);
+                    OFFLINE_SAMPLE_RESOLVE);
         }
     }
 
@@ -197,7 +199,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
         this.traceIndirect(
                 commandBuffer,
                 stack,
-                OfflineGroups.bridgeTrace(sourceQueue),
+                queuedGroup(sourceQueue, OFFLINE_BRIDGE_TRACE_0, OFFLINE_BRIDGE_TRACE_1),
                 commandOffset,
                 sourceQueue);
         WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
@@ -213,21 +215,21 @@ public final class OfflineRayTracingPipeline implements Destroyable {
         this.traceIndirect(
                 commandBuffer,
                 stack,
-                OfflineGroups.lightSelect(sourceQueue),
+                queuedGroup(sourceQueue, OFFLINE_LIGHT_SELECT_0, OFFLINE_LIGHT_SELECT_1),
                 commandOffset,
                 sourceQueue);
         WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
         this.traceIndirect(
                 commandBuffer,
                 stack,
-                OfflineGroups.direct(sourceQueue),
+                queuedGroup(sourceQueue, OFFLINE_DIRECT_0, OFFLINE_DIRECT_1),
                 commandOffset,
                 sourceQueue);
         WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
         this.traceIndirect(
                 commandBuffer,
                 stack,
-                OfflineGroups.scatter(sourceQueue),
+                queuedGroup(sourceQueue, OFFLINE_SCATTER_0, OFFLINE_SCATTER_1),
                 commandOffset,
                 sourceQueue);
         WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
@@ -246,6 +248,10 @@ public final class OfflineRayTracingPipeline implements Destroyable {
                 pushConstants,
                 this.backend.bindings().descriptorSet(),
                 this.bindings.descriptorSet);
+    }
+
+    private static int queuedGroup(int sourceQueue, int first, int second) {
+        return sourceQueue == 0 ? first : second;
     }
 
     private void trace(
