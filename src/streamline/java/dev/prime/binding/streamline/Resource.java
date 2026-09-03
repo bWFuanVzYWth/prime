@@ -32,9 +32,7 @@ public final class Resource {
             JAVA_INT.withName("reserved"),
             paddingLayout(4));
 
-    private static final VarHandle TYPE = LAYOUT.varHandle(groupElement("type"));
     private static final VarHandle NATIVE = LAYOUT.varHandle(groupElement("native"));
-    private static final VarHandle MEMORY = LAYOUT.varHandle(groupElement("memory"));
     private static final VarHandle VIEW = LAYOUT.varHandle(groupElement("view"));
     private static final VarHandle STATE = LAYOUT.varHandle(groupElement("state"));
     private static final VarHandle WIDTH = LAYOUT.varHandle(groupElement("width"));
@@ -50,10 +48,27 @@ public final class Resource {
         this.segment = segment;
     }
 
-    public static Resource allocate(Arena arena) {
+    public static Resource texture2D(
+            Arena arena,
+            MemorySegment nativeHandle,
+            MemorySegment view,
+            int state,
+            int width,
+            int height,
+            int nativeFormat,
+            int mipLevels,
+            int usage) {
         MemorySegment segment = arena.allocate(LAYOUT);
         StructHeader.init(segment, 0x3a9d70cf, (short) 0x2418, (short) 0x4b72, 0x61721C72F8139183L, 1);
-        STATE.set(segment, 0L, -1);
+        NATIVE.set(segment, 0L, nativeHandle);
+        VIEW.set(segment, 0L, view);
+        STATE.set(segment, 0L, state);
+        WIDTH.set(segment, 0L, width);
+        HEIGHT.set(segment, 0L, height);
+        NATIVE_FORMAT.set(segment, 0L, nativeFormat);
+        MIP_LEVELS.set(segment, 0L, mipLevels);
+        ARRAY_LAYERS.set(segment, 0L, 1);
+        USAGE.set(segment, 0L, usage);
         return new Resource(segment);
     }
 
@@ -61,64 +76,4 @@ public final class Resource {
         return this.segment;
     }
 
-    public Resource type(ResourceType value) {
-        TYPE.set(this.segment, 0L, value.value);
-        return this;
-    }
-
-    /** VkImage / VkBuffer handle value */
-    public Resource nativeHandle(MemorySegment value) {
-        NATIVE.set(this.segment, 0L, value);
-        return this;
-    }
-
-    /** VkDeviceMemory handle value or null */
-    public Resource memory(MemorySegment value) {
-        MEMORY.set(this.segment, 0L, value);
-        return this;
-    }
-
-    /** VkImageView / VkBufferView handle value or null */
-    public Resource view(MemorySegment value) {
-        VIEW.set(this.segment, 0L, value);
-        return this;
-    }
-
-    /** VkImageLayout when tagged resources are actually used */
-    public Resource state(int value) {
-        STATE.set(this.segment, 0L, value);
-        return this;
-    }
-
-    public Resource width(int value) {
-        WIDTH.set(this.segment, 0L, value);
-        return this;
-    }
-
-    public Resource height(int value) {
-        HEIGHT.set(this.segment, 0L, value);
-        return this;
-    }
-
-    /** VkFormat value */
-    public Resource nativeFormat(int value) {
-        NATIVE_FORMAT.set(this.segment, 0L, value);
-        return this;
-    }
-
-    public Resource mipLevels(int value) {
-        MIP_LEVELS.set(this.segment, 0L, value);
-        return this;
-    }
-
-    public Resource arrayLayers(int value) {
-        ARRAY_LAYERS.set(this.segment, 0L, value);
-        return this;
-    }
-
-    /** VkImageUsageFlags */
-    public Resource usage(int value) {
-        USAGE.set(this.segment, 0L, value);
-        return this;
-    }
 }

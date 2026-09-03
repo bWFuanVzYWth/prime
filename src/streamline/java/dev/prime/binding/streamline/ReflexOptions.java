@@ -13,6 +13,8 @@ import static java.lang.foreign.ValueLayout.JAVA_SHORT;
 
 /** sl::ReflexOptions — {F03AF81A-6D0B-4902-A651-C4965E215434}, kStructVersion1 */
 public final class ReflexOptions {
+    private static final short VK_F13 = 0x7c;
+
     public static final StructLayout LAYOUT = StructHeader.structWith(
             JAVA_INT.withName("mode"),
             JAVA_INT.withName("frameLimitUs"),
@@ -24,7 +26,6 @@ public final class ReflexOptions {
 
     private static final VarHandle MODE = LAYOUT.varHandle(groupElement("mode"));
     private static final VarHandle FRAME_LIMIT_US = LAYOUT.varHandle(groupElement("frameLimitUs"));
-    private static final VarHandle USE_MARKERS_TO_OPTIMIZE = LAYOUT.varHandle(groupElement("useMarkersToOptimize"));
     private static final VarHandle VIRTUAL_KEY = LAYOUT.varHandle(groupElement("virtualKey"));
     private static final VarHandle ID_THREAD = LAYOUT.varHandle(groupElement("idThread"));
 
@@ -37,6 +38,7 @@ public final class ReflexOptions {
     public static ReflexOptions allocate(Arena arena) {
         MemorySegment segment = arena.allocate(LAYOUT);
         StructHeader.init(segment, 0xf03af81a, (short) 0x6d0b, (short) 0x4902, 0x3454215E96C451A6L, 1);
+        VIRTUAL_KEY.set(segment, 0L, VK_F13);
         return new ReflexOptions(segment);
     }
 
@@ -44,31 +46,9 @@ public final class ReflexOptions {
         return this.segment;
     }
 
-    public ReflexOptions mode(ReflexMode value) {
+    public void set(ReflexMode value, int frameLimitUs, int threadId) {
         MODE.set(this.segment, 0L, value.value);
-        return this;
-    }
-
-    /** Frame limit (FPS cap) in microseconds; 0 disables */
-    public ReflexOptions frameLimitUs(int value) {
-        FRAME_LIMIT_US.set(this.segment, 0L, value);
-        return this;
-    }
-
-    /** Should only be enabled in specific scenarios; most integrations leave this false */
-    public ReflexOptions useMarkersToOptimize(boolean value) {
-        USE_MARKERS_TO_OPTIMIZE.set(this.segment, 0L, value);
-        return this;
-    }
-
-    public ReflexOptions virtualKey(HotKey value) {
-        VIRTUAL_KEY.set(this.segment, 0L, value.value);
-        return this;
-    }
-
-    /** ThreadID for PCL Stats messages; most integrations leave this 0 */
-    public ReflexOptions idThread(int value) {
-        ID_THREAD.set(this.segment, 0L, value);
-        return this;
+        FRAME_LIMIT_US.set(this.segment, 0L, frameLimitUs);
+        ID_THREAD.set(this.segment, 0L, threadId);
     }
 }

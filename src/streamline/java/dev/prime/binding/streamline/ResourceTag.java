@@ -12,6 +12,8 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 
 /** sl::ResourceTag — {4C6A5AAD-B445-496C-87FF-1AF3845BE653}, kStructVersion1 */
 public final class ResourceTag {
+    private static final int VALID_UNTIL_PRESENT = 1;
+
     public static final StructLayout LAYOUT = StructHeader.structWith(
             ADDRESS.withName("resource"),
             JAVA_INT.withName("type"),
@@ -55,27 +57,14 @@ public final class ResourceTag {
     }
 
     /** Pointer to the tagged {@link Resource} struct */
-    public ResourceTag resource(MemorySegment value) {
-        RESOURCE.set(this.segment, 0L, value);
-        return this;
-    }
-
-    public ResourceTag type(BufferType value) {
-        TYPE.set(this.segment, 0L, value.value);
-        return this;
-    }
-
-    public ResourceTag lifecycle(ResourceLifecycle value) {
-        LIFECYCLE.set(this.segment, 0L, value.value);
-        return this;
-    }
-
-    public ResourceTag extent(int top, int left, int width, int height) {
-        EXTENT_TOP.set(this.segment, 0L, top);
-        EXTENT_LEFT.set(this.segment, 0L, left);
+    public void set(Resource resource, BufferType type, int width, int height) {
+        RESOURCE.set(this.segment, 0L, resource.segment());
+        TYPE.set(this.segment, 0L, type.value);
+        LIFECYCLE.set(this.segment, 0L, VALID_UNTIL_PRESENT);
+        EXTENT_TOP.set(this.segment, 0L, 0);
+        EXTENT_LEFT.set(this.segment, 0L, 0);
         EXTENT_WIDTH.set(this.segment, 0L, width);
         EXTENT_HEIGHT.set(this.segment, 0L, height);
-        return this;
     }
 
     private static void initHeader(MemorySegment segment) {

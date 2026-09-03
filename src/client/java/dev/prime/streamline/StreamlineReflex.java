@@ -1,6 +1,5 @@
 package dev.prime.streamline;
 
-import dev.prime.binding.streamline.HotKey;
 import dev.prime.binding.streamline.Pcl;
 import dev.prime.binding.streamline.PclMarker;
 import dev.prime.binding.streamline.Reflex;
@@ -187,9 +186,7 @@ public final class StreamlineReflex {
                 new OptionsKey(
                         ReflexMode.OFF,
                         frameLimitUs(),
-                        HotKey.VK_F13,
-                        Win32ThreadId.current(),
-                        false),
+                        Win32ThreadId.current()),
                 true);
         lastAppliedOptions = null;
         currentToken = MemorySegment.NULL;
@@ -225,9 +222,7 @@ public final class StreamlineReflex {
                 new OptionsKey(
                         PrimeConfig.reflexMode(),
                         frameLimitUs(),
-                        HotKey.VK_F13,
-                        Win32ThreadId.current(),
-                        false),
+                        Win32ThreadId.current()),
                 false);
     }
 
@@ -235,11 +230,7 @@ public final class StreamlineReflex {
         if (!force && desired.equals(lastAppliedOptions)) {
             return;
         }
-        options.mode(desired.mode())
-                .frameLimitUs(desired.frameLimitUs())
-                .virtualKey(desired.virtualKey())
-                .idThread(desired.threadId())
-                .useMarkersToOptimize(desired.useMarkersToOptimize());
+        options.set(desired.mode(), desired.frameLimitUs(), desired.threadId());
         if (reflex.setOptions(options) == Streamline.RESULT_OK) {
             lastAppliedOptions = desired;
         }
@@ -258,8 +249,6 @@ public final class StreamlineReflex {
     private record OptionsKey(
             ReflexMode mode,
             int frameLimitUs,
-            HotKey virtualKey,
-            int threadId,
-            boolean useMarkersToOptimize) {
+            int threadId) {
     }
 }

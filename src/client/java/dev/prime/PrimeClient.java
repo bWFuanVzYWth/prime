@@ -1,12 +1,7 @@
 package dev.prime;
 
-import dev.prime.binding.streamline.EngineType;
-import dev.prime.binding.streamline.FrameGeneration;
-import dev.prime.binding.streamline.Pcl;
 import dev.prime.binding.streamline.PreferenceFlag;
 import dev.prime.binding.streamline.Preferences;
-import dev.prime.binding.streamline.Reflex;
-import dev.prime.binding.streamline.RenderApi;
 import dev.prime.binding.streamline.Streamline;
 import dev.prime.client.PrimeRuntime;
 import dev.prime.config.PrimeConfig;
@@ -16,8 +11,6 @@ import dev.prime.render.scene.vanilla.ItemFrameModelFallback;
 import dev.prime.render.vulkan.natives.NativeLibraries;
 import java.io.IOException;
 import java.lang.foreign.Arena;
-import java.lang.foreign.MemorySegment;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
@@ -32,9 +25,6 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.resources.PreparableReloadListener;
 import org.lwjgl.system.SharedLibrary;
-
-import static java.lang.foreign.ValueLayout.ADDRESS;
-import static java.lang.foreign.ValueLayout.JAVA_INT;
 
 public final class PrimeClient implements ClientModInitializer {
     private static final Identifier RELOAD_LISTENER_ID = Identifier.fromNamespaceAndPath(
@@ -72,29 +62,14 @@ public final class PrimeClient implements ClientModInitializer {
             Path logDir = createStreamlineLogDirectory();
             int initResult;
             try (Arena arena = Arena.ofConfined()) {
-                var preferences = Preferences.allocate(arena);
-                MemorySegment pluginPath = arena.allocateFrom(
-                        NativeLibraries.extractedNativePath().toString(),
-                        StandardCharsets.UTF_16LE);
-                preferences.pathsToPlugins(arena.allocateFrom(ADDRESS, pluginPath));
-                preferences.numPathsToPlugins(1);
-                preferences.pathToLogsAndData(
-                        arena.allocateFrom(logDir.toString(), StandardCharsets.UTF_16LE));
-                preferences.featuresToLoad(arena.allocateFrom(
-                        JAVA_INT,
-                        FrameGeneration.FEATURE_ID,
-                        Pcl.FEATURE_ID,
-                        Reflex.FEATURE_ID));
-                preferences.numFeaturesToLoad(3);
-                preferences.flags(
+                var preferences = Preferences.prime(
+                        arena,
+                        NativeLibraries.extractedNativePath(),
+                        logDir,
+                        "0.1.0",
+                        "07210721-0721-4E6F-A8C1-1145142D0A3C",
                         PreferenceFlag.DISABLE_CL_STATE_TRACKING.mask
                                 | PreferenceFlag.USE_FRAME_BASED_RESOURCE_TAGGING.mask);
-                preferences.renderApi(RenderApi.VULKAN);
-                preferences.engine(EngineType.CUSTOM);
-                preferences.engineVersion(arena.allocateFrom("0.1.0"));
-                preferences.projectId(
-                        arena.allocateFrom("07210721-0721-4E6F-A8C1-1145142D0A3C"));
-                preferences.showConsole(false);
                 initResult = instance.init(preferences);
             }
             if (initResult != Streamline.RESULT_OK) {

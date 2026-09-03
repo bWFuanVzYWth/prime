@@ -30,9 +30,7 @@ public final class Streamline implements AutoCloseable {
     private static final FunctionDescriptor GET_NEW_FRAME_TOKEN_DESC = FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS);
     private static final FunctionDescriptor SET_CONSTANTS_DESC = FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS);
     private static final FunctionDescriptor SET_TAG_FOR_FRAME_DESC = FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_INT, ADDRESS);
-    private static final FunctionDescriptor ALLOCATE_RESOURCES_DESC = FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, ADDRESS);
     private static final FunctionDescriptor FREE_RESOURCES_DESC = FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS);
-    private static final FunctionDescriptor EVALUATE_FEATURE_DESC = FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS, ADDRESS, JAVA_INT, ADDRESS);
     private static final FunctionDescriptor GET_FEATURE_FUNCTION_DESC = FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS, ADDRESS);
 
     private final Arena arena;
@@ -42,9 +40,7 @@ public final class Streamline implements AutoCloseable {
     private final MethodHandle slGetNewFrameToken;
     private final MethodHandle slSetConstants;
     private final MethodHandle slSetTagForFrame;
-    private final MethodHandle slAllocateResources;
     private final MethodHandle slFreeResources;
-    private final MethodHandle slEvaluateFeature;
     private final MethodHandle slGetFeatureFunction;
 
     private Streamline(Arena arena, Linker linker, SymbolLookup lookup) {
@@ -55,9 +51,7 @@ public final class Streamline implements AutoCloseable {
         this.slGetNewFrameToken = downcall(linker, lookup, "slGetNewFrameToken", GET_NEW_FRAME_TOKEN_DESC);
         this.slSetConstants = downcall(linker, lookup, "slSetConstants", SET_CONSTANTS_DESC);
         this.slSetTagForFrame = downcall(linker, lookup, "slSetTagForFrame", SET_TAG_FOR_FRAME_DESC);
-        this.slAllocateResources = downcall(linker, lookup, "slAllocateResources", ALLOCATE_RESOURCES_DESC);
         this.slFreeResources = downcall(linker, lookup, "slFreeResources", FREE_RESOURCES_DESC);
-        this.slEvaluateFeature = downcall(linker, lookup, "slEvaluateFeature", EVALUATE_FEATURE_DESC);
         this.slGetFeatureFunction = downcall(linker, lookup, "slGetFeatureFunction", GET_FEATURE_FUNCTION_DESC);
     }
 
@@ -117,25 +111,9 @@ public final class Streamline implements AutoCloseable {
         }
     }
 
-    public int allocateResources(MemorySegment commandBuffer, int featureId, ViewportHandle viewport) {
-        try {
-            return (int) this.slAllocateResources.invokeExact(commandBuffer, featureId, viewport.segment());
-        } catch (Throwable t) {
-            throw new RuntimeException(t);
-        }
-    }
-
     public int freeResources(int featureId, ViewportHandle viewport) {
         try {
             return (int) this.slFreeResources.invokeExact(featureId, viewport.segment());
-        } catch (Throwable t) {
-            throw new RuntimeException(t);
-        }
-    }
-
-    public int evaluateFeature(int featureId, MemorySegment frameToken, MemorySegment inputs, int numInputs, MemorySegment commandBuffer) {
-        try {
-            return (int) this.slEvaluateFeature.invokeExact(featureId, frameToken, inputs, numInputs, commandBuffer);
         } catch (Throwable t) {
             throw new RuntimeException(t);
         }

@@ -2,16 +2,11 @@ package dev.prime.streamline;
 
 import dev.prime.binding.streamline.BufferType;
 import dev.prime.binding.streamline.Constants;
-import dev.prime.binding.streamline.DlssgMode;
 import dev.prime.binding.streamline.DlssgOptions;
-import dev.prime.binding.streamline.DlssgQueueParallelismMode;
 import dev.prime.binding.streamline.DlssgState;
 import dev.prime.binding.streamline.FrameGeneration;
 import dev.prime.binding.streamline.Resource;
-import dev.prime.binding.streamline.ResourceLifecycle;
 import dev.prime.binding.streamline.ResourceTag;
-import dev.prime.binding.streamline.ResourceType;
-import dev.prime.binding.streamline.SlBoolean;
 import dev.prime.binding.streamline.Streamline;
 import dev.prime.binding.streamline.ViewportHandle;
 import dev.prime.config.PrimeConfig;
@@ -30,7 +25,6 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VK12;
 
 public final class StreamlineFrameGeneration {
-    private static final int VIEWPORT = 0;
     private static final Set<String> REPORTED_FAILURES = ConcurrentHashMap.newKeySet();
 
     private static Streamline streamline;
@@ -223,7 +217,7 @@ public final class StreamlineFrameGeneration {
                 throw new IllegalArgumentException(
                         "Streamline HUD-less color differs from the published frame");
             }
-            ViewportHandle viewport = ViewportHandle.allocate(callArena).value(VIEWPORT);
+            ViewportHandle viewport = ViewportHandle.allocate(callArena);
             Constants constants = Constants.allocate(callArena);
             FrameHistory history = frameHistory(current);
             StreamlineFrameConstants.create(
@@ -270,26 +264,20 @@ public final class StreamlineFrameGeneration {
                             ? VK12.VK_FORMAT_R8_UNORM
                             : 0);
             if (!desired.equals(lastOptions)) {
-                DlssgOptions options = DlssgOptions.allocate(callArena)
-                        .mode(DlssgMode.ON)
-                        .numFramesToGenerate(desired.generatedFrameCount)
-                        .flags(0)
-                        .numBackBuffers(desired.backBufferCount)
-                        .mvecDepthWidth(motion.width())
-                        .mvecDepthHeight(motion.height())
-                        .colorWidth(desired.colorWidth)
-                        .colorHeight(desired.colorHeight)
-                        .colorBufferFormat(desired.colorFormat)
-                        .mvecBufferFormat(desired.motionFormat)
-                        .depthBufferFormat(desired.depthFormat)
-                        .hudLessBufferFormat(desired.hudlessFormat)
-                        .uiBufferFormat(desired.uiFormat)
-                        .queueParallelismMode(DlssgQueueParallelismMode.BLOCK_PRESENTING_CLIENT_QUEUE)
-                        .enableUserInterfaceRecomposition(
-                                desired.uiRecomposition ? SlBoolean.TRUE : SlBoolean.FALSE)
-                        .dynamicResWidth(0)
-                        .dynamicResHeight(0)
-                        .dynamicTargetFrameRate(0.0f);
+                DlssgOptions options = DlssgOptions.enabled(
+                        callArena,
+                        desired.generatedFrameCount,
+                        desired.backBufferCount,
+                        motion.width(),
+                        motion.height(),
+                        desired.colorWidth,
+                        desired.colorHeight,
+                        desired.colorFormat,
+                        desired.motionFormat,
+                        desired.depthFormat,
+                        desired.hudlessFormat,
+                        desired.uiFormat,
+                        desired.uiRecomposition);
                 featureResourcesMayExist = true;
                 if (frameGeneration.setOptions(viewport, options) != Streamline.RESULT_OK) {
                     return fail("set-options", "slDLSSGSetOptions failed", null);
@@ -330,7 +318,7 @@ public final class StreamlineFrameGeneration {
             return false;
         }
         try (Arena callArena = Arena.ofConfined()) {
-            ViewportHandle viewport = ViewportHandle.allocate(callArena).value(VIEWPORT);
+            ViewportHandle viewport = ViewportHandle.allocate(callArena);
             MemorySegment tags = ResourceTag.allocateArray(callArena, 1);
             tag(ResourceTag.wrap(tags, 0), alpha, BufferType.UI_ALPHA, callArena);
             if (streamline.setTagForFrame(
@@ -383,15 +371,9 @@ public final class StreamlineFrameGeneration {
         }
         RuntimeException failure = null;
         try (Arena callArena = Arena.ofConfined()) {
-            ViewportHandle viewport = ViewportHandle.allocate(callArena).value(VIEWPORT);
+            ViewportHandle viewport = ViewportHandle.allocate(callArena);
             if (enabled) {
-                DlssgOptions options = DlssgOptions.allocate(callArena)
-                        .mode(DlssgMode.OFF)
-                        .numFramesToGenerate(1)
-                        .flags(0)
-                        .queueParallelismMode(
-                                DlssgQueueParallelismMode.BLOCK_PRESENTING_CLIENT_QUEUE)
-                        .enableUserInterfaceRecomposition(SlBoolean.FALSE);
+                DlssgOptions options = DlssgOptions.disabled(callArena);
                 int result = frameGeneration.setOptions(viewport, options);
                 if (result != Streamline.RESULT_OK) {
                     failure = new IllegalStateException(
@@ -442,7 +424,7 @@ public final class StreamlineFrameGeneration {
         }
         try (Arena callArena = Arena.ofConfined()) {
             DlssgState state = DlssgState.allocate(callArena);
-            ViewportHandle viewport = ViewportHandle.allocate(callArena).value(VIEWPORT);
+            ViewportHandle viewport = ViewportHandle.allocate(callArena);
             int result = frameGeneration.getState(
                     viewport, state, null);
             if (result != Streamline.RESULT_OK) {
@@ -468,22 +450,17 @@ public final class StreamlineFrameGeneration {
 
     private static void tag(
             ResourceTag tag, VulkanImage image, BufferType type, Arena arena) {
-        Resource resource = Resource.allocate(arena)
-                .type(ResourceType.TEX2D)
-                .nativeHandle(MemorySegment.ofAddress(image.image()))
-                .memory(MemorySegment.NULL)
-                .view(MemorySegment.ofAddress(image.view()))
-                .state(VK12.VK_IMAGE_LAYOUT_GENERAL)
-                .width(image.width())
-                .height(image.height())
-                .nativeFormat(image.format())
-                .mipLevels(image.mipLevels())
-                .arrayLayers(1)
-                .usage(image.usage());
-        tag.resource(resource.segment())
-                .type(type)
-                .lifecycle(ResourceLifecycle.VALID_UNTIL_PRESENT)
-                .extent(0, 0, image.width(), image.height());
+        Resource resource = Resource.texture2D(
+                arena,
+                MemorySegment.ofAddress(image.image()),
+                MemorySegment.ofAddress(image.view()),
+                VK12.VK_IMAGE_LAYOUT_GENERAL,
+                image.width(),
+                image.height(),
+                image.format(),
+                image.mipLevels(),
+                image.usage());
+        tag.set(resource, type, image.width(), image.height());
     }
 
     private static boolean fail(String key, String message, Throwable failure) {
