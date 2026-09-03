@@ -341,7 +341,7 @@ final class SpritePixelBoundaryTest {
         int readsAtLeaseClose = pixels.readCount;
         pixels.active = false;
         mesh.segments().forEach(segment -> segment.primitiveRecords());
-        mesh.voxelMeshes().forEach(voxel -> voxel.primitiveRecords());
+        mesh.voxelMeshes().forEach(voxel -> voxel.geometry().primitiveRecords());
         assertEquals(readsAtLeaseClose, pixels.readCount);
     }
 

@@ -11,9 +11,7 @@ import java.util.Objects;
  * high-detail mesh.
  */
 public final class CpuVoxelMesh {
-    private final float[] positions;
-    private final int[] primitiveRecords;
-    private final TriangleLayout triangleLayout;
+    private final CpuMeshSegment geometry;
     private final OpacityMicromapData opacityMicromap;
     private final int gpuContentHash;
 
@@ -22,30 +20,22 @@ public final class CpuVoxelMesh {
             int[] primitiveRecords,
             TriangleLayout triangleLayout,
             OpacityMicromapData opacityMicromap) {
-        this.positions = Objects.requireNonNull(positions, "positions");
-        this.primitiveRecords = Objects.requireNonNull(
-                primitiveRecords, "primitiveRecords");
-        this.triangleLayout = Objects.requireNonNull(triangleLayout, "triangleLayout");
+        this.geometry = new CpuMeshSegment(
+                positions, primitiveRecords, new int[0], triangleLayout);
         this.opacityMicromap = Objects.requireNonNull(
                 opacityMicromap, "opacityMicromap");
-        int triangles = Math.toIntExact(triangleLayout.triangleCount());
-        if (positions.length != Math.multiplyExact(triangles, 9)
-                || primitiveRecords.length
-                        != Math.multiplyExact(
-                                Math.toIntExact(triangleLayout.primitiveCount()),
-                                CpuSectionMesh.PRIMITIVE_WORDS)
-                || opacityMicromap.triangleCount() != triangleLayout.cutoutTriangleCount()) {
+        if (opacityMicromap.triangleCount() != this.geometry.cutoutTriangleCount()) {
             throw new IllegalArgumentException("Invalid reusable voxel-surface mesh");
         }
-        if (triangles == 0) {
+        if (this.geometry.triangleCount() == 0) {
             throw new IllegalArgumentException(
                     "A reusable voxel-surface mesh must contain geometry");
         }
-        int hash = rawFloatHash(this.positions);
-        hash = 31 * hash + Arrays.hashCode(this.primitiveRecords);
-        hash = 31 * hash + this.opaqueTriangleCount();
-        hash = 31 * hash + this.cutoutTriangleCount();
-        hash = 31 * hash + this.transmissiveTriangleCount();
+        int hash = rawFloatHash(this.geometry.positions());
+        hash = 31 * hash + Arrays.hashCode(this.geometry.primitiveRecords());
+        hash = 31 * hash + this.geometry.opaqueTriangleCount();
+        hash = 31 * hash + this.geometry.cutoutTriangleCount();
+        hash = 31 * hash + this.geometry.transmissiveTriangleCount();
         hash = 31 * hash + Arrays.hashCode(this.opacityMicromap.blocks());
         hash = 31 * hash + Arrays.hashCode(this.opacityMicromap.blockOffsets());
         hash = 31 * hash + Arrays.hashCode(this.opacityMicromap.blockFormats());
@@ -55,51 +45,17 @@ public final class CpuVoxelMesh {
         this.gpuContentHash = hash;
     }
 
-    /** Borrowed read-only backing storage. */
-    public float[] positions() {
-        return this.positions;
-    }
-
-    /** Borrowed read-only backing storage. */
-    public int[] primitiveRecords() {
-        return this.primitiveRecords;
-    }
-
-    public int opaqueTriangleCount() {
-        return Math.toIntExact(this.triangleLayout.opaqueTriangleCount());
-    }
-
-    public int cutoutTriangleCount() {
-        return Math.toIntExact(this.triangleLayout.cutoutTriangleCount());
-    }
-
-    public int transmissiveTriangleCount() {
-        return Math.toIntExact(this.triangleLayout.transmissiveTriangleCount());
-    }
-
-    public int triangleCount() {
-        return Math.toIntExact(this.triangleLayout.triangleCount());
-    }
-
-    public TriangleLayout triangleLayout() {
-        return this.triangleLayout;
+    public CpuMeshSegment geometry() {
+        return this.geometry;
     }
 
     public OpacityMicromapData opacityMicromap() {
         return this.opacityMicromap;
     }
 
-    public long positionBytes() {
-        return Math.multiplyExact((long) this.positions.length, Float.BYTES);
-    }
-
-    public long primitiveBytes() {
-        return Math.multiplyExact((long) this.primitiveRecords.length, Integer.BYTES);
-    }
-
     public long byteSize() {
         return Math.addExact(
-                Math.addExact(this.positionBytes(), this.primitiveBytes()),
+                Math.addExact(this.geometry.positionBytes(), this.geometry.primitiveBytes()),
                 this.opacityMicromap.byteSize());
     }
 

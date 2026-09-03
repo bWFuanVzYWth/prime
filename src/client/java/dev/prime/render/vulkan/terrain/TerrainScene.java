@@ -1335,38 +1335,39 @@ public final class TerrainScene implements AutoCloseable {
             VkCommandBuffer commandBuffer,
             IntUnaryOperator tintResolver,
             String label) {
+        CpuMeshSegment geometry = mesh.geometry();
         VulkanBuffer positions = null;
         VulkanBuffer primitives = null;
         PreparedBlas blas = null;
         try {
             positions = this.context.createBuffer(
-                    mesh.positionBytes(),
+                    geometry.positionBytes(),
                     VK12.VK_BUFFER_USAGE_TRANSFER_DST_BIT
                             | KHRAccelerationStructure.VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
                     false,
                     label + " positions");
             primitives = this.context.createBuffer(
-                    mesh.primitiveBytes(),
+                    geometry.primitiveBytes(),
                     VK12.VK_BUFFER_USAGE_TRANSFER_DST_BIT
                             | VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                     false,
                     label + " primitives");
             copyBuffer(
                     commandBuffer,
-                    stagingBatch.write(mesh.positions(), Float.BYTES),
+                    stagingBatch.write(geometry.positions(), Float.BYTES),
                     positions);
             copyBuffer(
                     commandBuffer,
                     stagingBatch.write(
                             TintIdResolver.primitiveRecords(
                                     MaterialIdResolver.primitiveRecords(
-                                            mesh.primitiveRecords(),
-                                            mesh.primitiveRecords(),
+                                            geometry.primitiveRecords(),
+                                            geometry.primitiveRecords(),
                                             CompiledClusterLights.EMPTY,
                                             MaterialIdResolver.cache(
                                                     List.of(),
                                                     this.materialIds::resolve)),
-                                    mesh.primitiveRecords(),
+                                    geometry.primitiveRecords(),
                                     tintResolver),
                             Integer.BYTES),
                     primitives);
@@ -1378,7 +1379,7 @@ public final class TerrainScene implements AutoCloseable {
                     mesh.opacityMicromap(),
                     stagingBatch,
                     commandBuffer,
-                    mesh.triangleLayout(),
+                    geometry.triangleLayout(),
                     PreparedBlas.CompactionPolicy.ENABLED,
                     label + " BLAS");
             return blas;

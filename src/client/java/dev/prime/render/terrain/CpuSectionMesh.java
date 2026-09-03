@@ -49,8 +49,8 @@ public record CpuSectionMesh(
     }
 
     public long byteSize() {
-        return (long) this.geometry.positions().length * Float.BYTES
-                + (long) this.geometry.primitiveRecords().length * Integer.BYTES
+        return this.geometry.positionBytes()
+                + this.geometry.primitiveBytes()
                 + (long) this.geometry.surfaceRelationRecords().length * Integer.BYTES
                 + this.opacityMicromap.byteSize()
                 + this.lights.byteSize();

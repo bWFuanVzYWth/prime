@@ -157,7 +157,7 @@ final class TextureVoxelSurfaceTest {
 
         assertEquals(
                 TextureVoxelMeshBuilder.heightFromArgb(0xff80_8080),
-                maximumAxis(generated.positions(), 2),
+                maximumAxis(generated.geometry().positions(), 2),
                 1.0E-7F);
     }
 
@@ -265,9 +265,10 @@ final class TextureVoxelSurfaceTest {
                 cluster.voxelInstances().packedTint(0));
 
         CpuVoxelMesh mesh = cluster.voxelMeshes().getFirst();
-        assertEquals(16 * 16 * 2, mesh.opaqueTriangleCount());
-        assertEquals(0, mesh.cutoutTriangleCount());
-        int[] primitives = mesh.primitiveRecords();
+        CpuMeshSegment geometry = mesh.geometry();
+        assertEquals(16 * 16 * 2, geometry.opaqueTriangleCount());
+        assertEquals(0, geometry.cutoutTriangleCount());
+        int[] primitives = geometry.primitiveRecords();
         assertEquals(0, PrimitivePacking.unpackSourceMediumId(primitives[4]));
         assertBakedMaterial(
                 primitives,
@@ -310,13 +311,13 @@ final class TextureVoxelSurfaceTest {
                 2,
                 -1);
 
-        assertEquals(8, outward.triangleCount());
-        assertEquals(0.0F, minimumAxis(outward.positions(), 2));
-        assertEquals(0.0F, maximumAxis(outward.positions(), 2));
-        assertEquals(0.0F, minimumAxis(inwardFacing.positions(), 2));
-        assertEquals(0.0F, maximumAxis(inwardFacing.positions(), 2));
-        assertNondegenerate(outward.positions());
-        assertNondegenerate(inwardFacing.positions());
+        assertEquals(8, outward.geometry().triangleCount());
+        assertEquals(0.0F, minimumAxis(outward.geometry().positions(), 2));
+        assertEquals(0.0F, maximumAxis(outward.geometry().positions(), 2));
+        assertEquals(0.0F, minimumAxis(inwardFacing.geometry().positions(), 2));
+        assertEquals(0.0F, maximumAxis(inwardFacing.geometry().positions(), 2));
+        assertNondegenerate(outward.geometry().positions());
+        assertNondegenerate(inwardFacing.geometry().positions());
     }
 
     @Test
@@ -338,12 +339,12 @@ final class TextureVoxelSurfaceTest {
                 1,
                 1);
 
-        assertEquals(8, flat.triangleCount());
+        assertEquals(8, flat.geometry().triangleCount());
         // Four top quads and four walls around the one raised corner column.
-        assertEquals(16, stepped.triangleCount());
-        assertEquals(0.0F, minimumAxis(stepped.positions(), 1));
-        assertEquals(1.0F / 16.0F, maximumAxis(stepped.positions(), 1));
-        assertNondegenerate(stepped.positions());
+        assertEquals(16, stepped.geometry().triangleCount());
+        assertEquals(0.0F, minimumAxis(stepped.geometry().positions(), 1));
+        assertEquals(1.0F / 16.0F, maximumAxis(stepped.geometry().positions(), 1));
+        assertNondegenerate(stepped.geometry().positions());
     }
 
     private static void assertBakedMaterial(

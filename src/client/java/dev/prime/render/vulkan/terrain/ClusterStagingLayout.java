@@ -34,8 +34,9 @@ public final class ClusterStagingLayout {
             result = StagingArena.requiredEndOffset(result, mesh.lights().byteSize(), 16L);
         }
         for (CpuVoxelMesh voxelMesh : mesh.voxelMeshes()) {
-            result = StagingArena.requiredEndOffset(result, voxelMesh.positionBytes(), Float.BYTES);
-            result = StagingArena.requiredEndOffset(result, voxelMesh.primitiveBytes(), Integer.BYTES);
+            CpuMeshSegment geometry = voxelMesh.geometry();
+            result = StagingArena.requiredEndOffset(result, geometry.positionBytes(), Float.BYTES);
+            result = StagingArena.requiredEndOffset(result, geometry.primitiveBytes(), Integer.BYTES);
             result = opacityEndOffset(result, voxelMesh.opacityMicromap(), includeOpacityMicromap);
         }
         return result;

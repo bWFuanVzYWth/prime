@@ -37,7 +37,7 @@ final class ClusterSceneTranslatorDeterminismTest {
                 first.voxelInstances().translations(),
                 second.voxelInstances().translations());
         assertArrayEquals(
-                first.voxelMeshes().getFirst().primitiveRecords(),
-                second.voxelMeshes().getFirst().primitiveRecords());
+                first.voxelMeshes().getFirst().geometry().primitiveRecords(),
+                second.voxelMeshes().getFirst().geometry().primitiveRecords());
     }
 }

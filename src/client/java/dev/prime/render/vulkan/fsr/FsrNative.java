@@ -28,9 +28,6 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 final class FsrNative {
     static final String EXPECTED_UPSCALER_VERSION = FsrSettings.UPSCALER_VERSION;
 
-    private static final String WINDOWS_RESOURCE =
-            "/prime/natives/windows-x86_64/amd_fidelityfx_vk.dll";
-
     private static final long CREATE_CONTEXT_UPSCALE = 0x0001_0000L;
     private static final long CREATE_BACKEND_VK = 0x0000_0003L;
     private static final long DISPATCH_UPSCALE = 0x0001_0001L;

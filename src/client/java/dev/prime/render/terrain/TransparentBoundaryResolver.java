@@ -714,28 +714,6 @@ final class TransparentBoundaryResolver {
                         output);
                 return;
             }
-            if (negativeKind == FaceKind.OPAQUE && positiveKind.transmissive) {
-                emitActual(
-                        List.of(negativeFace),
-                        minimumU,
-                        maximumU,
-                        minimumV,
-                        maximumV,
-                        null,
-                        output);
-                return;
-            }
-            if (positiveKind == FaceKind.OPAQUE && negativeKind.transmissive) {
-                emitActual(
-                        List.of(positiveFace),
-                        minimumU,
-                        maximumU,
-                        minimumV,
-                        maximumV,
-                        null,
-                        output);
-                return;
-            }
             if ((negativeKind == FaceKind.OPAQUE)
                     != (positiveKind == FaceKind.OPAQUE)) {
                 Candidate opaque = negativeKind == FaceKind.OPAQUE

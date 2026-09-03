@@ -1,5 +1,6 @@
 package dev.prime.render.vulkan.terrain;
 
+import dev.prime.render.terrain.CpuMeshSegment;
 import dev.prime.render.terrain.CpuVoxelMesh;
 import dev.prime.render.terrain.OpacityMicromapData;
 import dev.prime.render.vulkan.PreparedBlas;
@@ -132,13 +133,14 @@ final class VoxelBlasPool implements AutoCloseable {
         }
 
         private Key(CpuVoxelMesh mesh, boolean snapshot) {
-            this.positions = snapshot ? mesh.positions().clone() : mesh.positions();
+            CpuMeshSegment geometry = mesh.geometry();
+            this.positions = snapshot ? geometry.positions().clone() : geometry.positions();
             this.primitives = snapshot
-                    ? mesh.primitiveRecords().clone()
-                    : mesh.primitiveRecords();
-            this.opaqueTriangles = mesh.opaqueTriangleCount();
-            this.cutoutTriangles = mesh.cutoutTriangleCount();
-            this.transmissiveTriangles = mesh.transmissiveTriangleCount();
+                    ? geometry.primitiveRecords().clone()
+                    : geometry.primitiveRecords();
+            this.opaqueTriangles = geometry.opaqueTriangleCount();
+            this.cutoutTriangles = geometry.cutoutTriangleCount();
+            this.transmissiveTriangles = geometry.transmissiveTriangleCount();
             OpacityMicromapData micromap = mesh.opacityMicromap();
             this.micromapBlocks = snapshot
                     ? micromap.blocks().clone()

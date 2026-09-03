@@ -68,6 +68,14 @@ public record CpuMeshSegment(
         return Math.toIntExact(this.triangleLayout.primitiveCount());
     }
 
+    public long positionBytes() {
+        return (long) this.positions.length * Float.BYTES;
+    }
+
+    public long primitiveBytes() {
+        return (long) this.primitiveRecords.length * Integer.BYTES;
+    }
+
     public int opaqueMacroTriangleBase() {
         return Math.toIntExact(this.triangleLayout.opaqueMacroTriangleBase());
     }

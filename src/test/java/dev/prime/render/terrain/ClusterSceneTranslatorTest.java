@@ -112,11 +112,11 @@ final class ClusterSceneTranslatorTest {
                 first.voxelInstances().translations(),
                 second.voxelInstances().translations());
         assertArrayEquals(
-                first.voxelMeshes().getFirst().positions(),
-                second.voxelMeshes().getFirst().positions());
+                first.voxelMeshes().getFirst().geometry().positions(),
+                second.voxelMeshes().getFirst().geometry().positions());
         assertArrayEquals(
-                first.voxelMeshes().getFirst().primitiveRecords(),
-                second.voxelMeshes().getFirst().primitiveRecords());
+                first.voxelMeshes().getFirst().geometry().primitiveRecords(),
+                second.voxelMeshes().getFirst().geometry().primitiveRecords());
     }
 
     @Test
