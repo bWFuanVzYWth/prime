@@ -180,32 +180,44 @@ final class OfflineRenderer implements Destroyable {
                 current.scene().materialCore(),
                 current.scene().tintSamples(),
                 input.atmosphere());
-        OfflineFramePlan framePlan = new OfflineFrameInput(
+        long sample = current.sampleCount();
+        IntegratorFrameInput integrator = new IntegratorFrameInput(
                 current.camera(),
                 width,
                 height,
-                current.scene().revision(),
-                current.textureRevision(),
                 current.astronomy(),
+                RayConeParameters.fromProjection(
+                        current.camera().projection().m00(),
+                        current.camera().projection().m11(),
+                        width,
+                        height,
+                        0.0F),
+                SpecularBounceSettings.DEFAULT_COUNT,
+                MinimumBounceSettings.DEFAULT_COUNT,
+                current.settings().maximumBounces(),
+                (int) (sample & 0xffffL),
+                (int) (sample >>> 16),
+                0,
                 current.cameraInWater(),
+                dev.prime.render.post.PostProcessingMode.DISABLED,
+                dev.prime.render.post.TransparentGuideMode.DISABLED,
                 current.settings().lighting(),
                 current.settings().material(),
-                current.settings().maximumBounces(),
-                current.sampleCount(),
-                input.display()).plan();
+                false,
+                (sample & 0xffffL) != 0L);
         this.executor.execute(
                 activePipeline,
                 input.sunShadow(),
                 input.atmosphere(),
                 input.materialTextures(),
                 current.scene(),
-                framePlan,
+                integrator,
+                input.display(),
                 images.displayOutput,
                 images.runningMean,
                 images.display,
                 input.atlasView(),
                 current.sceneTextures(),
-                current.textureRevision(),
                 mainColor);
         current.commitSample();
         if (current.sampleCount() > 0L

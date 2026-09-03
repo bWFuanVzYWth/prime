@@ -274,32 +274,17 @@ final class RealtimeRenderer implements Destroyable {
         VulkanImage target = images.output();
         VulkanImage history = images.stableRadiance();
         VulkanReconstructionProcessor processor = images.processor();
-        RealtimeFrameInput frameInput = new RealtimeFrameInput(
+        RealtimeSampleState.Plan sampleFrame = this.planSample(new RealtimeSampleState.Input(
+                input.camera(), input.scene().resetRevision(), reconfigured));
+        ReconstructionFrameParameters postParameters = new ReconstructionFrameParameters(
                 input.camera(),
                 System.nanoTime(),
                 input.scene().resetRevision(),
-                input.scene().revision(),
                 input.textureRevision(),
-                renderWidth,
-                renderHeight,
-                width,
-                height,
-                input.astronomy(),
-                input.cameraInWater(),
-                selection.effectiveMode(),
-                selection.quality(),
-                selection.transparentGuideMode(),
-                settings.additionalSpecularBounces(),
-                settings.minimumBounces(),
-                settings.maximumBounces(),
+                sampleFrame.reset(),
+                input.astronomy().sunDirection(),
                 settings.lighting(),
-                settings.material(),
-                processor.rawFrame().usesShInputs(),
-                settings.display(),
-                reconfigured);
-        RealtimeSampleState.Plan sampleFrame = this.planSample(frameInput.sampleStateInput());
-        ReconstructionFrameParameters postParameters =
-                frameInput.reconstructionInput(sampleFrame.reset());
+                settings.display());
         ReconstructionDebugSettings debugSettings =
                 new ReconstructionDebugSettings(
                         input.controls().imageDiagnostics(),
@@ -307,18 +292,41 @@ final class RealtimeRenderer implements Destroyable {
         VulkanReconstructionProcessor.Frame postFrame =
                 processor.beginFrame(postParameters, debugSettings);
         ReconstructionFrame reconstructionFrame = postFrame.semantic();
-        RealtimeFramePlan framePlan;
+        var expectedJitter = selection.jitter(reconstructionFrame.frameIndex());
+        IntegratorFrameInput integrator;
         try {
-            framePlan = RealtimeFramePlan.complete(
-                    frameInput,
-                    sampleFrame,
-                    postParameters,
-                    reconstructionFrame,
-                    selection.jitter(reconstructionFrame.frameIndex()),
-                    selection.jitterPhase(reconstructionFrame.frameIndex()),
+            if (sampleFrame.reset() && !reconstructionFrame.reset()) {
+                throw new IllegalStateException(
+                        "Reconstruction history did not restart with the integrator");
+            }
+            if (Float.floatToRawIntBits(reconstructionFrame.jitter().x())
+                            != Float.floatToRawIntBits(expectedJitter.x())
+                    || Float.floatToRawIntBits(reconstructionFrame.jitter().y())
+                            != Float.floatToRawIntBits(expectedJitter.y())) {
+                throw new IllegalStateException(
+                        "Reconstruction jitter disagrees with its backend policy");
+            }
+            integrator = new IntegratorFrameInput(
+                    input.camera(),
+                    renderWidth,
+                    renderHeight,
+                    input.astronomy(),
                     selection.rayConeParameters(
                             input.camera().projection().m00(),
-                            input.camera().projection().m11()));
+                            input.camera().projection().m11()),
+                    settings.additionalSpecularBounces(),
+                    settings.minimumBounces(),
+                    settings.maximumBounces(),
+                    sampleFrame.sampleIndex(),
+                    sampleFrame.epoch(),
+                    selection.jitterPhase(reconstructionFrame.frameIndex()),
+                    input.cameraInWater(),
+                    selection.effectiveMode(),
+                    selection.transparentGuideMode(),
+                    settings.lighting(),
+                    settings.material(),
+                    processor.rawFrame().usesShInputs(),
+                    !reconstructionFrame.reset());
         } catch (RuntimeException exception) {
             throw ResourceCleanup.run(() -> processor.abandon(postFrame), exception);
         }
@@ -329,7 +337,10 @@ final class RealtimeRenderer implements Destroyable {
                 input.atmosphere(),
                 input.materialTextures(),
                 input.scene(),
-                framePlan,
+                integrator,
+                postParameters,
+                reconstructionFrame.jitter(),
+                reconstructionFrame.reset(),
                 processor,
                 postFrame,
                 target,
@@ -338,7 +349,6 @@ final class RealtimeRenderer implements Destroyable {
                 this.exposureDiagnostics,
                 input.atlasView(),
                 input.sceneTextures(),
-                input.textureRevision(),
                 mainColor);
         this.commitSample(sampleFrame);
         int accumulatedSamples = this.sampleIndex();

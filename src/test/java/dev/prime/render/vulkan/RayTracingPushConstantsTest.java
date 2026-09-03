@@ -11,7 +11,9 @@ import dev.prime.render.IntegratorFrameInput;
 import dev.prime.render.IntegratorSettings;
 import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
+import dev.prime.render.MinimumBounceSettings;
 import dev.prime.render.RayConeParameters;
+import dev.prime.render.SpecularBounceSettings;
 import dev.prime.render.SunDirection;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionQualityMode;
@@ -104,6 +106,8 @@ final class RayTracingPushConstantsTest {
                         valid.height(),
                         valid.astronomy(),
                         valid.rayCone(),
+                        valid.additionalSpecularBounces(),
+                        valid.minimumBounces(),
                         valid.maximumBounces(),
                         valid.sampleIndex(),
                         valid.sampleEpoch(),
@@ -113,7 +117,8 @@ final class RayTracingPushConstantsTest {
                         valid.transparentGuideMode(),
                         valid.lighting(),
                         valid.material(),
-                        valid.shInput()));
+                        valid.shInput(),
+                        valid.historyValid()));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new IntegratorFrameInput(
@@ -122,6 +127,8 @@ final class RayTracingPushConstantsTest {
                         valid.height(),
                         valid.astronomy(),
                         valid.rayCone(),
+                        valid.additionalSpecularBounces(),
+                        valid.minimumBounces(),
                         valid.maximumBounces(),
                         valid.sampleIndex(),
                         valid.sampleEpoch(),
@@ -131,7 +138,8 @@ final class RayTracingPushConstantsTest {
                         valid.transparentGuideMode(),
                         valid.lighting(),
                         valid.material(),
-                        valid.shInput()));
+                        valid.shInput(),
+                        valid.historyValid()));
     }
 
     private static Fixture input(int sampleIndex) {
@@ -174,6 +182,8 @@ final class RayTracingPushConstantsTest {
                 new RayConeParameters(
                         Float.float16ToFloat((short) 0x5678),
                         Float.float16ToFloat((short) 0x1234)),
+                SpecularBounceSettings.DEFAULT_COUNT,
+                MinimumBounceSettings.DEFAULT_COUNT,
                 4,
                 sampleIndex,
                 19,
@@ -183,7 +193,8 @@ final class RayTracingPushConstantsTest {
                 TransparentGuideMode.REFLECTION_AND_TRANSMISSION,
                 lighting,
                 material,
-                true);
+                true,
+                sampleIndex != 0);
         return new Fixture(input, scene);
     }
 

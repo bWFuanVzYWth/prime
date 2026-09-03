@@ -3,9 +3,11 @@ package dev.prime.render.vulkan;
 import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
 import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
 import com.mojang.blaze3d.vulkan.Destroyable;
-import dev.prime.render.RealtimeFramePlan;
+import dev.prime.render.IntegratorFrameInput;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.ImageDiagnosticSelection;
+import dev.prime.render.post.ReconstructionFrameParameters;
+import dev.prime.render.post.SubpixelJitter;
 import dev.prime.render.vulkan.reconstruction.VulkanReconstructionProcessor;
 import dev.prime.streamline.StreamlineFrameGeneration;
 import dev.prime.streamline.StreamlineReflex;
@@ -15,11 +17,10 @@ import java.util.Objects;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
 /**
- * Sole device executor for one planned interactive frame.
+ * Sole device executor for one interactive frame.
  *
- * <p>All frame-scalar semantics are already fixed by {@link RealtimeFramePlan}. This class only
- * binds captured asset/scene residency, records Vulkan work, submits it and commits backend-owned
- * GPU histories.
+ * <p>This class binds captured asset/scene residency, records Vulkan work, submits it and commits
+ * backend-owned GPU histories.
  */
 public final class RealtimeFrameExecutor implements Destroyable {
     private final VulkanContext context;
@@ -39,7 +40,10 @@ public final class RealtimeFrameExecutor implements Destroyable {
             AtmospherePipeline atmosphere,
             MaterialTexturePages materialTextures,
             TerrainScene.ResidentSceneView scene,
-            RealtimeFramePlan plan,
+            IntegratorFrameInput integrator,
+            ReconstructionFrameParameters reconstruction,
+            SubpixelJitter jitter,
+            boolean reconstructionReset,
             VulkanReconstructionProcessor processor,
             VulkanReconstructionProcessor.Frame processorFrame,
             VulkanImage output,
@@ -48,7 +52,6 @@ public final class RealtimeFrameExecutor implements Destroyable {
             DisplayExposureDiagnostics exposureDiagnostics,
             VulkanGpuTextureView atlasView,
             List<TraceBackend.SceneTexture> sceneTextures,
-            long textureRevision,
             VulkanGpuTexture mainColor) {
         requireOpen();
         Objects.requireNonNull(processor, "processor");
@@ -68,7 +71,9 @@ public final class RealtimeFrameExecutor implements Destroyable {
             Objects.requireNonNull(atmosphere, "atmosphere");
             Objects.requireNonNull(materialTextures, "materialTextures");
             Objects.requireNonNull(scene, "scene");
-            Objects.requireNonNull(plan, "plan");
+            Objects.requireNonNull(integrator, "integrator");
+            Objects.requireNonNull(reconstruction, "reconstruction");
+            Objects.requireNonNull(jitter, "jitter");
             Objects.requireNonNull(output, "output");
             Objects.requireNonNull(stableRadiance, "stableRadiance");
             Objects.requireNonNull(diagnostics, "diagnostics");
@@ -76,9 +81,7 @@ public final class RealtimeFrameExecutor implements Destroyable {
             Objects.requireNonNull(atlasView, "atlasView");
             Objects.requireNonNull(sceneTextures, "sceneTextures");
             Objects.requireNonNull(mainColor, "mainColor");
-            plan.requireSceneRevision(scene.revision());
-            plan.requireTextureRevision(textureRevision);
-            validateExtents(plan, processor, output, stableRadiance, mainColor);
+            validateExtents(integrator, processor, output, stableRadiance, mainColor);
             submission.begin();
 
             var encoder = this.context.commandEncoder();
@@ -106,18 +109,18 @@ public final class RealtimeFrameExecutor implements Destroyable {
             long atmosphereFrame = atmosphere.prepare(
                     commandBuffer,
                     sunShadow,
-                    plan.integrator(),
+                    integrator,
                     scene,
                     false);
             completion.onCommit(2, () -> atmosphere.submitted(atmosphereFrame));
             completion.onAbandon(1, failure -> ResourceCleanup.run(
                     () -> atmosphere.abandon(atmosphereFrame), failure));
-            pipeline.trace(commandBuffer, plan.integrator(), scene);
+            pipeline.trace(commandBuffer, integrator, scene);
             boolean prepareFrameGeneration = StreamlineFrameGeneration.publish(
                     StreamlineReflex.currentFrameIndex(),
-                    plan.integrator().camera(),
-                    plan.jitter(),
-                    plan.reconstructionReset(),
+                    integrator.camera(),
+                    jitter,
+                    reconstructionReset,
                     processor.rawFrame(),
                     output,
                     processor.displayWidth(),
@@ -139,7 +142,7 @@ public final class RealtimeFrameExecutor implements Destroyable {
             processor.record(
                     commandBuffer,
                     processorFrame,
-                    plan.reconstruction(),
+                    reconstruction,
                     this.imageInitialization);
             processor.presentRendererDiagnostic(commandBuffer, diagnostics.renderer());
             DisplayExposureDiagnostics.Capture exposureCapture = exposureDiagnostics.record(
@@ -229,13 +232,13 @@ public final class RealtimeFrameExecutor implements Destroyable {
     }
 
     private static void validateExtents(
-            RealtimeFramePlan plan,
+            IntegratorFrameInput integrator,
             VulkanReconstructionProcessor processor,
             VulkanImage output,
             VulkanImage stableRadiance,
             VulkanGpuTexture mainColor) {
-        if (plan.integrator().width() != processor.renderWidth()
-                || plan.integrator().height() != processor.renderHeight()
+        if (integrator.width() != processor.renderWidth()
+                || integrator.height() != processor.renderHeight()
                 || stableRadiance.width() != processor.renderWidth()
                 || stableRadiance.height() != processor.renderHeight()
                 || output.width() != processor.displayWidth()

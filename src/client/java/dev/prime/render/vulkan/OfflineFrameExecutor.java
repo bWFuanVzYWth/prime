@@ -3,13 +3,14 @@ package dev.prime.render.vulkan;
 import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
 import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
 import dev.prime.infrastructure.ResourceCleanup;
-import dev.prime.render.OfflineFramePlan;
+import dev.prime.render.DisplaySettings;
+import dev.prime.render.IntegratorFrameInput;
 import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.util.List;
 import java.util.Objects;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
-/** Device side effects for one already-planned native offline sample. */
+/** Device side effects for one native offline sample. */
 public final class OfflineFrameExecutor {
     private final VulkanContext context;
     private final VulkanImageInitializationBatch imageInitialization =
@@ -25,30 +26,29 @@ public final class OfflineFrameExecutor {
             AtmospherePipeline atmosphere,
             MaterialTexturePages materialTextures,
             TerrainScene.ResidentSceneView scene,
-            OfflineFramePlan plan,
+            IntegratorFrameInput integrator,
+            DisplaySettings.Snapshot displaySettings,
             VulkanImage displayOutput,
             VulkanImage runningMean,
             DisplayTransformPass display,
             VulkanGpuTextureView atlasView,
             List<TraceBackend.SceneTexture> sceneTextures,
-            long textureRevision,
             VulkanGpuTexture mainColor) {
         Objects.requireNonNull(pipeline, "pipeline");
         Objects.requireNonNull(sunShadow, "sunShadow");
         Objects.requireNonNull(atmosphere, "atmosphere");
         Objects.requireNonNull(materialTextures, "materialTextures");
         Objects.requireNonNull(scene, "scene");
-        Objects.requireNonNull(plan, "plan");
+        Objects.requireNonNull(integrator, "integrator");
+        Objects.requireNonNull(displaySettings, "displaySettings");
         Objects.requireNonNull(displayOutput, "displayOutput");
         Objects.requireNonNull(runningMean, "runningMean");
         Objects.requireNonNull(display, "display");
         Objects.requireNonNull(atlasView, "atlasView");
         Objects.requireNonNull(sceneTextures, "sceneTextures");
         Objects.requireNonNull(mainColor, "mainColor");
-        plan.requireSceneRevision(scene.revision());
-        plan.requireTextureRevision(textureRevision);
         validateExtents(
-                plan,
+                integrator,
                 displayOutput,
                 runningMean,
                 mainColor);
@@ -83,18 +83,18 @@ public final class OfflineFrameExecutor {
             long atmosphereFrame = atmosphere.prepare(
                     commandBuffer,
                     sunShadow,
-                    plan.integrator(),
+                    integrator,
                     scene,
                     true);
             completion.onCommit(1, () -> atmosphere.submitted(atmosphereFrame));
             completion.onAbandon(1, failure -> ResourceCleanup.run(
                     () -> atmosphere.abandon(atmosphereFrame), failure));
             pipeline.trace(
-                    commandBuffer, plan.integrator(), scene);
+                    commandBuffer, integrator, scene);
             VulkanImageTransitions.prepareOfflineDisplay(
                     commandBuffer, runningMean);
             display.recordFrozen(
-                    commandBuffer, plan.input().display(), this.imageInitialization);
+                    commandBuffer, displaySettings, this.imageInitialization);
             VulkanImageTransitions.finishAtlasRead(
                     commandBuffer, atlasView.texture());
             VulkanImageTransitions.finishSceneTextureReads(
@@ -103,8 +103,8 @@ public final class OfflineFrameExecutor {
                     commandBuffer,
                     displayOutput,
                     mainColor,
-                    plan.input().width(),
-                    plan.input().height());
+                    integrator.width(),
+                    integrator.height());
             this.context.device().instance().debug().endDebugGroup(
                     commandBuffer);
             submission.submit(
@@ -121,12 +121,12 @@ public final class OfflineFrameExecutor {
     }
 
     private static void validateExtents(
-            OfflineFramePlan plan,
+            IntegratorFrameInput integrator,
             VulkanImage displayOutput,
             VulkanImage runningMean,
             VulkanGpuTexture mainColor) {
-        int width = plan.input().width();
-        int height = plan.input().height();
+        int width = integrator.width();
+        int height = integrator.height();
         if (displayOutput.width() != width
                 || displayOutput.height() != height
                 || runningMean.width() != width
