@@ -41,9 +41,7 @@ final class GpuSurfaceRelationTableTest {
                 new float[3 * 9],
                 new int[3 * CpuSectionMesh.PRIMITIVE_WORDS],
                 source,
-                3,
-                0,
-                0,
+                TriangleLayout.triangles(3, 0, 0),
                 OpacityMicromapData.EMPTY,
                 CpuSectionLights.EMPTY);
         CpuClusterMesh mesh = CpuClusterMesh.fromSegments(List.of(section));

@@ -2,7 +2,6 @@ package dev.prime.render.vulkan;
 
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.shader.ShaderAbi;
-import java.nio.LongBuffer;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
@@ -11,8 +10,6 @@ import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkAccelerationStructureBuildGeometryInfoKHR;
 import org.lwjgl.vulkan.VkAccelerationStructureBuildRangeInfoKHR;
 import org.lwjgl.vulkan.VkAccelerationStructureBuildSizesInfoKHR;
-import org.lwjgl.vulkan.VkAccelerationStructureCreateInfoKHR;
-import org.lwjgl.vulkan.VkAccelerationStructureDeviceAddressInfoKHR;
 import org.lwjgl.vulkan.VkAccelerationStructureGeometryKHR;
 import org.lwjgl.vulkan.VkAccelerationStructureInstanceKHR;
 import org.lwjgl.vulkan.VkCommandBuffer;
@@ -60,10 +57,8 @@ public final class TopLevelAccelerationStructure {
                 : nextCapacity(requestedCapacity, deviceLimit);
         VulkanBuffer instances = null;
         VulkanBuffer sectionTable = null;
-        VulkanBuffer backing = null;
         VulkanBuffer scratch = null;
         AccelerationStructure accelerationStructure = null;
-        long handle = 0L;
         try {
             instances = context.createBuffer(
                     (long) capacity * VkAccelerationStructureInstanceKHR.SIZEOF,
@@ -92,36 +87,11 @@ public final class TopLevelAccelerationStructure {
                         buildInfo,
                         stack.ints(capacity),
                         sizes);
-                backing = context.createBuffer(
+                accelerationStructure = AccelerationStructure.create(
+                        context,
                         sizes.accelerationStructureSize(),
-                        KHRAccelerationStructure.VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR,
-                        false,
-                        label + " backing");
-                VkAccelerationStructureCreateInfoKHR createInfo = VkAccelerationStructureCreateInfoKHR.calloc(stack)
-                        .sType$Default()
-                        .buffer(backing.handle())
-                        .offset(0L)
-                        .size(sizes.accelerationStructureSize())
-                        .type(KHRAccelerationStructure.VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
-                LongBuffer handlePointer = stack.mallocLong(1);
-                VulkanContext.check(
-                        KHRAccelerationStructure.vkCreateAccelerationStructureKHR(
-                                context.vkDevice(), createInfo, null, handlePointer),
-                        "create " + label);
-                handle = handlePointer.get(0);
-                context.device().instance().debug().setObjectName(
-                        context.vkDevice(),
-                        KHRAccelerationStructure.VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR,
-                        handle,
+                        KHRAccelerationStructure.VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
                         label);
-                VkAccelerationStructureDeviceAddressInfoKHR addressInfo =
-                        VkAccelerationStructureDeviceAddressInfoKHR.calloc(stack)
-                                .sType$Default()
-                                .accelerationStructure(handle);
-                long address = KHRAccelerationStructure.vkGetAccelerationStructureDeviceAddressKHR(
-                        context.vkDevice(), addressInfo);
-                accelerationStructure = new AccelerationStructure(context.vkDevice(), handle, address, backing);
-                backing = null;
                 long scratchSize = sizes.buildScratchSize()
                         + context.capabilities().accelerationStructureScratchAlignment() - 1L;
                 scratch = context.createBuffer(
@@ -134,14 +104,7 @@ public final class TopLevelAccelerationStructure {
             }
         } catch (RuntimeException exception) {
             RuntimeException failure = exception;
-            if (accelerationStructure != null) {
-                failure = ResourceCleanup.destroy(accelerationStructure, failure);
-            } else {
-                if (handle != 0L) {
-                    KHRAccelerationStructure.vkDestroyAccelerationStructureKHR(context.vkDevice(), handle, null);
-                }
-                failure = ResourceCleanup.destroy(backing, failure);
-            }
+            failure = ResourceCleanup.destroy(accelerationStructure, failure);
             failure = ResourceCleanup.destroy(scratch, failure);
             failure = ResourceCleanup.destroy(sectionTable, failure);
             failure = ResourceCleanup.destroy(instances, failure);

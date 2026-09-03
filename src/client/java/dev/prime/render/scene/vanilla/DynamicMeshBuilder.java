@@ -5,6 +5,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.prime.render.terrain.CpuClusterMesh;
 import dev.prime.render.terrain.CpuSectionLights;
 import dev.prime.render.terrain.CpuSectionMesh;
+import dev.prime.render.terrain.TriangleLayout;
 import dev.prime.render.terrain.OpacityMicromapData;
 import dev.prime.render.terrain.PrimitivePacking;
 import it.unimi.dsi.fastutil.floats.FloatArrayList;
@@ -108,9 +109,8 @@ final class DynamicMeshBuilder {
         CpuSectionMesh section = new CpuSectionMesh(
                 this.positions.toFloatArray(),
                 this.primitives.toIntArray(),
-                0,
-                triangleCount,
-                0,
+                new int[0],
+                TriangleLayout.triangles(0, triangleCount, 0),
                 OpacityMicromapData.fullyUnknown(triangleCount),
                 CpuSectionLights.EMPTY);
         return new DynamicSceneFrame(

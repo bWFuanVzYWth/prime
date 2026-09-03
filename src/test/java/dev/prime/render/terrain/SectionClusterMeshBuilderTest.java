@@ -338,9 +338,8 @@ final class SectionClusterMeshBuilderTest {
         return new CpuSectionMesh(
                 positions,
                 primitives,
-                opaque,
-                cutout,
-                transmissive,
+                new int[0],
+                TriangleLayout.triangles(opaque, cutout, transmissive),
                 specialMicromap(cutout),
                 CpuSectionLights.EMPTY);
     }
@@ -353,9 +352,8 @@ final class SectionClusterMeshBuilderTest {
         return new CpuSectionMesh(
                 new float[Math.multiplyExact(triangleCount, 9)],
                 new int[Math.multiplyExact(triangleCount, CpuSectionMesh.PRIMITIVE_WORDS)],
-                triangleCount,
-                0,
-                0,
+                new int[0],
+                TriangleLayout.triangles(triangleCount, 0, 0),
                 OpacityMicromapData.EMPTY,
                 CpuSectionLights.EMPTY);
     }

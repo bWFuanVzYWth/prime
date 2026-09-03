@@ -219,20 +219,21 @@ final class SectionClusterMeshBuilder {
     }
 
     private CpuSectionMesh buildSegment() {
-        int triangleCount = Math.addExact(
-                Math.addExact(this.opaqueTriangleCount, this.cutoutTriangleCount),
-                this.transmissiveTriangleCount);
+        TriangleLayout triangleLayout = new TriangleLayout(
+                this.opaqueTriangleCount,
+                this.cutoutTriangleCount,
+                this.transmissiveTriangleCount,
+                this.opaqueMacroTriangleCount,
+                this.cutoutMacroTriangleCount,
+                this.transmissiveMacroTriangleCount);
+        int triangleCount = Math.toIntExact(triangleLayout.triangleCount());
         float[] positions = new float[Math.multiplyExact(
                 triangleCount, POSITION_WORDS_PER_TRIANGLE)];
-        int opaquePrimitiveCount = CpuSectionMesh.primitiveCount(
-                this.opaqueTriangleCount, this.opaqueMacroTriangleCount);
-        int cutoutPrimitiveCount = CpuSectionMesh.primitiveCount(
-                this.cutoutTriangleCount, this.cutoutMacroTriangleCount);
-        int transmissivePrimitiveCount = CpuSectionMesh.primitiveCount(
-                this.transmissiveTriangleCount, this.transmissiveMacroTriangleCount);
-        int primitiveCount = Math.addExact(
-                Math.addExact(opaquePrimitiveCount, cutoutPrimitiveCount),
-                transmissivePrimitiveCount);
+        int opaquePrimitiveCount = Math.toIntExact(triangleLayout.opaquePrimitiveCount());
+        int cutoutPrimitiveCount = Math.toIntExact(triangleLayout.cutoutPrimitiveCount());
+        int transmissivePrimitiveCount = Math.toIntExact(
+                triangleLayout.transmissivePrimitiveCount());
+        int primitiveCount = Math.toIntExact(triangleLayout.primitiveCount());
         int[] primitives = new int[Math.multiplyExact(
                 primitiveCount, PRIMITIVE_WORDS_PER_TRIANGLE)];
         ArrayList<int[]> opaqueRelations = new ArrayList<>(opaquePrimitiveCount);
@@ -372,12 +373,7 @@ final class SectionClusterMeshBuilder {
                 positions,
                 primitives,
                 SurfaceRelationTable.encode(relations),
-                this.opaqueTriangleCount,
-                this.cutoutTriangleCount,
-                this.transmissiveTriangleCount,
-                this.opaqueMacroTriangleCount,
-                this.cutoutMacroTriangleCount,
-                this.transmissiveMacroTriangleCount,
+                triangleLayout,
                 opacityMicromap.build(),
                 lights);
         return result;

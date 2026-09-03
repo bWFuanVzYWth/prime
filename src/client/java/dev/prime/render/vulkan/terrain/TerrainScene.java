@@ -1238,12 +1238,7 @@ public final class TerrainScene implements AutoCloseable {
                             mesh.opacityMicromap(),
                             stagingBatch,
                             commandBuffer,
-                            mesh.opaqueTriangleCount(),
-                            mesh.cutoutTriangleCount(),
-                            mesh.transmissiveTriangleCount(),
-                            mesh.opaqueMacroTriangleCount(),
-                            mesh.cutoutMacroTriangleCount(),
-                            mesh.transmissiveMacroTriangleCount(),
+                            mesh.triangleLayout(),
                             compactionPolicy,
                             "Prime cluster " + upload.key() + " BLAS");
                 } else {
@@ -1255,12 +1250,7 @@ public final class TerrainScene implements AutoCloseable {
                             mesh.opacityMicromap(),
                             stagingBatch,
                             commandBuffer,
-                            mesh.opaqueTriangleCount(),
-                            mesh.cutoutTriangleCount(),
-                            mesh.transmissiveTriangleCount(),
-                            mesh.opaqueMacroTriangleCount(),
-                            mesh.cutoutMacroTriangleCount(),
-                            mesh.transmissiveMacroTriangleCount(),
+                            mesh.triangleLayout(),
                             compactionPolicy,
                             "Prime cluster " + upload.key() + " BLAS");
                 }
@@ -1395,9 +1385,7 @@ public final class TerrainScene implements AutoCloseable {
                     mesh.opacityMicromap(),
                     stagingBatch,
                     commandBuffer,
-                    mesh.opaqueTriangleCount(),
-                    mesh.cutoutTriangleCount(),
-                    mesh.transmissiveTriangleCount(),
+                    mesh.triangleLayout(),
                     PreparedBlas.CompactionPolicy.ENABLED,
                     label + " BLAS");
             return blas;

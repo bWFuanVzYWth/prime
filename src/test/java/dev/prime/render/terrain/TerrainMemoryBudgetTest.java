@@ -32,9 +32,8 @@ final class TerrainMemoryBudgetTest {
         CpuSectionMesh mesh = new CpuSectionMesh(
                 new float[9],
                 new int[CpuSectionMesh.PRIMITIVE_WORDS],
-                1,
-                0,
-                0,
+                new int[0],
+                TriangleLayout.triangles(1, 0, 0),
                 OpacityMicromapData.EMPTY,
                 CpuSectionLights.EMPTY);
         assertFalse(TerrainMemoryBudget.startsNewSegment(

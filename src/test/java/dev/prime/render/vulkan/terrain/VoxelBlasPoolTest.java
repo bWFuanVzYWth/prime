@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import dev.prime.render.terrain.CpuSectionMesh;
 import dev.prime.render.terrain.CpuVoxelMesh;
 import dev.prime.render.terrain.OpacityMicromapData;
+import dev.prime.render.terrain.TriangleLayout;
 import org.junit.jupiter.api.Test;
 
 final class VoxelBlasPoolTest {
@@ -34,9 +35,7 @@ final class VoxelBlasPoolTest {
         CpuVoxelMesh borrowed = new CpuVoxelMesh(
                 positions,
                 primitives(3),
-                1,
-                0,
-                0,
+                TriangleLayout.triangles(1, 0, 0),
                 OpacityMicromapData.EMPTY);
         VoxelBlasPool.Key snapshot = new VoxelBlasPool.Key(borrowed);
         positions[0] = 2.0F;
@@ -51,9 +50,7 @@ final class VoxelBlasPoolTest {
         return new CpuVoxelMesh(
                 positions(firstPosition),
                 primitives(primitive),
-                opaque ? 1 : 0,
-                0,
-                opaque ? 0 : 1,
+                TriangleLayout.triangles(opaque ? 1 : 0, 0, opaque ? 0 : 1),
                 OpacityMicromapData.EMPTY);
     }
 

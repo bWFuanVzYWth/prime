@@ -13,12 +13,7 @@ import java.util.Set;
  */
 public final class CpuClusterMesh {
     private final List<Segment> segments;
-    private final long opaqueTriangleCount;
-    private final long cutoutTriangleCount;
-    private final long transmissiveTriangleCount;
-    private final long opaqueMacroTriangleCount;
-    private final long cutoutMacroTriangleCount;
-    private final long transmissiveMacroTriangleCount;
+    private final TriangleLayout triangleLayout;
     private final OpacityMicromapData opacityMicromap;
     private final CompiledClusterLights lights;
     private final List<CpuVoxelMesh> voxelMeshes;
@@ -49,27 +44,11 @@ public final class CpuClusterMesh {
             List<CpuVoxelMesh> voxelMeshes,
             CpuVoxelInstances voxelInstances,
             List<MediumKey> mediumCatalog,
-            Set<StaticCompatibilityIssue> compatibilityIssues) {
+        Set<StaticCompatibilityIssue> compatibilityIssues) {
         this.segments = List.copyOf(segments);
-        long segmentOpaque = 0L;
-        long segmentCutout = 0L;
-        long segmentTransmissive = 0L;
-        long segmentOpaqueMacro = 0L;
-        long segmentCutoutMacro = 0L;
-        long segmentTransmissiveMacro = 0L;
+        TriangleLayout combined = TriangleLayout.triangles(0L, 0L, 0L);
         for (Segment segment : this.segments) {
-            segmentOpaque = Math.addExact(
-                    segmentOpaque, segment.opaqueTriangleCount());
-            segmentCutout = Math.addExact(
-                    segmentCutout, segment.cutoutTriangleCount());
-            segmentTransmissive = Math.addExact(
-                    segmentTransmissive, segment.transmissiveTriangleCount());
-            segmentOpaqueMacro = Math.addExact(
-                    segmentOpaqueMacro, segment.opaqueMacroTriangleCount());
-            segmentCutoutMacro = Math.addExact(
-                    segmentCutoutMacro, segment.cutoutMacroTriangleCount());
-            segmentTransmissiveMacro = Math.addExact(
-                    segmentTransmissiveMacro, segment.transmissiveMacroTriangleCount());
+            combined = combined.plus(segment.triangleLayout());
         }
         Objects.requireNonNull(opacityMicromap, "opacityMicromap");
         Objects.requireNonNull(lights, "lights");
@@ -83,16 +62,11 @@ public final class CpuClusterMesh {
                     "Cluster medium catalog contains duplicate identities");
         }
         this.compatibilityIssues = Set.copyOf(compatibilityIssues);
-        if (opacityMicromap.triangleCount() != segmentCutout) {
+        if (opacityMicromap.triangleCount() != combined.cutoutTriangleCount()) {
             throw new IllegalArgumentException(
                     "Cluster opacity micromap does not match cutout geometry");
         }
-        this.opaqueTriangleCount = segmentOpaque;
-        this.cutoutTriangleCount = segmentCutout;
-        this.transmissiveTriangleCount = segmentTransmissive;
-        this.opaqueMacroTriangleCount = segmentOpaqueMacro;
-        this.cutoutMacroTriangleCount = segmentCutoutMacro;
-        this.transmissiveMacroTriangleCount = segmentTransmissiveMacro;
+        this.triangleLayout = combined;
         requireMacroTail(this.segments, 0);
         requireMacroTail(this.segments, 1);
         requireMacroTail(this.segments, 2);
@@ -129,12 +103,7 @@ public final class CpuClusterMesh {
                     mesh.positions(),
                     mesh.primitiveRecords(),
                     mesh.surfaceRelationRecords(),
-                    mesh.opaqueTriangleCount(),
-                    mesh.cutoutTriangleCount(),
-                    mesh.transmissiveTriangleCount(),
-                    mesh.opaqueMacroTriangleCount(),
-                    mesh.cutoutMacroTriangleCount(),
-                    mesh.transmissiveMacroTriangleCount()));
+                    mesh.triangleLayout()));
             opacityMicromap.append(mesh.opacityMicromap());
             if (!mesh.lights().isEmpty()) {
                 lightSources.add(new CpuSectionLights.Translated(
@@ -163,72 +132,71 @@ public final class CpuClusterMesh {
     }
 
     public long opaqueTriangleCount() {
-        return this.opaqueTriangleCount;
+        return this.triangleLayout.opaqueTriangleCount();
     }
 
     public long cutoutTriangleCount() {
-        return this.cutoutTriangleCount;
+        return this.triangleLayout.cutoutTriangleCount();
     }
 
     public long transmissiveTriangleCount() {
-        return this.transmissiveTriangleCount;
+        return this.triangleLayout.transmissiveTriangleCount();
     }
 
     public long opaqueMacroTriangleCount() {
-        return this.opaqueMacroTriangleCount;
+        return this.triangleLayout.opaqueMacroTriangleCount();
     }
 
     public long cutoutMacroTriangleCount() {
-        return this.cutoutMacroTriangleCount;
+        return this.triangleLayout.cutoutMacroTriangleCount();
     }
 
     public long transmissiveMacroTriangleCount() {
-        return this.transmissiveMacroTriangleCount;
+        return this.triangleLayout.transmissiveMacroTriangleCount();
     }
 
     public long opaquePrimitiveCount() {
-        return primitiveCount(this.opaqueTriangleCount, this.opaqueMacroTriangleCount);
+        return this.triangleLayout.opaquePrimitiveCount();
     }
 
     public long cutoutPrimitiveCount() {
-        return primitiveCount(this.cutoutTriangleCount, this.cutoutMacroTriangleCount);
+        return this.triangleLayout.cutoutPrimitiveCount();
     }
 
     public long transmissivePrimitiveCount() {
-        return primitiveCount(
-                this.transmissiveTriangleCount, this.transmissiveMacroTriangleCount);
+        return this.triangleLayout.transmissivePrimitiveCount();
     }
 
     public long primitiveCount() {
-        return Math.addExact(
-                Math.addExact(this.opaquePrimitiveCount(), this.cutoutPrimitiveCount()),
-                this.transmissivePrimitiveCount());
+        return this.triangleLayout.primitiveCount();
     }
 
     public long cutoutPrimitiveBase() {
-        return this.opaquePrimitiveCount();
+        return this.triangleLayout.cutoutPrimitiveBase();
     }
 
     public long transmissivePrimitiveBase() {
-        return Math.addExact(this.opaquePrimitiveCount(), this.cutoutPrimitiveCount());
+        return this.triangleLayout.transmissivePrimitiveBase();
     }
 
     public long opaqueMacroTriangleBase() {
-        return this.opaqueTriangleCount - this.opaqueMacroTriangleCount;
+        return this.triangleLayout.opaqueMacroTriangleBase();
     }
 
     public long cutoutMacroTriangleBase() {
-        return this.cutoutTriangleCount - this.cutoutMacroTriangleCount;
+        return this.triangleLayout.cutoutMacroTriangleBase();
     }
 
     public long transmissiveMacroTriangleBase() {
-        return this.transmissiveTriangleCount - this.transmissiveMacroTriangleCount;
+        return this.triangleLayout.transmissiveMacroTriangleBase();
     }
 
     public long triangleCount() {
-        return Math.addExact(
-                Math.addExact(this.opaqueTriangleCount, this.cutoutTriangleCount),
-                this.transmissiveTriangleCount);
+        return this.triangleLayout.triangleCount();
+    }
+
+    public TriangleLayout triangleLayout() {
+        return this.triangleLayout;
     }
 
     public OpacityMicromapData opacityMicromap() {
@@ -393,85 +361,67 @@ public final class CpuClusterMesh {
             float[] positions,
             int[] primitiveRecords,
             int[] surfaceRelationRecords,
-            int opaqueTriangleCount,
-            int cutoutTriangleCount,
-            int transmissiveTriangleCount,
-            int opaqueMacroTriangleCount,
-            int cutoutMacroTriangleCount,
-            int transmissiveMacroTriangleCount) {
+            TriangleLayout triangleLayout) {
         public Segment {
             positions = Objects.requireNonNull(positions, "positions");
             primitiveRecords = Objects.requireNonNull(
                     primitiveRecords, "primitiveRecords");
             surfaceRelationRecords = Objects.requireNonNull(
                     surfaceRelationRecords, "surfaceRelationRecords");
-            int triangles = Math.addExact(
-                    Math.addExact(opaqueTriangleCount, cutoutTriangleCount),
-                    transmissiveTriangleCount);
-            if (opaqueTriangleCount < 0
-                    || cutoutTriangleCount < 0
-                    || transmissiveTriangleCount < 0
-                    || !validMacroCount(opaqueTriangleCount, opaqueMacroTriangleCount)
-                    || !validMacroCount(cutoutTriangleCount, cutoutMacroTriangleCount)
-                    || !validMacroCount(
-                            transmissiveTriangleCount, transmissiveMacroTriangleCount)
-                    || positions.length != Math.multiplyExact(triangles, 9)
+            triangleLayout = Objects.requireNonNull(triangleLayout, "triangleLayout");
+            if (positions.length
+                            != Math.multiplyExact(
+                                    Math.toIntExact(triangleLayout.triangleCount()), 9)
                     || primitiveRecords.length
-                            != Math.multiplyExact(primitiveCount(
-                                            triangles,
-                                            Math.addExact(
-                                                    Math.addExact(
-                                                            opaqueMacroTriangleCount,
-                                                            cutoutMacroTriangleCount),
-                                                    transmissiveMacroTriangleCount)),
+                            != Math.multiplyExact(
+                                    Math.toIntExact(triangleLayout.primitiveCount()),
                                     CpuSectionMesh.PRIMITIVE_WORDS)) {
                 throw new IllegalArgumentException("Invalid cluster mesh segment");
             }
             SurfaceRelationTable.validate(
                     surfaceRelationRecords,
-                    Math.addExact(
-                            Math.addExact(
-                                    CpuSectionMesh.primitiveCount(
-                                            opaqueTriangleCount,
-                                            opaqueMacroTriangleCount),
-                                    CpuSectionMesh.primitiveCount(
-                                            cutoutTriangleCount,
-                                            cutoutMacroTriangleCount)),
-                            CpuSectionMesh.primitiveCount(
-                                    transmissiveTriangleCount,
-                                    transmissiveMacroTriangleCount)));
+                    Math.toIntExact(triangleLayout.primitiveCount()));
         }
 
         public int triangleCount() {
-            return Math.addExact(
-                    Math.addExact(this.opaqueTriangleCount, this.cutoutTriangleCount),
-                    this.transmissiveTriangleCount);
+            return Math.toIntExact(this.triangleLayout.triangleCount());
+        }
+
+        public int opaqueTriangleCount() {
+            return Math.toIntExact(this.triangleLayout.opaqueTriangleCount());
+        }
+
+        public int cutoutTriangleCount() {
+            return Math.toIntExact(this.triangleLayout.cutoutTriangleCount());
+        }
+
+        public int transmissiveTriangleCount() {
+            return Math.toIntExact(this.triangleLayout.transmissiveTriangleCount());
+        }
+
+        public int opaqueMacroTriangleCount() {
+            return Math.toIntExact(this.triangleLayout.opaqueMacroTriangleCount());
+        }
+
+        public int cutoutMacroTriangleCount() {
+            return Math.toIntExact(this.triangleLayout.cutoutMacroTriangleCount());
+        }
+
+        public int transmissiveMacroTriangleCount() {
+            return Math.toIntExact(this.triangleLayout.transmissiveMacroTriangleCount());
         }
 
         public int opaquePrimitiveCount() {
-            return CpuSectionMesh.primitiveCount(
-                    this.opaqueTriangleCount, this.opaqueMacroTriangleCount);
+            return Math.toIntExact(this.triangleLayout.opaquePrimitiveCount());
         }
 
         public int cutoutPrimitiveCount() {
-            return CpuSectionMesh.primitiveCount(
-                    this.cutoutTriangleCount, this.cutoutMacroTriangleCount);
+            return Math.toIntExact(this.triangleLayout.cutoutPrimitiveCount());
         }
 
         public int transmissivePrimitiveCount() {
-            return CpuSectionMesh.primitiveCount(
-                    this.transmissiveTriangleCount, this.transmissiveMacroTriangleCount);
+            return Math.toIntExact(this.triangleLayout.transmissivePrimitiveCount());
         }
-    }
-
-    private static long primitiveCount(long triangleCount, long macroTriangleCount) {
-        return Math.subtractExact(triangleCount, macroTriangleCount / 2L);
-    }
-
-    private static boolean validMacroCount(int triangleCount, int macroTriangleCount) {
-        return macroTriangleCount >= 0
-                && macroTriangleCount <= triangleCount
-                && (macroTriangleCount & 1) == 0;
     }
 
     private static void requireMacroTail(List<Segment> segments, int category) {

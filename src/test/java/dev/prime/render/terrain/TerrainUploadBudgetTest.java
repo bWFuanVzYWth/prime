@@ -36,9 +36,7 @@ final class TerrainUploadBudgetTest {
         CpuVoxelMesh voxelMesh = new CpuVoxelMesh(
                 new float[9],
                 new int[CpuSectionMesh.PRIMITIVE_WORDS],
-                1,
-                0,
-                0,
+                TriangleLayout.triangles(1, 0, 0),
                 OpacityMicromapData.EMPTY);
         CpuClusterMesh mesh = CpuClusterMesh.fromSegments(
                 List.of(),
@@ -56,9 +54,8 @@ final class TerrainUploadBudgetTest {
         return new CpuSectionMesh(
                 new float[triangles * 9],
                 new int[triangles * CpuSectionMesh.PRIMITIVE_WORDS],
-                opaque,
-                cutout,
-                transmissive,
+                new int[0],
+                TriangleLayout.triangles(opaque, cutout, transmissive),
                 OpacityMicromapData.fullyUnknown(cutout),
                 CpuSectionLights.EMPTY);
     }

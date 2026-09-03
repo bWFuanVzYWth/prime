@@ -463,12 +463,13 @@ final class MergedFaceMeshBuilder {
                     positions,
                     primitives,
                     SurfaceRelationTable.encode(relations),
-                    this.opaqueTriangles,
-                    this.cutoutTriangles,
-                    this.transmissiveTriangles,
-                    this.opaqueTriangles,
-                    this.cutoutTriangles,
-                    this.transmissiveTriangles,
+                    new TriangleLayout(
+                            this.opaqueTriangles,
+                            this.cutoutTriangles,
+                            this.transmissiveTriangles,
+                            this.opaqueTriangles,
+                            this.cutoutTriangles,
+                            this.transmissiveTriangles),
                     this.opacityMicromap.build(),
                     CpuSectionLights.EMPTY);
         }

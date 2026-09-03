@@ -878,9 +878,10 @@ final class TextureVoxelMeshBuilder {
             return new CpuVoxelMesh(
                     this.positions.toFloatArray(),
                     this.primitives.toIntArray(),
-                    this.transmissive || this.cutoutGeometry ? 0 : this.triangleCount,
-                    this.cutoutGeometry ? this.triangleCount : 0,
-                    this.transmissive ? this.triangleCount : 0,
+                    TriangleLayout.triangles(
+                            this.transmissive || this.cutoutGeometry ? 0 : this.triangleCount,
+                            this.cutoutGeometry ? this.triangleCount : 0,
+                            this.transmissive ? this.triangleCount : 0),
                     opacity);
         }
     }

@@ -184,9 +184,10 @@ public final class SectionMeshAccumulator {
                 positions,
                 primitives,
                 SurfaceRelationTable.encode(relations),
-                this.opaque.triangleCount,
-                this.cutout.triangleCount,
-                this.transmissive.triangleCount,
+                TriangleLayout.triangles(
+                        this.opaque.triangleCount,
+                        this.cutout.triangleCount,
+                        this.transmissive.triangleCount),
                 this.opacityMicromap == null
                         ? OpacityMicromapData.fullyUnknown(this.cutout.triangleCount)
                         : this.opacityMicromap.build(),

@@ -2,6 +2,7 @@ package dev.prime.render.vulkan;
 
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.terrain.OpacityMicromapData;
+import dev.prime.render.terrain.TriangleLayout;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import org.lwjgl.PointerBuffer;
@@ -13,8 +14,6 @@ import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkAccelerationStructureBuildGeometryInfoKHR;
 import org.lwjgl.vulkan.VkAccelerationStructureBuildRangeInfoKHR;
 import org.lwjgl.vulkan.VkAccelerationStructureBuildSizesInfoKHR;
-import org.lwjgl.vulkan.VkAccelerationStructureCreateInfoKHR;
-import org.lwjgl.vulkan.VkAccelerationStructureDeviceAddressInfoKHR;
 import org.lwjgl.vulkan.VkAccelerationStructureGeometryKHR;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkCopyAccelerationStructureInfoKHR;
@@ -42,12 +41,7 @@ public final class PreparedBlas {
     private long compactionSourceSize;
     private long compactedSize;
     private final String label;
-    private final long opaqueTriangleCount;
-    private final long cutoutTriangleCount;
-    private final long transmissiveTriangleCount;
-    private final long opaqueMacroTriangleCount;
-    private final long cutoutMacroTriangleCount;
-    private final long transmissiveMacroTriangleCount;
+    private final TriangleLayout triangleLayout;
 
     private PreparedBlas(
             VulkanContext context,
@@ -58,12 +52,7 @@ public final class PreparedBlas {
             OpacityMicromap opacityMicromap,
             VulkanBuffer compactionResult,
             long compactionQueryPool,
-            long opaqueTriangleCount,
-            long cutoutTriangleCount,
-            long transmissiveTriangleCount,
-            long opaqueMacroTriangleCount,
-            long cutoutMacroTriangleCount,
-            long transmissiveMacroTriangleCount,
+            TriangleLayout triangleLayout,
             CompactionPolicy compactionPolicy,
             boolean ownsGeometryBuffers,
             String label) {
@@ -75,12 +64,7 @@ public final class PreparedBlas {
         this.opacityMicromap = opacityMicromap;
         this.compactionResult = compactionResult;
         this.compactionQueryPool = compactionQueryPool;
-        this.opaqueTriangleCount = opaqueTriangleCount;
-        this.cutoutTriangleCount = cutoutTriangleCount;
-        this.transmissiveTriangleCount = transmissiveTriangleCount;
-        this.opaqueMacroTriangleCount = opaqueMacroTriangleCount;
-        this.cutoutMacroTriangleCount = cutoutMacroTriangleCount;
-        this.transmissiveMacroTriangleCount = transmissiveMacroTriangleCount;
+        this.triangleLayout = triangleLayout;
         this.compactionPolicy = compactionPolicy;
         this.ownsGeometryBuffers = ownsGeometryBuffers;
         this.compactionState = compactionPolicy == CompactionPolicy.ENABLED
@@ -131,9 +115,7 @@ public final class PreparedBlas {
             OpacityMicromapData opacityMicromapData,
             StagingArena.Batch staging,
             VkCommandBuffer commandBuffer,
-            long opaqueTriangleCount,
-            long cutoutTriangleCount,
-            long transmissiveTriangleCount,
+            TriangleLayout triangleLayout,
             CompactionPolicy compactionPolicy,
             String label) {
         return create(
@@ -144,46 +126,7 @@ public final class PreparedBlas {
                 opacityMicromapData,
                 staging,
                 commandBuffer,
-                opaqueTriangleCount,
-                cutoutTriangleCount,
-                transmissiveTriangleCount,
-                0L,
-                0L,
-                0L,
-                compactionPolicy,
-                label);
-    }
-
-    public static PreparedBlas create(
-            VulkanContext context,
-            OpacityMicromapPool opacityMicromapPool,
-            VulkanBuffer positions,
-            VulkanBuffer primitives,
-            OpacityMicromapData opacityMicromapData,
-            StagingArena.Batch staging,
-            VkCommandBuffer commandBuffer,
-            long opaqueTriangleCount,
-            long cutoutTriangleCount,
-            long transmissiveTriangleCount,
-            long opaqueMacroTriangleCount,
-            long cutoutMacroTriangleCount,
-            long transmissiveMacroTriangleCount,
-            CompactionPolicy compactionPolicy,
-            String label) {
-        return create(
-                context,
-                opacityMicromapPool,
-                positions,
-                primitives,
-                opacityMicromapData,
-                staging,
-                commandBuffer,
-                opaqueTriangleCount,
-                cutoutTriangleCount,
-                transmissiveTriangleCount,
-                opaqueMacroTriangleCount,
-                cutoutMacroTriangleCount,
-                transmissiveMacroTriangleCount,
+                triangleLayout,
                 compactionPolicy,
                 true,
                 label);
@@ -198,12 +141,7 @@ public final class PreparedBlas {
             OpacityMicromapData opacityMicromapData,
             StagingArena.Batch staging,
             VkCommandBuffer commandBuffer,
-            long opaqueTriangleCount,
-            long cutoutTriangleCount,
-            long transmissiveTriangleCount,
-            long opaqueMacroTriangleCount,
-            long cutoutMacroTriangleCount,
-            long transmissiveMacroTriangleCount,
+            TriangleLayout triangleLayout,
             CompactionPolicy compactionPolicy,
             String label) {
         return create(
@@ -214,12 +152,7 @@ public final class PreparedBlas {
                 opacityMicromapData,
                 staging,
                 commandBuffer,
-                opaqueTriangleCount,
-                cutoutTriangleCount,
-                transmissiveTriangleCount,
-                opaqueMacroTriangleCount,
-                cutoutMacroTriangleCount,
-                transmissiveMacroTriangleCount,
+                triangleLayout,
                 compactionPolicy,
                 false,
                 label);
@@ -233,26 +166,21 @@ public final class PreparedBlas {
             OpacityMicromapData opacityMicromapData,
             StagingArena.Batch staging,
             VkCommandBuffer commandBuffer,
-            long opaqueTriangleCount,
-            long cutoutTriangleCount,
-            long transmissiveTriangleCount,
-            long opaqueMacroTriangleCount,
-            long cutoutMacroTriangleCount,
-            long transmissiveMacroTriangleCount,
+            TriangleLayout triangleLayout,
             CompactionPolicy compactionPolicy,
             boolean ownsGeometryBuffers,
             String label) {
         if (compactionPolicy == null) {
             throw new IllegalArgumentException("BLAS compaction policy must not be null");
         }
+        if (triangleLayout == null) {
+            throw new IllegalArgumentException("BLAS triangle layout must not be null");
+        }
         validateCounts(
-                opaqueTriangleCount,
-                cutoutTriangleCount,
-                transmissiveTriangleCount,
+                triangleLayout.opaqueTriangleCount(),
+                triangleLayout.cutoutTriangleCount(),
+                triangleLayout.transmissiveTriangleCount(),
                 context.capabilities().maxAccelerationStructurePrimitiveCount());
-        requireMacroCount(opaqueTriangleCount, opaqueMacroTriangleCount);
-        requireMacroCount(cutoutTriangleCount, cutoutMacroTriangleCount);
-        requireMacroCount(transmissiveTriangleCount, transmissiveMacroTriangleCount);
         OpacityMicromap opacityMicromap = opacityMicromapPool.acquire(
                 opacityMicromapData,
                 staging,
@@ -262,9 +190,7 @@ public final class PreparedBlas {
             VkAccelerationStructureGeometryKHR.Buffer geometries = geometries(
                     stack,
                     positions.deviceAddress(),
-                    opaqueTriangleCount,
-                    cutoutTriangleCount,
-                    transmissiveTriangleCount,
+                    triangleLayout,
                     opacityMicromap);
             VkAccelerationStructureBuildGeometryInfoKHR buildInfo = VkAccelerationStructureBuildGeometryInfoKHR.calloc(stack)
                     .sType$Default()
@@ -274,9 +200,9 @@ public final class PreparedBlas {
                     .geometryCount(GEOMETRY_COUNT)
                     .pGeometries(geometries);
             IntBuffer primitiveCounts = stack.ints(
-                    (int) opaqueTriangleCount,
-                    (int) cutoutTriangleCount,
-                    (int) transmissiveTriangleCount);
+                    (int) triangleLayout.opaqueTriangleCount(),
+                    (int) triangleLayout.cutoutTriangleCount(),
+                    (int) triangleLayout.transmissiveTriangleCount());
             VkAccelerationStructureBuildSizesInfoKHR sizes = VkAccelerationStructureBuildSizesInfoKHR.calloc(stack).sType$Default();
             KHRAccelerationStructure.vkGetAccelerationStructureBuildSizesKHR(
                     context.vkDevice(),
@@ -290,8 +216,11 @@ public final class PreparedBlas {
             VulkanBuffer compactionResult = null;
             long compactionQueryPool = 0L;
             try {
-                accelerationStructure = createAccelerationStructure(
-                        context, sizes.accelerationStructureSize(), label);
+                accelerationStructure = AccelerationStructure.create(
+                        context,
+                        sizes.accelerationStructureSize(),
+                        KHRAccelerationStructure.VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+                        label);
                 long scratchSize = sizes.buildScratchSize()
                         + context.capabilities().accelerationStructureScratchAlignment() - 1L;
                 scratch = context.createBuffer(
@@ -324,12 +253,7 @@ public final class PreparedBlas {
                         opacityMicromap,
                         compactionResult,
                         compactionQueryPool,
-                        opaqueTriangleCount,
-                        cutoutTriangleCount,
-                        transmissiveTriangleCount,
-                        opaqueMacroTriangleCount,
-                        cutoutMacroTriangleCount,
-                        transmissiveMacroTriangleCount,
+                        triangleLayout,
                         compactionPolicy,
                         ownsGeometryBuffers,
                         label);
@@ -353,9 +277,7 @@ public final class PreparedBlas {
             VkAccelerationStructureGeometryKHR.Buffer geometries = geometries(
                     stack,
                     this.positions.deviceAddress(),
-                    this.opaqueTriangleCount,
-                    this.cutoutTriangleCount,
-                    this.transmissiveTriangleCount,
+                    this.triangleLayout,
                     this.opacityMicromap);
             VkAccelerationStructureBuildGeometryInfoKHR.Buffer buildInfo =
                     VkAccelerationStructureBuildGeometryInfoKHR.calloc(1, stack);
@@ -375,17 +297,17 @@ public final class PreparedBlas {
             VkAccelerationStructureBuildRangeInfoKHR.Buffer ranges =
                     VkAccelerationStructureBuildRangeInfoKHR.calloc(GEOMETRY_COUNT, stack);
             ranges.get(0)
-                    .primitiveCount((int) this.opaqueTriangleCount)
+                    .primitiveCount((int) this.triangleLayout.opaqueTriangleCount())
                     .primitiveOffset(0)
                     .firstVertex(0)
                     .transformOffset(0);
             ranges.get(1)
-                    .primitiveCount((int) this.cutoutTriangleCount)
+                    .primitiveCount((int) this.triangleLayout.cutoutTriangleCount())
                     .primitiveOffset(0)
                     .firstVertex(0)
                     .transformOffset(0);
             ranges.get(2)
-                    .primitiveCount((int) this.transmissiveTriangleCount)
+                    .primitiveCount((int) this.triangleLayout.transmissiveTriangleCount())
                     .primitiveOffset(0)
                     .firstVertex(0)
                     .transformOffset(0);
@@ -482,8 +404,11 @@ public final class PreparedBlas {
     public synchronized Compaction prepareCompaction() {
         requireState(CompactionState.READY);
         AccelerationStructure source = this.accelerationStructure;
-        AccelerationStructure compacted = createAccelerationStructure(
-                this.context, this.compactedSize, this.label + " compacted");
+        AccelerationStructure compacted = AccelerationStructure.create(
+                this.context,
+                this.compactedSize,
+                KHRAccelerationStructure.VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+                this.label + " compacted");
         this.transition(CompactionEvent.TARGET_PREPARED);
         return new Compaction(this, source, compacted);
     }
@@ -511,37 +436,35 @@ public final class PreparedBlas {
     }
 
     public long opaqueTriangleCount() {
-        return this.opaqueTriangleCount;
+        return this.triangleLayout.opaqueTriangleCount();
     }
 
     public long cutoutTriangleCount() {
-        return this.cutoutTriangleCount;
+        return this.triangleLayout.cutoutTriangleCount();
     }
 
     public long transmissiveTriangleCount() {
-        return this.transmissiveTriangleCount;
+        return this.triangleLayout.transmissiveTriangleCount();
     }
 
     public long cutoutPrimitiveBase() {
-        return primitiveCount(this.opaqueTriangleCount, this.opaqueMacroTriangleCount);
+        return this.triangleLayout.cutoutPrimitiveBase();
     }
 
     public long transmissivePrimitiveBase() {
-        return Math.addExact(
-                this.cutoutPrimitiveBase(),
-                primitiveCount(this.cutoutTriangleCount, this.cutoutMacroTriangleCount));
+        return this.triangleLayout.transmissivePrimitiveBase();
     }
 
     public long opaqueMacroTriangleBase() {
-        return this.opaqueTriangleCount - this.opaqueMacroTriangleCount;
+        return this.triangleLayout.opaqueMacroTriangleBase();
     }
 
     public long cutoutMacroTriangleBase() {
-        return this.cutoutTriangleCount - this.cutoutMacroTriangleCount;
+        return this.triangleLayout.cutoutMacroTriangleBase();
     }
 
     public long transmissiveMacroTriangleBase() {
-        return this.transmissiveTriangleCount - this.transmissiveMacroTriangleCount;
+        return this.triangleLayout.transmissiveMacroTriangleBase();
     }
 
     /** Scratch storage is build-only; positions remain shader-visible for exact hit reconstruction. */
@@ -700,47 +623,6 @@ public final class PreparedBlas {
         }
     }
 
-    private static AccelerationStructure createAccelerationStructure(
-            VulkanContext context, long size, String label) {
-        VulkanBuffer backing = context.createBuffer(
-                size,
-                KHRAccelerationStructure.VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR,
-                false,
-                label + " backing");
-        long handle = 0L;
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkAccelerationStructureCreateInfoKHR createInfo = VkAccelerationStructureCreateInfoKHR.calloc(stack)
-                    .sType$Default()
-                    .buffer(backing.handle())
-                    .offset(0L)
-                    .size(size)
-                    .type(KHRAccelerationStructure.VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
-            LongBuffer handlePointer = stack.mallocLong(1);
-            VulkanContext.check(
-                    KHRAccelerationStructure.vkCreateAccelerationStructureKHR(
-                            context.vkDevice(), createInfo, null, handlePointer),
-                    "create " + label);
-            handle = handlePointer.get(0);
-            context.device().instance().debug().setObjectName(
-                    context.vkDevice(),
-                    KHRAccelerationStructure.VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR,
-                    handle,
-                    label);
-            VkAccelerationStructureDeviceAddressInfoKHR addressInfo =
-                    VkAccelerationStructureDeviceAddressInfoKHR.calloc(stack)
-                            .sType$Default()
-                            .accelerationStructure(handle);
-            long deviceAddress = KHRAccelerationStructure.vkGetAccelerationStructureDeviceAddressKHR(
-                    context.vkDevice(), addressInfo);
-            return new AccelerationStructure(context.vkDevice(), handle, deviceAddress, backing);
-        } catch (RuntimeException exception) {
-            if (handle != 0L) {
-                KHRAccelerationStructure.vkDestroyAccelerationStructureKHR(context.vkDevice(), handle, null);
-            }
-            throw ResourceCleanup.destroy(backing, exception);
-        }
-    }
-
     public static final class Compaction implements AutoCloseable {
         private final PreparedBlas owner;
         private final AccelerationStructure source;
@@ -878,17 +760,22 @@ public final class PreparedBlas {
     private static VkAccelerationStructureGeometryKHR.Buffer geometries(
             MemoryStack stack,
             long positionAddress,
-            long opaqueTriangleCount,
-            long cutoutTriangleCount,
-            long transmissiveTriangleCount,
+            TriangleLayout triangleLayout,
             OpacityMicromap opacityMicromap) {
         VkAccelerationStructureGeometryKHR.Buffer geometries =
                 VkAccelerationStructureGeometryKHR.calloc(GEOMETRY_COUNT, stack);
-        fillGeometry(geometries.get(0), positionAddress, opaqueTriangleCount, true);
+        fillGeometry(
+                geometries.get(0),
+                positionAddress,
+                triangleLayout.opaqueTriangleCount(),
+                true);
         fillGeometry(
                 geometries.get(1),
-                cutoutGeometryVertexAddress(positionAddress, opaqueTriangleCount, cutoutTriangleCount),
-                cutoutTriangleCount,
+                cutoutGeometryVertexAddress(
+                        positionAddress,
+                        triangleLayout.opaqueTriangleCount(),
+                        triangleLayout.cutoutTriangleCount()),
+                triangleLayout.cutoutTriangleCount(),
                 false);
         if (opacityMicromap != null) {
             opacityMicromap.attach(geometries.get(1).geometry().triangles(), stack);
@@ -897,10 +784,10 @@ public final class PreparedBlas {
                 geometries.get(2),
                 transmissiveGeometryVertexAddress(
                         positionAddress,
-                        opaqueTriangleCount,
-                        cutoutTriangleCount,
-                        transmissiveTriangleCount),
-                transmissiveTriangleCount,
+                        triangleLayout.opaqueTriangleCount(),
+                        triangleLayout.cutoutTriangleCount(),
+                        triangleLayout.transmissiveTriangleCount()),
+                triangleLayout.transmissiveTriangleCount(),
                 false);
         return geometries;
     }
@@ -1004,16 +891,4 @@ public final class PreparedBlas {
         return total;
     }
 
-    private static long primitiveCount(long triangleCount, long macroTriangleCount) {
-        return Math.subtractExact(triangleCount, macroTriangleCount / 2L);
-    }
-
-    private static void requireMacroCount(long triangleCount, long macroTriangleCount) {
-        if (macroTriangleCount < 0L
-                || macroTriangleCount > triangleCount
-                || (macroTriangleCount & 1L) != 0L) {
-            throw new IllegalArgumentException(
-                    "Macro triangle counts must be even and inside their geometry partition");
-        }
-    }
 }
