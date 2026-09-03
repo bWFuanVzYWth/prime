@@ -8,6 +8,8 @@ import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkDescriptorPoolCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
 import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
+import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
+import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorImageInfo;
 import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
@@ -24,13 +26,23 @@ public final class VulkanDescriptors {
             long setLayout,
             VkPushConstantRange.Buffer pushConstants,
             String operation) {
+        return createPipelineLayout(
+                context, stack, stack.longs(setLayout), pushConstants, operation);
+    }
+
+    public static long createPipelineLayout(
+            VulkanContext context,
+            MemoryStack stack,
+            LongBuffer setLayouts,
+            VkPushConstantRange.Buffer pushConstants,
+            String operation) {
         LongBuffer pointer = stack.mallocLong(1);
         VulkanContext.check(
                 VK12.vkCreatePipelineLayout(
                         context.vkDevice(),
                         VkPipelineLayoutCreateInfo.calloc(stack)
                                 .sType$Default()
-                                .pSetLayouts(stack.longs(setLayout))
+                                .pSetLayouts(setLayouts)
                                 .pPushConstantRanges(pushConstants),
                         null,
                         pointer),
@@ -72,6 +84,24 @@ public final class VulkanDescriptors {
                                 .sType$Default()
                                 .descriptorPool(descriptorPool)
                                 .pSetLayouts(stack.longs(setLayout)),
+                        pointer),
+                operation);
+        return pointer.get(0);
+    }
+
+    public static long createSetLayout(
+            VulkanContext context,
+            MemoryStack stack,
+            VkDescriptorSetLayoutBinding.Buffer bindings,
+            String operation) {
+        LongBuffer pointer = stack.mallocLong(1);
+        VulkanContext.check(
+                VK12.vkCreateDescriptorSetLayout(
+                        context.vkDevice(),
+                        VkDescriptorSetLayoutCreateInfo.calloc(stack)
+                                .sType$Default()
+                                .pBindings(bindings),
+                        null,
                         pointer),
                 operation);
         return pointer.get(0);

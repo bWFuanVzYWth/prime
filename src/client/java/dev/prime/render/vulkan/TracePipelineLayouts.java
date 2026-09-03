@@ -1,11 +1,8 @@
 package dev.prime.render.vulkan;
 
 import dev.prime.render.shader.ShaderAbi;
-import java.nio.LongBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
-import org.lwjgl.vulkan.VK12;
-import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
 
 /** Shared pipeline-layout ABI for realtime and offline ray tracing. */
@@ -30,14 +27,11 @@ final class TracePipelineLayouts {
                 .stageFlags(ALL_RT_STAGES)
                 .offset(0)
                 .size(ShaderAbi.PUSH_CONSTANT_SIZE);
-        VkPipelineLayoutCreateInfo info = VkPipelineLayoutCreateInfo.calloc(stack)
-                .sType$Default()
-                .pSetLayouts(stack.longs(sharedSetLayout, integratorSetLayout))
-                .pPushConstantRanges(range);
-        LongBuffer pointer = stack.mallocLong(1);
-        VulkanContext.check(
-                VK12.vkCreatePipelineLayout(context.vkDevice(), info, null, pointer),
+        return VulkanDescriptors.createPipelineLayout(
+                context,
+                stack,
+                stack.longs(sharedSetLayout, integratorSetLayout),
+                range,
                 "create " + label + " trace pipeline layout");
-        return pointer.get(0);
     }
 }

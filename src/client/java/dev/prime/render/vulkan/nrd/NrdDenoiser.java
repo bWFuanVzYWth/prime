@@ -14,6 +14,7 @@ import dev.prime.render.SunDirection;
 import dev.prime.render.vulkan.AtmospherePipeline;
 import dev.prime.render.vulkan.ParallelPipelineCreation;
 import dev.prime.render.vulkan.VulkanContext;
+import dev.prime.render.vulkan.VulkanDescriptors;
 import dev.prime.render.vulkan.VulkanImage;
 import dev.prime.render.vulkan.RawWavefrontFrame;
 import dev.prime.render.vulkan.VulkanImageInitializationBatch;
@@ -35,7 +36,6 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
 import org.lwjgl.vulkan.VkDependencyInfo;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
 import org.lwjgl.vulkan.VkImageMemoryBarrier2;
 import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
 import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
@@ -886,14 +886,11 @@ public final class NrdDenoiser implements Destroyable {
                         .stageFlags(COMPUTE_STAGE);
             }
         }
-        VkDescriptorSetLayoutCreateInfo createInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
-                .sType$Default()
-                .pBindings(bindings);
-        LongBuffer pointer = stack.mallocLong(1);
-        VulkanContext.check(
-                VK12.vkCreateDescriptorSetLayout(context.vkDevice(), createInfo, null, pointer),
+        return VulkanDescriptors.createSetLayout(
+                context,
+                stack,
+                bindings,
                 "create Prime NRD resource descriptor set layout");
-        return pointer.get(0);
     }
 
     private static long createNrdConstantsDescriptorSetLayout(
@@ -929,14 +926,11 @@ public final class NrdDenoiser implements Destroyable {
                     .descriptorCount(1)
                     .stageFlags(COMPUTE_STAGE);
         }
-        VkDescriptorSetLayoutCreateInfo createInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
-                .sType$Default()
-                .pBindings(bindings);
-        LongBuffer pointer = stack.mallocLong(1);
-        VulkanContext.check(
-                VK12.vkCreateDescriptorSetLayout(context.vkDevice(), createInfo, null, pointer),
+        return VulkanDescriptors.createSetLayout(
+                context,
+                stack,
+                bindings,
                 "create Prime NRD constants descriptor set layout");
-        return pointer.get(0);
     }
 
 }

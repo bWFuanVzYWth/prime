@@ -7,8 +7,6 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
-import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
 import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
 
@@ -206,29 +204,20 @@ public final class VulkanSharedPrograms implements AutoCloseable {
                         .descriptorCount(1)
                         .stageFlags(COMPUTE_STAGE);
                 }
-                LongBuffer pointer = stack.mallocLong(1);
-                VulkanContext.check(
-                    VK12.vkCreateDescriptorSetLayout(context.vkDevice(),
-                        VkDescriptorSetLayoutCreateInfo.calloc(stack).sType$Default().pBindings(
-                            bindings),
-                        null, pointer),
-                    "create " + label + " descriptor layout");
-                descriptorSetLayout = pointer.get(0);
-
-                VkPipelineLayoutCreateInfo pipelineLayoutInfo =
-                    VkPipelineLayoutCreateInfo.calloc(stack).sType$Default().pSetLayouts(
-                        stack.longs(descriptorSetLayout));
-                if (pushSize > 0) {
-                    pipelineLayoutInfo.pPushConstantRanges(VkPushConstantRange.calloc(1, stack)
+                descriptorSetLayout = VulkanDescriptors.createSetLayout(
+                    context, stack, bindings, "create " + label + " descriptor layout");
+                VkPushConstantRange.Buffer pushConstants = pushSize > 0
+                    ? VkPushConstantRange.calloc(1, stack)
                             .stageFlags(COMPUTE_STAGE)
                             .offset(0)
-                            .size(pushSize));
-                }
-                pointer.clear();
-                VulkanContext.check(VK12.vkCreatePipelineLayout(
-                                        context.vkDevice(), pipelineLayoutInfo, null, pointer),
+                            .size(pushSize)
+                    : null;
+                pipelineLayout = VulkanDescriptors.createPipelineLayout(
+                    context,
+                    stack,
+                    descriptorSetLayout,
+                    pushConstants,
                     "create " + label + " pipeline layout");
-                pipelineLayout = pointer.get(0);
 
                 long finalPipelineLayout = pipelineLayout;
                 ParallelPipelineCreation.run(label, pipelines.length,

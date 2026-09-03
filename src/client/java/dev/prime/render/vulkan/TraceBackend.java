@@ -6,7 +6,6 @@ import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.vulkan.terrain.TerrainScene;
-import java.nio.LongBuffer;
 import java.util.List;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.KHRAccelerationStructure;
@@ -14,11 +13,8 @@ import org.lwjgl.vulkan.KHRRayTracingPipeline;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkDescriptorBufferInfo;
 import org.lwjgl.vulkan.VkDescriptorImageInfo;
-import org.lwjgl.vulkan.VkDescriptorPoolCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
-import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
 import org.lwjgl.vulkan.VkWriteDescriptorSet;
 import org.lwjgl.vulkan.VkWriteDescriptorSetAccelerationStructureKHR;
 import org.lwjgl.vulkan.VkCommandBuffer;
@@ -343,16 +339,11 @@ public final class TraceBackend implements Destroyable {
                 .descriptorType(VK12.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                 .descriptorCount(1)
                 .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
-        VkDescriptorSetLayoutCreateInfo createInfo =
-                VkDescriptorSetLayoutCreateInfo.calloc(stack)
-                        .sType$Default()
-                        .pBindings(bindings);
-        LongBuffer pointer = stack.mallocLong(1);
-        VulkanContext.check(
-                VK12.vkCreateDescriptorSetLayout(
-                        context.vkDevice(), createInfo, null, pointer),
+        return VulkanDescriptors.createSetLayout(
+                context,
+                stack,
+                bindings,
                 "create shared trace descriptor layout");
-        return pointer.get(0);
     }
 
     private static int[] sunShadowBindings() {
@@ -495,28 +486,19 @@ public final class TraceBackend implements Destroyable {
                 sizes.get(4)
                         .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                         .descriptorCount(4);
-                VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
-                        .sType$Default()
-                        .maxSets(1)
-                        .pPoolSizes(sizes);
-                LongBuffer poolPointer = stack.mallocLong(1);
-                VulkanContext.check(
-                        VK12.vkCreateDescriptorPool(
-                                context.vkDevice(), poolInfo, null, poolPointer),
+                long pool = VulkanDescriptors.createPool(
+                        context,
+                        stack,
+                        1,
+                        sizes,
                         "create shared trace descriptor pool");
-                long pool = poolPointer.get(0);
                 try {
-                    VkDescriptorSetAllocateInfo allocation =
-                            VkDescriptorSetAllocateInfo.calloc(stack)
-                                    .sType$Default()
-                                    .descriptorPool(pool)
-                                    .pSetLayouts(stack.longs(layout));
-                    LongBuffer setPointer = stack.mallocLong(1);
-                    VulkanContext.check(
-                            VK12.vkAllocateDescriptorSets(
-                                    context.vkDevice(), allocation, setPointer),
+                    long set = VulkanDescriptors.allocateSet(
+                            context,
+                            stack,
+                            pool,
+                            layout,
                             "allocate shared trace descriptor set");
-                    long set = setPointer.get(0);
                     if (sceneTextures.size() + 1 > ShaderAbi.SCENE_TEXTURE_COUNT) {
                         throw new IllegalArgumentException(
                                 "Dynamic scene texture count exceeds the descriptor ABI");

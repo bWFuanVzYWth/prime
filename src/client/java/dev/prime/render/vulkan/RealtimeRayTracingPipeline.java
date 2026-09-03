@@ -7,7 +7,6 @@ import dev.prime.render.IntegratorFrameInput;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.nio.ByteBuffer;
-import java.nio.LongBuffer;
 import java.util.Arrays;
 import java.util.List;
 import org.lwjgl.system.MemoryStack;
@@ -16,13 +15,8 @@ import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDescriptorBufferInfo;
 import org.lwjgl.vulkan.VkDescriptorImageInfo;
-import org.lwjgl.vulkan.VkDescriptorPoolCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
-import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
-import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
-import org.lwjgl.vulkan.VkPushConstantRange;
 import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /** Realtime ray-tracing pipeline and its wavefront resources. */
@@ -603,15 +597,11 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                 .descriptorCount(1)
                 .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
-        VkDescriptorSetLayoutCreateInfo info = VkDescriptorSetLayoutCreateInfo.calloc(stack)
-                .sType$Default()
-                .pBindings(bindings);
-        LongBuffer pointer = stack.mallocLong(1);
-        VulkanContext.check(
-                VK12.vkCreateDescriptorSetLayout(
-                        context.vkDevice(), info, null, pointer),
+        return VulkanDescriptors.createSetLayout(
+                context,
+                stack,
+                bindings,
                 "create realtime trace descriptor layout");
-        return pointer.get(0);
     }
 
     private static int[] imageBindings() {
@@ -716,28 +706,19 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 sizes.get(1)
                         .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                         .descriptorCount(2);
-                VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
-                        .sType$Default()
-                        .maxSets(1)
-                        .pPoolSizes(sizes);
-                LongBuffer poolPointer = stack.mallocLong(1);
-                VulkanContext.check(
-                        VK12.vkCreateDescriptorPool(
-                                context.vkDevice(), poolInfo, null, poolPointer),
+                long pool = VulkanDescriptors.createPool(
+                        context,
+                        stack,
+                        1,
+                        sizes,
                         "create realtime trace descriptor pool");
-                long pool = poolPointer.get(0);
                 try {
-                    VkDescriptorSetAllocateInfo allocation =
-                            VkDescriptorSetAllocateInfo.calloc(stack)
-                                    .sType$Default()
-                                    .descriptorPool(pool)
-                                    .pSetLayouts(stack.longs(layout));
-                    LongBuffer setPointer = stack.mallocLong(1);
-                    VulkanContext.check(
-                            VK12.vkAllocateDescriptorSets(
-                                    context.vkDevice(), allocation, setPointer),
+                    long set = VulkanDescriptors.allocateSet(
+                            context,
+                            stack,
+                            pool,
+                            layout,
                             "allocate realtime trace descriptor set");
-                    long set = setPointer.get(0);
                     VulkanImage[] images = outputImages(stableRadiance, signals);
                     long[] views = new long[images.length];
                     long[] imageHandles = new long[images.length];

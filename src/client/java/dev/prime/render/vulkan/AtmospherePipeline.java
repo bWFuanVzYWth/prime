@@ -25,13 +25,9 @@ import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
 import org.lwjgl.vulkan.VkDependencyInfo;
 import org.lwjgl.vulkan.VkDescriptorBufferInfo;
 import org.lwjgl.vulkan.VkDescriptorImageInfo;
-import org.lwjgl.vulkan.VkDescriptorPoolCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
-import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
 import org.lwjgl.vulkan.VkImageMemoryBarrier2;
-import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
 import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
 import org.lwjgl.vulkan.VkWriteDescriptorSet;
@@ -813,14 +809,11 @@ public final class AtmospherePipeline implements Destroyable {
                     .descriptorCount(1)
                     .stageFlags(COMPUTE_STAGE);
         }
-        VkDescriptorSetLayoutCreateInfo createInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
-                .sType$Default()
-                .pBindings(bindings);
-        LongBuffer pointer = stack.mallocLong(1);
-        VulkanContext.check(
-                VK12.vkCreateDescriptorSetLayout(context.vkDevice(), createInfo, null, pointer),
+        return VulkanDescriptors.createSetLayout(
+                context,
+                stack,
+                bindings,
                 "create Prime atmosphere descriptor set layout");
-        return pointer.get(0);
     }
 
     private static long createPipelineLayout(
@@ -831,15 +824,12 @@ public final class AtmospherePipeline implements Destroyable {
                 .stageFlags(COMPUTE_STAGE)
                 .offset(0)
                 .size(PUSH_CONSTANT_SIZE);
-        VkPipelineLayoutCreateInfo createInfo = VkPipelineLayoutCreateInfo.calloc(stack)
-                .sType$Default()
-                .pSetLayouts(stack.longs(descriptorSetLayout))
-                .pPushConstantRanges(pushRange);
-        LongBuffer pointer = stack.mallocLong(1);
-        VulkanContext.check(
-                VK12.vkCreatePipelineLayout(context.vkDevice(), createInfo, null, pointer),
+        return VulkanDescriptors.createPipelineLayout(
+                context,
+                stack,
+                descriptorSetLayout,
+                pushRange,
                 "create Prime atmosphere pipeline layout");
-        return pointer.get(0);
     }
 
     private static long[] createComputePipelines(
@@ -916,25 +906,19 @@ public final class AtmospherePipeline implements Destroyable {
         sizes.get(1)
                 .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                 .descriptorCount(1);
-        VkDescriptorPoolCreateInfo poolCreateInfo = VkDescriptorPoolCreateInfo.calloc(stack)
-                .sType$Default()
-                .maxSets(1)
-                .pPoolSizes(sizes);
-        LongBuffer poolPointer = stack.mallocLong(1);
-        VulkanContext.check(
-                VK12.vkCreateDescriptorPool(context.vkDevice(), poolCreateInfo, null, poolPointer),
+        long pool = VulkanDescriptors.createPool(
+                context,
+                stack,
+                1,
+                sizes,
                 "create Prime atmosphere descriptor pool");
-        long pool = poolPointer.get(0);
         try {
-            VkDescriptorSetAllocateInfo allocateInfo = VkDescriptorSetAllocateInfo.calloc(stack)
-                    .sType$Default()
-                    .descriptorPool(pool)
-                    .pSetLayouts(stack.longs(descriptorSetLayout));
-            LongBuffer setPointer = stack.mallocLong(1);
-            VulkanContext.check(
-                    VK12.vkAllocateDescriptorSets(context.vkDevice(), allocateInfo, setPointer),
+            long descriptorSet = VulkanDescriptors.allocateSet(
+                    context,
+                    stack,
+                    pool,
+                    descriptorSetLayout,
                     "allocate Prime atmosphere descriptor set");
-            long descriptorSet = setPointer.get(0);
             int shadowImageCount =
                     SunShadowClipmap.BANK_COUNT * SunShadowClipmap.CASCADE_COUNT;
             VkDescriptorImageInfo.Buffer imageInfos =

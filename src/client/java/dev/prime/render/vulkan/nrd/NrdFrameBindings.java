@@ -4,13 +4,13 @@ import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.vulkan.VulkanBuffer;
 import dev.prime.render.vulkan.VulkanContext;
+import dev.prime.render.vulkan.VulkanDescriptors;
 import dev.prime.render.vulkan.VulkanImage;
 import java.nio.LongBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkDescriptorBufferInfo;
 import org.lwjgl.vulkan.VkDescriptorImageInfo;
-import org.lwjgl.vulkan.VkDescriptorPoolCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
 import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
 import org.lwjgl.vulkan.VkWriteDescriptorSet;
@@ -74,16 +74,12 @@ final class NrdFrameBindings implements Destroyable {
             sizes.get(3)
                     .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
                     .descriptorCount(dispatchCapacity * maxStorages);
-            VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
-                    .sType$Default()
-                    .maxSets(Math.multiplyExact(dispatchCapacity, 2))
-                    .pPoolSizes(sizes);
-            LongBuffer poolPointer = stack.mallocLong(1);
-            VulkanContext.check(
-                    VK12.vkCreateDescriptorPool(
-                            owner.context.vkDevice(), poolInfo, null, poolPointer),
+            descriptorPool = VulkanDescriptors.createPool(
+                    owner.context,
+                    stack,
+                    Math.multiplyExact(dispatchCapacity, 2),
+                    sizes,
                     "create Prime NRD frame descriptor pool");
-            descriptorPool = poolPointer.get(0);
             long stride = VulkanContext.alignUp(
                     Math.max(description.constantBufferMaxDataSize(), 1),
                     Math.max(owner.context.uniformBufferOffsetAlignment(), 1L));

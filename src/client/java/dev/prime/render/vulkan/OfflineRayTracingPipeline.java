@@ -7,7 +7,6 @@ import dev.prime.render.IntegratorFrameInput;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.nio.ByteBuffer;
-import java.nio.LongBuffer;
 import java.util.List;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
@@ -15,13 +14,8 @@ import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDescriptorBufferInfo;
 import org.lwjgl.vulkan.VkDescriptorImageInfo;
-import org.lwjgl.vulkan.VkDescriptorPoolCreateInfo;
 import org.lwjgl.vulkan.VkDescriptorPoolSize;
-import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
-import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
-import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
-import org.lwjgl.vulkan.VkPushConstantRange;
 import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /** Offline-only full-path pipeline with a four-stage per-bounce wavefront. */
@@ -382,15 +376,11 @@ public final class OfflineRayTracingPipeline implements Destroyable {
                 .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                 .descriptorCount(1)
                 .stageFlags(KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
-        VkDescriptorSetLayoutCreateInfo info = VkDescriptorSetLayoutCreateInfo.calloc(stack)
-                .sType$Default()
-                .pBindings(bindings);
-        LongBuffer pointer = stack.mallocLong(1);
-        VulkanContext.check(
-                VK12.vkCreateDescriptorSetLayout(
-                        context.vkDevice(), info, null, pointer),
+        return VulkanDescriptors.createSetLayout(
+                context,
+                stack,
+                bindings,
                 "create offline trace descriptor layout");
-        return pointer.get(0);
     }
 
     @Override
@@ -443,28 +433,19 @@ public final class OfflineRayTracingPipeline implements Destroyable {
                 VkDescriptorPoolSize.Buffer sizes = VkDescriptorPoolSize.calloc(2, stack);
                 sizes.get(0).type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE).descriptorCount(1);
                 sizes.get(1).type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(2);
-                VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
-                        .sType$Default()
-                        .maxSets(1)
-                        .pPoolSizes(sizes);
-                LongBuffer poolPointer = stack.mallocLong(1);
-                VulkanContext.check(
-                        VK12.vkCreateDescriptorPool(
-                                context.vkDevice(), poolInfo, null, poolPointer),
+                long pool = VulkanDescriptors.createPool(
+                        context,
+                        stack,
+                        1,
+                        sizes,
                         "create offline trace descriptor pool");
-                long pool = poolPointer.get(0);
                 try {
-                    VkDescriptorSetAllocateInfo allocation =
-                            VkDescriptorSetAllocateInfo.calloc(stack)
-                                    .sType$Default()
-                                    .descriptorPool(pool)
-                                    .pSetLayouts(stack.longs(layout));
-                    LongBuffer setPointer = stack.mallocLong(1);
-                    VulkanContext.check(
-                            VK12.vkAllocateDescriptorSets(
-                                    context.vkDevice(), allocation, setPointer),
+                    long set = VulkanDescriptors.allocateSet(
+                            context,
+                            stack,
+                            pool,
+                            layout,
                             "allocate offline trace descriptor set");
-                    long set = setPointer.get(0);
                     VkDescriptorImageInfo imageInfo = VkDescriptorImageInfo.calloc(stack)
                             .imageView(runningMean.view())
                             .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
