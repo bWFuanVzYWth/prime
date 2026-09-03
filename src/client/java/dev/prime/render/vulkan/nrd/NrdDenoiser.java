@@ -60,7 +60,6 @@ public final class NrdDenoiser implements Destroyable {
     private final NrdNative.Instance nativeInstance;
     final NrdNative.Description description;
     private final NrdImages images;
-    private final RawWavefrontFrame rawFrame;
     private final PreparedNrdFrame preparedFrame;
     private final AtmospherePipeline atmosphere;
     private final long nearestSampler;
@@ -93,7 +92,6 @@ public final class NrdDenoiser implements Destroyable {
         this.nativeInstance = nativeInstance;
         this.description = nativeInstance.description();
         this.images = images;
-        this.rawFrame = new RawSignals(images);
         this.preparedFrame = new PreparedNrdFrame(
                 new PreparedNrdFrame.Branch(
                         images.motion(),
@@ -198,7 +196,7 @@ public final class NrdDenoiser implements Destroyable {
     }
 
     public RawWavefrontFrame rawFrame() {
-        return this.rawFrame;
+        return this.images;
     }
 
     public VulkanImage fsrMotion() {
@@ -595,62 +593,6 @@ public final class NrdDenoiser implements Destroyable {
             this.owner = owner;
             this.bindings = bindings;
         }
-    }
-
-    /** Raw raygen view kept separate from the in-place prepared NRD view. */
-    private static final class RawSignals implements RawWavefrontFrame {
-        private final NrdImages images;
-
-        private RawSignals(NrdImages images) {
-            this.images = images;
-        }
-
-        @Override public VulkanImage noisyDiffuse() { return this.images.noisyDiffuse(); }
-        @Override public VulkanImage noisySpecular() { return this.images.noisySpecular(); }
-        @Override public VulkanImage diffuseDirection() { return this.images.noisyDiffuseSh1(); }
-        @Override public VulkanImage specularDirection() { return this.images.noisySpecularSh1(); }
-        @Override public VulkanImage normalRoughness() { return this.images.normalRoughness(); }
-        @Override public VulkanImage viewZ() { return this.images.viewZ(); }
-        @Override public VulkanImage transportScratch() { return this.images.fsrMotion(); }
-        @Override public VulkanImage reconstructionMotion() { return this.images.fsrMotion(); }
-        @Override public VulkanImage material() { return this.images.material(); }
-        @Override public VulkanImage specularMaterial() { return this.images.specularMaterial(); }
-        @Override public VulkanImage reconstructionControl() {
-            return this.images.reconstructionControl();
-        }
-        @Override public VulkanImage primaryPosition() { return this.images.primaryPosition(); }
-        @Override public VulkanImage sunLighting() { return this.images.sunLighting(); }
-        @Override public VulkanImage sunPenumbra() { return this.images.sunPenumbra(); }
-        @Override public VulkanImage reflectionNoisyDiffuse() {
-            return this.images.reflectionNoisyDiffuse();
-        }
-        @Override public VulkanImage reflectionNoisySpecular() {
-            return this.images.reflectionNoisySpecular();
-        }
-        @Override public VulkanImage reflectionNormalRoughness() {
-            return this.images.reflectionNormalRoughness();
-        }
-        @Override public VulkanImage reflectionMaterial() {
-            return this.images.reflectionMaterial();
-        }
-        @Override public VulkanImage reflectionSpecularMaterial() {
-            return this.images.reflectionSpecularMaterial();
-        }
-        @Override public VulkanImage reflectionPosition() {
-            return this.images.reflectionPosition();
-        }
-        @Override public VulkanImage reflectionDiffuseDirection() {
-            return this.images.reflectionNoisyDiffuseSh1();
-        }
-        @Override public VulkanImage reflectionSpecularDirection() {
-            return this.images.reflectionNoisySpecularSh1();
-        }
-        @Override public VulkanImage displayPosition() { return this.images.displayPosition(); }
-        @Override public VulkanImage visibleHistoryPosition() {
-            return this.images.displayPosition();
-        }
-        @Override public boolean hasExactTransmissiveVisibleHistory() { return true; }
-        @Override public boolean usesShInputs() { return true; }
     }
 
     static final class ComputePipeline implements Destroyable {

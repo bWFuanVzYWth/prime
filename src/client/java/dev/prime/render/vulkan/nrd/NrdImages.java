@@ -1,6 +1,7 @@
 package dev.prime.render.vulkan.nrd;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
+import dev.prime.render.vulkan.RawWavefrontFrame;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanImage;
 import java.util.ArrayList;
@@ -8,7 +9,7 @@ import java.util.List;
 import org.lwjgl.vulkan.VK12;
 
 /** Owns every persistent and transient image used by one NRD instance. */
-final class NrdImages implements Destroyable {
+final class NrdImages implements RawWavefrontFrame, Destroyable {
     private static final int IMAGE_USAGE =
             VK12.VK_IMAGE_USAGE_STORAGE_BIT
                     | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
@@ -76,41 +77,62 @@ final class NrdImages implements Destroyable {
         return this.images[role.ordinal()];
     }
 
-    VulkanImage noisyDiffuse() { return get(Role.NOISY_DIFFUSE); }
-    VulkanImage noisySpecular() { return get(Role.NOISY_SPECULAR); }
+    @Override public VulkanImage noisyDiffuse() { return get(Role.NOISY_DIFFUSE); }
+    @Override public VulkanImage noisySpecular() { return get(Role.NOISY_SPECULAR); }
     VulkanImage noisyDiffuseSh1() { return get(Role.NOISY_DIFFUSE_SH1); }
     VulkanImage noisySpecularSh1() { return get(Role.NOISY_SPECULAR_SH1); }
-    VulkanImage normalRoughness() { return get(Role.NORMAL_ROUGHNESS); }
-    VulkanImage viewZ() { return get(Role.VIEW_Z); }
+    @Override public VulkanImage diffuseDirection() { return noisyDiffuseSh1(); }
+    @Override public VulkanImage specularDirection() { return noisySpecularSh1(); }
+    @Override public VulkanImage normalRoughness() { return get(Role.NORMAL_ROUGHNESS); }
+    @Override public VulkanImage viewZ() { return get(Role.VIEW_Z); }
     VulkanImage motion() { return get(Role.MOTION); }
     VulkanImage fsrMotion() { return get(Role.FSR_MOTION); }
+    @Override public VulkanImage transportScratch() { return fsrMotion(); }
+    @Override public VulkanImage reconstructionMotion() { return fsrMotion(); }
     VulkanImage fsrDepth() { return get(Role.FSR_DEPTH); }
-    VulkanImage material() { return get(Role.MATERIAL); }
-    VulkanImage specularMaterial() { return get(Role.SPECULAR_MATERIAL); }
-    VulkanImage reconstructionControl() { return get(Role.RECONSTRUCTION_CONTROL); }
-    VulkanImage primaryPosition() { return get(Role.PRIMARY_POSITION); }
-    VulkanImage sunLighting() { return get(Role.SUN_LIGHTING); }
-    VulkanImage sunPenumbra() { return get(Role.SUN_PENUMBRA); }
+    @Override public VulkanImage material() { return get(Role.MATERIAL); }
+    @Override public VulkanImage specularMaterial() { return get(Role.SPECULAR_MATERIAL); }
+    @Override public VulkanImage reconstructionControl() { return get(Role.RECONSTRUCTION_CONTROL); }
+    @Override public VulkanImage primaryPosition() { return get(Role.PRIMARY_POSITION); }
+    @Override public VulkanImage sunLighting() { return get(Role.SUN_LIGHTING); }
+    @Override public VulkanImage sunPenumbra() { return get(Role.SUN_PENUMBRA); }
     VulkanImage sunShadow() { return get(Role.SUN_SHADOW); }
     VulkanImage denoisedDiffuse() { return get(Role.DENOISED_DIFFUSE); }
     VulkanImage denoisedSpecular() { return get(Role.DENOISED_SPECULAR); }
     VulkanImage denoisedDiffuseSh1() { return get(Role.DENOISED_DIFFUSE_SH1); }
     VulkanImage denoisedSpecularSh1() { return get(Role.DENOISED_SPECULAR_SH1); }
-    VulkanImage reflectionNoisyDiffuse() { return get(Role.REFLECTION_NOISY_DIFFUSE); }
-    VulkanImage reflectionNoisySpecular() { return get(Role.REFLECTION_NOISY_SPECULAR); }
+    @Override public VulkanImage reflectionNoisyDiffuse() {
+        return get(Role.REFLECTION_NOISY_DIFFUSE);
+    }
+    @Override public VulkanImage reflectionNoisySpecular() {
+        return get(Role.REFLECTION_NOISY_SPECULAR);
+    }
     VulkanImage reflectionNoisyDiffuseSh1() { return get(Role.REFLECTION_NOISY_DIFFUSE_SH1); }
     VulkanImage reflectionNoisySpecularSh1() { return get(Role.REFLECTION_NOISY_SPECULAR_SH1); }
-    VulkanImage reflectionNormalRoughness() { return get(Role.REFLECTION_NORMAL_ROUGHNESS); }
+    @Override public VulkanImage reflectionNormalRoughness() {
+        return get(Role.REFLECTION_NORMAL_ROUGHNESS);
+    }
     VulkanImage reflectionViewZ() { return get(Role.REFLECTION_VIEW_Z); }
     VulkanImage reflectionMotion() { return get(Role.REFLECTION_MOTION); }
-    VulkanImage reflectionMaterial() { return get(Role.REFLECTION_MATERIAL); }
-    VulkanImage reflectionSpecularMaterial() { return get(Role.REFLECTION_SPECULAR_MATERIAL); }
-    VulkanImage reflectionPosition() { return get(Role.REFLECTION_POSITION); }
+    @Override public VulkanImage reflectionMaterial() { return get(Role.REFLECTION_MATERIAL); }
+    @Override public VulkanImage reflectionSpecularMaterial() {
+        return get(Role.REFLECTION_SPECULAR_MATERIAL);
+    }
+    @Override public VulkanImage reflectionPosition() { return get(Role.REFLECTION_POSITION); }
+    @Override public VulkanImage reflectionDiffuseDirection() {
+        return reflectionNoisyDiffuseSh1();
+    }
+    @Override public VulkanImage reflectionSpecularDirection() {
+        return reflectionNoisySpecularSh1();
+    }
     VulkanImage reflectionDenoisedDiffuse() { return get(Role.REFLECTION_DENOISED_DIFFUSE); }
     VulkanImage reflectionDenoisedSpecular() { return get(Role.REFLECTION_DENOISED_SPECULAR); }
     VulkanImage reflectionDenoisedDiffuseSh1() { return get(Role.REFLECTION_DENOISED_DIFFUSE_SH1); }
     VulkanImage reflectionDenoisedSpecularSh1() { return get(Role.REFLECTION_DENOISED_SPECULAR_SH1); }
-    VulkanImage displayPosition() { return get(Role.DISPLAY_POSITION); }
+    @Override public VulkanImage displayPosition() { return get(Role.DISPLAY_POSITION); }
+    @Override public VulkanImage visibleHistoryPosition() { return displayPosition(); }
+    @Override public boolean hasExactTransmissiveVisibleHistory() { return true; }
+    @Override public boolean usesShInputs() { return true; }
     VulkanImage fsrReactiveMask() { return get(Role.FSR_REACTIVE_MASK); }
     VulkanImage fsrTransparencyCompositionMask() {
         return get(Role.FSR_TRANSPARENCY_COMPOSITION_MASK);

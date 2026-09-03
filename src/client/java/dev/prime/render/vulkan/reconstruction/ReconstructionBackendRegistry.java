@@ -1,6 +1,7 @@
 package dev.prime.render.vulkan.reconstruction;
 
 import dev.prime.infrastructure.PrimeInfo;
+import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionExtent;
 import dev.prime.render.post.ReconstructionQualityMode;
@@ -88,8 +89,8 @@ public final class ReconstructionBackendRegistry {
             stableRadiance = this.context.createAccumulationImage(
                     selection.extent().width(), selection.extent().height());
         } catch (RuntimeException exception) {
-            VulkanReconstructionResources.destroy(stableRadiance, exception);
-            VulkanReconstructionResources.destroy(output, exception);
+            ResourceCleanup.destroy(stableRadiance, exception);
+            ResourceCleanup.destroy(output, exception);
             throw exception;
         }
 
@@ -99,9 +100,8 @@ public final class ReconstructionBackendRegistry {
             return new VulkanReconstructionResources(
                     output, stableRadiance, processor, selection);
         } catch (RuntimeException exception) {
-            RuntimeException failure = VulkanReconstructionResources.destroy(
-                    stableRadiance, exception);
-            failure = VulkanReconstructionResources.destroy(output, failure);
+            RuntimeException failure = ResourceCleanup.destroy(stableRadiance, exception);
+            failure = ResourceCleanup.destroy(output, failure);
             if (selection.effectiveMode() != PostProcessingMode.DLSS_RR) {
                 throw failure;
             }

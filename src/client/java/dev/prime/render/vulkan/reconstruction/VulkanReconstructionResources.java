@@ -1,6 +1,7 @@
 package dev.prime.render.vulkan.reconstruction;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
+import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.vulkan.VulkanImage;
 import java.util.Objects;
 
@@ -53,27 +54,10 @@ public final class VulkanReconstructionResources implements Destroyable {
             return;
         }
         RuntimeException failure = null;
-        failure = destroy(this.processor, failure);
-        failure = destroy(this.stableRadiance, failure);
-        failure = destroy(this.output, failure);
+        failure = ResourceCleanup.destroy(this.processor, failure);
+        failure = ResourceCleanup.destroy(this.stableRadiance, failure);
+        failure = ResourceCleanup.destroy(this.output, failure);
         this.destroyed = true;
-        if (failure != null) {
-            throw failure;
-        }
-    }
-
-    static RuntimeException destroy(Destroyable value, RuntimeException failure) {
-        if (value == null) {
-            return failure;
-        }
-        try {
-            value.destroy();
-        } catch (RuntimeException exception) {
-            if (failure == null) {
-                return exception;
-            }
-            failure.addSuppressed(exception);
-        }
-        return failure;
+        ResourceCleanup.throwIfFailed(failure);
     }
 }
