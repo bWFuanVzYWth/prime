@@ -5,32 +5,35 @@ import java.util.Arrays;
 /**
  * Optimal rectangle decomposition for one fixed 64x64 sparse layer.
  *
- * <p>This is a mechanical Java port of the incremental sparse path in
- * C:\WorkSpace\voxel_engine's rectangle_decomposition crate at
- * 3e13182214aa3bdf71d4769ca6b1078671a7842c. Prime-specific face translation
- * stays outside this class.
+ * <p>The chord selection follows voxel_engine's rectangle_decomposition crate at
+ * 3e13182214aa3bdf71d4769ca6b1078671a7842c. Prime writes unit faces, so the fixed grid and row
+ * masks avoid maintaining and sorting duplicate sparse interval views.
  */
 final class RectangleDecomposition64 {
     static final int EDGE = 64;
 
     private static final int MAX_LOD = 6;
-    private static final int MAX_AXIS_INTERVALS = EDGE * EDGE;
     private static final int MAX_CHORDS = EDGE * (EDGE - 1);
     private static final int MAX_RECTANGLES = EDGE * EDGE;
 
     private RectangleDecomposition64() {}
 
     static final class LayerBuilder {
-        private final long[] rowIntervals = new long[MAX_AXIS_INTERVALS];
-        private final long[] columnIntervals = new long[MAX_AXIS_INTERVALS];
-        private int rowIntervalCount;
-        private int columnIntervalCount;
-        private int squareCount;
+        private final char[] cells = new char[EDGE * EDGE];
+        private final char[] occupied = new char[EDGE * EDGE];
+        private final long[] rowMasks = new long[EDGE];
+        private final long[] columnMasks = new long[EDGE];
+        private int occupiedCount;
+        private boolean overlapping;
 
         void clear() {
-            this.rowIntervalCount = 0;
-            this.columnIntervalCount = 0;
-            this.squareCount = 0;
+            for (int index = 0; index < this.occupiedCount; index++) {
+                this.cells[this.occupied[index]] = 0;
+            }
+            Arrays.fill(this.rowMasks, 0L);
+            Arrays.fill(this.columnMasks, 0L);
+            this.occupiedCount = 0;
+            this.overlapping = false;
         }
 
         void pushSquare(int u, int v, int lod, int value) {
@@ -51,24 +54,21 @@ final class RectangleDecomposition64 {
                 throw new IllegalArgumentException(
                         "Rectangle square lies outside the 64x64 layer");
             }
-            if (this.rowIntervalCount + size > this.rowIntervals.length
-                    || this.columnIntervalCount + size
-                            > this.columnIntervals.length) {
-                throw new IllegalStateException(
-                        "Rectangle layer interval capacity was exceeded");
-            }
-
             int uEnd = u + size;
             int vEnd = v + size;
-            for (int line = v; line < vEnd; line++) {
-                this.rowIntervals[this.rowIntervalCount++] =
-                        packLineInterval(line, u, uEnd, value);
+            for (int y = v; y < vEnd; y++) {
+                for (int x = u; x < uEnd; x++) {
+                    int index = y * EDGE + x;
+                    if (this.cells[index] != 0) {
+                        this.overlapping = true;
+                    } else {
+                        this.cells[index] = (char) value;
+                        this.occupied[this.occupiedCount++] = (char) index;
+                        this.rowMasks[y] |= 1L << x;
+                        this.columnMasks[x] |= 1L << y;
+                    }
+                }
             }
-            for (int line = u; line < uEnd; line++) {
-                this.columnIntervals[this.columnIntervalCount++] =
-                        packLineInterval(line, v, vEnd, value);
-            }
-            this.squareCount = Math.addExact(this.squareCount, 1);
         }
 
         Result finish(Scratch scratch) {
@@ -110,19 +110,16 @@ final class RectangleDecomposition64 {
     }
 
     static final class Scratch {
-        private final AxisIntervals rows = new AxisIntervals();
-        private final AxisIntervals columns = new AxisIntervals();
-
         private final long[] horizontalChords = new long[MAX_CHORDS];
         private final long[] verticalChords = new long[MAX_CHORDS];
         private int horizontalChordCount;
         private int verticalChordCount;
 
         private final int[] groupHorizontalStart =
-                new int[MAX_AXIS_INTERVALS];
-        private final int[] groupHorizontalEnd = new int[MAX_AXIS_INTERVALS];
-        private final int[] groupVerticalStart = new int[MAX_AXIS_INTERVALS];
-        private final int[] groupVerticalEnd = new int[MAX_AXIS_INTERVALS];
+                new int[MAX_CHORDS];
+        private final int[] groupHorizontalEnd = new int[MAX_CHORDS];
+        private final int[] groupVerticalStart = new int[MAX_CHORDS];
+        private final int[] groupVerticalEnd = new int[MAX_CHORDS];
         private int groupCount;
 
         private final RectangleMatching64.Scratch matching =
@@ -144,22 +141,15 @@ final class RectangleDecomposition64 {
 
         private Result decompose(LayerBuilder builder) {
             this.rectangleCount = 0;
-            if (builder.squareCount == 0) {
+            if (builder.overlapping) {
+                throw new IllegalStateException("Rectangle layer squares overlap");
+            }
+            if (builder.occupiedCount == 0) {
                 return this.result;
             }
-            buildAxisIntervals(
-                    builder.rowIntervals,
-                    builder.rowIntervalCount,
-                    this.rows,
-                    true);
-            buildAxisIntervals(
-                    builder.columnIntervals,
-                    builder.columnIntervalCount,
-                    this.columns,
-                    false);
-            this.extractChords();
+            this.extractChords(builder);
             this.selectCuts();
-            this.partition();
+            this.partition(builder);
             return this.result;
         }
 
@@ -170,166 +160,65 @@ final class RectangleDecomposition64 {
             return this.rectangles[index];
         }
 
-        private void extractChords() {
+        private void extractChords(LayerBuilder builder) {
             this.horizontalChordCount = 0;
             this.verticalChordCount = 0;
-            for (int y = 1; y < EDGE; y++) {
-                this.emitHorizontalChords(y - 1, y, y);
-            }
-            for (int x = 1; x < EDGE; x++) {
-                this.emitVerticalChords(x - 1, x, x);
-            }
+            this.extractChords(builder.cells, builder.rowMasks, true);
+            this.extractChords(builder.cells, builder.columnMasks, false);
             this.finishChordGroups();
         }
 
-        private void emitHorizontalChords(
-                int upperLine, int lowerLine, int y) {
-            int upperIndex = this.rows.lineStart[upperLine];
-            int upperEnd = this.rows.lineEnd[upperLine];
-            int lowerIndex = this.rows.lineStart[lowerLine];
-            int lowerEnd = this.rows.lineEnd[lowerLine];
-            while (upperIndex < upperEnd && lowerIndex < lowerEnd) {
-                int upper = this.rows.intervals[upperIndex];
-                int lower = this.rows.intervals[lowerIndex];
-                int start = Math.max(
-                        intervalStart(upper), intervalStart(lower));
-                int end = Math.min(intervalEnd(upper), intervalEnd(lower));
-                if (intervalValue(upper) == intervalValue(lower)
-                        && start < end) {
-                    this.tryEmitHorizontalChord(
-                            upperLine,
-                            upperIndex,
-                            lowerLine,
-                            lowerIndex,
-                            y,
-                            start,
-                            end,
-                            intervalValue(upper));
-                }
-                if (intervalEnd(upper) <= intervalEnd(lower)) {
-                    upperIndex++;
-                } else {
-                    lowerIndex++;
-                }
-            }
-        }
-
-        private void tryEmitHorizontalChord(
-                int upperLine,
-                int upperIndex,
-                int lowerLine,
-                int lowerIndex,
-                int y,
-                int start,
-                int end,
-                int value) {
-            boolean leftUpper = start > 0
-                    && valueAt(
-                                    this.rows,
-                                    upperLine,
-                                    upperIndex,
-                                    start - 1)
-                            == value;
-            boolean leftLower = start > 0
-                    && valueAt(
-                                    this.rows,
-                                    lowerLine,
-                                    lowerIndex,
-                                    start - 1)
-                            == value;
-            int leftSupport = horizontalSupport(
-                    cornerKey(leftUpper, true, leftLower, true));
-            if ((leftSupport & 1) == 0) {
-                return;
-            }
-
-            boolean rightUpper = end < EDGE
-                    && valueAt(this.rows, upperLine, upperIndex, end)
-                            == value;
-            boolean rightLower = end < EDGE
-                    && valueAt(this.rows, lowerLine, lowerIndex, end)
-                            == value;
-            int rightSupport = horizontalSupport(
-                    cornerKey(true, rightUpper, true, rightLower));
-            if ((rightSupport & 2) != 0) {
-                this.addHorizontalChord(
-                        value, packChord(start, y, end, y));
-            }
-        }
-
-        private void emitVerticalChords(
-                int leftLine, int rightLine, int x) {
-            int leftIndex = this.columns.lineStart[leftLine];
-            int leftEnd = this.columns.lineEnd[leftLine];
-            int rightIndex = this.columns.lineStart[rightLine];
-            int rightEnd = this.columns.lineEnd[rightLine];
-            while (leftIndex < leftEnd && rightIndex < rightEnd) {
-                int left = this.columns.intervals[leftIndex];
-                int right = this.columns.intervals[rightIndex];
-                int start = Math.max(
-                        intervalStart(left), intervalStart(right));
-                int end = Math.min(intervalEnd(left), intervalEnd(right));
-                if (intervalValue(left) == intervalValue(right)
-                        && start < end) {
-                    this.tryEmitVerticalChord(
-                            leftLine,
-                            leftIndex,
-                            rightLine,
-                            rightIndex,
-                            x,
-                            start,
-                            end,
-                            intervalValue(left));
-                }
-                if (intervalEnd(left) <= intervalEnd(right)) {
-                    leftIndex++;
-                } else {
-                    rightIndex++;
+        private void extractChords(
+                char[] cells, long[] masks, boolean horizontal) {
+            for (int line = 1; line < EDGE; line++) {
+                long active = masks[line - 1] & masks[line];
+                while (active != 0L) {
+                    int start = Long.numberOfTrailingZeros(active);
+                    int value = commonValue(cells, horizontal, line, start);
+                    int end = start + 1;
+                    while (end < EDGE
+                            && (active & 1L << end) != 0L
+                            && commonValue(cells, horizontal, line, end) == value) {
+                        end++;
+                    }
+                    active &= ~cellRangeMask(start, end);
+                    if (value == 0) {
+                        continue;
+                    }
+                    boolean firstBefore = start > 0
+                            && axisValue(cells, horizontal, line - 1, start - 1) == value;
+                    boolean secondBefore = start > 0
+                            && axisValue(cells, horizontal, line, start - 1) == value;
+                    boolean firstAfter = end < EDGE
+                            && axisValue(cells, horizontal, line - 1, end) == value;
+                    boolean secondAfter = end < EDGE
+                            && axisValue(cells, horizontal, line, end) == value;
+                    if (firstBefore != secondBefore && firstAfter != secondAfter) {
+                        int chord = horizontal
+                                ? packChord(start, line, end, line)
+                                : packChord(line, start, line, end);
+                        if (horizontal) {
+                            this.addHorizontalChord(value, chord);
+                        } else {
+                            this.addVerticalChord(value, chord);
+                        }
+                    }
                 }
             }
         }
 
-        private void tryEmitVerticalChord(
-                int leftLine,
-                int leftIndex,
-                int rightLine,
-                int rightIndex,
-                int x,
-                int start,
-                int end,
-                int value) {
-            boolean topLeft = start > 0
-                    && valueAt(
-                                    this.columns,
-                                    leftLine,
-                                    leftIndex,
-                                    start - 1)
-                            == value;
-            boolean topRight = start > 0
-                    && valueAt(
-                                    this.columns,
-                                    rightLine,
-                                    rightIndex,
-                                    start - 1)
-                            == value;
-            int topSupport = verticalSupport(
-                    cornerKey(topLeft, topRight, true, true));
-            if ((topSupport & 1) == 0) {
-                return;
-            }
+        private static int commonValue(
+                char[] cells, boolean horizontal, int line, int coordinate) {
+            int first = axisValue(cells, horizontal, line - 1, coordinate);
+            int second = axisValue(cells, horizontal, line, coordinate);
+            return first == second ? first : 0;
+        }
 
-            boolean bottomLeft = end < EDGE
-                    && valueAt(this.columns, leftLine, leftIndex, end)
-                            == value;
-            boolean bottomRight = end < EDGE
-                    && valueAt(this.columns, rightLine, rightIndex, end)
-                            == value;
-            int bottomSupport = verticalSupport(
-                    cornerKey(true, true, bottomLeft, bottomRight));
-            if ((bottomSupport & 2) != 0) {
-                this.addVerticalChord(
-                        value, packChord(x, start, x, end));
-            }
+        private static int axisValue(
+                char[] cells, boolean horizontal, int line, int coordinate) {
+            return horizontal
+                    ? cells[line * EDGE + coordinate]
+                    : cells[coordinate * EDGE + line];
         }
 
         private void addHorizontalChord(int value, int chord) {
@@ -457,20 +346,20 @@ final class RectangleDecomposition64 {
             Arrays.sort(this.verticalCuts, 0, this.verticalCutCount);
         }
 
-        private void partition() {
+        private void partition(LayerBuilder builder) {
             this.buildCutMasks();
             this.rectangleCount = 0;
             long[] active = this.activeRectangles;
             long[] nextActive = this.nextActiveRectangles;
 
-            this.buildRunsForRow(0);
+            this.buildRunsForRow(builder, 0);
             int activeCount = this.runCount;
             for (int index = 0; index < this.runCount; index++) {
                 active[index] = packActiveRectangle(this.runs[index], 0);
             }
 
             for (int y = 1; y < EDGE; y++) {
-                this.buildRunsForRow(y);
+                this.buildRunsForRow(builder, y);
                 int nextCount = this.mergeSparseRuns(
                         active,
                         activeCount,
@@ -510,27 +399,26 @@ final class RectangleDecomposition64 {
             }
         }
 
-        private void buildRunsForRow(int y) {
+        private void buildRunsForRow(LayerBuilder builder, int y) {
             this.runCount = 0;
-            int startIndex = this.rows.lineStart[y];
-            int endIndex = this.rows.lineEnd[y];
-            for (int index = startIndex; index < endIndex; index++) {
-                int interval = this.rows.intervals[index];
-                int start = intervalStart(interval);
+            long active = builder.rowMasks[y];
+            while (active != 0L) {
+                int start = Long.numberOfTrailingZeros(active);
+                int value = builder.cells[y * EDGE + start];
+                int end = start + 1;
+                while (end < EDGE && builder.cells[y * EDGE + end] == value) {
+                    end++;
+                }
+                active &= ~cellRangeMask(start, end);
                 long splitMask = this.verticalCutMasks[y]
-                        & coordinateRangeMask(
-                                Math.min(start + 1, EDGE),
-                                Math.max(intervalEnd(interval) - 1, 0));
+                        & coordinateRangeMask(start + 1, end - 1);
                 while (splitMask != 0L) {
                     int split = Long.numberOfTrailingZeros(splitMask);
-                    this.pushRun(intervalValue(interval), start, split);
+                    this.pushRun(value, start, split);
                     start = split;
                     splitMask &= splitMask - 1L;
                 }
-                this.pushRun(
-                        intervalValue(interval),
-                        start,
-                        intervalEnd(interval));
+                this.pushRun(value, start, end);
             }
         }
 
@@ -599,121 +487,6 @@ final class RectangleDecomposition64 {
         }
     }
 
-    private static final class AxisIntervals {
-        private final int[] intervals = new int[MAX_AXIS_INTERVALS];
-        private final int[] lineStart = new int[EDGE];
-        private final int[] lineEnd = new int[EDGE];
-        private int intervalCount;
-    }
-
-    private static void buildAxisIntervals(
-            long[] lineIntervals,
-            int lineIntervalCount,
-            AxisIntervals output,
-            boolean validateOverlap) {
-        Arrays.sort(lineIntervals, 0, lineIntervalCount);
-        output.intervalCount = 0;
-        int cursor = 0;
-        for (int line = 0; line < EDGE; line++) {
-            int lineStart = output.intervalCount;
-            int previousEnd = -1;
-            while (cursor < lineIntervalCount
-                    && lineIntervalLine(lineIntervals[cursor]) == line) {
-                long item = lineIntervals[cursor++];
-                int start = lineIntervalStart(item);
-                int end = lineIntervalEnd(item);
-                if (validateOverlap && previousEnd > start) {
-                    throw new IllegalStateException(
-                            "Rectangle layer squares overlap");
-                }
-                previousEnd = end;
-                pushMergedInterval(
-                        output,
-                        lineStart,
-                        packInterval(
-                                start, end, lineIntervalValue(item)));
-            }
-            output.lineStart[line] = lineStart;
-            output.lineEnd[line] = output.intervalCount;
-        }
-    }
-
-    private static void pushMergedInterval(
-            AxisIntervals output, int lineStart, int interval) {
-        if (output.intervalCount > lineStart) {
-            int lastIndex = output.intervalCount - 1;
-            int last = output.intervals[lastIndex];
-            if (intervalValue(last) == intervalValue(interval)
-                    && intervalEnd(last) == intervalStart(interval)) {
-                output.intervals[lastIndex] = packInterval(
-                        intervalStart(last),
-                        intervalEnd(interval),
-                        intervalValue(last));
-                return;
-            }
-        }
-        if (output.intervalCount >= output.intervals.length) {
-            throw new IllegalStateException(
-                    "Normalized interval capacity was exceeded");
-        }
-        output.intervals[output.intervalCount++] = interval;
-    }
-
-    private static int valueAt(
-            AxisIntervals axis, int line, int index, int coordinate) {
-        int start = axis.lineStart[line];
-        int end = axis.lineEnd[line];
-        if (index < start || index >= end) {
-            return 0;
-        }
-        int interval = axis.intervals[index];
-        if (intervalStart(interval) <= coordinate
-                && coordinate < intervalEnd(interval)) {
-            return intervalValue(interval);
-        }
-        if (coordinate < intervalStart(interval)) {
-            if (index > start) {
-                int candidate = axis.intervals[index - 1];
-                if (intervalStart(candidate) <= coordinate
-                        && coordinate < intervalEnd(candidate)) {
-                    return intervalValue(candidate);
-                }
-            }
-            return 0;
-        }
-        if (index + 1 < end) {
-            int candidate = axis.intervals[index + 1];
-            if (intervalStart(candidate) <= coordinate
-                    && coordinate < intervalEnd(candidate)) {
-                return intervalValue(candidate);
-            }
-        }
-        return 0;
-    }
-
-    static int cornerKey(boolean northwest, boolean northeast, boolean southwest, boolean southeast) {
-        return (northwest ? 1 : 0)
-                | (northeast ? 2 : 0)
-                | (southwest ? 4 : 0)
-                | (southeast ? 8 : 0);
-    }
-
-    static int horizontalSupport(int corners) {
-        return switch (corners) {
-            case 0b0111, 0b1101 -> 2;
-            case 0b1011, 0b1110 -> 1;
-            default -> 0;
-        };
-    }
-
-    static int verticalSupport(int corners) {
-        return switch (corners) {
-            case 0b0111, 0b1011 -> 2;
-            case 0b1101, 0b1110 -> 1;
-            default -> 0;
-        };
-    }
-
     static int packChord(int x1, int y1, int x2, int y2) {
         return x1 | y1 << 7 | x2 << 14 | y2 << 21;
     }
@@ -761,30 +534,6 @@ final class RectangleDecomposition64 {
             }
             previous = current;
         }
-    }
-
-    private static long packLineInterval(
-            int line, int start, int end, int value) {
-        return (long) line << 56
-                | (long) start << 48
-                | (long) end << 40
-                | value;
-    }
-
-    private static int lineIntervalLine(long interval) {
-        return (int) (interval >>> 56) & 0xff;
-    }
-
-    private static int lineIntervalStart(long interval) {
-        return (int) (interval >>> 48) & 0xff;
-    }
-
-    private static int lineIntervalEnd(long interval) {
-        return (int) (interval >>> 40) & 0xff;
-    }
-
-    private static int lineIntervalValue(long interval) {
-        return (int) interval & 0xffff;
     }
 
     private static int packInterval(int start, int end, int value) {
