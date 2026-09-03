@@ -6,6 +6,7 @@ import dev.prime.render.FrameCamera;
 import dev.prime.render.post.SubpixelJitter;
 import dev.prime.render.post.nrd.NrdCameraTransform;
 import dev.prime.render.shader.ShaderAbi;
+import dev.prime.render.vulkan.VulkanDescriptors.BoundSet;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -14,9 +15,6 @@ import org.joml.Matrix4f;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkDescriptorImageInfo;
-import org.lwjgl.vulkan.VkDescriptorPoolSize;
-import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /** Builds Streamline depth and motion without changing Prime's top-left image coordinates. */
 public final class StreamlineInputPass implements Destroyable {
@@ -26,15 +24,13 @@ public final class StreamlineInputPass implements Destroyable {
     private static final int HISTORY_VALID_OFFSET = 136;
     private static final int TRANSMISSIVE_HISTORY_EXACT_OFFSET = 140;
 
-    private final VulkanContext context;
     private final SharedComputeProgram program;
     private final VulkanImage sourceDepth;
     private final VulkanImage sourceVisibleHistoryPosition;
     private final VulkanImage sourceControl;
     private final VulkanImage depth;
     private final VulkanImage motion;
-    private final long descriptorPool;
-    private final long descriptorSet;
+    private final BoundSet descriptors;
     private final boolean exactTransmissiveHistory;
     private final Matrix4f currentClipToWorld = new Matrix4f();
     private final Matrix4f previousWorldToClip = new Matrix4f();
@@ -43,25 +39,21 @@ public final class StreamlineInputPass implements Destroyable {
     private boolean destroyed;
 
     private StreamlineInputPass(
-            VulkanContext context,
             SharedComputeProgram program,
             VulkanImage sourceDepth,
             VulkanImage sourceVisibleHistoryPosition,
             VulkanImage sourceControl,
             VulkanImage depth,
             VulkanImage motion,
-            long descriptorPool,
-            long descriptorSet,
+            BoundSet descriptors,
             boolean exactTransmissiveHistory) {
-        this.context = context;
         this.program = program;
         this.sourceDepth = sourceDepth;
         this.sourceVisibleHistoryPosition = sourceVisibleHistoryPosition;
         this.sourceControl = sourceControl;
         this.depth = depth;
         this.motion = motion;
-        this.descriptorPool = descriptorPool;
-        this.descriptorSet = descriptorSet;
+        this.descriptors = descriptors;
         this.exactTransmissiveHistory = exactTransmissiveHistory;
     }
 
@@ -96,7 +88,7 @@ public final class StreamlineInputPass implements Destroyable {
         SharedComputeProgram program = null;
         VulkanImage streamlineDepth = null;
         VulkanImage streamlineMotion = null;
-        long descriptorPool = 0L;
+        BoundSet descriptors = null;
         try {
             program = context.acquireStreamlineInputProgram();
             streamlineDepth = context.createImage2D(
@@ -112,61 +104,39 @@ public final class StreamlineInputPass implements Destroyable {
                     VK12.VK_IMAGE_USAGE_STORAGE_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT,
                     "Prime Streamline top-left motion");
             try (MemoryStack stack = MemoryStack.stackPush()) {
-                VkDescriptorPoolSize.Buffer sizes = VkDescriptorPoolSize.calloc(2, stack);
-                sizes.get(0)
-                        .type(VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
-                        .descriptorCount(2);
-                sizes.get(1)
-                        .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .descriptorCount(3);
-                descriptorPool = VulkanDescriptors.createPool(
+                descriptors = VulkanDescriptors.bind(
                         context,
                         stack,
-                        1,
-                        sizes,
-                        "create Streamline input descriptor pool");
-                long descriptorSet = VulkanDescriptors.allocateSet(
-                        context,
-                        stack,
-                        descriptorPool,
                         program.descriptorSetLayout(),
-                        "allocate Streamline input descriptor set");
-                VkDescriptorImageInfo.Buffer infos = VkDescriptorImageInfo.calloc(5, stack);
-                infos.get(0).imageView(depth.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                infos.get(1)
-                        .imageView(visibleHistoryPosition.view())
-                        .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                infos.get(2).imageView(control.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                infos.get(3).imageView(streamlineDepth.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                infos.get(4).imageView(streamlineMotion.view()).imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(5, stack);
-                for (int binding = 0; binding < 5; binding++) {
-                    VulkanDescriptors.writeImage(
-                            writes.get(binding), descriptorSet, binding,
-                            binding < 2
-                                    ? VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-                                    : VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                            infos.get(binding));
-                }
-                VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
+                        "Streamline input",
+                        VulkanDescriptors.image(
+                                0, VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                depth.view(), VK12.VK_IMAGE_LAYOUT_GENERAL),
+                        VulkanDescriptors.image(
+                                1, VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                visibleHistoryPosition.view(), VK12.VK_IMAGE_LAYOUT_GENERAL),
+                        VulkanDescriptors.image(
+                                2, VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                control.view(), VK12.VK_IMAGE_LAYOUT_GENERAL),
+                        VulkanDescriptors.image(
+                                3, VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                streamlineDepth.view(), VK12.VK_IMAGE_LAYOUT_GENERAL),
+                        VulkanDescriptors.image(
+                                4, VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                streamlineMotion.view(), VK12.VK_IMAGE_LAYOUT_GENERAL));
                 return new StreamlineInputPass(
-                        context,
                         program,
                         depth,
                         visibleHistoryPosition,
                         control,
                         streamlineDepth,
                         streamlineMotion,
-                        descriptorPool,
-                        descriptorSet,
+                        descriptors,
                         exactTransmissiveHistory);
             }
         } catch (RuntimeException exception) {
-            if (descriptorPool != 0L) {
-                VK12.vkDestroyDescriptorPool(context.vkDevice(), descriptorPool, null);
-            }
-            RuntimeException failure = ResourceCleanup.destroy(
-                    streamlineMotion, exception);
+            RuntimeException failure = ResourceCleanup.destroy(descriptors, exception);
+            failure = ResourceCleanup.destroy(streamlineMotion, failure);
             failure = ResourceCleanup.destroy(streamlineDepth, failure);
             SharedComputeProgram acquiredProgram = program;
             if (acquiredProgram != null) {
@@ -234,7 +204,7 @@ public final class StreamlineInputPass implements Destroyable {
                     VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
                     this.program.pipelineLayout(),
                     0,
-                    stack.longs(this.descriptorSet),
+                    stack.longs(this.descriptors.handle()),
                     null);
             VK12.vkCmdPushConstants(
                     commandBuffer,
@@ -334,7 +304,7 @@ public final class StreamlineInputPass implements Destroyable {
     public void destroy() {
         if (this.destroyed) return;
         this.destroyed = true;
-        VK12.vkDestroyDescriptorPool(this.context.vkDevice(), this.descriptorPool, null);
+        this.descriptors.destroy();
         this.program.release();
         this.motion.destroy();
         this.depth.destroy();

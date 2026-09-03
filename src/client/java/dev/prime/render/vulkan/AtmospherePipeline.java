@@ -21,13 +21,9 @@ import org.lwjgl.vulkan.KHRRayTracingPipeline;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkComputePipelineCreateInfo;
-import org.lwjgl.vulkan.VkDescriptorBufferInfo;
-import org.lwjgl.vulkan.VkDescriptorImageInfo;
-import org.lwjgl.vulkan.VkDescriptorPoolSize;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
 import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
-import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 /**
  * Owns Prime's spectral atmosphere lookup tables and native Vulkan compute pipelines.
@@ -101,8 +97,7 @@ public final class AtmospherePipeline implements Destroyable {
     private final VulkanBuffer sunShadowQuery;
     private final VulkanBuffer phaseLut;
     private final long descriptorSetLayout;
-    private final long descriptorPool;
-    private final long descriptorSet;
+    private final VulkanDescriptors.BoundSet descriptors;
     private final long pipelineLayout;
     private final long[] pipelines;
     private final VulkanImage[] initialImages;
@@ -129,10 +124,9 @@ public final class AtmospherePipeline implements Destroyable {
         VulkanBuffer newSunShadowQuery = null;
         VulkanBuffer newPhaseLut = null;
         long newDescriptorSetLayout = 0L;
-        long newDescriptorPool = 0L;
+        VulkanDescriptors.BoundSet newDescriptors = null;
         long newPipelineLayout = 0L;
         long[] pipelines = new long[PipelineRole.values().length];
-        long newDescriptorSet = 0L;
         try {
             images[ImageRole.TRANSMITTANCE_LOW.ordinal()] = context.createAtmosphereImage2D(
                     256, 64, "Prime atmosphere transmittance low");
@@ -176,7 +170,7 @@ public final class AtmospherePipeline implements Destroyable {
                 newDescriptorSetLayout = createDescriptorSetLayout(context, stack);
                 newPipelineLayout = createPipelineLayout(context, stack, newDescriptorSetLayout);
                 pipelines = createComputePipelines(context, newPipelineLayout);
-                DescriptorAllocation allocation = createDescriptors(
+                newDescriptors = createDescriptors(
                         context,
                         stack,
                         newDescriptorSetLayout,
@@ -184,8 +178,6 @@ public final class AtmospherePipeline implements Destroyable {
                         sunShadowHierarchies,
                         newSunShadow,
                         newPhaseLut);
-                newDescriptorPool = allocation.pool();
-                newDescriptorSet = allocation.set();
             }
             this.images = images;
             this.sunShadow = newSunShadow;
@@ -193,8 +185,7 @@ public final class AtmospherePipeline implements Destroyable {
             this.sunShadowQuery = newSunShadowQuery;
             this.phaseLut = newPhaseLut;
             this.descriptorSetLayout = newDescriptorSetLayout;
-            this.descriptorPool = newDescriptorPool;
-            this.descriptorSet = newDescriptorSet;
+            this.descriptors = newDescriptors;
             this.pipelineLayout = newPipelineLayout;
             this.pipelines = pipelines;
             this.initialImages = new VulkanImage[
@@ -222,9 +213,7 @@ public final class AtmospherePipeline implements Destroyable {
                 image(ImageRole.AERIAL_TRANSMITTANCE)
             };
         } catch (RuntimeException exception) {
-            if (newDescriptorPool != 0L) {
-                VK12.vkDestroyDescriptorPool(context.vkDevice(), newDescriptorPool, null);
-            }
+            if (newDescriptors != null) newDescriptors.destroy();
             for (int index = pipelines.length - 1; index >= 0; index--) {
                 destroyPipeline(context, pipelines[index]);
             }
@@ -521,7 +510,7 @@ public final class AtmospherePipeline implements Destroyable {
     public void destroy() {
         if (!this.destroyed) {
             this.destroyed = true;
-            VK12.vkDestroyDescriptorPool(this.context.vkDevice(), this.descriptorPool, null);
+            this.descriptors.destroy();
             for (int index = this.pipelines.length - 1; index >= 0; index--) {
                 VK12.vkDestroyPipeline(this.context.vkDevice(), this.pipelines[index], null);
             }
@@ -555,7 +544,7 @@ public final class AtmospherePipeline implements Destroyable {
                     VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
                     this.pipelineLayout,
                     0,
-                    stack.longs(this.descriptorSet),
+                    stack.longs(this.descriptors.handle()),
                     null);
             if (pushConstants != null) {
                 VK12.vkCmdPushConstants(
@@ -792,7 +781,7 @@ public final class AtmospherePipeline implements Destroyable {
         }
     }
 
-    private static DescriptorAllocation createDescriptors(
+    private static VulkanDescriptors.BoundSet createDescriptors(
             VulkanContext context,
             MemoryStack stack,
             long descriptorSetLayout,
@@ -800,89 +789,42 @@ public final class AtmospherePipeline implements Destroyable {
             VulkanImage[] sunShadowHierarchies,
             SunShadowClipmap sunShadow,
             VulkanBuffer phaseLut) {
-        VkDescriptorPoolSize.Buffer sizes = VkDescriptorPoolSize.calloc(2, stack);
-        sizes.get(0)
-                .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                .descriptorCount(
-                        IMAGE_COUNT
-                                + SunShadowClipmap.BANK_COUNT
-                                        * SunShadowClipmap.CASCADE_COUNT
-                                + SUN_SHADOW_HIERARCHY_COUNT);
-        sizes.get(1)
-                .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                .descriptorCount(1);
-        long pool = VulkanDescriptors.createPool(
-                context,
-                stack,
-                1,
-                sizes,
-                "create Prime atmosphere descriptor pool");
-        try {
-            long descriptorSet = VulkanDescriptors.allocateSet(
-                    context,
-                    stack,
-                    pool,
-                    descriptorSetLayout,
-                    "allocate Prime atmosphere descriptor set");
-            int shadowImageCount =
-                    SunShadowClipmap.BANK_COUNT * SunShadowClipmap.CASCADE_COUNT;
-            VkDescriptorImageInfo.Buffer imageInfos =
-                    VkDescriptorImageInfo.calloc(
-                            IMAGE_COUNT
-                                    + shadowImageCount
-                                    + SUN_SHADOW_HIERARCHY_COUNT,
-                            stack);
-            VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(BINDING_COUNT, stack);
-            for (int index = 0; index < IMAGE_COUNT; index++) {
-                imageInfos.get(index)
-                        .imageView(images[index].view())
-                        .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                VulkanDescriptors.writeImage(
-                        writes.get(index), descriptorSet, index,
-                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, imageInfos.get(index));
-            }
-            VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack)
-                            .buffer(phaseLut.handle())
-                            .offset(0L)
-                            .range(phaseLut.size());
-            VulkanDescriptors.writeBuffer(
-                    writes.get(PHASE_LUT_BINDING), descriptorSet, PHASE_LUT_BINDING,
-                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, bufferInfo.get(0));
-            for (int bank = 0; bank < SunShadowClipmap.BANK_COUNT; bank++) {
-                for (int cascade = 0;
-                        cascade < SunShadowClipmap.CASCADE_COUNT;
-                        cascade++) {
-                    int index = bank * SunShadowClipmap.CASCADE_COUNT + cascade;
-                    int descriptorIndex = IMAGE_COUNT + index;
-                    imageInfos.get(descriptorIndex)
-                            .imageView(sunShadow.depth(bank, cascade).view())
-                            .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                    VulkanDescriptors.writeImage(
-                            writes.get(SUN_SHADOW_BINDING + index), descriptorSet,
-                            SUN_SHADOW_BINDING + index,
-                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                            imageInfos.get(descriptorIndex));
-                }
-            }
-            for (int cascade = 0;
-                    cascade < SUN_SHADOW_HIERARCHY_COUNT;
-                    cascade++) {
-                int descriptorIndex = IMAGE_COUNT + shadowImageCount + cascade;
-                imageInfos.get(descriptorIndex)
-                        .imageView(sunShadowHierarchies[cascade].view())
-                        .imageLayout(VK12.VK_IMAGE_LAYOUT_GENERAL);
-                VulkanDescriptors.writeImage(
-                        writes.get(SUN_SHADOW_HIERARCHY_BINDING + cascade), descriptorSet,
-                        SUN_SHADOW_HIERARCHY_BINDING + cascade,
-                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                        imageInfos.get(descriptorIndex));
-            }
-            VK12.vkUpdateDescriptorSets(context.vkDevice(), writes, null);
-            return new DescriptorAllocation(pool, descriptorSet);
-        } catch (RuntimeException exception) {
-            VK12.vkDestroyDescriptorPool(context.vkDevice(), pool, null);
-            throw exception;
+        VulkanDescriptors.Binding[] bindings =
+                new VulkanDescriptors.Binding[BINDING_COUNT];
+        for (int index = 0; index < IMAGE_COUNT; index++) {
+            bindings[index] = VulkanDescriptors.image(
+                    index,
+                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                    images[index].view(),
+                    VK12.VK_IMAGE_LAYOUT_GENERAL);
         }
+        bindings[PHASE_LUT_BINDING] = VulkanDescriptors.buffer(
+                PHASE_LUT_BINDING,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                phaseLut.handle(),
+                0L,
+                phaseLut.size());
+        for (int bank = 0; bank < SunShadowClipmap.BANK_COUNT; bank++) {
+            for (int cascade = 0; cascade < SunShadowClipmap.CASCADE_COUNT; cascade++) {
+                int index = bank * SunShadowClipmap.CASCADE_COUNT + cascade;
+                int binding = SUN_SHADOW_BINDING + index;
+                bindings[binding] = VulkanDescriptors.image(
+                        binding,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                        sunShadow.depth(bank, cascade).view(),
+                        VK12.VK_IMAGE_LAYOUT_GENERAL);
+            }
+        }
+        for (int cascade = 0; cascade < SUN_SHADOW_HIERARCHY_COUNT; cascade++) {
+            int binding = SUN_SHADOW_HIERARCHY_BINDING + cascade;
+            bindings[binding] = VulkanDescriptors.image(
+                    binding,
+                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                    sunShadowHierarchies[cascade].view(),
+                    VK12.VK_IMAGE_LAYOUT_GENERAL);
+        }
+        return VulkanDescriptors.bind(
+                context, stack, descriptorSetLayout, "Prime atmosphere", bindings);
     }
 
     private static VulkanBuffer createPhaseLut(VulkanContext context) {
@@ -930,6 +872,4 @@ public final class AtmospherePipeline implements Destroyable {
         }
     }
 
-    private record DescriptorAllocation(long pool, long set) {
-    }
 }
