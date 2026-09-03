@@ -1,6 +1,7 @@
 package dev.prime.render.vulkan;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
+import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -254,6 +255,35 @@ public final class ImageDiagnosticPass implements Destroyable {
         this.destroyed = true;
         VK12.vkDestroyDescriptorPool(this.context.vkDevice(), this.descriptorPool, null);
         this.program.release();
+    }
+
+    public record OutputPair(ImageDiagnosticPass sdr, ImageDiagnosticPass hdr)
+            implements Destroyable {
+        public OutputPair {
+            Objects.requireNonNull(sdr, "sdr");
+            Objects.requireNonNull(hdr, "hdr");
+        }
+
+        public static OutputPair create(
+                VulkanContext context,
+                VulkanImage sdrOutput,
+                VulkanImage hdrOutput,
+                VulkanImage... sources) {
+            ImageDiagnosticPass sdr = null;
+            try {
+                sdr = createSdr(context, sdrOutput, sources);
+                return new OutputPair(sdr, createHdr(context, hdrOutput, sources));
+            } catch (RuntimeException exception) {
+                throw ResourceCleanup.destroy(sdr, exception);
+            }
+        }
+
+        @Override
+        public void destroy() {
+            RuntimeException failure = ResourceCleanup.destroy(this.hdr, null);
+            failure = ResourceCleanup.destroy(this.sdr, failure);
+            ResourceCleanup.throwIfFailed(failure);
+        }
     }
 
     public record View(int source, int presentation) {}

@@ -1,7 +1,6 @@
 package dev.prime.render.vulkan.dlss;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
-import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.RrInputView;
 import dev.prime.render.vulkan.ImageDiagnosticPass;
 import dev.prime.render.vulkan.VulkanContext;
@@ -22,12 +21,10 @@ final class DlssRrDebugPass implements Destroyable {
     private static final int SPECULAR_HIT_DISTANCE = 8;
     private static final int RESPONSIVITY = 9;
 
-    private final ImageDiagnosticPass sdr;
-    private final ImageDiagnosticPass hdr;
+    private final ImageDiagnosticPass.OutputPair outputs;
 
-    private DlssRrDebugPass(ImageDiagnosticPass sdr, ImageDiagnosticPass hdr) {
-        this.sdr = sdr;
-        this.hdr = hdr;
+    private DlssRrDebugPass(ImageDiagnosticPass.OutputPair outputs) {
+        this.outputs = outputs;
     }
 
     static DlssRrDebugPass create(
@@ -47,17 +44,9 @@ final class DlssRrDebugPass implements Destroyable {
             targets.specularHitDistance(),
             targets.responsivity()
         };
-        ImageDiagnosticPass sdr = null;
-        ImageDiagnosticPass hdr = null;
-        try {
-            sdr = ImageDiagnosticPass.createSdr(context, displayOutput, sources);
-            hdr = ImageDiagnosticPass.createHdr(context, hdrOutput, sources);
-            return new DlssRrDebugPass(sdr, hdr);
-        } catch (RuntimeException exception) {
-            ResourceCleanup.destroy(hdr, exception);
-            ResourceCleanup.destroy(sdr, exception);
-            throw exception;
-        }
+        return new DlssRrDebugPass(
+                ImageDiagnosticPass.OutputPair.create(
+                        context, displayOutput, hdrOutput, sources));
     }
 
     void record(VkCommandBuffer commandBuffer, RrInputView view) {
@@ -75,13 +64,13 @@ final class DlssRrDebugPass implements Destroyable {
                     descriptor(RrInputView.SPECULAR_MOTION),
                     descriptor(RrInputView.SPECULAR_HIT_DISTANCE),
                     descriptor(RrInputView.RESPONSIVITY));
-            this.sdr.recordGrid(commandBuffer, 4, views);
-            this.hdr.recordGrid(commandBuffer, 4, views);
+            this.outputs.sdr().recordGrid(commandBuffer, 4, views);
+            this.outputs.hdr().recordGrid(commandBuffer, 4, views);
             return;
         }
         ImageDiagnosticPass.View descriptor = descriptor(view);
-        this.sdr.recordFull(commandBuffer, descriptor);
-        this.hdr.recordFull(commandBuffer, descriptor);
+        this.outputs.sdr().recordFull(commandBuffer, descriptor);
+        this.outputs.hdr().recordFull(commandBuffer, descriptor);
     }
 
     private static ImageDiagnosticPass.View descriptor(RrInputView view) {
@@ -108,8 +97,6 @@ final class DlssRrDebugPass implements Destroyable {
 
     @Override
     public void destroy() {
-        RuntimeException failure = ResourceCleanup.destroy(this.hdr, null);
-        failure = ResourceCleanup.destroy(this.sdr, failure);
-        ResourceCleanup.throwIfFailed(failure);
+        this.outputs.destroy();
     }
 }

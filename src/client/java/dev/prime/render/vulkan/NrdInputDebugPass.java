@@ -1,7 +1,6 @@
 package dev.prime.render.vulkan;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
-import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.NrdInputView;
 import dev.prime.render.vulkan.nrd.PreparedNrdFrame;
 import java.util.List;
@@ -26,12 +25,10 @@ final class NrdInputDebugPass implements Destroyable {
     private static final int REFLECTION_SPECULAR_SH1 = 14;
     private static final int SUN_PENUMBRA = 15;
 
-    private final ImageDiagnosticPass sdr;
-    private final ImageDiagnosticPass hdr;
+    private final ImageDiagnosticPass.OutputPair outputs;
 
-    private NrdInputDebugPass(ImageDiagnosticPass sdr, ImageDiagnosticPass hdr) {
-        this.sdr = sdr;
-        this.hdr = hdr;
+    private NrdInputDebugPass(ImageDiagnosticPass.OutputPair outputs) {
+        this.outputs = outputs;
     }
 
     static NrdInputDebugPass create(
@@ -60,17 +57,9 @@ final class NrdInputDebugPass implements Destroyable {
             reflection.noisySpecularSh1(),
             prepared.sunPenumbra()
         };
-        ImageDiagnosticPass sdr = null;
-        ImageDiagnosticPass hdr = null;
-        try {
-            sdr = ImageDiagnosticPass.createSdr(context, displayOutput, sources);
-            hdr = ImageDiagnosticPass.createHdr(context, hdrOutput, sources);
-            return new NrdInputDebugPass(sdr, hdr);
-        } catch (RuntimeException exception) {
-            ResourceCleanup.destroy(hdr, exception);
-            ResourceCleanup.destroy(sdr, exception);
-            throw exception;
-        }
+        return new NrdInputDebugPass(
+                ImageDiagnosticPass.OutputPair.create(
+                        context, displayOutput, hdrOutput, sources));
     }
 
     void record(VkCommandBuffer commandBuffer, NrdInputView view) {
@@ -89,14 +78,14 @@ final class NrdInputDebugPass implements Destroyable {
             VkCommandBuffer commandBuffer,
             int columns,
             List<ImageDiagnosticPass.View> views) {
-        this.sdr.recordGrid(commandBuffer, columns, views);
-        this.hdr.recordGrid(commandBuffer, columns, views);
+        this.outputs.sdr().recordGrid(commandBuffer, columns, views);
+        this.outputs.hdr().recordGrid(commandBuffer, columns, views);
     }
 
     private void recordFull(
             VkCommandBuffer commandBuffer, ImageDiagnosticPass.View view) {
-        this.sdr.recordFull(commandBuffer, view);
-        this.hdr.recordFull(commandBuffer, view);
+        this.outputs.sdr().recordFull(commandBuffer, view);
+        this.outputs.hdr().recordFull(commandBuffer, view);
     }
 
     static List<ImageDiagnosticPass.View> primaryGrid() {
@@ -166,8 +155,6 @@ final class NrdInputDebugPass implements Destroyable {
 
     @Override
     public void destroy() {
-        RuntimeException failure = ResourceCleanup.destroy(this.hdr, null);
-        failure = ResourceCleanup.destroy(this.sdr, failure);
-        ResourceCleanup.throwIfFailed(failure);
+        this.outputs.destroy();
     }
 }

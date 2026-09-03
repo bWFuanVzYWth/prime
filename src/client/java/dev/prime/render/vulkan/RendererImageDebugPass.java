@@ -21,18 +21,15 @@ public final class RendererImageDebugPass implements Destroyable {
 
     private final VulkanImage scratch;
     private final ImageDiagnosticPass capture;
-    private final ImageDiagnosticPass sdr;
-    private final ImageDiagnosticPass hdr;
+    private final ImageDiagnosticPass.OutputPair outputs;
 
     private RendererImageDebugPass(
             VulkanImage scratch,
             ImageDiagnosticPass capture,
-            ImageDiagnosticPass sdr,
-            ImageDiagnosticPass hdr) {
+            ImageDiagnosticPass.OutputPair outputs) {
         this.scratch = scratch;
         this.capture = capture;
-        this.sdr = sdr;
-        this.hdr = hdr;
+        this.outputs = outputs;
     }
 
     public static RendererImageDebugPass create(
@@ -44,8 +41,7 @@ public final class RendererImageDebugPass implements Destroyable {
             VulkanImage hdrOutput) {
         VulkanImage scratch = null;
         ImageDiagnosticPass capture = null;
-        ImageDiagnosticPass sdr = null;
-        ImageDiagnosticPass hdr = null;
+        ImageDiagnosticPass.OutputPair outputs = null;
         try {
             scratch = context.createImage2D(
                     displayOutput.width(),
@@ -65,14 +61,11 @@ public final class RendererImageDebugPass implements Destroyable {
                     raw.material(),
                     raw.specularMaterial(),
                     raw.primaryPosition());
-            sdr = ImageDiagnosticPass.createSdr(
-                    context, displayOutput, scratch, denoisedOutput);
-            hdr = ImageDiagnosticPass.createHdr(
-                    context, hdrOutput, scratch, denoisedOutput);
-            return new RendererImageDebugPass(scratch, capture, sdr, hdr);
+            outputs = ImageDiagnosticPass.OutputPair.create(
+                    context, displayOutput, hdrOutput, scratch, denoisedOutput);
+            return new RendererImageDebugPass(scratch, capture, outputs);
         } catch (RuntimeException exception) {
-            ResourceCleanup.destroy(hdr, exception);
-            ResourceCleanup.destroy(sdr, exception);
+            ResourceCleanup.destroy(outputs, exception);
             ResourceCleanup.destroy(capture, exception);
             ResourceCleanup.destroy(scratch, exception);
             throw exception;
@@ -111,17 +104,17 @@ public final class RendererImageDebugPass implements Destroyable {
         ImageDiagnosticPass.View denoised = new ImageDiagnosticPass.View(
                 1, ImageDiagnosticPass.RADIANCE);
         if (view == RendererImageView.DENOISED_OUTPUT) {
-            this.sdr.recordFull(commandBuffer, denoised);
-            this.hdr.recordFull(commandBuffer, denoised);
+            this.outputs.sdr().recordFull(commandBuffer, denoised);
+            this.outputs.hdr().recordFull(commandBuffer, denoised);
             return;
         }
         ImageDiagnosticPass.View atlas = new ImageDiagnosticPass.View(
                 0, ImageDiagnosticPass.RAW);
-        this.sdr.recordFull(commandBuffer, atlas);
-        this.hdr.recordFull(commandBuffer, atlas);
+        this.outputs.sdr().recordFull(commandBuffer, atlas);
+        this.outputs.hdr().recordFull(commandBuffer, atlas);
         if (view == RendererImageView.GRID) {
-            this.sdr.recordCell(commandBuffer, 4, 0, denoised);
-            this.hdr.recordCell(commandBuffer, 4, 0, denoised);
+            this.outputs.sdr().recordCell(commandBuffer, 4, 0, denoised);
+            this.outputs.hdr().recordCell(commandBuffer, 4, 0, denoised);
         }
     }
 
@@ -161,8 +154,7 @@ public final class RendererImageDebugPass implements Destroyable {
 
     @Override
     public void destroy() {
-        RuntimeException failure = ResourceCleanup.destroy(this.hdr, null);
-        failure = ResourceCleanup.destroy(this.sdr, failure);
+        RuntimeException failure = ResourceCleanup.destroy(this.outputs, null);
         failure = ResourceCleanup.destroy(this.capture, failure);
         failure = ResourceCleanup.destroy(this.scratch, failure);
         ResourceCleanup.throwIfFailed(failure);
