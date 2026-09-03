@@ -435,36 +435,8 @@ public final class PreparedBlas {
         return this.positions;
     }
 
-    public long opaqueTriangleCount() {
-        return this.triangleLayout.opaqueTriangleCount();
-    }
-
-    public long cutoutTriangleCount() {
-        return this.triangleLayout.cutoutTriangleCount();
-    }
-
-    public long transmissiveTriangleCount() {
-        return this.triangleLayout.transmissiveTriangleCount();
-    }
-
-    public long cutoutPrimitiveBase() {
-        return this.triangleLayout.cutoutPrimitiveBase();
-    }
-
-    public long transmissivePrimitiveBase() {
-        return this.triangleLayout.transmissivePrimitiveBase();
-    }
-
-    public long opaqueMacroTriangleBase() {
-        return this.triangleLayout.opaqueMacroTriangleBase();
-    }
-
-    public long cutoutMacroTriangleBase() {
-        return this.triangleLayout.cutoutMacroTriangleBase();
-    }
-
-    public long transmissiveMacroTriangleBase() {
-        return this.triangleLayout.transmissiveMacroTriangleBase();
+    public TriangleLayout triangleLayout() {
+        return this.triangleLayout;
     }
 
     /** Scratch storage is build-only; positions remain shader-visible for exact hit reconstruction. */

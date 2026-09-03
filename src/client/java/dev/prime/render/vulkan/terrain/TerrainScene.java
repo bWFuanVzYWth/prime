@@ -878,11 +878,7 @@ public final class TerrainScene implements AutoCloseable {
                         cluster.lightAddress(),
                         worldLightAddress,
                         worldLightLeafAddress,
-                        base.cutoutPrimitiveBase(),
-                        base.transmissivePrimitiveBase(),
-                        base.opaqueMacroTriangleBase(),
-                        base.cutoutMacroTriangleBase(),
-                        base.transmissiveMacroTriangleBase(),
+                        base.triangleLayout(),
                         cluster.dynamic()
                                 ? CpuLightTree.NO_INDEX
                                 : worldLightTree.lightPath(clusterIndex),
@@ -917,11 +913,7 @@ public final class TerrainScene implements AutoCloseable {
                             cluster.dynamic() ? 0L : cluster.lightAddress(),
                             worldLightAddress,
                             worldLightLeafAddress,
-                            voxel.cutoutPrimitiveBase(),
-                            voxel.transmissivePrimitiveBase(),
-                            voxel.opaqueMacroTriangleBase(),
-                            voxel.cutoutMacroTriangleBase(),
-                            voxel.transmissiveMacroTriangleBase(),
+                            voxel.triangleLayout(),
                             cluster.dynamic()
                                     ? CpuLightTree.NO_INDEX
                                     : worldLightTree.lightPath(clusterIndex),

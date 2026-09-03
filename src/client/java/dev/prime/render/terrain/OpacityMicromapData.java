@@ -32,7 +32,6 @@ public final class OpacityMicromapData {
     private static final int STATE_UNKNOWN_OPAQUE = 3;
     private static final int SPECIAL_FULLY_TRANSPARENT = -1;
     private static final int SPECIAL_FULLY_OPAQUE = -2;
-    private static final int SPECIAL_FULLY_UNKNOWN_TRANSPARENT = -3;
     private static final int SPECIAL_FULLY_UNKNOWN_OPAQUE = -4;
     private static final int MICROMAP_TRIANGLE_DESCRIPTOR_BYTES = 8;
     private static final int MISALIGNED_UV_REFINEMENT_LEVELS = 2;

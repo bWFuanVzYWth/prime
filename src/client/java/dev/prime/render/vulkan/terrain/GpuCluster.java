@@ -90,11 +90,7 @@ record GpuCluster(
     }
 
     static long triangleCount(PreparedBlas blas) {
-        return Math.addExact(
-                Math.addExact(
-                        blas.opaqueTriangleCount(),
-                        blas.cutoutTriangleCount()),
-                blas.transmissiveTriangleCount());
+        return blas.triangleLayout().triangleCount();
     }
 
     void forEachBlas(Consumer<PreparedBlas> consumer) {

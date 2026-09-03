@@ -34,16 +34,13 @@ final class TracePipelinesContractTest {
     private static final int OP_VARIABLE = 59;
     private static final int OP_CONSTANT = 43;
     private static final int OP_DECORATE = 71;
-    private static final int OP_MEMBER_DECORATE = 72;
     private static final int OP_GROUP_NON_UNIFORM_ELECT = 333;
     private static final int OP_GROUP_NON_UNIFORM_BROADCAST_FIRST = 338;
     private static final int OP_GROUP_NON_UNIFORM_BALLOT = 339;
     private static final int OP_GROUP_NON_UNIFORM_BALLOT_BIT_COUNT = 342;
-    private static final int OP_TRACE_RAY_KHR = 4445;
     private static final int DECORATION_ARRAY_STRIDE = 6;
     private static final int DECORATION_BINDING = 33;
     private static final int DECORATION_DESCRIPTOR_SET = 34;
-    private static final int DECORATION_OFFSET = 35;
 
     private static final int STORAGE_BUFFER = 12;
     private static final int STORAGE_RAY_PAYLOAD = 5338;
@@ -671,7 +668,6 @@ final class TracePipelinesContractTest {
                 throw new IllegalArgumentException("Malformed SPIR-V instruction");
             }
             result.opcodes.add(opcode);
-            result.opcodeCounts.merge(opcode, 1, Integer::sum);
             if (opcode == OP_TYPE_INT
                     || opcode == OP_TYPE_FLOAT
                     || opcode == OP_TYPE_VECTOR
@@ -749,12 +745,6 @@ final class TracePipelinesContractTest {
         final Map<Integer, Integer> arrayStrides = new HashMap<>();
         final List<Variable> variables = new ArrayList<>();
         final Set<Integer> opcodes = new HashSet<>();
-        final Map<Integer, Integer> opcodeCounts = new HashMap<>();
-
-        int opcodeCount(int opcode) {
-            return this.opcodeCounts.getOrDefault(opcode, 0);
-        }
-
         Type requireType(int identifier) {
             Type type = this.types.get(identifier);
             if (type == null) {

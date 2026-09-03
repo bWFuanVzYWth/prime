@@ -2,6 +2,7 @@ package dev.prime.render.vulkan;
 
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.shader.ShaderAbi;
+import dev.prime.render.terrain.TriangleLayout;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
@@ -239,137 +240,6 @@ public final class TopLevelAccelerationStructure {
             this.matrix = matrix;
         }
 
-        public void write(
-                long blasAddress,
-                long primitiveAddress,
-                long positionAddress,
-                long lightAddress,
-                long worldLightAddress,
-                long worldLightLeafAddress,
-                long opaqueTriangleCount,
-                long cutoutTriangleCount,
-                int worldLightPath,
-                int lightCount,
-                int worldLightLeafCount,
-                float translateX,
-                float translateY,
-                float translateZ) {
-            this.writeInstanced(
-                    blasAddress,
-                    primitiveAddress,
-                    positionAddress,
-                    lightAddress,
-                    worldLightAddress,
-                    worldLightLeafAddress,
-                    opaqueTriangleCount,
-                    cutoutTriangleCount,
-                    worldLightPath,
-                    lightCount,
-                    worldLightLeafCount,
-                    0xff,
-                    0,
-                    translateX,
-                    translateY,
-                    translateZ,
-                    translateX,
-                    translateY,
-                    translateZ);
-        }
-
-        public void writeInstanced(
-                long blasAddress,
-                long primitiveAddress,
-                long positionAddress,
-                long lightAddress,
-                long worldLightAddress,
-                long worldLightLeafAddress,
-                long opaqueTriangleCount,
-                long cutoutTriangleCount,
-                int worldLightPath,
-                int lightCount,
-                int worldLightLeafCount,
-                int mask,
-                int instanceTint,
-                float transformX,
-                float transformY,
-                float transformZ,
-                float sectionX,
-                float sectionY,
-                float sectionZ) {
-            this.writeInstanced(
-                    blasAddress,
-                    primitiveAddress,
-                    positionAddress,
-                    lightAddress,
-                    worldLightAddress,
-                    worldLightLeafAddress,
-                    opaqueTriangleCount,
-                    Math.addExact(opaqueTriangleCount, cutoutTriangleCount),
-                    0xffff_ffffL,
-                    0xffff_ffffL,
-                    0xffff_ffffL,
-                    worldLightPath,
-                    lightCount,
-                    worldLightLeafCount,
-                    mask,
-                    instanceTint,
-                    transformX,
-                    transformY,
-                    transformZ,
-                    sectionX,
-                    sectionY,
-                    sectionZ);
-        }
-
-        public void writeInstanced(
-                long blasAddress,
-                long primitiveAddress,
-                long positionAddress,
-                long lightAddress,
-                long worldLightAddress,
-                long worldLightLeafAddress,
-                long cutoutPrimitiveBase,
-                long transmissivePrimitiveBase,
-                long opaqueMacroTriangleBase,
-                long cutoutMacroTriangleBase,
-                long transmissiveMacroTriangleBase,
-                int worldLightPath,
-                int lightCount,
-                int worldLightLeafCount,
-                int mask,
-                int instanceTint,
-                float transformX,
-                float transformY,
-                float transformZ,
-                float sectionX,
-                float sectionY,
-                float sectionZ) {
-            this.writeInstanced(
-                    blasAddress,
-                    primitiveAddress,
-                    positionAddress,
-                    0L,
-                    lightAddress,
-                    worldLightAddress,
-                    worldLightLeafAddress,
-                    cutoutPrimitiveBase,
-                    transmissivePrimitiveBase,
-                    opaqueMacroTriangleBase,
-                    cutoutMacroTriangleBase,
-                    transmissiveMacroTriangleBase,
-                    worldLightPath,
-                    lightCount,
-                    worldLightLeafCount,
-                    mask,
-                    instanceTint,
-                    transformX,
-                    transformY,
-                    transformZ,
-                    sectionX,
-                    sectionY,
-                    sectionZ);
-        }
-
         public void writeInstanced(
                 long blasAddress,
                 long primitiveAddress,
@@ -378,11 +248,7 @@ public final class TopLevelAccelerationStructure {
                 long lightAddress,
                 long worldLightAddress,
                 long worldLightLeafAddress,
-                long cutoutPrimitiveBase,
-                long transmissivePrimitiveBase,
-                long opaqueMacroTriangleBase,
-                long cutoutMacroTriangleBase,
-                long transmissiveMacroTriangleBase,
+                TriangleLayout triangleLayout,
                 int worldLightPath,
                 int lightCount,
                 int worldLightLeafCount,
@@ -397,6 +263,11 @@ public final class TopLevelAccelerationStructure {
             if (this.index >= this.capacity) {
                 throw new IllegalStateException("TLAS populator wrote too many instances");
             }
+            long cutoutPrimitiveBase = triangleLayout.cutoutPrimitiveBase();
+            long transmissivePrimitiveBase = triangleLayout.transmissivePrimitiveBase();
+            long opaqueMacroTriangleBase = triangleLayout.opaqueMacroTriangleBase();
+            long cutoutMacroTriangleBase = triangleLayout.cutoutMacroTriangleBase();
+            long transmissiveMacroTriangleBase = triangleLayout.transmissiveMacroTriangleBase();
             if (!isShaderUint(cutoutPrimitiveBase)
                     || !isShaderUint(transmissivePrimitiveBase)
                     || !isShaderUint(opaqueMacroTriangleBase)
