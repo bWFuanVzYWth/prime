@@ -14,10 +14,10 @@ final class FrameCompletionTest {
     void failureBeforeHostAcceptanceAbandonsEveryPreparedOwnerInProtocolOrder() {
         FrameCompletion completion = new FrameCompletion();
         List<String> events = new ArrayList<>();
-        completion.onAbandon(30, failure -> record(events, "processor", failure));
+        completion.onAbandon(3, failure -> record(events, "processor", failure));
         completion.onAbandon(0, failure -> record(events, "submission", failure));
-        completion.onAbandon(20, failure -> record(events, "material", failure));
-        completion.onAbandon(10, failure -> record(events, "atmosphere", failure));
+        completion.onAbandon(2, failure -> record(events, "material", failure));
+        completion.onAbandon(1, failure -> record(events, "atmosphere", failure));
         RuntimeException original = new IllegalStateException("record failed");
 
         RuntimeException result = completion.abandon(original);
@@ -34,13 +34,13 @@ final class FrameCompletionTest {
     void acceptedFrameCommitsEveryHistoryEvenWhenOneCommitFails() {
         FrameCompletion completion = new FrameCompletion();
         List<String> events = new ArrayList<>();
-        completion.onCommit(20, () -> events.add("atmosphere"));
+        completion.onCommit(2, () -> events.add("atmosphere"));
         completion.onCommit(0, () -> events.add("submission"));
-        completion.onCommit(10, () -> {
+        completion.onCommit(1, () -> {
             events.add("exposure");
             throw new IllegalStateException("exposure completion failed");
         });
-        completion.onCommit(30, () -> events.add("processor"));
+        completion.onCommit(3, () -> events.add("processor"));
         completion.onAbandon(0, failure -> record(events, "rollback", failure));
         completion.acceptedBySubmission();
 

@@ -56,8 +56,6 @@ public final class OfflineFrameExecutor {
         var encoder = this.context.commandEncoder();
         VkCommandBuffer commandBuffer =
                 encoder.allocateAndBeginTransientCommandBuffer();
-        long atmosphereFrame = 0L;
-        MaterialTexturePages.FrameToken materialFrame = null;
         VulkanFrameSubmission submission =
                 new VulkanFrameSubmission(this.imageInitialization);
         FrameCompletion completion = new FrameCompletion();
@@ -76,22 +74,21 @@ public final class OfflineFrameExecutor {
                     commandBuffer, atlasView.texture());
             VulkanImageTransitions.prepareSceneTexturesForTrace(
                     commandBuffer, sceneTextures);
-            materialFrame = materialTextures.prepareAnimations(commandBuffer);
-            MaterialTexturePages.FrameToken trackedMaterialFrame = materialFrame;
-            completion.onCommit(2, () -> materialTextures.submitted(trackedMaterialFrame));
+            MaterialTexturePages.FrameToken materialFrame =
+                    materialTextures.prepareAnimations(commandBuffer);
+            completion.onCommit(2, () -> materialTextures.submitted(materialFrame));
             completion.onAbandon(2, failure -> ResourceCleanup.run(
-                    () -> materialTextures.abandon(trackedMaterialFrame), failure));
+                    () -> materialTextures.abandon(materialFrame), failure));
             // The sun-cache raygen borrows the shared scene descriptor set prepared above.
-            atmosphereFrame = atmosphere.prepare(
+            long atmosphereFrame = atmosphere.prepare(
                     commandBuffer,
                     sunShadow,
                     plan.integrator(),
                     scene,
                     true);
-            long trackedAtmosphereFrame = atmosphereFrame;
-            completion.onCommit(1, () -> atmosphere.submitted(trackedAtmosphereFrame));
+            completion.onCommit(1, () -> atmosphere.submitted(atmosphereFrame));
             completion.onAbandon(1, failure -> ResourceCleanup.run(
-                    () -> atmosphere.abandon(trackedAtmosphereFrame), failure));
+                    () -> atmosphere.abandon(atmosphereFrame), failure));
             pipeline.trace(
                     commandBuffer, plan.integrator(), scene);
             VulkanImageTransitions.prepareOfflineDisplay(

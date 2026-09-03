@@ -53,8 +53,6 @@ public final class RealtimeFrameExecutor implements Destroyable {
         requireOpen();
         Objects.requireNonNull(processor, "processor");
         Objects.requireNonNull(processorFrame, "processorFrame");
-        long atmosphereFrame = 0L;
-        MaterialTexturePages.FrameToken materialFrame = null;
         VulkanFrameSubmission submission =
                 new VulkanFrameSubmission(this.imageInitialization);
         FrameCompletion completion = new FrameCompletion();
@@ -98,23 +96,22 @@ public final class RealtimeFrameExecutor implements Destroyable {
                     commandBuffer, atlasView.texture());
             VulkanImageTransitions.prepareSceneTexturesForTrace(
                     commandBuffer, sceneTextures);
-            materialFrame = materialTextures.prepareAnimations(commandBuffer);
-            MaterialTexturePages.FrameToken trackedMaterialFrame = materialFrame;
-            completion.onCommit(4, () -> materialTextures.submitted(trackedMaterialFrame));
+            MaterialTexturePages.FrameToken materialFrame =
+                    materialTextures.prepareAnimations(commandBuffer);
+            completion.onCommit(4, () -> materialTextures.submitted(materialFrame));
             completion.onAbandon(2, failure -> ResourceCleanup.run(
-                    () -> materialTextures.abandon(trackedMaterialFrame), failure));
+                    () -> materialTextures.abandon(materialFrame), failure));
             // Atmosphere preparation traces the sun cache through the shared RT descriptor set.
             // Every image named by that set must have its declared layout before this call.
-            atmosphereFrame = atmosphere.prepare(
+            long atmosphereFrame = atmosphere.prepare(
                     commandBuffer,
                     sunShadow,
                     plan.integrator(),
                     scene,
                     false);
-            long trackedAtmosphereFrame = atmosphereFrame;
-            completion.onCommit(2, () -> atmosphere.submitted(trackedAtmosphereFrame));
+            completion.onCommit(2, () -> atmosphere.submitted(atmosphereFrame));
             completion.onAbandon(1, failure -> ResourceCleanup.run(
-                    () -> atmosphere.abandon(trackedAtmosphereFrame), failure));
+                    () -> atmosphere.abandon(atmosphereFrame), failure));
             pipeline.trace(commandBuffer, plan.integrator(), scene);
             boolean prepareFrameGeneration = StreamlineFrameGeneration.publish(
                     StreamlineReflex.currentFrameIndex(),

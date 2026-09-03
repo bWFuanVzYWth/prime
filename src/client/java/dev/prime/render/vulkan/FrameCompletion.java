@@ -1,24 +1,23 @@
 package dev.prime.render.vulkan;
 
 import dev.prime.infrastructure.ResourceCleanup;
-import java.util.ArrayList;
-import java.util.Comparator;
 
 /** Orders resource/history commit or rollback without crossing submission ownership. */
 final class FrameCompletion {
-    private final ArrayList<OrderedAction> commits = new ArrayList<>();
-    private final ArrayList<OrderedFailureAction> abandons = new ArrayList<>();
+    private static final int ACTION_SLOTS = 6;
+
+    private final Runnable[] commits = new Runnable[ACTION_SLOTS];
+    private final FailureAction[] abandons = new FailureAction[ACTION_SLOTS];
     private State state = State.OPEN;
 
     void onCommit(int order, Runnable action) {
         requireOpen("register a frame commit action");
-        this.commits.add(new OrderedAction(order, java.util.Objects.requireNonNull(action, "action")));
+        this.commits[order] = java.util.Objects.requireNonNull(action, "action");
     }
 
     void onAbandon(int order, FailureAction action) {
         requireOpen("register a frame abandon action");
-        this.abandons.add(new OrderedFailureAction(
-                order, java.util.Objects.requireNonNull(action, "action")));
+        this.abandons[order] = java.util.Objects.requireNonNull(action, "action");
     }
 
     void acceptedBySubmission() {
@@ -32,10 +31,11 @@ final class FrameCompletion {
                     "Frame completion requires accepted host ownership");
         }
         this.state = State.COMMITTED;
-        this.commits.sort(Comparator.comparingInt(OrderedAction::order));
         RuntimeException failure = null;
-        for (OrderedAction action : this.commits) {
-            failure = ResourceCleanup.run(action.action(), failure);
+        for (Runnable action : this.commits) {
+            if (action != null) {
+                failure = ResourceCleanup.run(action, failure);
+            }
         }
         ResourceCleanup.throwIfFailed(failure);
     }
@@ -49,10 +49,11 @@ final class FrameCompletion {
             throw new IllegalStateException("Frame completion was already abandoned");
         }
         this.state = State.ABANDONED;
-        this.abandons.sort(Comparator.comparingInt(OrderedFailureAction::order));
         RuntimeException result = failure;
-        for (OrderedFailureAction action : this.abandons) {
-            result = action.action().run(result);
+        for (FailureAction action : this.abandons) {
+            if (action != null) {
+                result = action.run(result);
+            }
         }
         return result;
     }
@@ -75,11 +76,5 @@ final class FrameCompletion {
         HOST_ACCEPTED,
         COMMITTED,
         ABANDONED
-    }
-
-    private record OrderedAction(int order, Runnable action) {
-    }
-
-    private record OrderedFailureAction(int order, FailureAction action) {
     }
 }
