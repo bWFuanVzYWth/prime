@@ -91,6 +91,7 @@ def removedShaderReferencePaths = [
 		file('shaders/bsdf/core'),
 		file('shaders/bsdf/adapter/prime_bsdf_specializations.slang')
 ]
+def shaderDependencyGraphType = primeShaderTaskTypes.dependencyGraph
 def verifyShaderIncludeGraph = tasks.register('verifyShaderIncludeGraph') {
 	group = 'verification'
 	description = 'Verifies that Prime Slang includes and path imports are resolvable and acyclic.'
@@ -107,80 +108,13 @@ def verifyShaderIncludeGraph = tasks.register('verifyShaderIncludeGraph') {
 			throw new GradleException(
 					"Removed local RoboCute reference code was restored: ${removedReferencePaths}")
 		}
-		def sources = []
 		def shaderRoot = shaderSourceRoot.canonicalFile
 		def includeRoots = [
 				shaderRoot,
 				shaderTestIncludeRoot,
 				shaderAbiSlangRoot.get().asFile
 		]
-		includeRoots.each { root ->
-			if (root.isDirectory()) {
-				root.eachFileRecurse(groovy.io.FileType.FILES) { source ->
-					if (source.name.endsWith('.slang') || source.name.endsWith('.h')) {
-						sources.add(source)
-					}
-				}
-			}
-		}
-		def sourcePaths = sources.collect { it.canonicalFile }.toSet()
-		def modulePattern = java.util.regex.Pattern.compile(
-				'(?m)^\s*module\s+"[^"]+"\s*;')
-		def modulePaths = sources.findAll { source ->
-			modulePattern.matcher(source.getText('UTF-8')).find()
-		}.collect { it.canonicalPath }.toSet()
-		def graph = new TreeMap<String, Set<String>>()
-		def dependencyPattern = java.util.regex.Pattern.compile(
-				'(?m)^\\s*(?:#\\s*include\\s+"([^"]+)"|import\\s+"([^"]+)"\\s*;)')
-		sources.each { source ->
-			def sourceName = source.canonicalPath
-			def targets = graph.computeIfAbsent(sourceName) { new TreeSet<String>() }
-			def matcher = dependencyPattern.matcher(source.getText('UTF-8'))
-			while (matcher.find()) {
-				def includeDependency = matcher.group(1) != null
-				def dependencyName = matcher.group(1) ?: matcher.group(2)
-				def candidates = ([new File(source.parentFile, dependencyName)]
-						+ includeRoots.collect { new File(it, dependencyName) })
-						.collect { it.canonicalFile }
-						.findAll { sourcePaths.contains(it) }
-						.unique()
-				if (candidates.empty) {
-					throw new GradleException(
-							"Unresolved shader dependency ${dependencyName} from ${source}")
-				}
-				if (candidates.size() != 1) {
-					throw new GradleException(
-							"Ambiguous shader dependency ${dependencyName} from ${source}: ${candidates}")
-				}
-				if (includeDependency
-						&& modulePaths.contains(candidates.first().canonicalPath)) {
-					throw new GradleException(
-							"Explicit shader module ${dependencyName} must be imported, not included, from ${source}")
-				}
-				targets.add(candidates.first().canonicalPath)
-			}
-		}
-
-		def state = new HashMap<String, Integer>()
-		def stack = []
-		Closure<Void> visit
-		visit = { String source ->
-			if (state[source] == 1) {
-				int start = stack.indexOf(source)
-				def cycle = stack.subList(start, stack.size()) + source
-				throw new GradleException(
-						"Shader dependency cycle: ${cycle.join(' -> ')}")
-			}
-			if (state[source] == 2) {
-				return
-			}
-			state[source] = 1
-			stack.add(source)
-			(graph[source] ?: Collections.emptySet()).each { visit(it) }
-			stack.remove(stack.size() - 1)
-			state[source] = 2
-		}
-		graph.keySet().each { visit(it) }
+		def graph = shaderDependencyGraphType.graph(includeRoots)
 
 		def report = shaderIncludeReport.get().asFile
 		report.parentFile.mkdirs()

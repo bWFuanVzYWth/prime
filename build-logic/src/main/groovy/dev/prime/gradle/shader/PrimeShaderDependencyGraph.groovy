@@ -14,6 +14,8 @@ abstract class PrimeShaderDependencyGraph
 
     private static final java.util.regex.Pattern DEPENDENCY = java.util.regex.Pattern.compile(
             '(?m)^\\s*(?:#\\s*include\\s+"([^"]+)"|import\\s+"([^"]+)"\\s*;)')
+    private static final java.util.regex.Pattern MODULE = java.util.regex.Pattern.compile(
+            '(?m)^\\s*module\\s+"[^"]+"\\s*;')
 
     private Map<String, Set<String>> sourceGraph
 
@@ -33,7 +35,10 @@ abstract class PrimeShaderDependencyGraph
             }
         }
         def sourcePaths = sources.collect { it.canonicalPath }.toSet()
-        def graph = new HashMap<String, Set<String>>()
+        def modulePaths = sources.findAll {
+            MODULE.matcher(it.getText('UTF-8')).find()
+        }.collect { it.canonicalPath }.toSet()
+        def graph = new TreeMap<String, Set<String>>()
         sources.each { source ->
             def targets = graph.computeIfAbsent(source.canonicalPath) { new TreeSet<String>() }
             def matcher = DEPENDENCY.matcher(source.getText('UTF-8'))
@@ -44,14 +49,44 @@ abstract class PrimeShaderDependencyGraph
                         .collect { it.canonicalFile }
                         .findAll { sourcePaths.contains(it.canonicalPath) }
                         .unique { it.canonicalPath }
+                if (matches.empty) {
+                    throw new GradleException(
+                            "Unresolved shader dependency ${name} from ${source}")
+                }
                 if (matches.size() != 1) {
                     throw new GradleException(
-                            "Cannot resolve unique shader dependency ${name} from ${source}")
+                            "Ambiguous shader dependency ${name} from ${source}: ${matches}")
+                }
+                if (matcher.group(1) != null
+                        && modulePaths.contains(matches.first().canonicalPath)) {
+                    throw new GradleException(
+                            "Explicit shader module ${name} must be imported, not included, from ${source}")
                 }
                 targets.add(matches.first().canonicalPath)
             }
         }
+        requireAcyclic(graph)
         return graph
+    }
+
+    private static void requireAcyclic(Map<String, Set<String>> graph) {
+        def state = new HashMap<String, Integer>()
+        def stack = []
+        Closure<Void> visit
+        visit = { String source ->
+            if (state[source] == 1) {
+                int start = stack.indexOf(source)
+                throw new GradleException(
+                        "Shader dependency cycle: ${(stack.subList(start, stack.size()) + source).join(' -> ')}")
+            }
+            if (state[source] == 2) return
+            state[source] = 1
+            stack.add(source)
+            graph[source].each { visit(it) }
+            stack.remove(stack.size() - 1)
+            state[source] = 2
+        }
+        graph.keySet().each { visit(it) }
     }
 
     static Set<String> paths(File source, Map<String, Set<String>> graph) {
