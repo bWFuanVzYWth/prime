@@ -69,15 +69,14 @@
       ]
     },
     "sectionLightHeader": {
-      "size": 48,
+      "size": 40,
       "fields": [
         { "name": "nodeAddress", "type": "uint64_t", "offset": 0 },
         { "name": "leafAddress", "type": "uint64_t", "offset": 8 },
-        { "name": "leafEndAddress", "type": "uint64_t", "offset": 16 },
-        { "name": "emitterAddress", "type": "uint64_t", "offset": 24 },
-        { "name": "cellAddress", "type": "uint64_t", "offset": 32 },
-        { "name": "root", "type": "uint", "offset": 40 },
-        { "name": "emitterCount", "type": "uint", "offset": 44 }
+        { "name": "emitterAddress", "type": "uint64_t", "offset": 16 },
+        { "name": "cellAddress", "type": "uint64_t", "offset": 24 },
+        { "name": "root", "type": "uint", "offset": 32 },
+        { "name": "emitterCount", "type": "uint", "offset": 36 }
       ]
     },
     "integratorRecord": {

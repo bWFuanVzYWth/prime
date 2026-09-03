@@ -7,11 +7,11 @@ import java.util.function.IntUnaryOperator;
 /**
  * Relocatable final light payload produced by cluster compilation.
  *
- * <p>The first five ABI fields are byte offsets when stored here. Upload adds the destination
+ * <p>The first four ABI fields are byte offsets when stored here. Upload adds the destination
  * device address without rebuilding emitters, distributions, or light-tree records.
  */
 public final class CompiledClusterLights {
-    private static final int POINTER_COUNT = 5;
+    private static final int POINTER_COUNT = 4;
     private static final int MAX_RELATION_OFFSET = 0x00ff_ffff;
     public static final CompiledClusterLights EMPTY =
             new CompiledClusterLights(new int[0], Summary.EMPTY);
@@ -65,7 +65,7 @@ public final class CompiledClusterLights {
             throw new IndexOutOfBoundsException(emitterIndex);
         }
         int emitterWords = ShaderAbi.LIGHT_EMITTER_SIZE / Integer.BYTES;
-        int emitterStart = Math.toIntExact(getLong(this.relativeWords, 6) / Integer.BYTES);
+        int emitterStart = Math.toIntExact(getLong(this.relativeWords, 4) / Integer.BYTES);
         int base = emitterStart + emitterIndex * emitterWords;
         int tintWord = ShaderAbi.LIGHT_EMITTER_UVS_TINT_OFFSET / Integer.BYTES + 3;
         int textureWord = ShaderAbi.LIGHT_EMITTER_METADATA_OFFSET / Integer.BYTES + 3;
@@ -99,7 +99,7 @@ public final class CompiledClusterLights {
         }
         int[] relocated = this.relativeWords.clone();
         int emitterWords = ShaderAbi.LIGHT_EMITTER_SIZE / Integer.BYTES;
-        int emitterStart = Math.toIntExact(getLong(relocated, 6) / Integer.BYTES);
+        int emitterStart = Math.toIntExact(getLong(relocated, 4) / Integer.BYTES);
         if (tintResolver != null) {
             int tintWord = ShaderAbi.LIGHT_EMITTER_UVS_TINT_OFFSET / Integer.BYTES + 3;
             for (int emitter = 0; emitter < this.emitterCount(); emitter++) {

@@ -299,7 +299,7 @@ final class FluidQuadTranslationTest {
     private static void assertAllEmitterNormalsHaveYSign(
             CompiledClusterLights lights, float expectedSign) {
         int[] words = lights.relocate(0L);
-        int emitterWord = words[6] / Integer.BYTES;
+        int emitterWord = words[4] / Integer.BYTES;
         int emitterWords = ShaderAbi.LIGHT_EMITTER_SIZE / Integer.BYTES;
         for (int emitter = 0; emitter < lights.emitterCount(); emitter++) {
             float normalY = Float.intBitsToFloat(

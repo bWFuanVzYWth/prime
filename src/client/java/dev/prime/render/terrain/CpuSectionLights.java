@@ -95,20 +95,18 @@ public final class CpuSectionLights {
         int cellCount = this.distributions.size() * EmissionDistribution.CELL_COUNT;
         int nodeStart = headerWords;
         int leafStart = nodeStart + nodeWords;
-        int leafEnd = leafStart + leafWords;
         int emitterStart = (int) (alignUp(
-                        (long) leafEnd * Integer.BYTES,
+                        (long) (leafStart + leafWords) * Integer.BYTES,
                         16L)
                 / Integer.BYTES);
         int cellStart = emitterStart + this.emitters.size * emitterWords;
         int[] result = new int[cellStart + cellCount * cellWords];
         putLong(result, 0, bufferAddress + (long) nodeStart * Integer.BYTES);
         putLong(result, 2, bufferAddress + (long) leafStart * Integer.BYTES);
-        putLong(result, 4, bufferAddress + (long) leafEnd * Integer.BYTES);
-        putLong(result, 6, bufferAddress + (long) emitterStart * Integer.BYTES);
-        putLong(result, 8, bufferAddress + (long) cellStart * Integer.BYTES);
-        result[10] = 0;
-        result[11] = this.emitters.size;
+        putLong(result, 4, bufferAddress + (long) emitterStart * Integer.BYTES);
+        putLong(result, 6, bufferAddress + (long) cellStart * Integer.BYTES);
+        result[8] = 0;
+        result[9] = this.emitters.size;
         this.tree.packInto(result, nodeStart, leafStart);
 
         for (int index = 0; index < this.emitters.size; index++) {

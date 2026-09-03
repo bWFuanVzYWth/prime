@@ -149,7 +149,7 @@ final class EmissionLightContractTest {
 
         CpuSectionLights lights = builder.build();
         int[] packed = lights.pack(0L);
-        int emitterStart = packed[6] / Integer.BYTES;
+        int emitterStart = packed[4] / Integer.BYTES;
         int lastEmitter = emitterStart
                 + (count - 1) * (ShaderAbi.LIGHT_EMITTER_SIZE / Integer.BYTES);
 
@@ -183,7 +183,7 @@ final class EmissionLightContractTest {
 
         CpuSectionLights lights = builder.build();
         int[] packed = lights.pack(0L);
-        int emitterStart = packed[6] / Integer.BYTES;
+        int emitterStart = packed[4] / Integer.BYTES;
 
         assertEquals(0.0F, Float.intBitsToFloat(packed[emitterStart + 12]), 0.0F);
         assertEquals(0.0F, Float.intBitsToFloat(packed[emitterStart + 13]), 0.0F);

@@ -23,11 +23,11 @@ final class CompiledClusterLightsTest {
             null);
 
     @Test
-    void relocationChangesOnlyTheFiveHeaderPointers() {
+    void relocationChangesOnlyTheFourHeaderPointers() {
         CompiledClusterLights lights = oneEmitterLights();
         int[] encoded = lights.relocate(0L);
         int[] expected = encoded.clone();
-        for (int pointer = 0; pointer < 5; pointer++) {
+        for (int pointer = 0; pointer < 4; pointer++) {
             putLong(expected, pointer * 2, 0x1000L + getLong(encoded, pointer * 2));
         }
 
@@ -108,7 +108,7 @@ final class CompiledClusterLightsTest {
     }
 
     private static int emitterStart(int[] words) {
-        return Math.toIntExact(getLong(words, 6) / Integer.BYTES);
+        return Math.toIntExact(getLong(words, 4) / Integer.BYTES);
     }
 
     private static long getLong(int[] words, int offset) {
