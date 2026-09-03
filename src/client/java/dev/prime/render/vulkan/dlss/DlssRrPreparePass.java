@@ -35,6 +35,7 @@ final class DlssRrPreparePass implements Destroyable {
     private final int dispatchY;
     private final Matrix4f currentClipToWorld = new Matrix4f();
     private final Matrix4f previousWorldToClip = new Matrix4f();
+    private final Matrix4f worldToViewScratch = new Matrix4f();
     private boolean destroyed;
 
     private DlssRrPreparePass(
@@ -107,7 +108,7 @@ final class DlssRrPreparePass implements Destroyable {
                 VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
         NrdCameraTransform.currentClipToWorld(camera, this.currentClipToWorld);
         NrdCameraTransform.previousWorldToClip(
-                camera, previousCamera, this.previousWorldToClip, new Matrix4f());
+                camera, previousCamera, this.previousWorldToClip, this.worldToViewScratch);
         try (MemoryStack stack = MemoryStack.stackPush()) {
             ByteBuffer push = stack.malloc(DlssRrPrepareConstants.SIZE)
                     .order(ByteOrder.nativeOrder());

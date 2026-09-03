@@ -82,11 +82,13 @@ public final class MaterialTexturePages implements AutoCloseable {
             };
         }
     }
+    private static final Channel[] CHANNELS = Channel.values();
 
     private final VulkanContext context;
     private final StagingArena stagingArena;
     private final ArrayList<AnimationUpdate> animationUpdates = new ArrayList<>();
     private final ArrayList<Copy> animationCopies = new ArrayList<>();
+    private final ArrayList<VulkanImage> changedImages = new ArrayList<>();
     private List<LabPbrAtlasFrame.AnimationSample> animationSamples = List.of();
     private Resources resources;
     private FrameToken pending;
@@ -161,6 +163,7 @@ public final class MaterialTexturePages implements AutoCloseable {
         }
         Resources current = requireResources();
         this.animationCopies.clear();
+        this.changedImages.clear();
         if (initialUpload) {
             recordInitialUpload(commandBuffer, current);
         }
@@ -187,7 +190,7 @@ public final class MaterialTexturePages implements AutoCloseable {
                 if (spriteBudget > batch.capacity()) {
                     continue;
                 }
-                for (Channel channel : Channel.values()) {
+                for (Channel channel : CHANNELS) {
                     TextureAnimationFrames frames = change.owner.frames(channel);
                     if (frames != null) {
                         TexturePageLayout.Placement placement = frames.placement();
@@ -211,15 +214,14 @@ public final class MaterialTexturePages implements AutoCloseable {
                 batch.close();
                 return this.publish(null, current, initialUpload, 0);
             }
-            ArrayList<VulkanImage> changedImages = new ArrayList<>();
             for (Copy copy : this.animationCopies) {
-                if (!changedImages.contains(copy.image)) {
-                    changedImages.add(copy.image);
+                if (!this.changedImages.contains(copy.image)) {
+                    this.changedImages.add(copy.image);
                 }
             }
             transitionImages(
                     commandBuffer,
-                    changedImages,
+                    this.changedImages,
                     current.prepared || initialUpload,
                     true);
             for (Copy copy : this.animationCopies) {
@@ -227,7 +229,7 @@ public final class MaterialTexturePages implements AutoCloseable {
             }
             transitionImages(
                     commandBuffer,
-                    changedImages,
+                    this.changedImages,
                     true,
                     false);
             return this.publish(
@@ -343,12 +345,12 @@ public final class MaterialTexturePages implements AutoCloseable {
                         "Canonical base-color source was retired before page construction");
             }
         }
-        ArrayList<TexturePageLayout.Layout> layouts = new ArrayList<>(Channel.values().length);
-        ArrayList<List<PageResource>> pages = new ArrayList<>(Channel.values().length);
+        ArrayList<TexturePageLayout.Layout> layouts = new ArrayList<>(CHANNELS.length);
+        ArrayList<List<PageResource>> pages = new ArrayList<>(CHANNELS.length);
         VulkanBuffer textureRecords = null;
         Resources resources = null;
         try {
-            for (Channel channel : Channel.values()) {
+            for (Channel channel : CHANNELS) {
                 TexturePageLayout.Layout layout = channel.pack(source);
                 layouts.add(layout);
                 pages.add(this.buildPages(source, layout, channel));
@@ -924,7 +926,7 @@ public final class MaterialTexturePages implements AutoCloseable {
             long cursor,
             AnimatedMaterialSprite animation) {
         long result = cursor;
-        for (Channel channel : Channel.values()) {
+        for (Channel channel : CHANNELS) {
             TextureAnimationFrames frames = animation.frames(channel);
             if (frames != null) {
                 for (int mip = 0; mip < frames.mipLevels(); mip++) {

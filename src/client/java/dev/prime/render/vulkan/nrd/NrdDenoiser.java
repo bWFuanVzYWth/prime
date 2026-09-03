@@ -238,19 +238,18 @@ public final class NrdDenoiser implements Destroyable {
         Objects.requireNonNull(commandBuffer, "commandBuffer");
         Objects.requireNonNull(plan, "plan");
         rayTraceToComputeBarrier(commandBuffer);
-        PreparedNrdFrame prepared = this.inputPreparationPipeline.record(
+        this.inputPreparationPipeline.record(
                 commandBuffer,
                 plan.camera(),
                 plan.historyCamera(),
                 this.width,
                 this.height,
                 plan.jitter().x(),
-                plan.jitter().y(),
-                this.preparedFrame);
+                plan.jitter().y());
         return new PreparedFrame(
                 this,
                 plan,
-                prepared);
+                this.preparedFrame);
     }
 
     /** Records native NRD dispatches and Prime's composite from one prepared input version. */

@@ -86,15 +86,14 @@ final class NrdInputPreparationPass implements Destroyable {
         }
     }
 
-    PreparedNrdFrame record(
+    void record(
             VkCommandBuffer commandBuffer,
             FrameCamera camera,
             FrameCamera previous,
             int width,
             int height,
             float cameraJitterX,
-            float cameraJitterY,
-            PreparedNrdFrame output) {
+            float cameraJitterY) {
         NrdCameraTransform.currentClipToWorld(camera, this.currentClipToWorld);
         NrdCameraTransform.previousWorldToClip(
                 camera, previous, this.previousWorldToClip, this.worldToViewScratch);
@@ -114,7 +113,6 @@ final class NrdInputPreparationPass implements Destroyable {
                     (width + 7) / 8,
                     (height + 7) / 8);
         }
-        return output;
     }
 
     @Override
