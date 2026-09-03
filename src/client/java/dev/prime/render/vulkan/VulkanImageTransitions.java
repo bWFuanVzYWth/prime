@@ -208,7 +208,7 @@ public final class VulkanImageTransitions {
         }
     }
 
-    private static void imageBarrier(
+    static void imageBarrier(
             VkCommandBuffer commandBuffer,
             long image,
             int oldLayout,

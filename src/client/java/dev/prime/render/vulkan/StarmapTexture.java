@@ -10,12 +10,9 @@ import java.util.zip.GZIPInputStream;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
-import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkBufferImageCopy;
 import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkDependencyInfo;
-import org.lwjgl.vulkan.VkImageMemoryBarrier2;
 import org.lwjgl.vulkan.VkSamplerCreateInfo;
 
 /** Owns the immutable full-resolution night-sky texture. */
@@ -31,7 +28,6 @@ public final class StarmapTexture implements Destroyable {
     private final VulkanImage image;
     private final long sampler;
     private VulkanBuffer[] uploads;
-    private boolean prepared;
     private boolean pending;
     private boolean destroyed;
 
@@ -103,7 +99,7 @@ public final class StarmapTexture implements Destroyable {
     boolean prepare(
             VkCommandBuffer commandBuffer,
             VulkanImageInitializationBatch initialization) {
-        if (this.prepared) {
+        if (this.uploads == null) {
             return false;
         }
         if (this.pending) {
@@ -120,20 +116,15 @@ public final class StarmapTexture implements Destroyable {
             for (VulkanBuffer upload : pending) {
                 upload.flush(0L, upload.size());
             }
-            VkImageMemoryBarrier2.Buffer toTransfer = VkImageMemoryBarrier2.calloc(1, stack);
-            fillImageBarrier(
-                    toTransfer.get(0),
+            VulkanImageTransitions.imageBarrier(
+                    commandBuffer,
+                    this.image.image(),
+                    VK12.VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                     0L,
                     VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
-                    VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
-                    VK12.VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-            KHRSynchronization2.vkCmdPipelineBarrier2KHR(
-                    commandBuffer,
-                    VkDependencyInfo.calloc(stack)
-                            .sType$Default()
-                            .pImageMemoryBarriers(toTransfer));
+                    VK12.VK_ACCESS_TRANSFER_WRITE_BIT);
 
             for (int index = 0; index < 4; index++) {
                 VkBufferImageCopy.Buffer copy = VkBufferImageCopy.calloc(1, stack);
@@ -153,20 +144,15 @@ public final class StarmapTexture implements Destroyable {
                         copy);
             }
 
-            VkImageMemoryBarrier2.Buffer toShader = VkImageMemoryBarrier2.calloc(1, stack);
-            fillImageBarrier(
-                    toShader.get(0),
+            VulkanImageTransitions.imageBarrier(
+                    commandBuffer,
+                    this.image.image(),
+                    VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                     VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
                     VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
                     KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                    VK12.VK_ACCESS_SHADER_READ_BIT,
-                    VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-            KHRSynchronization2.vkCmdPipelineBarrier2KHR(
-                    commandBuffer,
-                    VkDependencyInfo.calloc(stack)
-                            .sType$Default()
-                            .pImageMemoryBarriers(toShader));
+                    VK12.VK_ACCESS_SHADER_READ_BIT);
             return true;
         } catch (RuntimeException exception) {
             this.pending = false;
@@ -184,7 +170,6 @@ public final class StarmapTexture implements Destroyable {
             this.context.defer(upload);
         }
         this.uploads = null;
-        this.prepared = true;
         this.pending = false;
     }
 
@@ -194,32 +179,6 @@ public final class StarmapTexture implements Destroyable {
                     "Starmap upload is not pending submission");
         }
         this.pending = false;
-    }
-
-    private void fillImageBarrier(
-            VkImageMemoryBarrier2 barrier,
-            long sourceStage,
-            long sourceAccess,
-            long destinationStage,
-            long destinationAccess,
-            int oldLayout,
-            int newLayout) {
-        barrier.sType$Default()
-                .srcStageMask(sourceStage)
-                .srcAccessMask(sourceAccess)
-                .dstStageMask(destinationStage)
-                .dstAccessMask(destinationAccess)
-                .oldLayout(oldLayout)
-                .newLayout(newLayout)
-                .srcQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                .dstQueueFamilyIndex(VK12.VK_QUEUE_FAMILY_IGNORED)
-                .image(this.image.image());
-        barrier.subresourceRange()
-                .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                .baseMipLevel(0)
-                .levelCount(1)
-                .baseArrayLayer(0)
-                .layerCount(1);
     }
 
     private static VulkanBuffer createUpload(

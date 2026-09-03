@@ -26,7 +26,6 @@ final class RealtimeStbnTable implements Destroyable {
     private final VulkanContext context;
     private final VulkanBuffer table;
     private VulkanBuffer upload;
-    private boolean prepared;
     private boolean pending;
     private boolean destroyed;
 
@@ -60,7 +59,7 @@ final class RealtimeStbnTable implements Destroyable {
     }
 
     boolean prepare(VkCommandBuffer commandBuffer) {
-        if (this.prepared) {
+        if (this.upload == null) {
             return false;
         }
         if (this.pending) {
@@ -93,7 +92,6 @@ final class RealtimeStbnTable implements Destroyable {
         }
         this.context.defer(this.upload);
         this.upload = null;
-        this.prepared = true;
         this.pending = false;
     }
 
