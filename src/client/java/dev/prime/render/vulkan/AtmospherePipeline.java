@@ -45,7 +45,16 @@ public final class AtmospherePipeline implements Destroyable {
     public static final float AERIAL_MAX_DISTANCE_KM = ShaderAbi.ATMOSPHERE_AERIAL_MAX_DISTANCE_KM;
 
     private static final int PUSH_CONSTANT_SIZE = 128;
-    private static final int IMAGE_COUNT = 7;
+    private enum ImageRole {
+        TRANSMITTANCE_LOW,
+        TRANSMITTANCE_HIGH,
+        MULTI_SCATTERING_LOW,
+        MULTI_SCATTERING_HIGH,
+        SKY_VIEW,
+        AERIAL_RADIANCE,
+        AERIAL_TRANSMITTANCE
+    }
+    private static final int IMAGE_COUNT = ImageRole.values().length;
     private static final int PHASE_LUT_BINDING = 7;
     private static final int SUN_SHADOW_BINDING = 8;
     private static final int SUN_SHADOW_HIERARCHY_BINDING =
@@ -59,35 +68,37 @@ public final class AtmospherePipeline implements Destroyable {
     private static final int PHASE_LUT_BYTE_SIZE = 131_072;
     private static final int AERIAL_KEY_SIZE = 21;
     private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
-    private static final PipelineSource[] PIPELINE_SOURCES = {
-        new PipelineSource(
+    private enum PipelineRole {
+        TRANSMITTANCE(
                 GeneratedShaderPrograms.resource("atmosphere_transmittance"),
                 "Prime atmosphere transmittance pipeline"),
-        new PipelineSource(
+        MULTI_SCATTERING(
                 GeneratedShaderPrograms.resource("atmosphere_multi_scattering"),
                 "Prime atmosphere multiple scattering pipeline"),
-        new PipelineSource(
+        SKY(
                 GeneratedShaderPrograms.resource("atmosphere_sky"),
                 "Prime atmosphere sky pipeline"),
-        new PipelineSource(
+        AERIAL(
                 GeneratedShaderPrograms.resource("atmosphere_aerial"),
                 "Prime atmosphere epipolar aerial-radiance pipeline"),
-        new PipelineSource(
+        AERIAL_TRANSMITTANCE(
                 GeneratedShaderPrograms.resource("atmosphere_aerial_transmittance"),
                 "Prime atmosphere aerial-transmittance pipeline"),
-        new PipelineSource(
+        SUN_SHADOW_HIERARCHY(
                 GeneratedShaderPrograms.resource("sun_shadow_hierarchy"),
-                "Prime sun shadow hierarchy pipeline")
-    };
+                "Prime sun shadow hierarchy pipeline");
+
+        final String resourceName;
+        final String label;
+
+        PipelineRole(String resourceName, String label) {
+            this.resourceName = resourceName;
+            this.label = label;
+        }
+    }
 
     private final VulkanContext context;
-    private final VulkanImage transmittanceLow;
-    private final VulkanImage transmittanceHigh;
-    private final VulkanImage multiScatteringLow;
-    private final VulkanImage multiScatteringHigh;
-    private final VulkanImage skyView;
-    private final VulkanImage aerialRadiance;
-    private final VulkanImage aerialTransmittance;
+    private final VulkanImage[] images;
     private final SunShadowClipmap sunShadow;
     private final VulkanImage[] sunShadowHierarchies;
     private final VulkanBuffer sunShadowQuery;
@@ -96,12 +107,7 @@ public final class AtmospherePipeline implements Destroyable {
     private final long descriptorPool;
     private final long descriptorSet;
     private final long pipelineLayout;
-    private final long transmittancePipeline;
-    private final long multiScatteringPipeline;
-    private final long skyPipeline;
-    private final long aerialPipeline;
-    private final long aerialTransmittancePipeline;
-    private final long sunShadowHierarchyPipeline;
+    private final long[] pipelines;
     private final VulkanImage[] initialImages;
     private final VulkanImage[] transmittanceImages;
     private final VulkanImage[] multiScatteringImages;
@@ -128,25 +134,25 @@ public final class AtmospherePipeline implements Destroyable {
         long newDescriptorSetLayout = 0L;
         long newDescriptorPool = 0L;
         long newPipelineLayout = 0L;
-        long newTransmittancePipeline = 0L;
-        long newMultiScatteringPipeline = 0L;
-        long newSkyPipeline = 0L;
-        long newAerialPipeline = 0L;
-        long newAerialTransmittancePipeline = 0L;
-        long newSunShadowHierarchyPipeline = 0L;
+        long[] pipelines = new long[PipelineRole.values().length];
         long newDescriptorSet = 0L;
         try {
-            images[0] = context.createAtmosphereImage2D(256, 64, "Prime atmosphere transmittance low");
-            images[1] = context.createAtmosphereImage2D(256, 64, "Prime atmosphere transmittance high");
-            images[2] = context.createAtmosphereImage2D(64, 64, "Prime atmosphere multiple scattering low");
-            images[3] = context.createAtmosphereImage2D(64, 64, "Prime atmosphere multiple scattering high");
-            images[4] = context.createAtmosphereImage2D(256, 256, "Prime atmosphere sky view");
-            images[5] = context.createAtmosphereImage3D(
+            images[ImageRole.TRANSMITTANCE_LOW.ordinal()] = context.createAtmosphereImage2D(
+                    256, 64, "Prime atmosphere transmittance low");
+            images[ImageRole.TRANSMITTANCE_HIGH.ordinal()] = context.createAtmosphereImage2D(
+                    256, 64, "Prime atmosphere transmittance high");
+            images[ImageRole.MULTI_SCATTERING_LOW.ordinal()] = context.createAtmosphereImage2D(
+                    64, 64, "Prime atmosphere multiple scattering low");
+            images[ImageRole.MULTI_SCATTERING_HIGH.ordinal()] = context.createAtmosphereImage2D(
+                    64, 64, "Prime atmosphere multiple scattering high");
+            images[ImageRole.SKY_VIEW.ordinal()] = context.createAtmosphereImage2D(
+                    256, 256, "Prime atmosphere sky view");
+            images[ImageRole.AERIAL_RADIANCE.ordinal()] = context.createAtmosphereImage3D(
                     ShaderAbi.ATMOSPHERE_AERIAL_EPIPOLAR_SAMPLES,
                     ShaderAbi.ATMOSPHERE_AERIAL_EPIPOLAR_SLICES,
                     ShaderAbi.ATMOSPHERE_AERIAL_DEPTH,
                     "Prime atmosphere aerial radiance");
-            images[6] = context.createAtmosphereImage3D(
+            images[ImageRole.AERIAL_TRANSMITTANCE.ordinal()] = context.createAtmosphereImage3D(
                     ShaderAbi.ATMOSPHERE_AERIAL_WIDTH,
                     ShaderAbi.ATMOSPHERE_AERIAL_HEIGHT,
                     ShaderAbi.ATMOSPHERE_AERIAL_DEPTH,
@@ -172,13 +178,7 @@ public final class AtmospherePipeline implements Destroyable {
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 newDescriptorSetLayout = createDescriptorSetLayout(context, stack);
                 newPipelineLayout = createPipelineLayout(context, stack, newDescriptorSetLayout);
-                long[] pipelines = createComputePipelines(context, newPipelineLayout);
-                newTransmittancePipeline = pipelines[0];
-                newMultiScatteringPipeline = pipelines[1];
-                newSkyPipeline = pipelines[2];
-                newAerialPipeline = pipelines[3];
-                newAerialTransmittancePipeline = pipelines[4];
-                newSunShadowHierarchyPipeline = pipelines[5];
+                pipelines = createComputePipelines(context, newPipelineLayout);
                 DescriptorAllocation allocation = createDescriptors(
                         context,
                         stack,
@@ -190,13 +190,7 @@ public final class AtmospherePipeline implements Destroyable {
                 newDescriptorPool = allocation.pool();
                 newDescriptorSet = allocation.set();
             }
-            this.transmittanceLow = images[0];
-            this.transmittanceHigh = images[1];
-            this.multiScatteringLow = images[2];
-            this.multiScatteringHigh = images[3];
-            this.skyView = images[4];
-            this.aerialRadiance = images[5];
-            this.aerialTransmittance = images[6];
+            this.images = images;
             this.sunShadow = newSunShadow;
             this.sunShadowHierarchies = sunShadowHierarchies;
             this.sunShadowQuery = newSunShadowQuery;
@@ -205,13 +199,7 @@ public final class AtmospherePipeline implements Destroyable {
             this.descriptorPool = newDescriptorPool;
             this.descriptorSet = newDescriptorSet;
             this.pipelineLayout = newPipelineLayout;
-            this.transmittancePipeline = newTransmittancePipeline;
-            this.multiScatteringPipeline = newMultiScatteringPipeline;
-            this.skyPipeline = newSkyPipeline;
-            this.aerialPipeline = newAerialPipeline;
-            this.aerialTransmittancePipeline =
-                    newAerialTransmittancePipeline;
-            this.sunShadowHierarchyPipeline = newSunShadowHierarchyPipeline;
+            this.pipelines = pipelines;
             this.initialImages = new VulkanImage[
                     IMAGE_COUNT + SUN_SHADOW_HIERARCHY_COUNT];
             System.arraycopy(images, 0, this.initialImages, 0, IMAGE_COUNT);
@@ -222,28 +210,27 @@ public final class AtmospherePipeline implements Destroyable {
                     IMAGE_COUNT,
                     SUN_SHADOW_HIERARCHY_COUNT);
             this.transmittanceImages = new VulkanImage[] {
-                this.transmittanceLow, this.transmittanceHigh
+                image(ImageRole.TRANSMITTANCE_LOW), image(ImageRole.TRANSMITTANCE_HIGH)
             };
             this.multiScatteringImages = new VulkanImage[] {
-                this.multiScatteringLow, this.multiScatteringHigh
+                image(ImageRole.MULTI_SCATTERING_LOW), image(ImageRole.MULTI_SCATTERING_HIGH)
             };
-            this.skyImage = new VulkanImage[] {this.skyView};
+            this.skyImage = new VulkanImage[] {image(ImageRole.SKY_VIEW)};
             this.aerialImages = new VulkanImage[] {
-                this.aerialRadiance, this.aerialTransmittance
+                image(ImageRole.AERIAL_RADIANCE), image(ImageRole.AERIAL_TRANSMITTANCE)
             };
             this.dynamicImages = new VulkanImage[] {
-                this.skyView, this.aerialRadiance, this.aerialTransmittance
+                image(ImageRole.SKY_VIEW),
+                image(ImageRole.AERIAL_RADIANCE),
+                image(ImageRole.AERIAL_TRANSMITTANCE)
             };
         } catch (RuntimeException exception) {
             if (newDescriptorPool != 0L) {
                 VK12.vkDestroyDescriptorPool(context.vkDevice(), newDescriptorPool, null);
             }
-            destroyPipeline(context, newSunShadowHierarchyPipeline);
-            destroyPipeline(context, newAerialTransmittancePipeline);
-            destroyPipeline(context, newAerialPipeline);
-            destroyPipeline(context, newSkyPipeline);
-            destroyPipeline(context, newMultiScatteringPipeline);
-            destroyPipeline(context, newTransmittancePipeline);
+            for (int index = pipelines.length - 1; index >= 0; index--) {
+                destroyPipeline(context, pipelines[index]);
+            }
             if (newPipelineLayout != 0L) {
                 VK12.vkDestroyPipelineLayout(context.vkDevice(), newPipelineLayout, null);
             }
@@ -273,24 +260,32 @@ public final class AtmospherePipeline implements Destroyable {
         }
     }
 
+    private VulkanImage image(ImageRole role) {
+        return this.images[role.ordinal()];
+    }
+
+    private long pipeline(PipelineRole role) {
+        return this.pipelines[role.ordinal()];
+    }
+
     public VulkanImage skyView() {
-        return this.skyView;
+        return image(ImageRole.SKY_VIEW);
     }
 
     public VulkanImage transmittanceLow() {
-        return this.transmittanceLow;
+        return image(ImageRole.TRANSMITTANCE_LOW);
     }
 
     public VulkanImage transmittanceHigh() {
-        return this.transmittanceHigh;
+        return image(ImageRole.TRANSMITTANCE_HIGH);
     }
 
     public VulkanImage aerialRadiance() {
-        return this.aerialRadiance;
+        return image(ImageRole.AERIAL_RADIANCE);
     }
 
     public VulkanImage aerialTransmittance() {
-        return this.aerialTransmittance;
+        return image(ImageRole.AERIAL_TRANSMITTANCE);
     }
 
     /**
@@ -325,7 +320,7 @@ public final class AtmospherePipeline implements Destroyable {
             throw new IllegalStateException("Atmosphere preparation is already pending");
         }
         transitionAllToGeneral(commandBuffer);
-        dispatch(commandBuffer, this.transmittancePipeline, 32, 8, 1, null);
+        dispatch(commandBuffer, pipeline(PipelineRole.TRANSMITTANCE), 32, 8, 1, null);
         computeWriteBarrier(
                 commandBuffer,
                 this.transmittanceImages,
@@ -333,7 +328,7 @@ public final class AtmospherePipeline implements Destroyable {
                         | KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
         // Split the two spectral groups along dispatch Z to keep the one-time invocation below
         // Windows GPU-timeout risk while preserving the reference's 256 directions × 128 steps.
-        dispatch(commandBuffer, this.multiScatteringPipeline, 8, 8, 2, null);
+        dispatch(commandBuffer, pipeline(PipelineRole.MULTI_SCATTERING), 8, 8, 2, null);
         computeWriteBarrier(
                 commandBuffer,
                 this.multiScatteringImages,
@@ -444,7 +439,7 @@ public final class AtmospherePipeline implements Destroyable {
                     pushConstants.putInt(72, 0);
                     dispatch(
                             commandBuffer,
-                            this.sunShadowHierarchyPipeline,
+                            pipeline(PipelineRole.SUN_SHADOW_HIERARCHY),
                             SunShadowClipmap.RESOLUTION / 8,
                             SunShadowClipmap.RESOLUTION / 8,
                             SUN_SHADOW_HIERARCHY_COUNT,
@@ -457,19 +452,19 @@ public final class AtmospherePipeline implements Destroyable {
                     pushConstants.putInt(76, epipoleYBits);
                 }
                 if (prepareSky) {
-                    dispatch(commandBuffer, this.skyPipeline, 32, 32, 1, pushConstants);
+                    dispatch(commandBuffer, pipeline(PipelineRole.SKY), 32, 32, 1, pushConstants);
                 }
                 if (prepareAerial) {
                     dispatch(
                             commandBuffer,
-                            this.aerialTransmittancePipeline,
+                            pipeline(PipelineRole.AERIAL_TRANSMITTANCE),
                             ShaderAbi.ATMOSPHERE_AERIAL_WIDTH,
                             ShaderAbi.ATMOSPHERE_AERIAL_HEIGHT,
                             1,
                             pushConstants);
                     dispatch(
                             commandBuffer,
-                            this.aerialPipeline,
+                            pipeline(PipelineRole.AERIAL),
                             1,
                             ShaderAbi.ATMOSPHERE_AERIAL_EPIPOLAR_SLICES,
                             1,
@@ -530,18 +525,11 @@ public final class AtmospherePipeline implements Destroyable {
         if (!this.destroyed) {
             this.destroyed = true;
             VK12.vkDestroyDescriptorPool(this.context.vkDevice(), this.descriptorPool, null);
-            VK12.vkDestroyPipeline(
-                    this.context.vkDevice(), this.sunShadowHierarchyPipeline, null);
-            VK12.vkDestroyPipeline(
-                    this.context.vkDevice(), this.aerialTransmittancePipeline, null);
-            VK12.vkDestroyPipeline(this.context.vkDevice(), this.aerialPipeline, null);
-            VK12.vkDestroyPipeline(this.context.vkDevice(), this.skyPipeline, null);
-            VK12.vkDestroyPipeline(this.context.vkDevice(), this.multiScatteringPipeline, null);
-            VK12.vkDestroyPipeline(this.context.vkDevice(), this.transmittancePipeline, null);
+            for (int index = this.pipelines.length - 1; index >= 0; index--) {
+                VK12.vkDestroyPipeline(this.context.vkDevice(), this.pipelines[index], null);
+            }
             VK12.vkDestroyPipelineLayout(this.context.vkDevice(), this.pipelineLayout, null);
             VK12.vkDestroyDescriptorSetLayout(this.context.vkDevice(), this.descriptorSetLayout, null);
-            this.aerialTransmittance.destroy();
-            this.aerialRadiance.destroy();
             this.sunShadowQuery.destroy();
             this.sunShadow.destroy();
             for (int index = this.sunShadowHierarchies.length - 1;
@@ -549,11 +537,9 @@ public final class AtmospherePipeline implements Destroyable {
                     index--) {
                 this.sunShadowHierarchies[index].destroy();
             }
-            this.skyView.destroy();
-            this.multiScatteringHigh.destroy();
-            this.multiScatteringLow.destroy();
-            this.transmittanceHigh.destroy();
-            this.transmittanceLow.destroy();
+            for (int index = this.images.length - 1; index >= 0; index--) {
+                this.images[index].destroy();
+            }
             this.phaseLut.destroy();
         }
     }
@@ -834,15 +820,16 @@ public final class AtmospherePipeline implements Destroyable {
 
     private static long[] createComputePipelines(
             VulkanContext context, long pipelineLayout) {
-        long[] pipelines = new long[PIPELINE_SOURCES.length];
+        PipelineRole[] roles = PipelineRole.values();
+        long[] pipelines = new long[roles.length];
         try {
             ParallelPipelineCreation.run(
                     "atmosphere compute pipelines",
                     pipelines.length,
                     index -> {
-                        PipelineSource source = PIPELINE_SOURCES[index];
+                        PipelineRole role = roles[index];
                         pipelines[index] = createComputePipeline(
-                                context, pipelineLayout, source.resourceName(), source.label());
+                                context, pipelineLayout, role.resourceName, role.label);
                     });
             return pipelines;
         } catch (RuntimeException exception) {
@@ -882,9 +869,6 @@ public final class AtmospherePipeline implements Destroyable {
                 VK12.vkDestroyShaderModule(context.vkDevice(), module, null);
             }
         }
-    }
-
-    private record PipelineSource(String resourceName, String label) {
     }
 
     private static DescriptorAllocation createDescriptors(

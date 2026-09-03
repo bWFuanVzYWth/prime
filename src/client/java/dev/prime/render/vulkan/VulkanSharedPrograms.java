@@ -1,6 +1,7 @@
 package dev.prime.render.vulkan;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
+import dev.prime.render.shader.ShaderAbi;
 import java.nio.LongBuffer;
 import java.util.Arrays;
 import org.lwjgl.system.MemoryStack;
@@ -15,14 +16,48 @@ public final class VulkanSharedPrograms implements AutoCloseable {
     private static final int SAMPLED_IMAGE = VK12.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     private static final int STORAGE_IMAGE = VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     private static final int STORAGE_BUFFER = VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    private enum Program {
+        DISPLAY_TRANSFORM("common display-transform", 28, true,
+                new int[] {SAMPLED_IMAGE, STORAGE_IMAGE, STORAGE_BUFFER, STORAGE_IMAGE},
+                "fsr_display"),
+        AUTO_EXPOSURE("auto-exposure", 16, true,
+                new int[] {
+                    SAMPLED_IMAGE, STORAGE_IMAGE, STORAGE_IMAGE, STORAGE_BUFFER, STORAGE_BUFFER
+                },
+                "auto_exposure_histogram", "auto_exposure_update"),
+        HDR_PRESENT("HDR presentation", 16, true,
+                new int[] {SAMPLED_IMAGE, SAMPLED_IMAGE, SAMPLED_IMAGE, STORAGE_IMAGE},
+                "hdr_present"),
+        UI_ALPHA_CLEAR("UI alpha clear", 8, true,
+                new int[] {STORAGE_IMAGE}, "ui_alpha_clear"),
+        UI_ALPHA_EXTRACT("UI alpha extraction", 8, true,
+                new int[] {SAMPLED_IMAGE, STORAGE_IMAGE}, "ui_alpha_extract"),
+        STREAMLINE_INPUT("Streamline input preparation", ShaderAbi.NRD_MOTION_PUSH_CONSTANT_SIZE,
+                false,
+                new int[] {
+                    SAMPLED_IMAGE, SAMPLED_IMAGE, STORAGE_IMAGE, STORAGE_IMAGE, STORAGE_IMAGE
+                },
+                "streamline_input");
+
+        final String label;
+        final int pushSize;
+        final boolean prewarm;
+        final int[] descriptorTypes;
+        final String[] shaderResources;
+
+        Program(String label, int pushSize, boolean prewarm, int[] descriptorTypes, String... shaders) {
+            this.label = label;
+            this.pushSize = pushSize;
+            this.prewarm = prewarm;
+            this.descriptorTypes = descriptorTypes;
+            this.shaderResources = Arrays.stream(shaders)
+                    .map(GeneratedShaderPrograms::resource)
+                    .toArray(String[]::new);
+        }
+    }
 
     private final VulkanContext context;
-    private SharedComputeProgram displayTransform;
-    private SharedComputeProgram hdrPresent;
-    private SharedComputeProgram autoExposure;
-    private SharedComputeProgram uiAlphaClear;
-    private SharedComputeProgram uiAlphaExtract;
-    private SharedComputeProgram streamlineInput;
+    private final SharedComputeProgram[] programs = new SharedComputeProgram[Program.values().length];
     private boolean closed;
 
     VulkanSharedPrograms(VulkanContext context) {
@@ -30,119 +65,58 @@ public final class VulkanSharedPrograms implements AutoCloseable {
     }
 
     void prewarm() {
-        acquireDisplayTransform().release();
-        acquireAutoExposure().release();
-        acquireHdrPresent().release();
-        acquireUiAlphaClear().release();
-        acquireUiAlphaExtract().release();
+        for (Program program : Program.values()) {
+            if (program.prewarm) {
+                acquire(program).release();
+            }
+        }
     }
 
     SharedComputeProgram acquireDisplayTransform() {
-        requireOpen();
-        if (this.displayTransform == null) {
-            this.displayTransform =
-                SharedComputeProgram.create(this.context, "common display-transform", 28,
-                    new int[] {SAMPLED_IMAGE, STORAGE_IMAGE, STORAGE_BUFFER, STORAGE_IMAGE},
-                    new String[] {GeneratedShaderPrograms.resource("fsr_display")});
-        }
-        return this.displayTransform.retain();
+        return acquire(Program.DISPLAY_TRANSFORM);
     }
 
     SharedComputeProgram acquireAutoExposure() {
-        requireOpen();
-        if (this.autoExposure == null) {
-            this.autoExposure = SharedComputeProgram.create(this.context, "auto-exposure", 16,
-                new int[] {
-                    SAMPLED_IMAGE, STORAGE_IMAGE, STORAGE_IMAGE, STORAGE_BUFFER, STORAGE_BUFFER},
-                new String[] {GeneratedShaderPrograms.resource("auto_exposure_histogram"),
-                    GeneratedShaderPrograms.resource("auto_exposure_update")});
-        }
-        return this.autoExposure.retain();
+        return acquire(Program.AUTO_EXPOSURE);
     }
 
     SharedComputeProgram acquireHdrPresent() {
-        requireOpen();
-        if (this.hdrPresent == null) {
-            this.hdrPresent = SharedComputeProgram.create(
-                    this.context,
-                    "HDR presentation",
-                    16,
-                    new int[] {SAMPLED_IMAGE, SAMPLED_IMAGE, SAMPLED_IMAGE, STORAGE_IMAGE},
-                    new String[] {GeneratedShaderPrograms.resource("hdr_present")});
-        }
-        return this.hdrPresent.retain();
+        return acquire(Program.HDR_PRESENT);
     }
 
     SharedComputeProgram acquireUiAlphaClear() {
-        requireOpen();
-        if (this.uiAlphaClear == null) {
-            this.uiAlphaClear = SharedComputeProgram.create(
-                    this.context,
-                    "UI alpha clear",
-                    8,
-                    new int[] {STORAGE_IMAGE},
-                    new String[] {GeneratedShaderPrograms.resource("ui_alpha_clear")});
-        }
-        return this.uiAlphaClear.retain();
+        return acquire(Program.UI_ALPHA_CLEAR);
     }
 
     SharedComputeProgram acquireUiAlphaExtract() {
-        requireOpen();
-        if (this.uiAlphaExtract == null) {
-            this.uiAlphaExtract = SharedComputeProgram.create(
-                    this.context,
-                    "UI alpha extraction",
-                    8,
-                    new int[] {SAMPLED_IMAGE, STORAGE_IMAGE},
-                    new String[] {GeneratedShaderPrograms.resource("ui_alpha_extract")});
-        }
-        return this.uiAlphaExtract.retain();
+        return acquire(Program.UI_ALPHA_EXTRACT);
     }
 
     SharedComputeProgram acquireStreamlineInput() {
+        return acquire(Program.STREAMLINE_INPUT);
+    }
+
+    private SharedComputeProgram acquire(Program program) {
         requireOpen();
-        if (this.streamlineInput == null) {
-            this.streamlineInput = SharedComputeProgram.create(
+        int index = program.ordinal();
+        if (this.programs[index] == null) {
+            this.programs[index] = SharedComputeProgram.create(
                     this.context,
-                    "Streamline input preparation",
-                    dev.prime.render.shader.ShaderAbi.NRD_MOTION_PUSH_CONSTANT_SIZE,
-                    new int[] {
-                        SAMPLED_IMAGE,
-                        SAMPLED_IMAGE,
-                        STORAGE_IMAGE,
-                        STORAGE_IMAGE,
-                        STORAGE_IMAGE
-                    },
-                    new String[] {GeneratedShaderPrograms.resource("streamline_input")});
+                    program.label,
+                    program.pushSize,
+                    program.descriptorTypes,
+                    program.shaderResources);
         }
-        return this.streamlineInput.retain();
+        return this.programs[index].retain();
     }
 
     void invalidate() {
         requireOpen();
-        if (this.displayTransform != null) {
-            this.displayTransform.release();
-            this.displayTransform = null;
-        }
-        if (this.autoExposure != null) {
-            this.autoExposure.release();
-            this.autoExposure = null;
-        }
-        if (this.hdrPresent != null) {
-            this.hdrPresent.release();
-            this.hdrPresent = null;
-        }
-        if (this.uiAlphaClear != null) {
-            this.uiAlphaClear.release();
-            this.uiAlphaClear = null;
-        }
-        if (this.uiAlphaExtract != null) {
-            this.uiAlphaExtract.release();
-            this.uiAlphaExtract = null;
-        }
-        if (this.streamlineInput != null) {
-            this.streamlineInput.release();
-            this.streamlineInput = null;
+        for (int index = 0; index < this.programs.length; index++) {
+            if (this.programs[index] != null) {
+                this.programs[index].release();
+                this.programs[index] = null;
+            }
         }
     }
 

@@ -15,39 +15,35 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
             VK12.VK_IMAGE_USAGE_STORAGE_BIT
                     | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
                     | VK12.VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    private static final int LINEAR_OUTPUT_USAGE =
-            SIGNAL_USAGE | VK12.VK_IMAGE_USAGE_SAMPLED_BIT;
+    private enum Role {
+        NOISY_DIFFUSE(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "diffuse"),
+        NOISY_SPECULAR(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "specular"),
+        NORMAL_ROUGHNESS(VK12.VK_FORMAT_R32G32B32A32_SFLOAT, "world normal and roughness"),
+        VIEW_Z(VK12.VK_FORMAT_R32_SFLOAT, "view Z"),
+        TRANSPORT_METADATA(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "transport metadata"),
+        MATERIAL(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "material"),
+        SPECULAR_MATERIAL(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "specular material"),
+        PRIMARY_POSITION(VK12.VK_FORMAT_R32G32B32A32_SFLOAT, "primary position"),
+        SUN_LIGHTING(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "sun lighting"),
+        SUN_PENUMBRA(VK12.VK_FORMAT_R16_SFLOAT, "sun penumbra"),
+        RECONSTRUCTION_CONTROL(VK12.VK_FORMAT_R8_UINT, "reconstruction control"),
+        LINEAR_OUTPUT(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "linear HDR output");
 
-    private final VulkanImage noisyDiffuse;
-    private final VulkanImage noisySpecular;
-    private final VulkanImage normalRoughness;
-    private final VulkanImage viewZ;
-    private final VulkanImage transportMetadata;
-    private final VulkanImage material;
-    private final VulkanImage specularMaterial;
-    private final VulkanImage primaryPosition;
-    private final VulkanImage sunLighting;
-    private final VulkanImage sunPenumbra;
-    private final VulkanImage reconstructionControl;
-    private final VulkanImage linearOutput;
-    private final VulkanImage[] owned;
+        final int format;
+        final String label;
+
+        Role(int format, String label) {
+            this.format = format;
+            this.label = label;
+        }
+    }
+
+    private final VulkanImage[] images;
     private final boolean hasLinearOutput;
     private boolean destroyed;
 
     private BasicRawWavefrontFrame(ArrayList<VulkanImage> images, boolean hasLinearOutput) {
-        this.noisyDiffuse = images.get(0);
-        this.noisySpecular = images.get(1);
-        this.normalRoughness = images.get(2);
-        this.viewZ = images.get(3);
-        this.transportMetadata = images.get(4);
-        this.material = images.get(5);
-        this.specularMaterial = images.get(6);
-        this.primaryPosition = images.get(7);
-        this.sunLighting = images.get(8);
-        this.sunPenumbra = images.get(9);
-        this.reconstructionControl = images.get(10);
-        this.linearOutput = hasLinearOutput ? images.get(11) : null;
-        this.owned = images.toArray(VulkanImage[]::new);
+        this.images = images.toArray(VulkanImage[]::new);
         this.hasLinearOutput = hasLinearOutput;
     }
 
@@ -65,31 +61,12 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
             boolean hasLinearOutput) {
         ArrayList<VulkanImage> images = new ArrayList<>();
         try {
-            add(context, images, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    label + " diffuse");
-            add(context, images, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    label + " specular");
-            add(context, images, width, height, VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
-                    label + " world normal and roughness");
-            add(context, images, width, height, VK12.VK_FORMAT_R32_SFLOAT,
-                    label + " view Z");
-            add(context, images, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    label + " transport metadata");
-            add(context, images, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    label + " material");
-            add(context, images, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    label + " specular material");
-            add(context, images, width, height, VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
-                    label + " primary position");
-            add(context, images, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                    label + " sun lighting");
-            add(context, images, width, height, VK12.VK_FORMAT_R16_SFLOAT,
-                    label + " sun penumbra");
-            add(context, images, width, height, VK12.VK_FORMAT_R8_UINT,
-                    label + " reconstruction control");
-            if (hasLinearOutput) {
-                add(context, images, width, height, VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
-                        LINEAR_OUTPUT_USAGE, label + " linear HDR output");
+            for (Role role : Role.values()) {
+                if (role == Role.LINEAR_OUTPUT && !hasLinearOutput) {
+                    break;
+                }
+                images.add(context.createImage2D(
+                        width, height, role.format, SIGNAL_USAGE, label + " " + role.label));
             }
             return new BasicRawWavefrontFrame(images, hasLinearOutput);
         } catch (RuntimeException exception) {
@@ -100,38 +77,17 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
         }
     }
 
-    private static void add(
-            VulkanContext context,
-            ArrayList<VulkanImage> images,
-            int width,
-            int height,
-            int format,
-            String label) {
-        add(context, images, width, height, format, SIGNAL_USAGE, label);
-    }
-
-    private static void add(
-            VulkanContext context,
-            ArrayList<VulkanImage> images,
-            int width,
-            int height,
-            int format,
-            int usage,
-            String label) {
-        images.add(context.createImage2D(width, height, format, usage, label));
-    }
-
     public void prepareForRayTrace(
             org.lwjgl.vulkan.VkCommandBuffer commandBuffer,
             VulkanImageInitializationBatch initialization) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkImageMemoryBarrier2.Buffer barriers =
-                    VkImageMemoryBarrier2.calloc(this.owned.length, stack);
-            for (int index = 0; index < this.owned.length; index++) {
-                VulkanImage image = this.owned[index];
+                    VkImageMemoryBarrier2.calloc(this.images.length, stack);
+            for (int index = 0; index < this.images.length; index++) {
+                VulkanImage image = this.images[index];
                 boolean initialized = initialization.prepare(image);
                 boolean linearOutput = this.hasLinearOutput
-                        && index == this.owned.length - 1;
+                        && index == Role.LINEAR_OUTPUT.ordinal();
                 long destinationStages = destinationStages(
                         this.hasLinearOutput, linearOutput);
                 barriers.get(index).sType$Default()
@@ -161,23 +117,21 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
         }
     }
 
-    @Override public VulkanImage noisyDiffuse() { return this.noisyDiffuse; }
-    @Override public VulkanImage noisySpecular() { return this.noisySpecular; }
-    @Override public VulkanImage normalRoughness() { return this.normalRoughness; }
-    @Override public VulkanImage viewZ() { return this.viewZ; }
-    @Override public VulkanImage transportScratch() { return this.transportMetadata; }
-    @Override public VulkanImage reconstructionMotion() { return this.transportMetadata; }
-    @Override public VulkanImage material() { return this.material; }
-    @Override public VulkanImage specularMaterial() { return this.specularMaterial; }
-    @Override public VulkanImage reconstructionControl() { return this.reconstructionControl; }
-    @Override public VulkanImage primaryPosition() { return this.primaryPosition; }
-    @Override public VulkanImage sunLighting() { return this.sunLighting; }
-    @Override public VulkanImage sunPenumbra() { return this.sunPenumbra; }
-    VulkanImage linearOutput() { return this.linearOutput; }
+    private VulkanImage image(Role role) { return this.images[role.ordinal()]; }
 
-    static int imageUsage(boolean linearOutput) {
-        return linearOutput ? LINEAR_OUTPUT_USAGE : SIGNAL_USAGE;
-    }
+    @Override public VulkanImage noisyDiffuse() { return image(Role.NOISY_DIFFUSE); }
+    @Override public VulkanImage noisySpecular() { return image(Role.NOISY_SPECULAR); }
+    @Override public VulkanImage normalRoughness() { return image(Role.NORMAL_ROUGHNESS); }
+    @Override public VulkanImage viewZ() { return image(Role.VIEW_Z); }
+    @Override public VulkanImage transportScratch() { return image(Role.TRANSPORT_METADATA); }
+    @Override public VulkanImage reconstructionMotion() { return image(Role.TRANSPORT_METADATA); }
+    @Override public VulkanImage material() { return image(Role.MATERIAL); }
+    @Override public VulkanImage specularMaterial() { return image(Role.SPECULAR_MATERIAL); }
+    @Override public VulkanImage reconstructionControl() { return image(Role.RECONSTRUCTION_CONTROL); }
+    @Override public VulkanImage primaryPosition() { return image(Role.PRIMARY_POSITION); }
+    @Override public VulkanImage sunLighting() { return image(Role.SUN_LIGHTING); }
+    @Override public VulkanImage sunPenumbra() { return image(Role.SUN_PENUMBRA); }
+    VulkanImage linearOutput() { return image(Role.LINEAR_OUTPUT); }
 
     static long destinationStages(boolean hasLinearOutput, boolean linearOutput) {
         if (linearOutput) {
@@ -195,8 +149,8 @@ public final class BasicRawWavefrontFrame implements RawWavefrontFrame, Destroya
     public void destroy() {
         if (this.destroyed) return;
         this.destroyed = true;
-        for (int index = this.owned.length - 1; index >= 0; index--) {
-            this.owned[index].destroy();
+        for (int index = this.images.length - 1; index >= 0; index--) {
+            this.images[index].destroy();
         }
     }
 }
