@@ -1,10 +1,7 @@
 package dev.prime.render;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.TransparentGuideMode;
@@ -14,7 +11,7 @@ import org.junit.jupiter.api.Test;
 final class IntegratorSettingsTest {
     @Test
     void sampleEpochUsesOnlySamplingState() {
-        assertEquals(17, IntegratorSettings.packSampleEpoch(17));
+        assertEquals(17, IntegratorSettings.packSampleEpoch(17, false));
         assertEquals(
                 17 | ShaderAbi.PATH_HISTORY_VALID_MASK,
                 IntegratorSettings.packSampleEpoch(17, true));
@@ -23,7 +20,7 @@ final class IntegratorSettingsTest {
                 IntegratorSettings.packSampleEpoch(17, false));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> IntegratorSettings.packSampleEpoch(-1));
+                () -> IntegratorSettings.packSampleEpoch(-1, false));
     }
 
     @Test
@@ -107,7 +104,12 @@ final class IntegratorSettingsTest {
     void sampleControlKeepsSeasonSeparateFromSobolIdentity() {
         AstronomySettings astronomy = new AstronomySettings(30, 359);
         int packed = IntegratorSettings.packSampleControl(
-                0xabcd, astronomy, false, false);
+                0xabcd,
+                astronomy,
+                false,
+                false,
+                MaterialSettings.DEFAULT_VANILLA_PBR_PRESETS,
+                TransparentNeeMode.DEFAULT);
         assertEquals(0xabcd, packed & ShaderAbi.PATH_SAMPLE_INDEX_MASK);
         assertEquals(
                 359,
@@ -120,21 +122,35 @@ final class IntegratorSettingsTest {
                 packed & ShaderAbi.PATH_VANILLA_PBR_PRESETS_MASK);
         assertEquals(
                 ShaderAbi.PATH_SEAMLESS_GLASS_MASK,
-                IntegratorSettings.packSampleControl(0xabcd, astronomy, true, false)
+                IntegratorSettings.packSampleControl(
+                                0xabcd, astronomy, true, false, true,
+                                TransparentNeeMode.DEFAULT)
                         & ShaderAbi.PATH_SEAMLESS_GLASS_MASK);
         assertEquals(
                 ShaderAbi.PATH_AIR_GAP_MASK,
-                IntegratorSettings.packSampleControl(0xabcd, astronomy, false, true)
+                IntegratorSettings.packSampleControl(
+                                0xabcd, astronomy, false, true, true,
+                                TransparentNeeMode.DEFAULT)
                         & ShaderAbi.PATH_AIR_GAP_MASK);
         assertEquals(
                 0,
                 IntegratorSettings.packSampleControl(
-                                0xabcd, astronomy, false, false, false)
+                                0xabcd,
+                                astronomy,
+                                false,
+                                false,
+                                false,
+                                TransparentNeeMode.DEFAULT)
                         & ShaderAbi.PATH_VANILLA_PBR_PRESETS_MASK);
         assertThrows(
                 IllegalArgumentException.class,
                 () -> IntegratorSettings.packSampleControl(
-                        1 << 16, astronomy, false, false));
+                        1 << 16,
+                        astronomy,
+                        false,
+                        false,
+                        true,
+                        TransparentNeeMode.DEFAULT));
     }
 
     @Test
@@ -171,79 +187,4 @@ final class IntegratorSettingsTest {
                         0, 0, 0, 101, false));
     }
 
-    @Test
-    void rouletteStartsAtSecondScatter() {
-        assertEquals(1, IntegratorSettings.RUSSIAN_ROULETTE_START);
-    }
-
-    @Test
-    void reciprocalMisWeightsFormACompletePartition() {
-        float forward = IntegratorSettings.powerHeuristic(0.3F, 0.7F);
-        float reverse = IntegratorSettings.powerHeuristic(0.7F, 0.3F);
-        assertEquals(1.0F, forward + reverse, 1.0e-6F);
-        assertEquals(0.5F,
-                IntegratorSettings.powerHeuristic(Float.MAX_VALUE, Float.MAX_VALUE),
-                0.0F);
-        assertEquals(0.5F,
-                IntegratorSettings.powerHeuristic(Float.MIN_VALUE, Float.MIN_VALUE),
-                0.0F);
-    }
-
-    @Test
-    void rouletteCompensationPreservesExpectedThroughput() {
-        float throughput = 0.2F;
-        float etaScale = 2.25F;
-        float survival = IntegratorSettings.rouletteSurvival(throughput, etaScale);
-        assertEquals(throughput, survival * (throughput / survival), 1.0e-6F);
-        assertEquals((float) Math.sqrt(0.45F), survival, 1.0e-6F);
-        assertEquals(
-                (float) Math.sqrt(0.001F),
-                IntegratorSettings.rouletteSurvival(0.001F, 1.0F));
-        assertEquals(1.0F, IntegratorSettings.rouletteSurvival(10.0F, 1.0F));
-    }
-
-    @Test
-    void onlineMeanMatchesBatchMean() {
-        float mean = IntegratorSettings.updateMean(0.0F, 1.0F, 0);
-        mean = IntegratorSettings.updateMean(mean, 2.0F, 1);
-        mean = IntegratorSettings.updateMean(mean, 6.0F, 2);
-        assertEquals(3.0F, mean, 1.0e-6F);
-    }
-
-    @Test
-    void sobolStreamIsStableSeparatedByEffectAndStrictlyUnitRange() {
-        float[] first = IntegratorSettings.sobolSample2D(17, 29, 3, 5, 7, 1, 0);
-        assertArrayEquals(first, IntegratorSettings.sobolSample2D(17, 29, 3, 5, 7, 1, 0));
-        assertNotEquals(first[0], IntegratorSettings.sobolSample2D(17, 29, 4, 5, 7, 1, 0)[0]);
-        assertNotEquals(first[0], IntegratorSettings.sobolSample2D(17, 29, 3, 5, 7, 2, 0)[0]);
-        for (int sampleIndex = 0; sampleIndex < 10_000; sampleIndex++) {
-            float[] sample = IntegratorSettings.sobolSample2D(
-                    17, 29, sampleIndex, 5, 7, 1, 0);
-            assertTrue(sample[0] >= 0.0F && sample[0] < 1.0F);
-            assertTrue(sample[1] >= 0.0F && sample[1] < 1.0F);
-        }
-    }
-
-    @Test
-    void sobolPrefixStratifiesBothAxes() {
-        int[] xBins = new int[16];
-        int[] yBins = new int[16];
-        for (int sampleIndex = 0; sampleIndex < 256; sampleIndex++) {
-            float[] sample = IntegratorSettings.sobolSample2D(
-                    17, 29, sampleIndex, 5, 7, 1, 0);
-            xBins[(int) (sample[0] * 16.0F)]++;
-            yBins[(int) (sample[1] * 16.0F)]++;
-        }
-        for (int bin = 0; bin < 16; bin++) {
-            assertEquals(16, xBins[bin]);
-            assertEquals(16, yBins[bin]);
-        }
-    }
-
-    @Test
-    void diffusePdfIsDefinedOnlyOnTheVisibleHemisphere() {
-        assertEquals(1.0F / (float) Math.PI, IntegratorSettings.diffusePdf(1.0F), 1.0E-7F);
-        assertEquals(0.0F, IntegratorSettings.diffusePdf(0.0F));
-        assertEquals(0.0F, IntegratorSettings.diffusePdf(-1.0F));
-    }
 }

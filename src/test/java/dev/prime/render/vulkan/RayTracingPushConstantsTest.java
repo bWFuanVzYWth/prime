@@ -78,7 +78,8 @@ final class RayTracingPushConstantsTest {
                         input.astronomy().settings(),
                         input.material().seamlessGlass(),
                         input.material().airGap(),
-                        input.material().vanillaPbrPresets()),
+                        input.material().vanillaPbrPresets(),
+                        input.lighting().transparentNeeMode()),
                 firstBuffer.getInt(ShaderAbi.PUSH_PATH_OFFSET));
         assertEquals(
                 IntegratorSettings.packSampleEpoch(
