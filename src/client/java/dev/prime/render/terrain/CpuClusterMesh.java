@@ -88,6 +88,17 @@ public final class CpuClusterMesh {
         return fromSegments(meshes, List.of(), CpuVoxelInstances.EMPTY);
     }
 
+    /** Dynamic prototypes and unique fallbacks share one explicit TLAS-instance stream. */
+    public static CpuClusterMesh fromInstances(
+            List<CpuVoxelMesh> meshes, CpuVoxelInstances instances) {
+        return new CpuClusterMesh(
+                List.of(),
+                OpacityMicromapData.EMPTY,
+                CompiledClusterLights.EMPTY,
+                meshes,
+                instances);
+    }
+
     static CpuClusterMesh fromSegments(
             List<CpuSectionMesh> meshes,
             List<CpuVoxelMesh> voxelMeshes,
@@ -224,6 +235,7 @@ public final class CpuClusterMesh {
                 Math.multiplyExact(
                         (long) this.voxelInstances.count(),
                         2L * Integer.BYTES + 3L * Float.BYTES));
+        result = Math.addExact(result, this.voxelInstances.motionByteSize());
         return result;
     }
 

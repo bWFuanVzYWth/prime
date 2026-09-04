@@ -38,6 +38,25 @@ final class VulkanFrameSubmission {
         VulkanImageTransitions.finishImageCopy(commandBuffer, output, mainColor);
     }
 
+    void copyPrimaryRayToMinecraft(
+            VkCommandBuffer commandBuffer,
+            VulkanImage output,
+            VulkanGpuTexture mainColor,
+            int width,
+            int height) {
+        VulkanImageTransitions.preparePrimaryRayImageForCopy(
+                commandBuffer, output, mainColor);
+        VulkanImageTransitions.blitFlipped(
+                commandBuffer,
+                output.image(),
+                VK12.VK_IMAGE_LAYOUT_GENERAL,
+                mainColor.vkImage(),
+                VK12.VK_IMAGE_LAYOUT_GENERAL,
+                width,
+                height);
+        VulkanImageTransitions.finishImageCopy(commandBuffer, output, mainColor);
+    }
+
     void submit(
             VulkanCommandEncoder encoder,
             VkCommandBuffer commandBuffer,

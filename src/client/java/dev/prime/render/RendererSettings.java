@@ -9,6 +9,7 @@ import java.util.Objects;
 /** Immutable renderer configuration captured once at the client frame boundary. */
 public record RendererSettings(
         boolean pathTracingEnabled,
+        RealtimeRenderMode realtimeRenderMode,
         SurfaceDetailMode surfaceDetailMode,
         int voxelTextureSurfaceStrengthSteps,
         PostProcessingMode postProcessingMode,
@@ -23,6 +24,7 @@ public record RendererSettings(
         int terrainWorkerPercentage,
         long revision) {
     public RendererSettings {
+        realtimeRenderMode = Objects.requireNonNull(realtimeRenderMode, "realtimeRenderMode");
         postProcessingMode = Objects.requireNonNull(postProcessingMode, "postProcessingMode");
         reconstructionQuality = Objects.requireNonNull(
                 reconstructionQuality, "reconstructionQuality");

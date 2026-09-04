@@ -8,6 +8,7 @@ import dev.prime.render.HdrOutput;
 import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
 import dev.prime.render.BounceSettings;
+import dev.prime.render.RealtimeRenderMode;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.TransparentNeeMode;
 import dev.prime.render.post.PostProcessingMode;
@@ -25,6 +26,7 @@ import java.util.function.IntUnaryOperator;
 /** Scalar codec and validation for the current Prime properties format. */
 final class PrimeConfigCodec {
     private static final String PATH_TRACING_ENABLED_KEY = "renderer.path_tracing";
+    private static final String REALTIME_RENDER_MODE_KEY = "renderer.realtime_mode";
     private static final String ADDITIONAL_SPECULAR_BOUNCES_KEY =
             "renderer.additional_specular_bounces";
     private static final String MINIMUM_BOUNCES_KEY = "renderer.minimum_bounces";
@@ -76,6 +78,9 @@ final class PrimeConfigCodec {
         data.pathTracingEnabled = reader.value(
                 PATH_TRACING_ENABLED_KEY, data.pathTracingEnabled,
                 PrimeConfigCodec::parseBoolean, "path-tracing switch");
+        data.realtimeRenderMode = reader.value(
+                REALTIME_RENDER_MODE_KEY, data.realtimeRenderMode,
+                PrimeConfigCodec::parseRealtimeRenderMode, "realtime renderer mode");
         data.additionalSpecularBounces = reader.migratedValue(
                 ADDITIONAL_SPECULAR_BOUNCES_KEY, LEGACY_SPECULAR_BOUNCES_KEY,
                 data.additionalSpecularBounces,
@@ -178,6 +183,7 @@ final class PrimeConfigCodec {
 
     static String encode(PrimeConfigData data) {
         return PATH_TRACING_ENABLED_KEY + "=" + data.pathTracingEnabled + "\n"
+                + REALTIME_RENDER_MODE_KEY + "=" + data.realtimeRenderMode.id() + "\n"
                 + ADDITIONAL_SPECULAR_BOUNCES_KEY + "="
                 + data.additionalSpecularBounces + "\n"
                 + MINIMUM_BOUNCES_KEY + "=" + data.minimumBounces + "\n"
@@ -227,6 +233,11 @@ final class PrimeConfigCodec {
         } catch (IllegalArgumentException exception) {
             throw new IllegalArgumentException("Unknown Reflex mode", exception);
         }
+    }
+
+    static RealtimeRenderMode parseRealtimeRenderMode(String value) {
+        return RealtimeRenderMode.findById(value).orElseThrow(
+                () -> new IllegalArgumentException("Unknown realtime renderer mode"));
     }
 
     private static PostProcessingMode parsePersistentMode(String value) {

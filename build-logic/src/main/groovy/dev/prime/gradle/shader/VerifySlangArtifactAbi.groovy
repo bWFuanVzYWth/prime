@@ -222,7 +222,10 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 	}
 
 	private static void verifyPayloads(Map<String, Spirv> modules) {
-		def expectedOutgoing = [primeSurfacePayload: 0, primeShadowPayload: 1]
+		def expectedOutgoing = [
+				primeSurfacePayload: 0,
+				primeShadowPayload: 1,
+				primePrimaryPayload: 0]
 		modules.findAll { name, ignored ->
 			name.endsWith('.rgen.spv') || name.endsWith('.rmiss.spv')
 					|| name.endsWith('.rchit.spv') || name.endsWith('.rahit.spv')
@@ -236,7 +239,8 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 			}
 			def incoming = module.payloadLocations('IncomingRayPayloadKHR')
 			if (!incoming.isEmpty()) {
-				def expected = name.startsWith('world.') || name.startsWith('world_') ? 0
+				def expected = name.startsWith('world.') || name.startsWith('world_')
+						|| name.startsWith('primary_ray.') || name.startsWith('primary_ray_') ? 0
 						: name.startsWith('shadow.') || name.startsWith('shadow_') ? 1 : null
 				if (expected == null) {
 					throw new GradleException("Incoming payload stage has no ABI class: ${name}")
@@ -251,11 +255,16 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 				'vec3(f32),f32,u32,u32,u32,u32,vec3(f32),u32,vec3(f32),u32)'
 		def shadow = 'struct(vec4(f32),vec4(f32),vec4(f32),vec4(f32),vec2(u32),' +
 				'u32,vec2(u32),vec2(u32))'
+		def primary = 'struct(vec3(f32),u32)'
 		verifyShapes(modules, [trace] as Set, 'IncomingRayPayloadKHR',
 				['world.rmiss.spv', 'world.rchit.spv'])
 		verifyShapes(modules, [shadow] as Set, 'IncomingRayPayloadKHR', [
 				'shadow.rmiss.spv', 'shadow.rchit.spv',
 				'shadow_opaque.rahit.spv', 'shadow_nonopaque.rahit.spv'])
+		verifyShapes(modules, [primary] as Set, 'IncomingRayPayloadKHR', [
+				'primary_ray.rmiss.spv', 'primary_ray.rchit.spv'])
+		verifyShapes(modules, [primary] as Set, 'RayPayloadKHR', [
+				'primary_ray.rgen.spv'])
 		['', '_ser'].each { suffix ->
 			verifyWavefrontShapes(modules, [trace] as Set, 'realtime', suffix,
 					['camera_trace', 'delta_walk', 'guide_delta_walk', 'fixed_bridge_trace'])
@@ -294,6 +303,23 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 				'image_diagnostic_rgba16.comp.spv').descriptorBindings(0), 'RGBA16 diagnostic descriptors')
 		requireEqual([0, 1, 2, 3, 4] as Set, requireModule(modules,
 				'streamline_input.comp.spv').descriptorBindings(0), 'Streamline input descriptors')
+
+		def primaryStages = [
+				'primary_ray.rgen.spv', 'primary_ray.rmiss.spv',
+				'primary_ray.rchit.spv', 'primary_ray.rahit.spv']
+		def expectedPrimaryShared = [
+				schema.sharedDescriptors.tlas,
+				schema.sharedDescriptors.blockAtlas,
+				schema.sharedDescriptors.textureRecords,
+				schema.sharedDescriptors.tintSamples,
+				schema.sharedDescriptors.baseColorPages,
+				schema.sharedDescriptors.materialCoreRecords]
+				.collect { it as int }.toSet()
+		requireEqual(expectedPrimaryShared,
+				descriptorBindings(modules, primaryStages, 0),
+				'Primary-ray shared descriptors')
+		requireEqual([0] as Set, descriptorBindings(modules, primaryStages, 1),
+				'Primary-ray output descriptors')
 
 		def queue = schema.realtimeDescriptors.wavefrontQueue as int
 		def paths = schema.realtimeDescriptors.wavefrontPaths as int

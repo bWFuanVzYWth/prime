@@ -13,6 +13,7 @@ import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
 import dev.prime.render.BounceSettings;
 import dev.prime.render.RendererSettings;
+import dev.prime.render.RealtimeRenderMode;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.TransparentNeeMode;
 import dev.prime.render.diagnostic.NrdInputView;
@@ -35,6 +36,8 @@ import net.minecraft.network.chat.Component;
 public final class PrimeVideoOptions {
     private static final List<PostProcessingMode> POST_PROCESSING_MODES =
             List.of(PostProcessingMode.NRD_FSR, PostProcessingMode.DLSS_RR);
+    private static final List<RealtimeRenderMode> REALTIME_RENDER_MODES =
+            List.of(RealtimeRenderMode.values());
     private static final List<ReconstructionQualityMode> QUALITY_MODES =
             List.of(ReconstructionQualityMode.values());
     private static final List<SurfaceDetailMode> SURFACE_DETAIL_MODES =
@@ -105,6 +108,20 @@ public final class PrimeVideoOptions {
                                 "prime.options.path_tracing",
                                 settings.pathTracingEnabled(),
                                 PrimeVideoOptions::setPathTracingEnabled)),
+                                big(enumOption(
+                                "prime.options.realtime_renderer",
+                                new OptionInstance.Enum<>(
+                                        REALTIME_RENDER_MODES,
+                                        Codec.STRING.xmap(
+                                                id -> RealtimeRenderMode.findById(id)
+                                                        .orElse(RealtimeRenderMode.DEFAULT),
+                                                RealtimeRenderMode::id)),
+                                settings.realtimeRenderMode(),
+                                (caption, mode) -> Options.genericValueLabel(
+                                        caption,
+                                        Component.translatable(
+                                                "prime.options.realtime_renderer." + mode.id())),
+                                PrimeConfig::setRealtimeRenderMode)),
                                 big(booleanOption(
                                         "prime.options.screenshot_mode",
                                         runtime.screenshotRequested(),

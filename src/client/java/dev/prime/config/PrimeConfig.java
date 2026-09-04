@@ -9,6 +9,7 @@ import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
 import dev.prime.render.BounceSettings;
 import dev.prime.render.RendererSettings;
+import dev.prime.render.RealtimeRenderMode;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.TransparentNeeMode;
 import dev.prime.render.post.PostProcessingMode;
@@ -54,6 +55,7 @@ public final class PrimeConfig {
     public static RendererSettings rendererSettings() {
         return new RendererSettings(
                 data.pathTracingEnabled,
+                data.realtimeRenderMode,
                 data.surfaceDetailMode,
                 data.voxelTextureSurfaceStrengthSteps,
                 data.postProcessingMode,
@@ -177,6 +179,14 @@ public final class PrimeConfig {
     public static void setPathTracingEnabled(boolean value) {
         if (value != data.pathTracingEnabled) {
             data.pathTracingEnabled = value;
+            rendererChanged();
+        }
+    }
+
+    public static void setRealtimeRenderMode(RealtimeRenderMode value) {
+        Objects.requireNonNull(value, "value");
+        if (value != data.realtimeRenderMode) {
+            data.realtimeRenderMode = value;
             rendererChanged();
         }
     }

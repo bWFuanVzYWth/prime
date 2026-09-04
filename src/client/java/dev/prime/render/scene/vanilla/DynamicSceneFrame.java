@@ -19,12 +19,14 @@ public record DynamicSceneFrame(
         CpuClusterMesh mesh,
         List<SceneTexture> textures,
         List<MotionSegment> motionSegments,
+        List<GeometrySpan> geometrySpans,
         Set<CompatibilityIssue> compatibilityIssues) {
 
     public DynamicSceneFrame {
         mesh = Objects.requireNonNull(mesh, "mesh");
         textures = List.copyOf(textures);
         motionSegments = List.copyOf(motionSegments);
+        geometrySpans = List.copyOf(geometrySpans);
         EnumSet<CompatibilityIssue> issues = compatibilityIssues.isEmpty()
                 ? EnumSet.noneOf(CompatibilityIssue.class)
                 : EnumSet.copyOf(compatibilityIssues);
@@ -45,6 +47,21 @@ public record DynamicSceneFrame(
                     segment.firstTriangle(), segment.triangleCount());
         }
         motionSegments = unambiguousMotionSegments(motionSegments, issues);
+        int geometryEnd = 0;
+        for (GeometrySpan span : geometrySpans) {
+            Objects.requireNonNull(span, "geometry span");
+            if (span.firstTriangle() != geometryEnd
+                    || (long) span.firstTriangle() + span.triangleCount()
+                            > mesh.triangleLayout().triangleCount()) {
+                throw new IllegalArgumentException(
+                        "Dynamic geometry spans must exactly partition the captured mesh");
+            }
+            geometryEnd = Math.addExact(span.firstTriangle(), span.triangleCount());
+        }
+        if (geometryEnd != mesh.triangleLayout().triangleCount()) {
+            throw new IllegalArgumentException(
+                    "Dynamic geometry spans do not cover the captured mesh");
+        }
         compatibilityIssues = Set.copyOf(issues);
     }
 
@@ -58,13 +75,13 @@ public record DynamicSceneFrame(
         TEXTURELESS_MATERIAL_APPROXIMATED(
                 "a textureless render type is approximated with its submitted vertex color"),
         MISSING_ALBEDO_TEXTURE(
-                "a render type with textures has no Sampler0 albedo binding and was omitted"),
+                "a render type has no usable Sampler0 albedo and uses submitted vertex color"),
         UNSUPPORTED_ALBEDO_FORMAT(
-                "a dynamic albedo is not a supported two-dimensional RGBA8 texture and was omitted"),
+                "a dynamic albedo format is unsupported and uses submitted vertex color"),
         UNKNOWN_ALBEDO_ENCODING(
-                "a dynamic render attachment has no reliable source color encoding and was omitted"),
+                "a dynamic render attachment has unknown color encoding and uses submitted vertex color"),
         SCENE_TEXTURE_LIMIT(
-                "the dynamic scene texture descriptor limit was reached and geometry was omitted"),
+                "the scene texture descriptor ABI capacity was reached; excess geometry uses submitted vertex color"),
         UNSUPPORTED_TOPOLOGY(
                 "a non-triangle render topology was omitted"),
         CUSTOM_SUBMIT_NODE(
@@ -120,6 +137,35 @@ public record DynamicSceneFrame(
                         "Motion segment triangle range must not be negative");
             }
         }
+    }
+
+    /** One independently placed dynamic object or one unshareable compatibility submission. */
+    public record GeometrySpan(
+            GeometryKind kind,
+            VanillaSceneBoundary.Element element,
+            long key,
+            boolean stableIdentity,
+            int firstTriangle,
+            int triangleCount) {
+        public GeometrySpan {
+            Objects.requireNonNull(kind, "kind");
+            Objects.requireNonNull(element, "element");
+            if (firstTriangle < 0 || triangleCount <= 0) {
+                throw new IllegalArgumentException(
+                        "Dynamic geometry span must contain a non-negative triangle range");
+            }
+            if (stableIdentity
+                    && element != VanillaSceneBoundary.Element.ENTITY
+                    && element != VanillaSceneBoundary.Element.BLOCK_ENTITY) {
+                throw new IllegalArgumentException(
+                        "Only entities and block entities have stable dynamic identities");
+            }
+        }
+    }
+
+    public enum GeometryKind {
+        INSTANCED,
+        UNIQUE
     }
 
     private static List<MotionSegment> unambiguousMotionSegments(

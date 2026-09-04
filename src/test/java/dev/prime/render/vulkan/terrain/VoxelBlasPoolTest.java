@@ -46,6 +46,18 @@ final class VoxelBlasPoolTest {
                 new VoxelBlasPool.Key(mesh(-0.0F, 3, true)));
     }
 
+    @Test
+    void uniqueMeshDeclaresThatContentMustNotBeShared() {
+        CpuVoxelMesh unique = CpuVoxelMesh.unique(
+                positions(0.0F),
+                primitives(3),
+                TriangleLayout.triangles(1, 0, 0),
+                OpacityMicromapData.EMPTY);
+
+        org.junit.jupiter.api.Assertions.assertFalse(unique.reusable());
+        org.junit.jupiter.api.Assertions.assertTrue(mesh(0.0F, 3, true).reusable());
+    }
+
     private static CpuVoxelMesh mesh(float firstPosition, int primitive, boolean opaque) {
         return new CpuVoxelMesh(
                 positions(firstPosition),

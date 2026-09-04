@@ -53,6 +53,9 @@ final class TerrainUpdateTransaction implements AutoCloseable {
         requireOpen("submit terrain resources");
         this.state = State.SUBMITTED;
         RuntimeException failure = null;
+        if (this.tlas != null) {
+            this.tlas.buildSubmitted();
+        }
         if (this.clusterStaging != null) {
             failure = ResourceCleanup.run(this.clusterStaging::submitted, failure);
         }

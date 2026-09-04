@@ -193,10 +193,11 @@ public final class TerrainStreamer implements AutoCloseable {
     }
 
     /**
-     * Atomically replaces the one render-thread-owned dynamic BLAS.
+     * Atomically replaces the render-thread-owned dynamic instance set.
      *
-     * <p>The reserved instance is always sorted after terrain clusters and carries an empty light
-     * payload, so replacing it cannot add an emitter to either light tree.
+     * <p>Reusable prototypes retain their BLAS by exact content; unique fallback submissions own
+     * separate BLASes. The logical dynamic cluster remains after terrain and has no light-tree
+     * emitters.
      */
     public boolean updateDynamic(DynamicSceneMotion motion) {
         DynamicSceneFrame frame = motion.frame();
@@ -204,8 +205,8 @@ public final class TerrainStreamer implements AutoCloseable {
                 frame.clusterX(),
                 frame.clusterY(),
                 frame.clusterZ(),
-                frame.mesh(),
-                motion.previousPositions());
+                motion.mesh(),
+                new float[0]);
         double cameraX = (frame.clusterX() << 4) + 32.0;
         double cameraY = (frame.clusterY() << 4) + 32.0;
         double cameraZ = (frame.clusterZ() << 4) + 32.0;

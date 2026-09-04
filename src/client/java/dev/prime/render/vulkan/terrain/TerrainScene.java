@@ -125,7 +125,8 @@ public final class TerrainScene implements AutoCloseable {
         List<CompiledCluster> uploads = dynamicUpload == null
                 ? staticUploads
                 : List.of(dynamicUpload);
-        // Dynamic capture is the frame clock: replace and rebuild BLAS/TLAS without a dirty check.
+        // Dynamic capture is the frame clock. Replace its instance set; exact prototype pooling
+        // prevents unchanged reusable geometry from rebuilding its BLAS.
         boolean staticContentChanged =
                 this.hasActualStaticContentChange(staticUploads, evictions);
         boolean contentChanged = replaceDynamic || staticContentChanged;
@@ -187,8 +188,8 @@ public final class TerrainScene implements AutoCloseable {
          * compaction changes only addresses and deliberately reuses the committed tree.
          */
         /*
-         * The reserved dynamic instance sorts after every terrain cluster and cannot carry
-         * emitters. Replacing it cannot change static cluster indices or light-tree topology.
+         * The logical dynamic cluster sorts after every terrain cluster and cannot carry emitters.
+         * Replacing its instances cannot change static cluster indices or light-tree topology.
          */
         boolean rebuildWorldLights = staticContentChanged || needsRebase;
         boolean needsWorldStaging = rebuildWorldLights && finalClusterCount > 0 && hasPotentialLights;
@@ -542,6 +543,7 @@ public final class TerrainScene implements AutoCloseable {
                     "end Prime BLAS compaction command buffer");
             this.context.commandEncoder().execute(commandBuffer);
             submitted = true;
+            replacementTlas.buildSubmitted();
 
             for (PreparedBlas.Compaction compaction : batch.compactions()) {
                 compaction.publish();
@@ -881,10 +883,10 @@ public final class TerrainScene implements AutoCloseable {
                             voxel.primitives().deviceAddress(),
                             voxel.positions().deviceAddress(),
                             0L,
-                            // Dynamic previous positions describe only the base BLAS. Publishing
-                            // that address for an instanced voxel BLAS would make its local
-                            // triangle id index unrelated storage.
-                            cluster.dynamic() ? 0L : cluster.lightAddress(),
+                            cluster.dynamic()
+                                    && instances.hasMotion(index)
+                                    ? voxel.positions().deviceAddress()
+                                    : cluster.dynamic() ? 0L : cluster.lightAddress(),
                             worldLightAddress,
                             worldLightLeafAddress,
                             voxel.triangleLayout(),
@@ -894,13 +896,21 @@ public final class TerrainScene implements AutoCloseable {
                             cluster.lights().emitterCount(),
                             worldLightLeafCount,
                             0xff,
-                            0x8000_0000 | instances.tintId(index),
+                            cluster.dynamic()
+                                    ? 0
+                                    : 0x8000_0000 | instances.tintId(index),
                             sectionX + instances.translationX(index),
                             sectionY + instances.translationY(index),
                             sectionZ + instances.translationZ(index),
-                            sectionX,
-                            sectionY,
-                            sectionZ);
+                            cluster.dynamic()
+                                    ? sectionX + instances.previousTranslationX(index)
+                                    : sectionX,
+                            cluster.dynamic()
+                                    ? sectionY + instances.previousTranslationY(index)
+                                    : sectionY,
+                            cluster.dynamic()
+                                    ? sectionZ + instances.previousTranslationZ(index)
+                                    : sectionZ);
                 }
             }
         });

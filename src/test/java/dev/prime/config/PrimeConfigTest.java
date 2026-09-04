@@ -9,6 +9,7 @@ import dev.prime.render.AstronomySettings;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.BounceSettings;
 import dev.prime.render.RendererSettings;
+import dev.prime.render.RealtimeRenderMode;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.TransparentNeeMode;
 import dev.prime.render.post.PostProcessingMode;
@@ -274,6 +275,7 @@ final class PrimeConfigTest {
     void serializedContentsContainCurrentPersistentSettings() {
         String serialized = PrimeConfig.serializedContents();
         assertTrue(serialized.contains("renderer.path_tracing=true\n"));
+        assertTrue(serialized.contains("renderer.realtime_mode=path_tracing\n"));
         assertFalse(serialized.contains("renderer.sharc="));
         assertTrue(serialized.contains("renderer.additional_specular_bounces=16\n"));
         assertTrue(serialized.contains("renderer.minimum_bounces=2\n"));
@@ -305,6 +307,30 @@ final class PrimeConfigTest {
         assertTrue(defaults.material.seamlessGlass());
         assertTrue(defaults.material.airGap());
         assertTrue(defaults.material.vanillaPbrPresets());
+    }
+
+    @Test
+    void realtimeRendererModeIsStrictAndInvalidatesTheRendererRevision() {
+        assertEquals(
+                RealtimeRenderMode.TEXTURED_PRIMARY_RAYS,
+                PrimeConfigCodec.parseRealtimeRenderMode("textured_primary_rays"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> PrimeConfigCodec.parseRealtimeRenderMode("future_renderer"));
+
+        RealtimeRenderMode previous = PrimeConfig.rendererSettings().realtimeRenderMode();
+        long previousRevision = PrimeConfig.rendererSettings().revision();
+        RealtimeRenderMode replacement = previous == RealtimeRenderMode.PATH_TRACING
+                ? RealtimeRenderMode.TEXTURED_PRIMARY_RAYS
+                : RealtimeRenderMode.PATH_TRACING;
+        try {
+            PrimeConfig.setRealtimeRenderMode(replacement);
+
+            assertEquals(replacement, PrimeConfig.rendererSettings().realtimeRenderMode());
+            assertEquals(previousRevision + 1L, PrimeConfig.rendererSettings().revision());
+        } finally {
+            PrimeConfig.setRealtimeRenderMode(previous);
+        }
     }
 
     @Test

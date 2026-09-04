@@ -7,6 +7,7 @@ import dev.prime.render.HdrOutput;
 import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
 import dev.prime.render.BounceSettings;
+import dev.prime.render.RealtimeRenderMode;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.TransparentNeeMode;
 import dev.prime.render.post.PostProcessingMode;
@@ -17,6 +18,7 @@ import dev.prime.render.terrain.VoxelSurfaceSettings;
 /** Client-thread-owned state transferred to and from the properties codec. */
 final class PrimeConfigData {
     boolean pathTracingEnabled = true;
+    RealtimeRenderMode realtimeRenderMode = RealtimeRenderMode.DEFAULT;
     int additionalSpecularBounces = BounceSettings.DEFAULT_COUNT;
     int minimumBounces = BounceSettings.DEFAULT_FIXED_COUNT;
     int maximumBounces = BounceSettings.DEFAULT_COUNT;

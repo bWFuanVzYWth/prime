@@ -283,6 +283,7 @@ public final class DynamicSceneCapture {
         if (session == null) {
             return;
         }
+        session.builder.markMotionObjectUnique();
         DynamicMeshBuilder.VertexSink sink = session.builder.openUntextured(
                 PrimitiveTopology.TRIANGLE_STRIP, 0);
         Matrix4f pose = new Matrix4f(poseStack.last().pose());
@@ -423,6 +424,7 @@ public final class DynamicSceneCapture {
         if (session == null || renderType.isOutline()) {
             return;
         }
+        session.builder.markMotionObjectUnique();
         DynamicMeshBuilder.VertexSink sink = session.open(renderType, 0);
         if (sink == null) {
             return;
@@ -447,7 +449,7 @@ public final class DynamicSceneCapture {
             if (textureIndex < 0) {
                 continue;
             }
-            DynamicMeshBuilder.VertexSink sink = session.builder.open(
+            DynamicMeshBuilder.VertexSink sink = session.builder.openParticle(
                     PrimitiveTopology.QUADS,
                     textureIndex,
                     0);
@@ -608,6 +610,7 @@ public final class DynamicSceneCapture {
                         "Unsupported dynamic scene element " + element);
             }
             this.element = element;
+            this.builder.captureElement(element);
         }
 
         private void endElement(VanillaSceneBoundary.Element element) {
@@ -616,6 +619,7 @@ public final class DynamicSceneCapture {
                         "Dynamic scene element capture closed out of order");
             }
             this.element = VanillaSceneBoundary.Element.FEATURE;
+            this.builder.captureElement(VanillaSceneBoundary.Element.FEATURE);
         }
 
         private void beginMotionObject(
@@ -658,7 +662,7 @@ public final class DynamicSceneCapture {
             this.builder.report(prepared.textures().isEmpty()
                     ? DynamicSceneFrame.CompatibilityIssue.TEXTURELESS_MATERIAL_APPROXIMATED
                     : DynamicSceneFrame.CompatibilityIssue.MISSING_ALBEDO_TEXTURE);
-            return prepared.textures().isEmpty() ? 0 : -1;
+            return 0;
         }
 
         private DynamicMeshBuilder.@Nullable VertexSink open(
@@ -697,14 +701,14 @@ public final class DynamicSceneCapture {
                 if ((texture.usage() & GpuTexture.USAGE_RENDER_ATTACHMENT) != 0) {
                     this.builder.report(
                             DynamicSceneFrame.CompatibilityIssue.UNKNOWN_ALBEDO_ENCODING);
-                    return -1;
+                    return 0;
                 }
                 if (texture.getFormat() != GpuFormat.RGBA8_UNORM
                         || texture.getDepthOrLayers() != 1
                         || (texture.usage() & GpuTexture.USAGE_CUBEMAP_COMPATIBLE) != 0) {
                     this.builder.report(
                             DynamicSceneFrame.CompatibilityIssue.UNSUPPORTED_ALBEDO_FORMAT);
-                    return -1;
+                    return 0;
                 }
             }
             for (int index = 0; index < this.textures.size(); index++) {
@@ -718,7 +722,7 @@ public final class DynamicSceneCapture {
             if (this.textures.size() + 1 >= ShaderAbi.SCENE_TEXTURE_COUNT) {
                 this.builder.report(
                         DynamicSceneFrame.CompatibilityIssue.SCENE_TEXTURE_LIMIT);
-                return -1;
+                return 0;
             }
             this.textures.add(new DynamicSceneFrame.SceneTexture(view, sampler, sampling));
             return this.textures.size();

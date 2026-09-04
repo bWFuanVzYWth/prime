@@ -1,153 +1,320 @@
 package dev.prime.render.scene.vanilla;
 
 import dev.prime.render.terrain.CpuClusterMesh;
+import dev.prime.render.terrain.CpuMeshSegment;
 import dev.prime.render.terrain.CpuSectionMesh;
-import dev.prime.render.terrain.PrimitivePacking;
+import dev.prime.render.terrain.CpuVoxelInstances;
+import dev.prime.render.terrain.CpuVoxelMesh;
+import dev.prime.render.terrain.OpacityMicromapData;
+import dev.prime.render.terrain.TriangleLayout;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Previous-frame vertex correspondence prepared for one published dynamic BLAS. */
+/** Builds one exact instance stream from a captured dynamic frame. */
 public record DynamicSceneMotion(
         DynamicSceneFrame frame,
-        float[] previousPositions) {
+        CpuClusterMesh mesh,
+        Statistics statistics) {
     public DynamicSceneMotion {
         Objects.requireNonNull(frame, "frame");
-        Objects.requireNonNull(previousPositions, "previousPositions");
-        if (previousPositions.length != frame.mesh().triangleLayout().triangleCount() * 9L) {
+        Objects.requireNonNull(mesh, "mesh");
+        Objects.requireNonNull(statistics, "statistics");
+        if (!mesh.lights().isEmpty() || mesh.triangleLayout().triangleCount() != 0L) {
             throw new IllegalArgumentException(
-                    "Previous dynamic positions do not match the current mesh");
+                    "Dynamic instance geometry must not use the cluster base BLAS");
         }
     }
 
-    /** Pairs stable object identities; unmatched or ambiguous geometry keeps zero object motion. */
     public static DynamicSceneMotion prepare(
             DynamicSceneFrame current, DynamicSceneFrame previous) {
         Objects.requireNonNull(current, "current");
-        float[] currentPositions = positions(current.mesh());
-        float[] motionPositions = currentPositions.clone();
-        List<DynamicSceneFrame.MotionSegment> currentSegments =
-                current.motionSegments();
-        if (previous == null) {
-            return new DynamicSceneMotion(current, motionPositions);
-        }
-
-        Map<MotionKey, DynamicSceneFrame.MotionSegment> previousByKey =
-                segmentMap(previous.motionSegments());
-        boolean sameCluster = current.clusterX() == previous.clusterX()
+        CpuMeshSegment source = geometry(current.mesh());
+        List<BuiltGeometry> currentGeometry = buildGeometry(current, source);
+        Map<MotionKey, Integer> currentIdentityCounts = identityCounts(currentGeometry);
+        Map<MotionKey, BuiltGeometry> previousByKey = previous == null
+                ? Map.of()
+                : uniqueStableGeometry(buildGeometry(previous, geometry(previous.mesh())));
+        boolean sameCluster = previous != null
+                && current.clusterX() == previous.clusterX()
                 && current.clusterY() == previous.clusterY()
                 && current.clusterZ() == previous.clusterZ();
-        float[] oldPositions = positions(previous.mesh());
-        for (DynamicSceneFrame.MotionSegment segment : currentSegments) {
-            MotionKey key = new MotionKey(segment.element(), segment.key());
-            DynamicSceneFrame.MotionSegment old = previousByKey.get(key);
-            if (!sameCluster
-                    || old == null
-                    || !sameTopology(current, segment, previous, old)) {
-                continue;
+
+        ArrayList<CpuVoxelMesh> prototypes = new ArrayList<>();
+        Map<PrototypeKey, Integer> reusable = new HashMap<>();
+        int instanceCount = currentGeometry.size();
+        int[] meshIndices = new int[instanceCount];
+        int[] packedTints = new int[instanceCount];
+        float[] translations = new float[Math.multiplyExact(instanceCount, 3)];
+        float[] previousTranslations = new float[translations.length];
+        boolean[] motion = new boolean[instanceCount];
+        int uniqueCount = 0;
+        long uniqueTriangles = 0L;
+        EnumMap<VanillaSceneBoundary.Element, Integer> uniqueByElement =
+                new EnumMap<>(VanillaSceneBoundary.Element.class);
+
+        for (int index = 0; index < currentGeometry.size(); index++) {
+            BuiltGeometry geometry = currentGeometry.get(index);
+            boolean share = geometry.span().kind()
+                    == DynamicSceneFrame.GeometryKind.INSTANCED;
+            int meshIndex;
+            if (share) {
+                PrototypeKey key = new PrototypeKey(geometry.mesh());
+                Integer existing = reusable.get(key);
+                if (existing == null) {
+                    meshIndex = prototypes.size();
+                    prototypes.add(geometry.mesh());
+                    reusable.put(key, meshIndex);
+                } else {
+                    meshIndex = existing;
+                }
+            } else {
+                meshIndex = prototypes.size();
+                CpuMeshSegment local = geometry.mesh().geometry();
+                prototypes.add(CpuVoxelMesh.unique(
+                        local.positions().clone(),
+                        local.primitiveRecords().clone(),
+                        local.triangleLayout(),
+                        geometry.mesh().opacityMicromap()));
+                uniqueCount++;
+                uniqueTriangles = Math.addExact(
+                        uniqueTriangles, geometry.span().triangleCount());
+                uniqueByElement.merge(
+                        geometry.span().element(), 1, Math::addExact);
             }
-            System.arraycopy(
-                    oldPositions,
-                    Math.multiplyExact(old.firstTriangle(), 9),
-                    motionPositions,
-                    Math.multiplyExact(segment.firstTriangle(), 9),
-                    Math.multiplyExact(segment.triangleCount(), 9));
+            meshIndices[index] = meshIndex;
+            int translation = index * 3;
+            translations[translation] = geometry.translationX();
+            translations[translation + 1] = geometry.translationY();
+            translations[translation + 2] = geometry.translationZ();
+            previousTranslations[translation] = geometry.translationX();
+            previousTranslations[translation + 1] = geometry.translationY();
+            previousTranslations[translation + 2] = geometry.translationZ();
+
+            if (sameCluster
+                    && geometry.span().stableIdentity()
+                    && currentIdentityCounts.get(MotionKey.of(geometry.span())) == 1) {
+                BuiltGeometry old = previousByKey.get(MotionKey.of(geometry.span()));
+                if (old != null && samePrototype(geometry.mesh(), old.mesh())) {
+                    previousTranslations[translation] = old.translationX();
+                    previousTranslations[translation + 1] = old.translationY();
+                    previousTranslations[translation + 2] = old.translationZ();
+                    motion[index] = true;
+                }
+            }
         }
-        // Unmatched geometry keeps current positions. Depth, normal and material rejection then
-        // invalidate only its changed silhouette while unrelated pixels retain temporal history.
-        return new DynamicSceneMotion(current, motionPositions);
+
+        CpuVoxelInstances instances = instanceCount == 0
+                ? CpuVoxelInstances.EMPTY
+                : new CpuVoxelInstances(
+                        meshIndices,
+                        packedTints,
+                        translations,
+                        previousTranslations,
+                        motion);
+        CpuClusterMesh mesh = instanceCount == 0
+                ? CpuClusterMesh.empty()
+                : CpuClusterMesh.fromInstances(prototypes, instances);
+        return new DynamicSceneMotion(
+                current,
+                mesh,
+                new Statistics(
+                        instanceCount,
+                        prototypes.size() - uniqueCount,
+                        uniqueCount,
+                        uniqueTriangles,
+                        uniqueByElement));
     }
 
-    private static Map<MotionKey, DynamicSceneFrame.MotionSegment> segmentMap(
-            List<DynamicSceneFrame.MotionSegment> segments) {
-        Map<MotionKey, DynamicSceneFrame.MotionSegment> result =
-                new HashMap<>(segments.size());
-        for (DynamicSceneFrame.MotionSegment segment : segments) {
-            MotionKey key = new MotionKey(segment.element(), segment.key());
-            result.put(key, segment);
+    private static List<BuiltGeometry> buildGeometry(
+            DynamicSceneFrame frame, CpuMeshSegment source) {
+        ArrayList<BuiltGeometry> result = new ArrayList<>(frame.geometrySpans().size());
+        for (DynamicSceneFrame.GeometrySpan span : frame.geometrySpans()) {
+            int firstPosition = Math.multiplyExact(span.firstTriangle(), 9);
+            int positionCount = Math.multiplyExact(span.triangleCount(), 9);
+            int firstPrimitive = Math.multiplyExact(
+                    span.firstTriangle(), CpuSectionMesh.PRIMITIVE_WORDS);
+            int primitiveCount = Math.multiplyExact(
+                    span.triangleCount(), CpuSectionMesh.PRIMITIVE_WORDS);
+            float[] positions = Arrays.copyOfRange(
+                    source.positions(), firstPosition, firstPosition + positionCount);
+            int[] primitives = Arrays.copyOfRange(
+                    source.primitiveRecords(),
+                    firstPrimitive,
+                    firstPrimitive + primitiveCount);
+            float x = positions[0];
+            float y = positions[1];
+            float z = positions[2];
+            float[] local = positions.clone();
+            boolean exact = true;
+            for (int vertex = 0; vertex < local.length; vertex += 3) {
+                local[vertex] -= x;
+                local[vertex + 1] -= y;
+                local[vertex + 2] -= z;
+                exact &= Float.floatToRawIntBits(local[vertex] + x)
+                                == Float.floatToRawIntBits(positions[vertex])
+                        && Float.floatToRawIntBits(local[vertex + 1] + y)
+                                == Float.floatToRawIntBits(positions[vertex + 1])
+                        && Float.floatToRawIntBits(local[vertex + 2] + z)
+                                == Float.floatToRawIntBits(positions[vertex + 2]);
+            }
+            if (!exact) {
+                local = positions;
+                x = 0.0F;
+                y = 0.0F;
+                z = 0.0F;
+            }
+            CpuVoxelMesh mesh = new CpuVoxelMesh(
+                    local,
+                    primitives,
+                    TriangleLayout.triangles(0, span.triangleCount(), 0),
+                    OpacityMicromapData.fullyUnknown(span.triangleCount()));
+            result.add(new BuiltGeometry(span, mesh, x, y, z));
+        }
+        return List.copyOf(result);
+    }
+
+    private static Map<MotionKey, BuiltGeometry> uniqueStableGeometry(
+            List<BuiltGeometry> geometry) {
+        Map<MotionKey, Integer> counts = identityCounts(geometry);
+        Map<MotionKey, BuiltGeometry> result = new HashMap<>();
+        for (BuiltGeometry item : geometry) {
+            if (item.span().stableIdentity()) {
+                MotionKey key = MotionKey.of(item.span());
+                if (counts.get(key) == 1) {
+                    result.put(key, item);
+                }
+            }
         }
         return result;
     }
 
-    private static boolean sameTopology(
-            DynamicSceneFrame current,
-            DynamicSceneFrame.MotionSegment currentSegment,
-            DynamicSceneFrame previous,
-            DynamicSceneFrame.MotionSegment previousSegment) {
-        if (currentSegment.triangleCount() != previousSegment.triangleCount()) {
+    private static Map<MotionKey, Integer> identityCounts(
+            List<BuiltGeometry> geometry) {
+        Map<MotionKey, Integer> counts = new HashMap<>();
+        for (BuiltGeometry item : geometry) {
+            if (item.span().stableIdentity()) {
+                counts.merge(MotionKey.of(item.span()), 1, Math::addExact);
+            }
+        }
+        return counts;
+    }
+
+    private static boolean samePrototype(CpuVoxelMesh first, CpuVoxelMesh second) {
+        CpuMeshSegment a = first.geometry();
+        CpuMeshSegment b = second.geometry();
+        return a.triangleLayout().equals(b.triangleLayout())
+                && rawFloatEquals(a.positions(), b.positions())
+                && Arrays.equals(a.primitiveRecords(), b.primitiveRecords());
+    }
+
+    private static boolean rawFloatEquals(float[] first, float[] second) {
+        if (first.length != second.length) {
             return false;
         }
-        int[] currentPrimitives = primitives(current.mesh());
-        int[] previousPrimitives = primitives(previous.mesh());
-        for (int triangle = 0; triangle < currentSegment.triangleCount(); triangle++) {
-            int currentBase = Math.multiplyExact(
-                    currentSegment.firstTriangle() + triangle,
-                    CpuSectionMesh.PRIMITIVE_WORDS);
-            int previousBase = Math.multiplyExact(
-                    previousSegment.firstTriangle() + triangle,
-                    CpuSectionMesh.PRIMITIVE_WORDS);
-            if (currentPrimitives[currentBase] != previousPrimitives[previousBase]
-                    || currentPrimitives[currentBase + 1]
-                            != previousPrimitives[previousBase + 1]
-                    || currentPrimitives[currentBase + 2]
-                            != previousPrimitives[previousBase + 2]
-                    || !sameTexture(
-                            current,
-                            currentPrimitives[currentBase + 5],
-                            previous,
-                            previousPrimitives[previousBase + 5])) {
+        for (int index = 0; index < first.length; index++) {
+            if (Float.floatToRawIntBits(first[index])
+                    != Float.floatToRawIntBits(second[index])) {
                 return false;
             }
         }
         return true;
     }
 
-    private static boolean sameTexture(
-            DynamicSceneFrame current,
-            int currentFlags,
-            DynamicSceneFrame previous,
-            int previousFlags) {
-        int currentIndex = PrimitivePacking.unpackDynamicTextureIndex(currentFlags);
-        int previousIndex = PrimitivePacking.unpackDynamicTextureIndex(previousFlags);
-        if (currentIndex <= 0 || previousIndex <= 0) {
-            return currentIndex == previousIndex;
-        }
-        int currentListIndex = currentIndex - 1;
-        int previousListIndex = previousIndex - 1;
-        if (currentListIndex >= current.textures().size()
-                || previousListIndex >= previous.textures().size()) {
-            return currentIndex == previousIndex;
-        }
-        DynamicSceneFrame.SceneTexture currentTexture =
-                current.textures().get(currentListIndex);
-        DynamicSceneFrame.SceneTexture previousTexture =
-                previous.textures().get(previousListIndex);
-        return currentTexture.view() == previousTexture.view()
-                && currentTexture.sampler() == previousTexture.sampler();
-    }
-
-    private static float[] positions(CpuClusterMesh mesh) {
+    private static CpuMeshSegment geometry(CpuClusterMesh mesh) {
         if (mesh.isEmpty()) {
-            return new float[0];
+            return new CpuMeshSegment(
+                    new float[0],
+                    new int[0],
+                    new int[0],
+                    TriangleLayout.triangles(0, 0, 0));
         }
         if (mesh.segments().size() != 1) {
             throw new IllegalArgumentException(
-                    "Dynamic motion requires one captured mesh segment");
+                    "Dynamic capture requires one source mesh segment");
         }
-        return mesh.segments().getFirst().positions();
+        return mesh.segments().getFirst();
     }
 
-    private static int[] primitives(CpuClusterMesh mesh) {
-        if (mesh.isEmpty()) {
-            return new int[0];
+    public record Statistics(
+            int instanceCount,
+            int reusablePrototypeCount,
+            int uniqueFallbackCount,
+            long uniqueFallbackTriangles,
+            Map<VanillaSceneBoundary.Element, Integer> uniqueFallbackByElement) {
+        public Statistics {
+            uniqueFallbackByElement = Map.copyOf(uniqueFallbackByElement);
+            if (instanceCount < 0
+                    || reusablePrototypeCount < 0
+                    || uniqueFallbackCount < 0
+                    || uniqueFallbackTriangles < 0L) {
+                throw new IllegalArgumentException(
+                        "Dynamic instance statistics must not be negative");
+            }
+            int categorized = 0;
+            for (Map.Entry<VanillaSceneBoundary.Element, Integer> entry
+                    : uniqueFallbackByElement.entrySet()) {
+                if (entry.getValue() <= 0) {
+                    throw new IllegalArgumentException(
+                            "Fallback category counts must be positive");
+                }
+                categorized = Math.addExact(categorized, entry.getValue());
+            }
+            if (categorized != uniqueFallbackCount) {
+                throw new IllegalArgumentException(
+                        "Fallback category counts do not match the total");
+            }
         }
-        if (mesh.segments().size() != 1) {
-            throw new IllegalArgumentException(
-                    "Dynamic motion requires one captured mesh segment");
-        }
-        return mesh.segments().getFirst().primitiveRecords();
     }
 
-    private record MotionKey(VanillaSceneBoundary.Element element, long key) {}
+    private record BuiltGeometry(
+            DynamicSceneFrame.GeometrySpan span,
+            CpuVoxelMesh mesh,
+            float translationX,
+            float translationY,
+            float translationZ) {}
+
+    private record MotionKey(VanillaSceneBoundary.Element element, long key) {
+        private static MotionKey of(DynamicSceneFrame.GeometrySpan span) {
+            return new MotionKey(span.element(), span.key());
+        }
+    }
+
+    private static final class PrototypeKey {
+        private final float[] positions;
+        private final int[] primitives;
+        private final int hash;
+
+        private PrototypeKey(CpuVoxelMesh mesh) {
+            CpuMeshSegment geometry = mesh.geometry();
+            this.positions = geometry.positions();
+            this.primitives = geometry.primitiveRecords();
+            this.hash = 31 * rawFloatHash(this.positions) + Arrays.hashCode(this.primitives);
+        }
+
+        @Override
+        public int hashCode() {
+            return this.hash;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return this == other
+                    || other instanceof PrototypeKey key
+                            && rawFloatEquals(this.positions, key.positions)
+                            && Arrays.equals(this.primitives, key.primitives);
+        }
+
+        private static int rawFloatHash(float[] values) {
+            int result = 1;
+            for (float value : values) {
+                result = 31 * result + Float.floatToRawIntBits(value);
+            }
+            return result;
+        }
+    }
 }

@@ -114,6 +114,21 @@ public final class VulkanImageTransitions {
                 VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
     }
 
+    public static void preparePrimaryRayOutput(
+            VkCommandBuffer commandBuffer,
+            VulkanImageInitializationBatch initialization,
+            VulkanImage image) {
+        VulkanSync.prepareImage(
+                commandBuffer,
+                initialization,
+                image,
+                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                        | VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK12.VK_ACCESS_SHADER_WRITE_BIT | VK12.VK_ACCESS_TRANSFER_READ_BIT,
+                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                VK12.VK_ACCESS_SHADER_WRITE_BIT);
+    }
+
     public static void prepareOfflineDisplay(
             VkCommandBuffer commandBuffer, VulkanImage accumulation) {
         VulkanSync.imageBarrier(
@@ -131,6 +146,32 @@ public final class VulkanImageTransitions {
             VkCommandBuffer commandBuffer,
             VulkanImage source,
             VulkanGpuTexture destination) {
+        prepareImagesForCopy(
+                commandBuffer,
+                source,
+                destination,
+                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK12.VK_ACCESS_SHADER_WRITE_BIT);
+    }
+
+    public static void preparePrimaryRayImageForCopy(
+            VkCommandBuffer commandBuffer,
+            VulkanImage source,
+            VulkanGpuTexture destination) {
+        prepareImagesForCopy(
+                commandBuffer,
+                source,
+                destination,
+                KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                VK12.VK_ACCESS_SHADER_WRITE_BIT);
+    }
+
+    private static void prepareImagesForCopy(
+            VkCommandBuffer commandBuffer,
+            VulkanImage source,
+            VulkanGpuTexture destination,
+            long sourceStage,
+            long sourceAccess) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkImageMemoryBarrier2.Buffer barriers =
                     VkImageMemoryBarrier2.calloc(2, stack);
@@ -139,8 +180,8 @@ public final class VulkanImageTransitions {
                     source.image(),
                     VK12.VK_IMAGE_LAYOUT_GENERAL,
                     VK12.VK_IMAGE_LAYOUT_GENERAL,
-                    VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                    VK12.VK_ACCESS_SHADER_WRITE_BIT,
+                    sourceStage,
+                    sourceAccess,
                     VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
                     VK12.VK_ACCESS_TRANSFER_READ_BIT);
             VulkanSync.setImageBarrier(

@@ -86,7 +86,33 @@ final class TraceProgram implements Destroyable {
             String pipelineName,
             String sbtName,
             long... descriptorSetLayouts) {
+        return create(
+                context,
+                raygenSchedule,
+                FIXED_RESOURCES,
+                pipelineName,
+                sbtName,
+                descriptorSetLayouts);
+    }
+
+    static TraceProgram create(
+            VulkanContext context,
+            RaygenSchedule raygenSchedule,
+            String[] fixedResources,
+            String pipelineName,
+            String sbtName,
+            long... descriptorSetLayouts) {
         java.util.Objects.requireNonNull(raygenSchedule, "raygenSchedule");
+        fixedResources = java.util.Objects.requireNonNull(
+                fixedResources, "fixedResources").clone();
+        if (fixedResources.length != FIXED_MODULE_COUNT) {
+            throw new IllegalArgumentException("Trace program requires seven fixed-stage resources");
+        }
+        for (String resource : fixedResources) {
+            if (resource == null || resource.isBlank()) {
+                throw new IllegalArgumentException("Fixed-stage resource cannot be blank");
+            }
+        }
         try (MemoryStack stack = MemoryStack.stackPush()) {
             long pipelineLayout = 0L;
             long pipeline = 0L;
@@ -108,6 +134,7 @@ final class TraceProgram implements Destroyable {
                         stack,
                         pipelineLayout,
                         raygenSchedule,
+                        fixedResources,
                         pipelineName);
                 int handleSize = context.capabilities().shaderGroupHandleSize();
                 int handleAlignment = context.capabilities().shaderGroupHandleAlignment();
@@ -201,6 +228,7 @@ final class TraceProgram implements Destroyable {
             MemoryStack stack,
             long pipelineLayout,
             RaygenSchedule raygenSchedule,
+            String[] fixedResources,
             String debugName) {
         PrimeInfo.LOGGER.info("Compiling {}", debugName);
         long start = System.nanoTime();
@@ -213,7 +241,7 @@ final class TraceProgram implements Destroyable {
                     index -> {
                         String resource = index < raygenSchedule.moduleCount()
                                 ? raygenSchedule.moduleResource(index)
-                                : FIXED_RESOURCES[index - raygenSchedule.moduleCount()];
+                                : fixedResources[index - raygenSchedule.moduleCount()];
                         modules[index] = VulkanShaderModules.create(context, resource);
                     });
             int raygenStageCount = raygenSchedule.moduleCount();

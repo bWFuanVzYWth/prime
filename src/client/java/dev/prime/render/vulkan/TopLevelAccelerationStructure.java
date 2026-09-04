@@ -16,6 +16,9 @@ import org.lwjgl.vulkan.VkAccelerationStructureInstanceKHR;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
 public final class TopLevelAccelerationStructure {
+    private static final int BUILD_FLAGS =
+            KHRAccelerationStructure.VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
+                    | KHRAccelerationStructure.VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
     private final VulkanContext context;
     private final int capacity;
     private final VulkanBuffer instances;
@@ -25,6 +28,7 @@ public final class TopLevelAccelerationStructure {
     private boolean available = true;
     private boolean destroyed;
     private int instanceCount;
+    private int builtInstanceCount = -1;
 
     private TopLevelAccelerationStructure(
             VulkanContext context,
@@ -76,7 +80,7 @@ public final class TopLevelAccelerationStructure {
                 VkAccelerationStructureBuildGeometryInfoKHR buildInfo = VkAccelerationStructureBuildGeometryInfoKHR.calloc(stack)
                         .sType$Default()
                         .type(KHRAccelerationStructure.VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR)
-                        .flags(KHRAccelerationStructure.VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR)
+                        .flags(BUILD_FLAGS)
                         .mode(KHRAccelerationStructure.VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR)
                         .geometryCount(1)
                         .pGeometries(geometry);
@@ -93,7 +97,8 @@ public final class TopLevelAccelerationStructure {
                         sizes.accelerationStructureSize(),
                         KHRAccelerationStructure.VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
                         label);
-                long scratchSize = sizes.buildScratchSize()
+                long scratchSize = Math.max(
+                                sizes.buildScratchSize(), sizes.updateScratchSize())
                         + context.capabilities().accelerationStructureScratchAlignment() - 1L;
                 scratch = context.createBuffer(
                         scratchSize,
@@ -151,6 +156,7 @@ public final class TopLevelAccelerationStructure {
     }
 
     public void recordBuild(VkCommandBuffer commandBuffer) {
+        boolean update = this.builtInstanceCount == this.instanceCount;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkAccelerationStructureGeometryKHR.Buffer geometry = tlasGeometry(stack, this.instances.deviceAddress());
             VkAccelerationStructureBuildGeometryInfoKHR.Buffer buildInfo =
@@ -158,11 +164,17 @@ public final class TopLevelAccelerationStructure {
             buildInfo.get(0)
                     .sType$Default()
                     .type(KHRAccelerationStructure.VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR)
-                    .flags(KHRAccelerationStructure.VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR)
-                    .mode(KHRAccelerationStructure.VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR)
+                    .flags(BUILD_FLAGS)
+                    .mode(update
+                            ? KHRAccelerationStructure.VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR
+                            : KHRAccelerationStructure.VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR)
                     .geometryCount(1)
                     .pGeometries(geometry)
                     .dstAccelerationStructure(this.accelerationStructure.handle());
+            if (update) {
+                buildInfo.get(0).srcAccelerationStructure(
+                        this.accelerationStructure.handle());
+            }
             buildInfo.get(0).scratchData().deviceAddress(VulkanContext.alignUp(
                     this.scratch.deviceAddress(),
                     this.context.capabilities().accelerationStructureScratchAlignment()));
@@ -176,6 +188,11 @@ public final class TopLevelAccelerationStructure {
             PointerBuffer rangePointers = stack.mallocPointer(1).put(0, range.address());
             KHRAccelerationStructure.vkCmdBuildAccelerationStructuresKHR(commandBuffer, buildInfo, rangePointers);
         }
+    }
+
+    /** Commits the update eligibility only after command submission has succeeded. */
+    public void buildSubmitted() {
+        this.builtInstanceCount = this.instanceCount;
     }
 
     public long handle() {

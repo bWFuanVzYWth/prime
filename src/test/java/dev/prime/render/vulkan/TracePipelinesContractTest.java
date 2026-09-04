@@ -24,6 +24,11 @@ final class TracePipelinesContractTest {
 
     @Test
     void realtimeAndOfflineHaveIndependentSchedulesAndDescriptors() {
+        assertEquals(1, PrimaryRayTracingPipeline.DESCRIPTOR_BINDING_COUNT);
+        RaygenSchedule primary = GeneratedShaderPrograms.schedule("primary");
+        assertEquals(1, primary.groupCount());
+        assertEquals(1, primary.moduleCount());
+
         assertEquals(14, RealtimeRayTracingPipeline.dispatchCount(1));
         assertEquals(18, RealtimeRayTracingPipeline.dispatchCount(2));
         assertEquals(42, RealtimeRayTracingPipeline.dispatchCount(8));

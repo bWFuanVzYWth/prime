@@ -3,29 +3,57 @@ package dev.prime.render.terrain;
 import java.util.Arrays;
 import java.util.Objects;
 
-/** Compact immutable instance stream for reusable texture-derived meshes. */
+/** Compact immutable instance stream for reusable or unique auxiliary BLAS geometry. */
 public final class CpuVoxelInstances {
     public static final CpuVoxelInstances EMPTY =
-            new CpuVoxelInstances(new int[0], new int[0], new float[0]);
+            new CpuVoxelInstances(
+                    new int[0], new int[0], new float[0], new float[0], new boolean[0]);
 
     private final int[] meshIndices;
     private final int[] packedTints;
     private final float[] translations;
+    private final float[] previousTranslations;
+    private final boolean[] motion;
 
     public CpuVoxelInstances(
             int[] meshIndices, int[] packedTints, float[] translations) {
+        this(
+                meshIndices,
+                packedTints,
+                translations,
+                translations,
+                new boolean[0]);
+    }
+
+    public CpuVoxelInstances(
+            int[] meshIndices,
+            int[] packedTints,
+            float[] translations,
+            float[] previousTranslations,
+            boolean[] motion) {
         this.meshIndices = Objects.requireNonNull(meshIndices, "meshIndices");
         this.packedTints = Objects.requireNonNull(packedTints, "packedTints");
         this.translations = Objects.requireNonNull(translations, "translations");
+        this.previousTranslations = Objects.requireNonNull(
+                previousTranslations, "previousTranslations");
+        this.motion = Objects.requireNonNull(motion, "motion");
         if (packedTints.length != meshIndices.length
-                || translations.length != Math.multiplyExact(meshIndices.length, 3)) {
+                || translations.length != Math.multiplyExact(meshIndices.length, 3)
+                || previousTranslations.length != translations.length
+                || (motion.length != 0 && motion.length != meshIndices.length)) {
             throw new IllegalArgumentException(
-                    "Voxel-surface instance arrays have inconsistent lengths");
+                    "Instanced geometry arrays have inconsistent lengths");
         }
         for (float translation : translations) {
             if (!Float.isFinite(translation)) {
                 throw new IllegalArgumentException(
-                        "Voxel-surface instance translation must be finite");
+                        "Instance translation must be finite");
+            }
+        }
+        for (float translation : previousTranslations) {
+            if (!Float.isFinite(translation)) {
+                throw new IllegalArgumentException(
+                        "Previous instance translation must be finite");
             }
         }
         for (int packedTint : packedTints) {
@@ -73,6 +101,28 @@ public final class CpuVoxelInstances {
 
     public float translationZ(int index) {
         return this.translations[Math.multiplyExact(index, 3) + 2];
+    }
+
+    public boolean hasMotion(int index) {
+        return this.motion.length != 0 && this.motion[index];
+    }
+
+    public float previousTranslationX(int index) {
+        return this.previousTranslations[Math.multiplyExact(index, 3)];
+    }
+
+    public float previousTranslationY(int index) {
+        return this.previousTranslations[Math.multiplyExact(index, 3) + 1];
+    }
+
+    public float previousTranslationZ(int index) {
+        return this.previousTranslations[Math.multiplyExact(index, 3) + 2];
+    }
+
+    public long motionByteSize() {
+        return this.motion.length == 0
+                ? 0L
+                : Math.multiplyExact((long) this.count(), 3L * Float.BYTES + 1L);
     }
 
     static final class Builder {

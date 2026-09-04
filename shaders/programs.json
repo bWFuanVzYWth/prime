@@ -7,6 +7,10 @@
     "atmosphere_sky": "entry/atmosphere/atmosphere_sky.compute.slang",
     "atmosphere_transmittance": "entry/atmosphere/atmosphere_transmittance.compute.slang",
     "sun_shadow": "entry/lighting/sun_shadow.raygeneration.slang",
+    "primary_ray": "entry/primary/primary.raygeneration.slang",
+    "primary_ray_rahit": "entry/primary/primary.anyhit.slang",
+    "primary_ray_rchit": "entry/primary/primary.closesthit.slang",
+    "primary_ray_rmiss": "entry/primary/primary.miss.slang",
     "offline_wavefront_bridge_trace": {"entry": "entry/offline/bridge_trace.raygeneration.slang", "ser": true},
     "offline_wavefront_camera_trace": {"entry": "entry/offline/camera_trace.raygeneration.slang", "ser": true},
     "offline_wavefront_direct": {"entry": "entry/offline/direct.raygeneration.slang", "ser": true},
@@ -52,6 +56,11 @@
     "world_rmiss": "entry/hit/world.miss.slang"
   },
   "schedules": {
+    "primary": {
+      "groups": {
+        "trace": ["primary_ray", 0]
+      }
+    },
     "realtime.standard": {
       "variants": ["scalar", "ser"],
       "groups": {

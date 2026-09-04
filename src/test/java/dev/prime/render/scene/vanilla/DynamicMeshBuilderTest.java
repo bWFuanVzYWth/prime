@@ -2,7 +2,6 @@ package dev.prime.render.scene.vanilla;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.mojang.blaze3d.PrimitiveTopology;
@@ -168,20 +167,11 @@ final class DynamicMeshBuilderTest {
 
         DynamicSceneMotion motion = DynamicSceneMotion.prepare(current, previous);
 
-        float[] expected = new float[18];
-        System.arraycopy(
-                previous.mesh().segments().getFirst().positions(),
-                9,
-                expected,
-                0,
-                9);
-        System.arraycopy(
-                previous.mesh().segments().getFirst().positions(),
-                0,
-                expected,
-                9,
-                9);
-        assertArrayEquals(expected, motion.previousPositions());
+        assertEquals(2, motion.mesh().voxelInstances().count());
+        assertTrue(motion.mesh().voxelInstances().hasMotion(0));
+        assertTrue(motion.mesh().voxelInstances().hasMotion(1));
+        assertEquals(10.0F, motion.mesh().voxelInstances().previousTranslationX(0));
+        assertEquals(0.0F, motion.mesh().voxelInstances().previousTranslationX(1));
     }
 
     @Test
@@ -191,9 +181,10 @@ final class DynamicMeshBuilderTest {
 
         DynamicSceneMotion motion = DynamicSceneMotion.prepare(current, previous);
 
-        assertArrayEquals(
-                current.mesh().segments().getFirst().positions(),
-                motion.previousPositions());
+        assertFalse(motion.mesh().voxelInstances().hasMotion(0));
+        assertEquals(
+                motion.mesh().voxelInstances().translationX(0),
+                motion.mesh().voxelInstances().previousTranslationX(0));
     }
 
     @Test
@@ -219,14 +210,10 @@ final class DynamicMeshBuilderTest {
                 DynamicSceneFrame.CompatibilityIssue.DUPLICATE_MOTION_IDENTITY));
 
         DynamicSceneMotion motion = DynamicSceneMotion.prepare(current, previous);
-        float[] expected = current.mesh().segments().getFirst().positions().clone();
-        System.arraycopy(
-                previous.mesh().segments().getFirst().positions(),
-                9,
-                expected,
-                18,
-                9);
-        assertArrayEquals(expected, motion.previousPositions());
+        assertFalse(motion.mesh().voxelInstances().hasMotion(0));
+        assertFalse(motion.mesh().voxelInstances().hasMotion(1));
+        assertTrue(motion.mesh().voxelInstances().hasMotion(2));
+        assertEquals(20.0F, motion.mesh().voxelInstances().previousTranslationX(2));
     }
 
     @Test
@@ -251,7 +238,7 @@ final class DynamicMeshBuilderTest {
 
         DynamicSceneMotion motion = DynamicSceneMotion.prepare(current, previous);
 
-        assertEquals(0, motion.previousPositions().length);
+        assertEquals(0, motion.mesh().voxelInstances().count());
     }
 
     @Test
@@ -271,9 +258,52 @@ final class DynamicMeshBuilderTest {
                 currentBuilder.build(0, 0, 0, List.of()),
                 previousBuilder.build(0, 0, 0, List.of()));
 
-        assertArrayEquals(
-                motion.frame().mesh().segments().getFirst().positions(),
-                motion.previousPositions());
+        assertEquals(1, motion.mesh().voxelInstances().count());
+        assertFalse(motion.mesh().voxelInstances().hasMotion(0));
+    }
+
+    @Test
+    void translatedEntitiesShareOneImmutablePrototype() {
+        DynamicSceneMotion motion = DynamicSceneMotion.prepare(
+                twoEntities(0.0F, 10.0F, false), null);
+
+        assertEquals(2, motion.statistics().instanceCount());
+        assertEquals(1, motion.statistics().reusablePrototypeCount());
+        assertEquals(0, motion.statistics().uniqueFallbackCount());
+        assertEquals(1, motion.mesh().voxelMeshes().size());
+        assertEquals(0, motion.mesh().voxelInstances().meshIndex(0));
+        assertEquals(0, motion.mesh().voxelInstances().meshIndex(1));
+    }
+
+    @Test
+    void unrelatedSubmissionsRemainIndependentUniqueFallbacksWithoutACountCap() {
+        DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
+        for (int index = 0; index < 128; index++) {
+            triangle(builder, index, 0.0F);
+        }
+
+        DynamicSceneMotion motion = DynamicSceneMotion.prepare(
+                builder.build(0, 0, 0, List.of()), null);
+
+        assertEquals(128, motion.statistics().instanceCount());
+        assertEquals(128, motion.statistics().uniqueFallbackCount());
+        assertEquals(128L, motion.statistics().uniqueFallbackTriangles());
+        assertEquals(128, motion.mesh().voxelMeshes().size());
+    }
+
+    @Test
+    void instanceNormalizationExactlyReconstructsSubmittedF32Positions() {
+        DynamicSceneFrame frame = oneEntity(7L, 31.75F, 0.0F);
+        DynamicSceneMotion motion = DynamicSceneMotion.prepare(frame, null);
+        float[] source = frame.mesh().segments().getFirst().positions();
+        float[] local = motion.mesh().voxelMeshes().getFirst().geometry().positions();
+        float translation = motion.mesh().voxelInstances().translationX(0);
+
+        for (int index = 0; index < source.length; index += 3) {
+            assertEquals(
+                    Float.floatToRawIntBits(source[index]),
+                    Float.floatToRawIntBits(local[index] + translation));
+        }
     }
 
     private static DynamicSceneFrame twoEntities(

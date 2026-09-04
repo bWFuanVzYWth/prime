@@ -56,4 +56,20 @@ record ResolvedVoxelInstances(CpuVoxelInstances source, int[] tintIds) {
     float translationZ(int index) {
         return this.source.translationZ(index);
     }
+
+    boolean hasMotion(int index) {
+        return this.source.hasMotion(index);
+    }
+
+    float previousTranslationX(int index) {
+        return this.source.previousTranslationX(index);
+    }
+
+    float previousTranslationY(int index) {
+        return this.source.previousTranslationY(index);
+    }
+
+    float previousTranslationZ(int index) {
+        return this.source.previousTranslationZ(index);
+    }
 }

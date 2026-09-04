@@ -32,9 +32,13 @@ final class DynamicMeshBuilder {
     private final IntArrayList primitives = new IntArrayList(1024);
     private final ArrayList<DynamicSceneFrame.MotionSegment> motionSegments =
             new ArrayList<>();
+    private final ArrayList<DynamicSceneFrame.GeometrySpan> geometrySpans =
+            new ArrayList<>();
     private final EnumSet<DynamicSceneFrame.CompatibilityIssue> compatibilityIssues =
             EnumSet.noneOf(DynamicSceneFrame.CompatibilityIssue.class);
     private OpenMotionObject openMotionObject;
+    private VanillaSceneBoundary.Element captureElement =
+            VanillaSceneBoundary.Element.FEATURE;
 
     DynamicMeshBuilder(double offsetX, double offsetY, double offsetZ) {
         this.offsetX = offsetX;
@@ -61,14 +65,33 @@ final class DynamicMeshBuilder {
         if (triangleCount > 0) {
             this.motionSegments.add(new DynamicSceneFrame.MotionSegment(
                     element, key, object.firstTriangle, triangleCount));
+            this.geometrySpans.add(new DynamicSceneFrame.GeometrySpan(
+                    object.unique
+                            ? DynamicSceneFrame.GeometryKind.UNIQUE
+                            : DynamicSceneFrame.GeometryKind.INSTANCED,
+                    element,
+                    key,
+                    true,
+                    object.firstTriangle,
+                    triangleCount));
         }
+    }
+
+    void markMotionObjectUnique() {
+        if (this.openMotionObject != null) {
+            this.openMotionObject.unique = true;
+        }
+    }
+
+    void captureElement(VanillaSceneBoundary.Element element) {
+        this.captureElement = element;
     }
 
     VertexSink open(
             PrimitiveTopology topology,
             int textureIndex,
             int fallbackLight) {
-        return this.open(topology, textureIndex, fallbackLight, false);
+        return this.open(topology, textureIndex, fallbackLight, false, CaptureMode.UNIQUE);
     }
 
     VertexSink open(
@@ -76,20 +99,39 @@ final class DynamicMeshBuilder {
             int textureIndex,
             int fallbackLight,
             boolean redAlpha) {
+        return this.open(
+                topology, textureIndex, fallbackLight, redAlpha, CaptureMode.UNIQUE);
+    }
+
+    VertexSink openParticle(
+            PrimitiveTopology topology,
+            int textureIndex,
+            int fallbackLight) {
+        return this.open(
+                topology, textureIndex, fallbackLight, false, CaptureMode.PARTICLE);
+    }
+
+    private VertexSink open(
+            PrimitiveTopology topology,
+            int textureIndex,
+            int fallbackLight,
+            boolean redAlpha,
+            CaptureMode captureMode) {
         return new VertexSink(
                 this,
                 topology,
                 textureIndex,
                 fallbackLight,
                 false,
-                redAlpha);
+                redAlpha,
+                captureMode);
     }
 
     VertexSink openUntextured(
             PrimitiveTopology topology,
             int fallbackLight) {
         return new VertexSink(
-                this, topology, 0, fallbackLight, true, false);
+                this, topology, 0, fallbackLight, true, false, CaptureMode.UNIQUE);
     }
 
     void report(DynamicSceneFrame.CompatibilityIssue issue) {
@@ -120,7 +162,26 @@ final class DynamicMeshBuilder {
                 CpuClusterMesh.fromSegments(List.of(section)),
                 textures,
                 this.motionSegments,
+                this.geometrySpans,
                 this.compatibilityIssues);
+    }
+
+    private void recordUnscoped(
+            CaptureMode mode, int firstTriangle, int triangleCount) {
+        if (this.openMotionObject != null || triangleCount == 0) {
+            return;
+        }
+        this.geometrySpans.add(new DynamicSceneFrame.GeometrySpan(
+                mode == CaptureMode.PARTICLE
+                        ? DynamicSceneFrame.GeometryKind.INSTANCED
+                        : DynamicSceneFrame.GeometryKind.UNIQUE,
+                mode == CaptureMode.PARTICLE
+                        ? VanillaSceneBoundary.Element.PARTICLE
+                        : this.captureElement,
+                0L,
+                false,
+                firstTriangle,
+                triangleCount));
     }
 
     private void addTriangle(
@@ -286,6 +347,7 @@ final class DynamicMeshBuilder {
         private final int fallbackLight;
         private final boolean bakedMaterial;
         private final boolean redAlpha;
+        private final CaptureMode captureMode;
         private final ArrayList<Vertex> vertices = new ArrayList<>();
         private Vertex current;
         private boolean finished;
@@ -296,13 +358,15 @@ final class DynamicMeshBuilder {
                 int textureIndex,
                 int fallbackLight,
                 boolean bakedMaterial,
-                boolean redAlpha) {
+                boolean redAlpha,
+                CaptureMode captureMode) {
             this.owner = owner;
             this.topology = topology;
             this.textureIndex = textureIndex;
             this.fallbackLight = fallbackLight;
             this.bakedMaterial = bakedMaterial;
             this.redAlpha = redAlpha;
+            this.captureMode = captureMode;
         }
 
         @Override
@@ -371,19 +435,39 @@ final class DynamicMeshBuilder {
             this.commitCurrent();
             int count = this.vertices.size();
             if (this.topology == PrimitiveTopology.QUADS) {
+                int submissionFirstTriangle = this.owner.positions.size() / 9;
                 boolean[] removed = this.resolveReverseQuads(count);
                 for (int index = 0; index + 3 < count; index += 4) {
                     if (removed[index / 4]) {
                         continue;
                     }
+                    int firstTriangle = this.owner.positions.size() / 9;
                     this.emit(index, index + 1, index + 2);
                     this.emit(index, index + 2, index + 3);
+                    if (this.captureMode == CaptureMode.PARTICLE) {
+                        this.owner.recordUnscoped(
+                                this.captureMode,
+                                firstTriangle,
+                                this.owner.positions.size() / 9 - firstTriangle);
+                    }
+                }
+                if (this.captureMode != CaptureMode.PARTICLE) {
+                    this.owner.recordUnscoped(
+                            this.captureMode,
+                            submissionFirstTriangle,
+                            this.owner.positions.size() / 9 - submissionFirstTriangle);
                 }
             } else if (this.topology == PrimitiveTopology.TRIANGLES) {
+                int firstTriangle = this.owner.positions.size() / 9;
                 for (int index = 0; index + 2 < count; index += 3) {
                     this.emit(index, index + 1, index + 2);
                 }
+                this.owner.recordUnscoped(
+                        this.captureMode,
+                        firstTriangle,
+                        this.owner.positions.size() / 9 - firstTriangle);
             } else if (this.topology == PrimitiveTopology.TRIANGLE_STRIP) {
+                int firstTriangle = this.owner.positions.size() / 9;
                 for (int index = 0; index + 2 < count; index++) {
                     if ((index & 1) == 0) {
                         this.emit(index, index + 1, index + 2);
@@ -391,10 +475,19 @@ final class DynamicMeshBuilder {
                         this.emit(index + 1, index, index + 2);
                     }
                 }
+                this.owner.recordUnscoped(
+                        CaptureMode.UNIQUE,
+                        firstTriangle,
+                        this.owner.positions.size() / 9 - firstTriangle);
             } else if (this.topology == PrimitiveTopology.TRIANGLE_FAN) {
+                int firstTriangle = this.owner.positions.size() / 9;
                 for (int index = 1; index + 1 < count; index++) {
                     this.emit(0, index, index + 1);
                 }
+                this.owner.recordUnscoped(
+                        CaptureMode.UNIQUE,
+                        firstTriangle,
+                        this.owner.positions.size() / 9 - firstTriangle);
             } else {
                 this.owner.report(
                         DynamicSceneFrame.CompatibilityIssue.UNSUPPORTED_TOPOLOGY);
@@ -498,8 +591,24 @@ final class DynamicMeshBuilder {
         }
     }
 
-    private record OpenMotionObject(
-            VanillaSceneBoundary.Element element, long key, int firstTriangle) {}
+    private static final class OpenMotionObject {
+        private final VanillaSceneBoundary.Element element;
+        private final long key;
+        private final int firstTriangle;
+        private boolean unique;
+
+        private OpenMotionObject(
+                VanillaSceneBoundary.Element element, long key, int firstTriangle) {
+            this.element = element;
+            this.key = key;
+            this.firstTriangle = firstTriangle;
+        }
+    }
+
+    private enum CaptureMode {
+        UNIQUE,
+        PARTICLE
+    }
 
     private static final class Vertex {
         private final float x;

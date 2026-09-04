@@ -12,6 +12,7 @@ import dev.prime.render.LightingSettings;
 import dev.prime.render.MaterialSettings;
 import dev.prime.render.BounceSettings;
 import dev.prime.render.RendererSettings;
+import dev.prime.render.RealtimeRenderMode;
 import dev.prime.render.SurfaceDetailMode;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionQualityMode;
@@ -84,6 +85,7 @@ final class RendererLifecycleTest {
     private static RendererSettings settings(boolean enabled) {
         return new RendererSettings(
                 enabled,
+                RealtimeRenderMode.DEFAULT,
                 SurfaceDetailMode.DEFAULT,
                 VoxelSurfaceSettings.DEFAULT_STEPS,
                 PostProcessingMode.DISABLED,

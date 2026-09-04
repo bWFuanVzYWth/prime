@@ -1,8 +1,10 @@
 package dev.prime.render.vulkan.terrain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.prime.render.terrain.CpuVoxelInstances;
 import org.junit.jupiter.api.Test;
@@ -34,6 +36,25 @@ final class ResolvedVoxelInstancesTest {
         assertSame(
                 ResolvedVoxelInstances.EMPTY,
                 ResolvedVoxelInstances.resolve(CpuVoxelInstances.EMPTY, ignored -> 1));
+    }
+
+    @Test
+    void preservesPerInstancePreviousTranslationAndMotionState() {
+        CpuVoxelInstances source = new CpuVoxelInstances(
+                new int[] {0, 0},
+                new int[] {0, 0},
+                new float[] {4.0F, 5.0F, 6.0F, 7.0F, 8.0F, 9.0F},
+                new float[] {1.0F, 2.0F, 3.0F, 7.0F, 8.0F, 9.0F},
+                new boolean[] {true, false});
+
+        ResolvedVoxelInstances result = ResolvedVoxelInstances.resolve(source, ignored -> 0);
+
+        assertTrue(result.hasMotion(0));
+        assertFalse(result.hasMotion(1));
+        assertEquals(1.0F, result.previousTranslationX(0));
+        assertEquals(3.0F, result.previousTranslationZ(0));
+        assertEquals(7.0F, result.previousTranslationX(1));
+        assertEquals(9.0F, result.previousTranslationZ(1));
     }
 
     @Test

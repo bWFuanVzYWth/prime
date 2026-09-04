@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
-/** Render-thread-owned pool for exact, immutable texture-voxel GPU payloads. */
+/** Render-thread-owned pool for exact immutable instance prototypes and unique fallback BLASes. */
 final class VoxelBlasPool implements AutoCloseable {
     private final Map<Key, Entry> byContent = new HashMap<>();
     private final IdentityHashMap<PreparedBlas, Entry> byBlas = new IdentityHashMap<>();
@@ -19,6 +19,15 @@ final class VoxelBlasPool implements AutoCloseable {
 
     PreparedBlas acquire(CpuVoxelMesh mesh, Supplier<PreparedBlas> factory) {
         this.requireOpen();
+        if (!mesh.reusable()) {
+            PreparedBlas blas = factory.get();
+            Entry created = new Entry(null, blas);
+            created.references = 1;
+            if (this.byBlas.put(blas, created) != null) {
+                throw new IllegalStateException("Unique BLAS factory returned a pooled instance");
+            }
+            return blas;
+        }
         Key lookup = Key.lookup(mesh);
         Entry existing = this.byContent.get(lookup);
         if (existing != null) {
@@ -48,7 +57,7 @@ final class VoxelBlasPool implements AutoCloseable {
             return null;
         }
         this.byBlas.remove(blas);
-        if (!this.byContent.remove(entry.key, entry)) {
+        if (entry.key != null && !this.byContent.remove(entry.key, entry)) {
             throw new IllegalStateException("Voxel BLAS pool lost a live entry");
         }
         return blas;

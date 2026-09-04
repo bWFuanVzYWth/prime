@@ -77,6 +77,22 @@
       "maxFiles": 101,
       "maxBytes": 335320
     },
+    "entry/primary/primary.anyhit.slang": {
+      "maxFiles": 12,
+      "maxBytes": 53547
+    },
+    "entry/primary/primary.closesthit.slang": {
+      "maxFiles": 15,
+      "maxBytes": 59716
+    },
+    "entry/primary/primary.miss.slang": {
+      "maxFiles": 2,
+      "maxBytes": 407
+    },
+    "entry/primary/primary.raygeneration.slang": {
+      "maxFiles": 6,
+      "maxBytes": 14142
+    },
     "entry/post/auto_exposure_histogram.compute.slang": {
       "maxFiles": 2,
       "maxBytes": 8650
