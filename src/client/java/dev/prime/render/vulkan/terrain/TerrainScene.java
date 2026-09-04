@@ -878,15 +878,12 @@ public final class TerrainScene implements AutoCloseable {
                 for (int index = 0; index < instances.count(); index++) {
                     PreparedBlas voxel =
                             cluster.voxelBlases().get(instances.meshIndex(index));
-                    writer.writeInstanced(
+                    writer.writeTransformed(
                             compactionAddress(voxel, compactions),
                             voxel.primitives().deviceAddress(),
                             voxel.positions().deviceAddress(),
                             0L,
-                            cluster.dynamic()
-                                    && instances.hasMotion(index)
-                                    ? voxel.positions().deviceAddress()
-                                    : cluster.dynamic() ? 0L : cluster.lightAddress(),
+                            cluster.dynamic() ? 0L : cluster.lightAddress(),
                             worldLightAddress,
                             worldLightLeafAddress,
                             voxel.triangleLayout(),
@@ -896,21 +893,17 @@ public final class TerrainScene implements AutoCloseable {
                             cluster.lights().emitterCount(),
                             worldLightLeafCount,
                             0xff,
-                            cluster.dynamic()
-                                    ? 0
-                                    : 0x8000_0000 | instances.tintId(index),
-                            sectionX + instances.translationX(index),
-                            sectionY + instances.translationY(index),
-                            sectionZ + instances.translationZ(index),
-                            cluster.dynamic()
-                                    ? sectionX + instances.previousTranslationX(index)
-                                    : sectionX,
-                            cluster.dynamic()
-                                    ? sectionY + instances.previousTranslationY(index)
-                                    : sectionY,
-                            cluster.dynamic()
-                                    ? sectionZ + instances.previousTranslationZ(index)
-                                    : sectionZ);
+                            (instances.hasAffineLinearTransform(index)
+                                            ? 0x4000_0000
+                                            : 0)
+                                    | (cluster.dynamic()
+                                            ? 0
+                                            : 0x8000_0000 | instances.tintId(index)),
+                            instances.source(),
+                            index,
+                            sectionX,
+                            sectionY,
+                            sectionZ);
                 }
             }
         });

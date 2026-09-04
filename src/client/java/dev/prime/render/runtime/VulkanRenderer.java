@@ -60,6 +60,7 @@ public final class VulkanRenderer implements AutoCloseable {
     private long blockAtlasTextureRevision;
     private List<TraceBackend.SceneTexture> sceneTextures = List.of();
     private DynamicSceneFrame publishedDynamicFrame;
+    private DynamicSceneMotion publishedDynamicMotion;
     private DynamicSceneMotion.Statistics dynamicSceneStatistics =
             new DynamicSceneMotion.Statistics(0, 0, 0, 0L, Map.of());
     private long nextDynamicFallbackLogNanos;
@@ -330,9 +331,17 @@ public final class VulkanRenderer implements AutoCloseable {
                 List.copyOf(textures);
         DynamicSceneMotion motion = DynamicSceneMotion.prepare(
                 frame, this.publishedDynamicFrame);
+        if (motion.sameGpuState(this.publishedDynamicMotion)
+                && capturedTextures.equals(this.sceneTextures)) {
+            this.publishedDynamicFrame = frame;
+            this.reportDynamicFallback(motion.statistics());
+            this.dynamicSceneStatistics = motion.statistics();
+            return;
+        }
         if (this.terrain.updateDynamic(motion)) {
             this.sceneTextures = capturedTextures;
             this.publishedDynamicFrame = frame;
+            this.publishedDynamicMotion = motion;
             this.reportDynamicFallback(motion.statistics());
             this.dynamicSceneStatistics = motion.statistics();
         }

@@ -40,7 +40,7 @@ final class ResolvedVoxelInstancesTest {
 
     @Test
     void preservesPerInstancePreviousTranslationAndMotionState() {
-        CpuVoxelInstances source = new CpuVoxelInstances(
+        CpuVoxelInstances source = CpuVoxelInstances.translated(
                 new int[] {0, 0},
                 new int[] {0, 0},
                 new float[] {4.0F, 5.0F, 6.0F, 7.0F, 8.0F, 9.0F},

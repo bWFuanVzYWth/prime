@@ -9,10 +9,13 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.QuadInstance;
 import dev.prime.render.shader.ShaderAbi;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.model.Model;
+import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.particle.SingleQuadParticle;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.block.BlockQuadOutput;
@@ -119,17 +122,92 @@ public final class DynamicSceneCapture {
         if (session == null || renderType.isOutline()) {
             return;
         }
-        DynamicMeshBuilder.VertexSink sink = session.open(renderType, lightCoords);
-        if (sink == null) {
+        int textureIndex = session.textureIndex(
+                renderType, DynamicSceneFrame.Sampling.SRGB_COLOR);
+        if (textureIndex < 0) {
             return;
         }
-        var consumer = sprite == null ? sink : sprite.wrap(sink);
         PoseStack capturePose = new PoseStack();
         capturePose.last().set(poseStack.last());
         model.setupAnim(state);
-        model.renderToBuffer(
-                capturePose, consumer, lightCoords, overlayCoords, tintedColor);
-        sink.finish();
+        IdentityHashMap<ModelPart, Integer> partIndices = new IdentityHashMap<>();
+        List<ModelPart> parts = model.allParts();
+        for (int index = 0; index < parts.size(); index++) {
+            partIndices.put(parts.get(index), index);
+        }
+        int submission = session.builder.beginModelSubmission();
+        captureModelPart(
+                session,
+                model.root(),
+                partIndices,
+                capturePose,
+                renderType,
+                textureIndex,
+                lightCoords,
+                overlayCoords,
+                tintedColor,
+                sprite,
+                submission);
+    }
+
+    private static void captureModelPart(
+            Session session,
+            ModelPart part,
+            IdentityHashMap<ModelPart, Integer> partIndices,
+            PoseStack poseStack,
+            RenderType renderType,
+            int textureIndex,
+            int lightCoords,
+            int overlayCoords,
+            int color,
+            @Nullable TextureAtlasSprite sprite,
+            int submission) {
+        if (!part.visible) {
+            return;
+        }
+        poseStack.pushPose();
+        part.translateAndRotate(poseStack);
+        if (!part.skipDraw && !part.isEmpty()) {
+            Integer partIndex = partIndices.get(part);
+            if (partIndex == null) {
+                throw new IllegalStateException("Rendered model part is absent from its model index");
+            }
+            DynamicSceneFrame.InstanceTransform transform =
+                    session.builder.instanceTransform(poseStack.last().pose());
+            DynamicMeshBuilder.VertexSink sink = session.builder.openModelPart(
+                    renderType.primitiveTopology(),
+                    textureIndex,
+                    lightCoords,
+                    textureIndex == 0,
+                    false,
+                    submission,
+                    partIndex,
+                    transform);
+            var consumer = sprite == null ? sink : sprite.wrap(sink);
+            PoseStack identity = new PoseStack();
+            ((PrimeModelPart) (Object) part).prime$compile(
+                    transform == null ? poseStack.last() : identity.last(),
+                    consumer,
+                    lightCoords,
+                    overlayCoords,
+                    color);
+            sink.finish();
+        }
+        for (ModelPart child : ((PrimeModelPart) (Object) part).prime$children().values()) {
+            captureModelPart(
+                    session,
+                    child,
+                    partIndices,
+                    poseStack,
+                    renderType,
+                    textureIndex,
+                    lightCoords,
+                    overlayCoords,
+                    color,
+                    sprite,
+                    submission);
+        }
+        poseStack.popPose();
     }
 
     public static void captureBlockModel(
@@ -144,24 +222,34 @@ public final class DynamicSceneCapture {
         if (session == null || renderType.isOutline()) {
             return;
         }
-        DynamicMeshBuilder.VertexSink sink = session.open(renderType, lightCoords);
+        int submission = session.builder.beginModelSubmission();
+        DynamicSceneFrame.InstanceTransform transform =
+                session.builder.instanceTransform(poseStack.last().pose());
+        DynamicMeshBuilder.VertexSink sink = session.openModelPart(
+                renderType,
+                lightCoords,
+                submission,
+                0,
+                transform);
         if (sink == null) {
             return;
         }
+        PoseStack identity = new PoseStack();
+        PoseStack sourcePose = transform == null ? poseStack : identity;
         QuadInstance instance = new QuadInstance();
         instance.setLightCoords(lightCoords);
         instance.setOverlayCoords(overlayCoords);
         for (BlockStateModelPart part : modelParts) {
             for (Direction direction : DIRECTIONS) {
                 captureBlockQuads(
-                        poseStack,
+                        sourcePose,
                         part.getQuads(direction),
                         tintLayers,
                         instance,
                         sink);
             }
             captureBlockQuads(
-                    poseStack, part.getQuads(null), tintLayers, instance, sink);
+                    sourcePose, part.getQuads(null), tintLayers, instance, sink);
         }
         sink.finish();
     }
@@ -392,13 +480,30 @@ public final class DynamicSceneCapture {
         if (session == null) {
             return;
         }
+        int submission = session.builder.beginModelSubmission();
+        DynamicSceneFrame.InstanceTransform transform =
+                session.builder.instanceTransform(poseStack.last().pose());
+        LinkedHashMap<RenderType, DynamicMeshBuilder.VertexSink> sinks =
+                new LinkedHashMap<>();
+        PoseStack identity = new PoseStack();
         QuadInstance instance = new QuadInstance();
         instance.setLightCoords(lightCoords);
         instance.setOverlayCoords(overlayCoords);
         for (BakedQuad quad : quads) {
             BakedQuad.MaterialInfo material = quad.materialInfo();
             RenderType renderType = material.itemRenderType();
-            DynamicMeshBuilder.VertexSink sink = session.open(renderType, lightCoords);
+            DynamicMeshBuilder.VertexSink sink = sinks.get(renderType);
+            if (sink == null) {
+                sink = session.openModelPart(
+                        renderType,
+                        lightCoords,
+                        submission,
+                        sinks.size(),
+                        transform);
+                if (sink != null) {
+                    sinks.put(renderType, sink);
+                }
+            }
             if (sink == null) {
                 continue;
             }
@@ -411,7 +516,12 @@ public final class DynamicSceneCapture {
             instance.setLightCoords(
                     LightCoordsUtil.lightCoordsWithEmission(
                             lightCoords, material.lightEmission()));
-            sink.putBakedQuad(poseStack.last(), quad, instance);
+            sink.putBakedQuad(
+                    transform == null ? poseStack.last() : identity.last(),
+                    quad,
+                    instance);
+        }
+        for (DynamicMeshBuilder.VertexSink sink : sinks.values()) {
             sink.finish();
         }
     }
@@ -668,6 +778,27 @@ public final class DynamicSceneCapture {
         private DynamicMeshBuilder.@Nullable VertexSink open(
                 RenderType renderType, int fallbackLight) {
             return this.open(renderType, fallbackLight, false);
+        }
+
+        private DynamicMeshBuilder.@Nullable VertexSink openModelPart(
+                RenderType renderType,
+                int fallbackLight,
+                int submission,
+                int part,
+                DynamicSceneFrame.InstanceTransform transform) {
+            int textureIndex = this.textureIndex(
+                    renderType, DynamicSceneFrame.Sampling.SRGB_COLOR);
+            return textureIndex < 0
+                    ? null
+                    : this.builder.openModelPart(
+                            renderType.primitiveTopology(),
+                            textureIndex,
+                            fallbackLight,
+                            textureIndex == 0,
+                            false,
+                            submission,
+                            part,
+                            transform);
         }
 
         private DynamicMeshBuilder.@Nullable VertexSink open(

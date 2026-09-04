@@ -72,4 +72,16 @@ record ResolvedVoxelInstances(CpuVoxelInstances source, int[] tintIds) {
     float previousTranslationZ(int index) {
         return this.source.previousTranslationZ(index);
     }
+
+    float transform(int index, int row, int column) {
+        return this.source.transform(index, row, column);
+    }
+
+    float previousTransform(int index, int row, int column) {
+        return this.source.previousTransform(index, row, column);
+    }
+
+    boolean hasAffineLinearTransform(int index) {
+        return this.source.hasAffineLinearTransform(index);
+    }
 }

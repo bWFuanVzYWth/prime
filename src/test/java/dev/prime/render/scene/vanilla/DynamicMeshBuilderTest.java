@@ -10,6 +10,7 @@ import dev.prime.render.terrain.CpuMeshSegment;
 import dev.prime.render.terrain.PrimitivePacking;
 import java.util.List;
 import net.minecraft.util.LightCoordsUtil;
+import org.joml.Matrix4f;
 import org.junit.jupiter.api.Test;
 
 final class DynamicMeshBuilderTest {
@@ -306,6 +307,82 @@ final class DynamicMeshBuilderTest {
         }
     }
 
+    @Test
+    void modelPartKeepsLocalGeometryAndFullAffineMotion() {
+        DynamicSceneFrame previous = modelPart(0.0F);
+        DynamicSceneFrame current = modelPart(0.5F);
+
+        DynamicSceneMotion motion = DynamicSceneMotion.prepare(current, previous);
+        CpuMeshSegment prototype = motion.mesh().voxelMeshes().getFirst().geometry();
+        var instances = motion.mesh().voxelInstances();
+
+        assertEquals(0.0F, prototype.positions()[0]);
+        assertEquals(1.0F, prototype.positions()[3]);
+        assertTrue(instances.hasAffineLinearTransform(0));
+        assertTrue(instances.hasMotion(0));
+        assertEquals(14.0F, instances.translationX(0));
+        assertEquals(25.0F, instances.translationY(0));
+        assertEquals(36.0F, instances.translationZ(0));
+        assertEquals(1.0F, instances.previousTransform(0, 0, 0));
+        assertEquals(0.0F, instances.previousTransform(0, 0, 2));
+    }
+
+    @Test
+    void unchangedDynamicGpuStateCanSkipTheTerrainWideTlasUpdate() {
+        DynamicSceneFrame frame = modelPart(0.5F);
+        DynamicSceneMotion first = DynamicSceneMotion.prepare(frame, null);
+        DynamicSceneMotion second = DynamicSceneMotion.prepare(frame, frame);
+
+        assertTrue(first.sameGpuState(second));
+
+        DynamicSceneMotion moving = DynamicSceneMotion.prepare(
+                modelPart(0.75F), frame);
+        assertFalse(moving.sameGpuState(second));
+        assertTrue(moving.mesh().voxelInstances().hasMotion(0));
+    }
+
+    @Test
+    void emptyDynamicGpuStateIgnoresCaptureCluster() {
+        DynamicSceneFrame firstFrame = new DynamicMeshBuilder(0.0, 0.0, 0.0)
+                .build(0, 0, 0, List.of());
+        DynamicSceneFrame secondFrame = new DynamicMeshBuilder(256.0, 0.0, 0.0)
+                .build(4, 0, 0, List.of());
+
+        DynamicSceneMotion first = DynamicSceneMotion.prepare(firstFrame, null);
+        DynamicSceneMotion second = DynamicSceneMotion.prepare(secondFrame, firstFrame);
+
+        assertTrue(first.sameGpuState(second));
+    }
+
+    @Test
+    void singularModelTransformBakesAsLoggedUniqueFallback() {
+        DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
+        builder.beginMotionObject(VanillaSceneBoundary.Element.ENTITY, 8L);
+        int submission = builder.beginModelSubmission();
+        DynamicMeshBuilder.VertexSink sink = builder.openModelPart(
+                PrimitiveTopology.TRIANGLES,
+                1,
+                0,
+                false,
+                false,
+                submission,
+                0,
+                builder.instanceTransform(new Matrix4f().scaling(1.0F, 1.0F, 0.0F)));
+        vertex(sink, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F);
+        vertex(sink, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F);
+        vertex(sink, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F);
+        sink.finish();
+        builder.endMotionObject(VanillaSceneBoundary.Element.ENTITY, 8L);
+
+        DynamicSceneFrame frame = builder.build(0, 0, 0, List.of());
+        DynamicSceneMotion motion = DynamicSceneMotion.prepare(frame, null);
+
+        assertTrue(frame.compatibilityIssues().contains(
+                DynamicSceneFrame.CompatibilityIssue.SINGULAR_INSTANCE_TRANSFORM));
+        assertEquals(1, motion.statistics().uniqueFallbackCount());
+        assertEquals(0, motion.statistics().reusablePrototypeCount());
+    }
+
     private static DynamicSceneFrame twoEntities(
             float firstX, float secondX, boolean reverse) {
         DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
@@ -322,6 +399,30 @@ final class DynamicMeshBuilderTest {
     private static DynamicSceneFrame oneEntity(long key, float x, float secondU) {
         DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
         entity(builder, key, x, secondU);
+        return builder.build(0, 0, 0, List.of());
+    }
+
+    private static DynamicSceneFrame modelPart(float rotation) {
+        DynamicMeshBuilder builder = new DynamicMeshBuilder(10.0, 20.0, 30.0);
+        builder.beginMotionObject(VanillaSceneBoundary.Element.ENTITY, 7L);
+        int submission = builder.beginModelSubmission();
+        Matrix4f transform = new Matrix4f()
+                .translation(4.0F, 5.0F, 6.0F)
+                .rotateY(rotation);
+        DynamicMeshBuilder.VertexSink sink = builder.openModelPart(
+                PrimitiveTopology.TRIANGLES,
+                1,
+                0,
+                false,
+                false,
+                submission,
+                3,
+                builder.instanceTransform(transform));
+        vertex(sink, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F);
+        vertex(sink, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F);
+        vertex(sink, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F);
+        sink.finish();
+        builder.endMotionObject(VanillaSceneBoundary.Element.ENTITY, 7L);
         return builder.build(0, 0, 0, List.of());
     }
 

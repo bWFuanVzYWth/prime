@@ -26,6 +26,7 @@
         "MainTargetMixin",
         "MinecraftAccessor",
         "MinecraftMixin",
+        "ModelPartMixin",
         "ModelBlockRendererMixin",
         "OptionsMixin",
         "OptionsSubScreenAccessor",

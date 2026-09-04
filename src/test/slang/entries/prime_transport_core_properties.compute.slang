@@ -565,10 +565,12 @@ void primeCheckPreviousDynamicSurface(
             secondTranslationY.w,
             thirdTranslationZ.w);
     PrimePreviousDynamicSurface previous = primePreviousDynamicSurfaceValue(
+            float4(1.0, 0.0, 0.0, translation.x),
+            float4(0.0, 1.0, 0.0, translation.y),
+            float4(0.0, 0.0, 1.0, translation.z),
             firstTranslationX.xyz,
             secondTranslationY.xyz,
             thirdTranslationZ.xyz,
-            translation,
             restoredBarycentrics);
     float3 firstEdge = secondTranslationY.xyz - firstTranslationX.xyz;
     float3 secondEdge = thirdTranslationZ.xyz - firstTranslationX.xyz;

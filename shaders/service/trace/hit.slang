@@ -78,6 +78,8 @@ public struct PrimeHitTriangle {
     public uint triangleIndex;
 };
 
+public static const uint PRIME_INSTANCE_AFFINE_FLAG = 0x40000000u;
+
 public PrimeHitTriangle primeHitTriangle(
         SectionRecord section,
         float2 barycentrics) {
@@ -103,7 +105,12 @@ public PrimeHitTriangle primeHitTriangle(
             + first;
     result.position = mul(
             ObjectToWorld3x4(), float4(result.localPosition, 1.0));
-    float3 normal = cross(edgeOne, edgeTwo);
+    bool affine = (section.instanceTint & PRIME_INSTANCE_AFFINE_FLAG) != 0u;
+    float3 normal = affine
+            ? cross(
+                    mul(ObjectToWorld3x4(), float4(edgeOne, 0.0)),
+                    mul(ObjectToWorld3x4(), float4(edgeTwo, 0.0)))
+            : cross(edgeOne, edgeTwo);
     // Translation omits exact degenerates. Scaling by the nonzero maximum avoids squared-length
     // underflow without introducing an area threshold that would erase valid small triangles.
     float normalScale = max(abs(normal.x), max(abs(normal.y), abs(normal.z)));

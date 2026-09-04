@@ -112,11 +112,37 @@ public struct PrimePreviousDynamicSurface
     public float3 geometricNormal;
 };
 
+float3 primePreviousTransformPosition(
+        float4 transform0,
+        float4 transform1,
+        float4 transform2,
+        float3 position)
+{
+    return float3(
+            dot(transform0.xyz, position) + transform0.w,
+            dot(transform1.xyz, position) + transform1.w,
+            dot(transform2.xyz, position) + transform2.w);
+}
+
+float3 primePreviousTransformVector(
+        float4 transform0,
+        float4 transform1,
+        float4 transform2,
+        float3 direction)
+{
+    return float3(
+            dot(transform0.xyz, direction),
+            dot(transform1.xyz, direction),
+            dot(transform2.xyz, direction));
+}
+
 public PrimePreviousDynamicSurface primePreviousDynamicSurfaceValue(
+        float4 transform0,
+        float4 transform1,
+        float4 transform2,
         float3 first,
         float3 second,
         float3 third,
-        float3 translation,
         float2 barycentrics)
 {
     float3 barycentric = float3(
@@ -124,11 +150,18 @@ public PrimePreviousDynamicSurface primePreviousDynamicSurfaceValue(
             barycentrics.x,
             barycentrics.y);
     PrimePreviousDynamicSurface previous;
-    previous.position = first * barycentric.x
-            + second * barycentric.y
-            + third * barycentric.z
-            + translation;
-    float3 normal = cross(second - first, third - first);
+    previous.position = primePreviousTransformPosition(
+            transform0,
+            transform1,
+            transform2,
+            first * barycentric.x
+                    + second * barycentric.y
+                    + third * barycentric.z);
+    float3 normal = cross(
+            primePreviousTransformVector(
+                    transform0, transform1, transform2, second - first),
+            primePreviousTransformVector(
+                    transform0, transform1, transform2, third - first));
     float normalLengthSquared = dot(normal, normal);
     previous.geometricNormal = normalLengthSquared > 0.0
             ? normal * rsqrt(normalLengthSquared)
@@ -139,7 +172,8 @@ public PrimePreviousDynamicSurface primePreviousDynamicSurfaceValue(
 public PrimePreviousDynamicSurface primePreviousDynamicSurface(
         SectionRecord section, uint triangleIndex, float2 barycentrics)
 {
-    float* positions = (float*)section.lightAddress;
+    float* positions = (float*)section.positionAddress;
+    float* transform = (float*)section.lightAddress;
     uint vertexBase = triangleIndex * 9u;
     float3 first = float3(
             positions[vertexBase],
@@ -154,7 +188,13 @@ public PrimePreviousDynamicSurface primePreviousDynamicSurface(
             positions[vertexBase + 7u],
             positions[vertexBase + 8u]);
     return primePreviousDynamicSurfaceValue(
-            first, second, third, section.translation, barycentrics);
+            float4(transform[0u], transform[1u], transform[2u], transform[3u]),
+            float4(transform[4u], transform[5u], transform[6u], transform[7u]),
+            float4(transform[8u], transform[9u], transform[10u], transform[11u]),
+            first,
+            second,
+            third,
+            barycentrics);
 }
 
 public PrimePreviousDynamicSurface primeSurfacePreviousDynamicSurface(

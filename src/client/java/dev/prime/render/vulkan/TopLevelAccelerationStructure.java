@@ -2,6 +2,7 @@ package dev.prime.render.vulkan;
 
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.shader.ShaderAbi;
+import dev.prime.render.terrain.CpuVoxelInstances;
 import dev.prime.render.terrain.TriangleLayout;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
@@ -16,6 +17,7 @@ import org.lwjgl.vulkan.VkAccelerationStructureInstanceKHR;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
 public final class TopLevelAccelerationStructure {
+    private static final int MOTION_TRANSFORM_BYTES = 12 * Float.BYTES;
     private static final int BUILD_FLAGS =
             KHRAccelerationStructure.VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
                     | KHRAccelerationStructure.VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
@@ -23,6 +25,7 @@ public final class TopLevelAccelerationStructure {
     private final int capacity;
     private final VulkanBuffer instances;
     private final VulkanBuffer sectionTable;
+    private final VulkanBuffer motionTransforms;
     private final VulkanBuffer scratch;
     private final AccelerationStructure accelerationStructure;
     private boolean available = true;
@@ -35,12 +38,14 @@ public final class TopLevelAccelerationStructure {
             int capacity,
             VulkanBuffer instances,
             VulkanBuffer sectionTable,
+            VulkanBuffer motionTransforms,
             VulkanBuffer scratch,
             AccelerationStructure accelerationStructure) {
         this.context = context;
         this.capacity = capacity;
         this.instances = instances;
         this.sectionTable = sectionTable;
+        this.motionTransforms = motionTransforms;
         this.scratch = scratch;
         this.accelerationStructure = accelerationStructure;
     }
@@ -62,6 +67,7 @@ public final class TopLevelAccelerationStructure {
                 : nextCapacity(requestedCapacity, deviceLimit);
         VulkanBuffer instances = null;
         VulkanBuffer sectionTable = null;
+        VulkanBuffer motionTransforms = null;
         VulkanBuffer scratch = null;
         AccelerationStructure accelerationStructure = null;
         try {
@@ -75,6 +81,11 @@ public final class TopLevelAccelerationStructure {
                     VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                     true,
                     label + " section table");
+            motionTransforms = context.createBuffer(
+                    (long) capacity * MOTION_TRANSFORM_BYTES,
+                    VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                    true,
+                    label + " motion transforms");
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 VkAccelerationStructureGeometryKHR.Buffer geometry = tlasGeometry(stack, instances.deviceAddress());
                 VkAccelerationStructureBuildGeometryInfoKHR buildInfo = VkAccelerationStructureBuildGeometryInfoKHR.calloc(stack)
@@ -106,12 +117,19 @@ public final class TopLevelAccelerationStructure {
                         false,
                         label + " scratch");
                 return new TopLevelAccelerationStructure(
-                        context, capacity, instances, sectionTable, scratch, accelerationStructure);
+                        context,
+                        capacity,
+                        instances,
+                        sectionTable,
+                        motionTransforms,
+                        scratch,
+                        accelerationStructure);
             }
         } catch (RuntimeException exception) {
             RuntimeException failure = exception;
             failure = ResourceCleanup.destroy(accelerationStructure, failure);
             failure = ResourceCleanup.destroy(scratch, failure);
+            failure = ResourceCleanup.destroy(motionTransforms, failure);
             failure = ResourceCleanup.destroy(sectionTable, failure);
             failure = ResourceCleanup.destroy(instances, failure);
             throw failure;
@@ -153,6 +171,7 @@ public final class TopLevelAccelerationStructure {
         }
         this.instances.flush(0L, (long) count * VkAccelerationStructureInstanceKHR.SIZEOF);
         this.sectionTable.flush(0L, (long) count * ShaderAbi.SECTION_RECORD_SIZE);
+        this.motionTransforms.flush(0L, (long) count * MOTION_TRANSFORM_BYTES);
     }
 
     public void recordBuild(VkCommandBuffer commandBuffer) {
@@ -210,6 +229,7 @@ public final class TopLevelAccelerationStructure {
             RuntimeException failure = ResourceCleanup.destroy(this.accelerationStructure, null);
             failure = ResourceCleanup.destroy(this.instances, failure);
             failure = ResourceCleanup.destroy(this.sectionTable, failure);
+            failure = ResourceCleanup.destroy(this.motionTransforms, failure);
             failure = ResourceCleanup.destroy(this.scratch, failure);
             ResourceCleanup.throwIfFailed(failure);
         }
@@ -277,6 +297,95 @@ public final class TopLevelAccelerationStructure {
                 float sectionX,
                 float sectionY,
                 float sectionZ) {
+            this.writeInstanced(
+                    blasAddress,
+                    primitiveAddress,
+                    positionAddress,
+                    surfaceRelationAddress,
+                    lightAddress,
+                    worldLightAddress,
+                    worldLightLeafAddress,
+                    triangleLayout,
+                    worldLightPath,
+                    lightCount,
+                    worldLightLeafCount,
+                    mask,
+                    instanceTint,
+                    null,
+                    -1,
+                    transformX,
+                    transformY,
+                    transformZ,
+                    sectionX,
+                    sectionY,
+                    sectionZ);
+        }
+
+        public void writeTransformed(
+                long blasAddress,
+                long primitiveAddress,
+                long positionAddress,
+                long surfaceRelationAddress,
+                long lightAddress,
+                long worldLightAddress,
+                long worldLightLeafAddress,
+                TriangleLayout triangleLayout,
+                int worldLightPath,
+                int lightCount,
+                int worldLightLeafCount,
+                int mask,
+                int instanceTint,
+                CpuVoxelInstances transforms,
+                int transformIndex,
+                float originX,
+                float originY,
+                float originZ) {
+            this.writeInstanced(
+                    blasAddress,
+                    primitiveAddress,
+                    positionAddress,
+                    surfaceRelationAddress,
+                    lightAddress,
+                    worldLightAddress,
+                    worldLightLeafAddress,
+                    triangleLayout,
+                    worldLightPath,
+                    lightCount,
+                    worldLightLeafCount,
+                    mask,
+                    instanceTint,
+                    transforms,
+                    transformIndex,
+                    originX,
+                    originY,
+                    originZ,
+                    originX,
+                    originY,
+                    originZ);
+        }
+
+        private void writeInstanced(
+                long blasAddress,
+                long primitiveAddress,
+                long positionAddress,
+                long surfaceRelationAddress,
+                long lightAddress,
+                long worldLightAddress,
+                long worldLightLeafAddress,
+                TriangleLayout triangleLayout,
+                int worldLightPath,
+                int lightCount,
+                int worldLightLeafCount,
+                int mask,
+                int instanceTint,
+                CpuVoxelInstances transforms,
+                int transformIndex,
+                float transformX,
+                float transformY,
+                float transformZ,
+                float sectionX,
+                float sectionY,
+                float sectionZ) {
             if (this.index >= this.capacity) {
                 throw new IllegalStateException("TLAS populator wrote too many instances");
             }
@@ -298,11 +407,22 @@ public final class TopLevelAccelerationStructure {
                         "TLAS visibility mask exceeds its eight-bit ABI");
             }
             this.matrix.clear();
-            this.matrix
-                    .put(1.0F).put(0.0F).put(0.0F).put(transformX)
-                    .put(0.0F).put(1.0F).put(0.0F).put(transformY)
-                    .put(0.0F).put(0.0F).put(1.0F).put(transformZ)
-                    .flip();
+            if (transforms == null) {
+                this.matrix
+                        .put(1.0F).put(0.0F).put(0.0F).put(transformX)
+                        .put(0.0F).put(1.0F).put(0.0F).put(transformY)
+                        .put(0.0F).put(0.0F).put(1.0F).put(transformZ);
+            } else {
+                for (int row = 0; row < 3; row++) {
+                    this.matrix
+                            .put(transforms.transform(transformIndex, row, 0))
+                            .put(transforms.transform(transformIndex, row, 1))
+                            .put(transforms.transform(transformIndex, row, 2))
+                            .put(transforms.transform(transformIndex, row, 3)
+                                    + (row == 0 ? transformX : row == 1 ? transformY : transformZ));
+                }
+            }
+            this.matrix.flip();
             this.instance.transform().matrix(this.matrix);
             this.instance.instanceCustomIndex(this.index)
                     .mask(mask)
@@ -317,6 +437,23 @@ public final class TopLevelAccelerationStructure {
 
             long sectionAddress = this.owner.sectionTable.mappedAddress()
                     + (long) this.index * ShaderAbi.SECTION_RECORD_SIZE;
+            long resolvedLightAddress = lightAddress;
+            if (transforms != null && transforms.hasMotion(transformIndex)) {
+                long motionOffset = (long) this.index * MOTION_TRANSFORM_BYTES;
+                long motionAddress = this.owner.motionTransforms.mappedAddress() + motionOffset;
+                for (int row = 0; row < 3; row++) {
+                    for (int column = 0; column < 3; column++) {
+                        MemoryUtil.memPutFloat(
+                                motionAddress + (long) (row * 4 + column) * Float.BYTES,
+                                transforms.previousTransform(transformIndex, row, column));
+                    }
+                    MemoryUtil.memPutFloat(
+                            motionAddress + (long) (row * 4 + 3) * Float.BYTES,
+                            transforms.previousTransform(transformIndex, row, 3)
+                                    + (row == 0 ? sectionX : row == 1 ? sectionY : sectionZ));
+                }
+                resolvedLightAddress = this.owner.motionTransforms.deviceAddress() + motionOffset;
+            }
             MemoryUtil.memPutLong(
                     sectionAddress + ShaderAbi.SECTION_PRIMITIVE_ADDRESS_OFFSET,
                     primitiveAddress);
@@ -325,7 +462,7 @@ public final class TopLevelAccelerationStructure {
                     positionAddress);
             MemoryUtil.memPutLong(
                     sectionAddress + ShaderAbi.SECTION_LIGHT_ADDRESS_OFFSET,
-                    lightAddress);
+                    resolvedLightAddress);
             MemoryUtil.memPutLong(
                     sectionAddress + ShaderAbi.SECTION_WORLD_LIGHT_ADDRESS_OFFSET,
                     worldLightAddress);

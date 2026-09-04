@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.joml.Matrix4fc;
+import org.jspecify.annotations.Nullable;
 
 /** Immutable dynamic geometry captured from one vanilla world-render submission. */
 public record DynamicSceneFrame(
@@ -89,7 +91,9 @@ public record DynamicSceneFrame(
         MISSING_MOTION_IDENTITY(
                 "an entity submission bypassed stable identity extraction and uses zero object motion"),
         DUPLICATE_MOTION_IDENTITY(
-                "an entity or block entity was submitted more than once with the same motion identity and uses zero object motion");
+                "an entity or block entity was submitted more than once with the same motion identity and uses zero object motion"),
+        SINGULAR_INSTANCE_TRANSFORM(
+                "a non-invertible model transform cannot be instanced and was baked into unique geometry");
 
         private final String description;
 
@@ -144,7 +148,10 @@ public record DynamicSceneFrame(
             GeometryKind kind,
             VanillaSceneBoundary.Element element,
             long key,
+            int submission,
+            int part,
             boolean stableIdentity,
+            InstanceTransform transform,
             int firstTriangle,
             int triangleCount) {
         public GeometrySpan {
@@ -154,12 +161,80 @@ public record DynamicSceneFrame(
                 throw new IllegalArgumentException(
                         "Dynamic geometry span must contain a non-negative triangle range");
             }
+            if ((submission < 0) != (part < 0)) {
+                throw new IllegalArgumentException(
+                        "Dynamic geometry submission and part identities must be present together");
+            }
             if (stableIdentity
                     && element != VanillaSceneBoundary.Element.ENTITY
                     && element != VanillaSceneBoundary.Element.BLOCK_ENTITY) {
                 throw new IllegalArgumentException(
                         "Only entities and block entities have stable dynamic identities");
             }
+        }
+    }
+
+    /** Row-major Vulkan 3x4 object-to-cluster transform. */
+    public static final class InstanceTransform {
+        private static final int WORDS = 12;
+        private final float[] rows;
+
+        private InstanceTransform(float[] rows) {
+            this.rows = rows;
+        }
+
+        public static @Nullable InstanceTransform tryFrom(
+                Matrix4fc matrix, double x, double y, double z) {
+            Objects.requireNonNull(matrix, "matrix");
+            float[] rows = {
+                matrix.m00(), matrix.m10(), matrix.m20(), (float) (matrix.m30() + x),
+                matrix.m01(), matrix.m11(), matrix.m21(), (float) (matrix.m31() + y),
+                matrix.m02(), matrix.m12(), matrix.m22(), (float) (matrix.m32() + z)
+            };
+            for (float value : rows) {
+                if (!Float.isFinite(value)) {
+                    return null;
+                }
+            }
+            double determinant = (double) rows[0]
+                            * (rows[5] * rows[10] - rows[6] * rows[9])
+                    - (double) rows[1]
+                            * (rows[4] * rows[10] - rows[6] * rows[8])
+                    + (double) rows[2]
+                            * (rows[4] * rows[9] - rows[5] * rows[8]);
+            if (determinant == 0.0 || !Double.isFinite(determinant)) {
+                return null;
+            }
+            return new InstanceTransform(rows);
+        }
+
+        public static InstanceTransform translation(float x, float y, float z) {
+            return new InstanceTransform(new float[] {
+                1.0F, 0.0F, 0.0F, x,
+                0.0F, 1.0F, 0.0F, y,
+                0.0F, 0.0F, 1.0F, z
+            });
+        }
+
+        public float value(int row, int column) {
+            if (row < 0 || row >= 3 || column < 0 || column >= 4) {
+                throw new IndexOutOfBoundsException("3x4 transform index is outside the matrix");
+            }
+            return this.rows[row * 4 + column];
+        }
+
+        float[] copyRows() {
+            return this.rows.clone();
+        }
+
+        boolean rawEquals(InstanceTransform other) {
+            for (int index = 0; index < WORDS; index++) {
+                if (Float.floatToRawIntBits(this.rows[index])
+                        != Float.floatToRawIntBits(other.rows[index])) {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 

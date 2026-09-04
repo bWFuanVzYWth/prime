@@ -49,8 +49,9 @@ public record DynamicSceneMotion(
         int instanceCount = currentGeometry.size();
         int[] meshIndices = new int[instanceCount];
         int[] packedTints = new int[instanceCount];
-        float[] translations = new float[Math.multiplyExact(instanceCount, 3)];
-        float[] previousTranslations = new float[translations.length];
+        float[] transforms = new float[Math.multiplyExact(
+                instanceCount, CpuVoxelInstances.TRANSFORM_WORDS)];
+        float[] previousTransforms = new float[transforms.length];
         boolean[] motion = new boolean[instanceCount];
         int uniqueCount = 0;
         long uniqueTriangles = 0L;
@@ -87,34 +88,45 @@ public record DynamicSceneMotion(
                         geometry.span().element(), 1, Math::addExact);
             }
             meshIndices[index] = meshIndex;
-            int translation = index * 3;
-            translations[translation] = geometry.translationX();
-            translations[translation + 1] = geometry.translationY();
-            translations[translation + 2] = geometry.translationZ();
-            previousTranslations[translation] = geometry.translationX();
-            previousTranslations[translation + 1] = geometry.translationY();
-            previousTranslations[translation + 2] = geometry.translationZ();
+            int transform = index * CpuVoxelInstances.TRANSFORM_WORDS;
+            float[] currentTransform = geometry.transform().copyRows();
+            System.arraycopy(
+                    currentTransform,
+                    0,
+                    transforms,
+                    transform,
+                    CpuVoxelInstances.TRANSFORM_WORDS);
+            System.arraycopy(
+                    currentTransform,
+                    0,
+                    previousTransforms,
+                    transform,
+                    CpuVoxelInstances.TRANSFORM_WORDS);
 
             if (sameCluster
                     && geometry.span().stableIdentity()
                     && currentIdentityCounts.get(MotionKey.of(geometry.span())) == 1) {
                 BuiltGeometry old = previousByKey.get(MotionKey.of(geometry.span()));
                 if (old != null && samePrototype(geometry.mesh(), old.mesh())) {
-                    previousTranslations[translation] = old.translationX();
-                    previousTranslations[translation + 1] = old.translationY();
-                    previousTranslations[translation + 2] = old.translationZ();
-                    motion[index] = true;
+                    float[] previousTransform = old.transform().copyRows();
+                    System.arraycopy(
+                            previousTransform,
+                            0,
+                            previousTransforms,
+                            transform,
+                            CpuVoxelInstances.TRANSFORM_WORDS);
+                    motion[index] = !geometry.transform().rawEquals(old.transform());
                 }
             }
         }
 
         CpuVoxelInstances instances = instanceCount == 0
                 ? CpuVoxelInstances.EMPTY
-                : new CpuVoxelInstances(
+                : CpuVoxelInstances.transformed(
                         meshIndices,
                         packedTints,
-                        translations,
-                        previousTranslations,
+                        transforms,
+                        previousTransforms,
                         motion);
         CpuClusterMesh mesh = instanceCount == 0
                 ? CpuClusterMesh.empty()
@@ -146,34 +158,39 @@ public record DynamicSceneMotion(
                     source.primitiveRecords(),
                     firstPrimitive,
                     firstPrimitive + primitiveCount);
-            float x = positions[0];
-            float y = positions[1];
-            float z = positions[2];
-            float[] local = positions.clone();
-            boolean exact = true;
-            for (int vertex = 0; vertex < local.length; vertex += 3) {
-                local[vertex] -= x;
-                local[vertex + 1] -= y;
-                local[vertex + 2] -= z;
-                exact &= Float.floatToRawIntBits(local[vertex] + x)
-                                == Float.floatToRawIntBits(positions[vertex])
-                        && Float.floatToRawIntBits(local[vertex + 1] + y)
-                                == Float.floatToRawIntBits(positions[vertex + 1])
-                        && Float.floatToRawIntBits(local[vertex + 2] + z)
-                                == Float.floatToRawIntBits(positions[vertex + 2]);
-            }
-            if (!exact) {
-                local = positions;
-                x = 0.0F;
-                y = 0.0F;
-                z = 0.0F;
+            float[] local = positions;
+            DynamicSceneFrame.InstanceTransform transform = span.transform();
+            if (transform == null) {
+                float x = positions[0];
+                float y = positions[1];
+                float z = positions[2];
+                local = positions.clone();
+                boolean exact = true;
+                for (int vertex = 0; vertex < local.length; vertex += 3) {
+                    local[vertex] -= x;
+                    local[vertex + 1] -= y;
+                    local[vertex + 2] -= z;
+                    exact &= Float.floatToRawIntBits(local[vertex] + x)
+                                    == Float.floatToRawIntBits(positions[vertex])
+                            && Float.floatToRawIntBits(local[vertex + 1] + y)
+                                    == Float.floatToRawIntBits(positions[vertex + 1])
+                            && Float.floatToRawIntBits(local[vertex + 2] + z)
+                                    == Float.floatToRawIntBits(positions[vertex + 2]);
+                }
+                if (exact) {
+                    transform = DynamicSceneFrame.InstanceTransform.translation(x, y, z);
+                } else {
+                    local = positions;
+                    transform = DynamicSceneFrame.InstanceTransform.translation(
+                            0.0F, 0.0F, 0.0F);
+                }
             }
             CpuVoxelMesh mesh = new CpuVoxelMesh(
                     local,
                     primitives,
                     TriangleLayout.triangles(0, span.triangleCount(), 0),
                     OpacityMicromapData.fullyUnknown(span.triangleCount()));
-            result.add(new BuiltGeometry(span, mesh, x, y, z));
+            result.add(new BuiltGeometry(span, mesh, transform));
         }
         return List.copyOf(result);
     }
@@ -210,6 +227,48 @@ public record DynamicSceneMotion(
         return a.triangleLayout().equals(b.triangleLayout())
                 && rawFloatEquals(a.positions(), b.positions())
                 && Arrays.equals(a.primitiveRecords(), b.primitiveRecords());
+    }
+
+    public boolean sameGpuState(DynamicSceneMotion other) {
+        if (other == null) {
+            return false;
+        }
+        boolean bothEmpty = this.mesh.voxelMeshes().isEmpty()
+                && other.mesh.voxelMeshes().isEmpty()
+                && this.mesh.voxelInstances().count() == 0
+                && other.mesh.voxelInstances().count() == 0;
+        if (!bothEmpty
+                && (this.frame.clusterX() != other.frame.clusterX()
+                || this.frame.clusterY() != other.frame.clusterY()
+                || this.frame.clusterZ() != other.frame.clusterZ())) {
+            return false;
+        }
+        List<CpuVoxelMesh> firstMeshes = this.mesh.voxelMeshes();
+        List<CpuVoxelMesh> secondMeshes = other.mesh.voxelMeshes();
+        if (firstMeshes.size() != secondMeshes.size()) {
+            return false;
+        }
+        for (int index = 0; index < firstMeshes.size(); index++) {
+            CpuVoxelMesh first = firstMeshes.get(index);
+            CpuVoxelMesh second = secondMeshes.get(index);
+            if (first.reusable() != second.reusable() || !samePrototype(first, second)) {
+                return false;
+            }
+        }
+        CpuVoxelInstances first = this.mesh.voxelInstances();
+        CpuVoxelInstances second = other.mesh.voxelInstances();
+        if (!Arrays.equals(first.meshIndices(), second.meshIndices())
+                || !Arrays.equals(first.packedTints(), second.packedTints())
+                || !rawFloatEquals(first.transforms(), second.transforms())
+                || !rawFloatEquals(first.previousTransforms(), second.previousTransforms())) {
+            return false;
+        }
+        for (int index = 0; index < first.count(); index++) {
+            if (first.hasMotion(index) != second.hasMotion(index)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean rawFloatEquals(float[] first, float[] second) {
@@ -274,13 +333,16 @@ public record DynamicSceneMotion(
     private record BuiltGeometry(
             DynamicSceneFrame.GeometrySpan span,
             CpuVoxelMesh mesh,
-            float translationX,
-            float translationY,
-            float translationZ) {}
+            DynamicSceneFrame.InstanceTransform transform) {}
 
-    private record MotionKey(VanillaSceneBoundary.Element element, long key) {
+    private record MotionKey(
+            VanillaSceneBoundary.Element element,
+            long key,
+            int submission,
+            int part) {
         private static MotionKey of(DynamicSceneFrame.GeometrySpan span) {
-            return new MotionKey(span.element(), span.key());
+            return new MotionKey(
+                    span.element(), span.key(), span.submission(), span.part());
         }
     }
 

@@ -68,8 +68,8 @@ void main(in BuiltInTriangleIntersectionAttributes attributes)
             -WorldRayDirection(),
             material.shadingNormal);
     primePayload.t = RayTCurrent();
-    // Translation makes BLAS winding authoritative. Opaque shading orients this outward face
-    // normal at the integrator boundary; transparent transport keeps its winding-defined sign.
+    // TLAS transforms preserve BLAS winding. Opaque shading orients this outward face normal at
+    // the integrator boundary; transparent transport keeps its winding-defined sign.
     primePayload.geometricNormal = normal;
     primePayload.position = hit.position;
     primePayload.positionReserved = primePackSurfaceMotion(
