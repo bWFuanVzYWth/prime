@@ -38,6 +38,9 @@ final class PrimeShaderManifest {
             if (!(declaration instanceof CharSequence) && declaration.ser == true) {
                 addArtifact(artifacts, id + '_ser', entry, stage.value, SER_DEFINITIONS)
             }
+            if (!(declaration instanceof CharSequence) && declaration.subgroup == true) {
+                addArtifact(artifacts, id + '_subgroup', entry, stage.value, ['-DPRIME_ENABLE_SUBGROUP_QUEUE=1'])
+            }
         }
         def schedules = new LinkedHashMap<String, Map>()
         compact.schedules.each { String id, schedule ->
@@ -45,6 +48,9 @@ final class PrimeShaderManifest {
                 throw new GradleException("Shader schedule ${id} has no named groups")
             }
             (schedule.variants ?: [null]).each { variant ->
+                if (!(variant in [null, 'scalar', 'ser', 'subgroup'])) {
+                    throw new GradleException("Shader schedule ${id} has an unknown variant ${variant}")
+                }
                 def modules = []
                 def groups = schedule.groups.collect { String name, group ->
                     if (!(group instanceof List) || group.size() != 2) {
@@ -52,7 +58,7 @@ final class PrimeShaderManifest {
                                 "Shader schedule ${id} has an invalid group ${name}")
                     }
                     String module = group[0]
-                    def variantId = variant == 'ser' ? module + '_ser' : module
+                    def variantId = variant == null ? module : module + '_' + variant
                     String resolved = artifacts.containsKey(variantId) ? variantId : module
                     if (!artifacts.containsKey(resolved)) {
                         throw new GradleException(

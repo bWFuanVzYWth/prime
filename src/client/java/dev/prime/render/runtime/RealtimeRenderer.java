@@ -19,6 +19,8 @@ import dev.prime.render.vulkan.DisplayExposureDiagnostics;
 import dev.prime.render.vulkan.MaterialTexturePages;
 import dev.prime.render.vulkan.RealtimeFrameExecutor;
 import dev.prime.render.vulkan.RealtimeRayTracingPipeline;
+import dev.prime.render.vulkan.RealtimeTracePipeline;
+import dev.prime.render.vulkan.LambertRayTracingPipeline;
 import dev.prime.render.vulkan.SunShadowPipeline;
 import dev.prime.render.vulkan.TraceBackend;
 import dev.prime.render.vulkan.VulkanContext;
@@ -41,7 +43,8 @@ final class RealtimeRenderer implements Destroyable {
     private final DisplayExposureDiagnostics exposureDiagnostics;
     private final DlssRrNative.Context ngxContext;
     private final ReconstructionBackendRegistry reconstructionRegistry;
-    private RealtimeRayTracingPipeline pipeline;
+    private RealtimeTracePipeline pipeline;
+    private RealtimeRenderMode mode = RealtimeRenderMode.PATH_TRACING;
     private VulkanReconstructionResources resources;
     private RealtimeSampleState sampleState = RealtimeSampleState.initial();
     private long settingsRevision = -1L;
@@ -60,7 +63,7 @@ final class RealtimeRenderer implements Destroyable {
         this.exposureDiagnostics = new DisplayExposureDiagnostics(context);
     }
 
-    RealtimeRayTracingPipeline pipeline() {
+    RealtimeTracePipeline pipeline() {
         return this.pipeline;
     }
 
@@ -141,6 +144,7 @@ final class RealtimeRenderer implements Destroyable {
                     sceneTextures,
                     materialTextures.binding(),
                     scene.materialCore(),
+                    scene.surfaces(),
                     scene.tintSamples(),
                     atmosphere,
                     current.processor().rawFrame());
@@ -161,6 +165,7 @@ final class RealtimeRenderer implements Destroyable {
                     sceneTextures,
                     materialTextures.binding(),
                     scene.materialCore(),
+                    scene.surfaces(),
                     scene.tintSamples(),
                     atmosphere,
                     replacementResources.processor().rawFrame());
@@ -338,6 +343,22 @@ final class RealtimeRenderer implements Destroyable {
         }
     }
 
+    void selectMode(RealtimeRenderMode mode) {
+        if (!mode.usesReconstruction() || mode == this.mode) return;
+        RealtimeTracePipeline replacement = this.createPipeline(mode);
+        RealtimeTracePipeline previous = this.pipeline;
+        this.pipeline = replacement;
+        this.mode = mode;
+        this.sampleState = this.sampleState.invalidated();
+        this.context.defer(previous);
+    }
+
+    private RealtimeTracePipeline createPipeline(RealtimeRenderMode mode) {
+        return mode == RealtimeRenderMode.LIGHTWEIGHT_PATH_TRACING
+                ? new LambertRayTracingPipeline(this.context, this.backend)
+                : new RealtimeRayTracingPipeline(this.context, this.backend);
+    }
+
     void requestReset() {
         this.sampleState = this.sampleState.invalidated();
     }
@@ -409,10 +430,10 @@ final class RealtimeRenderer implements Destroyable {
     }
 
     void reload(AtmospherePipeline atmosphere) {
-        RealtimeRayTracingPipeline replacementPipeline = null;
+        RealtimeTracePipeline replacementPipeline = null;
         VulkanReconstructionResources replacementResources = null;
         try {
-            replacementPipeline = new RealtimeRayTracingPipeline(this.context, this.backend);
+            replacementPipeline = this.createPipeline(this.mode);
             VulkanReconstructionResources current = this.resources;
             if (current != null) {
                 replacementResources = this.reconstructionRegistry.createResources(
@@ -423,7 +444,7 @@ final class RealtimeRenderer implements Destroyable {
             ResourceCleanup.destroy(replacementPipeline, exception);
             throw exception;
         }
-        RealtimeRayTracingPipeline previousPipeline = this.pipeline;
+        RealtimeTracePipeline previousPipeline = this.pipeline;
         VulkanReconstructionResources previousResources = this.resources;
         this.pipeline = replacementPipeline;
         this.resources = replacementResources;

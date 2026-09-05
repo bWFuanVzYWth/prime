@@ -11,13 +11,15 @@ import java.util.Map;
 import java.util.function.Supplier;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
-/** Render-thread-owned pool for exact immutable instance prototypes and unique fallback BLASes. */
+/** Render-thread-owned prototype pool. Static and motion inputs have separate lifetime domains,
+ * so a dynamic instance can never acquire a static BLAS whose input vertices have retired. */
 final class VoxelBlasPool implements AutoCloseable {
     private final Map<Key, Entry> byContent = new HashMap<>();
     private final IdentityHashMap<PreparedBlas, Entry> byBlas = new IdentityHashMap<>();
     private boolean closed;
 
-    PreparedBlas acquire(CpuVoxelMesh mesh, Supplier<PreparedBlas> factory) {
+    PreparedBlas acquire(CpuVoxelMesh mesh, PreparedBlas.PositionLifetime lifetime,
+            Supplier<PreparedBlas> factory) {
         this.requireOpen();
         if (!mesh.reusable()) {
             PreparedBlas blas = factory.get();
@@ -28,7 +30,7 @@ final class VoxelBlasPool implements AutoCloseable {
             }
             return blas;
         }
-        Key lookup = Key.lookup(mesh);
+        Key lookup = Key.lookup(mesh, lifetime);
         Entry existing = this.byContent.get(lookup);
         if (existing != null) {
             existing.references++;
@@ -125,6 +127,7 @@ final class VoxelBlasPool implements AutoCloseable {
     }
 
     static final class Key {
+        private final PreparedBlas.PositionLifetime lifetime;
         private final float[] positions;
         private final int[] primitives;
         private final int opaqueTriangles;
@@ -138,10 +141,15 @@ final class VoxelBlasPool implements AutoCloseable {
         private final int hash;
 
         Key(CpuVoxelMesh mesh) {
-            this(mesh, true);
+            this(mesh, PreparedBlas.PositionLifetime.BUILD_ONLY, true);
         }
 
-        private Key(CpuVoxelMesh mesh, boolean snapshot) {
+        Key(CpuVoxelMesh mesh, PreparedBlas.PositionLifetime lifetime) {
+            this(mesh, lifetime, true);
+        }
+
+        private Key(CpuVoxelMesh mesh, PreparedBlas.PositionLifetime lifetime, boolean snapshot) {
+            this.lifetime = lifetime;
             CpuMeshSegment geometry = mesh.geometry();
             this.positions = snapshot ? geometry.positions().clone() : geometry.positions();
             this.primitives = snapshot
@@ -166,10 +174,11 @@ final class VoxelBlasPool implements AutoCloseable {
             this.micromapIndices = snapshot
                     ? micromap.triangleIndices().clone()
                     : micromap.triangleIndices();
-            this.hash = mesh.gpuContentHash();
+            this.hash = 31 * mesh.gpuContentHash() + lifetime.ordinal();
         }
 
         private Key(Key source) {
+            this.lifetime = source.lifetime;
             this.positions = source.positions.clone();
             this.primitives = source.primitives.clone();
             this.opaqueTriangles = source.opaqueTriangles;
@@ -183,8 +192,8 @@ final class VoxelBlasPool implements AutoCloseable {
             this.hash = source.hash;
         }
 
-        static Key lookup(CpuVoxelMesh mesh) {
-            return new Key(mesh, false);
+        static Key lookup(CpuVoxelMesh mesh, PreparedBlas.PositionLifetime lifetime) {
+            return new Key(mesh, lifetime, false);
         }
 
         Key snapshot() {
@@ -200,6 +209,7 @@ final class VoxelBlasPool implements AutoCloseable {
         public boolean equals(Object other) {
             return this == other
                     || other instanceof Key key
+                            && this.lifetime == key.lifetime
                             && this.opaqueTriangles == key.opaqueTriangles
                             && this.cutoutTriangles == key.cutoutTriangles
                             && this.transmissiveTriangles == key.transmissiveTriangles

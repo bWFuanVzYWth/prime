@@ -3,6 +3,9 @@ module "entry/hit/shadow_nonopaque.anyhit.slang";
 
 
 import glsl;
+
+import "service/material/coverage.slang";
+import "model/material/recipe.slang";
 import "prime_material_core_abi.slang";
 import "prime_abi_types.slang";
 import "math/packed_geometry.slang";
@@ -14,8 +17,9 @@ import "service/material/medium_access.slang";
 import "service/material/static_color.slang";
 import "model/material/transparent.slang";
 
-import "service/trace/hit.slang";
-import "service/trace/identity.slang";
+import "service/trace/candidate_material.slang";
+import "service/trace/candidate.slang";
+import "service/trace/candidate_record.slang";
 import "contract/trace/shadow_payload.slang";
 
 layout(location = 1) rayPayloadInEXT PrimeShadowPayload primeShadowPayload;
@@ -57,8 +61,8 @@ void primeAccumulateSolidMediumBoundary(
     }
 }
 
-float3 primeSurfaceBoundaryExtinction(PrimeSurfaceRelation relation) {
-    uint core = primeMaterialCoreWord(relation.materialId);
+float3 primeSurfaceBoundaryExtinction(uint materialId, uint tint, uint referenceUv) {
+    uint core = primeMaterialCoreWord(materialId);
     uint recipeControl = (core >> PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT)
             & PRIME_MATERIAL_CORE_RECIPE_CONTROL_MASK;
     if ((recipeControl & PRIME_RECIPE_WATER) != 0u) {
@@ -67,8 +71,8 @@ float3 primeSurfaceBoundaryExtinction(PrimeSurfaceRelation relation) {
     float opacity;
     float3 baseColor = primeStaticBaseColor(
             core & PRIME_MATERIAL_CORE_TEXTURE_ID_MASK,
-            relation.tint,
-            primeUnpackUv(relation.referenceUv),
+            tint,
+            primeUnpackUv(referenceUv),
             0.0,
             opacity);
     return primeGlassShadowExtinction(baseColor, opacity);
@@ -77,72 +81,34 @@ float3 primeSurfaceBoundaryExtinction(PrimeSurfaceRelation relation) {
 [shader("anyhit")]
 void main(in BuiltInTriangleIntersectionAttributes attributes)
 {
-    float2 barycentrics = attributes.barycentrics;
-    SectionRecord section = primeSection();
-    uint triangleIndex = primeGlobalTriangleIndex(section);
-    bool sameSourceSection = InstanceID()
-            == primeShadowPayload.sourcePrimitive.x;
-    if (sameSourceSection
-            && (triangleIndex == primeShadowPayload.sourcePrimitive.y
-                    || primeGlobalPrimitiveIndex(section)
-                            == primeGlobalPrimitiveIndexFromTriangle(
-                                    section,
-                                    primeShadowPayload.sourcePrimitive.y))) {
+    if (primeCandidateIsSource(primeShadowPayload.sourcePrimitive)) {
         IgnoreHit();
         return;
     }
     bool targetSection = InstanceID() == primeShadowPayload.targetEmitter.x;
-    if (GeometryIndex() == 0u && !targetSection) {
-        return;
-    }
-    PrimitiveRecord primitive = primePrimitive(section);
-    if (targetSection
-            && primePrimitiveEmitterIndex(primitive)
-                    == primeShadowPayload.targetEmitter.y) {
+    if (GeometryIndex() == 0u && !targetSection) return;
+    if (targetSection && primeCandidateEmitter(primeCandidateRecord()) == primeShadowPayload.targetEmitter.y) {
         IgnoreHit();
         return;
     }
-    // Opaque candidates require no material work once endpoint identities have been resolved.
-    if (GeometryIndex() == 0u) {
-        return;
-    }
-    uint primaryMaterialCoreWord = primePrimitiveMaterialCoreWord(primitive);
-    PrimeSurfaceRelation relation = primeSurfaceRelation(section, primitive);
-    PrimeHitTriangle hit = primeHitTriangle(section, barycentrics);
-    float3 outwardNormal = hit.geometricNormal;
-    PrimeResolvedSurface resolved = primeResolveSurfacePrimitive(
-            section,
-            primitive,
-            primaryMaterialCoreWord,
-            relation,
-            barycentrics,
-            hit.localPosition,
-            outwardNormal);
-    primitive = resolved.primitive;
-    if (targetSection
-            && primePrimitiveEmitterIndex(primitive)
-                    == primeShadowPayload.targetEmitter.y) {
+    if (GeometryIndex() == 0u) return;
+    PrimeCandidateSurface surface = primeCandidateSurface(attributes.barycentrics);
+    if (targetSection && primeCandidateEmitter(surface.record) == primeShadowPayload.targetEmitter.y) {
         IgnoreHit();
         return;
     }
-    uint recipeControl = resolved.recipeControl;
-    float2 materialUv = primeInterpolateUv(
-            section,
-            primitive,
-            barycentrics,
-            hit.localPosition,
-            outwardNormal);
-    uint textureId = primePrimitiveTextureId(
-            section, primitive, resolved.materialCoreWord);
-    float surfaceOpacity = primeEvaluateOpacity(primitive, textureId, materialUv);
-    if ((recipeControl & PRIME_RECIPE_ALPHA_CUTOUT) != 0u
-            && surfaceOpacity < PRIME_CUTOUT_ALPHA_THRESHOLD) {
+    uint recipeControl = surface.recipe;
+    bool cutout = (recipeControl & PRIME_RECIPE_ALPHA_CUTOUT) != 0u;
+    bool glass = primeRecipeIsTransmissive(recipeControl) && (recipeControl & PRIME_RECIPE_WATER) == 0u;
+    float surfaceOpacity = surface.opacity;
+    if ((cutout || glass) && surfaceOpacity < 0.0) {
+        surfaceOpacity = primeCandidateOpacity(surface.record, surface.core, attributes.barycentrics);
+    }
+    if (cutout && surfaceOpacity < PRIME_CUTOUT_ALPHA_THRESHOLD) {
         IgnoreHit();
         return;
     }
-    if (!primeRecipeIsTransmissive(recipeControl)) {
-        return;
-    }
+    if (!primeRecipeIsTransmissive(recipeControl)) return;
     // BSDF-only transparent transport is unbiased without MNEE: a shadow ray may retain
     // absorption from its starting medium, but it cannot cross a specular interface.
     PrimeTransparentNeeInterfaceDecision transparentNee =
@@ -159,11 +125,12 @@ void main(in BuiltInTriangleIntersectionAttributes attributes)
     if ((recipeControl & PRIME_RECIPE_WATER) != 0u) {
         extinction = PRIME_PURE_WATER_ABSORPTION_M_INV;
     } else {
+        uint textureId = primeCandidateTextureId(surface.record, surface.core);
         float opacity;
         float3 baseColor = primeStaticBaseColor(
                 textureId,
-                primitive.tint,
-                primePrimitiveMaterialReferenceUv(primitive),
+                primeCandidateMaterialTint(surface.record),
+                primeCandidateReferenceUv(surface.record),
                 0.0,
                 opacity);
         if (!primeGlassReferenceIsStained(opacity)
@@ -176,6 +143,7 @@ void main(in BuiltInTriangleIntersectionAttributes attributes)
         extinction = primeGlassShadowExtinction(baseColor, opacity);
     }
     extinction = primeShadowCanonicalExtinction(extinction);
+    float3 outwardNormal = primeCandidateNormal();
     float cosine = dot(outwardNormal, WorldRayDirection());
     if (primeRecipeIsThinWalled(recipeControl)) {
         primeShadowPayload.opticalDepthMomentHitDistance.xyz = primeShadowThinOpticalDepth(
@@ -186,15 +154,16 @@ void main(in BuiltInTriangleIntersectionAttributes attributes)
     } else {
         bool entering = cosine < 0.0;
         primeAccumulateSolidMediumBoundary(
-                primeShadowPayload, primePrimitiveMediumId(primitive), extinction, entering);
-        if ((relation.control & PRIME_SURFACE_RELATION_KIND_MASK)
-                == PRIME_SURFACE_RELATION_BOUNDARY) {
+                primeShadowPayload, primeCandidateMediumId(surface.record), extinction, entering);
+        // Boundary metadata is needed only for a solid interface, after alpha and extinction.
+        uint64_t relation = primeCandidateRelation(primeCandidateHeader(primeCandidateRecord()));
+        if (relation != uint64_t(0) && (((uint*)relation)[0] & 0xfu) == 1u) {
+            uint identity = ((uint*)relation)[2];
+            uint materialId = primeMaterialId(identity);
             primeAccumulateSolidMediumBoundary(
-                    primeShadowPayload,
-                    primeMaterialMediumId(relation.materialId),
-                    primeShadowCanonicalExtinction(
-                            primeSurfaceBoundaryExtinction(relation)),
-                    !entering);
+                    primeShadowPayload, primeMaterialMediumId(materialId),
+                    primeShadowCanonicalExtinction(primeSurfaceBoundaryExtinction(
+                            materialId, identity & 0xffffu, ((uint*)relation)[1])), !entering);
         }
     }
     IgnoreHit();

@@ -4,6 +4,7 @@ module "service/atmosphere/trace.slang";
 import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "model/atmosphere/sky.slang";
+import "math/atmosphere_direction.slang";
 import "model/atmosphere/epipolar.slang";
 import "policy/runtime/config.slang";
 
@@ -23,35 +24,16 @@ public bool primeAtmosphereDistantDirectionVisible(float3 direction) {
             primePush.atmosphereEyeRadiusKm, direction);
 }
 
-public float3 primeAtmosphereDistantTransmittance(
-        float3 surfacePosition,
-        float3 direction) {
-    // The same internal scale maps vertical coordinates and travelled distance. Splitting them
-    // would make density layers disagree with aerial perspective.
-    float radius = primePush.atmosphereEyeRadiusKm
-            + (surfacePosition.y - primePush.cameraPosition.y) * ATM_WORLD_UNIT_SCALE_KM;
-    radius = clamp(
-            radius,
-            ATM_BOTTOM_RADIUS_KM + ATM_WORLD_UNIT_SCALE_KM,
-            ATM_TOP_RADIUS_KM - ATM_WORLD_UNIT_SCALE_KM);
-    // Horizon visibility is a property of the current atmospheric view, not of every terrain
-    // sample independently. Testing at surface radius makes lower terrain enter the planet shadow
-    // while an elevated camera still sees the sun, producing a hard altitude boundary where only
-    // direct light vanishes. Surface radius remains correct for the transmittance lookup below.
+public float3 primeAtmosphereDistantTransmittance(float3 direction) {
     if (!primeAtmosphereDistantDirectionVisible(direction)) {
         return float3(0.0);
     }
-    float normalizedAltitude = (radius - ATM_BOTTOM_RADIUS_KM) / ATM_THICKNESS_KM;
-    float2 uv = atmTransmittanceUv(direction.y, normalizedAltitude);
-    return atmRec2020Transmittance(
-            atmSample2D(primeTransmittanceLow, uv),
-            atmSample2D(primeTransmittanceHigh, uv));
-}
-
-public float3 primeAtmosphereSunTransmittance(
-        float3 surfacePosition,
-        float3 directionToSun) {
-    return primeAtmosphereDistantTransmittance(surfacePosition, directionToSun);
+    float coordinate = primeAtmosphereDirectionCoordinate(direction.y)
+            * float(PRIME_ATMOSPHERE_DIRECTION_TRANSMITTANCE_WIDTH - 1u);
+    int first = int(coordinate);
+    int second = min(first + 1, int(PRIME_ATMOSPHERE_DIRECTION_TRANSMITTANCE_WIDTH) - 1);
+    return lerp(primeCameraTransmittance[int2(first, 0)].rgb,
+            primeCameraTransmittance[int2(second, 0)].rgb, frac(coordinate));
 }
 
 public float3 primeApplyAerialPerspective(

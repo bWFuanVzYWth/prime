@@ -2,6 +2,8 @@
 module "entry/hit/world.closesthit.slang";
 
 import glsl;
+import "service/material/coverage.slang";
+import "model/material/recipe.slang";
 import "prime_material_core_abi.slang";
 import "prime_abi_types.slang";
 import "math/packed_geometry.slang";

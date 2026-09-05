@@ -2,6 +2,7 @@
 module "transport/offline/scatter.slang";
 
 import "prime_abi.slang";
+import "math/hash.slang";
 import "prime_abi_types.slang";
 import "state/path.slang";
 import "service/bsdf/contract/sample.slang";

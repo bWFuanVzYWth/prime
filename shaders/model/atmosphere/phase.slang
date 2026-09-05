@@ -2,6 +2,9 @@
 module "model/atmosphere/phase.slang";
 
 import "model/atmosphere/sky.slang";
+import "model/atmosphere/spectrum.slang";
+
+
 
 [[vk::binding(7, 0)]] StructuredBuffer<float4> primeAtmospherePhaseLut;
 

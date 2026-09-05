@@ -12,6 +12,14 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.EXTDebugUtils;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VK12;
+import org.lwjgl.vulkan.KHRAccelerationStructure;
+import org.lwjgl.vulkan.KHRDeferredHostOperations;
+import org.lwjgl.vulkan.KHRRayTracingPipeline;
+import org.lwjgl.vulkan.KHRRayTracingPositionFetch;
+import org.lwjgl.vulkan.VkPhysicalDeviceAccelerationStructureFeaturesKHR;
+import org.lwjgl.vulkan.VkPhysicalDeviceBufferDeviceAddressFeatures;
+import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingPipelineFeaturesKHR;
+import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR;
 import org.lwjgl.vulkan.VkApplicationInfo;
 import org.lwjgl.vulkan.VkCommandPoolCreateInfo;
 import org.lwjgl.vulkan.VkDebugUtilsMessengerCallbackDataEXT;
@@ -66,6 +74,14 @@ final class VulkanTestDevice implements AutoCloseable {
     }
 
     static VulkanTestDevice open() throws ShaderComputeRunner.UnavailableException {
+        return open(false);
+    }
+
+    static VulkanTestDevice openRayTracing() throws ShaderComputeRunner.UnavailableException {
+        return open(true);
+    }
+
+    private static VulkanTestDevice open(boolean rayTracing) throws ShaderComputeRunner.UnavailableException {
         VkInstance instance = null;
         VkDevice device = null;
         long commandPool = 0L;
@@ -96,6 +112,8 @@ final class VulkanTestDevice implements AutoCloseable {
                                             & EXTDebugUtils
                                                     .VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
                                     != 0) {
+                                if (rayTracing) System.err.println(
+                                        VkDebugUtilsMessengerCallbackDataEXT.create(callbackData).pMessageString());
                                 validationErrors.add(
                                         VkDebugUtilsMessengerCallbackDataEXT
                                                 .create(callbackData)
@@ -152,6 +170,24 @@ final class VulkanTestDevice implements AutoCloseable {
                     .pQueueCreateInfos(queueInfo)
                     .pEnabledFeatures(VkPhysicalDeviceFeatures.calloc(stack)
                             .shaderInt64(true));
+            if (rayTracing) {
+                var address = VkPhysicalDeviceBufferDeviceAddressFeatures.calloc(stack)
+                        .sType$Default().bufferDeviceAddress(true);
+                var acceleration = VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack)
+                        .sType$Default().accelerationStructure(true);
+                var pipeline = VkPhysicalDeviceRayTracingPipelineFeaturesKHR.calloc(stack)
+                        .sType$Default().rayTracingPipeline(true);
+                var fetch = VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR.calloc(stack)
+                        .sType$Default().rayTracingPositionFetch(true);
+                address.pNext(acceleration.address());
+                acceleration.pNext(pipeline.address());
+                pipeline.pNext(fetch.address());
+                deviceInfo.pNext(address.address()).ppEnabledExtensionNames(stack.pointers(
+                        stack.UTF8(KHRAccelerationStructure.VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+                        stack.UTF8(KHRRayTracingPipeline.VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
+                        stack.UTF8(KHRDeferredHostOperations.VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME),
+                        stack.UTF8(KHRRayTracingPositionFetch.VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME)));
+            }
             pointer.clear();
             result = VK12.vkCreateDevice(selected.physicalDevice(), deviceInfo, null, pointer);
             if (result != VK12.VK_SUCCESS) {

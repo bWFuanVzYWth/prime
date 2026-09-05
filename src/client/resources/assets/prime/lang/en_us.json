@@ -12,6 +12,7 @@
   "prime.options.realtime_renderer": "Realtime Renderer",
   "prime.options.realtime_renderer.tooltip": "Switches between full path tracing and the independent lightweight primary-ray renderer. Primary Rays shows only the nearest hit's vanilla color and texture, with no lighting or PBR.",
   "prime.options.realtime_renderer.path_tracing": "Path Tracing",
+  "prime.options.realtime_renderer.lightweight_path_tracing": "Lightweight path tracing (Lambert)",
   "prime.options.realtime_renderer.textured_primary_rays": "Textured Primary Rays",
   "prime.options.additional_specular_bounces": "Additional Specular Bounces",
   "prime.options.additional_specular_bounces.tooltip": "Sets the realtime delta-chain length (1–64, default 16): up to this many ideal specular reflection or transmission events are followed before the first non-delta surface.",

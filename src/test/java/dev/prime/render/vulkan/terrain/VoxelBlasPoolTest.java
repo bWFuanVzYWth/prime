@@ -47,6 +47,16 @@ final class VoxelBlasPoolTest {
     }
 
     @Test
+    void identicalGeometryCannotCrossStaticAndMotionLifetimeDomains() {
+        CpuVoxelMesh mesh = mesh(0.0F, 3, true);
+        var motion = new VoxelBlasPool.Key(mesh,
+                dev.prime.render.vulkan.PreparedBlas.PositionLifetime.MOTION);
+        assertNotEquals(new VoxelBlasPool.Key(mesh), motion);
+        assertEquals(motion, VoxelBlasPool.Key.lookup(mesh,
+                dev.prime.render.vulkan.PreparedBlas.PositionLifetime.MOTION).snapshot());
+    }
+
+    @Test
     void uniqueMeshDeclaresThatContentMustNotBeShared() {
         CpuVoxelMesh unique = CpuVoxelMesh.unique(
                 positions(0.0F),

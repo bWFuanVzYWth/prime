@@ -42,6 +42,8 @@ public final class VulkanContext implements AutoCloseable {
     private UiAlphaCapturePass uiAlphaCapturePass;
     private final Set<Destroyable> deferred = Collections.newSetFromMap(new IdentityHashMap<>());
     private boolean closed;
+    private long nextMemorySnapshot;
+    private MemoryStatistics memoryStatistics;
 
     public VulkanContext(VulkanDevice device, VulkanCapabilities capabilities) {
         this.device = device;
@@ -75,6 +77,37 @@ public final class VulkanContext implements AutoCloseable {
             throw exception;
         }
     }
+
+    /** Cached on the render thread; VMA block commitment is distinct from live allocations. */
+    public MemoryStatistics memoryStatistics() {
+        long now = System.nanoTime();
+        if (this.memoryStatistics == null || now >= this.nextMemorySnapshot) {
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                var heaps = org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties.calloc(stack);
+                VK12.vkGetPhysicalDeviceMemoryProperties(this.vkDevice().getPhysicalDevice(), heaps);
+                var budgets = org.lwjgl.util.vma.VmaBudget.calloc(VK12.VK_MAX_MEMORY_HEAPS, stack);
+                Vma.vmaGetHeapBudgets(this.allocator, budgets);
+                long deviceAllocations = 0L, deviceBlocks = 0L, hostAllocations = 0L, hostBlocks = 0L;
+                for (int i = 0; i < heaps.memoryHeapCount(); i++) {
+                    var statistics = budgets.get(i).statistics();
+                    if ((heaps.memoryHeaps(i).flags() & VK12.VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0) {
+                        deviceAllocations += statistics.allocationBytes();
+                        deviceBlocks += statistics.blockBytes();
+                    } else {
+                        hostAllocations += statistics.allocationBytes();
+                        hostBlocks += statistics.blockBytes();
+                    }
+                }
+                this.memoryStatistics = new MemoryStatistics(
+                        deviceAllocations, deviceBlocks, hostAllocations, hostBlocks);
+            }
+            this.nextMemorySnapshot = now + 1_000_000_000L;
+        }
+        return this.memoryStatistics;
+    }
+
+    public record MemoryStatistics(long deviceAllocations, long deviceBlocks,
+            long hostAllocations, long hostBlocks) {}
 
     public VulkanDevice device() {
         return this.device;

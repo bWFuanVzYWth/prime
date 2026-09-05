@@ -53,7 +53,18 @@
     "shadow_rmiss": "entry/hit/shadow.miss.slang",
     "world_rahit": "entry/hit/world.anyhit.slang",
     "world_rchit": "entry/hit/world.closesthit.slang",
-    "world_rmiss": "entry/hit/world.miss.slang"
+    "world_rmiss": "entry/hit/world.miss.slang",
+    "lambert_camera": "entry/lambert/camera.raygeneration.slang",
+    "lambert_trace": "entry/lambert/trace.raygeneration.slang",
+    "lambert_shade": {"entry": "entry/lambert/shade.raygeneration.slang", "subgroup": true},
+    "lambert_resolve": "entry/lambert/resolve.raygeneration.slang",
+    "lambert_world_rahit": "entry/lambert/world.anyhit.slang",
+    "lambert_world_rchit": "entry/lambert/world.closesthit.slang",
+    "lambert_world_rmiss": "entry/lambert/world.miss.slang",
+    "lambert_shadow_rahit": "entry/lambert/shadow.anyhit.slang",
+    "lambert_shadow_opaque_rahit": "entry/lambert/shadow_opaque.anyhit.slang",
+    "lambert_shadow_rchit": "entry/lambert/shadow.closesthit.slang",
+    "lambert_shadow_rmiss": "entry/lambert/shadow.miss.slang"
   },
   "schedules": {
     "primary": {
@@ -102,6 +113,17 @@
         "direct_1": ["offline_wavefront_direct", 1],
         "scatter_1": ["offline_wavefront_scatter", 1],
         "sample_resolve": ["offline_wavefront_sample_resolve", 0]
+      }
+    },
+    "lambert": {
+      "variants": [null, "subgroup"],
+      "groups": {
+        "camera": ["lambert_camera", 0],
+        "trace_0": ["lambert_trace", 0],
+        "shade_0": ["lambert_shade", 0],
+        "trace_1": ["lambert_trace", 1],
+        "shade_1": ["lambert_shade", 1],
+        "resolve": ["lambert_resolve", 0]
       }
     }
   }

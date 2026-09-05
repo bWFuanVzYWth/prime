@@ -61,7 +61,7 @@ public PrimePrimarySunSample primeEstimatePrimaryDirectSun(
     result.lighting.direction = float3(0.0);
     result.penumbra = 0.0;
     result.visibility = 0.0;
-    LightSample light = primeSampleSun(integrator, surface.position, sampleValue);
+    LightSample light = primeSampleSun(integrator, sampleValue);
     if (!primeAtmosphereDistantDirectionVisible(light.direction)) {
         return result;
     }
@@ -74,7 +74,7 @@ public PrimePrimarySunSample primeEstimatePrimaryDirectSun(
     result.penumbra = primeSigmaPackDirectionalPenumbra(shadow.hitDistance);
     result.visibility = float(shadow.hitDistance >= PRIME_NRD_FP16_MAX);
     float3 radiance = primeResolveSampledSunRadiance(
-            integrator, surface.position, light) * shadow.transmittance;
+            integrator, light) * shadow.transmittance;
     result.lighting = primeEvaluateVisibleDirectSplit(
             context,
             surface,
@@ -171,7 +171,7 @@ public float3 primeEstimateDirectSun(
         float3 viewDirection,
         float2 sampleValue,
         PrimeOpenPbrVolumeStack volumeStack) {
-    LightSample light = primeSampleSun(integrator, surface.position, sampleValue);
+    LightSample light = primeSampleSun(integrator, sampleValue);
     if (!primeAtmosphereDistantDirectionVisible(light.direction)) {
         return float3(0.0);
     }
@@ -185,7 +185,7 @@ public float3 primeEstimateDirectSun(
         return float3(0.0);
     }
     float3 radiance = primeResolveSampledSunRadiance(
-            integrator, surface.position, light) * shadow.transmittance;
+            integrator, light) * shadow.transmittance;
     return primeEvaluateCompleteDirect(
             context,
             surface,

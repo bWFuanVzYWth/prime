@@ -54,6 +54,7 @@ final class PrimeShaderTool {
                 '-capability', 'spvGroupNonUniform',
                 '-capability', 'spvGroupNonUniformBallot',
                 '-capability', 'spvShaderInvocationReorderEXT',
+                '-capability', 'spvRayTracingPositionFetchKHR',
                 '-entry', 'main', '-stage', stage,
                 // Explicit ray-payload locations remain a cross-stage Vulkan ABI contract.
                 '-allow-glsl', '-matrix-layout-row-major', '-fvk-use-gl-layout',

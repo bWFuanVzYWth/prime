@@ -2,6 +2,7 @@
 module "state/offline/transport.slang";
 
 import "prime_abi_types.slang";
+import "math/hash.slang";
 import "prime_offline_abi.slang";
 import "state/path.slang";
 import "policy/runtime/config.slang";

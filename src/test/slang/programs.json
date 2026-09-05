@@ -1,5 +1,16 @@
 {
   "programs": [
+    {"entry": "lambert_roulette.compute.slang", "artifact": "lambert_roulette.comp.spv"},
+    {"entry": "successor_queue.compute.slang", "artifact": "successor_queue.comp.spv"},
+    {"entry": "successor_queue_subgroup.compute.slang", "artifact": "successor_queue_subgroup.comp.spv", "definitions": ["-DPRIME_ENABLE_SUBGROUP_QUEUE=1"]},
+    {"entry": "candidate_uv.compute.slang", "artifact": "candidate_uv.comp.spv"},
+    {"entry": "atmosphere_transmittance_table.compute.slang", "artifact": "atmosphere_transmittance_table.comp.spv"},
+    {"entry": "atmosphere_camera_error.compute.slang", "artifact": "atmosphere_camera_error.comp.spv"},
+    {"entry": "lambert_stbn.compute.slang", "artifact": "lambert_stbn.comp.spv"},
+    {"entry": "position_fetch.raygeneration.slang", "artifact": "position_fetch.rgen.spv"},
+    {"entry": "position_fetch.miss.slang", "artifact": "position_fetch.rmiss.spv"},
+    {"entry": "position_fetch.anyhit.slang", "artifact": "position_fetch.rahit.spv"},
+    {"entry": "position_fetch.closesthit.slang", "artifact": "position_fetch.rchit.spv"},
     {"entry": "atmosphere_aerial_prefix.compute.slang", "artifact": "atmosphere_aerial_prefix.comp.spv"},
     {"entry": "atmosphere_epipolar_properties.compute.slang", "artifact": "atmosphere_epipolar_properties.comp.spv"},
     {"entry": "atmosphere_epipolar_shadow_alignment.compute.slang", "artifact": "atmosphere_epipolar_shadow_alignment.comp.spv"},

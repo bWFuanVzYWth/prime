@@ -1,4 +1,5 @@
 #language slang 2026
+
 module "math/transport.slang";
 
 public float primeProductOver(float first, float second, float denominator)

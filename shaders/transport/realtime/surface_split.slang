@@ -2,6 +2,7 @@
 module "transport/realtime/surface_split.slang";
 
 import "policy/realtime/landing.slang";
+import "math/hash.slang";
 import "policy/realtime/direct.slang";
 import "policy/realtime/queue.slang";
 import "prime_realtime_abi.slang";

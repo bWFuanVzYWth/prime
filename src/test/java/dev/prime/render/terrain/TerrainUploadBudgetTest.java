@@ -22,12 +22,12 @@ final class TerrainUploadBudgetTest {
     }
 
     @Test
-    void stagingBudgetIncludesEveryCpuSegmentWithoutAddingBlasPayloads() {
+    void stagingBudgetReservesKeysAndWorstCaseNovelRecordsForEverySegment() {
         CpuClusterMesh mesh = CpuClusterMesh.fromSegments(List.of(
                 mesh(1, 1, 0),
                 mesh(0, 0, 1)));
 
-        assertEquals(204L, ClusterStagingLayout.endOffset(0L, mesh, false));
+        assertEquals(216L, ClusterStagingLayout.endOffset(0L, mesh, false));
         assertEquals(2, mesh.segments().size());
     }
 
@@ -46,7 +46,7 @@ final class TerrainUploadBudgetTest {
                         new int[] {0x00ff_ffff},
                         new float[] {0.0F, 0.0F, 0.0F}));
 
-        assertEquals(68L, ClusterStagingLayout.endOffset(0L, mesh, false));
+        assertEquals(72L, ClusterStagingLayout.endOffset(0L, mesh, false));
     }
 
     private static CpuSectionMesh mesh(int opaque, int cutout, int transmissive) {

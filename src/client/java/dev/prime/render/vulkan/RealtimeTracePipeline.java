@@ -1,0 +1,23 @@
+package dev.prime.render.vulkan;
+
+import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.blaze3d.vulkan.VulkanGpuSampler;
+import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
+import dev.prime.render.IntegratorFrameInput;
+import dev.prime.render.vulkan.terrain.TerrainScene;
+import java.util.List;
+import org.lwjgl.vulkan.VkCommandBuffer;
+
+/** Frame-owned transport; reconstruction consumes the same raw signal contract for both models. */
+public interface RealtimeTracePipeline extends Destroyable {
+    int passCount();
+    long sizedResourceBytes();
+    void releaseSizedResourcesAfterIdle();
+    void ensureDescriptors(long tlas, VulkanImage stableRadiance,
+            VulkanGpuTextureView atlasView, VulkanGpuSampler atlasSampler,
+            List<TraceBackend.SceneTexture> sceneTextures,
+            MaterialTexturePages.Binding materialTextures, TerrainScene.MaterialCoreBinding materialCore,
+            TerrainScene.SurfaceBinding surfaces, TerrainScene.TintSampleBinding tintSamples,
+            AtmospherePipeline atmosphere, RawWavefrontFrame signals);
+    void trace(VkCommandBuffer commandBuffer, IntegratorFrameInput input, TerrainScene.ResidentSceneView scene);
+}

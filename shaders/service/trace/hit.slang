@@ -2,10 +2,13 @@
 module "service/trace/hit.slang";
 
 import glsl;
+import "service/material/coverage.slang";
+import "model/material/recipe.slang";
 import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "prime_material_core_abi.slang";
 import "math/packed_geometry.slang";
+import "math/triangle_uv.slang";
 import "model/material/defaults.slang";
 import "model/material/medium_boundary.slang";
 import "service/material/access.slang";
@@ -85,20 +88,11 @@ public PrimeHitTriangle primeHitTriangle(
         float2 barycentrics) {
     PrimeHitTriangle result;
     result.triangleIndex = primeGlobalTriangleIndex(section);
-    float* positions = (float*)section.positionAddress;
-    uint vertexBase = result.triangleIndex * 9u;
-    float3 first = float3(
-            positions[vertexBase],
-            positions[vertexBase + 1u],
-            positions[vertexBase + 2u]);
-    float3 edgeOne = float3(
-            positions[vertexBase + 3u],
-            positions[vertexBase + 4u],
-            positions[vertexBase + 5u]) - first;
-    float3 edgeTwo = float3(
-            positions[vertexBase + 6u],
-            positions[vertexBase + 7u],
-            positions[vertexBase + 8u]) - first;
+    // All BLASes allow position fetch; geometry transforms are null. These are the build's
+    // object-space vertices in application order, including non-macro and dynamic triangles.
+    float3 first = HitTriangleVertexPosition(0u);
+    float3 edgeOne = HitTriangleVertexPosition(1u) - first;
+    float3 edgeTwo = HitTriangleVertexPosition(2u) - first;
     // Add the base vertex last so its rounding error is not amplified by both edge terms.
     result.localPosition = barycentrics.x * edgeOne
             + barycentrics.y * edgeTwo
@@ -113,9 +107,7 @@ public PrimeHitTriangle primeHitTriangle(
             : cross(edgeOne, edgeTwo);
     // Translation omits exact degenerates. Scaling by the nonzero maximum avoids squared-length
     // underflow without introducing an area threshold that would erase valid small triangles.
-    float normalScale = max(abs(normal.x), max(abs(normal.y), abs(normal.z)));
-    normal /= normalScale;
-    result.geometricNormal = normalize(normal);
+    result.geometricNormal = primeTriangleUnitNormal(normal);
     return result;
 }
 
@@ -293,25 +285,10 @@ public float2 primeInterpolateUv(
         return float2(asfloat(primitive.uv0), asfloat(primitive.uv1));
     }
     if (primeUsesRepeatedUv(primitive)) {
-        float3 normal = abs(geometricNormal);
-        float2 projectedPosition = normal.x > normal.y && normal.x > normal.z
-                ? localPosition.yz
-                : (normal.y > normal.z ? localPosition.xz : localPosition.xy);
-        float2 repeatedPosition = frac(projectedPosition);
-        float2 uv0 = primeUnpackUv(primitive.uv0);
-        float2 uv1 = primeUnpackUv(primitive.uv1);
-        float2 uv2 = primeUnpackUv(primitive.uv2);
-        return uv0
-                + repeatedPosition.x * (uv1 - uv0)
-                + repeatedPosition.y * (uv2 - uv0);
+        return primeRepeatedUv(uint3(primitive.uv0, primitive.uv1, primitive.uv2),
+                localPosition, geometricNormal);
     }
-    float3 barycentric = float3(
-            1.0 - barycentrics.x - barycentrics.y,
-            barycentrics.x,
-            barycentrics.y);
-    return primeUnpackUv(primitive.uv0) * barycentric.x
-            + primeUnpackUv(primitive.uv1) * barycentric.y
-            + primeUnpackUv(primitive.uv2) * barycentric.z;
+    return primeTriangleUv(uint3(primitive.uv0, primitive.uv1, primitive.uv2), barycentrics);
 }
 
 public float primeRayConeTextureLod(

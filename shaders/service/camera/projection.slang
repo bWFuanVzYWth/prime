@@ -2,6 +2,7 @@
 module "service/camera/projection.slang";
 
 import "prime_abi.slang";
+import "math/hash.slang";
 import "prime_abi_types.slang";
 import "contract/coordinate.slang";
 import "policy/runtime/config.slang";

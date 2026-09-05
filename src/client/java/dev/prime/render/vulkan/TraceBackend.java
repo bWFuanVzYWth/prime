@@ -107,6 +107,7 @@ public final class TraceBackend implements Destroyable {
             List<SceneTexture> sceneTextures,
             MaterialTexturePages.Binding materialTextures,
             TerrainScene.MaterialCoreBinding materialCore,
+            TerrainScene.SurfaceBinding surfaces,
             TerrainScene.TintSampleBinding tintSamples,
             AtmospherePipeline atmosphere) {
         if (!materialCore.present()) {
@@ -123,6 +124,7 @@ public final class TraceBackend implements Destroyable {
                         sceneTextures,
                         materialTextures,
                         materialCore,
+                        surfaces,
                         tintSamples,
                         atmosphere)) {
             return;
@@ -136,6 +138,7 @@ public final class TraceBackend implements Destroyable {
                 sceneTextures,
                 materialTextures,
                 materialCore,
+                surfaces,
                 tintSamples,
                 atmosphere,
                 this.bsdfLookup,
@@ -258,8 +261,7 @@ public final class TraceBackend implements Destroyable {
                 ShaderAbi.SCENE_TEXTURE_COUNT, ALL_RT_STAGES);
         int[] storageBindings = new int[] {
             ShaderAbi.DESCRIPTOR_SKY_VIEW,
-            ShaderAbi.DESCRIPTOR_TRANSMITTANCE_LOW,
-            ShaderAbi.DESCRIPTOR_TRANSMITTANCE_HIGH,
+            ShaderAbi.DESCRIPTOR_CAMERA_TRANSMITTANCE,
             ShaderAbi.DESCRIPTOR_AERIAL_RADIANCE,
             ShaderAbi.DESCRIPTOR_AERIAL_TRANSMITTANCE
         };
@@ -296,6 +298,11 @@ public final class TraceBackend implements Destroyable {
         VulkanDescriptors.layoutBinding(
                 bindings.get(cursor++), ShaderAbi.DESCRIPTOR_MATERIAL_CORE_RECORDS,
                 VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, ALL_RT_STAGES);
+        VulkanDescriptors.layoutBinding(
+                bindings.get(cursor++), ShaderAbi.DESCRIPTOR_SURFACE_RECORDS,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+                KHRRayTracingPipeline.VK_SHADER_STAGE_ANY_HIT_BIT_KHR
+                        | KHRRayTracingPipeline.VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
         VulkanDescriptors.layoutBinding(
                 bindings.get(cursor++), ShaderAbi.DESCRIPTOR_TINT_SAMPLES,
                 VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, ALL_RT_STAGES);
@@ -371,10 +378,10 @@ public final class TraceBackend implements Destroyable {
         private final List<SceneTexture> sceneTextures;
         private final MaterialTexturePages.Binding materialTextures;
         private final TerrainScene.MaterialCoreBinding materialCore;
+        private final TerrainScene.SurfaceBinding surfaces;
         private final TerrainScene.TintSampleBinding tintSamples;
         private final long skyView;
-        private final long transmittanceLow;
-        private final long transmittanceHigh;
+        private final long cameraTransmittance;
         private final long aerialRadiance;
         private final long aerialTransmittance;
         private final long sunShadowQuery;
@@ -391,6 +398,7 @@ public final class TraceBackend implements Destroyable {
                 List<SceneTexture> sceneTextures,
                 MaterialTexturePages.Binding materialTextures,
                 TerrainScene.MaterialCoreBinding materialCore,
+                TerrainScene.SurfaceBinding surfaces,
                 TerrainScene.TintSampleBinding tintSamples,
                 AtmospherePipeline atmosphere,
                 long[] sunShadowDepths) {
@@ -403,10 +411,10 @@ public final class TraceBackend implements Destroyable {
             this.sceneTextures = List.copyOf(sceneTextures);
             this.materialTextures = materialTextures;
             this.materialCore = materialCore;
+            this.surfaces = surfaces;
             this.tintSamples = tintSamples;
             this.skyView = atmosphere.skyView().view();
-            this.transmittanceLow = atmosphere.transmittanceLow().view();
-            this.transmittanceHigh = atmosphere.transmittanceHigh().view();
+            this.cameraTransmittance = atmosphere.cameraTransmittance().view();
             this.aerialRadiance = atmosphere.aerialRadiance().view();
             this.aerialTransmittance = atmosphere.aerialTransmittance().view();
             this.sunShadowQuery = atmosphere.sunShadowQuery().handle();
@@ -422,6 +430,7 @@ public final class TraceBackend implements Destroyable {
                 List<SceneTexture> sceneTextures,
                 MaterialTexturePages.Binding materialTextures,
                 TerrainScene.MaterialCoreBinding materialCore,
+                TerrainScene.SurfaceBinding surfaces,
                 TerrainScene.TintSampleBinding tintSamples,
                 AtmospherePipeline atmosphere,
                 StaticSampledTexture bsdfLookup,
@@ -438,7 +447,7 @@ public final class TraceBackend implements Destroyable {
                         .descriptorCount(1);
                 sizes.get(1)
                         .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                        .descriptorCount(5 + SunShadowClipmap.BANK_COUNT
+                        .descriptorCount(4 + SunShadowClipmap.BANK_COUNT
                                 * SunShadowClipmap.CASCADE_COUNT);
                 sizes.get(2)
                         .type(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
@@ -451,7 +460,7 @@ public final class TraceBackend implements Destroyable {
                         .descriptorCount(1);
                 sizes.get(4)
                         .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                        .descriptorCount(4);
+                        .descriptorCount(5);
                 long pool = VulkanDescriptors.createPool(
                         context,
                         stack,
@@ -479,7 +488,7 @@ public final class TraceBackend implements Destroyable {
                                 "Translated material page count exceeds the descriptor ABI");
                     }
                     int atmosphereStart = ShaderAbi.SCENE_TEXTURE_COUNT;
-                    int sampledStart = atmosphereStart + 5;
+                    int sampledStart = atmosphereStart + 4;
                     int baseColorStart = sampledStart + 1;
                     int normalStart = baseColorStart + ShaderAbi.BASE_COLOR_PAGE_COUNT;
                     int opticalStart = normalStart + ShaderAbi.MATERIAL_PAGE_COUNT;
@@ -504,8 +513,7 @@ public final class TraceBackend implements Destroyable {
                     }
                     VulkanImage[] atmosphereImages = new VulkanImage[] {
                         atmosphere.skyView(),
-                        atmosphere.transmittanceLow(),
-                        atmosphere.transmittanceHigh(),
+                        atmosphere.cameraTransmittance(),
                         atmosphere.aerialRadiance(),
                         atmosphere.aerialTransmittance()
                     };
@@ -563,7 +571,7 @@ public final class TraceBackend implements Destroyable {
                                     .sType$Default()
                                     .pAccelerationStructures(stack.longs(tlas));
                     VkDescriptorBufferInfo.Buffer bufferInfos =
-                            VkDescriptorBufferInfo.calloc(5, stack);
+                            VkDescriptorBufferInfo.calloc(6, stack);
                     VkDescriptorBufferInfo queryInfo = bufferInfos.get(0);
                     queryInfo
                                     .buffer(atmosphere.sunShadowQuery().handle())
@@ -589,6 +597,8 @@ public final class TraceBackend implements Destroyable {
                             .buffer(tintSamples.buffer())
                             .offset(0L)
                             .range(tintSamples.bytes());
+                    VkDescriptorBufferInfo surfaceInfo = bufferInfos.get(5);
+                    surfaceInfo.buffer(surfaces.buffer()).offset(0L).range(surfaces.bytes());
                     VkWriteDescriptorSet.Buffer writes =
                             VkWriteDescriptorSet.calloc(BINDING_COUNT, stack);
                     int write = 0;
@@ -605,8 +615,7 @@ public final class TraceBackend implements Destroyable {
                             infos.get(0), ShaderAbi.SCENE_TEXTURE_COUNT);
                     int[] atmosphereBindings = new int[] {
                         ShaderAbi.DESCRIPTOR_SKY_VIEW,
-                        ShaderAbi.DESCRIPTOR_TRANSMITTANCE_LOW,
-                        ShaderAbi.DESCRIPTOR_TRANSMITTANCE_HIGH,
+                        ShaderAbi.DESCRIPTOR_CAMERA_TRANSMITTANCE,
                         ShaderAbi.DESCRIPTOR_AERIAL_RADIANCE,
                         ShaderAbi.DESCRIPTOR_AERIAL_TRANSMITTANCE
                     };
@@ -650,6 +659,9 @@ public final class TraceBackend implements Destroyable {
                             writes.get(write++), set, ShaderAbi.DESCRIPTOR_REALTIME_STBN,
                             VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, stbnInfo);
                     VulkanDescriptors.writeBuffer(
+                            writes.get(write++), set, ShaderAbi.DESCRIPTOR_SURFACE_RECORDS,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, surfaceInfo);
+                    VulkanDescriptors.writeBuffer(
                             writes.get(write++), set, ShaderAbi.DESCRIPTOR_TINT_SAMPLES,
                             VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, tintSampleInfo);
                     int[] shadowBindings = sunShadowBindings();
@@ -673,6 +685,7 @@ public final class TraceBackend implements Destroyable {
                             sceneTextures,
                             materialTextures,
                             materialCore,
+                            surfaces,
                             tintSamples,
                             atmosphere,
                             shadowViews);
@@ -690,6 +703,7 @@ public final class TraceBackend implements Destroyable {
                 List<SceneTexture> candidateSceneTextures,
                 MaterialTexturePages.Binding candidateMaterialTextures,
                 TerrainScene.MaterialCoreBinding candidateMaterialCore,
+                TerrainScene.SurfaceBinding candidateSurfaces,
                 TerrainScene.TintSampleBinding candidateTintSamples,
                 AtmospherePipeline atmosphere) {
             if (this.tlas != candidateTlas
@@ -698,10 +712,10 @@ public final class TraceBackend implements Destroyable {
                     || !this.sceneTextures.equals(candidateSceneTextures)
                     || this.materialTextures != candidateMaterialTextures
                     || !this.materialCore.equals(candidateMaterialCore)
+                    || !this.surfaces.equals(candidateSurfaces)
                     || !this.tintSamples.equals(candidateTintSamples)
                     || this.skyView != atmosphere.skyView().view()
-                    || this.transmittanceLow != atmosphere.transmittanceLow().view()
-                    || this.transmittanceHigh != atmosphere.transmittanceHigh().view()
+                    || this.cameraTransmittance != atmosphere.cameraTransmittance().view()
                     || this.aerialRadiance != atmosphere.aerialRadiance().view()
                     || this.aerialTransmittance != atmosphere.aerialTransmittance().view()
                     || this.sunShadowQuery != atmosphere.sunShadowQuery().handle()) {

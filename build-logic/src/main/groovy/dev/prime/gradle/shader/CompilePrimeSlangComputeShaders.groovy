@@ -4,6 +4,7 @@ import org.gradle.api.*
 import org.gradle.api.file.*
 import org.gradle.api.provider.*
 import org.gradle.api.tasks.*
+import groovy.json.JsonSlurper
 
 @org.gradle.api.tasks.CacheableTask
 abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
@@ -13,6 +14,10 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 
 	@Internal
 	abstract DirectoryProperty getSourceDirectory()
+
+	@InputFile
+	@PathSensitive(PathSensitivity.RELATIVE)
+	abstract RegularFileProperty getProgramManifest()
 
 	@org.gradle.work.Incremental
 	@InputFiles
@@ -42,6 +47,8 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 
 	@TaskAction
 	void compile(org.gradle.work.InputChanges inputChanges) {
+		def definitions = new JsonSlurper().parse(programManifest.get().asFile).programs
+				.collectEntries { [(it.entry.toString()): (it.definitions ?: [])] }
 		def sources = sourceDirectory.get().asFileTree.matching {
 			include '**/*.compute.slang',
 					'**/*.raygeneration.slang',
@@ -103,6 +110,7 @@ abstract class CompilePrimeSlangComputeShaders extends DefaultTask {
 			compilationUnits.add({
 					def arguments = PrimeShaderTool.compileArguments(
 							compiler, source, stage.value[0], debugLevel.get())
+					arguments.addAll(definitions[source.name])
 					includes.each { include ->
 						arguments.addAll(['-I', include.absolutePath])
 					}

@@ -175,6 +175,7 @@ final class OfflineRenderer implements Destroyable {
                 current.sceneTextures(),
                 input.materialTextures().binding(),
                 current.scene().materialCore(),
+                current.scene().surfaces(),
                 current.scene().tintSamples(),
                 input.atmosphere());
         long sample = current.sampleCount();

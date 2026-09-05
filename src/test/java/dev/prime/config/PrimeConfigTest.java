@@ -318,6 +318,9 @@ final class PrimeConfigTest {
                 IllegalArgumentException.class,
                 () -> PrimeConfigCodec.parseRealtimeRenderMode("future_renderer"));
 
+        assertEquals(RealtimeRenderMode.LIGHTWEIGHT_PATH_TRACING,
+                PrimeConfigCodec.parseRealtimeRenderMode("lightweight_path_tracing"));
+        assertTrue(RealtimeRenderMode.LIGHTWEIGHT_PATH_TRACING.usesReconstruction());
         RealtimeRenderMode previous = PrimeConfig.rendererSettings().realtimeRenderMode();
         long previousRevision = PrimeConfig.rendererSettings().revision();
         RealtimeRenderMode replacement = previous == RealtimeRenderMode.PATH_TRACING

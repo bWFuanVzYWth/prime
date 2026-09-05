@@ -2,6 +2,9 @@
 module "entry/atmosphere/atmosphere_multi_scattering.compute.slang";
 
 import "model/atmosphere/sky.slang";
+import "model/atmosphere/spectrum.slang";
+
+
 import "service/image/access.slang";
 
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> transmittanceLow;

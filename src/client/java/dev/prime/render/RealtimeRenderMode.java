@@ -6,6 +6,7 @@ import java.util.Optional;
 /** Selects one independent interactive renderer while retaining the shared scene boundary. */
 public enum RealtimeRenderMode {
     PATH_TRACING("path_tracing"),
+    LIGHTWEIGHT_PATH_TRACING("lightweight_path_tracing"),
     TEXTURED_PRIMARY_RAYS("textured_primary_rays");
 
     public static final RealtimeRenderMode DEFAULT = PATH_TRACING;
@@ -14,6 +15,10 @@ public enum RealtimeRenderMode {
 
     RealtimeRenderMode(String id) {
         this.id = id;
+    }
+
+    public boolean usesReconstruction() {
+        return this != TEXTURED_PRIMARY_RAYS;
     }
 
     public String id() {

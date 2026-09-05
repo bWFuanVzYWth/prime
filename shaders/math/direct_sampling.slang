@@ -57,13 +57,19 @@ public PrimeDirectSampleBase primeMakeDirectSampleBase(
     return result;
 }
 
-public float2 primeDirectSample2D(
-        PrimeDirectSampleBase base, uint stream)
+public uint primeStbnSampleAddress(PrimeDirectSampleBase base, uint stream)
 {
-    uint packed = primeRealtimeStbn[
-            (stream << PRIME_STBN_BANK_SHIFT)
-                    + (base.frame << PRIME_STBN_FRAME_SHIFT)
-                    + base.texel];
+    return (stream << PRIME_STBN_BANK_SHIFT)
+            + (base.frame << PRIME_STBN_FRAME_SHIFT) + base.texel;
+}
+
+public float2 primeDecodeStbnSample(uint packed)
+{
     uint2 value = uint2(packed & 0xffffu, packed >> 16u);
     return (float2(value) + 0.5) * PRIME_STBN_SCALE;
+}
+
+public float2 primeDirectSample2D(PrimeDirectSampleBase base, uint stream)
+{
+    return primeDecodeStbnSample(primeRealtimeStbn[primeStbnSampleAddress(base, stream)]);
 }

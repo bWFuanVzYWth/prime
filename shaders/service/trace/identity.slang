@@ -4,8 +4,11 @@ module "service/trace/identity.slang";
 import glsl;
 import "prime_abi.slang";
 import "prime_abi_types.slang";
+import "prime_surface_abi.slang";
 import "contract/path.slang";
 import "math/packed_geometry.slang";
+
+import "service/trace/surface_records.slang";
 
 public SectionRecord primeSection() {
     return ((SectionRecord*)primePush.sectionTableAddress)[InstanceID()];
@@ -28,7 +31,12 @@ public PrimitiveRecord primeRawPrimitive(SectionRecord section) {
     uint base = GeometryIndex() == 0
             ? 0u
             : (GeometryIndex() == 1 ? section.cutoutBase : section.transmissiveBase);
-    return ((PrimitiveRecord*)section.primitiveAddress)[base + primeLocalPrimitiveIndex(section)];
+    uint index = base + primeLocalPrimitiveIndex(section);
+    if ((section.instanceTint & PRIME_SURFACE_KEYS_FLAG) != 0u) {
+        uint key = ((uint*)section.primitiveAddress)[index];
+        return primeSurfaceRecords[key];
+    }
+    return ((PrimitiveRecord*)section.primitiveAddress)[index];
 }
 
 public uint primeGlobalPrimitiveIndex(SectionRecord section) {

@@ -1,6 +1,8 @@
 package dev.prime.render.vulkan;
 
+import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.infrastructure.ResourceCleanup;
+import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.terrain.OpacityMicromapData;
 import dev.prime.render.terrain.TriangleLayout;
 import java.nio.IntBuffer;
@@ -9,6 +11,7 @@ import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.KHRAccelerationStructure;
+import org.lwjgl.vulkan.KHRRayTracingPositionFetch;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkAccelerationStructureBuildGeometryInfoKHR;
@@ -25,7 +28,8 @@ public final class PreparedBlas {
     private static final long MAX_PRIMITIVE_RECORDS = 0x1_0000_0000L;
     private static final long MAX_IDENTITY_TRIANGLES = 0x8000_0000L;
     private static final int BASE_BUILD_FLAGS =
-            KHRAccelerationStructure.VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+            KHRAccelerationStructure.VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
+                    | KHRRayTracingPositionFetch.VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_BIT_KHR;
 
     private final VulkanContext context;
     private AccelerationStructure accelerationStructure;
@@ -37,6 +41,8 @@ public final class PreparedBlas {
     private long compactionQueryPool;
     private final CompactionPolicy compactionPolicy;
     private final boolean ownsGeometryBuffers;
+    private final PositionLifetime positionLifetime;
+    private Destroyable surfaceLease;
     private CompactionState compactionState;
     private long compactionSourceSize;
     private long compactedSize;
@@ -55,6 +61,7 @@ public final class PreparedBlas {
             TriangleLayout triangleLayout,
             CompactionPolicy compactionPolicy,
             boolean ownsGeometryBuffers,
+            PositionLifetime positionLifetime,
             String label) {
         this.context = context;
         this.accelerationStructure = accelerationStructure;
@@ -67,11 +74,14 @@ public final class PreparedBlas {
         this.triangleLayout = triangleLayout;
         this.compactionPolicy = compactionPolicy;
         this.ownsGeometryBuffers = ownsGeometryBuffers;
+        this.positionLifetime = positionLifetime;
         this.compactionState = compactionPolicy == CompactionPolicy.ENABLED
                 ? CompactionState.BUILD_PENDING
                 : CompactionState.DISABLED;
         this.label = label;
     }
+
+    public enum PositionLifetime { BUILD_ONLY, MOTION }
 
     public enum CompactionPolicy {
         ENABLED,
@@ -117,6 +127,7 @@ public final class PreparedBlas {
             VkCommandBuffer commandBuffer,
             TriangleLayout triangleLayout,
             CompactionPolicy compactionPolicy,
+            PositionLifetime positionLifetime,
             String label) {
         return create(
                 context,
@@ -129,6 +140,7 @@ public final class PreparedBlas {
                 triangleLayout,
                 compactionPolicy,
                 true,
+                positionLifetime,
                 label);
     }
 
@@ -155,6 +167,7 @@ public final class PreparedBlas {
                 triangleLayout,
                 compactionPolicy,
                 false,
+                PositionLifetime.MOTION,
                 label);
     }
 
@@ -169,6 +182,7 @@ public final class PreparedBlas {
             TriangleLayout triangleLayout,
             CompactionPolicy compactionPolicy,
             boolean ownsGeometryBuffers,
+            PositionLifetime positionLifetime,
             String label) {
         if (compactionPolicy == null) {
             throw new IllegalArgumentException("BLAS compaction policy must not be null");
@@ -256,6 +270,7 @@ public final class PreparedBlas {
                         triangleLayout,
                         compactionPolicy,
                         ownsGeometryBuffers,
+                        positionLifetime,
                         label);
             } catch (RuntimeException exception) {
                 RuntimeException failure = ResourceCleanup.destroy(
@@ -431,15 +446,25 @@ public final class PreparedBlas {
         return this.primitives;
     }
 
-    public VulkanBuffer positions() {
-        return this.positions;
+    /** Motion geometry includes both borrowed fallback buffers and owned dynamic prototypes. */
+    public long motionPositionAddress() {
+        return this.positionLifetime == PositionLifetime.MOTION ? this.positions.deviceAddress() : 0L;
+    }
+
+    /** Transfers a static allocation's key lease; destruction occurs after its last GPU reader. */
+    public void useSurfaceKeys(Destroyable lease) {
+        this.surfaceLease = lease;
+    }
+
+    public int surfaceFlags() {
+        return this.surfaceLease == null ? 0 : ShaderAbi.SURFACE_KEYS_FLAG;
     }
 
     public TriangleLayout triangleLayout() {
         return this.triangleLayout;
     }
 
-    /** Scratch storage is build-only; positions remain shader-visible for exact hit reconstruction. */
+    /** Owned static positions are build-only; defer destruction past the submitted GPU build. */
     public void retireBuildResources() {
         VulkanBuffer retiredScratch = this.scratch;
         this.scratch = null;
@@ -447,6 +472,12 @@ public final class PreparedBlas {
         if (retiredScratch != null) {
             failure = ResourceCleanup.run(
                     () -> this.context.defer(retiredScratch::destroy), null);
+        }
+        if (this.positionLifetime == PositionLifetime.BUILD_ONLY && this.positions != null) {
+            VulkanBuffer retiredPositions = this.positions;
+            this.positions = null;
+            failure = ResourceCleanup.run(
+                    () -> this.context.defer(retiredPositions), failure);
         }
         if (this.opacityMicromap != null) {
             failure = ResourceCleanup.run(
@@ -470,6 +501,7 @@ public final class PreparedBlas {
         if (this.ownsGeometryBuffers) {
             failure = ResourceCleanup.destroy(this.primitives, failure);
         }
+        failure = ResourceCleanup.destroy(this.surfaceLease, failure);
         failure = ResourceCleanup.destroy(this.opacityMicromap, failure);
         failure = ResourceCleanup.run(this::destroyCompactionQuery, failure);
         if (this.ownsGeometryBuffers && this.positions != null) {

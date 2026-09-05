@@ -18,6 +18,7 @@ public final class VulkanDeviceNegotiator {
     private static final List<String> REQUIRED_EXTENSIONS = List.of(
             KHRAccelerationStructure.VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
             KHRRayTracingPipeline.VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+            KHRRayTracingPositionFetch.VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME,
             KHRDeferredHostOperations.VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
 
     private static final List<String> FIDELITY_FX_BACKEND_EXTENSIONS = List.of(
@@ -34,6 +35,9 @@ public final class VulkanDeviceNegotiator {
             EXTRayTracingInvocationReorder
                     .VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT,
             VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT.SIZEOF);
+    private static final VulkanPNextStruct POSITION_FETCH_FEATURES = new VulkanPNextStruct(
+            KHRRayTracingPositionFetch.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_POSITION_FETCH_FEATURES_KHR,
+            VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR.SIZEOF);
     private static final VulkanPNextStruct OPACITY_MICROMAP_FEATURES = new VulkanPNextStruct(
             EXTOpacityMicromap.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT,
             VkPhysicalDeviceOpacityMicromapFeaturesEXT.SIZEOF);
@@ -99,6 +103,10 @@ public final class VulkanDeviceNegotiator {
             INVOCATION_REORDER_FEATURES,
             "rayTracingInvocationReorder",
             VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT.RAYTRACINGINVOCATIONREORDER);
+    private static final VulkanFeature POSITION_FETCH = new VulkanFeature(
+            POSITION_FETCH_FEATURES,
+            "rayTracingPositionFetch",
+            VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR.RAYTRACINGPOSITIONFETCH);
     private static final VulkanFeature OPACITY_MICROMAP = new VulkanFeature(
             OPACITY_MICROMAP_FEATURES,
             "micromap",
@@ -138,6 +146,8 @@ public final class VulkanDeviceNegotiator {
                     VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack).sType$Default();
             VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracing =
                     VkPhysicalDeviceRayTracingPipelineFeaturesKHR.calloc(stack).sType$Default();
+            VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR positionFetch =
+                    VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR.calloc(stack).sType$Default();
             VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT invocationReorder =
                     VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT.calloc(stack)
                             .sType$Default();
@@ -163,7 +173,8 @@ public final class VulkanDeviceNegotiator {
                 privateDataFeatures.pNext(optionalFeatureChain);
                 optionalFeatureChain = privateDataFeatures.address();
             }
-            rayTracing.pNext(optionalFeatureChain);
+            rayTracing.pNext(positionFetch.address());
+            positionFetch.pNext(optionalFeatureChain);
             VK12.vkGetPhysicalDeviceFeatures2(physicalDevice.vkPhysicalDevice(), features);
 
             if (!features.features().shaderInt64()) {
@@ -192,6 +203,9 @@ public final class VulkanDeviceNegotiator {
             }
             if (!rayTracing.rayTracingPipelineTraceRaysIndirect()) {
                 missing.add("rayTracingPipelineTraceRaysIndirect");
+            }
+            if (!positionFetch.rayTracingPositionFetch()) {
+                missing.add("rayTracingPositionFetch");
             }
 
             if (!missing.isEmpty()) {
@@ -226,6 +240,10 @@ public final class VulkanDeviceNegotiator {
             VK12.vkGetPhysicalDeviceProperties2(physicalDevice.vkPhysicalDevice(), properties);
 
             var limits = properties.properties().limits();
+            if (limits.maxDescriptorSetStorageBuffers() < 5) {
+                return VulkanCapabilities.unavailable(deviceName,
+                        "At least five scene storage-buffer descriptors are required");
+            }
             if (!supportsSceneTextureDescriptors(
                     limits.maxPerStageDescriptorSamplers(),
                     limits.maxPerStageDescriptorSampledImages(),
@@ -328,6 +346,7 @@ public final class VulkanDeviceNegotiator {
             enabledFeatures.add(ACCELERATION_STRUCTURE);
             enabledFeatures.add(RAY_TRACING_PIPELINE);
             enabledFeatures.add(RAY_TRACING_PIPELINE_INDIRECT);
+            enabledFeatures.add(POSITION_FETCH);
 
             // The FidelityFX DLL owns its FP32/FP16 permutations, but it cannot use an optional
             // physical-device feature unless Minecraft enabled it on the logical device. Expose

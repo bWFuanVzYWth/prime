@@ -30,6 +30,15 @@ public uint primeTriangleCount(uint primitiveCount, uint macroTriangleBase)
             + 2u * (primitiveCount - macroTriangleBase);
 }
 
+public bool primeOpaqueSourceTriangle(
+        uint triangle, uint source, uint primitiveCount, uint macroBase) {
+    if (triangle == source) return true;
+    if (source >= primeTriangleCount(primitiveCount, macroBase)) return false;
+    uint currentPrimitive = triangle < macroBase ? triangle : macroBase + ((triangle - macroBase) >> 1u);
+    uint sourcePrimitive = source < macroBase ? source : macroBase + ((source - macroBase) >> 1u);
+    return currentPrimitive == sourcePrimitive;
+}
+
 public uint primeGlobalTriangleIndexValue(
         uint geometryIndex,
         uint primitiveIndex,

@@ -2,6 +2,7 @@
 module "transport/realtime/tail_admission.slang";
 
 import "prime_abi.slang";
+import "math/hash.slang";
 import "prime_realtime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/path.slang";

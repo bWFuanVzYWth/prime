@@ -35,7 +35,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				java.security.MessageDigest.getInstance('SHA-256')
 						.digest(schemaFile.get().asFile.getText('UTF-8')
 								.replace('\r\n', '\n').getBytes('UTF-8')))
-		if (schemaSha256 != '67c16c068538b5d440c07fdab6a34a2111010da08f6861cb82ce8dde2222ee1f') {
+		if (schemaSha256 != 'ae2777f2b4aceabd25e6b6fe7bc93066fd3bcd70b9242fdb6d82aafc25d9086e') {
 			throw new GradleException(
 					'Prime shader ABI changed without updating its reviewed contract hash')
 		}
@@ -160,6 +160,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		}
 		appendJava('TEXTURE', textureRecordContract)
 		appendJava('MATERIAL_CORE', materialCoreContract)
+		appendJava('SURFACE', schema.surfaceRecordContract)
 		def shadowDescriptorNames = (0..9).collectEntries {
 			[("sunShadowDepth${it}".toString()): "SUN_SHADOW_DEPTH_${it}".toString()]
 		}
@@ -191,6 +192,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 			textureEncoding: 'TEXTURE_COLOR_ENCODING',
 			displayEncoding: 'DISPLAY_COLOR_ENCODING'])
 		appendJava('', emissionContract, [level15BlockIntensity: 'LEVEL_15_BLOCK_INTENSITY'])
+		appendJava('LAMBERT', schema.lambertContract)
 		appendJava('NRD', nrdContract)
 		appendJava('FSR', fsrContract)
 		appendJava('ATMOSPHERE', atmosphereContract, [:], [
@@ -267,8 +269,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		}.join('\n\n')
 		def environmentImages = slangImages(schema.sharedDescriptors, 0, [
 			skyView: ['RWTexture2D', 'float4', 'primeSkyView', 'rgba16f', 'readonly'],
-			transmittanceLow: ['RWTexture2D', 'float4', 'primeTransmittanceLow', 'rgba16f', 'readonly'],
-			transmittanceHigh: ['RWTexture2D', 'float4', 'primeTransmittanceHigh', 'rgba16f', 'readonly'],
+			cameraTransmittance: ['RWTexture2D', 'float4', 'primeCameraTransmittance', 'rgba16f', 'readonly'],
 			aerialRadiance: ['RWTexture3D', 'float4', 'primeAerialRadiance', 'rgba16f', 'readonly'],
 			aerialTransmittance: ['RWTexture3D', 'float4', 'primeAerialTransmittance', 'rgba16f', 'readonly']])
 		def sunShadowImages = slangImages(schema.sharedDescriptors, 0,
@@ -359,6 +360,14 @@ ${javaConstants}${javaOffsets}
 
 		def slangDir = slangOutputDirectory.get().asFile
 		slangDir.mkdirs()
+		new File(slangDir, 'prime_surface_abi.slang').text = """\
+#language slang 2026
+module "prime_surface_abi.slang";
+
+// Generated from shaders/abi.json. Do not edit by hand.
+${slangConstants('SURFACE', schema.surfaceRecordContract)}
+public static const uint PRIME_SURFACE_RECORDS_BINDING = ${schema.sharedDescriptors.surfaceRecords};
+"""
 		new File(slangDir, 'prime_material_core_abi.slang').text = """\
 #language slang 2026
 module "prime_material_core_abi.slang";
@@ -424,6 +433,12 @@ import "prime_abi_types.slang";
 
 // Generated from shaders/abi.json. The Vulkan range and shader block share this layout.
 public [[vk::push_constant]] ConstantBuffer<NrdMotionPushConstants> primeMotionPush;
+"""
+		new File(slangDir, 'prime_lambert_contract.slang').text = """\
+#language slang 2026
+module "prime_lambert_contract.slang";
+
+${slangConstants('LAMBERT', schema.lambertContract)}
 """
 		new File(slangDir, 'prime_realtime_abi.slang').text = """\
 #language slang 2026

@@ -24,12 +24,10 @@ public float2 primeStarmapUv(IntegratorRecord integrator, float3 direction) {
 }
 
 public float3 primeStarmapRadianceUv(
-        float3 surfacePosition,
         float3 direction,
         float2 uv,
         float scale) {
-    float3 transmittance = primeAtmosphereDistantTransmittance(
-            surfacePosition, direction);
+    float3 transmittance = primeAtmosphereDistantTransmittance(direction);
     if (all(transmittance <= float3(0.0))) {
         return float3(0.0);
     }
@@ -39,13 +37,11 @@ public float3 primeStarmapRadianceUv(
 
 public float3 primeStarmapRadiance(
         IntegratorRecord integrator,
-        float3 surfacePosition,
         float3 direction) {
     float scale =
             PRIME_STARMAP_BASE_RADIANCE_SCALE * primeStarRadianceMultiplier();
     return scale > 0.0
             ? primeStarmapRadianceUv(
-                    surfacePosition,
                     direction,
                     primeStarmapUv(integrator, direction),
                     scale)

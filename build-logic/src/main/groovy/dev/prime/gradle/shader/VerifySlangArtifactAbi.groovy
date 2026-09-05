@@ -225,7 +225,9 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 		def expectedOutgoing = [
 				primeSurfacePayload: 0,
 				primeShadowPayload: 1,
-				primePrimaryPayload: 0]
+				primePrimaryPayload: 0,
+				primeLambertPayload: 0,
+				primeLambertShadow: 1]
 		modules.findAll { name, ignored ->
 			name.endsWith('.rgen.spv') || name.endsWith('.rmiss.spv')
 					|| name.endsWith('.rchit.spv') || name.endsWith('.rahit.spv')
@@ -240,8 +242,10 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 			def incoming = module.payloadLocations('IncomingRayPayloadKHR')
 			if (!incoming.isEmpty()) {
 				def expected = name.startsWith('world.') || name.startsWith('world_')
-						|| name.startsWith('primary_ray.') || name.startsWith('primary_ray_') ? 0
-						: name.startsWith('shadow.') || name.startsWith('shadow_') ? 1 : null
+						|| name.startsWith('primary_ray.') || name.startsWith('primary_ray_')
+						|| name.startsWith('lambert_world.') ? 0
+						: name.startsWith('shadow.') || name.startsWith('shadow_')
+						|| name.startsWith('lambert_shadow.') || name.startsWith('lambert_shadow_') ? 1 : null
 				if (expected == null) {
 					throw new GradleException("Incoming payload stage has no ABI class: ${name}")
 				}
@@ -256,6 +260,17 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 		def shadow = 'struct(vec4(f32),vec4(f32),vec4(f32),vec4(f32),vec2(u32),' +
 				'u32,vec2(u32),vec2(u32))'
 		def primary = 'struct(vec3(f32),u32)'
+		def lambert = 'struct(vec3(f32),f32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32)'
+		def lambertShadow = 'struct(vec2(u32),f32)'
+		verifyShapes(modules, [lambert] as Set, 'RayPayloadKHR', ['lambert_trace.rgen.spv'])
+		verifyShapes(modules, [lambertShadow] as Set, 'RayPayloadKHR',
+                ['lambert_shade.rgen.spv', 'lambert_shade_subgroup.rgen.spv'])
+		verifyShapes(modules, [] as Set, 'RayPayloadKHR', ['lambert_camera.rgen.spv', 'lambert_resolve.rgen.spv'])
+		verifyShapes(modules, [lambert] as Set, 'IncomingRayPayloadKHR', [
+				'lambert_world.rmiss.spv', 'lambert_world.rchit.spv', 'lambert_world.rahit.spv'])
+		verifyShapes(modules, [lambertShadow] as Set, 'IncomingRayPayloadKHR', [
+				'lambert_shadow.rmiss.spv', 'lambert_shadow.rchit.spv', 'lambert_shadow.rahit.spv',
+				'lambert_shadow_opaque.rahit.spv'])
 		verifyShapes(modules, [trace] as Set, 'IncomingRayPayloadKHR',
 				['world.rmiss.spv', 'world.rchit.spv'])
 		verifyShapes(modules, [shadow] as Set, 'IncomingRayPayloadKHR', [
@@ -313,7 +328,8 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 				schema.sharedDescriptors.textureRecords,
 				schema.sharedDescriptors.tintSamples,
 				schema.sharedDescriptors.baseColorPages,
-				schema.sharedDescriptors.materialCoreRecords]
+				schema.sharedDescriptors.materialCoreRecords,
+                schema.sharedDescriptors.surfaceRecords]
 				.collect { it as int }.toSet()
 		requireEqual(expectedPrimaryShared,
 				descriptorBindings(modules, primaryStages, 0),
@@ -323,6 +339,16 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 
 		def queue = schema.realtimeDescriptors.wavefrontQueue as int
 		def paths = schema.realtimeDescriptors.wavefrontPaths as int
+		['camera', 'trace', 'shade', 'shade_subgroup', 'resolve'].each { stage ->
+			def module = requireModule(modules, "lambert_${stage}.rgen.spv")
+			requireEqual(schema.lambertContract.recordSize as int, module.recordStride(1, paths),
+					"Lambert path stride in ${stage}")
+			if (stage != 'resolve') requireEqual(4, module.recordStride(1, queue), "Lambert queue stride in ${stage}")
+		}
+		requireBinding(requireModule(modules, 'lambert_shade.rgen.spv').descriptorBindings(0),
+				schema.sharedDescriptors.realtimeStbn as int, true, 'Lambert STBN binding')
+		requireEqual([] as Set, requireModule(modules, 'lambert_shadow_opaque.rahit.spv').descriptorBindings(0),
+				'Lambert opaque shadow has no texture descriptors')
 		['', '_ser'].each { suffix ->
 			def camera = requireModule(modules,
 					wavefrontShader('realtime', 'camera_trace', suffix)).descriptorBindings(1)
@@ -405,6 +431,14 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 	}
 
 	private static void verifySubgroups(Map<String, Spirv> modules) {
+        ['', '_subgroup'].each { suffix ->
+            def module = requireModule(modules, "lambert_shade${suffix}.rgen.spv")
+            ['OpGroupNonUniformElect', 'OpGroupNonUniformBroadcastFirst',
+             'OpGroupNonUniformBallot', 'OpGroupNonUniformBallotBitCount'].each { opcode ->
+                requireEqual(!suffix.isEmpty(), module.opcodes.contains(opcode),
+                        "Lambert subgroup compaction ${suffix}/${opcode}")
+            }
+        }
 		def verify = { boolean expected, String renderer, String stage, String suffix ->
 			def opcodes = requireModule(modules, wavefrontShader(renderer, stage, suffix)).opcodes
 			['OpGroupNonUniformElect', 'OpGroupNonUniformBroadcastFirst',

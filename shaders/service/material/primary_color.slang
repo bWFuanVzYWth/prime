@@ -2,6 +2,7 @@
 module "service/material/primary_color.slang";
 
 import "math/color_space.slang";
+import "model/material/recipe.slang";
 import "math/packed_geometry.slang";
 import "prime_abi_types.slang";
 import "service/material/access.slang";

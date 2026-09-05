@@ -42,6 +42,7 @@ public final class TerrainScene implements AutoCloseable {
     private final MediumIdRegistry mediumIds = new MediumIdRegistry();
     private final MaterialIdRegistry materialIds = new MaterialIdRegistry(this.mediumIds);
     private final VulkanBuffer materialCoreRecords;
+    private final SurfaceTable surfaces;
     private final TintSampleTable tintSamples;
     private final BlasCompactionScheduler compactionScheduler =
             new BlasCompactionScheduler();
@@ -65,13 +66,24 @@ public final class TerrainScene implements AutoCloseable {
         this.stagingArena = stagingArena;
         this.opacityMicromapPool = new OpacityMicromapPool(context);
         this.dynamicBufferPool = new DynamicBufferPool(context);
-        this.materialCoreRecords = context.createBuffer(
-                MaterialIdRegistry.BUFFER_BYTES,
-                VK12.VK_BUFFER_USAGE_TRANSFER_DST_BIT
-                        | VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                false,
-                "Prime material core records");
-        this.tintSamples = new TintSampleTable(context);
+        SurfaceTable newSurfaces = null;
+        VulkanBuffer newMaterials = null;
+        TintSampleTable newTints = null;
+        try {
+            newSurfaces = new SurfaceTable(context);
+            newMaterials = context.createBuffer(
+                    MaterialIdRegistry.BUFFER_BYTES,
+                    VK12.VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                    false, "Prime material core records");
+            newTints = new TintSampleTable(context);
+            this.surfaces = newSurfaces;
+            this.materialCoreRecords = newMaterials;
+            this.tintSamples = newTints;
+        } catch (RuntimeException exception) {
+            RuntimeException failure = ResourceCleanup.close(newTints, exception);
+            failure = ResourceCleanup.destroy(newMaterials, failure);
+            throw ResourceCleanup.close(newSurfaces, failure);
+        }
     }
 
     public boolean updateStatic(
@@ -246,6 +258,7 @@ public final class TerrainScene implements AutoCloseable {
         List<GpuCluster> replacements = transaction.replacements();
         VulkanBuffer replacementWorldLights = null;
         VkCommandBuffer commandBuffer = null;
+        boolean surfaceSubmitted = false;
         try {
             if (nonEmptyUploadCount > 0 || replacementTlas != null) {
                 commandBuffer = this.context.commandEncoder().allocateAndBeginTransientCommandBuffer();
@@ -262,6 +275,7 @@ public final class TerrainScene implements AutoCloseable {
             }
 
             if (clusterStagingBatch != null) {
+                this.surfaces.upload(clusterStagingBatch, commandBuffer);
                 int[] materialCore = this.materialIds.encodedCoreRecords();
                 copyBuffer(
                         commandBuffer,
@@ -408,10 +422,12 @@ public final class TerrainScene implements AutoCloseable {
                     worldStagingBatch.prepareForSubmission();
                 }
                 this.context.commandEncoder().execute(commandBuffer);
+                surfaceSubmitted = true;
                 transaction.submitted();
             }
             this.publish(preparedUpdate);
             transaction.published();
+            this.surfaces.publish();
             RuntimeException retirementFailure = null;
             for (GpuCluster replacement : replacements) {
                 retirementFailure = ResourceCleanup.run(
@@ -428,7 +444,10 @@ public final class TerrainScene implements AutoCloseable {
             ResourceCleanup.throwIfFailed(retirementFailure);
             return true;
         } catch (RuntimeException exception) {
-            throw transaction.abort(exception);
+            boolean submitted = surfaceSubmitted;
+            RuntimeException failure = ResourceCleanup.run(
+                    () -> this.surfaces.abort(submitted), exception);
+            throw transaction.abort(failure);
         } finally {
             transaction.close();
         }
@@ -593,6 +612,14 @@ public final class TerrainScene implements AutoCloseable {
         return this.currentView;
     }
 
+    public SurfaceStatistics surfaceStatistics() {
+        this.surfaces.records.drain();
+        return new SurfaceStatistics(this.surfaces.records.size(),
+                this.surfaces.records.extent(), this.surfaces.binding().bytes());
+    }
+
+    public record SurfaceStatistics(int live, int extent, long bytes) {}
+
     public CompactionStats compactionStats() {
         BlasCompactionScheduler.Snapshot snapshot =
                 this.compactionScheduler.snapshot();
@@ -658,6 +685,7 @@ public final class TerrainScene implements AutoCloseable {
         this.currentWorldLightTree = CpuWorldLightTree.Result.empty(0);
         failure = ResourceCleanup.close(this.voxelBlasPool, failure);
         failure = ResourceCleanup.close(this.tintSamples, failure);
+        failure = ResourceCleanup.close(this.surfaces, failure);
         failure = ResourceCleanup.destroy(this.materialCoreRecords, failure);
         failure = ResourceCleanup.run(this.dynamicBufferPool::destroy, failure);
         failure = ResourceCleanup.close(this.opacityMicromapPool, failure);
@@ -849,7 +877,7 @@ public final class TerrainScene implements AutoCloseable {
                 writer.writeInstanced(
                         compactionAddress(base, compactions),
                         base.primitives().deviceAddress(),
-                        base.positions().deviceAddress(),
+                        base.motionPositionAddress(),
                         cluster.surfaceRelationAddress(),
                         cluster.lightAddress(),
                         worldLightAddress,
@@ -861,7 +889,7 @@ public final class TerrainScene implements AutoCloseable {
                         cluster.lights().emitterCount(),
                         worldLightLeafCount,
                         cluster.blas() == null ? 0 : 0xff,
-                        0,
+                        base.surfaceFlags(),
                         sectionX,
                         sectionY,
                         sectionZ,
@@ -881,7 +909,7 @@ public final class TerrainScene implements AutoCloseable {
                     writer.writeTransformed(
                             compactionAddress(voxel, compactions),
                             voxel.primitives().deviceAddress(),
-                            voxel.positions().deviceAddress(),
+                            voxel.motionPositionAddress(),
                             0L,
                             cluster.dynamic() ? 0L : cluster.lightAddress(),
                             worldLightAddress,
@@ -893,7 +921,7 @@ public final class TerrainScene implements AutoCloseable {
                             cluster.lights().emitterCount(),
                             worldLightLeafCount,
                             0xff,
-                            (instances.hasAffineLinearTransform(index)
+                            voxel.surfaceFlags() | (instances.hasAffineLinearTransform(index)
                                             ? 0x4000_0000
                                             : 0)
                                     | (cluster.dynamic()
@@ -963,7 +991,15 @@ public final class TerrainScene implements AutoCloseable {
             areaLightEmitters = Math.addExact(
                     areaLightEmitters, cluster.lights().emitterCount());
         }
+        long staticTriangles = 0L;
+        long staticPrimitives = 0L;
+        long staticBlasBytes = 0L;
         for (PreparedBlas blas : uniqueBlases.keySet()) {
+            if (blas.surfaceFlags() != 0) {
+                staticTriangles += blas.triangleLayout().triangleCount();
+                staticPrimitives += blas.triangleLayout().primitiveCount();
+                staticBlasBytes += blas.accelerationStructure().backingSize();
+            }
             uniqueTriangles = Math.addExact(
                     uniqueTriangles, GpuCluster.triangleCount(blas));
         }
@@ -977,7 +1013,8 @@ public final class TerrainScene implements AutoCloseable {
                 uniqueTriangles,
                 instancedTriangles,
                 areaLightEmitters,
-                replacementWorldLightTree.nodeCount());
+                replacementWorldLightTree.nodeCount(),
+                staticTriangles, staticPrimitives, staticBlasBytes);
 
         TopLevelAccelerationStructure previousTlas = this.currentTlas;
         VulkanBuffer previousWorldLights = replaceWorldLights ? this.currentWorldLights : null;
@@ -996,6 +1033,7 @@ public final class TerrainScene implements AutoCloseable {
                         new MaterialCoreBinding(
                                 this.materialCoreRecords.handle(),
                                 this.materialCoreRecords.size()),
+                        this.surfaces.binding(),
                         nextOriginX,
                         nextOriginY,
                         nextOriginZ,
@@ -1134,6 +1172,7 @@ public final class TerrainScene implements AutoCloseable {
         VulkanBuffer motion = null;
         PreparedBlas blas = null;
         DynamicBufferPool.Lease dynamicBuffers = null;
+        SurfaceRecords.Lease surfaceLease = upload.dynamic() ? null : this.surfaces.records.lease();
         GpuSurfaceRelationTable.Encoding relationEncoding = null;
         ArrayList<PreparedBlas> voxelBlases =
                 new ArrayList<>(mesh.voxelMeshes().size());
@@ -1150,7 +1189,7 @@ public final class TerrainScene implements AutoCloseable {
                 int[] mediumMap = this.mediumIds.resolve(mesh.mediumCatalog());
                 long surfaceRelationBytes = relationEncoding.byteSize();
                 long primitiveBytes = Math.addExact(
-                        mesh.primitiveBytes(), surfaceRelationBytes);
+                        primitiveStorageBytes(mesh, upload.dynamic()), surfaceRelationBytes);
                 if (upload.dynamic()) {
                     dynamicBuffers = this.dynamicBufferPool.acquire(
                             mesh.positionBytes(),
@@ -1182,7 +1221,8 @@ public final class TerrainScene implements AutoCloseable {
                         tintResolver,
                         relationEncoding,
                         positions,
-                        primitives);
+                        primitives,
+                        surfaceLease);
                 if (upload.dynamic()) {
                     blas = PreparedBlas.createWithBorrowedGeometry(
                             this.context,
@@ -1206,7 +1246,9 @@ public final class TerrainScene implements AutoCloseable {
                             commandBuffer,
                             mesh.triangleLayout(),
                             compactionPolicy,
+                            PreparedBlas.PositionLifetime.BUILD_ONLY,
                             "Prime cluster " + upload.key() + " BLAS");
+                    blas.useSurfaceKeys(surfaceLease);
                 }
             }
             if (!mesh.lights().isEmpty()) {
@@ -1228,14 +1270,17 @@ public final class TerrainScene implements AutoCloseable {
                         lights);
             }
             CompiledClusterLights.Summary lightSummary = mesh.lights().summary();
+            PreparedBlas.PositionLifetime voxelLifetime = upload.dynamic()
+                    ? PreparedBlas.PositionLifetime.MOTION : PreparedBlas.PositionLifetime.BUILD_ONLY;
             for (int index = 0; index < mesh.voxelMeshes().size(); index++) {
                 CpuVoxelMesh voxelMesh = mesh.voxelMeshes().get(index);
                 String label = "Prime cluster " + upload.key()
                         + " voxel mesh " + index;
                 voxelBlases.add(this.voxelBlasPool.acquire(
-                        voxelMesh,
+                        voxelMesh, voxelLifetime,
                         () -> this.prepareVoxelMesh(
                                 voxelMesh,
+                                voxelLifetime,
                                 stagingBatch,
                                 commandBuffer,
                                 this.tintSamples::resolve,
@@ -1255,7 +1300,7 @@ public final class TerrainScene implements AutoCloseable {
                     ResolvedVoxelInstances.resolve(
                             mesh.voxelInstances(), this.tintSamples::resolve),
                     !relationEncoding.isEmpty()
-                            ? primitives.deviceAddress() + mesh.primitiveBytes()
+                            ? primitives.deviceAddress() + primitiveStorageBytes(mesh, upload.dynamic())
                             : 0L,
                     lights,
                     motion,
@@ -1271,6 +1316,7 @@ public final class TerrainScene implements AutoCloseable {
                 failure = ResourceCleanup.destroy(positions, failure);
                 failure = ResourceCleanup.destroy(primitives, failure);
             }
+            failure = ResourceCleanup.destroy(surfaceLease, failure);
             for (PreparedBlas voxelBlas : voxelBlases) {
                 PreparedBlas released = this.voxelBlasPool.release(voxelBlas);
                 if (released != null) {
@@ -1292,11 +1338,14 @@ public final class TerrainScene implements AutoCloseable {
 
     private PreparedBlas prepareVoxelMesh(
             CpuVoxelMesh mesh,
+            PreparedBlas.PositionLifetime lifetime,
             StagingArena.Batch stagingBatch,
             VkCommandBuffer commandBuffer,
             IntUnaryOperator tintResolver,
             String label) {
         CpuMeshSegment geometry = mesh.geometry();
+        SurfaceRecords.Lease surfaceLease = lifetime == PreparedBlas.PositionLifetime.BUILD_ONLY
+                ? this.surfaces.records.lease() : null;
         VulkanBuffer positions = null;
         VulkanBuffer primitives = null;
         PreparedBlas blas = null;
@@ -1308,7 +1357,8 @@ public final class TerrainScene implements AutoCloseable {
                     false,
                     label + " positions");
             primitives = this.context.createBuffer(
-                    geometry.primitiveBytes(),
+                    surfaceLease == null ? geometry.primitiveBytes()
+                            : geometry.primitiveBytes() / SurfaceRecords.WORDS,
                     VK12.VK_BUFFER_USAGE_TRANSFER_DST_BIT
                             | VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                     false,
@@ -1320,7 +1370,7 @@ public final class TerrainScene implements AutoCloseable {
             copyBuffer(
                     commandBuffer,
                     stagingBatch.write(
-                            TintIdResolver.primitiveRecords(
+                            encodeSurfaceRecords(surfaceLease, TintIdResolver.primitiveRecords(
                                     MaterialIdResolver.primitiveRecords(
                                             geometry.primitiveRecords(),
                                             geometry.primitiveRecords(),
@@ -1329,7 +1379,7 @@ public final class TerrainScene implements AutoCloseable {
                                                     List.of(),
                                                     this.materialIds::resolve)),
                                     geometry.primitiveRecords(),
-                                    tintResolver),
+                                    tintResolver)),
                             Integer.BYTES),
                     primitives);
             blas = PreparedBlas.create(
@@ -1342,7 +1392,9 @@ public final class TerrainScene implements AutoCloseable {
                     commandBuffer,
                     geometry.triangleLayout(),
                     PreparedBlas.CompactionPolicy.ENABLED,
+                    lifetime,
                     label + " BLAS");
+            if (surfaceLease != null) blas.useSurfaceKeys(surfaceLease);
             return blas;
         } catch (RuntimeException exception) {
             RuntimeException failure = exception;
@@ -1353,8 +1405,17 @@ public final class TerrainScene implements AutoCloseable {
                 failure = ResourceCleanup.destroy(positions, failure);
                 failure = ResourceCleanup.destroy(primitives, failure);
             }
+            failure = ResourceCleanup.destroy(surfaceLease, failure);
             throw failure;
         }
+    }
+
+    private static int[] encodeSurfaceRecords(SurfaceRecords.Lease lease, int[] records) {
+        return lease == null ? records : lease.encode(records);
+    }
+
+    private static long primitiveStorageBytes(CpuClusterMesh mesh, boolean dynamic) {
+        return dynamic ? mesh.primitiveBytes() : mesh.primitiveBytes() / SurfaceRecords.WORDS;
     }
 
     private static void copyMeshSegments(
@@ -1366,7 +1427,9 @@ public final class TerrainScene implements AutoCloseable {
             IntUnaryOperator tintResolver,
             GpuSurfaceRelationTable.Encoding relationEncoding,
             VulkanBuffer positions,
-            VulkanBuffer primitives) {
+            VulkanBuffer primitives,
+            SurfaceRecords.Lease surfaceLease) {
+        int wordsPerPrimitive = surfaceLease == null ? CpuSectionMesh.PRIMITIVE_WORDS : 1;
         TriangleLayout triangleLayout = mesh.triangleLayout();
         long[] positionCursors = new long[] {
             0L,
@@ -1381,12 +1444,12 @@ public final class TerrainScene implements AutoCloseable {
             0L,
             Math.multiplyExact(
                     triangleLayout.opaquePrimitiveCount(),
-                    (long) CpuSectionMesh.PRIMITIVE_WORDS * Integer.BYTES),
+                    (long) wordsPerPrimitive * Integer.BYTES),
             Math.multiplyExact(
                     Math.addExact(
                             triangleLayout.opaquePrimitiveCount(),
                             triangleLayout.cutoutPrimitiveCount()),
-                    (long) CpuSectionMesh.PRIMITIVE_WORDS * Integer.BYTES)
+                    (long) wordsPerPrimitive * Integer.BYTES)
         };
         int[] relationCursors = new int[] {
             0,
@@ -1415,6 +1478,7 @@ public final class TerrainScene implements AutoCloseable {
                     relationCursors[1],
                     relationCursors[2],
                     relationEncoding);
+            if (surfaceLease != null) primitiveRecords = surfaceLease.encode(primitiveRecords);
             int sourcePosition = 0;
             int sourcePrimitive = 0;
             for (int category = 0; category < 3; category++) {
@@ -1430,7 +1494,7 @@ public final class TerrainScene implements AutoCloseable {
                 };
                 int positionWords = Math.multiplyExact(triangleCount, 9);
                 int primitiveWords = Math.multiplyExact(
-                        primitiveCount, CpuSectionMesh.PRIMITIVE_WORDS);
+                        primitiveCount, wordsPerPrimitive);
                 if (triangleCount != 0) {
                     StagingArena.Slice positionSlice = staging.write(
                             segment.positions(), sourcePosition, positionWords, Float.BYTES);
@@ -1462,7 +1526,7 @@ public final class TerrainScene implements AutoCloseable {
                     commandBuffer,
                     staging.write(relationEncoding.words(), Integer.BYTES),
                     primitives,
-                    mesh.primitiveBytes());
+                    primitiveStorageBytes(mesh, surfaceLease == null));
         }
     }
 
@@ -1520,6 +1584,7 @@ public final class TerrainScene implements AutoCloseable {
             long sectionTableAddress,
             TintSampleBinding tintSamples,
             MaterialCoreBinding materialCore,
+            SurfaceBinding surfaces,
             int originX,
             int originY,
             int originZ,
@@ -1544,8 +1609,11 @@ public final class TerrainScene implements AutoCloseable {
             long uniqueBlasTriangleCount,
             long instancedTriangleCount,
             int areaLightEmitterCount,
-            int topLevelLightTreeNodeCount) {
-        static final SceneStatistics EMPTY = new SceneStatistics(0, 0L, 0L, 0, 0);
+            int topLevelLightTreeNodeCount,
+            long staticTriangleCount,
+            long staticPrimitiveCount,
+            long staticBlasBytes) {
+        static final SceneStatistics EMPTY = new SceneStatistics(0, 0L, 0L, 0, 0, 0L, 0L, 0L);
 
     }
 
@@ -1565,6 +1633,14 @@ public final class TerrainScene implements AutoCloseable {
     }
 
     /** Stable fixed-width material-core descriptor owned by the renderer scene lifetime. */
+    public record SurfaceBinding(long buffer, long bytes) {
+        public SurfaceBinding {
+            if (buffer == 0L || bytes <= 0L || bytes % 32L != 0L) {
+                throw new IllegalArgumentException("Surface binding is incomplete");
+            }
+        }
+    }
+
     public record MaterialCoreBinding(long buffer, long bytes) {
         static final MaterialCoreBinding EMPTY = new MaterialCoreBinding(0L, 0L);
 

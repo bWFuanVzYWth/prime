@@ -280,6 +280,12 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
                     .getBytes(java.nio.charset.StandardCharsets.UTF_8)
                     .length
         }
+        def atmosphereSpectrum = pathKey(new File(shaderRoot, 'model/atmosphere/spectrum.slang'))
+        productionEntries.findAll { !it.name.endsWith('.compute.slang') }.each { entry ->
+            if (closures[pathKey(entry)].contains(atmosphereSpectrum)) {
+                throw new GradleException("RT entry reaches atmosphere spectral integration: ${entry}")
+            }
+        }
         def deltaWalk = productionEntries.find {
             shaderRelative(it) == 'entry/realtime/delta_walk.raygeneration.slang'
         }

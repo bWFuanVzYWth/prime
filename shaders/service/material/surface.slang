@@ -2,6 +2,8 @@
 module "service/material/surface.slang";
 
 import "prime_abi.slang";
+import "service/material/coverage.slang";
+import "model/material/recipe.slang";
 import "prime_abi_types.slang";
 import "contract/material/normal.slang";
 import "math/color_space.slang";

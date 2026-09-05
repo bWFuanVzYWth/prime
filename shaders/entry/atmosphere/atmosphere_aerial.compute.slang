@@ -2,6 +2,9 @@
 module "entry/atmosphere/atmosphere_aerial.compute.slang";
 
 import "model/atmosphere/sky.slang";
+import "model/atmosphere/spectrum.slang";
+
+
 import "service/image/access.slang";
 import "model/atmosphere/epipolar.slang";
 import "model/atmosphere/phase.slang";

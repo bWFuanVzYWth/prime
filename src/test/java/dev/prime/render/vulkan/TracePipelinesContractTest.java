@@ -121,6 +121,13 @@ final class TracePipelinesContractTest {
 
     @Test
     void wavefrontBackingHasDeclaredFourKSize() {
+        assertEquals(1_128_038_432L, LambertRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
+        assertEquals(32L + 8L * 3840 * 2160, LambertRayTracingPipeline.LAYOUT.queueBytes(3840, 2160));
+        assertEquals(296L, LambertRayTracingPipeline.LAYOUT.wavefrontBytes(1, 1));
+        LambertRayTracingPipeline.LAYOUT.validateDispatch(3840, 2160, 3840 * 2160);
+        LambertRayTracingPipeline.LAYOUT.validateRanges(3840, 2160, 0xffff_ffffL);
+        assertThrows(IllegalStateException.class, () ->
+                LambertRayTracingPipeline.LAYOUT.validateDispatch(3840, 2160, 3840 * 2160 - 1));
         assertEquals(4_346_265_712L, RealtimeRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
         assertEquals(2_023_833_632L, OfflineRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
         assertEquals(962_150_432L, OfflineRayTracingPipeline.LAYOUT.queueBytes(3840, 2160));
@@ -146,6 +153,33 @@ final class TracePipelinesContractTest {
                         3840, 2160, 3840 * 2160));
         RealtimeRayTracingPipeline.LAYOUT.validateDispatch(3840, 2160, 2 * 3840 * 2160);
         OfflineRayTracingPipeline.LAYOUT.validateDispatch(3840, 2160, 1 << 24);
+    }
+
+    @Test
+    void lambertUsesTwoQueueParitiesAndOneTraceAndShadeModule() {
+        RaygenSchedule lambert = GeneratedShaderPrograms.schedule("lambert");
+        assertEquals(4, lambert.moduleCount());
+        assertEquals(6, lambert.groupCount());
+        assertEquals(lambert.module(GeneratedShaderPrograms.LAMBERT_TRACE_0),
+                lambert.module(GeneratedShaderPrograms.LAMBERT_TRACE_1));
+        assertEquals(lambert.module(GeneratedShaderPrograms.LAMBERT_SHADE_0),
+                lambert.module(GeneratedShaderPrograms.LAMBERT_SHADE_1));
+        assertEquals(0, lambert.control(GeneratedShaderPrograms.LAMBERT_TRACE_0));
+        assertEquals(0, lambert.control(GeneratedShaderPrograms.LAMBERT_SHADE_0));
+        assertEquals(1, lambert.control(GeneratedShaderPrograms.LAMBERT_TRACE_1));
+        assertEquals(1, lambert.control(GeneratedShaderPrograms.LAMBERT_SHADE_1));
+        RaygenSchedule scalar = LambertRayTracingPipeline.schedule(false);
+        RaygenSchedule subgroup = LambertRayTracingPipeline.schedule(true);
+        assertEquals(scalar.groupCount(), subgroup.groupCount());
+        assertEquals(scalar.moduleCount(), subgroup.moduleCount());
+        for (int group = 0; group < scalar.groupCount(); ++group) {
+            assertEquals(scalar.control(group), subgroup.control(group));
+            String resource = scalar.moduleResource(scalar.module(group));
+            String expected = group == GeneratedShaderPrograms.LAMBERT_SHADE_0
+                    || group == GeneratedShaderPrograms.LAMBERT_SHADE_1
+                    ? GeneratedShaderPrograms.resource("lambert_shade_subgroup") : resource;
+            assertEquals(expected, subgroup.moduleResource(subgroup.module(group)));
+        }
     }
 
     @Test

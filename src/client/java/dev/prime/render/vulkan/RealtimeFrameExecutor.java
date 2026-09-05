@@ -34,7 +34,7 @@ public final class RealtimeFrameExecutor implements Destroyable {
 
     public void execute(
             String debugLabel,
-            RealtimeRayTracingPipeline pipeline,
+            RealtimeTracePipeline pipeline,
             SunShadowPipeline sunShadow,
             AtmospherePipeline atmosphere,
             MaterialTexturePages materialTextures,

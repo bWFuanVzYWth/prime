@@ -153,7 +153,8 @@ public final class VulkanRenderer implements AutoCloseable {
             throw new IllegalStateException(
                     "Prime display extent is unavailable during renderer bootstrap");
         }
-        if (settings.realtimeRenderMode() == RealtimeRenderMode.PATH_TRACING) {
+        if (settings.realtimeRenderMode().usesReconstruction()) {
+            this.realtimeRenderer.selectMode(settings.realtimeRenderMode());
             this.realtimeRenderer.prewarmResources(
                     this.atmosphere,
                     settings.postProcessingMode(),
@@ -220,12 +221,13 @@ public final class VulkanRenderer implements AutoCloseable {
         if (previous != null) {
             this.context.awaitIdle();
             this.context.drainDeferredAfterIdle();
-            if (previous == RealtimeRenderMode.PATH_TRACING) {
+            if (previous.usesReconstruction()) {
                 this.realtimeRenderer.releaseSizedResourcesAfterIdle();
             } else {
                 this.primaryRayRenderer.releaseSizedResourcesAfterIdle();
             }
         }
+        this.realtimeRenderer.selectMode(mode);
         this.activeRealtimeRenderMode = mode;
     }
 
@@ -459,6 +461,8 @@ public final class VulkanRenderer implements AutoCloseable {
                 : offlineSession.scene();
 
         TerrainScene.CompactionStats stats = this.terrain.compactionStats();
+        TerrainScene.SurfaceStatistics surfaces = this.terrain.surfaceStatistics();
+        VulkanContext.MemoryStatistics memory = this.context.memoryStatistics();
         TerrainScene.SceneStatistics sceneStats = scene == null
                 ? null
                 : scene.statistics();
@@ -468,7 +472,7 @@ public final class VulkanRenderer implements AutoCloseable {
         OfflineRenderer.DiagnosticSnapshot offline =
                 this.offlineRenderer.diagnosticSnapshot();
         RealtimeRenderer.DiagnosticSnapshot realtime = offline == null
-                && settings.realtimeRenderMode() == RealtimeRenderMode.PATH_TRACING
+                && settings.realtimeRenderMode().usesReconstruction()
                 ? this.realtimeRenderer.diagnosticSnapshot()
                 : null;
         PrimaryRayRenderer.DiagnosticSnapshot primary = offline == null
@@ -543,6 +547,21 @@ public final class VulkanRenderer implements AutoCloseable {
                 "Geometry: instanced triangle references %s; unique BLAS triangles %s",
                 sceneStats == null ? "n/a" : count(sceneStats.instancedTriangleCount()),
                 sceneStats == null ? "n/a" : count(sceneStats.uniqueBlasTriangleCount())));
+        lines.add(String.format(Locale.ROOT,
+                "Prime VMA: device allocations %s / committed blocks %s; host allocations %s / blocks %s",
+                bytes(memory.deviceAllocations()), bytes(memory.deviceBlocks()),
+                bytes(memory.hostAllocations()), bytes(memory.hostBlocks())));
+        lines.add(String.format(Locale.ROOT,
+                "Surfaces: %s live / %s slots; table %s; static keys %s; static BLAS %s",
+                count(surfaces.live()), count(surfaces.extent()), bytes(surfaces.bytes()),
+                sceneStats == null ? "n/a" : bytes(sceneStats.staticPrimitiveCount() * 4L),
+                sceneStats == null ? "n/a" : bytes(sceneStats.staticBlasBytes())));
+        lines.add(String.format(Locale.ROOT,
+                "Static shading geometry: former vertices + records %s; keys + table %s (excludes BLAS)",
+                sceneStats == null ? "n/a" : bytes(sceneStats.staticTriangleCount() * 36L
+                        + sceneStats.staticPrimitiveCount() * 32L),
+                sceneStats == null ? "n/a" : bytes(sceneStats.staticPrimitiveCount() * 4L
+                        + surfaces.bytes())));
         lines.add(String.format(
                 Locale.ROOT,
                 "Dynamic: instances %s; reusable prototypes %s; unique fallback %s (%s triangles)",
@@ -552,7 +571,7 @@ public final class VulkanRenderer implements AutoCloseable {
                 count(this.dynamicSceneStatistics.uniqueFallbackTriangles())));
 
         var exposure = offlineSession == null
-                && settings.realtimeRenderMode() == RealtimeRenderMode.PATH_TRACING
+                && settings.realtimeRenderMode().usesReconstruction()
                 ? this.realtimeRenderer.exposureDiagnosticSnapshot()
                 : offlineSession == null ? null : offlineSession.exposure().diagnosticSnapshot();
         String exposureState = exposure == null

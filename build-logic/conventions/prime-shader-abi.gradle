@@ -160,6 +160,10 @@ def verifyShaderTestManifest = tasks.register('verifyShaderTestManifest') {
 			throw new GradleException('Shader test manifest contains duplicate artifacts')
 		}
 		manifest.programs.each { program ->
+			if (program.definitions != null && (!(program.definitions instanceof List)
+					|| program.definitions.any { !(it instanceof String) || !it.startsWith('-D') })) {
+				throw new GradleException("Invalid Shader test definitions for ${program.entry}")
+			}
 			def stage = shaderManifestType.stage(program.entry.toString())
 			if (stage == null) {
 				throw new GradleException("Unsupported Shader test entry stage: ${program.entry}")
@@ -192,6 +196,7 @@ def compileSlangTestShaders = tasks.register(
 			verifyRoboCuteReference, 'verifyShaderArchitecture',
 			'verifyShaderTestManifest', 'verifySlangToolchain'
 	sourceDirectory = file('src/test/slang/entries')
+	programManifest = shaderTestProgramManifest
 	includeDirectories.from(
 			file('src/test/slang'),
 			file('shaders'),
@@ -277,6 +282,8 @@ programManifest.artifacts.each { String id, artifact ->
 	def source = file(artifact.source)
 	def output = layout.buildDirectory.file(
 			"shaderPrograms/${id}/${artifact.resource}")
+	def dependencyClosure = objects.newInstance(
+			primeShaderTaskTypes.dependencyClosure, source, dependencyGraph)
 	def compileProgram = tasks.register(
 			taskName, primeShaderTaskTypes.compileProgram) {
 		group = 'build'
@@ -285,8 +292,12 @@ programManifest.artifacts.each { String id, artifact ->
 				verifyShaderArchitecture, 'verifySlangToolchain'
 		usesService compilerGate
 		sourceFile = source
-		shaderDependencies.from(objects.newInstance(
-				primeShaderTaskTypes.dependencyClosure, source, dependencyGraph))
+		// A file-tree spec survives configuration-cache serialization without evaluating the
+		// graph. A callable file list is resolved too early, before new ABI modules exist.
+		shaderDependencies.from(productionShaderIncludes.collect { root ->
+			fileTree(root).matching { include(dependencyClosure) }
+		})
+		shaderDependencies.builtBy(generateShaderAbi)
 		includeDirectories.from(productionShaderIncludes)
 		artifactId = id
 		stage = artifact.stage

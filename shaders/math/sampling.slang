@@ -2,18 +2,17 @@
 module "math/sampling.slang";
 
 import "prime_abi_types.slang";
+import "math/hash.slang";
 
 public static const uint PRIME_SAMPLE_EFFECT_CAMERA = 0;
 public static const uint PRIME_SAMPLE_EFFECT_DIRECT_SUN = 2;
 public static const uint PRIME_SAMPLE_EFFECT_SCATTER_BSDF = 3;
-public static const uint PRIME_SAMPLE_EFFECT_RUSSIAN_ROULETTE = 4;
 public static const uint PRIME_SAMPLE_EFFECT_DIRECT_AREA_LIGHT = 5;
 public static const uint PRIME_SAMPLE_DIMENSION_PRIMARY = 0;
 public static const uint PRIME_SAMPLE_DIMENSION_SECONDARY = 1;
 
 public static const uint PRIME_SOBOL_INDEX_MASK = 0xffff0000;
 public static const float PRIME_UINT32_TO_FLOAT_EXCLUSIVE_SCALE = 1.0 / 4294967808.0;
-public static const float PRIME_UINT24_TO_FLOAT_SCALE = 1.0 / 16777216.0;
 
 public struct PrimeSampleBase
 {
@@ -67,15 +66,6 @@ public static const uint PRIME_SOBOL_BURLEY_TABLE[128] = {
     0x1f001001, 0x2e003003, 0x45004004, 0xc900a00a
 };
 
-public uint primeHash32(uint value)
-{
-    value ^= value >> 16;
-    value *= 0x21f0aaad;
-    value ^= value >> 15;
-    value *= 0xf35a2d97;
-    value ^= value >> 15;
-    return value;
-}
 
 public uint primeHighQualityHash(uint value)
 {
@@ -87,18 +77,7 @@ public uint primeHighQualityHash(uint value)
     return value ^ 0xe6fe3beb;
 }
 
-public uint primeHashCombine(uint seed, uint value)
-{
-    return seed ^ (primeHash32(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2));
-}
 
-public uint primePathSampleSeed(uint2 pixel, uint sampleEpoch, uint pathIndex)
-{
-    uint seed = primeHash32(pixel.x);
-    seed = primeHashCombine(seed, pixel.y);
-    seed = primeHashCombine(seed, sampleEpoch);
-    return primeHashCombine(seed, pathIndex);
-}
 
 public uint primeSampleBaseSeed(PrimeSampleBase base)
 {
@@ -145,10 +124,6 @@ public float primeUintToFloatExclusive(uint value)
     return float(value) * PRIME_UINT32_TO_FLOAT_EXCLUSIVE_SCALE;
 }
 
-public float primeHashToFloat(uint value)
-{
-    return float(value >> 8) * PRIME_UINT24_TO_FLOAT_SCALE;
-}
 
 public float primeSobolBurley(uint reversedBitIndex, uint dimension, uint seed)
 {
@@ -233,8 +208,5 @@ public float primeHashSample1D(
         uint effect,
         uint streamIndex)
 {
-    uint seed = primeEffectSeed(base, effect);
-    seed = primeHashCombine(seed, base.sampleIndex);
-    seed = primeHashCombine(seed, streamIndex);
-    return primeHashToFloat(primeHash32(seed));
+    return primeHashSampleValue(base.seed, base.sampleIndex, effect, streamIndex);
 }

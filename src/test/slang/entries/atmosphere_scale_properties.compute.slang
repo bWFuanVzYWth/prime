@@ -1,5 +1,7 @@
 
 import "model/atmosphere/sky.slang";
+import "model/atmosphere/spectrum.slang";
+
 
 
 

@@ -57,27 +57,24 @@ bool primeSunContainsDirection(IntegratorRecord integrator, float3 direction) {
 
 float3 primeSunRadiance(
         IntegratorRecord integrator,
-        float3 surfacePosition,
         float3 direction) {
     return float3(max(integrator.sunDirectionIntensity.w, 0.0) / primeSunSolidAngle())
-            * primeAtmosphereSunTransmittance(surfacePosition, direction);
+            * primeAtmosphereDistantTransmittance(direction);
 }
 
 public float3 primeResolveSampledSunRadiance(
         IntegratorRecord integrator,
-        float3 surfacePosition,
         LightSample light) {
-    return primeSunRadiance(integrator, surfacePosition, light.direction);
+    return primeSunRadiance(integrator, light.direction);
 }
 
 public LightEvaluation primeEvaluateSun(
         IntegratorRecord integrator,
-        float3 surfacePosition,
         float3 direction) {
     LightEvaluation result;
     bool containsDirection = primeSunContainsDirection(integrator, direction);
     result.radiance = containsDirection
-            ? primeSunRadiance(integrator, surfacePosition, direction)
+            ? primeSunRadiance(integrator, direction)
             : float3(0.0);
     result.pdf = containsDirection ? primeSunPdf() : 0.0;
     return result;
@@ -85,7 +82,6 @@ public LightEvaluation primeEvaluateSun(
 
 public LightSample primeSampleSun(
         IntegratorRecord integrator,
-        float3 surfacePosition,
         float2 sampleValue) {
     float cosine = lerp(primeSunCosAngularRadius(), 1.0, sampleValue.x);
     float sine = sqrt(1.0 - cosine * cosine);

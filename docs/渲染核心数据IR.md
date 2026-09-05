@@ -36,6 +36,8 @@ Source → Scene → Frame → Transport → Reconstruction → Presentation
 - **Scene**：与相机无关的稳定 ID、几何、拓扑、材质、纹理、介质、灯光和动画计划。
 - **Frame**：一次候选帧的 extent、相机、jitter、revision、动态实例、功能选择和 history validity。
 - **Transport**：求交、BSDF、介质、路径状态、队列、随机地址和原始重建信号。
+  实验 Lambert 模型的独立路径记录和双队列合同见[轻量路径追踪首版](轻量路径追踪首版.md)；
+  它与 OpenPBR transport 不共享可变状态或记录布局。
 - **Reconstruction**：可见/虚拟表面、motion、depth、normal、albedo、radiance、exposure 和有效性。
 - **Presentation**：scene-referred linear Rec.2020 到 tone/gamut mapping、显示编码、UI 合成和 swapchain。
 - **Interop**：封送 Vulkan/NRD/FSR/NGX/Streamline 所需的 layout、matrix storage、scale 和 handle；
@@ -146,6 +148,9 @@ f32，不按 triangle 持久化高精度副本。
 同一命中的 base texture 读取已包含 frame extent；normal/optical 采样在当前材质求值内复用该
 exact word。两个 auxiliary 通道同时存在时可一次加载共享的 16 B 相邻区，单通道保持窄加载；
 descriptor carrier 在纹理求值结束即死亡，不进入 `PrimeMaterialSample` 或跨 dispatch 状态。
+
+静态几何使用 4 B 全局 SurfaceKey 引用去重后的固定记录数组；key 在有效 GPU 引用期间稳定，
+完成退休后可复用。key 不承担图元身份，跨 cluster 共享不会改变源/目标拒绝。
 
 `PrimitiveRecord` 保持 32 B。table-backed identity 为 `TintId:u16 | MaterialId:u16`，只内联 UV、方向、
 变化几何控制、emitter/relation payload 等 triangle-specific 事实；dynamic/baked ID 0 保留显式兼容编码。

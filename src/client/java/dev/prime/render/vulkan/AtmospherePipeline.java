@@ -45,7 +45,8 @@ public final class AtmospherePipeline implements Destroyable {
         MULTI_SCATTERING_HIGH,
         SKY_VIEW,
         AERIAL_RADIANCE,
-        AERIAL_TRANSMITTANCE
+        AERIAL_TRANSMITTANCE,
+        CAMERA_TRANSMITTANCE
     }
     private static final int IMAGE_COUNT = ImageRole.values().length;
     private static final int PHASE_LUT_BINDING = 7;
@@ -56,8 +57,9 @@ public final class AtmospherePipeline implements Destroyable {
     private static final int SUN_SHADOW_HIERARCHY_COUNT = SunShadowClipmap.CASCADE_COUNT;
     private static final int SUN_SHADOW_HIERARCHY_WIDTH = SunShadowClipmap.RESOLUTION;
     private static final int SUN_SHADOW_HIERARCHY_HEIGHT = SunShadowClipmap.RESOLUTION;
-    private static final int BINDING_COUNT =
+    private static final int CAMERA_TRANSMITTANCE_BINDING =
             SUN_SHADOW_HIERARCHY_BINDING + SUN_SHADOW_HIERARCHY_COUNT;
+    private static final int BINDING_COUNT = CAMERA_TRANSMITTANCE_BINDING + 1;
     private static final int PHASE_LUT_BYTE_SIZE = 131_072;
     private static final int AERIAL_KEY_SIZE = 21;
     private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
@@ -138,6 +140,9 @@ public final class AtmospherePipeline implements Destroyable {
                     64, 64, "Prime atmosphere multiple scattering high");
             images[ImageRole.SKY_VIEW.ordinal()] = context.createAtmosphereImage2D(
                     256, 256, "Prime atmosphere sky view");
+            images[ImageRole.CAMERA_TRANSMITTANCE.ordinal()] = context.createAtmosphereImage2D(
+                    ShaderAbi.ATMOSPHERE_DIRECTION_TRANSMITTANCE_WIDTH,
+                    1, "Prime atmosphere camera transmittance");
             images[ImageRole.AERIAL_RADIANCE.ordinal()] = context.createAtmosphereImage3D(
                     ShaderAbi.ATMOSPHERE_AERIAL_EPIPOLAR_SAMPLES,
                     ShaderAbi.ATMOSPHERE_AERIAL_EPIPOLAR_SLICES,
@@ -203,11 +208,14 @@ public final class AtmospherePipeline implements Destroyable {
             this.multiScatteringImages = new VulkanImage[] {
                 image(ImageRole.MULTI_SCATTERING_LOW), image(ImageRole.MULTI_SCATTERING_HIGH)
             };
-            this.skyImage = new VulkanImage[] {image(ImageRole.SKY_VIEW)};
+            this.skyImage = new VulkanImage[] {
+                image(ImageRole.SKY_VIEW), image(ImageRole.CAMERA_TRANSMITTANCE)
+            };
             this.aerialImages = new VulkanImage[] {
                 image(ImageRole.AERIAL_RADIANCE), image(ImageRole.AERIAL_TRANSMITTANCE)
             };
             this.dynamicImages = new VulkanImage[] {
+                image(ImageRole.CAMERA_TRANSMITTANCE),
                 image(ImageRole.SKY_VIEW),
                 image(ImageRole.AERIAL_RADIANCE),
                 image(ImageRole.AERIAL_TRANSMITTANCE)
@@ -258,12 +266,8 @@ public final class AtmospherePipeline implements Destroyable {
         return image(ImageRole.SKY_VIEW);
     }
 
-    public VulkanImage transmittanceLow() {
-        return image(ImageRole.TRANSMITTANCE_LOW);
-    }
-
-    public VulkanImage transmittanceHigh() {
-        return image(ImageRole.TRANSMITTANCE_HIGH);
+    public VulkanImage cameraTransmittance() {
+        return image(ImageRole.CAMERA_TRANSMITTANCE);
     }
 
     public VulkanImage aerialRadiance() {
@@ -683,8 +687,10 @@ public final class AtmospherePipeline implements Destroyable {
     private static long createDescriptorSetLayout(VulkanContext context, MemoryStack stack) {
         VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(BINDING_COUNT, stack);
         for (int index = 0; index < IMAGE_COUNT; index++) {
+            int binding = index == ImageRole.CAMERA_TRANSMITTANCE.ordinal()
+                    ? CAMERA_TRANSMITTANCE_BINDING : index;
             VulkanDescriptors.layoutBinding(
-                    bindings.get(index), index,
+                    bindings.get(binding), binding,
                     VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, COMPUTE_STAGE);
         }
         VulkanDescriptors.layoutBinding(
@@ -792,8 +798,10 @@ public final class AtmospherePipeline implements Destroyable {
         VulkanDescriptors.Binding[] bindings =
                 new VulkanDescriptors.Binding[BINDING_COUNT];
         for (int index = 0; index < IMAGE_COUNT; index++) {
-            bindings[index] = VulkanDescriptors.image(
-                    index,
+            int binding = index == ImageRole.CAMERA_TRANSMITTANCE.ordinal()
+                    ? CAMERA_TRANSMITTANCE_BINDING : index;
+            bindings[binding] = VulkanDescriptors.image(
+                    binding,
                     VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                     images[index].view(),
                     VK12.VK_IMAGE_LAYOUT_GENERAL);

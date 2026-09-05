@@ -1,4 +1,13 @@
 {
+  "lambertContract": {
+      "maximumBounces": 12,
+      "recordSize": 128,
+      "queueCount": 2,
+      "commandStride": 16,
+      "indexSize": 4,
+      "pathBinding": 36,
+      "queueBinding": 37
+  },
   "structs": {
     "primitiveRecord": {
       "size": 32,
@@ -212,8 +221,7 @@
     "tlas": 0,
     "blockAtlas": 2,
     "skyView": 4,
-    "transmittanceLow": 5,
-    "transmittanceHigh": 6,
+    "cameraTransmittance": 5,
     "aerialRadiance": 7,
     "aerialTransmittance": 8,
     "transmissionGgxEnergy": 17,
@@ -223,6 +231,7 @@
     "tintSamples": 50,
     "baseColorPages": 51,
     "materialCoreRecords": 52,
+    "surfaceRecords": 53,
     "starmap": 34,
     "realtimeStbn": 35,
     "sunShadowDepth0": 38,
@@ -289,6 +298,10 @@
     "auxiliaryInfoOffset": 16,
     "opticalOriginOffset": 20,
     "auxiliaryExtentOffset": 24
+  },
+  "surfaceRecordContract": {
+    "keySize": 4,
+    "keysFlag": "0x20000000"
   },
   "materialCoreContract": {
     "recordSize": 8,
@@ -405,6 +418,7 @@
     "worldUnitScaleKm": 0.001,
     "spaceSunIntensity": 12.5,
     "sunAngularRadiusRadians": 0.00471,
+    "directionTransmittanceWidth": 8193,
     "aerialMaxDistanceKm": 2.048,
     "aerialWidth": 128,
     "aerialHeight": 64,

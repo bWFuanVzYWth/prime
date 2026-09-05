@@ -2,6 +2,7 @@
 module "service/material/auxiliary_access.slang";
 
 import "service/material/access.slang";
+import "service/material/coverage.slang";
 import "math/packed_geometry.slang";
 
 // Only full material evaluation imports these arrays; opacity entries cannot see them.

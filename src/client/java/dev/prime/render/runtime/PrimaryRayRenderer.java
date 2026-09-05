@@ -95,6 +95,7 @@ final class PrimaryRayRenderer implements Destroyable {
                 sceneTextures,
                 materialTextures.binding(),
                 scene.materialCore(),
+                scene.surfaces(),
                 scene.tintSamples(),
                 atmosphere);
     }

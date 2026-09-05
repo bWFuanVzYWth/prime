@@ -160,6 +160,7 @@ final class RayTracingPushConstantsTest {
                         0x1020_3040_5060_7080L,
                         new TerrainScene.TintSampleBinding(0L, 0L),
                         new TerrainScene.MaterialCoreBinding(0L, 0L),
+                        new TerrainScene.SurfaceBinding(17L, 32L),
                         96,
                         48,
                         -48,
@@ -167,7 +168,7 @@ final class RayTracingPushConstantsTest {
                         5L,
                         4L,
                         java.util.List.of(),
-                        new TerrainScene.SceneStatistics(0, 0L, 0L, 0, 0));
+                        new TerrainScene.SceneStatistics(0, 0L, 0L, 0, 0, 0L, 0L, 0L));
         LightingSettings.Snapshot lighting =
                 new LightingSettings.Snapshot(4, -8, 12);
         MaterialSettings.Snapshot material =

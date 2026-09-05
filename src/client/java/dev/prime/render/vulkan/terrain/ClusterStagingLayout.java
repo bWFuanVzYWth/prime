@@ -36,7 +36,7 @@ public final class ClusterStagingLayout {
         for (CpuVoxelMesh voxelMesh : mesh.voxelMeshes()) {
             CpuMeshSegment geometry = voxelMesh.geometry();
             result = StagingArena.requiredEndOffset(result, geometry.positionBytes(), Float.BYTES);
-            result = StagingArena.requiredEndOffset(result, geometry.primitiveBytes(), Integer.BYTES);
+            result = StagingArena.requiredEndOffset(result, geometry.primitiveBytes() + geometry.primitiveBytes() / CpuSectionMesh.PRIMITIVE_WORDS, Integer.BYTES);
             result = opacityEndOffset(result, voxelMesh.opacityMicromap(), includeOpacityMicromap);
         }
         return result;
@@ -86,7 +86,7 @@ public final class ClusterStagingLayout {
                 cursor, (long) triangles * 9L * Float.BYTES, Float.BYTES);
         return StagingArena.requiredEndOffset(
                 result,
-                (long) primitives * CpuSectionMesh.PRIMITIVE_WORDS * Integer.BYTES,
+                (long) primitives * (CpuSectionMesh.PRIMITIVE_WORDS + 1) * Integer.BYTES,
                 Integer.BYTES);
     }
 }

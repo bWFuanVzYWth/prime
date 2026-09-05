@@ -17,9 +17,9 @@ public float3 primeEvaluateEnvironmentContribution(
         inout PrimeIntegratorContext context,
         PathState path, IntegratorRecord integrator) {
     float3 stars = primeStarmapRadiance(
-            integrator, path.physicalOrigin, path.rayDirection);
+            integrator, path.rayDirection);
     LightEvaluation sun = primeEvaluateSun(
-            integrator, path.physicalOrigin, path.rayDirection);
+            integrator, path.rayDirection);
     bool previousUsedSunNee =
             (primePathFlags(path.control)
                     & PRIME_PATH_PREVIOUS_NO_SUN_NEE) == 0u;

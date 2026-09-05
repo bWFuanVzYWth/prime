@@ -2,6 +2,7 @@
 module "service/material/medium_access.slang";
 
 import "prime_material_core_abi.slang";
+import "service/material/coverage.slang";
 import "prime_abi_types.slang";
 import "math/packed_geometry.slang";
 import "service/material/access.slang";

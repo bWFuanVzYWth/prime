@@ -12,6 +12,7 @@
   "prime.options.realtime_renderer": "实时渲染器",
   "prime.options.realtime_renderer.tooltip": "在完整路径追踪与独立的轻量主射线渲染器之间切换。主射线模式只显示最近命中的原版颜色和纹理，不计算光照或 PBR。",
   "prime.options.realtime_renderer.path_tracing": "路径追踪",
+  "prime.options.realtime_renderer.lightweight_path_tracing": "轻量路径追踪（Lambert）",
   "prime.options.realtime_renderer.textured_primary_rays": "纹理主射线",
   "prime.options.additional_specular_bounces": "额外镜面反弹次数",
   "prime.options.additional_specular_bounces.tooltip": "设置实时渲染的 Delta 链长度（1–64，默认 16）：在首个非 Delta 表面前，最多连续追踪这么多次理想镜面反射或折射。",

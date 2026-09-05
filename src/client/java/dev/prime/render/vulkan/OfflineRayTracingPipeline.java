@@ -81,6 +81,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
             List<TraceBackend.SceneTexture> sceneTextures,
             MaterialTexturePages.Binding materialTextures,
             TerrainScene.MaterialCoreBinding materialCore,
+            TerrainScene.SurfaceBinding surfaces,
             TerrainScene.TintSampleBinding tintSamples,
             AtmospherePipeline atmosphere) {
         this.backend.ensureSceneDescriptors(
@@ -90,6 +91,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
                 sceneTextures,
                 materialTextures,
                 materialCore,
+                surfaces,
                 tintSamples,
                 atmosphere);
         int width = runningMean.width();

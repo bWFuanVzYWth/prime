@@ -2,6 +2,9 @@
 module "entry/atmosphere/atmosphere_aerial_transmittance.compute.slang";
 
 import "model/atmosphere/sky.slang";
+import "model/atmosphere/spectrum.slang";
+
+
 import "service/image/access.slang";
 import "prime_abi_types.slang";
 import "contract/coordinate.slang";

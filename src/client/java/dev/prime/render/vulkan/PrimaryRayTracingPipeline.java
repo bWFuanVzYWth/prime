@@ -86,6 +86,7 @@ public final class PrimaryRayTracingPipeline implements Destroyable {
             List<TraceBackend.SceneTexture> sceneTextures,
             MaterialTexturePages.Binding materialTextures,
             TerrainScene.MaterialCoreBinding materialCore,
+            TerrainScene.SurfaceBinding surfaces,
             TerrainScene.TintSampleBinding tintSamples,
             AtmospherePipeline atmosphere) {
         this.backend.ensureSceneDescriptors(
@@ -95,6 +96,7 @@ public final class PrimaryRayTracingPipeline implements Destroyable {
                 sceneTextures,
                 materialTextures,
                 materialCore,
+                surfaces,
                 tintSamples,
                 atmosphere);
         VulkanImage current = this.output;

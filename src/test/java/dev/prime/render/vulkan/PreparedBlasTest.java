@@ -86,6 +86,8 @@ final class PreparedBlasTest {
     void compactionPolicyControlsOnlyTheCompactionBuildFlag() {
         int enabled = PreparedBlas.buildFlags(PreparedBlas.CompactionPolicy.ENABLED);
         int disabled = PreparedBlas.buildFlags(PreparedBlas.CompactionPolicy.DISABLED);
+        assertTrue((disabled & org.lwjgl.vulkan.KHRRayTracingPositionFetch
+                .VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_BIT_KHR) != 0);
 
         assertTrue((enabled
                         & KHRAccelerationStructure

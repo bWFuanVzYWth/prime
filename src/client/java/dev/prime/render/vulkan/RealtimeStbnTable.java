@@ -9,7 +9,7 @@ import org.lwjgl.vulkan.VK12;
 import org.lwjgl.vulkan.VkBufferCopy;
 import org.lwjgl.vulkan.VkCommandBuffer;
 
-/** Owns the immutable integer STBN banks used only by realtime direct-light sampling. */
+/** Owns the immutable integer STBN banks used by realtime transport sampling. */
 final class RealtimeStbnTable implements Destroyable {
     static final String RESOURCE = "/prime/stbn/realtime_128x128x64x3.rg16ui";
     static final int BYTE_SIZE = ShaderAbi.REALTIME_STBN_WIDTH

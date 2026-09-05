@@ -188,6 +188,10 @@ public final class TerrainStreamer implements AutoCloseable {
         return this.scene.residentView();
     }
 
+    public TerrainScene.SurfaceStatistics surfaceStatistics() {
+        return this.scene.surfaceStatistics();
+    }
+
     public TerrainScene.CompactionStats compactionStats() {
         return this.scene.compactionStats();
     }

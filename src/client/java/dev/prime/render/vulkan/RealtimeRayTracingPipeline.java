@@ -18,7 +18,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
 
 /** Realtime ray-tracing pipeline and its wavefront resources. */
-public final class RealtimeRayTracingPipeline implements Destroyable {
+public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
     private static final int PRIMARY_DIRECT_INPUT = 1;
     private static final int PRIMARY_INPUT = 2;
     private static final int NEXT_STEP_INPUT = 4;
@@ -101,6 +101,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
             List<TraceBackend.SceneTexture> sceneTextures,
             MaterialTexturePages.Binding materialTextures,
             TerrainScene.MaterialCoreBinding materialCore,
+            TerrainScene.SurfaceBinding surfaces,
             TerrainScene.TintSampleBinding tintSamples,
             AtmospherePipeline atmosphere,
             RawWavefrontFrame signals) {
@@ -111,6 +112,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 sceneTextures,
                 materialTextures,
                 materialCore,
+                surfaces,
                 tintSamples,
                 atmosphere);
         int width = signals.noisyDiffuse().width();
@@ -500,7 +502,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
                 destinationAccess);
     }
 
-    private static long createDescriptorSetLayout(
+    static long createDescriptorSetLayout(
             VulkanContext context, MemoryStack stack) {
         VkDescriptorSetLayoutBinding.Buffer bindings =
                 VkDescriptorSetLayoutBinding.calloc(DESCRIPTOR_BINDING_COUNT, stack);
@@ -655,7 +657,7 @@ public final class RealtimeRayTracingPipeline implements Destroyable {
         }
     }
 
-    private enum ImageBinding {
+    enum ImageBinding {
         STABLE(ShaderAbi.DESCRIPTOR_STABLE_RADIANCE, PRIMARY_INPUT | NEXT_STEP_INPUT),
         NOISY_DIFFUSE(ShaderAbi.DESCRIPTOR_NRD_NOISY_DIFFUSE, PRIMARY_DIRECT_INPUT | PRIMARY_INPUT | NEXT_STEP_INPUT),
         NOISY_SPECULAR(ShaderAbi.DESCRIPTOR_NRD_NOISY_SPECULAR, PRIMARY_DIRECT_INPUT | PRIMARY_INPUT | NEXT_STEP_INPUT),
