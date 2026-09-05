@@ -1,10 +1,13 @@
 package dev.prime.render.scene.vanilla;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.font.TextRenderable;
@@ -18,6 +21,24 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 final class DynamicSceneCaptureTest {
+    @Test
+    void capturedAtlasRetainsSrgbEncodingDespiteAttachmentUsage() {
+        GpuTexture atlas = texture(15);
+        GpuTexture unrelatedAttachment = texture(15);
+        var captured = java.util.List.of(atlas);
+        assertFalse(DynamicSceneCapture.hasUnknownColorEncoding(atlas, captured));
+        assertTrue(DynamicSceneCapture.hasUnknownColorEncoding(unrelatedAttachment, captured));
+        assertTrue(DynamicSceneCapture.hasUnknownColorEncoding(atlas, java.util.List.of()));
+        assertFalse(DynamicSceneCapture.hasUnknownColorEncoding(texture(5), java.util.List.of()));
+    }
+
+    private static GpuTexture texture(int usage) {
+        return new GpuTexture(usage, "same label", GpuFormat.RGBA8_UNORM, 16, 16, 1, 1) {
+            @Override public void close() {}
+            @Override public boolean isClosed() { return false; }
+        };
+    }
+
     @Test
     void preparedTextReplaysRenderableGlyphGeometry() {
         Font.PreparedText text = new Font.PreparedText() {

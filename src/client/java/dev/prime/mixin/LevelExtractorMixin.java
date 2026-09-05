@@ -109,7 +109,11 @@ public abstract class LevelExtractorMixin {
                 if (chunk == null) {
                     continue;
                 }
-                for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
+                var blockEntities = chunk.getBlockEntities();
+                // Most loaded chunks have none. Avoid a values view and iterator per empty
+                // chunk while still extracting every off-screen block entity needed by rays.
+                if (blockEntities.isEmpty()) continue;
+                for (BlockEntity blockEntity : blockEntities.values()) {
                     long position = blockEntity.getBlockPos().asLong();
                     if (extractedPositions.contains(position)) {
                         continue;

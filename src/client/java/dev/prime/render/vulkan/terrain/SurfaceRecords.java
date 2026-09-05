@@ -48,7 +48,11 @@ final class SurfaceRecords {
         return this.dirty.stream().sorted(java.util.Comparator.comparingInt(e -> e.key)).toList();
     }
 
-    void uploaded(List<Entry> entries) { this.dirty.removeAll(entries); }
+    void uploaded(List<Entry> entries) {
+        // AbstractSet.removeAll scans the list when sizes are equal (the normal full upload),
+        // making publication quadratic. Remove by hash to keep work linear in uploaded records.
+        for (Entry entry : entries) this.dirty.remove(entry);
+    }
 
     final class Lease implements Destroyable {
         private final HashSet<Entry> entries = new HashSet<>();

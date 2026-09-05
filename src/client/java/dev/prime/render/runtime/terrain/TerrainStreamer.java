@@ -46,9 +46,10 @@ import net.minecraft.util.Util;
  */
 public final class TerrainStreamer implements AutoCloseable {
     private static final long[] EMPTY_EVICTIONS = new long[0];
-    // A normal frame targets one reusable staging page. An oversized atomic replacement obtains a
-    // correspondingly sized transient page instead of being rejected by a content policy.
-    private static final long TARGET_UPLOAD_BYTES_PER_FRAME = StagingArena.PAGE_SIZE;
+    // Staging capacity is a memory limit, not a frame-time budget. Admit one oversized atomic
+    // cluster alone; ordinary frames spread BLAS builds across smaller upload batches.
+    private static final long TARGET_UPLOAD_BYTES_PER_FRAME = 8L * 1024L * 1024L;
+    private static final int MAX_UPLOADS_PER_FRAME = 4;
     private static final int MAX_UNLOADED_PROBES_PER_FRAME = 64;
     private static final int MAX_EXTERNAL_DIRTY_CLUSTERS = 16_384;
     private final TerrainScene scene;
@@ -645,7 +646,8 @@ public final class TerrainStreamer implements AutoCloseable {
             CpuClusterMesh mesh = next.mesh();
             long nextEndOffset = ClusterStagingLayout.endOffset(
                     uploadBytes, mesh, this.opacityMicromapSupported);
-            if (!uploads.isEmpty() && nextEndOffset > TARGET_UPLOAD_BYTES_PER_FRAME) {
+            if (uploads.size() >= MAX_UPLOADS_PER_FRAME
+                    || !uploads.isEmpty() && nextEndOffset > TARGET_UPLOAD_BYTES_PER_FRAME) {
                 break;
             }
             this.readyForUpload.removeFirst();

@@ -72,6 +72,10 @@ final class SurfaceRecordsTest {
         lease.encode(new int[8]);
         table.uploaded(upload);
         assertEquals(1, table.dirty().size());
+        table.uploaded(table.dirty());
+        assertTrue(table.dirty().isEmpty());
+        table.uploaded(upload);
+        assertTrue(table.dirty().isEmpty());
         assertThrows(IllegalArgumentException.class, () -> lease.encode(new int[9]));
     }
 }

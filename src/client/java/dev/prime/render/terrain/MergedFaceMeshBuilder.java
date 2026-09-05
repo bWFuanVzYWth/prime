@@ -127,9 +127,12 @@ final class MergedFaceMeshBuilder {
             groups.computeIfAbsent(new GroupKey(face), ignored -> new ArrayList<>())
                     .add(face);
         }
+        // Reuse one worker-local grid across material/plane groups instead of allocating 4096
+        // references per group. Reset also clears leftovers after cutout covering.
+        FaceGrid grid = new FaceGrid();
         for (ArrayList<MergeFace> group : groups.values()) {
             this.work.checkpoint();
-            FaceGrid grid = new FaceGrid();
+            grid.reset();
             for (MergeFace face : group) {
                 this.work.step();
                 grid.add(face);
@@ -539,6 +542,13 @@ final class MergedFaceMeshBuilder {
         private final long[] occupied = new long[GRID_SIZE];
         private final ArrayList<MergeFace> duplicates = new ArrayList<>();
         private MergeFace first;
+
+        void reset() {
+            Arrays.fill(this.faces, null);
+            Arrays.fill(this.occupied, 0L);
+            this.duplicates.clear();
+            this.first = null;
+        }
 
         void add(MergeFace face) {
             if (this.first == null) {

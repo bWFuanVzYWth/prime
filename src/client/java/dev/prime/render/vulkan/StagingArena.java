@@ -94,10 +94,7 @@ public final class StagingArena implements AutoCloseable {
         public Slice write(ByteBuffer data, long alignment) {
             long size = data.remaining();
             Slice slice = this.allocate(size, alignment);
-            MemoryUtil.memCopy(
-                    MemoryUtil.memAddress(data) + data.position(),
-                    this.page.buffer.mappedAddress() + slice.offset(),
-                    size);
+            VulkanBuffer.copyRemaining(data, this.page.buffer.mappedAddress() + slice.offset());
             return slice;
         }
 

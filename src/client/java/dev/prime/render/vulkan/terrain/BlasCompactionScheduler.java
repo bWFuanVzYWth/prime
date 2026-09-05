@@ -11,6 +11,8 @@ import java.util.function.ToLongFunction;
 /** Render-thread-owned FIFO admission and lifetime accounting for BLAS compaction. */
 final class BlasCompactionScheduler implements AutoCloseable {
     static final long TARGET_BUDGET_BYTES = 64L * 1024L * 1024L;
+    private static final long FRAME_BUDGET_BYTES = 8L * 1024L * 1024L;
+    private static final int MAX_JOBS_PER_FRAME = 16;
 
     private final ArrayList<Job> jobs = new ArrayList<>();
     private final IdentityHashMap<PreparedBlas, Job> byBlas = new IdentityHashMap<>();
@@ -200,8 +202,10 @@ final class BlasCompactionScheduler implements AutoCloseable {
             throw new IllegalArgumentException("Reserved compaction bytes must not be negative");
         }
         long remaining = Math.max(0L, TARGET_BUDGET_BYTES - reservedBytes);
+        long frameRemaining = FRAME_BUDGET_BYTES;
         ArrayList<T> admitted = new ArrayList<>();
         for (T job : jobs) {
+            if (admitted.size() == MAX_JOBS_PER_FRAME) break;
             if (!ready.test(job)) {
                 continue;
             }
@@ -218,8 +222,13 @@ final class BlasCompactionScheduler implements AutoCloseable {
                 }
                 break;
             }
+            // A single indivisible BLAS may exceed the frame budget, but never bypass the
+            // in-flight memory budget above or share that frame's compaction batch.
+            if (bytes > frameRemaining && !admitted.isEmpty()) break;
             admitted.add(job);
             remaining -= bytes;
+            frameRemaining -= bytes;
+            if (frameRemaining <= 0L) break;
         }
         return List.copyOf(admitted);
     }

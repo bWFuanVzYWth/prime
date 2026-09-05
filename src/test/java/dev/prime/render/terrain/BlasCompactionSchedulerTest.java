@@ -22,8 +22,8 @@ final class BlasCompactionSchedulerTest {
 
     @Test
     void admitsMultipleReadyJobsUpToTheExactBudgetBoundary() {
-        Job first = new Job(1, 16L * MIB, true);
-        Job second = new Job(2, 48L * MIB, true);
+        Job first = new Job(1, 3L * MIB, true);
+        Job second = new Job(2, 5L * MIB, true);
         Job third = new Job(3, 1L, true);
 
         assertEquals(
@@ -44,8 +44,8 @@ final class BlasCompactionSchedulerTest {
     @Test
     void olderUnreadyOrCancelledJobsDoNotBlockReadyWork() {
         Job unready = new Job(1, 63L * MIB, false);
-        Job ready = new Job(2, 32L * MIB, true);
-        Job alsoReady = new Job(3, 32L * MIB, true);
+        Job ready = new Job(2, 4L * MIB, true);
+        Job alsoReady = new Job(3, 4L * MIB, true);
 
         assertEquals(
                 List.of(ready, alsoReady),
@@ -63,6 +63,17 @@ final class BlasCompactionSchedulerTest {
         assertEquals(
                 List.of(),
                 admit(1L, List.of(oversized, younger)));
+    }
+
+    @Test
+    void frameBudgetIsIndependentOfOutstandingMemoryAndAllowsOneLargeJob() {
+        Job head = new Job(1, 12L * MIB, true);
+        Job younger = new Job(2, MIB, true);
+        assertEquals(List.of(head), admit(40L * MIB, List.of(head, younger)));
+        assertEquals(List.of(), admit(60L * MIB, List.of(head, younger)));
+        List<Job> tiny = java.util.stream.IntStream.range(0, 30)
+                .mapToObj(i -> new Job(i, 1L, true)).toList();
+        assertEquals(tiny.subList(0, 16), admit(0L, tiny));
     }
 
     @Test

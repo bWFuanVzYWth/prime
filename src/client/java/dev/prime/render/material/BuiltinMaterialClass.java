@@ -16,6 +16,8 @@ public enum BuiltinMaterialClass {
     COPPER(11, 0.34F, 235),
     AGED_COPPER(12, 0.78F, 0);
 
+    private static final BuiltinMaterialClass[] BY_ID = indexById();
+
     private final int id;
     private final float roughness;
     private final int fresnelCode;
@@ -39,11 +41,20 @@ public enum BuiltinMaterialClass {
     }
 
     public static BuiltinMaterialClass fromId(int id) {
-        for (BuiltinMaterialClass value : values()) {
-            if (value.id == id) {
-                return value;
-            }
+        if (id >= 0 && id < BY_ID.length && BY_ID[id] != null) {
+            return BY_ID[id];
         }
         throw new IllegalArgumentException("Invalid built-in material class: " + id);
+    }
+
+    private static BuiltinMaterialClass[] indexById() {
+        BuiltinMaterialClass[] result = new BuiltinMaterialClass[16];
+        for (BuiltinMaterialClass value : values()) {
+            if (value.id < 0 || value.id >= result.length || result[value.id] != null) {
+                throw new IllegalStateException("Built-in material IDs must be unique four-bit values");
+            }
+            result[value.id] = value;
+        }
+        return result;
     }
 }

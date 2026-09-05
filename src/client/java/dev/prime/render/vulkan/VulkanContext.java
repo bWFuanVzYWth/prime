@@ -44,6 +44,8 @@ public final class VulkanContext implements AutoCloseable {
     private boolean closed;
     private long nextMemorySnapshot;
     private MemoryStatistics memoryStatistics;
+    private final java.util.Map<String, SubmissionTiming> timings = new java.util.HashMap<>();
+    private static final boolean PROFILE_SUBMISSIONS = Boolean.getBoolean("prime.profileSubmissions");
 
     public VulkanContext(VulkanDevice device, VulkanCapabilities capabilities) {
         this.device = device;
@@ -124,6 +126,20 @@ public final class VulkanContext implements AutoCloseable {
     public VulkanCommandEncoder commandEncoder() {
         requireOpen();
         return this.device.createCommandEncoder();
+    }
+
+    public void beginTiming(String phase) {
+        if (PROFILE_SUBMISSIONS) this.timings.computeIfAbsent(phase, SubmissionTiming::new).begin();
+    }
+
+    public void endTiming(String phase) {
+        if (PROFILE_SUBMISSIONS) this.timings.get(phase).end();
+    }
+
+    public void abandonTiming(String phase) {
+        if (!PROFILE_SUBMISSIONS) return;
+        SubmissionTiming timing = this.timings.get(phase);
+        if (timing != null) timing.abandon();
     }
 
     public long uniformBufferOffsetAlignment() {
@@ -570,6 +586,8 @@ public final class VulkanContext implements AutoCloseable {
             failure = exception;
         }
         try {
+            for (SubmissionTiming timing : this.timings.values()) timing.close();
+            this.timings.clear();
             if (this.hdrPresentPass != null) {
                 this.hdrPresentPass.destroy();
                 this.hdrPresentPass = null;

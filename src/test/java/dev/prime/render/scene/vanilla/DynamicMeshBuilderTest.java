@@ -123,6 +123,27 @@ final class DynamicMeshBuilderTest {
     }
 
     @Test
+    void missingParticleTextureKeepsInstancesWithoutSamplingTheBlockAtlas() {
+        DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
+        DynamicMeshBuilder.VertexSink sink = builder.openParticle(PrimitiveTopology.QUADS, 0, 0);
+        vertex(sink, 0, 0, 0, 0.25F, 0.5F);
+        vertex(sink, 1, 0, 0, 0.5F, 0.5F);
+        vertex(sink, 1, 1, 0, 0.5F, 0.75F);
+        vertex(sink, 0, 1, 0, 0.25F, 0.75F);
+        sink.finish();
+        DynamicSceneFrame frame = builder.build(0, 0, 0, List.of());
+        DynamicSceneMotion motion = DynamicSceneMotion.prepare(frame, null);
+        assertEquals(1, motion.mesh().voxelInstances().count());
+        int[] records = motion.mesh().voxelMeshes().getFirst().geometry().primitiveRecords();
+        for (int triangle = 0; triangle < 2; triangle++) {
+            int base = triangle * 8;
+            assertEquals(PrimitivePacking.CONSTANT_UV_DENSITY, records[base + 6]);
+            assertEquals(PrimitivePacking.CONSTANT_UV_OWN_TINT
+                    | PrimitivePacking.CONSTANT_UV_BAKED_MATERIAL, records[base + 2]);
+        }
+    }
+
+    @Test
     void capturesTexturelessFeatureAsAnOwnedConstantMaterial() {
         DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
         DynamicMeshBuilder.VertexSink sink = builder.openUntextured(

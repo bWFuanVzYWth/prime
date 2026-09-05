@@ -42,6 +42,7 @@ public final class TerrainScene implements AutoCloseable {
     private final MediumIdRegistry mediumIds = new MediumIdRegistry();
     private final MaterialIdRegistry materialIds = new MaterialIdRegistry(this.mediumIds);
     private final VulkanBuffer materialCoreRecords;
+    private int uploadedMaterialCount;
     private final SurfaceTable surfaces;
     private final TintSampleTable tintSamples;
     private final BlasCompactionScheduler compactionScheduler =
@@ -259,8 +260,11 @@ public final class TerrainScene implements AutoCloseable {
         VulkanBuffer replacementWorldLights = null;
         VkCommandBuffer commandBuffer = null;
         boolean surfaceSubmitted = false;
+        int recordedMaterialCount = this.uploadedMaterialCount;
+        String timingPhase = replaceDynamic ? "dynamic scene" : "static scene";
         try {
             if (nonEmptyUploadCount > 0 || replacementTlas != null) {
+                this.context.beginTiming(timingPhase);
                 commandBuffer = this.context.commandEncoder().allocateAndBeginTransientCommandBuffer();
                 this.context.device().instance().debug().beginDebugGroup(commandBuffer, () -> "Prime terrain scene update");
             }
@@ -276,12 +280,16 @@ public final class TerrainScene implements AutoCloseable {
 
             if (clusterStagingBatch != null) {
                 this.surfaces.upload(clusterStagingBatch, commandBuffer);
-                int[] materialCore = this.materialIds.encodedCoreRecords();
-                copyBuffer(
-                        commandBuffer,
-                        clusterStagingBatch.write(
-                                materialCore, ShaderAbi.MATERIAL_CORE_RECORD_SIZE),
-                        this.materialCoreRecords);
+                recordedMaterialCount = this.materialIds.recordCount();
+                if (recordedMaterialCount != this.uploadedMaterialCount) {
+                    // IDs are append-only. Old frames can still read existing records, so write
+                    // only new IDs and advance the cursor after successful scene publication.
+                    int[] materialCore = this.materialIds.encodedCoreRecords(this.uploadedMaterialCount);
+                    copyBuffer(commandBuffer,
+                            clusterStagingBatch.write(materialCore, ShaderAbi.MATERIAL_CORE_RECORD_SIZE),
+                            this.materialCoreRecords,
+                            (long) this.uploadedMaterialCount * ShaderAbi.MATERIAL_CORE_RECORD_SIZE);
+                }
             }
 
             List<GpuCluster> finalClusters = this.buildFinalClusterList(
@@ -424,8 +432,10 @@ public final class TerrainScene implements AutoCloseable {
                 this.context.commandEncoder().execute(commandBuffer);
                 surfaceSubmitted = true;
                 transaction.submitted();
+                this.context.endTiming(timingPhase);
             }
             this.publish(preparedUpdate);
+            this.uploadedMaterialCount = recordedMaterialCount;
             transaction.published();
             this.surfaces.publish();
             RuntimeException retirementFailure = null;
@@ -447,6 +457,7 @@ public final class TerrainScene implements AutoCloseable {
             boolean submitted = surfaceSubmitted;
             RuntimeException failure = ResourceCleanup.run(
                     () -> this.surfaces.abort(submitted), exception);
+            failure = ResourceCleanup.run(() -> this.context.abandonTiming(timingPhase), failure);
             throw transaction.abort(failure);
         } finally {
             transaction.close();
@@ -501,6 +512,7 @@ public final class TerrainScene implements AutoCloseable {
                 }
             }
 
+            this.context.beginTiming("BLAS compaction");
             VkCommandBuffer commandBuffer =
                     this.context.commandEncoder().allocateAndBeginTransientCommandBuffer();
             this.context.device().instance().debug().beginDebugGroup(
@@ -563,6 +575,7 @@ public final class TerrainScene implements AutoCloseable {
             this.context.commandEncoder().execute(commandBuffer);
             submitted = true;
             replacementTlas.buildSubmitted();
+            this.context.endTiming("BLAS compaction");
 
             for (PreparedBlas.Compaction compaction : batch.compactions()) {
                 compaction.publish();
@@ -580,7 +593,8 @@ public final class TerrainScene implements AutoCloseable {
             retirementFailure = this.retire(preparedUpdate, retirementFailure);
             ResourceCleanup.throwIfFailed(retirementFailure);
         } catch (RuntimeException exception) {
-            RuntimeException failure = exception;
+            RuntimeException failure = ResourceCleanup.run(
+                    () -> this.context.abandonTiming("BLAS compaction"), exception);
             if (!ownershipTransferred) {
                 if (batch != null) {
                     if (submitted) {

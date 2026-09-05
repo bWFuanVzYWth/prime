@@ -55,8 +55,16 @@ public final class VulkanBuffer implements Destroyable {
         Objects.requireNonNull(source, "source");
         long length = source.remaining();
         validateMappedRange(offset, length);
-        MemoryUtil.memCopy(MemoryUtil.memAddress(source) + source.position(), this.mappedAddress() + offset, length);
+        copyRemaining(source, this.mappedAddress() + offset);
         Vma.vmaFlushAllocation(this.allocator, this.allocation, offset, length);
+    }
+
+    /** memAddress already includes position; preserve the source view's position and limit. */
+    static void copyRemaining(java.nio.ByteBuffer source, long destination) {
+        if (!source.isDirect()) {
+            throw new IllegalArgumentException("Native uploads require a direct buffer");
+        }
+        MemoryUtil.memCopy(MemoryUtil.memAddress(source), destination, source.remaining());
     }
 
     public void put(long offset, long sourceAddress, long length) {

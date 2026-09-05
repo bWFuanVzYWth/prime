@@ -172,6 +172,8 @@ final class TransparentBoundaryResolver {
 
         private final List<TwoSidedQuadReducer.ResolvedQuad> quads;
         private final Map<OverlayBin, ArrayList<Integer>> bins = new HashMap<>();
+        // Worker-local probe is never inserted into bins; stored keys remain immutable.
+        private final OverlayBin probe = new OverlayBin(0, 0, 0);
 
         OverlaySpatialIndex(
                 List<TwoSidedQuadReducer.ResolvedQuad> quads,
@@ -197,8 +199,8 @@ final class TransparentBoundaryResolver {
             for (int deltaX = -1; deltaX <= 1; deltaX++) {
                 for (int deltaY = -1; deltaY <= 1; deltaY++) {
                     for (int deltaZ = -1; deltaZ <= 1; deltaZ++) {
-                        ArrayList<Integer> candidates = this.bins.get(center.offset(
-                                deltaX, deltaY, deltaZ));
+                        this.probe.offsetFrom(center, deltaX, deltaY, deltaZ);
+                        ArrayList<Integer> candidates = this.bins.get(this.probe);
                         if (candidates == null) {
                             continue;
                         }
@@ -245,7 +247,17 @@ final class TransparentBoundaryResolver {
         }
     }
 
-    private record OverlayBin(long x, long y, long z) {
+    private static final class OverlayBin {
+        private long x;
+        private long y;
+        private long z;
+
+        OverlayBin(long x, long y, long z) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+        }
+
         static OverlayBin of(CapturedSectionGeometry.Quad quad) {
             float minimumX = Float.POSITIVE_INFINITY;
             float minimumY = Float.POSITIVE_INFINITY;
@@ -261,11 +273,20 @@ final class TransparentBoundaryResolver {
                     OverlaySpatialIndex.bin(minimumZ));
         }
 
-        OverlayBin offset(int deltaX, int deltaY, int deltaZ) {
-            return new OverlayBin(
-                    offset(this.x, deltaX),
-                    offset(this.y, deltaY),
-                    offset(this.z, deltaZ));
+        void offsetFrom(OverlayBin center, int deltaX, int deltaY, int deltaZ) {
+            this.x = offset(center.x, deltaX);
+            this.y = offset(center.y, deltaY);
+            this.z = offset(center.z, deltaZ);
+        }
+
+        @Override public int hashCode() {
+            return (Long.hashCode(this.x) * 31 + Long.hashCode(this.y)) * 31
+                    + Long.hashCode(this.z);
+        }
+
+        @Override public boolean equals(Object other) {
+            return other instanceof OverlayBin bin
+                    && this.x == bin.x && this.y == bin.y && this.z == bin.z;
         }
 
         private static long offset(long value, int delta) {
@@ -384,8 +405,8 @@ final class TransparentBoundaryResolver {
                 continue;
             }
             groups.computeIfAbsent(
-                            quad.candidate, ignored -> new java.util.IdentityHashMap<>())
-                    .computeIfAbsent(quad.definition, ignored -> new ArrayList<>())
+                            quad.candidate, ignored -> new java.util.IdentityHashMap<>(1))
+                    .computeIfAbsent(quad.definition, ignored -> new ArrayList<>(2))
                     .add(new IndexedResolvedQuad(index, quad));
         }
         for (java.util.IdentityHashMap<SurfaceDefinition, ArrayList<IndexedResolvedQuad>>

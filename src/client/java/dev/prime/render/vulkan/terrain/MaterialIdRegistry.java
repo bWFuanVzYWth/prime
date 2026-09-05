@@ -44,7 +44,16 @@ final class MaterialIdRegistry {
     }
 
     int[] encodedCoreRecords() {
-        return Arrays.copyOf(this.coreRecords, this.nextId * CORE_WORDS);
+        return this.encodedCoreRecords(0);
+    }
+
+    int recordCount() {
+        return this.nextId;
+    }
+
+    int[] encodedCoreRecords(int firstId) {
+        Objects.checkFromToIndex(firstId, this.nextId, this.nextId);
+        return Arrays.copyOfRange(this.coreRecords, firstId * CORE_WORDS, this.nextId * CORE_WORDS);
     }
 
     static int encodeCoreWord(MaterialKey key) {

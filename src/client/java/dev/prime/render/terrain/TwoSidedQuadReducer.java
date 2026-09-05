@@ -587,6 +587,14 @@ final class TwoSidedQuadReducer {
             return Float.floatToIntBits(value == 0.0F ? 0.0F : value);
         }
 
+        @Override public int hashCode() {
+            // Integer-aligned f32 coordinates share low bits. Mix each axis before combining
+            // them, otherwise large Minecraft grids collapse into HashMap collision trees.
+            return it.unimi.dsi.fastutil.HashCommon.mix(this.x)
+                    ^ Integer.rotateLeft(it.unimi.dsi.fastutil.HashCommon.mix(this.y), 11)
+                    ^ Integer.rotateLeft(it.unimi.dsi.fastutil.HashCommon.mix(this.z), 22);
+        }
+
         @Override
         public int compareTo(Position other) {
             int result = Integer.compare(this.x, other.x);
@@ -597,14 +605,14 @@ final class TwoSidedQuadReducer {
         }
     }
 
-    private record PositionSet(List<Position> positions) {
+    private record PositionSet(Position first, Position second, Position third, Position fourth) {
         static PositionSet of(CapturedSectionGeometry.Quad quad) {
             Position[] positions = new Position[4];
             for (int vertex = 0; vertex < 4; vertex++) {
                 positions[vertex] = Position.of(quad, vertex);
             }
             Arrays.sort(positions);
-            return new PositionSet(List.of(positions));
+            return new PositionSet(positions[0], positions[1], positions[2], positions[3]);
         }
     }
 }

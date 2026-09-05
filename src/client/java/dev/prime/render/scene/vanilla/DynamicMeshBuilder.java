@@ -117,8 +117,10 @@ final class DynamicMeshBuilder {
             PrimitiveTopology topology,
             int textureIndex,
             int fallbackLight) {
-        return this.open(
-                topology, textureIndex, fallbackLight, false, CaptureMode.PARTICLE, null);
+        // Slot zero signals a capture fallback. It must not sample the block atlas with UVs
+        // authored for a different atlas; keep the particle instance and its submitted color.
+        return new VertexSink(this, topology, textureIndex, fallbackLight,
+                textureIndex == 0, false, CaptureMode.PARTICLE, null);
     }
 
     VertexSink openModelPart(

@@ -55,6 +55,9 @@ loom {
 			setConfigName('Prime Vulkan Client')
 			ideConfigGenerated = true
 			runDir = 'run'
+			// Terrain streaming allocates heavily; concurrent collection reduces evacuation pauses.
+			// This is a latency choice, not a fix for the heap-corruption investigation.
+			vmArgs '-XX:+UseZGC'
 			def selectedBackend = developmentGraphicsBackend.get().toLowerCase(java.util.Locale.ROOT)
 			if (selectedBackend != 'vulkan' && selectedBackend != 'opengl') {
 				throw new GradleException("primeBackend must be either 'vulkan' or 'opengl'")

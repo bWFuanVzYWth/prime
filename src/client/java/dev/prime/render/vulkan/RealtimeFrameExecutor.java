@@ -80,6 +80,8 @@ public final class RealtimeFrameExecutor implements Destroyable {
             validateExtents(integrator, processor, output, stableRadiance, mainColor);
             submission.begin();
 
+            this.context.beginTiming("realtime");
+
             var encoder = this.context.commandEncoder();
             VkCommandBuffer commandBuffer =
                     encoder.allocateAndBeginTransientCommandBuffer();
@@ -172,11 +174,13 @@ public final class RealtimeFrameExecutor implements Destroyable {
                     commandBuffer,
                     "end Prime realtime command buffer");
             completion.acceptedBySubmission();
+            this.context.endTiming("realtime");
             HdrPresentation.publish(this.context, processor.hdrDisplayOutput(), output);
             // A normal return transfers command/resource ownership and advances Prime histories.
             completion.commit();
         } catch (RuntimeException exception) {
-            throw completion.abandon(exception);
+            throw completion.abandon(ResourceCleanup.run(
+                    () -> this.context.abandonTiming("realtime"), exception));
         }
     }
 

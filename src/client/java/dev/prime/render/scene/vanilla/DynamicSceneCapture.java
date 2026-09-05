@@ -690,6 +690,7 @@ public final class DynamicSceneCapture {
         private final DynamicMeshBuilder builder;
         private final ArrayList<DynamicSceneFrame.SceneTexture> textures =
                 new ArrayList<>();
+        private @Nullable List<GpuTexture> colorAtlases;
         private VanillaSceneBoundary.Element element =
                 VanillaSceneBoundary.Element.FEATURE;
 
@@ -829,7 +830,7 @@ public final class DynamicSceneCapture {
                 DynamicSceneFrame.Sampling sampling) {
             GpuTexture texture = view.texture();
             if (sampling == DynamicSceneFrame.Sampling.SRGB_COLOR) {
-                if ((texture.usage() & GpuTexture.USAGE_RENDER_ATTACHMENT) != 0) {
+                if (hasUnknownColorEncoding(texture, this.colorAtlases())) {
                     this.builder.report(
                             DynamicSceneFrame.CompatibilityIssue.UNKNOWN_ALBEDO_ENCODING);
                     return 0;
@@ -859,6 +860,16 @@ public final class DynamicSceneCapture {
             return this.textures.size();
         }
 
+        private List<GpuTexture> colorAtlases() {
+            if (this.colorAtlases == null) {
+                ArrayList<GpuTexture> captured = new ArrayList<>();
+                Minecraft.getInstance().getAtlasManager().forEach(
+                        (id, atlas) -> captured.add(atlas.getTexture()));
+                this.colorAtlases = captured;
+            }
+            return this.colorAtlases;
+        }
+
         private DynamicSceneFrame finish() {
             if (this.element != VanillaSceneBoundary.Element.FEATURE) {
                 throw new IllegalStateException(
@@ -870,5 +881,15 @@ public final class DynamicSceneCapture {
                     this.clusterZ,
                     this.textures);
         }
+    }
+
+    static boolean hasUnknownColorEncoding(GpuTexture texture, List<GpuTexture> colorAtlases) {
+        if ((texture.usage() & GpuTexture.USAGE_RENDER_ATTACHMENT) == 0) return false;
+        // 26.2 color atlases also allow render attachments for GPU animation updates.
+        // Only exact captured objects establish provenance; labels and usage bits do not.
+        for (GpuTexture atlas : colorAtlases) {
+            if (texture == atlas) return false;
+        }
+        return true;
     }
 }

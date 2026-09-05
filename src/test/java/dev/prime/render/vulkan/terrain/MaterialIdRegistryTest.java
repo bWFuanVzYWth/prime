@@ -45,6 +45,21 @@ final class MaterialIdRegistryTest {
     }
 
     @Test
+    void appendUploadLeavesPublishedIdsUntouchedAndCanBeRetried() {
+        MaterialIdRegistry registry = new MaterialIdRegistry(new MediumIdRegistry());
+        registry.resolve(new MaterialKey(1, null, 0));
+        int published = registry.recordCount();
+        int[] prefix = registry.encodedCoreRecords();
+        assertEquals(1, registry.resolve(new MaterialKey(1, null, 0)));
+        assertArrayEquals(new int[0], registry.encodedCoreRecords(published));
+        registry.resolve(new MaterialKey(2, null, 0));
+        int[] append = registry.encodedCoreRecords(published);
+        assertArrayEquals(new int[] {2, 0}, append);
+        assertArrayEquals(append, registry.encodedCoreRecords(published));
+        assertArrayEquals(prefix, java.util.Arrays.copyOf(registry.encodedCoreRecords(), prefix.length));
+    }
+
+    @Test
     void failsBeforeReusingOrTruncatingTheU16IdentityDomain() {
         MaterialIdRegistry registry = new MaterialIdRegistry(new MediumIdRegistry());
         for (int textureId = 1; textureId <= 0xffff; textureId++) {
