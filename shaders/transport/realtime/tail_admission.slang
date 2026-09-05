@@ -18,9 +18,9 @@ import "state/realtime/queue.slang";
 // stage is deliberately separate: rejected lanes must not acquire the tail's source closure.
 public void primeAdmitRealtimeTailPath(uint sourceQueue, uint launchIndex) {
     uint recordIndex = primeWavefrontQueuedPath(sourceQueue, launchIndex);
-    uint pathControl = primeWavefrontPaths[recordIndex]
+    uint pathControl = primeWavefrontPaths[primeWavefrontTransportIndex(recordIndex)]
             .transport.sourceAndPathControl.w;
-    uint control = asuint(primeWavefrontPaths[recordIndex]
+    uint control = asuint(primeWavefrontPaths[primeWavefrontTransportIndex(recordIndex)]
             .transport.rayDirectionAndDenoiserControl.w);
     uint secondaryBounce = pathControl & PRIME_WAVEFRONT_BYTE_MASK;
     bool continuation = primeRealtimeCompletedBounceCount(secondaryBounce)
@@ -30,7 +30,7 @@ public void primeAdmitRealtimeTailPath(uint sourceQueue, uint launchIndex) {
         bool guideEnabled = primeWavefrontGuideEnabled(control);
         bool hasGuide =
                 (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) != 0u;
-        uint guideControl = primeWavefrontPaths[recordIndex]
+        uint guideControl = primeWavefrontPaths[primeWavefrontTransportIndex(recordIndex)]
                 .transport.sourceAndPathControl.z;
         bool pathOwnsGuide = primeTransparentTransportOwnsGuide(
                 false,
@@ -51,19 +51,18 @@ public void primeAdmitRealtimeTailPath(uint sourceQueue, uint launchIndex) {
                         pixel, primeSampleEpoch(), samplePathIndex),
                 primeSampleIndex(),
                 secondaryBounce);
-        float3 throughput = primeWavefrontPaths[recordIndex]
+        float3 throughput = primeWavefrontPaths[primeWavefrontTransportIndex(recordIndex)]
                 .transport.throughputAndReserved.xyz;
         float etaScale = asfloat(
-                primeWavefrontPaths[recordIndex].transport.medium1.w);
-        float survival = primeRussianRouletteSurvival(
-                throughput, etaScale);
+                primeWavefrontPaths[primeWavefrontTransportIndex(recordIndex)].transport.medium1.w);
+        float survival = primeRussianRouletteSurvival(throughput, etaScale);
         float rouletteSample = primeHashSample1D(
                 preparedSample,
                 PRIME_SAMPLE_EFFECT_RUSSIAN_ROULETTE,
                 PRIME_SAMPLE_DIMENSION_PRIMARY);
         continuation = rouletteSample < survival;
         if (continuation) {
-            primeWavefrontPaths[recordIndex]
+            primeWavefrontPaths[primeWavefrontTransportIndex(recordIndex)]
                     .transport.throughputAndReserved.xyz =
                     primeRussianRouletteReweight(throughput, survival);
         }

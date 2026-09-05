@@ -8,33 +8,33 @@ import "state/realtime/contract.slang";
 public PrimeWavefrontTransportRecord primeLoadWavefrontTransportRecord(uint pathIndex) {
     PrimeWavefrontTransportRecord record;
     record.physicalOriginAndPreviousBsdfPdf =
-            primeWavefrontPaths[pathIndex]
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
                     .transport.physicalOriginAndPreviousBsdfPdf;
     record.sourceAndPathControl =
-            primeWavefrontPaths[pathIndex].transport.sourceAndPathControl;
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.sourceAndPathControl;
     record.rayDirectionAndDenoiserControl =
-            primeWavefrontPaths[pathIndex]
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
                     .transport.rayDirectionAndDenoiserControl;
     record.throughputAndReserved =
-            primeWavefrontPaths[pathIndex].transport.throughputAndReserved;
-    record.medium0 = primeWavefrontPaths[pathIndex].transport.medium0;
-    record.medium1 = primeWavefrontPaths[pathIndex].transport.medium1;
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.throughputAndReserved;
+    record.medium0 = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium0;
+    record.medium1 = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium1;
     return record;
 }
 
 public void primeStoreWavefrontTransportRecord(
         uint pathIndex,
         PrimeWavefrontTransportRecord record) {
-    primeWavefrontPaths[pathIndex]
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
             .transport.physicalOriginAndPreviousBsdfPdf =
             record.physicalOriginAndPreviousBsdfPdf;
-    primeWavefrontPaths[pathIndex].transport.sourceAndPathControl =
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.sourceAndPathControl =
             record.sourceAndPathControl;
-    primeWavefrontPaths[pathIndex]
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
             .transport.rayDirectionAndDenoiserControl =
             record.rayDirectionAndDenoiserControl;
-    primeWavefrontPaths[pathIndex].transport.throughputAndReserved =
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.throughputAndReserved =
             record.throughputAndReserved;
-    primeWavefrontPaths[pathIndex].transport.medium0 = record.medium0;
-    primeWavefrontPaths[pathIndex].transport.medium1 = record.medium1;
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium0 = record.medium0;
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium1 = record.medium1;
 }

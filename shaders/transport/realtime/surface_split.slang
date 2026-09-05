@@ -3,6 +3,9 @@ module "transport/realtime/surface_split.slang";
 
 import "policy/realtime/landing.slang";
 import "math/hash.slang";
+import "math/transparent_branch.slang";
+import "math/realtime_storage.slang";
+import "math/direct_sampling.slang";
 import "policy/realtime/direct.slang";
 import "policy/realtime/queue.slang";
 import "prime_realtime_abi.slang";
@@ -40,6 +43,8 @@ import "transport/surface/emission.slang";
 import "transport/surface/environment.slang";
 import "transport/surface/medium.slang";
 import "state/realtime/contract.slang";
+import "state/realtime/detached_guide.slang";
+import "state/realtime/detached_guide_medium.slang";
 import "state/realtime/guide.slang";
 import "state/realtime/guide_normal.slang";
 import "state/realtime/ordinary.slang";
@@ -68,7 +73,7 @@ void primeStoreInitialPath(
         PrimeWavefrontPathRecord record,
         PrimeDenoiserGuides guides,
         float3 previousLightNormal) {
-    primeWavefrontPaths[pathIndex] = record;
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)] = record;
     primeStoreWavefrontPreviousLightNormal(
             pathIndex, previousLightNormal);
     primeStoreWavefrontGuideSurface(
@@ -186,8 +191,15 @@ public uint primeInitializeTransparentWavefront(
             discreteOnlyInterface,
             primeHasScatter(primarySample.paths.transmission.bsdfSample),
             primeHasScatter(primarySample.paths.reflection.bsdfSample));
+    uint packed = primeRealtimeStbn[primePrimaryTransparentSampleAddress(
+            pixel, primeSampleIndex(), primeSampleEpoch())];
+    bool chooseTransmission = primeChoosePrimaryTransmission(packed);
+    float2 branchWeights = primePrimaryTransparentBranchWeights(
+            primeHasScatter(primarySample.paths.transmission.bsdfSample),
+            primeHasScatter(primarySample.paths.reflection.bsdfSample), chooseTransmission);
     for (uint branch = 0u; branch < 2u; ++branch) {
         bool transmissionBranch = branch == 0u;
+        float branchWeight = branchWeights[branch];
         PrimeTransmissiveBsdfSample selected = transmissionBranch
                 ? primarySample.paths.transmission
                 : primarySample.paths.reflection;
@@ -256,17 +268,18 @@ public uint primeInitializeTransparentWavefront(
                 pixel,
                 primeSampleEpoch(),
                 transmissionBranch ? 1u : 0u);
-        bool continuation = hasScatter;
+        bool continuation = hasScatter && branchWeight > 0.0;
         if (continuation) {
             continuation = primeAdvanceRealtimePath(context,
                     branchPath,
                     surface,
                     bsdf,
-                    preparedSample,
-                    discreteOnlyInterface,
-                    true);
+                    discreteOnlyInterface);
         }
         if (continuation) {
+            // Thin the existing conditional pair. First-surface NEE/emission and guide albedos
+            // remain unscaled; the branch's future transport alone receives inverse selection PDF.
+            branchPath.throughput *= branchWeight;
             branchPath.control = primePathWithBounce(
                     branchPath.control, primePathBounce(path.control) + 1u);
         }
@@ -292,11 +305,33 @@ public uint primeInitializeTransparentWavefront(
             record.transport = primeEnterSecondaryRecord(record.transport);
         }
         uint pathIndex = primeWavefrontIndex(pixel, branch);
-        primeStoreInitialPath(
-                pathIndex,
-                record,
-                branchResult.guides,
-                branchPath.previousLightNormal);
+        // Keep one complete record even when both candidate events are invalid; resolve still
+        // needs the transparent identity. The other branch owns only compact guide state.
+        bool ownsTransport = branchWeight > 0.0
+                || (transmissionBranch && all(branchWeights == float2(0.0)));
+        if (ownsTransport) {
+            primeStoreInitialPath(pathIndex, record, branchResult.guides, branchPath.previousLightNormal);
+        } else {
+            uint ownerWord = primeMissingGuideOwnerWord(pathIndex, primeWavefrontPixelCount());
+            primeWavefrontQueue[ownerWord + 0u] = primeWavefrontWithGuideTransitions(
+                    record.transport, primeQueuedPsrCount(psrState)).sourceAndPathControl.z;
+            primeWavefrontQueue[ownerWord + 1u] = asuint(record.transport.rayDirectionAndDenoiserControl.w);
+            primeWavefrontQueue[ownerWord + 2u] = asuint(record.transport.throughputAndReserved.w);
+            for (uint lane = 0u; lane < 4u; ++lane) primeWavefrontQueue[ownerWord + 3u + lane] = record.psrPacked[lane];
+            primeStoreWavefrontGuideSurface(pathIndex, branchResult.guides.primaryNormal,
+                    branchResult.guides.primaryLinearRoughness);
+        }
+        if (branchWeight == 0.0 && hasScatter && guideEnabled) {
+            PrimeDetachedGuideRecord guide;
+            guide.physicalOrigin = surface.position;
+            guide.sourcePrimitive = uint2(surface.sectionIndex, primeSurfaceTriangleIndex(surface));
+            guide.rayDirection = bsdf.direction;
+            guide.mediumState = primePackDetachedGuideMediumStack(selected.volumeStack);
+            // This branch never enters a transport queue. Its unused surface slot survives until
+            // the missing-guide drain, without aliasing split's receiver-normal writes.
+            primeStoreMissingGuideRecord(pathIndex, guide);
+            primeAppendWavefrontPath(PRIME_WAVEFRONT_GUIDE_QUEUE, pathIndex);
+        }
         uint continuationBit = deltaWalk
                 ? (transmissionBranch
                         ? PRIME_SPLIT_FIRST_DELTA_WALK
@@ -377,7 +412,6 @@ public void primeSplitVisibleSurface<AreaNee>(
                         denoiserState,
                         result,
                         surface,
-                        true,
                         recordIndex);
         bool deltaWalk = continuation
                 && (primePathFlags(path.control)

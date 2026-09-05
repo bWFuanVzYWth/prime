@@ -363,7 +363,9 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 		requireBinding(visible, queue, true, 'Visible direct queue')
 		requireBinding(visible, paths, false, 'Visible direct paths')
 		['', '_ser'].each { suffix ->
-			requireEqual([paths, queue] as Set, requireModule(modules,
+			// Linear RR consumes only the queued transport state, without reconstruction images.
+			def admissionBindings = [paths, queue].collect { it as int }.toSet()
+			requireEqual(admissionBindings, requireModule(modules,
 					wavefrontShader('realtime', 'tail_admission', suffix)).descriptorBindings(1),
 					"Tail admission descriptors ${suffix}")
 		}

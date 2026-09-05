@@ -2,6 +2,8 @@
 module "state/realtime/contract.slang";
 
 import "math/direction.slang";
+import "math/reconstruction_scratch.slang";
+import "math/realtime_storage.slang";
 
 import "prime_realtime_abi.slang";
 import "prime_abi.slang";
@@ -76,6 +78,26 @@ public uint primeWavefrontPixelCount() {
     return primePush.outputExtent.x * primePush.outputExtent.y;
 }
 
+public uint primeWavefrontTransportIndex(uint pathIndex) {
+    return primeRealtimeTransportIndex(pathIndex, primeWavefrontPixelCount());
+}
+
+// Logical indices remain branch-major even when the sole transport record belongs to reflection.
+public bool primeWavefrontMissingGuideOwner(uint pathIndex) {
+    uint control = asuint(primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
+            .transport.rayDirectionAndDenoiserControl.w);
+    return primeWavefrontTransparentBranch(control)
+            && ((pathIndex < primeWavefrontPixelCount()) != primeWavefrontTransmissionBranch(control));
+}
+
+public uint primeWavefrontBranchControl(uint pathIndex) {
+    if (primeWavefrontMissingGuideOwner(pathIndex)) {
+        return primeWavefrontQueue[primeMissingGuideOwnerWord(pathIndex, primeWavefrontPixelCount()) + 1u];
+    }
+    return asuint(primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
+            .transport.rayDirectionAndDenoiserControl.w);
+}
+
 public uint primeWavefrontQueueCapacity(uint queue) {
     return primeRealtimeQueueCapacity(primeWavefrontPixelCount(), queue);
 }
@@ -111,7 +133,7 @@ public static const uint PRIME_WAVEFRONT_AREA_GUIDE_WORDS =
         PRIME_WAVEFRONT_AREA_GUIDE_RECORD_SIZE / 4u;
 
 public uint primeWavefrontAreaWord(uint2 pixel, uint component) {
-    return primeWavefrontIndex(pixel) * PRIME_WAVEFRONT_AREA_GUIDE_WORDS + component;
+    return primeReconstructionGuideWord(primeWavefrontIndex(pixel), component);
 }
 
 public uint3 primePackWavefrontPair(float3 first, float3 second) {
@@ -184,7 +206,7 @@ public bool primeWavefrontGuideDetached(uint guideControl) {
 
 public bool primeWavefrontPixelTransparent(uint2 pixel) {
     uint control = asuint(
-            primeWavefrontPaths[primeWavefrontIndex(pixel, 0u)]
+            primeWavefrontPaths[primeWavefrontTransportIndex(primeWavefrontIndex(pixel, 0u))]
                     .transport.rayDirectionAndDenoiserControl.w);
     return primeWavefrontTransparentBranch(control);
 }
@@ -226,7 +248,7 @@ public PrimeOrdinarySample primeLoadWavefrontIntermediate(
     result.guides.primarySpecularAlbedo = specularMaterial.rgb;
     result.guides.primaryLinearRoughness = guideNormalRoughness.w;
     result.guides.primaryPosition = position.xyz;
-    uint4 previous = primeWavefrontPaths[pathIndex].psrPacked;
+    uint4 previous = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].psrPacked;
     result.guides.primaryHasMotion =
             (previous.w & PRIME_WAVEFRONT_PRIMARY_MOTION) != 0u;
     result.guides.primaryPreviousPosition = result.guides.primaryHasMotion

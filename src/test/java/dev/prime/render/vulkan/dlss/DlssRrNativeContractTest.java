@@ -11,7 +11,7 @@ import org.lwjgl.vulkan.VK12;
 final class DlssRrNativeContractTest {
     @Test
     void ngxReceivesTheDeclaredLinearHdrGuideFormats() {
-        assertEquals(17, DlssRrPreparePass.IMAGE_COUNT);
+        assertEquals(15, DlssRrPreparePass.IMAGE_COUNT);
         assertEquals(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, DlssRrTargets.COLOR_FORMAT);
         assertEquals(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, DlssRrTargets.ALBEDO_FORMAT);
         assertEquals(
@@ -19,7 +19,6 @@ final class DlssRrNativeContractTest {
                 DlssRrTargets.NORMAL_ROUGHNESS_FORMAT);
         assertEquals(VK12.VK_FORMAT_R32_SFLOAT, DlssRrTargets.LINEAR_DEPTH_FORMAT);
         assertEquals(VK12.VK_FORMAT_R32G32_SFLOAT, DlssRrTargets.MOTION_FORMAT);
-        assertEquals(VK12.VK_FORMAT_R32G32_SFLOAT, DlssRrTargets.SPECULAR_MOTION_FORMAT);
         assertEquals(
                 VK12.VK_FORMAT_R16_SFLOAT,
                 DlssRrTargets.SPECULAR_HIT_DISTANCE_FORMAT);

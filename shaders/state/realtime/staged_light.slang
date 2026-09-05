@@ -2,6 +2,7 @@
 module "state/realtime/staged_light.slang";
 
 import "contract/light_sample.slang";
+import "math/realtime_storage.slang";
 import "prime_abi_types.slang";
 import "prime_realtime_abi.slang";
 import "service/light/emission.slang";
@@ -36,13 +37,7 @@ public bool primeStagedHitEnabled(PrimeStagedLightSelection selection) {
 }
 
 public uint primeStagedLightSelectionWord(uint pathIndex) {
-    uint pixelCount = primeWavefrontPixelCount();
-    uint guideWords = pixelCount * PRIME_WAVEFRONT_AREA_GUIDE_WORDS;
-    uint surfaceWords = pixelCount
-            * PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL
-            * (PRIME_WAVEFRONT_SURFACE_RECORD_SIZE / 4u);
-    return guideWords + surfaceWords
-            + pathIndex * (PRIME_WAVEFRONT_STAGED_LIGHT_RECORD_SIZE / 4u);
+    return primeRealtimePhaseWord(pathIndex, primeWavefrontPixelCount());
 }
 
 public void primeStoreStagedLightSelection(

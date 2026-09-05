@@ -25,7 +25,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 
 /** Stable, fixed-width Java binding for Prime's private DLSS Ray Reconstruction bridge. */
 public final class DlssRrNative {
-    private static final int ABI_VERSION = 10;
+    private static final int ABI_VERSION = 11;
     private static final int RENDER_PRESET_F = 6;
     private static final int EXTENSION_QUERY_SIZE = 56;
     private static final int INIT_DESCRIPTION_SIZE = 56;
@@ -403,7 +403,9 @@ public final class DlssRrNative {
                 putImage(description, 176 + 4 * IMAGE_SIZE, evaluation.outputColor());
                 putImage(description, 176 + 5 * IMAGE_SIZE, evaluation.linearDepth());
                 putImage(description, 176 + 6 * IMAGE_SIZE, evaluation.motionVectors());
-                putImage(description, 176 + 7 * IMAGE_SIZE, evaluation.specularMotionVectors());
+                if (evaluation.specularMotionVectors() != null) {
+                    putImage(description, 176 + 7 * IMAGE_SIZE, evaluation.specularMotionVectors());
+                }
                 putImage(description, 176 + 8 * IMAGE_SIZE, evaluation.specularHitDistance());
                 putImage(description, 176 + 9 * IMAGE_SIZE, evaluation.responsivity());
                 checkResult(
@@ -488,8 +490,10 @@ public final class DlssRrNative {
                     renderWidth, renderHeight);
             requireInput(motionVectors, "motion vectors", DlssRrTargets.MOTION_FORMAT,
                     renderWidth, renderHeight);
-            requireInput(specularMotionVectors, "specular motion vectors",
-                    DlssRrTargets.SPECULAR_MOTION_FORMAT, renderWidth, renderHeight);
+            if (specularMotionVectors != null) {
+                requireInput(specularMotionVectors, "specular motion vectors",
+                        org.lwjgl.vulkan.VK12.VK_FORMAT_R32G32_SFLOAT, renderWidth, renderHeight);
+            }
             requireInput(specularHitDistance, "specular hit distance",
                     DlssRrTargets.SPECULAR_HIT_DISTANCE_FORMAT, renderWidth, renderHeight);
             requireInput(responsivity, "responsivity", DlssRrTargets.RESPONSIVITY_FORMAT,

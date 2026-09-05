@@ -50,7 +50,7 @@ public void primeProcessDeltaWalkBranch(
         uint recordIndex,
         uint maximumTransitions) {
     uint initialControl = asuint(
-            primeWavefrontPaths[recordIndex]
+            primeWavefrontPaths[primeWavefrontTransportIndex(recordIndex)]
                     .transport.rayDirectionAndDenoiserControl.w);
     if ((initialControl & PRIME_WAVEFRONT_ACTIVE_MASK) == 0u) {
         return;
@@ -85,10 +85,10 @@ public void primeProcessDeltaWalkBranch(
                 primeInvalidatePendingTransparentGuide(recordIndex, control);
             }
             control &= ~PRIME_WAVEFRONT_ACTIVE_MASK;
-            primeWavefrontPaths[recordIndex]
+            primeWavefrontPaths[primeWavefrontTransportIndex(recordIndex)]
                     .transport.rayDirectionAndDenoiserControl.w =
                     asfloat(control);
-            primeWavefrontPaths[recordIndex]
+            primeWavefrontPaths[primeWavefrontTransportIndex(recordIndex)]
                     .transport.sourceAndPathControl.z &=
                     ~PRIME_WAVEFRONT_GUIDE_FALLBACK;
             return;

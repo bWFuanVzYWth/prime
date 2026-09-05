@@ -35,9 +35,6 @@ Prime's epipolar sun-shadow profile is adapted from Intel's Apache-2.0-licensed
 Outdoor Light Scattering Sample. See `OUTDOOR-LIGHT-SCATTERING-NOTICE.txt` and
 `APACHE-2.0.txt`.
 
-Prime's triangle projected-solid-angle light sampler is adapted from Christoph Peters'
-BSD-3-Clause implementation. See `PROJECTED-SOLID-ANGLE-SAMPLING-NOTICE.txt`.
-
 Prime's Sobol samplers adapt pbrt-v4's Owen-scrambled and hierarchical Z-Sobol
 implementations. See `PBRT-V4-NOTICE.txt` and `APACHE-2.0.txt`.
 

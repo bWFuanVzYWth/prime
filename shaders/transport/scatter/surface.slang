@@ -45,7 +45,6 @@ public bool primeIntegrateWavefrontSurface<
         inout PrimeDenoiserState denoiserState,
         inout PrimeOrdinarySample result,
         SurfaceInteraction surface,
-        bool skipRoulette,
         uint pathIndex)
     where Phase : IPrimeRealtimeTransportPhase
     where SunNee : IPrimeSecondarySunNee
@@ -224,9 +223,7 @@ public bool primeIntegrateWavefrontSurface<
                     path,
                     surface,
                     bsdf,
-                    preparedSample,
-                    discreteOnlyInterface,
-                    skipRoulette)) {
+                    discreteOnlyInterface)) {
         return false;
     }
     path.control = primeIncrementPathBounce(path.control);

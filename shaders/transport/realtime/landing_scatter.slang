@@ -28,15 +28,13 @@ public void primeScatterLandingPath(
                     recordIndex,
                     record,
                     surface,
-                    control,
-                    true)
+                    control)
             : primeAdvanceOrdinaryWavefrontRecord(
                     PrimeLandingTransportPhase(),
                     context,
                     recordIndex,
                     record,
                     surface,
-                    control,
-                    true);
+                    control);
     primePublishLandingContinuation(recordIndex, transparent, continuation);
 }

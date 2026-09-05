@@ -5,6 +5,7 @@ import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/light_sample.slang";
 import "math/direct_sampling.slang";
+import "math/direct_discrete_sampling.slang";
 import "model/atmosphere/sky.slang";
 import "policy/runtime/config.slang";
 import "service/light/area_sample.slang";
@@ -16,7 +17,6 @@ import "state/realtime/staged_light.slang";
 import "state/realtime/queue.slang";
 import "state/realtime/surface.slang";
 import "transport/direct/primary.slang";
-import "transport/direct/selection.slang";
 import "transport/surface/medium.slang";
 import "transport/realtime/staged_hit_emission_direct.slang";
 import "bsdf/compact/contract/volume.slang";
@@ -47,17 +47,6 @@ public void primeEvaluateFixedDirect(
                 primeSampleEpoch(),
                 path.bounce + 1u,
                 uint(recordIndex >= primeWavefrontPixelCount()));
-        float2 areaSample = primeDirectSample2D(
-                directSample, PRIME_DIRECT_SAMPLE_AREA_PRIMARY);
-        float3 receiverNormal = primeAreaLightReceiverNormal(
-                surface, path.viewDirection);
-        AreaLightSample area = primeSampleAreaLightSelection(
-                surface.position,
-                receiverNormal,
-                selection.area,
-                areaSample.y,
-                primeDirectSample2D(
-                        directSample, PRIME_DIRECT_SAMPLE_AREA_SECONDARY));
         IntegratorRecord integrator;
         integrator.sunDirectionIntensity = float4(
                 primePush.sunDirection,
@@ -70,6 +59,12 @@ public void primeEvaluateFixedDirect(
                 primeDirectSample2D(
                         directSample, PRIME_DIRECT_SAMPLE_SUN),
                 path.volumeStack);
+        AreaLightSample area = primeSampleAreaLightSelection(
+                surface.position,
+                selection.area,
+                primeDirectDiscreteSample1D(directSample, primeDirectDiscreteSeed(pixel, primeSampleIndex(), primeSampleEpoch(),
+                        path.bounce + 1u, uint(recordIndex >= primeWavefrontPixelCount())), 1u),
+                primeDirectSample2D(directSample, PRIME_DIRECT_SAMPLE_AREA_SECONDARY));
         direct += primeEstimateDirectPreparedAreaLight(
                 context,
                 surface,

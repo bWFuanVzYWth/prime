@@ -118,7 +118,6 @@
   "prime.options.debug.image_view.input_color": "RR Noisy Input",
   "prime.options.debug.image_view.linear_depth": "Linear Depth",
   "prime.options.debug.image_view.motion": "Motion",
-  "prime.options.debug.image_view.specular_motion": "Specular Motion",
   "prime.options.debug.image_view.responsivity": "Responsivity",
   "prime.options.debug.image_view.primary_grid": "Primary REBLUR Input Grid",
   "prime.options.debug.image_view.primary_motion": "Primary: Raw MV",
@@ -153,4 +152,5 @@
   "prime.options.streamline.dlss_frame_generation_multiplier": "DLSS Frame Generation Multiplier",
   "prime.options.streamline.dlss_frame_generation_multiplier.tooltip": "Sets the output-frame multiplier for each rendered frame. The available maximum is determined by the driver and Streamline.",
   "prime.options.streamline.dlss_frame_generation_ui_recomposition": "DLSS UI Recomposition",
-  "prime.options.streamline.dlss_frame_generation_ui_recomposition.tooltip": "Separates the game's UI opacity for DLSS-G recomposition. Requires DLSS Frame Generation and a compatible Streamline UI alpha path."}
+  "prime.options.streamline.dlss_frame_generation_ui_recomposition.tooltip": "Separates the game's UI opacity for DLSS-G recomposition. Requires DLSS Frame Generation and a compatible Streamline UI alpha path."
+}

@@ -4,6 +4,7 @@ module "transport/direct/immediate.slang";
 import "prime_abi_types.slang";
 import "contract/light.slang";
 import "math/direct_sampling.slang";
+import "math/direct_discrete_sampling.slang";
 import "math/sampling.slang";
 import "service/trace/context.slang";
 import "transport/direct/contract.slang";
@@ -49,8 +50,8 @@ public struct PrimeImmediateSecondaryAreaNee : IPrimeSecondaryAreaNee {
                 context,
                 surface,
                 viewDirection,
-                primeDirectSample2D(
-                        this.directSample, PRIME_DIRECT_SAMPLE_AREA_PRIMARY),
+                primeDirectDiscreteSample2D(this.directSample,
+                        primeDirectDiscreteSeed(preparedSample.seed, preparedSample.sampleIndex)),
                 primeDirectSample2D(
                         this.directSample, PRIME_DIRECT_SAMPLE_AREA_SECONDARY),
                 volumeStack,
@@ -66,8 +67,8 @@ public struct PrimeImmediateSecondaryAreaNee : IPrimeSecondaryAreaNee {
                 context,
                 surface,
                 viewDirection,
-                primeDirectSample2D(
-                        this.directSample, PRIME_DIRECT_SAMPLE_AREA_PRIMARY),
+                primeDirectDiscreteSample2D(this.directSample,
+                        primeDirectDiscreteSeed(preparedSample.seed, preparedSample.sampleIndex)),
                 primeDirectSample2D(
                         this.directSample, PRIME_DIRECT_SAMPLE_AREA_SECONDARY),
                 volumeStack);

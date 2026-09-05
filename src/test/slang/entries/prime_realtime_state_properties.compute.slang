@@ -39,15 +39,17 @@ void primeCheckRealtimeQueueLayout(
                     || queue == PRIME_WAVEFRONT_AREA_QUEUE
             ? PRIME_WAVEFRONT_QUEUE_ENTRIES_PER_PIXEL
             : 1u);
-    bool exact = PRIME_WAVEFRONT_AREA_GUIDE_RECORD_SIZE
-                    == 4u * PRIME_WAVEFRONT_QUEUE_INDEX_SIZE
+    bool exact = PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL == 1u
+            && PRIME_WAVEFRONT_BRANCH_SLOTS_PER_PIXEL == 2u
+            && PRIME_WAVEFRONT_AREA_GUIDE_RECORD_SIZE
+                    == 8u * PRIME_WAVEFRONT_QUEUE_INDEX_SIZE
             && PRIME_WAVEFRONT_AREA_RECORD_SIZE
                     == PRIME_WAVEFRONT_AREA_GUIDE_RECORD_SIZE
-                            + PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL
+                            + PRIME_WAVEFRONT_BRANCH_SLOTS_PER_PIXEL
                                     * PRIME_WAVEFRONT_SURFACE_RECORD_SIZE
                             + max(
                                     PRIME_WAVEFRONT_DETACHED_GUIDE_RECORD_SIZE,
-                                    PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL
+                                    PRIME_WAVEFRONT_BRANCH_SLOTS_PER_PIXEL
                                             * PRIME_WAVEFRONT_STAGED_LIGHT_RECORD_SIZE)
             && capacity == expectedCapacity
             && entry < capacity

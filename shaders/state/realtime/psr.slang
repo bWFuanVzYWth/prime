@@ -14,7 +14,7 @@ public PrimeQueuedPsrState primeLoadWavefrontPsrState(
     state.firstDirectionLength = float4(
             primeCameraRayDirection(pixel, primeRealtimeCameraSample(pixel)),
             record.throughputAndReserved.w);
-    state.rotation = asfloat(primeWavefrontPaths[pathIndex].psrPacked);
+    state.rotation = asfloat(primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].psrPacked);
     float rotationLengthSquared = dot(state.rotation, state.rotation);
     state.rotation = rotationLengthSquared > 0.0
             ? state.rotation * rsqrt(rotationLengthSquared)
@@ -31,8 +31,8 @@ public PrimeQueuedPsrState primeLoadWavefrontPsrState(
 public void primeStoreWavefrontPsrState(
         uint pathIndex,
         PrimeQueuedPsrState state) {
-    primeWavefrontPaths[pathIndex].psrPacked =
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].psrPacked =
             primePackWavefrontPsrState(state);
-    primeWavefrontPaths[pathIndex].transport.throughputAndReserved.w =
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.throughputAndReserved.w =
             state.firstDirectionLength.w;
 }

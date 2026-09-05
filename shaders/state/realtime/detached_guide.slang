@@ -2,6 +2,7 @@
 module "state/realtime/detached_guide.slang";
 
 import "prime_realtime_abi.slang";
+import "math/realtime_storage.slang";
 import "bsdf/compact/contract/volume.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/detached_guide_medium.slang";
@@ -19,18 +20,10 @@ public struct PrimeDetachedGuideRecord {
 public static const uint PRIME_DETACHED_GUIDE_RECORD_WORDS = 10u;
 
 uint primeDetachedGuideRecordWord(uint2 pixel) {
-    uint pixelCount = primeWavefrontPixelCount();
-    // Detached guide and later staged-light records own this phase region in sequence.
-    uint precedingWords = pixelCount * PRIME_WAVEFRONT_AREA_GUIDE_WORDS
-            + pixelCount * PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL
-                    * (PRIME_WAVEFRONT_SURFACE_RECORD_SIZE / 4u);
-    return precedingWords
-            + primeWavefrontIndex(pixel) * PRIME_DETACHED_GUIDE_RECORD_WORDS;
+    return primeRealtimePhaseWord(primeWavefrontIndex(pixel), primeWavefrontPixelCount());
 }
 
-public void primeStoreDetachedGuideRecord(
-        uint2 pixel, PrimeDetachedGuideRecord record) {
-    uint word = primeDetachedGuideRecordWord(pixel);
+void primeStoreGuideRay(uint word, PrimeDetachedGuideRecord record) {
     primeWavefrontQueue[word + 0u] = asuint(record.physicalOrigin.x);
     primeWavefrontQueue[word + 1u] = asuint(record.physicalOrigin.y);
     primeWavefrontQueue[word + 2u] = asuint(record.physicalOrigin.z);
@@ -43,8 +36,7 @@ public void primeStoreDetachedGuideRecord(
     primeWavefrontQueue[word + 9u] = record.mediumState.y;
 }
 
-public PrimeDetachedGuideRecord primeLoadDetachedGuideRecord(uint2 pixel) {
-    uint word = primeDetachedGuideRecordWord(pixel);
+PrimeDetachedGuideRecord primeLoadGuideRay(uint word) {
     PrimeDetachedGuideRecord record;
     record.physicalOrigin = float3(
             asfloat(primeWavefrontQueue[word + 0u]),
@@ -60,6 +52,28 @@ public PrimeDetachedGuideRecord primeLoadDetachedGuideRecord(uint2 pixel) {
             primeWavefrontQueue[word + 8u],
             primeWavefrontQueue[word + 9u]);
     return record;
+}
+
+public void primeStoreDetachedGuideRecord(uint2 pixel, PrimeDetachedGuideRecord record) {
+    primeStoreGuideRay(primeDetachedGuideRecordWord(pixel), record);
+}
+
+public PrimeDetachedGuideRecord primeLoadDetachedGuideRecord(uint2 pixel) {
+    return primeLoadGuideRay(primeDetachedGuideRecordWord(pixel));
+}
+
+uint primeMissingGuideRecordWord(uint pathIndex) {
+    return primeRealtimeSurfaceWord(pathIndex, primeWavefrontPixelCount());
+}
+
+// A first-surface branch omitted from transport owns its otherwise unused 100-byte surface slot.
+// Keep its 40-byte ray here while split still writes the later phase region for other pixels.
+public void primeStoreMissingGuideRecord(uint pathIndex, PrimeDetachedGuideRecord record) {
+    primeStoreGuideRay(primeMissingGuideRecordWord(pathIndex), record);
+}
+
+public PrimeDetachedGuideRecord primeLoadMissingGuideRecord(uint pathIndex) {
+    return primeLoadGuideRay(primeMissingGuideRecordWord(pathIndex));
 }
 
 public PrimeOpenPbrVolumeStack primeDetachedGuideVolumeStack(

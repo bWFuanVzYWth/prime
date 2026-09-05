@@ -14,7 +14,6 @@ public enum RrInputView implements ImageDiagnosticView {
     ROUGHNESS("roughness"),
     LINEAR_DEPTH("linear_depth"),
     MOTION("motion"),
-    SPECULAR_MOTION("specular_motion"),
     SPECULAR_HIT_DISTANCE("specular_hit_distance"),
     RESPONSIVITY("responsivity"),
     GRID("grid");

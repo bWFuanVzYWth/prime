@@ -89,6 +89,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
     reflectionOnly.guides.primaryDistance = 3.0;
     reflectionOnly.transmissionGuides.primaryDistance = -1.0;
     reflectionOnly.reflectionGuides.primaryDistance = 7.0;
+    reflectionOnly.guides.primarySpecularAlbedo = float3(0.02, 0.04, 0.08);
+    reflectionOnly.transmissionGuides.primarySpecularAlbedo = float3(0.8, 0.7, 0.6);
+    reflectionOnly.reflectionGuides.primarySpecularAlbedo = float3(0.3, 0.2, 0.1);
+    if (any(primeSelectReconstructionPrimaryGuides(
+                    reflectionOnly, false, false, true).primarySpecularAlbedo
+                    != reflectionOnly.reflectionGuides.primarySpecularAlbedo)) {
+        mask |= PRIME_TEST_FAILURE_STATE;
+    }
     if (primeSelectReconstructionPrimaryGuides(
                     reflectionOnly, true, false, false).primaryDistance != 3.0
             || primeSelectReconstructionPrimaryGuides(
@@ -96,6 +104,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
         mask |= PRIME_TEST_FAILURE_STATE;
     }
     reflectionOnly.transparentReflectionOnly = false;
+    if (any(primeSelectReconstructionPrimaryGuides(
+                    reflectionOnly, false, true, false).primarySpecularAlbedo
+                    != reflectionOnly.guides.primarySpecularAlbedo)
+            || any(primeSelectReconstructionPrimaryGuides(
+                    reflectionOnly, true, false, false).primarySpecularAlbedo
+                    != reflectionOnly.transmissionGuides.primarySpecularAlbedo)) {
+        mask |= PRIME_TEST_FAILURE_STATE;
+    }
     if (primeRrUsesReflectionPrimaryGuide(reflectionOnly, 0.0)) {
         mask |= PRIME_TEST_FAILURE_STATE;
     }

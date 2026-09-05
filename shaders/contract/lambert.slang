@@ -20,14 +20,14 @@ public struct PrimeLambertShadowPayload {
 };
 
 // One owner per pixel. Trace overwrites the current surface; shade publishes at most one successor.
-// The first-direction and accumulated-radiance lanes survive bounces for reconstruction only.
+// First direction and accumulated radiance survive every later trace/shade.
 public struct PrimeLambertRecord {
     public float4 origin;
-    public float4 direction;
-    public float4 throughput;
+    public float4 direction; // ray direction, reserved
+    public float4 throughput; // physical beta (including RR compensation), reserved
     public float4 normalDistance;
     public float4 albedo;
     public uint4 identity; // section, triangle, completed scatters, primary-surface flag
-    public float4 radiance; // RGB sum, first secondary distance
+    public float4 radiance; // RGB sum, first secondary distance (0 unsampled; 65504 traced miss)
     public float4 firstDirection; // cosine-sampled direction, reserved
 };

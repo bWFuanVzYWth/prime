@@ -21,11 +21,9 @@ import "contract/coordinate.slang";
 [[vk::binding(9, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture3D<float4> rrAerialTransmittance;
 [[vk::binding(10, 0)]] [[vk::image_format("rgba16f")]] writeonly RWTexture2D<float4> rrInputColor;
 [[vk::binding(11, 0)]] [[vk::image_format("rg32f")]] writeonly RWTexture2D<float4> rrMotion;
-[[vk::binding(12, 0)]] [[vk::image_format("rg32f")]] writeonly RWTexture2D<float4> rrSpecularMotion;
-[[vk::binding(13, 0)]] [[vk::image_format("rgba32f")]] readonly RWTexture2D<float4> rrReflectionPreviousVirtualPosition;
-[[vk::binding(14, 0)]] [[vk::image_format("r16f")]] writeonly RWTexture2D<float4> rrSpecularHitDistance;
-[[vk::binding(15, 0)]] [[vk::image_format("r16f")]] writeonly RWTexture2D<float4> rrResponsivity;
-[[vk::binding(16, 0)]] [[vk::image_format("r8ui")]] readonly RWTexture2D<uint> rrReconstructionControl;
+[[vk::binding(12, 0)]] [[vk::image_format("r16f")]] writeonly RWTexture2D<float4> rrSpecularHitDistance;
+[[vk::binding(13, 0)]] [[vk::image_format("r16f")]] writeonly RWTexture2D<float4> rrResponsivity;
+[[vk::binding(14, 0)]] [[vk::image_format("r8ui")]] readonly RWTexture2D<uint> rrReconstructionControl;
 
 struct PrimeRrPreparePushConstants {
     float4x4 currentClipToWorld;
@@ -39,7 +37,6 @@ struct PrimeRrPreparePushConstants {
 [[vk::push_constant]] ConstantBuffer<PrimeRrPreparePushConstants> rrPush;
 
 static const float PRIME_RR_SKY_VIEW_Z = 65504.0;
-static const float PRIME_RR_SPECULAR_MOTION_ROUGHNESS = 0.25;
 static const uint PRIME_RR_HISTORY_VALID = 0x08u;
 
 // The viewport corner angles are identical for every lane in this 8x8 workgroup.
@@ -179,14 +176,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupIndex : SV_Gro
         float4 packedMotion = float4(
                 primeNrdSanitizeMotion(float3(motion, 0.0)), 0.0);
         primeWriteImageStore(rrMotion, pixel, packedMotion);
-        primeWriteImageStore(rrSpecularMotion, pixel, packedMotion);
         primeWriteImageStore(rrInputColor, pixel, float4(
                 primeReadonlyImageLoad(rrStableRadiance, pixel).rgb, 1.0));
         return;
     }
 
-    // The transmitted PSR and visible reflection interface can have different roughness.
-    float reflectionRoughness = specularMaterial.a;
     float4 noisyDiffuse = primeReadonlyImageLoad(rrNoisyDiffuse, pixel);
     float4 sun = primeReadonlyImageLoad(rrSunLighting, pixel);
     float3 inputRadiance = noisyDiffuse.rgb
@@ -194,7 +188,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupIndex : SV_Gro
             + sun.rgb * sun.a
             + primeReadonlyImageLoad(rrStableRadiance, pixel).rgb;
     // Finish and store color before matrix reconstruction so lighting vectors are no longer live
-    // while primary and virtual-reflection motion are projected.
+    // while primary motion is projected.
     inputRadiance = rrApplyAerial(pixel, extent, material.a, inputRadiance);
     primeWriteImageStore(rrInputColor, pixel, float4(
             primeNrdClampRadiance(inputRadiance, PRIME_NRD_FP16_MAX), 1.0));
@@ -225,26 +219,4 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupIndex : SV_Gro
             primaryMotion);
     primeWriteImageStore(rrMotion, pixel, float4(
             primeNrdSanitizeMotion(float3(primaryMotion, 0.0)), 0.0));
-
-    float2 specularMotion = primaryMotion;
-    float4 reflectionPreviousVirtualPosition = primeReadonlyImageLoad(
-            rrReflectionPreviousVirtualPosition, pixel);
-    bool hasReflectionProbe = reflectionPreviousVirtualPosition.w >= 0.0
-            && primeNrdIsFinite(reflectionPreviousVirtualPosition);
-    if (historyValid
-            && hasReflectionProbe
-            && reflectionRoughness < PRIME_RR_SPECULAR_MOTION_ROUGHNESS) {
-        // The raygen probe supplies the previous-frame virtual target itself. Its w lane selects
-        // a finite mirrored hit (zero) or an environment direction (one).
-        float2 reflectionMotion;
-        if (rrPreviousMotion(
-                currentSampleUv,
-                reflectionPreviousVirtualPosition.xyz,
-                reflectionPreviousVirtualPosition.w > 0.5,
-                reflectionMotion)) {
-            specularMotion = reflectionMotion;
-        }
-    }
-    primeWriteImageStore(rrSpecularMotion, pixel, float4(
-            primeNrdSanitizeMotion(float3(specularMotion, 0.0)), 0.0));
 }

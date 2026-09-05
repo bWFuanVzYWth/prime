@@ -55,7 +55,6 @@ public bool primeIntegrateTransparentWavefrontSurface<Phase, SunNee, AreaNee>(
         SurfaceInteraction surface,
         bool transmissionBranch,
         bool guideEnabled,
-        bool skipRoulette,
         uint pathIndex)
     where Phase : IPrimeRealtimeTransportPhase
     where SunNee : IPrimeSecondarySunNee
@@ -219,14 +218,7 @@ public bool primeIntegrateTransparentWavefrontSurface<Phase, SunNee, AreaNee>(
             path,
             surface,
             bsdf,
-            preparedSample,
-            discreteContinuation,
-            skipRoulette || primeTransparentRouletteBlocked(
-                    primeTransparentTransportOwnsGuide(
-                            false,
-                            guideFallback),
-                    guideEnabled,
-                    hasGuide))) {
+            discreteContinuation)) {
         return false;
     }
     path.control = primeIncrementPathBounce(path.control);

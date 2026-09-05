@@ -61,6 +61,7 @@ final class RayTracingPushConstantsTest {
         RayTracingPushConstants.write(input, fixture.scene(), secondBuffer);
 
         assertArrayEquals(first, second);
+        assertEquals(0, firstBuffer.getInt(ShaderAbi.PUSH_PATH_OFFSET) & 0xe000_0000);
         assertEquals(
                 fixture.scene().sectionTableAddress(),
                 firstBuffer.getLong(ShaderAbi.PUSH_SECTION_TABLE_ADDRESS_OFFSET));

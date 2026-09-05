@@ -9,6 +9,7 @@ import "contract/realtime/guide.slang";
 import "model/atmosphere/sky.slang";
 import "policy/runtime/config.slang";
 import "math/direct_sampling.slang";
+import "math/direct_discrete_sampling.slang";
 import "model/material/defaults.slang";
 import "service/bsdf/dispatch/traits.slang";
 import "service/bsdf/support/volume_transition.slang";
@@ -78,8 +79,9 @@ public void primeShadeVisibleDirect(
             context,
             surface,
             viewDirection,
-            primeDirectSample2D(
-                    directSample, PRIME_DIRECT_SAMPLE_AREA_PRIMARY),
+            primeDirectDiscreteSample2D(directSample, primeDirectDiscreteSeed(
+                    pixel, primeSampleIndex(), primeSampleEpoch(), 1u,
+                    uint(recordIndex >= primeWavefrontPixelCount()))),
             primeDirectSample2D(
                     directSample, PRIME_DIRECT_SAMPLE_AREA_SECONDARY),
             volumeStack,
@@ -117,6 +119,8 @@ public void primeShadeVisibleDirect(
         direct.specular *= sun.visibility;
         primeAccumulatePrimaryDirectSplit(pixel, direct);
     } else {
+        // Keep both solar lobes under SIGMA visibility. Filtering sun specular with general
+        // REBLUR radiance leaked bright highlights across shadows in the reconstruction trial.
         primeStoreWavefrontPrimarySun(
                 pixel,
                 direct.diffuse + direct.specular,

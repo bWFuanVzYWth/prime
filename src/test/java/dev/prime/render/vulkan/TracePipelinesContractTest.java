@@ -29,9 +29,9 @@ final class TracePipelinesContractTest {
         assertEquals(1, primary.groupCount());
         assertEquals(1, primary.moduleCount());
 
-        assertEquals(14, RealtimeRayTracingPipeline.dispatchCount(1));
-        assertEquals(18, RealtimeRayTracingPipeline.dispatchCount(2));
-        assertEquals(42, RealtimeRayTracingPipeline.dispatchCount(8));
+        assertEquals(15, RealtimeRayTracingPipeline.dispatchCount(1));
+        assertEquals(19, RealtimeRayTracingPipeline.dispatchCount(2));
+        assertEquals(43, RealtimeRayTracingPipeline.dispatchCount(8));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> RealtimeRayTracingPipeline.dispatchCount(0));
@@ -128,7 +128,10 @@ final class TracePipelinesContractTest {
         LambertRayTracingPipeline.LAYOUT.validateRanges(3840, 2160, 0xffff_ffffL);
         assertThrows(IllegalStateException.class, () ->
                 LambertRayTracingPipeline.LAYOUT.validateDispatch(3840, 2160, 3840 * 2160 - 1));
-        assertEquals(4_346_265_712L, RealtimeRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
+        assertEquals(1, RealtimeRayTracingPipeline.LAYOUT.pathSlotsPerPixel());
+        assertEquals(3_550_003_312L, RealtimeRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
+        assertEquals(316L * 3840 * 2160 + 112,
+                RealtimeRayTracingPipeline.LAYOUT.queueBytes(3840, 2160));
         assertEquals(2_023_833_632L, OfflineRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
         assertEquals(962_150_432L, OfflineRayTracingPipeline.LAYOUT.queueBytes(3840, 2160));
         assertEquals(

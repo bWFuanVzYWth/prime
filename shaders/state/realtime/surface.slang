@@ -2,6 +2,7 @@
 module "state/realtime/surface.slang";
 
 import "state/realtime/contract.slang";
+import "math/realtime_storage.slang";
 import "prime_realtime_abi.slang";
 import "prime_abi_types.slang";
 import "math/packed_geometry.slang";
@@ -34,9 +35,7 @@ public uint4 primeLoadWavefrontSurfaceLane(uint base, uint laneIndex) {
 // continuations can safely remain in flight. The shared 96-byte exact surface core is followed by
 // realtime's phase-specific f32 texture LOD.
 public uint primeWavefrontSurfaceWord(uint pathIndex) {
-    uint guideWords = primeWavefrontPixelCount() * PRIME_WAVEFRONT_AREA_GUIDE_WORDS;
-    return guideWords
-            + pathIndex * (PRIME_WAVEFRONT_SURFACE_RECORD_SIZE / 4u);
+    return primeRealtimeSurfaceWord(pathIndex, primeWavefrontPixelCount());
 }
 
 public void primeStoreWavefrontSurface(uint pathIndex, SurfaceInteraction surface) {
@@ -80,6 +79,6 @@ public SurfaceInteraction primeLoadWavefrontSurface(
 public SurfaceInteraction primeLoadWavefrontSurface(uint pathIndex) {
     return primeLoadWavefrontSurface(
             pathIndex,
-            primeWavefrontPaths[pathIndex]
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
                     .transport.sourceAndPathControl.xy);
 }

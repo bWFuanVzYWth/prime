@@ -127,9 +127,9 @@ void primeCheckRoulette(
         float sampleValue)
 {
     float survival = primeRussianRouletteSurvival(throughput, etaScale);
-    float expectedSurvival = min(sqrt(max(
+    float expectedSurvival = min(max(
             max(throughput.r, max(throughput.g, throughput.b)) * etaScale,
-            0.0)), 1.0);
+            0.0), 1.0);
     primeTransportClassify(result.mask, survival);
     primeTransportClassify(result.mask, etaScale);
     if (survival < 0.0 || survival > 1.0
@@ -190,7 +190,7 @@ void primeCheckOfflineRoulette(
     float metric = primeRussianRouletteMetric(throughput, etaScale);
     float survival = primeRussianRouletteSurvival(throughput, etaScale);
     float expectedMetric = max(throughput.r, max(throughput.g, throughput.b)) * etaScale;
-    float expectedSurvival = min(sqrt(max(expectedMetric, 0.0)), 1.0);
+    float expectedSurvival = min(max(expectedMetric, 0.0), 1.0);
     primeTransportClassify(result.mask, float3(transmittedScale, restoredScale, survival));
     if (survival < 0.0 || survival > 1.0
             || transmittedScale < 0.0 || restoredScale < 0.0

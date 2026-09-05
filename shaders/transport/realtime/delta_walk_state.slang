@@ -235,7 +235,7 @@ public bool primeAdvanceTransparentDeltaWalk(
                 record = primeWavefrontWithGuideTransitions(
                         record, primeQueuedPsrCount(psrState));
                 record = primeWavefrontWithGuideFallback(record, true);
-                primeWavefrontPaths[recordIndex]
+                primeWavefrontPaths[primeWavefrontTransportIndex(recordIndex)]
                         .transport.sourceAndPathControl.z =
                         record.sourceAndPathControl.z;
                 primeAppendWavefrontPath(
@@ -247,7 +247,7 @@ public bool primeAdvanceTransparentDeltaWalk(
             guideEnabled = false;
             uint disabledControl = control & ~PRIME_WAVEFRONT_GUIDE_ENABLED;
             record.rayDirectionAndDenoiserControl.w = asfloat(disabledControl);
-            primeWavefrontPaths[recordIndex]
+            primeWavefrontPaths[primeWavefrontTransportIndex(recordIndex)]
                     .transport.rayDirectionAndDenoiserControl.w =
                     asfloat(disabledControl);
             control = disabledControl;

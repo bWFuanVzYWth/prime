@@ -11,6 +11,7 @@ import "policy/runtime/config.slang";
 import "service/bsdf/contract/albedo.slang";
 import "service/bsdf/dispatch/guide_albedo.slang";
 import "service/reconstruct/nrd/common.slang";
+import "service/reconstruct/primary_guide.slang";
 import "service/trace/context.slang";
 import "service/trace/surface.slang";
 import "state/realtime/contract.slang";
@@ -46,8 +47,9 @@ void primeFinishDetachedGuide(
     // The detached guide aliases the later staged-light/receiver-normal phase region. Paths that
     // can coexist with it all left a transmissive or discrete receiver, whose exact Area-NEE
     // normal is zero; republish both branch values before either path reaches light selection.
-    primeClearWavefrontPreviousLightNormals(
-            primeWavefrontPixel(recordIndex));
+    if (!owner.primaryRay) {
+        primeClearWavefrontPreviousLightNormals(primeWavefrontPixel(recordIndex));
+    }
 }
 
 void primePublishDetachedGuideSurface(
@@ -142,7 +144,9 @@ public void primeDetachedGuideDeltaWalk(
     uint recordIndex = primeWavefrontQueuedPath(
             PRIME_WAVEFRONT_GUIDE_QUEUE, launchIndex);
     uint2 pixel = primeWavefrontPixel(recordIndex);
-    PrimeDetachedGuideRecord guide = primeLoadDetachedGuideRecord(pixel);
+    PrimeDetachedGuideOwnerState initialOwner = primeLoadDetachedGuideOwnerState(recordIndex);
+    PrimeDetachedGuideRecord guide = initialOwner.primaryRay
+            ? primeLoadMissingGuideRecord(recordIndex) : primeLoadDetachedGuideRecord(pixel);
     uint maximumTransitions = primeAdditionalSpecularBounces();
 
     [loop]
@@ -157,6 +161,21 @@ public void primeDetachedGuideDeltaWalk(
                 guide.rayDirection,
                 guide.sourcePrimitive,
                 pathClass);
+        if (owner.primaryRay && step == 0u) {
+            bool transmission = primeWavefrontTransmissionBranch(ownerControl);
+            PrimeTransparentBranchResult result = primeLoadTransparentBranchActiveIntermediate(
+                    pixel, transmission, ownerControl);
+            bool hasGuide = (ownerControl & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) != 0u;
+            primeRecordPrimaryGuideSegment(result, hasGuide,
+                    (ownerControl & PRIME_WAVEFRONT_DIFFUSE_PATH) != 0u,
+                    surface.hitKind == PRIME_HIT_SURFACE, surface.t);
+            primeStoreTransparentBranchActiveIntermediate(pixel, transmission, false, false,
+                    (ownerControl & PRIME_WAVEFRONT_PRIMARY_REFLECTION_ONLY) != 0u, result);
+            if (hasGuide) {
+                primeFinishDetachedGuide(recordIndex, owner, false);
+                return;
+            }
+        }
         if (surface.hitKind == PRIME_HIT_NONE) {
             primePublishDetachedGuideMiss(recordIndex, owner, guide);
             return;
@@ -200,7 +219,8 @@ public void primeDetachedGuideDeltaWalk(
                 surface.sectionIndex, primeSurfaceTriangleIndex(surface));
         guide.rayDirection = scatter.bsdf.direction;
         guide.mediumState = primePackDetachedGuideMediumStack(scatter.volumeStack);
-        primeStoreDetachedGuideRecord(pixel, guide);
+        if (owner.primaryRay) primeStoreMissingGuideRecord(recordIndex, guide);
+        else primeStoreDetachedGuideRecord(pixel, guide);
     }
     PrimeDetachedGuideOwnerState owner =
             primeLoadDetachedGuideOwnerState(recordIndex);

@@ -20,7 +20,6 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
     private static final long QUEUED_PSR_SEED = 0x5053_5208_0000_0001L;
     private static final long SAMPLING_SEED = 0x5341_4D50_4C49_4E47L;
     private static final long BSDF_CONTRACT_SEED = 0x4253_4446_434F_5245L;
-    private static final long PROJECTED_SOLID_ANGLE_SEED = 0x5052_4F4A_534F_4C49L;
     private static final int[] SPECIAL_FLOAT_BITS = {
         0x0000_0000,
         0x0000_0001,
@@ -713,173 +712,47 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
     }
 
     @Test
-    void projectedSolidAngleSamplingStaysInsideTheClippedTriangle() throws IOException {
-        int kinds = 6;
-        int inputWords = 7;
-        ShaderPropertyBatch.assertProperties(
-                runner,
-                "prime_projected_solid_angle_properties.comp.spv",
-                projectedSolidAngleCases(kinds, inputWords),
-                CASES_PER_KIND * kinds,
-                inputWords,
-                11,
-                PROJECTED_SOLID_ANGLE_SEED);
-    }
-
-    private static ByteBuffer projectedSolidAngleCases(int kinds, int inputWords) {
-        var input = ShaderTestBuffer.inputWriter(CASES_PER_KIND * kinds, inputWords);
-        SplittableRandom random = new SplittableRandom(PROJECTED_SOLID_ANGLE_SEED);
-        for (int kind = 0; kind < kinds; kind++) {
-            for (int local = 0; local < CASES_PER_KIND; local++) {
-                int index = kind * CASES_PER_KIND + local;
-                float[] normal = randomUnitVector(random);
-                if ((local & 255) == 0) {
-                    normal = switch ((local >>> 8) % 6) {
-                        case 0 -> new float[] {1.0F, 0.0F, 0.0F};
-                        case 1 -> new float[] {-1.0F, 0.0F, 0.0F};
-                        case 2 -> new float[] {0.0F, 1.0F, 0.0F};
-                        case 3 -> new float[] {0.0F, -1.0F, 0.0F};
-                        case 4 -> new float[] {0.0F, 0.0F, 1.0F};
-                        default -> new float[] {0.0F, 0.0F, -1.0F};
-                    };
-                }
-                float[] tangent = projectedTangent(normal);
-                float[] bitangent = cross(normal, tangent);
-                float[] receiver = {
-                    random.nextFloat() * 128.0F - 64.0F,
-                    random.nextFloat() * 128.0F - 64.0F,
-                    random.nextFloat() * 128.0F - 64.0F
-                };
-                float size = 0.125F + random.nextFloat() * 7.875F;
-                float distance = 0.125F + random.nextFloat() * 15.875F;
-                float x = 0.25F + random.nextFloat() * 8.0F;
-                float y = 0.25F + random.nextFloat() * 8.0F;
-                float[][] localVertices = switch (kind) {
-                    case 0 -> centralProjectedTriangle(random, size, distance);
-                    case 1 -> new float[][] {
-                        {x, y, distance},
-                        {x + size, y, distance},
-                        {x, y + size, distance}
-                    };
-                    case 2 -> new float[][] {
-                        {x, y, distance},
-                        {x + size, y, -0.25F * distance - 0.01F},
-                        {x, y + size, -0.5F * distance - 0.01F}
-                    };
-                    case 3 -> new float[][] {
-                        {x, y, distance},
-                        {x + size, y, 0.5F * distance + 0.01F},
-                        {x, y + size, -distance}
-                    };
-                    case 4 -> new float[][] {
-                        {x, y, -distance},
-                        {x + size, y, -0.5F * distance - 0.01F},
-                        {x, y + size, -0.25F * distance - 0.01F}
-                    };
-                    default -> {
-                        float grazing = 0.002F + random.nextFloat() * 0.098F;
-                        yield new float[][] {
-                            {x, y, grazing},
-                            {x + size, y, grazing},
-                            {x, y + size, grazing}
-                        };
+    void textureAreaSamplingKeepsCellSupportAndSolidAnglePdf() throws IOException {
+        int cases = 256 * 32;
+        long seed = 0x4152_4541_4345_4c4cL;
+        var input = ShaderTestBuffer.inputWriter(cases, 4);
+        SplittableRandom random = new SplittableRandom(seed);
+        int cell = 0;
+        for (int row = 0; row < 16; row++) {
+            for (int column = 0; column < 16 - row; column++) {
+                for (int upper = 0; upper < (row + column < 15 ? 2 : 1); upper++, cell++) {
+                    for (int sample = 0; sample < 32; sample++) {
+                        int index = cell * 32 + sample;
+                        // Interior points keep the forward/reverse cell identity unambiguous.
+                        float u = 0.01F + random.nextFloat() * 0.98F;
+                        float v = 0.01F + random.nextFloat() * 0.98F;
+                        double root = Math.sqrt(u);
+                        double x = (column + (upper == 0 ? root * (1.0 - v) : 1.0 - root * v)) / 16.0;
+                        double y = (row + (upper == 0 ? root * v : root)) / 16.0;
+                        float aliasValue = sample == 0 ? cell
+                                : sample == 1 ? Math.nextDown(cell + 1.0F)
+                                : cell + sample / 32.0F;
+                        float probability = sample == 2 ? 0.0F : sample == 3 ? 1.0F : 0.25F;
+                        int alias = 255 - cell;
+                        int selected = aliasValue - cell < probability ? cell : alias;
+                        int geometry = column | row << 4 | upper << 8;
+                        input.putInt(index, 0, 0, geometry);
+                        input.putInt(index, 0, 1, geometry << 8 | alias);
+                        input.putInt(index, 0, 2, cell);
+                        input.putInt(index, 0, 3, selected);
+                        input.putVec4(index, 1, u, v, aliasValue, probability);
+                        float height = positiveFloat(random, -10, 10);
+                        float mass = positiveFloat(random, -20, -1);
+                        double distance = Math.sqrt(x * x + y * y + (double) height * height);
+                        double pdf = mass * 512.0 * distance * distance * distance / height;
+                        input.putVec4(index, 2, (float) x, (float) y, (float) pdf, 0.0F);
+                        input.putVec4(index, 3, height, mass, 0.0F, 0.0F);
                     }
-                };
-                float[][] worldVertices = new float[3][];
-                for (int vertex = 0; vertex < 3; vertex++) {
-                    worldVertices[vertex] = projectedWorldPoint(
-                            receiver,
-                            tangent,
-                            bitangent,
-                            normal,
-                            localVertices[vertex]);
                 }
-                float[] firstEdge = subtract(worldVertices[1], worldVertices[0]);
-                float[] secondEdge = subtract(worldVertices[2], worldVertices[0]);
-                int expectedVertexCount = kind == 5
-                        ? -1
-                        : kind == 4 ? 0 : kind == 3 ? 4 : 3;
-                input.putInt(index, 0, 0, kind);
-                input.putInt(index, 0, 1, expectedVertexCount);
-                input.putVec4(index, 1,
-                        worldVertices[0][0], worldVertices[0][1], worldVertices[0][2], 0.0F);
-                input.putVec4(index, 2,
-                        firstEdge[0], firstEdge[1], firstEdge[2], 0.0F);
-                input.putVec4(index, 3,
-                        secondEdge[0], secondEdge[1], secondEdge[2], 0.0F);
-                input.putVec4(index, 4,
-                        receiver[0], receiver[1], receiver[2], 0.0F);
-                input.putVec4(index, 5,
-                        normal[0], normal[1], normal[2], 0.0F);
-                float randomX = 1.0e-6F + random.nextFloat() * (1.0F - 2.0e-6F);
-                float randomY = 1.0e-6F + random.nextFloat() * (1.0F - 2.0e-6F);
-                input.putVec4(index, 6, randomX, randomY, 0.0F, 0.0F);
             }
         }
-        return input.buffer();
-    }
-
-    private static float[][] centralProjectedTriangle(
-            SplittableRandom random, float size, float distance) {
-        float angle = random.nextFloat() * (float) (Math.PI * 2.0);
-        float[][] result = new float[3][3];
-        for (int vertex = 0; vertex < 3; vertex++) {
-            float vertexAngle = angle + vertex * (float) (Math.PI * 2.0 / 3.0);
-            float radius = size * (0.75F + random.nextFloat() * 0.5F);
-            result[vertex][0] = radius * (float) Math.cos(vertexAngle);
-            result[vertex][1] = radius * (float) Math.sin(vertexAngle);
-            result[vertex][2] = distance;
-        }
-        return result;
-    }
-
-    private static float[] projectedTangent(float[] normal) {
-        float[] helper = Math.abs(normal[2]) < 0.999F
-                ? new float[] {0.0F, 0.0F, 1.0F}
-                : new float[] {1.0F, 0.0F, 0.0F};
-        return normalize(cross(helper, normal));
-    }
-
-    private static float[] projectedWorldPoint(
-            float[] origin,
-            float[] tangent,
-            float[] bitangent,
-            float[] normal,
-            float[] local) {
-        return new float[] {
-            origin[0] + tangent[0] * local[0] + bitangent[0] * local[1]
-                    + normal[0] * local[2],
-            origin[1] + tangent[1] * local[0] + bitangent[1] * local[1]
-                    + normal[1] * local[2],
-            origin[2] + tangent[2] * local[0] + bitangent[2] * local[1]
-                    + normal[2] * local[2]
-        };
-    }
-
-    private static float[] subtract(float[] first, float[] second) {
-        return new float[] {
-            first[0] - second[0],
-            first[1] - second[1],
-            first[2] - second[2]
-        };
-    }
-
-    private static float[] cross(float[] first, float[] second) {
-        return new float[] {
-            first[1] * second[2] - first[2] * second[1],
-            first[2] * second[0] - first[0] * second[2],
-            first[0] * second[1] - first[1] * second[0]
-        };
-    }
-
-    private static float[] normalize(float[] value) {
-        float inverseLength = 1.0F / (float) Math.sqrt(
-                value[0] * value[0] + value[1] * value[1] + value[2] * value[2]);
-        return new float[] {
-            value[0] * inverseLength,
-            value[1] * inverseLength,
-            value[2] * inverseLength
-        };
+        ShaderPropertyBatch.assertProperties(runner, "prime_light_cell_properties.comp.spv",
+                input.buffer(), cases, 4, 2, seed);
     }
 
     private static void putLightBranchTargetCase(

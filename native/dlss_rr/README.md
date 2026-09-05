@@ -26,6 +26,13 @@ ABI v10 changes primary visible-surface motion to `VK_FORMAT_R32G32_SFLOAT`; ref
 already used the same lossless baseline format. The semantic inputs now have independent images
 instead of reusing the transport scratch image across phases.
 
+ABI v11 makes reflection motion optional, using the same all-zero descriptor convention. Hit
+distance remains required; absent reflection motion is passed to NGX as a null pointer with both
+camera matrices still supplied. The session comparison controls are described in
+[Reconstruction input experiments](../../docs/重建输入对照实验.md).
+`ctest --test-dir build/native/dlss_rr -C Release --output-on-failure` exercises the production
+argument builder without initializing NGX or Vulkan.
+
 Copy `prime_dlss_rr.dll` beside the release `nvngx_dlssd.dll` in
 `src/client/resources/prime/natives/windows-x86_64`. The bundled runtime is `310.7.128.0` with
 SHA-256 `59A005A6BEBBDE6DB27282B22D35E5E746FFB0BC91B07736B986BC658DC631FE`.

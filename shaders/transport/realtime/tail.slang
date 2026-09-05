@@ -6,7 +6,9 @@ import "prime_realtime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/path.slang";
 import "math/sampling.slang";
+import "math/hash.slang";
 import "math/direct_sampling.slang";
+import "math/transport.slang";
 import "model/atmosphere/sky.slang";
 import "model/realtime/transport.slang";
 import "policy/runtime/config.slang";
@@ -214,10 +216,16 @@ public bool primeIntegrateRealtimeTailSurface(
                     path,
                     surface,
                     bsdf,
-                    preparedSample,
-                    discreteOnlyInterface,
-                    false)) {
+                    discreteOnlyInterface)) {
         return false;
+    }
+    if (primeRussianRouletteApplies(primeRealtimeRouletteScatterIndex(primePathBounce(path.control)),
+            PRIME_RUSSIAN_ROULETTE_START)) {
+        float survival = primeRussianRouletteSurvival(path.throughput, path.etaScale);
+        float sample = primeHashSample1D(preparedSample,
+                PRIME_SAMPLE_EFFECT_RUSSIAN_ROULETTE, PRIME_SAMPLE_DIMENSION_PRIMARY);
+        if (sample >= survival) return false;
+        path.throughput = primeRussianRouletteReweight(path.throughput, survival);
     }
     path.control = primeIncrementPathBounce(path.control);
     return true;

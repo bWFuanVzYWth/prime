@@ -118,7 +118,6 @@
   "prime.options.debug.image_view.input_color": "RR 含噪输入",
   "prime.options.debug.image_view.linear_depth": "线性深度",
   "prime.options.debug.image_view.motion": "运动向量",
-  "prime.options.debug.image_view.specular_motion": "镜面运动向量",
   "prime.options.debug.image_view.responsivity": "响应度",
   "prime.options.debug.image_view.primary_grid": "主路径 REBLUR 输入分区",
   "prime.options.debug.image_view.primary_motion": "主路径：MV 原图",

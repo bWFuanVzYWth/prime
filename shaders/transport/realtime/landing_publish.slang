@@ -19,9 +19,9 @@ struct PrimeWavefrontContinuationControl {
 PrimeWavefrontContinuationControl primeLoadWavefrontContinuationControl(
         uint pathIndex) {
     uint4 sourceAndPathControl =
-            primeWavefrontPaths[pathIndex].transport.sourceAndPathControl;
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.sourceAndPathControl;
     float4 rayDirectionAndDenoiserControl =
-            primeWavefrontPaths[pathIndex]
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
                     .transport.rayDirectionAndDenoiserControl;
     PrimeWavefrontContinuationControl control;
     control.guide = sourceAndPathControl.z;
@@ -43,11 +43,11 @@ PrimeWavefrontContinuationControl primeEnterSecondaryControl(
 void primeStoreWavefrontContinuationControl(
         uint pathIndex,
         PrimeWavefrontContinuationControl control) {
-    primeWavefrontPaths[pathIndex].transport.sourceAndPathControl.z =
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.sourceAndPathControl.z =
             control.guide;
-    primeWavefrontPaths[pathIndex].transport.sourceAndPathControl.w =
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.sourceAndPathControl.w =
             control.path;
-    primeWavefrontPaths[pathIndex]
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
             .transport.rayDirectionAndDenoiserControl.w =
             asfloat(control.denoiser);
 }

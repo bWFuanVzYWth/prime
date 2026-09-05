@@ -29,16 +29,14 @@ public void primeScatterFixedPath(
                     recordIndex,
                     record,
                     surface,
-                    control,
-                    true)
+                    control)
             : primeAdvanceOrdinaryWavefrontRecord(
                     PrimeFixedTransportPhase(),
                     context,
                     recordIndex,
                     record,
                     surface,
-                    control,
-                    true);
+                    control);
     primeAppendWavefrontContinuation(
             PrimeWavefrontContinuationAppender(),
             targetQueue,

@@ -1,219 +1,747 @@
 {
   "lambertContract": {
-      "maximumBounces": 12,
-      "recordSize": 128,
-      "queueCount": 2,
-      "commandStride": 16,
-      "indexSize": 4,
-      "pathBinding": 36,
-      "queueBinding": 37
+    "maximumBounces": 12,
+    "recordSize": 128,
+    "queueCount": 2,
+    "commandStride": 16,
+    "indexSize": 4,
+    "pathBinding": 36,
+    "queueBinding": 37
   },
   "structs": {
     "primitiveRecord": {
       "size": 32,
       "fields": [
-        { "name": "uv0", "type": "uint", "offset": 0 },
-        { "name": "uv1", "type": "uint", "offset": 4 },
-        { "name": "uv2", "type": "uint", "offset": 8 },
-        { "name": "tint", "type": "uint", "offset": 12 },
-        { "name": "identity", "type": "uint", "offset": 16 },
-        { "name": "flagsEmitter", "type": "uint", "offset": 20 },
-        { "name": "uvDensity", "type": "uint", "offset": 24 },
-        { "name": "tangent", "type": "uint", "offset": 28 }
+        {
+          "name": "uv0",
+          "type": "uint",
+          "offset": 0
+        },
+        {
+          "name": "uv1",
+          "type": "uint",
+          "offset": 4
+        },
+        {
+          "name": "uv2",
+          "type": "uint",
+          "offset": 8
+        },
+        {
+          "name": "tint",
+          "type": "uint",
+          "offset": 12
+        },
+        {
+          "name": "identity",
+          "type": "uint",
+          "offset": 16
+        },
+        {
+          "name": "flagsEmitter",
+          "type": "uint",
+          "offset": 20
+        },
+        {
+          "name": "uvDensity",
+          "type": "uint",
+          "offset": 24
+        },
+        {
+          "name": "tangent",
+          "type": "uint",
+          "offset": 28
+        }
       ]
     },
     "sectionRecord": {
       "size": 96,
       "fields": [
-        { "name": "primitiveAddress", "type": "uint64_t", "offset": 0 },
-        { "name": "lightAddress", "type": "uint64_t", "offset": 8 },
-        { "name": "worldLightAddress", "type": "uint64_t", "offset": 16 },
-        { "name": "cutoutBase", "type": "uint", "offset": 24 },
-        { "name": "transmissiveBase", "type": "uint", "offset": 28 },
-        { "name": "worldLightPath", "type": "uint", "offset": 32 },
-        { "name": "lightCount", "type": "uint", "offset": 36 },
-        { "name": "worldLightLeafAddress", "type": "uint64_t", "offset": 40 },
-        { "name": "translation", "type": "vec3", "offset": 48 },
-        { "name": "worldLightLeafCount", "type": "uint", "offset": 60 },
-        { "name": "instanceTint", "type": "uint", "offset": 64 },
-        { "name": "opaqueMacroTriangleBase", "type": "uint", "offset": 68 },
-        { "name": "cutoutMacroTriangleBase", "type": "uint", "offset": 72 },
-        { "name": "transmissiveMacroTriangleBase", "type": "uint", "offset": 76 },
-        { "name": "surfaceRelationAddress", "type": "uint64_t", "offset": 80 },
-        { "name": "positionAddress", "type": "uint64_t", "offset": 88 }
+        {
+          "name": "primitiveAddress",
+          "type": "uint64_t",
+          "offset": 0
+        },
+        {
+          "name": "lightAddress",
+          "type": "uint64_t",
+          "offset": 8
+        },
+        {
+          "name": "worldLightAddress",
+          "type": "uint64_t",
+          "offset": 16
+        },
+        {
+          "name": "cutoutBase",
+          "type": "uint",
+          "offset": 24
+        },
+        {
+          "name": "transmissiveBase",
+          "type": "uint",
+          "offset": 28
+        },
+        {
+          "name": "worldLightPath",
+          "type": "uint",
+          "offset": 32
+        },
+        {
+          "name": "lightCount",
+          "type": "uint",
+          "offset": 36
+        },
+        {
+          "name": "worldLightLeafAddress",
+          "type": "uint64_t",
+          "offset": 40
+        },
+        {
+          "name": "translation",
+          "type": "vec3",
+          "offset": 48
+        },
+        {
+          "name": "worldLightLeafCount",
+          "type": "uint",
+          "offset": 60
+        },
+        {
+          "name": "instanceTint",
+          "type": "uint",
+          "offset": 64
+        },
+        {
+          "name": "opaqueMacroTriangleBase",
+          "type": "uint",
+          "offset": 68
+        },
+        {
+          "name": "cutoutMacroTriangleBase",
+          "type": "uint",
+          "offset": 72
+        },
+        {
+          "name": "transmissiveMacroTriangleBase",
+          "type": "uint",
+          "offset": 76
+        },
+        {
+          "name": "surfaceRelationAddress",
+          "type": "uint64_t",
+          "offset": 80
+        },
+        {
+          "name": "positionAddress",
+          "type": "uint64_t",
+          "offset": 88
+        }
       ]
     },
     "lightNode": {
       "size": 32,
       "fields": [
-        { "name": "centroidPower", "type": "vec4", "offset": 0 },
-        { "name": "directionChildReserved", "type": "uvec4", "offset": 16 }
+        {
+          "name": "centroidPower",
+          "type": "vec4",
+          "offset": 0
+        },
+        {
+          "name": "directionChildReserved",
+          "type": "uvec4",
+          "offset": 16
+        }
       ]
     },
     "lightLeaf": {
       "size": 8,
       "fields": [
-        { "name": "index", "type": "uint", "offset": 0 },
-        { "name": "power", "type": "float", "offset": 4 }
+        {
+          "name": "index",
+          "type": "uint",
+          "offset": 0
+        },
+        {
+          "name": "power",
+          "type": "float",
+          "offset": 4
+        }
       ]
     },
     "lightEmitter": {
       "size": 96,
       "fields": [
-        { "name": "cornerArea", "type": "vec4", "offset": 0 },
-        { "name": "edgeOneScale", "type": "vec4", "offset": 16 },
-        { "name": "edgeTwoPower", "type": "vec4", "offset": 32 },
-        { "name": "normal", "type": "vec3", "offset": 48 },
-        { "name": "relationOffset", "type": "uint", "offset": 60 },
-        { "name": "uvsTint", "type": "uvec4", "offset": 64 },
-        { "name": "metadata", "type": "uvec4", "offset": 80 }
+        {
+          "name": "cornerArea",
+          "type": "vec4",
+          "offset": 0
+        },
+        {
+          "name": "edgeOneScale",
+          "type": "vec4",
+          "offset": 16
+        },
+        {
+          "name": "edgeTwoPower",
+          "type": "vec4",
+          "offset": 32
+        },
+        {
+          "name": "normal",
+          "type": "vec3",
+          "offset": 48
+        },
+        {
+          "name": "relationOffset",
+          "type": "uint",
+          "offset": 60
+        },
+        {
+          "name": "uvsTint",
+          "type": "uvec4",
+          "offset": 64
+        },
+        {
+          "name": "metadata",
+          "type": "uvec4",
+          "offset": 80
+        }
       ]
     },
     "lightCell": {
       "size": 12,
       "fields": [
-        { "name": "aliasProbability", "type": "float", "offset": 0 },
-        { "name": "aliasGeometry", "type": "uint", "offset": 4 },
-        { "name": "probabilityMass", "type": "float", "offset": 8 }
+        {
+          "name": "aliasProbability",
+          "type": "float",
+          "offset": 0
+        },
+        {
+          "name": "aliasGeometry",
+          "type": "uint",
+          "offset": 4
+        },
+        {
+          "name": "probabilityMass",
+          "type": "float",
+          "offset": 8
+        }
       ]
     },
     "sectionLightHeader": {
       "size": 40,
       "fields": [
-        { "name": "nodeAddress", "type": "uint64_t", "offset": 0 },
-        { "name": "leafAddress", "type": "uint64_t", "offset": 8 },
-        { "name": "emitterAddress", "type": "uint64_t", "offset": 16 },
-        { "name": "cellAddress", "type": "uint64_t", "offset": 24 },
-        { "name": "root", "type": "uint", "offset": 32 },
-        { "name": "emitterCount", "type": "uint", "offset": 36 }
+        {
+          "name": "nodeAddress",
+          "type": "uint64_t",
+          "offset": 0
+        },
+        {
+          "name": "leafAddress",
+          "type": "uint64_t",
+          "offset": 8
+        },
+        {
+          "name": "emitterAddress",
+          "type": "uint64_t",
+          "offset": 16
+        },
+        {
+          "name": "cellAddress",
+          "type": "uint64_t",
+          "offset": 24
+        },
+        {
+          "name": "root",
+          "type": "uint",
+          "offset": 32
+        },
+        {
+          "name": "emitterCount",
+          "type": "uint",
+          "offset": 36
+        }
       ]
     },
     "integratorRecord": {
       "size": 16,
       "fields": [
-        { "name": "sunDirectionIntensity", "type": "vec4", "offset": 0 }
+        {
+          "name": "sunDirectionIntensity",
+          "type": "vec4",
+          "offset": 0
+        }
       ]
     },
     "pathState": {
       "size": 80,
       "fields": [
-        { "name": "physicalOrigin", "type": "vec3", "offset": 0 },
-        { "name": "previousBsdfPdf", "type": "float", "offset": 12 },
-        { "name": "rayDirection", "type": "vec3", "offset": 16 },
-        { "name": "etaScale", "type": "float", "offset": 28 },
-        { "name": "throughput", "type": "vec3", "offset": 32 },
-        { "name": "control", "type": "uint", "offset": 44 },
-        { "name": "sourcePrimitive", "type": "uvec2", "offset": 48 },
-        { "name": "sampleSeed", "type": "uint", "offset": 56 },
-        { "name": "previousLightNormal", "type": "vec3", "offset": 64 }
+        {
+          "name": "physicalOrigin",
+          "type": "vec3",
+          "offset": 0
+        },
+        {
+          "name": "previousBsdfPdf",
+          "type": "float",
+          "offset": 12
+        },
+        {
+          "name": "rayDirection",
+          "type": "vec3",
+          "offset": 16
+        },
+        {
+          "name": "etaScale",
+          "type": "float",
+          "offset": 28
+        },
+        {
+          "name": "throughput",
+          "type": "vec3",
+          "offset": 32
+        },
+        {
+          "name": "control",
+          "type": "uint",
+          "offset": 44
+        },
+        {
+          "name": "sourcePrimitive",
+          "type": "uvec2",
+          "offset": 48
+        },
+        {
+          "name": "sampleSeed",
+          "type": "uint",
+          "offset": 56
+        },
+        {
+          "name": "previousLightNormal",
+          "type": "vec3",
+          "offset": 64
+        }
       ]
     },
     "tracePayload": {
       "size": 112,
       "fields": [
-        { "name": "geometricNormal", "type": "vec3", "offset": 0 },
-        { "name": "t", "type": "float", "offset": 12 },
-        { "name": "baseColor", "type": "vec3", "offset": 16 },
-        { "name": "materialControl", "type": "uint", "offset": 28 },
-        { "name": "sectionIndex", "type": "uint", "offset": 32 },
-        { "name": "emitterIndex", "type": "uint", "offset": 36 },
-        { "name": "textureLod", "type": "float", "offset": 40 },
-        { "name": "opacity", "type": "float", "offset": 44 },
-        { "name": "shadingNormal", "type": "vec3", "offset": 48 },
-        { "name": "roughness", "type": "float", "offset": 60 },
-        { "name": "opticalControl", "type": "uint", "offset": 64 },
-        { "name": "hitKind", "type": "uint", "offset": 68 },
-        { "name": "mediumId", "type": "uint", "offset": 72 },
-        { "name": "adjacentMediumId", "type": "uint", "offset": 76 },
-        { "name": "adjacentBaseColor", "type": "vec3", "offset": 80 },
-        { "name": "adjacentInterfaceControl", "type": "uint", "offset": 92 },
-        { "name": "position", "type": "vec3", "offset": 96 },
-        { "name": "positionReserved", "type": "uint", "offset": 108 }
+        {
+          "name": "geometricNormal",
+          "type": "vec3",
+          "offset": 0
+        },
+        {
+          "name": "t",
+          "type": "float",
+          "offset": 12
+        },
+        {
+          "name": "baseColor",
+          "type": "vec3",
+          "offset": 16
+        },
+        {
+          "name": "materialControl",
+          "type": "uint",
+          "offset": 28
+        },
+        {
+          "name": "sectionIndex",
+          "type": "uint",
+          "offset": 32
+        },
+        {
+          "name": "emitterIndex",
+          "type": "uint",
+          "offset": 36
+        },
+        {
+          "name": "textureLod",
+          "type": "float",
+          "offset": 40
+        },
+        {
+          "name": "opacity",
+          "type": "float",
+          "offset": 44
+        },
+        {
+          "name": "shadingNormal",
+          "type": "vec3",
+          "offset": 48
+        },
+        {
+          "name": "roughness",
+          "type": "float",
+          "offset": 60
+        },
+        {
+          "name": "opticalControl",
+          "type": "uint",
+          "offset": 64
+        },
+        {
+          "name": "hitKind",
+          "type": "uint",
+          "offset": 68
+        },
+        {
+          "name": "mediumId",
+          "type": "uint",
+          "offset": 72
+        },
+        {
+          "name": "adjacentMediumId",
+          "type": "uint",
+          "offset": 76
+        },
+        {
+          "name": "adjacentBaseColor",
+          "type": "vec3",
+          "offset": 80
+        },
+        {
+          "name": "adjacentInterfaceControl",
+          "type": "uint",
+          "offset": 92
+        },
+        {
+          "name": "position",
+          "type": "vec3",
+          "offset": 96
+        },
+        {
+          "name": "positionReserved",
+          "type": "uint",
+          "offset": 108
+        }
       ]
     },
     "surfaceInteraction": {
       "size": 112,
       "fields": [
-        { "name": "position", "type": "vec3", "offset": 0 },
-        { "name": "t", "type": "float", "offset": 12 },
-        { "name": "geometricNormal", "type": "vec3", "offset": 16 },
-        { "name": "hitKind", "type": "uint", "offset": 28 },
-        { "name": "baseColor", "type": "vec3", "offset": 32 },
-        { "name": "materialControl", "type": "uint", "offset": 44 },
-        { "name": "sectionIndex", "type": "uint", "offset": 48 },
-        { "name": "emitterIndex", "type": "uint", "offset": 52 },
-        { "name": "textureLod", "type": "float", "offset": 56 },
-        { "name": "opacity", "type": "float", "offset": 60 },
-        { "name": "shadingNormal", "type": "vec3", "offset": 64 },
-        { "name": "roughness", "type": "float", "offset": 76 },
-        { "name": "opticalControl", "type": "uint", "offset": 80 },
-        { "name": "motionZFlags", "type": "uint", "offset": 84 },
-        { "name": "mediumId", "type": "uint", "offset": 88 },
-        { "name": "adjacentMediumId", "type": "uint", "offset": 92 },
-        { "name": "adjacentBaseColor", "type": "vec3", "offset": 96 },
-        { "name": "adjacentInterfaceControl", "type": "uint", "offset": 108 }
+        {
+          "name": "position",
+          "type": "vec3",
+          "offset": 0
+        },
+        {
+          "name": "t",
+          "type": "float",
+          "offset": 12
+        },
+        {
+          "name": "geometricNormal",
+          "type": "vec3",
+          "offset": 16
+        },
+        {
+          "name": "hitKind",
+          "type": "uint",
+          "offset": 28
+        },
+        {
+          "name": "baseColor",
+          "type": "vec3",
+          "offset": 32
+        },
+        {
+          "name": "materialControl",
+          "type": "uint",
+          "offset": 44
+        },
+        {
+          "name": "sectionIndex",
+          "type": "uint",
+          "offset": 48
+        },
+        {
+          "name": "emitterIndex",
+          "type": "uint",
+          "offset": 52
+        },
+        {
+          "name": "textureLod",
+          "type": "float",
+          "offset": 56
+        },
+        {
+          "name": "opacity",
+          "type": "float",
+          "offset": 60
+        },
+        {
+          "name": "shadingNormal",
+          "type": "vec3",
+          "offset": 64
+        },
+        {
+          "name": "roughness",
+          "type": "float",
+          "offset": 76
+        },
+        {
+          "name": "opticalControl",
+          "type": "uint",
+          "offset": 80
+        },
+        {
+          "name": "motionZFlags",
+          "type": "uint",
+          "offset": 84
+        },
+        {
+          "name": "mediumId",
+          "type": "uint",
+          "offset": 88
+        },
+        {
+          "name": "adjacentMediumId",
+          "type": "uint",
+          "offset": 92
+        },
+        {
+          "name": "adjacentBaseColor",
+          "type": "vec3",
+          "offset": 96
+        },
+        {
+          "name": "adjacentInterfaceControl",
+          "type": "uint",
+          "offset": 108
+        }
       ]
     },
     "wavefrontSurfaceRecord": {
       "size": 100,
       "fields": [
-        { "name": "distance", "type": "uint", "offset": 0 },
-        { "name": "geometricNormalX", "type": "uint", "offset": 4 },
-        { "name": "geometricNormalY", "type": "uint", "offset": 8 },
-        { "name": "geometricNormalZ", "type": "uint", "offset": 12 },
-        { "name": "hitMaterialMedium", "type": "uint", "offset": 16 },
-        { "name": "sectionIndex", "type": "uint", "offset": 20 },
-        { "name": "emitterIndex", "type": "uint", "offset": 24 },
-        { "name": "baseColorX", "type": "uint", "offset": 28 },
-        { "name": "baseColorY", "type": "uint", "offset": 32 },
-        { "name": "baseColorZ", "type": "uint", "offset": 36 },
-        { "name": "opacity", "type": "uint", "offset": 40 },
-        { "name": "roughness", "type": "uint", "offset": 44 },
-        { "name": "opticalAdjacentHigh", "type": "uint", "offset": 48 },
-        { "name": "shadingNormalX", "type": "uint", "offset": 52 },
-        { "name": "shadingNormalY", "type": "uint", "offset": 56 },
-        { "name": "shadingNormalZ", "type": "uint", "offset": 60 },
-        { "name": "adjacentBaseColorX", "type": "uint", "offset": 64 },
-        { "name": "adjacentBaseColorY", "type": "uint", "offset": 68 },
-        { "name": "adjacentBaseColorZ", "type": "uint", "offset": 72 },
-        { "name": "positionX", "type": "uint", "offset": 76 },
-        { "name": "positionY", "type": "uint", "offset": 80 },
-        { "name": "positionZ", "type": "uint", "offset": 84 },
-        { "name": "motionZFlags", "type": "uint", "offset": 88 },
-        { "name": "adjacentMediumControl", "type": "uint", "offset": 92 },
-        { "name": "textureLod", "type": "uint", "offset": 96 }
+        {
+          "name": "distance",
+          "type": "uint",
+          "offset": 0
+        },
+        {
+          "name": "geometricNormalX",
+          "type": "uint",
+          "offset": 4
+        },
+        {
+          "name": "geometricNormalY",
+          "type": "uint",
+          "offset": 8
+        },
+        {
+          "name": "geometricNormalZ",
+          "type": "uint",
+          "offset": 12
+        },
+        {
+          "name": "hitMaterialMedium",
+          "type": "uint",
+          "offset": 16
+        },
+        {
+          "name": "sectionIndex",
+          "type": "uint",
+          "offset": 20
+        },
+        {
+          "name": "emitterIndex",
+          "type": "uint",
+          "offset": 24
+        },
+        {
+          "name": "baseColorX",
+          "type": "uint",
+          "offset": 28
+        },
+        {
+          "name": "baseColorY",
+          "type": "uint",
+          "offset": 32
+        },
+        {
+          "name": "baseColorZ",
+          "type": "uint",
+          "offset": 36
+        },
+        {
+          "name": "opacity",
+          "type": "uint",
+          "offset": 40
+        },
+        {
+          "name": "roughness",
+          "type": "uint",
+          "offset": 44
+        },
+        {
+          "name": "opticalAdjacentHigh",
+          "type": "uint",
+          "offset": 48
+        },
+        {
+          "name": "shadingNormalX",
+          "type": "uint",
+          "offset": 52
+        },
+        {
+          "name": "shadingNormalY",
+          "type": "uint",
+          "offset": 56
+        },
+        {
+          "name": "shadingNormalZ",
+          "type": "uint",
+          "offset": 60
+        },
+        {
+          "name": "adjacentBaseColorX",
+          "type": "uint",
+          "offset": 64
+        },
+        {
+          "name": "adjacentBaseColorY",
+          "type": "uint",
+          "offset": 68
+        },
+        {
+          "name": "adjacentBaseColorZ",
+          "type": "uint",
+          "offset": 72
+        },
+        {
+          "name": "positionX",
+          "type": "uint",
+          "offset": 76
+        },
+        {
+          "name": "positionY",
+          "type": "uint",
+          "offset": 80
+        },
+        {
+          "name": "positionZ",
+          "type": "uint",
+          "offset": 84
+        },
+        {
+          "name": "motionZFlags",
+          "type": "uint",
+          "offset": 88
+        },
+        {
+          "name": "adjacentMediumControl",
+          "type": "uint",
+          "offset": 92
+        },
+        {
+          "name": "textureLod",
+          "type": "uint",
+          "offset": 96
+        }
       ]
     },
     "pushConstants": {
       "size": 128,
       "fields": [
-        { "name": "inverseViewProjection", "type": "mat4", "offset": 0 },
-        { "name": "cameraPosition", "type": "vec3", "offset": 64 },
-        { "name": "atmosphereEyeRadiusKm", "type": "float", "offset": 76 },
-        { "name": "sectionTableAddress", "type": "uint64_t", "offset": 80 },
-        { "name": "outputExtent", "type": "uvec2", "offset": 88 },
-        { "name": "sunDirection", "type": "vec3", "offset": 96 },
-        { "name": "rayCone", "type": "uint", "offset": 108 },
-        { "name": "path", "type": "uvec4", "offset": 112 }
+        {
+          "name": "inverseViewProjection",
+          "type": "mat4",
+          "offset": 0
+        },
+        {
+          "name": "cameraPosition",
+          "type": "vec3",
+          "offset": 64
+        },
+        {
+          "name": "atmosphereEyeRadiusKm",
+          "type": "float",
+          "offset": 76
+        },
+        {
+          "name": "sectionTableAddress",
+          "type": "uint64_t",
+          "offset": 80
+        },
+        {
+          "name": "outputExtent",
+          "type": "uvec2",
+          "offset": 88
+        },
+        {
+          "name": "sunDirection",
+          "type": "vec3",
+          "offset": 96
+        },
+        {
+          "name": "rayCone",
+          "type": "uint",
+          "offset": 108
+        },
+        {
+          "name": "path",
+          "type": "uvec4",
+          "offset": 112
+        }
       ]
     },
     "nrdMotionPushConstants": {
       "size": 144,
       "fields": [
-        { "name": "currentClipToWorld", "type": "mat4", "offset": 0 },
-        { "name": "previousWorldToClip", "type": "mat4", "offset": 64 },
-        { "name": "currentJitterPixels", "type": "vec2", "offset": 128 }
+        {
+          "name": "currentClipToWorld",
+          "type": "mat4",
+          "offset": 0
+        },
+        {
+          "name": "previousWorldToClip",
+          "type": "mat4",
+          "offset": 64
+        },
+        {
+          "name": "currentJitterPixels",
+          "type": "vec2",
+          "offset": 128
+        }
       ]
     },
     "sunShadowQueryConstants": {
       "size": 48,
       "fields": [
-        { "name": "directionToSun", "type": "vec3", "offset": 0 },
-        { "name": "bank", "type": "uint", "offset": 12 },
-        { "name": "basisU", "type": "vec3", "offset": 16 },
-        { "name": "valid", "type": "uint", "offset": 28 },
-        { "name": "basisV", "type": "vec3", "offset": 32 },
-        { "name": "reserved", "type": "uint", "offset": 44 }
+        {
+          "name": "directionToSun",
+          "type": "vec3",
+          "offset": 0
+        },
+        {
+          "name": "bank",
+          "type": "uint",
+          "offset": 12
+        },
+        {
+          "name": "basisU",
+          "type": "vec3",
+          "offset": 16
+        },
+        {
+          "name": "valid",
+          "type": "uint",
+          "offset": 28
+        },
+        {
+          "name": "basisV",
+          "type": "vec3",
+          "offset": 32
+        },
+        {
+          "name": "reserved",
+          "type": "uint",
+          "offset": 44
+        }
       ]
     }
   },
@@ -315,12 +843,12 @@
     "pathRecordSize": 112,
     "etaScaleOffset": 92,
     "pathControlReservedMask": "0x00ffff00",
-    "pathSlotsPerPixel": 2,
-    "areaGuideRecordSize": 16,
+    "pathSlotsPerPixel": 1,
+    "areaGuideRecordSize": 32,
     "stagedLightRecordSize": 24,
     "stagedReceiverNormalOffset": 12,
     "detachedGuideRecordSize": 40,
-    "areaRecordSize": 264,
+    "areaRecordSize": 280,
     "queueEntriesPerPixel": 2,
     "queueStorageEntriesPerPixel": 9,
     "queueCount": 7,
@@ -334,7 +862,8 @@
     "guideQueue": 6,
     "queueCommandStride": 16,
     "queueIndexSize": 4,
-    "activeMask": "0x1"
+    "activeMask": "0x1",
+    "branchSlotsPerPixel": 2
   },
   "offlineWavefrontContract": {
     "pathRecordSize": 128,

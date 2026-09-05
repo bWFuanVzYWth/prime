@@ -61,7 +61,11 @@ public PrimeDenoiserGuides primeSelectReconstructionPrimaryGuides(
     if (result.transparentPrimary
             && (usesTransmissionGuide
                     || (nrdShInputs && !result.transparentReflectionOnly))) {
-        return result.transmissionGuides;
+        PrimeDenoiserGuides guides = result.transmissionGuides;
+        if (!nrdShInputs) {
+            guides.primarySpecularAlbedo = result.guides.primarySpecularAlbedo;
+        }
+        return guides;
     }
     return result.guides;
 }

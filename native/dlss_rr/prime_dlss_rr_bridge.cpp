@@ -19,7 +19,7 @@
 
 namespace {
 
-constexpr std::uint32_t PRIME_DLSS_RR_ABI_VERSION = 10;
+constexpr std::uint32_t PRIME_DLSS_RR_ABI_VERSION = 11;
 constexpr auto PRIME_DLSS_RR_RENDER_PRESET = NVSDK_NGX_RayReconstruction_Hint_Render_Preset_F;
 constexpr char PROJECT_ID[] = "7bc01faf-de5e-4c7c-9936-43cb5c301232";
 constexpr std::uint32_t EXTENSION_NAME_STRIDE = 256;
@@ -232,6 +232,51 @@ NVSDK_NGX_Resource_VK imageResource(const PrimeImage& image, bool readWrite) {
             image.width,
             image.height,
             readWrite);
+}
+
+NVSDK_NGX_VK_DLSSD_Eval_Params makeEvaluation(
+        PrimeEvaluateDescription& description,
+        std::array<NVSDK_NGX_Resource_VK, IMAGE_COUNT>& resources) {
+    for (std::size_t index = 0; index < RESPONSIVITY; ++index) {
+        if (!absentImage(description.images[index])) {
+            resources[index] = imageResource(
+                    description.images[index], index == OUTPUT_COLOR);
+        }
+    }
+    const bool hasResponsivity = !absentImage(description.images[RESPONSIVITY]);
+    if (hasResponsivity) {
+        resources[RESPONSIVITY] = imageResource(
+                description.images[RESPONSIVITY], false);
+    }
+    NVSDK_NGX_VK_DLSSD_Eval_Params evaluate{};
+    evaluate.pInDiffuseAlbedo = &resources[DIFFUSE_ALBEDO];
+    evaluate.pInSpecularAlbedo = &resources[SPECULAR_ALBEDO];
+    evaluate.pInNormals = &resources[NORMAL_ROUGHNESS];
+    evaluate.pInRoughness = nullptr;
+    evaluate.pInColor = &resources[INPUT_COLOR];
+    evaluate.pInOutput = &resources[OUTPUT_COLOR];
+    evaluate.pInDepth = &resources[LINEAR_DEPTH];
+    evaluate.pInMotionVectors = &resources[MOTION_VECTORS];
+    evaluate.pInMotionVectorsReflections = absentImage(description.images[SPECULAR_MOTION_VECTORS])
+            ? nullptr : &resources[SPECULAR_MOTION_VECTORS];
+    // Without explicit reflection motion, NGX uses hit distance and the matrices below.
+    // Prime's transparent split has no raster pre-transparency snapshot.
+    evaluate.pInColorBeforeTransparency = nullptr;
+    evaluate.pInSpecularHitDistance = &resources[SPECULAR_HIT_DISTANCE];
+    evaluate.pInResponsivityMask = hasResponsivity ? &resources[RESPONSIVITY] : nullptr;
+    evaluate.pInWorldToViewMatrix = description.worldToView;
+    evaluate.pInViewToClipMatrix = description.viewToClip;
+    evaluate.InJitterOffsetX = description.jitterX;
+    evaluate.InJitterOffsetY = description.jitterY;
+    evaluate.InMVScaleX = description.motionScaleX;
+    evaluate.InMVScaleY = description.motionScaleY;
+    evaluate.InReset = description.reset;
+    evaluate.InFrameTimeDeltaInMsec = description.frameTimeMilliseconds;
+    evaluate.InRenderSubrectDimensions.Width = description.renderWidth;
+    evaluate.InRenderSubrectDimensions.Height = description.renderHeight;
+    evaluate.InPreExposure = 1.0F;
+    evaluate.InExposureScale = 1.0F;
+    return evaluate;
 }
 
 bool succeeded(NVSDK_NGX_Result result) {
@@ -501,11 +546,12 @@ PRIME_EXPORT int primeDlssRrEvaluate(PrimeEvaluateDescription* description) {
                     VK_FORMAT_R32G32_SFLOAT,
                     feature->renderWidth,
                     feature->renderHeight)
-            && validImage(
-                    description->images[SPECULAR_MOTION_VECTORS],
-                    VK_FORMAT_R32G32_SFLOAT,
-                    feature->renderWidth,
-                    feature->renderHeight)
+            && (absentImage(description->images[SPECULAR_MOTION_VECTORS])
+                    || validImage(
+                            description->images[SPECULAR_MOTION_VECTORS],
+                            VK_FORMAT_R32G32_SFLOAT,
+                            feature->renderWidth,
+                            feature->renderHeight))
             && validImage(
                     description->images[SPECULAR_HIT_DISTANCE],
                     VK_FORMAT_R16_SFLOAT,
@@ -521,43 +567,7 @@ PRIME_EXPORT int primeDlssRrEvaluate(PrimeEvaluateDescription* description) {
         return -2;
     }
     std::array<NVSDK_NGX_Resource_VK, IMAGE_COUNT> resources{};
-    for (std::size_t index = 0; index < RESPONSIVITY; ++index) {
-        resources[index] = imageResource(
-                description->images[index], index == OUTPUT_COLOR);
-    }
-    const bool hasResponsivity = !absentImage(description->images[RESPONSIVITY]);
-    if (hasResponsivity) {
-        resources[RESPONSIVITY] = imageResource(
-                description->images[RESPONSIVITY], false);
-    }
-    NVSDK_NGX_VK_DLSSD_Eval_Params evaluate{};
-    evaluate.pInDiffuseAlbedo = &resources[DIFFUSE_ALBEDO];
-    evaluate.pInSpecularAlbedo = &resources[SPECULAR_ALBEDO];
-    evaluate.pInNormals = &resources[NORMAL_ROUGHNESS];
-    evaluate.pInRoughness = nullptr;
-    evaluate.pInColor = &resources[INPUT_COLOR];
-    evaluate.pInOutput = &resources[OUTPUT_COLOR];
-    evaluate.pInDepth = &resources[LINEAR_DEPTH];
-    evaluate.pInMotionVectors = &resources[MOTION_VECTORS];
-    evaluate.pInMotionVectorsReflections = &resources[SPECULAR_MOTION_VECTORS];
-    // Prime's transparent-primary split is not a raster overlay, so there is no truthful
-    // pre-transparency snapshot. Reflection MV transports history while hit distance independently
-    // preserves spatial separation between reflected surfaces.
-    evaluate.pInColorBeforeTransparency = nullptr;
-    evaluate.pInSpecularHitDistance = &resources[SPECULAR_HIT_DISTANCE];
-    evaluate.pInResponsivityMask = hasResponsivity ? &resources[RESPONSIVITY] : nullptr;
-    evaluate.pInWorldToViewMatrix = description->worldToView;
-    evaluate.pInViewToClipMatrix = description->viewToClip;
-    evaluate.InJitterOffsetX = description->jitterX;
-    evaluate.InJitterOffsetY = description->jitterY;
-    evaluate.InMVScaleX = description->motionScaleX;
-    evaluate.InMVScaleY = description->motionScaleY;
-    evaluate.InReset = description->reset;
-    evaluate.InFrameTimeDeltaInMsec = description->frameTimeMilliseconds;
-    evaluate.InRenderSubrectDimensions.Width = description->renderWidth;
-    evaluate.InRenderSubrectDimensions.Height = description->renderHeight;
-    evaluate.InPreExposure = 1.0F;
-    evaluate.InExposureScale = 1.0F;
+    NVSDK_NGX_VK_DLSSD_Eval_Params evaluate = makeEvaluation(*description, resources);
     NVSDK_NGX_Result result = NGX_VULKAN_EVALUATE_DLSSD_EXT(
             reinterpret_cast<VkCommandBuffer>(description->commandBuffer),
             feature->handle,

@@ -12,12 +12,8 @@ import "service/reconstruct/ordinary.slang";
 import "service/reconstruct/resolved.slang";
 
 public PrimeResolvedSample primeResolveTransparentWavefrontResult(uint2 pixel) {
-    uint transmissionControl = asuint(
-            primeWavefrontPaths[primeWavefrontIndex(pixel, 0u)]
-                    .transport.rayDirectionAndDenoiserControl.w);
-    uint reflectionControl = asuint(
-            primeWavefrontPaths[primeWavefrontIndex(pixel, 1u)]
-                    .transport.rayDirectionAndDenoiserControl.w);
+    uint transmissionControl = primeWavefrontBranchControl(primeWavefrontIndex(pixel, 0u));
+    uint reflectionControl = primeWavefrontBranchControl(primeWavefrontIndex(pixel, 1u));
     PrimeTransparentBranchResult transmission =
             primeLoadTransparentBranchIntermediate(
                     pixel, true, transmissionControl);

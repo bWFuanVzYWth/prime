@@ -10,11 +10,12 @@ final class LambertRouletteGpuTest extends GpuShaderTest {
     @Test
     void truncatedTransportPreservesExpectationAndLegacyRandomMapping() throws Exception {
         int count = 1 << 18;
-        float[][] colors = {{0.2f, 0.4f, 0.5f}, {0.9f, 0.8f, 0.6f}};
+        float[][] colors = {{0.2f, 0.4f, 0.5f}, {0.9f, 0.8f, 0.6f}, {0.002f, 0.01f, 0}};
         for (float[] color : colors) {
             ByteBuffer input = ByteBuffer.allocateDirect(32).order(ByteOrder.LITTLE_ENDIAN);
             input.putInt(count).putInt(0).putInt(-8).putInt(-1);
             for (float c : color) input.putFloat(c);
+            input.putInt(0);
             input.clear();
             ByteBuffer output = runner.dispatch("lambert_roulette.comp.spv", input, count * 32, count);
             double[] sums = new double[3], squares = new double[3];
@@ -28,7 +29,7 @@ final class LambertRouletteGpuTest extends GpuShaderTest {
                     squares[c] += (double) value * value;
                 }
                 float vertices = output.getFloat(offset + 12);
-                assertTrue(vertices >= 1 && vertices <= 12);
+                assertTrue(vertices >= 1 && vertices <= 12, "RR must preserve its start and bounce limit");
                 length += vertices;
                 assertEquals(0.0f, output.getFloat(offset + 16), "Legacy hash mapping changed");
                 float u = output.getFloat(offset + 20), v = output.getFloat(offset + 24);
@@ -51,14 +52,17 @@ final class LambertRouletteGpuTest extends GpuShaderTest {
 
     @Test
     void survivalBoundaryZeroAndUnitProbabilityRemainFinite() throws Exception {
-        // RGB, completed scatters, random value, survives, expected surviving scale.
+        // Beta RGB, completed scatters, random value, survives, expected scale.
         float[][] cases = {
             {0, 0, 0, 1, 0, 0, 1}, {0.25f, 0.125f, 0, 0, 0.9f, 1, 1},
-            {0.25f, 0.125f, 0, 1, 0.5f, 0, 1},
-            {0.25f, 0.125f, 0, 1, Math.nextDown(0.5f), 1, 2},
+            {0.25f, 0.125f, 0, 1, 0.25f, 0, 1},
+            {0.25f, 0.125f, 0, 1, Math.nextDown(0.25f), 1, 4},
             {1, 0.5f, 0, 1, Math.nextDown(1.0f), 1, 1},
             {4, 2, 0, 12, Math.nextDown(1.0f), 1, 1},
-            {1e-30f, 0, 0, 1, 0, 1, 1e15f}
+            {1e-30f, 0, 0, 1, 0, 1, 1e30f},
+            {1e-30f, 0, 0, 1, Math.nextDown(1.0f), 0, 1},
+            {0.001f, 0.4f, 0, 1, Math.nextDown(0.4f), 1, 2.5f},
+            {0.001f, 0.4f, 0, 1, 0.4f, 0, 1}
         };
         ByteBuffer input = ByteBuffer.allocateDirect(16 + cases.length * 32).order(ByteOrder.LITTLE_ENDIAN);
         input.putInt(cases.length).putInt(1).putLong(0);

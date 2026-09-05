@@ -2,18 +2,13 @@
 module "state/realtime/phase_scratch.slang";
 
 import "prime_realtime_abi.slang";
+import "math/realtime_storage.slang";
 import "state/realtime/contract.slang";
 
 // Light selection and the exact previous receiver normal coexist per path. Their 24-byte records
 // replace the earlier 40-byte detached-guide tail only after detached guide work has completed.
 public uint primeWavefrontPhaseWord(uint pathIndex) {
-    uint pixelCount = primeWavefrontPixelCount();
-    uint guideWords = pixelCount * PRIME_WAVEFRONT_AREA_GUIDE_WORDS;
-    uint surfaceWords = pixelCount
-            * PRIME_WAVEFRONT_PATH_SLOTS_PER_PIXEL
-            * (PRIME_WAVEFRONT_SURFACE_RECORD_SIZE / 4u);
-    return guideWords + surfaceWords
-            + pathIndex * (PRIME_WAVEFRONT_STAGED_LIGHT_RECORD_SIZE / 4u);
+    return primeRealtimePhaseWord(pathIndex, primeWavefrontPixelCount());
 }
 
 public void primeStoreWavefrontPreviousLightNormal(

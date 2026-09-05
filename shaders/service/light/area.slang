@@ -14,7 +14,6 @@ public AreaLightSample primeSampleAreaLight(
             surfacePosition, receiverNormal, treeSample.x);
     return primeSampleAreaLightSelection(
             surfacePosition,
-            receiverNormal,
             selection,
             treeSample.y,
             positionSample);

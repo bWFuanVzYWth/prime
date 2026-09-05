@@ -17,9 +17,8 @@ final class DlssRrDebugPass implements Destroyable {
     private static final int NORMAL_ROUGHNESS = 4;
     private static final int DEPTH = 5;
     private static final int MOTION = 6;
-    private static final int SPECULAR_MOTION = 7;
-    private static final int SPECULAR_HIT_DISTANCE = 8;
-    private static final int RESPONSIVITY = 9;
+    private static final int SPECULAR_HIT_DISTANCE = 7;
+    private static final int RESPONSIVITY = 8;
 
     private final ImageDiagnosticPass.OutputPair outputs;
 
@@ -40,7 +39,6 @@ final class DlssRrDebugPass implements Destroyable {
             targets.rrNormalRoughness(),
             targets.viewZ(),
             targets.motion(),
-            targets.specularMotion(),
             targets.specularHitDistance(),
             targets.responsivity()
         };
@@ -61,7 +59,6 @@ final class DlssRrDebugPass implements Destroyable {
                     descriptor(RrInputView.ROUGHNESS),
                     descriptor(RrInputView.LINEAR_DEPTH),
                     descriptor(RrInputView.MOTION),
-                    descriptor(RrInputView.SPECULAR_MOTION),
                     descriptor(RrInputView.SPECULAR_HIT_DISTANCE),
                     descriptor(RrInputView.RESPONSIVITY));
             this.outputs.sdr().recordGrid(commandBuffer, 4, views);
@@ -83,7 +80,6 @@ final class DlssRrDebugPass implements Destroyable {
             case ROUGHNESS -> view(NORMAL_ROUGHNESS, ImageDiagnosticPass.ROUGHNESS);
             case LINEAR_DEPTH -> view(DEPTH, ImageDiagnosticPass.DEPTH);
             case MOTION -> view(MOTION, ImageDiagnosticPass.MOTION);
-            case SPECULAR_MOTION -> view(SPECULAR_MOTION, ImageDiagnosticPass.MOTION);
             case SPECULAR_HIT_DISTANCE ->
                     view(SPECULAR_HIT_DISTANCE, ImageDiagnosticPass.HIT_R);
             case RESPONSIVITY -> view(RESPONSIVITY, ImageDiagnosticPass.SIGNED);

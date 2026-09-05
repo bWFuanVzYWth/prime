@@ -141,7 +141,6 @@ public void primeEvaluateOfflineDirect(
                         PRIME_SAMPLE_DIMENSION_PRIMARY);
                 AreaLightSample area = primeSampleAreaLightSelection(
                         surface.position,
-                        receiverNormal,
                         selection.area,
                         areaSample.y,
                         primeSobolSample2D(

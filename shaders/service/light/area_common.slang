@@ -5,7 +5,6 @@ import "math/transport.slang";
 
 public static const uint PRIME_LIGHT_CELL_SUBDIVISION = 16u;
 public static const uint PRIME_LIGHT_CELL_COUNT = 256u;
-public static const float PRIME_AREA_PROJECTED_MIXTURE = 0.5;
 
 public uint primeLightCellIndex(float2 parentBarycentric) {
     float2 bounded = max(parentBarycentric, float2(0.0));
@@ -39,13 +38,4 @@ public float primeAreaSolidAnglePdf(
     float3 delta = lightPosition - origin;
     float distanceSquared = dot(delta, delta);
     return primeAreaSolidAnglePdfValue(areaPdf, distanceSquared, lightCosine);
-}
-
-public float primeAreaMixturePdf(
-        float texturePdf,
-        float projectedPdf,
-        bool projectedActive) {
-    return projectedActive
-            ? lerp(texturePdf, projectedPdf, PRIME_AREA_PROJECTED_MIXTURE)
-            : texturePdf;
 }

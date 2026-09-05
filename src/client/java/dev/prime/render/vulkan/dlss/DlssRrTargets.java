@@ -16,7 +16,6 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     static final int NORMAL_ROUGHNESS_FORMAT = VK12.VK_FORMAT_R32G32B32A32_SFLOAT;
     static final int LINEAR_DEPTH_FORMAT = VK12.VK_FORMAT_R32_SFLOAT;
     static final int MOTION_FORMAT = VK12.VK_FORMAT_R32G32_SFLOAT;
-    static final int SPECULAR_MOTION_FORMAT = VK12.VK_FORMAT_R32G32_SFLOAT;
     static final int SPECULAR_HIT_DISTANCE_FORMAT = VK12.VK_FORMAT_R16_SFLOAT;
     static final int RESPONSIVITY_FORMAT = VK12.VK_FORMAT_R16_SFLOAT;
     private static final int USAGE =
@@ -92,7 +91,6 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
     public VulkanImage inputColor() { return image(Role.TRANSPORT_SCRATCH); }
     public VulkanImage motion() { return image(Role.MOTION); }
     public VulkanImage rrNormalRoughness() { return image(Role.NORMAL_ROUGHNESS); }
-    public VulkanImage specularMotion() { return image(Role.SPECULAR_MOTION); }
     public VulkanImage specularHitDistance() { return image(Role.SUN_PENUMBRA); }
     public VulkanImage rrOutput() { return image(Role.OUTPUT); }
     public VulkanImage responsivity() { return image(Role.RESPONSIVITY); }
@@ -123,7 +121,6 @@ public final class DlssRrTargets implements RawWavefrontFrame, Destroyable {
                 "Prime RR sun penumbra / specular hit distance"),
         REFLECTION_NORMAL_ROUGHNESS(NORMAL_ROUGHNESS_FORMAT,
                 "Prime RR reflection guide surface"),
-        SPECULAR_MOTION(SPECULAR_MOTION_FORMAT, "Prime RR reflection motion"),
         REFLECTION_POSITION(VK12.VK_FORMAT_R32G32B32A32_SFLOAT,
                 "Prime RR reflection previous virtual position"),
         OUTPUT(COLOR_FORMAT, "Prime RR linear HDR output", true),

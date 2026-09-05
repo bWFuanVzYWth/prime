@@ -5,7 +5,6 @@ import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/light_sample.slang";
 import "math/packed_geometry.slang";
-import "math/projected_solid_angle_domain.slang";
 import "service/material/surface.slang";
 import "service/light/area_common.slang";
 import "service/light/emission.slang";
@@ -118,23 +117,10 @@ public LightEvaluation primeEvaluateAreaLight(
     }
     float selectionPdf = worldPdf * sectionPdf;
     float textureAreaPdf = selectionPdf * cellProbabilityMass / cellArea;
-    float texturePdf = primeAreaSolidAnglePdf(
+    result.pdf = primeAreaSolidAnglePdf(
             rayOrigin,
             surface.position,
             lightCosine,
             textureAreaPdf);
-    float3 lightCorner = emitterCornerArea.xyz + sectionTranslation;
-    float projectedArea = primePrepareProjectedSolidAngleTriangle(
-            lightCorner,
-            firstEdge,
-            secondEdge,
-            rayOrigin,
-            receiverNormal).area;
-    float projectedPdf = selectionPdf * primeProjectedSolidAnglePdf(
-            projectedArea, receiverNormal, rayDirection);
-    result.pdf = primeAreaMixturePdf(
-            texturePdf,
-            projectedPdf,
-            primeProjectedSolidAngleReliable(projectedArea));
     return result;
 }

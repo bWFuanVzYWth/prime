@@ -7,6 +7,7 @@ import "prime_realtime_abi.slang";
 import "contract/light_sample.slang";
 import "contract/path.slang";
 import "math/direct_sampling.slang";
+import "math/direct_discrete_sampling.slang";
 import "policy/runtime/config.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/dispatch/traits.slang";
@@ -39,8 +40,8 @@ public void primeSelectLandingLight(uint launchIndex) {
                     primeSampleEpoch(),
                     path.bounce + 1u,
                     uint(recordIndex >= primeWavefrontPixelCount()));
-            float treeSample = primeDirectSample2D(
-                    directSample, PRIME_DIRECT_SAMPLE_AREA_PRIMARY).x;
+            float treeSample = primeDirectDiscreteSample1D(directSample, primeDirectDiscreteSeed(pixel, primeSampleIndex(), primeSampleEpoch(),
+                        path.bounce + 1u, uint(recordIndex >= primeWavefrontPixelCount())), 0u);
             selection.area = primeSelectAreaLight(
                     surface.position,
                     primeAreaLightReceiverNormal(surface, path.viewDirection),

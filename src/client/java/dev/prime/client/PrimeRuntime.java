@@ -1,5 +1,6 @@
 package dev.prime.client;
 
+
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.prime.PrimeClient;

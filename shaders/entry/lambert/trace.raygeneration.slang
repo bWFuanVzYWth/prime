@@ -2,6 +2,7 @@
 module "entry/lambert/trace.raygeneration.slang";
 import "prime_abi.slang";
 import "contract/lambert.slang";
+import "model/lambert/path.slang";
 import glsl;
 import "state/lambert.slang";
 import "service/camera/projection.slang";
@@ -30,8 +31,6 @@ void main() {
         uint2 pixel = primeLambertPixel(index);
         primeLambertPaths[index].identity.w = uint(primeLambertPayload.distance >= 0.0);
         primeLambertWriteGuides(pixel, primeRealtimeCameraSample(pixel), primeLambertPayload);
-    } else if (identity.z == 1u) {
-        primeLambertPaths[index].radiance.w = primeLambertPayload.distance >= 0.0
-                ? primeLambertPayload.distance : 65504.0;
     }
+    primeLambertRecordHitDistance(primeLambertPaths[index].radiance.w, identity.z, primeLambertPayload.distance);
 }

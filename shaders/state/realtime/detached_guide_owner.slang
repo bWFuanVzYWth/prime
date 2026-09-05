@@ -2,6 +2,7 @@
 module "state/realtime/detached_guide_owner.slang";
 
 import "math/queued_psr.slang";
+import "math/realtime_storage.slang";
 import "service/camera/projection.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/medium.slang";
@@ -12,18 +13,27 @@ public struct PrimeDetachedGuideOwnerState {
     public uint guideControl;
     public uint denoiserControl;
     public float firstDirectionLength;
+    public bool primaryRay;
 };
 
 public PrimeDetachedGuideOwnerState primeLoadDetachedGuideOwnerState(
         uint pathIndex) {
+    PrimeDetachedGuideOwnerState state;
+    state.primaryRay = primeWavefrontMissingGuideOwner(pathIndex);
+    if (state.primaryRay) {
+        uint word = primeMissingGuideOwnerWord(pathIndex, primeWavefrontPixelCount());
+        state.guideControl = primeWavefrontQueue[word + 0u];
+        state.denoiserControl = primeWavefrontQueue[word + 1u];
+        state.firstDirectionLength = asfloat(primeWavefrontQueue[word + 2u]);
+        return state;
+    }
     uint4 sourceAndPathControl =
-            primeWavefrontPaths[pathIndex].transport.sourceAndPathControl;
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.sourceAndPathControl;
     float4 rayDirectionAndDenoiserControl =
-            primeWavefrontPaths[pathIndex]
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
                     .transport.rayDirectionAndDenoiserControl;
     float4 throughputAndReserved =
-            primeWavefrontPaths[pathIndex].transport.throughputAndReserved;
-    PrimeDetachedGuideOwnerState state;
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.throughputAndReserved;
     state.guideControl = sourceAndPathControl.z;
     state.denoiserControl = asuint(rayDirectionAndDenoiserControl.w);
     state.firstDirectionLength = throughputAndReserved.w;
@@ -38,7 +48,12 @@ public PrimeQueuedPsrState primeLoadDetachedGuideOwnerPsrState(
     state.firstDirectionLength = float4(
             primeCameraRayDirection(pixel, primeRealtimeCameraSample(pixel)),
             owner.firstDirectionLength);
-    state.rotation = asfloat(primeWavefrontPaths[pathIndex].psrPacked);
+    if (owner.primaryRay) {
+        uint word = primeMissingGuideOwnerWord(pathIndex, primeWavefrontPixelCount());
+        for (uint lane = 0u; lane < 4u; ++lane) state.rotation[lane] = asfloat(primeWavefrontQueue[word + 3u + lane]);
+    } else {
+        state.rotation = asfloat(primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].psrPacked);
+    }
     float rotationLengthSquared = dot(state.rotation, state.rotation);
     state.rotation = rotationLengthSquared > 0.0
             ? state.rotation * rsqrt(rotationLengthSquared)
@@ -52,9 +67,15 @@ public PrimeQueuedPsrState primeLoadDetachedGuideOwnerPsrState(
 public void primeStoreDetachedGuideOwnerControl(
         uint pathIndex,
         PrimeDetachedGuideOwnerState owner) {
-    primeWavefrontPaths[pathIndex].transport.sourceAndPathControl.z =
+    if (owner.primaryRay) {
+        uint word = primeMissingGuideOwnerWord(pathIndex, primeWavefrontPixelCount());
+        primeWavefrontQueue[word + 0u] = owner.guideControl;
+        primeWavefrontQueue[word + 1u] = owner.denoiserControl;
+        return;
+    }
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.sourceAndPathControl.z =
             owner.guideControl;
-    primeWavefrontPaths[pathIndex]
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
             .transport.rayDirectionAndDenoiserControl.w =
             asfloat(owner.denoiserControl);
 }
@@ -63,9 +84,15 @@ public void primeStoreDetachedGuideOwnerPsrState(
         uint pathIndex,
         inout PrimeDetachedGuideOwnerState owner,
         PrimeQueuedPsrState state) {
-    primeWavefrontPaths[pathIndex].psrPacked = asuint(state.rotation);
-    primeWavefrontPaths[pathIndex].transport.throughputAndReserved.w =
-            state.firstDirectionLength.w;
+    if (owner.primaryRay) {
+        uint word = primeMissingGuideOwnerWord(pathIndex, primeWavefrontPixelCount());
+        primeWavefrontQueue[word + 2u] = asuint(state.firstDirectionLength.w);
+        for (uint lane = 0u; lane < 4u; ++lane) primeWavefrontQueue[word + 3u + lane] = asuint(state.rotation[lane]);
+    } else {
+        primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].psrPacked = asuint(state.rotation);
+        primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.throughputAndReserved.w =
+                state.firstDirectionLength.w;
+    }
     owner.firstDirectionLength = state.firstDirectionLength.w;
     uint transitionMask = PRIME_WAVEFRONT_GUIDE_CONTROL_MASK
             & ~PRIME_WAVEFRONT_GUIDE_FALLBACK;
@@ -74,6 +101,5 @@ public void primeStoreDetachedGuideOwnerPsrState(
             | (primeQueuedPsrStorageFlags(state)
                     & PRIME_WAVEFRONT_PSR_CONTROL_MASK)
             | (min(primeQueuedPsrCount(state), transitionLimit) << 8u);
-    primeWavefrontPaths[pathIndex].transport.sourceAndPathControl.z =
-            owner.guideControl;
+    primeStoreDetachedGuideOwnerControl(pathIndex, owner);
 }

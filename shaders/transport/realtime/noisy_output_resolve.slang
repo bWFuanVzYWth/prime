@@ -25,7 +25,7 @@ public void primeResolveNoisyOutput(
     }
     uint pathIndex = primeWavefrontIndex(pixel, 0u);
     uint denoiserControl = asuint(
-            primeWavefrontPaths[pathIndex]
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
                     .transport.rayDirectionAndDenoiserControl.w);
     PrimeOrdinarySample ordinary = primeLoadWavefrontIntermediate(
             pixel, pathIndex, denoiserControl);

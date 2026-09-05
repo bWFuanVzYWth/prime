@@ -17,12 +17,12 @@ public struct PrimeWavefrontLightSelectionState {
 public PrimeWavefrontLightSelectionState primeLoadWavefrontLightSelectionState(
         uint pathIndex) {
     uint4 sourceAndPathControl =
-            primeWavefrontPaths[pathIndex].transport.sourceAndPathControl;
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.sourceAndPathControl;
     float4 rayDirectionAndDenoiserControl =
-            primeWavefrontPaths[pathIndex]
+            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
                     .transport.rayDirectionAndDenoiserControl;
-    uint4 medium0 = primeWavefrontPaths[pathIndex].transport.medium0;
-    uint4 medium1 = primeWavefrontPaths[pathIndex].transport.medium1;
+    uint4 medium0 = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium0;
+    uint4 medium1 = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium1;
 
     PrimeWavefrontLightSelectionState state;
     state.viewDirection = -rayDirectionAndDenoiserControl.xyz;

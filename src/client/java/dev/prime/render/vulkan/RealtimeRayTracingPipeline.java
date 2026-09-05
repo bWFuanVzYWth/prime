@@ -49,7 +49,7 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
         dev.prime.render.BounceSettings.validateFixedCount(minimumBounces);
         // Landing owns the primary-surface bounce. Every additional minimum bounce has four
         // narrow stages; admission and the register tail replace all remaining dispatches.
-        return 4 * (minimumBounces - 1) + 14;
+        return 4 * (minimumBounces - 1) + 15;
     }
 
     public RealtimeRayTracingPipeline(VulkanContext context, TraceBackend backend) {
@@ -341,6 +341,11 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
                 commandOffset,
                 ShaderAbi.WAVEFRONT_PRIMARY_QUEUE);
         this.nextStepBarrier(commandBuffer, stack);
+        // Drain the omitted primary guide before a transport delta walk can detach another
+        // guide for the same pixel. Both use the existing compact guide kernel.
+        this.traceQueued(commandBuffer, stack, REALTIME_STANDARD_GUIDE_DELTA_WALK_0,
+                commandOffset, ShaderAbi.WAVEFRONT_GUIDE_QUEUE);
+        this.nextStepBarrier(commandBuffer, stack);
         this.traceQueued(
                 commandBuffer,
                 stack,
@@ -473,6 +478,10 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
                 this.bindings.nextStepInputImages);
     }
 
+    static long[] nextStepInputImages(long[] images) {
+        return OutputBindings.phaseImages(images, NEXT_STEP_INPUT);
+    }
+
     private void resolveInputBarrier(
             VkCommandBuffer commandBuffer, MemoryStack stack) {
         this.wavefrontResourceBarrier(
@@ -563,7 +572,7 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
             this.allImages = Arrays.stream(allImages).distinct().toArray();
             this.primaryDirectInputImages = phaseImages(allImages, PRIMARY_DIRECT_INPUT);
             this.primaryInputImages = phaseImages(allImages, PRIMARY_INPUT);
-            this.nextStepInputImages = phaseImages(allImages, NEXT_STEP_INPUT);
+            this.nextStepInputImages = RealtimeRayTracingPipeline.nextStepInputImages(allImages);
             this.wavefront = wavefront;
         }
 
@@ -678,7 +687,8 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
         REFLECTION_DIFFUSE_DIRECTION(ShaderAbi.DESCRIPTOR_NRD_REFLECTION_DIFFUSE_DIRECTION, NEXT_STEP_INPUT),
         REFLECTION_SPECULAR_DIRECTION(ShaderAbi.DESCRIPTOR_NRD_REFLECTION_SPECULAR_DIRECTION, NEXT_STEP_INPUT),
         DISPLAY_POSITION(ShaderAbi.DESCRIPTOR_NRD_DISPLAY_POSITION, 0),
-        SUN_LIGHTING(ShaderAbi.DESCRIPTOR_NRD_SUN_LIGHTING, PRIMARY_INPUT),
+        // Non-NRD transparent paths preserve the visible specular guide here; tail RR reads it.
+        SUN_LIGHTING(ShaderAbi.DESCRIPTOR_NRD_SUN_LIGHTING, PRIMARY_INPUT | NEXT_STEP_INPUT),
         SUN_PENUMBRA(ShaderAbi.DESCRIPTOR_NRD_SUN_PENUMBRA, PRIMARY_INPUT | NEXT_STEP_INPUT),
         RECONSTRUCTION_CONTROL(ShaderAbi.DESCRIPTOR_RECONSTRUCTION_CONTROL, 0);
 

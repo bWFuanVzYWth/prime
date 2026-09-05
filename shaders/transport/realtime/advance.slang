@@ -44,8 +44,7 @@ public bool primeAdvanceOrdinaryWavefrontRecord<Phase>(
         uint recordIndex,
         PrimeWavefrontTransportRecord record,
         SurfaceInteraction surface,
-        uint control,
-        bool skipRoulette)
+        uint control)
     where Phase : IPrimeRealtimeTransportPhase
 {
     uint2 pixel = primeWavefrontPixel(recordIndex);
@@ -77,7 +76,6 @@ public bool primeAdvanceOrdinaryWavefrontRecord<Phase>(
                     denoiserState,
                     result,
                     surface,
-                    skipRoulette,
                     recordIndex);
     PrimeWavefrontTransportRecord updatedRecord =
             primeMakeUpdatedWavefrontRecord(
@@ -107,8 +105,7 @@ public bool primeAdvanceTransparentWavefrontRecord<Phase>(
         uint recordIndex,
         PrimeWavefrontTransportRecord record,
         SurfaceInteraction surface,
-        uint control,
-        bool skipRoulette)
+        uint control)
     where Phase : IPrimeRealtimeTransportPhase
 {
     uint2 pixel = primeWavefrontPixel(recordIndex);
@@ -159,7 +156,6 @@ public bool primeAdvanceTransparentWavefrontRecord<Phase>(
             surface,
             transmissionBranch,
             guideEnabled,
-            skipRoulette,
             recordIndex);
     PrimeWavefrontTransportRecord updatedRecord =
             primeMakeUpdatedTransparentWavefrontRecord(

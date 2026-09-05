@@ -35,7 +35,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				java.security.MessageDigest.getInstance('SHA-256')
 						.digest(schemaFile.get().asFile.getText('UTF-8')
 								.replace('\r\n', '\n').getBytes('UTF-8')))
-		if (schemaSha256 != 'ae2777f2b4aceabd25e6b6fe7bc93066fd3bcd70b9242fdb6d82aafc25d9086e') {
+		if (schemaSha256 != 'cef490a5b552ce73b8400c5779e00d4e2c055de963d174995252e0ca633be771') {
 			throw new GradleException(
 					'Prime shader ABI changed without updating its reviewed contract hash')
 		}

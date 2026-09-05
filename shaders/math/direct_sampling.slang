@@ -15,7 +15,7 @@ static const uint PRIME_STBN_BANK_SHIFT = 20u;
 static const float PRIME_STBN_SCALE = 1.0 / 65536.0;
 
 [[vk::binding(PRIME_REALTIME_STBN_BINDING, 0)]]
-StructuredBuffer<uint> primeRealtimeStbn;
+public StructuredBuffer<uint> primeRealtimeStbn;
 
 public struct PrimeDirectSampleBase
 {
