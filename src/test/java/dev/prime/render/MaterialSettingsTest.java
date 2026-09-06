@@ -24,6 +24,7 @@ final class MaterialSettingsTest {
         assertTrue(snapshot.seamlessGlass());
         assertTrue(snapshot.airGap());
         assertTrue(snapshot.vanillaPbrPresets());
+        assertTrue(snapshot.baseColorCompensation());
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new MaterialSettings.Snapshot(101));

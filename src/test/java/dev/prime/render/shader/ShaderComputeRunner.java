@@ -88,12 +88,19 @@ final class ShaderComputeRunner implements AutoCloseable {
     ByteBuffer dispatch(
             String shaderArtifact, ByteBuffer input, int outputBytes, int invocationCount)
             throws IOException {
+        return dispatch(shaderArtifact, input, outputBytes, invocationCount, null);
+    }
+
+    ByteBuffer dispatch(
+            String shaderArtifact, ByteBuffer input, int outputBytes, int invocationCount,
+            ByteBuffer pushConstants)
+            throws IOException {
         return dispatch(
                 shaderArtifact,
                 input,
                 outputBytes,
                 new Workgroups(Math.max(1, (invocationCount + LOCAL_SIZE - 1) / LOCAL_SIZE), 1, 1),
-                null);
+                pushConstants);
     }
 
     ByteBuffer dispatch(

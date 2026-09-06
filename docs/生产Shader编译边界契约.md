@@ -119,6 +119,12 @@ delta-walk 只导入 opaque/dielectric 的专用离散状态、能量与采样�
 entry 到达 foliage、NEE、通用 operation dispatcher、有限立体角 microfacet 分布以及一般
 evaluate/sample 模块；通用采样器的 delta 分支反向复用同一离散实现，避免数学与随机映射分叉。
 
+帧参数的唯一 push-constant 声明位于生成的 `prime_abi_push.slang`。`prime_abi.slang` 通过
+Slang `__exported import` 重导出同一个声明，原有生产消费者继续使用相同变量和布局；只需
+材质开关的模块直接导入窄 push 模块，不得因此看到 TLAS、场景纹理和大气资源绑定。
+依赖图与架构门禁同样跟踪 exported import，并由每个 artifact 的实际 depfile 核验闭包。
+这是资源声明拆分，不新增 GPU 绑定、复制 push 数据或依赖链接期删除冲突 descriptor。
+
 大气光谱积分与光谱到 Rec.2020 的转换集中在 `model/atmosphere/spectrum.slang`，仅由 LUT
 生产者访问；架构门禁拒绝 RT entry 到达该模块。照明消费最终 RGB 表，几何与 LUT 坐标数学
 保持独立可见，不借助编译器从光谱实现中消除未用函数。

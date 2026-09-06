@@ -42,6 +42,19 @@ final class ShaderPropertyBatch {
             int witnessWords,
             long seed)
             throws IOException {
+        assertProperties(runner, shader, input, caseCount, inputWords, witnessWords, seed, null);
+    }
+
+    static void assertProperties(
+            ShaderComputeRunner runner,
+            String shader,
+            ByteBuffer input,
+            int caseCount,
+            int inputWords,
+            int witnessWords,
+            long seed,
+            ByteBuffer pushConstants)
+            throws IOException {
         if (witnessWords <= SWEEP_WORDS) {
             throw new IllegalArgumentException("Witness output must contain more than one word");
         }
@@ -52,7 +65,7 @@ final class ShaderPropertyBatch {
                 Math.multiplyExact(
                         Math.multiplyExact(caseCount, SWEEP_WORDS),
                         ShaderTestBuffer.WORD_BYTES),
-                caseCount);
+                caseCount, pushConstants);
         Map<Long, FailureRecord> distinctFailures = new LinkedHashMap<>();
         Map<Long, Integer> failureCounts = new LinkedHashMap<>();
         int failedCases = 0;
@@ -116,7 +129,7 @@ final class ShaderPropertyBatch {
                         inputWords,
                         witnessWords,
                         seed,
-                        record.mask());
+                        record.mask(), pushConstants);
                 message.append(System.lineSeparator())
                         .append(System.lineSeparator())
                         .append(witness.getMessage());
@@ -133,7 +146,8 @@ final class ShaderPropertyBatch {
             int inputWords,
             int witnessWords,
             long seed,
-            int sweepMask)
+            int sweepMask,
+            ByteBuffer pushConstants)
             throws IOException {
         ByteBuffer replay = ShaderTestBuffer.inputs(1, inputWords);
         ShaderTestBuffer.setOutputWords(replay, witnessWords);
@@ -153,7 +167,7 @@ final class ShaderPropertyBatch {
                 shader,
                 replay,
                 Math.multiplyExact(witnessWords, ShaderTestBuffer.WORD_BYTES),
-                1);
+                1, pushConstants);
         int witnessMask = ShaderTestBuffer.getInt(
                 witness, 0, witnessWords, 0, 0);
         int kind = ShaderTestBuffer.getInt(

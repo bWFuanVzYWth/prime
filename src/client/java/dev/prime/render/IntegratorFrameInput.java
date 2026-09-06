@@ -63,6 +63,7 @@ public record IntegratorFrameInput(
                 material.seamlessGlass(),
                 material.airGap(),
                 material.vanillaPbrPresets(),
+                material.baseColorCompensation(),
                 lighting.transparentNeeMode());
         IntegratorSettings.packSampleEpoch(sampleEpoch, historyValid);
         IntegratorSettings.packPathControl(

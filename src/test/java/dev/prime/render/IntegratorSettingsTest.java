@@ -10,6 +10,21 @@ import org.junit.jupiter.api.Test;
 
 final class IntegratorSettingsTest {
     @Test
+    void baseColorCompensationUsesOnlyItsOwnBit() {
+        for (TransparentNeeMode nee : TransparentNeeMode.values()) {
+            int on = IntegratorSettings.packSampleControl(
+                    0xffff, new AstronomySettings(30, 359), true, true, true, true, nee);
+            int off = IntegratorSettings.packSampleControl(
+                    0xffff, new AstronomySettings(30, 359), true, true, true, false, nee);
+            assertEquals(0x2000_0000, on ^ off);
+            assertEquals(ShaderAbi.PATH_BASE_COLOR_COMPENSATION_MASK, on ^ off);
+            assertEquals(0, off & ShaderAbi.PATH_BASE_COLOR_COMPENSATION_MASK);
+            assertEquals(0xffff, on & ShaderAbi.PATH_SAMPLE_INDEX_MASK);
+            assertEquals(0, on & 0xc000_0000);
+        }
+    }
+
+    @Test
     void sampleEpochUsesOnlySamplingState() {
         assertEquals(17, IntegratorSettings.packSampleEpoch(17, false));
         assertEquals(
@@ -32,14 +47,14 @@ final class IntegratorSettingsTest {
                 true,
                 true,
                 true,
-                TransparentNeeMode.STRAIGHT_APPROXIMATION);
+                true, TransparentNeeMode.STRAIGHT_APPROXIMATION);
         int unbiased = IntegratorSettings.packSampleControl(
                 41,
                 astronomy,
                 true,
                 true,
                 true,
-                TransparentNeeMode.UNBIASED_BSDF_ONLY);
+                true, TransparentNeeMode.UNBIASED_BSDF_ONLY);
 
         assertEquals(0, approximation & ShaderAbi.PATH_TRANSPARENT_NEE_UNBIASED_MASK);
         assertEquals(
@@ -109,7 +124,7 @@ final class IntegratorSettingsTest {
                 false,
                 false,
                 MaterialSettings.DEFAULT_VANILLA_PBR_PRESETS,
-                TransparentNeeMode.DEFAULT);
+                true, TransparentNeeMode.DEFAULT);
         assertEquals(0xabcd, packed & ShaderAbi.PATH_SAMPLE_INDEX_MASK);
         assertEquals(
                 359,
@@ -124,13 +139,13 @@ final class IntegratorSettingsTest {
                 ShaderAbi.PATH_SEAMLESS_GLASS_MASK,
                 IntegratorSettings.packSampleControl(
                                 0xabcd, astronomy, true, false, true,
-                                TransparentNeeMode.DEFAULT)
+                                true, TransparentNeeMode.DEFAULT)
                         & ShaderAbi.PATH_SEAMLESS_GLASS_MASK);
         assertEquals(
                 ShaderAbi.PATH_AIR_GAP_MASK,
                 IntegratorSettings.packSampleControl(
                                 0xabcd, astronomy, false, true, true,
-                                TransparentNeeMode.DEFAULT)
+                                true, TransparentNeeMode.DEFAULT)
                         & ShaderAbi.PATH_AIR_GAP_MASK);
         assertEquals(
                 0,
@@ -140,7 +155,7 @@ final class IntegratorSettingsTest {
                                 false,
                                 false,
                                 false,
-                                TransparentNeeMode.DEFAULT)
+                                true, TransparentNeeMode.DEFAULT)
                         & ShaderAbi.PATH_VANILLA_PBR_PRESETS_MASK);
         assertThrows(
                 IllegalArgumentException.class,
@@ -150,7 +165,7 @@ final class IntegratorSettingsTest {
                         false,
                         false,
                         true,
-                        TransparentNeeMode.DEFAULT));
+                        true, TransparentNeeMode.DEFAULT));
     }
 
     @Test

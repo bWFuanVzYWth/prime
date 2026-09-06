@@ -309,7 +309,8 @@ public final class PrimeConfig {
                     value,
                     data.material.seamlessGlass(),
                     data.material.airGap(),
-                    data.material.vanillaPbrPresets()));
+                    data.material.vanillaPbrPresets(),
+                    data.material.baseColorCompensation()));
         }
     }
 
@@ -319,7 +320,8 @@ public final class PrimeConfig {
                     data.material.roughnessSteps(),
                     value,
                     data.material.airGap(),
-                    data.material.vanillaPbrPresets()));
+                    data.material.vanillaPbrPresets(),
+                    data.material.baseColorCompensation()));
         }
     }
 
@@ -329,7 +331,8 @@ public final class PrimeConfig {
                     data.material.roughnessSteps(),
                     data.material.seamlessGlass(),
                     value,
-                    data.material.vanillaPbrPresets()));
+                    data.material.vanillaPbrPresets(),
+                    data.material.baseColorCompensation()));
         }
     }
 
@@ -339,6 +342,18 @@ public final class PrimeConfig {
                     data.material.roughnessSteps(),
                     data.material.seamlessGlass(),
                     data.material.airGap(),
+                    value,
+                    data.material.baseColorCompensation()));
+        }
+    }
+
+    public static void setBaseColorCompensation(boolean value) {
+        if (value != data.material.baseColorCompensation()) {
+            setMaterial(new MaterialSettings.Snapshot(
+                    data.material.roughnessSteps(),
+                    data.material.seamlessGlass(),
+                    data.material.airGap(),
+                    data.material.vanillaPbrPresets(),
                     value));
         }
     }

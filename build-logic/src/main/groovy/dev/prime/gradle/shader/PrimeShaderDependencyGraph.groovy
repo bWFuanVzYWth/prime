@@ -13,7 +13,7 @@ abstract class PrimeShaderDependencyGraph
     }
 
     private static final java.util.regex.Pattern DEPENDENCY = java.util.regex.Pattern.compile(
-            '(?m)^\\s*(?:#\\s*include\\s+"([^"]+)"|import\\s+"([^"]+)"\\s*;)')
+            '(?m)^\\s*(?:#\\s*include\\s+"([^"]+)"|(?:__exported\\s+)?import\\s+"([^"]+)"\\s*;)')
     private static final java.util.regex.Pattern MODULE = java.util.regex.Pattern.compile(
             '(?m)^\\s*module\\s+"[^"]+"\\s*;')
 

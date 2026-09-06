@@ -26,6 +26,7 @@
     {"entry": "compact_openpbr_opaque_properties.compute.slang", "artifact": "compact_openpbr_opaque_properties.comp.spv"},
     {"entry": "compact_openpbr_transmission_properties.compute.slang", "artifact": "compact_openpbr_transmission_properties.comp.spv"},
     {"entry": "openpbr_core_properties.compute.slang", "artifact": "openpbr_core_properties.comp.spv"},
+    {"entry": "opaque_base_color.compute.slang", "artifact": "opaque_base_color.comp.spv"},
     {"entry": "openpbr_distribution_statistics.compute.slang", "artifact": "openpbr_distribution_statistics.comp.spv"},
     {"entry": "prime_auto_exposure_properties.compute.slang", "artifact": "prime_auto_exposure_properties.comp.spv"},
     {"entry": "prime_bsdf_contract_properties.compute.slang", "artifact": "prime_bsdf_contract_properties.comp.spv"},

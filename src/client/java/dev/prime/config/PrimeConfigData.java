@@ -40,7 +40,8 @@ final class PrimeConfigData {
             MaterialSettings.DEFAULT_ROUGHNESS_STEPS,
             MaterialSettings.DEFAULT_SEAMLESS_GLASS,
             MaterialSettings.DEFAULT_AIR_GAP,
-            MaterialSettings.DEFAULT_VANILLA_PBR_PRESETS);
+            MaterialSettings.DEFAULT_VANILLA_PBR_PRESETS,
+            MaterialSettings.DEFAULT_BASE_COLOR_COMPENSATION);
     boolean hdrEnabled;
     int referenceWhiteNits = HdrOutput.AUTOMATIC_REFERENCE_WHITE_NITS;
     ReflexMode reflexMode = ReflexMode.OFF;

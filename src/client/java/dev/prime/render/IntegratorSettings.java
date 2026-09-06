@@ -22,6 +22,7 @@ public final class IntegratorSettings {
             boolean seamlessGlass,
             boolean airGap,
             boolean vanillaPbrPresets,
+            boolean baseColorCompensation,
             TransparentNeeMode transparentNeeMode) {
         if (sampleIndex < 0
                 || (sampleIndex & ~ShaderAbi.PATH_SAMPLE_INDEX_MASK) != 0) {
@@ -42,6 +43,7 @@ public final class IntegratorSettings {
                 | (vanillaPbrPresets
                         ? ShaderAbi.PATH_VANILLA_PBR_PRESETS_MASK
                         : 0)
+                | (baseColorCompensation ? ShaderAbi.PATH_BASE_COLOR_COMPENSATION_MASK : 0)
                 | (transparentNeeMode == TransparentNeeMode.UNBIASED_BSDF_ONLY
                         ? ShaderAbi.PATH_TRANSPARENT_NEE_UNBIASED_MASK
                         : 0);

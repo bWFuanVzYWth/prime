@@ -88,6 +88,8 @@
   "prime.options.material.air_gap": "透明材质空气微缝",
   "prime.options.material.air_gap.tooltip": "在不同的等折射率实体透明材质之间加入分辨率以下的空气薄层，保留切割反射。水、粗糙度不兼容及不同折射率的接触仍使用直接介质边界。",
   "prime.options.material.vanilla_pbr_presets": "原版 PBR 预设",
+  "prime.options.material.base_color_compensation": "底色饱和度补偿",
+  "prime.options.material.base_color_compensation.tooltip": "使用轻微的非线性底色调整，减轻高光使普通不透明材质颜色变淡的观感。默认开启；关闭后使用材质原始底色。适用于完整实时与离线路径追踪。",
   "prime.options.material.vanilla_pbr_presets.tooltip": "为没有提供 PBR 参数的原版同质材质应用保守预设。材质包提供的逐纹理参数始终优先。",
   "prime.options.debug.renderer_diagnostics": "渲染诊断信息",
   "prime.options.debug.renderer_diagnostics.tooltip": "在屏幕上显示分辨率、几何数量、曝光等运行状态。排查性能问题或提交错误报告时开启；仅本次游戏会话有效。",

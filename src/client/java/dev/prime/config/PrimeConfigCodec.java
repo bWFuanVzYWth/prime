@@ -57,6 +57,7 @@ final class PrimeConfigCodec {
     private static final String SEAMLESS_GLASS_KEY = "material.seamless_glass";
     private static final String AIR_GAP_KEY = "material.air_gap";
     private static final String VANILLA_PBR_PRESETS_KEY = "material.vanilla_pbr_presets";
+    private static final String BASE_COLOR_COMPENSATION_KEY = "material.base_color_compensation";
     private static final String REFLEX_MODE_KEY = "low_latency.reflex_mode";
     private static final String DLSS_FRAME_GENERATION_ENABLED_KEY =
             "streamline.dlss_frame_generation";
@@ -159,7 +160,10 @@ final class PrimeConfigCodec {
                         PrimeConfigCodec::parseBoolean, "air-gap switch"),
                 reader.value(
                         VANILLA_PBR_PRESETS_KEY, data.material.vanillaPbrPresets(),
-                        PrimeConfigCodec::parseBoolean, "vanilla-PBR preset switch"));
+                        PrimeConfigCodec::parseBoolean, "vanilla-PBR preset switch"),
+                reader.value(
+                        BASE_COLOR_COMPENSATION_KEY, data.material.baseColorCompensation(),
+                        PrimeConfigCodec::parseBoolean, "base-color compensation switch"));
         data.reflexMode = reader.value(
                 REFLEX_MODE_KEY, data.reflexMode,
                 PrimeConfigCodec::parseReflexMode, "Reflex mode");
@@ -214,6 +218,7 @@ final class PrimeConfigCodec {
                 + SEAMLESS_GLASS_KEY + "=" + data.material.seamlessGlass() + "\n"
                 + AIR_GAP_KEY + "=" + data.material.airGap() + "\n"
                 + VANILLA_PBR_PRESETS_KEY + "=" + data.material.vanillaPbrPresets() + "\n"
+                + BASE_COLOR_COMPENSATION_KEY + "=" + data.material.baseColorCompensation() + "\n"
                 + REFLEX_MODE_KEY + "=" + data.reflexMode.name().toLowerCase(Locale.ROOT) + "\n"
                 + DLSS_FRAME_GENERATION_ENABLED_KEY + "=" + data.dlssFrameGenerationEnabled + "\n"
                 + DLSS_FRAME_GENERATION_MULTIPLIER_KEY + "=" + data.dlssFrameGenerationMultiplier + "\n"

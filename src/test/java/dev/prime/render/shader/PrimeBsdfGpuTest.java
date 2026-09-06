@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -68,6 +69,9 @@ final class PrimeBsdfGpuTest extends GpuShaderTest {
     }
 
     private void assertProperties(ByteBuffer input, int caseCount) throws IOException {
+        ByteBuffer push = ByteBuffer.allocateDirect(ShaderAbi.PUSH_CONSTANT_SIZE)
+                .order(ByteOrder.nativeOrder());
+        push.putInt(ShaderAbi.PUSH_PATH_OFFSET, ShaderAbi.PATH_BASE_COLOR_COMPENSATION_MASK);
         ShaderPropertyBatch.assertProperties(
                 runner,
                 "prime_bsdf_properties.comp.spv",
@@ -75,7 +79,7 @@ final class PrimeBsdfGpuTest extends GpuShaderTest {
                 caseCount,
                 INPUT_WORDS,
                 WITNESS_WORDS,
-                SEED);
+                SEED, push);
     }
 
     private static ByteBuffer createCases(int firstKind, int kindCount) {

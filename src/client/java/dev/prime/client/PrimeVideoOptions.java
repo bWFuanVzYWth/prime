@@ -282,7 +282,11 @@ public final class PrimeVideoOptions {
                                 booleanOption(
                                 "prime.options.material.vanilla_pbr_presets",
                                 settings.material().vanillaPbrPresets(),
-                                PrimeConfig::setVanillaPbrPresets)))),
+                                PrimeConfig::setVanillaPbrPresets)),
+                                big(booleanOption(
+                                "prime.options.material.base_color_compensation",
+                                settings.material().baseColorCompensation(),
+                                PrimeConfig::setBaseColorCompensation)))),
                         new Section("prime.options.header.streamline", List.of(
                                 big(streamline.reflexMode()))),
                         new Section("prime.options.header.high_risk", List.of(

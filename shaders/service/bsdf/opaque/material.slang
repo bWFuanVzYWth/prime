@@ -4,7 +4,10 @@ module "service/bsdf/opaque/material.slang";
 import "bsdf/compact/contract/material.slang";
 import "bsdf/compact/math/spectrum.slang";
 import "bsdf/compact/model/material.slang";
+import "model/material/defaults.slang";
 import "model/material/translation.slang";
+import "prime_abi_push.slang";
+import "prime_abi_types.slang";
 
 public PrimeOpenPbrMaterial primeOpaqueMaterialWithMinimumRoughness(
         float3 baseColor,
@@ -28,6 +31,13 @@ public PrimeOpenPbrMaterial primeOpaqueMaterialWithMinimumRoughness(
         material.specular.color = fresnel.f82Tint;
     } else {
         material.specular.ior = primeOpenPbrF0ToIor(translated.dielectricF0);
+        if (primeMaterialFamily(flags) == PRIME_MATERIAL_FAMILY_OPAQUE
+                && translated.subsurfaceWeight == 0.0
+                && (primePush.path.x & PRIME_PATH_BASE_COLOR_COMPENSATION_MASK) != 0u) {
+            // Artistic translation in linear Rec.2020, independent of other channels and F0.
+            // Fixed positive exponent preserves black/white and componentwise ordering.
+            material.base.color = pow(baseColor, float3(1.04));
+        }
         if (translated.thinWalled != 0u) {
             material.weight.subsurface = translated.subsurfaceWeight;
             material.subsurface.color = baseColor;

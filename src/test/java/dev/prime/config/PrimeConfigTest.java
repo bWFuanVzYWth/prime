@@ -36,6 +36,51 @@ final class PrimeConfigTest {
     }
 
     @Test
+    void baseColorCompensationDefaultsOnAndPersistsAnExplicitOptOut() throws Exception {
+        Properties properties = new Properties();
+        properties.load(new StringReader(PrimeConfig.serializedContents()));
+        String key = "material.base_color_compensation";
+        properties.remove(key);
+        PrimeConfigCodec.DecodeResult missing = PrimeConfigCodec.decode(properties);
+        assertTrue(missing.rewriteNeeded());
+        assertTrue(missing.data().material.baseColorCompensation());
+        properties.setProperty(key, "invalid");
+        assertTrue(PrimeConfigCodec.decode(properties).data().material.baseColorCompensation());
+        properties.setProperty(key, "false");
+        PrimeConfigCodec.DecodeResult disabled = PrimeConfigCodec.decode(properties);
+        assertFalse(disabled.rewriteNeeded());
+        assertFalse(disabled.data().material.baseColorCompensation());
+        Properties roundTrip = new Properties();
+        roundTrip.load(new StringReader(PrimeConfigCodec.encode(disabled.data())));
+        assertFalse(PrimeConfigCodec.decode(roundTrip).data().material.baseColorCompensation());
+    }
+
+    @Test
+    void baseColorCompensationSwitchInvalidatesHistoryWithoutChangingOtherMaterialSettings() {
+        var previous = PrimeConfig.rendererSettings().material();
+        long revision = PrimeConfig.rendererSettings().revision();
+        boolean replacement = !previous.baseColorCompensation();
+        try {
+            PrimeConfig.setBaseColorCompensation(replacement);
+            var changed = PrimeConfig.rendererSettings().material();
+            assertEquals(replacement, changed.baseColorCompensation());
+            assertEquals(previous.roughnessSteps(), changed.roughnessSteps());
+            assertEquals(previous.seamlessGlass(), changed.seamlessGlass());
+            assertEquals(previous.airGap(), changed.airGap());
+            assertEquals(previous.vanillaPbrPresets(), changed.vanillaPbrPresets());
+            assertEquals(revision + 1, PrimeConfig.rendererSettings().revision());
+            PrimeConfig.setBaseColorCompensation(replacement);
+            assertEquals(revision + 1, PrimeConfig.rendererSettings().revision());
+            PrimeConfig.setVanillaPbrPresets(!previous.vanillaPbrPresets());
+            assertEquals(replacement,
+                    PrimeConfig.rendererSettings().material().baseColorCompensation());
+        } finally {
+            PrimeConfig.setVanillaPbrPresets(previous.vanillaPbrPresets());
+            PrimeConfig.setBaseColorCompensation(previous.baseColorCompensation());
+        }
+    }
+
+    @Test
     void transparentNeeModeMigratesMissingAndInvalidValuesToTheDefault() throws Exception {
         Properties properties = new Properties();
         properties.load(new StringReader(PrimeConfig.serializedContents()));
@@ -301,12 +346,14 @@ final class PrimeConfigTest {
         assertTrue(serialized.contains("material.seamless_glass=true\n"));
         assertTrue(serialized.contains("material.air_gap=true\n"));
         assertTrue(serialized.contains("material.vanilla_pbr_presets=true\n"));
+        assertTrue(serialized.contains("material.base_color_compensation=true\n"));
         assertTrue(serialized.contains(
                 "streamline.dlss_frame_generation_ui_recomposition=true\n"));
         assertTrue(defaults.dlssFrameGenerationUiRecomposition);
         assertTrue(defaults.material.seamlessGlass());
         assertTrue(defaults.material.airGap());
         assertTrue(defaults.material.vanillaPbrPresets());
+        assertTrue(defaults.material.baseColorCompensation());
     }
 
     @Test

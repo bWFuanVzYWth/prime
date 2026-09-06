@@ -61,7 +61,9 @@ final class RayTracingPushConstantsTest {
         RayTracingPushConstants.write(input, fixture.scene(), secondBuffer);
 
         assertArrayEquals(first, second);
-        assertEquals(0, firstBuffer.getInt(ShaderAbi.PUSH_PATH_OFFSET) & 0xe000_0000);
+        assertEquals(0, firstBuffer.getInt(ShaderAbi.PUSH_PATH_OFFSET) & 0xc000_0000);
+        assertEquals(ShaderAbi.PATH_BASE_COLOR_COMPENSATION_MASK,
+                firstBuffer.getInt(ShaderAbi.PUSH_PATH_OFFSET) & 0x2000_0000);
         assertEquals(
                 fixture.scene().sectionTableAddress(),
                 firstBuffer.getLong(ShaderAbi.PUSH_SECTION_TABLE_ADDRESS_OFFSET));
@@ -79,6 +81,7 @@ final class RayTracingPushConstantsTest {
                         input.material().seamlessGlass(),
                         input.material().airGap(),
                         input.material().vanillaPbrPresets(),
+                        input.material().baseColorCompensation(),
                         input.lighting().transparentNeeMode()),
                 firstBuffer.getInt(ShaderAbi.PUSH_PATH_OFFSET));
         assertEquals(

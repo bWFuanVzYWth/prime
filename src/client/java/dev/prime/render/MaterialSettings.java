@@ -9,6 +9,7 @@ public final class MaterialSettings {
     public static final boolean DEFAULT_SEAMLESS_GLASS = true;
     public static final boolean DEFAULT_AIR_GAP = true;
     public static final boolean DEFAULT_VANILLA_PBR_PRESETS = true;
+    public static final boolean DEFAULT_BASE_COLOR_COMPENSATION = true;
 
     private MaterialSettings() {
     }
@@ -29,13 +30,15 @@ public final class MaterialSettings {
             int roughnessSteps,
             boolean seamlessGlass,
             boolean airGap,
-            boolean vanillaPbrPresets) {
+            boolean vanillaPbrPresets,
+            boolean baseColorCompensation) {
         public Snapshot(int roughnessSteps) {
             this(
                     roughnessSteps,
                     DEFAULT_SEAMLESS_GLASS,
                     DEFAULT_AIR_GAP,
-                    DEFAULT_VANILLA_PBR_PRESETS);
+                    DEFAULT_VANILLA_PBR_PRESETS,
+                    DEFAULT_BASE_COLOR_COMPENSATION);
         }
 
         public Snapshot(int roughnessSteps, boolean seamlessGlass) {
@@ -43,7 +46,8 @@ public final class MaterialSettings {
                     roughnessSteps,
                     seamlessGlass,
                     DEFAULT_AIR_GAP,
-                    DEFAULT_VANILLA_PBR_PRESETS);
+                    DEFAULT_VANILLA_PBR_PRESETS,
+                    DEFAULT_BASE_COLOR_COMPENSATION);
         }
 
         public Snapshot(
@@ -54,7 +58,8 @@ public final class MaterialSettings {
                     roughnessSteps,
                     seamlessGlass,
                     airGap,
-                    DEFAULT_VANILLA_PBR_PRESETS);
+                    DEFAULT_VANILLA_PBR_PRESETS,
+                    DEFAULT_BASE_COLOR_COMPENSATION);
         }
 
         public Snapshot {

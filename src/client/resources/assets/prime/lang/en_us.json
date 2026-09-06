@@ -88,6 +88,8 @@
   "prime.options.material.air_gap": "Transparent Air Gaps",
   "prime.options.material.air_gap.tooltip": "Adds a sub-pixel air sheet between different solid transparent materials with matching IOR, preserving a cut reflection. Water, incompatible roughness, and unequal-IOR contacts keep their direct medium boundary.",
   "prime.options.material.vanilla_pbr_presets": "Vanilla PBR Presets",
+  "prime.options.material.base_color_compensation": "Base Color Saturation Compensation",
+  "prime.options.material.base_color_compensation.tooltip": "Applies a mild nonlinear base-color adjustment to reduce the washed-out appearance of ordinary opaque materials under specular reflection. Enabled by default; turn off to use authored base colors. Applies to full realtime and offline path tracing.",
   "prime.options.material.vanilla_pbr_presets.tooltip": "Applies conservative defaults to homogeneous vanilla materials that have no authored PBR parameters. Per-texture resource-pack parameters always take precedence.",
   "prime.options.debug.renderer_diagnostics": "Rendering Diagnostics",
   "prime.options.debug.renderer_diagnostics.tooltip": "Shows runtime information such as resolution, geometry counts, and exposure. Enable it when troubleshooting performance or preparing a bug report; it lasts only for the current game session.",

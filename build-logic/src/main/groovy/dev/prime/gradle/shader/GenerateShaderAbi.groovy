@@ -35,7 +35,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				java.security.MessageDigest.getInstance('SHA-256')
 						.digest(schemaFile.get().asFile.getText('UTF-8')
 								.replace('\r\n', '\n').getBytes('UTF-8')))
-		if (schemaSha256 != 'cef490a5b552ce73b8400c5779e00d4e2c055de963d174995252e0ca633be771') {
+		if (schemaSha256 != '45f4b9ec765a5c3f10aa1b4dd508a40aa57925b56003d82cbc540ede5651ee8d') {
 			throw new GradleException(
 					'Prime shader ABI changed without updating its reviewed contract hash')
 		}
@@ -396,13 +396,21 @@ ${slangTypeConstants}
 ${slangStructs}
 
 """
+		new File(slangDir, 'prime_abi_push.slang').text = """\
+#language slang 2026
+module "prime_abi_push.slang";
+
+import "prime_abi_types.slang";
+
+public [[vk::push_constant]] ConstantBuffer<PrimePushConstants> primePush;
+"""
 		new File(slangDir, 'prime_abi.slang').text = """\
 #language slang 2026
 module "prime_abi.slang";
 
 import "prime_abi_types.slang";
 
-public [[vk::push_constant]] ConstantBuffer<PrimePushConstants> primePush;
+__exported import "prime_abi_push.slang";
 
 [[vk::binding(${schema.sharedDescriptors.sunShadowQuery}, 0)]]
 public ConstantBuffer<SunShadowQueryConstants> primeSunShadowQuery;

@@ -78,7 +78,7 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
         def modulePattern = java.util.regex.Pattern.compile(
                 '(?m)^\\s*module\\s+"([^"]+)"\\s*;')
         def dependencyPattern = java.util.regex.Pattern.compile(
-                '(?m)^\\s*(?:#\\s*include\\s+"([^"]+)"|import\\s+"([^"]+)"\\s*;)')
+                '(?m)^\\s*(?:#\\s*include\\s+"([^"]+)"|(?:__exported\\s+)?import\\s+"([^"]+)"\\s*;)')
         def modulePaths = new HashSet<String>()
         def unmodularized = []
         sources.findAll { it.toPath().startsWith(shaderRoot.toPath()) }.each { source ->
