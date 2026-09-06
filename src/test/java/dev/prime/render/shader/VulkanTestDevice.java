@@ -16,6 +16,8 @@ import org.lwjgl.vulkan.KHRAccelerationStructure;
 import org.lwjgl.vulkan.KHRDeferredHostOperations;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
 import org.lwjgl.vulkan.KHRRayTracingPositionFetch;
+import org.lwjgl.vulkan.EXTRayTracingInvocationReorder;
+import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT;
 import org.lwjgl.vulkan.VkPhysicalDeviceAccelerationStructureFeaturesKHR;
 import org.lwjgl.vulkan.VkPhysicalDeviceBufferDeviceAddressFeatures;
 import org.lwjgl.vulkan.VkPhysicalDeviceRayTracingPipelineFeaturesKHR;
@@ -74,14 +76,18 @@ final class VulkanTestDevice implements AutoCloseable {
     }
 
     static VulkanTestDevice open() throws ShaderComputeRunner.UnavailableException {
-        return open(false);
+        return open(false, false);
     }
 
     static VulkanTestDevice openRayTracing() throws ShaderComputeRunner.UnavailableException {
-        return open(true);
+        return open(true, false);
     }
 
-    private static VulkanTestDevice open(boolean rayTracing) throws ShaderComputeRunner.UnavailableException {
+    static VulkanTestDevice openRayTracing(boolean reorder) throws ShaderComputeRunner.UnavailableException {
+        return open(true, reorder);
+    }
+
+    private static VulkanTestDevice open(boolean rayTracing, boolean reorder) throws ShaderComputeRunner.UnavailableException {
         VkInstance instance = null;
         VkDevice device = null;
         long commandPool = 0L;
@@ -182,11 +188,18 @@ final class VulkanTestDevice implements AutoCloseable {
                 address.pNext(acceleration.address());
                 acceleration.pNext(pipeline.address());
                 pipeline.pNext(fetch.address());
-                deviceInfo.pNext(address.address()).ppEnabledExtensionNames(stack.pointers(
-                        stack.UTF8(KHRAccelerationStructure.VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
-                        stack.UTF8(KHRRayTracingPipeline.VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
-                        stack.UTF8(KHRDeferredHostOperations.VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME),
-                        stack.UTF8(KHRRayTracingPositionFetch.VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME)));
+                PointerBuffer extensions = stack.mallocPointer(reorder ? 5 : 4);
+                extensions.put(stack.UTF8(KHRAccelerationStructure.VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME))
+                        .put(stack.UTF8(KHRRayTracingPipeline.VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME))
+                        .put(stack.UTF8(KHRDeferredHostOperations.VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME))
+                        .put(stack.UTF8(KHRRayTracingPositionFetch.VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME));
+                if (reorder) {
+                    var feature = VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT.calloc(stack)
+                            .sType$Default().rayTracingInvocationReorder(true);
+                    fetch.pNext(feature.address());
+                    extensions.put(stack.UTF8(EXTRayTracingInvocationReorder.VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME));
+                }
+                deviceInfo.pNext(address.address()).ppEnabledExtensionNames(extensions.flip());
             }
             pointer.clear();
             result = VK12.vkCreateDevice(selected.physicalDevice(), deviceInfo, null, pointer);

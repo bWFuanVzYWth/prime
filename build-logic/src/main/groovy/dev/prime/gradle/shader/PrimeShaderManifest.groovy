@@ -59,6 +59,10 @@ final class PrimeShaderManifest {
                     }
                     String module = group[0]
                     def variantId = variant == null ? module : module + '_' + variant
+                    if (variant == 'ser' && !artifacts.containsKey(variantId)
+                            && artifacts.containsKey(module + '_subgroup')) {
+                        variantId = module + '_subgroup'
+                    }
                     String resolved = artifacts.containsKey(variantId) ? variantId : module
                     if (!artifacts.containsKey(resolved)) {
                         throw new GradleException(

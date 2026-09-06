@@ -8,9 +8,12 @@ import "contract/light.slang";
 import "contract/light_sample.slang";
 import "math/direct_sampling.slang";
 import "math/direct_discrete_sampling.slang";
+import "math/packed_geometry.slang";
 import "model/atmosphere/sky.slang";
+import "model/material/defaults.slang";
 import "policy/runtime/config.slang";
 import "service/light/area_sample.slang";
+import "service/light/emission.slang";
 import "service/trace/context.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/direct.slang";
@@ -117,6 +120,9 @@ public void primeEvaluateLandingDirect(
         }
     }
 
+    // Visible emission also covers dynamic geometry whose emitter lane is a motion identity.
+    if ((surface.materialControl & PRIME_MATERIAL_VISIBLE_EMISSION) == 0u
+            && primeSurfaceEmitterIndex(surface) == PRIME_NO_LIGHT_INDEX) return;
     bool previousUsedAreaNee = !primeWavefrontTransparentBranch(control)
             || path.bounce > 0u;
     PrimeWavefrontHitEmissionState hitPath =

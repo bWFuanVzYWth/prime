@@ -25,11 +25,6 @@ final class TracePipelinesContractTest {
 
     @Test
     void realtimeAndOfflineHaveIndependentSchedulesAndDescriptors() {
-        assertEquals(1, PrimaryRayTracingPipeline.DESCRIPTOR_BINDING_COUNT);
-        RaygenSchedule primary = GeneratedShaderPrograms.schedule("primary");
-        assertEquals(1, primary.groupCount());
-        assertEquals(1, primary.moduleCount());
-
         assertEquals(13, RealtimeRayTracingPipeline.dispatchCount(1, 1));
         assertEquals(57, RealtimeRayTracingPipeline.dispatchCount(2, 12));
         assertEquals(41, RealtimeRayTracingPipeline.dispatchCount(8, 1));
@@ -177,8 +172,8 @@ final class TracePipelinesContractTest {
         assertEquals(0, lambert.control(GeneratedShaderPrograms.LAMBERT_SHADE_0));
         assertEquals(1, lambert.control(GeneratedShaderPrograms.LAMBERT_TRACE_1));
         assertEquals(1, lambert.control(GeneratedShaderPrograms.LAMBERT_SHADE_1));
-        RaygenSchedule scalar = LambertRayTracingPipeline.schedule(false);
-        RaygenSchedule subgroup = LambertRayTracingPipeline.schedule(true);
+        RaygenSchedule scalar = LambertRayTracingPipeline.schedule(false, false);
+        RaygenSchedule subgroup = LambertRayTracingPipeline.schedule(true, false);
         assertEquals(scalar.groupCount(), subgroup.groupCount());
         assertEquals(scalar.moduleCount(), subgroup.moduleCount());
         for (int group = 0; group < scalar.groupCount(); ++group) {
@@ -193,6 +188,29 @@ final class TracePipelinesContractTest {
                                     ? GeneratedShaderPrograms.resource("lambert_camera_subgroup") : resource;
             assertEquals(expected, subgroup.moduleResource(subgroup.module(group)));
         }
+    }
+
+    @Test
+    void lambertSerUsesNarrowAnyHitAndRetainsSubgroupShading() {
+        RaygenSchedule ser = LambertRayTracingPipeline.schedule(true, true);
+        RaygenSchedule scalar = LambertRayTracingPipeline.schedule(false, true);
+        assertEquals(7, ser.moduleCount());
+        assertEquals(10, ser.groupCount());
+        String[] expected = {"lambert_camera_ser", "lambert_guide_ser", "lambert_first_subgroup",
+                "lambert_trace_ser", "lambert_shade_subgroup", "lambert_trace_ser",
+                "lambert_shade_subgroup", "lambert_terminal", "lambert_terminal", "lambert_resolve"};
+        for (int group = 0; group < ser.groupCount(); ++group) {
+            assertEquals(scalar.control(group), ser.control(group));
+            assertEquals(GeneratedShaderPrograms.resource(expected[group]),
+                    ser.moduleResource(ser.module(group)));
+            assertEquals(LambertRayTracingPipeline.schedule(false, false).moduleResource(scalar.module(group)),
+                    scalar.moduleResource(scalar.module(group)));
+        }
+        String[] normal = LambertRayTracingPipeline.fixedResources(false);
+        String[] reordered = LambertRayTracingPipeline.fixedResources(true);
+        assertEquals(normal.length, reordered.length);
+        for (int i = 0; i < normal.length; ++i) assertEquals(i == 3
+                ? GeneratedShaderPrograms.resource("lambert_world_rahit_ser") : normal[i], reordered[i]);
     }
 
     @Test

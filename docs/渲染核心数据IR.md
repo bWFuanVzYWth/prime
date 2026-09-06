@@ -1,8 +1,8 @@
 # 渲染核心数据 IR
 
 本文是 Prime 常用渲染数据的规范来源，只记录长期约束和已冻结的编码。未完成工作见
-[TODO](TODO.md)；测量数字、旧实现和迁移过程见[阶段 2 编码精度初始预算](阶段2编码精度初始预算.md)与
-[渲染数据标准化调查报告](渲染数据标准化调查报告.md)。历史记录不能反向定义当前规范。
+[TODO](TODO.md)，已知缺陷见 [FIXME](FIXME.md)。具体格式和实现布局以本规范及其引用的
+专项契约为准，测量记录不能反向定义规范。
 
 ## 1. 核心原则
 
@@ -36,7 +36,7 @@ Source → Scene → Frame → Transport → Reconstruction → Presentation
 - **Scene**：与相机无关的稳定 ID、几何、拓扑、材质、纹理、介质、灯光和动画计划。
 - **Frame**：一次候选帧的 extent、相机、jitter、revision、动态实例、功能选择和 history validity。
 - **Transport**：求交、BSDF、介质、路径状态、队列、随机地址和原始重建信号。
-  实验 Lambert 模型的独立路径记录和双队列合同见[轻量路径追踪首版](轻量路径追踪首版.md)；
+  实验 Lambert 模型的独立路径记录和三个队列合同见[轻量路径追踪](轻量路径追踪.md)；
   它与 OpenPBR transport 不共享可变状态或记录布局。
 - **Reconstruction**：可见/虚拟表面、motion、depth、normal、albedo、radiance、exposure 和有效性。
 - **Presentation**：scene-referred linear Rec.2020 到 tone/gamut mapping、显示编码、UI 合成和 swapchain。
@@ -194,7 +194,7 @@ queue 0 的间接命令第四字低 8 位保存 delta 上限，接下来的 8 �
 再后为三个索引数组。camera 发布首接口和选中 guide，guide 消费未选分支 seed 后，first
 才将 scratch 后 32 B 改为直接辐射 / SH 方向矩；path.firstDirection.xyz 同时从接口法线切换
 为首次散射方向。两次用途切换都有 RT 写读屏障，resize / reload 沿用帧所有者的退休流程。
-具体偏移、控制位和预算见 [轻量灯光与透明实现](轻量渲染器灯光与透明设计.md)。
+具体偏移、控制位和预算见 [轻量路径追踪](轻量路径追踪.md)。
 
 材质配方、OpenPBR compact 拓扑、采样与闭包测度见
 [统一材质 IR 与闭包](统一材质IR与闭包.md)。

@@ -117,10 +117,8 @@ public final class PrimeVideoOptions {
                                                         .orElse(RealtimeRenderMode.DEFAULT),
                                                 RealtimeRenderMode::id)),
                                 settings.realtimeRenderMode(),
-                                (caption, mode) -> Options.genericValueLabel(
-                                        caption,
-                                        Component.translatable(
-                                                "prime.options.realtime_renderer." + mode.id())),
+                                (caption, mode) -> Component.translatable(
+                                        "prime.options.realtime_renderer." + mode.id()),
                                 PrimeConfig::setRealtimeRenderMode)),
                                 big(booleanOption(
                                         "prime.options.screenshot_mode",

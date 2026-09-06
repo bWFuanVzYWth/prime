@@ -10,14 +10,13 @@ public interface IPrimeSuccessorQueueStorage {
     void store(uint queue, uint entry, uint pathIndex);
 }
 
-// The frame owner supplies N slots: N unique input paths each publish at most one successor.
-// No overflow path is needed under this contract. All lanes, including terminated paths, call
-// from uniform control flow with the same queue. Subgroup membership is only observed here,
-// after traversal; no lane index or ballot survives a trace/reorder operation.
+// N slots: N unique inputs publish at most one successor. All lanes, including terminated paths,
+// call uniformly with the same queue. Post-HitObject subgroup compaction causes device loss in
+// Lambert camera; SER entries must publish individually.
 public void primeAppendSuccessor<Storage>(Storage storage, uint queue, uint pathIndex, bool continuation)
     where Storage : IPrimeSuccessorQueueStorage
 {
-#if PRIME_ENABLE_SUBGROUP_QUEUE
+#if PRIME_ENABLE_SUBGROUP_QUEUE && !defined(PRIME_ENABLE_SER)
     uint4 mask = WaveActiveBallot(continuation);
     uint count = countbits(mask.x) + countbits(mask.y) + countbits(mask.z) + countbits(mask.w);
     uint first = 0u;

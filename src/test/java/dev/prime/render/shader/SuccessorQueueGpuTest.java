@@ -20,13 +20,15 @@ final class SuccessorQueueGpuTest extends GpuShaderTest {
                         input.putInt(alive); expected += alive;
                     }
                     input.flip();
-                    for (String variant : new String[] {"", "_subgroup"}) {
-                        ByteBuffer output = runner.dispatch("successor_queue" + variant + ".comp.spv",
+                    for (String artifact : new String[] {"successor_queue", "successor_queue_subgroup", "successor_queue_ser",
+                            "wavefront_queue", "wavefront_queue_subgroup"}) {
+                        ByteBuffer output = runner.dispatch(artifact + ".comp.spv",
                                 input, (8 + 2 * count) * 4, count);
                         assertEquals(expected, output.getInt(queue * 16));
                         assertEquals(0, output.getInt((queue ^ 1) * 16));
                         int reservations = output.getInt(queue * 16 + 4);
-                        if (variant.isEmpty()) assertEquals(expected, reservations);
+                        assertEquals(0, output.getInt(queue * 16 + 8), "No overflow");
+                        if (!artifact.endsWith("_subgroup")) assertEquals(expected, reservations);
                         else {
                             assertTrue(reservations <= expected);
                             if (expected == 0) assertEquals(0, reservations);

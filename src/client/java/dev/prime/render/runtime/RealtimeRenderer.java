@@ -345,7 +345,7 @@ final class RealtimeRenderer implements Destroyable {
     }
 
     void selectMode(RealtimeRenderMode mode) {
-        if (!mode.usesReconstruction() || mode == this.mode) return;
+        if (mode == this.mode) return;
         RealtimeTracePipeline replacement = this.createPipeline(mode);
         RealtimeTracePipeline previous = this.pipeline;
         this.pipeline = replacement;

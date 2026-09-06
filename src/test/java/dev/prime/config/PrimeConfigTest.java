@@ -358,20 +358,20 @@ final class PrimeConfigTest {
 
     @Test
     void realtimeRendererModeIsStrictAndInvalidatesTheRendererRevision() {
-        assertEquals(
-                RealtimeRenderMode.TEXTURED_PRIMARY_RAYS,
-                PrimeConfigCodec.parseRealtimeRenderMode("textured_primary_rays"));
+        assertEquals(RealtimeRenderMode.PATH_TRACING,
+                PrimeConfigCodec.parseRealtimeRenderMode("path_tracing"));
+        assertThrows(IllegalArgumentException.class,
+                () -> PrimeConfigCodec.parseRealtimeRenderMode("textured_primary_rays"));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> PrimeConfigCodec.parseRealtimeRenderMode("future_renderer"));
 
         assertEquals(RealtimeRenderMode.LIGHTWEIGHT_PATH_TRACING,
                 PrimeConfigCodec.parseRealtimeRenderMode("lightweight_path_tracing"));
-        assertTrue(RealtimeRenderMode.LIGHTWEIGHT_PATH_TRACING.usesReconstruction());
         RealtimeRenderMode previous = PrimeConfig.rendererSettings().realtimeRenderMode();
         long previousRevision = PrimeConfig.rendererSettings().revision();
         RealtimeRenderMode replacement = previous == RealtimeRenderMode.PATH_TRACING
-                ? RealtimeRenderMode.TEXTURED_PRIMARY_RAYS
+                ? RealtimeRenderMode.LIGHTWEIGHT_PATH_TRACING
                 : RealtimeRenderMode.PATH_TRACING;
         try {
             PrimeConfig.setRealtimeRenderMode(replacement);
@@ -381,6 +381,22 @@ final class PrimeConfigTest {
         } finally {
             PrimeConfig.setRealtimeRenderMode(previous);
         }
+    }
+
+    @Test
+    void removedRealtimeModeRewritesToTheDefaultWithoutChangingOtherSettings() throws Exception {
+        Properties properties = new Properties();
+        properties.load(new StringReader(PrimeConfig.serializedContents()));
+        properties.setProperty("renderer.realtime_mode", "textured_primary_rays");
+        properties.setProperty("material.base_color_compensation", "false");
+        PrimeConfigCodec.DecodeResult decoded = PrimeConfigCodec.decode(properties);
+        assertTrue(decoded.rewriteNeeded());
+        assertEquals(RealtimeRenderMode.DEFAULT, decoded.data().realtimeRenderMode);
+        assertFalse(decoded.data().material.baseColorCompensation());
+        Properties normalized = new Properties();
+        normalized.load(new StringReader(PrimeConfigCodec.encode(decoded.data())));
+        assertEquals(RealtimeRenderMode.DEFAULT.id(), normalized.getProperty("renderer.realtime_mode"));
+        assertFalse(PrimeConfigCodec.decode(normalized).rewriteNeeded());
     }
 
     @Test

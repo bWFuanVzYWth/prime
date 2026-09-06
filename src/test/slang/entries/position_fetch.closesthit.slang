@@ -1,5 +1,6 @@
 #language slang 2026
 import glsl;
+import "contract/lambert.slang";
 import "prime_abi_types.slang";
 import "prime_surface_abi.slang";
 import "service/trace/identity.slang";
@@ -8,7 +9,11 @@ struct TestPush { uint64_t keys; uint64_t direct; uint64_t relation; };
 [[vk::push_constant]] ConstantBuffer<TestPush> testPush;
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> output;
 [shader("closesthit")]
+#if defined(PRIME_TEST_SER)
+void main(inout PrimeLambertPayload payload, in BuiltInTriangleIntersectionAttributes attributes) {
+#else
 void main(inout uint payload, in BuiltInTriangleIntersectionAttributes attributes) {
+#endif
     uint base = DispatchRaysIndex().x * 30u + 10u;
     for (uint i = 0; i < 3u; i++) {
         uint3 bits = asuint(HitTriangleVertexPosition(i));
@@ -43,5 +48,9 @@ void main(inout uint payload, in BuiltInTriangleIntersectionAttributes attribute
     output[offset + 4u] = header.y; output[offset + 5u] = header.z;
     output[offset + 6u] = uv.w; output[offset + 7u] = record.tangent;
     output[offset + 8u] = primeGlobalTriangleIndex(section);
+#if defined(PRIME_TEST_SER)
+    payload.flags |= 2u;
+#else
     payload |= 2u;
+#endif
 }

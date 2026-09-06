@@ -6,7 +6,6 @@ import "math/hash.slang";
 import "math/transparent_branch.slang";
 import "math/realtime_storage.slang";
 import "math/direct_sampling.slang";
-import "policy/realtime/direct.slang";
 import "policy/realtime/queue.slang";
 import "prime_realtime_abi.slang";
 import "prime_abi.slang";
@@ -18,7 +17,6 @@ import "service/bsdf/support/volume_transition.slang";
 import "service/camera/projection.slang";
 import "service/reconstruct/ordinary.slang";
 import "contract/realtime/guide.slang";
-import "model/atmosphere/sky.slang";
 import "service/reconstruct/nrd/common.slang";
 import "math/packed_geometry.slang";
 import "math/queued_psr.slang";
@@ -30,8 +28,6 @@ import "service/bsdf/contract/albedo.slang";
 import "service/bsdf/dispatch/traits.slang";
 import "service/bsdf/support/conversion.slang";
 import "service/trace/context.slang";
-import "transport/direct/contract.slang";
-import "transport/direct/primary.slang";
 import "model/realtime/transport.slang";
 import "transport/guide/queued_psr.slang";
 import "transport/scatter/ordinary.slang";
@@ -39,7 +35,6 @@ import "transport/scatter/path_update.slang";
 import "transport/scatter/surface.slang";
 import "transport/surface/access.slang";
 import "transport/surface/accumulate.slang";
-import "transport/surface/emission.slang";
 import "transport/surface/environment.slang";
 import "transport/surface/medium.slang";
 import "state/realtime/contract.slang";
@@ -67,6 +62,9 @@ static const uint PRIME_SPLIT_FIRST_STEADY = 1u << 0u;
 static const uint PRIME_SPLIT_SECOND_STEADY = 1u << 1u;
 static const uint PRIME_SPLIT_FIRST_DELTA_WALK = 1u << 2u;
 static const uint PRIME_SPLIT_SECOND_DELTA_WALK = 1u << 3u;
+static const uint PRIME_SPLIT_RESOLVE = 1u << 4u;
+static const uint PRIME_SPLIT_FIRST_GUIDE = 1u << 5u;
+static const uint PRIME_SPLIT_SECOND_GUIDE = 1u << 6u;
 
 void primeStoreInitialPath(
         uint pathIndex,
@@ -115,7 +113,7 @@ public uint primeInitializeTransparentWavefront(
     initialResult.radiance.specular = float3(0.0);
     primeAccumulate(context,
             reflectionSpecularRadiance,
-            primeEvaluateHitEmission(context, path, surface, false));
+            primeEvaluateDeltaHitEmission(context, path, surface));
     float surfaceLinearRoughness = primeSurfaceLinearRoughness(surface);
     PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
             surface, viewDirection, volumeStack, primeUsesAirGap());
@@ -184,9 +182,7 @@ public uint primeInitializeTransparentWavefront(
             guideMode == PRIME_PATH_TRANSPARENT_GUIDE_MODE_NRD
             || guideMode == PRIME_PATH_TRANSPARENT_GUIDE_MODE_DLSS_RR;
     primeStoreWavefrontVisibleScratch(pixel, initialResult.guides);
-    primeAppendWavefrontPath(
-            PRIME_WAVEFRONT_TRANSPARENT_RESOLVE_QUEUE,
-            primeWavefrontIndex(pixel, 0u));
+    continuationMask |= PRIME_SPLIT_RESOLVE;
     bool primaryReflectionOnly = primeTransparentPrimaryReflectionOnly(
             discreteOnlyInterface,
             primeHasScatter(primarySample.paths.transmission.bsdfSample),
@@ -330,7 +326,7 @@ public uint primeInitializeTransparentWavefront(
             // This branch never enters a transport queue. Its unused surface slot survives until
             // the missing-guide drain, without aliasing split's receiver-normal writes.
             primeStoreMissingGuideRecord(pathIndex, guide);
-            primeAppendWavefrontPath(PRIME_WAVEFRONT_GUIDE_QUEUE, pathIndex);
+            continuationMask |= transmissionBranch ? PRIME_SPLIT_FIRST_GUIDE : PRIME_SPLIT_SECOND_GUIDE;
         }
         uint continuationBit = deltaWalk
                 ? (transmissionBranch
@@ -350,11 +346,9 @@ public uint primeInitializeTransparentWavefront(
     return continuationMask;
 }
 
-public void primeSplitVisibleSurface<AreaNee>(
-        AreaNee areaNee,
+public void primeSplitVisibleSurface(
         inout PrimeIntegratorContext context,
         uint launchIndex)
-    where AreaNee : IPrimeSecondaryAreaNee
 {
     uint recordIndex = primeWavefrontQueuedPath(
             PRIME_WAVEFRONT_PRIMARY_QUEUE, launchIndex);
@@ -381,10 +375,6 @@ public void primeSplitVisibleSurface<AreaNee>(
                 surface,
                 initialResult);
     } else {
-        IntegratorRecord integrator;
-        integrator.sunDirectionIntensity = float4(
-                primePush.sunDirection,
-                ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
         PrimeDenoiserState denoiserState = primeInitialDenoiserState();
         PrimeOrdinarySample result = surface.hitKind == PRIME_HIT_SURFACE
                 ? primeLoadWavefrontPrimaryIntermediate(pixel)
@@ -396,23 +386,18 @@ public void primeSplitVisibleSurface<AreaNee>(
             primeAccumulate(
                     context,
                     result.radiance.stable,
-                    primeEvaluateHitEmission(
-                            context, path, surface, false));
+                    // A camera hit has no previous area-light sample and therefore no reverse PDF.
+                    primeEvaluateDeltaHitEmission(context, path, surface));
         }
         bool continuation = segmentAlive
                 && primeIntegrateWavefrontSurface(
                         PrimeLandingTransportPhase(),
-                        PrimeStagedSecondarySunNee(),
-                        areaNee,
-                        PrimeNoIndirectReuse(),
                         context,
                         path,
-                        integrator,
                         volumeStack,
                         denoiserState,
                         result,
-                        surface,
-                        recordIndex);
+                        surface);
         bool deltaWalk = continuation
                 && (primePathFlags(path.control)
                         & PRIME_PATH_PREVIOUS_DISCRETE) != 0u;
@@ -443,13 +428,8 @@ public void primeSplitVisibleSurface<AreaNee>(
     primeAppendWavefrontContinuation(
             PrimeWavefrontContinuationAppender(),
             PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0,
-            recordIndex,
-            (continuationMask & PRIME_SPLIT_FIRST_STEADY) != 0u);
-    primeAppendWavefrontContinuation(
-            PrimeWavefrontContinuationAppender(),
-            PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0,
-            primeWavefrontIndex(pixel, 1u),
-            (continuationMask & PRIME_SPLIT_SECOND_STEADY) != 0u);
+            (continuationMask & PRIME_SPLIT_SECOND_STEADY) != 0u ? primeWavefrontIndex(pixel, 1u) : recordIndex,
+            (continuationMask & (PRIME_SPLIT_FIRST_STEADY | PRIME_SPLIT_SECOND_STEADY)) != 0u);
     primeAppendWavefrontContinuation(
             PrimeWavefrontContinuationAppender(),
             PRIME_WAVEFRONT_TRACE_QUEUE_0,
@@ -460,4 +440,13 @@ public void primeSplitVisibleSurface<AreaNee>(
             PRIME_WAVEFRONT_TRACE_QUEUE_1,
             primeWavefrontIndex(pixel, 1u),
             (continuationMask & PRIME_SPLIT_SECOND_DELTA_WALK) != 0u);
+    // Only the selected branch carries lighting; at most one complementary guide is missing.
+    // Publish after the primary sample and guide construction temporaries have expired.
+    primeAppendWavefrontContinuation(
+            PrimeWavefrontContinuationAppender(), PRIME_WAVEFRONT_TRANSPARENT_RESOLVE_QUEUE,
+            recordIndex, (continuationMask & PRIME_SPLIT_RESOLVE) != 0u);
+    primeAppendWavefrontContinuation(
+            PrimeWavefrontContinuationAppender(), PRIME_WAVEFRONT_GUIDE_QUEUE,
+            (continuationMask & PRIME_SPLIT_SECOND_GUIDE) != 0u ? primeWavefrontIndex(pixel, 1u) : recordIndex,
+            (continuationMask & (PRIME_SPLIT_FIRST_GUIDE | PRIME_SPLIT_SECOND_GUIDE)) != 0u);
 }

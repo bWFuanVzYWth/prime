@@ -2,26 +2,14 @@
 module "transport/realtime/advance.slang";
 
 import "transport/scatter/phase_contract.slang";
-import "policy/realtime/direct.slang";
 import "prime_abi_types.slang";
 import "state/path.slang";
-import "prime_abi.slang";
-import "contract/realtime/guide.slang";
-import "model/atmosphere/sky.slang";
 import "math/queued_psr.slang";
-import "math/packed_geometry.slang";
-import "policy/runtime/config.slang";
-import "service/light/sample.slang";
-import "service/light/emission.slang";
-import "model/material/defaults.slang";
 import "service/trace/context.slang";
-import "transport/direct/staged.slang";
 import "model/realtime/transport.slang";
-import "transport/scatter/surface.slang";
 import "transport/scatter/transparent.slang";
 import "transport/surface/access.slang";
 import "transport/surface/environment.slang";
-import "transport/surface/medium.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/light.slang";
 import "state/realtime/ordinary.slang";
@@ -32,13 +20,14 @@ import "state/realtime/guide.slang";
 import "state/realtime/transparent.slang";
 import "state/realtime/transport.slang";
 
-import "transport/realtime/trace.slang";
 import "bsdf/compact/contract/volume.slang";
 import "contract/realtime/ordinary.slang";
 import "contract/realtime/transparent.slang";
 import "contract/path.slang";
+import "transport/surface/accumulate.slang";
+import "service/reconstruct/nrd/common.slang";
 
-public bool primeAdvanceOrdinaryWavefrontRecord<Phase>(
+public bool primeAdvanceOrdinaryWavefrontMiss<Phase>(
         Phase phase,
         inout PrimeIntegratorContext context,
         uint recordIndex,
@@ -50,10 +39,6 @@ public bool primeAdvanceOrdinaryWavefrontRecord<Phase>(
     uint2 pixel = primeWavefrontPixel(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
     PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
-    IntegratorRecord integrator;
-    integrator.sunDirectionIntensity = float4(
-            primePush.sunDirection,
-            ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
 
     bool guideWasPending =
             (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) == 0u;
@@ -61,22 +46,15 @@ public bool primeAdvanceOrdinaryWavefrontRecord<Phase>(
             primeLoadWavefrontActiveIntermediate(pixel, control);
     PrimeDenoiserState denoiserState =
             primeWavefrontDenoiserState(control, result);
-    bool segmentAlive = surface.hitKind != PRIME_HIT_SURFACE
-            || primeApplySegmentMedium(path.throughput, surface, volumeStack);
-    bool continuation = segmentAlive
-            && primeIntegrateWavefrontSurface(
-                    phase,
-                    PrimeStagedSecondarySunNee(),
-                    PrimeFixedSecondaryAreaNee(),
-                    PrimeNoIndirectReuse(),
-                    context,
-                    path,
-                    integrator,
-                    volumeStack,
-                    denoiserState,
-                    result,
-                    surface,
-                    recordIndex);
+    bool continuation = false;
+    if (surface.hitKind == PRIME_HIT_NONE) {
+        if (primePathBounce(path.control) == phase.ordinaryGuideHitBounce(denoiserState.primaryBounce)) {
+            if (denoiserState.diffusePath) result.guides.diffuseHitDistance = PRIME_NRD_FP16_MAX;
+            else result.guides.specularHitDistance = PRIME_NRD_FP16_MAX;
+        }
+        primeAccumulateAfterPrimary(context, result, denoiserState.diffusePath,
+                primeEvaluateEnvironmentContribution(context, path));
+    }
     PrimeWavefrontTransportRecord updatedRecord =
             primeMakeUpdatedWavefrontRecord(
                     path,
@@ -99,7 +77,7 @@ public bool primeAdvanceOrdinaryWavefrontRecord<Phase>(
     return continuation;
 }
 
-public bool primeAdvanceTransparentWavefrontRecord<Phase>(
+public bool primeAdvanceTransparentWavefrontMiss<Phase>(
         Phase phase,
         inout PrimeIntegratorContext context,
         uint recordIndex,
@@ -111,10 +89,6 @@ public bool primeAdvanceTransparentWavefrontRecord<Phase>(
     uint2 pixel = primeWavefrontPixel(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
     PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
-    IntegratorRecord integrator;
-    integrator.sunDirectionIntensity = float4(
-            primePush.sunDirection,
-            ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
 
     bool hadGuide =
             (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) != 0u;
@@ -138,13 +112,10 @@ public bool primeAdvanceTransparentWavefrontRecord<Phase>(
     bool hadDirectionalGuide = directionalGuide;
     bool guideFallback = primeWavefrontGuideFallback(
             record.sourceAndPathControl.z);
-    bool continuation = primeIntegrateTransparentWavefrontSurface(
+    bool continuation = primeIntegrateTransparentWavefrontMiss(
             phase,
-            PrimeStagedSecondarySunNee(),
-            PrimeFixedSecondaryAreaNee(),
             context,
             path,
-            integrator,
             volumeStack,
             branchResult,
             psrState,
@@ -155,8 +126,7 @@ public bool primeAdvanceTransparentWavefrontRecord<Phase>(
             guideFallback,
             surface,
             transmissionBranch,
-            guideEnabled,
-            recordIndex);
+            guideEnabled);
     PrimeWavefrontTransportRecord updatedRecord =
             primeMakeUpdatedTransparentWavefrontRecord(
                     path,

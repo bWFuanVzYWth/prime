@@ -77,6 +77,9 @@ Players installing a release do not need the Vulkan SDK, a compiler, or other de
 The release JAR includes the Windows native libraries needed at runtime. Prime requires
 substantially more GPU time, video memory, and CPU scene streaming than vanilla Minecraft.
 
+All devices must expose `VK_KHR_ray_tracing_position_fetch` and its feature. Prime reads static
+vertices directly from BLAS to reduce resident VRAM.
+
 ## Installation
 
 1. Install and launch Minecraft 26.2 at least once.
@@ -110,16 +113,20 @@ reuse the driver cache.
 
 ## Common Settings
 
+- **Realtime Renderer:** choose full path tracing or the performance-oriented lightweight model.
+
 - **Denoising & Image Reconstruction:** compatible RTX GPUs can use DLSS RR; Prime falls back to
   NRD + FSR when it is unavailable.
 - **Reconstruction Quality Preset:** defaults to Performance. Raise it when the game is comfortably
   responsive, or lower it when frame rate is insufficient.
 - **Additional Specular Bounces:** controls the realtime delta reflection/transmission chain before
-  the primary surface, from 1–64; the default is 16.
-- **Minimum Bounces:** controls the fixed no-roulette realtime Wavefront rounds, from 1–8; the
+  the primary surface, from 1–64; the default is 12.
+- **Minimum Bounces:** sets the minimum realtime rounds before Russian roulette, from 1–8; the
   default is 2.
-- **Maximum Bounces:** controls regular transport from 1–64; the default is 16. In realtime, values
-  below Minimum Bounces do not shorten the fixed Wavefront. Offline uses this total directly.
+- **Maximum Bounces:** controls regular transport from 1–64; the default is 12. In realtime, values
+  below Minimum Bounces use that minimum instead. Offline uses this total directly.
+- **Base-color Saturation Compensation:** enabled by default to reduce washed-out base colors in the
+  full model; users can turn it off.
 - **Terrain Worker Share:** defaults to 50% of Minecraft's maximum background workers. Lower it to
   reduce CPU contention while chunks load, or raise it to make Prime geometry appear sooner; at
   least one worker is always retained.
@@ -158,11 +165,13 @@ fixes:
 - At most two non-air transparent regions can be nested reliably. Deeper nesting, open models, and
   boundaries without a meaningful inside and outside do not guarantee correct absorption or
   refraction.
-- Realtime transparent lighting keeps conditional transmission and reflection slots at the first
-  interface, straight shadow filtering, and bounded single-branch sampling afterward. A radiance
-  branch accumulates its guide along the continuation it actually selected; motion, chain overflow,
-  depth limits, or invalid state fall back to the true visible interface without an independent
-  guide replay. This does not fully solve arbitrary refractive chains.
+- Full realtime selects one conditional reflection or transmission candidate at the first transparent
+  interface, compensates its lighting weight, and supplies both guides. Later transport samples the
+  full closure. Motion, chain limits, or invalid guides fall back to the visible interface; this does
+  not fully solve arbitrary refractive chains.
+- Lightweight mode uses Lambert surfaces and only reflects at the first camera-visible transparent
+  interface. Later transparent surfaces transmit straight with absorption. Block-light NEE runs only
+  at the first Lambert surface.
 - Shadow rays connecting a surface to a light do not refract at transparent interfaces. They only
   accumulate absorption along the original direction.
 - Volumetric sun shadows approximate visibility from one sun direction; they do not represent sky
@@ -204,7 +213,8 @@ $env:Path = "$env:JAVA_HOME\bin;$env:VULKAN_SDK\Bin;$env:Path"
 .\gradlew.bat build
 ```
 
-After a successful build, the sole release JAR is in `build\libs`. Environment checks, tests,
+After a successful build, use `build\libs\prime-<mod_version>.jar`, with the version from
+`gradle.properties`. Environment checks, tests,
 development runs, and shader debugging are documented in
 [Build and Validation](docs/构建与验证.md).
 
@@ -218,22 +228,31 @@ The technical documents are currently written in Chinese.
 - [Build and validation](docs/构建与验证.md)
 - [Rendering implementation](docs/渲染实现.md)
 - [Architecture and data flow](docs/纯函数式架构.md)
+- [Rendering core data IR](docs/渲染核心数据IR.md)
 
 ### Scene, Resources, and Materials
 
 - [Terrain cluster scene translation](docs/区块簇场景翻译架构.md)
+- [Scene resource lifetime](docs/场景资源生命周期.md)
+- [Terrain geometry memory compression](docs/地形几何显存压缩设计.md)
 - [Texture translation architecture](docs/纹理翻译架构.md)
 - [Canonical material IR and closures](docs/统一材质IR与闭包.md)
 - [Compact OpenPBR implementation](docs/OpenPBR紧凑模块.md)
 
 ### Light Transport and Display
 
+- [Lightweight path tracing](docs/轻量路径追踪.md)
+- [Full realtime wavefront scheduling](docs/完整实时Wavefront调度.md)
+- [Sampling and path termination](docs/采样与路径终止.md)
+- [Lighting and atmosphere sampling](docs/灯光与大气采样.md)
 - [Offline light transport contract](docs/离线光传输契约.md)
 - [Transparency and realtime reconstruction](docs/透明渲染与实时重建.md)
 - [HDR output](docs/HDR输出.md)
 
 ### Engineering Contracts
 
+- [Path-tracing performance constraints](docs/路径追踪性能约束.md)
+- [Tests and benchmarks](docs/测试与基准验证.md)
 - [GPU geometry tracing precision contract](docs/GPU几何追踪精度契约.md)
 - [Production shader compilation boundaries](docs/生产Shader编译边界契约.md)
 - [Zero-cost production shader diagnostics](docs/生产Shader零诊断成本契约.md)
@@ -242,7 +261,6 @@ The technical documents are currently written in Chinese.
 ### Maintenance Records
 
 - [TODO](docs/TODO.md)
-- [Oblique-water fine black-line investigation and fix](docs/斜水面细密黑纹排查报告.md)
 
 ## Related Open-Source Projects
 

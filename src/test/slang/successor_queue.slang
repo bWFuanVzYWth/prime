@@ -1,9 +1,16 @@
 import "policy/queue/single_successor.slang";
+import "policy/queue/wavefront.slang";
 
 [[vk::binding(0, 0)]] StructuredBuffer<uint> inputData;
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> outputData;
 
+#if defined(PRIME_TEST_WAVEFRONT_QUEUE)
+struct TestStorage : IPrimeWavefrontQueueStorage {
+#else
 struct TestStorage : IPrimeSuccessorQueueStorage {
+#endif
+    uint capacity(uint queue) { return inputData[0]; }
+    void markOverflow(uint queue, uint capacity) { InterlockedOr(outputData[queue * 4u + 2u], 1u); }
     uint reserve(uint queue, uint count) {
         uint first;
         InterlockedAdd(outputData[queue * 4u], count, first);
@@ -25,5 +32,13 @@ bool continues(uint index) {
 void main(uint3 tid : SV_DispatchThreadID) {
     // Match the production helper-return / common append shape, including inactive tail lanes.
     bool continuation = continues(tid.x);
+#if defined(PRIME_TEST_WAVEFRONT_QUEUE)
+#if defined(PRIME_ENABLE_SUBGROUP_QUEUE)
+    primeAppendSubgroupQueueEntry(TestStorage(), inputData[1], tid.x, continuation);
+#else
+    primeAppendScalarQueueEntry(TestStorage(), inputData[1], tid.x, continuation);
+#endif
+#else
     primeAppendSuccessor(TestStorage(), inputData[1], tid.x, continuation);
+#endif
 }

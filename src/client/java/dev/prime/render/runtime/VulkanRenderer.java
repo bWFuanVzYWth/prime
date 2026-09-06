@@ -46,7 +46,6 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 public final class VulkanRenderer implements AutoCloseable {
     private final VulkanContext context;
     private final RealtimeRenderer realtimeRenderer;
-    private final PrimaryRayRenderer primaryRayRenderer;
     private final OfflineRenderer offlineRenderer;
     private final StagingArena stagingArena;
     private final TerrainStreamer terrain;
@@ -84,7 +83,6 @@ public final class VulkanRenderer implements AutoCloseable {
         AtmospherePipeline newAtmosphere = null;
         TraceBackend newTraceBackend = null;
         RealtimeRenderer newRealtimeRenderer = null;
-        PrimaryRayRenderer newPrimaryRayRenderer = null;
         OfflineRenderer newOfflineRenderer = null;
         TerrainStreamer newTerrain = null;
         MaterialTexturePages newMaterialTextures = null;
@@ -99,11 +97,9 @@ public final class VulkanRenderer implements AutoCloseable {
             newNgxContext = DlssRrBootstrap.initialize(newContext).orElse(null);
             newRealtimeRenderer = new RealtimeRenderer(
                     newContext, newTraceBackend, newNgxContext);
-            newPrimaryRayRenderer = new PrimaryRayRenderer(newContext, newTraceBackend);
             newOfflineRenderer = new OfflineRenderer(newContext, newTraceBackend);
             this.context = newContext;
             this.realtimeRenderer = newRealtimeRenderer;
-            this.primaryRayRenderer = newPrimaryRayRenderer;
             this.offlineRenderer = newOfflineRenderer;
             this.stagingArena = newStagingArena;
             this.traceBackend = newTraceBackend;
@@ -113,7 +109,6 @@ public final class VulkanRenderer implements AutoCloseable {
             this.shaderFingerprint = VulkanShaderModules.fingerprint();
         } catch (RuntimeException exception) {
             ResourceCleanup.destroy(newOfflineRenderer, exception);
-            ResourceCleanup.destroy(newPrimaryRayRenderer, exception);
             ResourceCleanup.destroy(newRealtimeRenderer, exception);
             if (newRealtimeRenderer == null && newNgxContext != null) {
                 DlssRrNative.Context failedNgxContext = newNgxContext;
@@ -153,15 +148,13 @@ public final class VulkanRenderer implements AutoCloseable {
             throw new IllegalStateException(
                     "Prime display extent is unavailable during renderer bootstrap");
         }
-        if (settings.realtimeRenderMode().usesReconstruction()) {
-            this.realtimeRenderer.selectMode(settings.realtimeRenderMode());
-            this.realtimeRenderer.prewarmResources(
-                    this.atmosphere,
-                    settings.postProcessingMode(),
-                    settings.reconstructionQuality(),
-                    width,
-                    height);
-        }
+        this.realtimeRenderer.selectMode(settings.realtimeRenderMode());
+        this.realtimeRenderer.prewarmResources(
+                this.atmosphere,
+                settings.postProcessingMode(),
+                settings.reconstructionQuality(),
+                width,
+                height);
         this.activeRealtimeRenderMode = settings.realtimeRenderMode();
     }
 
@@ -221,11 +214,7 @@ public final class VulkanRenderer implements AutoCloseable {
         if (previous != null) {
             this.context.awaitIdle();
             this.context.drainDeferredAfterIdle();
-            if (previous.usesReconstruction()) {
-                this.realtimeRenderer.releaseSizedResourcesAfterIdle();
-            } else {
-                this.primaryRayRenderer.releaseSizedResourcesAfterIdle();
-            }
+            this.realtimeRenderer.releaseSizedResourcesAfterIdle();
         }
         this.realtimeRenderer.selectMode(mode);
         this.activeRealtimeRenderMode = mode;
@@ -417,20 +406,6 @@ public final class VulkanRenderer implements AutoCloseable {
             this.debugLines = this.withRendererDiagnostics(settings);
             return;
         }
-        if (settings.realtimeRenderMode() == RealtimeRenderMode.TEXTURED_PRIMARY_RAYS) {
-            this.primaryRayRenderer.render(
-                    new PrimaryRayRenderer.RenderInput(
-                            mainTarget,
-                            scene,
-                            frameCamera,
-                            this.atmosphere,
-                            this.materialTextures,
-                            atlas.view(),
-                            atlas.sampler(),
-                            this.sceneTextures));
-            this.debugLines = this.withRendererDiagnostics(settings);
-            return;
-        }
         this.realtimeRenderer.setExposureDiagnosticsEnabled(
                 this.frameControls.rendererDiagnostics());
         this.realtimeRenderer.render(
@@ -472,12 +447,7 @@ public final class VulkanRenderer implements AutoCloseable {
         OfflineRenderer.DiagnosticSnapshot offline =
                 this.offlineRenderer.diagnosticSnapshot();
         RealtimeRenderer.DiagnosticSnapshot realtime = offline == null
-                && settings.realtimeRenderMode().usesReconstruction()
                 ? this.realtimeRenderer.diagnosticSnapshot()
-                : null;
-        PrimaryRayRenderer.DiagnosticSnapshot primary = offline == null
-                && settings.realtimeRenderMode() == RealtimeRenderMode.TEXTURED_PRIMARY_RAYS
-                ? this.primaryRayRenderer.diagnosticSnapshot()
                 : null;
 
         ArrayList<String> lines = new ArrayList<>(14);
@@ -497,8 +467,6 @@ public final class VulkanRenderer implements AutoCloseable {
                 "Path: %s; quality: %s",
                 offline != null
                         ? "offline path-tracing accumulation"
-                        : primary != null
-                                ? "textured primary rays"
                         : realtime != null
                                 ? renderingPath(realtime.postProcessingMode())
                                 : "n/a",
@@ -510,15 +478,11 @@ public final class VulkanRenderer implements AutoCloseable {
                 "Resolution: render %s; display %s",
                 offline != null
                         ? extent(offline.width(), offline.height())
-                        : primary != null
-                                ? extent(primary.width(), primary.height())
                         : realtime != null
                                 ? extent(realtime.renderWidth(), realtime.renderHeight())
                                 : "n/a",
                 offline != null
                         ? extent(offline.width(), offline.height())
-                        : primary != null
-                                ? extent(primary.width(), primary.height())
                         : realtime != null
                                 ? extent(realtime.displayWidth(), realtime.displayHeight())
                                 : "n/a"));
@@ -530,12 +494,8 @@ public final class VulkanRenderer implements AutoCloseable {
                         : realtime != null
                                 ? count(realtime.accumulatedSamples())
                                 : "n/a",
-                primary != null
-                        ? "1"
-                        : realtime != null ? count(realtime.integratorPassCount()) : "n/a",
-                primary != null
-                        ? bytes(primary.resourceBytes())
-                        : realtime != null ? bytes(realtime.integratorResourceBytes()) : "n/a"));
+                realtime != null ? count(realtime.integratorPassCount()) : "n/a",
+                realtime != null ? bytes(realtime.integratorResourceBytes()) : "n/a"));
         lines.add(String.format(
                 Locale.ROOT,
                 "Scene: TLAS instances %s; area-light emitters %s; light-tree nodes %s",
@@ -571,9 +531,8 @@ public final class VulkanRenderer implements AutoCloseable {
                 count(this.dynamicSceneStatistics.uniqueFallbackTriangles())));
 
         var exposure = offlineSession == null
-                && settings.realtimeRenderMode().usesReconstruction()
                 ? this.realtimeRenderer.exposureDiagnosticSnapshot()
-                : offlineSession == null ? null : offlineSession.exposure().diagnosticSnapshot();
+                : offlineSession.exposure().diagnosticSnapshot();
         String exposureState = exposure == null
                 ? "waiting for GPU readback"
                 : !exposure.initialized()
@@ -901,7 +860,6 @@ public final class VulkanRenderer implements AutoCloseable {
         failure = ResourceCleanup.run(this.context::drainDeferredAfterIdle, failure);
         failure = ResourceCleanup.destroy(this.pendingOfflineSession, failure);
         failure = ResourceCleanup.destroy(this.offlineRenderer, failure);
-        failure = ResourceCleanup.destroy(this.primaryRayRenderer, failure);
         failure = ResourceCleanup.destroy(this.realtimeRenderer, failure);
         failure = ResourceCleanup.close(this.terrain, failure);
         failure = ResourceCleanup.close(this.materialTextures, failure);
@@ -937,7 +895,6 @@ public final class VulkanRenderer implements AutoCloseable {
             replacementAtmosphereSubmitted = true;
             this.offlineRenderer.reload();
             this.realtimeRenderer.reload(replacementAtmosphere);
-            this.primaryRayRenderer.reload();
         } catch (RuntimeException exception) {
             ResourceCleanup.destroy(replacementSunShadow, exception);
             if (replacementAtmosphereSubmitted) {

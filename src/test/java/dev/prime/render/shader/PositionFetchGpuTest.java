@@ -23,7 +23,23 @@ import org.lwjgl.vulkan.*;
 @Tag("gpu-shader")
 final class PositionFetchGpuTest {
     @Test void fetchedVerticesSurviveInputRetirementAndCompaction() throws Exception {
-        try (var device = VulkanTestDevice.openRayTracing(); var gpu = new Harness(device)) {
+        checkPositionFetch(false);
+    }
+
+    @Test void reorderedTraversalUsesNarrowPayloadAndPreservesShadingIdentity() throws Exception {
+        checkPositionFetch(true);
+    }
+
+    @Test void productionLambertTracePreservesLoopStateIdentityAndPostTracePublication() throws Exception {
+        checkPositionFetch(true, true);
+    }
+
+    private void checkPositionFetch(boolean reorder) throws Exception {
+        checkPositionFetch(reorder, false);
+    }
+
+    private void checkPositionFetch(boolean reorder, boolean production) throws Exception {
+        try (var device = VulkanTestDevice.openRayTracing(reorder); var gpu = new Harness(device)) {
             Buffer vertices = gpu.buffer(9L * 36L,
                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
             int[] expected = new int[81];
@@ -39,10 +55,10 @@ final class PositionFetchGpuTest {
             }
             As source = gpu.build(false, vertices.address);
             vertices.close();
-            gpu.traceAndCheck(source, expected);
+            gpu.traceAndCheck(source, expected, reorder, production);
             As compacted = gpu.compact(source);
             source.close();
-            gpu.traceAndCheck(compacted, expected);
+            gpu.traceAndCheck(compacted, expected, reorder, production);
         }
     }
 
@@ -170,7 +186,7 @@ final class PositionFetchGpuTest {
             }
         }
 
-        void traceAndCheck(As blas, int[] expected) throws Exception {
+        void traceAndCheck(As blas, int[] expected, boolean reorder, boolean production) throws Exception {
             Buffer instances = buffer(64, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
             // Matrix is row-major, with translation to distinguish object-space from world-space fetch.
             float[] transform = {1,0,0,11, 0,1,0,-3, 0,0,1,2};
@@ -198,7 +214,13 @@ final class PositionFetchGpuTest {
                     surfaces.bytes.putInt(key * 32 + j * 4, word);
                 }
             }
-            Buffer output = buffer(9 * 30 * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+            int rayCount = production ? 1031 : 10;
+            Buffer output = buffer((rayCount * 30 + (production ? 2 + rayCount : 0)) * 4,
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+            if (production) {
+                output.bytes.putInt(rayCount * 30 * 4, 0);
+                output.bytes.putInt((rayCount * 30 + 1) * 4, 0);
+            }
             relation.bytes.putInt(0, 0x80000002);
             int[] relationWords = {0, 1, 2, 4, 6, 7};
             for (int i = 0; i < relationWords.length; i++) {
@@ -251,7 +273,8 @@ final class PositionFetchGpuTest {
                         VK_SHADER_STAGE_ANY_HIT_BIT_KHR, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
                 for (int i = 0; i < 4; i++) {
                     stages.get(i).sType$Default().stage(stageBits[i]).pName(stack.UTF8("main"))
-                            .module(shader("position_fetch." + suffixes[i] + ".spv"));
+                            .module(shader(i == 0 && production ? "lambert_trace_contract.rgen.spv"
+                                    : "position_fetch" + (reorder ? "_ser." : ".") + suffixes[i] + ".spv"));
                 }
                 var groups = VkRayTracingShaderGroupCreateInfoKHR.calloc(3, stack);
                 for (int i = 0; i < 3; i++) groups.get(i).sType$Default()
@@ -268,7 +291,7 @@ final class PositionFetchGpuTest {
                 this.resources.push(() -> vkDestroyPipeline(this.device, pipeline, null));
                 int stride = (int) align(this.handleSize, this.handleAlignment);
                 int region = (int) align(stride, this.baseAlignment);
-                Buffer sbt = buffer(region * 3L + this.baseAlignment, VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR);
+                Buffer sbt = buffer(region * 2L + stride * 3L + this.baseAlignment, VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR);
                 long sbtAddress = align(sbt.address, this.baseAlignment);
                 int offset = (int) (sbtAddress - sbt.address);
                 ByteBuffer handles = stack.malloc(this.handleSize * 3);
@@ -276,9 +299,12 @@ final class PositionFetchGpuTest {
                 for (int i = 0; i < 3; i++) {
                     sbt.bytes.put(offset + i * region, handles, i * this.handleSize, this.handleSize);
                 }
+                for (int i = 1; i < 3; i++) {
+                    sbt.bytes.put(offset + 2 * region + i * stride, handles, 2 * this.handleSize, this.handleSize);
+                }
                 var raygen = VkStridedDeviceAddressRegionKHR.calloc(stack).deviceAddress(sbtAddress).stride(stride).size(stride);
                 var miss = VkStridedDeviceAddressRegionKHR.calloc(stack).deviceAddress(sbtAddress + region).stride(stride).size(stride);
-                var hit = VkStridedDeviceAddressRegionKHR.calloc(stack).deviceAddress(sbtAddress + region * 2L).stride(stride).size(stride);
+                var hit = VkStridedDeviceAddressRegionKHR.calloc(stack).deviceAddress(sbtAddress + region * 2L).stride(stride).size(stride * 3L);
                 var callable = VkStridedDeviceAddressRegionKHR.calloc(stack);
                 execute(command -> {
                     barrier(command, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_WRITE_BIT,
@@ -287,21 +313,43 @@ final class PositionFetchGpuTest {
                     vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                             layout, 0, stack.longs(set), null);
                     vkCmdPushConstants(command, layout, hitStages, 0, stack.longs(keys.address, direct.address, relation.address));
-                    vkCmdTraceRaysKHR(command, raygen, miss, hit, callable, 9, 1, 1);
+                    vkCmdTraceRaysKHR(command, raygen, miss, hit, callable, rayCount, 1, 1);
                     barrier(command, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_SHADER_WRITE_BIT,
                             VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT);
                 });
-                for (int i = 0; i < 9; i++) {
+                if (production) {
+                    int count = 0;
+                    for (int i = 0; i < rayCount; ++i) if (i % 10 != 9 && i % 3 != 0) count++;
+                    int base = rayCount * 30;
+                    assertEquals(count, output.bytes.getInt(base * 4));
+                    assertEquals(count, output.bytes.getInt((base + 1) * 4),
+                            "SER post-trace publication must reserve individually");
+                    boolean[] seen = new boolean[rayCount];
+                    for (int entry = 0; entry < count; ++entry) {
+                        int id = output.bytes.getInt((base + 2 + entry) * 4);
+                        assertTrue(id >= 0 && id < rayCount);
+                        assertFalse(seen[id], "Duplicate post-trace successor");
+                        seen[id] = true;
+                    }
+                    for (int i = 0; i < rayCount; ++i) assertEquals(i % 10 != 9 && i % 3 != 0, seen[i]);
+                }
+                for (int i = 0; i < rayCount; i++) {
+                    int ray = i % 10;
+                    if (ray == 9) {
+                        assertEquals(99, output.bytes.getInt((i * 30 + 29) * 4),
+                                "Miss preserves invocation / payload identity");
+                        continue;
+                    }
                     assertEquals(3, output.bytes.getInt((i * 30 + 29) * 4), "Both hit stages must run");
-                    int logical = (i / 3) * 2 + Math.min(i % 3, 1);
+                    int logical = (ray / 3) * 2 + Math.min(ray % 3, 1);
                     int key = 1 - (logical & 1);
                     for (int j = 0; j < 8; j++) assertEquals(
                             i == 8 && j == 3 ? 0x80000000 : i == 8 && j == 5 ? 0 : 0x87654321 + key * 73 + j,
                             output.bytes.getInt((i * 30 + 20 + j) * 4));
-                    assertEquals(i, output.bytes.getInt((i * 30 + 28) * 4), "Shared key preserves triangle identity");
+                    assertEquals(ray, output.bytes.getInt((i * 30 + 28) * 4), "Shared key preserves triangle identity");
                     for (int base : new int[] {0, 10}) {
-                        assertEquals(i, output.bytes.getInt((i * 30 + base + 9) * 4));
-                        for (int j = 0; j < 9; j++) assertEquals(expected[i * 9 + j],
+                        assertEquals(ray, output.bytes.getInt((i * 30 + base + 9) * 4));
+                        for (int j = 0; j < 9; j++) assertEquals(expected[ray * 9 + j],
                                 output.bytes.getInt((i * 30 + base + j) * 4), "Exact object vertex " + i + ":" + j);
                     }
                 }

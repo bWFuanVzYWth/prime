@@ -54,13 +54,24 @@ Minecraft render layer。
 
 在较小 Java 堆、高视距且持续跑图时，Section→cluster 中间存储和全 resident TLAS 更新仍可能
 造成高分配率、GC 停顿和帧率下降。当前使用紧凑 light tree、有界 CPU segment、跨世界统一
-in-flight 上限和 64 MiB 上传/compaction 背压；仍需实机测量稳态分配、GC、TLAS build 与
+in-flight 上限和有界上传/compaction 预算（见[场景资源生命周期](场景资源生命周期.md)）；仍需实机测量稳态分配、GC、TLAS build 与
 长期帧时间。增大 `-Xmx` 只能临时延后问题。
 
 后续优化不得丢弃 geometry、放宽无界队列、在热路径调用 `System.gc()`，也不得用增加 TLAS
 instance 换取较低上传峰值。
 
 ## 平台集成
+
+### 原生损坏引用与平台稳定性待排查
+
+已观察到 Java/GC 原生崩溃；不加载 Vulkan 或 NVIDIA 库的纯 CPU 建网基准也复现了损坏
+Java 引用。切换 G1/ZGC、JDK 补丁版本或关闭 JOML Unsafe 均不足以证明问题已解决。
+测试机器还发生过蓝屏，短时 CPU/内存压力测试未复现；这些证据不能确认 JVM、应用或
+硬件中的具体根因。
+
+用户已暂停此项，待安排较长的 CPU/内存稳定性复测。复查时保留 hs_err、压力测试条件
+和结果，并区分此类坏引用与 GPU `VK_ERROR_DEVICE_LOST`。不能把 GC 选择或暂时未再
+崩溃记录为修复，也不与已规避的 SER 后 subgroup 入队问题合并。
 
 ### NVIDIA DLSS Frame Generation 可能触发不可恢复的 Vulkan device lost
 
@@ -85,9 +96,11 @@ Vulkan 错误。NVIDIA 给出可验证修复前，不把该功能移动到常规
   单三角形 micromap 存储按每级四倍无界增长。
 - 透明介质栈最多容纳两个非空气区域；第三层嵌套、非流形边界或缺失界面的吸收/pop 顺序不受
   保证。实体玻璃与水的折射都会占用一个带 IOR 和 RGB 消光的栈项。
-- 实时透明使用首接口固定双槽；首面与后续顶点使用完整条件/随机闭包，guide 沿各辐射分支
-  实际选择的 continuation 累积 PSR。运动、溢出、链上限或非法状态回退真实可见接口，不执行
-  独立 replay。这仍不是任意折射链的无偏连接。
+- 完整实时首透明面随机选择一个条件照明候选并补偿权重，保留透射/反射两个 guide；
+  后续照明使用完整随机闭包，guide 使用规范事件，分歧时独立补齐。运动、溢出和链上限
+  回退真实可见接口；这不等于求解任意折射链的无偏连接。
+- 轻量模型把非透明面视为 Lambert，只保留相机首可见透明面的反射，之后沿直线透过并按
+  介质段滤色；方块光 NEE 仅在首 Lambert 面启用。这是明确的性能与外观取舍。
 - `lighting.transparent_nee_mode=straight_approximation` 是默认的有偏近似：NEE 阴影忽略透明
   界面的折射，只沿原连接线累计透明实体的体积吸收。`unbiased_bsdf_only` 在 alpha 测试后把
   首个透明界面当作遮挡，只保留起始介质内尚未跨界面的 Beer 段；结果无偏但透明折射链的直接

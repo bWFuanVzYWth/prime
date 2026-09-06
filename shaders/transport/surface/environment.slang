@@ -6,6 +6,7 @@ import "contract/path.slang";
 import "math/transport.slang";
 import "model/atmosphere/sky.slang";
 import "policy/runtime/config.slang";
+import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "service/atmosphere/starmap.slang";
 import "service/light/sample.slang";
@@ -33,28 +34,11 @@ public float3 primeEvaluateEnvironmentContribution(
             + sun.radiance * sunWeight);
 }
 
-public struct PrimeIndirectReuseResult {
-    public float3 contribution;
-    public bool hit;
-};
-
-public interface IPrimeIndirectReuse {
-    PrimeIndirectReuseResult query(
-            inout PrimeIntegratorContext context,
-            PathState path,
-            SurfaceInteraction surface,
-            bool previousUsedAreaNee);
-}
-
-public struct PrimeNoIndirectReuse : IPrimeIndirectReuse {
-    PrimeIndirectReuseResult query(
-            inout PrimeIntegratorContext context,
-            PathState path,
-            SurfaceInteraction surface,
-            bool previousUsedAreaNee) {
-        PrimeIndirectReuseResult result;
-        result.contribution = float3(0.0);
-        result.hit = false;
-        return result;
-    }
+public float3 primeEvaluateEnvironmentContribution(
+        inout PrimeIntegratorContext context, PathState path) {
+    // Miss-only construction keeps the sun descriptor out of the scatter call's live state.
+    IntegratorRecord integrator;
+    integrator.sunDirectionIntensity = float4(
+            primePush.sunDirection, ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
+    return primeEvaluateEnvironmentContribution(context, path, integrator);
 }

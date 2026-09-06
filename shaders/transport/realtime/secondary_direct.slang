@@ -6,9 +6,12 @@ import "prime_abi_types.slang";
 import "contract/light_sample.slang";
 import "math/direct_sampling.slang";
 import "math/direct_discrete_sampling.slang";
+import "math/packed_geometry.slang";
 import "model/atmosphere/sky.slang";
+import "model/material/defaults.slang";
 import "policy/runtime/config.slang";
 import "service/light/area_sample.slang";
+import "service/light/emission.slang";
 import "service/trace/context.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/direct.slang";
@@ -79,6 +82,9 @@ public void primeEvaluateSecondaryDirect(
                     contribution);
         }
     }
+    // Most receivers cannot emit. Do not load the previous origin, PDF, normal or guide state.
+    if ((surface.materialControl & PRIME_MATERIAL_VISIBLE_EMISSION) == 0u
+            && primeSurfaceEmitterIndex(surface) == PRIME_NO_LIGHT_INDEX) return;
     PrimeWavefrontHitEmissionState hitPath =
             primeLoadWavefrontHitEmissionState(recordIndex);
     float3 emitted = primeEvaluateStagedHitEmission(

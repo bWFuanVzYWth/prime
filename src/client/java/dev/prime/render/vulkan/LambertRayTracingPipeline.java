@@ -49,8 +49,10 @@ public final class LambertRayTracingPipeline implements RealtimeTracePipeline {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             // The image formats/aliases are the reconstruction ABI, independent of transport.
             candidateLayout = RealtimeRayTracingPipeline.createDescriptorSetLayout(context, stack);
-            candidateProgram = TraceProgram.create(context, schedule(context.capabilities().wavefrontSubgroupSupported()),
-                    FIXED_RESOURCES, "Prime Lambert wavefront", "Prime Lambert SBT",
+            boolean subgroup = context.capabilities().wavefrontSubgroupSupported();
+            boolean ser = subgroup && context.capabilities().invocationReorderSupported();
+            candidateProgram = TraceProgram.create(context, schedule(subgroup, ser),
+                    fixedResources(ser), "Prime Lambert wavefront", "Prime Lambert SBT",
                     backend.bindings().descriptorSetLayout(), candidateLayout);
             this.layout = candidateLayout;
             this.program = candidateProgram;
@@ -61,8 +63,15 @@ public final class LambertRayTracingPipeline implements RealtimeTracePipeline {
         }
     }
 
-    static RaygenSchedule schedule(boolean subgroupSupported) {
-        return GeneratedShaderPrograms.schedule(subgroupSupported ? "lambert.subgroup" : "lambert");
+    static RaygenSchedule schedule(boolean subgroupSupported, boolean serSupported) {
+        return GeneratedShaderPrograms.schedule(subgroupSupported && serSupported ? "lambert.ser"
+                : subgroupSupported ? "lambert.subgroup" : "lambert");
+    }
+
+    static String[] fixedResources(boolean ser) {
+        String[] resources = FIXED_RESOURCES.clone();
+        if (ser) resources[3] = GeneratedShaderPrograms.resource("lambert_world_rahit_ser");
+        return resources;
     }
 
     static int bounceLimit(int minimum, int maximum) {

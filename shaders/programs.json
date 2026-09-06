@@ -7,10 +7,6 @@
     "atmosphere_sky": "entry/atmosphere/atmosphere_sky.compute.slang",
     "atmosphere_transmittance": "entry/atmosphere/atmosphere_transmittance.compute.slang",
     "sun_shadow": "entry/lighting/sun_shadow.raygeneration.slang",
-    "primary_ray": "entry/primary/primary.raygeneration.slang",
-    "primary_ray_rahit": "entry/primary/primary.anyhit.slang",
-    "primary_ray_rchit": "entry/primary/primary.closesthit.slang",
-    "primary_ray_rmiss": "entry/primary/primary.miss.slang",
     "offline_wavefront_bridge_trace": {"entry": "entry/offline/bridge_trace.raygeneration.slang", "ser": true},
     "offline_wavefront_camera_trace": {"entry": "entry/offline/camera_trace.raygeneration.slang", "ser": true},
     "offline_wavefront_direct": {"entry": "entry/offline/direct.raygeneration.slang", "ser": true},
@@ -52,14 +48,14 @@
     "world_rahit": "entry/hit/world.anyhit.slang",
     "world_rchit": "entry/hit/world.closesthit.slang",
     "world_rmiss": "entry/hit/world.miss.slang",
-    "lambert_camera": {"entry": "entry/lambert/camera.raygeneration.slang", "subgroup": true},
-    "lambert_guide": "entry/lambert/guide.raygeneration.slang",
+    "lambert_camera": {"entry": "entry/lambert/camera.raygeneration.slang", "subgroup": true, "ser": true},
+    "lambert_guide": {"entry": "entry/lambert/guide.raygeneration.slang", "ser": true},
     "lambert_first": {"entry": "entry/lambert/first.raygeneration.slang", "subgroup": true},
     "lambert_terminal": "entry/lambert/terminal.raygeneration.slang",
-    "lambert_trace": "entry/lambert/trace.raygeneration.slang",
+    "lambert_trace": {"entry": "entry/lambert/trace.raygeneration.slang", "ser": true},
     "lambert_shade": {"entry": "entry/lambert/shade.raygeneration.slang", "subgroup": true},
     "lambert_resolve": "entry/lambert/resolve.raygeneration.slang",
-    "lambert_world_rahit": "entry/lambert/world.anyhit.slang",
+    "lambert_world_rahit": {"entry": "entry/lambert/world.anyhit.slang", "ser": true},
     "lambert_world_rchit": "entry/lambert/world.closesthit.slang",
     "lambert_world_rmiss": "entry/lambert/world.miss.slang",
     "lambert_shadow_rahit": "entry/lambert/shadow.anyhit.slang",
@@ -68,11 +64,6 @@
     "lambert_shadow_rmiss": "entry/lambert/shadow.miss.slang"
   },
   "schedules": {
-    "primary": {
-      "groups": {
-        "trace": ["primary_ray", 0]
-      }
-    },
     "realtime.standard": {
       "variants": ["scalar", "ser"],
       "groups": {
@@ -114,7 +105,7 @@
       }
     },
     "lambert": {
-      "variants": [null, "subgroup"],
+      "variants": [null, "subgroup", "ser"],
       "groups": {
         "camera": ["lambert_camera", 0],
         "guide": ["lambert_guide", 0],

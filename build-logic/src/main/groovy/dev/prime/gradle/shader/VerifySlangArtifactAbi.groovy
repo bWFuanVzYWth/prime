@@ -225,8 +225,8 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 		def expectedOutgoing = [
 				primeSurfacePayload: 0,
 				primeShadowPayload: 1,
-				primePrimaryPayload: 0,
 				primeLambertPayload: 0,
+				primeLambertTrace: 2,
 				primeLambertShadow: 1]
 		modules.findAll { name, ignored ->
 			name.endsWith('.rgen.spv') || name.endsWith('.rmiss.spv')
@@ -241,8 +241,8 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 			}
 			def incoming = module.payloadLocations('IncomingRayPayloadKHR')
 			if (!incoming.isEmpty()) {
-				def expected = name.startsWith('world.') || name.startsWith('world_')
-						|| name.startsWith('primary_ray.') || name.startsWith('primary_ray_')
+				def expected = name == 'lambert_world_rahit_ser.rahit.spv' ? 2
+						: name.startsWith('world.') || name.startsWith('world_')
 						|| name.startsWith('lambert_world.') ? 0
 						: name.startsWith('shadow.') || name.startsWith('shadow_')
 						|| name.startsWith('lambert_shadow.') || name.startsWith('lambert_shadow_') ? 1 : null
@@ -259,10 +259,14 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 				'vec3(f32),f32,u32,u32,u32,u32,vec3(f32),u32,vec3(f32),u32)'
 		def shadow = 'struct(vec4(f32),vec4(f32),vec4(f32),vec4(f32),vec2(u32),' +
 				'u32,vec2(u32),vec2(u32))'
-		def primary = 'struct(vec3(f32),u32)'
 		def lambert = 'struct(vec3(f32),f32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32)'
+		def lambertTrace = 'struct(vec2(u32),u32)'
 		def lambertShadow = 'struct(vec2(u32),vec2(u32),vec3(f32),f32,vec3(f32),u32,vec3(f32),u32)'
 		verifyShapes(modules, [lambert] as Set, 'RayPayloadKHR', ['lambert_trace.rgen.spv', 'lambert_camera.rgen.spv', 'lambert_camera_subgroup.rgen.spv', 'lambert_guide.rgen.spv'])
+		verifyShapes(modules, [lambert, lambertTrace] as Set, 'RayPayloadKHR',
+                ['lambert_trace_ser.rgen.spv', 'lambert_camera_ser.rgen.spv', 'lambert_guide_ser.rgen.spv'])
+        verifyShapes(modules, [lambertTrace] as Set, 'IncomingRayPayloadKHR',
+                ['lambert_world_rahit_ser.rahit.spv'])
 		verifyShapes(modules, [lambertShadow] as Set, 'RayPayloadKHR',
                 ['lambert_shade.rgen.spv', 'lambert_shade_subgroup.rgen.spv', 'lambert_first.rgen.spv', 'lambert_first_subgroup.rgen.spv'])
 		verifyShapes(modules, [] as Set, 'RayPayloadKHR', ['lambert_terminal.rgen.spv', 'lambert_resolve.rgen.spv'])
@@ -276,10 +280,6 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 		verifyShapes(modules, [shadow] as Set, 'IncomingRayPayloadKHR', [
 				'shadow.rmiss.spv', 'shadow.rchit.spv',
 				'shadow_opaque.rahit.spv', 'shadow_nonopaque.rahit.spv'])
-		verifyShapes(modules, [primary] as Set, 'IncomingRayPayloadKHR', [
-				'primary_ray.rmiss.spv', 'primary_ray.rchit.spv'])
-		verifyShapes(modules, [primary] as Set, 'RayPayloadKHR', [
-				'primary_ray.rgen.spv'])
 		['', '_ser'].each { suffix ->
 			verifyWavefrontShapes(modules, [trace] as Set, 'realtime', suffix,
 					['camera_trace', 'delta_walk', 'guide_delta_walk', 'secondary_trace'])
@@ -319,27 +319,9 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 		requireEqual([0, 1, 2, 3, 4] as Set, requireModule(modules,
 				'streamline_input.comp.spv').descriptorBindings(0), 'Streamline input descriptors')
 
-		def primaryStages = [
-				'primary_ray.rgen.spv', 'primary_ray.rmiss.spv',
-				'primary_ray.rchit.spv', 'primary_ray.rahit.spv']
-		def expectedPrimaryShared = [
-				schema.sharedDescriptors.tlas,
-				schema.sharedDescriptors.blockAtlas,
-				schema.sharedDescriptors.textureRecords,
-				schema.sharedDescriptors.tintSamples,
-				schema.sharedDescriptors.baseColorPages,
-				schema.sharedDescriptors.materialCoreRecords,
-                schema.sharedDescriptors.surfaceRecords]
-				.collect { it as int }.toSet()
-		requireEqual(expectedPrimaryShared,
-				descriptorBindings(modules, primaryStages, 0),
-				'Primary-ray shared descriptors')
-		requireEqual([0] as Set, descriptorBindings(modules, primaryStages, 1),
-				'Primary-ray output descriptors')
-
 		def queue = schema.realtimeDescriptors.wavefrontQueue as int
 		def paths = schema.realtimeDescriptors.wavefrontPaths as int
-		['camera', 'camera_subgroup', 'guide', 'first', 'first_subgroup', 'trace', 'shade', 'shade_subgroup', 'terminal', 'resolve'].each { stage ->
+		['camera', 'camera_subgroup', 'camera_ser', 'guide', 'guide_ser', 'first', 'first_subgroup', 'trace', 'trace_ser', 'shade', 'shade_subgroup', 'terminal', 'resolve'].each { stage ->
 			def module = requireModule(modules, "lambert_${stage}.rgen.spv")
 			requireEqual(schema.lambertContract.recordSize as int, module.recordStride(1, paths),
 					"Lambert path stride in ${stage}")
@@ -431,6 +413,14 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 	}
 
 	private static void verifySubgroups(Map<String, Spirv> modules) {
+        ['', '_subgroup', '_ser'].each { suffix ->
+            def module = requireModule(modules, "lambert_camera${suffix}.rgen.spv")
+            ['OpGroupNonUniformElect', 'OpGroupNonUniformBroadcastFirst',
+             'OpGroupNonUniformBallot', 'OpGroupNonUniformBallotBitCount'].each { opcode ->
+                requireEqual(suffix == '_subgroup', module.opcodes.contains(opcode),
+                        "Lambert post-trace publication ${suffix}/${opcode}")
+            }
+        }
         ['', '_subgroup'].each { suffix ->
             def module = requireModule(modules, "lambert_shade${suffix}.rgen.spv")
             ['OpGroupNonUniformElect', 'OpGroupNonUniformBroadcastFirst',

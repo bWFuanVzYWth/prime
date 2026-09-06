@@ -11,6 +11,8 @@ import "state/realtime/light.slang";
 import "state/realtime/queue.slang";
 import "state/realtime/surface.slang";
 import "transport/realtime/advance.slang";
+import "transport/realtime/scatter_hit.slang";
+import "contract/path.slang";
 import "transport/realtime/continuation.slang";
 
 public void primeScatterSecondaryPath(
@@ -23,15 +25,17 @@ public void primeScatterSecondaryPath(
             primeLoadWavefrontTransportRecord(recordIndex);
     SurfaceInteraction surface = primeLoadWavefrontSurface(recordIndex);
     uint control = asuint(record.rayDirectionAndDenoiserControl.w);
-    bool continuation = primeWavefrontTransparentBranch(control)
-            ? primeAdvanceTransparentWavefrontRecord(
+    bool continuation = surface.hitKind == PRIME_HIT_SURFACE
+            ? primeAdvanceWavefrontHit(PrimeSecondaryTransportPhase(), context, recordIndex, record, surface, control)
+            : primeWavefrontTransparentBranch(control)
+            ? primeAdvanceTransparentWavefrontMiss(
                     PrimeSecondaryTransportPhase(),
                     context,
                     recordIndex,
                     record,
                     surface,
                     control)
-            : primeAdvanceOrdinaryWavefrontRecord(
+            : primeAdvanceOrdinaryWavefrontMiss(
                     PrimeSecondaryTransportPhase(),
                     context,
                     recordIndex,
