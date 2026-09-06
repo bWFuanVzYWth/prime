@@ -83,6 +83,14 @@ final class PreparedBlasTest {
     }
 
     @Test
+    void positionLifetimeControlsCompactionForBothOwnedAndBorrowedGeometry() {
+        assertEquals(PreparedBlas.CompactionPolicy.DISABLED,
+                PreparedBlas.compactionPolicy(PreparedBlas.PositionLifetime.MOTION));
+        assertEquals(PreparedBlas.CompactionPolicy.ENABLED,
+                PreparedBlas.compactionPolicy(PreparedBlas.PositionLifetime.BUILD_ONLY));
+    }
+
+    @Test
     void compactionPolicyControlsOnlyTheCompactionBuildFlag() {
         int enabled = PreparedBlas.buildFlags(PreparedBlas.CompactionPolicy.ENABLED);
         int disabled = PreparedBlas.buildFlags(PreparedBlas.CompactionPolicy.DISABLED);

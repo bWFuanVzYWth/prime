@@ -131,6 +131,15 @@ record GpuCluster(
         }
     }
 
+    void recordCompactionQueries(VkCommandBuffer commandBuffer) {
+        if (this.blas != null) {
+            this.blas.recordCompactionQuery(commandBuffer);
+        }
+        for (PreparedBlas voxelBlas : this.voxelBlases) {
+            voxelBlas.recordCompactionQuery(commandBuffer);
+        }
+    }
+
     void submitted(VoxelBlasPool voxelPool) {
         RuntimeException failure = null;
         if (this.blas != null) {

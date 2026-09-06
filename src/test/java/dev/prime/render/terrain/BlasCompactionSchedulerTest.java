@@ -3,22 +3,11 @@ package dev.prime.render.vulkan.terrain;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import dev.prime.render.vulkan.PreparedBlas;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 final class BlasCompactionSchedulerTest {
     private static final long MIB = 1024L * 1024L;
-
-    @Test
-    void dynamicBlasesAreExcludedFromCompaction() {
-        assertEquals(
-                PreparedBlas.CompactionPolicy.DISABLED,
-                TerrainScene.compactionPolicy(true));
-        assertEquals(
-                PreparedBlas.CompactionPolicy.ENABLED,
-                TerrainScene.compactionPolicy(false));
-    }
 
     @Test
     void admitsMultipleReadyJobsUpToTheExactBudgetBoundary() {

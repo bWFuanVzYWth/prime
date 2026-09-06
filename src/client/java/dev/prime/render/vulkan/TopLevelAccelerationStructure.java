@@ -205,7 +205,12 @@ public final class TopLevelAccelerationStructure {
                     .firstVertex(0)
                     .transformOffset(0);
             PointerBuffer rangePointers = stack.mallocPointer(1).put(0, range.address());
+            var debug = this.context.device().instance().debug();
+            debug.beginDebugGroup(commandBuffer, () -> "Prime TLAS " + (update ? "UPDATE" : "BUILD")
+                    + " instances=" + this.instanceCount + " previous=" + this.builtInstanceCount
+                    + " capacity=" + this.capacity);
             KHRAccelerationStructure.vkCmdBuildAccelerationStructuresKHR(commandBuffer, buildInfo, rangePointers);
+            debug.endDebugGroup(commandBuffer);
         }
     }
 

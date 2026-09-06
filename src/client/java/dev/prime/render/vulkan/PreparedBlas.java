@@ -39,6 +39,8 @@ public final class PreparedBlas {
     private final OpacityMicromap opacityMicromap;
     private VulkanBuffer compactionResult;
     private long compactionQueryPool;
+    // Recording belongs to the render thread; pooled prototypes may appear in several clusters.
+    private boolean compactionQueryRecorded;
     private final CompactionPolicy compactionPolicy;
     private final boolean ownsGeometryBuffers;
     private final PositionLifetime positionLifetime;
@@ -126,7 +128,6 @@ public final class PreparedBlas {
             StagingArena.Batch staging,
             VkCommandBuffer commandBuffer,
             TriangleLayout triangleLayout,
-            CompactionPolicy compactionPolicy,
             PositionLifetime positionLifetime,
             String label) {
         return create(
@@ -138,7 +139,6 @@ public final class PreparedBlas {
                 staging,
                 commandBuffer,
                 triangleLayout,
-                compactionPolicy,
                 true,
                 positionLifetime,
                 label);
@@ -154,7 +154,6 @@ public final class PreparedBlas {
             StagingArena.Batch staging,
             VkCommandBuffer commandBuffer,
             TriangleLayout triangleLayout,
-            CompactionPolicy compactionPolicy,
             String label) {
         return create(
                 context,
@@ -165,7 +164,6 @@ public final class PreparedBlas {
                 staging,
                 commandBuffer,
                 triangleLayout,
-                compactionPolicy,
                 false,
                 PositionLifetime.MOTION,
                 label);
@@ -180,13 +178,10 @@ public final class PreparedBlas {
             StagingArena.Batch staging,
             VkCommandBuffer commandBuffer,
             TriangleLayout triangleLayout,
-            CompactionPolicy compactionPolicy,
             boolean ownsGeometryBuffers,
             PositionLifetime positionLifetime,
             String label) {
-        if (compactionPolicy == null) {
-            throw new IllegalArgumentException("BLAS compaction policy must not be null");
-        }
+        CompactionPolicy compactionPolicy = compactionPolicy(positionLifetime);
         if (triangleLayout == null) {
             throw new IllegalArgumentException("BLAS triangle layout must not be null");
         }
@@ -327,29 +322,42 @@ public final class PreparedBlas {
                     .firstVertex(0)
                     .transformOffset(0);
             PointerBuffer rangePointers = stack.mallocPointer(1).put(0, ranges.address());
-            if (this.compactionQueryPool != 0L) {
-                VK10.vkCmdResetQueryPool(commandBuffer, this.compactionQueryPool, 0, 1);
-            }
+            var debug = this.context.device().instance().debug();
+            debug.beginDebugGroup(commandBuffer, () -> this.label + " BUILD triangles="
+                    + this.triangleLayout.triangleCount() + " lifetime=" + this.positionLifetime
+                    + " compaction=" + this.compactionPolicy);
             KHRAccelerationStructure.vkCmdBuildAccelerationStructuresKHR(commandBuffer, buildInfo, rangePointers);
-            if (this.compactionQueryPool != 0L) {
-                LongBuffer structures = stack.longs(this.accelerationStructure.handle());
-                KHRAccelerationStructure.vkCmdWriteAccelerationStructuresPropertiesKHR(
-                        commandBuffer,
-                        structures,
-                        KHRAccelerationStructure.VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
-                        this.compactionQueryPool,
-                        0);
-                VK10.vkCmdCopyQueryPoolResults(
-                        commandBuffer,
-                        this.compactionQueryPool,
-                        0,
-                        1,
-                        this.compactionResult.handle(),
-                        0L,
-                        Long.BYTES,
-                        VK10.VK_QUERY_RESULT_64_BIT | VK10.VK_QUERY_RESULT_WAIT_BIT);
-            }
+            debug.endDebugGroup(commandBuffer);
         }
+    }
+
+    /** Call after the batch's AS-build write -> read barrier, before submission. */
+    public void recordCompactionQuery(VkCommandBuffer commandBuffer) {
+        if (this.compactionQueryPool == 0L || this.compactionQueryRecorded) {
+            return;
+        }
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            var debug = this.context.device().instance().debug();
+            debug.beginDebugGroup(commandBuffer, () -> this.label + " compaction size query/copy WAIT");
+            VK10.vkCmdResetQueryPool(commandBuffer, this.compactionQueryPool, 0, 1);
+            KHRAccelerationStructure.vkCmdWriteAccelerationStructuresPropertiesKHR(
+                    commandBuffer,
+                    stack.longs(this.accelerationStructure.handle()),
+                    KHRAccelerationStructure.VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+                    this.compactionQueryPool,
+                    0);
+            VK10.vkCmdCopyQueryPoolResults(
+                    commandBuffer,
+                    this.compactionQueryPool,
+                    0,
+                    1,
+                    this.compactionResult.handle(),
+                    0L,
+                    Long.BYTES,
+                    VK10.VK_QUERY_RESULT_64_BIT | VK10.VK_QUERY_RESULT_WAIT_BIT);
+            debug.endDebugGroup(commandBuffer);
+        }
+        this.compactionQueryRecorded = true;
     }
 
     /** Registers readiness only after the build/query submission has completed on the real queue. */
@@ -377,8 +385,11 @@ public final class PreparedBlas {
     }
 
     public void recordOpacityMicromapBuild(VkCommandBuffer commandBuffer) {
-        if (this.opacityMicromap != null) {
+        if (this.hasOpacityMicromapBuild()) {
+            var debug = this.context.device().instance().debug();
+            debug.beginDebugGroup(commandBuffer, () -> this.label + " OMM BUILD");
             this.opacityMicromap.recordBuild(commandBuffer);
+            debug.endDebugGroup(commandBuffer);
         }
     }
 
@@ -426,6 +437,16 @@ public final class PreparedBlas {
                 this.label + " compacted");
         this.transition(CompactionEvent.TARGET_PREPARED);
         return new Compaction(this, source, compacted);
+    }
+
+    // Motion includes owned prototypes as well as borrowed fallback buffers. Their short-lived
+    // builds must not enqueue per-prototype compaction queries and waiting GPU result copies.
+    static CompactionPolicy compactionPolicy(PositionLifetime lifetime) {
+        return switch (lifetime) {
+            case null -> throw new IllegalArgumentException("BLAS position lifetime must not be null");
+            case BUILD_ONLY -> CompactionPolicy.ENABLED;
+            case MOTION -> CompactionPolicy.DISABLED;
+        };
     }
 
     static int buildFlags(CompactionPolicy policy) {

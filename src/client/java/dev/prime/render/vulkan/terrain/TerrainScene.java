@@ -266,7 +266,9 @@ public final class TerrainScene implements AutoCloseable {
             if (nonEmptyUploadCount > 0 || replacementTlas != null) {
                 this.context.beginTiming(timingPhase);
                 commandBuffer = this.context.commandEncoder().allocateAndBeginTransientCommandBuffer();
-                this.context.device().instance().debug().beginDebugGroup(commandBuffer, () -> "Prime terrain scene update");
+                this.context.device().instance().debug().beginDebugGroup(commandBuffer,
+                        () -> "Prime " + timingPhase + " update: uploads=" + uploads.size()
+                                + " instances=" + finalInstanceCount);
             }
 
             if (clusterStagingBatch != null) {
@@ -374,6 +376,11 @@ public final class TerrainScene implements AutoCloseable {
                             KHRAccelerationStructure.VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
                             KHRAccelerationStructure.VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                             KHRAccelerationStructure.VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
+                }
+                // Queries read completed BLAS data. Keep their waiting result copies after all
+                // builds so tiny prototypes can build concurrently, using the barrier above.
+                for (GpuCluster cluster : replacements) {
+                    cluster.recordCompactionQueries(commandBuffer);
                 }
             }
 
@@ -1178,8 +1185,6 @@ public final class TerrainScene implements AutoCloseable {
             VkCommandBuffer commandBuffer) {
         CpuClusterMesh mesh = upload.mesh();
         TriangleLayout triangleLayout = mesh.triangleLayout();
-        PreparedBlas.CompactionPolicy compactionPolicy =
-                compactionPolicy(upload.dynamic());
         VulkanBuffer positions = null;
         VulkanBuffer primitives = null;
         VulkanBuffer lights = null;
@@ -1247,7 +1252,6 @@ public final class TerrainScene implements AutoCloseable {
                             stagingBatch,
                             commandBuffer,
                             mesh.triangleLayout(),
-                            compactionPolicy,
                             "Prime cluster " + upload.key() + " BLAS");
                 } else {
                     blas = PreparedBlas.create(
@@ -1259,7 +1263,6 @@ public final class TerrainScene implements AutoCloseable {
                             stagingBatch,
                             commandBuffer,
                             mesh.triangleLayout(),
-                            compactionPolicy,
                             PreparedBlas.PositionLifetime.BUILD_ONLY,
                             "Prime cluster " + upload.key() + " BLAS");
                     blas.useSurfaceKeys(surfaceLease);
@@ -1405,7 +1408,6 @@ public final class TerrainScene implements AutoCloseable {
                     stagingBatch,
                     commandBuffer,
                     geometry.triangleLayout(),
-                    PreparedBlas.CompactionPolicy.ENABLED,
                     lifetime,
                     label + " BLAS");
             if (surfaceLease != null) blas.useSurfaceKeys(surfaceLease);
@@ -1566,12 +1568,6 @@ public final class TerrainScene implements AutoCloseable {
                     .size(source.size());
             VK12.vkCmdCopyBuffer(commandBuffer, source.buffer(), destination.handle(), copy);
         }
-    }
-
-    public static PreparedBlas.CompactionPolicy compactionPolicy(boolean dynamic) {
-        return dynamic
-                ? PreparedBlas.CompactionPolicy.DISABLED
-                : PreparedBlas.CompactionPolicy.ENABLED;
     }
 
     private record PreparedUpdate(
