@@ -1,10 +1,10 @@
 package dev.prime.render;
 
-/** Shared transport-count domain plus the narrower fixed no-roulette realtime prefix. */
+/** Shared transport-count domain and the minimum realtime rounds before roulette. */
 public final class BounceSettings {
     public static final int MINIMUM_COUNT = 1;
     public static final int MAXIMUM_COUNT = 64;
-    public static final int DEFAULT_COUNT = 16;
+    public static final int DEFAULT_COUNT = 12;
     public static final int MAXIMUM_FIXED_COUNT = 8;
     public static final int DEFAULT_FIXED_COUNT = 2;
 

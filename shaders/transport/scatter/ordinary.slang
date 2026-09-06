@@ -8,7 +8,7 @@ import "service/trace/context.slang";
 import "transport/direct/selection.slang";
 import "transport/scatter/path_update.slang";
 
-// Queued prefix stages do not run RR. Tail admission and tail continuation own that policy.
+// BSDF advancement does not run RR. The queued continuation publisher owns that policy.
 public bool primeAdvanceRealtimePath(
         inout PrimeIntegratorContext context,
         inout PathState path,

@@ -1,15 +1,15 @@
 #language slang 2026
-module "policy/realtime/fixed_queue.slang";
+module "policy/realtime/secondary_queue.slang";
 
 import "prime_realtime_abi.slang";
 
-public uint primeFixedSourceQueue(uint control) {
+public uint primeSecondarySourceQueue(uint control) {
     return (control & 1u) == 0u
             ? PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0
             : PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1;
 }
 
-public uint primeFixedTargetQueue(uint control) {
+public uint primeSecondaryTargetQueue(uint control) {
     return (control & 1u) == 0u
             ? PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1
             : PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0;

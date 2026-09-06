@@ -30,15 +30,16 @@ final class TracePipelinesContractTest {
         assertEquals(1, primary.groupCount());
         assertEquals(1, primary.moduleCount());
 
-        assertEquals(15, RealtimeRayTracingPipeline.dispatchCount(1));
-        assertEquals(19, RealtimeRayTracingPipeline.dispatchCount(2));
-        assertEquals(43, RealtimeRayTracingPipeline.dispatchCount(8));
+        assertEquals(13, RealtimeRayTracingPipeline.dispatchCount(1, 1));
+        assertEquals(57, RealtimeRayTracingPipeline.dispatchCount(2, 12));
+        assertEquals(41, RealtimeRayTracingPipeline.dispatchCount(8, 1));
+        assertEquals(265, RealtimeRayTracingPipeline.dispatchCount(2, 64));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> RealtimeRayTracingPipeline.dispatchCount(0));
+                () -> RealtimeRayTracingPipeline.dispatchCount(0, 12));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> RealtimeRayTracingPipeline.dispatchCount(9));
+                () -> RealtimeRayTracingPipeline.dispatchCount(9, 12));
         assertEquals(25, RealtimeRayTracingPipeline.DESCRIPTOR_BINDING_COUNT);
 
         assertEquals(49, OfflineRayTracingPipeline.dispatchCount(12));
@@ -54,8 +55,8 @@ final class TracePipelinesContractTest {
 
         RaygenSchedule realtime =
                 GeneratedShaderPrograms.schedule("realtime.standard", ".rgen.spv");
-        assertEquals(23, realtime.groupCount());
-        assertEquals(16, realtime.moduleCount());
+        assertEquals(20, realtime.groupCount());
+        assertEquals(14, realtime.moduleCount());
         RaygenSchedule offline = GeneratedShaderPrograms.schedule("offline", ".rgen.spv");
         assertEquals(10, offline.groupCount());
         assertEquals(6, offline.moduleCount());
@@ -65,8 +66,8 @@ final class TracePipelinesContractTest {
     void realtimeScheduleKeepsItsDeclaredGroupsAndResources() {
         RaygenSchedule realtime =
                 GeneratedShaderPrograms.schedule("realtime.standard", "_ser.rgen.spv");
-        assertEquals(16, realtime.moduleCount());
-        assertEquals(23, realtime.groupCount());
+        assertEquals(14, realtime.moduleCount());
+        assertEquals(20, realtime.groupCount());
         assertEquals(
                 "/prime/shaders/realtime_wavefront_surface_split_ser.rgen.spv",
                 realtime.moduleResource(2));
@@ -74,13 +75,13 @@ final class TracePipelinesContractTest {
                 "/prime/shaders/realtime_wavefront_guide_delta_walk_ser.rgen.spv",
                 realtime.moduleResource(4));
         assertEquals(
-                "/prime/shaders/realtime_wavefront_fixed_direct_ser.rgen.spv",
+                "/prime/shaders/realtime_wavefront_secondary_direct_ser.rgen.spv",
                 realtime.moduleResource(10));
         assertEquals(
-                "/prime/shaders/realtime_wavefront_tail_admission_ser.rgen.spv",
+                "/prime/shaders/realtime_wavefront_branch_resolve_ser.rgen.spv",
                 realtime.moduleResource(12));
         assertEquals(
-                "/prime/shaders/realtime_wavefront_tail_ser.rgen.spv",
+                "/prime/shaders/realtime_wavefront_noisy_output_resolve.rgen.spv",
                 realtime.moduleResource(13));
     }
 
@@ -208,6 +209,21 @@ final class TracePipelinesContractTest {
         assertThrows(IllegalArgumentException.class, () -> LambertRayTracingPipeline.bounceLimit(9, 16));
         assertThrows(IllegalArgumentException.class, () -> LambertRayTracingPipeline.bounceLimit(2, 65));
         assertThrows(IllegalArgumentException.class, () -> LambertRayTracingPipeline.queueMetadata(2, 0));
+    }
+
+    @Test
+    void realtimeMinimumAndDeltaShareOnlyTheReservedCommandWord() {
+        for (int minimum = 1; minimum <= 8; ++minimum) {
+            for (int delta = 1; delta <= 64; ++delta) {
+                int metadata = RealtimeRayTracingPipeline.queueMetadata(minimum, delta);
+                assertEquals(delta, metadata & 255);
+                assertEquals(minimum, metadata >>> 8 & 255);
+                assertEquals(0, metadata >>> 16);
+            }
+        }
+        assertThrows(IllegalArgumentException.class, () -> RealtimeRayTracingPipeline.queueMetadata(0, 12));
+        assertThrows(IllegalArgumentException.class, () -> RealtimeRayTracingPipeline.queueMetadata(2, 65));
+        assertThrows(IllegalArgumentException.class, () -> RealtimeRayTracingPipeline.dispatchCount(2, 65));
     }
 
     @Test

@@ -282,12 +282,12 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 				'primary_ray.rgen.spv'])
 		['', '_ser'].each { suffix ->
 			verifyWavefrontShapes(modules, [trace] as Set, 'realtime', suffix,
-					['camera_trace', 'delta_walk', 'guide_delta_walk', 'fixed_bridge_trace'])
+					['camera_trace', 'delta_walk', 'guide_delta_walk', 'secondary_trace'])
 			verifyWavefrontShapes(modules, [shadow] as Set, 'realtime', suffix,
-					['landing_direct', 'fixed_direct', 'visible_direct'])
+					['landing_direct', 'secondary_direct', 'visible_direct'])
 			verifyWavefrontShapes(modules, [] as Set, 'realtime', suffix, [
 					'surface_split', 'landing_light_select', 'landing_scatter',
-					'fixed_light_select', 'fixed_scatter', 'branch_resolve',
+					'secondary_light_select', 'secondary_scatter', 'branch_resolve',
 					'noisy_output_resolve'])
 			verifyWavefrontShapes(modules, [trace] as Set, 'offline', suffix,
 					['camera_trace', 'bridge_trace'])
@@ -368,20 +368,12 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 				wavefrontShader('realtime', 'visible_direct', '')).descriptorBindings(1)
 		requireBinding(visible, queue, true, 'Visible direct queue')
 		requireBinding(visible, paths, false, 'Visible direct paths')
-		['', '_ser'].each { suffix ->
-			// Linear RR consumes only the queued transport state, without reconstruction images.
-			def admissionBindings = [paths, queue].collect { it as int }.toSet()
-			requireEqual(admissionBindings, requireModule(modules,
-					wavefrontShader('realtime', 'tail_admission', suffix)).descriptorBindings(1),
-					"Tail admission descriptors ${suffix}")
-		}
 
 		def realtimeStages = [
 				'camera_trace', 'surface_split', 'delta_walk', 'guide_delta_walk',
 				'landing_light_select', 'landing_direct', 'landing_scatter',
-				'fixed_bridge_trace', 'fixed_light_select', 'fixed_direct', 'fixed_scatter',
-				'tail_admission',
-				'tail', 'branch_resolve', 'visible_direct', 'noisy_output_resolve']
+				'secondary_trace', 'secondary_light_select', 'secondary_direct', 'secondary_scatter',
+				'branch_resolve', 'visible_direct', 'noisy_output_resolve']
 		def offlineStages = [
 				'camera_trace', 'bridge_trace', 'light_select', 'direct', 'scatter',
 				'sample_resolve']
@@ -405,7 +397,7 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 		def stbn = schema.sharedDescriptors.realtimeStbn as int
 		['', '_ser'].each { suffix ->
 			def realtime = requireModule(modules,
-					wavefrontShader('realtime', 'fixed_direct', suffix)).descriptorBindings(0)
+					wavefrontShader('realtime', 'secondary_direct', suffix)).descriptorBindings(0)
 			requireBinding(realtime, stbn, true, "Realtime STBN ${suffix}")
 			def offline = descriptorBindings(modules,
 					offlineStages.collect { wavefrontShader('offline', it, suffix) }, 0)
@@ -459,8 +451,9 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 		verify(true, 'realtime', 'surface_split', '_ser')
 		verify(true, 'realtime', 'landing_scatter', '_ser')
 		['', '_ser'].each { suffix ->
-			['landing_light_select', 'landing_direct', 'fixed_bridge_trace',
-			 'fixed_light_select', 'fixed_direct'].each {
+			verify(!suffix.isEmpty(), 'realtime', 'secondary_scatter', suffix)
+			['landing_light_select', 'landing_direct', 'secondary_trace',
+			 'secondary_light_select', 'secondary_direct'].each {
 				verify(false, 'realtime', it, suffix)
 			}
 		}

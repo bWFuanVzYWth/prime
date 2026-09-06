@@ -129,6 +129,11 @@ public uint primeAdditionalSpecularBounces() {
             & 0xffu;
 }
 
+public uint primeMinimumRealtimeBounces() {
+    return (primeWavefrontQueue[primeWavefrontQueueCommandWord(PRIME_WAVEFRONT_TRACE_QUEUE_0) + 3u]
+            >> PRIME_WAVEFRONT_MINIMUM_BOUNCE_SHIFT) & PRIME_WAVEFRONT_MINIMUM_BOUNCE_MASK;
+}
+
 public static const uint PRIME_WAVEFRONT_AREA_GUIDE_WORDS =
         PRIME_WAVEFRONT_AREA_GUIDE_RECORD_SIZE / 4u;
 

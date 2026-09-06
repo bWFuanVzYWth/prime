@@ -183,8 +183,11 @@ scatter 不得重新引入反向面积光求值闭包。
 
 realtime phase scratch 为 264 B/pixel：16 B area guide、两项 100 B surface 和 48 B 的
 detached-guide/后期 staged-record 最大别名区。area guide 只承载两个 FP16 radiance triplet 与一个
-oct-SNORM16x2 direction。九项物理 queue index 中，串行 guide queue 在初始 area 消费之后、tail
-area 发布之前复用 area queue 的首槽；transparent resolve 与 tail 同时存活，不参与该 alias。
+oct-SNORM16x2 direction。九项物理 queue index 中，串行 guide queue 在初始 area 消费之后复用
+area queue 的首槽；transparent resolve 跨后续 wavefront 轮次存活，不参与该 alias。
+queue 0 的间接命令第四字低 8 位保存 delta 上限，接下来的 8 位保存最小常规轮数，最高位
+保留 overflow；各轮只清零命令第一字，不覆盖配置。完整实时主体已删除 tail，调度与计数见
+[完整实时 Wavefront 调度](完整实时Wavefront调度.md)。
 
 独立 lightweight 路径为 144 B，连续量保持 f32；两个 MediumId 为 exact u16 bit packing。
 48 B/pixel phase scratch 与三个 N 容量 u32 queue 共用队列绑定：scratch 后为 48 B 间接命令，

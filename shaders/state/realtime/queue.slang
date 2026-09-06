@@ -35,7 +35,7 @@ public struct PrimeRealtimeQueueStorage : IPrimeWavefrontQueueStorage {
         uint commandWord = primeWavefrontQueueCommandWord(queue);
         uint ignored;
         InterlockedMin(primeWavefrontQueue[commandWord], capacity, ignored);
-        // Queue zero's low byte is immutable first-stage metadata.
+        // Queue zero's low two bytes are immutable delta / minimum-bounce metadata.
         InterlockedOr(primeWavefrontQueue[commandWord + 3u], 0x80000000u, ignored);
     }
 

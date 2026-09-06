@@ -863,7 +863,9 @@
     "queueCommandStride": 16,
     "queueIndexSize": 4,
     "activeMask": "0x1",
-    "branchSlotsPerPixel": 2
+    "branchSlotsPerPixel": 2,
+    "minimumBounceShift": 8,
+    "minimumBounceMask": 255
   },
   "offlineWavefrontContract": {
     "pathRecordSize": 128,

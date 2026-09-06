@@ -1,5 +1,5 @@
 #language slang 2026
-module "transport/realtime/fixed_direct.slang";
+module "transport/realtime/secondary_direct.slang";
 
 import "prime_abi.slang";
 import "prime_abi_types.slang";
@@ -21,7 +21,7 @@ import "transport/surface/medium.slang";
 import "transport/realtime/staged_hit_emission_direct.slang";
 import "bsdf/compact/contract/volume.slang";
 
-public void primeEvaluateFixedDirect(
+public void primeEvaluateSecondaryDirect(
         inout PrimeIntegratorContext context,
         uint sourceQueue,
         uint launchIndex) {

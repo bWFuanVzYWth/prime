@@ -35,7 +35,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				java.security.MessageDigest.getInstance('SHA-256')
 						.digest(schemaFile.get().asFile.getText('UTF-8')
 								.replace('\r\n', '\n').getBytes('UTF-8')))
-		if (schemaSha256 != 'ee265a33a9b4af81b853f54b03598fefbdccac4a9a8d5ba579ff86cba91f3759') {
+		if (schemaSha256 != 'ebcb8fc699d4a282f309e6f48a831ab4576e013272760637e6882ae5faee3c52') {
 			throw new GradleException(
 					'Prime shader ABI changed without updating its reviewed contract hash')
 		}
@@ -473,7 +473,7 @@ public uint primeRealtimeQueueWord(uint pixelCount, uint queue, uint entry) {
     uint base = primeRealtimeQueueCommandWord(
             pixelCount, PRIME_WAVEFRONT_QUEUE_COUNT);
     // Primary/transparent-1 share slot 2 after primary consumption. Initial area, serialized
-    // guide, and tail area share slot 6; dispatch barriers order all three lifetimes.
+    // guide share slot 6; dispatch barriers order both lifetimes.
     uint slot = queue == PRIME_WAVEFRONT_TRACE_QUEUE_0 ? 0u
             : queue == PRIME_WAVEFRONT_TRACE_QUEUE_1 ? 1u
             : queue == PRIME_WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1 ? 2u

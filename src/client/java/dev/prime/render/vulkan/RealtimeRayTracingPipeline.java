@@ -45,11 +45,19 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
     private int lastRecordedPassCount;
     private boolean destroyed;
 
-    static int dispatchCount(int minimumBounces) {
-        dev.prime.render.BounceSettings.validateFixedCount(minimumBounces);
-        // Landing owns the primary-surface bounce. Every additional minimum bounce has four
-        // narrow stages; admission and the register tail replace all remaining dispatches.
-        return 4 * (minimumBounces - 1) + 15;
+    static int bounceLimit(int minimum, int maximum) {
+        return Math.max(dev.prime.render.BounceSettings.validateFixedCount(minimum),
+                dev.prime.render.BounceSettings.validateCount(maximum));
+    }
+
+    static int dispatchCount(int minimum, int maximum) {
+        // Eleven primary stages, four stages per secondary vertex, and two output stages.
+        return 4 * (bounceLimit(minimum, maximum) - 1) + 13;
+    }
+
+    static int queueMetadata(int minimum, int delta) {
+        return dev.prime.render.BounceSettings.validateCount(delta)
+                | (dev.prime.render.BounceSettings.validateFixedCount(minimum) << ShaderAbi.WAVEFRONT_MINIMUM_BOUNCE_SHIFT);
     }
 
     public RealtimeRayTracingPipeline(VulkanContext context, TraceBackend backend) {
@@ -73,7 +81,8 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
             this.descriptorSetLayout = setLayout;
             this.program = traceProgram;
             this.lastRecordedPassCount = dispatchCount(
-                    dev.prime.render.BounceSettings.MAXIMUM_FIXED_COUNT);
+                    dev.prime.render.BounceSettings.DEFAULT_FIXED_COUNT,
+                    dev.prime.render.BounceSettings.DEFAULT_COUNT);
         } catch (RuntimeException exception) {
             if (traceProgram != null) {
                 traceProgram.destroy();
@@ -198,7 +207,7 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
             long commandOffset = LAYOUT.queueCommandOffset(width, height);
             this.bind(commandBuffer, stack, pushConstants);
             this.initializeQueues(
-                    commandBuffer, stack, commandOffset, input.additionalSpecularBounces());
+                    commandBuffer, stack, commandOffset, input.minimumBounces(), input.additionalSpecularBounces());
             this.lastRecordedPassCount = this.recordTransport(
                     commandBuffer, stack, input, commandOffset);
         }
@@ -216,9 +225,9 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
                 input.height(),
                 REALTIME_STANDARD_CAMERA_TRACE);
         this.recordPrimaryPrefix(commandBuffer, stack, commandOffset);
-        int minimumBounces = input.minimumBounces();
+        int limit = bounceLimit(input.minimumBounces(), input.maximumBounces());
         boolean sourceOne = false;
-        for (int round = 1; round < minimumBounces; round++) {
+        for (int round = 1; round < limit; round++) {
             WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
             int sourceQueue = sourceOne
                     ? ShaderAbi.WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1
@@ -264,28 +273,8 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
                     sourceQueue);
             sourceOne = !sourceOne;
         }
-        int tailSourceQueue = sourceOne
-                ? ShaderAbi.WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1
-                : ShaderAbi.WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0;
-        this.nextStepBarrier(commandBuffer, stack);
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                queuedGroup(
-                        sourceOne,
-                        REALTIME_STANDARD_TAIL_ADMISSION_0,
-                        REALTIME_STANDARD_TAIL_ADMISSION_1),
-                commandOffset,
-                tailSourceQueue);
-        this.nextStepBarrier(commandBuffer, stack);
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                REALTIME_STANDARD_TAIL,
-                commandOffset,
-                ShaderAbi.WAVEFRONT_AREA_QUEUE);
         this.resolveInputBarrier(commandBuffer, stack);
-        this.recordOutputTail(
+        this.recordOutput(
                 commandBuffer,
                 stack,
                 commandOffset,
@@ -293,7 +282,7 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
                 input.height(),
                 REALTIME_STANDARD_BRANCH_RESOLVE,
                 REALTIME_STANDARD_NOISY_OUTPUT_RESOLVE);
-        return dispatchCount(minimumBounces);
+        return dispatchCount(input.minimumBounces(), input.maximumBounces());
     }
 
     private void bind(
@@ -321,7 +310,7 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
                 commandBuffer, stack, this.program, width, height, group);
     }
 
-    /** Records groups 1..9, from visible-primary work through secondary-queue publication. */
+    /** Records visible-primary work through secondary-queue publication. */
     private void recordPrimaryPrefix(
             VkCommandBuffer commandBuffer,
             MemoryStack stack,
@@ -396,7 +385,7 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
                 ShaderAbi.WAVEFRONT_PRIMARY_QUEUE);
     }
 
-    private void recordOutputTail(
+    private void recordOutput(
             VkCommandBuffer commandBuffer,
             MemoryStack stack,
             long commandOffset,
@@ -443,7 +432,7 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
             VkCommandBuffer commandBuffer,
             MemoryStack stack,
             long commandOffset,
-            int additionalSpecularBounces) {
+            int minimumBounces, int additionalSpecularBounces) {
         WavefrontCommands.initializeQueues(
                 commandBuffer,
                 stack,
@@ -451,7 +440,7 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
                 commandOffset,
                 ShaderAbi.WAVEFRONT_QUEUE_COUNT,
                 ShaderAbi.WAVEFRONT_QUEUE_COMMAND_STRIDE,
-                additionalSpecularBounces);
+                queueMetadata(minimumBounces, additionalSpecularBounces));
     }
 
     private void primaryDirectInputBarrier(
@@ -687,7 +676,7 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
         REFLECTION_DIFFUSE_DIRECTION(ShaderAbi.DESCRIPTOR_NRD_REFLECTION_DIFFUSE_DIRECTION, NEXT_STEP_INPUT),
         REFLECTION_SPECULAR_DIRECTION(ShaderAbi.DESCRIPTOR_NRD_REFLECTION_SPECULAR_DIRECTION, NEXT_STEP_INPUT),
         DISPLAY_POSITION(ShaderAbi.DESCRIPTOR_NRD_DISPLAY_POSITION, 0),
-        // Non-NRD transparent paths preserve the visible specular guide here; tail RR reads it.
+        // Non-NRD transparent paths preserve the visible specular guide here.
         SUN_LIGHTING(ShaderAbi.DESCRIPTOR_NRD_SUN_LIGHTING, PRIMARY_INPUT | NEXT_STEP_INPUT),
         SUN_PENUMBRA(ShaderAbi.DESCRIPTOR_NRD_SUN_PENUMBRA, PRIMARY_INPUT | NEXT_STEP_INPUT),
         RECONSTRUCTION_CONTROL(ShaderAbi.DESCRIPTOR_RECONSTRUCTION_CONTROL, 0);

@@ -27,7 +27,6 @@ public PathState primeWavefrontPath(
     path.previousBsdfPdf = record.physicalOriginAndPreviousBsdfPdf.w;
     path.rayDirection = record.rayDirectionAndDenoiserControl.xyz;
     // Queued scatter has already consumed hit-emission MIS before this state is reconstructed.
-    // The register tail restores the exact previous normal from phase scratch explicitly.
     path.previousLightNormal = float3(0.0);
     path.etaScale = primeUnpackWavefrontEtaScale(record.medium1);
     path.throughput = record.throughputAndReserved.xyz;

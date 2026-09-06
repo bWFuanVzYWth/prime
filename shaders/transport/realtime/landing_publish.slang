@@ -9,6 +9,8 @@ import "state/realtime/contract.slang";
 import "state/realtime/queue.slang";
 import "state/realtime/transparent.slang";
 import "contract/realtime/transparent.slang";
+import "policy/realtime/continuation.slang";
+import "policy/runtime/config.slang";
 
 struct PrimeWavefrontContinuationControl {
     uint guide;
@@ -63,7 +65,7 @@ public uint primeSealLandingGuide(
 
     // Reaching the configured delta limit is the only live path that can leave landing without a
     // solid-angle guide. Keep its resident visible-interface fallback, terminate its hit-distance
-    // lane, and prevent PSR/guide state from extending into the fixed wavefront prefix and tail.
+    // lane, and prevent PSR/guide state from extending into the secondary wavefront stages.
     uint2 pixel = primeWavefrontPixel(recordIndex);
     bool transmission = primeWavefrontTransmissionBranch(control);
     PrimeTransparentBranchResult result =
@@ -106,6 +108,9 @@ public void primePublishLandingContinuation(
                     recordIndex, control.denoiser);
         }
         control = primeEnterSecondaryControl(control);
+        // Landing cannot run RR: its first secondary guide query is still pending.
+        continuation = primeRealtimeCanContinue(0u, primeMinimumRealtimeBounces(), primeMaximumBounces());
+        if (!continuation) control.denoiser &= ~PRIME_WAVEFRONT_ACTIVE_MASK;
         primeStoreWavefrontContinuationControl(recordIndex, control);
     }
     primeAppendWavefrontContinuation(

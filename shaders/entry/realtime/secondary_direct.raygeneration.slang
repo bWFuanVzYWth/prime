@@ -1,16 +1,16 @@
 #language slang 2026
-module "entry/realtime/fixed_direct.raygeneration.slang";
+module "entry/realtime/secondary_direct.raygeneration.slang";
 
 import "contract/realtime/shader_record.slang";
-import "policy/realtime/fixed_queue.slang";
+import "policy/realtime/secondary_queue.slang";
 import "service/trace/context.slang";
-import "transport/realtime/fixed_direct.slang";
+import "transport/realtime/secondary_direct.slang";
 
 [shader("raygeneration")]
 void main() {
     PrimeIntegratorContext context = primeIntegratorContextCreate();
-    primeEvaluateFixedDirect(
+    primeEvaluateSecondaryDirect(
             context,
-            primeFixedSourceQueue(primeWavefrontShaderRecord.control),
+            primeSecondarySourceQueue(primeWavefrontShaderRecord.control),
             DispatchRaysIndex().x);
 }

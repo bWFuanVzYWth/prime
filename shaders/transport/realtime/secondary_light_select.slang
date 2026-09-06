@@ -1,5 +1,5 @@
 #language slang 2026
-module "transport/realtime/fixed_light_select.slang";
+module "transport/realtime/secondary_light_select.slang";
 
 import "prime_abi.slang";
 import "prime_abi_types.slang";
@@ -19,7 +19,7 @@ import "state/realtime/surface.slang";
 import "transport/direct/selection.slang";
 import "bsdf/compact/contract/volume.slang";
 
-public void primeSelectFixedLight(uint sourceQueue, uint launchIndex) {
+public void primeSelectSecondaryLight(uint sourceQueue, uint launchIndex) {
     uint recordIndex = primeWavefrontQueuedPath(sourceQueue, launchIndex);
     SurfaceInteraction surface = primeLoadWavefrontSurface(recordIndex);
     PrimeStagedLightSelection selection = primeDisabledStagedLightSelection();

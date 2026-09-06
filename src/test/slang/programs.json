@@ -1,5 +1,6 @@
 {
   "programs": [
+    {"entry": "realtime_continuation.compute.slang", "artifact": "realtime_continuation.comp.spv"},
     {"entry": "lambert_transport.compute.slang", "artifact": "lambert_transport.comp.spv"},
     {"entry": "primary_transparent_branch.compute.slang", "artifact": "primary_transparent_branch.comp.spv"},
     {"entry": "reconstruction_direction.compute.slang", "artifact": "reconstruction_direction.comp.spv"},
