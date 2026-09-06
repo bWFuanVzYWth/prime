@@ -1,8 +1,8 @@
 {
   "lambertContract": {
-    "maximumBounces": 12,
-    "recordSize": 128,
-    "queueCount": 2,
+    "recordSize": 144,
+    "scratchRecordSize": 48,
+    "queueCount": 3,
     "commandStride": 16,
     "indexSize": 4,
     "pathBinding": 36,

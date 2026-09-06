@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vulkan.VulkanGpuSampler;
 import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.IntegratorFrameInput;
+import dev.prime.render.BounceSettings;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.util.Arrays;
@@ -15,8 +16,8 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 
 /** One-path Lambert transport. The frame owner alone replaces descriptors and sized resources. */
 public final class LambertRayTracingPipeline implements RealtimeTracePipeline {
-    static final WavefrontLayout LAYOUT = new WavefrontLayout(1, 1, 2,
-            ShaderAbi.LAMBERT_RECORD_SIZE, 0, ShaderAbi.LAMBERT_QUEUE_COUNT,
+    static final WavefrontLayout LAYOUT = new WavefrontLayout(1, 1, 3,
+            ShaderAbi.LAMBERT_RECORD_SIZE, ShaderAbi.LAMBERT_SCRATCH_RECORD_SIZE, ShaderAbi.LAMBERT_QUEUE_COUNT,
             ShaderAbi.LAMBERT_COMMAND_STRIDE, ShaderAbi.LAMBERT_INDEX_SIZE, "Lambert");
     private static final RealtimeRayTracingPipeline.ImageBinding[] IMAGE_BINDINGS =
             RealtimeRayTracingPipeline.ImageBinding.values();
@@ -38,6 +39,7 @@ public final class LambertRayTracingPipeline implements RealtimeTracePipeline {
     private long[] views;
     private long[] imageHandles;
     private boolean destroyed;
+    private int lastRecordedPassCount = dispatchCount(BounceSettings.DEFAULT_FIXED_COUNT, BounceSettings.DEFAULT_COUNT);
 
     public LambertRayTracingPipeline(VulkanContext context, TraceBackend backend) {
         this.context = context;
@@ -63,7 +65,14 @@ public final class LambertRayTracingPipeline implements RealtimeTracePipeline {
         return GeneratedShaderPrograms.schedule(subgroupSupported ? "lambert.subgroup" : "lambert");
     }
 
-    @Override public int passCount() { return 2 * (ShaderAbi.LAMBERT_MAXIMUM_BOUNCES + 1) + 2; }
+    static int bounceLimit(int minimum, int maximum) {
+        return Math.max(BounceSettings.validateFixedCount(minimum), BounceSettings.validateCount(maximum));
+    }
+    static int dispatchCount(int minimum, int maximum) { return 2 * bounceLimit(minimum, maximum) + 4; }
+    static int queueMetadata(int minimum, int delta) {
+        return BounceSettings.validateFixedCount(minimum) | (BounceSettings.validateCount(delta) << 8);
+    }
+    @Override public int passCount() { return this.lastRecordedPassCount; }
     @Override public long sizedResourceBytes() { return this.wavefront == null ? 0L : this.wavefront.size(); }
 
     @Override
@@ -123,25 +132,35 @@ public final class LambertRayTracingPipeline implements RealtimeTracePipeline {
                     this.backend.bindings().descriptorSet(), this.descriptors.handle());
             long commands = LAYOUT.queueCommandOffset(input.width(), input.height());
             WavefrontCommands.initializeQueues(command, stack, this.wavefront, commands,
-                    ShaderAbi.LAMBERT_QUEUE_COUNT, ShaderAbi.LAMBERT_COMMAND_STRIDE);
+                    ShaderAbi.LAMBERT_QUEUE_COUNT, ShaderAbi.LAMBERT_COMMAND_STRIDE,
+                    queueMetadata(input.minimumBounces(), input.additionalSpecularBounces()));
             WavefrontCommands.trace(command, stack, this.program, input.width(), input.height(),
                     GeneratedShaderPrograms.LAMBERT_CAMERA);
-            // The final trace only resolves escape after twelve scatters; it cannot extend transport.
-            for (int bounce = 0; bounce <= ShaderAbi.LAMBERT_MAXIMUM_BOUNCES; ++bounce) {
+            this.outputBarrier(command, stack);
+            WavefrontCommands.traceIndirect(command, stack, this.program, this.wavefront,
+                    GeneratedShaderPrograms.LAMBERT_GUIDE, commands, 2, ShaderAbi.LAMBERT_COMMAND_STRIDE);
+            this.outputBarrier(command, stack);
+            WavefrontCommands.traceIndirect(command, stack, this.program, this.wavefront,
+                    GeneratedShaderPrograms.LAMBERT_FIRST, commands, 0, ShaderAbi.LAMBERT_COMMAND_STRIDE);
+            int limit = bounceLimit(input.minimumBounces(), input.maximumBounces());
+            for (int bounce = 1; bounce <= limit; ++bounce) {
                 int queue = bounce & 1;
                 WavefrontCommands.wavefrontBarrier(command, stack, this.wavefront);
                 WavefrontCommands.traceIndirect(command, stack, this.program, this.wavefront,
                         queue == 0 ? GeneratedShaderPrograms.LAMBERT_TRACE_0 : GeneratedShaderPrograms.LAMBERT_TRACE_1,
                         commands, queue, ShaderAbi.LAMBERT_COMMAND_STRIDE);
-                if (bounce == 0) this.outputBarrier(command, stack);
-                else WavefrontCommands.wavefrontBarrier(command, stack, this.wavefront);
+                WavefrontCommands.wavefrontBarrier(command, stack, this.wavefront);
+                int shade = bounce == limit
+                        ? (queue == 0 ? GeneratedShaderPrograms.LAMBERT_TERMINAL_0 : GeneratedShaderPrograms.LAMBERT_TERMINAL_1)
+                        : (queue == 0 ? GeneratedShaderPrograms.LAMBERT_SHADE_0 : GeneratedShaderPrograms.LAMBERT_SHADE_1);
                 WavefrontCommands.traceIndirect(command, stack, this.program, this.wavefront,
-                        queue == 0 ? GeneratedShaderPrograms.LAMBERT_SHADE_0 : GeneratedShaderPrograms.LAMBERT_SHADE_1,
+                        shade,
                         commands, queue, ShaderAbi.LAMBERT_COMMAND_STRIDE);
             }
             this.outputBarrier(command, stack);
             WavefrontCommands.trace(command, stack, this.program, input.width(), input.height(),
                     GeneratedShaderPrograms.LAMBERT_RESOLVE);
+            this.lastRecordedPassCount = dispatchCount(input.minimumBounces(), input.maximumBounces());
         }
     }
 

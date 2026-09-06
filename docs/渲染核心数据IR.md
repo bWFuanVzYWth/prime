@@ -186,6 +186,13 @@ detached-guide/后期 staged-record 最大别名区。area guide 只承载两个
 oct-SNORM16x2 direction。九项物理 queue index 中，串行 guide queue 在初始 area 消费之后、tail
 area 发布之前复用 area queue 的首槽；transparent resolve 与 tail 同时存活，不参与该 alias。
 
+独立 lightweight 路径为 144 B，连续量保持 f32；两个 MediumId 为 exact u16 bit packing。
+48 B/pixel phase scratch 与三个 N 容量 u32 queue 共用队列绑定：scratch 后为 48 B 间接命令，
+再后为三个索引数组。camera 发布首接口和选中 guide，guide 消费未选分支 seed 后，first
+才将 scratch 后 32 B 改为直接辐射 / SH 方向矩；path.firstDirection.xyz 同时从接口法线切换
+为首次散射方向。两次用途切换都有 RT 写读屏障，resize / reload 沿用帧所有者的退休流程。
+具体偏移、控制位和预算见 [轻量灯光与透明实现](轻量渲染器灯光与透明设计.md)。
+
 材质配方、OpenPBR compact 拓扑、采样与闭包测度见
 [统一材质 IR 与闭包](统一材质IR与闭包.md)。
 

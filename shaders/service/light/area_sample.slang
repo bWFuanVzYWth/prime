@@ -7,7 +7,7 @@ import "contract/light_sample.slang";
 import "service/light/area_common.slang";
 import "service/light/cell_sample.slang";
 import "service/light/emission.slang";
-import "service/material/surface.slang";
+import "service/material/emission.slang";
 
 AreaLightSample primeInvalidAreaLightSample() {
     AreaLightSample result;
@@ -126,25 +126,29 @@ public AreaLightSample primeSampleAreaLightSelection(
             positionSample);
 }
 
-public float3 primeResolveSampledAreaLightRadiance(AreaLightSample areaSample) {
-    if (areaSample.sectionIndex == PRIME_NO_LIGHT_INDEX
-            || areaSample.emitterIndex == PRIME_NO_LIGHT_INDEX) {
+public float3 primeResolveSampledAreaLightRadiance(uint sectionIndex, uint emitterIndex, float2 uv) {
+    if (sectionIndex == PRIME_NO_LIGHT_INDEX
+            || emitterIndex == PRIME_NO_LIGHT_INDEX) {
         return float3(0.0);
     }
     SectionRecord* sections = (SectionRecord*)primePush.sectionTableAddress;
-    uint64_t sectionLightAddress = sections[areaSample.sectionIndex].lightAddress;
+    uint64_t sectionLightAddress = sections[sectionIndex].lightAddress;
     if (sectionLightAddress == uint64_t(0)) {
         return float3(0.0);
     }
     SectionLightHeader* sectionBuffer = (SectionLightHeader*)sectionLightAddress;
-    if (areaSample.emitterIndex >= sectionBuffer[0].emitterCount) {
+    if (emitterIndex >= sectionBuffer[0].emitterCount) {
         return float3(0.0);
     }
     LightEmitter* emitters = (LightEmitter*)sectionBuffer[0].emitterAddress;
     return primeEvaluateEmitterRadiance(
-            emitters[areaSample.emitterIndex].metadata.w,
-            emitters[areaSample.emitterIndex].uvsTint.w,
-            emitters[areaSample.emitterIndex].metadata.z,
-            emitters[areaSample.emitterIndex].edgeOneScale.w,
-            areaSample.uv);
+            emitters[emitterIndex].metadata.w,
+            emitters[emitterIndex].uvsTint.w,
+            emitters[emitterIndex].metadata.z,
+            emitters[emitterIndex].edgeOneScale.w,
+            uv);
+}
+
+public float3 primeResolveSampledAreaLightRadiance(AreaLightSample sample) {
+    return primeResolveSampledAreaLightRadiance(sample.sectionIndex, sample.emitterIndex, sample.uv);
 }

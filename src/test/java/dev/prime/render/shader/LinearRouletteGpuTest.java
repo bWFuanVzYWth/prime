@@ -44,7 +44,7 @@ final class LinearRouletteGpuTest extends GpuShaderTest {
             assertEquals(0, output.getFloat(i * 16));
             assertEquals(distances[i], output.getFloat(i * 16 + 4));
             assertEquals(distances[i], output.getFloat(i * 16 + 8));
-            assertEquals(128, output.getFloat(i * 16 + 12));
+            assertEquals(144, output.getFloat(i * 16 + 12));
         }
     }
 }

@@ -1,6 +1,7 @@
 package dev.prime.render.vulkan;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
@@ -121,9 +122,9 @@ final class TracePipelinesContractTest {
 
     @Test
     void wavefrontBackingHasDeclaredFourKSize() {
-        assertEquals(1_128_038_432L, LambertRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
-        assertEquals(32L + 8L * 3840 * 2160, LambertRayTracingPipeline.LAYOUT.queueBytes(3840, 2160));
-        assertEquals(296L, LambertRayTracingPipeline.LAYOUT.wavefrontBytes(1, 1));
+        assertEquals(1_692_057_648L, LambertRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
+        assertEquals(48L + 60L * 3840 * 2160, LambertRayTracingPipeline.LAYOUT.queueBytes(3840, 2160));
+        assertEquals(364L, LambertRayTracingPipeline.LAYOUT.wavefrontBytes(1, 1));
         LambertRayTracingPipeline.LAYOUT.validateDispatch(3840, 2160, 3840 * 2160);
         LambertRayTracingPipeline.LAYOUT.validateRanges(3840, 2160, 0xffff_ffffL);
         assertThrows(IllegalStateException.class, () ->
@@ -159,10 +160,14 @@ final class TracePipelinesContractTest {
     }
 
     @Test
-    void lambertUsesTwoQueueParitiesAndOneTraceAndShadeModule() {
+    void lambertKeepsGuideFirstAndTerminalStagesSeparateFromDeepShading() {
         RaygenSchedule lambert = GeneratedShaderPrograms.schedule("lambert");
-        assertEquals(4, lambert.moduleCount());
-        assertEquals(6, lambert.groupCount());
+        assertEquals(7, lambert.moduleCount());
+        assertEquals(10, lambert.groupCount());
+        assertNotEquals(lambert.module(GeneratedShaderPrograms.LAMBERT_FIRST),
+                lambert.module(GeneratedShaderPrograms.LAMBERT_SHADE_0));
+        assertNotEquals(lambert.module(GeneratedShaderPrograms.LAMBERT_TERMINAL_0),
+                lambert.module(GeneratedShaderPrograms.LAMBERT_SHADE_0));
         assertEquals(lambert.module(GeneratedShaderPrograms.LAMBERT_TRACE_0),
                 lambert.module(GeneratedShaderPrograms.LAMBERT_TRACE_1));
         assertEquals(lambert.module(GeneratedShaderPrograms.LAMBERT_SHADE_0),
@@ -180,9 +185,29 @@ final class TracePipelinesContractTest {
             String resource = scalar.moduleResource(scalar.module(group));
             String expected = group == GeneratedShaderPrograms.LAMBERT_SHADE_0
                     || group == GeneratedShaderPrograms.LAMBERT_SHADE_1
-                    ? GeneratedShaderPrograms.resource("lambert_shade_subgroup") : resource;
+                    ? GeneratedShaderPrograms.resource("lambert_shade_subgroup")
+                    : group == GeneratedShaderPrograms.LAMBERT_FIRST
+                            ? GeneratedShaderPrograms.resource("lambert_first_subgroup")
+                            : group == GeneratedShaderPrograms.LAMBERT_CAMERA
+                                    ? GeneratedShaderPrograms.resource("lambert_camera_subgroup") : resource;
             assertEquals(expected, subgroup.moduleResource(subgroup.module(group)));
         }
+    }
+
+    @Test
+    void lambertConfiguredBudgetOwnsSchedulingAndPreservesMinimumPriority() {
+        assertEquals(1, LambertRayTracingPipeline.bounceLimit(1, 1));
+        assertEquals(6, LambertRayTracingPipeline.dispatchCount(1, 1));
+        assertEquals(16, LambertRayTracingPipeline.bounceLimit(2, 16));
+        assertEquals(36, LambertRayTracingPipeline.dispatchCount(2, 16));
+        assertEquals(8, LambertRayTracingPipeline.bounceLimit(8, 1));
+        assertEquals(132, LambertRayTracingPipeline.dispatchCount(2, 64));
+        assertEquals(0x1002, LambertRayTracingPipeline.queueMetadata(2, 16));
+        assertEquals(0x4008, LambertRayTracingPipeline.queueMetadata(8, 64));
+        assertThrows(IllegalArgumentException.class, () -> LambertRayTracingPipeline.bounceLimit(0, 16));
+        assertThrows(IllegalArgumentException.class, () -> LambertRayTracingPipeline.bounceLimit(9, 16));
+        assertThrows(IllegalArgumentException.class, () -> LambertRayTracingPipeline.bounceLimit(2, 65));
+        assertThrows(IllegalArgumentException.class, () -> LambertRayTracingPipeline.queueMetadata(2, 0));
     }
 
     @Test

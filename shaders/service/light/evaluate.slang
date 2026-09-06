@@ -5,7 +5,7 @@ import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/light_sample.slang";
 import "math/packed_geometry.slang";
-import "service/material/surface.slang";
+import "service/material/emission.slang";
 import "service/light/area_common.slang";
 import "service/light/emission.slang";
 import "service/light/tree_common.slang";

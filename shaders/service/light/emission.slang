@@ -4,7 +4,7 @@ module "service/light/emission.slang";
 import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "math/packed_geometry.slang";
-import "service/material/surface.slang";
+import "service/material/emission.slang";
 
 public static const uint PRIME_NO_LIGHT_INDEX = 0xffffffffu;
 public static const uint PRIME_EMITTER_TWO_SIDED = 1u;
@@ -32,14 +32,15 @@ public float primeEmitterCosine(
 // Delta transport has no competing area-light technique. Resolve only the hit emitter and avoid
 // importing the light-tree sampler and reverse-PDF reconstruction into that megakernel.
 public float3 primeEvaluateHitEmitterRadiance(
-        SurfaceInteraction surface,
+        uint sectionIndex,
+        uint emitterIndex,
+        float3 position,
         float3 rayDirection) {
-    uint emitterIndex = primeSurfaceEmitterIndex(surface);
     if (emitterIndex == PRIME_NO_LIGHT_INDEX) {
         return float3(0.0);
     }
     SectionRecord* sections = (SectionRecord*)primePush.sectionTableAddress;
-    uint64_t sectionLightAddress = sections[surface.sectionIndex].lightAddress;
+    uint64_t sectionLightAddress = sections[sectionIndex].lightAddress;
     if (sectionLightAddress == uint64_t(0)) {
         return float3(0.0);
     }
@@ -58,8 +59,8 @@ public float3 primeEvaluateHitEmitterRadiance(
         return float3(0.0);
     }
 
-    float3 sectionTranslation = sections[surface.sectionIndex].translation;
-    float3 localPosition = surface.position - sectionTranslation;
+    float3 sectionTranslation = sections[sectionIndex].translation;
+    float3 localPosition = position - sectionTranslation;
     float3 relative = localPosition - emitterCornerArea.xyz;
     float3 firstEdge = emitters[emitterIndex].edgeOneScale.xyz;
     float3 secondEdge = emitters[emitterIndex].edgeTwoPower.xyz;
@@ -77,4 +78,9 @@ public float3 primeEvaluateHitEmitterRadiance(
                     emitters[emitterIndex].uvsTint.xyz,
                     parentBarycentric),
             0.0);
+}
+
+public float3 primeEvaluateHitEmitterRadiance(SurfaceInteraction surface, float3 rayDirection) {
+    return primeEvaluateHitEmitterRadiance(surface.sectionIndex, primeSurfaceEmitterIndex(surface),
+            surface.position, rayDirection);
 }

@@ -4,6 +4,7 @@ module "state/lambert.slang";
 import "prime_abi.slang";
 import "prime_lambert_contract.slang";
 import "contract/lambert.slang";
+import "math/lambert_storage.slang";
 
 [[vk::binding(PRIME_LAMBERT_PATH_BINDING, 1)]]
 public RWStructuredBuffer<PrimeLambertRecord> primeLambertPaths;
@@ -14,9 +15,13 @@ public uint primeLambertPixelCount() { return primePush.outputExtent.x * primePu
 public uint2 primeLambertPixel(uint index) {
     return uint2(index % primePush.outputExtent.x, index / primePush.outputExtent.x);
 }
+public uint primeLambertCommandWord(uint queue) {
+    return primeLambertCommandWord(primeLambertPixelCount(), queue);
+}
+public uint primeLambertMinimumBounces() { return primeLambertQueue[primeLambertCommandWord(0u) + 3u] & 0xffu; }
+public uint primeLambertDeltaLimit() { return primeLambertQueue[primeLambertCommandWord(0u) + 3u] >> 8u; }
 public uint primeLambertQueueWord(uint queue, uint index) {
-    return PRIME_LAMBERT_QUEUE_COUNT * (PRIME_LAMBERT_COMMAND_STRIDE / 4u)
-            + queue * primeLambertPixelCount() + index;
+    return primeLambertQueueWord(primeLambertPixelCount(), queue, index);
 }
 public uint primeLambertQueuedPath(uint queue, uint index) {
     return primeLambertQueue[primeLambertQueueWord(queue, index)];

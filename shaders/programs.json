@@ -54,7 +54,10 @@
     "world_rahit": "entry/hit/world.anyhit.slang",
     "world_rchit": "entry/hit/world.closesthit.slang",
     "world_rmiss": "entry/hit/world.miss.slang",
-    "lambert_camera": "entry/lambert/camera.raygeneration.slang",
+    "lambert_camera": {"entry": "entry/lambert/camera.raygeneration.slang", "subgroup": true},
+    "lambert_guide": "entry/lambert/guide.raygeneration.slang",
+    "lambert_first": {"entry": "entry/lambert/first.raygeneration.slang", "subgroup": true},
+    "lambert_terminal": "entry/lambert/terminal.raygeneration.slang",
     "lambert_trace": "entry/lambert/trace.raygeneration.slang",
     "lambert_shade": {"entry": "entry/lambert/shade.raygeneration.slang", "subgroup": true},
     "lambert_resolve": "entry/lambert/resolve.raygeneration.slang",
@@ -119,10 +122,14 @@
       "variants": [null, "subgroup"],
       "groups": {
         "camera": ["lambert_camera", 0],
+        "guide": ["lambert_guide", 0],
+        "first": ["lambert_first", 0],
         "trace_0": ["lambert_trace", 0],
         "shade_0": ["lambert_shade", 0],
         "trace_1": ["lambert_trace", 1],
         "shade_1": ["lambert_shade", 1],
+        "terminal_0": ["lambert_terminal", 0],
+        "terminal_1": ["lambert_terminal", 1],
         "resolve": ["lambert_resolve", 0]
       }
     }

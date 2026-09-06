@@ -11,5 +11,7 @@ layout(location = 1) rayPayloadInEXT PrimeLambertShadowPayload primeLambertShado
 void main(in BuiltInTriangleIntersectionAttributes attributes) {
     // Slang's input-aggregate workaround; closest-hit/miss replaces this output lane.
     primeLambertShadow.distance = 0.0;
-    if (primeOpaqueCandidateIsSource(primeLambertShadow.source)) IgnoreHit();
+    if (primeOpaqueCandidateIsSource(primeLambertShadow.source)
+            || (InstanceID() == primeLambertShadow.target.x
+                    && primeOpaqueCandidateEmitter() == primeLambertShadow.target.y)) IgnoreHit();
 }

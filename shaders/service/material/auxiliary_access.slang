@@ -4,12 +4,11 @@ module "service/material/auxiliary_access.slang";
 import "service/material/access.slang";
 import "service/material/coverage.slang";
 import "math/packed_geometry.slang";
+import "service/material/optical_pages.slang";
 
 // Only full material evaluation imports these arrays; opacity entries cannot see them.
 [[vk::binding(19, 0)]]
 public Sampler2D<float4> primeMaterialNormalPages[16];
-[[vk::binding(49, 0)]]
-public Sampler2D<float4> primeMaterialOpticalPages[16];
 
 public struct PrimeAuxiliaryTextureRecord {
     public uint4 words;

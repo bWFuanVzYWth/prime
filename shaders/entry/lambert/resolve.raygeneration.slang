@@ -1,5 +1,6 @@
 #language slang 2026
 module "entry/lambert/resolve.raygeneration.slang";
+import "contract/lambert.slang";
 import "prime_abi.slang";
 import glsl;
 import "state/lambert.slang";

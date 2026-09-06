@@ -260,12 +260,12 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 		def shadow = 'struct(vec4(f32),vec4(f32),vec4(f32),vec4(f32),vec2(u32),' +
 				'u32,vec2(u32),vec2(u32))'
 		def primary = 'struct(vec3(f32),u32)'
-		def lambert = 'struct(vec3(f32),f32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32)'
-		def lambertShadow = 'struct(vec2(u32),f32)'
-		verifyShapes(modules, [lambert] as Set, 'RayPayloadKHR', ['lambert_trace.rgen.spv'])
+		def lambert = 'struct(vec3(f32),f32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32)'
+		def lambertShadow = 'struct(vec2(u32),vec2(u32),vec3(f32),f32,vec3(f32),u32,vec3(f32),u32)'
+		verifyShapes(modules, [lambert] as Set, 'RayPayloadKHR', ['lambert_trace.rgen.spv', 'lambert_camera.rgen.spv', 'lambert_camera_subgroup.rgen.spv', 'lambert_guide.rgen.spv'])
 		verifyShapes(modules, [lambertShadow] as Set, 'RayPayloadKHR',
-                ['lambert_shade.rgen.spv', 'lambert_shade_subgroup.rgen.spv'])
-		verifyShapes(modules, [] as Set, 'RayPayloadKHR', ['lambert_camera.rgen.spv', 'lambert_resolve.rgen.spv'])
+                ['lambert_shade.rgen.spv', 'lambert_shade_subgroup.rgen.spv', 'lambert_first.rgen.spv', 'lambert_first_subgroup.rgen.spv'])
+		verifyShapes(modules, [] as Set, 'RayPayloadKHR', ['lambert_terminal.rgen.spv', 'lambert_resolve.rgen.spv'])
 		verifyShapes(modules, [lambert] as Set, 'IncomingRayPayloadKHR', [
 				'lambert_world.rmiss.spv', 'lambert_world.rchit.spv', 'lambert_world.rahit.spv'])
 		verifyShapes(modules, [lambertShadow] as Set, 'IncomingRayPayloadKHR', [
@@ -339,7 +339,7 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 
 		def queue = schema.realtimeDescriptors.wavefrontQueue as int
 		def paths = schema.realtimeDescriptors.wavefrontPaths as int
-		['camera', 'trace', 'shade', 'shade_subgroup', 'resolve'].each { stage ->
+		['camera', 'camera_subgroup', 'guide', 'first', 'first_subgroup', 'trace', 'shade', 'shade_subgroup', 'terminal', 'resolve'].each { stage ->
 			def module = requireModule(modules, "lambert_${stage}.rgen.spv")
 			requireEqual(schema.lambertContract.recordSize as int, module.recordStride(1, paths),
 					"Lambert path stride in ${stage}")
@@ -347,8 +347,14 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 		}
 		requireBinding(requireModule(modules, 'lambert_shade.rgen.spv').descriptorBindings(0),
 				schema.sharedDescriptors.realtimeStbn as int, true, 'Lambert STBN binding')
-		requireEqual([] as Set, requireModule(modules, 'lambert_shadow_opaque.rahit.spv').descriptorBindings(0),
-				'Lambert opaque shadow has no texture descriptors')
+		requireEqual([schema.sharedDescriptors.surfaceRecords as int] as Set,
+                requireModule(modules, 'lambert_shadow_opaque.rahit.spv').descriptorBindings(0),
+				'Lambert opaque shadow reads only the exact emitter identity table')
+		['lambert_shade.rgen.spv', 'lambert_shade_subgroup.rgen.spv', 'lambert_first.rgen.spv',
+		 'lambert_first_subgroup.rgen.spv', 'lambert_world.rchit.spv'].each { artifact ->
+			requireBinding(requireModule(modules, artifact).descriptorBindings(0), 19, false,
+					"Lambert must not bind normal maps in ${artifact}")
+		}
 		['', '_ser'].each { suffix ->
 			def camera = requireModule(modules,
 					wavefrontShader('realtime', 'camera_trace', suffix)).descriptorBindings(1)

@@ -1,7 +1,6 @@
 import "math/lambert_roulette.slang";
 import "math/sampling.slang";
 import "math/hash.slang";
-import "prime_lambert_contract.slang";
 
 [[vk::binding(0, 0)]] StructuredBuffer<uint> inputData;
 [[vk::binding(1, 0)]] RWStructuredBuffer<float4> outputData;
@@ -27,7 +26,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
     float mappingError = 0.0;
     float first = 0.0;
     bool alive = true;
-    for (uint bounce = 0u; bounce < PRIME_LAMBERT_MAXIMUM_BOUNCES; ++bounce) {
+    for (uint bounce = 0u; bounce < 12u; ++bounce) {
         // Current lighting precedes roulette; an escaped endpoint after twelve scatters is retained.
         sum += throughput * albedo;
         ++vertices;

@@ -321,6 +321,18 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
             throw new GradleException(
                     "Delta-walk reaches non-discrete BSDF/NEE code: ${primaryViolations}")
         }
+        productionEntries.findAll { shaderRelative(it).startsWith('entry/lambert/') }.each { entry ->
+            def relative = shaderRelative(entry)
+            def narrowStage = entry.name.startsWith('shade.') || entry.name.startsWith('terminal.')
+                    || entry.name.startsWith('trace.') || entry.name.startsWith('camera.') || entry.name.startsWith('guide.')
+            def violations = closures[pathKey(entry)].collect { shaderRelative(new File(it)) }.findAll {
+                it != null && (it.startsWith('bsdf/') || it.startsWith('service/bsdf/')
+                        || it == 'service/material/surface.slang'
+                        || (narrowStage && (it == 'service/light/tree_select.slang'
+                                || it == 'service/light/area_sample.slang')))
+            }
+            if (!violations.empty) throw new GradleException("Lambert stage widened: ${relative}: ${violations}")
+        }
         def budget = new JsonSlurper().parse(closureBudget.get().asFile)
         if (budget.schema != 1) {
             throw new GradleException("Unsupported shader closure budget schema: ${budget.schema}")

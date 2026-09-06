@@ -25,8 +25,8 @@ public void primeLambertWriteGuides(uint2 pixel, float2 cameraSample, PrimeLambe
     primeImageStore(primeNrdMaterial, p, float4(valid ? hit.albedo : float3(0.0), distance));
     primeImageStore(primeNrdSpecularMaterial, p, float4(0.0, 0.0, 0.0, sh ? 0.0 : 1.0));
     primeImageStore(primeNrdNormalRoughness, p, primeNrdDirectNormalRoughness(normal, 1.0));
-    primeImageStore(primeNrdPrimaryPosition, p, float4(sh ? position : previous,
-            sh ? asfloat(packHalf2x16(cameraSample)) : (motion ? -distance - 1.0 : distance)));
+    // Both backends accept previous geometry plus signed current distance for moving targets.
+    primeImageStore(primeNrdPrimaryPosition, p, float4(previous, motion ? -distance - 1.0 : distance));
     primeImageStore(primeReconstructionControl, p, primePackReconstructionControl(0u, valid,
             (primePush.path.y & 0x80000000u) != 0u, motion));
     primeImageStore(primeNrdNoisySpecular, p, float4(0.0));
