@@ -12,24 +12,25 @@ final class ReinhardGamutOutputTest {
         ReinhardGamutOutput.Parameters parameters = ReinhardGamutOutput.parameters(1.0F);
 
         assertEquals(1.0F, parameters.outputPeak());
-        assertTrue(parameters.curvePeak() > 1.04F);
-        assertTrue(parameters.curvePeak() < 1.05F);
+        assertTrue(parameters.curvePeak() > 1.001F);
+        assertTrue(parameters.curvePeak() < 1.002F);
         assertEquals(0.0, evaluate(parameters, 0.0));
         assertEquals(0.09, evaluate(parameters, 0.09));
         assertEquals(ReinhardGamutOutput.MIDDLE_GRAY,
                 evaluate(parameters, ReinhardGamutOutput.MIDDLE_GRAY));
+        assertEquals(0.5, evaluate(parameters, 0.5));
     }
 
     @Test
-    void curveIsValueAndSlopeContinuousAtMiddleGray() {
+    void curveIsValueAndSlopeContinuousAtCompressionStart() {
         ReinhardGamutOutput.Parameters parameters = ReinhardGamutOutput.parameters(4.0F);
-        double middle = ReinhardGamutOutput.MIDDLE_GRAY;
+        double start = ReinhardGamutOutput.COMPRESSION_START;
         double step = 1.0E-5;
-        double atMiddle = evaluate(parameters, middle);
-        double leftSlope = (atMiddle - evaluate(parameters, middle - step)) / step;
-        double rightSlope = (evaluate(parameters, middle + step) - atMiddle) / step;
+        double atStart = evaluate(parameters, start);
+        double leftSlope = (atStart - evaluate(parameters, start - step)) / step;
+        double rightSlope = (evaluate(parameters, start + step) - atStart) / step;
 
-        assertEquals(middle, atMiddle);
+        assertEquals(start, atStart);
         assertEquals(1.0, leftSlope, 1.0E-11);
         assertEquals(1.0, rightSlope, 2.0E-4);
     }
@@ -71,11 +72,11 @@ final class ReinhardGamutOutputTest {
     private static double evaluate(
             ReinhardGamutOutput.Parameters parameters,
             double color) {
-        double middle = ReinhardGamutOutput.MIDDLE_GRAY;
-        if (color <= middle) return color;
+        double start = ReinhardGamutOutput.COMPRESSION_START;
+        if (color <= start) return color;
 
-        double shoulderExtent = parameters.curvePeak() - middle;
-        double distance = color - middle;
-        return middle + distance / (1.0 + distance / shoulderExtent);
+        double shoulderExtent = parameters.curvePeak() - start;
+        double distance = color - start;
+        return start + distance / (1.0 + distance / shoulderExtent);
     }
 }

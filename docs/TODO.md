@@ -30,9 +30,9 @@
 
 ## 渲染能力
 
-- 重新设计 Reinhard-Gamut 的 HDR shoulder。当前 `+6.5 EV` reach 随显示峰值 headroom
-  整体放宽中灰以上曲线，数学上能在有限输入命中峰值，但会过度抬升太阳等中高亮，达不到
-  艺术需求；后续应明确 SDR 参考白以下的外观保持边界，并只用额外 headroom 展开 HDR 高光；
+- 继续评估 Reinhard-Gamut 的 HDR shoulder 外观。已同步 `0.5` 起始压缩点与 `+10 EV` reach，
+  `0.5` 以下保持单位斜率；旧 `+6.5 EV` 曲线曾过度抬升太阳等中高亮，新曲线仍需实景验收。
+  后续应明确 SDR 参考白以下的外观保持边界，并只用额外 headroom 展开 HDR 高光；
 - 场景几何 LOD；
 - 云渲染（细节待定）；
 - 评估 LabPBR AO/porosity 的物理用途；不能把源格式字节直接泄漏到积分器或用环境遮蔽重复

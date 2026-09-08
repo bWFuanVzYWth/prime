@@ -4,13 +4,13 @@ module "service/reconstruct/display.slang";
 import "prime_abi_types.slang";
 import "math/color_space.slang";
 
-// Ported from C:/WorkSpace/drt at commit 3f32130a3cd561930d3ebd027a927ccac12c3f05.
+// Ported from C:/WorkSpace/drt at commit cf52682e8a55fe07df02c1d4ff20770ebeaffdd1.
 // Prime keeps its Rec.2020 input boundary, so the source bench's AP0 conversion is omitted.
 
 public struct PrimeReinhardGamutParameters
 {
     public float gamutExpansion;
-    public float middleGray;
+    public float compressionStart;
     // Linear display headroom; encoding happens after the tone curve.
     public float outputPeak;
     public float hueRetention;
@@ -22,25 +22,28 @@ static const float3 PRIME_REINHARD_NEUTRAL_WEIGHTS = float3(
         0.3921825078090138,
         0.3958121374360396);
 static const float PRIME_REINHARD_MIDDLE_GRAY = 0.18;
-static const float PRIME_REINHARD_HIGHLIGHT_REACH_EV = 6.5;
+static const float PRIME_REINHARD_COMPRESSION_START = 0.5;
+static const float PRIME_REINHARD_HIGHLIGHT_REACH_EV = 10.0;
 
 public float primeReinhardCurvePeak(float outputPeak)
 {
-    float reachRatio = exp2(PRIME_REINHARD_HIGHLIGHT_REACH_EV) * outputPeak;
-    float tangentDistance = PRIME_REINHARD_MIDDLE_GRAY * (reachRatio - 1.0);
-    float outputDistance = outputPeak - PRIME_REINHARD_MIDDLE_GRAY;
+    // The bench's default input scale gives a unit linear slope.
+    float reachInput = PRIME_REINHARD_MIDDLE_GRAY
+            * exp2(PRIME_REINHARD_HIGHLIGHT_REACH_EV) * outputPeak;
+    float tangentDistance = reachInput - PRIME_REINHARD_COMPRESSION_START;
+    float outputDistance = outputPeak - PRIME_REINHARD_COMPRESSION_START;
     float shoulderExtent = outputDistance * tangentDistance
             / (tangentDistance - outputDistance);
-    return PRIME_REINHARD_MIDDLE_GRAY + shoulderExtent;
+    return PRIME_REINHARD_COMPRESSION_START + shoulderExtent;
 }
 
 public PrimeReinhardGamutParameters primeDefaultReinhardGamutParameters()
 {
     PrimeReinhardGamutParameters parameters;
-    parameters.gamutExpansion = 0.03;
-    parameters.middleGray = PRIME_REINHARD_MIDDLE_GRAY;
+    parameters.gamutExpansion = 0.04;
+    parameters.compressionStart = PRIME_REINHARD_COMPRESSION_START;
     parameters.outputPeak = 1.0;
-    parameters.hueRetention = 0.5;
+    parameters.hueRetention = 0.75;
     parameters.curvePeak = primeReinhardCurvePeak(parameters.outputPeak);
     return parameters;
 }
@@ -69,14 +72,11 @@ public float primeReinhardCurveComponent(
         float color,
         PrimeReinhardGamutParameters parameters)
 {
-    float linearSlope = parameters.middleGray / PRIME_REINHARD_MIDDLE_GRAY;
-    if (color <= PRIME_REINHARD_MIDDLE_GRAY) return linearSlope * color;
-
-    float shoulderExtent = parameters.curvePeak - parameters.middleGray;
-    float distance = color - PRIME_REINHARD_MIDDLE_GRAY;
-    float tangentDistance = linearSlope * distance;
-    return parameters.middleGray
-            + tangentDistance / (1.0 + tangentDistance / shoulderExtent);
+    float start = parameters.compressionStart;
+    if (color <= start) return color;
+    float shoulderExtent = parameters.curvePeak - start;
+    float distance = color - start;
+    return start + distance / (1.0 + distance / shoulderExtent);
 }
 
 public float3 primeReinhardCurve(

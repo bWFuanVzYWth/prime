@@ -3,7 +3,8 @@ package dev.prime.render;
 /** Exact derived output parameters for Prime's unified SDR/HDR Reinhard-Gamut curve. */
 public final class ReinhardGamutOutput {
     public static final double MIDDLE_GRAY = 0.18;
-    public static final double HIGHLIGHT_REACH_EV = 6.5;
+    public static final double COMPRESSION_START = 0.5;
+    public static final double HIGHLIGHT_REACH_EV = 10.0;
 
     private ReinhardGamutOutput() {
     }
@@ -16,14 +17,15 @@ public final class ReinhardGamutOutput {
                 (double) requestedHeadroom,
                 (double) HdrOutput.MINIMUM_HEADROOM,
                 (double) HdrOutput.MAXIMUM_HEADROOM);
-        double reachRatio = Math.pow(2.0, HIGHLIGHT_REACH_EV) * outputPeak;
-        double tangentDistance = MIDDLE_GRAY * (reachRatio - 1.0);
-        double outputDistance = outputPeak - MIDDLE_GRAY;
+        // The bench's default input scale gives a unit linear slope.
+        double reachInput = MIDDLE_GRAY * Math.pow(2.0, HIGHLIGHT_REACH_EV) * outputPeak;
+        double tangentDistance = reachInput - COMPRESSION_START;
+        double outputDistance = outputPeak - COMPRESSION_START;
         double shoulderExtent = outputDistance * tangentDistance
                 / (tangentDistance - outputDistance);
         return new Parameters(
                 (float) outputPeak,
-                (float) (MIDDLE_GRAY + shoulderExtent));
+                (float) (COMPRESSION_START + shoulderExtent));
     }
 
     public record Parameters(float outputPeak, float curvePeak) {

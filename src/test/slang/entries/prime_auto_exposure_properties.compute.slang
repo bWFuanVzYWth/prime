@@ -92,25 +92,20 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     } else if (kind == 6) {
         PrimeReinhardGamutParameters parameters =
                 primeDefaultReinhardGamutParameters();
+        if (parameters.gamutExpansion != 0.04
+                || parameters.compressionStart != 0.5 || parameters.outputPeak != 1.0
+                || parameters.hueRetention != 0.75) {
+            mask |= PRIME_TEST_FAILURE_IDENTITY;
+        }
+        parameters.outputPeak = values.w;
+        parameters.curvePeak = primeReinhardCurvePeak(values.w);
         float value = max(values.x, 0.0);
         actual.x = primeReinhardCurveComponent(value, parameters);
-        actual.y = max(
-                max(
-                        abs(parameters.gamutExpansion - 0.03),
-                        abs(parameters.middleGray - 0.18)),
-                max(
-                        abs(parameters.outputPeak - 1.0),
-                        abs(parameters.hueRetention - 0.5)));
-        if (value <= 0.18) {
-            expected.x = value;
-        } else {
-            float shoulderExtent = parameters.curvePeak - 0.18;
-            float distance = value - 0.18;
-            expected.x = 0.18 + distance / (1.0 + distance / shoulderExtent);
-        }
-        expected.y = 0.0;
+        actual.y = parameters.curvePeak;
+        // CPU-derived output and peak independently check the production Slang curve.
+        expected = values.yz;
         if (!primeTestClose(actual.x, expected.x, 3.0e-6, 3.0e-6)
-                || !primeTestClose(actual.y, expected.y, 1.0e-7, 1.0e-7)) {
+                || !primeTestClose(actual.y, expected.y, 3.0e-6, 3.0e-6)) {
             mask |= PRIME_TEST_FAILURE_IDENTITY;
         }
         if (actual.x < -1.0e-6 || actual.x > parameters.curvePeak) {
@@ -142,10 +137,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         if (originalHsv.y > 1.0e-7 && mappedHsv.y > 1.0e-7) {
             float hueOffset = originalHsv.x - mappedHsv.x;
             hueOffset -= floor(hueOffset + 0.5);
-            float expectedHue = frac(mappedHsv.x + 0.5 * hueOffset);
+            float expectedHue = frac(mappedHsv.x + 0.75 * hueOffset);
             float repairedOffset = repairedHsv.x - expectedHue;
             repairedOffset -= floor(repairedOffset + 0.5);
-            hueError = abs(repairedOffset);
+            // Hue is ill-conditioned near neutral; bound its RGB displacement by 6 * chroma.
+            hueError = abs(repairedOffset) * 6.0 * mappedHsv.y * mappedHsv.z;
             svError = max(
                     abs(repairedHsv.y - mappedHsv.y),
                     abs(repairedHsv.z - mappedHsv.z));

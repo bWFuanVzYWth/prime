@@ -8,9 +8,11 @@ HDR，DXGI 能报告有效的峰值亮度与 SDR 白电平，并且 Vulkan surfa
 ## 显示变换契约
 
 Reinhard-Gamut 来自 `C:\WorkSpace\drt` 的
-`3f32130a3cd561930d3ebd027a927ccac12c3f05`。Prime 保留自身的线性 Rec.2020 输入边界，
-因此不会移植参考程序面向 ACES AP0 图像的输入矩阵。SDR 使用固定的 3% 虚拟色域扩张、
-18% 中灰、`+6.5 EV` 高光 reach 和 50% HSV 色相保持；HDR 依据当前屏幕的线性亮度余量
+`cf52682e8a55fe07df02c1d4ff20770ebeaffdd1`。Prime 保留自身的线性 Rec.2020 输入边界，
+因此不会移植参考程序面向 ACES AP0 图像的输入矩阵。SDR 使用固定的 4% 虚拟色域扩张、
+`0.5` 起始压缩点、`+10 EV` 高光 reach 和 75% HSV 色相保持。参考 input scale
+`1/(1-0.18)` 对应单位线性斜率；输入到 `0.5` 为止保持线性，以上接入值和一阶导数连续的
+Reinhard shoulder，18% 中灰保持不变，SDR 曲线渐近值约为 `1.0014`。HDR 依据当前屏幕的线性亮度余量
 延伸同一解析 shoulder。Windows
 查询保留峰值亮度 `P` 与系统 SDR 白电平 `W_system` 的绝对 nit 值，不能只保留两者比值。
 
@@ -18,7 +20,8 @@ Reinhard-Gamut 来自 `C:\WorkSpace\drt` 的
 值可从 1 nit 调到当前屏幕报告的 HDR 峰值；跨屏幕后若旧配置高于新屏峰值，运行时只在该屏
 钳制到峰值，不改写持久配置。显示变换使用 `P / W` 推导 HDR shoulder，场景线性 18% 灰仍
 固定映射为参考白的 18%，因此该选项不移动 SDR 中灰或场景曝光。运行时曲线渐近值使用 double
-推导后再提交为 float，并使中性灰在 `+6.5 EV + log2(P / W)` 处通过所请求的线性输出峰值。
+推导后再提交为 float，并使中性灰在 `+10 EV + log2(P / W)` 处通过所请求的线性输出峰值。
+Prime 延续自身 `1..10000` 的合法 headroom 范围，使用同一解析公式，不采用测试台的 `64` 上限。
 
 显示变换同时生成两个结果：
 

@@ -1,6 +1,7 @@
 package dev.prime.render.shader;
 
 import dev.prime.render.MaterialSettings;
+import dev.prime.render.ReinhardGamutOutput;
 import dev.prime.render.material.BuiltinMaterialClass;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -258,19 +259,35 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
                             blue,
                             random.nextInt(-12, 13));
                 } else if (kind == 6) {
-                    float curveInput = switch (local & 3) {
+                    float headroom = switch ((local / 8) & 3) {
+                        case 0 -> 1.0F;
+                        case 1 -> 4.0F;
+                        case 2 -> 64.0F;
+                        default -> 10_000.0F;
+                    };
+                    ReinhardGamutOutput.Parameters curve =
+                            ReinhardGamutOutput.parameters(headroom);
+                    float curveInput = switch (local & 7) {
                         case 0 -> 0.0F;
                         case 1 -> 0.09F;
                         case 2 -> 0.18F;
-                        default -> 0.18F * powerOfTwo(random.nextInt(-8, 11));
+                        case 3 -> 0.4999F;
+                        case 4 -> 0.5F;
+                        case 5 -> 0.5001F;
+                        case 6 -> 0.18F * powerOfTwo(10) * headroom;
+                        default -> 0.18F * powerOfTwo(random.nextInt(-8, 16)) * headroom;
                     };
+                    double distance = Math.max(curveInput - 0.5, 0.0);
+                    double expected = curveInput <= 0.5F
+                            ? curveInput
+                            : 0.5 + distance / (1.0 + distance / (curve.curvePeak() - 0.5));
                     input.putVec4(
                             index,
                             1,
                             curveInput,
-                            0.0F,
-                            0.0F,
-                            0.0F);
+                            (float) expected,
+                            curve.curvePeak(),
+                            headroom);
                 } else {
                     float red = random.nextFloat() * 4.0F;
                     float green = random.nextFloat() * 4.0F;
@@ -279,6 +296,11 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
                         red = (local & 1) != 0 ? 1.0F : 0.0F;
                         green = (local & 2) != 0 ? 1.0F : 0.0F;
                         blue = (local & 4) != 0 ? 1.0F : 0.0F;
+                    } else if (kind == 7 && local == 8) {
+                        // Near-neutral HDR color exercises hue roundoff at very low output chroma.
+                        red = 3.4374495F;
+                        green = 3.376667F;
+                        blue = 3.439753F;
                     }
                     float auxiliary = kind == 7
                             ? random.nextFloat() * 4.0F
