@@ -4,17 +4,17 @@ module "service/reconstruct/display.slang";
 import "prime_abi_types.slang";
 import "math/color_space.slang";
 
-// Ported from C:/WorkSpace/drt at commit cf52682e8a55fe07df02c1d4ff20770ebeaffdd1.
+// Ported from C:/WorkSpace/drt at commit 09c162b2e4647b1c6e56ff6028baa1048a57c1cb.
 // Prime keeps its Rec.2020 input boundary, so the source bench's AP0 conversion is omitted.
 
-public struct PrimeReinhardGamutParameters
+public struct PrimeReinhardAgxParameters
 {
     public float gamutExpansion;
     public float compressionStart;
     // Linear display headroom; encoding happens after the tone curve.
     public float outputPeak;
     public float hueRetention;
-    public float curvePeak;
+    public float shoulderCoefficient;
 };
 
 static const float3 PRIME_REINHARD_NEUTRAL_WEIGHTS = float3(
@@ -22,35 +22,35 @@ static const float3 PRIME_REINHARD_NEUTRAL_WEIGHTS = float3(
         0.3921825078090138,
         0.3958121374360396);
 static const float PRIME_REINHARD_MIDDLE_GRAY = 0.18;
-static const float PRIME_REINHARD_COMPRESSION_START = 0.5;
-static const float PRIME_REINHARD_HIGHLIGHT_REACH_EV = 10.0;
+static const float PRIME_REINHARD_COMPRESSION_START = 0.18;
+static const float PRIME_REINHARD_HIGHLIGHT_REACH_EV = 8.0;
+static const float PRIME_REINHARD_SHOULDER_POWER = 5.0;
 
-public float primeReinhardCurvePeak(float outputPeak)
+public float primeReinhardShoulderCoefficient(float outputPeak)
 {
     // The bench's default input scale gives a unit linear slope.
     float reachInput = PRIME_REINHARD_MIDDLE_GRAY
             * exp2(PRIME_REINHARD_HIGHLIGHT_REACH_EV) * outputPeak;
-    float tangentDistance = reachInput - PRIME_REINHARD_COMPRESSION_START;
     float outputDistance = outputPeak - PRIME_REINHARD_COMPRESSION_START;
-    float shoulderExtent = outputDistance * tangentDistance
-            / (tangentDistance - outputDistance);
-    return PRIME_REINHARD_COMPRESSION_START + shoulderExtent;
+    float logReach = 0.69314718056 * log2(
+            1.0 + (reachInput - PRIME_REINHARD_COMPRESSION_START) / outputDistance);
+    return 1.0 - pow(logReach, -PRIME_REINHARD_SHOULDER_POWER);
 }
 
-public PrimeReinhardGamutParameters primeDefaultReinhardGamutParameters()
+public PrimeReinhardAgxParameters primeDefaultReinhardAgxParameters()
 {
-    PrimeReinhardGamutParameters parameters;
+    PrimeReinhardAgxParameters parameters;
     parameters.gamutExpansion = 0.04;
     parameters.compressionStart = PRIME_REINHARD_COMPRESSION_START;
     parameters.outputPeak = 1.0;
-    parameters.hueRetention = 0.75;
-    parameters.curvePeak = primeReinhardCurvePeak(parameters.outputPeak);
+    parameters.hueRetention = 0.5;
+    parameters.shoulderCoefficient = primeReinhardShoulderCoefficient(parameters.outputPeak);
     return parameters;
 }
 
 public float3 primeReinhardToExpandedGamut(
         float3 color,
-        PrimeReinhardGamutParameters parameters)
+        PrimeReinhardAgxParameters parameters)
 {
     // Moving the virtual primaries outward contracts unchanged Rec.709 coordinates
     // toward the neutral axis.
@@ -60,7 +60,7 @@ public float3 primeReinhardToExpandedGamut(
 
 public float3 primeReinhardFromExpandedGamut(
         float3 color,
-        PrimeReinhardGamutParameters parameters)
+        PrimeReinhardAgxParameters parameters)
 {
     // The neutral projection is invariant, so this is the exact linear inverse.
     float neutral = dot(color, PRIME_REINHARD_NEUTRAL_WEIGHTS);
@@ -68,20 +68,31 @@ public float3 primeReinhardFromExpandedGamut(
             / (1.0 - parameters.gamutExpansion);
 }
 
+float primeReinhardLogDistance(float distance)
+{
+    // ln(1+x), with the bench's cancellation-safe series near the linear join.
+    if (distance < 0.001)
+        return distance * (1.0 + distance * (-0.5 + distance / 3.0));
+    return 0.69314718056 * log2(1.0 + distance);
+}
+
 public float primeReinhardCurveComponent(
         float color,
-        PrimeReinhardGamutParameters parameters)
+        PrimeReinhardAgxParameters parameters)
 {
     float start = parameters.compressionStart;
     if (color <= start) return color;
-    float shoulderExtent = parameters.curvePeak - start;
-    float distance = color - start;
-    return start + distance / (1.0 + distance / shoulderExtent);
+    float extent = parameters.outputPeak - start;
+    // Unit input slope and normalized output room preserve the join tangent in SDR/HDR.
+    float distance = primeReinhardLogDistance((color - start) / extent);
+    float power = PRIME_REINHARD_SHOULDER_POWER;
+    return start + extent * distance
+            * pow(1.0 + parameters.shoulderCoefficient * pow(distance, power), -1.0 / power);
 }
 
 public float3 primeReinhardCurve(
         float3 color,
-        PrimeReinhardGamutParameters parameters)
+        PrimeReinhardAgxParameters parameters)
 {
     return float3(
             primeReinhardCurveComponent(color.x, parameters),
@@ -139,7 +150,7 @@ public float3 primeReinhardHsvToRgb(float3 hsv)
 public float3 primeReinhardProtectHsvHue(
         float3 originalLinear,
         float3 mappedDisplay,
-        PrimeReinhardGamutParameters parameters)
+        PrimeReinhardAgxParameters parameters)
 {
     if (parameters.hueRetention <= 0.0) return mappedDisplay;
 
@@ -154,9 +165,9 @@ public float3 primeReinhardProtectHsvHue(
     return primeReinhardHsvToRgb(mappedHsv);
 }
 
-public float3 primeReinhardGamutTonemap(
+public float3 primeReinhardAgxTonemap(
         float3 linearBt709,
-        PrimeReinhardGamutParameters parameters)
+        PrimeReinhardAgxParameters parameters)
 {
     float3 nonnegative = max(linearBt709, float3(0.0));
     float3 working = primeReinhardToExpandedGamut(nonnegative, parameters);
@@ -171,19 +182,19 @@ public float3 primeDisplayTransformToSrgb(
         float3 hdrRec2020,
         float exposureMultiplier,
         float outputPeak,
-        float curvePeak)
+        float shoulderCoefficient)
 {
     float3 exposedRec2020 = max(hdrRec2020, float3(0.0))
             * (PRIME_DISPLAY_EXPOSURE * exposureMultiplier);
     float3 linearBt709 = max(
             primeLinearRec2020ToLinearBt709(exposedRec2020),
             float3(0.0));
-    PrimeReinhardGamutParameters parameters = primeDefaultReinhardGamutParameters();
+    PrimeReinhardAgxParameters parameters = primeDefaultReinhardAgxParameters();
     parameters.outputPeak = outputPeak;
-    parameters.curvePeak = curvePeak;
+    parameters.shoulderCoefficient = shoulderCoefficient;
     float encodedOutputPeak = primeReinhardEncodeSrgb(outputPeak.xxx).x;
     return clamp(
-            primeReinhardGamutTonemap(linearBt709, parameters),
+            primeReinhardAgxTonemap(linearBt709, parameters),
             float3(0.0),
             encodedOutputPeak.xxx);
 }
@@ -192,10 +203,10 @@ public float3 primeDisplayTransformToSrgb(
         float3 hdrRec2020,
         float exposureMultiplier)
 {
-    PrimeReinhardGamutParameters parameters = primeDefaultReinhardGamutParameters();
+    PrimeReinhardAgxParameters parameters = primeDefaultReinhardAgxParameters();
     return primeDisplayTransformToSrgb(
             hdrRec2020,
             exposureMultiplier,
             parameters.outputPeak,
-            parameters.curvePeak);
+            parameters.shoulderCoefficient);
 }

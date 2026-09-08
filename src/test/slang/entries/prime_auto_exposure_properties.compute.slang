@@ -90,30 +90,37 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             mask |= PRIME_TEST_FAILURE_IDENTITY;
         }
     } else if (kind == 6) {
-        PrimeReinhardGamutParameters parameters =
-                primeDefaultReinhardGamutParameters();
+        PrimeReinhardAgxParameters parameters =
+                primeDefaultReinhardAgxParameters();
         if (parameters.gamutExpansion != 0.04
-                || parameters.compressionStart != 0.5 || parameters.outputPeak != 1.0
-                || parameters.hueRetention != 0.75) {
+                || parameters.compressionStart != 0.18 || parameters.outputPeak != 1.0
+                || parameters.hueRetention != 0.5) {
             mask |= PRIME_TEST_FAILURE_IDENTITY;
         }
         parameters.outputPeak = values.w;
-        parameters.curvePeak = primeReinhardCurvePeak(values.w);
+        parameters.shoulderCoefficient = primeReinhardShoulderCoefficient(values.w);
         float value = max(values.x, 0.0);
         actual.x = primeReinhardCurveComponent(value, parameters);
-        actual.y = parameters.curvePeak;
-        // CPU-derived output and peak independently check the production Slang curve.
+        actual.y = parameters.shoulderCoefficient;
+        // CPU-derived output and coefficient independently check the production Slang curve.
         expected = values.yz;
-        if (!primeTestClose(actual.x, expected.x, 3.0e-6, 3.0e-6)
+        // Rounding 1 + distance before log2 costs at most one f32 ULP times output room.
+        // Keep the tighter bound in the cancellation-safe series at the join.
+        float extent = parameters.outputPeak - parameters.compressionStart;
+        float absoluteTolerance = 3.0e-6;
+        if ((value - parameters.compressionStart) / extent >= 0.001)
+            absoluteTolerance += 1.2e-7 * extent;
+        if (!primeTestClose(actual.x, expected.x, absoluteTolerance, 3.0e-6)
                 || !primeTestClose(actual.y, expected.y, 3.0e-6, 3.0e-6)) {
             mask |= PRIME_TEST_FAILURE_IDENTITY;
         }
-        if (actual.x < -1.0e-6 || actual.x > parameters.curvePeak) {
+        float limit = 0.18 + (values.w - 0.18) * pow(parameters.shoulderCoefficient, -1.0 / 5.0);
+        if (actual.x < -1.0e-6 || actual.x > limit * (1.0 + 3.0e-6)) {
             mask |= PRIME_TEST_FAILURE_RANGE;
         }
     } else if (kind == 7) {
-        PrimeReinhardGamutParameters parameters =
-                primeDefaultReinhardGamutParameters();
+        PrimeReinhardAgxParameters parameters =
+                primeDefaultReinhardAgxParameters();
         float3 rgb = max(values.xyz, float3(0.0));
         float3 expanded = primeReinhardToExpandedGamut(rgb, parameters);
         float3 restored = primeReinhardFromExpandedGamut(expanded, parameters);
@@ -137,7 +144,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         if (originalHsv.y > 1.0e-7 && mappedHsv.y > 1.0e-7) {
             float hueOffset = originalHsv.x - mappedHsv.x;
             hueOffset -= floor(hueOffset + 0.5);
-            float expectedHue = frac(mappedHsv.x + 0.75 * hueOffset);
+            float expectedHue = frac(mappedHsv.x + 0.5 * hueOffset);
             float repairedOffset = repairedHsv.x - expectedHue;
             repairedOffset -= floor(repairedOffset + 0.5);
             // Hue is ill-conditioned near neutral; bound its RGB displacement by 6 * chroma.
@@ -177,14 +184,14 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     } else if (kind == 8) {
         float3 hdrRec2020 = max(values.xyz, float3(0.0));
         float outputPeak = clamp(values.w, 1.0, 10000.0);
-        float curvePeak = primeReinhardCurvePeak(outputPeak);
-        PrimeReinhardGamutParameters parameters =
-                primeDefaultReinhardGamutParameters();
+        float shoulderCoefficient = primeReinhardShoulderCoefficient(outputPeak);
+        PrimeReinhardAgxParameters parameters =
+                primeDefaultReinhardAgxParameters();
         parameters.outputPeak = outputPeak;
-        parameters.curvePeak = curvePeak;
+        parameters.shoulderCoefficient = shoulderCoefficient;
         float encodedPeak = primeReinhardEncodeSrgb(outputPeak.xxx).x;
         float3 expectedReinhard = clamp(
-                primeReinhardGamutTonemap(
+                primeReinhardAgxTonemap(
                         max(
                                 primeLinearRec2020ToLinearBt709(hdrRec2020),
                                 float3(0.0)),
@@ -192,7 +199,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
                 float3(0.0),
                 encodedPeak.xxx);
         float3 output = primeDisplayTransformToSrgb(
-                hdrRec2020, 1.0, outputPeak, curvePeak);
+                hdrRec2020, 1.0, outputPeak, shoulderCoefficient);
         float3 error = abs(output - expectedReinhard);
         if (outputPeak == 1.0) {
             float3 sdrError = abs(output - primeDisplayTransformToSrgb(hdrRec2020, 1.0));

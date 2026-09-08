@@ -9,7 +9,7 @@ struct PrimeFsrDisplayPushConstants
     uint2 outputExtent;
     float finalExposureMultiplier;
     float reinhardOutputPeak;
-    float reinhardCurvePeak;
+    float reinhardShoulderCoefficient;
 };
 
 [[vk::binding(0, 0)]] Texture2D<float4> primeFsrLinearOutput;
@@ -40,7 +40,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
                 nonnegative,
                 exposure,
                 primeFsrDisplayPush.reinhardOutputPeak,
-                primeFsrDisplayPush.reinhardCurvePeak);
+                primeFsrDisplayPush.reinhardShoulderCoefficient);
         primeHdrDisplayOutput.Store(pixel, float4(hdr, 1.0));
     }
     // HDR presentation uses zero alpha as an exact coverage accumulator for vanilla UI.

@@ -1,7 +1,7 @@
 package dev.prime.render.shader;
 
 import dev.prime.render.MaterialSettings;
-import dev.prime.render.ReinhardGamutOutput;
+import dev.prime.render.ReinhardAgxOutput;
 import dev.prime.render.material.BuiltinMaterialClass;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -265,28 +265,30 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
                         case 2 -> 64.0F;
                         default -> 10_000.0F;
                     };
-                    ReinhardGamutOutput.Parameters curve =
-                            ReinhardGamutOutput.parameters(headroom);
+                    ReinhardAgxOutput.Parameters curve =
+                            ReinhardAgxOutput.parameters(headroom);
                     float curveInput = switch (local & 7) {
                         case 0 -> 0.0F;
                         case 1 -> 0.09F;
-                        case 2 -> 0.18F;
-                        case 3 -> 0.4999F;
-                        case 4 -> 0.5F;
-                        case 5 -> 0.5001F;
-                        case 6 -> 0.18F * powerOfTwo(10) * headroom;
-                        default -> 0.18F * powerOfTwo(random.nextInt(-8, 16)) * headroom;
+                        case 2 -> Math.nextUp(0.18F);
+                        case 3 -> 0.1799F;
+                        case 4 -> 0.18F;
+                        case 5 -> 0.1801F;
+                        case 6 -> 0.18F * powerOfTwo(8) * headroom;
+                        default -> 0.18F * powerOfTwo(random.nextInt(-8, 101)) * headroom;
                     };
-                    double distance = Math.max(curveInput - 0.5, 0.0);
-                    double expected = curveInput <= 0.5F
+                    double extent = headroom - 0.18;
+                    double logDistance = Math.log1p(Math.max(curveInput - 0.18, 0.0) / extent);
+                    double expected = curveInput <= 0.18F
                             ? curveInput
-                            : 0.5 + distance / (1.0 + distance / (curve.curvePeak() - 0.5));
+                            : 0.18 + extent / Math.pow(
+                                    Math.pow(logDistance, -5.0) + curve.shoulderCoefficient(), 1.0 / 5.0);
                     input.putVec4(
                             index,
                             1,
                             curveInput,
                             (float) expected,
-                            curve.curvePeak(),
+                            curve.shoulderCoefficient(),
                             headroom);
                 } else {
                     float red = random.nextFloat() * 4.0F;

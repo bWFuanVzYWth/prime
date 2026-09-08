@@ -5,7 +5,6 @@ import "service/image/access.slang";
 
 import "model/atmosphere/sky.slang";
 import "model/atmosphere/epipolar.slang";
-import "service/reconstruct/display.slang";
 import "service/reconstruct/fsr_input.slang";
 import "service/reconstruct/nrd/common.slang";
 import "model/material/defaults.slang";

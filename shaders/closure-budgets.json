@@ -87,7 +87,7 @@
     },
     "entry/post/fsr_display.compute.slang": {
       "maxFiles": 5,
-      "maxBytes": 23596
+      "maxBytes": 24175
     },
     "entry/post/streamline_input.compute.slang": {
       "maxFiles": 7,
@@ -110,8 +110,8 @@
       "maxBytes": 59511
     },
     "entry/post/nrd_composite.compute.slang": {
-      "maxFiles": 13,
-      "maxBytes": 91339
+      "maxFiles": 11,
+      "maxBytes": 82793
     },
     "entry/post/nrd_motion.compute.slang": {
       "maxFiles": 9,

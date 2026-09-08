@@ -30,8 +30,7 @@
 
 ## 渲染能力
 
-- 继续评估 Reinhard-Gamut 的 HDR shoulder 外观。已同步 `0.5` 起始压缩点与 `+10 EV` reach，
-  `0.5` 以下保持单位斜率；旧 `+6.5 EV` 曲线曾过度抬升太阳等中高亮，新曲线仍需实景验收。
+- 继续评估 Reinhard AgX 的 SDR/HDR shoulder 外观，重点实景验收太阳等中高亮区域。
   后续应明确 SDR 参考白以下的外观保持边界，并只用额外 headroom 展开 HDR 高光；
 - 场景几何 LOD；
 - 云渲染（细节待定）；
