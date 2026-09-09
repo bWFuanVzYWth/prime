@@ -59,7 +59,7 @@ Shader Pack 使用光栅化、屏幕空间效果或软件体素光线追踪，�
 | 兼容性支持 GPU | 支持 Vulkan KHR ray tracing pipeline、acceleration structure 与 position fetch 的其他显卡 |
 
 所有设备均需提供 `VK_KHR_ray_tracing_position_fetch` 及对应 feature，以直接从 BLAS 读取
-静态顶点并减少显存。
+静态顶点并减少显存。星图还需要 BC 纹理压缩和 16K BC6H 纹理的线性采样支持。
 
 建议使用兼容的 NVIDIA RTX 显卡和最新稳定驱动，以获得 Prime 当前验证最充分的路径和最佳
 体验。其他兼容显卡使用 NRD + FSR，功能和画面稳定性可能因设备与驱动而异。
@@ -239,5 +239,5 @@ Prime 自有代码使用 [MIT License](LICENSE)。NRD、DLSS、FidelityFX 和 Ro
 NASA/Goddard Space Flight Center Scientific Visualization Studio。Gaia DR2：
 [ESA/Gaia/DPAC](https://gea.esac.esa.int/archive/documentation/GDR2/Miscellaneous/sec_credit_and_citation_instructions/)。
 星座图形基于 Alan MacRobert 为 IAU 制作并发表于 *Sky and Telescope* 的版本
-（Roger Sinnott 与 Rick Fienberg）。完整归属与无损重打包说明见
+（Roger Sinnott 与 Rick Fienberg）。完整归属与 BC6H 预处理说明见
 `THIRD_PARTY_LICENSES/NASA-DEEP-STAR-MAPS-2020-NOTICE.md`。

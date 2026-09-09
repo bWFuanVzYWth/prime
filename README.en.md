@@ -78,7 +78,8 @@ The release JAR includes the Windows native libraries needed at runtime. Prime r
 substantially more GPU time, video memory, and CPU scene streaming than vanilla Minecraft.
 
 All devices must expose `VK_KHR_ray_tracing_position_fetch` and its feature. Prime reads static
-vertices directly from BLAS to reduce resident VRAM.
+vertices directly from BLAS to reduce resident VRAM. The starmap also requires BC texture
+compression and linear sampling of 16K BC6H textures.
 
 ## Installation
 
@@ -286,6 +287,6 @@ The night-sky asset comes from
 [NASA SVS Deep Star Maps 2020](https://svs.gsfc.nasa.gov/4851/): NASA/Goddard Space Flight Center
 Scientific Visualization Studio. Gaia DR2: [ESA/Gaia/DPAC](https://gea.esac.esa.int/archive/documentation/GDR2/Miscellaneous/sec_credit_and_citation_instructions/).
 Constellation artwork is based on the version created for the IAU by Alan MacRobert and published
-by *Sky and Telescope* (Roger Sinnott and Rick Fienberg). Complete attribution and lossless
+by *Sky and Telescope* (Roger Sinnott and Rick Fienberg). Complete attribution and BC6H
 repackaging details are in
 `THIRD_PARTY_LICENSES/NASA-DEEP-STAR-MAPS-2020-NOTICE.md`.

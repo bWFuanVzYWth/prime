@@ -166,6 +166,8 @@ final class VulkanTestDevice implements AutoCloseable {
             }
 
             SelectedDevice selected = selectDevice(instance, stack);
+            var supportedFeatures = VkPhysicalDeviceFeatures.calloc(stack);
+            VK12.vkGetPhysicalDeviceFeatures(selected.physicalDevice(), supportedFeatures);
             VkDeviceQueueCreateInfo.Buffer queueInfo = VkDeviceQueueCreateInfo.calloc(1, stack);
             queueInfo.get(0)
                     .sType$Default()
@@ -175,7 +177,8 @@ final class VulkanTestDevice implements AutoCloseable {
                     .sType$Default()
                     .pQueueCreateInfos(queueInfo)
                     .pEnabledFeatures(VkPhysicalDeviceFeatures.calloc(stack)
-                            .shaderInt64(true));
+                            .shaderInt64(true)
+                            .textureCompressionBC(supportedFeatures.textureCompressionBC()));
             if (rayTracing) {
                 var address = VkPhysicalDeviceBufferDeviceAddressFeatures.calloc(stack)
                         .sType$Default().bufferDeviceAddress(true);

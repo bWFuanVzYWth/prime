@@ -15,6 +15,7 @@ jar {
 
 def distributionVersion = providers.provider { project.version.toString() }
 def shaderProgramManifestFile = file('shaders/programs.json')
+def distributionShaderAbiFile = file('shaders/abi.json')
 def nativeRuntimeNames = [
 		'prime_nrd.dll',
 		'amd_fidelityfx_vk.dll',
@@ -35,6 +36,7 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 	def archiveProvider = tasks.named('jar', Jar).flatMap { it.archiveFile }
 	inputs.file(archiveProvider)
 	inputs.file(shaderProgramManifestFile)
+	inputs.file(distributionShaderAbiFile)
 	inputs.files(streamlineOutput)
 
 	doLast {
@@ -91,11 +93,11 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 			'META-INF/licenses/STREAMLINE-LICENSE.txt',
 			'META-INF/licenses/ROBOCUTE-NOTICE.txt',
 			'META-INF/licenses/NASA-DEEP-STAR-MAPS-2020-NOTICE.md',
-			'prime/starmap/starmap_2020_8k.json',
-			'prime/starmap/starmap_2020_8k_0.rgba16f.gz',
-			'prime/starmap/starmap_2020_8k_1.rgba16f.gz',
-			'prime/starmap/starmap_2020_8k_2.rgba16f.gz',
-			'prime/starmap/starmap_2020_8k_3.rgba16f.gz',
+			'prime/starmap/starmap_2020_16k.json',
+			'prime/starmap/starmap_2020_16k_0.bc6h.gz',
+			'prime/starmap/starmap_2020_16k_1.bc6h.gz',
+			'prime/starmap/starmap_2020_16k_2.bc6h.gz',
+			'prime/starmap/starmap_2020_16k_3.bc6h.gz',
 			'prime/shaders/manifest.sha256'
 		] + nativeRuntimeNames.collect {
 			"prime/natives/windows-x86_64/${it}".toString()
@@ -114,19 +116,31 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 		}
 
 		new java.util.zip.ZipFile(archive).withCloseable { zip ->
-			def starmap = zip.getInputStream(zip.getEntry('prime/starmap/starmap_2020_8k.json'))
+			def contract = new groovy.json.JsonSlurper().parse(distributionShaderAbiFile).starmapContract
+			def starmap = zip.getInputStream(zip.getEntry('prime/starmap/starmap_2020_16k.json'))
 					.withCloseable { new groovy.json.JsonSlurper().parse(it) }
-			def stripeNames = (0..<4).collect { "starmap_2020_8k_${it}.rgba16f.gz".toString() }
-			if (starmap.image.width != 8192 || starmap.image.height != 4096
+			def stripeNames = (0..<4).collect { "starmap_2020_16k_${it}.bc6h.gz".toString() }
+			if (starmap.version != 2 || starmap.source.sha256 != contract.sourceSha256
+					|| starmap.image.width != contract.width || starmap.image.height != contract.height
+					|| starmap.image.format != 'VK_FORMAT_BC6H_UFLOAT_BLOCK'
+					|| starmap.image.colorSpace != 'D65 linear Rec.2020' || starmap.image.mipLevels != 1
+					|| starmap.image.blockWidth != 4 || starmap.image.blockHeight != 4
+					|| starmap.image.blockBytes != 16
 					|| starmap.image.stripes.collect { it.name } != stripeNames) {
-				throw new GradleException('Distribution jar has invalid starmap dimensions or stripes')
+				throw new GradleException('Distribution jar has invalid BC6H starmap format, source or stripes')
+			}
+			def expectedStarmap = (stripeNames.collect { "prime/starmap/${it}".toString() }
+					+ ['prime/starmap/starmap_2020_16k.json']) as Set
+			def actualStarmap = names.findAll { it.startsWith('prime/starmap/') && !it.endsWith('/') } as Set
+			if (actualStarmap != expectedStarmap) {
+				throw new GradleException('Distribution jar contains stale or undeclared starmap assets')
 			}
 			// Validate the shipped bytes, not only their presence. Stream both passes so the
-			// 256 MiB decoded image never needs a second in-memory copy during packaging.
+			// 128 MiB BC6H image never needs a second in-memory copy during packaging.
 			starmap.image.stripes.eachWithIndex { stripe, index ->
 				def name = "prime/starmap/${stripe.name}".toString()
-				long expectedBytes = 8192L * 1024L * 4L * Short.BYTES
-				if (stripe.firstRow != index * 1024 || stripe.rows != 1024
+				long expectedBytes = (contract.width / 4L) * (contract.stripeRows / 4L) * 16L
+				if (stripe.firstRow != index * contract.stripeRows || stripe.rows != contract.stripeRows
 						|| stripe.uncompressedBytes != expectedBytes) {
 					throw new GradleException("Invalid starmap stripe layout: ${name}")
 				}

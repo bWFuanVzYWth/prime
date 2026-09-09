@@ -969,10 +969,11 @@
     "defaultSolarLongitudeDegrees": 0
   },
   "starmapContract": {
-    "width": 8192,
-    "height": 4096,
+    "width": 16384,
+    "height": 8192,
+    "stripeRows": 2048,
     "baseRadianceScale": 0.025,
-    "sourceSha256": "dc6c4f413e85707a29a25a9451148154554ecca2c996f84fa8f47b65ef9ff7c4"
+    "sourceSha256": "19a1351f00c386a6e5eec4d67af96d5fc71edf6a1189941579b9498b52e7589a"
   },
   "realtimeStbnContract": {
     "width": 128,
