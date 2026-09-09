@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #ifndef PRIME_OFFLINE_BSDF_TEST_H
 #define PRIME_OFFLINE_BSDF_TEST_H
 

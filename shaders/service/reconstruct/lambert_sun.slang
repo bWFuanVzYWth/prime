@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "service/reconstruct/lambert_sun.slang";
 import "prime_abi_types.slang";

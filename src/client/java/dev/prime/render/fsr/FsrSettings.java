@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.fsr;
 
 import dev.prime.render.shader.ShaderAbi;

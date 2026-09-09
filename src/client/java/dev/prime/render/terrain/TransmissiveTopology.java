@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.terrain;
 
 /** Proven physical topology used to choose the dielectric closure. */

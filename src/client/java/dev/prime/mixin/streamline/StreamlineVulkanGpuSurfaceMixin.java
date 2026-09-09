@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.mixin.streamline;
 
 import com.llamalad7.mixinextras.sugar.Local;

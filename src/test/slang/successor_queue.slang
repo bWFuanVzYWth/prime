@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 import "policy/queue/single_successor.slang";
 import "policy/queue/wavefront.slang";
 

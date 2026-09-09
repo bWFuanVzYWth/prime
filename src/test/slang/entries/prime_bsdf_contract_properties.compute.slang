@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #include "core/prime_test_abi.slang"
 import "model/material/medium_boundary.slang";
 import "service/bsdf/contract/sample.slang";

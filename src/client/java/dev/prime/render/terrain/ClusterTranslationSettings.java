@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.terrain;
 
 /** Explicit policy inputs for one captured-cluster translation. */

@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.binding.streamline;
 
 /** sl::PCLMarker (uint32_t). Value 6 (eInputSample) is deprecated in the SDK and intentionally omitted. */

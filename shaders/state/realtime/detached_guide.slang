@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "state/realtime/detached_guide.slang";
 

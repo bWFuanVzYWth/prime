@@ -1,3 +1,5 @@
+# Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 cmake_minimum_required(VERSION 3.24)
 project(prime_dlss_rr LANGUAGES CXX)
 

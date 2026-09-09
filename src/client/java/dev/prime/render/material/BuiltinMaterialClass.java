@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.material;
 
 /** Stable four-bit ABI identifiers for conservative built-in Minecraft PBR presets. */

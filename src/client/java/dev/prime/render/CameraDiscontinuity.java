@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render;
 
 /** Detects camera translation large enough to replace the visible scene in one frame. */

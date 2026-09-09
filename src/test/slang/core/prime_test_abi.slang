@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #ifndef PRIME_TEST_ABI_SLANG
 #define PRIME_TEST_ABI_SLANG
 

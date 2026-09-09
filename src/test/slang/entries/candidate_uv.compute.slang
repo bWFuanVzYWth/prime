@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 import "math/triangle_uv.slang";
 import "math/packed_geometry.slang";
 [[vk::binding(0, 0)]] StructuredBuffer<float4> input;

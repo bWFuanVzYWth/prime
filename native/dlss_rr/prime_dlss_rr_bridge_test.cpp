@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 // Exercise the exact production ABI-to-NGX mapping without initializing NGX or a Vulkan device.
 #include "prime_dlss_rr_bridge.cpp"
 #include <cstdio>

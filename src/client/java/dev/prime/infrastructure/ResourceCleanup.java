@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.infrastructure;
 
 import com.mojang.blaze3d.vulkan.Destroyable;

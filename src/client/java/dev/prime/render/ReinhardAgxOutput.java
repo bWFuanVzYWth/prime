@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render;
 
 /** Derived output parameters for Prime's unified SDR/HDR Reinhard AgX curve. */

@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 
 import "math/sun_shadow_hierarchy.slang";
 import "service/atmosphere/epipolar_shadow.slang";

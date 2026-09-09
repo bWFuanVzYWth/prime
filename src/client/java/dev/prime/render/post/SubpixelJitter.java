@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.post;
 
 /** Centered source-pixel sample displacement shared by every reconstruction backend. */

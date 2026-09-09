@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 
 import "model/atmosphere/sky.slang";
 import "model/atmosphere/spectrum.slang";

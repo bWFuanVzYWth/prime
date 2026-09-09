@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 import "service/bsdf/opaque/material.slang";
 import "model/material/defaults.slang";
 import "bsdf/compact/contract/material.slang";

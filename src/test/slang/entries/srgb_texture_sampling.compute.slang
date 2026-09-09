@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 layout(set = 0, binding = 0, std430) readonly buffer PrimeSrgbInput {
     uint unused[];
 } primeSrgbInput;

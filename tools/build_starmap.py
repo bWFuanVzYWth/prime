@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 """Build Prime's lossless GPU starmap resources from NASA's 2020 EXR."""
 
 from __future__ import annotations

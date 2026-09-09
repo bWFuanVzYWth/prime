@@ -232,8 +232,18 @@ Prime 并不是唯一探索 Minecraft 硬件光线追踪的开源项目。以下
 
 ## 许可与归属
 
-Prime 自有代码使用 [MIT License](LICENSE)。NRD、DLSS、FidelityFX 和 RoboCute 相关组件
-保留各自许可；完整文本见 `THIRD_PARTY_LICENSES`。
+Prime 自有代码使用 [GNU GPL v3.0 only（GPL-3.0-only）](LICENSE)，并附带
+[Minecraft 与 NVIDIA 链接和组合分发例外](LICENSE-EXCEPTIONS)。例外允许与其中明确列出的
+组件组合，Prime 自有代码及修改仍须遵守 GPL 的对应源码提供等要求；它不授予第三方组件
+本身的分发权。NRD、DLSS、Streamline、FidelityFX、RoboCute 等第三方组件和素材保留各自
+许可，完整说明见 [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES/README.md)。
+
+分发二进制时，应按 GPL 第 6 条提供与该版本对应的完整源码和所需构建脚本；仅提供 Java
+源码并不完整，Prime 的原生桥接和 shader 源码也在范围内。JAR 内附 `LICENSE_prime`、
+`LICENSE-EXCEPTIONS` 和 `META-INF/licenses/` 中的第三方许可。贡献到 Prime 自有代码的
+修改应采用相同的 GPL-3.0-only 加例外条款；提交贡献不转让著作权。
+
+此前已按 MIT 分发的版本继续保留原有授权，本次切换不追溯撤销这些授权。
 
 夜空资源来自 [NASA SVS Deep Star Maps 2020](https://svs.gsfc.nasa.gov/4851/)：
 NASA/Goddard Space Flight Center Scientific Visualization Studio。Gaia DR2：

@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 import "math/transparent_branch.slang";
 import "math/direct_sampling.slang";
 import "math/realtime_storage.slang";

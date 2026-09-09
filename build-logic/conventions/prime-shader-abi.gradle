@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 def shaderAbiJavaRoot = layout.buildDirectory.dir('generated/sources/shaderAbi/java')
 def shaderAbiSlangRoot = layout.buildDirectory.dir('generated/sources/shaderAbi/slang')
 def shaderProgramJavaRoot = layout.buildDirectory.dir('generated/sources/shaderPrograms/java')

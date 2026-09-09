@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.terrain;
 
 /** Pure CPU segmentation and scheduling policy; neither value limits total scene geometry. */

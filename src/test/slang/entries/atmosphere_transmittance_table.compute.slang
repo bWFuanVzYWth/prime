@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 import glsl;
 import "model/atmosphere/transmittance.slang";
 [[vk::binding(0, 0)]] StructuredBuffer<uint> input;

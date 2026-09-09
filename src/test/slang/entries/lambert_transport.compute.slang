@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 import "math/lambert_transport.slang";
 import "math/lambert_roulette.slang";
 import "math/direct_sampling.slang";

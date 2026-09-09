@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 import glsl;
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure scene;

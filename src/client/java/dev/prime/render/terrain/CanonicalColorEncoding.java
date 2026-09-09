@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.terrain;
 
 /** Source-faithful RGB8/tint translation into the renderer's linear Rec.2020 material domain. */

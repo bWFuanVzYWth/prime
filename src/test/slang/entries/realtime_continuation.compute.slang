@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 import "policy/realtime/continuation.slang";
 import "policy/transport/path.slang";
 import "math/transport.slang";

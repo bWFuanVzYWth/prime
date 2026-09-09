@@ -7,7 +7,7 @@
   "authors": [
     "linlin"
   ],
-  "license": "MIT",
+  "license": "GPL-3.0-only with Prime linking exceptions (see LICENSE-EXCEPTIONS)",
   "environment": "client",
   "accessWidener": "prime.accesswidener",
   "entrypoints": {

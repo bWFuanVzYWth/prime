@@ -1,3 +1,5 @@
+# Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 """Conditional single-triangle sampling variance; requires NumPy, does not benchmark the GPU.
 
 Run from the repository root. Results go to build/light-sampling-analysis/variance.json.

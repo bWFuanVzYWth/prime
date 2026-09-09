@@ -1,21 +1,31 @@
 # Third-party licenses
 
+Prime-authored code uses GPL-3.0-only with the additional permissions in
+`LICENSE-EXCEPTIONS` at the source-tree and mod-JAR root. The GPL text is in
+`LICENSE` in the source tree and `LICENSE_prime` in the JAR. The exception
+permits the specified Minecraft and NVIDIA combinations; it does not relicense
+third-party material or waive its license obligations. The terms below also
+apply to third-party material incorporated into Prime source files.
+
 - FidelityFX SDK 1.1.4 (AMD's signed Vulkan library containing the FSR 3.1.4 Upscaler): MIT
   License. See `FIDELITYFX-SDK-LICENSE.txt`. Prime calls only the upscaling API; frame
   interpolation and swapchain replacement are not included or used.
 
 Prime releases include a compiled NVIDIA Real-time Denoisers (NRD) component.
-That component is not covered by Prime's MIT license. It remains subject to the
-NVIDIA RTX SDKs License in `NRD-LICENSE.txt`.
+The NVIDIA code in that component remains subject to the NVIDIA RTX SDKs
+License in `NRD-LICENSE.txt`. Prime's own bridge code is covered by
+GPL-3.0-only with the additional permissions in `LICENSE-EXCEPTIONS`.
 
 NVIDIA, the NVIDIA logo, and NVIDIA Real-time Denoisers (NRD) are trademarks
 and/or registered trademarks of NVIDIA Corporation in the United States and
 other countries.
 
 Prime releases also include its own `prime_dlss_rr.dll` C ABI bridge and NVIDIA's
-release `nvngx_dlssd.dll` for DLSS Ray Reconstruction. The SDK and redistributable
-remain subject to `DLSS-SDK-LICENSE.txt`; Prime does not ship the DLSS development
-DLL or standalone DLSS Super Resolution.
+release `nvngx_dlssd.dll` for DLSS Ray Reconstruction. Prime's own bridge code
+is covered by GPL-3.0-only with the additional permissions in
+`LICENSE-EXCEPTIONS`; NVIDIA's linked SDK code and redistributable remain
+subject to `DLSS-SDK-LICENSE.txt`. Prime does not ship the DLSS development DLL
+or standalone DLSS Super Resolution.
 
 Windows releases also include NVIDIA Streamline and its Reflex/PCL plugins under the
 Streamline MIT license in `STREAMLINE-LICENSE.txt`. The DLSS Frame Generation plugin,

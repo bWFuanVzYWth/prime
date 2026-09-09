@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.terrain;
 
 /** Triangle partitions and paired-triangle macro tails for one three-geometry BLAS. */

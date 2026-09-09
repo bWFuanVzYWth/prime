@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 struct PrimeSlangSmokePush
 {
     float4x4 transform;

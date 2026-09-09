@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "entry/lambert/terminal.raygeneration.slang";
 import "state/lambert.slang";

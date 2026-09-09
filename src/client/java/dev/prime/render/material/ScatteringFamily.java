@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.material;
 
 /** Closed set of material families stored in the two-bit primitive recipe field. */

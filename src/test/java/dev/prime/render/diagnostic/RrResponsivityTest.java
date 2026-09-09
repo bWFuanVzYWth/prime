@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.diagnostic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

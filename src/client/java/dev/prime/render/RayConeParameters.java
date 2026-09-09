@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render;
 
 /** Semantic primary-ray footprint and texture-LOD bias before the Vulkan ABI encoding. */

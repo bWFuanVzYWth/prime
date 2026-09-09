@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.scene.vanilla;
 
 /** Stable inclusion rules for content submitted by Minecraft's world renderer. */

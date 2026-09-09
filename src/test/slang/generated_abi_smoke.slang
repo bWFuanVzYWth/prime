@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 import "prime_abi_types.slang";
 
 [[vk::binding(0, 0)]] StructuredBuffer<PrimitiveRecord> primitiveRecords;

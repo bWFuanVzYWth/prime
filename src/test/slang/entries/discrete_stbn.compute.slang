@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 import "math/direct_discrete_sampling.slang";
 import "math/direct_sampling.slang";
 import "math/hash.slang";

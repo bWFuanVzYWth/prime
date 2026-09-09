@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 def licenseArchiveSuffix = project.name
 def shaderManifestType = primeShaderManifestType
 def streamlineOutput = sourceSets.getByName('streamline').output
@@ -8,6 +10,7 @@ jar {
 	from('LICENSE') {
 		rename { "${it}_${licenseArchiveSuffix}" }
 	}
+	from('LICENSE-EXCEPTIONS')
 	from('THIRD_PARTY_LICENSES') {
 		into 'META-INF/licenses'
 	}
@@ -36,6 +39,11 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 	inputs.file(archiveProvider)
 	inputs.file(shaderProgramManifestFile)
 	inputs.files(streamlineOutput)
+	def licenseFiles = [
+		'LICENSE_prime': file('LICENSE'),
+		'LICENSE-EXCEPTIONS': file('LICENSE-EXCEPTIONS')
+	]
+	inputs.files(licenseFiles.values())
 
 	doLast {
 		def archive = archiveProvider.get().asFile
@@ -83,6 +91,7 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 			'prime.mixins.json',
 			'prime.accesswidener',
 			'LICENSE_prime',
+			'LICENSE-EXCEPTIONS',
 			'META-INF/licenses/README.md',
 			'META-INF/licenses/APACHE-2.0.txt',
 			'META-INF/licenses/FIDELITYFX-SDK-LICENSE.txt',
@@ -114,6 +123,12 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 		}
 
 		new java.util.zip.ZipFile(archive).withCloseable { zip ->
+			licenseFiles.each { entryName, sourceFile ->
+				def packaged = zip.getInputStream(zip.getEntry(entryName)).withCloseable { it.readAllBytes() }
+				if (!java.util.Arrays.equals(packaged, sourceFile.bytes)) {
+					throw new GradleException("Distribution jar has outdated license text: ${entryName}")
+				}
+			}
 			def starmap = zip.getInputStream(zip.getEntry('prime/starmap/starmap_2020_8k.json'))
 					.withCloseable { new groovy.json.JsonSlurper().parse(it) }
 			def stripeNames = (0..<4).collect { "starmap_2020_8k_${it}.rgba16f.gz".toString() }
@@ -159,10 +174,12 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 			def metadata = metadataInput.withCloseable { new groovy.json.JsonSlurper().parse(it) }
 			if (metadata.id != 'prime'
 					|| metadata.version.toString() != distributionVersion.get()
-					|| metadata.environment != 'client') {
+					|| metadata.environment != 'client'
+					|| metadata.license != 'GPL-3.0-only with Prime linking exceptions (see LICENSE-EXCEPTIONS)') {
 				throw new GradleException(
 						"Distribution jar has invalid Fabric metadata: id=${metadata.id}, "
-								+ "version=${metadata.version}, environment=${metadata.environment}")
+								+ "version=${metadata.version}, environment=${metadata.environment}, "
+								+ "license=${metadata.license}")
 			}
 			def expectedFabricDependencies = [
 					'fabric-model-loading-api-v1',

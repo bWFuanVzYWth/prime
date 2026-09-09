@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 """Build Prime's immutable realtime direct-light STBN table with EA FAST.
 
 The initializer is a two-dimensional Sobol digital sequence with the Laine-Karras

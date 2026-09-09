@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 import "policy/realtime/hit_distance.slang";
 import "policy/realtime/landing.slang";
 import "policy/realtime/secondary.slang";

@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render;
 
 /** Shared transport-count domain and the minimum realtime rounds before roulette. */

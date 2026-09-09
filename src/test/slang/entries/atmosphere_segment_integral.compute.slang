@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 import "model/atmosphere/sky.slang";
 
 [[vk::binding(0, 0)]] StructuredBuffer<float4> atmosphereSegmentInput;

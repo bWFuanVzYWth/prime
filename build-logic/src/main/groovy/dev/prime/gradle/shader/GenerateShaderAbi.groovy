@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.gradle.shader
 
 import org.gradle.api.*
@@ -346,6 +348,8 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		def javaPackageDir = new File(javaOutputDirectory.get().asFile, 'dev/prime/render/shader')
 		javaPackageDir.mkdirs()
 		new File(javaPackageDir, 'ShaderAbi.java').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.shader;
 
 /** Generated from shaders/abi.json. Do not edit by hand. */
@@ -361,6 +365,8 @@ ${javaConstants}${javaOffsets}
 		def slangDir = slangOutputDirectory.get().asFile
 		slangDir.mkdirs()
 		new File(slangDir, 'prime_surface_abi.slang').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "prime_surface_abi.slang";
 
@@ -369,6 +375,8 @@ ${slangConstants('SURFACE', schema.surfaceRecordContract)}
 public static const uint PRIME_SURFACE_RECORDS_BINDING = ${schema.sharedDescriptors.surfaceRecords};
 """
 		new File(slangDir, 'prime_material_core_abi.slang').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "prime_material_core_abi.slang";
 
@@ -376,6 +384,8 @@ module "prime_material_core_abi.slang";
 ${slangConstants('MATERIAL_CORE', materialCoreContract)}
 """
 		new File(slangDir, 'prime_abi_bindings.slang').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "prime_abi_bindings.slang";
 
@@ -388,6 +398,8 @@ public static const uint PRIME_REALTIME_STBN_DEPTH = ${realtimeStbnContract.dept
 public static const uint PRIME_REALTIME_STBN_BANK_COUNT = ${realtimeStbnContract.bankCount};
 """
 		new File(slangDir, 'prime_abi_types.slang').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "prime_abi_types.slang";
 
@@ -397,6 +409,8 @@ ${slangStructs}
 
 """
 		new File(slangDir, 'prime_abi_push.slang').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "prime_abi_push.slang";
 
@@ -405,6 +419,8 @@ import "prime_abi_types.slang";
 public [[vk::push_constant]] ConstantBuffer<PrimePushConstants> primePush;
 """
 		new File(slangDir, 'prime_abi.slang').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "prime_abi.slang";
 
@@ -426,6 +442,8 @@ ${sunShadowImages}
 public Sampler2D<float4> primeStarmap;
 """
 		new File(slangDir, 'prime_fsr_contract.slang').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "prime_fsr_contract.slang";
 
@@ -434,6 +452,8 @@ public static const float PRIME_FSR_NEAR_PLANE = ${fsrContract.nearPlane};
 public static const float PRIME_FSR_VIEW_SPACE_TO_METERS_FACTOR = ${fsrContract.viewSpaceToMetersFactor};
 """
 		new File(slangDir, 'prime_nrd_motion_contract.slang').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "prime_nrd_motion_contract.slang";
 
@@ -443,12 +463,16 @@ import "prime_abi_types.slang";
 public [[vk::push_constant]] ConstantBuffer<NrdMotionPushConstants> primeMotionPush;
 """
 		new File(slangDir, 'prime_lambert_contract.slang').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "prime_lambert_contract.slang";
 
 ${slangConstants('LAMBERT', schema.lambertContract)}
 """
 		new File(slangDir, 'prime_realtime_abi.slang').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "prime_realtime_abi.slang";
 
@@ -523,6 +547,8 @@ public void primeImageStoreWriteOnly(
 }
 """
 		new File(slangDir, 'prime_offline_abi.slang').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #language slang 2026
 module "prime_offline_abi.slang";
 

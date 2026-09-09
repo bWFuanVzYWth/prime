@@ -1,3 +1,5 @@
+# Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 """Reproduce sampling-grid limits and exact scalar RR moments; not a GPU benchmark.
 
 Reads the shipped STBN bank. Writes build/path-sampling-analysis/results.json.

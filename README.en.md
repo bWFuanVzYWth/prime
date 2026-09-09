@@ -279,8 +279,23 @@ differ from Prime's.
 
 ## License and Attribution
 
-Prime-owned code is licensed under the [MIT License](LICENSE). NRD, DLSS, FidelityFX, and RoboCute
-components retain their respective licenses; complete texts are in `THIRD_PARTY_LICENSES`.
+Prime-authored code is licensed under [GNU GPL version 3 only (GPL-3.0-only)](LICENSE), with
+[Minecraft and NVIDIA linking and combination exceptions](LICENSE-EXCEPTIONS). The exceptions
+permit combinations with the expressly listed components; Prime's own code and modifications
+remain subject to the GPL, including its Corresponding Source requirements. They do not grant
+distribution rights in third-party components. NRD, DLSS, Streamline, FidelityFX, RoboCute, and
+other third-party components and assets retain their respective licenses; see
+[THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES/README.md).
+
+Binary distributions must provide the complete Corresponding Source and required build scripts
+for that version as specified by GPL section 6. Java sources alone are insufficient: Prime's
+native bridge and shader sources are also in scope. The JAR includes `LICENSE_prime`,
+`LICENSE-EXCEPTIONS`, and third-party licenses under `META-INF/licenses/`. Contributions to
+Prime-authored code should use the same GPL-3.0-only terms with these exceptions; submitting a
+contribution does not transfer copyright.
+
+Previously distributed MIT versions retain their original grants; this change does not
+retroactively withdraw those permissions.
 
 The night-sky asset comes from
 [NASA SVS Deep Star Maps 2020](https://svs.gsfc.nasa.gov/4851/): NASA/Goddard Space Flight Center

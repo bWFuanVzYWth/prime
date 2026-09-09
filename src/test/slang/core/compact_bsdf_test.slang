@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 #ifndef PRIME_COMPACT_BSDF_TEST_SLANG
 #define PRIME_COMPACT_BSDF_TEST_SLANG
 

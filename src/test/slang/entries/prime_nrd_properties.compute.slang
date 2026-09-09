@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 
 #include "core/prime_test_abi.slang"
 import "core/numerical.slang";

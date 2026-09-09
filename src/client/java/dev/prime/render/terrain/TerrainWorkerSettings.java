@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.terrain;
 
 /** User-facing admission limit for Prime jobs submitted to Minecraft's shared worker pool. */

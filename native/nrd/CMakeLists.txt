@@ -1,3 +1,5 @@
+# Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 cmake_minimum_required(VERSION 3.22...3.30)
 
 project(PrimeNrdBridge VERSION 1.0.0 LANGUAGES CXX)

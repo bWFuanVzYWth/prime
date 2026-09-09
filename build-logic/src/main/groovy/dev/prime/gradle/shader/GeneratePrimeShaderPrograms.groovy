@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.gradle.shader
 
 import org.gradle.api.DefaultTask
@@ -33,7 +35,9 @@ abstract class GeneratePrimeShaderPrograms extends DefaultTask {
     void generate() {
         def manifest = PrimeShaderManifest.read(manifestFile.get().asFile)
         def artifacts = manifest.artifacts
-        def source = new StringBuilder('''package dev.prime.render.vulkan;
+        def source = new StringBuilder('''// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
+package dev.prime.render.vulkan;
 
 import java.util.List;
 

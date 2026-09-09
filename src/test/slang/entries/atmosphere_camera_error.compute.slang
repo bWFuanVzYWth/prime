@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 import glsl;
 import "model/atmosphere/spectrum.slang";
 

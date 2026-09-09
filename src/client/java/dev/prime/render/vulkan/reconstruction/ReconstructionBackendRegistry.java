@@ -1,3 +1,5 @@
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
 package dev.prime.render.vulkan.reconstruction;
 
 import dev.prime.infrastructure.PrimeInfo;
