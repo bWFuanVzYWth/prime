@@ -271,8 +271,9 @@ scene epoch 同时就绪后原子发布。Frame candidate 只在 host accept 后
 | visible motion / linear view-Z | `RG32F` / `R32F` |
 | reconstruction control | `R8_UINT` exact bits |
 | ray-cone push | binary16x2，LOD 误差 `<=1/512 mip` |
+| starmap | D65 linear Rec.2020 `BC6H_UFLOAT`，16K 单 mip；误差门禁见[灯光与大气采样](灯光与大气采样.md) |
 
-上表未列出的 normal/radiance/transport 连续数据、wavefront stride、SoA/AoS、medium 参数表、starmap 和
+上表未列出的 normal/radiance/transport 连续数据、wavefront stride、SoA/AoS、medium 参数表和
 backend target alias 仍属可替换编码。在新门禁通过前保留当前较高精度基线。
 
 ## 10. 变更门禁与文档边界

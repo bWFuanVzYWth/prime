@@ -7,7 +7,6 @@ import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "service/atmosphere/trace.slang";
 import "model/atmosphere/celestial.slang";
-import "math/color_space.slang";
 import "policy/runtime/config.slang";
 
 static const float PRIME_STARMAP_PI = 3.141592653589793;
@@ -33,8 +32,8 @@ public float3 primeStarmapRadianceUv(
     if (all(transmittance <= float3(0.0))) {
         return float3(0.0);
     }
-    float3 source = max(primeStarmap.SampleLevel(uv, 0.0).rgb, float3(0.0));
-    return primeLinearSrgbToLinearRec2020(source) * scale * transmittance;
+    // The offline BC6H asset already contains nonnegative linear Rec.2020 radiance.
+    return primeStarmap.SampleLevel(uv, 0.0).rgb * scale * transmittance;
 }
 
 public float3 primeStarmapRadiance(

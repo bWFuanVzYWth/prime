@@ -107,8 +107,8 @@ Vulkan 错误。NVIDIA 给出可验证修复前，不把该功能移动到常规
   光只能由 BSDF 路径命中，可能极难收敛。Prime 不实现或暴露 MNEE 模式。
 - HDR 世界与原版 UI 的最终 alpha 合成不能精确恢复 UI 目标中已经执行的非 source-over 混合；
   当前接受该显示近似。
-- NASA 星图保持当前 scene-linear RGB 数值，但来源未提供 primaries、white point 或 EXR
-  `chromaticities`，因此色度解释未知。
+- NASA 星图延续既有 linear-sRGB 解释，在离线预处理时转为 Rec.2020 BC6H；来源未提供
+  primaries、white point 或 EXR `chromaticities`，因此该源色度解释仍未获证实。
 - LabPBR 厚材质的 SSS 明确降级为 diffuse；介电 F0 在输入翻译边界清洗到 `[0.02, 0.17]`。
   两者都是稳定策略，不属于 compact OpenPBR 数学中的未修缺陷。
 - 太阳体积阴影只近似单方向太阳可见性，不表示半球天空、局部灯光或参与介质多次散射。

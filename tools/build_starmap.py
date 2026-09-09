@@ -1,216 +1,198 @@
 #!/usr/bin/env python3
 # Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
 
-"""Build Prime's lossless GPU starmap resources from NASA's 2020 EXR."""
-
+"""Offline NASA 16K EXR to linear Rec.2020 BC6H; no runtime transcoder."""
 from __future__ import annotations
 
 import argparse
 import gzip
 import hashlib
 import json
+import struct
+import subprocess
 from pathlib import Path
 
+import Imath
 import numpy as np
 import OpenEXR
-import Imath
 
-
-SOURCE_SHA256 = "dc6c4f413e85707a29a25a9451148154554ecca2c996f84fa8f47b65ef9ff7c4"
-WIDTH = 8192
-HEIGHT = 4096
-STRIPE_ROWS = 1024
-IMPORTANCE_WIDTH = 1024
-IMPORTANCE_HEIGHT = 512
-SOURCE_URL = "https://svs.gsfc.nasa.gov/4851/"
-CREDIT = (
-    "NASA/Goddard Space Flight Center Scientific Visualization Studio. "
-    "Gaia DR2: ESA/Gaia/DPAC. Constellation figures based on those developed "
-    "for the IAU by Alan MacRobert of Sky and Telescope magazine "
-    "(Roger Sinnott and Rick Fienberg)."
-)
+SOURCE_SHA256 = "19a1351f00c386a6e5eec4d67af96d5fc71edf6a1189941579b9498b52e7589a"
+TEXCONV_SHA256 = "dcfdec10244e02cf5037fba089c55fb7e1326b1c8181742d77d15fa5cb5eef06"
+WIDTH, HEIGHT, STRIPE_ROWS = 16384, 8192, 2048
+NAME = "starmap_2020_16k"
+MATRIX = np.array(((0.6274039, 0.3292830, 0.0433131),
+                   (0.0690973, 0.9195404, 0.0113623),
+                   (0.0163914, 0.0880133, 0.8955953)), dtype=np.float32)
+LUMA = np.array((0.2627, 0.6780, 0.0593), dtype=np.float32)
+# Relative to the uncompressed 16K working-space image, without exposure/tone mapping.
+LIMITS = {"rgbNrmse": 0.08, "luminanceNrmse": 0.06,
+          "sphericalEnergyRelativeError": 0.01, "brightLuminanceNrmse": 0.06}
 
 
 def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
     with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def write_gzip(path: Path, data: memoryview) -> str:
-    digest = hashlib.sha256()
-    with path.open("wb") as raw:
-        with gzip.GzipFile(
-            filename="",
-            mode="wb",
-            fileobj=raw,
-            compresslevel=9,
-            mtime=0,
-        ) as compressed:
-            for offset in range(0, len(data), 1024 * 1024):
-                chunk = data[offset : offset + 1024 * 1024]
-                compressed.write(chunk)
-                digest.update(chunk)
-    return digest.hexdigest()
+def dds_header(width: int, height: int) -> bytes:
+    words = [124, 0x100F, height, width, width * 16, 0, 1] + [0] * 11
+    words += [32, 4, int.from_bytes(b"DX10", "little"), 0, 0, 0, 0, 0]
+    words += [0x1000, 0, 0, 0, 0]
+    return b"DDS " + struct.pack("<31I", *words) + struct.pack("<5I", 2, 3, 0, 1, 0)
 
 
-def build_alias_table(masses: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    flat = masses.ravel()
-    total = float(flat.sum(dtype=np.float64))
-    if not np.isfinite(total) or not total > 0.0:
-        raise ValueError("Starmap importance mass must be finite and positive")
-    probability = flat / total
-    count = probability.size
-    scaled = probability * count
-    threshold = np.empty(count, dtype="<f4")
-    alias = np.arange(count, dtype="<u4")
-    small = [int(index) for index in np.flatnonzero(scaled < 1.0)]
-    large = [int(index) for index in np.flatnonzero(scaled >= 1.0)]
-    while small and large:
-        low = small.pop()
-        high = large.pop()
-        threshold[low] = scaled[low]
-        alias[low] = high
-        scaled[high] = scaled[high] - (1.0 - scaled[low])
-        (small if scaled[high] < 1.0 else large).append(high)
-    for index in small + large:
-        threshold[index] = 1.0
-        alias[index] = index
-    records = np.empty(
-        count,
-        dtype=np.dtype([
-            ("threshold", "<f4"),
-            ("alias", "<u4"),
-            ("probability_mass", "<f4"),
-        ]),
-    )
-    records["threshold"] = threshold
-    records["alias"] = alias
-    records["probability_mass"] = probability.astype("<f4")
-    return records, probability
+def check_dds(path: Path, width: int, height: int, dxgi: int) -> None:
+    with path.open("rb") as f:
+        header = f.read(148)
+    if len(header) != 148 or header[:4] != b"DDS ":
+        raise ValueError(f"Invalid DDS: {path}")
+    words = struct.unpack_from("<31I", header, 4)
+    extension = struct.unpack_from("<5I", header, 128)
+    if (words[0], words[2], words[3], words[6], words[18], words[20]) != (
+            124, height, width, 1, 32, int.from_bytes(b"DX10", "little")):
+        raise ValueError(f"DDS layout mismatch: {path}")
+    if extension[:4] != (dxgi, 3, 0, 1):
+        raise ValueError(f"DDS format/array mismatch: {path}")
+    size = width * height if dxgi == 95 else width * height * 16
+    if path.stat().st_size != 148 + size:
+        raise ValueError(f"DDS data size mismatch: {path}")
+
+
+def write_gzip(path: Path, data: bytes) -> dict:
+    with path.open("wb") as stream:
+        with gzip.GzipFile(filename="", fileobj=stream, mode="wb", mtime=0, compresslevel=9) as f:
+            f.write(data)
+    return {"name": path.name, "uncompressedBytes": len(data),
+            "uncompressedSha256": hashlib.sha256(data).hexdigest(),
+            "compressedBytes": path.stat().st_size, "compressedSha256": sha256(path)}
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("source", type=Path)
-    parser.add_argument("output", type=Path)
-    args = parser.parse_args()
-
-    source = args.source.resolve()
-    output = args.output.resolve()
-    source_hash = sha256(source)
-    if source_hash != SOURCE_SHA256:
-        raise ValueError(
-            f"Unexpected source SHA-256 {source_hash}; expected {SOURCE_SHA256}"
-        )
-
-    exr = OpenEXR.InputFile(str(source))
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("source", type=Path)
+    p.add_argument("output", type=Path)
+    p.add_argument("--texconv", required=True, type=Path,
+                   help="DirectXTex may2026 texconv.exe (2026.5.8.1), verified by SHA-256")
+    p.add_argument("--work", required=True, type=Path, help="Intermediate DDS/error report directory")
+    p.add_argument("--fixture", type=Path, help="Independent decoder samples for Vulkan regression")
+    args = p.parse_args()
+    if sha256(args.source) != SOURCE_SHA256 or sha256(args.texconv) != TEXCONV_SHA256:
+        raise ValueError("Source or texconv SHA-256 does not match the pinned asset/tool")
+    args.output.mkdir(parents=True, exist_ok=True)
+    work = args.work.resolve()
+    for name in ("source", "bc6h", "decoded"):
+        (work / name).mkdir(parents=True, exist_ok=True)
+    exr = OpenEXR.InputFile(str(args.source))
     try:
         header = exr.header()
-        window = header["dataWindow"]
-        width = window.max.x - window.min.x + 1
-        height = window.max.y - window.min.y + 1
-        if (width, height) != (WIDTH, HEIGHT):
-            raise ValueError(f"Unexpected EXR extent {width}x{height}")
-        channels = header["channels"]
-        if set(channels) != {"R", "G", "B"}:
-            raise ValueError(f"Unexpected EXR channels {sorted(channels)}")
-        half = Imath.PixelType(Imath.PixelType.HALF)
-        red = np.frombuffer(exr.channel("R", half), dtype="<f2").reshape(HEIGHT, WIDTH)
-        green = np.frombuffer(exr.channel("G", half), dtype="<f2").reshape(HEIGHT, WIDTH)
-        blue = np.frombuffer(exr.channel("B", half), dtype="<f2").reshape(HEIGHT, WIDTH)
+        w = header["dataWindow"]
+        if (w.min.x, w.min.y, w.max.x, w.max.y) != (0, 0, WIDTH-1, HEIGHT-1):
+            raise ValueError("Unexpected EXR extent/origin")
+        if set(header["channels"]) != {"R", "G", "B"} or "chromaticities" in header:
+            raise ValueError("EXR no longer matches the reviewed source colorimetry rule")
+        channels = [np.frombuffer(exr.channel(c, Imath.PixelType(Imath.PixelType.HALF)),
+                                  dtype="<f2").reshape(HEIGHT, WIDTH) for c in ("R", "G", "B")]
     finally:
         exr.close()
-
-    output.mkdir(parents=True, exist_ok=True)
-    files: list[dict[str, object]] = []
-    for stripe, first_row in enumerate(range(0, HEIGHT, STRIPE_ROWS)):
-        rows = min(STRIPE_ROWS, HEIGHT - first_row)
-        rgba = np.empty((rows, WIDTH, 4), dtype="<f2")
-        rgba[:, :, 0] = red[first_row : first_row + rows]
-        rgba[:, :, 1] = green[first_row : first_row + rows]
-        rgba[:, :, 2] = blue[first_row : first_row + rows]
-        rgba[:, :, 3] = np.float16(1.0)
-        path = output / f"starmap_2020_8k_{stripe}.rgba16f.gz"
-        raw_hash = write_gzip(path, memoryview(rgba).cast("B"))
-        files.append({
-            "name": path.name,
-            "firstRow": first_row,
-            "rows": rows,
-            "uncompressedBytes": int(rgba.nbytes),
-            "uncompressedSha256": raw_hash,
-            "compressedBytes": path.stat().st_size,
-            "compressedSha256": sha256(path),
-        })
-        print(f"wrote {path.name}: {path.stat().st_size / (1024 * 1024):.1f} MiB")
-
-    cell_width = WIDTH // IMPORTANCE_WIDTH
-    cell_height = HEIGHT // IMPORTANCE_HEIGHT
-    masses = np.zeros((IMPORTANCE_HEIGHT, IMPORTANCE_WIDTH), dtype=np.float64)
-    delta_ra = 2.0 * np.pi / WIDTH
-    for cell_y in range(IMPORTANCE_HEIGHT):
-        first_row = cell_y * cell_height
-        rows = np.arange(first_row, first_row + cell_height, dtype=np.float64)
-        declination_top = 0.5 * np.pi - np.pi * rows / HEIGHT
-        declination_bottom = 0.5 * np.pi - np.pi * (rows + 1.0) / HEIGHT
-        pixel_solid_angle = delta_ra * (
-            np.sin(declination_top) - np.sin(declination_bottom)
-        )
-        luminance = (
-            red[first_row : first_row + cell_height].astype(np.float32) * 0.2126
-            + green[first_row : first_row + cell_height].astype(np.float32) * 0.7152
-            + blue[first_row : first_row + cell_height].astype(np.float32) * 0.0722
-        )
-        weighted = luminance * pixel_solid_angle[:, None]
-        masses[cell_y] = weighted.reshape(
-            cell_height, IMPORTANCE_WIDTH, cell_width
-        ).sum(axis=(0, 2), dtype=np.float64)
-
-    alias, probability = build_alias_table(masses)
-    alias_path = output / "starmap_2020_8k.alias.gz"
-    alias_raw_hash = write_gzip(alias_path, memoryview(alias).cast("B"))
-    print(f"wrote {alias_path.name}: {alias_path.stat().st_size / (1024 * 1024):.1f} MiB")
+    for channel in channels:
+        if not np.all(np.isfinite(channel)) or np.any(channel < 0):
+            raise ValueError("BC6H_UFLOAT source must be finite and nonnegative")
+    sums = np.zeros(8, dtype=np.float64)
+    max_error = 0.0
+    samples, files = [], []
+    rng = np.random.default_rng(4851)
+    for stripe, first in enumerate(range(0, HEIGHT, STRIPE_ROWS)):
+        base = f"{NAME}_{stripe}"
+        original = work / "source" / (base + ".dds")
+        # Preserve the existing source-linear-sRGB interpretation once at asset build time.
+        rgba = np.empty((STRIPE_ROWS, WIDTH, 4), dtype="<f4")
+        for start in range(0, STRIPE_ROWS, 64):
+            rgb = np.stack([c[first+start:first+start+64] for c in channels], axis=-1).astype(np.float32)
+            rgba[start:start+64, :, :3] = rgb @ MATRIX.T
+        rgba[:, :, 3] = 1
+        with original.open("wb") as f:
+            f.write(dds_header(WIDTH, STRIPE_ROWS))
+            rgba.tofile(f)
+        subprocess.run([str(args.texconv.resolve()), "-nologo", "-y", "-dx10", "-m", "1", "-f", "BC6H_UF16",
+                        "-gpu", "0", "-o", str(work / "bc6h"), str(original)], check=True)
+        compressed = work / "bc6h" / (base + ".dds")
+        check_dds(compressed, WIDTH, STRIPE_ROWS, 95)
+        subprocess.run([str(args.texconv.resolve()), "-nologo", "-y", "-dx10", "-m", "1", "-f", "R32G32B32A32_FLOAT",
+                        "-o", str(work / "decoded"), str(compressed)], check=True)
+        decoded_path = work / "decoded" / (base + ".dds")
+        check_dds(decoded_path, WIDTH, STRIPE_ROWS, 2)
+        decoded = np.memmap(decoded_path, dtype="<f4", mode="r", offset=148, shape=rgba.shape)
+        for start in range(0, STRIPE_ROWS, 64):
+            ref = rgba[start:start+64, :, :3]
+            out = decoded[start:start+64, :, :3]
+            if not np.all(np.isfinite(out)) or np.any(out < 0) or not np.all(decoded[start:start+64, :, 3] == 1):
+                raise ValueError("Invalid BC6H decoded values")
+            error = out - ref
+            lum, actual = ref @ LUMA, out @ LUMA
+            diff = actual - lum
+            bright = lum >= 0.1
+            rows = np.arange(first+start, first+start+ref.shape[0], dtype=np.float64)
+            weight = np.cos(np.pi * rows / HEIGHT) - np.cos(np.pi * (rows+1) / HEIGHT)
+            sums += [np.sum(error.astype(np.float64)**2), np.sum(ref.astype(np.float64)**2),
+                     np.sum(diff.astype(np.float64)**2), np.sum(lum.astype(np.float64)**2),
+                     np.sum(actual * weight[:, None]), np.sum(lum * weight[:, None]),
+                     np.sum(diff[bright].astype(np.float64)**2), np.sum(lum[bright].astype(np.float64)**2)]
+            max_error = max(max_error, float(np.max(np.abs(error))))
+        coords = [(0, 0), (WIDTH-1, 0), (0, STRIPE_ROWS-1), (WIDTH-1, STRIPE_ROWS-1),
+                  (WIDTH//2, STRIPE_ROWS//2)]
+        coords += list(zip(rng.integers(1, WIDTH-1, 64), rng.integers(1, STRIPE_ROWS-1, 64)))
+        for row in range(0, STRIPE_ROWS, 128):
+            coords.append((int(np.argmax(rgba[row, :, :3] @ LUMA)), row))
+        for x, y in coords:
+            samples.append({"x": int(x), "y": int(first+y), "rgb": decoded[y, x, :3].tolist()})
+        print(f"Encoded and measured stripe {stripe}", flush=True)
+        del decoded, rgba
+    metrics = {"rgbNrmse": float(np.sqrt(sums[0]/sums[1])),
+               "luminanceNrmse": float(np.sqrt(sums[2]/sums[3])),
+               "sphericalEnergyRelativeError": float(abs(sums[4]/sums[5]-1)),
+               "brightLuminanceNrmse": float(np.sqrt(sums[6]/sums[7])),
+               "maxAbsoluteChannelError": max_error}
+    report = {"reference": "Uncompressed 16K source mapped to linear Rec.2020; no exposure/tone mapping",
+              "metrics": metrics, "limits": LIMITS}
+    (work / "quality.json").write_text(json.dumps(report, indent=2)+"\n", encoding="utf-8")
+    print(json.dumps(report, indent=2), flush=True)
+    if any(metrics[k] > v for k, v in LIMITS.items()):
+        raise ValueError("BC6H asset exceeds quality limits; manifest not published")
+    decoded_stripes = [np.memmap(work / "decoded" / f"{NAME}_{i}.dds", dtype="<f4", mode="r",
+                                offset=148, shape=(STRIPE_ROWS, WIDTH, 4)) for i in range(HEIGHT // STRIPE_ROWS)]
+    def pixel(x: int, y: int) -> np.ndarray:
+        return decoded_stripes[y // STRIPE_ROWS][y % STRIPE_ROWS, x, :3]
+    for sample in samples:
+        x, y = sample["x"], sample["y"]
+        right, below = min(x+1, WIDTH-1), min(y+1, HEIGHT-1)
+        sample["filteredRgb"] = ((pixel(x,y)+pixel(right,y)+pixel(x,below)+pixel(right,below))*0.25).tolist()
+    for stripe, first in enumerate(range(0, HEIGHT, STRIPE_ROWS)):
+        base = f"{NAME}_{stripe}"
+        with (work / "bc6h" / (base + ".dds")).open("rb") as f:
+            f.seek(148)
+            data = f.read()
+        record = write_gzip(args.output / (base + ".bc6h.gz"), data)
+        files.append({**record, "firstRow": first, "rows": STRIPE_ROWS})
+        print(f"Published stripe {stripe}: {record['compressedBytes']} packaged bytes", flush=True)
     manifest = {
-        "version": 1,
-        "source": {
-            "name": source.name,
-            "url": SOURCE_URL,
-            "sha256": source_hash,
-            "projection": (
-                "plate carree celestial ICRF/J2000; centered at 0h right ascension; "
-                "right ascension increases to the left"
-            ),
-            "encoding": "scene-linear RGB, primaries and white point unknown, OpenEXR HALF",
-            "credit": CREDIT,
-        },
-        "image": {
-            "width": WIDTH,
-            "height": HEIGHT,
-            "format": "little-endian RGBA16F; RGB preserves source HALF bits; A is 1",
-            "stripes": files,
-        },
-        "importance": {
-            "width": IMPORTANCE_WIDTH,
-            "height": IMPORTANCE_HEIGHT,
-            "cellWidth": cell_width,
-            "cellHeight": cell_height,
-            "format": "little-endian records: float threshold, uint alias, float probability mass",
-            "uncompressedBytes": int(alias.nbytes),
-            "uncompressedSha256": alias_raw_hash,
-            "compressedBytes": alias_path.stat().st_size,
-            "compressedSha256": sha256(alias_path),
-            "probabilitySum": float(probability.sum(dtype=np.float64)),
-        },
-    }
-    manifest_path = output / "starmap_2020_8k.json"
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    print(f"wrote {manifest_path.name}")
+        "version": 2,
+        "source": {"name": "starmap_2020_16k.exr", "sha256": SOURCE_SHA256,
+                   "url": "https://svs.gsfc.nasa.gov/4851/",
+                   "projection": "plate carree ICRF/J2000; RA 0h at center, RA increases left",
+                   "encoding": "scene-linear RGB HALF; source primaries/white point unspecified",
+                   "interpretation": "Preserve Prime's source-linear-sRGB interpretation; convert once to D65 linear Rec.2020",
+                   "toRec2020": MATRIX.tolist()},
+        "encoder": {"name": "Microsoft DirectXTex texconv", "version": "2026.5.8.1 (may2026)",
+                    "sha256": TEXCONV_SHA256, "mode": "BC6H_UF16 DirectCompute; one mip, no resize/gamma/tonemap"},
+        "image": {"width": WIDTH, "height": HEIGHT, "mipLevels": 1,
+                  "format": "VK_FORMAT_BC6H_UFLOAT_BLOCK", "colorSpace": "D65 linear Rec.2020",
+                  "blockWidth": 4, "blockHeight": 4, "blockBytes": 16, "stripes": files},
+        "quality": report}
+    (args.output / (NAME + ".json")).write_text(json.dumps(manifest, indent=2)+"\n", encoding="utf-8")
+    if args.fixture:
+        args.fixture.parent.mkdir(parents=True, exist_ok=True)
+        args.fixture.write_text(json.dumps({"sourceSha256": SOURCE_SHA256, "samples": samples}, indent=2)+"\n",
+                                encoding="utf-8")
 
 
 if __name__ == "__main__":

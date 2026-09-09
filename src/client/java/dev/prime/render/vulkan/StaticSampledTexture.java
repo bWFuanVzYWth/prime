@@ -4,6 +4,7 @@ package dev.prime.render.vulkan;
 
 import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.infrastructure.ResourceCleanup;
+import dev.prime.render.shader.ShaderAbi;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -24,11 +25,12 @@ final class StaticSampledTexture implements Destroyable {
     private static final int LUT_HEIGHT = 32;
     private static final int LUT_DEPTH = 159;
     private static final int LUT_BYTES = LUT_WIDTH * LUT_HEIGHT * LUT_DEPTH * 4 * Short.BYTES;
-    private static final int STARMAP_WIDTH = 8192;
-    private static final int STARMAP_HEIGHT = 4096;
-    private static final int STARMAP_STRIPE_ROWS = 1024;
+    private static final int STARMAP_WIDTH = ShaderAbi.STARMAP_WIDTH;
+    private static final int STARMAP_HEIGHT = ShaderAbi.STARMAP_HEIGHT;
+    private static final int STARMAP_STRIPE_ROWS = ShaderAbi.STARMAP_STRIPE_ROWS;
+    // BC6H stores one 16-byte block per 4x4 texels. Copy extents remain in texels.
     private static final int STARMAP_STRIPE_BYTES =
-            STARMAP_WIDTH * STARMAP_STRIPE_ROWS * 4 * Short.BYTES;
+            (STARMAP_WIDTH / 4) * (STARMAP_STRIPE_ROWS / 4) * 16;
 
     private final VulkanContext context;
     private final String label;
@@ -97,21 +99,21 @@ final class StaticSampledTexture implements Destroyable {
 
     static StaticSampledTexture starmap(VulkanContext context) {
         VulkanImage image = null;
-        VulkanBuffer[] uploads = new VulkanBuffer[4];
+        VulkanBuffer[] uploads = new VulkanBuffer[STARMAP_HEIGHT / STARMAP_STRIPE_ROWS];
         long sampler = 0L;
         try {
             image = context.createImage2D(
                     STARMAP_WIDTH,
                     STARMAP_HEIGHT,
-                    VK12.VK_FORMAT_R16G16B16A16_SFLOAT,
+                    VK12.VK_FORMAT_BC6H_UFLOAT_BLOCK,
                     VK12.VK_IMAGE_USAGE_SAMPLED_BIT | VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                    "Prime NASA 2020 starmap");
+                    "Prime NASA 2020 16K BC6H starmap");
             for (int index = 0; index < uploads.length; index++) {
                 uploads[index] = createUpload(
                         context,
                         STARMAP_STRIPE_BYTES,
                         "Prime starmap stripe " + index + " upload",
-                        "/prime/starmap/starmap_2020_8k_" + index + ".rgba16f.gz");
+                        "/prime/starmap/starmap_2020_16k_" + index + ".bc6h.gz");
             }
             sampler = createSampler(
                     context,

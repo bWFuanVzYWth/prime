@@ -53,4 +53,4 @@ BSD-3-Clause FastNoise implementation. See `FASTNOISE-NOTICE.txt`.
 
 Prime's night sky uses NASA Scientific Visualization Studio's Deep Star Maps
 2020 with Gaia DR2 data. See `NASA-DEEP-STAR-MAPS-2020-NOTICE.md` for the
-source, lossless repacking details, and requested attribution.
+source, BC6H preprocessing details, and requested attribution.

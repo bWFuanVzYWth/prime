@@ -1,0 +1,98 @@
+{
+  "version": 2,
+  "source": {
+    "name": "starmap_2020_16k.exr",
+    "sha256": "19a1351f00c386a6e5eec4d67af96d5fc71edf6a1189941579b9498b52e7589a",
+    "url": "https://svs.gsfc.nasa.gov/4851/",
+    "projection": "plate carree ICRF/J2000; RA 0h at center, RA increases left",
+    "encoding": "scene-linear RGB HALF; source primaries/white point unspecified",
+    "interpretation": "Preserve Prime's source-linear-sRGB interpretation; convert once to D65 linear Rec.2020",
+    "toRec2020": [
+      [
+        0.6274039149284363,
+        0.3292829990386963,
+        0.043313100934028625
+      ],
+      [
+        0.06909730285406113,
+        0.9195404052734375,
+        0.011362300254404545
+      ],
+      [
+        0.01639140024781227,
+        0.08801329880952835,
+        0.8955953121185303
+      ]
+    ]
+  },
+  "encoder": {
+    "name": "Microsoft DirectXTex texconv",
+    "version": "2026.5.8.1 (may2026)",
+    "sha256": "dcfdec10244e02cf5037fba089c55fb7e1326b1c8181742d77d15fa5cb5eef06",
+    "mode": "BC6H_UF16 DirectCompute; one mip, no resize/gamma/tonemap"
+  },
+  "image": {
+    "width": 16384,
+    "height": 8192,
+    "mipLevels": 1,
+    "format": "VK_FORMAT_BC6H_UFLOAT_BLOCK",
+    "colorSpace": "D65 linear Rec.2020",
+    "blockWidth": 4,
+    "blockHeight": 4,
+    "blockBytes": 16,
+    "stripes": [
+      {
+        "name": "starmap_2020_16k_0.bc6h.gz",
+        "uncompressedBytes": 33554432,
+        "uncompressedSha256": "3232ddb374f73d6b34047000c68fa169d4e1fab61d41db6c62da707b264d5334",
+        "compressedBytes": 30042756,
+        "compressedSha256": "cdf2cab32096b34db2897b564f3efcb46238777012b895b30ac66a97f791adb0",
+        "firstRow": 0,
+        "rows": 2048
+      },
+      {
+        "name": "starmap_2020_16k_1.bc6h.gz",
+        "uncompressedBytes": 33554432,
+        "uncompressedSha256": "313fe015b269fff44b3165e2b9b87cd9b03705ae1111ba260ed727fc2b323bae",
+        "compressedBytes": 30689282,
+        "compressedSha256": "cb8da9b748529ff8de2afe5686f278bdfc6b1d00f24afca91278417d2e71cbf3",
+        "firstRow": 2048,
+        "rows": 2048
+      },
+      {
+        "name": "starmap_2020_16k_2.bc6h.gz",
+        "uncompressedBytes": 33554432,
+        "uncompressedSha256": "b56e1cacc0aa44dc412853f63865e5d8bdcf7b782eefc11d35d52a29f36f0981",
+        "compressedBytes": 31025950,
+        "compressedSha256": "f6edb3a5ff3b7bdf827936422bed5e5604f46155585cad6a4f599e6ebfb5b7d4",
+        "firstRow": 4096,
+        "rows": 2048
+      },
+      {
+        "name": "starmap_2020_16k_3.bc6h.gz",
+        "uncompressedBytes": 33554432,
+        "uncompressedSha256": "84e1f41ca4f78d699c7ec2f309b0fac16b6dcd8faa780022059dfa30d17f50a4",
+        "compressedBytes": 31281919,
+        "compressedSha256": "bc764f8b089e8970c0cbb9f79d3c8e72d6955662dd5467d7675e44e273dcb6de",
+        "firstRow": 6144,
+        "rows": 2048
+      }
+    ]
+  },
+  "quality": {
+    "reference": "Uncompressed 16K source mapped to linear Rec.2020; no exposure/tone mapping",
+    "metrics": {
+      "rgbNrmse": 0.07055116775069811,
+      "luminanceNrmse": 0.05778335431042444,
+      "sphericalEnergyRelativeError": 0.00655556154509096,
+      "brightLuminanceNrmse": 0.057532757974385715,
+      "maxAbsoluteChannelError": 0.3827363848686218
+    },
+    "limits": {
+      "rgbNrmse": 0.08,
+      "luminanceNrmse": 0.06,
+      "sphericalEnergyRelativeError": 0.01,
+      "brightLuminanceNrmse": 0.06
+    }
+  }
+}

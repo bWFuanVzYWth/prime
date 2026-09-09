@@ -1,15 +1,17 @@
 # NASA Deep Star Maps 2020 notice
 
-Prime includes a losslessly repacked copy of `starmap_2020_8k.exr` from
+Prime includes a preprocessed, lossy BC6H copy of `starmap_2020_16k.exr` from
 [NASA SVS Deep Star Maps 2020](https://svs.gsfc.nasa.gov/4851/). The source
-image is the 8192×4096 plate carrée celestial map in ICRF/J2000 coordinates,
+image is the 16384×8192 plate carrée celestial map in ICRF/J2000 coordinates,
 centered at 0h right ascension with right ascension increasing to the left.
-Prime preserves the source RGB OpenEXR HALF values and adds an opaque alpha
-channel for direct GPU upload. A derived low-resolution importance table is
-used only to reduce path-tracing variance.
+Prime retains its existing linear-sRGB interpretation and converts the source
+RGB to D65 linear Rec.2020 before BC6H unsigned-float encoding. The EXR does
+not specify primaries or white point; this interpretation is not a claim about
+NASA's source colorimetry. No exposure, tone mapping, resize or resampling is
+applied. Compressed blocks are uploaded directly with one mip level.
 
 Source SHA-256:
-`DC6C4F413E85707A29A25A9451148154554ECCA2C996F84FA8F47B65EF9FF7C4`
+`19a1351f00c386a6e5eec4d67af96d5fc71edf6a1189941579b9498b52e7589a`
 
 Please give credit for this item to:
 

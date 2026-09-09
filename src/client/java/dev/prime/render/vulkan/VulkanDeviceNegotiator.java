@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vulkan.VulkanBackend;
 import com.mojang.blaze3d.vulkan.VulkanPhysicalDevice;
 import com.mojang.blaze3d.vulkan.init.VulkanFeature;
 import com.mojang.blaze3d.vulkan.init.VulkanPNextStruct;
+import dev.prime.render.shader.ShaderAbi;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -51,6 +52,10 @@ public final class VulkanDeviceNegotiator {
             VulkanBackend.VK10_FEATURES_STRUCT,
             "shaderInt64",
             VkPhysicalDeviceFeatures.SHADERINT64);
+    private static final VulkanFeature TEXTURE_COMPRESSION_BC = new VulkanFeature(
+            VulkanBackend.VK10_FEATURES_STRUCT,
+            "textureCompressionBC",
+            VkPhysicalDeviceFeatures.TEXTURECOMPRESSIONBC);
     private static final VulkanFeature SHADER_INT16 = new VulkanFeature(
             VulkanBackend.VK10_FEATURES_STRUCT,
             "shaderInt16",
@@ -182,6 +187,9 @@ public final class VulkanDeviceNegotiator {
             if (!features.features().shaderInt64()) {
                 missing.add("shaderInt64");
             }
+            if (!features.features().textureCompressionBC()) {
+                missing.add("textureCompressionBC (BC6H starmap)");
+            }
             if (!features.features().shaderStorageImageExtendedFormats()) {
                 missing.add("shaderStorageImageExtendedFormats");
             }
@@ -242,6 +250,24 @@ public final class VulkanDeviceNegotiator {
             VK12.vkGetPhysicalDeviceProperties2(physicalDevice.vkPhysicalDevice(), properties);
 
             var limits = properties.properties().limits();
+            VkImageFormatProperties starmapProperties = VkImageFormatProperties.calloc(stack);
+            int starmapResult = VK12.vkGetPhysicalDeviceImageFormatProperties(
+                    physicalDevice.vkPhysicalDevice(), VK12.VK_FORMAT_BC6H_UFLOAT_BLOCK,
+                    VK12.VK_IMAGE_TYPE_2D, VK12.VK_IMAGE_TILING_OPTIMAL,
+                    VK12.VK_IMAGE_USAGE_SAMPLED_BIT | VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                    0, starmapProperties);
+            VkFormatProperties starmapFormat = VkFormatProperties.calloc(stack);
+            VK12.vkGetPhysicalDeviceFormatProperties(
+                    physicalDevice.vkPhysicalDevice(), VK12.VK_FORMAT_BC6H_UFLOAT_BLOCK, starmapFormat);
+            int starmapFeatures = VK12.VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT
+                    | VK12.VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+            if (starmapResult != VK12.VK_SUCCESS
+                    || starmapProperties.maxExtent().width() < ShaderAbi.STARMAP_WIDTH
+                    || starmapProperties.maxExtent().height() < ShaderAbi.STARMAP_HEIGHT
+                    || (starmapFormat.optimalTilingFeatures() & starmapFeatures) != starmapFeatures) {
+                return VulkanCapabilities.unavailable(deviceName,
+                        "16K BC6H linearly filtered sampled/transfer images required for the starmap are not supported");
+            }
             if (limits.maxDescriptorSetStorageBuffers() < 5) {
                 return VulkanCapabilities.unavailable(deviceName,
                         "At least five scene storage-buffer descriptors are required");
@@ -340,6 +366,7 @@ public final class VulkanDeviceNegotiator {
                 enabledExtensions.addAll(FIDELITY_FX_BACKEND_EXTENSIONS);
             }
             enabledFeatures.add(SHADER_INT64);
+            enabledFeatures.add(TEXTURE_COMPRESSION_BC);
             enabledFeatures.add(STORAGE_IMAGE_EXTENDED_FORMATS);
             enabledFeatures.add(STORAGE_IMAGE_READ_WITHOUT_FORMAT);
             enabledFeatures.add(STORAGE_IMAGE_WRITE_WITHOUT_FORMAT);

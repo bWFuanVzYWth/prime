@@ -37,7 +37,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				java.security.MessageDigest.getInstance('SHA-256')
 						.digest(schemaFile.get().asFile.getText('UTF-8')
 								.replace('\r\n', '\n').getBytes('UTF-8')))
-		if (schemaSha256 != 'ebcb8fc699d4a282f309e6f48a831ab4576e013272760637e6882ae5faee3c52') {
+		if (schemaSha256 != 'dc2016e1a26389860eee996440442c36cc1421be4c8b1c42a6889f396c958c47') {
 			throw new GradleException(
 					'Prime shader ABI changed without updating its reviewed contract hash')
 		}
@@ -260,9 +260,8 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		}, [:], [:], [
 			worldUnitScaleKm: { it * atmosphereContract.worldToAtmosphereScale },
 			aerialMaxDistanceKm: { it * atmosphereContract.worldToAtmosphereScale }])
-		appendSlangTypes('STARMAP', starmapContract.findAll {
-			it.key != 'sourceSha256'
-		})
+		// Image extent, upload stripes and source identity belong to the host asset boundary.
+		appendSlangTypes('STARMAP', [baseRadianceScale: starmapContract.baseRadianceScale])
 		def slangStructs = abiStructs.findAll {
 			it.key != 'WAVEFRONT_SURFACE_RECORD'
 		}.collect { prefix, pair ->

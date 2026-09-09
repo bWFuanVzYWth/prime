@@ -163,9 +163,7 @@ final class ShaderComputeRunner implements AutoCloseable {
             int depth) {
         requireOpen();
         validateImageBinding(binding, dimension, width, height, depth);
-        int byteSize = Math.multiplyExact(
-                Math.multiplyExact(Math.multiplyExact(width, height), depth),
-                format.bytesPerPixel());
+        int byteSize = format.byteSize(width, height, depth);
         ByteBuffer source = pixels.duplicate();
         if (source.remaining() != byteSize) {
             throw new IllegalArgumentException(
@@ -907,22 +905,32 @@ final class ShaderComputeRunner implements AutoCloseable {
     enum ImageFormat {
         R8G8B8A8_UNORM(VK12.VK_FORMAT_R8G8B8A8_UNORM, 4),
         R8G8B8A8_SRGB(VK12.VK_FORMAT_R8G8B8A8_SRGB, 4),
-        R16G16B16A16_SFLOAT(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, 4 * Short.BYTES);
+        R16G16B16A16_SFLOAT(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, 4 * Short.BYTES),
+        BC6H_UFLOAT_BLOCK(VK12.VK_FORMAT_BC6H_UFLOAT_BLOCK, 16, 4);
 
         private final int vkFormat;
-        private final int bytesPerPixel;
+        private final int blockBytes;
+        private final int blockExtent;
 
         ImageFormat(int vkFormat, int bytesPerPixel) {
+            this(vkFormat, bytesPerPixel, 1);
+        }
+
+        ImageFormat(int vkFormat, int blockBytes, int blockExtent) {
             this.vkFormat = vkFormat;
-            this.bytesPerPixel = bytesPerPixel;
+            this.blockBytes = blockBytes;
+            this.blockExtent = blockExtent;
         }
 
         int vkFormat() {
             return this.vkFormat;
         }
 
-        int bytesPerPixel() {
-            return this.bytesPerPixel;
+        int byteSize(int width, int height, int depth) {
+            int blocks = Math.multiplyExact(
+                    (width + this.blockExtent - 1) / this.blockExtent,
+                    (height + this.blockExtent - 1) / this.blockExtent);
+            return Math.multiplyExact(Math.multiplyExact(blocks, depth), this.blockBytes);
         }
     }
 
