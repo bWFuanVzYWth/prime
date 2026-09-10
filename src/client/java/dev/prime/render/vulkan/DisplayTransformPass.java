@@ -5,7 +5,7 @@ package dev.prime.render.vulkan;
 import com.mojang.blaze3d.vulkan.Destroyable;
 import dev.prime.render.DisplaySettings;
 import dev.prime.render.HdrOutput;
-import dev.prime.render.ReinhardAgxOutput;
+import dev.prime.render.RgbReinhardOutput;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.vulkan.VulkanDescriptors.BoundSet;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
@@ -203,15 +203,15 @@ public final class DisplayTransformPass implements Destroyable {
         java.util.Objects.requireNonNull(initialization, "initialization");
         VulkanImageTransitions.prepareOutputForComposite(
                 commandBuffer, initialization, this.hdrOutput);
-        ReinhardAgxOutput.Parameters reinhard =
-                ReinhardAgxOutput.parameters(HdrOutput.activeHeadroom());
+        float headroom = HdrOutput.activeHeadroom();
+        RgbReinhardOutput.Parameters reinhard = RgbReinhardOutput.parameters(headroom);
         try (MemoryStack stack = MemoryStack.stackPush()) {
             ByteBuffer push = stack.malloc(PUSH_SIZE).order(ByteOrder.nativeOrder());
             push.putInt(0, this.width);
             push.putInt(4, this.height);
             push.putFloat(8, display.finalExposureMultiplier());
-            push.putFloat(12, reinhard.outputPeak());
-            push.putFloat(16, reinhard.shoulderCoefficient());
+            push.putFloat(12, headroom);
+            push.putFloat(16, reinhard.curvePeak());
             this.program.dispatch(
                     commandBuffer,
                     stack,

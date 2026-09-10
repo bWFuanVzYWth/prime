@@ -29,7 +29,7 @@
 
 ## 渲染能力
 
-- 继续评估 Reinhard AgX 的 SDR/HDR shoulder 外观，重点实景验收太阳等中高亮区域。
+- 继续评估 RGB Reinhard 的 SDR/HDR shoulder 外观，重点实景验收太阳等中高亮区域。
   后续应明确 SDR 参考白以下的外观保持边界，并只用额外 headroom 展开 HDR 高光；
 - 场景几何 LOD；
 - 云渲染（细节待定）；

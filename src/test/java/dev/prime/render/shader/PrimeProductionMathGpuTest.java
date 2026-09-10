@@ -3,10 +3,13 @@
 package dev.prime.render.shader;
 
 import dev.prime.render.MaterialSettings;
-import dev.prime.render.ReinhardAgxOutput;
+import dev.prime.render.RgbReinhardOutput;
 import dev.prime.render.material.BuiltinMaterialClass;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.Test;
@@ -183,7 +186,7 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
     @Test
     void exposureAndDisplayCurvesUseTheProductionContract() throws IOException {
         int kinds = 9;
-        int inputWords = 2;
+        int inputWords = 3;
         ShaderPropertyBatch.assertProperties(
                 runner,
                 "prime_auto_exposure_properties.comp.spv",
@@ -192,6 +195,31 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
                 inputWords,
                 4,
                 AUTO_EXPOSURE_SEED);
+    }
+
+    @Test
+    void rgbReinhardMatchesWgslReference() throws IOException {
+        // Captured by tools/generate_rgb_reinhard_reference.py from the pinned WGSL.
+        try (var reader = new BufferedReader(new InputStreamReader(
+                java.util.Objects.requireNonNull(getClass().getResourceAsStream(
+                        "/prime/rgb_reinhard_reference.txt")), StandardCharsets.UTF_8))) {
+            var samples = reader.lines().filter(line -> !line.startsWith("#") && !line.isBlank())
+                    .map(line -> line.split(" ")).toList();
+            var input = ShaderTestBuffer.inputWriter(samples.size(), 3);
+            for (int index = 0; index < samples.size(); index++) {
+                String[] sample = samples.get(index);
+                var parameters = RgbReinhardOutput.parameters(Float.parseFloat(sample[0]));
+                input.putInt(index, 0, 0, 9);
+                input.putFloat(index, 0, 1, parameters.outputPeak());
+                input.putFloat(index, 0, 2, parameters.curvePeak());
+                for (int channel = 0; channel < 3; channel++) {
+                    input.putFloat(index, 1, channel, Float.parseFloat(sample[1 + channel]));
+                    input.putFloat(index, 2, channel, Float.parseFloat(sample[4 + channel]));
+                }
+            }
+            ShaderPropertyBatch.assertProperties(runner, "prime_auto_exposure_properties.comp.spv",
+                    input.buffer(), samples.size(), 3, 4, AUTO_EXPOSURE_SEED);
+        }
     }
 
     private static ByteBuffer autoExposureCases(int kinds, int inputWords) {
@@ -261,15 +289,14 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
                             blue,
                             random.nextInt(-12, 13));
                 } else if (kind == 6) {
-                    float headroom = switch ((local / 8) & 3) {
+                    float headroom = switch ((local / 16) & 3) {
                         case 0 -> 1.0F;
                         case 1 -> 4.0F;
                         case 2 -> 64.0F;
                         default -> 10_000.0F;
                     };
-                    ReinhardAgxOutput.Parameters curve =
-                            ReinhardAgxOutput.parameters(headroom);
-                    float curveInput = switch (local & 7) {
+                    RgbReinhardOutput.Parameters curve = RgbReinhardOutput.parameters(headroom);
+                    float curveInput = switch (local & 15) {
                         case 0 -> 0.0F;
                         case 1 -> 0.09F;
                         case 2 -> Math.nextUp(0.18F);
@@ -277,21 +304,25 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
                         case 4 -> 0.18F;
                         case 5 -> 0.1801F;
                         case 6 -> 0.18F * powerOfTwo(8) * headroom;
-                        default -> 0.18F * powerOfTwo(random.nextInt(-8, 101)) * headroom;
+                        case 7 -> Float.MAX_VALUE;
+                        case 8 -> -1.0F;
+                        case 9 -> 1.0E-30F;
+                        case 10 -> 0.0031308F;
+                        case 11 -> Math.nextUp(0.0031308F);
+                        default -> 0.18F * powerOfTwo(random.nextInt(-40, 121));
                     };
-                    double extent = headroom - 0.18;
-                    double logDistance = Math.log1p(Math.max(curveInput - 0.18, 0.0) / extent);
-                    double expected = curveInput <= 0.18F
-                            ? curveInput
-                            : 0.18 + extent / Math.pow(
-                                    Math.pow(logDistance, -5.0) + curve.shoulderCoefficient(), 1.0 / 5.0);
+                    double distance = Math.max(curveInput - 0.18, 0.0);
+                    double extent = curve.curvePeak() - 0.18;
+                    // Evaluate the reference form in double, independently of the GPU's stable quotient.
+                    double expected = curveInput <= 0.18F ? Math.max(curveInput, 0.0)
+                            : 0.18 + distance / (1.0 + distance / extent);
                     input.putVec4(
                             index,
                             1,
                             curveInput,
                             (float) expected,
-                            curve.shoulderCoefficient(),
-                            headroom);
+                            curve.curvePeak(),
+                            curve.outputPeak());
                 } else {
                     float red = random.nextFloat() * 4.0F;
                     float green = random.nextFloat() * 4.0F;
@@ -315,6 +346,11 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
                                 default -> 10_000.0F;
                             };
                     input.putVec4(index, 1, red, green, blue, auxiliary);
+                    if (kind == 8) {
+                        var curve = RgbReinhardOutput.parameters(auxiliary);
+                        input.putFloat(index, 0, 1, curve.outputPeak());
+                        input.putFloat(index, 0, 2, curve.curvePeak());
+                    }
                 }
             }
         }

@@ -5,7 +5,7 @@ import "service/reconstruct/auto_exposure.slang";
 import "math/color_space.slang";
 import "service/reconstruct/display.slang";
 
-static const uint PRIME_AUTO_EXPOSURE_INPUT_WORDS = 2;
+static const uint PRIME_AUTO_EXPOSURE_INPUT_WORDS = 3;
 static const uint PRIME_AUTO_EXPOSURE_WITNESS_WORDS = 4;
 
 [numthreads(64, 1, 1)]
@@ -92,55 +92,49 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             mask |= PRIME_TEST_FAILURE_IDENTITY;
         }
     } else if (kind == 6) {
-        PrimeReinhardAgxParameters parameters =
-                primeDefaultReinhardAgxParameters();
-        if (parameters.gamutExpansion != 0.04
-                || parameters.compressionStart != 0.18 || parameters.outputPeak != 1.0
-                || parameters.hueRetention != 0.5) {
-            mask |= PRIME_TEST_FAILURE_IDENTITY;
-        }
+        PrimeRgbReinhardParameters parameters =
+                primeDefaultRgbReinhardParameters();
         parameters.outputPeak = values.w;
-        parameters.shoulderCoefficient = primeReinhardShoulderCoefficient(values.w);
+        parameters.curvePeak = values.z;
         float value = max(values.x, 0.0);
         actual.x = primeReinhardCurveComponent(value, parameters);
-        actual.y = parameters.shoulderCoefficient;
-        // CPU-derived output and coefficient independently check the production Slang curve.
-        expected = values.yz;
-        // Rounding 1 + distance before log2 costs at most one f32 ULP times output room.
-        // Keep the tighter bound in the cancellation-safe series at the join.
-        float extent = parameters.outputPeak - parameters.compressionStart;
-        float absoluteTolerance = 3.0e-6;
-        if ((value - parameters.compressionStart) / extent >= 0.001)
-            absoluteTolerance += 1.2e-7 * extent;
-        if (!primeTestClose(actual.x, expected.x, absoluteTolerance, 3.0e-6)
-                || !primeTestClose(actual.y, expected.y, 3.0e-6, 3.0e-6)) {
+        actual.y = actual.x;
+        expected = float2(values.y, max(value, 0.0));
+        if (!primeTestClose(actual.x, expected.x, 2.0e-7, 4.0e-6)) {
             mask |= PRIME_TEST_FAILURE_IDENTITY;
         }
-        float limit = 0.18 + (values.w - 0.18) * pow(parameters.shoulderCoefficient, -1.0 / 5.0);
-        if (actual.x < -1.0e-6 || actual.x > limit * (1.0 + 3.0e-6)) {
+        // The rational shoulder preserves unit slope below the join.
+        if (value <= 0.18 && !primeTestClose(actual.y, expected.y, 1.0e-35, 5.0e-6)) {
+            mask |= PRIME_TEST_FAILURE_IDENTITY;
+        }
+        if (actual.x < 0.0 || actual.x > parameters.curvePeak * (1.0 + 3.0e-6)) {
             mask |= PRIME_TEST_FAILURE_RANGE;
         }
+        if (value == 0.18) {
+            float3 linearJoin = primeReinhardCurve(float3(0.1799, 0.18, 0.1801), parameters);
+            float2 slopes = float2(linearJoin.y - linearJoin.x, linearJoin.z - linearJoin.y) / 0.0001;
+            if (any(abs(slopes - 1.0) > 0.003)) mask |= PRIME_TEST_FAILURE_IDENTITY;
+            float peak = primeReinhardCurveComponent(0.18 * exp2(8.0) * values.w, parameters);
+            if (!primeTestClose(peak, values.w, 2.0e-6, 3.0e-6)) mask |= PRIME_TEST_FAILURE_RANGE;
+        }
     } else if (kind == 7) {
-        PrimeReinhardAgxParameters parameters =
-                primeDefaultReinhardAgxParameters();
+        PrimeRgbReinhardParameters parameters =
+                primeDefaultRgbReinhardParameters();
         float3 rgb = max(values.xyz, float3(0.0));
-        float3 expanded = primeReinhardToExpandedGamut(rgb, parameters);
-        float3 restored = primeReinhardFromExpandedGamut(expanded, parameters);
-        float3 rgbRoundTrip = primeReinhardHsvToRgb(
-                primeReinhardRgbToHsv(rgb));
+        float3 expanded = primeReinhardToVirtualRgb(rgb);
+        float3 restored = primeReinhardFromVirtualRgb(expanded);
+        float3 rgbRoundTrip = primeDisplayHsvToRgb(
+                primeDisplayRgbToHsv(rgb));
         float3 gray = max(values.w, 0.0).xxx;
-        float3 grayExpanded = primeReinhardToExpandedGamut(gray, parameters);
+        float3 grayExpanded = primeReinhardToVirtualRgb(gray);
 
-        float3 mappedLinear = primeReinhardFromExpandedGamut(
-                primeReinhardCurve(expanded, parameters),
-                parameters);
-        float3 mappedDisplay = primeReinhardEncodeSrgb(mappedLinear);
-        float3 repaired = primeReinhardProtectHsvHue(
-                rgb, mappedDisplay, parameters);
-        float3 originalHsv = primeReinhardRgbToHsv(
+        float3 mappedDisplay = primeReinhardEncodeSrgb(
+                primeReinhardFromVirtualRgb(primeReinhardCurve(expanded, parameters)));
+        float3 repaired = primeReinhardProtectHsvHue(rgb, mappedDisplay);
+        float3 originalHsv = primeDisplayRgbToHsv(
                 primeReinhardEncodeSrgb(rgb));
-        float3 mappedHsv = primeReinhardRgbToHsv(mappedDisplay);
-        float3 repairedHsv = primeReinhardRgbToHsv(repaired);
+        float3 mappedHsv = primeDisplayRgbToHsv(mappedDisplay);
+        float3 repairedHsv = primeDisplayRgbToHsv(repaired);
         float hueError = 0.0;
         float svError = 0.0;
         if (originalHsv.y > 1.0e-7 && mappedHsv.y > 1.0e-7) {
@@ -185,15 +179,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         mask |= primeTestClassify(repaired);
     } else if (kind == 8) {
         float3 hdrRec2020 = max(values.xyz, float3(0.0));
-        float outputPeak = clamp(values.w, 1.0, 10000.0);
-        float shoulderCoefficient = primeReinhardShoulderCoefficient(outputPeak);
-        PrimeReinhardAgxParameters parameters =
-                primeDefaultReinhardAgxParameters();
-        parameters.outputPeak = outputPeak;
-        parameters.shoulderCoefficient = shoulderCoefficient;
+        float outputPeak = asfloat(control.y);
         float encodedPeak = primeReinhardEncodeSrgb(outputPeak.xxx).x;
+        float curvePeak = asfloat(control.z);
+        PrimeRgbReinhardParameters parameters =
+                primeDefaultRgbReinhardParameters();
+        parameters.outputPeak = outputPeak;
+        parameters.curvePeak = curvePeak;
         float3 expectedReinhard = clamp(
-                primeReinhardAgxTonemap(
+                primeRgbReinhardTonemap(
                         max(
                                 primeLinearRec2020ToLinearBt709(hdrRec2020),
                                 float3(0.0)),
@@ -201,7 +195,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
                 float3(0.0),
                 encodedPeak.xxx);
         float3 output = primeDisplayTransformToSrgb(
-                hdrRec2020, 1.0, outputPeak, shoulderCoefficient);
+                hdrRec2020, 1.0, values.w, curvePeak);
         float3 error = abs(output - expectedReinhard);
         if (outputPeak == 1.0) {
             float3 sdrError = abs(output - primeDisplayTransformToSrgb(hdrRec2020, 1.0));
@@ -211,11 +205,25 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
                 max(error.x, max(error.y, error.z)),
                 max(output.x, max(output.y, output.z)));
         expected = float2(0.0, actual.y);
-        if (!primeTestClose(actual.x, 0.0, 1.0e-7, 1.0e-7)) {
+        if (!primeTestClose(actual.x, 0.0, 2.0e-6, 2.0e-6)) {
             mask |= PRIME_TEST_FAILURE_IDENTITY;
         }
         if (any(output < float3(0.0)) || any(output > encodedPeak.xxx)) {
             mask |= PRIME_TEST_FAILURE_RANGE;
+        }
+        mask |= primeTestClassify(output);
+    } else if (kind == 9) {
+        PrimeRgbReinhardParameters parameters;
+        parameters.outputPeak = asfloat(control.y);
+        parameters.curvePeak = asfloat(control.z);
+        float3 output = clamp(primeRgbReinhardTonemap(values.xyz, parameters),
+                0.0, primeReinhardEncodeSrgb(parameters.outputPeak.xxx).x);
+        float3 reference = asfloat(primeTestInput[inputOffset + 2]).xyz;
+        float3 error = abs(output - reference);
+        actual = float2(max(error.x, max(error.y, error.z)), max(output.x, max(output.y, output.z)));
+        expected = float2(0.0, max(reference.x, max(reference.y, reference.z)));
+        if (any(error > 2.0e-6 + 8.0e-6 * abs(reference))) {
+            mask |= PRIME_TEST_FAILURE_IDENTITY;
         }
         mask |= primeTestClassify(output);
     } else {
