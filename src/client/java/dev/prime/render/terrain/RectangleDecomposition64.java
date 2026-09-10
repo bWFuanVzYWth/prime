@@ -7,15 +7,14 @@ import java.util.Arrays;
 /**
  * Optimal rectangle decomposition for one fixed 64x64 sparse layer.
  *
- * <p>The chord selection follows voxel_engine's rectangle_decomposition crate at
- * 3e13182214aa3bdf71d4769ca6b1078671a7842c. Prime writes unit faces, so the fixed grid and row
- * masks avoid maintaining and sorting duplicate sparse interval views.
+ * <p>Ports rectangle_decomposition at 334d078. Prime writes unit faces, so a fixed grid
+ * and row masks avoid sorting sparse input intervals. Scratch is reused by one owner.
  */
 final class RectangleDecomposition64 {
     static final int EDGE = 64;
 
     private static final int MAX_LOD = 6;
-    private static final int MAX_CHORDS = EDGE * (EDGE - 1);
+    private static final int MAX_CHORDS = RectangleMatching64.MAX_CHORDS;
     private static final int MAX_RECTANGLES = EDGE * EDGE;
 
     private RectangleDecomposition64() {}
@@ -26,6 +25,7 @@ final class RectangleDecomposition64 {
         private final long[] rowMasks = new long[EDGE];
         private final long[] columnMasks = new long[EDGE];
         private int occupiedCount;
+        private int uniformValue;
         private boolean overlapping;
 
         void clear() {
@@ -35,6 +35,7 @@ final class RectangleDecomposition64 {
             Arrays.fill(this.rowMasks, 0L);
             Arrays.fill(this.columnMasks, 0L);
             this.occupiedCount = 0;
+            this.uniformValue = 0;
             this.overlapping = false;
         }
 
@@ -52,24 +53,36 @@ final class RectangleDecomposition64 {
                 throw new IllegalArgumentException(
                         "Rectangle square is not aligned to its lod");
             }
-            if (u < 0 || v < 0 || u + size > EDGE || v + size > EDGE) {
+            if (u < 0 || v < 0 || u > EDGE - size || v > EDGE - size) {
                 throw new IllegalArgumentException(
                         "Rectangle square lies outside the 64x64 layer");
             }
             int uEnd = u + size;
             int vEnd = v + size;
+            if (this.uniformValue != value) {
+                this.uniformValue = this.occupiedCount == 0 ? value : 0;
+            }
+            // Production supplies unit faces; keep that path free of the two LOD loops.
+            if (size == 1) {
+                this.pushCell(u, v, value);
+                return;
+            }
             for (int y = v; y < vEnd; y++) {
                 for (int x = u; x < uEnd; x++) {
-                    int index = y * EDGE + x;
-                    if (this.cells[index] != 0) {
-                        this.overlapping = true;
-                    } else {
-                        this.cells[index] = (char) value;
-                        this.occupied[this.occupiedCount++] = (char) index;
-                        this.rowMasks[y] |= 1L << x;
-                        this.columnMasks[x] |= 1L << y;
-                    }
+                    this.pushCell(x, y, value);
                 }
+            }
+        }
+
+        private void pushCell(int x, int y, int value) {
+            int index = y * EDGE + x;
+            if (this.cells[index] != 0) {
+                this.overlapping = true;
+            } else {
+                this.cells[index] = (char) value;
+                this.occupied[this.occupiedCount++] = (char) index;
+                this.rowMasks[y] |= 1L << x;
+                this.columnMasks[x] |= 1L << y;
             }
         }
 
@@ -117,19 +130,11 @@ final class RectangleDecomposition64 {
         private int horizontalChordCount;
         private int verticalChordCount;
 
-        private final int[] groupHorizontalStart =
-                new int[MAX_CHORDS];
-        private final int[] groupHorizontalEnd = new int[MAX_CHORDS];
-        private final int[] groupVerticalStart = new int[MAX_CHORDS];
-        private final int[] groupVerticalEnd = new int[MAX_CHORDS];
-        private int groupCount;
+        private final long[] sortedChords = new long[MAX_CHORDS];
+        private final int[] valueOffsets = new int[256];
 
         private final RectangleMatching64.Scratch matching =
                 new RectangleMatching64.Scratch();
-        private final int[] horizontalCuts = new int[MAX_CHORDS];
-        private final int[] verticalCuts = new int[MAX_CHORDS];
-        private int horizontalCutCount;
-        private int verticalCutCount;
 
         private final long[] horizontalCutMasks = new long[EDGE];
         private final long[] verticalCutMasks = new long[EDGE];
@@ -150,7 +155,7 @@ final class RectangleDecomposition64 {
                 return this.result;
             }
             this.extractChords(builder);
-            this.selectCuts();
+            this.selectCuts(builder.uniformValue != 0);
             this.partition(builder);
             return this.result;
         }
@@ -165,9 +170,35 @@ final class RectangleDecomposition64 {
         private void extractChords(LayerBuilder builder) {
             this.horizontalChordCount = 0;
             this.verticalChordCount = 0;
-            this.extractChords(builder.cells, builder.rowMasks, true);
-            this.extractChords(builder.cells, builder.columnMasks, false);
-            this.finishChordGroups();
+            if (builder.uniformValue != 0) {
+                this.extractUniformChords(builder.rowMasks, builder.uniformValue, true);
+                this.extractUniformChords(builder.columnMasks, builder.uniformValue, false);
+            } else {
+                this.extractChords(builder.cells, builder.rowMasks, true);
+                this.extractChords(builder.cells, builder.columnMasks, false);
+            }
+        }
+
+        private void extractUniformChords(long[] masks, int value, boolean horizontal) {
+            for (int line = 1; line < EDGE; line++) {
+                long shared = masks[line - 1] & masks[line];
+                long different = masks[line - 1] ^ masks[line];
+                // A shared run starts at a concave corner iff exactly one row extends left.
+                // Bit zero is excluded by the shift; endpoints must be internal grid points.
+                long starts = shared & ~(shared << 1) & (different << 1);
+                while (starts != 0L) {
+                    int start = Long.numberOfTrailingZeros(starts);
+                    int end = start + Long.numberOfTrailingZeros(~(shared >>> start));
+                    if (end < EDGE && (different & 1L << end) != 0L) {
+                        if (horizontal) {
+                            this.addHorizontalChord(value, packChord(start, line, end, line));
+                        } else {
+                            this.addVerticalChord(value, packChord(line, start, line, end));
+                        }
+                    }
+                    starts &= starts - 1L;
+                }
+            }
         }
 
         private void extractChords(
@@ -229,8 +260,7 @@ final class RectangleDecomposition64 {
                         "Horizontal chord capacity was exceeded");
             }
             this.horizontalChords[this.horizontalChordCount] =
-                    packValuedChord(
-                            value, this.horizontalChordCount, chord);
+                    packValuedChord(value, chord);
             this.horizontalChordCount++;
         }
 
@@ -240,116 +270,94 @@ final class RectangleDecomposition64 {
                         "Vertical chord capacity was exceeded");
             }
             this.verticalChords[this.verticalChordCount] =
-                    packValuedChord(
-                            value, this.verticalChordCount, chord);
+                    packValuedChord(value, chord);
             this.verticalChordCount++;
         }
 
-        private void finishChordGroups() {
-            sortValuedChords(
-                    this.horizontalChords, this.horizontalChordCount);
-            sortValuedChords(this.verticalChords, this.verticalChordCount);
-            this.groupCount = 0;
+        private void selectCuts(boolean uniform) {
+            Arrays.fill(this.horizontalCutMasks, 0L);
+            Arrays.fill(this.verticalCutMasks, 0L);
+            if (uniform) {
+                this.selectGroupCuts(0, this.horizontalChordCount, 0, this.verticalChordCount);
+                return;
+            }
+            this.sortValuedChords(this.horizontalChords, this.horizontalChordCount);
+            this.sortValuedChords(this.verticalChords, this.verticalChordCount);
             int horizontalIndex = 0;
             int verticalIndex = 0;
             while (horizontalIndex < this.horizontalChordCount
                     || verticalIndex < this.verticalChordCount) {
-                int value;
-                if (horizontalIndex < this.horizontalChordCount
-                        && verticalIndex < this.verticalChordCount) {
-                    value = Math.min(
-                            valuedChordValue(
-                                    this.horizontalChords[horizontalIndex]),
-                            valuedChordValue(
-                                    this.verticalChords[verticalIndex]));
-                } else if (horizontalIndex
-                        < this.horizontalChordCount) {
-                    value = valuedChordValue(
-                            this.horizontalChords[horizontalIndex]);
-                } else {
-                    value = valuedChordValue(
-                            this.verticalChords[verticalIndex]);
-                }
-
+                int horizontalValue = horizontalIndex < this.horizontalChordCount
+                        ? valuedChordValue(this.horizontalChords[horizontalIndex]) : 0x10000;
+                int verticalValue = verticalIndex < this.verticalChordCount
+                        ? valuedChordValue(this.verticalChords[verticalIndex]) : 0x10000;
+                int value = Math.min(horizontalValue, verticalValue);
                 int horizontalStart = horizontalIndex;
+                int verticalStart = verticalIndex;
                 while (horizontalIndex < this.horizontalChordCount
-                        && valuedChordValue(
-                                        this.horizontalChords[horizontalIndex])
-                                == value) {
+                        && valuedChordValue(this.horizontalChords[horizontalIndex]) == value) {
                     horizontalIndex++;
                 }
-                int verticalStart = verticalIndex;
                 while (verticalIndex < this.verticalChordCount
-                        && valuedChordValue(
-                                        this.verticalChords[verticalIndex])
-                                == value) {
+                        && valuedChordValue(this.verticalChords[verticalIndex]) == value) {
                     verticalIndex++;
                 }
-                if (this.groupCount >= this.groupHorizontalStart.length) {
-                    throw new IllegalStateException(
-                            "Chord group capacity was exceeded");
-                }
-                this.groupHorizontalStart[this.groupCount] =
-                        horizontalStart;
-                this.groupHorizontalEnd[this.groupCount] =
-                        horizontalIndex;
-                this.groupVerticalStart[this.groupCount] = verticalStart;
-                this.groupVerticalEnd[this.groupCount] = verticalIndex;
-                this.groupCount++;
+                this.selectGroupCuts(horizontalStart, horizontalIndex, verticalStart, verticalIndex);
             }
         }
 
-        private void selectCuts() {
-            this.horizontalCutCount = 0;
-            this.verticalCutCount = 0;
-            for (int group = 0; group < this.groupCount; group++) {
-                int horizontalStart =
-                        this.groupHorizontalStart[group];
-                int horizontalEnd = this.groupHorizontalEnd[group];
-                int verticalStart = this.groupVerticalStart[group];
-                int verticalEnd = this.groupVerticalEnd[group];
-                this.matching.selectMaximumIndependentSet(
-                        this.horizontalChords,
-                        horizontalStart,
-                        horizontalEnd,
-                        this.verticalChords,
-                        verticalStart,
-                        verticalEnd);
-
-                for (int index = 0;
-                        index < this.matching.selectedHorizontalCount();
-                        index++) {
-                    int selected =
-                            this.matching.selectedHorizontal(index);
-                    int selectedChord = chord(
-                            this.horizontalChords[
-                                    horizontalStart + selected]);
-                    this.horizontalCuts[this.horizontalCutCount++] =
-                            packHorizontalCut(
-                                    chordY1(selectedChord),
-                                    chordX1(selectedChord),
-                                    chordX2(selectedChord));
-                }
-                for (int index = 0;
-                        index < this.matching.selectedVerticalCount();
-                        index++) {
-                    int selected = this.matching.selectedVertical(index);
-                    int selectedChord = chord(
-                            this.verticalChords[verticalStart + selected]);
-                    this.verticalCuts[this.verticalCutCount++] =
-                            packVerticalCut(
-                                    chordX1(selectedChord),
-                                    chordY1(selectedChord),
-                                    chordY2(selectedChord));
+        private void selectGroupCuts(
+                int horizontalStart, int horizontalEnd, int verticalStart, int verticalEnd) {
+            this.matching.selectMaximumIndependentSet(
+                    this.horizontalChords, horizontalStart, horizontalEnd,
+                    this.verticalChords, verticalStart, verticalEnd);
+            // Cut masks combine by OR; materializing and sorting cut lists adds no information.
+            for (int index = 0; index < this.matching.selectedHorizontalCount(); index++) {
+                int selected = chord(this.horizontalChords[
+                        horizontalStart + this.matching.selectedHorizontal(index)]);
+                this.horizontalCutMasks[chordY1(selected)] |=
+                        cellRangeMask(chordX1(selected), chordX2(selected));
+            }
+            for (int index = 0; index < this.matching.selectedVerticalCount(); index++) {
+                int selected = chord(this.verticalChords[
+                        verticalStart + this.matching.selectedVertical(index)]);
+                long bit = 1L << chordX1(selected);
+                for (int y = chordY1(selected); y < chordY2(selected); y++) {
+                    this.verticalCutMasks[y] |= bit;
                 }
             }
-            Arrays.sort(
-                    this.horizontalCuts, 0, this.horizontalCutCount);
-            Arrays.sort(this.verticalCuts, 0, this.verticalCutCount);
+        }
+
+        private void sortValuedChords(long[] chords, int count) {
+            for (int index = 1; index < count; index++) {
+                if (valuedChordValue(chords[index - 1]) > valuedChordValue(chords[index])) {
+                    // Stable label radix sort preserves extraction order without the temporary
+                    // allocations made by Arrays.sort on some long runs of primitive values.
+                    this.sortValueByte(chords, this.sortedChords, count, 0);
+                    this.sortValueByte(this.sortedChords, chords, count, 8);
+                    return;
+                }
+            }
+        }
+
+        private void sortValueByte(long[] source, long[] target, int count, int shift) {
+            Arrays.fill(this.valueOffsets, 0);
+            for (int index = 0; index < count; index++) {
+                this.valueOffsets[valuedChordValue(source[index]) >>> shift & 0xff]++;
+            }
+            int offset = 0;
+            for (int value = 0; value < this.valueOffsets.length; value++) {
+                int size = this.valueOffsets[value];
+                this.valueOffsets[value] = offset;
+                offset += size;
+            }
+            for (int index = 0; index < count; index++) {
+                long chord = source[index];
+                target[this.valueOffsets[valuedChordValue(chord) >>> shift & 0xff]++] = chord;
+            }
         }
 
         private void partition(LayerBuilder builder) {
-            this.buildCutMasks();
             this.rectangleCount = 0;
             long[] active = this.activeRectangles;
             long[] nextActive = this.nextActiveRectangles;
@@ -378,42 +386,25 @@ final class RectangleDecomposition64 {
             }
         }
 
-        private void buildCutMasks() {
-            Arrays.fill(this.horizontalCutMasks, 0L);
-            Arrays.fill(this.verticalCutMasks, 0L);
-            for (int index = 0; index < this.verticalCutCount; index++) {
-                int cut = this.verticalCuts[index];
-                long bit = 1L << verticalCutX(cut);
-                for (int y = verticalCutStart(cut);
-                        y < verticalCutEnd(cut);
-                        y++) {
-                    this.verticalCutMasks[y] |= bit;
-                }
-            }
-            for (int index = 0;
-                    index < this.horizontalCutCount;
-                    index++) {
-                int cut = this.horizontalCuts[index];
-                this.horizontalCutMasks[horizontalCutY(cut)] |=
-                        cellRangeMask(
-                                horizontalCutStart(cut),
-                                horizontalCutEnd(cut));
-            }
-        }
-
         private void buildRunsForRow(LayerBuilder builder, int y) {
             this.runCount = 0;
             long active = builder.rowMasks[y];
             while (active != 0L) {
                 int start = Long.numberOfTrailingZeros(active);
-                int value = builder.cells[y * EDGE + start];
-                int end = start + 1;
-                while (end < EDGE && builder.cells[y * EDGE + end] == value) {
-                    end++;
+                int value = builder.uniformValue;
+                int end;
+                if (value != 0) {
+                    end = start + Long.numberOfTrailingZeros(~(active >>> start));
+                } else {
+                    value = builder.cells[y * EDGE + start];
+                    end = start + 1;
+                    while (end < EDGE && builder.cells[y * EDGE + end] == value) {
+                        end++;
+                    }
                 }
-                active &= ~cellRangeMask(start, end);
-                long splitMask = this.verticalCutMasks[y]
-                        & coordinateRangeMask(start + 1, end - 1);
+                long mask = cellRangeMask(start, end);
+                active &= ~mask;
+                long splitMask = this.verticalCutMasks[y] & mask & ~(1L << start);
                 while (splitMask != 0L) {
                     int split = Long.numberOfTrailingZeros(splitMask);
                     this.pushRun(value, start, split);
@@ -425,9 +416,7 @@ final class RectangleDecomposition64 {
         }
 
         private void pushRun(int value, int start, int end) {
-            if (start >= end) {
-                return;
-            }
+            assert start < end;
             if (this.runCount >= this.runs.length) {
                 throw new IllegalStateException("Row run capacity was exceeded");
             }
@@ -513,29 +502,12 @@ final class RectangleDecomposition64 {
         return chord >>> 21 & 0x7f;
     }
 
-    static long packValuedChord(int value, int order, int chord) {
-        return (long) (value ^ 0x8000) << 48
-                | (long) order << 32
-                | Integer.toUnsignedLong(chord);
+    private static long packValuedChord(int value, int chord) {
+        return (long) value << 32 | Integer.toUnsignedLong(chord);
     }
 
     private static int valuedChordValue(long valuedChord) {
-        return ((int) (valuedChord >>> 48) ^ 0x8000) & 0xffff;
-    }
-
-    private static void sortValuedChords(long[] chords, int count) {
-        if (count <= 1) {
-            return;
-        }
-        long previous = chords[0];
-        for (int index = 1; index < count; index++) {
-            long current = chords[index];
-            if (previous > current) {
-                Arrays.sort(chords, 0, count);
-                return;
-            }
-            previous = current;
-        }
+        return (int) (valuedChord >>> 32);
     }
 
     private static int packInterval(int start, int end, int value) {
@@ -552,38 +524,6 @@ final class RectangleDecomposition64 {
 
     private static int intervalEnd(int interval) {
         return interval >>> 24 & 0xff;
-    }
-
-    private static int packHorizontalCut(int y, int start, int end) {
-        return y << 16 | start << 8 | end;
-    }
-
-    private static int horizontalCutY(int cut) {
-        return cut >>> 16 & 0xff;
-    }
-
-    private static int horizontalCutStart(int cut) {
-        return cut >>> 8 & 0xff;
-    }
-
-    private static int horizontalCutEnd(int cut) {
-        return cut & 0xff;
-    }
-
-    private static int packVerticalCut(int x, int start, int end) {
-        return start << 16 | end << 8 | x;
-    }
-
-    private static int verticalCutX(int cut) {
-        return cut & 0xff;
-    }
-
-    private static int verticalCutStart(int cut) {
-        return cut >>> 16 & 0xff;
-    }
-
-    private static int verticalCutEnd(int cut) {
-        return cut >>> 8 & 0xff;
     }
 
     private static long packActiveRectangle(int interval, int yStart) {
@@ -640,24 +580,8 @@ final class RectangleDecomposition64 {
         return (mask & cellRangeMask(start, end)) != 0L;
     }
 
-    private static long coordinateRangeMask(int start, int end) {
-        if (start > end || start >= EDGE) {
-            return 0L;
-        }
-        int clampedEnd = Math.min(end, EDGE - 1);
-        long startMask = -1L << start;
-        long endMask = clampedEnd == EDGE - 1
-                ? -1L
-                : (1L << (clampedEnd + 1)) - 1L;
-        return startMask & endMask;
-    }
-
     private static long cellRangeMask(int start, int end) {
-        if (start >= end) {
-            return 0L;
-        }
-        long startMask = -1L << start;
-        long endMask = end >= EDGE ? -1L : (1L << end) - 1L;
-        return startMask & endMask;
+        // All callers provide a nonempty half-open cell interval within [0, 64].
+        return (-1L << start) & (-1L >>> (EDGE - end));
     }
 }

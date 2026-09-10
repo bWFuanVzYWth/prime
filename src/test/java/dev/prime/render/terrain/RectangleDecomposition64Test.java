@@ -34,6 +34,12 @@ final class RectangleDecomposition64Test {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> builder.pushSquare(0, 0, 0, 0));
+        for (int coordinate : new int[] {Integer.MIN_VALUE, -1, 64, Integer.MAX_VALUE}) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> builder.pushSquare(coordinate, 0, 0, 1));
+            assertThrows(IllegalArgumentException.class,
+                    () -> builder.pushSquare(0, coordinate, 0, 1));
+        }
 
         builder.pushSquare(0, 0, 6, 5);
         builder.pushSquare(0, 0, 5, 5);
@@ -65,17 +71,17 @@ final class RectangleDecomposition64Test {
     }
 
     @Test
-    void everyThreeByThreeImageMatchesBruteForceOptimalPartition() {
-        int[] optimum = optimalThreeByThreeCounts();
+    void everyFourByFourImageMatchesBruteForceOptimalPartition() {
+        int[] optimum = optimalCounts(4);
         RectangleDecomposition64.LayerBuilder builder =
                 new RectangleDecomposition64.LayerBuilder();
         RectangleDecomposition64.Scratch scratch =
                 new RectangleDecomposition64.Scratch();
-        for (int mask = 0; mask < 1 << 9; mask++) {
+        for (int mask = 0; mask < 1 << 16; mask++) {
             builder.clear();
-            for (int cell = 0; cell < 9; cell++) {
+            for (int cell = 0; cell < 16; cell++) {
                 if ((mask & 1 << cell) != 0) {
-                    builder.pushSquare(cell % 3, cell / 3, 0, 1);
+                    builder.pushSquare(cell % 4, cell / 4, 0, 1);
                 }
             }
 
@@ -88,8 +94,8 @@ final class RectangleDecomposition64Test {
                     for (int x = result.xStart(index);
                             x < result.xEnd(index);
                             x++) {
-                        assertTrue(x < 3 && y < 3);
-                        int bit = 1 << (y * 3 + x);
+                        assertTrue(x < 4 && y < 4);
+                        int bit = 1 << (y * 4 + x);
                         assertTrue((mask & bit) != 0);
                         assertEquals(0, covered & bit);
                         covered |= bit;
@@ -127,17 +133,71 @@ final class RectangleDecomposition64Test {
         assertArrayEquals(expected, snapshot(second));
     }
 
-    private static int[] optimalThreeByThreeCounts() {
-        int[] result = new int[1 << 9];
-        Arrays.fill(result, 10);
+    @Test
+    void everyThreeByThreeTwoLabelImageIsOptimalAtBothGridEdges() {
+        int[] optimum = optimalCounts(3);
+        RectangleDecomposition64.LayerBuilder builder = new RectangleDecomposition64.LayerBuilder();
+        RectangleDecomposition64.Scratch scratch = new RectangleDecomposition64.Scratch();
+        int[] expected = new int[EDGE * EDGE];
+        int[] labels = {0x00ff, 0x0100, 0x8000, 0xffff};
+        for (int pattern = 0; pattern < 19683; pattern++) {
+            Arrays.fill(expected, 0);
+            int firstMask = 0;
+            int secondMask = 0;
+            int code = pattern;
+            int offset = (pattern & 1) == 0 ? 0 : EDGE - 3;
+            for (int cell = 0; cell < 9; cell++, code /= 3) {
+                int value = code % 3;
+                if (value == 1) {
+                    firstMask |= 1 << cell;
+                } else if (value == 2) {
+                    secondMask |= 1 << cell;
+                }
+                expected[(offset + cell / 3) * EDGE + offset + cell % 3] = value == 0
+                        ? 0 : labels[(pattern + value) & 3];
+            }
+            RectangleDecompositionCorpus.fill(builder, expected);
+            RectangleDecomposition64.Result result = builder.finish(scratch);
+            RectangleDecompositionCorpus.verify(expected, result);
+            assertEquals(optimum[firstMask] + optimum[secondMask], result.size());
+        }
+    }
+
+    @Test
+    void corpusPreservesCoverageAndScratchReuseAcrossSizesAndLabels() {
+        RectangleDecomposition64.LayerBuilder builder = new RectangleDecomposition64.LayerBuilder();
+        RectangleDecomposition64.Scratch scratch = new RectangleDecomposition64.Scratch();
+        for (String scenario : RectangleDecompositionCorpus.SCENARIOS) {
+            int[] cells = RectangleDecompositionCorpus.cells(scenario);
+            RectangleDecompositionCorpus.fill(builder, cells);
+            RectangleDecomposition64.Result result = builder.finish(scratch);
+            RectangleDecompositionCorpus.verify(cells, result);
+            assertEquals(RectangleDecompositionCorpus.expectedCount(scenario), result.size());
+            long[] expected = snapshot(result);
+            // Reversing input must retain canonical extraction order and preserve unsigned labels.
+            builder.clear();
+            for (int cell = cells.length - 1; cell >= 0; cell--) {
+                if (cells[cell] != 0) {
+                    builder.pushSquare(cell % EDGE, cell / EDGE, 0, cells[cell]);
+                }
+            }
+            assertArrayEquals(expected, snapshot(builder.finish(scratch)));
+            builder.clear();
+            assertEquals(0, builder.finish(scratch).size());
+        }
+    }
+
+    private static int[] optimalCounts(int edge) {
+        int[] result = new int[1 << (edge * edge)];
+        Arrays.fill(result, edge * edge + 1);
         result[0] = 0;
         for (int mask = 1; mask < result.length; mask++) {
             int first = Integer.numberOfTrailingZeros(mask);
-            int x = first % 3;
-            int y = first / 3;
-            for (int height = 1; y + height <= 3; height++) {
-                for (int width = 1; x + width <= 3; width++) {
-                    int rectangle = rectangleMask(x, y, width, height);
+            int x = first % edge;
+            int y = first / edge;
+            for (int height = 1; y + height <= edge; height++) {
+                for (int width = 1; x + width <= edge; width++) {
+                    int rectangle = rectangleMask(edge, x, y, width, height);
                     if ((mask & rectangle) == rectangle) {
                         result[mask] = Math.min(
                                 result[mask], 1 + result[mask ^ rectangle]);
@@ -149,11 +209,11 @@ final class RectangleDecomposition64Test {
     }
 
     private static int rectangleMask(
-            int x, int y, int width, int height) {
+            int edge, int x, int y, int width, int height) {
         int mask = 0;
         for (int row = y; row < y + height; row++) {
             for (int column = x; column < x + width; column++) {
-                mask |= 1 << (row * 3 + column);
+                mask |= 1 << (row * edge + column);
             }
         }
         return mask;

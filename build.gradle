@@ -182,6 +182,17 @@ tasks.register('translationBenchmark', JavaExec) {
 	}
 }
 
+tasks.register('rectangleBenchmark', JavaExec) {
+	group = 'benchmark'
+	description = 'Measures reusable rectangle decomposition and unit-face input with JMH.'
+	dependsOn tasks.named('benchmarkClasses')
+	classpath = benchmarkSourceSet.runtimeClasspath
+	mainClass = 'org.openjdk.jmh.Main'
+	args 'dev.prime.render.terrain.RectangleDecompositionBenchmark',
+			'-wi', '5', '-i', '10', '-f', '2',
+			'-w', '500ms', '-r', '1s', '-foe', 'true', '-prof', 'gc'
+}
+
 jacoco {
 	toolVersion = '0.8.15'
 }
