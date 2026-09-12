@@ -193,6 +193,10 @@ public final class VulkanDescriptors {
         return new BufferBinding(binding, type, buffer, offset, range);
     }
 
+    public static SampledImageBinding sampledImage(int binding, long view, int layout, long sampler) {
+        return new SampledImageBinding(binding, view, layout, sampler);
+    }
+
     /** Allocates, writes and owns one immutable descriptor set and its private pool. */
     public static BoundSet bind(
             VulkanContext context,
@@ -212,7 +216,7 @@ public final class VulkanDescriptors {
                 throw new IllegalArgumentException("Duplicate descriptor binding");
             }
             typeCounts.merge(binding.type(), 1, Math::addExact);
-            if (binding instanceof ImageBinding) {
+            if (binding instanceof ImageBinding || binding instanceof SampledImageBinding) {
                 imageCount++;
             } else if (binding instanceof BufferBinding) {
                 bufferCount++;
@@ -249,6 +253,10 @@ public final class VulkanDescriptors {
                     info.imageView(image.view())
                             .imageLayout(image.layout());
                     writeImage(writes.get(index), set, image.binding(), image.type(), info);
+                } else if (binding instanceof SampledImageBinding image) {
+                    VkDescriptorImageInfo info = infos.get(imageIndex++);
+                    info.imageView(image.view()).imageLayout(image.layout()).sampler(image.sampler());
+                    writeImage(writes.get(index), set, image.binding(), image.type(), info);
                 } else if (binding instanceof BufferBinding buffer) {
                     VkDescriptorBufferInfo info = bufferInfos.get(bufferIndex++);
                     info.buffer(buffer.buffer())
@@ -267,13 +275,17 @@ public final class VulkanDescriptors {
         }
     }
 
-    public sealed interface Binding permits ImageBinding, BufferBinding {
+    public sealed interface Binding permits ImageBinding, SampledImageBinding, BufferBinding {
         int binding();
         int type();
     }
 
     public record ImageBinding(
             int binding, int type, long view, int layout) implements Binding {}
+
+    public record SampledImageBinding(int binding, long view, int layout, long sampler) implements Binding {
+        @Override public int type() { return VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; }
+    }
 
     public record BufferBinding(
             int binding, int type, long buffer, long offset, long range) implements Binding {}

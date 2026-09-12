@@ -16,6 +16,7 @@ import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.post.ReconstructionQualityMode;
+import dev.prime.render.post.StarsFrameParameters;
 import dev.prime.render.vulkan.terrain.TerrainScene;
 import dev.prime.render.vulkan.AtmospherePipeline;
 import dev.prime.render.vulkan.DisplayExposureDiagnostics;
@@ -156,7 +157,8 @@ final class RealtimeRenderer implements Destroyable {
         VulkanReconstructionResources replacementResources = null;
         try {
             replacementResources =
-                    this.reconstructionRegistry.createResources(atmosphere, selection);
+                    this.reconstructionRegistry.createResources(atmosphere,
+                            this.backend.starmapImage(), this.backend.starmapSampler(), selection);
             this.requireRayDispatchCapacity(
                     replacementResources.selection().extent().width(),
                     replacementResources.selection().extent().height());
@@ -198,7 +200,7 @@ final class RealtimeRenderer implements Destroyable {
         this.requireRayDispatchCapacity(
                 selection.extent().width(), selection.extent().height());
         this.resources = this.reconstructionRegistry.createResources(
-                atmosphere, selection);
+                atmosphere, this.backend.starmapImage(), this.backend.starmapSampler(), selection);
         this.sampleState = this.sampleState.invalidated();
     }
 
@@ -284,6 +286,8 @@ final class RealtimeRenderer implements Destroyable {
                 sampleFrame.deltaMilliseconds(),
                 input.astronomy().sunDirection(),
                 settings.lighting().sunMultiplier(),
+                new StarsFrameParameters(input.astronomy().settings(),
+                        settings.lighting().starMultiplier(), input.cameraInWater()),
                 settings.display());
         ReconstructionDebugSettings debugSettings =
                 new ReconstructionDebugSettings(
@@ -440,7 +444,7 @@ final class RealtimeRenderer implements Destroyable {
             VulkanReconstructionResources current = this.resources;
             if (current != null) {
                 replacementResources = this.reconstructionRegistry.createResources(
-                        atmosphere, current.selection());
+                        atmosphere, this.backend.starmapImage(), this.backend.starmapSampler(), current.selection());
             }
         } catch (RuntimeException exception) {
             ResourceCleanup.destroy(replacementResources, exception);

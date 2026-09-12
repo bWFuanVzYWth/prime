@@ -26,6 +26,7 @@
     "nrd_composite": "entry/post/nrd_composite.compute.slang",
     "nrd_motion": "entry/post/nrd_motion.compute.slang",
     "rr_prepare": "entry/post/rr_prepare.compute.slang",
+    "rr_stars": "entry/post/rr_stars.compute.slang",
     "sun_shadow_hierarchy": "entry/post/sun_shadow_hierarchy.compute.slang",
     "realtime_wavefront_camera_trace": {"entry": "entry/realtime/camera_trace.raygeneration.slang", "ser": true},
     "realtime_wavefront_delta_walk": {"entry": "entry/realtime/delta_walk.raygeneration.slang", "ser": true},

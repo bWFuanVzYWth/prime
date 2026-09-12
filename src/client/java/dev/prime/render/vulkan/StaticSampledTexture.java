@@ -28,17 +28,12 @@ final class StaticSampledTexture implements Destroyable {
     private static final int STARMAP_WIDTH = ShaderAbi.STARMAP_WIDTH;
     private static final int STARMAP_HEIGHT = ShaderAbi.STARMAP_HEIGHT;
     private static final int STARMAP_STRIPE_ROWS = ShaderAbi.STARMAP_STRIPE_ROWS;
-    // BC6H stores one 16-byte block per 4x4 texels. Copy extents remain in texels.
-    private static final int STARMAP_STRIPE_BYTES =
-            (STARMAP_WIDTH / 4) * (STARMAP_STRIPE_ROWS / 4) * 16;
 
     private final VulkanContext context;
     private final String label;
     private final VulkanImage image;
     private final long sampler;
-    private final int copyWidth;
-    private final int copyHeight;
-    private final int copyDepth;
+    private final Copy[] copies;
     private VulkanBuffer[] uploads;
     private boolean pending;
     private boolean destroyed;
@@ -49,17 +44,13 @@ final class StaticSampledTexture implements Destroyable {
             VulkanImage image,
             long sampler,
             VulkanBuffer[] uploads,
-            int copyWidth,
-            int copyHeight,
-            int copyDepth) {
+            Copy[] copies) {
         this.context = context;
         this.label = label;
         this.image = image;
         this.sampler = sampler;
         this.uploads = uploads;
-        this.copyWidth = copyWidth;
-        this.copyHeight = copyHeight;
-        this.copyDepth = copyDepth;
+        this.copies = copies;
     }
 
     static StaticSampledTexture transmissionGgx(VulkanContext context) {
@@ -81,6 +72,7 @@ final class StaticSampledTexture implements Destroyable {
             sampler = createSampler(
                     context,
                     VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                    1,
                     "Prime transmission GGX energy sampler");
             return new StaticSampledTexture(
                     context,
@@ -88,9 +80,7 @@ final class StaticSampledTexture implements Destroyable {
                     image,
                     sampler,
                     new VulkanBuffer[] {upload},
-                    LUT_WIDTH,
-                    LUT_HEIGHT,
-                    LUT_DEPTH);
+                    new Copy[] {new Copy(LUT_WIDTH, LUT_HEIGHT, LUT_DEPTH, 0, 0)});
         } catch (RuntimeException exception) {
             destroy(context, sampler, upload, image, exception);
             throw exception;
@@ -99,25 +89,34 @@ final class StaticSampledTexture implements Destroyable {
 
     static StaticSampledTexture starmap(VulkanContext context) {
         VulkanImage image = null;
-        VulkanBuffer[] uploads = new VulkanBuffer[STARMAP_HEIGHT / STARMAP_STRIPE_ROWS];
+        int stripes = STARMAP_HEIGHT / STARMAP_STRIPE_ROWS;
+        VulkanBuffer[] uploads = new VulkanBuffer[stripes + ShaderAbi.STARMAP_MIP_LEVELS - 1];
+        Copy[] copies = new Copy[uploads.length];
         long sampler = 0L;
         try {
-            image = context.createImage2D(
+            image = context.createMipmappedImage2D(
                     STARMAP_WIDTH,
                     STARMAP_HEIGHT,
+                    ShaderAbi.STARMAP_MIP_LEVELS,
                     VK12.VK_FORMAT_BC6H_UFLOAT_BLOCK,
                     VK12.VK_IMAGE_USAGE_SAMPLED_BIT | VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                     "Prime NASA 2020 16K BC6H starmap");
             for (int index = 0; index < uploads.length; index++) {
+                int level = Math.max(0, index - stripes + 1);
+                int width = Math.max(1, STARMAP_WIDTH >> level);
+                int height = level == 0 ? STARMAP_STRIPE_ROWS : Math.max(1, STARMAP_HEIGHT >> level);
+                copies[index] = new Copy(width, height, 1, level, level == 0 ? index * height : 0);
                 uploads[index] = createUpload(
                         context,
-                        STARMAP_STRIPE_BYTES,
-                        "Prime starmap stripe " + index + " upload",
-                        "/prime/starmap/starmap_2020_16k_" + index + ".bc6h.gz");
+                        ((width + 3) / 4) * ((height + 3) / 4) * 16,
+                        "Prime starmap upload " + index,
+                        "/prime/starmap/starmap_2020_16k_"
+                                + (level == 0 ? index : "mip" + level) + ".bc6h.gz");
             }
             sampler = createSampler(
                     context,
                     VK12.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                    ShaderAbi.STARMAP_MIP_LEVELS,
                     "Prime NASA 2020 starmap sampler");
             return new StaticSampledTexture(
                     context,
@@ -125,9 +124,7 @@ final class StaticSampledTexture implements Destroyable {
                     image,
                     sampler,
                     uploads,
-                    STARMAP_WIDTH,
-                    STARMAP_STRIPE_ROWS,
-                    1);
+                    copies);
         } catch (RuntimeException exception) {
             RuntimeException failure = exception;
             if (sampler != 0L) {
@@ -169,20 +166,21 @@ final class StaticSampledTexture implements Destroyable {
                     VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                     0L,
                     VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
-                    VK12.VK_ACCESS_TRANSFER_WRITE_BIT);
+                    VK12.VK_ACCESS_TRANSFER_WRITE_BIT, this.image.mipLevels());
             for (int index = 0; index < this.uploads.length; index++) {
                 VulkanBuffer upload = this.uploads[index];
+                Copy region = this.copies[index];
                 upload.flush(0L, upload.size());
                 VkBufferImageCopy.Buffer copy = VkBufferImageCopy.calloc(1, stack);
                 copy.get(0).bufferOffset(0L).bufferRowLength(0).bufferImageHeight(0);
                 copy.get(0).imageSubresource()
                         .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                        .mipLevel(0)
+                        .mipLevel(region.level())
                         .baseArrayLayer(0)
                         .layerCount(1);
-                copy.get(0).imageOffset().set(0, index * this.copyHeight, 0);
+                copy.get(0).imageOffset().set(0, region.y(), 0);
                 copy.get(0).imageExtent().set(
-                        this.copyWidth, this.copyHeight, this.copyDepth);
+                        region.width(), region.height(), region.depth());
                 VK12.vkCmdCopyBufferToImage(
                         commandBuffer,
                         upload.handle(),
@@ -197,8 +195,9 @@ final class StaticSampledTexture implements Destroyable {
                     VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                     VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,
                     VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
-                    KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                    VK12.VK_ACCESS_SHADER_READ_BIT);
+                    KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                            | VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    VK12.VK_ACCESS_SHADER_READ_BIT, this.image.mipLevels());
             return true;
         } catch (RuntimeException exception) {
             this.pending = false;
@@ -284,18 +283,18 @@ final class StaticSampledTexture implements Destroyable {
         }
     }
 
-    private static long createSampler(VulkanContext context, int addressModeU, String label) {
+    private static long createSampler(VulkanContext context, int addressModeU, int mipLevels, String label) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkSamplerCreateInfo createInfo = VkSamplerCreateInfo.calloc(stack)
                     .sType$Default()
                     .magFilter(VK12.VK_FILTER_LINEAR)
                     .minFilter(VK12.VK_FILTER_LINEAR)
-                    .mipmapMode(VK12.VK_SAMPLER_MIPMAP_MODE_NEAREST)
+                    .mipmapMode(VK12.VK_SAMPLER_MIPMAP_MODE_LINEAR)
                     .addressModeU(addressModeU)
                     .addressModeV(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                     .addressModeW(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                     .minLod(0.0F)
-                    .maxLod(0.0F)
+                    .maxLod(mipLevels - 1.0F)
                     .maxAnisotropy(1.0F);
             LongBuffer pointer = stack.mallocLong(1);
             VulkanContext.check(
@@ -307,6 +306,8 @@ final class StaticSampledTexture implements Destroyable {
             return sampler;
         }
     }
+
+    private record Copy(int width, int height, int depth, int level, int y) {}
 
     private static void destroy(
             VulkanContext context,

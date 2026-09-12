@@ -46,10 +46,18 @@ public final class VulkanSync {
             long sourceAccess,
             long destinationStage,
             long destinationAccess) {
+        imageBarrier(commandBuffer, image, oldLayout, newLayout, sourceStage, sourceAccess,
+                destinationStage, destinationAccess, 1);
+    }
+
+    public static void imageBarrier(
+            VkCommandBuffer commandBuffer, long image, int oldLayout, int newLayout,
+            long sourceStage, long sourceAccess, long destinationStage, long destinationAccess,
+            int mipLevels) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkImageMemoryBarrier2.Buffer barrier = VkImageMemoryBarrier2.calloc(1, stack);
             setImageBarrier(barrier.get(0), image, oldLayout, newLayout,
-                    sourceStage, sourceAccess, destinationStage, destinationAccess);
+                    sourceStage, sourceAccess, destinationStage, destinationAccess, mipLevels);
             KHRSynchronization2.vkCmdPipelineBarrier2KHR(
                     commandBuffer,
                     VkDependencyInfo.calloc(stack)

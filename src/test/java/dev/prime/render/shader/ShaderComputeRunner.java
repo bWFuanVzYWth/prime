@@ -161,9 +161,21 @@ final class ShaderComputeRunner implements AutoCloseable {
             int width,
             int height,
             int depth) {
+        bindMipmappedImage(binding, dimension, format, pixels, width, height, depth, 1, false);
+    }
+
+    void bindMipmappedImage(int binding, ImageDimension dimension, ImageFormat format,
+            ByteBuffer pixels, int width, int height, int depth, int mipLevels, boolean repeatU) {
         requireOpen();
         validateImageBinding(binding, dimension, width, height, depth);
-        int byteSize = format.byteSize(width, height, depth);
+        if (mipLevels < 1 || mipLevels > 32 - Integer.numberOfLeadingZeros(Math.max(width, Math.max(height, depth)))) {
+            throw new IllegalArgumentException("Invalid shader-test mip count");
+        }
+        int byteSize = 0;
+        for (int level = 0; level < mipLevels; level++) {
+            byteSize = Math.addExact(byteSize, format.byteSize(Math.max(1, width >> level),
+                    Math.max(1, height >> level), Math.max(1, depth >> level)));
+        }
         ByteBuffer source = pixels.duplicate();
         if (source.remaining() != byteSize) {
             throw new IllegalArgumentException(
@@ -178,7 +190,7 @@ final class ShaderComputeRunner implements AutoCloseable {
                 width,
                 height,
                 depth,
-                source);
+                source, mipLevels, repeatU);
         this.images.add(new ImageBinding(binding, image));
     }
 
@@ -188,7 +200,7 @@ final class ShaderComputeRunner implements AutoCloseable {
             int width,
             int height,
             int depth,
-            ByteBuffer pixels) {
+            ByteBuffer pixels, int mipLevels, boolean repeatU) {
         long image = 0L;
         long memory = 0L;
         long view = 0L;
@@ -203,7 +215,7 @@ final class ShaderComputeRunner implements AutoCloseable {
                     .sType$Default()
                     .imageType(dimension.imageType())
                     .format(format.vkFormat())
-                    .mipLevels(1)
+                    .mipLevels(mipLevels)
                     .arrayLayers(1)
                     .samples(VK12.VK_SAMPLE_COUNT_1_BIT)
                     .tiling(VK12.VK_IMAGE_TILING_OPTIMAL)
@@ -248,7 +260,7 @@ final class ShaderComputeRunner implements AutoCloseable {
             viewInfo.subresourceRange()
                     .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
                     .baseMipLevel(0)
-                    .levelCount(1)
+                    .levelCount(mipLevels)
                     .baseArrayLayer(0)
                     .layerCount(1);
             check(
@@ -264,19 +276,19 @@ final class ShaderComputeRunner implements AutoCloseable {
                                     .sType$Default()
                                     .magFilter(VK12.VK_FILTER_LINEAR)
                                     .minFilter(VK12.VK_FILTER_LINEAR)
-                                    .mipmapMode(VK12.VK_SAMPLER_MIPMAP_MODE_NEAREST)
-                                    .addressModeU(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                                    .mipmapMode(VK12.VK_SAMPLER_MIPMAP_MODE_LINEAR)
+                                    .addressModeU(repeatU ? VK12.VK_SAMPLER_ADDRESS_MODE_REPEAT : VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                                     .addressModeV(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                                     .addressModeW(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                                     .minLod(0.0F)
-                                    .maxLod(0.0F)
+                                    .maxLod(mipLevels - 1.0F)
                                     .maxAnisotropy(1.0F),
                             null,
                             handle),
                     "create shader-test sampler");
             sampler = handle.get(0);
 
-            prepareImage(upload, image, width, height, depth);
+            prepareImage(upload, image, width, height, depth, format, mipLevels);
             ImageResource result =
                     new ImageResource(this.device, image, memory, view, sampler);
             image = 0L;
@@ -575,7 +587,7 @@ final class ShaderComputeRunner implements AutoCloseable {
             long image,
             int width,
             int height,
-            int depth) {
+            int depth, ImageFormat format, int mipLevels) {
         VkCommandBuffer commandBuffer = null;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             PointerBuffer commandPointer = stack.mallocPointer(1);
@@ -607,6 +619,7 @@ final class ShaderComputeRunner implements AutoCloseable {
                     VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
                     VK12.VK_IMAGE_LAYOUT_UNDEFINED,
                     VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            toTransfer.get(0).subresourceRange().levelCount(mipLevels);
             VK12.vkCmdPipelineBarrier(
                     commandBuffer,
                     VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -616,18 +629,23 @@ final class ShaderComputeRunner implements AutoCloseable {
                     null,
                     toTransfer);
 
-            VkBufferImageCopy.Buffer copy = VkBufferImageCopy.calloc(1, stack);
-            copy.get(0)
-                    .bufferOffset(0L)
+            VkBufferImageCopy.Buffer copy = VkBufferImageCopy.calloc(mipLevels, stack);
+            long offset = 0;
+            for (int level = 0; level < mipLevels; level++) {
+                int w = Math.max(1, width >> level), h = Math.max(1, height >> level), d = Math.max(1, depth >> level);
+                copy.get(level)
+                    .bufferOffset(offset)
                     .bufferRowLength(0)
                     .bufferImageHeight(0);
-            copy.get(0).imageSubresource()
+                copy.get(level).imageSubresource()
                     .aspectMask(VK12.VK_IMAGE_ASPECT_COLOR_BIT)
-                    .mipLevel(0)
+                    .mipLevel(level)
                     .baseArrayLayer(0)
                     .layerCount(1);
-            copy.get(0).imageOffset().set(0, 0, 0);
-            copy.get(0).imageExtent().set(width, height, depth);
+                copy.get(level).imageOffset().set(0, 0, 0);
+                copy.get(level).imageExtent().set(w, h, d);
+                offset += format.byteSize(w, h, d);
+            }
             VK12.vkCmdCopyBufferToImage(
                     commandBuffer,
                     upload.buffer(),
@@ -643,6 +661,7 @@ final class ShaderComputeRunner implements AutoCloseable {
                     VK12.VK_ACCESS_SHADER_READ_BIT,
                     VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            toShader.get(0).subresourceRange().levelCount(mipLevels);
             VK12.vkCmdPipelineBarrier(
                     commandBuffer,
                     VK12.VK_PIPELINE_STAGE_TRANSFER_BIT,

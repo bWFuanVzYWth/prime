@@ -84,6 +84,10 @@ public final class TraceBackend implements Destroyable {
         return this.bindings;
     }
 
+    /** Borrowed by reconstruction; this backend owns the texture through all frame retirement. */
+    public VulkanImage starmapImage() { return this.starmap.image(); }
+    public long starmapSampler() { return this.starmap.sampler(); }
+
     public SunShadowPipeline sunShadowPipeline() {
         return this.sunShadowPipeline;
     }

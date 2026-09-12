@@ -148,6 +148,26 @@ final class RayTracingPushConstantsTest {
                         valid.historyValid()));
     }
 
+    @Test
+    void nativeStarsAreEnabledOnlyForRrCameraRaysOutsideWater() {
+        Fixture fixture = input(0);
+        var p = fixture.input();
+        for (PostProcessingMode mode : PostProcessingMode.values()) for (boolean water : new boolean[] {false, true}) {
+            var frame = new IntegratorFrameInput(p.camera(), p.width(), p.height(), p.astronomy(), p.rayCone(),
+                    p.additionalSpecularBounces(), p.minimumBounces(), p.maximumBounces(), p.sampleIndex(),
+                    p.sampleEpoch(), p.jitterPhase(), water, mode, p.transparentGuideMode(), p.lighting(),
+                    p.material(), p.shInput(), p.historyValid());
+            var bytes = ByteBuffer.allocate(ShaderAbi.PUSH_CONSTANT_SIZE).order(ByteOrder.nativeOrder());
+            RayTracingPushConstants.write(frame, fixture.scene(), bytes);
+            int control = bytes.getInt(ShaderAbi.PUSH_PATH_OFFSET + 12);
+            assertEquals(mode == PostProcessingMode.DLSS_RR && !water,
+                    (control & ShaderAbi.PATH_NATIVE_STARS_MASK) != 0);
+            assertEquals(IntegratorSettings.packMaterialLightingControl(p.lighting().sunQuarterSteps(),
+                    p.lighting().starQuarterSteps(), p.lighting().blockLightQuarterSteps(),
+                    p.material().roughnessSteps(), p.shInput()), control & ~ShaderAbi.PATH_NATIVE_STARS_MASK);
+        }
+    }
+
     private static Fixture input(int sampleIndex) {
         FrameCamera camera = new FrameCamera(
                 new Matrix4f().perspective(

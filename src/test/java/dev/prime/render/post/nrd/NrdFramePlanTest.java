@@ -58,6 +58,7 @@ final class NrdFramePlanTest {
                 frame.deltaMilliseconds(),
                 SUN,
                 1.0F,
+                new dev.prime.render.post.StarsFrameParameters(dev.prime.render.AstronomySettings.defaults(), 1.0F, false),
                 new DisplaySettings.Snapshot(0, 0));
     }
 

@@ -217,6 +217,13 @@ RR render targets 中 ray-tracing `transportScratch` 在 `rr_prepare` 后成为 
 重复归一化或复制。独立的 RGBA32F reflection guide 仍是 wavefront 双身份状态，不能与主 guide
 合并；prepare 不再把它误作主法线输出。
 
+RR `inputColor.a` 为真实可见前景覆盖：直接 camera miss 为 0，真实表面为 1，不能由虚拟
+guide 的 miss 推断。`outputColor.a` 为 NGX 重建覆盖，独立星空 pass 只消费它并保留原值。
+同一 pass 只读 `ReconstructionControl.surfaceValid` 的当前邻域，在纯前景内部阻止 reset
+后的 alpha 下偏漏星。颜色仍是线性 Rec.2020，alpha 不参与颜色转换。
+`path.w` bit 24 表示 RR 原生直接星空，仅 RR、非水下帧启用；已有精确 source/visible 状态
+决定真正的相机 miss，不以 bounce 计数代替路径身份。
+
 Reconstruction IR 至少区分：
 
 - stable/noisy `LinearRec2020Radiance`，diffuse/specular/transparent branch；
@@ -271,7 +278,7 @@ scene epoch 同时就绪后原子发布。Frame candidate 只在 host accept 后
 | visible motion / linear view-Z | `RG32F` / `R32F` |
 | reconstruction control | `R8_UINT` exact bits |
 | ray-cone push | binary16x2，LOD 误差 `<=1/512 mip` |
-| starmap | D65 linear Rec.2020 `BC6H_UFLOAT`，16K 单 mip；误差门禁见[灯光与大气采样](灯光与大气采样.md) |
+| starmap | D65 linear Rec.2020 `BC6H_UFLOAT`，16K、15 层球面滤波 mip；误差门禁见[灯光与大气采样](灯光与大气采样.md) |
 
 上表未列出的 normal/radiance/transport 连续数据、wavefront stride、SoA/AoS、medium 参数表和
 backend target alias 仍属可替换编码。在新门禁通过前保留当前较高精度基线。

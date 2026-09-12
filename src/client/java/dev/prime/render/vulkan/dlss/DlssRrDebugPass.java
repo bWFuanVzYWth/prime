@@ -62,7 +62,9 @@ final class DlssRrDebugPass implements Destroyable {
                     descriptor(RrInputView.LINEAR_DEPTH),
                     descriptor(RrInputView.MOTION),
                     descriptor(RrInputView.SPECULAR_HIT_DISTANCE),
-                    descriptor(RrInputView.RESPONSIVITY));
+                    descriptor(RrInputView.RESPONSIVITY),
+                    descriptor(RrInputView.INPUT_COVERAGE),
+                    descriptor(RrInputView.OUTPUT_COVERAGE));
             this.outputs.sdr().recordGrid(commandBuffer, 4, views);
             this.outputs.hdr().recordGrid(commandBuffer, 4, views);
             return;
@@ -85,6 +87,8 @@ final class DlssRrDebugPass implements Destroyable {
             case SPECULAR_HIT_DISTANCE ->
                     view(SPECULAR_HIT_DISTANCE, ImageDiagnosticPass.HIT_R);
             case RESPONSIVITY -> view(RESPONSIVITY, ImageDiagnosticPass.SIGNED);
+            case INPUT_COVERAGE -> view(INPUT_COLOR, ImageDiagnosticPass.ROUGHNESS);
+            case OUTPUT_COVERAGE -> view(OUTPUT, ImageDiagnosticPass.ROUGHNESS);
             case OFF, GRID -> throw new IllegalArgumentException("RR view has no single image");
         };
     }

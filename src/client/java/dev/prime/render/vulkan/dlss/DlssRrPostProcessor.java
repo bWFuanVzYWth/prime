@@ -23,6 +23,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
     private final DlssRrTargets targets;
     private final DlssRrPreparePass preparePass;
+    private final DlssRrStarsPass starsPass;
     private final DlssRrNative.Feature feature;
     private final DisplayTransformPass displayTransform;
     private DlssRrDebugPass debugPass;
@@ -33,6 +34,7 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
             ResolvedReconstruction selection,
             DlssRrTargets targets,
             DlssRrPreparePass preparePass,
+            DlssRrStarsPass starsPass,
             DlssRrNative.Feature feature,
             DisplayTransformPass displayTransform,
             VulkanImage displayOutput,
@@ -44,6 +46,7 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
                 displayOutput);
         this.targets = targets;
         this.preparePass = preparePass;
+        this.starsPass = starsPass;
         this.feature = feature;
         this.displayTransform = displayTransform;
     }
@@ -52,6 +55,8 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
             VulkanContext context,
             DlssRrNative.Context ngxContext,
             AtmospherePipeline atmosphere,
+            VulkanImage starmap,
+            long starmapSampler,
             VulkanImage accumulation,
             VulkanImage displayOutput,
             ResolvedReconstruction selection) {
@@ -61,12 +66,15 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
         int displayHeight = selection.displayExtent().height();
         DlssRrTargets targets = null;
         DlssRrPreparePass preparePass = null;
+        DlssRrStarsPass starsPass = null;
         DlssRrNative.Feature feature = null;
         DisplayTransformPass displayTransform = null;
         try {
             targets = DlssRrTargets.create(
                     context, renderWidth, renderHeight, displayWidth, displayHeight);
             preparePass = DlssRrPreparePass.create(context, targets, accumulation, atmosphere);
+            starsPass = DlssRrStarsPass.create(context, targets.rrOutput(), atmosphere, starmap,
+                    starmapSampler, targets.reconstructionControl());
             displayTransform = DisplayTransformPass.createRealtime(
                     context, targets.rrOutput(), targets, displayOutput);
             var encoder = context.commandEncoder();
@@ -87,6 +95,7 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
                     selection,
                     targets,
                     preparePass,
+                    starsPass,
                     feature,
                     displayTransform,
                     displayOutput,
@@ -96,6 +105,7 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
             failure = ResourceCleanup.close(feature, failure);
             failure = ResourceCleanup.destroy(displayTransform, failure);
             failure = ResourceCleanup.destroy(preparePass, failure);
+            failure = ResourceCleanup.destroy(starsPass, failure);
             failure = ResourceCleanup.destroy(targets, failure);
             throw failure;
         }
@@ -168,6 +178,7 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
                         null,
                         this.targets.specularHitDistance(),
                         this.targets.responsivity()));
+        this.starsPass.record(commandBuffer, parameters);
         this.displayTransform.record(
                 commandBuffer,
                 parameters.deltaMilliseconds() * 0.001F,
@@ -212,6 +223,7 @@ public final class DlssRrPostProcessor extends VulkanReconstructionProcessor {
         failure = ResourceCleanup.destroy(this.debugPass, failure);
         failure = ResourceCleanup.destroy(this.displayTransform, failure);
         failure = ResourceCleanup.destroy(this.preparePass, failure);
+        failure = ResourceCleanup.destroy(this.starsPass, failure);
         failure = ResourceCleanup.destroy(this.targets, failure);
         finishDestroy(failure);
     }

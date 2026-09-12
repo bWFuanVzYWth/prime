@@ -49,7 +49,10 @@ public final class VulkanSharedPrograms implements AutoCloseable {
         NRD_COMPOSITE("Prime NRD composite", 32, false,
                 storageImages(28), "nrd_composite"),
         RR_PREPARE("RR prepare", 216, false,
-                storageImages(15), "rr_prepare");
+                storageImages(15), "rr_prepare"),
+        RR_STARS("RR native stars", 104, false,
+                new int[] {STORAGE_IMAGE, VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, STORAGE_IMAGE, STORAGE_IMAGE},
+                "rr_stars");
 
         final String label;
         final int pushSize;

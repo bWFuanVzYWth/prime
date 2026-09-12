@@ -19,8 +19,10 @@ import "transport/surface/access.slang";
 public float3 primeEvaluateEnvironmentContribution(
         inout PrimeIntegratorContext context,
         PathState path, IntegratorRecord integrator) {
-    float3 stars = primeStarmapRadiance(
-            integrator, path.rayDirection);
+    // Source identity survives local bounce resets; only the camera ray has no source primitive.
+    bool nativeStars = (primePush.path.w & PRIME_PATH_NATIVE_STARS_MASK) != 0u
+            && all(path.sourcePrimitive == uint2(PRIME_NO_PRIMITIVE_INDEX));
+    float3 stars = nativeStars ? float3(0.0) : primeStarmapRadiance(integrator, path.rayDirection);
     LightEvaluation sun = primeEvaluateSun(
             integrator, path.rayDirection);
     bool previousUsedSunNee =

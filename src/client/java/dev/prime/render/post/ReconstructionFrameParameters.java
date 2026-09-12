@@ -18,6 +18,7 @@ public record ReconstructionFrameParameters(
         float deltaMilliseconds,
         SunDirection sunDirection,
         float sunRadianceMultiplier,
+        StarsFrameParameters stars,
         DisplaySettings.Snapshot display) {
     public ReconstructionFrameParameters {
         camera = Objects.requireNonNull(camera, "camera");
@@ -25,6 +26,7 @@ public record ReconstructionFrameParameters(
         jitter = Objects.requireNonNull(jitter, "jitter");
         sunDirection = Objects.requireNonNull(sunDirection, "sunDirection");
         display = Objects.requireNonNull(display, "display");
+        stars = Objects.requireNonNull(stars, "stars");
         if (frameIndex < 0
                 || !Float.isFinite(deltaMilliseconds)
                 || deltaMilliseconds < 0.0F

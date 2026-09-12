@@ -6,6 +6,7 @@ import dev.prime.render.IntegratorFrameInput;
 import dev.prime.render.AtmosphereCoordinates;
 import dev.prime.render.IntegratorSettings;
 import dev.prime.render.RayConeParameters;
+import dev.prime.render.post.PostProcessingMode;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.vulkan.terrain.TerrainScene;
 import java.nio.ByteBuffer;
@@ -91,7 +92,9 @@ public final class RayTracingPushConstants {
                         input.lighting().starQuarterSteps(),
                         input.lighting().blockLightQuarterSteps(),
                         input.material().roughnessSteps(),
-                        input.shInput()));
+                        input.shInput())
+                        | (input.postProcessingMode() == PostProcessingMode.DLSS_RR
+                                && !input.cameraInWater() ? ShaderAbi.PATH_NATIVE_STARS_MASK : 0));
     }
 
     static int packRayCone(RayConeParameters rayCone) {

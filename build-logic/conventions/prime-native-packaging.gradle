@@ -135,27 +135,35 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 			def starmap = zip.getInputStream(zip.getEntry('prime/starmap/starmap_2020_16k.json'))
 					.withCloseable { new groovy.json.JsonSlurper().parse(it) }
 			def stripeNames = (0..<4).collect { "starmap_2020_16k_${it}.bc6h.gz".toString() }
-			if (starmap.version != 2 || starmap.source.sha256 != contract.sourceSha256
+			def mipNames = (1..<contract.mipLevels).collect { "starmap_2020_16k_mip${it}.bc6h.gz".toString() }
+			if (starmap.version != 3 || starmap.source.sha256 != contract.sourceSha256
 					|| starmap.image.width != contract.width || starmap.image.height != contract.height
 					|| starmap.image.format != 'VK_FORMAT_BC6H_UFLOAT_BLOCK'
-					|| starmap.image.colorSpace != 'D65 linear Rec.2020' || starmap.image.mipLevels != 1
+					|| starmap.image.colorSpace != 'D65 linear Rec.2020' || starmap.image.mipLevels != contract.mipLevels
+					|| starmap.image.mips.collect { it.name } != mipNames
 					|| starmap.image.blockWidth != 4 || starmap.image.blockHeight != 4
 					|| starmap.image.blockBytes != 16
 					|| starmap.image.stripes.collect { it.name } != stripeNames) {
 				throw new GradleException('Distribution jar has invalid BC6H starmap format, source or stripes')
 			}
-			def expectedStarmap = (stripeNames.collect { "prime/starmap/${it}".toString() }
+			def expectedStarmap = ((stripeNames + mipNames).collect { "prime/starmap/${it}".toString() }
 					+ ['prime/starmap/starmap_2020_16k.json']) as Set
 			def actualStarmap = names.findAll { it.startsWith('prime/starmap/') && !it.endsWith('/') } as Set
 			if (actualStarmap != expectedStarmap) {
 				throw new GradleException('Distribution jar contains stale or undeclared starmap assets')
 			}
 			// Validate the shipped bytes, not only their presence. Stream both passes so the
-			// 128 MiB BC6H image never needs a second in-memory copy during packaging.
-			starmap.image.stripes.eachWithIndex { stripe, index ->
+			// BC6H mip chain never needs a second in-memory copy during packaging.
+			(starmap.image.stripes + starmap.image.mips).eachWithIndex { stripe, index ->
 				def name = "prime/starmap/${stripe.name}".toString()
-				long expectedBytes = (contract.width / 4L) * (contract.stripeRows / 4L) * 16L
-				if (stripe.firstRow != index * contract.stripeRows || stripe.rows != contract.stripeRows
+				int level = Math.max(0, index - 3)
+				int width = Math.max(1, (int) contract.width >> level)
+				int height = level == 0 ? contract.stripeRows : Math.max(1, (int) contract.height >> level)
+				long expectedBytes = Math.floorDiv(width + 3, 4) * (long) Math.floorDiv(height + 3, 4) * 16L
+				if ((level == 0 && (stripe.firstRow != index * contract.stripeRows || stripe.rows != height))
+						|| (level > 0 && (stripe.level != level || stripe.width != width || stripe.height != height
+								|| !(stripe.sphericalEnergyRelativeError <= 0.01) || !(stripe.luminanceNrmse <= 0.06)
+								|| !(stripe.rgbNrmse <= 0.08)))
 						|| stripe.uncompressedBytes != expectedBytes) {
 					throw new GradleException("Invalid starmap stripe layout: ${name}")
 				}

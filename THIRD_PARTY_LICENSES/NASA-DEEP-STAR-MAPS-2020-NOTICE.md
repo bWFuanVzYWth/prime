@@ -7,8 +7,10 @@ centered at 0h right ascension with right ascension increasing to the left.
 Prime retains its existing linear-sRGB interpretation and converts the source
 RGB to D65 linear Rec.2020 before BC6H unsigned-float encoding. The EXR does
 not specify primaries or white point; this interpretation is not a claim about
-NASA's source colorimetry. No exposure, tone mapping, resize or resampling is
-applied. Compressed blocks are uploaded directly with one mip level.
+NASA's source colorimetry. No exposure or tone mapping is applied. The original
+16K base level is retained; 14 additional mip levels are averaged in linear
+Rec.2020 using texel solid-angle weights. Compressed BC6H blocks for all 15 levels
+are uploaded directly.
 
 Source SHA-256:
 `19a1351f00c386a6e5eec4d67af96d5fc71edf6a1189941579b9498b52e7589a`

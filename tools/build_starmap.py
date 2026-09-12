@@ -53,7 +53,7 @@ def check_dds(path: Path, width: int, height: int, dxgi: int) -> None:
         raise ValueError(f"DDS layout mismatch: {path}")
     if extension[:4] != (dxgi, 3, 0, 1):
         raise ValueError(f"DDS format/array mismatch: {path}")
-    size = width * height if dxgi == 95 else width * height * 16
+    size = ((width + 3) // 4) * ((height + 3) // 4) * 16 if dxgi == 95 else width * height * 16
     if path.stat().st_size != 148 + size:
         raise ValueError(f"DDS data size mismatch: {path}")
 
@@ -67,6 +67,83 @@ def write_gzip(path: Path, data: bytes) -> dict:
             "compressedBytes": path.stat().st_size, "compressedSha256": sha256(path)}
 
 
+def downsample_sphere(rgb: np.ndarray, first_row: int = 0, sphere_height: int | None = None) -> np.ndarray:
+    """Average radiance by texel solid angle, including the final 2x1 -> 1x1 level."""
+    height, width, _ = rgb.shape
+    horizontal = (rgb[:, 0::2] + rgb[:, 1::2]) * 0.5 if width > 1 else rgb
+    if height == 1:
+        return horizontal
+    rows = np.arange(first_row, first_row + height + 1, dtype=np.float64)
+    weights = -np.diff(np.cos(np.pi * rows / (sphere_height or height)))
+    top = (weights[0::2] / (weights[0::2] + weights[1::2])).astype(np.float32)[:, None, None]
+    return horizontal[0::2] * top + horizontal[1::2] * (1.0 - top)
+
+
+def build_mips(channels, args, manifest):
+    work = args.work.resolve()
+    rgb = np.empty((HEIGHT // 2, WIDTH // 2, 3), dtype=np.float32)
+    for first in range(0, HEIGHT, 64):
+        source = np.stack([c[first:first+64] for c in channels], axis=-1).astype(np.float32) @ MATRIX.T
+        rgb[first//2:(first+64)//2] = downsample_sphere(source, first, HEIGHT)
+    levels = []
+    fixture = []
+    for level in range(1, 15):
+        height, width, _ = rgb.shape
+        # The CPU encoder fits the tiny tail more accurately; its cost is bounded to 16x8 and below.
+        encoder = ["-gpu", "0"] if level < 10 else ["-nogpu"]
+        base = f"{NAME}_mip{level}"
+        original = work / "source" / (base + ".dds")
+        rgba = np.ones((height, width, 4), dtype="<f4")
+        rgba[:, :, :3] = rgb
+        with original.open("wb") as f:
+            f.write(dds_header(width, height))
+            rgba.tofile(f)
+        del rgba
+        subprocess.run([str(args.texconv.resolve()), "-nologo", "-y", "-dx10", "-m", "1", "-f", "BC6H_UF16",
+                        *encoder, "-o", str(work / "bc6h"), str(original)], check=True)
+        compressed = work / "bc6h" / (base + ".dds")
+        check_dds(compressed, width, height, 95)
+        subprocess.run([str(args.texconv.resolve()), "-nologo", "-y", "-dx10", "-m", "1", "-f", "R32G32B32A32_FLOAT",
+                        "-o", str(work / "decoded"), str(compressed)], check=True)
+        decoded_path = work / "decoded" / (base + ".dds")
+        check_dds(decoded_path, width, height, 2)
+        decoded = np.memmap(decoded_path, dtype="<f4", mode="r", offset=148, shape=(height, width, 4))
+        out = decoded[:, :, :3]
+        if not np.all(np.isfinite(out)) or np.any(out < 0):
+            raise ValueError("Invalid decoded starmap mip")
+        weights = -np.diff(np.cos(np.pi * np.arange(height+1, dtype=np.float64) / height))[:, None]
+        lum, actual = rgb @ LUMA, out @ LUMA
+        energy_error = float(abs(np.sum(actual * weights) / np.sum(lum * weights) - 1))
+        nrmse = float(np.sqrt(np.sum((actual.astype(np.float64)-lum)**2) / np.sum(lum.astype(np.float64)**2)))
+        rgb_nrmse = float(np.sqrt(np.sum((out.astype(np.float64)-rgb)**2) / np.sum(rgb.astype(np.float64)**2)))
+        if (energy_error > LIMITS["sphericalEnergyRelativeError"] or nrmse > LIMITS["luminanceNrmse"]
+                or rgb_nrmse > LIMITS["rgbNrmse"]):
+            raise ValueError(f"Mip {level} exceeds BC6H quality limits: {energy_error}, {nrmse}, {rgb_nrmse}")
+        coords = {(0, 0), (width-1, height-1), (width//2, height//2)}
+        coords.add((int(np.argmax(lum[height//2])), height//2))
+        for x, y in sorted(coords):
+            fixture.append({"level": level, "x": x, "y": y, "rgb": out[y, x].tolist()})
+        with compressed.open("rb") as f:
+            f.seek(148)
+            record = write_gzip(args.output / (base + ".bc6h.gz"), f.read())
+        levels.append({**record, "level": level, "width": width, "height": height,
+                       "encoder": "DirectCompute" if level < 10 else "CPU", "sphericalEnergyRelativeError": energy_error,
+                       "luminanceNrmse": nrmse, "rgbNrmse": rgb_nrmse})
+        print(f"Mip {level}: {width}x{height}, energy error {energy_error:.6f}, NRMSE {nrmse:.6f}", flush=True)
+        del decoded, out, lum, actual
+        if width > 1:
+            rgb = downsample_sphere(rgb)
+    manifest["version"] = 3
+    manifest["image"]["mipLevels"] = 15
+    manifest["image"]["mips"] = levels
+    manifest["encoder"]["mode"] = "BC6H_UF16 DirectCompute (levels 0-9), CPU (10-14); solid-angle-weighted linear Rec.2020 mip chain"
+    (args.output / (NAME + ".json")).write_text(json.dumps(manifest, indent=2)+"\n", encoding="utf-8")
+    if args.fixture:
+        data = json.loads(args.fixture.read_text(encoding="utf-8"))
+        data["mipSamples"] = fixture
+        args.fixture.write_text(json.dumps(data, indent=2)+"\n", encoding="utf-8")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("source", type=Path)
@@ -75,6 +152,7 @@ def main() -> None:
                    help="DirectXTex may2026 texconv.exe (2026.5.8.1), verified by SHA-256")
     p.add_argument("--work", required=True, type=Path, help="Intermediate DDS/error report directory")
     p.add_argument("--fixture", type=Path, help="Independent decoder samples for Vulkan regression")
+    p.add_argument("--mips-only", action="store_true", help="Keep reviewed base-level blocks and build their mip chain")
     args = p.parse_args()
     if sha256(args.source) != SOURCE_SHA256 or sha256(args.texconv) != TEXCONV_SHA256:
         raise ValueError("Source or texconv SHA-256 does not match the pinned asset/tool")
@@ -97,6 +175,15 @@ def main() -> None:
     for channel in channels:
         if not np.all(np.isfinite(channel)) or np.any(channel < 0):
             raise ValueError("BC6H_UFLOAT source must be finite and nonnegative")
+    if args.mips_only:
+        manifest = json.loads((args.output / (NAME + ".json")).read_text(encoding="utf-8"))
+        if manifest["source"]["sha256"] != SOURCE_SHA256:
+            raise ValueError("Base asset does not match the mip source")
+        for stripe in manifest["image"]["stripes"]:
+            if sha256(args.output / stripe["name"]) != stripe["compressedSha256"]:
+                raise ValueError("Base asset hash mismatch")
+        build_mips(channels, args, manifest)
+        return
     sums = np.zeros(8, dtype=np.float64)
     max_error = 0.0
     samples, files = [], []
@@ -193,6 +280,7 @@ def main() -> None:
         args.fixture.parent.mkdir(parents=True, exist_ok=True)
         args.fixture.write_text(json.dumps({"sourceSha256": SOURCE_SHA256, "samples": samples}, indent=2)+"\n",
                                 encoding="utf-8")
+    build_mips(channels, args, manifest)
 
 
 if __name__ == "__main__":

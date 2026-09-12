@@ -12,6 +12,18 @@ if(NOT EXISTS "${DLSS_SDK_DIR}/include/nvsdk_ngx_vk.h")
     message(FATAL_ERROR "Set DLSS_SDK_DIR to the NVIDIA DLSS SDK root")
 endif()
 
+option(PRIME_DLSS_RR_GPU_TESTS "Build optional real-NGX Vulkan coverage test (RTX required)" OFF)
+if(PRIME_DLSS_RR_GPU_TESTS)
+    find_package(Vulkan REQUIRED)
+    add_executable(prime_dlss_rr_gpu_test prime_dlss_rr_gpu_test.cpp)
+    target_compile_features(prime_dlss_rr_gpu_test PRIVATE cxx_std_20)
+    target_compile_definitions(prime_dlss_rr_gpu_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_include_directories(prime_dlss_rr_gpu_test PRIVATE "${DLSS_SDK_DIR}/include")
+    target_link_libraries(prime_dlss_rr_gpu_test PRIVATE Vulkan::Vulkan
+        "${DLSS_SDK_DIR}/lib/Windows_x86_64/khr/x64/nvsdk_ngx_khr_s.lib")
+    set_target_properties(prime_dlss_rr_gpu_test PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 include(FetchContent)
 FetchContent_Declare(
     vulkan_headers

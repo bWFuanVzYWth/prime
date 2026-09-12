@@ -78,7 +78,8 @@ public final class ReconstructionBackendRegistry {
     }
 
     public VulkanReconstructionResources createResources(
-            AtmospherePipeline atmosphere, ResolvedReconstruction selection) {
+            AtmospherePipeline atmosphere, VulkanImage starmap, long starmapSampler,
+            ResolvedReconstruction selection) {
         if (this.context == null) {
             throw new IllegalStateException(
                     "The selection-only reconstruction registry cannot create Vulkan resources");
@@ -98,7 +99,7 @@ public final class ReconstructionBackendRegistry {
 
         try {
             VulkanReconstructionProcessor processor = this.createProcessor(
-                    atmosphere, stableRadiance, output, selection);
+                    atmosphere, starmap, starmapSampler, stableRadiance, output, selection);
             return new VulkanReconstructionResources(
                     output, stableRadiance, processor);
         } catch (RuntimeException exception) {
@@ -108,12 +109,14 @@ public final class ReconstructionBackendRegistry {
                 throw failure;
             }
             return this.createResources(
-                    atmosphere, this.recoverCreationFailure(selection, exception));
+                    atmosphere, starmap, starmapSampler, this.recoverCreationFailure(selection, exception));
         }
     }
 
     private VulkanReconstructionProcessor createProcessor(
             AtmospherePipeline atmosphere,
+            VulkanImage starmap,
+            long starmapSampler,
             VulkanImage stableRadiance,
             VulkanImage output,
             ResolvedReconstruction selection) {
@@ -133,6 +136,8 @@ public final class ReconstructionBackendRegistry {
                         this.context,
                         this.ngxContext,
                         atmosphere,
+                        starmap,
+                        starmapSampler,
                         stableRadiance,
                         output,
                         selection);

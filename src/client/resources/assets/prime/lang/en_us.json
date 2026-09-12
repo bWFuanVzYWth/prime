@@ -120,6 +120,8 @@
   "prime.options.debug.image_view.linear_depth": "Linear Depth",
   "prime.options.debug.image_view.motion": "Motion",
   "prime.options.debug.image_view.responsivity": "Responsivity",
+  "prime.options.debug.image_view.input_coverage": "RR Input Foreground Coverage",
+  "prime.options.debug.image_view.output_coverage": "RR Output Foreground Coverage",
   "prime.options.debug.image_view.primary_grid": "Primary REBLUR Input Grid",
   "prime.options.debug.image_view.primary_motion": "Primary: Raw MV",
   "prime.options.debug.image_view.primary_normal_roughness": "Primary: Raw Normal/Roughness",

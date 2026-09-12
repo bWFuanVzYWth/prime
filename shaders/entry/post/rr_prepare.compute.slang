@@ -40,6 +40,7 @@ struct PrimeRrPreparePushConstants {
 
 static const float PRIME_RR_SKY_VIEW_Z = 65504.0;
 static const uint PRIME_RR_HISTORY_VALID = 0x08u;
+static const uint PRIME_RR_SURFACE_VALID = 0x04u;
 
 // The viewport corner angles are identical for every lane in this 8x8 workgroup.
 groupshared AtmEpipolarRange rrEpipolarRange;
@@ -149,8 +150,10 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupIndex : SV_Gro
     }
 
     primeWriteImageStore(rrResponsivity, pixel, float4(rrPush.responsivity));
-    bool historyValid = (rrReconstructionControl[pixel]
-            & PRIME_RR_HISTORY_VALID) != 0u;
+    uint control = rrReconstructionControl[pixel];
+    bool historyValid = (control & PRIME_RR_HISTORY_VALID) != 0u;
+    // Coverage follows actual camera visibility, not a reflected/refracted guide's miss marker.
+    float coverage = (control & PRIME_RR_SURFACE_VALID) != 0u ? 1.0 : 0.0;
 
     float4 material = primeImageLoad(rrDiffuseMaterial, pixel);
     float4 specularMaterial = primeImageLoad(rrSpecularMaterial, pixel);
@@ -179,7 +182,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupIndex : SV_Gro
                 primeNrdSanitizeMotion(float3(motion, 0.0)), 0.0);
         primeWriteImageStore(rrMotion, pixel, packedMotion);
         primeWriteImageStore(rrInputColor, pixel, float4(
-                primeReadonlyImageLoad(rrStableRadiance, pixel).rgb, 1.0));
+                primeReadonlyImageLoad(rrStableRadiance, pixel).rgb, coverage));
         return;
     }
 
@@ -193,7 +196,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupIndex : SV_Gro
     // while primary motion is projected.
     inputRadiance = rrApplyAerial(pixel, extent, material.a, inputRadiance);
     primeWriteImageStore(rrInputColor, pixel, float4(
-            primeNrdClampRadiance(inputRadiance, PRIME_NRD_FP16_MAX), 1.0));
+            primeNrdClampRadiance(inputRadiance, PRIME_NRD_FP16_MAX), coverage));
 
     // The position is not needed by material decode or lighting. Loading it here keeps four
     // components out of the color/aerial live range.

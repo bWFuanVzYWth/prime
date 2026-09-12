@@ -21,7 +21,7 @@
 
 namespace {
 
-constexpr std::uint32_t PRIME_DLSS_RR_ABI_VERSION = 11;
+constexpr std::uint32_t PRIME_DLSS_RR_ABI_VERSION = 13;
 constexpr auto PRIME_DLSS_RR_RENDER_PRESET = NVSDK_NGX_RayReconstruction_Hint_Render_Preset_F;
 constexpr char PROJECT_ID[] = "7bc01faf-de5e-4c7c-9936-43cb5c301232";
 constexpr std::uint32_t EXTENSION_NAME_STRIDE = 256;
@@ -471,7 +471,8 @@ PRIME_EXPORT int primeDlssRrCreateFeature(PrimeFeatureDescription* description) 
     create.InTargetHeight = description->outputHeight;
     create.InPerfQualityValue = static_cast<NVSDK_NGX_PerfQuality_Value>(description->quality);
     create.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_IsHDR
-            | NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
+            | NVSDK_NGX_DLSS_Feature_Flags_MVLowRes
+            | NVSDK_NGX_DLSS_Feature_Flags_AlphaUpscaling;
     create.InEnableOutputSubrects = false;
     result = NGX_VULKAN_CREATE_DLSSD_EXT1(
             context->device,

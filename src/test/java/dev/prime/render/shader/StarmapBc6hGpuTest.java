@@ -19,7 +19,12 @@ final class StarmapBc6hGpuTest extends GpuShaderTest {
     void packagedBlocksMatchIndependentDecoderAcrossStripesAndFilterInLinearLight() throws Exception {
         int width = ShaderAbi.STARMAP_WIDTH;
         int height = ShaderAbi.STARMAP_HEIGHT;
-        ByteBuffer blocks = ByteBuffer.allocateDirect(width * height).order(ByteOrder.LITTLE_ENDIAN);
+        int byteSize = 0;
+        for (int level = 0; level < ShaderAbi.STARMAP_MIP_LEVELS; level++) {
+            byteSize += ShaderComputeRunner.ImageFormat.BC6H_UFLOAT_BLOCK.byteSize(
+                    Math.max(1, width >> level), Math.max(1, height >> level), 1);
+        }
+        ByteBuffer blocks = ByteBuffer.allocateDirect(byteSize).order(ByteOrder.LITTLE_ENDIAN);
         for (int stripe = 0; stripe < height / ShaderAbi.STARMAP_STRIPE_ROWS; stripe++) {
             String name = "/prime/starmap/starmap_2020_16k_" + stripe + ".bc6h.gz";
             try (var resource = getClass().getResourceAsStream(name)) {
@@ -31,9 +36,21 @@ final class StarmapBc6hGpuTest extends GpuShaderTest {
                 }
             }
         }
+        for (int level = 1; level < ShaderAbi.STARMAP_MIP_LEVELS; level++) {
+            try (var resource = getClass().getResourceAsStream("/prime/starmap/starmap_2020_16k_mip" + level + ".bc6h.gz")) {
+                assertNotNull(resource);
+                try (var gzip = new GZIPInputStream(resource)) {
+                    byte[] data = gzip.readAllBytes();
+                    assertEquals(ShaderComputeRunner.ImageFormat.BC6H_UFLOAT_BLOCK.byteSize(
+                            Math.max(1, width >> level), Math.max(1, height >> level), 1), data.length);
+                    blocks.put(data);
+                }
+            }
+        }
         blocks.flip();
-        runner.bindSampledImage(2, ShaderComputeRunner.ImageDimension.TWO_D,
-                ShaderComputeRunner.ImageFormat.BC6H_UFLOAT_BLOCK, blocks, width, height, 1);
+        runner.bindMipmappedImage(2, ShaderComputeRunner.ImageDimension.TWO_D,
+                ShaderComputeRunner.ImageFormat.BC6H_UFLOAT_BLOCK, blocks, width, height, 1,
+                ShaderAbi.STARMAP_MIP_LEVELS, false);
         try (var resource = getClass().getResourceAsStream("/prime/starmap_2020_16k_samples.json")) {
             assertNotNull(resource);
             var fixture = new Gson().fromJson(new InputStreamReader(resource, StandardCharsets.UTF_8),
@@ -60,6 +77,29 @@ final class StarmapBc6hGpuTest extends GpuShaderTest {
                             halfUlp, "BC6H filtering " + i);
                 }
                 assertEquals(1.0F, output.getFloat(i * 32 + 12), 0.0F);
+            }
+            var mips = fixture.getAsJsonArray("mipSamples");
+            ByteBuffer mipInput = ByteBuffer.allocateDirect(mips.size() * 16).order(ByteOrder.LITTLE_ENDIAN);
+            for (var value : mips) {
+                var sample = value.getAsJsonObject();
+                mipInput.putInt(sample.get("x").getAsInt()).putInt(sample.get("y").getAsInt())
+                        .putInt(sample.get("level").getAsInt()).putInt(0);
+            }
+            mipInput.flip();
+            ByteBuffer mipOutput = runner.dispatch("starmap_mips.comp.spv", mipInput, mips.size() * 32,
+                    new ShaderComputeRunner.Workgroups(mips.size(), 1, 1), null);
+            var coarsest = mips.get(mips.size() - 1).getAsJsonObject().getAsJsonArray("rgb");
+            for (int i = 0; i < mips.size(); i++) {
+                var sample = mips.get(i).getAsJsonObject();
+                for (int c = 0; c < 3; c++) {
+                    float expected = sample.getAsJsonArray("rgb").get(c).getAsFloat();
+                    assertEquals(expected, mipOutput.getFloat(i * 32 + c * 4), 1.0e-7F, "mip texel " + i);
+                    if (sample.get("level").getAsInt() == 13) {
+                        float blended = (expected + coarsest.get(c).getAsFloat()) * 0.5F;
+                        float halfUlp = Math.scalb(1.0F, Math.max(-14, Math.getExponent(blended)) - 10);
+                        assertEquals(blended, mipOutput.getFloat(i * 32 + 16 + c * 4), halfUlp, "trilinear mip blend");
+                    }
+                }
             }
         }
     }

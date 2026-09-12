@@ -18,6 +18,8 @@ public enum RrInputView implements ImageDiagnosticView {
     MOTION("motion"),
     SPECULAR_HIT_DISTANCE("specular_hit_distance"),
     RESPONSIVITY("responsivity"),
+    INPUT_COVERAGE("input_coverage"),
+    OUTPUT_COVERAGE("output_coverage"),
     GRID("grid");
 
     private final String id;

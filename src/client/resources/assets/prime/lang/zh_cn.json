@@ -120,6 +120,8 @@
   "prime.options.debug.image_view.linear_depth": "线性深度",
   "prime.options.debug.image_view.motion": "运动向量",
   "prime.options.debug.image_view.responsivity": "响应度",
+  "prime.options.debug.image_view.input_coverage": "RR 输入前景覆盖率",
+  "prime.options.debug.image_view.output_coverage": "RR 输出前景覆盖率",
   "prime.options.debug.image_view.primary_grid": "主路径 REBLUR 输入分区",
   "prime.options.debug.image_view.primary_motion": "主路径：MV 原图",
   "prime.options.debug.image_view.primary_normal_roughness": "主路径：法线/粗糙度原图",

@@ -264,6 +264,7 @@ public final class VulkanDeviceNegotiator {
             if (starmapResult != VK12.VK_SUCCESS
                     || starmapProperties.maxExtent().width() < ShaderAbi.STARMAP_WIDTH
                     || starmapProperties.maxExtent().height() < ShaderAbi.STARMAP_HEIGHT
+                    || starmapProperties.maxMipLevels() < ShaderAbi.STARMAP_MIP_LEVELS
                     || (starmapFormat.optimalTilingFeatures() & starmapFeatures) != starmapFeatures) {
                 return VulkanCapabilities.unavailable(deviceName,
                         "16K BC6H linearly filtered sampled/transfer images required for the starmap are not supported");

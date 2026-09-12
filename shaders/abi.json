@@ -910,6 +910,7 @@
     "materialRoughnessMask": "0x7f",
     "materialRoughnessStepsPerUnit": 100,
     "shInputMask": "0x00800000",
+    "nativeStarsMask": "0x01000000",
     "starEvQuarterShift": 25,
     "starEvQuarterMask": "0x7f",
     "starEvQuarterBias": 32,
@@ -972,6 +973,7 @@
     "width": 16384,
     "height": 8192,
     "stripeRows": 2048,
+    "mipLevels": 15,
     "baseRadianceScale": 0.025,
     "sourceSha256": "19a1351f00c386a6e5eec4d67af96d5fc71edf6a1189941579b9498b52e7589a"
   },
