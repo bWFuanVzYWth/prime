@@ -493,30 +493,91 @@ final class TransparentBoundaryResolverTest {
     }
 
     @Test
-    void knownFluidSideInsetCompositesCutoutCoverageOverWater() {
-        TestSprite water = new TestSprite("inset_leaf_water");
-        TestSprite leaves = new TestSprite("inset_leaves");
-        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
-        section.add(
-                xFaceAt(0.999F, 1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
-                fluidSurface(water, 0, 0, 0));
-        section.add(
-                xFaceAt(1.0F, -1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
-                cutoutSurface(leaves, 1, 0, 0));
+    void fluidCutoutContactsPreserveTheAuthoredGapAndDirectionalCoverage() {
+        // Includes the waterlogged oak leaf / dry oak leaf contact at (-184, 55, 874).
+        float height = 0.88789F;
+        int[][] orders = {{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}};
+        for (int normal : new int[] {-1, 1}) {
+            for (int leafMask : new int[] {1, 2, 3}) {
+                for (int[] order : orders) {
+                    int owner = normal > 0 ? 0 : 1;
+                    float waterPlane = 1.0F - normal * 0.001F;
+                    var faces = new CapturedSectionGeometry.MutableQuad[] {
+                            xFaceAt(waterPlane, normal, 0.0F, height, 0.0F, 1.0F),
+                            xFace(normal, 0.0F, 1.0F, 0.0F, 1.0F),
+                            xFace(-normal, 0.0F, 1.0F, 0.0F, 1.0F)
+                    };
+                    var surfaces = new CapturedSectionGeometry.Surface[] {
+                            fluidSurface(new TestSprite("water_overlay"), owner, 0, 0),
+                            cutoutSurface(new TestSprite("wet_leaves"), owner, 0, 0),
+                            cutoutSurface(new TestSprite("dry_leaves"), 1 - owner, 0, 0)
+                    };
+                    for (int vertex = 0; vertex < 4; vertex++) {
+                        // Different mappings must survive clipping and opposite-side selection.
+                        faces[1].u[vertex] = faces[1].y[vertex];
+                        faces[1].v[vertex] = faces[1].z[vertex];
+                        faces[2].u[vertex] = 1.0F - faces[2].y[vertex];
+                        faces[2].v[vertex] = 1.0F - faces[2].z[vertex];
+                    }
+                    var section = new CapturedSectionGeometry.Builder();
+                    for (int index : order) {
+                        if (index == 0 || (leafMask & (1 << (index - 1))) != 0) {
+                            section.add(faces[index], surfaces[index]);
+                        }
+                    }
+                    var builder = new CapturedCluster.Builder(0, 0, 0);
+                    builder.add(0, 0, 0, section.build());
+                    CapturedCluster cluster = builder.build();
+                    float waterArea = 0.0F;
+                    float leafArea = 0.0F;
+                    for (var face : TransparentBoundaryResolver.resolve(cluster, true).section(0)) {
+                        var geometry = new SectionMeshAccumulator.Quad();
+                        face.write(geometry);
+                        if (face.surface().water()) {
+                            assertInstanceOf(SurfaceDefinition.Single.class, face.definition());
+                            assertEquals(TransmissiveTopology.SOLID,
+                                    face.definition().primary().transmissiveTopology());
+                            waterArea += projectedArea(face);
+                            for (float x : geometry.x) {
+                                assertEquals(waterPlane, x, 0.0F);
+                            }
+                        } else {
+                            leafArea += projectedArea(face);
+                            for (float x : geometry.x) {
+                                assertEquals(1.0F, x, 0.0F);
+                            }
+                            assertLeafUv(face.definition().primary(), geometry, surfaces[1]);
+                            if (leafMask == 3) {
+                                var bilateral = assertInstanceOf(
+                                        SurfaceDefinition.Bilateral.class, face.definition());
+                                assertLeafUv(bilateral.secondary(), geometry, surfaces[1]);
+                                assertTrue(bilateral.primary().surface() != bilateral.secondary().surface());
+                            } else {
+                                assertInstanceOf(SurfaceDefinition.Single.class, face.definition());
+                            }
+                        }
+                    }
+                    assertEquals(height, waterArea, 1.0E-6F);
+                    assertEquals(1.0F, leafArea, 1.0E-6F);
+                    CpuClusterMesh mesh = translate(cluster);
+                    assertEquals(2L, mesh.triangleLayout().transmissiveTriangleCount());
+                    assertEquals(height, projectedArea(mesh), 1.0E-6F);
+                }
+            }
+        }
+    }
 
-        CpuClusterMesh mesh = translate(0, section.build());
-
-        assertEquals(2L, mesh.triangleLayout().cutoutTriangleCount());
-        assertEquals(0L, mesh.triangleLayout().transmissiveTriangleCount());
-        CpuMeshSegment segment = mesh.segments().getFirst();
-        int[] relation = SurfaceRelationTable.record(
-                segment.surfaceRelationRecords(), segment.cutoutPrimitiveCount(), 0);
-        assertEquals(
-                CpuSectionMesh.SURFACE_RELATION_OVERLAY,
-                relation[0] & CpuSectionMesh.SURFACE_RELATION_KIND_MASK);
-        int secondaryFlags = PrimitivePacking.unpackControl(relation[4], relation[6]);
-        assertTrue(PrimitivePacking.isTransmissive(secondaryFlags));
-        assertEquals(1.0F, segment.positions()[0], 0.0F);
+    private static void assertLeafUv(
+            SurfaceDefinition.MaterialBinding binding,
+            SectionMeshAccumulator.Quad geometry,
+            CapturedSectionGeometry.Surface wetLeaf) {
+        boolean wet = binding.surface() == wetLeaf;
+        for (int vertex = 0; vertex < 4; vertex++) {
+            assertEquals(wet ? geometry.y[vertex] : 1.0F - geometry.y[vertex],
+                    binding.uv().u(vertex), 1.0E-6F);
+            assertEquals(wet ? geometry.z[vertex] : 1.0F - geometry.z[vertex],
+                    binding.uv().v(vertex), 1.0E-6F);
+        }
     }
 
     @Test

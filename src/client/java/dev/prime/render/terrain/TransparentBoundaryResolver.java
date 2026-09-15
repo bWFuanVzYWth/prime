@@ -636,6 +636,16 @@ final class TransparentBoundaryResolver {
                 float minimumV,
                 float maximumV,
                 ArrayList<ResolvedQuad>[] output) {
+            Candidate insetFluid = separatedFluid(negativeCover, positiveCover);
+            if (insetFluid != null) {
+                // Cutout coverage does not occupy the fluid volume. Preserve Minecraft's
+                // authored inset instead of creating a coincident water / leaf interface.
+                emitActual(
+                        List.of(insetFluid.atCapturedPlane()),
+                        minimumU, maximumU, minimumV, maximumV, null, output);
+                negativeCover.remove(insetFluid);
+                positiveCover.remove(insetFluid);
+            }
             if (tryEmitAttachedOverlay(
                     negativeCover,
                     positiveCover,
@@ -793,6 +803,28 @@ final class TransparentBoundaryResolver {
                     maximumU,
                     minimumV,
                     maximumV));
+        }
+
+        private static Candidate separatedFluid(
+                List<Candidate> negative, List<Candidate> positive) {
+            Candidate fluid = null;
+            boolean cutout = false;
+            for (List<Candidate> side : List.of(negative, positive)) {
+                for (Candidate candidate : side) {
+                    if (candidate.quad.surface().fluid() != null) {
+                        // Competing volumes still require an explicit medium resolution.
+                        if (fluid != null || candidate.capturedPlane() == candidate.plane) {
+                            return null;
+                        }
+                        fluid = candidate;
+                    } else if (candidate.kind() == FaceKind.OTHER) {
+                        cutout = true;
+                    } else {
+                        return null;
+                    }
+                }
+            }
+            return cutout ? fluid : null;
         }
 
         private static Candidate ownedGeometry(Candidate first, Candidate second) {
@@ -1367,6 +1399,19 @@ final class TransparentBoundaryResolver {
                     maximumU,
                     minimumV,
                     maximumV);
+        }
+
+        private float capturedPlane() {
+            return coordinate(this.quad, this.planeAxis, 0) + this.origin(this.planeAxis);
+        }
+
+        private Candidate atCapturedPlane() {
+            return new Candidate(
+                    this.sectionIndex, this.originX, this.originY, this.originZ,
+                    this.quad, this.transmissiveTopology, this.key,
+                    this.planeAxis, this.axisU, this.axisV, this.normalSign,
+                    this.capturedPlane(), this.minimumU, this.maximumU,
+                    this.minimumV, this.maximumV, this.cornerU, this.cornerV);
         }
 
         SurfaceDefinition.MediumEndpoint mediumEndpoint() {
