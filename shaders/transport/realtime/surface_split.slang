@@ -53,7 +53,7 @@ import "state/realtime/surface.slang";
 import "state/realtime/secondary_transition.slang";
 import "state/realtime/transparent.slang";
 import "state/realtime/transport.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/path.slang";
 import "contract/material/normal.slang";
 import "policy/transport/path.slang";
@@ -84,7 +84,7 @@ public uint primeInitializeTransparentWavefront(
         inout PrimeIntegratorContext context,
         uint2 pixel,
         PathState path,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         SurfaceInteraction surface,
         PrimeOrdinarySample initialResult) {
     uint continuationMask = 0u;
@@ -359,7 +359,7 @@ public void primeSplitVisibleSurface(
             recordIndex, uint2(PRIME_NO_PRIMITIVE_INDEX));
     PathState path = primeCameraPath(
             pixel, 0u, primeRealtimeCameraSample(pixel));
-    PrimeOpenPbrVolume medium =
+    PrimeMedium medium =
             (primePush.path.z & PRIME_PATH_CAMERA_IN_WATER_MASK) != 0u
             ? primeCameraWaterMedium()
             : primeVacuumMedium();

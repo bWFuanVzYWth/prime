@@ -39,17 +39,16 @@ public PrimeCompactFoliageState primeCompactFoliageStateInit<TransmissionGgxEner
         TransmissionGgxEnergy transmissionGgxEnergy,
         PrimeOpenPbrMaterial material,
         float3 wi,
-        PrimeOpenPbrVolume outsideMedium,
-        float rayT)
+        PrimeOpenPbrVolume outsideMedium)
     where TransmissionGgxEnergy : IPrimeOpenPbrTransmissionGgxEnergy
 {
     PrimeCompactFoliageState state;
     float inverseOutsideIor = 1.0 / outsideMedium.ior;
     state.base = primeCompactOpaqueStateInit(
-            transmissionGgxEnergy, material, wi, inverseOutsideIor, rayT);
+            transmissionGgxEnergy, material, wi, inverseOutsideIor);
     state.transmissionWeight = material.weight.transmission;
     PrimeCompactTransmissionState transmission = primeCompactTransmissionStateInit(
-            transmissionGgxEnergy, material, wi, outsideMedium, rayT);
+            transmissionGgxEnergy, material, wi, outsideMedium, 0.0);
     state.transmissionMicrofacet = transmission.transmissionMicrofacet;
     state.transmissionTint = transmission.transmissionTint;
 

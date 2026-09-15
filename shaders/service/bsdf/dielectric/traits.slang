@@ -12,7 +12,7 @@ import "model/material/translation.slang";
 import "model/material/medium_boundary.slang";
 import "service/bsdf/dielectric/state.slang";
 import "service/bsdf/support/microfacet.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/contract/sample.slang";
 import "bsdf/compact/math/spectrum.slang";
 import "bsdf/compact/model/material.slang";
@@ -34,7 +34,6 @@ public bool primeMinecraftTransmissionIsDiscrete(PrimeCompactTransmissionState s
                     primeMinecraftTransmissionMicrofacet(state));
 }
 
-
 public PrimeClosureTraits primeMinecraftTransmissionClosureTraits(
         PrimeCompactTransmissionState state) {
     PrimeClosureTraits result;
@@ -55,7 +54,7 @@ public PrimeClosureTraits primeMinecraftTransmissionClosureTraits(
         float roughness,
         uint opticalControl,
         float3 viewDirection,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         uint adjacentInterfaceControl,
         bool usesAirGap) {
     PrimeOpticalMaterial translated = primeDecodeOpticalMaterial(

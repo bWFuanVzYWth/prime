@@ -27,7 +27,7 @@ import "service/bsdf/contract/albedo.slang";
 import "service/bsdf/dispatch/sample.slang";
 import "service/bsdf/dispatch/traits.slang";
 import "service/reconstruct/nrd/common.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "transport/scatter/contract.slang";
 import "transport/scatter/path_update.slang";
 import "transport/scatter/ordinary.slang";
@@ -47,7 +47,7 @@ struct PrimeWavefrontScatter {
 };
 
 PrimeWavefrontScatter primeSampleWavefrontHit(inout PrimeIntegratorContext context, PathState path,
-        PrimeOpenPbrVolume volume, SurfaceInteraction surface, bool needsGuide, bool transparent) {
+        PrimeMedium volume, SurfaceInteraction surface, bool needsGuide, bool transparent) {
     PrimeWavefrontScatter result;
     float3 viewDirection = -path.rayDirection;
     result.traits = primeSurfaceClosureTraits(surface, viewDirection, volume, primeUsesAirGap());
@@ -81,7 +81,7 @@ public bool primeAdvanceWavefrontHit<Phase>(Phase phase, inout PrimeIntegratorCo
     bool guideFallback = transparent && primeWavefrontGuideFallback(record.sourceAndPathControl.z);
     uint guideBounce = (control >> PRIME_WAVEFRONT_PRIMARY_BOUNCE_SHIFT) & PRIME_WAVEFRONT_BYTE_MASK;
     PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolume volume = primeWavefrontMedium(record);
+    PrimeMedium volume = primeWavefrontMedium(record);
     bool segmentAlive = primeApplySegmentMedium(path.throughput, surface, volume);
     uint updates = primeScatterHitDistanceUpdates(phase, transparent, segmentAlive, primePathBounce(path.control), guideBounce);
     if (transparent && !hadGuide) updates &= ~PRIME_SCATTER_GUIDE_HIT;

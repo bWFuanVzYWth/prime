@@ -1,6 +1,5 @@
 // Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
 
-
 #define PRIME_COLOR_WORKING_SPACE_LINEAR_REC2020_D65 1
 #define PRIME_COLOR_TEXTURE_ENCODING_SRGB 1
 #define PRIME_COLOR_DISPLAY_ENCODING_SRGB 1
@@ -15,6 +14,8 @@ bool primeUsesSeamlessGlass() {
     return false;
 }
 
+import "service/bsdf/support/medium_conversion.slang";
+import "bsdf/compact/contract/volume_sample.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/sanitization.slang";
 import "bsdf/compact/opaque/state.slang";
@@ -63,7 +64,7 @@ import "service/bsdf/foliage/sample.slang";
 import "service/bsdf/dielectric/primary.slang";
 import "bsdf/compact/contract/flags.slang";
 import "bsdf/compact/contract/material.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/contract/sample.slang";
 import "bsdf/compact/math/spectrum.slang";
 import "bsdf/compact/math/frame.slang";
@@ -125,8 +126,8 @@ float primeAdapterFloat(uint4 encoded[7], uint index) {
     return asfloat(encoded[flatIndex / 4u][flatIndex % 4u]);
 }
 
-PrimeOpenPbrVolume primeAdapterMedium(uint kind) {
-    PrimeOpenPbrVolume medium = primeVacuumMedium();
+PrimeMedium primeAdapterMedium(uint kind) {
+    PrimeMedium medium = primeVacuumMedium();
     if (kind == 0u) return medium;
     medium.mediumId = kind;
     medium.iorEncoding = kind == 1u ? 1u << 8u : 0u;
@@ -155,28 +156,27 @@ bool primeAdapterSameSample(BsdfSample first, BsdfSample second) {
             && first.eventFlags == second.eventFlags;
 }
 
-bool primeAdapterSameMedium(PrimeOpenPbrVolume a, PrimeOpenPbrVolume b) {
-    return all(a.extinction == b.extinction) && all(a.albedo == b.albedo)
-            && a.anisotropy == b.anisotropy && a.ior == b.ior
+bool primeAdapterSameMedium(PrimeMedium a, PrimeMedium b) {
+    return all(a.extinction == b.extinction) && a.ior == b.ior
             && a.mediumId == b.mediumId && a.iorEncoding == b.iorEncoding;
 }
 
 uint primeAdapterExpectedTransmittedMediumId(
-        PrimeCompactTransmissionState state, uint materialControl, PrimeOpenPbrVolume medium) {
+        PrimeCompactTransmissionState state, uint materialControl, PrimeMedium medium) {
     return state.geometryThinWalled != 0u ? medium.mediumId : state.entering != 0u ? 37u : 0u;
 }
 
 float primeAdapterExpectedInterfaceIor(
         PrimeCompactTransmissionState state,
         uint materialControl,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     return state.specularFresnel.ior;
 }
 
 float primeAdapterExpectedRelativeIor(
         PrimeCompactTransmissionState state,
         uint materialControl,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     float interfaceIor =
             primeAdapterExpectedInterfaceIor(state, materialControl, medium);
     return state.entering != 0u ? interfaceIor : 1.0 / interfaceIor;
@@ -187,7 +187,7 @@ bool primeAdapterCanRefract(
         uint materialControl,
         float3 outwardNormal,
         float3 viewDirection,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     if (state.geometryThinWalled != 0u) return true;
     float relativeIor =
             primeAdapterExpectedRelativeIor(state, materialControl, medium);
@@ -201,7 +201,7 @@ float3 primeAdapterExpectedRefraction(
         uint materialControl,
         float3 outwardNormal,
         float3 viewDirection,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     float relativeIor =
             primeAdapterExpectedRelativeIor(state, materialControl, medium);
     float3 interfaceNormal = state.entering != 0u
@@ -369,7 +369,7 @@ void primeAdapterProperties(
             primeAdapterFloat(encoded, 18u),
             primeAdapterFloat(encoded, 19u),
             primeAdapterFloat(encoded, 20u)));
-    PrimeOpenPbrVolume medium = primeAdapterMedium(mediumKind);
+    PrimeMedium medium = primeAdapterMedium(mediumKind);
 
     if (kind == PRIME_ADAPTER_OPAQUE) {
         result.first = primeSampleOpaque(
@@ -380,7 +380,6 @@ void primeAdapterProperties(
                 materialControl,
                 viewDirection,
                 firstSample,
-                rayT,
                 medium);
         if (result.first.eventFlags != 0u) {
             PrimeBsdfComponents components = primeEvaluateOpaqueComponents(
@@ -391,7 +390,6 @@ void primeAdapterProperties(
                     materialControl,
                     viewDirection,
                     result.first.direction,
-                    rayT,
                     medium);
             result.sampledEvaluation.response =
                     components.diffuseResponse + components.specularResponse;
@@ -405,7 +403,6 @@ void primeAdapterProperties(
                 materialControl,
                 viewDirection,
                 probeDirection,
-                rayT,
                 medium);
         result.probeEvaluation.response =
                 probe.diffuseResponse + probe.specularResponse;
@@ -417,7 +414,6 @@ void primeAdapterProperties(
                 opticalControl,
                 materialControl,
                 viewDirection,
-                rayT,
                 medium);
         PrimeClosureTraits opaqueTraits = primeOpaqueClosureTraits(state);
         PrimeClosureTraits fastOpaqueTraits = primeOpaqueClosureTraits(
@@ -464,7 +460,6 @@ void primeAdapterProperties(
                     materialControl,
                     viewDirection,
                     firstSample,
-                    rayT,
                     medium);
             PrimeBsdfComponents diffuseProbe = primeEvaluateOpaqueComponents(
                     baseColor,
@@ -474,7 +469,6 @@ void primeAdapterProperties(
                     materialControl,
                     viewDirection,
                     probeDirection,
-                    rayT,
                     medium);
             if (!primeAdapterSameSample(result.first, diffuseFallback)
                     || !all(equal(
@@ -501,10 +495,9 @@ void primeAdapterProperties(
                     outwardNormal,
                     roughness,
                     opticalControl,
-                    materialControl,
-                    rayT);
+                    materialControl);
             BsdfSample discreteSample = primeSampleOpaqueDiscreteFromState(
-                    discreteState, outwardNormal, viewDirection, medium);
+                    discreteState, outwardNormal, viewDirection);
             PrimeDenoiseAlbedos discreteAlbedos = primeOpaqueDiscreteAlbedosFromState(
                     discreteState, viewDirection);
             if (!primeAdapterSameSample(result.first, discreteSample)
@@ -522,7 +515,6 @@ void primeAdapterProperties(
                 materialControl,
                 viewDirection,
                 firstSample,
-                rayT,
                 medium);
         if (result.first.eventFlags != 0u) {
             result.sampledEvaluation = primeEvaluateMinecraftFoliage(
@@ -533,7 +525,6 @@ void primeAdapterProperties(
                     materialControl,
                     viewDirection,
                     result.first.direction,
-                    rayT,
                     medium);
         }
         result.probeEvaluation = primeEvaluateMinecraftFoliage(
@@ -544,7 +535,6 @@ void primeAdapterProperties(
                 materialControl,
                 viewDirection,
                 probeDirection,
-                rayT,
                 medium);
         PrimeCompactFoliageState state = primeMinecraftFoliageState(
                 baseColor,
@@ -553,7 +543,6 @@ void primeAdapterProperties(
                 opticalControl,
                 materialControl,
                 viewDirection,
-                rayT,
                 medium);
         PrimeClosureTraits fastFoliageTraits = primeFoliageClosureTraits(
                 roughness, opticalControl, materialControl);
@@ -839,7 +828,7 @@ void primeAdapterProperties(
                     firstSample,
                     state,
                     PRIME_OPENPBR_FLAG_TRANSMISSION,
-                    medium);
+                    primeOpenPbrVolumeFromMedium(medium));
             BsdfSample expected = primeInvalidBsdfSample();
             if (primeOpenPbrHasSample(reference.bsdfSample)) {
                 expected.direction = primeOpenPbrOnbToWorld(
@@ -851,9 +840,9 @@ void primeAdapterProperties(
                         reference.bsdfSample.throughput.flags);
                 expected = primeSanitizeBsdfSample(expected);
             }
-            PrimeOpenPbrVolume expectedMedium = expected.eventFlags == 0u
+            PrimeMedium expectedMedium = expected.eventFlags == 0u
                     ? medium
-                    : reference.medium;
+                    : primeMediumFromOpenPbrVolume(reference.medium);
             if (!primeAdapterSameSample(result.second, expected)
                     || !primeAdapterSameMedium(
                             sampled.paths.transmission.medium,
@@ -999,7 +988,7 @@ void primeAdapterProperties(
                 | (opticalControl & PRIME_OPTICAL_FRESNEL_MASK)
                         << PRIME_ADJACENT_FRESNEL_SHIFT;
         float3 adjacentBaseColor = float3(0.2, 0.5, 0.8);
-        PrimeOpenPbrVolume adjacent = primeAdjacentMediumVolume(
+        PrimeMedium adjacent = primeAdjacentMediumVolume(
                 adjacentBaseColor, adjacentInterfaceControl, 41u);
         PrimeCompactTransmissionState state = primeMinecraftBoundaryTransmissionState(
                 baseColor,
@@ -1062,14 +1051,14 @@ void primeAdapterProperties(
             result.mask |= PRIME_TEST_FAILURE_STATE;
         }
         if ((result.first.eventFlags & PRIME_BSDF_EVENT_TRANSMISSION) != 0u) {
-            PrimeOpenPbrVolume target;
+            PrimeMedium target;
             if (state.entering != 0u) {
-                target = state.transmissionVolume;
+                target = primeMediumFromOpenPbrVolume(state.transmissionVolume);
                 target.ior = state.originalIor;
             } else {
                 target = adjacent;
             }
-            PrimeOpenPbrVolume expectedMedium = target;
+            PrimeMedium expectedMedium = target;
             if (!primeAdapterSameMedium(sampled.medium, expectedMedium)) {
                 result.mask |= PRIME_TEST_FAILURE_STATE;
             }
@@ -1106,7 +1095,7 @@ void primeAdapterProperties(
                         && (!primeTestClose(sampleValue.response, evaluated.response, 3.0e-6, 2.0e-3)
                                 || !primeTestClose(sampleValue.pdf, evaluated.pdf, 3.0e-6, 2.0e-3)))
                     result.mask |= PRIME_TEST_FAILURE_PDF;
-                PrimeOpenPbrVolume target = branch == 0u ? medium : state.transmissionVolume;
+                PrimeMedium target = branch == 0u ? medium : primeMediumFromOpenPbrVolume(state.transmissionVolume);
                 if (!primeAdapterSameMedium(conditional.medium, target))
                     result.mask |= PRIME_TEST_FAILURE_STATE;
                 result.second = sampleValue;
@@ -1120,9 +1109,9 @@ void primeAdapterProperties(
                 | (opticalControl & PRIME_OPTICAL_FRESNEL_MASK)
                         << PRIME_ADJACENT_FRESNEL_SHIFT;
         float3 adjacentBaseColor = float3(0.2, 0.5, 0.8);
-        PrimeOpenPbrVolume surfaceMedium = primeBoundarySurfaceVolume(
+        PrimeMedium surfaceMedium = primeBoundarySurfaceVolume(
                 baseColor, opacity, materialControl, opticalControl, 37u);
-        PrimeOpenPbrVolume adjacent = primeAdjacentMediumVolume(
+        PrimeMedium adjacent = primeAdjacentMediumVolume(
                 adjacentBaseColor, adjacentInterfaceControl, 41u);
         PrimeCompactTransmissionState state = primeMinecraftBoundaryTransmissionState(
                 baseColor,
@@ -1186,8 +1175,8 @@ void primeAdapterProperties(
             result.mask |= PRIME_TEST_FAILURE_STATE;
         }
         if ((result.first.eventFlags & PRIME_BSDF_EVENT_TRANSMISSION) != 0u) {
-            PrimeOpenPbrVolume target = expectedEntering ? surfaceMedium : adjacent;
-            PrimeOpenPbrVolume expectedMedium = target;
+            PrimeMedium target = expectedEntering ? surfaceMedium : adjacent;
+            PrimeMedium expectedMedium = target;
             if (!primeAdapterSameMedium(sampled.medium, expectedMedium)
                     || !primeTestClose(
                             result.first.direction,
@@ -1222,9 +1211,6 @@ void primeAdapterProperties(
         PrimeTransmissiveBsdfSample sampled =
                 primeSampleMinecraftTransmissionCompleteFromState(
                         state,
-                        baseColor,
-                        opacity,
-                        materialControl,
                         viewDirection,
                         firstSample,
                         medium);
@@ -1261,7 +1247,7 @@ void primeAdapterProperties(
 
         float3 localView = primeOpenPbrOnbToLocal(state.onb, viewDirection);
         PrimeOpenPbrSampleResult reference = primeCompactTransmissionSample(
-                localView, firstSample, state, PRIME_OPENPBR_FLAG_ALL, medium);
+                localView, firstSample, state, PRIME_OPENPBR_FLAG_ALL, primeOpenPbrVolumeFromMedium(medium));
         BsdfSample expected = primeInvalidBsdfSample();
         if (primeOpenPbrHasSample(reference.bsdfSample)) {
             expected.direction = primeOpenPbrOnbToWorld(
@@ -1273,9 +1259,9 @@ void primeAdapterProperties(
                     reference.bsdfSample.throughput.flags);
             expected = primeSanitizeBsdfSample(expected);
         }
-        PrimeOpenPbrVolume expectedMedium = expected.eventFlags == 0u
+        PrimeMedium expectedMedium = expected.eventFlags == 0u
                 ? medium
-                : reference.medium;
+                : primeMediumFromOpenPbrVolume(reference.medium);
         if (!primeAdapterSameSample(result.first, expected)
                 || !primeAdapterSameMedium(sampled.medium, expectedMedium)
                 || !primeAdapterSameSample(
@@ -1290,9 +1276,6 @@ void primeAdapterProperties(
         result.probeEvaluation =
                 primeEvaluateMinecraftTransmissionCompleteFromState(
                         state,
-                        baseColor,
-                        opacity,
-                        materialControl,
                         viewDirection,
                         probeDirection);
         if (result.first.eventFlags != 0u
@@ -1300,9 +1283,6 @@ void primeAdapterProperties(
             result.sampledEvaluation =
                     primeEvaluateMinecraftTransmissionCompleteFromState(
                             state,
-                            baseColor,
-                            opacity,
-                            materialControl,
                             viewDirection,
                             result.first.direction);
             float3 localScatter = primeOpenPbrOnbToLocal(

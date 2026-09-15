@@ -5,7 +5,7 @@ import "model/material/transparent.slang";
 import "model/material/defaults.slang";
 import "model/material/medium_boundary.slang";
 import "prime_abi_types.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 [[vk::binding(0, 0)]] StructuredBuffer<uint> inputData;
 [[vk::binding(1, 0)]] RWStructuredBuffer<float4> outputData;
@@ -38,13 +38,13 @@ void main(uint3 tid : SV_DispatchThreadID) {
     }
     if (kind == 4u) surface.materialControl |= PRIME_MATERIAL_THIN_WALLED;
     if (kind == 5u) surface.materialControl = 0u;
-    PrimeOpenPbrVolume incident = primeVacuumMedium();
+    PrimeMedium incident = primeVacuumMedium();
     incident.extinction = float3(0.2, 0.5, 0.8);
     incident.ior = 1.5;
     incident.mediumId = 47u;
     float3 view = normalize(float3(0.2, entering ? 1.0 : -1.0, 0.0));
     float3 direction = reflection ? view : -view;
-    PrimeOpenPbrVolume start = primeShadowStartingMedium(surface, view, direction, incident);
+    PrimeMedium start = primeShadowStartingMedium(surface, view, direction, incident);
     float3 extinction = primeShadowCanonicalExtinction(start.extinction);
     // An unobstructed connection has no any-hit boundary after the excluded source surface.
     float3 filter = exp(-primeShadowOpticalDepth(float3(0.0), extinction, distance));

@@ -101,7 +101,9 @@ final class PrimeBsdfGpuTest extends GpuShaderTest {
                 int fresnelCode = material < 230
                         ? material + 1
                         : material <= 237 ? material + 1 : material == 255 ? 239 : 0;
-                int subsurfaceCode = subsurface >= 66 ? subsurface - 65 : 0;
+                // BSDF inputs are the final surface, after topology has consumed the texture SSS tag.
+                int subsurfaceCode = (flags & MATERIAL_THIN_WALLED) != 0 && subsurface >= 66
+                        ? subsurface - 65 : 0;
                 int porosityCode = subsurface <= 64 ? subsurface : 0;
                 int opticalControl = fresnelCode
                         | subsurfaceCode << 8

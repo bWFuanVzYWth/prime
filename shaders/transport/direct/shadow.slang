@@ -13,7 +13,7 @@ import "model/material/transparent.slang";
 import "contract/trace/shadow_payload.slang";
 import "service/trace/context.slang";
 import "bsdf/compact/contract/flags.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/path.slang";
 
 layout(location = 1) rayPayloadEXT PrimeShadowPayload primeShadowPayload;
@@ -69,7 +69,7 @@ public PrimeShadowTrace primeTraceShadow(
         SurfaceInteraction surface,
         LightSample light,
         uint2 targetEmitter,
-        PrimeOpenPbrVolume startingMedium) {
+        PrimeMedium startingMedium) {
     return primeTracePreparedShadow(context,
             surface.position,
             light.direction,
@@ -84,7 +84,7 @@ public PrimeShadowTrace primeTraceShadow(
         inout PrimeIntegratorContext context,
         SurfaceInteraction surface,
         LightSample light,
-        PrimeOpenPbrVolume startingMedium) {
+        PrimeMedium startingMedium) {
     return primeTraceShadow(
             context,
             surface,

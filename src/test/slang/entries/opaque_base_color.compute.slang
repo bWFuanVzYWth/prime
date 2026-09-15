@@ -3,7 +3,7 @@
 import "service/bsdf/opaque/material.slang";
 import "model/material/defaults.slang";
 import "bsdf/compact/contract/material.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/opaque/state.slang";
 import "bsdf/compact/opaque/traits.slang";
 import "service/bsdf/contract/albedo.slang";
@@ -38,9 +38,9 @@ void main(uint3 tid : SV_DispatchThreadID) {
     outputData[output + 5u] = float4(0.0);
     if (primeMaterialIsFoliage(control.y)) return;
 
-    PrimeOpenPbrVolume medium = primeVacuumMedium();
+    PrimeMedium medium = primeVacuumMedium();
     PrimeCompactOpaqueState state = primeOpaqueStateWithMinimumRoughness(
-            source.rgb, normal, source.a, control.x, control.y, normal, 0.0, medium,
+            source.rgb, normal, source.a, control.x, control.y, normal, medium,
             minimumRoughness);
     PrimeCompactOpaqueEnergy energy = primeCompactOpaqueEnergy(normal, state);
     outputData[output + 1u] = float4(energy.diffuse + energy.specular, energy.specular.x);
@@ -48,14 +48,14 @@ void main(uint3 tid : SV_DispatchThreadID) {
     // Restore the authored input to measure the old material using the same OpenPBR math.
     material.base.color = source.rgb;
     PrimeCompactOpaqueState previous = primeCompactOpaqueStateInit(
-            primeTransmissionGgxEnergy(), material, normal, 1.0, 0.0);
+            primeTransmissionGgxEnergy(), material, normal, 1.0);
     PrimeCompactOpaqueEnergy oldEnergy = primeCompactOpaqueEnergy(normal, previous);
     outputData[output + 2u] = float4(oldEnergy.diffuse + oldEnergy.specular, 0.0);
 
     float cosine = asfloat(control.w);
     float3 view = float3(sqrt(1.0 - cosine * cosine), 0.0, cosine);
     state = primeOpaqueStateWithMinimumRoughness(
-            source.rgb, normal, source.a, control.x, control.y, view, 0.0, medium,
+            source.rgb, normal, source.a, control.x, control.y, view, medium,
             minimumRoughness);
     energy = primeCompactOpaqueEnergy(view, state);
     PrimeDenoiseAlbedos guide = primeDenoiseAlbedosFromState(

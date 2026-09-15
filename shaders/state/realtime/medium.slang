@@ -3,15 +3,15 @@
 #language slang 2026
 module "state/realtime/medium.slang";
 
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "service/bsdf/support/medium_identity.slang";
 
 // PSR/fallback occupy bits 0..2 and guide transition count occupies bits 8..14.
 public static const uint PRIME_WAVEFRONT_GUIDE_CONTROL_MASK = 0x00007f07u;
 static const uint PRIME_WAVEFRONT_IOR_SHIFT = 16u;
 
-public PrimeOpenPbrVolume primeUnpackWavefrontMedium(uint4 packed, uint iorEncoding) {
-    PrimeOpenPbrVolume medium = primeVacuumMedium();
+public PrimeMedium primeUnpackWavefrontMedium(uint4 packed, uint iorEncoding) {
+    PrimeMedium medium = primeVacuumMedium();
     medium.extinction = asfloat(packed.xyz);
     medium.mediumId = packed.w;
     medium.iorEncoding = iorEncoding;
@@ -19,7 +19,7 @@ public PrimeOpenPbrVolume primeUnpackWavefrontMedium(uint4 packed, uint iorEncod
     return medium;
 }
 
-public uint primePackWavefrontMediumIor(PrimeOpenPbrVolume medium) {
+public uint primePackWavefrontMediumIor(PrimeMedium medium) {
     return medium.iorEncoding << PRIME_WAVEFRONT_IOR_SHIFT;
 }
 

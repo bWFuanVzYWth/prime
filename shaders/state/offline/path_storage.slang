@@ -5,7 +5,7 @@ module "state/offline/path_storage.slang";
 
 import "state/path.slang";
 import "state/realtime/medium.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/path.slang";
 import "prime_abi_types.slang";
 import "prime_offline_abi.slang";
@@ -22,7 +22,7 @@ static const uint PRIME_OFFLINE_MEDIUM_ID_MASK = 0xffffu;
 
 uint primePackOfflineState(
         PathState path,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool enabled) {
     return (enabled ? PRIME_OFFLINE_STATE_ACTIVE : 0u)
             | (medium.iorEncoding
@@ -40,7 +40,7 @@ uint primeOfflineMediumIorEncoding(uint state) {
 
 public PrimeOfflineTransportRecord primePackOfflineTransport(
         PathState path,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool enabled) {
     PrimeOfflineTransportRecord record;
     record.physicalOriginAndPreviousBsdfPdf = asuint(
@@ -84,7 +84,7 @@ public void primeUnpackOfflineTransportPath(
             record.previousLightNormalZAndReserved.w));
 }
 
-public PrimeOpenPbrVolume primeUnpackOfflineTransportMedium(PrimeOfflineTransportRecord record) {
+public PrimeMedium primeUnpackOfflineTransportMedium(PrimeOfflineTransportRecord record) {
     return primeUnpackWavefrontMedium(
             uint4(record.mediumAndPreviousLightNormalY.xyz, record.sourceStateAndMediumId.w),
             primeOfflineMediumIorEncoding(record.sourceStateAndMediumId.z));

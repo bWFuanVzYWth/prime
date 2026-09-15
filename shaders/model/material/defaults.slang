@@ -32,8 +32,7 @@ public static const uint PRIME_FRESNEL_SILVER = 238;
 public static const uint PRIME_FRESNEL_CUSTOM_CONDUCTOR = 239;
 
 public static const float PRIME_DEFAULT_DIELECTRIC_F0 = 0.04;
-// LabPBR's byte range includes invalid/extreme dielectrics. These bounds are deliberate input
-// cleaning at the translation boundary and are not part of compact OpenPBR mathematics.
+// Endpoints of the canonical dielectric codebook, independent of compact OpenPBR mathematics.
 public static const float PRIME_COMMON_DIELECTRIC_F0_MINIMUM = 0.02;
 public static const float PRIME_COMMON_DIELECTRIC_F0_MAXIMUM = 0.17;
 public static const float PRIME_DEFAULT_REFERENCE_LINEAR_ROUGHNESS = 0.9;
@@ -102,15 +101,6 @@ public bool primeFresnelIsConductor(uint fresnelCode)
 {
     return fresnelCode >= PRIME_FRESNEL_IRON
             && fresnelCode <= PRIME_FRESNEL_CUSTOM_CONDUCTOR;
-}
-public float primeDecodeDielectricF0(uint fresnelCode)
-{
-    return fresnelCode == PRIME_FRESNEL_DEFAULT_DIELECTRIC
-            ? PRIME_DEFAULT_DIELECTRIC_F0
-            : clamp(
-                    float(fresnelCode - 1) / 255.0,
-                    PRIME_COMMON_DIELECTRIC_F0_MINIMUM,
-                    PRIME_COMMON_DIELECTRIC_F0_MAXIMUM);
 }
 
 public struct PrimeFsrMasks

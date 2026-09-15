@@ -36,7 +36,7 @@ import "state/realtime/psr.slang";
 import "state/realtime/queue.slang";
 import "state/realtime/transparent.slang";
 import "state/realtime/transport.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/realtime/ordinary.slang";
 import "contract/realtime/transparent.slang";
 import "contract/path.slang";
@@ -49,7 +49,7 @@ public bool primeAdvanceOrdinaryDeltaWalk(
         uint control) {
     uint2 pixel = primeWavefrontPixel(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolume medium = primeWavefrontMedium(record);
+    PrimeMedium medium = primeWavefrontMedium(record);
     PrimeDenoiserState denoiserState =
             primeWavefrontDenoiserState(
                     control,
@@ -143,7 +143,7 @@ public bool primeAdvanceTransparentDeltaWalk(
         uint control) {
     uint2 pixel = primeWavefrontPixel(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolume medium = primeWavefrontMedium(record);
+    PrimeMedium medium = primeWavefrontMedium(record);
     bool transmissionBranch = primeWavefrontTransmissionBranch(control);
     bool guideEnabled =
             (control & PRIME_WAVEFRONT_GUIDE_ENABLED) != 0u;

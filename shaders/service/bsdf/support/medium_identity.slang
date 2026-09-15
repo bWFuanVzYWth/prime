@@ -4,6 +4,7 @@
 module "service/bsdf/support/medium_identity.slang";
 
 import "model/material/defaults.slang";
+import "model/material/fresnel_code.slang";
 import "bsdf/compact/math/spectrum.slang";
 
 public static const uint PRIME_MEDIUM_ID_VACUUM = 0u;
@@ -23,8 +24,6 @@ public float primeDecodeMediumIor(uint encoding) {
         return 1.333;
     }
     uint fresnelCode = encoding & PRIME_MEDIUM_IOR_CODE_MASK;
-    float dielectricF0 = fresnelCode <= 230u
-            ? primeDecodeDielectricF0(fresnelCode)
-            : PRIME_DEFAULT_DIELECTRIC_F0;
+    float dielectricF0 = primeDecodeDielectricF0(fresnelCode);
     return primeOpenPbrF0ToIor(dielectricF0);
 }

@@ -23,7 +23,7 @@ import "contract/light.slang";
 import "contract/material/normal.slang";
 import "transport/direct/shadow.slang";
 import "transport/surface/access.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
         inout PrimeIntegratorContext context,
@@ -32,7 +32,7 @@ public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
         float3 shadingNormal,
         LightSample light,
         float3 lightRadiance,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool usesAirGap,
         bool conditionalTransparentBranch,
         bool usesMis) {
@@ -96,9 +96,6 @@ public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
         } else {
             evaluation = primeEvaluateMinecraftTransmissionCompleteFromState(
                     state,
-                    surface.baseColor,
-                    primeSurfaceOpacity(surface),
-                    surface.materialControl,
                     viewDirection,
                     light.direction);
         }
@@ -127,7 +124,6 @@ public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
                 surface.materialControl,
                 viewDirection,
                 light.direction,
-                0.0,
                 medium);
         float weightedInversePdf = primePowerHeuristicOverPdf(
                 light.pdf, usesMis ? components.pdf : 0.0);
@@ -148,7 +144,6 @@ public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
             surface.materialControl,
             viewDirection,
             light.direction,
-            0.0,
             medium);
     float weightedInversePdf = primePowerHeuristicOverPdf(
             light.pdf, usesMis ? components.pdf : 0.0);
@@ -166,7 +161,7 @@ public float3 primeEvaluateCompleteDirect(
         float3 shadingNormal,
         LightSample light,
         float3 lightRadiance,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool usesAirGap,
         bool usesMis) {
     PrimeDirectLightingSplit split = primeEvaluateVisibleDirectSplit(

@@ -4,7 +4,6 @@
 module "bsdf/compact/contract/sample.slang";
 
 import "bsdf/compact/contract/flags.slang";
-import "bsdf/compact/contract/volume.slang";
 
 public struct PrimeOpenPbrThroughput {
     public float3 value;
@@ -42,12 +41,6 @@ public struct PrimeOpenPbrConductorFresnel {
     public float3 f90;
     public float weight;
     public float3 energyF0;
-};
-
-public struct PrimeOpenPbrSampleResult {
-    public PrimeOpenPbrSample bsdfSample;
-    public PrimeOpenPbrVolume medium;
-    public float rayT;
 };
 
 public PrimeOpenPbrThroughput primeOpenPbrZeroThroughput() {

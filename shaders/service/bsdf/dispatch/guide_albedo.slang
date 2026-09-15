@@ -15,12 +15,12 @@ import "service/bsdf/dielectric/albedo.slang";
 import "service/bsdf/dielectric/state.slang";
 import "service/bsdf/foliage/albedo.slang";
 import "service/bsdf/foliage/state.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 public PrimeDenoiseAlbedos primeSurfaceGuideAlbedos(
         SurfaceInteraction surface,
         float3 viewDirection,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool usesAirGap) {
     float3 outwardNormal = surface.shadingNormal;
     outwardNormal = dot(outwardNormal, surface.geometricNormal) >= 0.0
@@ -37,7 +37,6 @@ public PrimeDenoiseAlbedos primeSurfaceGuideAlbedos(
                 surface.opticalControl,
                 surface.materialControl,
                 viewDirection,
-                surface.t,
                 medium);
         return primeDenoiseAlbedosFromState(
                 state, viewDirection, PRIME_DENOISE_CLOSURE_FOLIAGE);
@@ -69,7 +68,6 @@ public PrimeDenoiseAlbedos primeSurfaceGuideAlbedos(
             surface.opticalControl,
             surface.materialControl,
             viewDirection,
-            surface.t,
             medium);
     return primeDenoiseAlbedosFromState(
             state, viewDirection, PRIME_DENOISE_CLOSURE_OPAQUE);

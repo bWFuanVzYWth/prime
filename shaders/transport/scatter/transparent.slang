@@ -19,7 +19,7 @@ import "transport/scatter/phase_contract.slang";
 import "transport/surface/access.slang";
 import "transport/surface/accumulate.slang";
 import "transport/surface/environment.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/path.slang";
 import "contract/realtime/transparent.slang";
 
@@ -29,7 +29,7 @@ public bool primeIntegrateTransparentWavefrontMiss<Phase>(
         Phase phase,
         inout PrimeIntegratorContext context,
         inout PathState path,
-        inout PrimeOpenPbrVolume medium,
+        inout PrimeMedium medium,
         inout PrimeTransparentBranchResult result,
         inout PrimeQueuedPsrState psrState,
         inout bool hasGuide,
@@ -87,7 +87,7 @@ public bool primeIntegrateTransparentWavefrontMiss<Phase>(
 public bool primeFinishTransparentWavefrontSurface(
         inout PrimeIntegratorContext context,
         inout PathState path,
-        inout PrimeOpenPbrVolume medium,
+        inout PrimeMedium medium,
         inout PrimeTransparentBranchResult result,
         inout PrimeQueuedPsrState psrState,
         inout bool hasGuide,

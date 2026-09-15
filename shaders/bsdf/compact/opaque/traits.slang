@@ -33,8 +33,7 @@ public PrimeCompactOpaqueState primeCompactOpaqueStateInit<TransmissionGgxEnergy
         TransmissionGgxEnergy transmissionGgxEnergy,
         PrimeOpenPbrMaterial material,
         float3 wi,
-        float inverseOutsideIor,
-        float rayT)
+        float inverseOutsideIor)
     where TransmissionGgxEnergy : IPrimeOpenPbrTransmissionGgxEnergy
 {
     PrimeCompactOpaqueState state;
@@ -46,7 +45,6 @@ public PrimeCompactOpaqueState primeCompactOpaqueStateInit<TransmissionGgxEnergy
                     : material.weight.subsurface > 0.0
                             ? PRIME_COMPACT_OPAQUE_MIXED_SUBSURFACE
                             : PRIME_COMPACT_OPAQUE_DIELECTRIC;
-    state.rayT = rayT;
     state.baseColor = material.base.color;
     state.subsurfaceWeight = material.weight.subsurface;
     state.subsurfaceColor = material.subsurface.color;

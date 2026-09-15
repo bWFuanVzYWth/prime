@@ -5,6 +5,7 @@ package dev.prime.render.vulkan;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.shader.ShaderAbi;
+import dev.prime.render.terrain.CanonicalOpticalEncoding;
 import dev.prime.render.terrain.LabPbrAtlasFrame;
 import dev.prime.render.terrain.LabPbrMaterialSet;
 import java.nio.ByteBuffer;
@@ -26,7 +27,8 @@ import org.lwjgl.vulkan.VkImageMemoryBarrier2;
  *
  * <p>Normal pages store a normalized tangent-space direction in RG, LabPBR AO in B, and the
  * equivalent GGX perceptual roughness of the filtered normal distribution in A. Source height
- * remains CPU-owned by geometric displacement. Optical pages preserve their source semantics.
+ * remains CPU-owned by geometric displacement. Optical pages contain canonical Fresnel identities
+ * and tagged SSS/porosity codes.
  * A missing map is represented by immutable availability bits in terrain primitives, not by an
  * ambiguous texel sentinel. Animated maps follow the base sprite's real source-frame sequence; a
  * single-frame auxiliary map is intentionally reused for every frame.
@@ -35,7 +37,8 @@ public final class MaterialTexturePages implements AutoCloseable {
     private static final int BASE_COLOR_BYTES_PER_PIXEL = 8;
     private static final int AUXILIARY_BYTES_PER_PIXEL = 4;
     private static final int NORMAL_DEFAULT_ARGB = 0x008080ff;
-    private static final int OPTICAL_DEFAULT_ARGB = 0xff000400;
+    private static final int OPTICAL_DEFAULT_ARGB =
+            CanonicalOpticalEncoding.fromLabPbrArgb(0xff000400);
     private enum Channel {
         BASE_COLOR(
                 BASE_COLOR_BYTES_PER_PIXEL,
@@ -732,7 +735,8 @@ public final class MaterialTexturePages implements AutoCloseable {
                                         Math.multiplyExact((long) destinationY + y, rowWidth),
                                         (long) destinationX + x),
                                 4L));
-                writeArgb(target, offset, pixel);
+                writeArgb(target, offset, specular
+                        ? CanonicalOpticalEncoding.fromLabPbrArgb(pixel) : pixel);
             }
         }
     }

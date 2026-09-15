@@ -15,7 +15,7 @@ import "state/offline/index.slang";
 import "state/offline/queue.slang";
 import "state/offline/surface.slang";
 import "transport/offline/context.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/path.slang";
 
 public void primeTraceOfflineCamera(uint2 pixel) {

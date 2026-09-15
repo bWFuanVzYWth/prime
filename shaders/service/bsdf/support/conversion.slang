@@ -6,7 +6,7 @@ module "service/bsdf/support/conversion.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/sanitization.slang";
 import "bsdf/compact/contract/flags.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/contract/sample.slang";
 
 public bool3 lessThan(float3 first, float3 second) { return first < second; }
@@ -17,7 +17,7 @@ public bool3 lessThanEqual(float3 first, float3 second) { return first <= second
 // continuation. The adapter owns the conditional primary proposals and medium handoff.
 public struct PrimeTransmissiveBsdfSample {
     public BsdfSample bsdfSample;
-    public PrimeOpenPbrVolume medium;
+    public PrimeMedium medium;
 };
 
 public struct PrimeTransmissiveBsdfSplit {

@@ -22,7 +22,7 @@ import "state/offline/surface.slang";
 import "state/offline/transport.slang";
 import "transport/scatter/path_update.slang";
 import "transport/scatter/contract.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/path.slang";
 
 public bool primeAdvanceOfflinePath(
@@ -66,7 +66,7 @@ public void primeScatterOfflinePath<Appender>(
     }
     uint2 pixel = primeOfflinePixel(pathIndex);
     PathState path = primeOfflinePath(pixel, record.transport);
-    PrimeOpenPbrVolume medium = primeOfflineMedium(record.transport);
+    PrimeMedium medium = primeOfflineMedium(record.transport);
     SurfaceInteraction surface = primeLoadOfflineSurface(pathIndex);
     PrimePreparedSampleBase preparedSample = primePreparePathSample(
             path.sampleSeed,

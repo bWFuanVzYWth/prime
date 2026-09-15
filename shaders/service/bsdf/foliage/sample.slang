@@ -10,28 +10,27 @@ import "bsdf/compact/foliage/contract.slang";
 import "service/bsdf/foliage/state.slang";
 import "service/bsdf/support/conversion.slang";
 import "bsdf/compact/contract/material.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/contract/sample.slang";
 import "bsdf/compact/math/frame.slang";
 
 public BsdfSample primeSampleMinecraftFoliageFromState(
         PrimeCompactFoliageState state,
         float3 viewDirection,
-        float3 sampleValue,
-        PrimeOpenPbrVolume medium) {
+        float3 sampleValue) {
     BsdfSample result = primeInvalidBsdfSample();
     float3 localView = primeOpenPbrOnbToLocal(state.base.onb, viewDirection);
-    PrimeOpenPbrSampleResult sampled = primeCompactFoliageSample(
-            localView, sampleValue, state, medium);
-    if (!primeOpenPbrHasSample(sampled.bsdfSample)) {
+    PrimeOpenPbrSample sampled = primeCompactFoliageSample(
+            localView, sampleValue, state);
+    if (!primeOpenPbrHasSample(sampled)) {
         return result;
     }
     result.direction = primeOpenPbrOnbToWorld(
-            state.base.onb, sampled.bsdfSample.wo);
-    result.response = sampled.bsdfSample.throughput.value;
-    result.pdf = sampled.bsdfSample.pdf;
+            state.base.onb, sampled.wo);
+    result.response = sampled.throughput.value;
+    result.pdf = sampled.pdf;
     result.relativeEta = 1.0;
-    result.eventFlags = primeOpenPbrToBsdfEventFlags(sampled.bsdfSample.throughput.flags);
+    result.eventFlags = primeOpenPbrToBsdfEventFlags(sampled.throughput.flags);
     return primeSanitizeBsdfSample(result);
 }
 
@@ -43,8 +42,7 @@ public BsdfSample primeSampleMinecraftFoliage(
         uint materialControl,
         float3 viewDirection,
         float3 sampleValue,
-        float rayT,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     PrimeCompactFoliageState state = primeMinecraftFoliageState(
             baseColor,
             outwardNormal,
@@ -52,8 +50,7 @@ public BsdfSample primeSampleMinecraftFoliage(
             opticalControl,
             materialControl,
             viewDirection,
-            rayT,
             medium);
     return primeSampleMinecraftFoliageFromState(
-            state, viewDirection, sampleValue, medium);
+            state, viewDirection, sampleValue);
 }

@@ -31,7 +31,7 @@ import "transport/surface/accumulate.slang";
 import "transport/surface/emission.slang";
 import "transport/surface/environment.slang";
 import "transport/surface/medium.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/path.slang";
 
 public void primeAccumulateOfflineAreaDirect(
@@ -41,7 +41,7 @@ public void primeAccumulateOfflineAreaDirect(
         SurfaceInteraction surface,
         float3 viewDirection,
         AreaLightSample area,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     float3 shadingNormal = primeSurfaceShadingNormal(surface, viewDirection);
     float3 sourceRadiance = primeResolveSampledAreaLightRadiance(area);
     float3 contribution = path.throughput * primeEvaluateCompleteDirect(
@@ -79,7 +79,7 @@ public void primeEvaluateOfflineDirect(
     PrimeOfflinePathRecord record = primeOfflinePaths[pathIndex];
     uint2 pixel = primeOfflinePixel(pathIndex);
     PathState path = primeOfflinePath(pixel, record.transport);
-    PrimeOpenPbrVolume medium = primeOfflineMedium(record.transport);
+    PrimeMedium medium = primeOfflineMedium(record.transport);
     float3 radiance = record.radianceAndPrimaryDistance.xyz;
     float primaryDistance = record.radianceAndPrimaryDistance.w;
     float3 primaryAlbedo = record.primaryAlbedoAndMaterialFlags.xyz;

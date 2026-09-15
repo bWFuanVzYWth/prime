@@ -23,7 +23,7 @@ import "transport/direct/selection.slang";
 import "transport/direct/shadow.slang";
 import "transport/direct/medium.slang";
 import "transport/surface/access.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 public bool primeDirectSampleEligible(
         SurfaceInteraction surface,
@@ -56,7 +56,7 @@ public PrimePrimarySunSample primeEstimatePrimaryDirectSun(
         SurfaceInteraction surface,
         float3 viewDirection,
         float2 sampleValue,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool conditionalTransparentBranch) {
     PrimePrimarySunSample result;
     result.lighting.diffuse = float3(0.0);
@@ -98,7 +98,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryDirectPreparedAreaLight(
         SurfaceInteraction surface,
         float3 viewDirection,
         AreaLightSample area,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool conditionalTransparentBranch) {
     float3 shadingNormal = primeSurfaceShadingNormal(surface, viewDirection);
     if (!primeDirectSampleEligible(surface, shadingNormal, area.light)) {
@@ -141,7 +141,7 @@ public float3 primeEstimateDirectPreparedAreaLight(
         SurfaceInteraction surface,
         float3 viewDirection,
         AreaLightSample area,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     float3 shadingNormal = primeSurfaceShadingNormal(surface, viewDirection);
     if (!primeDirectSampleEligible(surface, shadingNormal, area.light)) {
         return float3(0.0);
@@ -174,7 +174,7 @@ public float3 primeEstimateDirectSun(
         SurfaceInteraction surface,
         float3 viewDirection,
         float2 sampleValue,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     LightSample light = primeSampleSun(integrator, sampleValue);
     if (!primeAtmosphereDistantDirectionVisible(light.direction)) {
         return float3(0.0);

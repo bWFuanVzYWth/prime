@@ -19,7 +19,7 @@ import "state/realtime/light_selection.slang";
 import "state/realtime/queue.slang";
 import "state/realtime/surface.slang";
 import "transport/direct/selection.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 public void primeSelectSecondaryLight(uint sourceQueue, uint launchIndex) {
     uint recordIndex = primeWavefrontQueuedPath(sourceQueue, launchIndex);

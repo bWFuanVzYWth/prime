@@ -16,7 +16,7 @@ import "state/realtime/path_storage.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/transport.slang";
 import "model/realtime/transport.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/realtime/ordinary.slang";
 import "contract/realtime/transparent.slang";
 import "contract/path.slang";
@@ -49,7 +49,7 @@ public PathState primeWavefrontPath(
     return path;
 }
 
-public PrimeOpenPbrVolume primeWavefrontMedium(PrimeWavefrontTransportRecord record) {
+public PrimeMedium primeWavefrontMedium(PrimeWavefrontTransportRecord record) {
     return primeUnpackWavefrontMediumState(record.medium,
             primeWavefrontMediumId(record.sourceAndPathControl.w),
             primeUnpackWavefrontMediumIor(record.sourceAndPathControl.z));
@@ -74,7 +74,7 @@ public PrimeDenoiserState primeWavefrontDenoiserState(
 
 public PrimeWavefrontTransportRecord primeMakeUpdatedWavefrontRecord(
         PathState path,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         PrimeDenoiserState denoiserState,
         uint previousDenoiserControl,
         uint psrControl,
@@ -100,7 +100,7 @@ path,
 
 public PrimeWavefrontPathRecord primeMakeTransparentWavefrontRecord(
         PathState path,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         PrimeTransparentBranchResult branchResult,
         PrimeQueuedPsrState psrState,
         bool transmissionBranch,
@@ -149,7 +149,7 @@ path,
 
 public PrimeWavefrontTransportRecord primeMakeUpdatedTransparentWavefrontRecord(
         PathState path,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         PrimeTransparentBranchResult branchResult,
         PrimeQueuedPsrState psrState,
         bool hasGuide,

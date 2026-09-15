@@ -3,6 +3,8 @@
 #include "core/prime_test_abi.slang"
 import "model/material/labpbr.slang";
 import "model/material/defaults.slang";
+import "model/material/optical.slang";
+import "model/material/fresnel_code.slang";
 import "model/material/translation.slang";
 import "model/material/transparent.slang";
 import "policy/transport/transparent_nee.slang";
@@ -10,7 +12,9 @@ import "service/bsdf/contract/sample.slang";
 import "service/material/normal_mapping.slang";
 import "math/packed_geometry.slang";
 
-static const uint PRIME_MATERIAL_INPUT_WORDS = 3;
+#include "core/labpbr_source.slang"
+
+static const uint PRIME_MATERIAL_INPUT_WORDS = 4;
 static const uint PRIME_MATERIAL_WITNESS_WORDS = 10;
 
 void primeMaterialClassify(inout uint mask, float value) { mask |= primeTestClassify(value); }
@@ -48,8 +52,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         mask |= PRIME_TEST_FAILURE_IDENTITY;
     }
     PrimeLabPbrSample decoded = primeDecodeLabPbr(packedNormal, packedSpecular, flags);
-    PrimeCanonicalOptics canonical = primeAdaptLabPbrSpecular(
-            unpackUnorm4x8ToFloat(packedSpecular));
+    PrimeCanonicalOptics canonical = primeDecodeOpticalSample(
+            unpackUnorm4x8ToFloat(primeTestInput[inputOffset + 3].x));
     PrimeLabPbrNormalAtlasSample filteredNormal = primeAdaptLabPbrNormalAtlas(
             unpackUnorm4x8ToFloat(packedNormal));
     uint4 specularBytes = uint4(round(unpackUnorm4x8ToFloat(packedSpecular) * 255.0));
@@ -90,7 +94,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     float minimumReflectionCosine = min(0.9 * viewCosine, 0.01);
     uint opticalControl = hasOpticalTexture ? canonical.opticalControl : 0;
     PrimeOpticalMaterial translated = primeDecodeOpticalMaterial(
-            roughness, opticalControl, PRIME_MATERIAL_FAMILY_OPAQUE);
+            roughness,
+            primeSurfaceOpticalControl(opticalControl, PRIME_MATERIAL_FAMILY_OPAQUE),
+            PRIME_MATERIAL_FAMILY_OPAQUE);
     PrimeOpticalMaterial translatedThin = primeDecodeOpticalMaterial(
             roughness,
             opticalControl,
@@ -174,6 +180,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
                             ? float(min(expectedSubsurfaceCode, 190u)) / 190.0
                             : 0.0)) {
         mask |= PRIME_TEST_FAILURE_RANGE;
+    }
+    uint codeProbe = expected.x;
+    float expectedF0 = codeProbe == 0u || codeProbe > 230u ? 0.04
+            : min(0.17, max(0.02, float(codeProbe - 1u) / 255.0));
+    if (primeDecodeDielectricF0(codeProbe) != expectedF0) {
+        mask |= PRIME_TEST_FAILURE_VALUE;
     }
     float previousF0 = PRIME_COMMON_DIELECTRIC_F0_MINIMUM;
     for (uint code = 1u; code <= 230u; code++) {

@@ -3,6 +3,7 @@
 #language slang 2026
 module "service/bsdf/dielectric/conditional.slang";
 
+import "service/bsdf/support/medium_conversion.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/sanitization.slang";
 import "bsdf/compact/math/fresnel.slang";
@@ -12,7 +13,7 @@ import "service/bsdf/support/transmission_energy.slang";
 import "service/bsdf/dielectric/state.slang";
 import "service/bsdf/dielectric/traits.slang";
 import "service/bsdf/support/conversion.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/contract/sample.slang";
 import "bsdf/compact/math/spectrum.slang";
 
@@ -43,10 +44,11 @@ public PrimeMinecraftMirrorSplit primeMinecraftMirrorSplit(
     return result;
 }
 
-public PrimeOpenPbrVolume primeMinecraftTransmissionMedium(
+public PrimeMedium primeMinecraftTransmissionMedium(
         PrimeCompactTransmissionState state,
-        PrimeOpenPbrVolume medium) {
-    return state.geometryThinWalled != 0u ? medium : state.transmissionVolume;
+        PrimeMedium medium) {
+    return state.geometryThinWalled != 0u
+            ? medium : primeMediumFromOpenPbrVolume(state.transmissionVolume);
 }
 
 public float primeMinecraftInterfaceIor(
@@ -61,7 +63,7 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftRefractedTransmissionFrom
         float3 viewDirection,
         float3 interfaceWeight,
         bool reflectOnTotalInternalReflection,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     PrimeTransmissiveBsdfSample result;
     result.bsdfSample = primeInvalidBsdfSample();
     result.medium = medium;

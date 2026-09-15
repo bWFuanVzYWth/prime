@@ -13,7 +13,7 @@ import "service/bsdf/dielectric/conditional.slang";
 import "service/bsdf/dielectric/sample.slang";
 import "service/bsdf/support/conversion.slang";
 import "bsdf/compact/contract/material.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/math/frame.slang";
 
 public struct PrimeTransmissivePrimarySample {
@@ -31,7 +31,7 @@ public PrimeTransmissivePrimarySample primeSampleMinecraftTransmissionPrimary(
         float3 viewDirection,
         float3 reflectionSample,
         float rayT,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         uint mediumId,
         float3 adjacentBaseColor,
         uint adjacentInterfaceControl,
@@ -72,9 +72,6 @@ public PrimeTransmissivePrimarySample primeSampleMinecraftTransmissionPrimary(
             outwardNormal,
             viewDirection,
             reflectionSample,
-            baseColor,
-            opacity,
-            materialControl,
             medium);
     result.paths.transmission = primeApplyAirGapMediumTransition(
             result.paths.transmission,

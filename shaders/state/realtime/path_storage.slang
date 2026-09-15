@@ -3,7 +3,7 @@
 #language slang 2026
 module "state/realtime/path_storage.slang";
 
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "state/realtime/medium.slang";
 
 // RGB extinction and etaScale retain all f32 bits. The exact u16 identity occupies
@@ -12,11 +12,11 @@ public uint primeWavefrontMediumId(uint pathControl) {
     return (pathControl >> 8u) & 0xffffu;
 }
 
-public uint4 primePackWavefrontMediumState(PrimeOpenPbrVolume medium, float etaScale) {
+public uint4 primePackWavefrontMediumState(PrimeMedium medium, float etaScale) {
     return uint4(asuint(medium.extinction), asuint(etaScale));
 }
 
-public PrimeOpenPbrVolume primeUnpackWavefrontMediumState(
+public PrimeMedium primeUnpackWavefrontMediumState(
         uint4 packed, uint mediumId, uint iorEncoding) {
     return primeUnpackWavefrontMedium(uint4(packed.xyz, mediumId), iorEncoding);
 }

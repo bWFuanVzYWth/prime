@@ -26,7 +26,7 @@ struct PrimeMixedResult {
     PrimeCompactOpaqueEvaluation sampledEvaluation;
     PrimeCompactOpaqueComponents components;
     PrimeCompactOpaqueEnergy energy;
-    PrimeOpenPbrSampleResult sample;
+    PrimeOpenPbrSample sample;
 };
 
 PrimeMixedResult primeMixedRun(uint4 encoded[4]) {
@@ -68,7 +68,7 @@ PrimeMixedResult primeMixedRun(uint4 encoded[4]) {
     }
 
     PrimeCompactOpaqueState state = primeCompactOpaqueStateInit(
-            primeTransmissionGgxEnergy(), material, wi, inverseOutsideIor, 1.0);
+            primeTransmissionGgxEnergy(), material, wi, inverseOutsideIor);
     result.evaluation = primeCompactOpaqueEvaluate(wi, wo, state);
     result.components = primeCompactOpaqueEvaluateComponents(wi, wo, state);
     result.energy = primeCompactOpaqueEnergy(wi, state);
@@ -81,14 +81,12 @@ PrimeMixedResult primeMixedRun(uint4 encoded[4]) {
             primeTransmissionGgxEnergy(),
             diffuseMaterial,
             wi,
-            inverseOutsideIor,
-            1.0);
+            inverseOutsideIor);
     PrimeCompactOpaqueState subsurfaceState = primeCompactOpaqueStateInit(
             primeTransmissionGgxEnergy(),
             subsurfaceMaterial,
             wi,
-            inverseOutsideIor,
-            1.0);
+            inverseOutsideIor);
     PrimeCompactOpaqueEvaluation diffuseEvaluation = primeCompactOpaqueEvaluate(
             wi, wo, diffuseState);
     PrimeCompactOpaqueEvaluation subsurfaceEvaluation = primeCompactOpaqueEvaluate(
@@ -144,7 +142,7 @@ PrimeMixedResult primeMixedRun(uint4 encoded[4]) {
         result.mask |= PRIME_TEST_FAILURE_VALUE;
     }
     result.sample = primeCompactOpaqueSample(
-            wi, randomValue, state, primeCompactTestVacuum());
+            wi, randomValue, state);
     result.sampledEvaluation.throughput = primeOpenPbrZeroThroughput();
     result.sampledEvaluation.pdf = 0.0;
 
@@ -175,26 +173,26 @@ PrimeMixedResult primeMixedRun(uint4 encoded[4]) {
         result.mask |= PRIME_TEST_FAILURE_VALUE;
     }
 
-    uint flags = result.sample.bsdfSample.throughput.flags;
+    uint flags = result.sample.throughput.flags;
     if (flags != PRIME_OPENPBR_FLAG_NONE) {
-        primeCompactTestClassify(result.mask, result.sample.bsdfSample.throughput.value);
-        primeCompactTestClassify(result.mask, result.sample.bsdfSample.pdf);
-        primeCompactTestClassify(result.mask, result.sample.bsdfSample.eta);
-        primeCompactTestClassify(result.mask, result.sample.bsdfSample.wo);
-        if (!primeCompactTestNonnegative(result.sample.bsdfSample.throughput.value)
-                || !primeCompactTestNonnegative(result.sample.bsdfSample.pdf)
-                || !primeCompactTestNonnegative(result.sample.bsdfSample.eta)
+        primeCompactTestClassify(result.mask, result.sample.throughput.value);
+        primeCompactTestClassify(result.mask, result.sample.pdf);
+        primeCompactTestClassify(result.mask, result.sample.eta);
+        primeCompactTestClassify(result.mask, result.sample.wo);
+        if (!primeCompactTestNonnegative(result.sample.throughput.value)
+                || !primeCompactTestNonnegative(result.sample.pdf)
+                || !primeCompactTestNonnegative(result.sample.eta)
                 || !primeTestClose(
-                        length(result.sample.bsdfSample.wo), 1.0, 2.0e-5, 2.0e-5)) {
+                        length(result.sample.wo), 1.0, 2.0e-5, 2.0e-5)) {
             result.mask |= PRIME_TEST_FAILURE_STATE;
         }
-        bool reflected = wi.z * result.sample.bsdfSample.wo.z > 0.0;
+        bool reflected = wi.z * result.sample.wo.z > 0.0;
         if (reflected != primeOpenPbrIsReflective(flags)
                 || reflected == primeOpenPbrIsTransmissive(flags)) {
             result.mask |= PRIME_TEST_FAILURE_EVENT;
         }
         result.sampledEvaluation = primeCompactOpaqueEvaluate(
-                wi, result.sample.bsdfSample.wo, state);
+                wi, result.sample.wo, state);
         primeCompactTestClassify(result.mask, result.sampledEvaluation.throughput.value);
         primeCompactTestClassify(result.mask, result.sampledEvaluation.pdf);
         if (!primeCompactTestNonnegative(result.sampledEvaluation.throughput.value)
@@ -218,18 +216,18 @@ void primeMixedWrite(uint caseIndex, PrimeMixedResult result) {
     primeTestOutput[outputOffset + 4u] = asuint(float4(result.energy.diffuse, 0.0));
     primeTestOutput[outputOffset + 5u] = asuint(float4(result.energy.specular, 0.0));
     primeTestOutput[outputOffset + 6u] = asuint(float4(
-            result.sample.bsdfSample.throughput.value,
-            result.sample.bsdfSample.pdf));
+            result.sample.throughput.value,
+            result.sample.pdf));
     primeTestOutput[outputOffset + 7u] = uint4(
-            asuint(result.sample.bsdfSample.wo),
-            result.sample.bsdfSample.throughput.flags);
+            asuint(result.sample.wo),
+            result.sample.throughput.flags);
     primeTestOutput[outputOffset + 8u] = asuint(float4(
             result.sampledEvaluation.throughput.value,
             result.sampledEvaluation.pdf));
     primeTestOutput[outputOffset + 9u] = uint4(
-            result.sample.medium.mediumId,
-            asuint(result.sample.rayT),
-            asuint(result.sample.bsdfSample.eta),
+            0u,
+            asuint(0.0),
+            asuint(result.sample.eta),
             0u);
 }
 

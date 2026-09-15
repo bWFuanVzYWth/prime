@@ -11,7 +11,7 @@ import "service/bsdf/dielectric/state.slang";
 import "service/bsdf/dielectric/traits.slang";
 import "bsdf/compact/contract/flags.slang";
 import "bsdf/compact/contract/material.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/math/frame.slang";
 
 public BsdfEvaluation primeEvaluateMinecraftTransparentReflectionFromState(
@@ -46,7 +46,7 @@ public BsdfEvaluation primeEvaluateMinecraftTransparentReflection(
         float3 viewDirection,
         float3 scatterDirection,
         float rayT,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     PrimeCompactTransmissionState state = primeMinecraftTransmissionState(
             baseColor, opacity, outwardNormal, materialControl, roughness, opticalControl,
             viewDirection, rayT, medium, 0u);
@@ -85,7 +85,7 @@ public BsdfEvaluation primeEvaluateMinecraftTransparentTransmission(
         float3 viewDirection,
         float3 scatterDirection,
         float rayT,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     PrimeCompactTransmissionState state = primeMinecraftTransmissionState(
             baseColor, opacity, outwardNormal, materialControl, roughness, opticalControl,
             viewDirection, rayT, medium, 0u);
@@ -93,12 +93,8 @@ public BsdfEvaluation primeEvaluateMinecraftTransparentTransmission(
             state, viewDirection, scatterDirection);
 }
 
-
 public BsdfEvaluation primeEvaluateMinecraftTransmissionCompleteFromState(
         PrimeCompactTransmissionState state,
-        float3 baseColor,
-        float opacity,
-        uint materialControl,
         float3 viewDirection,
         float3 scatterDirection) {
     float3 localView = primeOpenPbrOnbToLocal(state.onb, viewDirection);

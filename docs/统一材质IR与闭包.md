@@ -87,7 +87,7 @@ u8 code/texture；过滤、法线分布组合和 BSDF 消费在寄存器中使�
 1. 采样 base/albedo；
 2. 建立全局 roughness 与 dielectric F0 默认值；
 3. 若开启原版预设，应用 builtin class；
-4. 若当前 sprite 有有效 `_s`，LabPBR adapter 覆盖 roughness、Fresnel、SSS 和 porosity；
+4. 若当前 sprite 有有效 `_s`，规范 optical decoder 覆盖 roughness、Fresnel、SSS 和 porosity；
 5. 若当前 sprite 有有效 `_n`，应用分布感知法线与粗糙度；
 6. 应用玻璃、水、薄壁、叶片和 alpha 语义。
 
@@ -111,11 +111,16 @@ emission 和 decorative interface。decorative interface 表示玻璃 alpha 规�
 - subsurface 0 表示关闭，1..190 表示权重 `code / 190`；
 - porosity 0..64 表示 `code / 64`，当前闭包尚不求值，但不再保留源格式字节。
 
-subsurface code 只保留作者输入；生产闭包仅在非金属材质明确标记 thin-walled 时消费该权重。
-厚材质不尝试缺少散射半径控制的表面穿透近似，统一把 subsurface 权重清零并退化为常规漫反射。
-这是 LabPBR 输入翻译契约，不是 compact OpenPBR 内部的 lobe 近似。LabPBR 的介电 F0 字节也在
-同一边界以具名上下界清洗到 `[0.02, 0.17]`，用于阻止无效极端值破坏积分；该清洗不得移入或
-伪装成 OpenPBR Fresnel 数学的一部分。
+规范 optical 页面使用 RGBA8：R 为补数 roughness，G 为 Fresnel 身份，B 为 SSS/porosity
+联合编码（0..64 为 porosity，65..254 为 SSS code+64），A 保持发光 encoding。
+资源翻译与体素烘焙统一把 LabPBR 源字节转换为该 encoding；保留码不进入 BSDF。
+R/A 过滤与舍入顺序不变，R=255 的浮点端点保护属于 encoding 解码。
+
+subsurface 的 thin/thick 策略在最终 surface 合成处完成：共享纹理本身没有唯一材质角色。
+厚材质的 SSS code 在合成时清零；非金属薄壁才消费权重，闭包不再重新钳制或判断源字节。
+介电 Fresnel code 的物理值由固定码表定义为 `[0.02, 0.17]` 内的 F0，默认与金属角色的介电
+值为 0.04；小型算术解码保持既有浮点公式。具有相同 F0 的不同身份仍须保留，空气微缝匹配
+比较的是精确身份。以上均为翻译/encoding 契约，不属于 compact OpenPBR 内部数学。
 
 法线贴图激活时，evaluate、NEE 和 realtime/offline continuation 共用同一几何支持域：反射
 方向必须与入射方向位于几何法线同侧，透射必须位于异侧。违反支持域的 sample 直接终止，不

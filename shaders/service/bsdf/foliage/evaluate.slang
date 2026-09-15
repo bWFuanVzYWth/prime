@@ -11,7 +11,7 @@ import "service/bsdf/contract/components.slang";
 import "service/bsdf/foliage/state.slang";
 import "bsdf/compact/contract/flags.slang";
 import "bsdf/compact/contract/material.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/math/frame.slang";
 
 public BsdfEvaluation primeEvaluateMinecraftFoliage(
@@ -22,8 +22,7 @@ public BsdfEvaluation primeEvaluateMinecraftFoliage(
         uint materialControl,
         float3 viewDirection,
         float3 scatterDirection,
-        float rayT,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     PrimeCompactFoliageState state = primeMinecraftFoliageState(
             baseColor,
             outwardNormal,
@@ -31,7 +30,6 @@ public BsdfEvaluation primeEvaluateMinecraftFoliage(
             opticalControl,
             materialControl,
             viewDirection,
-            rayT,
             medium);
     float3 localView = primeOpenPbrOnbToLocal(state.base.onb, viewDirection);
     float3 localScatter = primeOpenPbrOnbToLocal(state.base.onb, scatterDirection);
@@ -54,8 +52,7 @@ public PrimeBsdfComponents primeEvaluateMinecraftFoliageComponents(
         uint materialControl,
         float3 viewDirection,
         float3 scatterDirection,
-        float rayT,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     PrimeBsdfComponents result;
     result.diffuseResponse = float3(0.0);
     result.specularResponse = float3(0.0);
@@ -67,7 +64,6 @@ public PrimeBsdfComponents primeEvaluateMinecraftFoliageComponents(
             opticalControl,
             materialControl,
             viewDirection,
-            rayT,
             medium);
     float3 localView = primeOpenPbrOnbToLocal(state.base.onb, viewDirection);
     float3 localScatter = primeOpenPbrOnbToLocal(state.base.onb, scatterDirection);

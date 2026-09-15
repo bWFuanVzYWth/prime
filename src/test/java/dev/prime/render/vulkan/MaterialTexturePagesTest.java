@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.prime.render.terrain.CanonicalColorEncoding;
+import dev.prime.render.terrain.CanonicalOpticalEncoding;
 import dev.prime.render.terrain.LabPbrAtlasFrame;
 import dev.prime.render.terrain.LabPbrMaterialSet;
 import java.nio.ByteBuffer;
@@ -337,7 +338,7 @@ final class MaterialTexturePagesTest {
                     0);
 
             assertArrayEquals(
-                    new byte[] {(byte) 0x80, 0, 0, (byte) 0xff},
+                    new byte[] {(byte) 0x80, 1, 0, (byte) 0xff},
                     new byte[] {target.get(0), target.get(1), target.get(2), target.get(3)});
         } finally {
             MemoryUtil.memFree(target);
@@ -544,5 +545,56 @@ final class MaterialTexturePagesTest {
                 true);
 
         assertEquals(0x2030_e540, sampled);
+    }
+
+    @Test
+    void canonicalOpticalPagesAndAnimationMatchSourceTranslationAtEveryProgressAndMip() {
+        int[] pixels = {
+            0xff00_0040, 0xfeff_e641, 0x7f01_ee42,
+            0x0020_ff00, 0x01a0_edff, 0xff40_fe3f,
+            0xfefe_0142, 0xff00_e5ff, 0x8080_ef40,
+            0xff01_ff41, 0xfeef_ed42, 0x0040_0040
+        };
+        var source = LabPbrAtlasFrame.MaterialSource.create(pixels, 3, 4, 3, 2, 3, 2);
+        var sprite = new LabPbrAtlasFrame.Sprite(1, 0, 0, 3, 2, 1, null, null, source, 0);
+        var placement = new TexturePageLayout.Placement(0, 0, 0, sprite);
+        var frames = TextureAnimationFrames.material(placement, source, 3, true);
+        ByteBuffer cached = MemoryUtil.memAlloc(sprite.mipWidth(0) * sprite.mipHeight(0) * 4);
+        ByteBuffer direct = MemoryUtil.memAlloc(cached.capacity());
+        try {
+            for (int current = 0; current < 2; current++) {
+                for (int progress = 0; progress < 1000; progress++) {
+                    var sample = new LabPbrAtlasFrame.AnimationSample(current, 1 - current, progress);
+                    for (int mip = 0; mip < 3; mip++) {
+                        int width = sprite.mipWidth(mip);
+                        int height = sprite.mipHeight(mip);
+                        frames.write(MemoryUtil.memAddress(cached), sample, mip);
+                        MaterialTexturePages.writeSprite(MemoryUtil.memAddress(direct), 0L, width,
+                                placement, source, sample, mip, true, true);
+                        for (int y = 0; y < height; y++) {
+                            for (int x = 0; x < width; x++) {
+                                int raw = source.filtered(sample,
+                                        (double) x * 5 / width - 1, (double) y * 4 / height - 1,
+                                        (double) (x + 1) * 5 / width - 1,
+                                        (double) (y + 1) * 4 / height - 1, 3, 2, true);
+                                int expected = CanonicalOpticalEncoding.fromLabPbrArgb(raw);
+                                int offset = (y * width + x) * 4;
+                                assertEquals(expected, readArgb(direct, offset));
+                                assertEquals(expected, readArgb(cached, offset));
+                            }
+                        }
+                    }
+                }
+            }
+        } finally {
+            MemoryUtil.memFree(cached);
+            MemoryUtil.memFree(direct);
+            frames.destroy();
+        }
+    }
+
+    private static int readArgb(ByteBuffer buffer, int offset) {
+        return (buffer.get(offset + 3) & 255) << 24 | (buffer.get(offset) & 255) << 16
+                | (buffer.get(offset + 1) & 255) << 8 | buffer.get(offset + 2) & 255;
     }
 }

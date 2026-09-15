@@ -5,7 +5,7 @@ module "state/realtime/detached_guide.slang";
 
 import "prime_realtime_abi.slang";
 import "math/realtime_storage.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/detached_guide_medium.slang";
 
@@ -75,7 +75,7 @@ public PrimeDetachedGuideRecord primeLoadMissingGuideRecord(uint pathIndex) {
     return primeLoadGuideRay(primeMissingGuideRecordWord(pathIndex));
 }
 
-public PrimeOpenPbrVolume primeDetachedGuideMedium(
+public PrimeMedium primeDetachedGuideMedium(
         PrimeDetachedGuideRecord record) {
     return primeUnpackDetachedGuideMedium(record.mediumState);
 }

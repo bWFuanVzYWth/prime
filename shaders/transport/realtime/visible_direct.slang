@@ -27,7 +27,7 @@ import "contract/path.slang";
 import "transport/direct/area.slang";
 import "transport/direct/primary.slang";
 import "transport/surface/medium.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "model/realtime/guide.slang";
 
 void primeInitializeVisibleDirectSignals(uint2 pixel) {
@@ -52,7 +52,7 @@ public void primeShadeVisibleDirect(
     float3 viewDirection = -primeCameraRayDirection(
             pixel, primeRealtimeCameraSample(pixel));
     float3 throughput = float3(1.0);
-    PrimeOpenPbrVolume medium =
+    PrimeMedium medium =
             (primePush.path.z & PRIME_PATH_CAMERA_IN_WATER_MASK) != 0u
             ? primeCameraWaterMedium()
             : primeVacuumMedium();

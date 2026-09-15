@@ -11,14 +11,14 @@ import "service/light/area.slang";
 import "service/trace/context.slang";
 import "transport/direct/primary.slang";
 import "transport/direct/selection.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 public PrimeDirectLightingSplit primeEstimatePrimaryDirectAreaLight(
         inout PrimeIntegratorContext context,
         SurfaceInteraction surface,
         float3 viewDirection,
         PrimePreparedSampleBase preparedSample,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool conditionalTransparentBranch) {
     return primeEstimatePrimaryDirectAreaLightSampled(
             context,
@@ -42,7 +42,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryDirectAreaLightSampled(
         float3 viewDirection,
         float2 treeSample,
         float2 positionSample,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool conditionalTransparentBranch) {
     AreaLightSample area = primeSampleAreaLight(
             surface.position,
@@ -64,7 +64,7 @@ public float3 primeEstimateDirectAreaLight(
         float3 viewDirection,
         float2 treeSample,
         float2 positionSample,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     AreaLightSample area = primeSampleAreaLight(
             surface.position,
             primeAreaLightReceiverNormal(surface, viewDirection),
@@ -83,7 +83,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryNonsunDirect(
         SurfaceInteraction surface,
         float3 viewDirection,
         PrimePreparedSampleBase preparedSample,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool conditionalTransparentBranch) {
     // Stars are evaluated only when the continuation ray misses. Primary non-sun guides therefore
     // contain only the explicitly sampled area-light family.
@@ -102,7 +102,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryNonsunDirectSampled(
         float3 viewDirection,
         float2 treeSample,
         float2 positionSample,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool conditionalTransparentBranch) {
     return primeEstimatePrimaryDirectAreaLightSampled(
             context,

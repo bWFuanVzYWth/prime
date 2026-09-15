@@ -33,13 +33,13 @@ import "transport/scatter/path_update.slang";
 import "transport/surface/access.slang";
 import "transport/surface/accumulate.slang";
 import "transport/surface/medium.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/material/normal.slang";
 
 PrimePathScatter primeEnforceDiscreteGeometricSupport(
         SurfaceInteraction surface,
         float3 viewDirection,
-        PrimeOpenPbrVolume originalMedium,
+        PrimeMedium originalMedium,
         PrimePathScatter scatter) {
     if (!primeGeometricSampleSupport(
             primeMaterialUsesNormalMap(surface.opticalControl),
@@ -57,7 +57,7 @@ PrimePathScatter primeEnforceDiscreteGeometricSupport(
 public bool primeSurfaceIsDiscreteOnly(
         SurfaceInteraction surface,
         float3 viewDirection,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     if (primeMaterialIsFoliage(surface.materialControl)) {
         return false;
     }
@@ -78,13 +78,12 @@ public bool primeSurfaceIsDiscreteOnly(
     return primeClosureIsDiscreteOnly(traits);
 }
 
-
 public PrimePathScatter primeSampleDiscretePathSurface(
         inout PrimeIntegratorContext context,
         SurfaceInteraction surface,
         float3 viewDirection,
         float3 sampleValue,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     PrimePathScatter result;
     result.bsdf = primeInvalidBsdfSample();
     result.medium = medium;
@@ -132,13 +131,11 @@ public PrimePathScatter primeSampleDiscretePathSurface(
                 shadingNormal,
                 surface.roughness,
                 surface.opticalControl,
-                surface.materialControl,
-                surface.t);
+                surface.materialControl);
         result.bsdf = primeSampleOpaqueDiscreteFromState(
                 state,
                 shadingNormal,
-                viewDirection,
-                medium);
+                viewDirection);
     }
     return primeEnforceDiscreteGeometricSupport(
             surface, viewDirection, medium, result);
@@ -151,7 +148,7 @@ public PrimePathScatter primeSamplePreferredTransmissionDiscretePathSurface(
         inout PrimeIntegratorContext context,
         SurfaceInteraction surface,
         float3 viewDirection,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     PrimePathScatter preferred = primeSampleDiscretePathSurface(
             context,
             surface,
@@ -180,7 +177,7 @@ public PrimeGuidedPathScatter primeSampleGuidedDiscretePathSurface(
         SurfaceInteraction surface,
         float3 viewDirection,
         float3 sampleValue,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         uint bounce) {
     PrimeGuidedPathScatter result;
     result.scatter.bsdf = primeInvalidBsdfSample();
@@ -235,15 +232,13 @@ public PrimeGuidedPathScatter primeSampleGuidedDiscretePathSurface(
                 shadingNormal,
                 surface.roughness,
                 surface.opticalControl,
-                surface.materialControl,
-                surface.t);
+                surface.materialControl);
         result.albedos = primeOpaqueDiscreteAlbedosFromState(
                 state, viewDirection);
         result.scatter.bsdf = primeSampleOpaqueDiscreteFromState(
                 state,
                 shadingNormal,
-                viewDirection,
-                medium);
+                viewDirection);
     }
     result.scatter = primeEnforceDiscreteGeometricSupport(
             surface, viewDirection, medium, result.scatter);

@@ -11,19 +11,8 @@ import "bsdf/compact/math/microfacet_distribution.slang";
 import "bsdf/compact/math/microfacet_energy.slang";
 import "bsdf/compact/math/microfacet_measure.slang";
 import "bsdf/compact/contract/flags.slang";
-import "bsdf/compact/contract/volume.slang";
 import "bsdf/compact/contract/sample.slang";
 import "bsdf/compact/math/spectrum.slang";
-
-public PrimeOpenPbrSampleResult primeCompactTransmissionZeroResult(
-        PrimeCompactTransmissionState state,
-        PrimeOpenPbrVolume medium) {
-    PrimeOpenPbrSampleResult result;
-    result.bsdfSample = primeOpenPbrZeroSample();
-    result.medium = medium;
-    result.rayT = state.rayT;
-    return result;
-}
 
 public float primeCompactMicrofacetG2r(
         PrimeOpenPbrMicrofacet microfacet,
@@ -266,23 +255,22 @@ public PrimeOpenPbrThroughput primeCompactTransmissionEvalRaw(
     return result;
 }
 
-public PrimeOpenPbrSampleResult primeCompactTransmissionSampleRaw(
+public PrimeOpenPbrSample primeCompactTransmissionSampleRaw(
         float3 wi,
         float3 randomValue,
         PrimeCompactTransmissionState state,
-        uint samplingFlags,
-        PrimeOpenPbrVolume medium) {
-    PrimeOpenPbrSampleResult result = primeCompactTransmissionZeroResult(state, medium);
+        uint samplingFlags) {
+    PrimeOpenPbrSample result = primeOpenPbrZeroSample();
     if (state.geometryThinWalled != 0u) {
         if (primeOpenPbrMicrofacetEffectivelySmooth(state.transmissionMicrofacet)) {
             return primeCompactThinWallDiscreteSampleRaw(
-                    wi, randomValue.z, state, samplingFlags, medium);
+                    wi, randomValue.z, state, samplingFlags);
         }
         PrimeOpenPbrReflectiveSampleBase base = primeOpenPbrReflectiveSampleBase(
                 wi, randomValue, state.transmissionMicrofacet,
                 samplingFlags, PRIME_OPENPBR_FLAG_ALL);
-        result.bsdfSample = base.bsdfSample;
-        if (result.bsdfSample.throughput.flags != PRIME_OPENPBR_FLAG_NONE) {
+        result = base.bsdfSample;
+        if (result.throughput.flags != PRIME_OPENPBR_FLAG_NONE) {
             PrimeOpenPbrVecPair rt = primeCompactTransmissionThinWallRt(
                     base.microCosine, state);
             float reflectionProbability = primeOpenPbrSpectrumToWeight(rt.first);
@@ -291,23 +279,23 @@ public PrimeOpenPbrSampleResult primeCompactTransmissionSampleRaw(
             if (!primeOpenPbrIsTransmissive(samplingFlags)) { transmissionProbability = 0.0; }
             float probabilitySum = reflectionProbability + transmissionProbability;
             if (probabilitySum == 0.0) {
-                result.bsdfSample = primeOpenPbrZeroSample();
+                result = primeOpenPbrZeroSample();
                 return result;
             }
             if (randomValue.z < transmissionProbability / probabilitySum) {
-                result.bsdfSample.throughput.value *= rt.second;
-                result.bsdfSample.pdf *= transmissionProbability / probabilitySum;
-                result.bsdfSample.throughput.flags =
-                        primeOpenPbrIsDelta(result.bsdfSample.throughput.flags)
+                result.throughput.value *= rt.second;
+                result.pdf *= transmissionProbability / probabilitySum;
+                result.throughput.flags =
+                        primeOpenPbrIsDelta(result.throughput.flags)
                         ? PRIME_OPENPBR_FLAG_DELTA_TRANSMISSION
                         : PRIME_OPENPBR_FLAG_SPECULAR_TRANSMISSION;
-                result.bsdfSample.wo.z = -result.bsdfSample.wo.z;
+                result.wo.z = -result.wo.z;
             } else {
-                result.bsdfSample.throughput.value *= rt.first;
-                result.bsdfSample.pdf *= reflectionProbability / probabilitySum;
+                result.throughput.value *= rt.first;
+                result.pdf *= reflectionProbability / probabilitySum;
             }
-            if (primeOpenPbrIsNonDelta(result.bsdfSample.throughput.flags)) {
-                result.bsdfSample.throughput.value /=
+            if (primeOpenPbrIsNonDelta(result.throughput.flags)) {
+                result.throughput.value /=
                         primeOpenPbrMicrofacetDirectionalAlbedoUnity(
                                 state.transmissionMicrofacet, wi.z);
             }
@@ -316,17 +304,17 @@ public PrimeOpenPbrSampleResult primeCompactTransmissionSampleRaw(
     }
 
     float3 materialWi = primeCompactTransmissionMaterialFrame(wi, state);
-    result.bsdfSample = primeCompactRefractiveSample(
+    result = primeCompactRefractiveSample(
             materialWi, randomValue, state, samplingFlags);
-    if (result.bsdfSample.throughput.flags == PRIME_OPENPBR_FLAG_NONE) { return result; }
-    result.bsdfSample.wo = primeCompactTransmissionMaterialFrame(
-            result.bsdfSample.wo, state);
-    if (primeOpenPbrIsTransmissive(result.bsdfSample.throughput.flags)) {
-        result.bsdfSample.throughput.value *= state.transmissionTint;
+    if (result.throughput.flags == PRIME_OPENPBR_FLAG_NONE) { return result; }
+    result.wo = primeCompactTransmissionMaterialFrame(
+            result.wo, state);
+    if (primeOpenPbrIsTransmissive(result.throughput.flags)) {
+        result.throughput.value *= state.transmissionTint;
     }
-    if (primeOpenPbrIsNonDelta(result.bsdfSample.throughput.flags)) {
-        result.bsdfSample.throughput.value *=
-                primeOpenPbrIsTransmissive(result.bsdfSample.throughput.flags)
+    if (primeOpenPbrIsNonDelta(result.throughput.flags)) {
+        result.throughput.value *=
+                primeOpenPbrIsTransmissive(result.throughput.flags)
                 ? state.transmissionMultipleScattering.y
                 : state.transmissionMultipleScattering.x;
     }

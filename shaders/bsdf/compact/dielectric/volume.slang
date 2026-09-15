@@ -3,6 +3,7 @@
 #language slang 2026
 module "bsdf/compact/dielectric/volume.slang";
 
+import "bsdf/compact/contract/volume_sample.slang";
 import "bsdf/compact/contract/flags.slang";
 import "bsdf/compact/contract/sample.slang";
 import "bsdf/compact/contract/volume.slang";

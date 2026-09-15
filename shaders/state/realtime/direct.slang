@@ -7,7 +7,7 @@ import "state/realtime/contract.slang";
 import "state/realtime/medium.slang";
 import "state/realtime/path_storage.slang";
 import "state/realtime/phase_scratch.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 // NEE state stays narrow. Reverse-MIS state is loaded only after NEE so origin/PDF/normal do not
 // remain live through the shadow-trace call tree.
@@ -16,7 +16,7 @@ public struct PrimeWavefrontDirectState {
     public float3 throughput;
     public uint bounce;
     public uint control;
-    public PrimeOpenPbrVolume medium;
+    public PrimeMedium medium;
 };
 
 public struct PrimeWavefrontHitEmissionState {
@@ -30,7 +30,7 @@ public struct PrimeWavefrontHitEmissionState {
     public float3 previousLightNormal;
 };
 
-PrimeOpenPbrVolume primeUnpackWavefrontDirectMedium(uint4 control, uint4 medium) {
+PrimeMedium primeUnpackWavefrontDirectMedium(uint4 control, uint4 medium) {
     return primeUnpackWavefrontMediumState(medium,
             primeWavefrontMediumId(control.w), primeUnpackWavefrontMediumIor(control.z));
 }
@@ -80,7 +80,7 @@ public PrimeWavefrontHitEmissionState primeLoadWavefrontHitEmissionState(
     return state;
 }
 
-public PrimeOpenPbrVolume primeLoadWavefrontHitMedium(
+public PrimeMedium primeLoadWavefrontHitMedium(
         uint pathIndex) {
     uint4 sourceAndPathControl =
             primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.sourceAndPathControl;

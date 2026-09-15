@@ -4,7 +4,7 @@
 import "prime_realtime_abi.slang";
 import "prime_abi_types.slang";
 import "state/realtime/path_storage.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 static const uint PRIME_REALTIME_STATE_INPUT_WORDS = 2;
 static const uint PRIME_REALTIME_STATE_WITNESS_WORDS = 4;
@@ -95,12 +95,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    PrimeOpenPbrVolume medium = primeVacuumMedium();
+    PrimeMedium medium = primeVacuumMedium();
     medium.extinction = values.yzw;
     medium.mediumId = control.y;
     uint4 first = primePackWavefrontMediumState(medium, values.x);
     uint4 second = uint4(control.y, 0u, 0u, 0u);
-    PrimeOpenPbrVolume restored = primeUnpackWavefrontMediumState(first, control.y, 0u);
+    PrimeMedium restored = primeUnpackWavefrontMediumState(first, control.y, 0u);
     uint mask = 0u;
     if (asuint(asfloat(first.w)) != asuint(values.x)
             || restored.mediumId != control.y

@@ -1,7 +1,7 @@
 // Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
 
-
 #include "core/prime_test_abi.slang"
+import "bsdf/compact/contract/volume_sample.slang";
 import "service/bsdf/support/transmission_energy.slang";
 import "bsdf/compact/contract/material.slang";
 import "bsdf/compact/dielectric/contract.slang";
@@ -20,7 +20,7 @@ import "bsdf/compact/model/material.slang";
 static const uint PRIME_SLAB_INPUT_WORDS = 1u;
 static const uint PRIME_SLAB_WITNESS_WORDS = 8u;
 
-PrimeOpenPbrVolume primeSlabVacuum() { return primeVacuumMedium(); }
+PrimeOpenPbrVolume primeSlabVacuum() { return primeOpenPbrVacuumVolume(); }
 
 PrimeOpenPbrMaterial primeSlabMaterial(float ior) {
     PrimeOpenPbrMaterial material = primeCompactMaterialFromMetallic(
@@ -43,7 +43,7 @@ PrimeCompactTransmissionState primeSlabState(
             primeTransmissionGgxEnergy(),
             material,
             wi,
-            primeVacuumMedium(),
+            primeOpenPbrVacuumVolume(),
             4.0);
     if (wi.z >= 0.0) state.transmissionVolume.mediumId = 1u;
     state = primeCompactTransmissionInterfaceState(

@@ -20,7 +20,7 @@ import "state/offline/staged_light.slang";
 import "state/offline/surface.slang";
 import "state/offline/transport.slang";
 import "transport/direct/selection.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/path.slang";
 
 public void primeSelectOfflineLight(uint sourceQueue, uint launchIndex) {
@@ -32,7 +32,7 @@ public void primeSelectOfflineLight(uint sourceQueue, uint launchIndex) {
         PrimeOfflineTransportRecord record = primeOfflinePaths[pathIndex].transport;
         uint2 pixel = primeOfflinePixel(pathIndex);
         PathState path = primeOfflinePath(pixel, record);
-        PrimeOpenPbrVolume medium = primeOfflineMedium(record);
+        PrimeMedium medium = primeOfflineMedium(record);
         float3 viewDirection = -path.rayDirection;
         PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
                 surface, viewDirection, medium, primeUsesAirGap());

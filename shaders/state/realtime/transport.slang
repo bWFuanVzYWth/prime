@@ -13,7 +13,7 @@ import "math/transport.slang";
 import "state/realtime/medium.slang";
 import "state/realtime/path_storage.slang";
 import "model/realtime/transport.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/path.slang";
 
 public uint primePackWavefrontPathControl(PathState path) {
@@ -87,7 +87,7 @@ public PrimeWavefrontPathRecord primeWavefrontWithPrimaryPreviousPosition(
 
 public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
         PathState path,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         PrimeDenoiserState denoiserState,
         uint primaryMaterialFlags,
         bool enabled) {
@@ -119,7 +119,7 @@ public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
 
 public PrimeWavefrontPathRecord primeMakeWavefrontRecord(
         PathState path,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         PrimeDenoiserState denoiserState,
         PrimeDenoiserGuides guides,
         bool enabled) {

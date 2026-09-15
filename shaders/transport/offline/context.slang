@@ -12,7 +12,7 @@ import "state/realtime/medium.slang";
 import "service/bsdf/support/volume_transition.slang";
 import "state/offline/contract.slang";
 import "state/offline/transport.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 public IntegratorRecord primeOfflineIntegrator() {
     IntegratorRecord integrator;
@@ -22,7 +22,7 @@ public IntegratorRecord primeOfflineIntegrator() {
     return integrator;
 }
 
-public PrimeOpenPbrVolume primeOfflineInitialMedium() {
+public PrimeMedium primeOfflineInitialMedium() {
     return (primePush.path.z & PRIME_PATH_CAMERA_IN_WATER_MASK) != 0u
             ? primeCameraWaterMedium()
             : primeVacuumMedium();
@@ -30,7 +30,7 @@ public PrimeOpenPbrVolume primeOfflineInitialMedium() {
 
 public PrimeOfflinePathRecord primeMakeOfflineRecord(
         PathState path,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         float3 radiance,
         float primaryDistance,
         float3 primaryAlbedo,

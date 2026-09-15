@@ -5,7 +5,7 @@ module "transport/realtime/guide_delta_walk.slang";
 
 import "prime_realtime_abi.slang";
 import "prime_abi_types.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/realtime/transparent.slang";
 import "math/packed_geometry.slang";
 import "math/queued_psr.slang";
@@ -58,7 +58,7 @@ void primePublishDetachedGuideSurface(
         uint recordIndex,
         PrimeDetachedGuideOwnerState owner,
         PrimeDetachedGuideRecord guide,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         SurfaceInteraction surface) {
     uint2 pixel = primeWavefrontPixel(recordIndex);
     uint control = owner.denoiserControl;
@@ -183,7 +183,7 @@ public void primeDetachedGuideDeltaWalk(
             return;
         }
 
-        PrimeOpenPbrVolume medium =
+        PrimeMedium medium =
                 primeDetachedGuideMedium(guide);
         if (!primeSurfaceIsDiscreteOnly(
                 surface, -guide.rayDirection, medium)) {

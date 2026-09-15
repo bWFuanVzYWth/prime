@@ -1,6 +1,7 @@
 // Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
 
 #include "core/prime_test_abi.slang"
+import "bsdf/compact/contract/volume_sample.slang";
 import "service/bsdf/support/transmission_energy.slang";
 import "bsdf/compact/contract/material.slang";
 import "bsdf/compact/dielectric/contract.slang";
@@ -15,9 +16,42 @@ import "bsdf/compact/contract/volume.slang";
 import "bsdf/compact/contract/sample.slang";
 import "bsdf/compact/model/material.slang";
 import "bsdf/compact/model/volume.slang";
+import "contract/medium.slang";
+import "service/bsdf/support/medium_conversion.slang";
 #include "core/compact_bsdf_test.slang"
 
 static const uint PRIME_COMPACT_TRANSMISSION_INPUT_WORDS = 4u;
+
+uint primeVolumeRepresentationFailures()
+{
+    PrimeOpenPbrTransmission transmission = {};
+    transmission.color = exp(-float3(0.5, 1.0, 2.0));
+    transmission.scatter = float3(0.25, 0.5, 1.0);
+    transmission.scatterAnisotropy = 0.4;
+    transmission.depth = 2.0;
+    PrimeOpenPbrVolume scattering = primeOpenPbrVolumeFromTransmission(transmission);
+    if (any(abs(scattering.extinction - float3(0.25, 0.5, 1.0)) > 1.0e-6)
+            || any(abs(scattering.albedo - float3(0.5)) > 1.0e-6)
+            || scattering.anisotropy != 0.4) {
+        return PRIME_TEST_FAILURE_STATE;
+    }
+    PrimeMedium incident = primeVacuumMedium();
+    incident.extinction = float3(0.0, 0.1, 37.0);
+    incident.ior = 1.333;
+    incident.mediumId = 0xfedcba98u;
+    incident.iorEncoding = 0x100u;
+    PrimeOpenPbrVolume compact = primeOpenPbrVolumeFromMedium(incident);
+    PrimeMedium restored = primeMediumFromOpenPbrVolume(compact);
+    if (any(compact.albedo != float3(0.0)) || compact.anisotropy != 0.0
+            || any(asuint(restored.extinction) != asuint(incident.extinction))
+            || asuint(restored.ior) != asuint(incident.ior)
+            || restored.mediumId != incident.mediumId
+            || restored.iorEncoding != incident.iorEncoding
+            || sizeof(PrimeMedium) != 24u) {
+        return PRIME_TEST_FAILURE_STATE;
+    }
+    return 0u;
+}
 
 struct PrimeCompactTransmissionTestResult {
     uint mask;
@@ -30,7 +64,7 @@ struct PrimeCompactTransmissionTestResult {
 };
 
 PrimeOpenPbrVolume primeCompactTransmissionMedium(bool exiting, PrimeOpenPbrMaterial material) {
-    if (!exiting) return primeVacuumMedium();
+    if (!exiting) return primeOpenPbrVacuumVolume();
     PrimeOpenPbrVolume medium = primeOpenPbrVolumeFromTransmission(material.transmission);
     medium.ior = material.specular.ior;
     medium.mediumId = 1u;
@@ -93,7 +127,7 @@ PrimeCompactTransmissionTestResult primeCompactTransmissionRun(uint4 encoded[4])
     }
 
     PrimeOpenPbrVolume medium = primeCompactTransmissionMedium(exiting, material);
-    PrimeOpenPbrVolume outside = primeVacuumMedium();
+    PrimeOpenPbrVolume outside = primeOpenPbrVacuumVolume();
     outside.ior = 1.0 / inverseOutsideIor;
     uint originalMediumId = medium.mediumId;
     PrimeCompactTransmissionState state = primeCompactTransmissionStateInit(
@@ -213,6 +247,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
     for (uint word = 0u; word < PRIME_COMPACT_TRANSMISSION_INPUT_WORDS; word++) {
         encoded[word] = primeTestInput[inputOffset + word];
     }
-    primeCompactTransmissionWrite(
-            caseIndex, primeCompactTransmissionRun(encoded));
+    PrimeCompactTransmissionTestResult result = primeCompactTransmissionRun(encoded);
+    if (caseIndex == 0u) result.mask |= primeVolumeRepresentationFailures();
+    primeCompactTransmissionWrite(caseIndex, result);
 }

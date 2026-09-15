@@ -17,7 +17,7 @@ import "state/offline/path_storage.slang";
 import "state/path.slang";
 import "state/surface_storage.slang";
 
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/path.slang";
 import "policy/transport/path.slang";
 
@@ -356,13 +356,13 @@ void primeCheckShadowOpticalDepth(inout PrimeTransportResult result, float4 firs
 
 void primeCheckWavefrontMedium(inout PrimeTransportResult result, uint2 identity,
         float4 transport, float4 coldVolumeFields) {
-    PrimeOpenPbrVolume medium = primeVacuumMedium();
+    PrimeMedium medium = primeVacuumMedium();
     medium.extinction = transport.xyz;
     medium.mediumId = identity.x;
     medium.iorEncoding = identity.y;
     medium.ior = identity.x == 0u ? 1.0 : primeDecodeMediumIor(identity.y);
     uint4 packed = uint4(asuint(medium.extinction), medium.mediumId);
-    PrimeOpenPbrVolume restored = primeUnpackWavefrontMedium(packed, identity.y);
+    PrimeMedium restored = primeUnpackWavefrontMedium(packed, identity.y);
     uint ior = primePackWavefrontMediumIor(medium);
     uint guide = 0x00007f07u;
     uint merged = primeMergeWavefrontGuideControl(ior, guide);
@@ -371,16 +371,16 @@ void primeCheckWavefrontMedium(inout PrimeTransportResult result, uint2 identity
             || primeUnpackWavefrontMediumIor(ior) != identity.y
             || (merged & PRIME_WAVEFRONT_GUIDE_CONTROL_MASK) != guide
             || (merged & ~PRIME_WAVEFRONT_GUIDE_CONTROL_MASK) != ior
-            || any(restored.albedo != float3(0.0)) || restored.anisotropy != 0.0)
+            || sizeof(PrimeMedium) != 24u)
         result.mask |= PRIME_TEST_FAILURE_STATE;
     result.first = float4(restored.extinction, restored.ior);
     result.second = transport;
-    result.third = float4(restored.albedo, restored.anisotropy);
+    result.third = float4(float(sizeof(PrimeMedium)), 0.0, 0.0, 0.0);
 }
 
 void primeCheckDetachedGuideMedium(inout PrimeTransportResult result, uint selected,
         uint2 mediumIds, uint2 iorEncodings) {
-    PrimeOpenPbrVolume medium = primeVacuumMedium();
+    PrimeMedium medium = primeVacuumMedium();
     if (selected != 0u) {
         uint index = selected - 1u;
         medium.mediumId = mediumIds[index];
@@ -388,11 +388,10 @@ void primeCheckDetachedGuideMedium(inout PrimeTransportResult result, uint selec
         medium.ior = primeDecodeMediumIor(medium.iorEncoding);
     }
     uint packed = primePackDetachedGuideMedium(medium);
-    PrimeOpenPbrVolume restored = primeUnpackDetachedGuideMedium(packed);
+    PrimeMedium restored = primeUnpackDetachedGuideMedium(packed);
     if (restored.mediumId != medium.mediumId || restored.iorEncoding != medium.iorEncoding
             || asuint(restored.ior) != asuint(medium.ior)
-            || any(restored.extinction != float3(0.0)) || any(restored.albedo != float3(0.0))
-            || restored.anisotropy != 0.0)
+            || any(restored.extinction != float3(0.0)))
         result.mask |= PRIME_TEST_FAILURE_IDENTITY;
     result.first = asfloat(uint4(packed, restored.mediumId, mediumIds));
     result.second = asfloat(uint4(iorEncodings, selected, restored.iorEncoding));
@@ -733,7 +732,7 @@ void primeCheckOfflineTransportStorage(
     path.sourcePrimitive = control.yz;
     path.control = primeMakePathStateControl(bounce, flags);
     path.sampleSeed = 0u;
-    PrimeOpenPbrVolume medium = primeVacuumMedium();
+    PrimeMedium medium = primeVacuumMedium();
     medium.extinction = fourth.xyz;
     medium.mediumId = control.y & 0xffffu;
     medium.iorEncoding = (control.y >> 16u) & 0x1ffu;
@@ -743,7 +742,7 @@ void primeCheckOfflineTransportStorage(
             primePackOfflineTransport(path, medium, active);
     PathState restoredPath;
     primeUnpackOfflineTransportPath(packed, restoredPath);
-    PrimeOpenPbrVolume restoredMedium =
+    PrimeMedium restoredMedium =
             primeUnpackOfflineTransportMedium(packed);
     PrimeOfflineTransportRecord roundTrip = primePackOfflineTransport(
             restoredPath, restoredMedium, primeOfflineTransportIsActive(packed));

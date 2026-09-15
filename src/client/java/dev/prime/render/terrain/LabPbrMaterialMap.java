@@ -7,7 +7,8 @@ public record LabPbrMaterialMap(
         LabPbrAtlasFrame.MaterialSource normal,
         LabPbrAtlasFrame.MaterialSource specular) {
     static final int DEFAULT_NORMAL = 0xffff_8080;
-    static final int DEFAULT_SPECULAR = 0xff00_0400;
+    static final int DEFAULT_SPECULAR =
+            packArgb(CanonicalOpticalEncoding.fromLabPbrArgb(0xff000400));
 
     int sampleNormal(int requestedFrame, float localU, float localV) {
         return this.normal == null
@@ -19,8 +20,8 @@ public record LabPbrMaterialMap(
     int sampleSpecular(int requestedFrame, float localU, float localV) {
         return this.specular == null
                 ? DEFAULT_SPECULAR
-                : packArgb(this.specular.argb(
-                        this.specular.index(requestedFrame, localU, localV)));
+                : packArgb(CanonicalOpticalEncoding.fromLabPbrArgb(this.specular.argb(
+                        this.specular.index(requestedFrame, localU, localV))));
     }
 
     static int packArgb(int argb) {

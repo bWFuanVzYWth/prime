@@ -10,13 +10,13 @@ import "state/path.slang";
 import "policy/runtime/config.slang";
 import "state/offline/contract.slang";
 import "state/offline/path_storage.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "math/sampling.slang";
 import "contract/path.slang";
 
 public PrimeOfflineTransportRecord primeMakeOfflineTransport(
         PathState path,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool enabled) {
     return primePackOfflineTransport(path, medium, enabled);
 }
@@ -30,7 +30,7 @@ public PathState primeOfflinePath(
     return path;
 }
 
-public PrimeOpenPbrVolume primeOfflineMedium(
+public PrimeMedium primeOfflineMedium(
         PrimeOfflineTransportRecord record) {
     return primeUnpackOfflineTransportMedium(record);
 }

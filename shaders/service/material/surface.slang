@@ -13,6 +13,7 @@ import "math/packed_geometry.slang";
 import "policy/runtime/config.slang";
 import "model/material/defaults.slang";
 import "model/material/labpbr.slang";
+import "model/material/optical.slang";
 import "model/material/translation.slang";
 import "model/material/transparent.slang";
 import "service/material/access.slang";
@@ -118,7 +119,7 @@ public PrimeMaterialSample primeEvaluateMaterial(
     normalSample.tangentNormal = float3(0.0, 0.0, 1.0);
     normalSample.distributionRoughness = 0.0;
     if (bakedMaterial && (recipeControl & PRIME_RECIPE_OPTICAL_TEXTURE) != 0u) {
-        PrimeCanonicalOptics optics = primeAdaptLabPbrSpecular(
+        PrimeCanonicalOptics optics = primeDecodeOpticalSample(
                 unpackUnorm4x8ToFloat(primitive.uv1));
         result.roughness = optics.roughness;
         result.opticalControl = optics.opticalControl;
@@ -127,7 +128,7 @@ public PrimeMaterialSample primeEvaluateMaterial(
         // to texture evaluation so only the derived material sample survives into transport.
         PrimeAuxiliaryTextureRecord auxiliary =
                 primeLoadAuxiliaryTextureRecord(textureId);
-        PrimeCanonicalOptics optics = primeAdaptLabPbrSpecular(
+        PrimeCanonicalOptics optics = primeDecodeOpticalSample(
                 primeSampleMaterialOptical(
                         auxiliary,
                         packedFrameExtent,
@@ -148,7 +149,7 @@ public PrimeMaterialSample primeEvaluateMaterial(
                     auxiliaryFrameExtent,
                     uv,
                     textureLodValue);
-            PrimeCanonicalOptics optics = primeAdaptLabPbrSpecular(opticalSample);
+            PrimeCanonicalOptics optics = primeDecodeOpticalSample(opticalSample);
             result.roughness = optics.roughness;
             result.opticalControl = optics.opticalControl;
         }
@@ -215,6 +216,7 @@ public PrimeMaterialSample primeEvaluateMaterial(
         materialControl |= PRIME_MATERIAL_THIN_WALLED;
     }
     result.materialControl = materialControl;
+    result.opticalControl = primeSurfaceOpticalControl(result.opticalControl, materialControl);
     if (usesNormalMap) {
         float3 tangent = primeUnpackOctahedralUnitVector(primitive.tangent);
         tangent = normalize(tangent - geometricNormal * dot(tangent, geometricNormal));

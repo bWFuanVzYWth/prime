@@ -3,6 +3,7 @@
 #language slang 2026
 module "service/bsdf/foliage/state.slang";
 
+import "service/bsdf/support/medium_conversion.slang";
 import "bsdf/compact/contract/material.slang";
 import "bsdf/compact/foliage/state.slang";
 import "bsdf/compact/foliage/contract.slang";
@@ -11,7 +12,7 @@ import "model/material/defaults.slang";
 import "model/material/translation.slang";
 import "service/bsdf/opaque/material.slang";
 import "service/bsdf/support/volume_transition.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/math/frame.slang";
 import "bsdf/compact/model/material.slang";
 
@@ -62,8 +63,7 @@ public PrimeCompactFoliageState primeMinecraftFoliageStateWithMinimumRoughness(
         uint opticalControl,
         uint materialControl,
         float3 viewDirection,
-        float rayT,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         float minimumLinearRoughness) {
     float3 closureNormal = dot(outwardNormal, viewDirection) < 0.0
             ? -outwardNormal
@@ -80,8 +80,7 @@ public PrimeCompactFoliageState primeMinecraftFoliageStateWithMinimumRoughness(
             primeTransmissionGgxEnergy(),
             material,
             localView,
-            medium,
-            rayT);
+            primeOpenPbrVolumeFromMedium(medium));
 }
 
 public PrimeCompactFoliageState primeMinecraftFoliageState(
@@ -91,8 +90,7 @@ public PrimeCompactFoliageState primeMinecraftFoliageState(
         uint opticalControl,
         uint materialControl,
         float3 viewDirection,
-        float rayT,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     return primeMinecraftFoliageStateWithMinimumRoughness(
             baseColor,
             outwardNormal,
@@ -100,7 +98,6 @@ public PrimeCompactFoliageState primeMinecraftFoliageState(
             opticalControl,
             materialControl,
             viewDirection,
-            rayT,
             medium,
             0.0);
 }

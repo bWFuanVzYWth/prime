@@ -14,7 +14,7 @@ float3 primeCompactTestDirection(float cosineTheta, float phi) {
 }
 
 PrimeOpenPbrVolume primeCompactTestVacuum() {
-    return primeVacuumMedium();
+    return primeOpenPbrVacuumVolume();
 }
 
 void primeCompactTestClassify(inout uint mask, float value) {

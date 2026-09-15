@@ -361,7 +361,7 @@ final class TextureVoxelSurfaceTest {
                 LabPbrMaterialMap.packArgb(normalArgb),
                 primitives[record]);
         assertEquals(
-                LabPbrMaterialMap.packArgb(specularArgb),
+                LabPbrMaterialMap.packArgb(CanonicalOpticalEncoding.fromLabPbrArgb(specularArgb)),
                 primitives[record + 1]);
         assertEquals(
                 PrimitivePacking.CONSTANT_UV_BAKED_MATERIAL

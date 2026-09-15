@@ -3,12 +3,13 @@
 #language slang 2026
 module "service/bsdf/support/volume_transition.slang";
 
+import "service/bsdf/support/medium_conversion.slang";
 import "bsdf/compact/contract/material.slang";
 import "model/material/defaults.slang";
 import "model/material/translation.slang";
 import "model/material/transparent.slang";
 import "service/bsdf/support/medium_identity.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/math/spectrum.slang";
 import "bsdf/compact/model/material.slang";
 import "bsdf/compact/model/volume.slang";
@@ -79,7 +80,7 @@ public PrimeOpenPbrMaterial primeMinecraftTransmissionMaterial(
             0.0);
 }
 
-public PrimeOpenPbrVolume primeCameraWaterMedium() {
+public PrimeMedium primeCameraWaterMedium() {
     // The camera starts without an intersected surface, but pure-water absorption is independent
     // of the discarded biome surface tint, so a neutral placeholder reconstructs the same medium.
     PrimeOpenPbrMaterial material = primeMinecraftTransmissionMaterial(
@@ -89,7 +90,8 @@ public PrimeOpenPbrVolume primeCameraWaterMedium() {
             PRIME_MATERIAL_FAMILY_DIELECTRIC | PRIME_MATERIAL_MEDIUM_WATER,
             0.0,
             0u);
-    PrimeOpenPbrVolume volume = primeOpenPbrVolumeFromTransmission(material.transmission);
+    PrimeMedium volume = primeMediumFromOpenPbrVolume(
+            primeOpenPbrVolumeFromTransmission(material.transmission));
     volume.ior = material.specular.ior;
     volume.mediumId = PRIME_MEDIUM_ID_WATER;
     volume.iorEncoding = PRIME_MEDIUM_IOR_WATER;

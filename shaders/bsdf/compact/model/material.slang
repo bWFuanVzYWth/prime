@@ -5,10 +5,9 @@ module "bsdf/compact/model/material.slang";
 
 import "bsdf/compact/contract/flags.slang";
 import "bsdf/compact/contract/material.slang";
-import "bsdf/compact/contract/volume.slang";
 import "bsdf/compact/math/frame.slang";
 
-// OpenPBR's default metallic material initializer and outside-medium lookup.
+// OpenPBR's default metallic material initializer.
 // These are compact boundary utilities, not a retained generic closure graph.
 
 public PrimeOpenPbrMaterial primeCompactMaterialFromMetallic(
@@ -61,8 +60,4 @@ public PrimeOpenPbrMaterial primeCompactMaterialFromMetallic(
     material.diffraction.lobeCount = 5u;
     material.diffraction.kind = PRIME_OPENPBR_DIFFRACTION_RECTANGULAR;
     return material;
-}
-
-public float primeCompactInverseOutsideIor(PrimeOpenPbrVolume medium) {
-    return 1.0 / medium.ior;
 }

@@ -3,14 +3,15 @@
 #language slang 2026
 module "service/bsdf/support/boundary_volume.slang";
 
+import "service/bsdf/support/medium_conversion.slang";
 import "service/bsdf/support/volume_transition.slang";
 import "model/material/medium_boundary.slang";
 import "service/bsdf/support/medium_identity.slang";
 import "bsdf/compact/contract/material.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/model/volume.slang";
 
-public PrimeOpenPbrVolume primeAdjacentMediumVolume(
+public PrimeMedium primeAdjacentMediumVolume(
         float3 baseColor,
         uint adjacentInterfaceControl,
         uint mediumId) {
@@ -24,14 +25,15 @@ public PrimeOpenPbrVolume primeAdjacentMediumVolume(
             materialControl,
             0.0,
             opticalControl);
-    PrimeOpenPbrVolume volume = primeOpenPbrVolumeFromTransmission(material.transmission);
+    PrimeMedium volume = primeMediumFromOpenPbrVolume(
+            primeOpenPbrVolumeFromTransmission(material.transmission));
     volume.ior = material.specular.ior;
     volume.mediumId = mediumId;
     volume.iorEncoding = primeMediumIorEncoding(materialControl, opticalControl);
     return volume;
 }
 
-public PrimeOpenPbrVolume primeBoundarySurfaceVolume(
+public PrimeMedium primeBoundarySurfaceVolume(
         float3 baseColor,
         float opacity,
         uint materialControl,
@@ -44,10 +46,10 @@ public PrimeOpenPbrVolume primeBoundarySurfaceVolume(
             materialControl,
             0.0,
             opticalControl);
-    PrimeOpenPbrVolume volume = primeOpenPbrVolumeFromTransmission(material.transmission);
+    PrimeMedium volume = primeMediumFromOpenPbrVolume(
+            primeOpenPbrVolumeFromTransmission(material.transmission));
     volume.ior = material.specular.ior;
     volume.mediumId = mediumId;
     volume.iorEncoding = primeMediumIorEncoding(materialControl, opticalControl);
     return volume;
 }
-

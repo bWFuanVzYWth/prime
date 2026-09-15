@@ -25,14 +25,14 @@ import "transport/surface/access.slang";
 import "service/trace/context.slang";
 import "contract/material/normal.slang";
 import "transport/scatter/contract.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
         inout PrimeIntegratorContext context,
         SurfaceInteraction surface,
         float3 viewDirection,
         float3 sampleValue,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         float minimumLinearRoughness,
         bool usesAirGap) {
     PrimePathScatter result;
@@ -46,11 +46,10 @@ public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
                         surface.opticalControl,
                         surface.materialControl,
                         viewDirection,
-                        surface.t,
                         medium,
                         minimumLinearRoughness);
         result.bsdf = primeSampleMinecraftFoliageFromState(
-                state, viewDirection, sampleValue, medium);
+                state, viewDirection, sampleValue);
     } else if (primeMaterialIsTransmissive(surface.materialControl)) {
         float3 outwardNormal = primeSurfaceOutwardShadingNormal(surface);
         PrimeCompactTransmissionState state =
@@ -73,9 +72,6 @@ public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
         PrimeTransmissiveBsdfSample sampled =
                 primeSampleMinecraftTransmissionCompleteFromState(
                         state,
-                        surface.baseColor,
-                        primeSurfaceOpacity(surface),
-                        surface.materialControl,
                         viewDirection,
                         sampleValue,
                         medium);
@@ -103,15 +99,13 @@ public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
                 surface.opticalControl,
                 surface.materialControl,
                 viewDirection,
-                surface.t,
                 medium,
                 minimumLinearRoughness);
         result.bsdf = primeSampleOpaqueFromState(
                 state,
                 shadingNormal,
                 viewDirection,
-                sampleValue,
-                medium);
+                sampleValue);
     }
     if (!primeGeometricSampleSupport(
             primeMaterialUsesNormalMap(surface.opticalControl),
@@ -129,7 +123,7 @@ public PrimePathScatter primeSamplePathSurface(
         SurfaceInteraction surface,
         float3 viewDirection,
         float3 sampleValue,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool usesAirGap) {
     return primeSamplePathSurfaceWithMinimumRoughness(
             context,
@@ -146,7 +140,7 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
         SurfaceInteraction surface,
         float3 viewDirection,
         float3 sampleValue,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         uint bounce,
         bool usesAirGap) {
     PrimeGuidedPathScatter result;
@@ -159,14 +153,13 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
                 surface.opticalControl,
                 surface.materialControl,
                 viewDirection,
-                surface.t,
                 medium);
         result.albedos = primeDenoiseAlbedosFromState(
                 state,
                 viewDirection,
                 PRIME_DENOISE_CLOSURE_FOLIAGE);
         result.scatter.bsdf = primeSampleMinecraftFoliageFromState(
-                state, viewDirection, sampleValue, medium);
+                state, viewDirection, sampleValue);
     } else if (primeMaterialIsTransmissive(surface.materialControl)) {
         float3 outwardNormal = primeSurfaceOutwardShadingNormal(surface);
         PrimeCompactTransmissionState state =
@@ -192,9 +185,6 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
         PrimeTransmissiveBsdfSample sampled =
                 primeSampleMinecraftTransmissionCompleteFromState(
                         state,
-                        surface.baseColor,
-                        primeSurfaceOpacity(surface),
-                        surface.materialControl,
                         viewDirection,
                         sampleValue,
                         medium);
@@ -222,7 +212,6 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
                 surface.opticalControl,
                 surface.materialControl,
                 viewDirection,
-                surface.t,
                 medium);
         result.albedos = primeDenoiseAlbedosFromState(
                 state,
@@ -232,8 +221,7 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
                 state,
                 shadingNormal,
                 viewDirection,
-                sampleValue,
-                medium);
+                sampleValue);
     }
     if (!primeGeometricSampleSupport(
             primeMaterialUsesNormalMap(surface.opticalControl),

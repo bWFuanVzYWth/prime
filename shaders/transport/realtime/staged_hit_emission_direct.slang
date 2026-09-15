@@ -4,7 +4,7 @@
 module "transport/realtime/staged_hit_emission_direct.slang";
 
 import "prime_abi_types.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/light_sample.slang";
 import "contract/path.slang";
 import "math/transport.slang";
@@ -60,7 +60,7 @@ public bool primeStagedHitEmissionDiffuse(
             && (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) == 0u
             && !primeWavefrontGuideFallback(path.guideControl);
     if (pendingReplacement) {
-        PrimeOpenPbrVolume medium =
+        PrimeMedium medium =
                 primeLoadWavefrontHitMedium(pathIndex);
         PrimeClosureTraits traits = primeSurfaceClosureTraits(
                 surface, path.viewDirection, medium, primeUsesAirGap());

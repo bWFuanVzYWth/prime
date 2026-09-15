@@ -24,7 +24,7 @@ import "state/realtime/surface.slang";
 import "transport/direct/primary.slang";
 import "transport/surface/medium.slang";
 import "transport/realtime/staged_hit_emission_direct.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 public void primeEvaluateSecondaryDirect(
         inout PrimeIntegratorContext context,

@@ -10,7 +10,7 @@ import "bsdf/compact/opaque/state.slang";
 import "service/bsdf/contract/components.slang";
 import "service/bsdf/opaque/state.slang";
 import "bsdf/compact/contract/material.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/math/frame.slang";
 
 public PrimeBsdfComponents primeEvaluateOpaqueComponents(
@@ -21,8 +21,7 @@ public PrimeBsdfComponents primeEvaluateOpaqueComponents(
         uint flags,
         float3 viewDirection,
         float3 scatterDirection,
-        float rayT,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     PrimeBsdfComponents result;
     result.diffuseResponse = float3(0.0);
     result.specularResponse = float3(0.0);
@@ -34,7 +33,6 @@ public PrimeBsdfComponents primeEvaluateOpaqueComponents(
             opticalControl,
             flags,
             viewDirection,
-            rayT,
             medium);
     float3 localView = primeOpenPbrOnbToLocal(state.onb, viewDirection);
     float3 localScatter = primeOpenPbrOnbToLocal(state.onb, scatterDirection);

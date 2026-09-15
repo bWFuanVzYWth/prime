@@ -4,6 +4,7 @@
 module "model/material/translation.slang";
 
 import "model/material/defaults.slang";
+import "model/material/fresnel_code.slang";
 import "math/color_space.slang";
 
 public struct PrimeOpticalMaterial
@@ -40,21 +41,15 @@ public PrimeOpticalMaterial primeDecodeOpticalMaterial(
     uint subsurfaceCode = opticalControl >> PRIME_OPTICAL_SUBSURFACE_SHIFT & 0xff;
     bool transmissive = primeMaterialIsTransmissive(materialControl);
     PrimeOpticalMaterial result;
-    result.perceptualRoughness = clamp(roughness, 0.0, 1.0);
+    result.perceptualRoughness = roughness;
     result.fresnelCode = !transmissive
                     && !primeMaterialIsColorlessGlass(materialControl)
-                    && primeIsSupportedConductorCode(fresnelCode)
+                    && primeFresnelIsConductor(fresnelCode)
             ? fresnelCode
             : PRIME_FRESNEL_DEFAULT_DIELECTRIC;
-    result.dielectricF0 = fresnelCode <= 230
-            ? primeDecodeDielectricF0(fresnelCode)
-            : PRIME_DEFAULT_DIELECTRIC_F0;
+    result.dielectricF0 = primeDecodeDielectricF0(fresnelCode);
     result.thinWalled = (materialControl & PRIME_MATERIAL_THIN_WALLED) != 0 ? 1 : 0;
-    // LabPBR has no usable thick-surface SSS topology in Prime. Only an explicitly thin
-    // material may carry this weight; thick input is intentionally translated to diffuse.
-    result.subsurfaceWeight = result.thinWalled != 0
-            ? float(min(subsurfaceCode, 190)) / 190.0
-            : 0.0;
+    result.subsurfaceWeight = float(subsurfaceCode) / 190.0;
     return result;
 }
 

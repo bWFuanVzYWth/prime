@@ -9,7 +9,7 @@ import "math/transport.slang";
 import "service/light/emission.slang";
 import "model/material/defaults.slang";
 import "service/trace/context.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 public float3 primeEvaluateDeltaHitEmission(
         inout PrimeIntegratorContext context,
@@ -27,7 +27,7 @@ public float3 primeEvaluateDeltaHitEmission(
 public bool primeApplySegmentMedium(
         inout float3 throughput,
         SurfaceInteraction surface,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     throughput *= primeSegmentTransmittance(medium.extinction, surface.t);
     return !all(throughput == float3(0.0));
 }

@@ -39,7 +39,7 @@ public PrimeCompactTransmissionState primeCompactFoliageTransmissionState(
     result.onb = state.base.onb;
     result.geometryThinWalled = 1u;
     result.entering = 1u;
-    result.rayT = state.base.rayT;
+    result.rayT = 0.0; // Thin-sheet math does not consume a volume segment distance.
     result.originalIor = state.base.dielectricFresnel.ior;
     result.transmissionColor = state.transmissionTint;
     result.specularMicrofacet = state.base.microfacet;

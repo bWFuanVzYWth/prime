@@ -3,9 +3,11 @@
 #language slang 2026
 module "service/bsdf/dielectric/discrete.slang";
 
+import "bsdf/compact/contract/volume_sample.slang";
+import "service/bsdf/support/medium_conversion.slang";
 import "bsdf/compact/contract/flags.slang";
 import "bsdf/compact/contract/sample.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/dielectric/contract.slang";
 import "bsdf/compact/dielectric/discrete.slang";
 import "bsdf/compact/math/frame.slang";
@@ -19,7 +21,7 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransmissionDiscreteFromS
         PrimeCompactTransmissionState state,
         float3 viewDirection,
         float randomEvent,
-        PrimeOpenPbrVolume medium) {
+        PrimeMedium medium) {
     PrimeTransmissiveBsdfSample result;
     result.bsdfSample = primeInvalidBsdfSample();
     result.medium = medium;
@@ -29,7 +31,7 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransmissionDiscreteFromS
             randomEvent,
             state,
             PRIME_OPENPBR_FLAG_ALL,
-            medium);
+            primeOpenPbrVolumeFromMedium(medium));
     if (!primeOpenPbrHasSample(sampled.bsdfSample)) {
         return result;
     }
@@ -40,7 +42,7 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransmissionDiscreteFromS
     result.bsdfSample.relativeEta = sampled.bsdfSample.eta;
     result.bsdfSample.eventFlags = primeOpenPbrToBsdfEventFlags(
             sampled.bsdfSample.throughput.flags);
-    result.medium = sampled.medium;
+    result.medium = primeMediumFromOpenPbrVolume(sampled.medium);
     result.bsdfSample = primeSanitizeBsdfSample(result.bsdfSample);
     if (result.bsdfSample.eventFlags == 0u) {
         result.medium = medium;

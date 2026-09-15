@@ -15,7 +15,7 @@ public struct PrimeOpenPbrVolume {
 };
 
 // A ray carries exactly one resolved medium. Zero is the explicit vacuum endpoint.
-public PrimeOpenPbrVolume primeVacuumMedium() {
+public PrimeOpenPbrVolume primeOpenPbrVacuumVolume() {
     PrimeOpenPbrVolume medium = {};
     medium.ior = 1.0;
     return medium;

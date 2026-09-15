@@ -6,7 +6,6 @@ module "bsdf/compact/opaque/discrete.slang";
 import "bsdf/compact/contract/flags.slang";
 import "bsdf/compact/contract/material.slang";
 import "bsdf/compact/contract/sample.slang";
-import "bsdf/compact/contract/volume.slang";
 import "bsdf/compact/math/fresnel.slang";
 import "bsdf/compact/math/microfacet_energy.slang";
 import "bsdf/compact/math/spectrum.slang";
@@ -14,17 +13,14 @@ import "bsdf/compact/opaque/state.slang";
 
 public struct PrimeCompactOpaqueDiscreteState {
     public PrimeOpenPbrOnb onb;
-    public float rayT;
     public PrimeOpenPbrMicrofacet microfacet;
     public PrimeOpenPbrConductorFresnel conductorFresnel;
 };
 
 public PrimeCompactOpaqueDiscreteState primeCompactOpaqueDiscreteStateInit(
-        PrimeOpenPbrMaterial material,
-        float rayT) {
+        PrimeOpenPbrMaterial material) {
     PrimeCompactOpaqueDiscreteState state;
     state.onb = material.geometry.onb;
-    state.rayT = rayT;
     state.microfacet.alpha = primeOpenPbrSpecularNdfRoughnesses(
             material.specular.roughness, material.specular.roughnessAnisotropy);
     state.conductorFresnel.f0 = material.base.color * material.weight.base;
@@ -42,30 +38,25 @@ public PrimeCompactOpaqueDiscreteState primeCompactOpaqueDiscreteStateFromFull(
         PrimeCompactOpaqueState state) {
     PrimeCompactOpaqueDiscreteState result;
     result.onb = state.onb;
-    result.rayT = state.rayT;
     result.microfacet = state.microfacet;
     result.conductorFresnel = state.conductorFresnel;
     return result;
 }
 
-public PrimeOpenPbrSampleResult primeCompactConductorDiscreteSample(
+public PrimeOpenPbrSample primeCompactConductorDiscreteSample(
         float3 wi,
         PrimeCompactOpaqueDiscreteState state,
-        uint samplingFlags,
-        PrimeOpenPbrVolume medium) {
-    PrimeOpenPbrSampleResult result;
-    result.bsdfSample = primeOpenPbrZeroSample();
-    result.medium = medium;
-    result.rayT = state.rayT;
+        uint samplingFlags) {
+    PrimeOpenPbrSample result = primeOpenPbrZeroSample();
     if (wi.z <= 0.0
             || (samplingFlags & PRIME_OPENPBR_FLAG_DELTA_REFLECTION) == 0u) {
         return result;
     }
-    result.bsdfSample.wo = reflect(-wi, float3(0.0, 0.0, 1.0));
-    result.bsdfSample.throughput.value = primeOpenPbrConductorFresnelUnpolarized(
+    result.wo = reflect(-wi, float3(0.0, 0.0, 1.0));
+    result.throughput.value = primeOpenPbrConductorFresnelUnpolarized(
             state.conductorFresnel, float3(0.0), 0u, wi.z);
-    result.bsdfSample.throughput.flags = PRIME_OPENPBR_FLAG_DELTA_REFLECTION;
-    result.bsdfSample.pdf = 1.0;
+    result.throughput.flags = PRIME_OPENPBR_FLAG_DELTA_REFLECTION;
+    result.pdf = 1.0;
     return result;
 }
 

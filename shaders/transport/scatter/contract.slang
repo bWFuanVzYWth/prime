@@ -5,11 +5,11 @@ module "transport/scatter/contract.slang";
 
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/contract/albedo.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 public struct PrimePathScatter {
     public BsdfSample bsdf;
-    public PrimeOpenPbrVolume medium;
+    public PrimeMedium medium;
 };
 
 public struct PrimeGuidedPathScatter {

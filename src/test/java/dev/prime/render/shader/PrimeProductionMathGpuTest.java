@@ -5,6 +5,7 @@ package dev.prime.render.shader;
 import dev.prime.render.MaterialSettings;
 import dev.prime.render.RgbReinhardOutput;
 import dev.prime.render.material.BuiltinMaterialClass;
+import dev.prime.render.terrain.CanonicalOpticalEncoding;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -124,7 +125,7 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
     @Test
     void labPbrDecodeTranslationAndFresnelCoverTheIntegerTransportDomain() throws IOException {
         int kinds = 2;
-        int inputWords = 3;
+        int inputWords = 4;
         ShaderPropertyBatch.assertProperties(
                 runner,
                 "prime_material_properties.comp.spv",
@@ -1080,6 +1081,12 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
                         2,
                         Float.floatToRawIntBits(builtinRoughness));
                 input.putInt(index, 2, 3, builtinFresnel);
+                int sourceArgb = (specular & 0xff00_ff00)
+                        | (specular & 0xff) << 16 | (specular >>> 16 & 0xff);
+                int canonical = CanonicalOpticalEncoding.fromLabPbrArgb(sourceArgb);
+                int canonicalRgba = (canonical & 0xff00_ff00)
+                        | (canonical & 0xff) << 16 | (canonical >>> 16 & 0xff);
+                input.putInt(index, 3, 0, canonicalRgba);
             }
         }
         return input.buffer();

@@ -22,7 +22,7 @@ import "state/realtime/guide.slang";
 import "state/realtime/transparent.slang";
 import "state/realtime/transport.slang";
 
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "contract/realtime/ordinary.slang";
 import "contract/realtime/transparent.slang";
 import "contract/path.slang";
@@ -40,7 +40,7 @@ public bool primeAdvanceOrdinaryWavefrontMiss<Phase>(
 {
     uint2 pixel = primeWavefrontPixel(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolume medium = primeWavefrontMedium(record);
+    PrimeMedium medium = primeWavefrontMedium(record);
 
     bool guideWasPending =
             (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) == 0u;
@@ -90,7 +90,7 @@ public bool primeAdvanceTransparentWavefrontMiss<Phase>(
 {
     uint2 pixel = primeWavefrontPixel(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolume medium = primeWavefrontMedium(record);
+    PrimeMedium medium = primeWavefrontMedium(record);
 
     bool hadGuide =
             (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) != 0u;

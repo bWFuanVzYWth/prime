@@ -6,14 +6,14 @@ module "state/realtime/light_selection.slang";
 import "state/realtime/contract.slang";
 import "state/realtime/medium.slang";
 import "state/realtime/path_storage.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 // Light selection consumes only the incident direction, local bounce and volume identity. Keep
 // the remaining transport state out of this phase so it does not extend across material dispatch.
 public struct PrimeWavefrontLightSelectionState {
     public float3 viewDirection;
     public uint bounce;
-    public PrimeOpenPbrVolume medium;
+    public PrimeMedium medium;
 };
 
 public PrimeWavefrontLightSelectionState primeLoadWavefrontLightSelectionState(

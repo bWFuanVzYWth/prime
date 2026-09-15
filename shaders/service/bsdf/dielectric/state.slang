@@ -3,6 +3,7 @@
 #language slang 2026
 module "service/bsdf/dielectric/state.slang";
 
+import "service/bsdf/support/medium_conversion.slang";
 import "service/bsdf/contract/sample.slang";
 import "bsdf/compact/contract/material.slang";
 import "bsdf/compact/dielectric/state.slang";
@@ -16,7 +17,7 @@ import "model/material/transparent.slang";
 import "service/bsdf/support/conversion.slang";
 import "service/bsdf/support/volume_transition.slang";
 import "service/bsdf/support/boundary_volume.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 import "bsdf/compact/math/spectrum.slang";
 import "bsdf/compact/math/frame.slang";
 import "bsdf/compact/model/material.slang";
@@ -39,7 +40,7 @@ public PrimeCompactTransmissionState primeMinecraftTransmissionStateWithMinimumR
         uint opticalControl,
         float3 viewDirection,
         float rayT,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         uint mediumId,
         float minimumLinearRoughness) {
     bool thinWalled = (materialControl & PRIME_MATERIAL_THIN_WALLED) != 0u;
@@ -56,12 +57,12 @@ public PrimeCompactTransmissionState primeMinecraftTransmissionStateWithMinimumR
             minimumLinearRoughness);
     float3 localView = primeOpenPbrOnbToLocal(material.geometry.onb, viewDirection);
     // SINGLE solid surfaces encode a vacuum exterior; thin sheets keep the incident medium.
-    PrimeOpenPbrVolume outsideMedium = thinWalled ? medium : primeVacuumMedium();
+    PrimeMedium outsideMedium = thinWalled ? medium : primeVacuumMedium();
     PrimeCompactTransmissionState state = primeCompactTransmissionStateInit(
             primeTransmissionGgxEnergy(),
             material,
             localView,
-            outsideMedium,
+            primeOpenPbrVolumeFromMedium(outsideMedium),
             rayT);
     if (state.geometryThinWalled != 0u || state.entering != 0u) {
         state.transmissionVolume.mediumId = mediumId;
@@ -81,7 +82,7 @@ public PrimeCompactTransmissionState primeMinecraftTransmissionState(
         uint opticalControl,
         float3 viewDirection,
         float rayT,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         uint mediumId) {
     return primeMinecraftTransmissionStateWithMinimumRoughness(
             baseColor,
@@ -141,7 +142,7 @@ public PrimeCompactTransmissionState primeMinecraftBoundaryTransmissionStateWith
         uint opticalControl,
         float3 viewDirection,
         float rayT,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         uint mediumId,
         float minimumLinearRoughness,
         float3 adjacentBaseColor,
@@ -171,7 +172,7 @@ public PrimeCompactTransmissionState primeMinecraftBoundaryTransmissionStateWith
             opticalControl,
             minimumLinearRoughness);
     float3 localView = primeOpenPbrOnbToLocal(material.geometry.onb, viewDirection);
-    PrimeOpenPbrVolume adjacent = primeAdjacentMediumVolume(
+    PrimeMedium adjacent = primeAdjacentMediumVolume(
             adjacentBaseColor, adjacentInterfaceControl, adjacentMediumId);
     bool airGap = primeUsesAdjacentAirGap(
             usesAirGap,
@@ -190,7 +191,7 @@ public PrimeCompactTransmissionState primeMinecraftBoundaryTransmissionStateWith
                 primeTransmissionGgxEnergy(),
                 material,
                 localView,
-                adjacent,
+                primeOpenPbrVolumeFromMedium(adjacent),
                 rayT);
         state.transmissionVolume.mediumId = mediumId;
         state.transmissionVolume.iorEncoding = primeMediumIorEncoding(
@@ -204,7 +205,7 @@ public PrimeCompactTransmissionState primeMinecraftBoundaryTransmissionStateWith
             primeTransmissionGgxEnergy(),
             material,
             localView,
-            adjacent,
+            primeOpenPbrVolumeFromMedium(adjacent),
             rayT);
     if (state.geometryThinWalled != 0u || state.entering != 0u) {
         state.transmissionVolume.mediumId = mediumId;
@@ -224,7 +225,7 @@ public PrimeCompactTransmissionState primeMinecraftBoundaryTransmissionState(
         uint opticalControl,
         float3 viewDirection,
         float rayT,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         uint mediumId,
         float3 adjacentBaseColor,
         uint adjacentInterfaceControl,

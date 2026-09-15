@@ -56,7 +56,7 @@ float3 primeStatRandom(uint index, uint seed) {
             primeStatUnit(index ^ seed ^ 0x3c6ef372u));
 }
 
-PrimeOpenPbrVolume primeStatVacuum() { return primeVacuumMedium(); }
+PrimeOpenPbrVolume primeStatVacuum() { return primeOpenPbrVacuumVolume(); }
 
 PrimeOpenPbrMaterial primeStatMaterial(
         uint suite,
@@ -83,22 +83,22 @@ PrimeOpenPbrMaterial primeStatMaterial(
     return material;
 }
 
-PrimeOpenPbrSampleResult primeStatSample(
+PrimeOpenPbrSample primeStatSample(
         uint suite,
         float3 wi,
         float3 randomValue,
         PrimeOpenPbrMaterial material) {
     if (suite == PRIME_STAT_TRANSMISSION) {
         PrimeCompactTransmissionState state = primeCompactTransmissionStateInit(
-                primeTransmissionGgxEnergy(), material, wi, primeVacuumMedium(), 0.0);
+                primeTransmissionGgxEnergy(), material, wi, primeOpenPbrVacuumVolume(), 0.0);
         state = primeCompactTransmissionInterfaceState(
                 primeTransmissionGgxEnergy(), wi, state);
         return primeCompactTransmissionSample(
-                wi, randomValue, state, PRIME_OPENPBR_FLAG_ALL, primeStatVacuum());
+                wi, randomValue, state, PRIME_OPENPBR_FLAG_ALL, primeStatVacuum()).bsdfSample;
     }
     PrimeCompactOpaqueState state = primeCompactOpaqueStateInit(
-            primeTransmissionGgxEnergy(), material, wi, 1.0, 0.0);
-    return primeCompactOpaqueSample(wi, randomValue, state, primeStatVacuum());
+            primeTransmissionGgxEnergy(), material, wi, 1.0);
+    return primeCompactOpaqueSample(wi, randomValue, state);
 }
 
 PrimeStatEvaluation primeStatEvaluate(
@@ -109,7 +109,7 @@ PrimeStatEvaluation primeStatEvaluate(
     PrimeStatEvaluation result;
     if (suite == PRIME_STAT_TRANSMISSION) {
         PrimeCompactTransmissionState state = primeCompactTransmissionStateInit(
-                primeTransmissionGgxEnergy(), material, wi, primeVacuumMedium(), 0.0);
+                primeTransmissionGgxEnergy(), material, wi, primeOpenPbrVacuumVolume(), 0.0);
         state = primeCompactTransmissionInterfaceState(
                 primeTransmissionGgxEnergy(), wi, state);
         PrimeCompactTransmissionEvaluation evaluated =
@@ -120,7 +120,7 @@ PrimeStatEvaluation primeStatEvaluate(
         return result;
     }
     PrimeCompactOpaqueState state = primeCompactOpaqueStateInit(
-            primeTransmissionGgxEnergy(), material, wi, 1.0, 0.0);
+            primeTransmissionGgxEnergy(), material, wi, 1.0);
     PrimeCompactOpaqueEvaluation evaluated = primeCompactOpaqueEvaluate(wi, wo, state);
     result.throughput = evaluated.throughput;
     result.pdf = evaluated.pdf;
@@ -133,14 +133,14 @@ float3 primeStatEnergy(
         PrimeOpenPbrMaterial material) {
     if (suite == PRIME_STAT_TRANSMISSION) {
         PrimeCompactTransmissionState state = primeCompactTransmissionStateInit(
-                primeTransmissionGgxEnergy(), material, wi, primeVacuumMedium(), 0.0);
+                primeTransmissionGgxEnergy(), material, wi, primeOpenPbrVacuumVolume(), 0.0);
         state = primeCompactTransmissionInterfaceState(
                 primeTransmissionGgxEnergy(), wi, state);
         return primeCompactTransmissionEnergy(
                 primeTransmissionGgxEnergy(), wi, state, PRIME_OPENPBR_FLAG_ALL);
     }
     PrimeCompactOpaqueState state = primeCompactOpaqueStateInit(
-            primeTransmissionGgxEnergy(), material, wi, 1.0, 0.0);
+            primeTransmissionGgxEnergy(), material, wi, 1.0);
     PrimeCompactOpaqueEnergy energy = primeCompactOpaqueEnergy(wi, state);
     return energy.diffuse + energy.specular;
 }
@@ -167,17 +167,17 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
     uint outputOffset = caseIndex * PRIME_STAT_OUTPUT_WORDS;
 
     if (mode == PRIME_STAT_SAMPLE) {
-        PrimeOpenPbrSampleResult sampled = primeStatSample(
+        PrimeOpenPbrSample sampled = primeStatSample(
                 suite, wi, primeStatRandom(caseIndex, seed), material);
         primeTestOutput[outputOffset] = asuint(float4(
-                sampled.bsdfSample.wo, sampled.bsdfSample.pdf));
+                sampled.wo, sampled.pdf));
         primeTestOutput[outputOffset + 1u] = uint4(
-                asuint(sampled.bsdfSample.throughput.value.x),
-                asuint(sampled.bsdfSample.throughput.value.y),
-                asuint(sampled.bsdfSample.throughput.value.z),
-                sampled.bsdfSample.throughput.flags);
+                asuint(sampled.throughput.value.x),
+                asuint(sampled.throughput.value.y),
+                asuint(sampled.throughput.value.z),
+                sampled.throughput.flags);
         PrimeStatEvaluation evaluated = primeStatEvaluate(
-                suite, wi, sampled.bsdfSample.wo, material);
+                suite, wi, sampled.wo, material);
         primeTestOutput[outputOffset + 2u] = asuint(float4(
                 evaluated.throughput.value, evaluated.pdf));
         return;

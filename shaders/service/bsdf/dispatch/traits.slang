@@ -10,12 +10,12 @@ import "service/bsdf/opaque/traits.slang";
 import "service/bsdf/dielectric/traits.slang";
 import "service/bsdf/foliage/traits.slang";
 import "transport/surface/access.slang";
-import "bsdf/compact/contract/volume.slang";
+import "contract/medium.slang";
 
 public PrimeClosureTraits primeSurfaceClosureTraits(
         SurfaceInteraction surface,
         float3 viewDirection,
-        PrimeOpenPbrVolume medium,
+        PrimeMedium medium,
         bool usesAirGap) {
     if (primeMaterialIsTransmissive(surface.materialControl)) {
         return primeMinecraftTransmissionClosureTraits(

@@ -3,6 +3,7 @@
 #language slang 2026
 module "bsdf/compact/dielectric/discrete.slang";
 
+import "bsdf/compact/contract/volume_sample.slang";
 import "bsdf/compact/contract/flags.slang";
 import "bsdf/compact/contract/sample.slang";
 import "bsdf/compact/contract/volume.slang";
@@ -60,16 +61,12 @@ public PrimeOpenPbrSample primeCompactRefractiveDiscreteSample(
     return result;
 }
 
-public PrimeOpenPbrSampleResult primeCompactThinWallDiscreteSampleRaw(
+public PrimeOpenPbrSample primeCompactThinWallDiscreteSampleRaw(
         float3 wi,
         float randomEvent,
         PrimeCompactTransmissionState state,
-        uint samplingFlags,
-        PrimeOpenPbrVolume medium) {
-    PrimeOpenPbrSampleResult result;
-    result.bsdfSample = primeOpenPbrZeroSample();
-    result.medium = medium;
-    result.rayT = state.rayT;
+        uint samplingFlags) {
+    PrimeOpenPbrSample result = primeOpenPbrZeroSample();
     if (wi.z <= 0.0 || !primeOpenPbrIsDelta(samplingFlags)) {
         return result;
     }
@@ -82,17 +79,17 @@ public PrimeOpenPbrSampleResult primeCompactThinWallDiscreteSampleRaw(
     if (probabilitySum == 0.0) {
         return result;
     }
-    result.bsdfSample.wo = reflect(-wi, float3(0.0, 0.0, 1.0));
-    result.bsdfSample.pdf = 1.0;
+    result.wo = reflect(-wi, float3(0.0, 0.0, 1.0));
+    result.pdf = 1.0;
     if (randomEvent < transmissionProbability / probabilitySum) {
-        result.bsdfSample.throughput.value = rt.second;
-        result.bsdfSample.pdf *= transmissionProbability / probabilitySum;
-        result.bsdfSample.throughput.flags = PRIME_OPENPBR_FLAG_DELTA_TRANSMISSION;
-        result.bsdfSample.wo.z = -result.bsdfSample.wo.z;
+        result.throughput.value = rt.second;
+        result.pdf *= transmissionProbability / probabilitySum;
+        result.throughput.flags = PRIME_OPENPBR_FLAG_DELTA_TRANSMISSION;
+        result.wo.z = -result.wo.z;
     } else {
-        result.bsdfSample.throughput.value = rt.first;
-        result.bsdfSample.pdf *= reflectionProbability / probabilitySum;
-        result.bsdfSample.throughput.flags = PRIME_OPENPBR_FLAG_DELTA_REFLECTION;
+        result.throughput.value = rt.first;
+        result.pdf *= reflectionProbability / probabilitySum;
+        result.throughput.flags = PRIME_OPENPBR_FLAG_DELTA_REFLECTION;
     }
     return result;
 }
@@ -108,17 +105,17 @@ public PrimeOpenPbrSampleResult primeCompactTransmissionDiscreteSample(
         closureState.entering = 1u;
     }
     PrimeOpenPbrSampleResult result;
+    result.medium = medium;
+    result.rayT = state.rayT;
     if (closureState.geometryThinWalled != 0u) {
-        result = primeCompactThinWallDiscreteSampleRaw(
-                wi, randomEvent, closureState, samplingFlags, medium);
+        result.bsdfSample = primeCompactThinWallDiscreteSampleRaw(
+                wi, randomEvent, closureState, samplingFlags);
     } else {
         result.bsdfSample = primeCompactRefractiveDiscreteSample(
                 primeCompactTransmissionMaterialFrame(wi, closureState),
                 randomEvent,
                 closureState,
                 samplingFlags);
-        result.medium = medium;
-        result.rayT = closureState.rayT;
         if (result.bsdfSample.throughput.flags != PRIME_OPENPBR_FLAG_NONE) {
             result.bsdfSample.wo = primeCompactTransmissionMaterialFrame(
                     result.bsdfSample.wo, closureState);
