@@ -43,25 +43,15 @@ public PrimeMinecraftMirrorSplit primeMinecraftMirrorSplit(
     return result;
 }
 
-public PrimeOpenPbrVolumeStack primeMinecraftTransmissionStack(
+public PrimeOpenPbrVolume primeMinecraftTransmissionMedium(
         PrimeCompactTransmissionState state,
-        PrimeOpenPbrVolumeStack volumeStack) {
-    if (state.geometryThinWalled != 0u) {
-        return volumeStack;
-    }
-    if (state.entering != 0u) {
-        PrimeOpenPbrVolume volume = state.transmissionVolume;
-        volume.ior = state.originalIor;
-        primeOpenPbrStackPush(volumeStack, volume);
-    } else if (volumeStack.count > 0u) {
-        primeOpenPbrStackPop(volumeStack);
-    }
-    return volumeStack;
+        PrimeOpenPbrVolume medium) {
+    return state.geometryThinWalled != 0u ? medium : state.transmissionVolume;
 }
 
 public float primeMinecraftInterfaceIor(
         PrimeCompactTransmissionState state) {
-    // State initialization selected the medium on the other side of the boundary from the stack.
+    // Both endpoint IORs were resolved before constructing the closure.
     return state.specularFresnel.ior;
 }
 
@@ -71,10 +61,10 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftRefractedTransmissionFrom
         float3 viewDirection,
         float3 interfaceWeight,
         bool reflectOnTotalInternalReflection,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     PrimeTransmissiveBsdfSample result;
     result.bsdfSample = primeInvalidBsdfSample();
-    result.volumeStack = volumeStack;
+    result.medium = medium;
     if (state.geometryThinWalled != 0u) {
         result.bsdfSample.direction = -viewDirection;
         result.bsdfSample.response = interfaceWeight * state.transmissionTint;
@@ -116,11 +106,11 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftRefractedTransmissionFrom
     result.bsdfSample.relativeEta = refracted.relativeIor;
     result.bsdfSample.eventFlags = PRIME_BSDF_EVENT_TRANSMISSION
             | PRIME_BSDF_EVENT_DISCRETE;
-    result.volumeStack = primeMinecraftTransmissionStack(
-            state, volumeStack);
+    result.medium = primeMinecraftTransmissionMedium(
+            state, medium);
     result.bsdfSample = primeSanitizeBsdfSample(result.bsdfSample);
     if (result.bsdfSample.eventFlags == 0u) {
-        result.volumeStack = volumeStack;
+        result.medium = medium;
     }
     return result;
 }

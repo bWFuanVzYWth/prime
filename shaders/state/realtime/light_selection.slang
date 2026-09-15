@@ -13,7 +13,7 @@ import "bsdf/compact/contract/volume.slang";
 public struct PrimeWavefrontLightSelectionState {
     public float3 viewDirection;
     public uint bounce;
-    public PrimeOpenPbrVolumeStack volumeStack;
+    public PrimeOpenPbrVolume medium;
 };
 
 public PrimeWavefrontLightSelectionState primeLoadWavefrontLightSelectionState(
@@ -23,27 +23,14 @@ public PrimeWavefrontLightSelectionState primeLoadWavefrontLightSelectionState(
     float4 rayDirectionAndDenoiserControl =
             primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
                     .transport.rayDirectionAndDenoiserControl;
-    uint4 medium0 = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium0;
-    uint4 medium1 = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium1;
+    uint4 medium = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium;
 
     PrimeWavefrontLightSelectionState state;
     state.viewDirection = -rayDirectionAndDenoiserControl.xyz;
     state.bounce = (sourceAndPathControl.w >> PRIME_WAVEFRONT_BOUNCE_SHIFT)
             & PRIME_WAVEFRONT_BYTE_MASK;
-    state.volumeStack.values[0] = primeUnpackWavefrontMediumState(
-            medium0,
-            medium1,
-            0u,
-            primeUnpackWavefrontMediumIor(sourceAndPathControl.z, 0u));
-    state.volumeStack.values[1] = primeUnpackWavefrontMediumState(
-            medium0,
-            medium1,
-            1u,
-            primeUnpackWavefrontMediumIor(sourceAndPathControl.z, 1u));
-    uint denoiserControl = asuint(rayDirectionAndDenoiserControl.w);
-    state.volumeStack.count = min(
-            (denoiserControl >> PRIME_WAVEFRONT_MEDIUM_COUNT_SHIFT)
-                    & PRIME_WAVEFRONT_MEDIUM_COUNT_MASK,
-            2u);
+    state.medium = primeUnpackWavefrontMediumState(medium,
+            primeWavefrontMediumId(sourceAndPathControl.w),
+            primeUnpackWavefrontMediumIor(sourceAndPathControl.z));
     return state;
 }

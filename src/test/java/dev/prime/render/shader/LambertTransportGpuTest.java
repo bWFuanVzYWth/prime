@@ -54,8 +54,8 @@ final class LambertTransportGpuTest extends GpuShaderTest {
         }
         assertEquals(0, output.getFloat(12));
         assertEquals(1, output.getFloat(16));
-        assertEquals(0xfffffffe, output.getInt(20));
-        assertEquals(144, output.getFloat(24));
+        assertEquals(65535, output.getInt(20));
+        assertEquals(128, output.getFloat(24));
         assertEquals(48, output.getFloat(28));
         for (int offset : new int[] {44, 60, 76}) assertEquals(1, output.getFloat(offset));
     }

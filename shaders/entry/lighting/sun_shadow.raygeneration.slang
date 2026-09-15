@@ -68,10 +68,8 @@ void main()
     float traceDistance = 2.0 * halfTraceDistance;
     primeShadowPayload.opticalDepthMomentHitDistance = float4(0.0);
     primeShadowPayload.terminalExtinctionRayDistance = float4(0.0, 0.0, 0.0, traceDistance);
-    primeShadowPayload.startingExtinction0Winding = float4(0.0);
-    primeShadowPayload.startingExtinction1Winding = float4(0.0);
-    primeShadowPayload.startingMediumIds = uint2(0u);
-    primeShadowPayload.startingMediumCount = 0u;
+    primeShadowPayload.startingExtinctionLastBoundary = float4(0.0, 0.0, 0.0, -1.0);
+    primeShadowPayload.startingMediumId = 0u;
     primeShadowPayload.sourcePrimitive = uint2(PRIME_NO_PRIMITIVE_INDEX);
     primeShadowPayload.targetEmitter = uint2(PRIME_NO_PRIMITIVE_INDEX);
     traceRayEXT(

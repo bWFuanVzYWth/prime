@@ -188,8 +188,12 @@ final class ClusterTranslationSemanticOracle {
             List<Face> normalNegative) {
         ArrayList<SurfaceKey> result = new ArrayList<>();
         if (normalPositive.isEmpty() || normalNegative.isEmpty()) {
+            List<Face> cover = normalPositive.isEmpty() ? normalNegative : normalPositive;
+            if (cover.size() > 1 && !noneTransmissive(cover)) {
+                throw new AmbiguousMediumBoundary();
+            }
             emitSingles(gridSize, edges, cell,
-                    normalPositive.isEmpty() ? normalNegative : normalPositive, result);
+                    cover, result);
             return result;
         }
         if (allTransmissive(normalPositive)
@@ -205,6 +209,9 @@ final class ClusterTranslationSemanticOracle {
             return result;
         }
         if (normalPositive.size() != 1 || normalNegative.size() != 1) {
+            if (!noneTransmissive(normalPositive) || !noneTransmissive(normalNegative)) {
+                throw new AmbiguousMediumBoundary();
+            }
             emitSingles(gridSize, edges, cell, normalPositive, result);
             emitSingles(gridSize, edges, cell, normalNegative, result);
             return result;
@@ -252,6 +259,10 @@ final class ClusterTranslationSemanticOracle {
             }
         }
         return true;
+    }
+
+    static final class AmbiguousMediumBoundary extends RuntimeException {
+        private static final long serialVersionUID = 1L;
     }
 
     private static boolean noneTransmissive(List<Face> faces) {

@@ -3,6 +3,7 @@
 package dev.prime.render.terrain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.prime.test.PrimeProperties;
 import java.util.ArrayList;
@@ -43,12 +44,23 @@ final class ClusterTranslationSemanticPropertyTest {
 
     private static void assertScenario(List<Integer> values) {
         ClusterTranslationSemanticOracle.Scenario scenario = scenario(values);
-        ClusterTranslationSemanticOracle.Canonical expected =
-                ClusterTranslationSemanticOracle.expected(scenario);
+        ClusterTranslationSemanticOracle.Canonical expected;
+        try {
+            expected = ClusterTranslationSemanticOracle.expected(scenario);
+        } catch (ClusterTranslationSemanticOracle.AmbiguousMediumBoundary exception) {
+            expected = null;
+        }
         List<Integer> original = IntStream.range(0, values.size()).boxed().toList();
         for (int shuffle = 0; shuffle < 4; shuffle++) {
             ArrayList<Integer> order = new ArrayList<>(original);
             Collections.shuffle(order, new Random(0x51a7_0000L + shuffle));
+            if (expected == null) {
+                assertThrows(IllegalArgumentException.class,
+                        () -> ClusterTranslationSemanticOracle.actual(scenario,
+                                ClusterTranslationSemanticOracle.build(scenario, order)),
+                        "ambiguous medium boundary, shuffle=" + shuffle + ", values=" + values);
+                continue;
+            }
             ClusterTranslationSemanticOracle.Built built =
                     ClusterTranslationSemanticOracle.build(scenario, order);
             assertEquals(

@@ -79,14 +79,16 @@ PrimeCompactFoliageTestResult primeCompactFoliageRun(uint4 encoded[4]) {
         result.mask |= PRIME_TEST_FAILURE_STATE;
     }
 
+    PrimeOpenPbrVolume outsideMedium = primeVacuumMedium();
+    outsideMedium.ior = 1.0 / inverseOutsideIor;
     PrimeCompactFoliageState state = primeCompactFoliageStateInit(
-            primeTransmissionGgxEnergy(), material, wi, inverseOutsideIor, rayT);
+            primeTransmissionGgxEnergy(), material, wi, outsideMedium, rayT);
     result.evaluation = primeCompactFoliageEvaluate(wi, wo, state);
     result.components = primeCompactFoliageEvaluateComponents(wi, wo, state);
     result.energy = primeCompactFoliageEnergy(
             primeTransmissionGgxEnergy(), wi, state);
     result.sample = primeCompactFoliageSample(
-            wi, randomValue, state, primeCompactTestEmptyStack());
+            wi, randomValue, state, primeCompactTestVacuum());
     result.sampledEvaluation.throughput = primeOpenPbrZeroThroughput();
     result.sampledEvaluation.pdf = 0.0;
 
@@ -137,7 +139,7 @@ PrimeCompactFoliageTestResult primeCompactFoliageRun(uint4 encoded[4]) {
             result.mask |= PRIME_TEST_FAILURE_EVENT;
         }
     }
-    if (result.sample.volumeStack.count != 0u
+    if (result.sample.medium.mediumId != 0u
             || !primeTestClose(result.sample.rayT, rayT, 0.0, 0.0)) {
         result.mask |= PRIME_TEST_FAILURE_STATE;
     }
@@ -166,7 +168,7 @@ void primeCompactFoliageWrite(uint caseIndex, PrimeCompactFoliageTestResult resu
             result.evaluation.throughput.flags,
             result.sample.bsdfSample.throughput.flags,
             result.sampledEvaluation.throughput.flags,
-            result.sample.volumeStack.count);
+            result.sample.medium.mediumId);
     primeTestOutput[outputOffset + 10u] = asuint(float4(result.sample.rayT, 0.0, 0.0, 0.0));
     primeTestOutput[outputOffset + 11u] = uint4(0u);
 }

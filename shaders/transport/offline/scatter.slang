@@ -66,7 +66,7 @@ public void primeScatterOfflinePath<Appender>(
     }
     uint2 pixel = primeOfflinePixel(pathIndex);
     PathState path = primeOfflinePath(pixel, record.transport);
-    PrimeOpenPbrVolumeStack volumeStack = primeOfflineVolumeStack(record.transport);
+    PrimeOpenPbrVolume medium = primeOfflineMedium(record.transport);
     SurfaceInteraction surface = primeLoadOfflineSurface(pathIndex);
     PrimePreparedSampleBase preparedSample = primePreparePathSample(
             path.sampleSeed,
@@ -80,10 +80,10 @@ public void primeScatterOfflinePath<Appender>(
                     preparedSample,
                     PRIME_SAMPLE_EFFECT_SCATTER_BSDF,
                     PRIME_SAMPLE_DIMENSION_PRIMARY),
-            volumeStack,
+            medium,
             primeUsesAirGap());
     BsdfSample bsdf = scatter.bsdf;
-    volumeStack = scatter.volumeStack;
+    medium = scatter.medium;
     bool usedAreaNee = primeOfflineStagedDirectEnabled(
             primeLoadOfflineStagedLightSelection(pathIndex));
     bool continuation = false;
@@ -107,7 +107,7 @@ public void primeScatterOfflinePath<Appender>(
         continuation = primePathBounce(path.control) < primeMaximumBounces();
     }
     record.transport = primeMakeOfflineTransport(
-            path, volumeStack, continuation);
+            path, medium, continuation);
     primeOfflinePaths[pathIndex] = record;
     primeAppendOfflineContinuation(
             appender, targetQueue, pathIndex, continuation);

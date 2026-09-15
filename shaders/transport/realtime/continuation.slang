@@ -35,7 +35,7 @@ public bool primeContinueRealtimePath(uint recordIndex) {
                 primePathSampleSeed(primeWavefrontPixel(recordIndex), primeSampleEpoch(), branch),
                 primeSampleIndex(), secondaryBounce);
         float3 throughput = primeWavefrontPaths[storage].transport.throughputAndReserved.xyz;
-        float eta = asfloat(primeWavefrontPaths[storage].transport.medium1.w);
+        float eta = asfloat(primeWavefrontPaths[storage].transport.medium.w);
         float survival = primeRussianRouletteSurvival(throughput, eta);
         continuation = primeHashSample1D(sample, PRIME_SAMPLE_EFFECT_RUSSIAN_ROULETTE,
                 PRIME_SAMPLE_DIMENSION_PRIMARY) < survival;

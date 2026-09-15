@@ -15,12 +15,6 @@ public void primeCompactApplyTransmissionVolumeTransition(
             || !primeOpenPbrIsTransmissive(result.bsdfSample.throughput.flags)) {
         return;
     }
-    if (state.entering != 0u) {
-        PrimeOpenPbrVolume volume = state.transmissionVolume;
-        volume.ior = state.originalIor;
-        primeOpenPbrStackPush(result.volumeStack, volume);
-    } else if (result.volumeStack.count > 0u) {
-        result.rayT = 0.0;
-        primeOpenPbrStackPop(result.volumeStack);
-    }
+    result.medium = state.transmissionVolume;
+    if (state.entering == 0u) result.rayT = 0.0;
 }

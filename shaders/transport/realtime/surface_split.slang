@@ -84,14 +84,14 @@ public uint primeInitializeTransparentWavefront(
         inout PrimeIntegratorContext context,
         uint2 pixel,
         PathState path,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         SurfaceInteraction surface,
         PrimeOrdinarySample initialResult) {
     uint continuationMask = 0u;
-    if (!primeApplySegmentMedium(path.throughput, surface, volumeStack)) {
+    if (!primeApplySegmentMedium(path.throughput, surface, medium)) {
         PrimeDenoiserState emptyState = primeInitialDenoiserState();
         PrimeWavefrontPathRecord emptyRecord = primeMakeWavefrontRecord(path,
-                volumeStack,
+                medium,
                 emptyState,
                 initialResult.guides,
                 false);
@@ -118,7 +118,7 @@ public uint primeInitializeTransparentWavefront(
             primeEvaluateDeltaHitEmission(context, path, surface));
     float surfaceLinearRoughness = primeSurfaceLinearRoughness(surface);
     PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
-            surface, viewDirection, volumeStack, primeUsesAirGap());
+            surface, viewDirection, medium, primeUsesAirGap());
     bool discreteOnlyInterface = primeClosureIsDiscreteOnly(closureTraits);
     PrimePreparedSampleBase preparedSample =
             primePreparePathSample(
@@ -139,7 +139,7 @@ public uint primeInitializeTransparentWavefront(
                     PRIME_SAMPLE_EFFECT_SCATTER_BSDF,
                     PRIME_SAMPLE_DIMENSION_PRIMARY),
             surface.t,
-            volumeStack,
+            medium,
             surface.mediumId,
             surface.adjacentBaseColor,
             surface.adjacentInterfaceControl,
@@ -152,7 +152,7 @@ public uint primeInitializeTransparentWavefront(
             viewDirection,
             primarySample.paths.transmission.bsdfSample)) {
         primarySample.paths.transmission.bsdfSample = primeInvalidBsdfSample();
-        primarySample.paths.transmission.volumeStack = volumeStack;
+        primarySample.paths.transmission.medium = medium;
     }
     if (!primeGeometricSampleSupport(
             normalMapped,
@@ -160,7 +160,7 @@ public uint primeInitializeTransparentWavefront(
             viewDirection,
             primarySample.paths.reflection.bsdfSample)) {
         primarySample.paths.reflection.bsdfSample = primeInvalidBsdfSample();
-        primarySample.paths.reflection.volumeStack = volumeStack;
+        primarySample.paths.reflection.medium = medium;
     }
     PrimeDenoiseAlbedos albedos = primarySample.albedos;
     float3 shadingNormal = primeSurfaceShadingNormal(surface, viewDirection);
@@ -288,7 +288,7 @@ public uint primeInitializeTransparentWavefront(
         }
         PrimeWavefrontPathRecord record =
                 primeMakeTransparentWavefrontRecord(branchPath,
-                selected.volumeStack,
+                selected.medium,
                 branchResult,
                 psrState,
                 transmissionBranch,
@@ -324,7 +324,7 @@ public uint primeInitializeTransparentWavefront(
             guide.physicalOrigin = surface.position;
             guide.sourcePrimitive = uint2(surface.sectionIndex, primeSurfaceTriangleIndex(surface));
             guide.rayDirection = bsdf.direction;
-            guide.mediumState = primePackDetachedGuideMediumStack(selected.volumeStack);
+            guide.mediumState = primePackDetachedGuideMedium(selected.medium);
             // This branch never enters a transport queue. Its unused surface slot survives until
             // the missing-guide drain, without aliasing split's receiver-normal writes.
             primeStoreMissingGuideRecord(pathIndex, guide);
@@ -359,10 +359,10 @@ public void primeSplitVisibleSurface(
             recordIndex, uint2(PRIME_NO_PRIMITIVE_INDEX));
     PathState path = primeCameraPath(
             pixel, 0u, primeRealtimeCameraSample(pixel));
-    PrimeOpenPbrVolumeStack volumeStack =
+    PrimeOpenPbrVolume medium =
             (primePush.path.z & PRIME_PATH_CAMERA_IN_WATER_MASK) != 0u
-            ? primeCameraWaterVolumeStack()
-            : primeEmptyVolumeStack();
+            ? primeCameraWaterMedium()
+            : primeVacuumMedium();
     uint continuationMask = 0u;
 
     if (surface.hitKind == PRIME_HIT_SURFACE
@@ -373,7 +373,7 @@ public void primeSplitVisibleSurface(
                 context,
                 pixel,
                 path,
-                volumeStack,
+                medium,
                 surface,
                 initialResult);
     } else {
@@ -383,7 +383,7 @@ public void primeSplitVisibleSurface(
                 : primeEmptyOrdinarySample();
         bool segmentAlive = surface.hitKind != PRIME_HIT_SURFACE
                 || primeApplySegmentMedium(
-                        path.throughput, surface, volumeStack);
+                        path.throughput, surface, medium);
         if (segmentAlive && surface.hitKind == PRIME_HIT_SURFACE) {
             primeAccumulate(
                     context,
@@ -396,7 +396,7 @@ public void primeSplitVisibleSurface(
                         PrimeLandingTransportPhase(),
                         context,
                         path,
-                        volumeStack,
+                        medium,
                         denoiserState,
                         result,
                         surface);
@@ -408,7 +408,7 @@ public void primeSplitVisibleSurface(
         }
         PrimeWavefrontPathRecord updated = primeMakeWavefrontRecord(
                 path,
-                volumeStack,
+                medium,
                 denoiserState,
                 result.guides,
                 continuation);

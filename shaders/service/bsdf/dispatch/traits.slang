@@ -15,7 +15,7 @@ import "bsdf/compact/contract/volume.slang";
 public PrimeClosureTraits primeSurfaceClosureTraits(
         SurfaceInteraction surface,
         float3 viewDirection,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         bool usesAirGap) {
     if (primeMaterialIsTransmissive(surface.materialControl)) {
         return primeMinecraftTransmissionClosureTraits(
@@ -24,7 +24,7 @@ public PrimeClosureTraits primeSurfaceClosureTraits(
                 surface.roughness,
                 surface.opticalControl,
                 viewDirection,
-                volumeStack,
+                medium,
                 surface.adjacentInterfaceControl,
                 usesAirGap);
     }

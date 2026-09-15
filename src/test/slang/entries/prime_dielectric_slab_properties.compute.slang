@@ -20,16 +20,7 @@ import "bsdf/compact/model/material.slang";
 static const uint PRIME_SLAB_INPUT_WORDS = 1u;
 static const uint PRIME_SLAB_WITNESS_WORDS = 8u;
 
-PrimeOpenPbrVolumeStack primeSlabEmptyStack() {
-    PrimeOpenPbrVolumeStack stack;
-    stack.values[0].extinction = float3(0.0);
-    stack.values[0].albedo = float3(0.0);
-    stack.values[0].anisotropy = 0.0;
-    stack.values[0].ior = 1.0;
-    stack.values[1] = stack.values[0];
-    stack.count = 0u;
-    return stack;
-}
+PrimeOpenPbrVolume primeSlabVacuum() { return primeVacuumMedium(); }
 
 PrimeOpenPbrMaterial primeSlabMaterial(float ior) {
     PrimeOpenPbrMaterial material = primeCompactMaterialFromMetallic(
@@ -47,13 +38,14 @@ PrimeOpenPbrMaterial primeSlabMaterial(float ior) {
 }
 
 PrimeCompactTransmissionState primeSlabState(
-        PrimeOpenPbrMaterial material, float3 wi, PrimeOpenPbrVolumeStack stack) {
+        PrimeOpenPbrMaterial material, float3 wi, PrimeOpenPbrVolume medium) {
     PrimeCompactTransmissionState state = primeCompactTransmissionStateInit(
             primeTransmissionGgxEnergy(),
             material,
             wi,
-            primeCompactInverseOutsideIor(wi.z, stack),
+            primeVacuumMedium(),
             4.0);
+    if (wi.z >= 0.0) state.transmissionVolume.mediumId = 1u;
     state = primeCompactTransmissionInterfaceState(
             primeTransmissionGgxEnergy(), wi, state);
     return state;
@@ -81,17 +73,17 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     PrimeOpenPbrMaterial material = primeSlabMaterial(ior);
 
     uint mask = 0u;
-    PrimeOpenPbrVolumeStack emptyStack = primeSlabEmptyStack();
-    PrimeCompactTransmissionState enterState = primeSlabState(material, wi, emptyStack);
+    PrimeOpenPbrVolume vacuum = primeSlabVacuum();
+    PrimeCompactTransmissionState enterState = primeSlabState(material, wi, vacuum);
     PrimeOpenPbrSampleResult entered = primeCompactTransmissionSample(
             wi, randomValue, enterState,
-            PRIME_OPENPBR_FLAG_DELTA_TRANSMISSION, emptyStack);
+            PRIME_OPENPBR_FLAG_DELTA_TRANSMISSION, vacuum);
     float3 exitWi = entered.bsdfSample.wo;
     PrimeCompactTransmissionState exitState = primeSlabState(
-            material, exitWi, entered.volumeStack);
+            material, exitWi, entered.medium);
     PrimeOpenPbrSampleResult exited = primeCompactTransmissionSample(
             exitWi, randomValue, exitState,
-            PRIME_OPENPBR_FLAG_DELTA_TRANSMISSION, entered.volumeStack);
+            PRIME_OPENPBR_FLAG_DELTA_TRANSMISSION, entered.medium);
 
     primeSlabClassify(mask, entered.bsdfSample);
     primeSlabClassify(mask, exited.bsdfSample);
@@ -104,8 +96,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             || exited.bsdfSample.throughput.flags != PRIME_OPENPBR_FLAG_DELTA_TRANSMISSION) {
         mask |= PRIME_TEST_FAILURE_EVENT;
     }
-    if (entered.volumeStack.count != 1u
-            || exited.volumeStack.count != 0u
+    if (entered.medium.mediumId != 1u
+            || exited.medium.mediumId != 0u
             || !primeTestClose(exited.rayT, 0.0, 0.0, 0.0)) {
         mask |= PRIME_TEST_FAILURE_STATE;
     }
@@ -134,13 +126,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     float tirCosine = sqrt(max(0.0, 1.0 - tirSine * tirSine));
     float3 tirWi = float3(-tirSine, 0.0, -tirCosine);
     PrimeCompactTransmissionState tirState = primeSlabState(
-            material, tirWi, entered.volumeStack);
+            material, tirWi, entered.medium);
     PrimeOpenPbrSampleResult tir = primeCompactTransmissionSample(
             tirWi, randomValue, tirState,
-            PRIME_OPENPBR_FLAG_DELTA_TRANSMISSION, entered.volumeStack);
+            PRIME_OPENPBR_FLAG_DELTA_TRANSMISSION, entered.medium);
     primeSlabClassify(mask, tir.bsdfSample);
     if (tir.bsdfSample.throughput.flags != PRIME_OPENPBR_FLAG_NONE
-            || tir.volumeStack.count != 1u
+            || tir.medium.mediumId != 1u
             || !primeTestClose(tirState.specularFresnel.ior, ior, 2.0e-6, 2.0e-6)) {
         mask |= PRIME_TEST_FAILURE_EVENT;
     }
@@ -168,6 +160,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
                 entered.bsdfSample.throughput.flags,
                 exited.bsdfSample.throughput.flags,
                 tir.bsdfSample.throughput.flags,
-                tir.volumeStack.count);
+                tir.medium.mediumId);
     }
 }

@@ -242,22 +242,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
             primeShadowBoundaryOpticalDepthMoment(
                     float3(0.0), startingExtinction, interfaceDistance, false),
             float3(0.0),
-            float4(startingExtinction, 0.0),
-            float4(0.0),
-            1u,
             shadowDistance);
     float3 unbiasedStartingSegment = primeShadowOpticalDepth(
             float3(0.0),
-            float3(0.0),
-            float4(startingExtinction, 1.0),
-            float4(0.0),
-            1u,
+            startingExtinction,
             unbiasedNee.terminalDistance);
     float3 straightAir = primeShadowOpticalDepth(
-            float3(0.0), float3(0.0), float4(0.0), float4(0.0), 0u,
+            float3(0.0), float3(0.0),
             straightNee.terminalDistance);
     float3 unbiasedAir = primeShadowOpticalDepth(
-            float3(0.0), float3(0.0), float4(0.0), float4(0.0), 0u,
+            float3(0.0), float3(0.0),
             unbiasedNee.terminalDistance);
     if (straightNee.blocks
             || straightNee.terminalDistance != shadowDistance

@@ -32,7 +32,7 @@ public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
         float3 shadingNormal,
         LightSample light,
         float3 lightRadiance,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         bool usesAirGap,
         bool conditionalTransparentBranch,
         bool usesMis) {
@@ -70,56 +70,30 @@ public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
         if (normalMapped && reflection != geometricReflection) {
             return result;
         }
+        PrimeCompactTransmissionState state = primeMinecraftBoundaryTransmissionState(
+                surface.baseColor,
+                primeSurfaceOpacity(surface),
+                outwardNormal,
+                surface.materialControl,
+                surface.roughness,
+                surface.opticalControl,
+                viewDirection,
+                surface.t,
+                medium,
+                surface.mediumId,
+                surface.adjacentBaseColor,
+                surface.adjacentInterfaceControl,
+                surface.adjacentMediumId,
+                usesAirGap);
         BsdfEvaluation evaluation;
         if (conditionalTransparentBranch) {
-            // The first visible interface exposes fixed-split conditional proposals. Smooth
-            // transmission remains discrete; a rough stained-glass texel has a finite conditional
-            // transmission lobe and therefore participates in NEE from the opposite hemisphere.
+            // Both conditional lobes consume the same resolved boundary as continuation.
             evaluation = reflection
-                    ? primeEvaluateMinecraftTransparentReflection(
-                            surface.baseColor,
-                            primeSurfaceOpacity(surface),
-                            outwardNormal,
-                            surface.materialControl,
-                            surface.roughness,
-                            surface.opticalControl,
-                            viewDirection,
-                            light.direction,
-                            0.0,
-                            volumeStack,
-                            surface.adjacentBaseColor,
-                            surface.adjacentInterfaceControl,
-                            usesAirGap)
-                    : primeEvaluateMinecraftTransparentTransmission(
-                            surface.baseColor,
-                            primeSurfaceOpacity(surface),
-                            outwardNormal,
-                            surface.materialControl,
-                            surface.roughness,
-                            surface.opticalControl,
-                            viewDirection,
-                            light.direction,
-                            0.0,
-                            volumeStack,
-                            surface.adjacentBaseColor,
-                            surface.adjacentInterfaceControl,
-                            usesAirGap);
+                    ? primeEvaluateMinecraftTransparentReflectionFromState(
+                            state, viewDirection, light.direction)
+                    : primeEvaluateMinecraftTransparentTransmissionFromState(
+                            state, viewDirection, light.direction);
         } else {
-            PrimeCompactTransmissionState state = primeMinecraftBoundaryTransmissionState(
-                    surface.baseColor,
-                    primeSurfaceOpacity(surface),
-                    outwardNormal,
-                    surface.materialControl,
-                    surface.roughness,
-                    surface.opticalControl,
-                    viewDirection,
-                    surface.t,
-                    volumeStack,
-                    surface.mediumId,
-                    surface.adjacentBaseColor,
-                    surface.adjacentInterfaceControl,
-                    surface.adjacentMediumId,
-                    usesAirGap);
             evaluation = primeEvaluateMinecraftTransmissionCompleteFromState(
                     state,
                     surface.baseColor,
@@ -154,7 +128,7 @@ public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
                 viewDirection,
                 light.direction,
                 0.0,
-                volumeStack);
+                medium);
         float weightedInversePdf = primePowerHeuristicOverPdf(
                 light.pdf, usesMis ? components.pdf : 0.0);
         result.diffuse = primeTripleProduct(
@@ -175,7 +149,7 @@ public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
             viewDirection,
             light.direction,
             0.0,
-            volumeStack);
+            medium);
     float weightedInversePdf = primePowerHeuristicOverPdf(
             light.pdf, usesMis ? components.pdf : 0.0);
     result.diffuse = primeTripleProduct(
@@ -192,7 +166,7 @@ public float3 primeEvaluateCompleteDirect(
         float3 shadingNormal,
         LightSample light,
         float3 lightRadiance,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         bool usesAirGap,
         bool usesMis) {
     PrimeDirectLightingSplit split = primeEvaluateVisibleDirectSplit(
@@ -202,7 +176,7 @@ public float3 primeEvaluateCompleteDirect(
             shadingNormal,
             light,
             lightRadiance,
-            volumeStack,
+            medium,
             usesAirGap,
             false,
             usesMis);

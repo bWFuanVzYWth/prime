@@ -32,7 +32,6 @@ public static const uint PRIME_OPENPBR_FLAG_ALL =
         PRIME_OPENPBR_FLAG_REFLECTION | PRIME_OPENPBR_FLAG_TRANSMISSION;
 
 public static const uint PRIME_OPENPBR_DIFFRACTION_RECTANGULAR = 1u;
-public static const uint PRIME_OPENPBR_MAX_VOLUME_STACK_SIZE = 2u;
 
 public bool primeOpenPbrIsReflective(uint flags) {
     return (flags & PRIME_OPENPBR_FLAG_REFLECTION) != 0u;

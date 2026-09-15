@@ -120,7 +120,7 @@ final class TracePipelinesContractTest {
 
     @Test
     void wavefrontBackingHasDeclaredFourKSize() {
-        assertEquals(1_692_057_648L, LambertRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
+        assertEquals(1_559_347_248L, LambertRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
         assertEquals(48L + 60L * 3840 * 2160, LambertRayTracingPipeline.LAYOUT.queueBytes(3840, 2160));
         assertEquals(364L, LambertRayTracingPipeline.LAYOUT.wavefrontBytes(1, 1));
         LambertRayTracingPipeline.LAYOUT.validateDispatch(3840, 2160, 3840 * 2160);
@@ -128,7 +128,7 @@ final class TracePipelinesContractTest {
         assertThrows(IllegalStateException.class, () ->
                 LambertRayTracingPipeline.LAYOUT.validateDispatch(3840, 2160, 3840 * 2160 - 1));
         assertEquals(1, RealtimeRayTracingPipeline.LAYOUT.pathSlotsPerPixel());
-        assertEquals(3_550_003_312L, RealtimeRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
+        assertEquals(3_417_292_912L, RealtimeRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));
         assertEquals(316L * 3840 * 2160 + 112,
                 RealtimeRayTracingPipeline.LAYOUT.queueBytes(3840, 2160));
         assertEquals(2_023_833_632L, OfflineRayTracingPipeline.LAYOUT.wavefrontBytes(3840, 2160));

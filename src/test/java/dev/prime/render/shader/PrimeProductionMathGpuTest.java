@@ -516,6 +516,11 @@ final class PrimeProductionMathGpuTest extends GpuShaderTest {
                         random.nextFloat() * boundaryRange
                     };
                     Arrays.sort(hits);
+                    for (int hit = 1; hit < hits.length; hit++) {
+                        if (hits[hit] <= hits[hit - 1]) {
+                            hits[hit] = Math.nextUp(hits[hit - 1]);
+                        }
+                    }
                     input.putVec4(
                             index,
                             1,

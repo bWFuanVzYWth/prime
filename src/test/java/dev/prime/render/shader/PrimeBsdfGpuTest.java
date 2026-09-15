@@ -128,7 +128,7 @@ final class PrimeBsdfGpuTest extends GpuShaderTest {
                     COLORS[(localCase / (COLORS.length * COLORS.length)) % COLORS.length]
                 };
                 float opacity = UNIT_BOUNDARIES[(localCase / 31) % UNIT_BOUNDARIES.length];
-                int stackCount = backFace
+                int mediumKind = backFace
                         ? 1 + ((localCase / 19) & 1)
                         : (localCase / 19) % 3;
 
@@ -146,7 +146,7 @@ final class PrimeBsdfGpuTest extends GpuShaderTest {
                         3,
                         DISTANCES[localCase % DISTANCES.length]);
                 putVec3(input, caseIndex, 3, view.x(), view.y(), view.z());
-                putInt(input, caseIndex, 3, 3, stackCount);
+                putInt(input, caseIndex, 3, 3, mediumKind);
                 putVec3(
                         input,
                         caseIndex,
@@ -181,7 +181,7 @@ final class PrimeBsdfGpuTest extends GpuShaderTest {
                 flags |= (localCase & 64) != 0
                         ? MATERIAL_MEDIUM_COLORLESS_GLASS
                         : MATERIAL_MEDIUM_STAINED_GLASS;
-                if (kind != 6 && (localCase & 16) != 0) {
+                if (kind != 5 && kind != 6 && (localCase & 16) != 0) {
                     flags |= MATERIAL_THIN_WALLED;
                 }
                 if (kind != 6 && (localCase & 32) != 0) {

@@ -65,10 +65,10 @@ public PrimeOpenPbrSampleResult primeCompactThinWallDiscreteSampleRaw(
         float randomEvent,
         PrimeCompactTransmissionState state,
         uint samplingFlags,
-        PrimeOpenPbrVolumeStack stack) {
+        PrimeOpenPbrVolume medium) {
     PrimeOpenPbrSampleResult result;
     result.bsdfSample = primeOpenPbrZeroSample();
-    result.volumeStack = stack;
+    result.medium = medium;
     result.rayT = state.rayT;
     if (wi.z <= 0.0 || !primeOpenPbrIsDelta(samplingFlags)) {
         return result;
@@ -102,7 +102,7 @@ public PrimeOpenPbrSampleResult primeCompactTransmissionDiscreteSample(
         float randomEvent,
         PrimeCompactTransmissionState state,
         uint samplingFlags,
-        PrimeOpenPbrVolumeStack stack) {
+        PrimeOpenPbrVolume medium) {
     PrimeCompactTransmissionState closureState = state;
     if (closureState.geometryThinWalled == 0u) {
         closureState.entering = 1u;
@@ -110,14 +110,14 @@ public PrimeOpenPbrSampleResult primeCompactTransmissionDiscreteSample(
     PrimeOpenPbrSampleResult result;
     if (closureState.geometryThinWalled != 0u) {
         result = primeCompactThinWallDiscreteSampleRaw(
-                wi, randomEvent, closureState, samplingFlags, stack);
+                wi, randomEvent, closureState, samplingFlags, medium);
     } else {
         result.bsdfSample = primeCompactRefractiveDiscreteSample(
                 primeCompactTransmissionMaterialFrame(wi, closureState),
                 randomEvent,
                 closureState,
                 samplingFlags);
-        result.volumeStack = stack;
+        result.medium = medium;
         result.rayT = closureState.rayT;
         if (result.bsdfSample.throughput.flags != PRIME_OPENPBR_FLAG_NONE) {
             result.bsdfSample.wo = primeCompactTransmissionMaterialFrame(

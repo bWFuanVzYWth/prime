@@ -60,10 +60,10 @@ public bool primeStagedHitEmissionDiffuse(
             && (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) == 0u
             && !primeWavefrontGuideFallback(path.guideControl);
     if (pendingReplacement) {
-        PrimeOpenPbrVolumeStack volumeStack =
-                primeLoadWavefrontHitVolumeStack(pathIndex);
+        PrimeOpenPbrVolume medium =
+                primeLoadWavefrontHitMedium(pathIndex);
         PrimeClosureTraits traits = primeSurfaceClosureTraits(
-                surface, path.viewDirection, volumeStack, primeUsesAirGap());
+                surface, path.viewDirection, medium, primeUsesAirGap());
         if (!primeClosureIsDiscreteOnly(traits)) return true;
     }
     return (control & PRIME_WAVEFRONT_DIFFUSE_PATH) != 0u;

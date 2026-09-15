@@ -13,19 +13,6 @@ import "bsdf/compact/math/spectrum.slang";
 import "bsdf/compact/model/material.slang";
 import "bsdf/compact/model/volume.slang";
 
-public PrimeOpenPbrVolumeStack primeEmptyVolumeStack() {
-    PrimeOpenPbrVolumeStack result;
-    result.values[0].extinction = float3(0.0);
-    result.values[0].albedo = float3(0.0);
-    result.values[0].anisotropy = 0.0;
-    result.values[0].ior = 1.0;
-    result.values[0].mediumId = PRIME_MEDIUM_ID_VACUUM;
-    result.values[0].iorEncoding = 0u;
-    result.values[1] = result.values[0];
-    result.count = 0u;
-    return result;
-}
-
 public PrimeOpenPbrMaterial primeMinecraftTransmissionMaterialWithMinimumRoughness(
         float3 baseColor,
         float opacity,
@@ -38,8 +25,8 @@ public PrimeOpenPbrMaterial primeMinecraftTransmissionMaterialWithMinimumRoughne
     bool thinWalled = (materialControl & PRIME_MATERIAL_THIN_WALLED) != 0u;
     PrimeOpticalMaterial translated = primeDecodeOpticalMaterial(
             roughness, opticalControl, materialControl);
-    // Alpha classifies the interface; it never scales roughness. Rough texels use authored
-    // Authored roughness or the configured fallback is already resolved by the material composer.
+    // Alpha classifies the interface; it never scales roughness. The material composer already
+    // resolves authored roughness or the configured default.
     float interfaceRoughness = max(
             primeMaterialEffectiveLinearRoughness(
                     materialControl, translated.perceptualRoughness),
@@ -58,7 +45,7 @@ public PrimeOpenPbrMaterial primeMinecraftTransmissionMaterialWithMinimumRoughne
     if (water) {
         // RoboCute's transmission ABI stores transmittance at a reference depth and recovers
         // extinction as -log(T) / depth. Supplying the measured one-metre transmittance therefore
-        // reconstructs PRIME_PURE_WATER_ABSORPTION_M_INV without changing its volume-stack code.
+        // reconstructs PRIME_PURE_WATER_ABSORPTION_M_INV without changing its volume-medium code.
         material.transmission.color = exp(-PRIME_PURE_WATER_ABSORPTION_M_INV);
     } else if (primeMaterialIsColorlessGlass(materialControl)) {
         material.transmission.color = float3(1.0);
@@ -67,7 +54,7 @@ public PrimeOpenPbrMaterial primeMinecraftTransmissionMaterialWithMinimumRoughne
                 baseColor, PRIME_STAINED_GLASS_ABSORPTION_OPACITY);
     }
     // Solid transparent materials describe one-metre Beer-Lambert transmittance and enter the
-    // path medium stack. True zero-volume geometry retains RoboCute's explicit thin-wall tint.
+    // path medium. True zero-volume geometry retains RoboCute's explicit thin-wall tint.
     material.transmission.depth = thinWalled ? 0.0 : 1.0;
     material.transmission.scatter = float3(0.0);
     material.transmission.scatterAnisotropy = 0.0;
@@ -92,8 +79,7 @@ public PrimeOpenPbrMaterial primeMinecraftTransmissionMaterial(
             0.0);
 }
 
-public PrimeOpenPbrVolumeStack primeCameraWaterVolumeStack() {
-    PrimeOpenPbrVolumeStack result = primeEmptyVolumeStack();
+public PrimeOpenPbrVolume primeCameraWaterMedium() {
     // The camera starts without an intersected surface, but pure-water absorption is independent
     // of the discarded biome surface tint, so a neutral placeholder reconstructs the same medium.
     PrimeOpenPbrMaterial material = primeMinecraftTransmissionMaterial(
@@ -107,6 +93,5 @@ public PrimeOpenPbrVolumeStack primeCameraWaterVolumeStack() {
     volume.ior = material.specular.ior;
     volume.mediumId = PRIME_MEDIUM_ID_WATER;
     volume.iorEncoding = PRIME_MEDIUM_IOR_WATER;
-    primeOpenPbrStackPush(result, volume);
-    return result;
+    return volume;
 }

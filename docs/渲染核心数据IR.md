@@ -55,7 +55,7 @@ umbrella module 扩大生产 Shader 编译闭包。
 | 等级 | 示例 | 最低要求 |
 | --- | --- | --- |
 | exact identity | TextureId、MaterialId、MediumId、TriangleId、event、valid bit | 逐位保持，无碰撞，不用浮点比较 |
-| exact topology | source/target、front/back、thin/solid、surface relation、介质栈 | 不得因量化或 epsilon 改变离散结果 |
+| exact topology | source/target、front/back、thin/solid、surface relation、当前介质 | 不得因量化或 epsilon 改变离散结果 |
 | source-faithful | UQ UV、源 RG8 切线法线、authored byte code | 无损表达源信息，转换唯一 |
 | bounded continuous | roughness、IOR、extinction、jitter、motion、用途专属方向 | 有数值上界和消费误差分析 |
 | accumulated transport | position、throughput、radiance、PDF、optical depth | 覆盖范围、累计误差、分布及 NaN/Inf |
@@ -168,28 +168,30 @@ two-sided、sampling strategy 和 tree role 是离散事实；radiance/power/bou
 texture LOD；不得把这项 exact packing 误写成连续量量化。
 
 offline path 使用 128 B 固定记录。origin、direction、throughput、PDF、eta、previous-light normal
-和两层 extinction 均逐位 f32；两项 `MediumId:u16` 共用一字，两个 9-bit IOR source code、2-bit
-stack count、active、8-bit bounce 和 2-bit flags 共用一个 31-bit state word。consumer 通过
-`state/offline/transport.slang` 的窄 accessor 读取，不重复位布局。
+和当前 extinction 均逐位 f32；一个 `MediumId:u16` 保存身份，9-bit IOR source code、active、
+8-bit bounce 和 2-bit flags 保存离散状态。已删除第二介质和计数，剩余对齐 padding 不承载历史。
+consumer 通过 `state/offline/transport.slang` 的窄 accessor 读取，不重复位布局。
 
-realtime path 使用 112 B 固定记录，其中 96 B 是跨 dispatch transport，16 B 是 PSR/previous-position
-cold lane。两层 extinction 和 f32 `etaScale` 逐位保留；两项 `MediumId:u16` 共用第一层的第四字，
-`etaScale` 使用第二层的第四字。反向面积光 MIS 所需的 f32 previous receiver normal 不属于整条
+realtime path 使用 96 B 固定记录，其中 80 B 是跨 dispatch transport，16 B 是 PSR/previous-position
+cold lane。当前 extinction 和 f32 `etaScale` 逐位保留在一个 uint4 中；`MediumId:u16` 使用
+path control 的 bits 8..23，9-bit IOR source 使用 guide control 的 bits 16..24。
+反向面积光 MIS 所需的 f32 previous receiver normal 不属于整条
 continuation 的常驻字段：它位于 24 B/path 的后期 phase record 偏移 12，和前 12 B light selection
-同时存活，并与更早的 40 B/pixel detached-guide 严格按阶段复用。detached guide 完成后必须先
+同时存活，并与更早的 36 B/pixel detached-guide 严格按阶段复用。detached guide 完成后必须先
 重新发布其覆盖的零 receiver normal，之后才可进入 light selection/direct。命中发光在 direct
 阶段的 NEE 完成后才窄加载这一状态，避免 origin/PDF/normal 跨 shadow-trace 调用树存活；queued
 scatter 不得重新引入反向面积光求值闭包。
 
-realtime phase scratch 为 264 B/pixel：16 B area guide、两项 100 B surface 和 48 B 的
-detached-guide/后期 staged-record 最大别名区。area guide 只承载两个 FP16 radiance triplet 与一个
-oct-SNORM16x2 direction。九项物理 queue index 中，串行 guide queue 在初始 area 消费之后复用
+realtime phase scratch 为 280 B/pixel：32 B area guide、两项 100 B surface 和 48 B 的
+detached-guide/后期 staged-record 最大别名区。area guide 前 16 B 承载两个 FP16 radiance triplet
+与一个 oct-SNORM16x2 direction，后 16 B 保存可见接口 f32 normal/roughness。
+九项物理 queue index 中，串行 guide queue 在初始 area 消费之后复用
 area queue 的首槽；transparent resolve 跨后续 wavefront 轮次存活，不参与该 alias。
 queue 0 的间接命令第四字低 8 位保存 delta 上限，接下来的 8 位保存最小常规轮数，最高位
 保留 overflow；各轮只清零命令第一字，不覆盖配置。完整实时主体已删除 tail，调度与计数见
 [完整实时 Wavefront 调度](完整实时Wavefront调度.md)。
 
-独立 lightweight 路径为 144 B，连续量保持 f32；两个 MediumId 为 exact u16 bit packing。
+独立 lightweight 路径为 128 B，连续量保持 f32；只保存当前介质的 exact MediumId。
 48 B/pixel phase scratch 与三个 N 容量 u32 queue 共用队列绑定：scratch 后为 48 B 间接命令，
 再后为三个索引数组。camera 发布首接口和选中 guide，guide 消费未选分支 seed 后，first
 才将 scratch 后 32 B 改为直接辐射 / SH 方向矩；path.firstDirection.xyz 同时从接口法线切换
@@ -201,7 +203,7 @@ queue 0 的间接命令第四字低 8 位保存 delta 上限，接下来的 8 �
 
 ## 7. Transport、重建与显示
 
-路径逻辑状态包含 ray/cone/source identity、throughput/radiance/PDF/MIS、medium stack、RNG address、
+路径逻辑状态包含 ray/cone/source identity、throughput/radiance/PDF/MIS、current medium、RNG address、
 branch/guide 和 phase-local request/result。表面状态必须区分 geometric/shading/guide normal、位置、UV/LOD、
 material sample、front/back、relation、emitter 和 previous position。哪些字段跨 dispatch 存活由 phase liveness
 决定，不由一个最大结构体决定。

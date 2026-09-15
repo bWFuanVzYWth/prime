@@ -297,261 +297,105 @@ void primeCheckGlassVolume(
     result.third = float4(twoMetres, 0.0);
 }
 
-void primeCheckShadowOpticalDepth(
-        inout PrimeTransportResult result, float4 first, float4 second)
-{
+void primeCheckShadowOpticalDepth(inout PrimeTransportResult result, float4 first, float4 second) {
     float rayDistance = max(abs(first.x), 1.0e-6);
-    float firstHit = clamp(first.y, 0.0, rayDistance);
-    float secondHit = clamp(first.z, firstHit, rayDistance);
-    float thirdHit = clamp(first.w, secondHit, rayDistance);
-    float fourthHit = clamp(second.x, thirdHit, rayDistance);
-    float3 firstExtinction = primeShadowCanonicalExtinction(
-            PRIME_PURE_WATER_ABSORPTION_M_INV);
-    float3 secondExtinction = primeShadowCanonicalExtinction(max(second.yzw, float3(0.0)));
-
-    float3 forwardMoment = primeShadowBoundaryOpticalDepthMoment(
-            float3(0.0), firstExtinction, firstHit, true);
-    float3 forwardTerminal = primeShadowBoundaryTerminalExtinction(
-            float3(0.0), firstExtinction, true);
-    forwardMoment = primeShadowBoundaryOpticalDepthMoment(
-            forwardMoment, secondExtinction, secondHit, true);
-    forwardTerminal = primeShadowBoundaryTerminalExtinction(
-            forwardTerminal, secondExtinction, true);
-    forwardMoment = primeShadowBoundaryOpticalDepthMoment(
-            forwardMoment, secondExtinction, thirdHit, false);
-    forwardTerminal = primeShadowBoundaryTerminalExtinction(
-            forwardTerminal, secondExtinction, false);
-    forwardMoment = primeShadowBoundaryOpticalDepthMoment(
-            forwardMoment, firstExtinction, fourthHit, false);
-    forwardTerminal = primeShadowBoundaryTerminalExtinction(
-            forwardTerminal, firstExtinction, false);
-
-    float3 reverseMoment = primeShadowBoundaryOpticalDepthMoment(
-            float3(0.0), firstExtinction, fourthHit, false);
-    float3 reverseTerminal = primeShadowBoundaryTerminalExtinction(
-            float3(0.0), firstExtinction, false);
-    reverseMoment = primeShadowBoundaryOpticalDepthMoment(
-            reverseMoment, secondExtinction, thirdHit, false);
-    reverseTerminal = primeShadowBoundaryTerminalExtinction(
-            reverseTerminal, secondExtinction, false);
-    reverseMoment = primeShadowBoundaryOpticalDepthMoment(
-            reverseMoment, secondExtinction, secondHit, true);
-    reverseTerminal = primeShadowBoundaryTerminalExtinction(
-            reverseTerminal, secondExtinction, true);
-    reverseMoment = primeShadowBoundaryOpticalDepthMoment(
-            reverseMoment, firstExtinction, firstHit, true);
-    reverseTerminal = primeShadowBoundaryTerminalExtinction(
-            reverseTerminal, firstExtinction, true);
-
-    PrimeOpenPbrVolume queuedFirstMedium;
-    queuedFirstMedium.extinction = PRIME_PURE_WATER_ABSORPTION_M_INV;
-    queuedFirstMedium.ior = 1.333;
-    queuedFirstMedium.albedo = float3(0.0);
-    queuedFirstMedium.anisotropy = 0.0;
-    queuedFirstMedium.mediumId = PRIME_MEDIUM_ID_WATER;
-    queuedFirstMedium.iorEncoding = PRIME_MEDIUM_IOR_WATER;
-    float3 queuedFirstExtinction = primeShadowCanonicalExtinction(
-            primeUnpackWavefrontMedium(
-                    primePackWavefrontMedium(queuedFirstMedium),
-                    queuedFirstMedium.iorEncoding).extinction);
-    float3 insideMoment = primeShadowBoundaryOpticalDepthMoment(
-            float3(0.0), queuedFirstExtinction, firstHit, false);
-    float3 insideTerminal = float3(0.0);
-    insideMoment = primeShadowBoundaryOpticalDepthMoment(
-            insideMoment, secondExtinction, secondHit, true);
-    insideTerminal = primeShadowBoundaryTerminalExtinction(
-            insideTerminal, secondExtinction, true);
-    insideMoment = primeShadowBoundaryOpticalDepthMoment(
-            insideMoment, secondExtinction, thirdHit, false);
-    insideTerminal = primeShadowBoundaryTerminalExtinction(
-            insideTerminal, secondExtinction, false);
-
-    float thinCosine = max((secondHit - firstHit) / rayDistance, 1.0e-3);
-    float3 thin = primeShadowThinOpticalDepth(
-            float3(0.0), secondExtinction, rayDistance, thinCosine);
-    float3 forward = primeShadowOpticalDepth(
-            forwardMoment, forwardTerminal, float4(0.0), float4(0.0), 0, rayDistance);
-    float3 reverse = primeShadowOpticalDepth(
-            reverseMoment, reverseTerminal, float4(0.0), float4(0.0), 0, rayDistance);
-    float3 inside = primeShadowOpticalDepth(
-            insideMoment,
-            insideTerminal,
-            float4(queuedFirstExtinction, 0.0),
-            float4(0.0),
-            1,
-            rayDistance);
-    float3 unboundedStartingMedium = primeShadowOpticalDepth(
-            float3(0.0),
-            float3(0.0),
-            float4(queuedFirstExtinction, 1.0),
-            float4(0.0),
-            1,
-            rayDistance);
-    float3 innerCoefficient = primeShadowStartingMediumCoefficient(
-            firstExtinction, secondExtinction, 1);
-    float3 nestedMoment = primeShadowBoundaryOpticalDepthMoment(
-            float3(0.0), innerCoefficient, firstHit, false);
-    nestedMoment = primeShadowBoundaryOpticalDepthMoment(
-            nestedMoment, firstExtinction, fourthHit, false);
-    float3 nested = primeShadowOpticalDepth(
-            nestedMoment,
-            float3(0.0),
-            float4(firstExtinction, 0.0),
-            float4(secondExtinction, 0.0),
-            2,
-            rayDistance);
-    float3 unboundedNested = primeShadowOpticalDepth(
-            float3(0.0),
-            float3(0.0),
-            float4(firstExtinction, 1.0),
-            float4(secondExtinction, 1.0),
-            2,
-            rayDistance);
-
-    float3 transmittance = exp(-forward);
-    float3 expectedOutside = firstExtinction * (fourthHit - firstHit)
-            + secondExtinction * (thirdHit - secondHit);
-    float3 expectedInside = firstExtinction * firstHit
-            + secondExtinction * (thirdHit - secondHit);
-    float3 expectedNested = secondExtinction * firstHit
-            + firstExtinction * (fourthHit - firstHit);
-    float3 expectedThin = secondExtinction * min(
-            PRIME_THIN_WALLED_THICKNESS_M / thinCosine, rayDistance);
-    float distanceTolerance = 2.0e-6 + 2.0e-6 * fourthHit;
-    primeTransportClassify(result.mask, forward);
-    primeTransportClassify(result.mask, reverse);
-    primeTransportClassify(result.mask, inside);
-    primeTransportClassify(result.mask, nested);
-    primeTransportClassify(result.mask, thin);
-    primeTransportClassify(result.mask, transmittance);
-    if (!primeTestClose(forward, expectedOutside, distanceTolerance, 2.0e-6)
-            || !primeTestClose(forward, reverse, distanceTolerance, 2.0e-6)
-            || any(queuedFirstExtinction != firstExtinction)
-            || primeShadowStartingMediumIndex(
-                    PRIME_MEDIUM_ID_WATER,
-                    uint2(PRIME_MEDIUM_ID_WATER, 29u),
-                    float4(firstExtinction, 1.0),
-                    float4(secondExtinction, 1.0),
-                    2u,
-                    true) != 0
-            || primeShadowStartingMediumIndex(
-                    17u,
-                    uint2(PRIME_MEDIUM_ID_WATER, 29u),
-                    float4(firstExtinction, 1.0),
-                    float4(secondExtinction, 1.0),
-                    2u,
-                    true) != -1
-            || !primeTestClose(inside, expectedInside, distanceTolerance, 2.0e-6)
-            || !primeTestClose(nested, expectedNested, distanceTolerance, 2.0e-6)
-            || !primeTestClose(
-                    unboundedNested,
-                    secondExtinction * rayDistance,
-                    distanceTolerance,
-                    2.0e-6)
-            || !primeTestClose(
-                    unboundedStartingMedium,
-                    firstExtinction * rayDistance,
-                    distanceTolerance,
-                    2.0e-6)
-            || !primeTestClose(thin, expectedThin, distanceTolerance, 2.0e-6)
-            || any(primeShadowOpticalDepth(
-                    float3(-rayDistance),
-                    float3(0.0),
-                    float4(0.0),
-                    float4(0.0),
-                    0,
-                    rayDistance) != float3(0.0))
-            || any(transmittance < float3(0.0))
-            || any(transmittance > float3(1.0))) {
-        result.mask |= PRIME_TEST_FAILURE_IDENTITY;
+    float distances[4];
+    distances[0] = clamp(first.y, 0.0, rayDistance);
+    distances[1] = clamp(first.z, distances[0], rayDistance);
+    distances[2] = clamp(first.w, distances[1], rayDistance);
+    distances[3] = clamp(second.x, distances[2], rayDistance);
+    float3 a = primeShadowCanonicalExtinction(PRIME_PURE_WATER_ABSORPTION_M_INV);
+    float3 b = primeShadowCanonicalExtinction(max(second.yzw, float3(0.0)));
+    float3 expected = a * ((distances[1] - distances[0]) + (distances[3] - distances[2]))
+            + b * (distances[2] - distances[1]);
+    float tolerance = 2.0e-6 + 4.0e-6 * distances[3];
+    float3 opticalDepth = float3(0.0);
+    // All 24 any-hit orders for vacuum -> A -> B -> A -> vacuum. The producer supplies
+    // distinct canonical boundaries, including arbitrarily short representable intervals.
+    for (uint i = 0u; i < 4u; ++i) for (uint j = 0u; j < 4u; ++j) {
+        if (i == j) continue;
+        for (uint k = 0u; k < 4u; ++k) {
+            if (k == i || k == j) continue;
+            uint order[4] = {i, j, k, 6u-i-j-k};
+            float3 moment = float3(0.0), terminal = float3(0.0);
+            float last = -1.0;
+            for (uint event = 0u; event < 4u; ++event) {
+                uint index = order[event];
+                bool inner = index == 1u || index == 2u;
+                primeShadowCrossBoundary(moment, terminal, last, 0u, float3(0.0),
+                        inner ? 65535u : 1u, inner ? b : a,
+                        inner ? 1u : 0u, inner ? a : float3(0.0), index < 2u, distances[index]);
+            }
+            opticalDepth = primeShadowOpticalDepth(moment, terminal, rayDistance);
+            if (any(terminal != float3(0.0)) || !primeTestClose(opticalDepth, expected, tolerance, 2.0e-6))
+                result.mask |= PRIME_TEST_FAILURE_IDENTITY;
+        }
     }
-    result.first = float4(forward, rayDistance);
-    result.second = float4(transmittance, 0.0);
-    result.third = float4(nested, distanceTolerance);
+    // Start inside B, leave into A, then vacuum: no saved outer medium is available or needed.
+    float3 moment = float3(0.0), terminal = b;
+    float last = -1.0;
+    primeShadowCrossBoundary(moment, terminal, last, 65535u, b,
+            1u, a, 0u, float3(0.0), false, distances[3]);
+    primeShadowCrossBoundary(moment, terminal, last, 65535u, b,
+            65535u, b * 1.001, 1u, a, false, distances[0]);
+    float3 nested = primeShadowOpticalDepth(moment, terminal, rayDistance);
+    float3 expectedNested = b * distances[0] + a * (distances[3] - distances[0]);
+    if (!primeTestClose(nested, expectedNested, tolerance, 2.0e-6)
+            || any(primeShadowOpticalDepth(float3(0.0), b, rayDistance) != b * rayDistance))
+        result.mask |= PRIME_TEST_FAILURE_IDENTITY;
+    float cosine = max((distances[1]-distances[0])/rayDistance, 1.0e-3);
+    float3 thin = primeShadowThinOpticalDepth(float3(0.0), b, rayDistance, cosine);
+    if (!primeTestClose(thin, b * min(PRIME_THIN_WALLED_THICKNESS_M/cosine, rayDistance), tolerance, 2.0e-6))
+        result.mask |= PRIME_TEST_FAILURE_IDENTITY;
+    primeTransportClassify(result.mask, opticalDepth);
+    primeTransportClassify(result.mask, nested);
+    result.first = float4(opticalDepth, rayDistance);
+    result.second = float4(exp(-opticalDepth), 0.0);
+    result.third = float4(nested, tolerance);
 }
 
-void primeCheckWavefrontMedium(
-        inout PrimeTransportResult result,
-        uint2 identity,
-        float4 transport,
-        float4 coldVolumeFields)
-{
-    PrimeOpenPbrVolume medium;
+void primeCheckWavefrontMedium(inout PrimeTransportResult result, uint2 identity,
+        float4 transport, float4 coldVolumeFields) {
+    PrimeOpenPbrVolume medium = primeVacuumMedium();
     medium.extinction = transport.xyz;
-    medium.ior = primeDecodeMediumIor(identity.y);
-    medium.albedo = coldVolumeFields.xyz;
-    medium.anisotropy = coldVolumeFields.w;
     medium.mediumId = identity.x;
     medium.iorEncoding = identity.y;
-    uint4 packed = primePackWavefrontMedium(medium);
+    medium.ior = identity.x == 0u ? 1.0 : primeDecodeMediumIor(identity.y);
+    uint4 packed = uint4(asuint(medium.extinction), medium.mediumId);
     PrimeOpenPbrVolume restored = primeUnpackWavefrontMedium(packed, identity.y);
-    PrimeOpenPbrVolumeStack stack;
-    stack.values[0] = medium;
-    stack.values[1] = medium;
-    stack.count = 2u;
-    uint packedIors = primePackWavefrontMediumIors(stack);
-    uint guideControl = 0x00007f07u;
-    uint mergedControl = primeMergeWavefrontGuideControl(packedIors, guideControl);
-    primeTransportClassify(result.mask, restored.extinction);
-    primeTransportClassify(result.mask, restored.ior);
-    if (any(primePackWavefrontMedium(restored) != packed)
-            || any(restored.albedo != float3(0.0))
-            || restored.anisotropy != 0.0
-            || any(asuint(restored.extinction) != asuint(medium.extinction))
-            || asuint(restored.ior) != asuint(medium.ior)
-            || restored.mediumId != medium.mediumId
-            || restored.iorEncoding != medium.iorEncoding
-            || primeUnpackWavefrontMediumIor(packedIors, 0u) != identity.y
-            || primeUnpackWavefrontMediumIor(packedIors, 1u) != identity.y
-            || (mergedControl & ~PRIME_WAVEFRONT_GUIDE_CONTROL_MASK)
-                    != (packedIors & ~PRIME_WAVEFRONT_GUIDE_CONTROL_MASK)
-            || (mergedControl & PRIME_WAVEFRONT_GUIDE_CONTROL_MASK)
-                    != (guideControl & PRIME_WAVEFRONT_GUIDE_CONTROL_MASK)) {
+    uint ior = primePackWavefrontMediumIor(medium);
+    uint guide = 0x00007f07u;
+    uint merged = primeMergeWavefrontGuideControl(ior, guide);
+    if (any(asuint(restored.extinction) != asuint(medium.extinction))
+            || restored.mediumId != identity.x || asuint(restored.ior) != asuint(medium.ior)
+            || primeUnpackWavefrontMediumIor(ior) != identity.y
+            || (merged & PRIME_WAVEFRONT_GUIDE_CONTROL_MASK) != guide
+            || (merged & ~PRIME_WAVEFRONT_GUIDE_CONTROL_MASK) != ior
+            || any(restored.albedo != float3(0.0)) || restored.anisotropy != 0.0)
         result.mask |= PRIME_TEST_FAILURE_STATE;
-    }
     result.first = float4(restored.extinction, restored.ior);
     result.second = transport;
     result.third = float4(restored.albedo, restored.anisotropy);
 }
 
-void primeCheckDetachedGuideMedium(
-        inout PrimeTransportResult result,
-        uint count,
-        uint2 mediumIds,
-        uint2 iorEncodings)
-{
-    PrimeOpenPbrVolumeStack stack;
-    stack.count = count;
-    [unroll]
-    for (uint index = 0u; index < 2u; ++index) {
-        stack.values[index].mediumId = mediumIds[index];
-        stack.values[index].iorEncoding = iorEncodings[index];
-        stack.values[index].ior = primeDecodeMediumIor(iorEncodings[index]);
+void primeCheckDetachedGuideMedium(inout PrimeTransportResult result, uint selected,
+        uint2 mediumIds, uint2 iorEncodings) {
+    PrimeOpenPbrVolume medium = primeVacuumMedium();
+    if (selected != 0u) {
+        uint index = selected - 1u;
+        medium.mediumId = mediumIds[index];
+        medium.iorEncoding = iorEncodings[index];
+        medium.ior = primeDecodeMediumIor(medium.iorEncoding);
     }
-    uint2 packed = primePackDetachedGuideMediumStack(stack);
-    PrimeOpenPbrVolumeStack restored =
-            primeUnpackDetachedGuideMediumStack(packed);
-    bool exact = restored.count == count;
-    [unroll]
-    for (uint index = 0u; index < 2u; ++index) {
-        bool active = index < count;
-        exact = exact
-                && restored.values[index].mediumId
-                        == (active ? mediumIds[index] : PRIME_MEDIUM_ID_VACUUM)
-                && restored.values[index].iorEncoding
-                        == (active ? iorEncodings[index] : 0u)
-                && asuint(restored.values[index].ior) == asuint(active
-                        ? primeDecodeMediumIor(iorEncodings[index])
-                        : 1.0)
-                && all(restored.values[index].extinction == float3(0.0))
-                && all(restored.values[index].albedo == float3(0.0))
-                && restored.values[index].anisotropy == 0.0;
-    }
-    if (!exact) {
+    uint packed = primePackDetachedGuideMedium(medium);
+    PrimeOpenPbrVolume restored = primeUnpackDetachedGuideMedium(packed);
+    if (restored.mediumId != medium.mediumId || restored.iorEncoding != medium.iorEncoding
+            || asuint(restored.ior) != asuint(medium.ior)
+            || any(restored.extinction != float3(0.0)) || any(restored.albedo != float3(0.0))
+            || restored.anisotropy != 0.0)
         result.mask |= PRIME_TEST_FAILURE_IDENTITY;
-    }
-    result.first = asfloat(uint4(packed, mediumIds));
-    result.second = asfloat(uint4(iorEncodings, count, restored.count));
+    result.first = asfloat(uint4(packed, restored.mediumId, mediumIds));
+    result.second = asfloat(uint4(iorEncodings, selected, restored.iorEncoding));
 }
 
 void primeCheckPreviousDynamicSurface(
@@ -876,7 +720,6 @@ void primeCheckOfflineTransportStorage(
         float4 fourth,
         float4 fifth)
 {
-    uint count = control.w & 0x3u;
     bool active = (control.w & 0x4u) != 0u;
     uint bounce = (control.w >> 8u) & PRIME_OFFLINE_PATH_BYTE_MASK;
     uint flags = (control.w >> 16u) & PRIME_OFFLINE_PATH_FLAGS_MASK;
@@ -890,41 +733,32 @@ void primeCheckOfflineTransportStorage(
     path.sourcePrimitive = control.yz;
     path.control = primeMakePathStateControl(bounce, flags);
     path.sampleSeed = 0u;
-    PrimeOpenPbrVolumeStack stack;
-    stack.count = count;
-    stack.values[0].extinction = fourth.xyz;
-    stack.values[0].albedo = float3(0.0);
-    stack.values[0].anisotropy = 0.0;
-    stack.values[0].mediumId = control.y & 0xffffu;
-    stack.values[0].iorEncoding = (control.y >> 16u) & 0x1ffu;
-    stack.values[0].ior = primeDecodeMediumIor(stack.values[0].iorEncoding);
-    stack.values[1].extinction = fifth.xyz;
-    stack.values[1].albedo = float3(0.0);
-    stack.values[1].anisotropy = 0.0;
-    stack.values[1].mediumId = control.z & 0xffffu;
-    stack.values[1].iorEncoding = (control.z >> 16u) & 0x1ffu;
-    stack.values[1].ior = primeDecodeMediumIor(stack.values[1].iorEncoding);
+    PrimeOpenPbrVolume medium = primeVacuumMedium();
+    medium.extinction = fourth.xyz;
+    medium.mediumId = control.y & 0xffffu;
+    medium.iorEncoding = (control.y >> 16u) & 0x1ffu;
+    medium.ior = medium.mediumId == 0u ? 1.0 : primeDecodeMediumIor(medium.iorEncoding);
 
     PrimeOfflineTransportRecord packed =
-            primePackOfflineTransport(path, stack, active);
+            primePackOfflineTransport(path, medium, active);
     PathState restoredPath;
     primeUnpackOfflineTransportPath(packed, restoredPath);
-    PrimeOpenPbrVolumeStack restoredStack =
-            primeUnpackOfflineTransportVolumeStack(packed);
+    PrimeOpenPbrVolume restoredMedium =
+            primeUnpackOfflineTransportMedium(packed);
     PrimeOfflineTransportRecord roundTrip = primePackOfflineTransport(
-            restoredPath, restoredStack, primeOfflineTransportIsActive(packed));
+            restoredPath, restoredMedium, primeOfflineTransportIsActive(packed));
     bool exact = all(packed.physicalOriginAndPreviousBsdfPdf
                         == roundTrip.physicalOriginAndPreviousBsdfPdf)
-            && all(packed.sourceStateAndMediumIds
-                        == roundTrip.sourceStateAndMediumIds)
+            && all(packed.sourceStateAndMediumId
+                        == roundTrip.sourceStateAndMediumId)
             && all(packed.rayDirectionAndEtaScale
                         == roundTrip.rayDirectionAndEtaScale)
             && all(packed.throughputAndPreviousLightNormalX
                         == roundTrip.throughputAndPreviousLightNormalX)
-            && all(packed.medium0AndPreviousLightNormalY
-                        == roundTrip.medium0AndPreviousLightNormalY)
-            && all(packed.medium1AndPreviousLightNormalZ
-                        == roundTrip.medium1AndPreviousLightNormalZ)
+            && all(packed.mediumAndPreviousLightNormalY
+                        == roundTrip.mediumAndPreviousLightNormalY)
+            && all(packed.previousLightNormalZAndReserved
+                        == roundTrip.previousLightNormalZAndReserved)
             && all(asuint(restoredPath.physicalOrigin) == asuint(path.physicalOrigin))
             && asuint(restoredPath.previousBsdfPdf) == asuint(path.previousBsdfPdf)
             && all(asuint(restoredPath.rayDirection) == asuint(path.rayDirection))
@@ -935,22 +769,17 @@ void primeCheckOfflineTransportStorage(
             && all(restoredPath.sourcePrimitive == path.sourcePrimitive)
             && primePathBounce(restoredPath.control) == bounce
             && primePathFlags(restoredPath.control) == flags
-            && restoredStack.count == count
-            && restoredStack.values[0].mediumId == stack.values[0].mediumId
-            && restoredStack.values[1].mediumId == stack.values[1].mediumId
-            && restoredStack.values[0].iorEncoding == stack.values[0].iorEncoding
-            && restoredStack.values[1].iorEncoding == stack.values[1].iorEncoding
-            && all(asuint(restoredStack.values[0].extinction)
-                        == asuint(stack.values[0].extinction))
-            && all(asuint(restoredStack.values[1].extinction)
-                        == asuint(stack.values[1].extinction))
+            && restoredMedium.mediumId == medium.mediumId
+            && restoredMedium.iorEncoding == medium.iorEncoding
+            && all(asuint(restoredMedium.extinction)
+                        == asuint(medium.extinction))
             && primeOfflineTransportIsActive(packed) == active;
     if (!exact) {
         result.mask |= PRIME_TEST_FAILURE_IDENTITY;
     }
-    result.first = asfloat(packed.sourceStateAndMediumIds);
-    result.second = asfloat(packed.medium0AndPreviousLightNormalY);
-    result.third = asfloat(packed.medium1AndPreviousLightNormalZ);
+    result.first = asfloat(packed.sourceStateAndMediumId);
+    result.second = asfloat(packed.mediumAndPreviousLightNormalY);
+    result.third = asfloat(packed.previousLightNormalZAndReserved);
 }
 
 [numthreads(64, 1, 1)]

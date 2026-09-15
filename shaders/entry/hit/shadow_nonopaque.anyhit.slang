@@ -3,7 +3,6 @@
 #language slang 2026
 module "entry/hit/shadow_nonopaque.anyhit.slang";
 
-
 import glsl;
 
 import "service/material/coverage.slang";
@@ -26,41 +25,13 @@ import "contract/trace/shadow_payload.slang";
 
 layout(location = 1) rayPayloadInEXT PrimeShadowPayload primeShadowPayload;
 
-void primeAccumulateSolidMediumBoundary(
-        inout PrimeShadowPayload primeShadowPayload,
-        uint mediumId,
-        float3 extinction,
-        bool entering) {
-    int startingMediumIndex = primeShadowStartingMediumIndex(
-            mediumId,
-            primeShadowPayload.startingMediumIds,
-            primeShadowPayload.startingExtinction0Winding,
-            primeShadowPayload.startingExtinction1Winding,
-            primeShadowPayload.startingMediumCount,
-            entering);
-    float3 boundaryExtinction = startingMediumIndex >= 0
-            ? primeShadowStartingMediumCoefficient(
-                    primeShadowPayload.startingExtinction0Winding.xyz,
-                    primeShadowPayload.startingExtinction1Winding.xyz,
-                    uint(startingMediumIndex))
-            : extinction;
-    primeShadowPayload.opticalDepthMomentHitDistance.xyz =
-            primeShadowBoundaryOpticalDepthMoment(
-                    primeShadowPayload.opticalDepthMomentHitDistance.xyz,
-                    boundaryExtinction,
-                    RayTCurrent(),
-                    entering);
-    if (startingMediumIndex == 0) {
-        primeShadowPayload.startingExtinction0Winding.w += entering ? 1.0 : -1.0;
-    } else if (startingMediumIndex == 1) {
-        primeShadowPayload.startingExtinction1Winding.w += entering ? 1.0 : -1.0;
-    } else {
-        primeShadowPayload.terminalExtinctionRayDistance.xyz =
-                primeShadowBoundaryTerminalExtinction(
-                        primeShadowPayload.terminalExtinctionRayDistance.xyz,
-                        boundaryExtinction,
-                        entering);
-    }
+void primeAccumulateSolidMediumBoundary(uint insideId, float3 insideExtinction,
+        uint outsideId, float3 outsideExtinction, bool entering) {
+    primeShadowCrossBoundary(primeShadowPayload.opticalDepthMomentHitDistance.xyz,
+            primeShadowPayload.terminalExtinctionRayDistance.xyz,
+            primeShadowPayload.startingExtinctionLastBoundary.w,
+            primeShadowPayload.startingMediumId, primeShadowPayload.startingExtinctionLastBoundary.xyz,
+            insideId, insideExtinction, outsideId, outsideExtinction, entering, RayTCurrent());
 }
 
 float3 primeSurfaceBoundaryExtinction(uint materialId, uint tint, uint referenceUv) {
@@ -154,19 +125,19 @@ void main(in BuiltInTriangleIntersectionAttributes attributes)
                 primeShadowPayload.terminalExtinctionRayDistance.w,
                 cosine);
     } else {
-        bool entering = cosine < 0.0;
-        primeAccumulateSolidMediumBoundary(
-                primeShadowPayload, primeCandidateMediumId(surface.record), extinction, entering);
-        // Boundary metadata is needed only for a solid interface, after alpha and extinction.
+        uint outsideId = 0u;
+        float3 outsideExtinction = float3(0.0);
+        // A SINGLE solid has an explicitly translated vacuum exterior. A BOUNDARY supplies it.
         uint64_t relation = primeCandidateRelation(primeCandidateHeader(primeCandidateRecord()));
         if (relation != uint64_t(0) && (((uint*)relation)[0] & 0xfu) == 1u) {
             uint identity = ((uint*)relation)[2];
             uint materialId = primeMaterialId(identity);
-            primeAccumulateSolidMediumBoundary(
-                    primeShadowPayload, primeMaterialMediumId(materialId),
-                    primeShadowCanonicalExtinction(primeSurfaceBoundaryExtinction(
-                            materialId, identity & 0xffffu, ((uint*)relation)[1])), !entering);
+            outsideId = primeMaterialMediumId(materialId);
+            outsideExtinction = primeShadowCanonicalExtinction(primeSurfaceBoundaryExtinction(
+                    materialId, identity & 0xffffu, ((uint*)relation)[1]));
         }
+        primeAccumulateSolidMediumBoundary(primeCandidateMediumId(surface.record), extinction,
+                outsideId, outsideExtinction, cosine < 0.0);
     }
     IgnoreHit();
 }

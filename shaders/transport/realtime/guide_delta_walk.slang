@@ -58,7 +58,7 @@ void primePublishDetachedGuideSurface(
         uint recordIndex,
         PrimeDetachedGuideOwnerState owner,
         PrimeDetachedGuideRecord guide,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         SurfaceInteraction surface) {
     uint2 pixel = primeWavefrontPixel(recordIndex);
     uint control = owner.denoiserControl;
@@ -70,7 +70,7 @@ void primePublishDetachedGuideSurface(
             recordIndex, owner);
     float3 viewDirection = -guide.rayDirection;
     PrimeDenoiseAlbedos albedos = primeSurfaceGuideAlbedos(
-            surface, viewDirection, volumeStack, primeUsesAirGap());
+            surface, viewDirection, medium, primeUsesAirGap());
     result.guides = primeQueuedPsrGuide(
             result.guides,
             surface,
@@ -183,12 +183,12 @@ public void primeDetachedGuideDeltaWalk(
             return;
         }
 
-        PrimeOpenPbrVolumeStack volumeStack =
-                primeDetachedGuideVolumeStack(guide);
+        PrimeOpenPbrVolume medium =
+                primeDetachedGuideMedium(guide);
         if (!primeSurfaceIsDiscreteOnly(
-                surface, -guide.rayDirection, volumeStack)) {
+                surface, -guide.rayDirection, medium)) {
             primePublishDetachedGuideSurface(
-                    recordIndex, owner, guide, volumeStack, surface);
+                    recordIndex, owner, guide, medium, surface);
             return;
         }
         PrimeQueuedPsrState psrState = primeLoadDetachedGuideOwnerPsrState(
@@ -205,7 +205,7 @@ public void primeDetachedGuideDeltaWalk(
                         context,
                         surface,
                         -guide.rayDirection,
-                        volumeStack);
+                        medium);
         if (!primeHasScatter(scatter.bsdf)) {
             primeFinishDetachedGuide(recordIndex, owner, false);
             return;
@@ -220,7 +220,7 @@ public void primeDetachedGuideDeltaWalk(
         guide.sourcePrimitive = uint2(
                 surface.sectionIndex, primeSurfaceTriangleIndex(surface));
         guide.rayDirection = scatter.bsdf.direction;
-        guide.mediumState = primePackDetachedGuideMediumStack(scatter.volumeStack);
+        guide.mediumState = primePackDetachedGuideMedium(scatter.medium);
         if (owner.primaryRay) primeStoreMissingGuideRecord(recordIndex, guide);
         else primeStoreDetachedGuideRecord(pixel, guide);
     }

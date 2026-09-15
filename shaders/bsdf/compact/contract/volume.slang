@@ -14,22 +14,9 @@ public struct PrimeOpenPbrVolume {
     public uint iorEncoding;
 };
 
-public struct PrimeOpenPbrVolumeStack {
-    public PrimeOpenPbrVolume values[2];
-    public uint count;
-};
-
-public bool primeOpenPbrStackPush(
-        inout PrimeOpenPbrVolumeStack stack,
-        PrimeOpenPbrVolume volume) {
-    if (stack.count >= PRIME_OPENPBR_MAX_VOLUME_STACK_SIZE) return false;
-    stack.values[stack.count] = volume;
-    stack.count++;
-    return true;
-}
-
-public bool primeOpenPbrStackPop(inout PrimeOpenPbrVolumeStack stack) {
-    if (stack.count == 0u) return false;
-    stack.count--;
-    return true;
+// A ray carries exactly one resolved medium. Zero is the explicit vacuum endpoint.
+public PrimeOpenPbrVolume primeVacuumMedium() {
+    PrimeOpenPbrVolume medium = {};
+    medium.ior = 1.0;
+    return medium;
 }

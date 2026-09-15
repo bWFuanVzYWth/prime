@@ -16,13 +16,13 @@ public PrimeOpenPbrSampleResult primeCompactTransmissionSample(
         float3 randomValue,
         PrimeCompactTransmissionState state,
         uint samplingFlags,
-        PrimeOpenPbrVolumeStack stack) {
+        PrimeOpenPbrVolume medium) {
     PrimeOpenPbrSampleResult result = primeCompactTransmissionSampleRaw(
             wi,
             randomValue,
             primeCompactTransmissionClosureState(state),
             samplingFlags,
-            stack);
+            medium);
     primeCompactApplyTransmissionVolumeTransition(state, result);
     return result;
 }

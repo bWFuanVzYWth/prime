@@ -31,7 +31,7 @@ public PrimeTransmissivePrimarySample primeSampleMinecraftTransmissionPrimary(
         float3 viewDirection,
         float3 reflectionSample,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         uint mediumId,
         float3 adjacentBaseColor,
         uint adjacentInterfaceControl,
@@ -48,7 +48,7 @@ public PrimeTransmissivePrimarySample primeSampleMinecraftTransmissionPrimary(
             opticalControl,
             viewDirection,
             rayT,
-            volumeStack,
+            medium,
             mediumId,
             adjacentBaseColor,
             adjacentInterfaceControl,
@@ -75,11 +75,10 @@ public PrimeTransmissivePrimarySample primeSampleMinecraftTransmissionPrimary(
             baseColor,
             opacity,
             materialControl,
-            volumeStack);
-    result.paths.transmission = primeApplyAdjacentMediumTransition(
+            medium);
+    result.paths.transmission = primeApplyAirGapMediumTransition(
             result.paths.transmission,
             state,
-            volumeStack,
             baseColor,
             opacity,
             materialControl,

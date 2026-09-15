@@ -32,11 +32,11 @@ public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
         SurfaceInteraction surface,
         float3 viewDirection,
         float3 sampleValue,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         float minimumLinearRoughness,
         bool usesAirGap) {
     PrimePathScatter result;
-    result.volumeStack = volumeStack;
+    result.medium = medium;
     if (primeMaterialIsFoliage(surface.materialControl)) {
         PrimeCompactFoliageState state =
                 primeMinecraftFoliageStateWithMinimumRoughness(
@@ -47,10 +47,10 @@ public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
                         surface.materialControl,
                         viewDirection,
                         surface.t,
-                        volumeStack,
+                        medium,
                         minimumLinearRoughness);
         result.bsdf = primeSampleMinecraftFoliageFromState(
-                state, viewDirection, sampleValue, volumeStack);
+                state, viewDirection, sampleValue, medium);
     } else if (primeMaterialIsTransmissive(surface.materialControl)) {
         float3 outwardNormal = primeSurfaceOutwardShadingNormal(surface);
         PrimeCompactTransmissionState state =
@@ -63,7 +63,7 @@ public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
                         surface.opticalControl,
                         viewDirection,
                         surface.t,
-                        volumeStack,
+                        medium,
                         surface.mediumId,
                         minimumLinearRoughness,
                         surface.adjacentBaseColor,
@@ -78,11 +78,10 @@ public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
                         surface.materialControl,
                         viewDirection,
                         sampleValue,
-                        volumeStack);
-        sampled = primeApplyAdjacentMediumTransition(
+                        medium);
+        sampled = primeApplyAirGapMediumTransition(
                 sampled,
                 state,
-                volumeStack,
                 surface.baseColor,
                 primeSurfaceOpacity(surface),
                 surface.materialControl,
@@ -93,7 +92,7 @@ public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
                 surface.adjacentMediumId,
                 usesAirGap);
         result.bsdf = sampled.bsdfSample;
-        result.volumeStack = sampled.volumeStack;
+        result.medium = sampled.medium;
     } else {
         float3 shadingNormal =
                 primeSurfaceShadingNormal(surface, viewDirection);
@@ -105,14 +104,14 @@ public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
                 surface.materialControl,
                 viewDirection,
                 surface.t,
-                volumeStack,
+                medium,
                 minimumLinearRoughness);
         result.bsdf = primeSampleOpaqueFromState(
                 state,
                 shadingNormal,
                 viewDirection,
                 sampleValue,
-                volumeStack);
+                medium);
     }
     if (!primeGeometricSampleSupport(
             primeMaterialUsesNormalMap(surface.opticalControl),
@@ -120,7 +119,7 @@ public PrimePathScatter primeSamplePathSurfaceWithMinimumRoughness(
             viewDirection,
             result.bsdf)) {
         result.bsdf = primeInvalidBsdfSample();
-        result.volumeStack = volumeStack;
+        result.medium = medium;
     }
     return result;
 }
@@ -130,14 +129,14 @@ public PrimePathScatter primeSamplePathSurface(
         SurfaceInteraction surface,
         float3 viewDirection,
         float3 sampleValue,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         bool usesAirGap) {
     return primeSamplePathSurfaceWithMinimumRoughness(
             context,
             surface,
             viewDirection,
             sampleValue,
-            volumeStack,
+            medium,
             0.0,
             usesAirGap);
 }
@@ -147,11 +146,11 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
         SurfaceInteraction surface,
         float3 viewDirection,
         float3 sampleValue,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         uint bounce,
         bool usesAirGap) {
     PrimeGuidedPathScatter result;
-    result.scatter.volumeStack = volumeStack;
+    result.scatter.medium = medium;
     if (primeMaterialIsFoliage(surface.materialControl)) {
         PrimeCompactFoliageState state = primeMinecraftFoliageState(
                 surface.baseColor,
@@ -161,13 +160,13 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
                 surface.materialControl,
                 viewDirection,
                 surface.t,
-                volumeStack);
+                medium);
         result.albedos = primeDenoiseAlbedosFromState(
                 state,
                 viewDirection,
                 PRIME_DENOISE_CLOSURE_FOLIAGE);
         result.scatter.bsdf = primeSampleMinecraftFoliageFromState(
-                state, viewDirection, sampleValue, volumeStack);
+                state, viewDirection, sampleValue, medium);
     } else if (primeMaterialIsTransmissive(surface.materialControl)) {
         float3 outwardNormal = primeSurfaceOutwardShadingNormal(surface);
         PrimeCompactTransmissionState state =
@@ -180,7 +179,7 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
                         surface.opticalControl,
                         viewDirection,
                         surface.t,
-                        volumeStack,
+                        medium,
                         surface.mediumId,
                         surface.adjacentBaseColor,
                         surface.adjacentInterfaceControl,
@@ -198,11 +197,10 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
                         surface.materialControl,
                         viewDirection,
                         sampleValue,
-                        volumeStack);
-        sampled = primeApplyAdjacentMediumTransition(
+                        medium);
+        sampled = primeApplyAirGapMediumTransition(
                 sampled,
                 state,
-                volumeStack,
                 surface.baseColor,
                 primeSurfaceOpacity(surface),
                 surface.materialControl,
@@ -213,7 +211,7 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
                 surface.adjacentMediumId,
                 usesAirGap);
         result.scatter.bsdf = sampled.bsdfSample;
-        result.scatter.volumeStack = sampled.volumeStack;
+        result.scatter.medium = sampled.medium;
     } else {
         float3 shadingNormal =
                 primeSurfaceShadingNormal(surface, viewDirection);
@@ -225,7 +223,7 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
                 surface.materialControl,
                 viewDirection,
                 surface.t,
-                volumeStack);
+                medium);
         result.albedos = primeDenoiseAlbedosFromState(
                 state,
                 viewDirection,
@@ -235,7 +233,7 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
                 shadingNormal,
                 viewDirection,
                 sampleValue,
-                volumeStack);
+                medium);
     }
     if (!primeGeometricSampleSupport(
             primeMaterialUsesNormalMap(surface.opticalControl),
@@ -243,7 +241,7 @@ public PrimeGuidedPathScatter primeSampleGuidedPathSurface(
             viewDirection,
             result.scatter.bsdf)) {
         result.scatter.bsdf = primeInvalidBsdfSample();
-        result.scatter.volumeStack = volumeStack;
+        result.scatter.medium = medium;
     }
     return result;
 }

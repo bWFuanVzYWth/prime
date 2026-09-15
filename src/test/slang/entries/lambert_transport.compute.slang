@@ -26,26 +26,25 @@ void main(uint3 tid : SV_DispatchThreadID) {
         PrimeLambertMedium medium = primeLambertCameraMedium(false);
         uint first = 65534u, second = 65535u;
         float3 sigmaA = float3(0.2, 0.5, 1.0), sigmaB = float3(0.8, 0.1, 0.25);
-        bool a = primeLambertEnterMedium(medium, first, sigmaA);
+        primeLambertCrossBoundary(medium, first, sigmaA, float3(0.0), PRIME_LAMBERT_ENTERING);
         float3 filter = primeLambertSegmentFilter(medium, 2.0);
-        bool b = primeLambertEnterMedium(medium, second, sigmaB);
-        bool overflow = primeLambertEnterMedium(medium, 2u, sigmaB);
-        uint ids = medium.ids;
-        filter *= primeLambertSegmentFilter(medium, 0.75) * primeLambertSegmentFilter(medium, 2.25);
-        primeLambertLeaveMedium(medium, second);
+        primeLambertCrossBoundary(medium, second | (first << 16u), sigmaB, sigmaA, PRIME_LAMBERT_ENTERING);
+        filter *= primeLambertSegmentFilter(medium, 3.0);
+        primeLambertCrossBoundary(medium, second | (first << 16u), sigmaB, sigmaA, 0u);
         filter *= primeLambertSegmentFilter(medium, 1.0);
-        primeLambertLeaveMedium(medium, first);
-        outputData[0] = float4(filter, medium.count);
-        outputData[1] = float4(float(a && b && !overflow), asfloat(ids), float(sizeof(PrimeLambertRecord)), float(sizeof(PrimeLambertInterface)));
-        medium = primeLambertCameraMedium(false);
-        bool enter = primeLambertCrossBoundary(medium, first, sigmaA, float3(0.0), PRIME_LAMBERT_ENTERING);
-        bool transition = primeLambertCrossBoundary(medium, first | (second << 16u), sigmaA, sigmaB, 0u);
-        outputData[2] = float4(primeLambertExtinction(medium), float(enter && transition && medium.ids == second));
-        bool exit = primeLambertCrossBoundary(medium, second, sigmaB, float3(0.0), 0u);
-        outputData[3] = float4(primeLambertExtinction(medium), float(exit && medium.count == 0u));
-        medium = primeLambertCameraMedium(false);
-        bool inside = primeLambertInferIncomingMedium(medium, first, sigmaA, float3(0.0), PRIME_LAMBERT_DELTA);
-        outputData[4] = float4(primeLambertSegmentFilter(medium, 2.0), float(inside && medium.ids == first));
+        primeLambertCrossBoundary(medium, first, sigmaA, float3(0.0), 0u);
+        outputData[0] = float4(filter, medium.id);
+        // Repeated explicit transitions have no depth limit or hidden return history.
+        for (uint depth = 1u; depth <= 64u; ++depth)
+            primeLambertCrossBoundary(medium, depth | ((depth - 1u) << 16u), sigmaA, sigmaB, PRIME_LAMBERT_ENTERING);
+        outputData[1] = float4(float(medium.id == 64u), asfloat(second), float(sizeof(PrimeLambertRecord)), float(sizeof(PrimeLambertInterface)));
+        primeLambertCrossBoundary(medium, first | (second << 16u), sigmaA, sigmaB, 0u);
+        outputData[2] = float4(primeLambertExtinction(medium), float(medium.id == second));
+        primeLambertCrossBoundary(medium, second, sigmaB, float3(0.0), 0u);
+        outputData[3] = float4(primeLambertExtinction(medium), float(medium.id == 0u));
+        medium.extinction = sigmaA;
+        medium.id = first;
+        outputData[4] = float4(primeLambertSegmentFilter(medium, 2.0), float(medium.id == first));
     } else if (mode == 2u) {
         float cosine = float(index) / float(max(inputData[0] - 1u, 1u));
         float f = primeLambertFresnel(cosine, inputData[2] != 0u);

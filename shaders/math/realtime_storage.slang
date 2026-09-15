@@ -17,15 +17,15 @@ public uint primeRealtimeSurfaceWord(uint pathIndex, uint pixels) {
             + pathIndex * (PRIME_WAVEFRONT_SURFACE_RECORD_SIZE / 4u);
 }
 
-// An omitted branch owns 40 bytes of ray plus 28 bytes of exact guide control/PSR in its unused
+// An omitted branch owns 36 bytes of ray plus 28 bytes of exact guide control/PSR in its unused
 // surface slot. This owner survives through resolve; it never aliases the selected transport.
 public uint primeMissingGuideOwnerWord(uint pathIndex, uint pixels) {
     return primeRealtimeSurfaceWord(pathIndex, pixels) + PRIME_WAVEFRONT_DETACHED_GUIDE_RECORD_SIZE / 4u;
 }
 
-public static const uint PRIME_MISSING_GUIDE_WORDS = 17u;
+public static const uint PRIME_MISSING_GUIDE_WORDS = PRIME_WAVEFRONT_DETACHED_GUIDE_RECORD_SIZE / 4u + 7u;
 
-// The early 40 B guide and both later 24 B light/normal records share one 48 B pixel region.
+// The early 36 B guide and both later 24 B light/normal records share one 48 B pixel region.
 // Branch-major light records overlapped guides belonging to other pixels, including opaque paths
 // whose previous receiver normal was already live during the guide phase.
 public uint primeRealtimePhaseWord(uint pathIndex, uint pixels) {

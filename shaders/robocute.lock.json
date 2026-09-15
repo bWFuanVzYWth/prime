@@ -16,6 +16,6 @@
   "approvedDifferences": [
     "Zero-probability sampling endpoints stay on a positive-probability branch so remapping never evaluates 0 / 0.",
     "The RoboCute author's 2026-07-24 dielectric-highlight hotfix replaces the directional-energy normalization with branch-separated multiple-scattering compensation and its 44x32x159 HALF4 table.",
-    "Prime retains its bounded two-entry medium stack instead of RoboCute's nested-priority medium integrator; interface sampling, transport eta and exiting material-frame behavior follow the pinned reference."
+    "Prime carries one current medium and uses translated boundary endpoints for transmission; interface sampling, transport eta and exiting material-frame behavior follow the pinned reference."
   ]
 }

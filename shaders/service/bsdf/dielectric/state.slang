@@ -38,7 +38,7 @@ public PrimeCompactTransmissionState primeMinecraftTransmissionStateWithMinimumR
         uint opticalControl,
         float3 viewDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         uint mediumId,
         float minimumLinearRoughness) {
     bool thinWalled = (materialControl & PRIME_MATERIAL_THIN_WALLED) != 0u;
@@ -54,16 +54,19 @@ public PrimeCompactTransmissionState primeMinecraftTransmissionStateWithMinimumR
             opticalControl,
             minimumLinearRoughness);
     float3 localView = primeOpenPbrOnbToLocal(material.geometry.onb, viewDirection);
-    float inverseOutsideIor = primeCompactInverseOutsideIor(localView.z, volumeStack);
+    // SINGLE solid surfaces encode a vacuum exterior; thin sheets keep the incident medium.
+    PrimeOpenPbrVolume outsideMedium = thinWalled ? medium : primeVacuumMedium();
     PrimeCompactTransmissionState state = primeCompactTransmissionStateInit(
             primeTransmissionGgxEnergy(),
             material,
             localView,
-            inverseOutsideIor,
+            outsideMedium,
             rayT);
-    state.transmissionVolume.mediumId = mediumId;
-    state.transmissionVolume.iorEncoding = primeMediumIorEncoding(
-            materialControl, opticalControl);
+    if (state.geometryThinWalled != 0u || state.entering != 0u) {
+        state.transmissionVolume.mediumId = mediumId;
+        state.transmissionVolume.iorEncoding = primeMediumIorEncoding(
+                materialControl, opticalControl);
+    }
     return primeCompactTransmissionInterfaceState(
             primeTransmissionGgxEnergy(), localView, state);
 }
@@ -77,7 +80,7 @@ public PrimeCompactTransmissionState primeMinecraftTransmissionState(
         uint opticalControl,
         float3 viewDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         uint mediumId) {
     return primeMinecraftTransmissionStateWithMinimumRoughness(
             baseColor,
@@ -88,7 +91,7 @@ public PrimeCompactTransmissionState primeMinecraftTransmissionState(
             opticalControl,
             viewDirection,
             rayT,
-            volumeStack,
+            medium,
             mediumId,
             0.0);
 }
@@ -115,6 +118,7 @@ public PrimeOpenPbrVolume primeAdjacentMediumVolume(
         float3 baseColor,
         uint adjacentInterfaceControl,
         uint mediumId) {
+    if (mediumId == PRIME_MEDIUM_ID_VACUUM) return primeVacuumMedium();
     uint materialControl = primeAdjacentMaterialControl(adjacentInterfaceControl);
     uint opticalControl = primeAdjacentFresnelCode(adjacentInterfaceControl);
     PrimeOpenPbrMaterial material = primeMinecraftTransmissionMaterial(
@@ -177,7 +181,7 @@ public PrimeCompactTransmissionState primeMinecraftBoundaryTransmissionStateWith
         uint opticalControl,
         float3 viewDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         uint mediumId,
         float minimumLinearRoughness,
         float3 adjacentBaseColor,
@@ -194,7 +198,7 @@ public PrimeCompactTransmissionState primeMinecraftBoundaryTransmissionStateWith
                 opticalControl,
                 viewDirection,
                 rayT,
-                volumeStack,
+                medium,
                 mediumId,
                 minimumLinearRoughness);
     }
@@ -226,13 +230,13 @@ public PrimeCompactTransmissionState primeMinecraftBoundaryTransmissionStateWith
                 primeTransmissionGgxEnergy(),
                 material,
                 localView,
-                1.0 / adjacent.ior,
+                adjacent,
                 rayT);
         state.transmissionVolume.mediumId = mediumId;
         state.transmissionVolume.iorEncoding = primeMediumIorEncoding(
                 materialControl, opticalControl);
         // Thin-wall shading orients its local frame toward the incident ray. Preserve which
-        // physical voxel medium lies across the authored boundary for the later stack swap.
+        // physical voxel medium lies across the authored boundary for the later medium transition.
         state.entering = enteringBoundaryMaterial ? 1u : 0u;
         return state;
     }
@@ -240,11 +244,13 @@ public PrimeCompactTransmissionState primeMinecraftBoundaryTransmissionStateWith
             primeTransmissionGgxEnergy(),
             material,
             localView,
-            1.0 / adjacent.ior,
+            adjacent,
             rayT);
-    state.transmissionVolume.mediumId = mediumId;
-    state.transmissionVolume.iorEncoding = primeMediumIorEncoding(
-            materialControl, opticalControl);
+    if (state.geometryThinWalled != 0u || state.entering != 0u) {
+        state.transmissionVolume.mediumId = mediumId;
+        state.transmissionVolume.iorEncoding = primeMediumIorEncoding(
+                materialControl, opticalControl);
+    }
     return primeCompactTransmissionInterfaceState(
             primeTransmissionGgxEnergy(), localView, state);
 }
@@ -258,7 +264,7 @@ public PrimeCompactTransmissionState primeMinecraftBoundaryTransmissionState(
         uint opticalControl,
         float3 viewDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         uint mediumId,
         float3 adjacentBaseColor,
         uint adjacentInterfaceControl,
@@ -273,7 +279,7 @@ public PrimeCompactTransmissionState primeMinecraftBoundaryTransmissionState(
             opticalControl,
             viewDirection,
             rayT,
-            volumeStack,
+            medium,
             mediumId,
             0.0,
             adjacentBaseColor,
@@ -282,10 +288,9 @@ public PrimeCompactTransmissionState primeMinecraftBoundaryTransmissionState(
             usesAirGap);
 }
 
-public PrimeTransmissiveBsdfSample primeApplyAdjacentMediumTransition(
+public PrimeTransmissiveBsdfSample primeApplyAirGapMediumTransition(
         PrimeTransmissiveBsdfSample sampled,
         PrimeCompactTransmissionState state,
-        PrimeOpenPbrVolumeStack originalStack,
         float3 baseColor,
         float opacity,
         uint materialControl,
@@ -295,32 +300,14 @@ public PrimeTransmissiveBsdfSample primeApplyAdjacentMediumTransition(
         uint adjacentInterfaceControl,
         uint adjacentMediumId,
         bool usesAirGap) {
-    if (!primeHasAdjacentMedium(adjacentInterfaceControl)
-            || (sampled.bsdfSample.eventFlags & PRIME_BSDF_EVENT_TRANSMISSION) == 0u) {
-        return sampled;
-    }
-    PrimeOpenPbrVolume target;
-    if (state.entering != 0u) {
-        if (primeUsesAdjacentAirGap(
-                usesAirGap,
-                materialControl,
-                opticalControl,
-                adjacentInterfaceControl)) {
-            target = primeBoundarySurfaceVolume(
-                    baseColor, opacity, materialControl, opticalControl, mediumId);
-        } else {
-            target = state.transmissionVolume;
-            target.ior = state.originalIor;
-        }
-    } else {
-        target = primeAdjacentMediumVolume(
-                adjacentBaseColor, adjacentInterfaceControl, adjacentMediumId);
-    }
-    sampled.volumeStack = originalStack;
-    if (sampled.volumeStack.count == 0u) {
-        primeOpenPbrStackPush(sampled.volumeStack, target);
-    } else {
-        sampled.volumeStack.values[sampled.volumeStack.count - 1u] = target;
+    if ((sampled.bsdfSample.eventFlags & PRIME_BSDF_EVENT_TRANSMISSION) != 0u
+            && primeUsesAdjacentAirGap(usesAirGap, materialControl,
+                    opticalControl, adjacentInterfaceControl)) {
+        sampled.medium = state.entering != 0u
+                ? primeBoundarySurfaceVolume(baseColor, opacity,
+                        materialControl, opticalControl, mediumId)
+                : primeAdjacentMediumVolume(adjacentBaseColor,
+                        adjacentInterfaceControl, adjacentMediumId);
     }
     return sampled;
 }

@@ -56,20 +56,7 @@ float3 primeStatRandom(uint index, uint seed) {
             primeStatUnit(index ^ seed ^ 0x3c6ef372u));
 }
 
-PrimeOpenPbrVolumeStack primeStatEmptyStack() {
-    PrimeOpenPbrVolumeStack stack;
-    PrimeOpenPbrVolume volume;
-    volume.extinction = float3(0.0);
-    volume.albedo = float3(0.0);
-    volume.anisotropy = 0.0;
-    volume.ior = 1.0;
-    volume.mediumId = 0u;
-    volume.iorEncoding = 0u;
-    stack.values[0] = volume;
-    stack.values[1] = volume;
-    stack.count = 0u;
-    return stack;
-}
+PrimeOpenPbrVolume primeStatVacuum() { return primeVacuumMedium(); }
 
 PrimeOpenPbrMaterial primeStatMaterial(
         uint suite,
@@ -103,15 +90,15 @@ PrimeOpenPbrSampleResult primeStatSample(
         PrimeOpenPbrMaterial material) {
     if (suite == PRIME_STAT_TRANSMISSION) {
         PrimeCompactTransmissionState state = primeCompactTransmissionStateInit(
-                primeTransmissionGgxEnergy(), material, wi, 1.0, 0.0);
+                primeTransmissionGgxEnergy(), material, wi, primeVacuumMedium(), 0.0);
         state = primeCompactTransmissionInterfaceState(
                 primeTransmissionGgxEnergy(), wi, state);
         return primeCompactTransmissionSample(
-                wi, randomValue, state, PRIME_OPENPBR_FLAG_ALL, primeStatEmptyStack());
+                wi, randomValue, state, PRIME_OPENPBR_FLAG_ALL, primeStatVacuum());
     }
     PrimeCompactOpaqueState state = primeCompactOpaqueStateInit(
             primeTransmissionGgxEnergy(), material, wi, 1.0, 0.0);
-    return primeCompactOpaqueSample(wi, randomValue, state, primeStatEmptyStack());
+    return primeCompactOpaqueSample(wi, randomValue, state, primeStatVacuum());
 }
 
 PrimeStatEvaluation primeStatEvaluate(
@@ -122,7 +109,7 @@ PrimeStatEvaluation primeStatEvaluate(
     PrimeStatEvaluation result;
     if (suite == PRIME_STAT_TRANSMISSION) {
         PrimeCompactTransmissionState state = primeCompactTransmissionStateInit(
-                primeTransmissionGgxEnergy(), material, wi, 1.0, 0.0);
+                primeTransmissionGgxEnergy(), material, wi, primeVacuumMedium(), 0.0);
         state = primeCompactTransmissionInterfaceState(
                 primeTransmissionGgxEnergy(), wi, state);
         PrimeCompactTransmissionEvaluation evaluated =
@@ -146,7 +133,7 @@ float3 primeStatEnergy(
         PrimeOpenPbrMaterial material) {
     if (suite == PRIME_STAT_TRANSMISSION) {
         PrimeCompactTransmissionState state = primeCompactTransmissionStateInit(
-                primeTransmissionGgxEnergy(), material, wi, 1.0, 0.0);
+                primeTransmissionGgxEnergy(), material, wi, primeVacuumMedium(), 0.0);
         state = primeCompactTransmissionInterfaceState(
                 primeTransmissionGgxEnergy(), wi, state);
         return primeCompactTransmissionEnergy(

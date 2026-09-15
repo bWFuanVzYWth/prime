@@ -14,6 +14,7 @@ import "bsdf/compact/opaque/state.slang";
 import "bsdf/compact/opaque/traits.slang";
 import "bsdf/compact/contract/flags.slang";
 import "bsdf/compact/contract/material.slang";
+import "bsdf/compact/contract/volume.slang";
 
 public bool primeCompactFoliageSupports(PrimeOpenPbrMaterial material) {
     return material.weight.base == 1.0
@@ -38,16 +39,17 @@ public PrimeCompactFoliageState primeCompactFoliageStateInit<TransmissionGgxEner
         TransmissionGgxEnergy transmissionGgxEnergy,
         PrimeOpenPbrMaterial material,
         float3 wi,
-        float inverseOutsideIor,
+        PrimeOpenPbrVolume outsideMedium,
         float rayT)
     where TransmissionGgxEnergy : IPrimeOpenPbrTransmissionGgxEnergy
 {
     PrimeCompactFoliageState state;
+    float inverseOutsideIor = 1.0 / outsideMedium.ior;
     state.base = primeCompactOpaqueStateInit(
             transmissionGgxEnergy, material, wi, inverseOutsideIor, rayT);
     state.transmissionWeight = material.weight.transmission;
     PrimeCompactTransmissionState transmission = primeCompactTransmissionStateInit(
-            transmissionGgxEnergy, material, wi, inverseOutsideIor, rayT);
+            transmissionGgxEnergy, material, wi, outsideMedium, rayT);
     state.transmissionMicrofacet = transmission.transmissionMicrofacet;
     state.transmissionTint = transmission.transmissionTint;
 

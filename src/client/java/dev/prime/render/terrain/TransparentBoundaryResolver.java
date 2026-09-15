@@ -586,9 +586,11 @@ final class TransparentBoundaryResolver {
                 ArrayList<ResolvedQuad>[] output,
                 ClusterTranslationWork work) {
             if (this.negative.isEmpty() || this.positive.isEmpty()) {
-                this.emitWholeActual(this.negative, output);
-                this.emitWholeActual(this.positive, output);
-                return;
+                List<Candidate> cover = this.negative.isEmpty() ? this.positive : this.negative;
+                if (cover.size() <= 1 || !hasSolidMedium(cover)) {
+                    this.emitWholeActual(cover, output);
+                    return;
+                }
             }
             float[] uEdges = edges(this.negative, this.positive, true);
             float[] vEdges = edges(this.negative, this.positive, false);
@@ -612,6 +614,8 @@ final class TransparentBoundaryResolver {
                     float centerU = 0.5F * (minimumU + maximumU);
                     covering(this.negative, centerU, centerV, negativeCover, work);
                     covering(this.positive, centerU, centerV, positiveCover, work);
+                    removeDisplacedFluid(negativeCover);
+                    removeDisplacedFluid(positiveCover);
                     this.emitCell(
                             negativeCover,
                             positiveCover,
@@ -643,8 +647,13 @@ final class TransparentBoundaryResolver {
                 return;
             }
             if (negativeCover.isEmpty() || positiveCover.isEmpty()) {
+                List<Candidate> cover = negativeCover.isEmpty() ? positiveCover : negativeCover;
+                if (cover.size() > 1 && hasSolidMedium(cover)) {
+                    throw ambiguousContact(negativeCover, positiveCover,
+                            minimumU, maximumU, minimumV, maximumV);
+                }
                 emitActual(
-                        negativeCover.isEmpty() ? positiveCover : negativeCover,
+                        cover,
                         minimumU,
                         maximumU,
                         minimumV,
@@ -680,6 +689,10 @@ final class TransparentBoundaryResolver {
                 return;
             }
             if (negativeCover.size() != 1 || positiveCover.size() != 1) {
+                if (hasSolidMedium(negativeCover) || hasSolidMedium(positiveCover)) {
+                    throw ambiguousContact(negativeCover, positiveCover,
+                            minimumU, maximumU, minimumV, maximumV);
+                }
                 emitActual(
                         negativeCover,
                         minimumU,
@@ -860,6 +873,52 @@ final class TransparentBoundaryResolver {
                 }
             }
             return true;
+        }
+
+        private static void removeDisplacedFluid(ArrayList<Candidate> cover) {
+            if (cover.size() < 2) {
+                return;
+            }
+            // A group side belongs to one block. Its opaque or solid model occupies this
+            // cell; a captured waterlogged fluid face cannot also occupy that volume.
+            // Cutout and thin sheets do not prove occupancy across their entire rectangle.
+            for (Candidate candidate : cover) {
+                if (candidate.quad.surface().fluid() == null
+                        && (candidate.kind() == FaceKind.OPAQUE
+                        || candidate.kind() == FaceKind.SOLID_TRANSMISSIVE)) {
+                    cover.removeIf(face -> face.quad.surface().fluid() != null);
+                    return;
+                }
+            }
+        }
+
+        private static IllegalArgumentException ambiguousContact(
+                List<Candidate> negative, List<Candidate> positive,
+                float minimumU, float maximumU, float minimumV, float maximumV) {
+            Candidate first = (negative.isEmpty() ? positive : negative).getFirst();
+            return new IllegalArgumentException(
+                    "Ambiguous transparent contact at " + first.key
+                            + " u=[" + minimumU + ", " + maximumU
+                            + "] v=[" + minimumV + ", " + maximumV
+                            + "]: negative=" + describe(negative)
+                            + ", positive=" + describe(positive)
+                            + "; translation must resolve both medium endpoints");
+        }
+
+        private static List<String> describe(List<Candidate> candidates) {
+            return candidates.stream().map(candidate -> candidate.kind()
+                    + " " + candidate.quad.surface().sprite().id()
+                    + " owner=" + candidate.quad.surface().block()
+                    + " peer=" + candidate.quad.peerOnly()).toList();
+        }
+
+        private static boolean hasSolidMedium(List<Candidate> candidates) {
+            for (Candidate candidate : candidates) {
+                if (candidate.kind() == FaceKind.SOLID_TRANSMISSIVE) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static boolean noneTransmissive(List<Candidate> candidates) {

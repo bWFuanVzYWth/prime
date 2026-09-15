@@ -9,7 +9,7 @@ import "bsdf/compact/contract/volume.slang";
 
 public struct PrimePathScatter {
     public BsdfSample bsdf;
-    public PrimeOpenPbrVolumeStack volumeStack;
+    public PrimeOpenPbrVolume medium;
 };
 
 public struct PrimeGuidedPathScatter {

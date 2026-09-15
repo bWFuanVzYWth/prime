@@ -30,19 +30,12 @@ public PrimeShadowTrace primeTracePreparedShadow(
         float distance,
         uint2 sourcePrimitive,
         uint2 targetEmitter,
-        float3 startingExtinction0,
-        float3 startingExtinction1,
-        uint2 startingMediumIds,
-        uint startingMediumCount) {
+        float3 startingExtinction,
+        uint startingMediumId) {
     primeShadowPayload.opticalDepthMomentHitDistance = float4(0.0);
-    primeShadowPayload.terminalExtinctionRayDistance = float4(
-            float3(0.0), distance);
-    primeShadowPayload.startingExtinction0Winding = float4(
-            startingExtinction0, startingMediumCount > 0u ? 1.0 : 0.0);
-    primeShadowPayload.startingExtinction1Winding = float4(
-            startingExtinction1, startingMediumCount > 1u ? 1.0 : 0.0);
-    primeShadowPayload.startingMediumIds = startingMediumIds;
-    primeShadowPayload.startingMediumCount = startingMediumCount;
+    primeShadowPayload.terminalExtinctionRayDistance = float4(startingExtinction, distance);
+    primeShadowPayload.startingExtinctionLastBoundary = float4(startingExtinction, -1.0);
+    primeShadowPayload.startingMediumId = startingMediumId;
     primeShadowPayload.sourcePrimitive = sourcePrimitive;
     primeShadowPayload.targetEmitter = targetEmitter;
     // Source and target geometry are rejected by exact identity in any-hit. The physical segment
@@ -63,9 +56,6 @@ public PrimeShadowTrace primeTracePreparedShadow(
     result.transmittance = clamp(exp(-primeShadowOpticalDepth(
                     primeShadowPayload.opticalDepthMomentHitDistance.xyz,
                     primeShadowPayload.terminalExtinctionRayDistance.xyz,
-                    primeShadowPayload.startingExtinction0Winding,
-                    primeShadowPayload.startingExtinction1Winding,
-                    primeShadowPayload.startingMediumCount,
                     primeShadowPayload.terminalExtinctionRayDistance.w)),
             float3(0.0),
             float3(1.0));
@@ -79,41 +69,26 @@ public PrimeShadowTrace primeTraceShadow(
         SurfaceInteraction surface,
         LightSample light,
         uint2 targetEmitter,
-        PrimeOpenPbrVolumeStack volumeStack) {
-    uint startingMediumCount = min(
-            volumeStack.count, PRIME_OPENPBR_MAX_VOLUME_STACK_SIZE);
-    float3 startingExtinction0 = startingMediumCount > 0u
-            ? primeShadowCanonicalExtinction(
-                    volumeStack.values[0].extinction)
-            : float3(0.0);
-    float3 startingExtinction1 = startingMediumCount > 1u
-            ? primeShadowCanonicalExtinction(
-                    volumeStack.values[1].extinction)
-            : float3(0.0);
-    uint2 startingMediumIds = uint2(
-            startingMediumCount > 0u ? volumeStack.values[0].mediumId : 0u,
-            startingMediumCount > 1u ? volumeStack.values[1].mediumId : 0u);
+        PrimeOpenPbrVolume medium) {
     return primeTracePreparedShadow(context,
             surface.position,
             light.direction,
             light.distance,
             uint2(surface.sectionIndex, primeSurfaceTriangleIndex(surface)),
             targetEmitter,
-            startingExtinction0,
-            startingExtinction1,
-            startingMediumIds,
-            startingMediumCount);
+            primeShadowCanonicalExtinction(medium.extinction),
+            medium.mediumId);
 }
 
 public PrimeShadowTrace primeTraceShadow(
         inout PrimeIntegratorContext context,
         SurfaceInteraction surface,
         LightSample light,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     return primeTraceShadow(
             context,
             surface,
             light,
             uint2(PRIME_NO_PRIMITIVE_INDEX),
-            volumeStack);
+            medium);
 }

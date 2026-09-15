@@ -10,7 +10,7 @@ import "state/realtime/contract.slang";
 import "state/realtime/medium.slang";
 
 // Detached guide traversal owns only guide/branch control and queued PSR state. Keeping this
-// explicit prevents the 112-byte transport aggregate from becoming live in its iterative kernel.
+// explicit prevents the full path record from becoming live in its iterative kernel.
 public struct PrimeDetachedGuideOwnerState {
     public uint guideControl;
     public uint denoiserControl;

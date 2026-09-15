@@ -6,11 +6,137 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import dev.prime.render.scene.CapturedSectionGeometry;
 import org.junit.jupiter.api.Test;
 
 final class TransparentBoundaryResolverTest {
+    @Test
+    void waterloggedPaneDisplacesWaterOnlyWithinItsGlassContact() {
+        // Reproduces the pink glass / waterlogged pane contact at (-139, 18, 727).
+        float waterHeight = 0.88789F;
+        for (int normal : new int[] {-1, 1}) {
+            for (int order = 0; order < 6; order++) {
+                CapturedCluster cluster = waterloggedFace(normal, order, true, false, waterHeight);
+                float boundaryArea = 0.0F;
+                float vacuumArea = 0.0F;
+                for (var face : TransparentBoundaryResolver.resolve(cluster, true).section(0)) {
+                    if (face.definition() instanceof SurfaceDefinition.Boundary boundary) {
+                        var water = normal > 0 ? boundary.positiveMedium() : boundary.negativeMedium();
+                        var glass = normal > 0 ? boundary.negativeMedium() : boundary.positiveMedium();
+                        assertTrue(water.surface().water());
+                        assertEquals(8, glass.surface().block().mediumFamily());
+                        boundaryArea += projectedArea(face);
+                    } else {
+                        assertInstanceOf(SurfaceDefinition.Single.class, face.definition());
+                        assertEquals(8, face.surface().block().mediumFamily());
+                        vacuumArea += projectedArea(face);
+                    }
+                }
+                assertEquals(0.875F * waterHeight, boundaryArea, 1.0E-6F);
+                assertEquals(0.875F * (1.0F - waterHeight), vacuumArea, 1.0E-6F);
+                assertEquals(0.875F, projectedArea(translate(cluster)), 1.0E-6F);
+            }
+        }
+    }
+
+    @Test
+    void waterloggedSolidDisplacesWaterOnAnExposedFace() {
+        for (boolean opaque : new boolean[] {false, true}) {
+            for (int normal : new int[] {-1, 1}) {
+                CapturedCluster cluster = waterloggedFace(normal, 0, false, opaque, 1.0F);
+                float waterArea = 0.0F;
+                float solidArea = 0.0F;
+                for (var face : TransparentBoundaryResolver.resolve(cluster, true).section(0)) {
+                    assertInstanceOf(SurfaceDefinition.Single.class, face.definition());
+                    if (face.surface().water()) {
+                        waterArea += projectedArea(face);
+                    } else {
+                        solidArea += projectedArea(face);
+                    }
+                }
+                assertEquals(0.875F, waterArea, 1.0E-6F);
+                assertEquals(0.125F, solidArea, 1.0E-6F);
+            }
+        }
+    }
+
+    private static CapturedCluster waterloggedFace(
+            int normal, int order, boolean oppositeGlass, boolean opaque, float waterHeight) {
+        int owner = normal > 0 ? 1 : 0;
+        var faces = new CapturedSectionGeometry.MutableQuad[] {
+                xFace(normal, 0.0F, 1.0F, 0.0F, 1.0F),
+                xFace(-normal, 0.0F, 1.0F, 0.4375F, 0.5625F),
+                xFaceAt(1.0F + normal * 0.001F, -normal, 0.0F, waterHeight, 0.0F, 1.0F)
+        };
+        var surfaces = new CapturedSectionGeometry.Surface[] {
+                surface(new TestSprite("pink_glass"), -1, false, false, 1 - owner, 0, 0, 8),
+                surface(new TestSprite("pink_pane_top"), -1, false, opaque, owner, 0, 0, 8),
+                fluidSurface(new TestSprite("water_overlay"), owner, 0, 0)
+        };
+        int[][] permutations = {{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}};
+        var section = new CapturedSectionGeometry.Builder();
+        for (int index : permutations[order]) {
+            if (index != 0 || oppositeGlass) {
+                section.add(faces[index], surfaces[index]);
+            }
+        }
+        var cluster = new CapturedCluster.Builder(0, 0, 0);
+        cluster.add(0, 0, 0, section.build());
+        return cluster.build();
+    }
+
+    private static float projectedArea(TransparentBoundaryResolver.ResolvedQuad face) {
+        var quad = new SectionMeshAccumulator.Quad();
+        face.write(quad);
+        float area = 0.0F;
+        for (int vertex = 0; vertex < 4; vertex++) {
+            int next = (vertex + 1) % 4;
+            area += quad.y[vertex] * quad.z[next] - quad.y[next] * quad.z[vertex];
+        }
+        return 0.5F * Math.abs(area);
+    }
+
+    @Test
+    void ambiguousSolidContactFailsAtTranslationInsteadOfDeferringToRayHistory() {
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        section.add(xFace(1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                surface(new TestSprite("ambiguous_glass_a"), -1, false, false, 0, 0, 0));
+        section.add(xFace(1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                surface(new TestSprite("ambiguous_glass_b"), -1, false, false, 0, 0, 0));
+        section.add(xFace(-1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                surface(new TestSprite("ambiguous_glass_c"), -1, false, false, 1, 0, 0));
+        assertThrows(IllegalArgumentException.class, () -> translate(0, section.build()));
+    }
+
+    @Test
+    void competingSolidEndpointsOnOneSideFailAtTranslation() {
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        section.add(xFace(1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                surface(new TestSprite("competing_glass_a"), -1, false, false, 0, 0, 0));
+        section.add(xFace(1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                surface(new TestSprite("competing_glass_b"), -1, false, false, 0, 0, 0));
+        assertThrows(IllegalArgumentException.class, () -> translate(0, section.build()));
+    }
+
+    @Test
+    void solidBoundaryRejectsAThinEndpoint() {
+        CapturedSectionGeometry.Builder section = new CapturedSectionGeometry.Builder();
+        section.add(xFace(1.0F, 0.0F, 1.0F, 0.0F, 1.0F),
+                surface(new TestSprite("boundary_glass"), -1, false, false, 0, 0, 0));
+        CapturedSectionGeometry.Quad quad = section.build().quads().getFirst();
+        SurfaceDefinition.MaterialBinding binding =
+                SurfaceDefinition.MaterialBinding.of(quad, TransmissiveTopology.SOLID);
+        SurfaceDefinition.MediumEndpoint solid = new SurfaceDefinition.MediumEndpoint(
+                quad.surface(), 0.5F, 0.5F, TransmissiveTopology.SOLID);
+        SurfaceDefinition.MediumEndpoint thin = new SurfaceDefinition.MediumEndpoint(
+                quad.surface(), 0.5F, 0.5F, TransmissiveTopology.THIN_SHEET);
+        assertThrows(IllegalArgumentException.class,
+                () -> SurfaceDefinition.boundary(binding, thin, solid));
+    }
+
     @Test
     void collisionBackedPaneIsSolidEvenWhenItsCapturedComponentIsOpen() {
         TestSprite glass = new TestSprite("solid_glass_pane");

@@ -47,7 +47,7 @@ struct PrimeWavefrontScatter {
 };
 
 PrimeWavefrontScatter primeSampleWavefrontHit(inout PrimeIntegratorContext context, PathState path,
-        PrimeOpenPbrVolumeStack volume, SurfaceInteraction surface, bool needsGuide, bool transparent) {
+        PrimeOpenPbrVolume volume, SurfaceInteraction surface, bool needsGuide, bool transparent) {
     PrimeWavefrontScatter result;
     float3 viewDirection = -path.rayDirection;
     result.traits = primeSurfaceClosureTraits(surface, viewDirection, volume, primeUsesAirGap());
@@ -81,7 +81,7 @@ public bool primeAdvanceWavefrontHit<Phase>(Phase phase, inout PrimeIntegratorCo
     bool guideFallback = transparent && primeWavefrontGuideFallback(record.sourceAndPathControl.z);
     uint guideBounce = (control >> PRIME_WAVEFRONT_PRIMARY_BOUNCE_SHIFT) & PRIME_WAVEFRONT_BYTE_MASK;
     PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolumeStack volume = primeWavefrontVolumeStack(record);
+    PrimeOpenPbrVolume volume = primeWavefrontMedium(record);
     bool segmentAlive = primeApplySegmentMedium(path.throughput, surface, volume);
     uint updates = primeScatterHitDistanceUpdates(phase, transparent, segmentAlive, primePathBounce(path.control), guideBounce);
     if (transparent && !hadGuide) updates &= ~PRIME_SCATTER_GUIDE_HIT;
@@ -102,7 +102,7 @@ public bool primeAdvanceWavefrontHit<Phase>(Phase phase, inout PrimeIntegratorCo
         if (segmentAlive) {
             bool hasScatter = primeHasScatter(sampled.scatter.bsdf);
             // Preserve the different invalid-sample volume assignments of the two signal paths.
-            if (!transparent || hasScatter) volume = sampled.scatter.volumeStack;
+            if (!transparent || hasScatter) volume = sampled.scatter.medium;
             continuation = hasScatter && primeAdvanceRealtimePath(context, path, surface,
                     sampled.scatter.bsdf, primeClosureIsDiscreteOnly(sampled.traits));
             if (continuation) path.control = primeIncrementPathBounce(path.control);

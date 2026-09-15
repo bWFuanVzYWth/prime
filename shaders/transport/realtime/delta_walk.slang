@@ -32,7 +32,7 @@ public bool primeDeltaWalkHitIsDeltaOnly(
     return primeSurfaceIsDiscreteOnly(
             surface,
             -path.rayDirection,
-            primeWavefrontVolumeStack(record));
+            primeWavefrontMedium(record));
 }
 
 public void primeQueueDeltaWalkLanding(

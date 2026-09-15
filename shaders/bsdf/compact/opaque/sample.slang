@@ -13,22 +13,22 @@ public PrimeOpenPbrSampleResult primeCompactOpaqueSample(
         float3 wi,
         float3 randomValue,
         PrimeCompactOpaqueState state,
-        PrimeOpenPbrVolumeStack stack) {
+        PrimeOpenPbrVolume medium) {
     return state.kind == PRIME_COMPACT_OPAQUE_CONDUCTOR
             ? primeCompactConductorSample(
-                    wi, randomValue, state, PRIME_OPENPBR_FLAG_ALL, stack)
+                    wi, randomValue, state, PRIME_OPENPBR_FLAG_ALL, medium)
             : primeCompactOpaqueLayerSample(
-                    wi, randomValue, state, stack, false);
+                    wi, randomValue, state, medium, false);
 }
 
 public PrimeOpenPbrSampleResult primeCompactOpaqueSampleWithEonDiffuse(
         float3 wi,
         float3 randomValue,
         PrimeCompactOpaqueState state,
-        PrimeOpenPbrVolumeStack stack) {
+        PrimeOpenPbrVolume medium) {
     return state.kind == PRIME_COMPACT_OPAQUE_CONDUCTOR
             ? primeCompactConductorSample(
-                    wi, randomValue, state, PRIME_OPENPBR_FLAG_ALL, stack)
+                    wi, randomValue, state, PRIME_OPENPBR_FLAG_ALL, medium)
             : primeCompactOpaqueLayerSample(
-                    wi, randomValue, state, stack, true);
+                    wi, randomValue, state, medium, true);
 }

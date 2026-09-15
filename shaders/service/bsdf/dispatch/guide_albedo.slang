@@ -20,7 +20,7 @@ import "bsdf/compact/contract/volume.slang";
 public PrimeDenoiseAlbedos primeSurfaceGuideAlbedos(
         SurfaceInteraction surface,
         float3 viewDirection,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         bool usesAirGap) {
     float3 outwardNormal = surface.shadingNormal;
     outwardNormal = dot(outwardNormal, surface.geometricNormal) >= 0.0
@@ -38,7 +38,7 @@ public PrimeDenoiseAlbedos primeSurfaceGuideAlbedos(
                 surface.materialControl,
                 viewDirection,
                 surface.t,
-                volumeStack);
+                medium);
         return primeDenoiseAlbedosFromState(
                 state, viewDirection, PRIME_DENOISE_CLOSURE_FOLIAGE);
     }
@@ -53,7 +53,7 @@ public PrimeDenoiseAlbedos primeSurfaceGuideAlbedos(
                         surface.opticalControl,
                         viewDirection,
                         surface.t,
-                        volumeStack,
+                        medium,
                         surface.mediumId,
                         surface.adjacentBaseColor,
                         surface.adjacentInterfaceControl,
@@ -70,7 +70,7 @@ public PrimeDenoiseAlbedos primeSurfaceGuideAlbedos(
             surface.materialControl,
             viewDirection,
             surface.t,
-            volumeStack);
+            medium);
     return primeDenoiseAlbedosFromState(
             state, viewDirection, PRIME_DENOISE_CLOSURE_OPAQUE);
 }

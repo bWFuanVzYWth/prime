@@ -17,7 +17,7 @@ public bool3 lessThanEqual(float3 first, float3 second) { return first <= second
 // continuation. The adapter owns the conditional primary proposals and medium handoff.
 public struct PrimeTransmissiveBsdfSample {
     public BsdfSample bsdfSample;
-    public PrimeOpenPbrVolumeStack volumeStack;
+    public PrimeOpenPbrVolume medium;
 };
 
 public struct PrimeTransmissiveBsdfSplit {

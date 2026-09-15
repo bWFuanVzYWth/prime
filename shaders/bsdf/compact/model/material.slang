@@ -63,14 +63,6 @@ public PrimeOpenPbrMaterial primeCompactMaterialFromMetallic(
     return material;
 }
 
-public float primeCompactInverseOutsideIor(
-        float wiZ, PrimeOpenPbrVolumeStack volumeStack) {
-    if (wiZ > 0.0) {
-        if (volumeStack.count > 0u) {
-            return 1.0 / volumeStack.values[volumeStack.count - 1u].ior;
-        }
-    } else if (volumeStack.count > 1u) {
-        return 1.0 / volumeStack.values[volumeStack.count - 2u].ior;
-    }
-    return 1.0;
+public float primeCompactInverseOutsideIor(PrimeOpenPbrVolume medium) {
+    return 1.0 / medium.ior;
 }

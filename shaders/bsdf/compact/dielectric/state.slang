@@ -38,7 +38,7 @@ public PrimeCompactTransmissionState primeCompactTransmissionStateInit<Transmiss
         TransmissionGgxEnergy transmissionGgxEnergy,
         PrimeOpenPbrMaterial material,
         float3 wi,
-        float inverseOutsideIor,
+        PrimeOpenPbrVolume outsideMedium,
         float rayT)
     where TransmissionGgxEnergy : IPrimeOpenPbrTransmissionGgxEnergy
 {
@@ -52,13 +52,17 @@ public PrimeCompactTransmissionState primeCompactTransmissionStateInit<Transmiss
     state.specularMicrofacet.alpha = primeOpenPbrSpecularNdfRoughnesses(
             material.specular.roughness,
             material.specular.roughnessAnisotropy);
-    state.specularFresnel.ior = material.specular.ior * inverseOutsideIor;
+    state.specularFresnel.ior = material.specular.ior * (1.0 / outsideMedium.ior);
     state.specularFresnel.energyIor = primeOpenPbrIorAdjustment(
             state.specularFresnel.ior, material.weight.specular);
     state.specularFresnel.color = material.specular.color;
     state.transmissionTint = material.transmission.depth == 0.0
             ? material.transmission.color : float3(1.0);
     state.transmissionVolume = primeOpenPbrVolumeFromTransmission(material.transmission);
+    state.transmissionVolume.ior = material.specular.ior;
+    if (state.geometryThinWalled == 0u && state.entering == 0u) {
+        state.transmissionVolume = outsideMedium;
+    }
     state.transmissionMicrofacet.alpha = float2(0.0);
     state.transmissionMultipleScattering = float3(1.0, 1.0, 0.0);
     if (state.geometryThinWalled != 0u) {

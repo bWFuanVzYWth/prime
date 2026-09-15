@@ -16,9 +16,9 @@ import "contract/path.slang";
 
 public PrimeOfflineTransportRecord primeMakeOfflineTransport(
         PathState path,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         bool enabled) {
-    return primePackOfflineTransport(path, volumeStack, enabled);
+    return primePackOfflineTransport(path, medium, enabled);
 }
 
 public PathState primeOfflinePath(
@@ -30,9 +30,9 @@ public PathState primeOfflinePath(
     return path;
 }
 
-public PrimeOpenPbrVolumeStack primeOfflineVolumeStack(
+public PrimeOpenPbrVolume primeOfflineMedium(
         PrimeOfflineTransportRecord record) {
-    return primeUnpackOfflineTransportVolumeStack(record);
+    return primeUnpackOfflineTransportMedium(record);
 }
 
 public bool primeOfflineIsActive(PrimeOfflinePathRecord record) {

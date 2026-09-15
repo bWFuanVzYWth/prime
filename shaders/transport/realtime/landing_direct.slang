@@ -43,7 +43,7 @@ public void primeEvaluateLandingDirect(
     uint2 pixel = primeWavefrontPixel(recordIndex);
     SurfaceInteraction surface = primeLoadWavefrontSurface(recordIndex);
     if (!primeApplySegmentMedium(
-            path.throughput, surface, path.volumeStack)) {
+            path.throughput, surface, path.medium)) {
         return;
     }
 
@@ -68,7 +68,7 @@ public void primeEvaluateLandingDirect(
                     path.viewDirection,
                     primeDirectSample2D(
                             directSample, PRIME_DIRECT_SAMPLE_SUN),
-                    path.volumeStack,
+                    path.medium,
                     false);
             AreaLightSample area = primeSampleAreaLightSelection(
                     surface.position,
@@ -82,7 +82,7 @@ public void primeEvaluateLandingDirect(
                             surface,
                             path.viewDirection,
                             area,
-                            path.volumeStack,
+                            path.medium,
                             false);
             primeAccumulateTransparentPrimaryDirect(
                     pixel,
@@ -101,7 +101,7 @@ public void primeEvaluateLandingDirect(
                     path.viewDirection,
                     primeDirectSample2D(
                             directSample, PRIME_DIRECT_SAMPLE_SUN),
-                    path.volumeStack);
+                    path.medium);
             AreaLightSample area = primeSampleAreaLightSelection(
                     surface.position,
                     selection.area,
@@ -113,7 +113,7 @@ public void primeEvaluateLandingDirect(
                     surface,
                     path.viewDirection,
                     area,
-                    path.volumeStack);
+                    path.medium);
             float3 contribution = path.throughput * direct;
             if (any(contribution > float3(0.0))) {
                 primeAccumulateDeferredDirectLight(

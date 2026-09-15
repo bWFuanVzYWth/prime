@@ -18,7 +18,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryDirectAreaLight(
         SurfaceInteraction surface,
         float3 viewDirection,
         PrimePreparedSampleBase preparedSample,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         bool conditionalTransparentBranch) {
     return primeEstimatePrimaryDirectAreaLightSampled(
             context,
@@ -32,7 +32,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryDirectAreaLight(
                     preparedSample,
                     PRIME_SAMPLE_EFFECT_DIRECT_AREA_LIGHT,
                     PRIME_SAMPLE_DIMENSION_SECONDARY),
-            volumeStack,
+            medium,
             conditionalTransparentBranch);
 }
 
@@ -42,7 +42,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryDirectAreaLightSampled(
         float3 viewDirection,
         float2 treeSample,
         float2 positionSample,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         bool conditionalTransparentBranch) {
     AreaLightSample area = primeSampleAreaLight(
             surface.position,
@@ -54,7 +54,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryDirectAreaLightSampled(
             surface,
             viewDirection,
             area,
-            volumeStack,
+            medium,
             conditionalTransparentBranch);
 }
 
@@ -64,7 +64,7 @@ public float3 primeEstimateDirectAreaLight(
         float3 viewDirection,
         float2 treeSample,
         float2 positionSample,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     AreaLightSample area = primeSampleAreaLight(
             surface.position,
             primeAreaLightReceiverNormal(surface, viewDirection),
@@ -75,7 +75,7 @@ public float3 primeEstimateDirectAreaLight(
             surface,
             viewDirection,
             area,
-            volumeStack);
+            medium);
 }
 
 public PrimeDirectLightingSplit primeEstimatePrimaryNonsunDirect(
@@ -83,7 +83,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryNonsunDirect(
         SurfaceInteraction surface,
         float3 viewDirection,
         PrimePreparedSampleBase preparedSample,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         bool conditionalTransparentBranch) {
     // Stars are evaluated only when the continuation ray misses. Primary non-sun guides therefore
     // contain only the explicitly sampled area-light family.
@@ -92,7 +92,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryNonsunDirect(
             surface,
             viewDirection,
             preparedSample,
-            volumeStack,
+            medium,
             conditionalTransparentBranch);
 }
 
@@ -102,7 +102,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryNonsunDirectSampled(
         float3 viewDirection,
         float2 treeSample,
         float2 positionSample,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         bool conditionalTransparentBranch) {
     return primeEstimatePrimaryDirectAreaLightSampled(
             context,
@@ -110,6 +110,6 @@ public PrimeDirectLightingSplit primeEstimatePrimaryNonsunDirectSampled(
             viewDirection,
             treeSample,
             positionSample,
-            volumeStack,
+            medium,
             conditionalTransparentBranch);
 }

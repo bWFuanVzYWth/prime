@@ -88,6 +88,7 @@ sealed interface SurfaceDefinition permits
         }
     }
 
+    /** A solid SINGLE declares a vacuum exterior; it never means an unresolved outside medium. */
     record Single(MaterialBinding primary) implements SurfaceDefinition {
         public Single {
             Objects.requireNonNull(primary, "primary");
@@ -137,6 +138,13 @@ sealed interface SurfaceDefinition permits
             Objects.requireNonNull(primary, "primary");
             Objects.requireNonNull(positiveMedium, "positiveMedium");
             Objects.requireNonNull(negativeMedium, "negativeMedium");
+            if (primary.transmissiveTopology() != TransmissiveTopology.SOLID
+                    || positiveMedium.transmissiveTopology() != TransmissiveTopology.SOLID
+                    || negativeMedium.transmissiveTopology() != TransmissiveTopology.SOLID
+                    || !primary.surface().equals(negativeMedium.surface())) {
+                throw new IllegalArgumentException(
+                        "A medium boundary requires two solid endpoints and a matching negative substrate");
+            }
         }
 
         @Override

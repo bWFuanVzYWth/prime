@@ -1,6 +1,6 @@
 {
   "lambertContract": {
-    "recordSize": 144,
+    "recordSize": 128,
     "scratchRecordSize": 48,
     "queueCount": 3,
     "commandStride": 16,
@@ -840,14 +840,14 @@
     "mediumIdMask": "0xffff"
   },
   "realtimeWavefrontContract": {
-    "pathRecordSize": 112,
-    "etaScaleOffset": 92,
-    "pathControlReservedMask": "0x00ffff00",
+    "pathRecordSize": 96,
+    "etaScaleOffset": 76,
+    "pathControlReservedMask": "0x00000000",
     "pathSlotsPerPixel": 1,
     "areaGuideRecordSize": 32,
     "stagedLightRecordSize": 24,
     "stagedReceiverNormalOffset": 12,
-    "detachedGuideRecordSize": 40,
+    "detachedGuideRecordSize": 36,
     "areaRecordSize": 280,
     "queueEntriesPerPixel": 2,
     "queueStorageEntriesPerPixel": 9,

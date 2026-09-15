@@ -40,7 +40,7 @@ public bool primeAdvanceOrdinaryWavefrontMiss<Phase>(
 {
     uint2 pixel = primeWavefrontPixel(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
+    PrimeOpenPbrVolume medium = primeWavefrontMedium(record);
 
     bool guideWasPending =
             (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) == 0u;
@@ -60,7 +60,7 @@ public bool primeAdvanceOrdinaryWavefrontMiss<Phase>(
     PrimeWavefrontTransportRecord updatedRecord =
             primeMakeUpdatedWavefrontRecord(
                     path,
-                    volumeStack,
+                    medium,
                     denoiserState,
                     control,
                     0u,
@@ -90,7 +90,7 @@ public bool primeAdvanceTransparentWavefrontMiss<Phase>(
 {
     uint2 pixel = primeWavefrontPixel(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
+    PrimeOpenPbrVolume medium = primeWavefrontMedium(record);
 
     bool hadGuide =
             (control & PRIME_WAVEFRONT_REACHED_SOLID_ANGLE) != 0u;
@@ -118,7 +118,7 @@ public bool primeAdvanceTransparentWavefrontMiss<Phase>(
             phase,
             context,
             path,
-            volumeStack,
+            medium,
             branchResult,
             psrState,
             hasGuide,
@@ -132,7 +132,7 @@ public bool primeAdvanceTransparentWavefrontMiss<Phase>(
     PrimeWavefrontTransportRecord updatedRecord =
             primeMakeUpdatedTransparentWavefrontRecord(
                     path,
-                    volumeStack,
+                    medium,
                     branchResult,
                     psrState,
                     hasGuide,

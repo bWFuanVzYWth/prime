@@ -32,10 +32,10 @@ public void primeSelectOfflineLight(uint sourceQueue, uint launchIndex) {
         PrimeOfflineTransportRecord record = primeOfflinePaths[pathIndex].transport;
         uint2 pixel = primeOfflinePixel(pathIndex);
         PathState path = primeOfflinePath(pixel, record);
-        PrimeOpenPbrVolumeStack volumeStack = primeOfflineVolumeStack(record);
+        PrimeOpenPbrVolume medium = primeOfflineMedium(record);
         float3 viewDirection = -path.rayDirection;
         PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
-                surface, viewDirection, volumeStack, primeUsesAirGap());
+                surface, viewDirection, medium, primeUsesAirGap());
         if (primeClosureSupports(closureTraits, PRIME_MEASURE_SOLID_ANGLE)) {
             PrimePreparedSampleBase preparedSample = primePreparePathSample(
                     path.sampleSeed,

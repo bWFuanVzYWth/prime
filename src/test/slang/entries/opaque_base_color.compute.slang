@@ -38,9 +38,9 @@ void main(uint3 tid : SV_DispatchThreadID) {
     outputData[output + 5u] = float4(0.0);
     if (primeMaterialIsFoliage(control.y)) return;
 
-    PrimeOpenPbrVolumeStack stack = {};
+    PrimeOpenPbrVolume medium = primeVacuumMedium();
     PrimeCompactOpaqueState state = primeOpaqueStateWithMinimumRoughness(
-            source.rgb, normal, source.a, control.x, control.y, normal, 0.0, stack,
+            source.rgb, normal, source.a, control.x, control.y, normal, 0.0, medium,
             minimumRoughness);
     PrimeCompactOpaqueEnergy energy = primeCompactOpaqueEnergy(normal, state);
     outputData[output + 1u] = float4(energy.diffuse + energy.specular, energy.specular.x);
@@ -55,7 +55,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
     float cosine = asfloat(control.w);
     float3 view = float3(sqrt(1.0 - cosine * cosine), 0.0, cosine);
     state = primeOpaqueStateWithMinimumRoughness(
-            source.rgb, normal, source.a, control.x, control.y, view, 0.0, stack,
+            source.rgb, normal, source.a, control.x, control.y, view, 0.0, medium,
             minimumRoughness);
     energy = primeCompactOpaqueEnergy(view, state);
     PrimeDenoiseAlbedos guide = primeDenoiseAlbedosFromState(

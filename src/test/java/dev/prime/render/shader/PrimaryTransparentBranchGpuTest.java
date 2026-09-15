@@ -92,8 +92,8 @@ final class PrimaryTransparentBranchGpuTest extends GpuShaderTest {
                 int start = output.getInt(offset + 8), owner = output.getInt(offset + 12);
                 int words = output.getInt(offset + 16), surfaceWords = output.getInt(offset + 20);
                 assertEquals(8 * pixels + 25 * path, start);
-                assertEquals(start + 10, owner);
-                assertEquals(17, words);
+                assertEquals(start + 9, owner);
+                assertEquals(16, words);
                 assertTrue(owner + 7 <= start + surfaceWords);
                 assertTrue(start + words <= output.getInt(offset + 24));
                 int opposite = 8 * pixels + 25 * (path < pixels ? path + pixels : path - pixels);

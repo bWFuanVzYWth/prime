@@ -41,7 +41,7 @@ public void primeEvaluateSecondaryDirect(
             primeLoadWavefrontDirectState(recordIndex);
     SurfaceInteraction surface = primeLoadWavefrontSurface(recordIndex);
     if (!primeApplySegmentMedium(
-            path.throughput, surface, path.volumeStack)) {
+            path.throughput, surface, path.medium)) {
         return;
     }
 
@@ -63,7 +63,7 @@ public void primeEvaluateSecondaryDirect(
                 path.viewDirection,
                 primeDirectSample2D(
                         directSample, PRIME_DIRECT_SAMPLE_SUN),
-                path.volumeStack);
+                path.medium);
         AreaLightSample area = primeSampleAreaLightSelection(
                 surface.position,
                 selection.area,
@@ -75,7 +75,7 @@ public void primeEvaluateSecondaryDirect(
                 surface,
                 path.viewDirection,
                 area,
-                path.volumeStack);
+                path.medium);
         float3 contribution = path.throughput * direct;
         if (any(contribution > float3(0.0))) {
             primeAccumulateDeferredDirectLight(

@@ -19,17 +19,17 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransmissionDiscreteFromS
         PrimeCompactTransmissionState state,
         float3 viewDirection,
         float randomEvent,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     PrimeTransmissiveBsdfSample result;
     result.bsdfSample = primeInvalidBsdfSample();
-    result.volumeStack = volumeStack;
+    result.medium = medium;
     float3 localView = primeOpenPbrOnbToLocal(state.onb, viewDirection);
     PrimeOpenPbrSampleResult sampled = primeCompactTransmissionDiscreteSample(
             localView,
             randomEvent,
             state,
             PRIME_OPENPBR_FLAG_ALL,
-            volumeStack);
+            medium);
     if (!primeOpenPbrHasSample(sampled.bsdfSample)) {
         return result;
     }
@@ -40,10 +40,10 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransmissionDiscreteFromS
     result.bsdfSample.relativeEta = sampled.bsdfSample.eta;
     result.bsdfSample.eventFlags = primeOpenPbrToBsdfEventFlags(
             sampled.bsdfSample.throughput.flags);
-    result.volumeStack = sampled.volumeStack;
+    result.medium = sampled.medium;
     result.bsdfSample = primeSanitizeBsdfSample(result.bsdfSample);
     if (result.bsdfSample.eventFlags == 0u) {
-        result.volumeStack = volumeStack;
+        result.medium = medium;
     }
     return result;
 }

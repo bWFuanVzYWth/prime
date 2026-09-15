@@ -14,35 +14,10 @@ import "bsdf/compact/contract/material.slang";
 import "bsdf/compact/contract/volume.slang";
 import "bsdf/compact/math/frame.slang";
 
-public BsdfEvaluation primeEvaluateMinecraftTransparentReflection(
-        float3 baseColor,
-        float opacity,
-        float3 outwardNormal,
-        uint materialControl,
-        float roughness,
-        uint opticalControl,
+public BsdfEvaluation primeEvaluateMinecraftTransparentReflectionFromState(
+        PrimeCompactTransmissionState state,
         float3 viewDirection,
-        float3 scatterDirection,
-        float rayT,
-        PrimeOpenPbrVolumeStack volumeStack,
-        float3 adjacentBaseColor,
-        uint adjacentInterfaceControl,
-        bool usesAirGap) {
-    PrimeCompactTransmissionState state = primeMinecraftBoundaryTransmissionState(
-            baseColor,
-            opacity,
-            outwardNormal,
-            materialControl,
-            roughness,
-            opticalControl,
-            viewDirection,
-            rayT,
-            volumeStack,
-            0u,
-            adjacentBaseColor,
-            adjacentInterfaceControl,
-            0u,
-            usesAirGap);
+        float3 scatterDirection) {
     float3 localView = primeOpenPbrOnbToLocal(state.onb, viewDirection);
     float3 localScatter = primeOpenPbrOnbToLocal(state.onb, scatterDirection);
     if (localView.z * localScatter.z < 0.0
@@ -71,52 +46,18 @@ public BsdfEvaluation primeEvaluateMinecraftTransparentReflection(
         float3 viewDirection,
         float3 scatterDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack) {
-    return primeEvaluateMinecraftTransparentReflection(
-            baseColor,
-            opacity,
-            outwardNormal,
-            materialControl,
-            roughness,
-            opticalControl,
-            viewDirection,
-            scatterDirection,
-            rayT,
-            volumeStack,
-            float3(0.0),
-            0u,
-            false);
+        PrimeOpenPbrVolume medium) {
+    PrimeCompactTransmissionState state = primeMinecraftTransmissionState(
+            baseColor, opacity, outwardNormal, materialControl, roughness, opticalControl,
+            viewDirection, rayT, medium, 0u);
+    return primeEvaluateMinecraftTransparentReflectionFromState(
+            state, viewDirection, scatterDirection);
 }
 
-public BsdfEvaluation primeEvaluateMinecraftTransparentTransmission(
-        float3 baseColor,
-        float opacity,
-        float3 outwardNormal,
-        uint materialControl,
-        float roughness,
-        uint opticalControl,
+public BsdfEvaluation primeEvaluateMinecraftTransparentTransmissionFromState(
+        PrimeCompactTransmissionState state,
         float3 viewDirection,
-        float3 scatterDirection,
-        float rayT,
-        PrimeOpenPbrVolumeStack volumeStack,
-        float3 adjacentBaseColor,
-        uint adjacentInterfaceControl,
-        bool usesAirGap) {
-    PrimeCompactTransmissionState state = primeMinecraftBoundaryTransmissionState(
-            baseColor,
-            opacity,
-            outwardNormal,
-            materialControl,
-            roughness,
-            opticalControl,
-            viewDirection,
-            rayT,
-            volumeStack,
-            0u,
-            adjacentBaseColor,
-            adjacentInterfaceControl,
-            0u,
-            usesAirGap);
+        float3 scatterDirection) {
     float3 localView = primeOpenPbrOnbToLocal(state.onb, viewDirection);
     float3 localScatter = primeOpenPbrOnbToLocal(state.onb, scatterDirection);
     if (localView.z * localScatter.z >= 0.0
@@ -144,21 +85,12 @@ public BsdfEvaluation primeEvaluateMinecraftTransparentTransmission(
         float3 viewDirection,
         float3 scatterDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack) {
-    return primeEvaluateMinecraftTransparentTransmission(
-            baseColor,
-            opacity,
-            outwardNormal,
-            materialControl,
-            roughness,
-            opticalControl,
-            viewDirection,
-            scatterDirection,
-            rayT,
-            volumeStack,
-            float3(0.0),
-            0u,
-            false);
+        PrimeOpenPbrVolume medium) {
+    PrimeCompactTransmissionState state = primeMinecraftTransmissionState(
+            baseColor, opacity, outwardNormal, materialControl, roughness, opticalControl,
+            viewDirection, rayT, medium, 0u);
+    return primeEvaluateMinecraftTransparentTransmissionFromState(
+            state, viewDirection, scatterDirection);
 }
 
 

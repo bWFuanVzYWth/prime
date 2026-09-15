@@ -17,10 +17,10 @@ import "bsdf/compact/math/spectrum.slang";
 
 public PrimeOpenPbrSampleResult primeCompactTransmissionZeroResult(
         PrimeCompactTransmissionState state,
-        PrimeOpenPbrVolumeStack stack) {
+        PrimeOpenPbrVolume medium) {
     PrimeOpenPbrSampleResult result;
     result.bsdfSample = primeOpenPbrZeroSample();
-    result.volumeStack = stack;
+    result.medium = medium;
     result.rayT = state.rayT;
     return result;
 }
@@ -271,12 +271,12 @@ public PrimeOpenPbrSampleResult primeCompactTransmissionSampleRaw(
         float3 randomValue,
         PrimeCompactTransmissionState state,
         uint samplingFlags,
-        PrimeOpenPbrVolumeStack stack) {
-    PrimeOpenPbrSampleResult result = primeCompactTransmissionZeroResult(state, stack);
+        PrimeOpenPbrVolume medium) {
+    PrimeOpenPbrSampleResult result = primeCompactTransmissionZeroResult(state, medium);
     if (state.geometryThinWalled != 0u) {
         if (primeOpenPbrMicrofacetEffectivelySmooth(state.transmissionMicrofacet)) {
             return primeCompactThinWallDiscreteSampleRaw(
-                    wi, randomValue.z, state, samplingFlags, stack);
+                    wi, randomValue.z, state, samplingFlags, medium);
         }
         PrimeOpenPbrReflectiveSampleBase base = primeOpenPbrReflectiveSampleBase(
                 wi, randomValue, state.transmissionMicrofacet,

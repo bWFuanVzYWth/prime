@@ -23,7 +23,7 @@ public BsdfEvaluation primeEvaluateMinecraftFoliage(
         float3 viewDirection,
         float3 scatterDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     PrimeCompactFoliageState state = primeMinecraftFoliageState(
             baseColor,
             outwardNormal,
@@ -32,7 +32,7 @@ public BsdfEvaluation primeEvaluateMinecraftFoliage(
             materialControl,
             viewDirection,
             rayT,
-            volumeStack);
+            medium);
     float3 localView = primeOpenPbrOnbToLocal(state.base.onb, viewDirection);
     float3 localScatter = primeOpenPbrOnbToLocal(state.base.onb, scatterDirection);
     PrimeCompactFoliageEvaluation evaluation = primeCompactFoliageEvaluate(
@@ -55,7 +55,7 @@ public PrimeBsdfComponents primeEvaluateMinecraftFoliageComponents(
         float3 viewDirection,
         float3 scatterDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     PrimeBsdfComponents result;
     result.diffuseResponse = float3(0.0);
     result.specularResponse = float3(0.0);
@@ -68,7 +68,7 @@ public PrimeBsdfComponents primeEvaluateMinecraftFoliageComponents(
             materialControl,
             viewDirection,
             rayT,
-            volumeStack);
+            medium);
     float3 localView = primeOpenPbrOnbToLocal(state.base.onb, viewDirection);
     float3 localScatter = primeOpenPbrOnbToLocal(state.base.onb, scatterDirection);
     PrimeCompactFoliageComponents components = primeCompactFoliageEvaluateComponents(

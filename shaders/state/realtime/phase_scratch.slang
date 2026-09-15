@@ -8,7 +8,7 @@ import "math/realtime_storage.slang";
 import "state/realtime/contract.slang";
 
 // Light selection and the exact previous receiver normal coexist per path. Their 24-byte records
-// replace the earlier 40-byte detached-guide tail only after detached guide work has completed.
+// replace the earlier 36-byte detached-guide tail only after detached guide work has completed.
 public uint primeWavefrontPhaseWord(uint pathIndex) {
     return primeRealtimePhaseWord(pathIndex, primeWavefrontPixelCount());
 }

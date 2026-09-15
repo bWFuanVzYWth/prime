@@ -30,7 +30,7 @@ public PathState primeWavefrontPath(
     path.rayDirection = record.rayDirectionAndDenoiserControl.xyz;
     // Queued scatter has already consumed hit-emission MIS before this state is reconstructed.
     path.previousLightNormal = float3(0.0);
-    path.etaScale = primeUnpackWavefrontEtaScale(record.medium1);
+    path.etaScale = asfloat(record.medium.w);
     path.throughput = record.throughputAndReserved.xyz;
     uint bounce = (pathControl >> PRIME_WAVEFRONT_BOUNCE_SHIFT)
             & PRIME_WAVEFRONT_BYTE_MASK;
@@ -49,26 +49,10 @@ public PathState primeWavefrontPath(
     return path;
 }
 
-public PrimeOpenPbrVolumeStack primeWavefrontVolumeStack(
-        PrimeWavefrontTransportRecord record) {
-    PrimeOpenPbrVolumeStack volumeStack;
-    volumeStack.values[0] = primeUnpackWavefrontMediumState(
-            record.medium0,
-            record.medium1,
-            0u,
-            primeUnpackWavefrontMediumIor(record.sourceAndPathControl.z, 0u));
-    volumeStack.values[1] = primeUnpackWavefrontMediumState(
-            record.medium0,
-            record.medium1,
-            1u,
-            primeUnpackWavefrontMediumIor(record.sourceAndPathControl.z, 1u));
-    uint denoiserControl =
-            asuint(record.rayDirectionAndDenoiserControl.w);
-    volumeStack.count = min(
-            (denoiserControl >> PRIME_WAVEFRONT_MEDIUM_COUNT_SHIFT)
-                    & PRIME_WAVEFRONT_MEDIUM_COUNT_MASK,
-            2u);
-    return volumeStack;
+public PrimeOpenPbrVolume primeWavefrontMedium(PrimeWavefrontTransportRecord record) {
+    return primeUnpackWavefrontMediumState(record.medium,
+            primeWavefrontMediumId(record.sourceAndPathControl.w),
+            primeUnpackWavefrontMediumIor(record.sourceAndPathControl.z));
 }
 
 public PrimeDenoiserState primeWavefrontDenoiserState(
@@ -90,7 +74,7 @@ public PrimeDenoiserState primeWavefrontDenoiserState(
 
 public PrimeWavefrontTransportRecord primeMakeUpdatedWavefrontRecord(
         PathState path,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         PrimeDenoiserState denoiserState,
         uint previousDenoiserControl,
         uint psrControl,
@@ -102,7 +86,7 @@ public PrimeWavefrontTransportRecord primeMakeUpdatedWavefrontRecord(
             & PRIME_WAVEFRONT_PRIMARY_FLAGS_MASK;
     PrimeWavefrontTransportRecord record = primeMakeWavefrontTransportRecord(
 path,
-            volumeStack,
+            medium,
             denoiserState,
             primaryMaterialFlags,
             enabled);
@@ -116,7 +100,7 @@ path,
 
 public PrimeWavefrontPathRecord primeMakeTransparentWavefrontRecord(
         PathState path,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         PrimeTransparentBranchResult branchResult,
         PrimeQueuedPsrState psrState,
         bool transmissionBranch,
@@ -137,7 +121,7 @@ public PrimeWavefrontPathRecord primeMakeTransparentWavefrontRecord(
     denoiserState.primaryBounce = guideBounce;
     PrimeWavefrontPathRecord record = primeMakeWavefrontRecord(
 path,
-            volumeStack,
+            medium,
             denoiserState,
             branchResult.guides,
             enabled);
@@ -165,7 +149,7 @@ path,
 
 public PrimeWavefrontTransportRecord primeMakeUpdatedTransparentWavefrontRecord(
         PathState path,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         PrimeTransparentBranchResult branchResult,
         PrimeQueuedPsrState psrState,
         bool hasGuide,
@@ -185,7 +169,7 @@ public PrimeWavefrontTransportRecord primeMakeUpdatedTransparentWavefrontRecord(
     denoiserState.primaryBounce = guideBounce;
     PrimeWavefrontTransportRecord record = primeMakeUpdatedWavefrontRecord(
 path,
-            volumeStack,
+            medium,
             denoiserState,
             previousDenoiserControl,
             primeQueuedPsrStorageFlags(psrState),

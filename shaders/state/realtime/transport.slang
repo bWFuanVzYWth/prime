@@ -87,7 +87,7 @@ public PrimeWavefrontPathRecord primeWavefrontWithPrimaryPreviousPosition(
 
 public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
         PathState path,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         PrimeDenoiserState denoiserState,
         uint primaryMaterialFlags,
         bool enabled) {
@@ -96,10 +96,9 @@ public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
             float4(path.physicalOrigin, path.previousBsdfPdf);
     record.sourceAndPathControl = uint4(
             path.sourcePrimitive,
-            primePackWavefrontMediumIors(volumeStack),
-            primePackWavefrontPathControl(path));
-    primePackWavefrontMediumState(
-            volumeStack, path.etaScale, record.medium0, record.medium1);
+            primePackWavefrontMediumIor(medium),
+            primePackWavefrontPathControl(path) | (medium.mediumId << 8u));
+    record.medium = primePackWavefrontMediumState(medium, path.etaScale);
     uint denoiserControl = enabled ? PRIME_WAVEFRONT_ACTIVE_MASK : 0u;
     if (denoiserState.reachedSolidAngle) {
         denoiserControl |= PRIME_WAVEFRONT_REACHED_SOLID_ANGLE;
@@ -110,8 +109,6 @@ public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
     denoiserControl = denoiserControl
             | (min(denoiserState.primaryBounce, PRIME_WAVEFRONT_BYTE_MASK)
                     << PRIME_WAVEFRONT_PRIMARY_BOUNCE_SHIFT)
-            | (min(volumeStack.count, 2u)
-                    << PRIME_WAVEFRONT_MEDIUM_COUNT_SHIFT)
             | ((primaryMaterialFlags & PRIME_WAVEFRONT_PRIMARY_FLAGS_MASK)
                     << PRIME_WAVEFRONT_PRIMARY_FLAGS_SHIFT);
     record.rayDirectionAndDenoiserControl =
@@ -122,14 +119,14 @@ public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
 
 public PrimeWavefrontPathRecord primeMakeWavefrontRecord(
         PathState path,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         PrimeDenoiserState denoiserState,
         PrimeDenoiserGuides guides,
         bool enabled) {
     PrimeWavefrontPathRecord record;
     record.transport = primeMakeWavefrontTransportRecord(
             path,
-            volumeStack,
+            medium,
             denoiserState,
             guides.primaryMaterialFlags,
             enabled);

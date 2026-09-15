@@ -259,8 +259,7 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 
 		def trace = 'struct(vec3(f32),f32,vec3(f32),u32,u32,u32,f32,f32,' +
 				'vec3(f32),f32,u32,u32,u32,u32,vec3(f32),u32,vec3(f32),u32)'
-		def shadow = 'struct(vec4(f32),vec4(f32),vec4(f32),vec4(f32),vec2(u32),' +
-				'u32,vec2(u32),vec2(u32))'
+		def shadow = 'struct(vec4(f32),vec4(f32),vec4(f32),u32,vec2(u32),vec2(u32))'
 		def lambert = 'struct(vec3(f32),f32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32)'
 		def lambertTrace = 'struct(vec2(u32),u32)'
 		def lambertShadow = 'struct(vec2(u32),vec2(u32),vec3(f32),f32,vec3(f32),u32,vec3(f32),u32)'

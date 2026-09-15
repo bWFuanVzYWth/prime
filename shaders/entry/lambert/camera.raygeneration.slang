@@ -39,7 +39,6 @@ void main() {
     primeLambertPaths[index].identity.w = visible ? PRIME_LAMBERT_VISIBLE : 0u;
     bool exhausted = false;
     // Camera initialization has at most one active medium, so one inferred entry cannot overflow.
-    if (visible) primeLambertInferIncomingMedium(medium, hit.media, hit.albedo, hit.auxiliary, hit.flags);
     float3 throughput = primeLambertSegmentFilter(medium, visible ? length(hit.position - origin) : 1000000.0);
     if (visible && !transparent) {
         primeLambertWriteVisibleEmission(index, throughput * hit.auxiliary);
@@ -55,7 +54,7 @@ void main() {
         origin = hit.position;
         source = uint2(hit.section, hit.triangle);
         if (reflection) direction = reflect(direction, hit.normal);
-        else exhausted = !primeLambertTransmit(medium, throughput, hit);
+        else primeLambertTransmit(medium, throughput, hit);
         if (!exhausted) hit = primeWalkLambert(origin, direction, source, medium, throughput,
                 1u, primeLambertDeltaLimit(), 1u, exhausted);
         primeLambertWriteReceiver(index, hit, direction, reflection, exhausted);

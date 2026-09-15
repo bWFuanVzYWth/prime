@@ -52,18 +52,18 @@ public void primeShadeVisibleDirect(
     float3 viewDirection = -primeCameraRayDirection(
             pixel, primeRealtimeCameraSample(pixel));
     float3 throughput = float3(1.0);
-    PrimeOpenPbrVolumeStack volumeStack =
+    PrimeOpenPbrVolume medium =
             (primePush.path.z & PRIME_PATH_CAMERA_IN_WATER_MASK) != 0u
-            ? primeCameraWaterVolumeStack()
-            : primeEmptyVolumeStack();
+            ? primeCameraWaterMedium()
+            : primeVacuumMedium();
     if (!primeApplySegmentMedium(
-            throughput, surface, volumeStack)) {
+            throughput, surface, medium)) {
         return;
     }
     PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
             surface,
             viewDirection,
-            volumeStack,
+            medium,
             primeUsesAirGap());
     if (!primeClosureSupports(closureTraits, PRIME_MEASURE_SOLID_ANGLE)) {
         return;
@@ -86,7 +86,7 @@ public void primeShadeVisibleDirect(
                     uint(recordIndex >= primeWavefrontPixelCount()))),
             primeDirectSample2D(
                     directSample, PRIME_DIRECT_SAMPLE_AREA_SECONDARY),
-            volumeStack,
+            medium,
             transparent);
     area.diffuse *= throughput;
     area.specular *= throughput;
@@ -111,7 +111,7 @@ public void primeShadeVisibleDirect(
             viewDirection,
             primeDirectSample2D(
                     directSample, PRIME_DIRECT_SAMPLE_SUN),
-            volumeStack,
+            medium,
             transparent);
     PrimeDirectLightingSplit direct = sun.lighting;
     direct.diffuse *= throughput;

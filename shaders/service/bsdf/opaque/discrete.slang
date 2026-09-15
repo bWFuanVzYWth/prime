@@ -30,11 +30,11 @@ public BsdfSample primeSampleOpaqueDiscreteFromState(
         PrimeCompactOpaqueDiscreteState state,
         float3 normal,
         float3 viewDirection,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     BsdfSample result = primeInvalidBsdfSample();
     float3 localView = primeOpenPbrOnbToLocal(state.onb, viewDirection);
     PrimeOpenPbrSampleResult sampled = primeCompactConductorDiscreteSample(
-            localView, state, PRIME_OPENPBR_FLAG_ALL, volumeStack);
+            localView, state, PRIME_OPENPBR_FLAG_ALL, medium);
     if (!primeOpenPbrHasSample(sampled.bsdfSample)) {
         return result;
     }

@@ -18,11 +18,11 @@ public BsdfSample primeSampleMinecraftFoliageFromState(
         PrimeCompactFoliageState state,
         float3 viewDirection,
         float3 sampleValue,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     BsdfSample result = primeInvalidBsdfSample();
     float3 localView = primeOpenPbrOnbToLocal(state.base.onb, viewDirection);
     PrimeOpenPbrSampleResult sampled = primeCompactFoliageSample(
-            localView, sampleValue, state, volumeStack);
+            localView, sampleValue, state, medium);
     if (!primeOpenPbrHasSample(sampled.bsdfSample)) {
         return result;
     }
@@ -44,7 +44,7 @@ public BsdfSample primeSampleMinecraftFoliage(
         float3 viewDirection,
         float3 sampleValue,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     PrimeCompactFoliageState state = primeMinecraftFoliageState(
             baseColor,
             outwardNormal,
@@ -53,7 +53,7 @@ public BsdfSample primeSampleMinecraftFoliage(
             materialControl,
             viewDirection,
             rayT,
-            volumeStack);
+            medium);
     return primeSampleMinecraftFoliageFromState(
-            state, viewDirection, sampleValue, volumeStack);
+            state, viewDirection, sampleValue, medium);
 }

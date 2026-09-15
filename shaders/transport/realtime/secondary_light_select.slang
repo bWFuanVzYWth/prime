@@ -31,7 +31,7 @@ public void primeSelectSecondaryLight(uint sourceQueue, uint launchIndex) {
         PrimeWavefrontLightSelectionState path =
                 primeLoadWavefrontLightSelectionState(recordIndex);
         PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
-                surface, path.viewDirection, path.volumeStack, primeUsesAirGap());
+                surface, path.viewDirection, path.medium, primeUsesAirGap());
         if (primeClosureSupports(
                 closureTraits, PRIME_MEASURE_SOLID_ANGLE)) {
             PrimeDirectSampleBase directSample = primeMakeDirectSampleBase(

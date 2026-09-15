@@ -22,7 +22,7 @@ public PrimeBsdfComponents primeEvaluateOpaqueComponents(
         float3 viewDirection,
         float3 scatterDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     PrimeBsdfComponents result;
     result.diffuseResponse = float3(0.0);
     result.specularResponse = float3(0.0);
@@ -35,7 +35,7 @@ public PrimeBsdfComponents primeEvaluateOpaqueComponents(
             flags,
             viewDirection,
             rayT,
-            volumeStack);
+            medium);
     float3 localView = primeOpenPbrOnbToLocal(state.onb, viewDirection);
     float3 localScatter = primeOpenPbrOnbToLocal(state.onb, scatterDirection);
     PrimeCompactOpaqueComponents compact = primeCompactOpaqueEvaluateComponents(

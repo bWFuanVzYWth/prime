@@ -19,8 +19,7 @@ public PrimeWavefrontTransportRecord primeLoadWavefrontTransportRecord(uint path
                     .transport.rayDirectionAndDenoiserControl;
     record.throughputAndReserved =
             primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.throughputAndReserved;
-    record.medium0 = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium0;
-    record.medium1 = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium1;
+    record.medium = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium;
     return record;
 }
 
@@ -37,6 +36,5 @@ public void primeStoreWavefrontTransportRecord(
             record.rayDirectionAndDenoiserControl;
     primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.throughputAndReserved =
             record.throughputAndReserved;
-    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium0 = record.medium0;
-    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium1 = record.medium1;
+    primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium = record.medium;
 }

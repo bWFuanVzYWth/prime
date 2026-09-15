@@ -37,7 +37,7 @@ public PrimeCompactOpaqueState primeOpaqueStateWithMinimumRoughness(
         uint flags,
         float3 viewDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         float minimumLinearRoughness) {
     PrimeOpenPbrMaterial material = primeOpaqueMaterialWithMinimumRoughness(
             baseColor,
@@ -47,7 +47,7 @@ public PrimeCompactOpaqueState primeOpaqueStateWithMinimumRoughness(
             flags,
             minimumLinearRoughness);
     float3 localView = primeOpenPbrOnbToLocal(material.geometry.onb, viewDirection);
-    float inverseOutsideIor = primeCompactInverseOutsideIor(localView.z, volumeStack);
+    float inverseOutsideIor = primeCompactInverseOutsideIor(medium);
     // Material translation restricts opaque production inputs to the exact OpenPBR
     // dielectric/conductor/subsurface submanifold accepted by the compact module.
     return primeCompactOpaqueStateInit(
@@ -66,7 +66,7 @@ public PrimeCompactOpaqueState primeOpaqueState(
         uint flags,
         float3 viewDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     return primeOpaqueStateWithMinimumRoughness(
             baseColor,
             normal,
@@ -75,6 +75,6 @@ public PrimeCompactOpaqueState primeOpaqueState(
             flags,
             viewDirection,
             rayT,
-            volumeStack,
+            medium,
             0.0);
 }

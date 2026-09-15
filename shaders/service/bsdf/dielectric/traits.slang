@@ -55,7 +55,7 @@ public PrimeClosureTraits primeMinecraftTransmissionClosureTraits(
         float roughness,
         uint opticalControl,
         float3 viewDirection,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         uint adjacentInterfaceControl,
         bool usesAirGap) {
     PrimeOpticalMaterial translated = primeDecodeOpticalMaterial(
@@ -83,12 +83,7 @@ public PrimeClosureTraits primeMinecraftTransmissionClosureTraits(
             relativeIor = originalIor * (1.0 / adjacentIor);
         }
     } else {
-        float3 closureNormal = thinWalled
-                        && dot(outwardNormal, viewDirection) < 0.0
-                ? -outwardNormal
-                : outwardNormal;
-        relativeIor = originalIor * primeCompactInverseOutsideIor(
-                dot(closureNormal, viewDirection), volumeStack);
+        relativeIor = originalIor * (thinWalled ? 1.0 / medium.ior : 1.0);
     }
     PrimeOpenPbrMicrofacet microfacet =
             primeClosureMicrofacet(interfaceRoughness);

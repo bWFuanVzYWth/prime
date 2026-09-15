@@ -26,7 +26,7 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransparentReflectionFrom
         float3 viewDirection,
         float3 localView,
         float3 sampleValue,
-        PrimeOpenPbrVolumeStack volumeStack);
+        PrimeOpenPbrVolume medium);
 
 public PrimeTransmissiveBsdfSample primeSampleMinecraftTransparentTransmissionFromState(
         PrimeCompactTransmissionState state,
@@ -35,7 +35,7 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransparentTransmissionFr
         float3 viewDirection,
         float3 localView,
         float3 sampleValue,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     if (primeMinecraftTransmissionIsDiscrete(state)) {
         return primeSampleMinecraftRefractedTransmissionFromState(
                 state,
@@ -43,18 +43,18 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransparentTransmissionFr
                 viewDirection,
                 float3(1.0) - mirror.reflectance,
                 false,
-                volumeStack);
+                medium);
     }
 
     PrimeTransmissiveBsdfSample result;
     result.bsdfSample = primeInvalidBsdfSample();
-    result.volumeStack = volumeStack;
+    result.medium = medium;
     PrimeOpenPbrSampleResult sampled = primeCompactTransmissionSample(
             localView,
             sampleValue,
             state,
             PRIME_OPENPBR_FLAG_TRANSMISSION,
-            volumeStack);
+            medium);
     if (!primeOpenPbrHasSample(sampled.bsdfSample)) {
         return result;
     }
@@ -67,17 +67,17 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransparentTransmissionFr
     result.bsdfSample.relativeEta = sampled.bsdfSample.eta;
     result.bsdfSample.eventFlags = primeOpenPbrToBsdfEventFlags(
             sampled.bsdfSample.throughput.flags);
-    result.volumeStack = sampled.volumeStack;
+    result.medium = sampled.medium;
     result.bsdfSample = primeSanitizeBsdfSample(result.bsdfSample);
     if (result.bsdfSample.eventFlags == 0u) {
-        result.volumeStack = volumeStack;
+        result.medium = medium;
     }
     return result;
 }
 
 // A queued single-path integrator samples the complete transmissive closure instead of forcing a
 // hemisphere. The closure's reflection/transmission selection probability remains in the PDF,
-// and only a sampled transmission event may replace the medium stack.
+// and only a sampled transmission event may replace the current medium.
 public PrimeTransmissiveBsdfSample primeSampleMinecraftTransmissionCompleteFromState(
         PrimeCompactTransmissionState state,
         float3 baseColor,
@@ -85,13 +85,13 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransmissionCompleteFromS
         uint materialControl,
         float3 viewDirection,
         float3 sampleValue,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     PrimeTransmissiveBsdfSample result;
     result.bsdfSample = primeInvalidBsdfSample();
-    result.volumeStack = volumeStack;
+    result.medium = medium;
     float3 localView = primeOpenPbrOnbToLocal(state.onb, viewDirection);
     PrimeOpenPbrSampleResult sampled = primeCompactTransmissionSample(
-            localView, sampleValue, state, PRIME_OPENPBR_FLAG_ALL, volumeStack);
+            localView, sampleValue, state, PRIME_OPENPBR_FLAG_ALL, medium);
     if (!primeOpenPbrHasSample(sampled.bsdfSample)) {
         return result;
     }
@@ -102,10 +102,10 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransmissionCompleteFromS
     result.bsdfSample.relativeEta = sampled.bsdfSample.eta;
     result.bsdfSample.eventFlags = primeOpenPbrToBsdfEventFlags(
             sampled.bsdfSample.throughput.flags);
-    result.volumeStack = sampled.volumeStack;
+    result.medium = sampled.medium;
     result.bsdfSample = primeSanitizeBsdfSample(result.bsdfSample);
     if (result.bsdfSample.eventFlags == 0u) {
-        result.volumeStack = volumeStack;
+        result.medium = medium;
     }
     return result;
 }
@@ -120,7 +120,7 @@ public PrimeTransmissiveBsdfSplit primeSampleMinecraftTransmissionSplitFromState
         float3 baseColor,
         float opacity,
         uint materialControl,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     // The first visible transparent interface evaluates one conditional reflection and one
     // conditional transmission event. Smooth interfaces remain exact; rough interfaces sample
     // the corresponding finite lobe without adding an event-selection probability.
@@ -132,7 +132,7 @@ public PrimeTransmissiveBsdfSplit primeSampleMinecraftTransmissionSplitFromState
             viewDirection,
             localView,
             reflectionSample,
-            volumeStack);
+            medium);
     result.transmission = primeSampleMinecraftTransparentTransmissionFromState(
             state,
             mirror,
@@ -140,15 +140,15 @@ public PrimeTransmissiveBsdfSplit primeSampleMinecraftTransmissionSplitFromState
             viewDirection,
             localView,
             reflectionSample,
-            volumeStack);
+            medium);
     // Both paths are evaluated, so neither PDF contains a branch-selection probability.
     result.reflection.bsdfSample = primeSanitizeBsdfSample(result.reflection.bsdfSample);
     if (result.reflection.bsdfSample.eventFlags == 0u) {
-        result.reflection.volumeStack = volumeStack;
+        result.reflection.medium = medium;
     }
     result.transmission.bsdfSample = primeSanitizeBsdfSample(result.transmission.bsdfSample);
     if (result.transmission.bsdfSample.eventFlags == 0u) {
-        result.transmission.volumeStack = volumeStack;
+        result.transmission.medium = medium;
     }
     return result;
 }
@@ -160,10 +160,10 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransparentReflectionFrom
         float3 viewDirection,
         float3 localView,
         float3 sampleValue,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     PrimeTransmissiveBsdfSample result;
     result.bsdfSample = primeInvalidBsdfSample();
-    result.volumeStack = volumeStack;
+    result.medium = medium;
     if (state.geometryThinWalled == 0u
             && primeOpenPbrMicrofacetEffectivelySmooth(state.specularMicrofacet)) {
         // Closed Minecraft glass models the reflected interface as a discrete mirror. This
@@ -186,7 +186,7 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransparentReflectionFrom
             sampleValue,
             state,
             PRIME_OPENPBR_FLAG_REFLECTION,
-            volumeStack);
+            medium);
     if (!primeOpenPbrHasSample(sampled.bsdfSample)) {
         return result;
     }
@@ -199,10 +199,10 @@ public PrimeTransmissiveBsdfSample primeSampleMinecraftTransparentReflectionFrom
     result.bsdfSample.relativeEta = 1.0;
     result.bsdfSample.eventFlags = primeOpenPbrToBsdfEventFlags(
             sampled.bsdfSample.throughput.flags);
-    result.volumeStack = sampled.volumeStack;
+    result.medium = sampled.medium;
     result.bsdfSample = primeSanitizeBsdfSample(result.bsdfSample);
     if (result.bsdfSample.eventFlags == 0u) {
-        result.volumeStack = volumeStack;
+        result.medium = medium;
     }
     return result;
 }

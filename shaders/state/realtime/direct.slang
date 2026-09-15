@@ -16,7 +16,7 @@ public struct PrimeWavefrontDirectState {
     public float3 throughput;
     public uint bounce;
     public uint control;
-    public PrimeOpenPbrVolumeStack volumeStack;
+    public PrimeOpenPbrVolume medium;
 };
 
 public struct PrimeWavefrontHitEmissionState {
@@ -30,28 +30,9 @@ public struct PrimeWavefrontHitEmissionState {
     public float3 previousLightNormal;
 };
 
-PrimeOpenPbrVolumeStack primeUnpackWavefrontDirectVolumeStack(
-        uint4 sourceAndPathControl,
-        float4 rayDirectionAndDenoiserControl,
-        uint4 medium0,
-        uint4 medium1) {
-    PrimeOpenPbrVolumeStack volumeStack;
-    volumeStack.values[0] = primeUnpackWavefrontMediumState(
-            medium0,
-            medium1,
-            0u,
-            primeUnpackWavefrontMediumIor(sourceAndPathControl.z, 0u));
-    volumeStack.values[1] = primeUnpackWavefrontMediumState(
-            medium0,
-            medium1,
-            1u,
-            primeUnpackWavefrontMediumIor(sourceAndPathControl.z, 1u));
-    volumeStack.count = min(
-            (asuint(rayDirectionAndDenoiserControl.w)
-                    >> PRIME_WAVEFRONT_MEDIUM_COUNT_SHIFT)
-                    & PRIME_WAVEFRONT_MEDIUM_COUNT_MASK,
-            2u);
-    return volumeStack;
+PrimeOpenPbrVolume primeUnpackWavefrontDirectMedium(uint4 control, uint4 medium) {
+    return primeUnpackWavefrontMediumState(medium,
+            primeWavefrontMediumId(control.w), primeUnpackWavefrontMediumIor(control.z));
 }
 
 public PrimeWavefrontDirectState primeLoadWavefrontDirectState(uint pathIndex) {
@@ -62,19 +43,15 @@ public PrimeWavefrontDirectState primeLoadWavefrontDirectState(uint pathIndex) {
                     .transport.rayDirectionAndDenoiserControl;
     float4 throughputAndReserved =
             primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.throughputAndReserved;
-    uint4 medium0 = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium0;
-    uint4 medium1 = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium1;
+    uint4 medium = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium;
     PrimeWavefrontDirectState state;
     state.viewDirection = -rayDirectionAndDenoiserControl.xyz;
     state.throughput = throughputAndReserved.xyz;
     state.bounce = (sourceAndPathControl.w >> PRIME_WAVEFRONT_BOUNCE_SHIFT)
             & PRIME_WAVEFRONT_BYTE_MASK;
     state.control = asuint(rayDirectionAndDenoiserControl.w);
-    state.volumeStack = primeUnpackWavefrontDirectVolumeStack(
-            sourceAndPathControl,
-            rayDirectionAndDenoiserControl,
-            medium0,
-            medium1);
+    state.medium = primeUnpackWavefrontDirectMedium(
+            sourceAndPathControl, medium);
     return state;
 }
 
@@ -103,18 +80,11 @@ public PrimeWavefrontHitEmissionState primeLoadWavefrontHitEmissionState(
     return state;
 }
 
-public PrimeOpenPbrVolumeStack primeLoadWavefrontHitVolumeStack(
+public PrimeOpenPbrVolume primeLoadWavefrontHitMedium(
         uint pathIndex) {
     uint4 sourceAndPathControl =
             primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.sourceAndPathControl;
-    float4 rayDirectionAndDenoiserControl =
-            primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)]
-                    .transport.rayDirectionAndDenoiserControl;
-    uint4 medium0 = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium0;
-    uint4 medium1 = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium1;
-    return primeUnpackWavefrontDirectVolumeStack(
-            sourceAndPathControl,
-            rayDirectionAndDenoiserControl,
-            medium0,
-            medium1);
+    uint4 medium = primeWavefrontPaths[primeWavefrontTransportIndex(pathIndex)].transport.medium;
+    return primeUnpackWavefrontDirectMedium(
+            sourceAndPathControl, medium);
 }

@@ -84,7 +84,7 @@ PrimeCompactTestResult primeCompactRun(uint4 encoded[4]) {
     result.components = primeCompactOpaqueEvaluateComponents(wi, wo, state);
     result.energy = primeCompactOpaqueEnergy(wi, state);
     result.sample = primeCompactOpaqueSample(
-            wi, randomValue, state, primeCompactTestEmptyStack());
+            wi, randomValue, state, primeCompactTestVacuum());
     result.sampledEvaluation.throughput = primeOpenPbrZeroThroughput();
     result.sampledEvaluation.pdf = 0.0;
 
@@ -133,7 +133,7 @@ PrimeCompactTestResult primeCompactRun(uint4 encoded[4]) {
             result.mask |= PRIME_TEST_FAILURE_EVENT;
         }
     }
-    if (result.sample.volumeStack.count != 0u
+    if (result.sample.medium.mediumId != 0u
             || !primeTestClose(result.sample.rayT, rayT, 0.0, 0.0)) {
         result.mask |= PRIME_TEST_FAILURE_STATE;
     }
@@ -157,7 +157,7 @@ void primeCompactWrite(uint caseIndex, PrimeCompactTestResult result) {
             result.sample.bsdfSample.wo, result.sample.bsdfSample.eta));
     primeTestOutput[outputOffset + 8u] = uint4(
             result.sample.bsdfSample.throughput.flags,
-            result.sample.volumeStack.count,
+            result.sample.medium.mediumId,
             asuint(result.sample.rayT),
             0u);
     primeTestOutput[outputOffset + 9u] = asuint(float4(

@@ -36,11 +36,6 @@ public PrimeLambertVisibility primeTraceLambertShadow(float3 origin, float3 dire
             return result;
         }
         float segment = length(primeLambertShadow.position - origin);
-        if (!primeLambertInferIncomingMedium(medium, primeLambertShadow.media,
-                primeLambertShadow.extinction, primeLambertShadow.adjacentExtinction, primeLambertShadow.flags)) {
-            result.blockerDistance = traveled + segment;
-            return result;
-        }
         result.filter *= primeLambertSegmentFilter(medium, segment);
         if (transitions == limit) {
             result.blockerDistance = traveled + segment;
@@ -48,11 +43,8 @@ public PrimeLambertVisibility primeTraceLambertShadow(float3 origin, float3 dire
         }
         if ((primeLambertShadow.flags & PRIME_LAMBERT_THIN) != 0u)
             result.filter *= exp(-primeLambertShadow.extinction);
-        else if (!primeLambertCrossBoundary(medium, primeLambertShadow.media,
-                primeLambertShadow.extinction, primeLambertShadow.adjacentExtinction, primeLambertShadow.flags)) {
-            result.blockerDistance = traveled + segment;
-            return result;
-        }
+        else primeLambertCrossBoundary(medium, primeLambertShadow.media,
+                primeLambertShadow.extinction, primeLambertShadow.adjacentExtinction, primeLambertShadow.flags);
         origin = primeLambertShadow.position;
         source = primeLambertShadow.source;
         remaining = max(0.0, remaining - segment);

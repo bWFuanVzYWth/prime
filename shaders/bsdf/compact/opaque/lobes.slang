@@ -15,10 +15,10 @@ import "bsdf/compact/contract/sample.slang";
 import "bsdf/compact/math/spectrum.slang";
 
 public PrimeOpenPbrSampleResult primeCompactZeroSampleResult(
-        PrimeCompactOpaqueState state, PrimeOpenPbrVolumeStack stack) {
+        PrimeCompactOpaqueState state, PrimeOpenPbrVolume medium) {
     PrimeOpenPbrSampleResult result;
     result.bsdfSample = primeOpenPbrZeroSample();
-    result.volumeStack = stack;
+    result.medium = medium;
     result.rayT = state.rayT;
     return result;
 }
@@ -115,8 +115,8 @@ public PrimeOpenPbrSampleResult primeCompactLambertSample(
         float3 randomValue,
         PrimeCompactOpaqueState state,
         uint samplingFlags,
-        PrimeOpenPbrVolumeStack stack) {
-    PrimeOpenPbrSampleResult result = primeCompactZeroSampleResult(state, stack);
+        PrimeOpenPbrVolume medium) {
+    PrimeOpenPbrSampleResult result = primeCompactZeroSampleResult(state, medium);
     if (wi.z < 0.0 || (samplingFlags & PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION) == 0u) {
         return result;
     }
@@ -136,8 +136,8 @@ public PrimeOpenPbrSampleResult primeCompactZeroRoughnessEonSample(
         float3 randomValue,
         PrimeCompactOpaqueState state,
         uint samplingFlags,
-        PrimeOpenPbrVolumeStack stack) {
-    PrimeOpenPbrSampleResult result = primeCompactZeroSampleResult(state, stack);
+        PrimeOpenPbrVolume medium) {
+    PrimeOpenPbrSampleResult result = primeCompactZeroSampleResult(state, medium);
     if (wi.z < 0.0 || (samplingFlags & PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION) == 0u) {
         return result;
     }
@@ -221,8 +221,8 @@ public PrimeOpenPbrSampleResult primeCompactSubsurfaceSample(
         float3 randomValue,
         PrimeCompactOpaqueState state,
         uint samplingFlags,
-        PrimeOpenPbrVolumeStack stack) {
-    PrimeOpenPbrSampleResult result = primeCompactZeroSampleResult(state, stack);
+        PrimeOpenPbrVolume medium) {
+    PrimeOpenPbrSampleResult result = primeCompactZeroSampleResult(state, medium);
     if ((samplingFlags & PRIME_OPENPBR_FLAG_DIFFUSE) == 0u) { return result; }
     float reflectionProbability = primeCompactSubsurfaceReflectionProbability(
             state, samplingFlags);
@@ -295,9 +295,9 @@ public PrimeOpenPbrSampleResult primeCompactMixedDiffuseSample(
         float3 randomValue,
         PrimeCompactOpaqueState state,
         uint samplingFlags,
-        PrimeOpenPbrVolumeStack stack) {
+        PrimeOpenPbrVolume medium) {
     if (state.diffuseMix.firstSampleWeight + state.diffuseMix.secondSampleWeight <= 0.0) {
-        return primeCompactZeroSampleResult(state, stack);
+        return primeCompactZeroSampleResult(state, medium);
     }
     if (randomValue.z <= state.diffuseMix.secondSampleWeight
             && state.diffuseMix.secondSampleWeight > 0.0) {
@@ -307,7 +307,7 @@ public PrimeOpenPbrSampleResult primeCompactMixedDiffuseSample(
                         randomValue.z / state.diffuseMix.secondSampleWeight),
                 state,
                 samplingFlags,
-                stack);
+                medium);
         result.bsdfSample.throughput = primeOpenPbrThroughputScale(
                 result.bsdfSample.throughput, state.subsurfaceWeight);
         result.bsdfSample.pdf *= state.diffuseMix.secondSampleWeight;
@@ -320,7 +320,7 @@ public PrimeOpenPbrSampleResult primeCompactMixedDiffuseSample(
                     / state.diffuseMix.firstSampleWeight),
             state,
             samplingFlags,
-            stack);
+            medium);
     result.bsdfSample.throughput = primeOpenPbrThroughputScale(
             result.bsdfSample.throughput, 1.0 - state.subsurfaceWeight);
     result.bsdfSample.pdf *= state.diffuseMix.firstSampleWeight;
@@ -366,8 +366,8 @@ public PrimeOpenPbrSampleResult primeCompactDielectricSample(
         float3 randomValue,
         PrimeCompactOpaqueState state,
         uint samplingFlags,
-        PrimeOpenPbrVolumeStack stack) {
-    PrimeOpenPbrSampleResult result = primeCompactZeroSampleResult(state, stack);
+        PrimeOpenPbrVolume medium) {
+    PrimeOpenPbrSampleResult result = primeCompactZeroSampleResult(state, medium);
     PrimeOpenPbrReflectiveSampleBase base = primeOpenPbrReflectiveSampleBase(
             wi, randomValue, state.microfacet, samplingFlags, PRIME_OPENPBR_FLAG_REFLECTION);
     result.bsdfSample = base.bsdfSample;
@@ -425,15 +425,15 @@ public PrimeOpenPbrSampleResult primeCompactConductorSample(
         float3 randomValue,
         PrimeCompactOpaqueState state,
         uint samplingFlags,
-        PrimeOpenPbrVolumeStack stack) {
+        PrimeOpenPbrVolume medium) {
     if (primeOpenPbrMicrofacetEffectivelySmooth(state.microfacet)) {
         return primeCompactConductorDiscreteSample(
                 wi,
                 primeCompactOpaqueDiscreteStateFromFull(state),
                 samplingFlags,
-                stack);
+                medium);
     }
-    PrimeOpenPbrSampleResult result = primeCompactZeroSampleResult(state, stack);
+    PrimeOpenPbrSampleResult result = primeCompactZeroSampleResult(state, medium);
     PrimeOpenPbrReflectiveSampleBase base = primeOpenPbrReflectiveSampleBase(
             wi, randomValue, state.microfacet, samplingFlags, PRIME_OPENPBR_FLAG_REFLECTION);
     result.bsdfSample = base.bsdfSample;
@@ -477,10 +477,10 @@ public PrimeOpenPbrSampleResult primeCompactOpaqueLayerSample(
         float3 wi,
         float3 randomValue,
         PrimeCompactOpaqueState state,
-        PrimeOpenPbrVolumeStack stack,
+        PrimeOpenPbrVolume medium,
         bool useEonDiffuseMapping) {
     if (state.layer.baseSampleWeight + state.layer.specularSampleWeight <= 0.0) {
-        return primeCompactZeroSampleResult(state, stack);
+        return primeCompactZeroSampleResult(state, medium);
     }
     if (randomValue.z <= state.layer.specularSampleWeight
             && state.layer.specularSampleWeight > 0.0) {
@@ -489,7 +489,7 @@ public PrimeOpenPbrSampleResult primeCompactOpaqueLayerSample(
                 float3(randomValue.xy, randomValue.z / state.layer.specularSampleWeight),
                 state,
                 PRIME_OPENPBR_FLAG_ALL,
-                stack);
+                medium);
         result.bsdfSample.pdf *= state.layer.specularSampleWeight;
         return result;
     }
@@ -501,7 +501,7 @@ public PrimeOpenPbrSampleResult primeCompactOpaqueLayerSample(
                             / state.layer.baseSampleWeight),
                     state,
                     PRIME_OPENPBR_FLAG_ALL,
-                    stack)
+                    medium)
             : state.kind == PRIME_COMPACT_OPAQUE_SUBSURFACE
                     ? primeCompactSubsurfaceSample(
                             wi,
@@ -510,7 +510,7 @@ public PrimeOpenPbrSampleResult primeCompactOpaqueLayerSample(
                                     / state.layer.baseSampleWeight),
                             state,
                             PRIME_OPENPBR_FLAG_ALL,
-                            stack)
+                            medium)
                     : useEonDiffuseMapping
                             ? primeCompactZeroRoughnessEonSample(
                                     wi,
@@ -520,7 +520,7 @@ public PrimeOpenPbrSampleResult primeCompactOpaqueLayerSample(
                                             / state.layer.baseSampleWeight),
                                     state,
                                     PRIME_OPENPBR_FLAG_ALL,
-                                    stack)
+                                    medium)
                             : primeCompactLambertSample(
                             wi,
                             float3(randomValue.xy,
@@ -528,7 +528,7 @@ public PrimeOpenPbrSampleResult primeCompactOpaqueLayerSample(
                                     / state.layer.baseSampleWeight),
                             state,
                             PRIME_OPENPBR_FLAG_ALL,
-                            stack);
+                            medium);
     result.bsdfSample.throughput = primeOpenPbrThroughputScale(
             result.bsdfSample.throughput, state.layer.transmittanceIn);
     result.bsdfSample.pdf *= state.layer.baseSampleWeight;

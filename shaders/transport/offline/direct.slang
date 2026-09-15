@@ -40,7 +40,7 @@ public void primeAccumulateOfflineAreaDirect(
         SurfaceInteraction surface,
         float3 viewDirection,
         AreaLightSample area,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     float3 shadingNormal = primeSurfaceShadingNormal(surface, viewDirection);
     float3 sourceRadiance = primeResolveSampledAreaLightRadiance(area);
     float3 contribution = path.throughput * primeEvaluateCompleteDirect(
@@ -50,7 +50,7 @@ public void primeAccumulateOfflineAreaDirect(
             shadingNormal,
             area.light,
             sourceRadiance,
-            volumeStack,
+            medium,
             primeUsesAirGap(),
             true);
     bool valid = area.light.pdf > 0.0
@@ -64,7 +64,7 @@ public void primeAccumulateOfflineAreaDirect(
             surface,
             area.light,
             uint2(area.sectionIndex, area.emitterIndex),
-            volumeStack);
+            medium);
     if (shadow.hitDistance >= PRIME_NRD_FP16_MAX) {
         primeAccumulate(context, radiance, contribution * shadow.transmittance);
     }
@@ -78,7 +78,7 @@ public void primeEvaluateOfflineDirect(
     PrimeOfflinePathRecord record = primeOfflinePaths[pathIndex];
     uint2 pixel = primeOfflinePixel(pathIndex);
     PathState path = primeOfflinePath(pixel, record.transport);
-    PrimeOpenPbrVolumeStack volumeStack = primeOfflineVolumeStack(record.transport);
+    PrimeOpenPbrVolume medium = primeOfflineMedium(record.transport);
     float3 radiance = record.radianceAndPrimaryDistance.xyz;
     float primaryDistance = record.radianceAndPrimaryDistance.w;
     float3 primaryAlbedo = record.primaryAlbedoAndMaterialFlags.xyz;
@@ -94,7 +94,7 @@ public void primeEvaluateOfflineDirect(
                     primeEvaluateEnvironmentContribution(
                             context, path, primeOfflineIntegrator()));
         } else if (primeApplySegmentMedium(
-                path.throughput, surface, volumeStack)) {
+                path.throughput, surface, medium)) {
             bool previousUsedAreaNee =
                     (primePathFlags(path.control)
                             & PRIME_OFFLINE_PATH_PREVIOUS_AREA_NEE) != 0u;
@@ -136,7 +136,7 @@ public void primeEvaluateOfflineDirect(
                                         preparedSample,
                                         PRIME_SAMPLE_EFFECT_DIRECT_SUN,
                                         PRIME_SAMPLE_DIMENSION_PRIMARY),
-                                volumeStack));
+                                medium));
                 float3 areaSample = primeSobolSample3D(
                         preparedSample,
                         PRIME_SAMPLE_EFFECT_DIRECT_AREA_LIGHT,
@@ -156,13 +156,13 @@ public void primeEvaluateOfflineDirect(
                         surface,
                         viewDirection,
                         area,
-                        volumeStack);
+                        medium);
             }
             active = true;
         }
     }
 
-    record.transport = primeMakeOfflineTransport(path, volumeStack, active);
+    record.transport = primeMakeOfflineTransport(path, medium, active);
     record.radianceAndPrimaryDistance = float4(radiance, primaryDistance);
     record.primaryAlbedoAndMaterialFlags = float4(
             primaryAlbedo, asfloat(primaryMaterialFlags));

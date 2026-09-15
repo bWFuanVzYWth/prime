@@ -88,7 +88,7 @@ IOR、各向异性和粗糙度。测试直接验证 eval 分量求和、PDF、�
 
 该测试类的 transmission 组执行 36,864 个性质用例，覆盖厚介质进入/退出、thin-wall、
 三组 sampling flags、smooth/rough 与 index-matched 边界，并验证状态、eval、PDF、有效事件、
-方向、eta、directional energy、volume stack 和退出时的 ray distance。参考公式可能生成的
+方向、eta、directional energy、current medium 和退出时的 ray distance。参考公式可能生成的
 无效 proposal 按生产 adapter 的接受谓词拒绝，不消费 provisional event 或介质状态。
 
 foliage 组执行 12,288 个性质用例，覆盖 dielectric、分数 subsurface 和
@@ -97,7 +97,7 @@ energy 和紧凑组合状态。
 
 `OpenPbrCoreGpuTest` 验证 common、Fresnel 和反射 microfacet 的恒等式、边界与互易性质；
 `OpenPbrDistributionGpuTest` 以采样直方图对 PDF，并以 Monte Carlo 能量对独立求积；
-`OpenPbrTransmissionSlabGpuTest` 验证两界面 Snell、TIR、互反 eta、介质栈和 ray distance。
+`OpenPbrTransmissionSlabGpuTest` 验证两界面 Snell、TIR、互反 eta、当前介质和 ray distance。
 
 被拒绝且事件为 `NONE` 的 proposal payload 沿用 adapter 现有契约：payload 未定义且不会被消费，
 测试不以其中的 NaN/Inf 判定失败；任何有效事件的 payload 仍必须完整通过数值检查。

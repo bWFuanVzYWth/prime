@@ -55,7 +55,7 @@ public PrimePrimarySunSample primeEstimatePrimaryDirectSun(
         SurfaceInteraction surface,
         float3 viewDirection,
         float2 sampleValue,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         bool conditionalTransparentBranch) {
     PrimePrimarySunSample result;
     result.lighting.diffuse = float3(0.0);
@@ -72,7 +72,7 @@ public PrimePrimarySunSample primeEstimatePrimaryDirectSun(
         return result;
     }
     PrimeShadowTrace shadow = primeTraceShadow(
-            context, surface, light, volumeStack);
+            context, surface, light, medium);
     result.penumbra = primeSigmaPackDirectionalPenumbra(shadow.hitDistance);
     result.visibility = float(shadow.hitDistance >= PRIME_NRD_FP16_MAX);
     float3 radiance = primeResolveSampledSunRadiance(
@@ -84,7 +84,7 @@ public PrimePrimarySunSample primeEstimatePrimaryDirectSun(
             shadingNormal,
             light,
             radiance,
-            volumeStack,
+            medium,
             primeUsesAirGap(),
             conditionalTransparentBranch,
             true);
@@ -96,7 +96,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryDirectPreparedAreaLight(
         SurfaceInteraction surface,
         float3 viewDirection,
         AreaLightSample area,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         bool conditionalTransparentBranch) {
     float3 shadingNormal = primeSurfaceShadingNormal(surface, viewDirection);
     if (!primeDirectSampleEligible(surface, shadingNormal, area.light)) {
@@ -111,7 +111,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryDirectPreparedAreaLight(
             surface,
             area.light,
             uint2(area.sectionIndex, area.emitterIndex),
-            volumeStack);
+            medium);
     if (shadow.hitDistance < PRIME_NRD_FP16_MAX) {
         PrimeDirectLightingSplit result;
         result.diffuse = float3(0.0);
@@ -128,7 +128,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryDirectPreparedAreaLight(
             shadingNormal,
             area.light,
             radiance,
-            volumeStack,
+            medium,
             primeUsesAirGap(),
             conditionalTransparentBranch,
             false);
@@ -139,7 +139,7 @@ public float3 primeEstimateDirectPreparedAreaLight(
         SurfaceInteraction surface,
         float3 viewDirection,
         AreaLightSample area,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     float3 shadingNormal = primeSurfaceShadingNormal(surface, viewDirection);
     if (!primeDirectSampleEligible(surface, shadingNormal, area.light)) {
         return float3(0.0);
@@ -149,7 +149,7 @@ public float3 primeEstimateDirectPreparedAreaLight(
             surface,
             area.light,
             uint2(area.sectionIndex, area.emitterIndex),
-            volumeStack);
+            medium);
     if (shadow.hitDistance < PRIME_NRD_FP16_MAX) {
         return float3(0.0);
     }
@@ -162,7 +162,7 @@ public float3 primeEstimateDirectPreparedAreaLight(
             shadingNormal,
             area.light,
             radiance,
-            volumeStack,
+            medium,
             primeUsesAirGap(),
             true);
 }
@@ -172,7 +172,7 @@ public float3 primeEstimateDirectSun(
         SurfaceInteraction surface,
         float3 viewDirection,
         float2 sampleValue,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     LightSample light = primeSampleSun(integrator, sampleValue);
     if (!primeAtmosphereDistantDirectionVisible(light.direction)) {
         return float3(0.0);
@@ -182,7 +182,7 @@ public float3 primeEstimateDirectSun(
         return float3(0.0);
     }
     PrimeShadowTrace shadow = primeTraceShadow(
-            context, surface, light, volumeStack);
+            context, surface, light, medium);
     if (shadow.hitDistance < PRIME_NRD_FP16_MAX) {
         return float3(0.0);
     }
@@ -195,7 +195,7 @@ public float3 primeEstimateDirectSun(
             shadingNormal,
             light,
             radiance,
-            volumeStack,
+            medium,
             primeUsesAirGap(),
             true);
 }

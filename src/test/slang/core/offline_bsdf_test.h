@@ -13,7 +13,7 @@ PrimeTransmissiveBsdfSample primeSampleOfflineMinecraftTransmissionFromState(
         uint materialControl,
         float3 viewDirection,
         float3 sampleValue,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     return primeSampleMinecraftTransmissionCompleteFromState(
             state,
             baseColor,
@@ -21,14 +21,14 @@ PrimeTransmissiveBsdfSample primeSampleOfflineMinecraftTransmissionFromState(
             materialControl,
             viewDirection,
             sampleValue,
-            volumeStack);
+            medium);
 }
 
 BsdfEvaluation primeEvaluateOfflineMinecraftTransmission(
         SurfaceInteraction surface,
         float3 viewDirection,
         float3 scatterDirection,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     float3 outwardNormal = primeSurfaceOutwardShadingNormal(surface);
     PrimeCompactTransmissionState state = primeMinecraftBoundaryTransmissionState(
             surface.baseColor,
@@ -39,7 +39,7 @@ BsdfEvaluation primeEvaluateOfflineMinecraftTransmission(
             surface.opticalControl,
             viewDirection,
             surface.t,
-            volumeStack,
+            medium,
             surface.mediumId,
             surface.adjacentBaseColor,
             surface.adjacentInterfaceControl,

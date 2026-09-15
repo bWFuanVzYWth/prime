@@ -22,22 +22,22 @@ public IntegratorRecord primeOfflineIntegrator() {
     return integrator;
 }
 
-public PrimeOpenPbrVolumeStack primeOfflineInitialVolumeStack() {
+public PrimeOpenPbrVolume primeOfflineInitialMedium() {
     return (primePush.path.z & PRIME_PATH_CAMERA_IN_WATER_MASK) != 0u
-            ? primeCameraWaterVolumeStack()
-            : primeEmptyVolumeStack();
+            ? primeCameraWaterMedium()
+            : primeVacuumMedium();
 }
 
 public PrimeOfflinePathRecord primeMakeOfflineRecord(
         PathState path,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         float3 radiance,
         float primaryDistance,
         float3 primaryAlbedo,
         uint primaryMaterialFlags,
         bool enabled) {
     PrimeOfflinePathRecord record;
-    record.transport = primeMakeOfflineTransport(path, volumeStack, enabled);
+    record.transport = primeMakeOfflineTransport(path, medium, enabled);
     record.radianceAndPrimaryDistance = float4(radiance, primaryDistance);
     record.primaryAlbedoAndMaterialFlags = float4(
             primaryAlbedo, asfloat(primaryMaterialFlags));

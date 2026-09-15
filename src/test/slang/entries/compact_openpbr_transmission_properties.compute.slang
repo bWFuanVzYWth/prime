@@ -29,28 +29,12 @@ struct PrimeCompactTransmissionTestResult {
     float3 energy;
 };
 
-PrimeOpenPbrVolumeStack primeCompactTransmissionStack(
-        bool exiting,
-        PrimeOpenPbrMaterial material) {
-    PrimeOpenPbrVolumeStack stack;
-    PrimeOpenPbrVolume air;
-    air.extinction = float3(0.0);
-    air.albedo = float3(0.0);
-    air.anisotropy = 0.0;
-    air.ior = 1.0;
-    air.mediumId = 0u;
-    air.iorEncoding = 0u;
-    stack.values[0] = air;
-    stack.values[1] = air;
-    stack.count = 0u;
-    if (exiting) {
-        PrimeOpenPbrVolume volume = primeOpenPbrVolumeFromTransmission(
-                material.transmission);
-        volume.ior = material.specular.ior;
-        stack.values[0] = volume;
-        stack.count = 1u;
-    }
-    return stack;
+PrimeOpenPbrVolume primeCompactTransmissionMedium(bool exiting, PrimeOpenPbrMaterial material) {
+    if (!exiting) return primeVacuumMedium();
+    PrimeOpenPbrVolume medium = primeOpenPbrVolumeFromTransmission(material.transmission);
+    medium.ior = material.specular.ior;
+    medium.mediumId = 1u;
+    return medium;
 }
 
 PrimeCompactTransmissionTestResult primeCompactTransmissionRun(uint4 encoded[4]) {
@@ -108,10 +92,13 @@ PrimeCompactTransmissionTestResult primeCompactTransmissionRun(uint4 encoded[4])
         result.mask |= PRIME_TEST_FAILURE_STATE;
     }
 
-    PrimeOpenPbrVolumeStack stack = primeCompactTransmissionStack(exiting, material);
-    uint originalStackCount = stack.count;
+    PrimeOpenPbrVolume medium = primeCompactTransmissionMedium(exiting, material);
+    PrimeOpenPbrVolume outside = primeVacuumMedium();
+    outside.ior = 1.0 / inverseOutsideIor;
+    uint originalMediumId = medium.mediumId;
     PrimeCompactTransmissionState state = primeCompactTransmissionStateInit(
-            primeTransmissionGgxEnergy(), material, wi, inverseOutsideIor, rayT);
+            primeTransmissionGgxEnergy(), material, wi, outside, rayT);
+    if (!exiting) state.transmissionVolume.mediumId = 1u;
     state = primeCompactTransmissionInterfaceState(
             primeTransmissionGgxEnergy(), wi, state);
     if (thinPhysicalExit) { state.entering = 0u; }
@@ -119,7 +106,7 @@ PrimeCompactTransmissionTestResult primeCompactTransmissionRun(uint4 encoded[4])
     result.evaluation = primeCompactTransmissionEvaluate(
             wi, wo, state, result.samplingFlags);
     result.sample = primeCompactTransmissionSample(
-            wi, randomValue, state, result.samplingFlags, stack);
+            wi, randomValue, state, result.samplingFlags, medium);
     result.energy = primeCompactTransmissionEnergy(
             primeTransmissionGgxEnergy(), wi, state, result.samplingFlags);
     result.sampledEvaluation.throughput = primeOpenPbrZeroThroughput();
@@ -168,16 +155,15 @@ PrimeCompactTransmissionTestResult primeCompactTransmissionRun(uint4 encoded[4])
     }
 
     bool transmitted = accepted && primeOpenPbrIsTransmissive(flags);
-    uint expectedStackCount = originalStackCount;
+    uint expectedMediumId = originalMediumId;
     float expectedRayT = rayT;
     if (!thinWalled && transmitted) {
-        expectedStackCount = exiting ? 0u : 1u;
+        expectedMediumId = exiting ? 0u : 1u;
         if (exiting) { expectedRayT = 0.0; }
     }
     if ((accepted
-            && (result.sample.volumeStack.count != expectedStackCount
+            && (result.sample.medium.mediumId != expectedMediumId
             || !primeTestClose(result.sample.rayT, expectedRayT, 0.0, 0.0)))
-            || result.sample.volumeStack.count > 2u
             || primeTestClassify(result.sample.rayT) != 0u) {
         result.mask |= PRIME_TEST_FAILURE_STATE;
     }
@@ -208,7 +194,7 @@ void primeCompactTransmissionWrite(
             result.sampledEvaluation.throughput.flags,
             result.samplingFlags);
     primeTestOutput[outputOffset + 7u] = uint4(
-            result.sample.volumeStack.count,
+            result.sample.medium.mediumId,
             asuint(result.sample.rayT),
             0u,
             0u);

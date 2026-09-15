@@ -38,7 +38,7 @@ public bool primeIntegrateWavefrontSurface<Phase>(
         Phase phase,
         inout PrimeIntegratorContext context,
         inout PathState path,
-        inout PrimeOpenPbrVolumeStack volumeStack,
+        inout PrimeOpenPbrVolume medium,
         inout PrimeDenoiserState denoiserState,
         inout PrimeOrdinarySample result,
         SurfaceInteraction surface)
@@ -74,7 +74,7 @@ public bool primeIntegrateWavefrontSurface<Phase>(
 
     float3 viewDirection = -path.rayDirection;
     PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
-            surface, viewDirection, volumeStack, primeUsesAirGap());
+            surface, viewDirection, medium, primeUsesAirGap());
     PrimePreparedSampleBase preparedSample =
             primePreparePathSample(
                     path.sampleSeed,
@@ -95,7 +95,7 @@ public bool primeIntegrateWavefrontSurface<Phase>(
                 surface,
                 viewDirection,
                 scatterSample,
-                volumeStack,
+                medium,
                 primePathBounce(path.control),
                 primeUsesAirGap());
         scatter = guided.scatter;
@@ -106,17 +106,17 @@ public bool primeIntegrateWavefrontSurface<Phase>(
                 surface,
                 viewDirection,
                 scatterSample,
-                volumeStack,
+                medium,
                 primeUsesAirGap());
     }
-    return primeFinishWavefrontSurface(context, path, volumeStack, denoiserState,
+    return primeFinishWavefrontSurface(context, path, medium, denoiserState,
             result.guides, surface, scatter, surfaceAlbedos, closureTraits);
 }
 
 public bool primeFinishWavefrontSurface(
         inout PrimeIntegratorContext context,
         inout PathState path,
-        inout PrimeOpenPbrVolumeStack volumeStack,
+        inout PrimeOpenPbrVolume medium,
         inout PrimeDenoiserState denoiserState,
         inout PrimeDenoiserGuides guides,
         SurfaceInteraction surface,
@@ -130,7 +130,7 @@ public bool primeFinishWavefrontSurface(
     bool supportsSolidAngle = primeClosureSupports(closureTraits, PRIME_MEASURE_SOLID_ANGLE);
     bool discreteOnlyInterface = primeClosureIsDiscreteOnly(closureTraits);
     BsdfSample bsdf = scatter.bsdf;
-    volumeStack = scatter.volumeStack;
+    medium = scatter.medium;
     bool hasScatter = primeHasScatter(bsdf);
     bool sampledSolidAngle = primeIsSolidAngleSample(bsdf);
     if (!denoiserState.reachedSolidAngle) {

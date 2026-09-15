@@ -20,11 +20,11 @@ public BsdfSample primeSampleOpaqueFromState(
         float3 normal,
         float3 viewDirection,
         float3 sampleValue,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     BsdfSample result = primeInvalidBsdfSample();
     float3 localView = primeOpenPbrOnbToLocal(state.onb, viewDirection);
     PrimeOpenPbrSampleResult sampled = primeCompactOpaqueSample(
-            localView, sampleValue, state, volumeStack);
+            localView, sampleValue, state, medium);
     if (!primeOpenPbrHasSample(sampled.bsdfSample)) {
         return result;
     }
@@ -52,7 +52,7 @@ public BsdfSample primeSampleOpaque(
         float3 viewDirection,
         float3 sampleValue,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     PrimeCompactOpaqueState state = primeOpaqueState(
             baseColor,
             normal,
@@ -61,7 +61,7 @@ public BsdfSample primeSampleOpaque(
             flags,
             viewDirection,
             rayT,
-            volumeStack);
+            medium);
     return primeSampleOpaqueFromState(
-            state, normal, viewDirection, sampleValue, volumeStack);
+            state, normal, viewDirection, sampleValue, medium);
 }

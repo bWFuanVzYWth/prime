@@ -17,15 +17,15 @@ public PrimeOpenPbrSampleResult primeCompactFoliageSample(
         float3 wi,
         float3 randomValue,
         PrimeCompactFoliageState state,
-        PrimeOpenPbrVolumeStack stack) {
+        PrimeOpenPbrVolume medium) {
     if (state.base.kind == PRIME_COMPACT_OPAQUE_CONDUCTOR) {
-        return primeCompactOpaqueSample(wi, randomValue, state.base, stack);
+        return primeCompactOpaqueSample(wi, randomValue, state.base, medium);
     }
     if (state.dielectricMix.firstSampleWeight
             + state.dielectricMix.secondSampleWeight <= 0.0) {
         PrimeOpenPbrSampleResult result;
         result.bsdfSample = primeOpenPbrZeroSample();
-        result.volumeStack = stack;
+        result.medium = medium;
         result.rayT = state.base.rayT;
         return result;
     }
@@ -38,7 +38,7 @@ public PrimeOpenPbrSampleResult primeCompactFoliageSample(
                         randomValue.z / state.dielectricMix.secondSampleWeight),
                 primeCompactFoliageTransmissionState(state),
                 PRIME_OPENPBR_FLAG_ALL,
-                stack);
+                medium);
         result.bsdfSample.throughput = primeOpenPbrThroughputScale(
                 result.bsdfSample.throughput, state.transmissionWeight);
         result.bsdfSample.pdf *= state.dielectricMix.secondSampleWeight;
@@ -51,7 +51,7 @@ public PrimeOpenPbrSampleResult primeCompactFoliageSample(
                     (randomValue.z - state.dielectricMix.secondSampleWeight)
                     / state.dielectricMix.firstSampleWeight),
             state.base,
-            stack);
+            medium);
     result.bsdfSample.throughput = primeOpenPbrThroughputScale(
             result.bsdfSample.throughput, 1.0 - state.transmissionWeight);
     result.bsdfSample.pdf *= state.dielectricMix.firstSampleWeight;

@@ -29,7 +29,7 @@ public bool primeIntegrateTransparentWavefrontMiss<Phase>(
         Phase phase,
         inout PrimeIntegratorContext context,
         inout PathState path,
-        inout PrimeOpenPbrVolumeStack volumeStack,
+        inout PrimeOpenPbrVolume medium,
         inout PrimeTransparentBranchResult result,
         inout PrimeQueuedPsrState psrState,
         inout bool hasGuide,
@@ -87,7 +87,7 @@ public bool primeIntegrateTransparentWavefrontMiss<Phase>(
 public bool primeFinishTransparentWavefrontSurface(
         inout PrimeIntegratorContext context,
         inout PathState path,
-        inout PrimeOpenPbrVolumeStack volumeStack,
+        inout PrimeOpenPbrVolume medium,
         inout PrimeTransparentBranchResult result,
         inout PrimeQueuedPsrState psrState,
         inout bool hasGuide,
@@ -136,7 +136,7 @@ public bool primeFinishTransparentWavefrontSurface(
         psrState = primeAppendQueuedPsrDiscrete(
                 psrState, path.physicalOrigin, surface, bsdf);
     }
-    volumeStack = scatter.volumeStack;
+    medium = scatter.medium;
     if (!primeAdvanceRealtimePath(
             context,
             path,

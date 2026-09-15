@@ -46,7 +46,7 @@ public struct PrimeOpenPbrConductorFresnel {
 
 public struct PrimeOpenPbrSampleResult {
     public PrimeOpenPbrSample bsdfSample;
-    public PrimeOpenPbrVolumeStack volumeStack;
+    public PrimeOpenPbrVolume medium;
     public float rayT;
 };
 

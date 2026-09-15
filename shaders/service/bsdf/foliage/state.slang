@@ -63,7 +63,7 @@ public PrimeCompactFoliageState primeMinecraftFoliageStateWithMinimumRoughness(
         uint materialControl,
         float3 viewDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack,
+        PrimeOpenPbrVolume medium,
         float minimumLinearRoughness) {
     float3 closureNormal = dot(outwardNormal, viewDirection) < 0.0
             ? -outwardNormal
@@ -76,12 +76,11 @@ public PrimeCompactFoliageState primeMinecraftFoliageStateWithMinimumRoughness(
             materialControl,
             minimumLinearRoughness);
     float3 localView = primeOpenPbrOnbToLocal(material.geometry.onb, viewDirection);
-    float inverseOutsideIor = primeCompactInverseOutsideIor(localView.z, volumeStack);
     return primeCompactFoliageStateInit(
             primeTransmissionGgxEnergy(),
             material,
             localView,
-            inverseOutsideIor,
+            medium,
             rayT);
 }
 
@@ -93,7 +92,7 @@ public PrimeCompactFoliageState primeMinecraftFoliageState(
         uint materialControl,
         float3 viewDirection,
         float rayT,
-        PrimeOpenPbrVolumeStack volumeStack) {
+        PrimeOpenPbrVolume medium) {
     return primeMinecraftFoliageStateWithMinimumRoughness(
             baseColor,
             outwardNormal,
@@ -102,6 +101,6 @@ public PrimeCompactFoliageState primeMinecraftFoliageState(
             materialControl,
             viewDirection,
             rayT,
-            volumeStack,
+            medium,
             0.0);
 }

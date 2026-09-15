@@ -30,7 +30,7 @@ public void primeTraceOfflineCamera(uint2 pixel) {
     PathState path = primeCameraPath(pixel, 0u, cameraSample);
     primeOfflinePaths[pathIndex] = primeMakeOfflineRecord(
             path,
-            primeOfflineInitialVolumeStack(),
+            primeOfflineInitialMedium(),
             float3(0.0),
             -1.0,
             float3(1.0),

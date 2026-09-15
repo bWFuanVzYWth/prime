@@ -37,7 +37,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				java.security.MessageDigest.getInstance('SHA-256')
 						.digest(schemaFile.get().asFile.getText('UTF-8')
 								.replace('\r\n', '\n').getBytes('UTF-8')))
-		if (schemaSha256 != 'b5be2da143ab2bd021e4817069973b61e1f925f3233a955b0403099a5ceea853') {
+		if (schemaSha256 != 'afb8f743ab45631b1069068bfa33b3c8fe3e49d7a266a7d1fc21cadb24ee8d01') {
 			throw new GradleException(
 					'Prime shader ABI changed without updating its reviewed contract hash')
 		}
@@ -557,11 +557,11 @@ ${offlineConstants}
 
 public struct PrimeOfflineTransportRecord {
     public uint4 physicalOriginAndPreviousBsdfPdf;
-    public uint4 sourceStateAndMediumIds;
+    public uint4 sourceStateAndMediumId;
     public uint4 rayDirectionAndEtaScale;
     public uint4 throughputAndPreviousLightNormalX;
-    public uint4 medium0AndPreviousLightNormalY;
-    public uint4 medium1AndPreviousLightNormalZ;
+    public uint4 mediumAndPreviousLightNormalY;
+    public uint4 previousLightNormalZAndReserved;
 };
 
 [[vk::binding(${schema.offlineDescriptors.runningMean}, 1)]] [[vk::image_format("rgba32f")]]

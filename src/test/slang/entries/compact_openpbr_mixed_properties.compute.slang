@@ -144,7 +144,7 @@ PrimeMixedResult primeMixedRun(uint4 encoded[4]) {
         result.mask |= PRIME_TEST_FAILURE_VALUE;
     }
     result.sample = primeCompactOpaqueSample(
-            wi, randomValue, state, primeCompactTestEmptyStack());
+            wi, randomValue, state, primeCompactTestVacuum());
     result.sampledEvaluation.throughput = primeOpenPbrZeroThroughput();
     result.sampledEvaluation.pdf = 0.0;
 
@@ -227,7 +227,7 @@ void primeMixedWrite(uint caseIndex, PrimeMixedResult result) {
             result.sampledEvaluation.throughput.value,
             result.sampledEvaluation.pdf));
     primeTestOutput[outputOffset + 9u] = uint4(
-            result.sample.volumeStack.count,
+            result.sample.medium.mediumId,
             asuint(result.sample.rayT),
             asuint(result.sample.bsdfSample.eta),
             0u);

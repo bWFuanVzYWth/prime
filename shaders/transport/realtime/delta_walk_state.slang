@@ -49,7 +49,7 @@ public bool primeAdvanceOrdinaryDeltaWalk(
         uint control) {
     uint2 pixel = primeWavefrontPixel(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
+    PrimeOpenPbrVolume medium = primeWavefrontMedium(record);
     PrimeDenoiserState denoiserState =
             primeWavefrontDenoiserState(
                     control,
@@ -67,7 +67,7 @@ public bool primeAdvanceOrdinaryDeltaWalk(
             result.guides.specularHitDistance = hitDistance;
         }
     }
-    if (!primeApplySegmentMedium(path.throughput, surface, volumeStack)) {
+    if (!primeApplySegmentMedium(path.throughput, surface, medium)) {
         return false;
     }
 
@@ -91,11 +91,11 @@ public bool primeAdvanceOrdinaryDeltaWalk(
             surface,
             viewDirection,
             scatterSample,
-            volumeStack,
+            medium,
             primePathBounce(path.control));
     PrimePathScatter scatter = guided.scatter;
     BsdfSample bsdf = scatter.bsdf;
-    volumeStack = scatter.volumeStack;
+    medium = scatter.medium;
     if (!primeHasScatter(bsdf)) {
         return false;
     }
@@ -125,7 +125,7 @@ public bool primeAdvanceOrdinaryDeltaWalk(
     path.control = primeIncrementPathBounce(path.control);
     PrimeWavefrontTransportRecord updated = primeMakeUpdatedWavefrontRecord(
             path,
-            volumeStack,
+            medium,
             denoiserState,
             control,
             0u,
@@ -143,7 +143,7 @@ public bool primeAdvanceTransparentDeltaWalk(
         uint control) {
     uint2 pixel = primeWavefrontPixel(recordIndex);
     PathState path = primeWavefrontPath(pixel, record);
-    PrimeOpenPbrVolumeStack volumeStack = primeWavefrontVolumeStack(record);
+    PrimeOpenPbrVolume medium = primeWavefrontMedium(record);
     bool transmissionBranch = primeWavefrontTransmissionBranch(control);
     bool guideEnabled =
             (control & PRIME_WAVEFRONT_GUIDE_ENABLED) != 0u;
@@ -179,7 +179,7 @@ public bool primeAdvanceTransparentDeltaWalk(
                     primeNrdSanitizeHitDistance(surface.t);
         }
     }
-    if (!primeApplySegmentMedium(path.throughput, surface, volumeStack)) {
+    if (!primeApplySegmentMedium(path.throughput, surface, medium)) {
         return false;
     }
 
@@ -202,14 +202,14 @@ public bool primeAdvanceTransparentDeltaWalk(
                     preparedSample,
                     PRIME_SAMPLE_EFFECT_SCATTER_BSDF,
                     PRIME_SAMPLE_DIMENSION_PRIMARY),
-            volumeStack);
+            medium);
     BsdfSample bsdf = scatter.bsdf;
     PrimePathScatter guideScatter;
     guideScatter.bsdf = primeInvalidBsdfSample();
-    guideScatter.volumeStack = volumeStack;
+    guideScatter.medium = medium;
     if (observesGuide) {
         guideScatter = primeSamplePreferredTransmissionDiscretePathSurface(
-                context, surface, viewDirection, volumeStack);
+                context, surface, viewDirection, medium);
         if (primeHasScatter(guideScatter.bsdf)) {
             psrState = primeAppendQueuedPsrDiscrete(
                     psrState,
@@ -226,8 +226,8 @@ public bool primeAdvanceTransparentDeltaWalk(
                         surface.sectionIndex,
                         primeSurfaceTriangleIndex(surface));
                 guideRecord.rayDirection = guideScatter.bsdf.direction;
-                guideRecord.mediumState = primePackDetachedGuideMediumStack(
-                        guideScatter.volumeStack);
+                guideRecord.mediumState = primePackDetachedGuideMedium(
+                        guideScatter.medium);
                 primeStoreDetachedGuideRecord(pixel, guideRecord);
                 primeStoreWavefrontPsrState(recordIndex, psrState);
                 record.throughputAndReserved.w =
@@ -259,7 +259,7 @@ public bool primeAdvanceTransparentDeltaWalk(
     if (!primeHasScatter(bsdf)) {
         return false;
     }
-    volumeStack = scatter.volumeStack;
+    medium = scatter.medium;
     if (!primeAdvancePathWithoutRoulette(
             context,
             path,
@@ -273,7 +273,7 @@ public bool primeAdvanceTransparentDeltaWalk(
     PrimeWavefrontTransportRecord updated =
             primeMakeUpdatedTransparentWavefrontRecord(
                     path,
-                    volumeStack,
+                    medium,
                     result,
                     psrState,
                     hadGuide,

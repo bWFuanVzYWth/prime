@@ -35,15 +35,14 @@ public struct PrimeLambertShadowPayload {
 // One owner per pixel. Trace overwrites the current surface; shade publishes at most one successor.
 // First direction and accumulated radiance survive every later trace/shade.
 public struct PrimeLambertRecord {
-    public float4 origin; // current position, outer extinction R
-    public float4 direction; // ray direction, outer extinction G
-    public float4 throughput; // physical beta, outer extinction B
+    public float4 origin; // current position, extinction R
+    public float4 direction; // ray direction, extinction G
+    public float4 throughput; // physical beta, extinction B
     public float4 normalDistance;
-    public float4 albedo; // current Lambert color, exact packed active MediumIds
-    public uint4 identity; // section, triangle, Lambert scatters, path flags / medium count
+    public float4 albedo; // current Lambert color, exact current MediumId
+    public uint4 identity; // section, triangle, Lambert scatters, path flags
     public float4 radiance; // RGB sum, first secondary distance (0 unsampled; 65504 traced miss)
     public float4 firstDirection; // first interface normal until first shade; then cosine direction in guide space
-    public float4 innerMedium; // inner extinction, reserved
 };
 
 // Only lives from camera through guide publication. No second lighting path is allocated.
@@ -62,5 +61,4 @@ public static const uint PRIME_LAMBERT_VISIBLE = 1u;
 public static const uint PRIME_LAMBERT_TRANSPARENT = 2u;
 public static const uint PRIME_LAMBERT_REFLECTION = 4u;
 public static const uint PRIME_LAMBERT_LIMIT = 8u;
-public static const uint PRIME_LAMBERT_MEDIUM_SHIFT = 4u;
 public static const uint PRIME_LAMBERT_GUIDE_QUEUE = 2u;

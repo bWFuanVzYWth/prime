@@ -52,10 +52,10 @@ public PrimeOpenPbrSampleResult primeCompactConductorDiscreteSample(
         float3 wi,
         PrimeCompactOpaqueDiscreteState state,
         uint samplingFlags,
-        PrimeOpenPbrVolumeStack stack) {
+        PrimeOpenPbrVolume medium) {
     PrimeOpenPbrSampleResult result;
     result.bsdfSample = primeOpenPbrZeroSample();
-    result.volumeStack = stack;
+    result.medium = medium;
     result.rayT = state.rayT;
     if (wi.z <= 0.0
             || (samplingFlags & PRIME_OPENPBR_FLAG_DELTA_REFLECTION) == 0u) {

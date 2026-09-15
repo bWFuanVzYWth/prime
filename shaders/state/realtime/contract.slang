@@ -26,11 +26,10 @@ public struct PrimeWavefrontTransportRecord {
     public uint4 sourceAndPathControl;
     public float4 rayDirectionAndDenoiserControl;
     public float4 throughputAndReserved;
-    public uint4 medium0;
-    public uint4 medium1;
+    public uint4 medium;
 };
 
-// 96 bytes of transport are followed by exact queued PSR/previous-position data: 112 bytes in
+// 80 bytes of transport are followed by exact queued PSR/previous-position data: 96 bytes in
 // total. Exact branch guide normals live in the already-resident RGBA32F reconstruction images.
 public struct PrimeWavefrontPathRecord {
     public PrimeWavefrontTransportRecord transport;
@@ -57,12 +56,10 @@ public static const uint PRIME_WAVEFRONT_PATH_FLAGS_MASK =
         PRIME_PATH_PREVIOUS_DISCRETE
         | PRIME_PATH_PREVIOUS_NO_SUN_NEE;
 public static const uint PRIME_WAVEFRONT_PRIMARY_BOUNCE_SHIFT = 8u;
-public static const uint PRIME_WAVEFRONT_MEDIUM_COUNT_SHIFT = 16u;
 // Bits 18..31 are the complete current material-flag domain. Extending material flags beyond
 // bit 13 requires a queue ABI migration rather than silent truncation here.
 public static const uint PRIME_WAVEFRONT_PRIMARY_FLAGS_SHIFT = 18u;
 public static const uint PRIME_WAVEFRONT_BYTE_MASK = 0xffu;
-public static const uint PRIME_WAVEFRONT_MEDIUM_COUNT_MASK = 0x3u;
 public static const uint PRIME_WAVEFRONT_PRIMARY_FLAGS_MASK = 0x3fffu;
 public static const uint PRIME_WAVEFRONT_PSR_CONTROL_MASK = 0x3u;
 // The low guide lanes are disjoint from exact medium IOR-source encodings in this word. During

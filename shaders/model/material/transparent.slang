@@ -29,35 +29,6 @@ public float3 primeShadowCanonicalExtinction(float3 extinction)
     return float3(extinction01, extinction2);
 }
 
-public float3 primeShadowStartingMediumCoefficient(
-        float3 outerExtinction,
-        float3 innerExtinction,
-        uint mediumIndex)
-{
-    return mediumIndex == 0 ? outerExtinction : innerExtinction - outerExtinction;
-}
-
-public int primeShadowStartingMediumIndex(
-        uint boundaryMediumId,
-        uint2 startingMediumIds,
-        float4 outerExtinctionWinding,
-        float4 innerExtinctionWinding,
-        uint mediumCount,
-        bool entering)
-{
-    bool matchesOuter = mediumCount > 0
-            && boundaryMediumId == startingMediumIds.x;
-    bool matchesInner = mediumCount > 1
-            && boundaryMediumId == startingMediumIds.y;
-    if (matchesOuter && matchesInner) {
-        if (entering) {
-            return outerExtinctionWinding.w <= 0.0 ? 0 : 1;
-        }
-        return innerExtinctionWinding.w > 0.0 ? 1 : 0;
-    }
-    return matchesInner ? 1 : (matchesOuter ? 0 : -1);
-}
-
 public float3 primeGlassVolumeTransmittance(float3 baseColor, float opacity)
 {
     float3 linearSrgb = clamp(
@@ -93,14 +64,6 @@ public float3 primeShadowBoundaryOpticalDepthMoment(
     return currentMoment + extinction * (entering ? -hitDistance : hitDistance);
 }
 
-public float3 primeShadowBoundaryTerminalExtinction(
-        float3 currentExtinction,
-        float3 boundaryExtinction,
-        bool entering)
-{
-    return currentExtinction + boundaryExtinction * (entering ? 1.0 : -1.0);
-}
-
 public float3 primeShadowThinOpticalDepth(
         float3 currentMoment,
         float3 extinction,
@@ -113,21 +76,23 @@ public float3 primeShadowThinOpticalDepth(
 }
 
 public float3 primeShadowOpticalDepth(
-        float3 opticalDepthMoment,
-        float3 terminalExtinction,
-        float4 outerExtinctionWinding,
-        float4 innerExtinctionWinding,
-        uint startingMediumCount,
-        float rayDistance)
-{
-    float3 endpointExtinction = terminalExtinction;
-    if (startingMediumCount > 1) {
-        endpointExtinction += innerExtinctionWinding.xyz * innerExtinctionWinding.w;
-        endpointExtinction += outerExtinctionWinding.xyz
-                * (outerExtinctionWinding.w - innerExtinctionWinding.w);
-    } else if (startingMediumCount > 0) {
-        endpointExtinction += outerExtinctionWinding.xyz * outerExtinctionWinding.w;
+        float3 opticalDepthMoment, float3 terminalExtinction, float rayDistance) {
+    return max(opticalDepthMoment + terminalExtinction * rayDistance, float3(0.0));
+}
+
+// Signed boundary moments integrate the piecewise medium field independently of traversal order.
+// Select the terminal medium by distance, without adding/subtracting extinction to recover it.
+public void primeShadowCrossBoundary(
+        inout float3 moment, inout float3 terminal, inout float lastBoundary,
+        uint startingId, float3 startingExtinction,
+        uint insideId, float3 inside, uint outsideId, float3 outside,
+        bool entering, float distance) {
+    if (insideId == startingId) inside = startingExtinction;
+    if (outsideId == startingId) outside = startingExtinction;
+    moment = primeShadowBoundaryOpticalDepthMoment(moment, inside, distance, entering);
+    moment = primeShadowBoundaryOpticalDepthMoment(moment, outside, distance, !entering);
+    if (distance > lastBoundary) {
+        lastBoundary = distance;
+        terminal = entering ? inside : outside;
     }
-    float3 opticalDepth = opticalDepthMoment + endpointExtinction * rayDistance;
-    return max(opticalDepth, float3(0.0));
 }
