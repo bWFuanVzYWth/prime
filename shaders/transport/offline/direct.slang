@@ -24,6 +24,7 @@ import "transport/direct/evaluate.slang";
 import "transport/direct/primary.slang";
 import "transport/direct/selection.slang";
 import "transport/direct/shadow.slang";
+import "transport/direct/medium.slang";
 import "transport/offline/context.slang";
 import "transport/surface/access.slang";
 import "transport/surface/accumulate.slang";
@@ -64,7 +65,7 @@ public void primeAccumulateOfflineAreaDirect(
             surface,
             area.light,
             uint2(area.sectionIndex, area.emitterIndex),
-            medium);
+            primeShadowStartingMedium(surface, viewDirection, area.light.direction, medium));
     if (shadow.hitDistance >= PRIME_NRD_FP16_MAX) {
         primeAccumulate(context, radiance, contribution * shadow.transmittance);
     }

@@ -21,6 +21,7 @@ import "contract/light.slang";
 import "transport/direct/evaluate.slang";
 import "transport/direct/selection.slang";
 import "transport/direct/shadow.slang";
+import "transport/direct/medium.slang";
 import "transport/surface/access.slang";
 import "bsdf/compact/contract/volume.slang";
 
@@ -72,7 +73,8 @@ public PrimePrimarySunSample primeEstimatePrimaryDirectSun(
         return result;
     }
     PrimeShadowTrace shadow = primeTraceShadow(
-            context, surface, light, medium);
+            context, surface, light,
+            primeShadowStartingMedium(surface, viewDirection, light.direction, medium));
     result.penumbra = primeSigmaPackDirectionalPenumbra(shadow.hitDistance);
     result.visibility = float(shadow.hitDistance >= PRIME_NRD_FP16_MAX);
     float3 radiance = primeResolveSampledSunRadiance(
@@ -111,7 +113,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryDirectPreparedAreaLight(
             surface,
             area.light,
             uint2(area.sectionIndex, area.emitterIndex),
-            medium);
+            primeShadowStartingMedium(surface, viewDirection, area.light.direction, medium));
     if (shadow.hitDistance < PRIME_NRD_FP16_MAX) {
         PrimeDirectLightingSplit result;
         result.diffuse = float3(0.0);
@@ -149,7 +151,7 @@ public float3 primeEstimateDirectPreparedAreaLight(
             surface,
             area.light,
             uint2(area.sectionIndex, area.emitterIndex),
-            medium);
+            primeShadowStartingMedium(surface, viewDirection, area.light.direction, medium));
     if (shadow.hitDistance < PRIME_NRD_FP16_MAX) {
         return float3(0.0);
     }
@@ -182,7 +184,8 @@ public float3 primeEstimateDirectSun(
         return float3(0.0);
     }
     PrimeShadowTrace shadow = primeTraceShadow(
-            context, surface, light, medium);
+            context, surface, light,
+            primeShadowStartingMedium(surface, viewDirection, light.direction, medium));
     if (shadow.hitDistance < PRIME_NRD_FP16_MAX) {
         return float3(0.0);
     }

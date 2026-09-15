@@ -69,26 +69,26 @@ public PrimeShadowTrace primeTraceShadow(
         SurfaceInteraction surface,
         LightSample light,
         uint2 targetEmitter,
-        PrimeOpenPbrVolume medium) {
+        PrimeOpenPbrVolume startingMedium) {
     return primeTracePreparedShadow(context,
             surface.position,
             light.direction,
             light.distance,
             uint2(surface.sectionIndex, primeSurfaceTriangleIndex(surface)),
             targetEmitter,
-            primeShadowCanonicalExtinction(medium.extinction),
-            medium.mediumId);
+            primeShadowCanonicalExtinction(startingMedium.extinction),
+            startingMedium.mediumId);
 }
 
 public PrimeShadowTrace primeTraceShadow(
         inout PrimeIntegratorContext context,
         SurfaceInteraction surface,
         LightSample light,
-        PrimeOpenPbrVolume medium) {
+        PrimeOpenPbrVolume startingMedium) {
     return primeTraceShadow(
             context,
             surface,
             light,
             uint2(PRIME_NO_PRIMITIVE_INDEX),
-            medium);
+            startingMedium);
 }

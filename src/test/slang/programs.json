@@ -1,65 +1,279 @@
 {
   "programs": [
-    {"entry": "starmap_filter.compute.slang", "artifact": "starmap_filter.comp.spv"},
-    {"entry": "starmap_mips.compute.slang", "artifact": "starmap_mips.comp.spv"},
-    {"entry": "scatter_hit_distance.compute.slang", "artifact": "scatter_hit_distance.comp.spv"},
-    {"entry": "realtime_continuation.compute.slang", "artifact": "realtime_continuation.comp.spv"},
-    {"entry": "lambert_transport.compute.slang", "artifact": "lambert_transport.comp.spv"},
-    {"entry": "primary_transparent_branch.compute.slang", "artifact": "primary_transparent_branch.comp.spv"},
-    {"entry": "reconstruction_direction.compute.slang", "artifact": "reconstruction_direction.comp.spv"},
-    {"entry": "discrete_stbn.compute.slang", "artifact": "discrete_stbn.comp.spv"},
-    {"entry": "linear_roulette.compute.slang", "artifact": "linear_roulette.comp.spv"},
-    {"entry": "lambert_roulette.compute.slang", "artifact": "lambert_roulette.comp.spv"},
-    {"entry": "successor_queue.compute.slang", "artifact": "successor_queue.comp.spv"},
-    {"entry": "successor_queue_ser.compute.slang", "artifact": "successor_queue_ser.comp.spv", "definitions": ["-DPRIME_ENABLE_SUBGROUP_QUEUE=1", "-DPRIME_ENABLE_SER=1"]},
-    {"entry": "successor_queue_subgroup.compute.slang", "artifact": "successor_queue_subgroup.comp.spv", "definitions": ["-DPRIME_ENABLE_SUBGROUP_QUEUE=1"]},
-    {"entry": "wavefront_queue.compute.slang", "artifact": "wavefront_queue.comp.spv", "definitions": ["-DPRIME_TEST_WAVEFRONT_QUEUE=1"]},
-    {"entry": "wavefront_queue_subgroup.compute.slang", "artifact": "wavefront_queue_subgroup.comp.spv", "definitions": ["-DPRIME_TEST_WAVEFRONT_QUEUE=1", "-DPRIME_ENABLE_SUBGROUP_QUEUE=1"]},
-    {"entry": "candidate_uv.compute.slang", "artifact": "candidate_uv.comp.spv"},
-    {"entry": "atmosphere_transmittance_table.compute.slang", "artifact": "atmosphere_transmittance_table.comp.spv"},
-    {"entry": "atmosphere_camera_error.compute.slang", "artifact": "atmosphere_camera_error.comp.spv"},
-    {"entry": "lambert_stbn.compute.slang", "artifact": "lambert_stbn.comp.spv"},
-    {"entry": "position_fetch.raygeneration.slang", "artifact": "position_fetch.rgen.spv"},
-    {"entry": "position_fetch.miss.slang", "artifact": "position_fetch.rmiss.spv"},
-    {"entry": "position_fetch.anyhit.slang", "artifact": "position_fetch.rahit.spv"},
-    {"entry": "position_fetch.closesthit.slang", "artifact": "position_fetch.rchit.spv"},
-    {"entry": "position_fetch_ser.raygeneration.slang", "artifact": "position_fetch_ser.rgen.spv"},
-    {"entry": "lambert_trace_contract.raygeneration.slang", "artifact": "lambert_trace_contract.rgen.spv", "definitions": ["-DPRIME_ENABLE_SER=1", "-DPRIME_ENABLE_SUBGROUP_QUEUE=1"]},
-    {"entry": "position_fetch_ser.miss.slang", "artifact": "position_fetch_ser.rmiss.spv", "definitions": ["-DPRIME_TEST_SER=1"]},
-    {"entry": "position_fetch_ser.anyhit.slang", "artifact": "position_fetch_ser.rahit.spv", "definitions": ["-DPRIME_TEST_SER=1"]},
-    {"entry": "position_fetch_ser.closesthit.slang", "artifact": "position_fetch_ser.rchit.spv", "definitions": ["-DPRIME_TEST_SER=1"]},
-    {"entry": "atmosphere_aerial_prefix.compute.slang", "artifact": "atmosphere_aerial_prefix.comp.spv"},
-    {"entry": "atmosphere_epipolar_properties.compute.slang", "artifact": "atmosphere_epipolar_properties.comp.spv"},
-    {"entry": "atmosphere_epipolar_shadow_alignment.compute.slang", "artifact": "atmosphere_epipolar_shadow_alignment.comp.spv"},
-    {"entry": "atmosphere_epipolar_shadow_profile.compute.slang", "artifact": "atmosphere_epipolar_shadow_profile.comp.spv"},
-    {"entry": "atmosphere_scale_properties.compute.slang", "artifact": "atmosphere_scale_properties.comp.spv"},
-    {"entry": "atmosphere_segment_integral.compute.slang", "artifact": "atmosphere_segment_integral.comp.spv"},
-    {"entry": "compact_openpbr_foliage_properties.compute.slang", "artifact": "compact_openpbr_foliage_properties.comp.spv"},
-    {"entry": "compact_openpbr_mixed_properties.compute.slang", "artifact": "compact_openpbr_mixed_properties.comp.spv"},
-    {"entry": "compact_openpbr_opaque_properties.compute.slang", "artifact": "compact_openpbr_opaque_properties.comp.spv"},
-    {"entry": "compact_openpbr_transmission_properties.compute.slang", "artifact": "compact_openpbr_transmission_properties.comp.spv"},
-    {"entry": "openpbr_core_properties.compute.slang", "artifact": "openpbr_core_properties.comp.spv"},
-    {"entry": "opaque_base_color.compute.slang", "artifact": "opaque_base_color.comp.spv"},
-    {"entry": "openpbr_distribution_statistics.compute.slang", "artifact": "openpbr_distribution_statistics.comp.spv"},
-    {"entry": "prime_auto_exposure_properties.compute.slang", "artifact": "prime_auto_exposure_properties.comp.spv"},
-    {"entry": "prime_bsdf_contract_properties.compute.slang", "artifact": "prime_bsdf_contract_properties.comp.spv"},
-    {"entry": "prime_bsdf_diagnostics.compute.slang", "artifact": "prime_bsdf_diagnostics.comp.spv"},
-    {"entry": "prime_bsdf_properties.compute.slang", "artifact": "prime_bsdf_properties.comp.spv"},
-    {"entry": "prime_celestial_properties.compute.slang", "artifact": "prime_celestial_properties.comp.spv"},
-    {"entry": "prime_dielectric_slab_properties.compute.slang", "artifact": "prime_dielectric_slab_properties.comp.spv"},
-    {"entry": "prime_fsr_input_properties.compute.slang", "artifact": "prime_fsr_input_properties.comp.spv"},
-    {"entry": "prime_material_properties.compute.slang", "artifact": "prime_material_properties.comp.spv"},
-    {"entry": "prime_nrd_properties.compute.slang", "artifact": "prime_nrd_properties.comp.spv"},
-    {"entry": "prime_numerical_properties.compute.slang", "artifact": "prime_numerical_properties.comp.spv"},
-    {"entry": "prime_light_cell_properties.compute.slang", "artifact": "prime_light_cell_properties.comp.spv"},
-    {"entry": "prime_realtime_state_properties.compute.slang", "artifact": "prime_realtime_state_properties.comp.spv"},
-    {"entry": "prime_queued_psr_properties.compute.slang", "artifact": "prime_queued_psr_properties.comp.spv"},
-    {"entry": "prime_sampling_parity.compute.slang", "artifact": "prime_sampling_parity.comp.spv"},
-    {"entry": "prime_transport_core_properties.compute.slang", "artifact": "prime_transport_core_properties.comp.spv"},
-    {"entry": "prime_zsobol_parity.compute.slang", "artifact": "prime_zsobol_parity.comp.spv"},
-    {"entry": "robocute_lut_roundtrip.compute.slang", "artifact": "robocute_lut_roundtrip.comp.spv"},
-    {"entry": "srgb_texture_sampling.compute.slang", "artifact": "srgb_texture_sampling.comp.spv"},
-    {"entry": "starmap_bc6h.compute.slang", "artifact": "starmap_bc6h.comp.spv"},
-    {"entry": "sun_shadow_hierarchy_properties.compute.slang", "artifact": "sun_shadow_hierarchy_properties.comp.spv"}
+    {
+      "entry": "starmap_filter.compute.slang",
+      "artifact": "starmap_filter.comp.spv"
+    },
+    {
+      "entry": "starmap_mips.compute.slang",
+      "artifact": "starmap_mips.comp.spv"
+    },
+    {
+      "entry": "scatter_hit_distance.compute.slang",
+      "artifact": "scatter_hit_distance.comp.spv"
+    },
+    {
+      "entry": "realtime_continuation.compute.slang",
+      "artifact": "realtime_continuation.comp.spv"
+    },
+    {
+      "entry": "lambert_transport.compute.slang",
+      "artifact": "lambert_transport.comp.spv"
+    },
+    {
+      "entry": "primary_transparent_branch.compute.slang",
+      "artifact": "primary_transparent_branch.comp.spv"
+    },
+    {
+      "entry": "reconstruction_direction.compute.slang",
+      "artifact": "reconstruction_direction.comp.spv"
+    },
+    {
+      "entry": "discrete_stbn.compute.slang",
+      "artifact": "discrete_stbn.comp.spv"
+    },
+    {
+      "entry": "linear_roulette.compute.slang",
+      "artifact": "linear_roulette.comp.spv"
+    },
+    {
+      "entry": "lambert_roulette.compute.slang",
+      "artifact": "lambert_roulette.comp.spv"
+    },
+    {
+      "entry": "successor_queue.compute.slang",
+      "artifact": "successor_queue.comp.spv"
+    },
+    {
+      "entry": "successor_queue_ser.compute.slang",
+      "artifact": "successor_queue_ser.comp.spv",
+      "definitions": [
+        "-DPRIME_ENABLE_SUBGROUP_QUEUE=1",
+        "-DPRIME_ENABLE_SER=1"
+      ]
+    },
+    {
+      "entry": "successor_queue_subgroup.compute.slang",
+      "artifact": "successor_queue_subgroup.comp.spv",
+      "definitions": [
+        "-DPRIME_ENABLE_SUBGROUP_QUEUE=1"
+      ]
+    },
+    {
+      "entry": "wavefront_queue.compute.slang",
+      "artifact": "wavefront_queue.comp.spv",
+      "definitions": [
+        "-DPRIME_TEST_WAVEFRONT_QUEUE=1"
+      ]
+    },
+    {
+      "entry": "wavefront_queue_subgroup.compute.slang",
+      "artifact": "wavefront_queue_subgroup.comp.spv",
+      "definitions": [
+        "-DPRIME_TEST_WAVEFRONT_QUEUE=1",
+        "-DPRIME_ENABLE_SUBGROUP_QUEUE=1"
+      ]
+    },
+    {
+      "entry": "candidate_uv.compute.slang",
+      "artifact": "candidate_uv.comp.spv"
+    },
+    {
+      "entry": "atmosphere_transmittance_table.compute.slang",
+      "artifact": "atmosphere_transmittance_table.comp.spv"
+    },
+    {
+      "entry": "atmosphere_camera_error.compute.slang",
+      "artifact": "atmosphere_camera_error.comp.spv"
+    },
+    {
+      "entry": "lambert_stbn.compute.slang",
+      "artifact": "lambert_stbn.comp.spv"
+    },
+    {
+      "entry": "position_fetch.raygeneration.slang",
+      "artifact": "position_fetch.rgen.spv"
+    },
+    {
+      "entry": "position_fetch.miss.slang",
+      "artifact": "position_fetch.rmiss.spv"
+    },
+    {
+      "entry": "position_fetch.anyhit.slang",
+      "artifact": "position_fetch.rahit.spv"
+    },
+    {
+      "entry": "position_fetch.closesthit.slang",
+      "artifact": "position_fetch.rchit.spv"
+    },
+    {
+      "entry": "position_fetch_ser.raygeneration.slang",
+      "artifact": "position_fetch_ser.rgen.spv"
+    },
+    {
+      "entry": "lambert_trace_contract.raygeneration.slang",
+      "artifact": "lambert_trace_contract.rgen.spv",
+      "definitions": [
+        "-DPRIME_ENABLE_SER=1",
+        "-DPRIME_ENABLE_SUBGROUP_QUEUE=1"
+      ]
+    },
+    {
+      "entry": "position_fetch_ser.miss.slang",
+      "artifact": "position_fetch_ser.rmiss.spv",
+      "definitions": [
+        "-DPRIME_TEST_SER=1"
+      ]
+    },
+    {
+      "entry": "position_fetch_ser.anyhit.slang",
+      "artifact": "position_fetch_ser.rahit.spv",
+      "definitions": [
+        "-DPRIME_TEST_SER=1"
+      ]
+    },
+    {
+      "entry": "position_fetch_ser.closesthit.slang",
+      "artifact": "position_fetch_ser.rchit.spv",
+      "definitions": [
+        "-DPRIME_TEST_SER=1"
+      ]
+    },
+    {
+      "entry": "atmosphere_aerial_prefix.compute.slang",
+      "artifact": "atmosphere_aerial_prefix.comp.spv"
+    },
+    {
+      "entry": "atmosphere_epipolar_properties.compute.slang",
+      "artifact": "atmosphere_epipolar_properties.comp.spv"
+    },
+    {
+      "entry": "atmosphere_epipolar_shadow_alignment.compute.slang",
+      "artifact": "atmosphere_epipolar_shadow_alignment.comp.spv"
+    },
+    {
+      "entry": "atmosphere_epipolar_shadow_profile.compute.slang",
+      "artifact": "atmosphere_epipolar_shadow_profile.comp.spv"
+    },
+    {
+      "entry": "atmosphere_scale_properties.compute.slang",
+      "artifact": "atmosphere_scale_properties.comp.spv"
+    },
+    {
+      "entry": "atmosphere_segment_integral.compute.slang",
+      "artifact": "atmosphere_segment_integral.comp.spv"
+    },
+    {
+      "entry": "compact_openpbr_foliage_properties.compute.slang",
+      "artifact": "compact_openpbr_foliage_properties.comp.spv"
+    },
+    {
+      "entry": "compact_openpbr_mixed_properties.compute.slang",
+      "artifact": "compact_openpbr_mixed_properties.comp.spv"
+    },
+    {
+      "entry": "compact_openpbr_opaque_properties.compute.slang",
+      "artifact": "compact_openpbr_opaque_properties.comp.spv"
+    },
+    {
+      "entry": "compact_openpbr_transmission_properties.compute.slang",
+      "artifact": "compact_openpbr_transmission_properties.comp.spv"
+    },
+    {
+      "entry": "openpbr_core_properties.compute.slang",
+      "artifact": "openpbr_core_properties.comp.spv"
+    },
+    {
+      "entry": "opaque_base_color.compute.slang",
+      "artifact": "opaque_base_color.comp.spv"
+    },
+    {
+      "entry": "openpbr_distribution_statistics.compute.slang",
+      "artifact": "openpbr_distribution_statistics.comp.spv"
+    },
+    {
+      "entry": "prime_auto_exposure_properties.compute.slang",
+      "artifact": "prime_auto_exposure_properties.comp.spv"
+    },
+    {
+      "entry": "prime_bsdf_contract_properties.compute.slang",
+      "artifact": "prime_bsdf_contract_properties.comp.spv"
+    },
+    {
+      "entry": "prime_bsdf_diagnostics.compute.slang",
+      "artifact": "prime_bsdf_diagnostics.comp.spv"
+    },
+    {
+      "entry": "prime_bsdf_properties.compute.slang",
+      "artifact": "prime_bsdf_properties.comp.spv"
+    },
+    {
+      "entry": "prime_celestial_properties.compute.slang",
+      "artifact": "prime_celestial_properties.comp.spv"
+    },
+    {
+      "entry": "prime_dielectric_slab_properties.compute.slang",
+      "artifact": "prime_dielectric_slab_properties.comp.spv"
+    },
+    {
+      "entry": "prime_fsr_input_properties.compute.slang",
+      "artifact": "prime_fsr_input_properties.comp.spv"
+    },
+    {
+      "entry": "prime_material_properties.compute.slang",
+      "artifact": "prime_material_properties.comp.spv"
+    },
+    {
+      "entry": "prime_nrd_properties.compute.slang",
+      "artifact": "prime_nrd_properties.comp.spv"
+    },
+    {
+      "entry": "prime_numerical_properties.compute.slang",
+      "artifact": "prime_numerical_properties.comp.spv"
+    },
+    {
+      "entry": "prime_light_cell_properties.compute.slang",
+      "artifact": "prime_light_cell_properties.comp.spv"
+    },
+    {
+      "entry": "prime_realtime_state_properties.compute.slang",
+      "artifact": "prime_realtime_state_properties.comp.spv"
+    },
+    {
+      "entry": "prime_queued_psr_properties.compute.slang",
+      "artifact": "prime_queued_psr_properties.comp.spv"
+    },
+    {
+      "entry": "prime_sampling_parity.compute.slang",
+      "artifact": "prime_sampling_parity.comp.spv"
+    },
+    {
+      "entry": "prime_transport_core_properties.compute.slang",
+      "artifact": "prime_transport_core_properties.comp.spv"
+    },
+    {
+      "entry": "prime_zsobol_parity.compute.slang",
+      "artifact": "prime_zsobol_parity.comp.spv"
+    },
+    {
+      "entry": "robocute_lut_roundtrip.compute.slang",
+      "artifact": "robocute_lut_roundtrip.comp.spv"
+    },
+    {
+      "entry": "srgb_texture_sampling.compute.slang",
+      "artifact": "srgb_texture_sampling.comp.spv"
+    },
+    {
+      "entry": "starmap_bc6h.compute.slang",
+      "artifact": "starmap_bc6h.comp.spv"
+    },
+    {
+      "entry": "sun_shadow_hierarchy_properties.compute.slang",
+      "artifact": "sun_shadow_hierarchy_properties.comp.spv"
+    },
+    {
+      "entry": "shadow_source_medium.compute.slang",
+      "artifact": "shadow_source_medium.comp.spv"
+    }
   ]
 }

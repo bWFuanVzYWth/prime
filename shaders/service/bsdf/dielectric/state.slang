@@ -15,6 +15,7 @@ import "service/bsdf/support/medium_identity.slang";
 import "model/material/transparent.slang";
 import "service/bsdf/support/conversion.slang";
 import "service/bsdf/support/volume_transition.slang";
+import "service/bsdf/support/boundary_volume.slang";
 import "bsdf/compact/contract/volume.slang";
 import "bsdf/compact/math/spectrum.slang";
 import "bsdf/compact/math/frame.slang";
@@ -112,47 +113,6 @@ public bool primeUsesAdjacentAirGap(
                     opticalControl & PRIME_OPTICAL_FRESNEL_MASK,
                     primeAdjacentMaterialControl(adjacentInterfaceControl),
                     primeAdjacentFresnelCode(adjacentInterfaceControl));
-}
-
-public PrimeOpenPbrVolume primeAdjacentMediumVolume(
-        float3 baseColor,
-        uint adjacentInterfaceControl,
-        uint mediumId) {
-    if (mediumId == PRIME_MEDIUM_ID_VACUUM) return primeVacuumMedium();
-    uint materialControl = primeAdjacentMaterialControl(adjacentInterfaceControl);
-    uint opticalControl = primeAdjacentFresnelCode(adjacentInterfaceControl);
-    PrimeOpenPbrMaterial material = primeMinecraftTransmissionMaterial(
-            baseColor,
-            1.0,
-            float3(0.0, 1.0, 0.0),
-            materialControl,
-            0.0,
-            opticalControl);
-    PrimeOpenPbrVolume volume = primeOpenPbrVolumeFromTransmission(material.transmission);
-    volume.ior = material.specular.ior;
-    volume.mediumId = mediumId;
-    volume.iorEncoding = primeMediumIorEncoding(materialControl, opticalControl);
-    return volume;
-}
-
-public PrimeOpenPbrVolume primeBoundarySurfaceVolume(
-        float3 baseColor,
-        float opacity,
-        uint materialControl,
-        uint opticalControl,
-        uint mediumId) {
-    PrimeOpenPbrMaterial material = primeMinecraftTransmissionMaterial(
-            baseColor,
-            opacity,
-            float3(0.0, 1.0, 0.0),
-            materialControl,
-            0.0,
-            opticalControl);
-    PrimeOpenPbrVolume volume = primeOpenPbrVolumeFromTransmission(material.transmission);
-    volume.ior = material.specular.ior;
-    volume.mediumId = mediumId;
-    volume.iorEncoding = primeMediumIorEncoding(materialControl, opticalControl);
-    return volume;
 }
 
 public PrimeOpenPbrMaterial primeAirGapMaterial(

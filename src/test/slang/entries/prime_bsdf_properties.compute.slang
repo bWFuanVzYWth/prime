@@ -49,6 +49,7 @@ import "service/bsdf/opaque/evaluate.slang";
 import "service/bsdf/opaque/sample.slang";
 import "service/bsdf/dielectric/albedo.slang";
 import "service/bsdf/dielectric/state.slang";
+import "service/bsdf/support/boundary_volume.slang";
 import "service/bsdf/dielectric/traits.slang";
 import "service/bsdf/dielectric/conditional.slang";
 import "service/bsdf/dielectric/evaluate.slang";

@@ -62,11 +62,11 @@
       "maxBytes": 154654
     },
     "entry/offline/direct.raygeneration.slang": {
-      "maxFiles": 127,
+      "maxFiles": 129,
       "maxBytes": 417632
     },
     "entry/offline/light_select.raygeneration.slang": {
-      "maxFiles": 76,
+      "maxFiles": 77,
       "maxBytes": 213003
     },
     "entry/offline/sample_resolve.raygeneration.slang": {
@@ -74,7 +74,7 @@
       "maxBytes": 84713
     },
     "entry/offline/scatter.raygeneration.slang": {
-      "maxFiles": 106,
+      "maxFiles": 107,
       "maxBytes": 333246
     },
     "entry/post/auto_exposure_histogram.compute.slang": {
@@ -138,31 +138,31 @@
       "maxBytes": 161057
     },
     "entry/realtime/landing_light_select.raygeneration.slang": {
-      "maxFiles": 81,
+      "maxFiles": 82,
       "maxBytes": 239114
     },
     "entry/realtime/landing_direct.raygeneration.slang": {
-      "maxFiles": 130,
+      "maxFiles": 132,
       "maxBytes": 446475
     },
     "entry/realtime/landing_scatter.raygeneration.slang": {
-      "maxFiles": 150,
+      "maxFiles": 151,
       "maxBytes": 504476
     },
     "entry/realtime/delta_walk.raygeneration.slang": {
-      "maxFiles": 110,
+      "maxFiles": 111,
       "maxBytes": 347896
     },
     "entry/realtime/guide_delta_walk.raygeneration.slang": {
-      "maxFiles": 116,
+      "maxFiles": 117,
       "maxBytes": 377749
     },
     "entry/realtime/visible_direct.raygeneration.slang": {
-      "maxFiles": 130,
+      "maxFiles": 132,
       "maxBytes": 444154
     },
     "entry/realtime/surface_split.raygeneration.slang": {
-      "maxFiles": 148,
+      "maxFiles": 149,
       "maxBytes": 505230
     },
     "entry/realtime/noisy_output_resolve.raygeneration.slang": {
@@ -174,15 +174,15 @@
       "maxBytes": 119346
     },
     "entry/realtime/secondary_light_select.raygeneration.slang": {
-      "maxFiles": 83,
+      "maxFiles": 84,
       "maxBytes": 240136
     },
     "entry/realtime/secondary_direct.raygeneration.slang": {
-      "maxFiles": 132,
+      "maxFiles": 134,
       "maxBytes": 445220
     },
     "entry/realtime/secondary_scatter.raygeneration.slang": {
-      "maxFiles": 152,
+      "maxFiles": 153,
       "maxBytes": 503579
     },
     "entry/realtime/branch_resolve.raygeneration.slang": {
