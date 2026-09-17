@@ -3,6 +3,7 @@
 #language slang 2026
 module "transport/realtime/guide_delta_walk.slang";
 
+import "transport/guide/append.slang";
 import "prime_realtime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/medium.slang";

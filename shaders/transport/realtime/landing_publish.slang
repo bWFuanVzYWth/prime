@@ -14,12 +14,6 @@ import "contract/realtime/transparent.slang";
 import "policy/realtime/continuation.slang";
 import "policy/runtime/config.slang";
 
-struct PrimeWavefrontContinuationControl {
-    uint guide;
-    uint path;
-    uint denoiser;
-};
-
 PrimeWavefrontContinuationControl primeLoadWavefrontContinuationControl(
         uint pathIndex) {
     uint4 sourceAndPathControl =
@@ -31,16 +25,6 @@ PrimeWavefrontContinuationControl primeLoadWavefrontContinuationControl(
     control.guide = sourceAndPathControl.z;
     control.path = sourceAndPathControl.w;
     control.denoiser = asuint(rayDirectionAndDenoiserControl.w);
-    return control;
-}
-
-PrimeWavefrontContinuationControl primeEnterSecondaryControl(
-        PrimeWavefrontContinuationControl control) {
-    control.path &= ~PRIME_WAVEFRONT_BYTE_MASK;
-    control.denoiser &= ~(PRIME_WAVEFRONT_BYTE_MASK
-            << PRIME_WAVEFRONT_PRIMARY_BOUNCE_SHIFT);
-    control.guide &= ~(PRIME_WAVEFRONT_PSR_CONTROL_MASK
-            | PRIME_WAVEFRONT_GUIDE_FALLBACK);
     return control;
 }
 

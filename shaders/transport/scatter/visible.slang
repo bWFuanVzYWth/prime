@@ -38,8 +38,7 @@ public bool primeIntegrateVisibleSurface(
         return false;
     }
     float3 viewDirection = -path.rayDirection;
-    PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
-            surface, viewDirection, medium, primeUsesAirGap());
+    PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(surface, medium.ior, primeUsesAirGap());
     PrimePreparedSampleBase preparedSample = primePreparePathSample(
             path.sampleSeed, primeSampleIndex(), primePathBounce(path.control) + 1u);
     float3 scatterSample = primeSobolSample3D(

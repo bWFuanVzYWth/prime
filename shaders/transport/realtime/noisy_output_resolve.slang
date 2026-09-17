@@ -3,6 +3,7 @@
 #language slang 2026
 module "transport/realtime/noisy_output_resolve.slang";
 
+import "state/realtime/intermediate.slang";
 import "prime_realtime_abi.slang";
 import "prime_abi.slang";
 import "prime_abi_types.slang";

@@ -6,7 +6,7 @@ module "service/light/tree_common.slang";
 import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "math/light_tree.slang";
-import "service/light/emission.slang";
+import "contract/light_sample.slang";
 
 public static const uint PRIME_LIGHT_LEAF_FLAG = 0x80000000u;
 public static const uint PRIME_LIGHT_INDEX_MASK = 0x7fffffffu;

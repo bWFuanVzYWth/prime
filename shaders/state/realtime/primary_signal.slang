@@ -3,6 +3,7 @@
 #language slang 2026
 module "state/realtime/primary_signal.slang";
 
+import "state/realtime/area.slang";
 import "prime_realtime_abi.slang";
 import "service/reconstruct/nrd/common.slang";
 import "service/reconstruct/ordinary.slang";

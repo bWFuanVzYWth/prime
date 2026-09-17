@@ -10,7 +10,8 @@ import "state/offline/contract.slang";
 import "state/offline/path_storage.slang";
 import "state/offline/index.slang";
 import "state/surface_storage.slang";
-import "service/trace/surface.slang";
+import "model/surface/miss.slang";
+import "policy/runtime/config.slang";
 import "contract/path.slang";
 
 public static const uint PRIME_OFFLINE_SURFACE_WORDS =
@@ -60,7 +61,7 @@ public SurfaceInteraction primeLoadOfflineSurface(uint pathIndex) {
     if (hitKind == PRIME_HIT_NONE) {
         return primeMissSurfaceInteraction(
                 primeOfflineSourcePrimitive(
-                        primeOfflinePaths[pathIndex].transport));
+                        primeOfflinePaths[pathIndex].transport), primeConfiguredDefaultLinearRoughness());
     }
     PrimeSurfaceStorageRecord record;
     record.geometry = primeLoadOfflineSurfaceLane(word, 0u);

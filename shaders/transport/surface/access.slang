@@ -8,6 +8,7 @@ import "state/path.slang";
 import "math/packed_geometry.slang";
 import "model/material/defaults.slang";
 import "contract/path.slang";
+import "math/surface_normal.slang";
 
 public bool primeKnownHitKind(SurfaceInteraction surface) {
     return surface.hitKind == PRIME_HIT_NONE
@@ -15,18 +16,12 @@ public bool primeKnownHitKind(SurfaceInteraction surface) {
 }
 
 public float3 primeSurfaceOutwardShadingNormal(SurfaceInteraction surface) {
-    float3 shadingNormal = surface.shadingNormal;
-    return dot(shadingNormal, surface.geometricNormal) >= 0.0
-            ? shadingNormal
-            : -shadingNormal;
+    return primeOutwardShadingNormal(surface.shadingNormal, surface.geometricNormal);
 }
 
 public float3 primeSurfaceShadingNormal(
         SurfaceInteraction surface, float3 viewDirection) {
-    float3 shadingNormal = primeSurfaceOutwardShadingNormal(surface);
-    return dot(surface.geometricNormal, viewDirection) >= 0.0
-            ? shadingNormal
-            : -shadingNormal;
+    return primeIncidentShadingNormal(surface.shadingNormal, surface.geometricNormal, viewDirection);
 }
 
 public float primeSurfaceOpacity(SurfaceInteraction surface) {
@@ -37,4 +32,3 @@ public float primeSurfaceLinearRoughness(SurfaceInteraction surface) {
     return primeMaterialEffectiveLinearRoughness(
             surface.materialControl, surface.roughness);
 }
-

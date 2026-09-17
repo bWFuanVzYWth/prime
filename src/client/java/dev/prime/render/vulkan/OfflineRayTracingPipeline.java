@@ -58,6 +58,7 @@ public final class OfflineRayTracingPipeline implements Destroyable {
             traceProgram = TraceProgram.create(
                     context,
                     GeneratedShaderPrograms.schedule("offline", suffix),
+                    TraceProgram.fixedResources(suffix),
                     "Prime offline ray tracing pipeline",
                     "Prime offline shader binding table",
                     backend.bindings().descriptorSetLayout(),

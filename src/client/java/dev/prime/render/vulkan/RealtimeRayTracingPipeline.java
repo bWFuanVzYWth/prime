@@ -2,8 +2,6 @@
 
 package dev.prime.render.vulkan;
 
-import static dev.prime.render.vulkan.GeneratedShaderPrograms.*;
-
 import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import com.mojang.renderpearl.backend.vulkan.VulkanGpuSampler;
 import com.mojang.renderpearl.backend.vulkan.VulkanGpuTextureView;
@@ -47,14 +45,8 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
     private int lastRecordedPassCount;
     private boolean destroyed;
 
-    static int bounceLimit(int minimum, int maximum) {
-        return Math.max(dev.prime.render.BounceSettings.validateFixedCount(minimum),
-                dev.prime.render.BounceSettings.validateCount(maximum));
-    }
-
     static int dispatchCount(int minimum, int maximum) {
-        // Eleven primary stages, four stages per secondary vertex, and two output stages.
-        return 4 * (bounceLimit(minimum, maximum) - 1) + 13;
+        return RealtimeTracePlan.forBounces(minimum, maximum).size();
     }
 
     static int queueMetadata(int minimum, int delta) {
@@ -71,11 +63,13 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 setLayout = createDescriptorSetLayout(context, stack);
             }
+            String suffix = context.capabilities().wavefrontShaderSuffix();
             traceProgram = TraceProgram.create(
                     context,
                     GeneratedShaderPrograms.schedule(
                             "realtime.standard",
-                            context.capabilities().wavefrontShaderSuffix()),
+                            suffix),
+                    TraceProgram.fixedResources(suffix),
                     "Prime realtime ray tracing pipeline",
                     "Prime realtime shader binding table",
                     backend.bindings().descriptorSetLayout(),
@@ -220,71 +214,24 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
             MemoryStack stack,
             IntegratorFrameInput input,
             long commandOffset) {
-        this.traceDirect(
-                commandBuffer,
-                stack,
-                input.width(),
-                input.height(),
-                REALTIME_STANDARD_CAMERA_TRACE);
-        this.recordPrimaryPrefix(commandBuffer, stack, commandOffset);
-        int limit = bounceLimit(input.minimumBounces(), input.maximumBounces());
-        boolean sourceOne = false;
-        for (int round = 1; round < limit; round++) {
-            WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
-            int sourceQueue = sourceOne
-                    ? ShaderAbi.WAVEFRONT_TRANSPARENT_TRACE_QUEUE_1
-                    : ShaderAbi.WAVEFRONT_TRANSPARENT_TRACE_QUEUE_0;
-            this.traceQueued(
-                    commandBuffer,
-                    stack,
-                    queuedGroup(
-                            sourceOne,
-                            REALTIME_STANDARD_BRIDGE_TRACE_0,
-                            REALTIME_STANDARD_BRIDGE_TRACE_1),
-                    commandOffset,
-                    sourceQueue);
-            WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
-            this.traceQueued(
-                    commandBuffer,
-                    stack,
-                    queuedGroup(
-                            sourceOne,
-                            REALTIME_STANDARD_LIGHT_SELECT_0,
-                            REALTIME_STANDARD_LIGHT_SELECT_1),
-                    commandOffset,
-                    sourceQueue);
-            this.nextStepBarrier(commandBuffer, stack);
-            this.traceQueued(
-                    commandBuffer,
-                    stack,
-                    queuedGroup(
-                            sourceOne,
-                            REALTIME_STANDARD_DIRECT_0,
-                            REALTIME_STANDARD_DIRECT_1),
-                    commandOffset,
-                    sourceQueue);
-            this.nextStepBarrier(commandBuffer, stack);
-            this.traceQueued(
-                    commandBuffer,
-                    stack,
-                    queuedGroup(
-                            sourceOne,
-                            REALTIME_STANDARD_SCATTER_0,
-                            REALTIME_STANDARD_SCATTER_1),
-                    commandOffset,
-                    sourceQueue);
-            sourceOne = !sourceOne;
+        RealtimeTracePlan plan = RealtimeTracePlan.forBounces(input.minimumBounces(), input.maximumBounces());
+        for (int index = 0; index < plan.size(); ++index) {
+            RealtimeTracePlan.Dispatch dispatch = plan.dispatch(index);
+            switch (dispatch.barrier()) {
+                case NONE -> { }
+                case WAVEFRONT -> WavefrontCommands.wavefrontBarrier(commandBuffer, stack, this.wavefront);
+                case PRIMARY_DIRECT -> this.primaryDirectInputBarrier(commandBuffer, stack);
+                case PRIMARY -> this.primaryInputBarrier(commandBuffer, stack);
+                case NEXT_STEP -> this.nextStepBarrier(commandBuffer, stack);
+                case RESOLVE -> this.resolveInputBarrier(commandBuffer, stack);
+            }
+            if (dispatch.indirect()) {
+                this.traceQueued(commandBuffer, stack, dispatch.group(), commandOffset, dispatch.queue());
+            } else {
+                this.traceDirect(commandBuffer, stack, input.width(), input.height(), dispatch.group());
+            }
         }
-        this.resolveInputBarrier(commandBuffer, stack);
-        this.recordOutput(
-                commandBuffer,
-                stack,
-                commandOffset,
-                input.width(),
-                input.height(),
-                REALTIME_STANDARD_BRANCH_RESOLVE,
-                REALTIME_STANDARD_NOISY_OUTPUT_RESOLVE);
-        return dispatchCount(input.minimumBounces(), input.maximumBounces());
+        return plan.size();
     }
 
     private void bind(
@@ -312,103 +259,6 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
                 commandBuffer, stack, this.program, width, height, group);
     }
 
-    /** Records visible-primary work through secondary-queue publication. */
-    private void recordPrimaryPrefix(
-            VkCommandBuffer commandBuffer,
-            MemoryStack stack,
-            long commandOffset) {
-        this.primaryDirectInputBarrier(commandBuffer, stack);
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                REALTIME_STANDARD_VISIBLE_DIRECT,
-                commandOffset,
-                ShaderAbi.WAVEFRONT_AREA_QUEUE);
-        this.primaryInputBarrier(commandBuffer, stack);
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                REALTIME_STANDARD_SURFACE_SPLIT,
-                commandOffset,
-                ShaderAbi.WAVEFRONT_PRIMARY_QUEUE);
-        this.nextStepBarrier(commandBuffer, stack);
-        // Drain the omitted primary guide before a transport delta walk can detach another
-        // guide for the same pixel. Both use the existing compact guide kernel.
-        this.traceQueued(commandBuffer, stack, REALTIME_STANDARD_GUIDE_DELTA_WALK_0,
-                commandOffset, ShaderAbi.WAVEFRONT_GUIDE_QUEUE);
-        this.nextStepBarrier(commandBuffer, stack);
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                REALTIME_STANDARD_DELTA_WALK_0,
-                commandOffset,
-                ShaderAbi.WAVEFRONT_TRACE_QUEUE_0);
-        this.nextStepBarrier(commandBuffer, stack);
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                REALTIME_STANDARD_GUIDE_DELTA_WALK_0,
-                commandOffset,
-                ShaderAbi.WAVEFRONT_GUIDE_QUEUE);
-        this.nextStepBarrier(commandBuffer, stack);
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                REALTIME_STANDARD_DELTA_WALK_1,
-                commandOffset,
-                ShaderAbi.WAVEFRONT_TRACE_QUEUE_1);
-        this.nextStepBarrier(commandBuffer, stack);
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                REALTIME_STANDARD_GUIDE_DELTA_WALK_1,
-                commandOffset,
-                ShaderAbi.WAVEFRONT_GUIDE_QUEUE);
-        this.nextStepBarrier(commandBuffer, stack);
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                REALTIME_STANDARD_LANDING_LIGHT_SELECT,
-                commandOffset,
-                ShaderAbi.WAVEFRONT_PRIMARY_QUEUE);
-        this.nextStepBarrier(commandBuffer, stack);
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                REALTIME_STANDARD_LANDING_DIRECT,
-                commandOffset,
-                ShaderAbi.WAVEFRONT_PRIMARY_QUEUE);
-        this.nextStepBarrier(commandBuffer, stack);
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                REALTIME_STANDARD_LANDING_SCATTER,
-                commandOffset,
-                ShaderAbi.WAVEFRONT_PRIMARY_QUEUE);
-    }
-
-    private void recordOutput(
-            VkCommandBuffer commandBuffer,
-            MemoryStack stack,
-            long commandOffset,
-            int width,
-            int height,
-            int branchResolveGroup,
-            int outputResolveGroup) {
-        this.traceQueued(
-                commandBuffer,
-                stack,
-                branchResolveGroup,
-                commandOffset,
-                ShaderAbi.WAVEFRONT_TRANSPARENT_RESOLVE_QUEUE);
-        this.traceDirect(
-                commandBuffer,
-                stack,
-                width,
-                height,
-                outputResolveGroup);
-    }
-
     private void traceQueued(
             VkCommandBuffer commandBuffer,
             MemoryStack stack,
@@ -424,10 +274,6 @@ public final class RealtimeRayTracingPipeline implements RealtimeTracePipeline {
                 commandOffset,
                 commandQueue,
                 ShaderAbi.WAVEFRONT_QUEUE_COMMAND_STRIDE);
-    }
-
-    private static int queuedGroup(boolean sourceOne, int first, int second) {
-        return sourceOne ? second : first;
     }
 
     private void initializeQueues(

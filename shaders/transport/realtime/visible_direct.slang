@@ -3,6 +3,7 @@
 #language slang 2026
 module "transport/realtime/visible_direct.slang";
 
+import "state/realtime/area.slang";
 import "prime_realtime_abi.slang";
 import "prime_abi.slang";
 import "prime_abi_types.slang";
@@ -60,11 +61,7 @@ public void primeShadeVisibleDirect(
             throughput, surface, medium)) {
         return;
     }
-    PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
-            surface,
-            viewDirection,
-            medium,
-            primeUsesAirGap());
+    PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(surface, medium.ior, primeUsesAirGap());
     if (!primeClosureSupports(closureTraits, PRIME_MEASURE_SOLID_ANGLE)) {
         return;
     }

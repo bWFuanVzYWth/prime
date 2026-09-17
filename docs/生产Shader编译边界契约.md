@@ -93,15 +93,16 @@ TraceRay 复用而长期保存宽 BSDF 聚合状态；若这会延长 live range
 - 缓存 key 与因一次源修改而失效的 entry 集合；
 - 用户启动阶段的管线创建 wall time 和驱动缓存命中状态。
 
-依赖门禁必须拒绝禁止边、环和已经消除的聚合入口。规模采用已审查基线控制：新增功能可以在
-证据支持下提高局部预算，但无关 entry 的闭包不得增长，现存宽依赖只能缩小。源码图门禁只
-证明架构边界，不能代替 OpenPBR、数值、状态、ABI 和图像行为测试。
+依赖门禁必须拒绝违反层级和阶段能力的边与环。门禁约束数据叶不依赖行为、分类不依赖完整
+求值/采样、输出不依赖传输等不变量，不锁定文件数、源码字节或产物体积。规模和失效扇出作为
+诊断报告保留，性能变化通过测量判断；合法功能增长不需要修改一份实现快照才能通过构建。
+源码图门禁只证明架构边界，不能代替 OpenPBR、数值、状态、ABI 和图像行为测试。
 
 ## 已落地结构
 
 生产源码只允许位于 `contract`、`math`、`model`、`bsdf/compact`、`service`、`transport`、
-`state`、`policy`、`phase` 与 `entry`。每个 entry 各自只导入一个 phase；phase 不互相导入，
-state 不依赖 transport。旧 `core`、`material`、`lighting`、`integrator`、`realtime`、`rt`、
+`state`、`policy` 与 `entry`。entry 通过窄 transport 入口组织工作，state 不依赖 transport
+或追踪服务。旧 `core`、`material`、`lighting`、`integrator`、`realtime`、`rt`、
 `post` 顶层以及全功能 BSDF/integrator/wavefront umbrella 均已删除，门禁拒绝恢复。
 
 `shaders/programs.json` 是实际 artifact、资源名及 realtime/offline schedule 的唯一清单。
@@ -109,10 +110,17 @@ state 不依赖 transport。旧 `core`、`material`、`lighting`、`integrator`�
 版本和 canonical workspace path 为输入；共享 Build Service 限制 slangc 并发。构建产物只保留
 实际 scalar/SER artifact，不复制 `_ser` alias。
 
-`shaders/closure-budgets.json` 保存逐 entry 的已审查文件数和源码字节上限。架构任务同时校验
-module/path、允许层级、禁止边、环、生产 include 禁令、manifest 完整性、诊断不可达性和
-resolved-state 边界，并在报告中列出 fanout 与源修改的 artifact 失效集合。预算变化必须与真实
-依赖变化一同审查，不能用提高全局上限掩盖无关闭包增长。
+架构任务校验 module/path、允许层级、禁止边、环、生产 include 禁令、manifest 完整性、
+诊断不可达性和 resolved-state 边界，并在报告中列出规模、fanout 与源修改的 artifact
+失效集合。历史尺寸预算和按旧符号名称搜索的门禁已移除。
+
+实时路径的数据布局和控制位属于 `contract/realtime/path`，secondary 入口的局部计数重置
+只由 `math/realtime_control` 实现；事件历史与 IOR 不随阶段切换丢失。资源绑定、guide 图像
+读写、初始记录/PSR 构造分开，消费已有 transport 记录不会因此获得初始 PSR 构造能力。
+
+landing/secondary 选灯共用同一入口。实时与离线按字段解码 `PrimeLightReceiver` 和入射 IOR，
+不构造完整 surface 或 medium；分类器只获得离散类别、粗糙度、光学控制和相邻界面状态。
+依赖门禁拒绝选灯引入追踪、重建、完整 BSDF 状态/求值/采样或发光求值，常数由数据叶提供。
 
 delta-walk 只导入 opaque/dielectric 的专用离散状态、能量与采样叶。架构门禁明确拒绝该
 entry 到达 foliage、NEE、通用 operation dispatcher、有限立体角 microfacet 分布以及一般

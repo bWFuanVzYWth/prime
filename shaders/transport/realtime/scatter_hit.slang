@@ -3,6 +3,7 @@
 #language slang 2026
 module "transport/realtime/scatter_hit.slang";
 
+import "state/realtime/transparent_record.slang";
 import "prime_abi_types.slang";
 import "state/path.slang";
 import "state/realtime/contract.slang";
@@ -50,7 +51,7 @@ PrimeWavefrontScatter primeSampleWavefrontHit(inout PrimeIntegratorContext conte
         PrimeMedium volume, SurfaceInteraction surface, bool needsGuide, bool transparent) {
     PrimeWavefrontScatter result;
     float3 viewDirection = -path.rayDirection;
-    result.traits = primeSurfaceClosureTraits(surface, viewDirection, volume, primeUsesAirGap());
+    result.traits = primeSurfaceClosureTraits(surface, volume.ior, primeUsesAirGap());
     result.guided = needsGuide && (!transparent || !primeClosureIsDiscreteOnly(result.traits));
     PrimePreparedSampleBase prepared = primePreparePathSample(
             path.sampleSeed, primeSampleIndex(), primePathBounce(path.control) + 1u);

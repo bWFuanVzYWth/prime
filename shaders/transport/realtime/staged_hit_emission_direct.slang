@@ -61,8 +61,7 @@ public bool primeStagedHitEmissionDiffuse(
     if (pendingReplacement) {
         PrimeMedium medium =
                 primeLoadWavefrontHitMedium(pathIndex);
-        PrimeClosureTraits traits = primeSurfaceClosureTraits(
-                surface, path.viewDirection, medium, primeUsesAirGap());
+        PrimeClosureTraits traits = primeSurfaceClosureTraits(surface, medium.ior, primeUsesAirGap());
         if (!primeClosureIsDiscreteOnly(traits)) return true;
     }
     return (control & PRIME_WAVEFRONT_DIFFUSE_PATH) != 0u;

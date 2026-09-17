@@ -62,15 +62,7 @@ public bool primeSurfaceIsDiscreteOnly(
         return false;
     }
     PrimeClosureTraits traits = primeMaterialIsTransmissive(surface.materialControl)
-            ? primeMinecraftTransmissionClosureTraits(
-                    primeSurfaceOutwardShadingNormal(surface),
-                    surface.materialControl,
-                    surface.roughness,
-                    surface.opticalControl,
-                    viewDirection,
-                    medium,
-                    surface.adjacentInterfaceControl,
-                    primeUsesAirGap())
+            ? primeMinecraftTransmissionClosureTraits(surface.materialControl, surface.roughness, surface.opticalControl, medium.ior, surface.adjacentInterfaceControl, primeUsesAirGap())
             : primeOpaqueClosureTraits(
                     surface.roughness,
                     surface.opticalControl,

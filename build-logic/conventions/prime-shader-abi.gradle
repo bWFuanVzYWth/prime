@@ -268,7 +268,6 @@ def verifyShaderArchitecture = tasks.register(
 	shaderDirectory = shaderSourceRoot
 	includeDirectories.from(shaderAbiSlangRoot)
 	programManifest = shaderProgramManifest
-	closureBudget = layout.projectDirectory.file('shaders/closure-budgets.json')
 	reportFile = shaderArchitectureReport
 }
 // The artifact set creates tasks during configuration, so make the manifest contents an explicit

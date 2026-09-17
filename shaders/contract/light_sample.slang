@@ -3,6 +3,9 @@
 #language slang 2026
 module "contract/light_sample.slang";
 
+public static const uint PRIME_NO_LIGHT_INDEX = 0xffffffffu;
+public static const uint PRIME_EMITTER_TWO_SIDED = 1u;
+
 public struct LightSample {
     public float3 direction;
     public float distance;

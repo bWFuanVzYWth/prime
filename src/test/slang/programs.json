@@ -1,6 +1,10 @@
 {
   "programs": [
     {
+      "entry": "stage_state.compute.slang",
+      "artifact": "stage_state.comp.spv"
+    },
+    {
       "entry": "surface_sampling.compute.slang",
       "artifact": "surface_sampling.comp.spv"
     },
@@ -286,6 +290,36 @@
     {
       "entry": "shadow_source_medium.compute.slang",
       "artifact": "shadow_source_medium.comp.spv"
+    },
+    {
+      "entry": "surface_trace_contract.raygeneration.slang",
+      "artifact": "surface_trace_contract.rgen.spv"
+    },
+    {
+      "entry": "surface_trace_contract_ser.raygeneration.slang",
+      "artifact": "surface_trace_contract_ser.rgen.spv",
+      "definitions": [
+        "-DPRIME_ENABLE_SER=1",
+        "-DPRIME_ENABLE_SUBGROUP_QUEUE=1"
+      ]
+    },
+    {
+      "entry": "surface_trace_contract.anyhit.slang",
+      "artifact": "surface_trace_contract.rahit.spv",
+      "definitions": [
+        "-DPRIME_TEST_SURFACE=1"
+      ]
+    },
+    {
+      "entry": "surface_trace_contract.closesthit.slang",
+      "artifact": "surface_trace_contract.rchit.spv",
+      "definitions": [
+        "-DPRIME_TEST_SURFACE=1"
+      ]
+    },
+    {
+      "entry": "surface_trace_contract.miss.slang",
+      "artifact": "surface_trace_contract.rmiss.spv"
     }
   ]
 }

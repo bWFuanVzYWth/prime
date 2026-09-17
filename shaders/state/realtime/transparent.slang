@@ -3,6 +3,7 @@
 #language slang 2026
 module "state/realtime/transparent.slang";
 
+import "state/realtime/area.slang";
 import "math/direction.slang";
 
 import "prime_realtime_abi.slang";

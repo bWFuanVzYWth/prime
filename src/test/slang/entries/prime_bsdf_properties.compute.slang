@@ -585,15 +585,7 @@ void primeAdapterProperties(
         PrimeClosureTraits transmissionTraits =
                 primeMinecraftTransmissionClosureTraits(state);
         PrimeClosureTraits fastTransmissionTraits =
-                primeMinecraftTransmissionClosureTraits(
-                        outwardNormal,
-                        materialControl,
-                        roughness,
-                        opticalControl,
-                        viewDirection,
-                        medium,
-                        0u,
-                        primeUsesAirGap());
+                primeMinecraftTransmissionClosureTraits(materialControl, roughness, opticalControl, medium.ior, 0u, primeUsesAirGap());
         if (transmissionTraits.measureMask != fastTransmissionTraits.measureMask
                 || transmissionTraits.eventMask != fastTransmissionTraits.eventMask) {
             result.mask |= PRIME_TEST_FAILURE_EVENT;
@@ -1008,15 +1000,7 @@ void primeAdapterProperties(
         PrimeClosureTraits boundaryTraits =
                 primeMinecraftTransmissionClosureTraits(state);
         PrimeClosureTraits fastBoundaryTraits =
-                primeMinecraftTransmissionClosureTraits(
-                        outwardNormal,
-                        materialControl,
-                        roughness,
-                        opticalControl,
-                        viewDirection,
-                        medium,
-                        adjacentInterfaceControl,
-                        primeUsesAirGap());
+                primeMinecraftTransmissionClosureTraits(materialControl, roughness, opticalControl, medium.ior, adjacentInterfaceControl, primeUsesAirGap());
         if (boundaryTraits.measureMask != fastBoundaryTraits.measureMask
                 || boundaryTraits.eventMask != fastBoundaryTraits.eventMask) {
             result.mask |= PRIME_TEST_FAILURE_EVENT;
@@ -1131,15 +1115,7 @@ void primeAdapterProperties(
         PrimeClosureTraits airGapTraits =
                 primeMinecraftTransmissionClosureTraits(state);
         PrimeClosureTraits fastAirGapTraits =
-                primeMinecraftTransmissionClosureTraits(
-                        outwardNormal,
-                        materialControl,
-                        roughness,
-                        opticalControl,
-                        viewDirection,
-                        medium,
-                        adjacentInterfaceControl,
-                        primeUsesAirGap());
+                primeMinecraftTransmissionClosureTraits(materialControl, roughness, opticalControl, medium.ior, adjacentInterfaceControl, primeUsesAirGap());
         if (airGapTraits.measureMask != fastAirGapTraits.measureMask
                 || airGapTraits.eventMask != fastAirGapTraits.eventMask) {
             result.mask |= PRIME_TEST_FAILURE_EVENT;

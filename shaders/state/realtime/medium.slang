@@ -15,7 +15,7 @@ public PrimeMedium primeUnpackWavefrontMedium(uint4 packed, uint iorEncoding) {
     medium.extinction = asfloat(packed.xyz);
     medium.mediumId = packed.w;
     medium.iorEncoding = iorEncoding;
-    medium.ior = packed.w == 0u ? 1.0 : primeDecodeMediumIor(iorEncoding);
+    medium.ior = primeDecodeMediumIor(packed.w, iorEncoding);
     return medium;
 }
 

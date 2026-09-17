@@ -241,6 +241,7 @@ java {
 
 tasks.named('check') {
 	dependsOn 'verifyDistributionJar', 'verifyRoboCuteReference'
+	dependsOn gradle.includedBuild('build-logic').task(':test')
 }
 
 publishing {

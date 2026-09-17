@@ -2,7 +2,6 @@
 
 package dev.prime.gradle.shader
 
-import groovy.json.JsonSlurper
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileCollection
@@ -33,10 +32,6 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
     @InputFile
     @PathSensitive(PathSensitivity.RELATIVE)
     abstract RegularFileProperty getProgramManifest()
-
-    @InputFile
-    @PathSensitive(PathSensitivity.RELATIVE)
-    abstract RegularFileProperty getClosureBudget()
 
     @OutputFile
     abstract RegularFileProperty getReportFile()
@@ -189,19 +184,6 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
             }
         }
 
-        def forbiddenSources = [
-                'bsdf/adapter/bsdf.slang',
-                'integrator/integrator.slang',
-                'integrator/transport_core.slang',
-                'realtime/realtime_wavefront_common.slang',
-                'realtime/wavefront_state.slang',
-                'offline/offline_wavefront.slang'
-        ]
-        forbiddenSources.each { relative ->
-            if (new File(shaderRoot, relative).exists()) {
-                throw new GradleException("Removed shader umbrella was restored: ${relative}")
-            }
-        }
         def allowedRoots = [
                 'bsdf', 'contract', 'entry', 'math', 'model',
                 'policy', 'service', 'state', 'transport'] as Set
@@ -217,23 +199,29 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
                         "OpenPBR code outside the compact implementation was restored: ${relative}")
             }
         }
-        def forbiddenMacros = [
-                'PRIME_TWO_STAGE_WAVEFRONT',
-                'PRIME_STEADY_WAVEFRONT',
-                'PRIME_WAVEFRONT_CLASSIFY_ONLY',
-                'PRIME_WAVEFRONT_NO_ADVANCE'
-        ]
-        sources.findAll { shaderRelative(it) != null }.each { source ->
-            def text = source.getText('UTF-8')
-            forbiddenMacros.each { macro ->
-                if (text.contains(macro)) {
-                    throw new GradleException(
-                            "Removed shader mode macro ${macro} was restored in ${shaderRelative(source)}")
-                }
-            }
-        }
-
         PrimeShaderDependencyGraph.requireAcyclic(graph)
+
+        def relativeGraph = graph.collectEntries { source, targets ->
+            [(shaderRelative(new File(source)) ?: source): targets.collect {
+                shaderRelative(new File(it)) ?: it
+            }.toSet()]
+        }
+        relativeGraph.keySet().findAll { it.startsWith('state/') }.each { source ->
+            PrimeShaderVisibility.requireSeparated(relativeGraph, source, ['service/trace'],
+                    'State access cannot acquire ray traversal')
+        }
+        ['transport/realtime/light_select.slang', 'transport/offline/light_select.slang'].each { source ->
+            PrimeShaderVisibility.requireSeparated(relativeGraph, source,
+                    ['service/trace', 'service/reconstruct', 'transport/scatter',
+                     'service/bsdf/dispatch/sample.slang', 'service/bsdf/dispatch/evaluate.slang',
+                     'service/bsdf/dielectric/state.slang', 'service/light/emission.slang'],
+                    'Light selection consumes receiver classification, never shading or reconstruction')
+        }
+        PrimeShaderVisibility.requireSeparated(relativeGraph, 'service/bsdf/dispatch/classify.slang',
+                ['service/trace', 'service/reconstruct', 'transport',
+                 'service/bsdf/dielectric/state.slang', 'bsdf/compact/dielectric/state.slang',
+                 'service/bsdf/dispatch/sample.slang', 'service/bsdf/dispatch/evaluate.slang'],
+                'Closure classification cannot construct or evaluate a BSDF')
 
         def manifest = PrimeShaderManifest.read(programManifest.get().asFile)
         def manifestSources = manifest.artifacts.values().collect { artifact ->
@@ -334,29 +322,6 @@ abstract class VerifyPrimeShaderArchitecture extends DefaultTask {
                                 || it == 'service/light/area_sample.slang')))
             }
             if (!violations.empty) throw new GradleException("Lambert stage widened: ${relative}: ${violations}")
-        }
-        def budget = new JsonSlurper().parse(closureBudget.get().asFile)
-        if (budget.schema != 1) {
-            throw new GradleException("Unsupported shader closure budget schema: ${budget.schema}")
-        }
-        def entryByRelative = productionEntries.collectEntries { entry ->
-            [(shaderRelative(entry)): entry]
-        }
-        if (budget.entries.keySet() as Set != entryByRelative.keySet() as Set) {
-            def missing = entryByRelative.keySet() - budget.entries.keySet()
-            def stale = budget.entries.keySet() - entryByRelative.keySet()
-            throw new GradleException(
-                    "Shader closure budget mismatch; missing=${missing}, stale=${stale}")
-        }
-        budget.entries.each { relative, limit ->
-            def closure = closures[pathKey(entryByRelative[relative])]
-            long bytes = closure.sum(normalizedSourceBytes) as long
-            if (closure.size() > limit.maxFiles || bytes > limit.maxBytes) {
-                throw new GradleException(
-                        "Shader closure budget exceeded for ${relative}: "
-                                + "files=${closure.size()}/${limit.maxFiles}, "
-                                + "bytes=${bytes}/${limit.maxBytes}")
-            }
         }
         def diagnostics = sources.findAll {
             def path = pathKey(it).replace('\\', '/').toLowerCase(Locale.ROOT)

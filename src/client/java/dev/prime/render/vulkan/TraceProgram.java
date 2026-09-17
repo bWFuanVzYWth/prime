@@ -42,6 +42,16 @@ final class TraceProgram implements Destroyable {
     };
     private static final int RECORD_DATA_SIZE = Integer.BYTES;
 
+    static String[] fixedResources(String raygenSuffix) {
+        String[] resources = FIXED_RESOURCES.clone();
+        switch (raygenSuffix) {
+            case ".rgen.spv" -> { }
+            case "_ser.rgen.spv" -> resources[3] = GeneratedShaderPrograms.resource("world_rahit_ser");
+            default -> throw new IllegalArgumentException("Unknown trace variant: " + raygenSuffix);
+        }
+        return resources;
+    }
+
     static String shadowAnyHitResource(int geometryClass) {
         return FIXED_RESOURCES[shadowAnyHitModule(geometryClass)];
     }

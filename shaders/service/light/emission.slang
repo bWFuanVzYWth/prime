@@ -3,13 +3,12 @@
 #language slang 2026
 module "service/light/emission.slang";
 
+import "contract/light_sample.slang";
 import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "math/packed_geometry.slang";
 import "service/material/emission.slang";
 
-public static const uint PRIME_NO_LIGHT_INDEX = 0xffffffffu;
-public static const uint PRIME_EMITTER_TWO_SIDED = 1u;
 
 public float2 primeEmitterUv(
         uint3 packedUvs, float2 parentBarycentric) {

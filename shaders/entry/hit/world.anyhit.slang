@@ -8,16 +8,26 @@ import "model/material/recipe.slang";
 import "prime_abi_types.slang";
 import "service/trace/candidate.slang";
 import "service/trace/candidate_record.slang";
+import "contract/trace.slang";
 
+#if defined(PRIME_ENABLE_SER)
+layout(location = 2) rayPayloadInEXT PrimeTraceRequest primeTraceRequest;
+#else
 layout(location = 0) rayPayloadInEXT TracePayload primePayload;
+#endif
 
 [shader("anyhit")]
 void main(in BuiltInTriangleIntersectionAttributes attributes)
 {
-    // Slang's GLSL front end otherwise diagnoses this input-only aggregate as uninitialized.
-    // t is already reset to zero before traversal and closest-hit overwrites it on acceptance.
+    // Slang requires an aggregate write before reading the incoming payload.
+#if defined(PRIME_ENABLE_SER)
+    primeTraceRequest.reserved = 0u;
+    uint2 source = primeTraceRequest.source;
+#else
     primePayload.t = 0.0;
-    if (primeCandidateIsSource(uint2(primePayload.sectionIndex, primePayload.positionReserved))) {
+    uint2 source = uint2(primePayload.sectionIndex, primePayload.positionReserved);
+#endif
+    if (primeCandidateIsSource(source)) {
         IgnoreHit();
         return;
     }

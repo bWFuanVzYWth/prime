@@ -3,6 +3,7 @@
 #language slang 2026
 module "state/realtime/guide.slang";
 
+import "state/realtime/area.slang";
 import "prime_realtime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/realtime/guide.slang";

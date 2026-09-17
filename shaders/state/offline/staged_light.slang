@@ -6,7 +6,6 @@ module "state/offline/staged_light.slang";
 import "prime_abi_types.slang";
 import "prime_offline_abi.slang";
 import "contract/light_sample.slang";
-import "service/light/emission.slang";
 import "state/offline/contract.slang";
 import "state/offline/index.slang";
 import "state/offline/surface.slang";
