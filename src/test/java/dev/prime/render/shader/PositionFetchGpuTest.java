@@ -24,6 +24,7 @@ import org.lwjgl.vulkan.*;
  * both hit stages, freed build inputs, and a compacted BLAS. Validation errors fail the test. */
 @Tag("gpu-shader")
 final class PositionFetchGpuTest {
+    private enum TraceMode { VERTICES, LAMBERT, SURFACE }
     @Test void fetchedVerticesSurviveInputRetirementAndCompaction() throws Exception {
         checkPositionFetch(false);
     }
@@ -33,14 +34,22 @@ final class PositionFetchGpuTest {
     }
 
     @Test void productionLambertTracePreservesLoopStateIdentityAndPostTracePublication() throws Exception {
-        checkPositionFetch(true, true);
+        checkPositionFetch(true, TraceMode.LAMBERT);
+    }
+
+    @Test void scalarSurfaceTraceKeepsIdentityAndClearsHitStateOnMiss() throws Exception {
+        checkPositionFetch(false, TraceMode.SURFACE);
+    }
+
+    @Test void reorderedSurfaceTraceKeepsIdentityAndClearsHitStateOnMiss() throws Exception {
+        checkPositionFetch(true, TraceMode.SURFACE);
     }
 
     private void checkPositionFetch(boolean reorder) throws Exception {
-        checkPositionFetch(reorder, false);
+        checkPositionFetch(reorder, TraceMode.VERTICES);
     }
 
-    private void checkPositionFetch(boolean reorder, boolean production) throws Exception {
+    private void checkPositionFetch(boolean reorder, TraceMode mode) throws Exception {
         try (var device = VulkanTestDevice.openRayTracing(reorder); var gpu = new Harness(device)) {
             Buffer vertices = gpu.buffer(9L * 36L,
                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
@@ -57,10 +66,10 @@ final class PositionFetchGpuTest {
             }
             As source = gpu.build(false, vertices.address);
             vertices.close();
-            gpu.traceAndCheck(source, expected, reorder, production);
+            gpu.traceAndCheck(source, expected, reorder, mode);
             As compacted = gpu.compact(source);
             source.close();
-            gpu.traceAndCheck(compacted, expected, reorder, production);
+            gpu.traceAndCheck(compacted, expected, reorder, mode);
         }
     }
 
@@ -188,7 +197,8 @@ final class PositionFetchGpuTest {
             }
         }
 
-        void traceAndCheck(As blas, int[] expected, boolean reorder, boolean production) throws Exception {
+        void traceAndCheck(As blas, int[] expected, boolean reorder, TraceMode mode) throws Exception {
+            boolean production = mode != TraceMode.VERTICES;
             Buffer instances = buffer(64, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR);
             // Matrix is row-major, with translation to distinguish object-space from world-space fetch.
             float[] transform = {1,0,0,11, 0,1,0,-3, 0,0,1,2};
@@ -274,9 +284,17 @@ final class PositionFetchGpuTest {
                 int[] stageBits = {VK_SHADER_STAGE_RAYGEN_BIT_KHR, VK_SHADER_STAGE_MISS_BIT_KHR,
                         VK_SHADER_STAGE_ANY_HIT_BIT_KHR, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
                 for (int i = 0; i < 4; i++) {
+                    String artifact;
+                    if (mode == TraceMode.SURFACE) {
+                        artifact = i == 0 ? "surface_trace_contract" + (reorder ? "_ser" : "") + ".rgen.spv"
+                                : i == 2 && reorder ? "position_fetch_ser.rahit.spv"
+                                : "surface_trace_contract." + suffixes[i] + ".spv";
+                    } else {
+                        artifact = i == 0 && production ? "lambert_trace_contract.rgen.spv"
+                                : "position_fetch" + (reorder ? "_ser." : ".") + suffixes[i] + ".spv";
+                    }
                     stages.get(i).sType$Default().stage(stageBits[i]).pName(stack.UTF8("main"))
-                            .module(shader(i == 0 && production ? "lambert_trace_contract.rgen.spv"
-                                    : "position_fetch" + (reorder ? "_ser." : ".") + suffixes[i] + ".spv"));
+                            .module(shader(artifact));
                 }
                 var groups = VkRayTracingShaderGroupCreateInfoKHR.calloc(3, stack);
                 for (int i = 0; i < 3; i++) groups.get(i).sType$Default()

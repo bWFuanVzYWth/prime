@@ -8,7 +8,6 @@ import "prime_abi_types.slang";
 import "state/path.slang";
 import "service/bsdf/contract/sample.slang";
 import "math/packed_geometry.slang";
-import "math/queued_psr.slang";
 import "math/transport.slang";
 import "transport/surface/access.slang";
 import "service/trace/context.slang";
@@ -76,18 +75,4 @@ public bool primeAdvancePathWithoutRoulette(
     }
     path.previousLightNormal = previousLightNormal;
     return true;
-}
-
-public PrimeQueuedPsrState primeAppendQueuedPsrDiscrete(
-        PrimeQueuedPsrState state,
-        float3 previousPosition,
-        SurfaceInteraction surface,
-        BsdfSample bsdf) {
-    return primeAppendQueuedPsrState(
-            state,
-            primePush.cameraPosition,
-            previousPosition,
-            surface.position,
-            surface.geometricNormal,
-            (bsdf.eventFlags & PRIME_BSDF_EVENT_REFLECTION) != 0u);
 }

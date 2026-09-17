@@ -10,7 +10,7 @@ import "bsdf/compact/math/microfacet_measure.slang";
 import "model/material/defaults.slang";
 import "model/material/translation.slang";
 import "model/material/medium_boundary.slang";
-import "service/bsdf/dielectric/state.slang";
+import "service/bsdf/support/interface.slang";
 import "service/bsdf/support/microfacet.slang";
 import "contract/medium.slang";
 import "bsdf/compact/contract/sample.slang";
@@ -49,12 +49,10 @@ public PrimeClosureTraits primeMinecraftTransmissionClosureTraits(
 }
 
 public PrimeClosureTraits primeMinecraftTransmissionClosureTraits(
-        float3 outwardNormal,
         uint materialControl,
         float roughness,
         uint opticalControl,
-        float3 viewDirection,
-        PrimeMedium medium,
+        float mediumIor,
         uint adjacentInterfaceControl,
         bool usesAirGap) {
     PrimeOpticalMaterial translated = primeDecodeOpticalMaterial(
@@ -82,7 +80,7 @@ public PrimeClosureTraits primeMinecraftTransmissionClosureTraits(
             relativeIor = originalIor * (1.0 / adjacentIor);
         }
     } else {
-        relativeIor = originalIor * (thinWalled ? 1.0 / medium.ior : 1.0);
+        relativeIor = originalIor * (thinWalled ? 1.0 / mediumIor : 1.0);
     }
     PrimeOpenPbrMicrofacet microfacet =
             primeClosureMicrofacet(interfaceRoughness);

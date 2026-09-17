@@ -4,10 +4,10 @@
 module "entry/lambert/world.anyhit.slang";
 import glsl;
 import "contract/lambert.slang";
-import "contract/lambert_trace.slang";
+import "contract/trace.slang";
 import "service/trace/lambert_candidate.slang";
 #if defined(PRIME_ENABLE_SER)
-layout(location = 2) rayPayloadInEXT PrimeLambertTracePayload primeLambertTrace;
+layout(location = 2) rayPayloadInEXT PrimeTraceRequest primeLambertTrace;
 #else
 layout(location = 0) rayPayloadInEXT PrimeLambertPayload primeLambertPayload;
 #endif

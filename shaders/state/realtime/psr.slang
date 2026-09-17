@@ -3,6 +3,7 @@
 #language slang 2026
 module "state/realtime/psr.slang";
 
+import "state/realtime/initial_record.slang";
 import "math/queued_psr.slang";
 import "service/camera/projection.slang";
 import "state/realtime/contract.slang";

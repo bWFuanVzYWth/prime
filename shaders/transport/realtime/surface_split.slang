@@ -3,6 +3,9 @@
 #language slang 2026
 module "transport/realtime/surface_split.slang";
 
+import "transport/guide/append.slang";
+import "state/realtime/transparent_record.slang";
+import "state/realtime/initial_record.slang";
 import "policy/realtime/landing.slang";
 import "math/hash.slang";
 import "math/transparent_branch.slang";
@@ -117,8 +120,7 @@ public uint primeInitializeTransparentWavefront(
             reflectionSpecularRadiance,
             primeEvaluateDeltaHitEmission(context, path, surface));
     float surfaceLinearRoughness = primeSurfaceLinearRoughness(surface);
-    PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
-            surface, viewDirection, medium, primeUsesAirGap());
+    PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(surface, medium.ior, primeUsesAirGap());
     bool discreteOnlyInterface = primeClosureIsDiscreteOnly(closureTraits);
     PrimePreparedSampleBase preparedSample =
             primePreparePathSample(

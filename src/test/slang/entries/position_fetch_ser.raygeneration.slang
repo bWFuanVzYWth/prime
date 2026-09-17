@@ -3,10 +3,10 @@
 #language slang 2026
 import glsl;
 import "contract/lambert.slang";
-import "contract/lambert_trace.slang";
+import "contract/trace.slang";
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure scene;
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> output;
-layout(location = 2) rayPayloadEXT PrimeLambertTracePayload traversal;
+layout(location = 2) rayPayloadEXT PrimeTraceRequest traversal;
 layout(location = 0) rayPayloadEXT PrimeLambertPayload shading;
 [shader("raygeneration")]
 void main() {

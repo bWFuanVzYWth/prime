@@ -11,7 +11,9 @@ struct TestPush { uint64_t keys; uint64_t direct; uint64_t relation; };
 [[vk::push_constant]] ConstantBuffer<TestPush> testPush;
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> output;
 [shader("closesthit")]
-#if defined(PRIME_TEST_SER)
+#if defined(PRIME_TEST_SURFACE)
+void main(inout TracePayload payload, in BuiltInTriangleIntersectionAttributes attributes) {
+#elif defined(PRIME_TEST_SER)
 void main(inout PrimeLambertPayload payload, in BuiltInTriangleIntersectionAttributes attributes) {
 #else
 void main(inout uint payload, in BuiltInTriangleIntersectionAttributes attributes) {
@@ -50,7 +52,12 @@ void main(inout uint payload, in BuiltInTriangleIntersectionAttributes attribute
     output[offset + 4u] = header.y; output[offset + 5u] = header.z;
     output[offset + 6u] = uv.w; output[offset + 7u] = record.tangent;
     output[offset + 8u] = primeGlobalTriangleIndex(section);
-#if defined(PRIME_TEST_SER)
+#if defined(PRIME_TEST_SURFACE)
+    payload.hitKind = 1u;
+    payload.roughness = 0.25;
+    payload.baseColor = float3(0.125, 0.5, 0.75);
+    payload.mediumId = 37u;
+#elif defined(PRIME_TEST_SER)
     payload.flags |= 2u;
 #else
     payload |= 2u;

@@ -9,7 +9,8 @@ import "prime_realtime_abi.slang";
 import "prime_abi_types.slang";
 import "math/packed_geometry.slang";
 import "model/material/defaults.slang";
-import "service/trace/surface.slang";
+import "model/surface/miss.slang";
+import "policy/runtime/config.slang";
 import "state/surface_storage.slang";
 import "contract/path.slang";
 
@@ -64,7 +65,7 @@ public SurfaceInteraction primeLoadWavefrontSurface(
             base + PRIME_WAVEFRONT_SURFACE_LANE_WORDS]
             & PRIME_HIT_KIND_MASK;
     if (hitKind == PRIME_HIT_NONE) {
-        return primeMissSurfaceInteraction(missSourcePrimitive);
+        return primeMissSurfaceInteraction(missSourcePrimitive, primeConfiguredDefaultLinearRoughness());
     }
     PrimeSurfaceStorageRecord record;
     record.geometry = primeLoadWavefrontSurfaceLane(base, 0u);

@@ -8,7 +8,6 @@ import "prime_realtime_abi.slang";
 import "prime_abi_types.slang";
 import "state/path.slang";
 import "contract/realtime/guide.slang";
-import "math/queued_psr.slang";
 import "math/transport.slang";
 import "state/realtime/medium.slang";
 import "state/realtime/path_storage.slang";
@@ -61,30 +60,6 @@ public PrimeWavefrontTransportRecord primeWavefrontWithGuideTransitions(
     return record;
 }
 
-public uint4 primePackWavefrontPsrState(PrimeQueuedPsrState state) {
-    return asuint(state.rotation);
-}
-
-public PrimeWavefrontPathRecord primeWavefrontWithQueuedPsrState(
-        PrimeWavefrontPathRecord record,
-        PrimeQueuedPsrState state) {
-    record.transport = primeWavefrontWithQueuedPsrControl(
-            record.transport, primeQueuedPsrStorageFlags(state));
-    record.psrPacked = primePackWavefrontPsrState(state);
-    record.transport.throughputAndReserved.w = state.firstDirectionLength.w;
-    return record;
-}
-
-public PrimeWavefrontPathRecord primeWavefrontWithPrimaryPreviousPosition(
-        PrimeWavefrontPathRecord record, PrimeDenoiserGuides guides) {
-    record.psrPacked.xyz = asuint(guides.primaryHasMotion
-            ? guides.primaryPreviousPosition
-            : guides.primaryPosition);
-    record.psrPacked.w = (record.psrPacked.w & ~PRIME_WAVEFRONT_PRIMARY_MOTION)
-            | (guides.primaryHasMotion ? PRIME_WAVEFRONT_PRIMARY_MOTION : 0u);
-    return record;
-}
-
 public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
         PathState path,
         PrimeMedium medium,
@@ -114,24 +89,5 @@ public PrimeWavefrontTransportRecord primeMakeWavefrontTransportRecord(
     record.rayDirectionAndDenoiserControl =
             float4(path.rayDirection, asfloat(denoiserControl));
     record.throughputAndReserved = float4(path.throughput, 0.0);
-    return record;
-}
-
-public PrimeWavefrontPathRecord primeMakeWavefrontRecord(
-        PathState path,
-        PrimeMedium medium,
-        PrimeDenoiserState denoiserState,
-        PrimeDenoiserGuides guides,
-        bool enabled) {
-    PrimeWavefrontPathRecord record;
-    record.transport = primeMakeWavefrontTransportRecord(
-            path,
-            medium,
-            denoiserState,
-            guides.primaryMaterialFlags,
-            enabled);
-    record = primeWavefrontWithQueuedPsrState(
-            record, primeEmptyQueuedPsrState());
-    record = primeWavefrontWithPrimaryPreviousPosition(record, guides);
     return record;
 }

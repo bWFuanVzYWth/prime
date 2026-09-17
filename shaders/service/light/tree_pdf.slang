@@ -5,7 +5,7 @@ module "service/light/tree_pdf.slang";
 
 import "prime_abi_types.slang";
 import "math/light_tree.slang";
-import "service/light/emission.slang";
+import "contract/light_sample.slang";
 import "service/light/tree_common.slang";
 
 static const uint PRIME_LIGHT_PATH_DEPTH_SHIFT = 27u;

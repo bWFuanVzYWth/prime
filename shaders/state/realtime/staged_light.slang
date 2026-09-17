@@ -7,7 +7,6 @@ import "contract/light_sample.slang";
 import "math/realtime_storage.slang";
 import "prime_abi_types.slang";
 import "prime_realtime_abi.slang";
-import "service/light/emission.slang";
 import "state/realtime/contract.slang";
 
 public struct PrimeStagedLightSelection {

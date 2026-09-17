@@ -5,6 +5,7 @@ module "state/offline/path_storage.slang";
 
 import "state/path.slang";
 import "state/realtime/medium.slang";
+import "service/bsdf/support/medium_identity.slang";
 import "contract/medium.slang";
 import "contract/path.slang";
 import "prime_abi_types.slang";
@@ -71,8 +72,7 @@ public void primeUnpackOfflineTransportPath(
     path.rayDirection = asfloat(record.rayDirectionAndEtaScale.xyz);
     path.etaScale = asfloat(record.rayDirectionAndEtaScale.w);
     path.throughput = asfloat(record.throughputAndPreviousLightNormalX.xyz);
-    uint bounce = (state >> PRIME_OFFLINE_STATE_BOUNCE_SHIFT)
-            & PRIME_OFFLINE_PATH_BYTE_MASK;
+    uint bounce = primeOfflineBounce(state);
     uint flags = (state >> PRIME_OFFLINE_STATE_FLAGS_SHIFT)
             & PRIME_OFFLINE_PATH_FLAGS_MASK;
     path.control = primeMakePathStateControl(bounce, flags);
@@ -104,4 +104,12 @@ public float3 primeOfflineRayDirection(PrimeOfflineTransportRecord record) {
 
 public uint2 primeOfflineSourcePrimitive(PrimeOfflineTransportRecord record) {
     return record.sourceStateAndMediumId.xy;
+}
+
+public uint primeOfflineBounce(uint state) {
+    return (state >> PRIME_OFFLINE_STATE_BOUNCE_SHIFT) & PRIME_OFFLINE_PATH_BYTE_MASK;
+}
+
+public float primeOfflineIncidentIor(uint state, uint mediumId) {
+    return primeDecodeMediumIor(mediumId, primeOfflineMediumIorEncoding(state));
 }

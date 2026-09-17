@@ -5,9 +5,9 @@ module "service/trace/lambert_world.slang";
 import glsl;
 import "prime_abi.slang";
 import "contract/lambert.slang";
-import "contract/lambert_trace.slang";
+import "contract/trace.slang";
 #if defined(PRIME_ENABLE_SER)
-layout(location = 2) rayPayloadEXT PrimeLambertTracePayload primeLambertTrace;
+layout(location = 2) rayPayloadEXT PrimeTraceRequest primeLambertTrace;
 #endif
 
 layout(location = 0) rayPayloadEXT PrimeLambertPayload primeLambertPayload;

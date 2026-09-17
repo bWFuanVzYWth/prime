@@ -27,3 +27,8 @@ public float primeDecodeMediumIor(uint encoding) {
     float dielectricF0 = primeDecodeDielectricF0(fresnelCode);
     return primeOpenPbrF0ToIor(dielectricF0);
 }
+
+// Vacuum identity overrides any stale IOR encoding in a reused path slot.
+public float primeDecodeMediumIor(uint mediumId, uint encoding) {
+    return mediumId == PRIME_MEDIUM_ID_VACUUM ? 1.0 : primeDecodeMediumIor(encoding);
+}

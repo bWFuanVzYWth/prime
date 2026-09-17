@@ -7,6 +7,5 @@ module "transport/scatter/phase_contract.slang";
 // allowing transport to import a scheduler or exposing macro-controlled alternate algorithms.
 public interface IPrimeRealtimeTransportPhase {
     uint transparentFirstHitBounce();
-    bool transparentPreviousUsedAreaNee(bool enabled, uint bounce);
     uint ordinaryGuideHitBounce(uint primaryBounce);
 }

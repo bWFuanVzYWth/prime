@@ -7,7 +7,6 @@ import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "contract/light_sample.slang";
 import "math/light_tree.slang";
-import "service/light/emission.slang";
 import "service/light/tree_common.slang";
 
 public struct LightTreePick {

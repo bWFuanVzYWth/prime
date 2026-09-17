@@ -2,17 +2,29 @@
 
 #language slang 2026
 import glsl;
-import "contract/lambert_trace.slang";
+import "contract/trace.slang";
+import "prime_abi_types.slang";
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> output;
 #if defined(PRIME_TEST_SER)
-layout(location = 2) rayPayloadInEXT PrimeLambertTracePayload traversal;
+layout(location = 2) rayPayloadInEXT PrimeTraceRequest traversal;
 #endif
 [shader("anyhit")]
 #if defined(PRIME_TEST_SER)
 void main(in BuiltInTriangleIntersectionAttributes attributes) {
     uint id = DispatchRaysIndex().x;
     traversal.reserved = 1u;
-    if (any(traversal.source != uint2(id ^ 0x55u, id * 17u))) traversal.reserved |= 0x80u;
+    if (any(traversal.source != uint2(id ^ 0x55u, id * 17u))) {
+        traversal.reserved |= 0x80u;
+        IgnoreHit();
+        return;
+    }
+#elif defined(PRIME_TEST_SURFACE)
+void main(inout TracePayload payload, in BuiltInTriangleIntersectionAttributes attributes) {
+    uint id = DispatchRaysIndex().x;
+    if (any(uint2(payload.sectionIndex, payload.positionReserved) != uint2(id ^ 0x55u, id * 17u))) {
+        IgnoreHit();
+        return;
+    }
 #else
 void main(inout uint payload, in BuiltInTriangleIntersectionAttributes attributes) {
 #endif
@@ -24,7 +36,7 @@ void main(inout uint payload, in BuiltInTriangleIntersectionAttributes attribute
         output[base + i * 3u + 2u] = bits.z;
     }
     output[base + 9u] = GeometryIndex() * 3u + PrimitiveIndex();
-#if !defined(PRIME_TEST_SER)
+#if !defined(PRIME_TEST_SER) && !defined(PRIME_TEST_SURFACE)
     payload |= 1u;
 #endif
 }

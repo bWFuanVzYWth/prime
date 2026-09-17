@@ -7,8 +7,5 @@ import "transport/scatter/phase_contract.slang";
 
 public struct PrimeLandingTransportPhase : IPrimeRealtimeTransportPhase {
     uint transparentFirstHitBounce() { return 1u; }
-    bool transparentPreviousUsedAreaNee(bool enabled, uint bounce) {
-        return enabled && bounce > 0u;
-    }
     uint ordinaryGuideHitBounce(uint primaryBounce) { return primaryBounce + 1u; }
 }

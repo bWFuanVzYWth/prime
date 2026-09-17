@@ -47,7 +47,7 @@
     "shadow_nonopaque_rahit": "entry/hit/shadow_nonopaque.anyhit.slang",
     "shadow_rchit": "entry/hit/shadow.closesthit.slang",
     "shadow_rmiss": "entry/hit/shadow.miss.slang",
-    "world_rahit": "entry/hit/world.anyhit.slang",
+    "world_rahit": {"entry": "entry/hit/world.anyhit.slang", "ser": true},
     "world_rchit": "entry/hit/world.closesthit.slang",
     "world_rmiss": "entry/hit/world.miss.slang",
     "lambert_camera": {"entry": "entry/lambert/camera.raygeneration.slang", "subgroup": true, "ser": true},

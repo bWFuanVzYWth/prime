@@ -7,9 +7,12 @@ import "prime_abi.slang";
 import "prime_offline_abi.slang";
 import "prime_abi_types.slang";
 import "math/sampling.slang";
+import "math/hash.slang";
 import "policy/runtime/config.slang";
 import "service/bsdf/contract/sample.slang";
-import "service/bsdf/dispatch/traits.slang";
+import "service/bsdf/dispatch/classify.slang";
+import "state/light_receiver.slang";
+import "contract/light_receiver.slang";
 import "service/light/tree_select.slang";
 import "state/path.slang";
 import "state/offline/contract.slang";
@@ -17,30 +20,26 @@ import "state/offline/path_storage.slang";
 import "state/offline/index.slang";
 import "state/offline/queue.slang";
 import "state/offline/staged_light.slang";
-import "state/offline/surface.slang";
-import "state/offline/transport.slang";
 import "transport/direct/selection.slang";
-import "contract/medium.slang";
 import "contract/path.slang";
 
 public void primeSelectOfflineLight(uint sourceQueue, uint launchIndex) {
     uint pathIndex = primeOfflineQueuedPath(sourceQueue, launchIndex);
     PrimeOfflineStagedLightSelection selection =
             primeDisabledOfflineStagedLightSelection();
-    SurfaceInteraction surface = primeLoadOfflineSurface(pathIndex);
+    PrimeLightReceiver surface = primeLoadLightReceiver(primeOfflineQueue,
+            pathIndex * (PRIME_OFFLINE_WAVEFRONT_SURFACE_RECORD_SIZE / 4u));
     if (surface.hitKind == PRIME_HIT_SURFACE) {
-        PrimeOfflineTransportRecord record = primeOfflinePaths[pathIndex].transport;
+        uint state = primeOfflinePaths[pathIndex].transport.sourceStateAndMediumId.z;
+        uint mediumId = primeOfflinePaths[pathIndex].transport.sourceStateAndMediumId.w;
         uint2 pixel = primeOfflinePixel(pathIndex);
-        PathState path = primeOfflinePath(pixel, record);
-        PrimeMedium medium = primeOfflineMedium(record);
-        float3 viewDirection = -path.rayDirection;
-        PrimeClosureTraits closureTraits = primeSurfaceClosureTraits(
-                surface, viewDirection, medium, primeUsesAirGap());
+        float3 viewDirection = -asfloat(primeOfflinePaths[pathIndex].transport.rayDirectionAndEtaScale.xyz);
+        PrimeClosureTraits closureTraits = primeClassifySurface(surface.classification, primeOfflineIncidentIor(state, mediumId), primeUsesAirGap());
         if (primeClosureSupports(closureTraits, PRIME_MEASURE_SOLID_ANGLE)) {
             PrimePreparedSampleBase preparedSample = primePreparePathSample(
-                    path.sampleSeed,
+                    primePathSampleSeed(pixel, primeSampleEpoch(), 0u),
                     primeSampleIndex(),
-                    primePathBounce(path.control) + 1u);
+                    primeOfflineBounce(state) + 1u);
             float3 areaSample = primeSobolSample3D(
                     preparedSample,
                     PRIME_SAMPLE_EFFECT_DIRECT_AREA_LIGHT,

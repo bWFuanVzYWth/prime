@@ -8,35 +8,17 @@ import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "math/packed_geometry.slang";
 import "policy/runtime/config.slang";
-import "service/light/emission.slang";
+import "contract/light_sample.slang";
 import "model/material/defaults.slang";
 import "contract/path.slang";
+import "contract/trace.slang";
 
 layout(location = 0) rayPayloadEXT TracePayload primeSurfacePayload;
+#if defined(PRIME_ENABLE_SER)
+layout(location = 2) rayPayloadEXT PrimeTraceRequest primeSurfaceTrace;
+#endif
 
-public SurfaceInteraction primeMissSurfaceInteraction(uint2 sourcePrimitive) {
-    SurfaceInteraction surface;
-    surface.position = float3(0.0);
-    surface.t = 0.0;
-    surface.geometricNormal = float3(0.0, 1.0, 0.0);
-    surface.hitKind = PRIME_HIT_NONE;
-    surface.baseColor = float3(0.0);
-    surface.materialControl = 0u;
-    surface.sectionIndex = sourcePrimitive.x;
-    surface.emitterIndex = PRIME_NO_LIGHT_INDEX;
-    surface.textureLod = 0.0;
-    surface.opacity = 0.0;
-    surface.shadingNormal = float3(0.0, 1.0, 0.0);
-    surface.roughness = primeConfiguredDefaultLinearRoughness();
-    surface.opticalControl = 0u;
-    surface.motionZFlags = sourcePrimitive.y;
-    surface.mediumId = 0u;
-    surface.adjacentMediumId = 0u;
-    surface.adjacentBaseColor = float3(0.0);
-    surface.adjacentInterfaceControl = 0u;
-    return surface;
-}
-public void primeResetSurfacePayload(uint2 sourcePrimitive) {
+public void primeResetSurfacePayload(uint2 sourcePrimitive, float defaultRoughness) {
     primeSurfacePayload.t = 0.0;
     primeSurfacePayload.geometricNormal = float3(0.0, 1.0, 0.0);
     primeSurfacePayload.hitKind = PRIME_HIT_NONE;
@@ -47,7 +29,7 @@ public void primeResetSurfacePayload(uint2 sourcePrimitive) {
     primeSurfacePayload.textureLod = 0.0;
     primeSurfacePayload.opacity = 0.0;
     primeSurfacePayload.shadingNormal = float3(0.0, 1.0, 0.0);
-    primeSurfacePayload.roughness = primeConfiguredDefaultLinearRoughness();
+    primeSurfacePayload.roughness = defaultRoughness;
     primeSurfacePayload.opticalControl = 0u;
     primeSurfacePayload.mediumId = 0u;
     primeSurfacePayload.adjacentMediumId = 0u;
@@ -88,7 +70,8 @@ public interface IPrimeSurfaceTracePolicy {
             float3 origin,
             float3 direction,
             uint2 sourcePrimitive,
-            uint pathClass);
+            uint pathClass,
+            float defaultRoughness);
 }
 
 public struct PrimeScalarSurfaceTracePolicy : IPrimeSurfaceTracePolicy {
@@ -96,7 +79,9 @@ public struct PrimeScalarSurfaceTracePolicy : IPrimeSurfaceTracePolicy {
             float3 origin,
             float3 direction,
             uint2 sourcePrimitive,
-            uint pathClass) {
+            uint pathClass,
+            float defaultRoughness) {
+        primeResetSurfacePayload(sourcePrimitive, defaultRoughness);
         uint rayFlags = sourcePrimitive.x == PRIME_NO_PRIMITIVE_INDEX
                 ? gl_RayFlagsNoneEXT
                 : gl_RayFlagsNoOpaqueEXT;
@@ -105,13 +90,16 @@ public struct PrimeScalarSurfaceTracePolicy : IPrimeSurfaceTracePolicy {
     }
 };
 
+#if defined(PRIME_ENABLE_SER)
 public struct PrimeSerSurfaceTracePolicy : IPrimeSurfaceTracePolicy {
     void trace(
             float3 origin,
             float3 direction,
             uint2 sourcePrimitive,
-            uint pathClass) {
-        int payloadLocation = 0;
+            uint pathClass,
+            float defaultRoughness) {
+        primeSurfaceTrace.source = sourcePrimitive;
+        primeSurfaceTrace.reserved = 0u;
         HitObject hitObject;
         hitObjectTraceRayEXT(
                 hitObject,
@@ -127,15 +115,18 @@ public struct PrimeSerSurfaceTracePolicy : IPrimeSurfaceTracePolicy {
                 0.0,
                 direction,
                 1000000.0,
-                payloadLocation);
+                2);
         bool hit = hitObjectIsHitEXT(hitObject);
         uint coherenceHint = ((pathClass & 0x3u) << 10u)
                 | (hit ? (uint(hitObjectGetGeometryIndexEXT(hitObject)) & 0x3u) << 8u : 0u)
                 | (hit ? uint(hitObjectGetInstanceIdEXT(hitObject)) & 0xffu : 0u);
         reorderThreadEXT(hitObject, coherenceHint, 12u);
-        hitObjectExecuteShaderEXT(hitObject, payloadLocation);
+        // The shading result does not exist across traversal/reorder. Any-hit consumes only source.
+        primeResetSurfacePayload(sourcePrimitive, defaultRoughness);
+        hitObjectExecuteShaderEXT(hitObject, 0);
     }
 };
+#endif
 
 #if defined(PRIME_ENABLE_SER)
 public typealias PrimeSurfaceTracePolicy = PrimeSerSurfaceTracePolicy;
@@ -148,12 +139,20 @@ public SurfaceInteraction primeTraceSurfaceClassified<TracePolicy>(
         float3 origin,
         float3 direction,
         uint2 sourcePrimitive,
-        uint pathClass)
+        uint pathClass,
+        float defaultRoughness)
     where TracePolicy : IPrimeSurfaceTracePolicy
 {
-    primeResetSurfacePayload(sourcePrimitive);
-    policy.trace(origin, direction, sourcePrimitive, pathClass);
+    policy.trace(origin, direction, sourcePrimitive, pathClass, defaultRoughness);
     return primeSurfaceInteractionFromPayload();
+}
+
+public SurfaceInteraction primeTraceSurfaceClassified<TracePolicy>(
+        TracePolicy policy, float3 origin, float3 direction, uint2 sourcePrimitive, uint pathClass)
+    where TracePolicy : IPrimeSurfaceTracePolicy
+{
+    return primeTraceSurfaceClassified(policy, origin, direction, sourcePrimitive, pathClass,
+            primeConfiguredDefaultLinearRoughness());
 }
 
 public SurfaceInteraction primeTraceSurface(float3 origin, float3 direction) {

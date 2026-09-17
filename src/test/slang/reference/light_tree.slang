@@ -3,6 +3,7 @@
 // Metric math is shared; only the record access and traversal state are under comparison.
 import "service/light/tree_select.slang";
 import "service/light/tree_pdf.slang";
+import "contract/light_sample.slang";
 
 bool referenceLoadLightChildMetrics(
         LightNode* nodes, LightLeaf* leaves, SectionRecord* sections,

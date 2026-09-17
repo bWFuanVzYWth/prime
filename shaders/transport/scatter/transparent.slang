@@ -3,6 +3,7 @@
 #language slang 2026
 module "transport/scatter/transparent.slang";
 
+import "transport/guide/append.slang";
 import "prime_abi_types.slang";
 import "state/path.slang";
 import "service/bsdf/contract/sample.slang";

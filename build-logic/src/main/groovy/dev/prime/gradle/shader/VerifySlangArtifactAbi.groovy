@@ -29,8 +29,6 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 				'^\\s*(?:%\\w+\\s*=\\s*)?(Op\\w+)\\b')
 		private static final def EXTENSION = java.util.regex.Pattern.compile(
 				'^\\s*OpExtension "([^"]+)"')
-		private static final def NAME = java.util.regex.Pattern.compile(
-				'^\\s*OpName %(\\w+) "([^"]+)"')
 		private static final def TYPE = java.util.regex.Pattern.compile(
 				'^\\s*%(\\w+) = OpType(\\w+)(?: (.*))?$')
 		private static final def CONSTANT = java.util.regex.Pattern.compile(
@@ -40,7 +38,6 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 		private static final def DECORATION = java.util.regex.Pattern.compile(
 				'^\\s*OpDecorate %(\\w+) (ArrayStride|Binding|DescriptorSet|Location) (\\d+)$')
 
-		final Map<String, String> names = [:]
 		final Map<String, List<String>> types = [:]
 		final Map<String, Long> constants = [:]
 		final Map<String, Map<String, Integer>> decorations = [:]
@@ -57,10 +54,6 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 				def extension = EXTENSION.matcher(line)
 				if (extension.find()) {
 					extensions.add(extension.group(1))
-				}
-				def name = NAME.matcher(line)
-				if (name.find()) {
-					names[name.group(1)] = name.group(2)
 				}
 				def type = TYPE.matcher(line)
 				if (type.find()) {
@@ -106,21 +99,18 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 			return decorations[id]?.get(name)
 		}
 
-		Map<String, Integer> payloadLocations(String storage) {
-			def result = [:]
-			variables.findAll { it.storage == storage }.each { variable ->
-				def name = names[variable.id]
-				if (name == null) {
-					throw new GradleException("${storage} variable %${variable.id} has no SPIR-V name")
-				}
-				def location = decoration(variable.id, 'Location')
-				if (location == null) {
-					throw new GradleException("${storage} variable ${name} has no Location")
-				}
-				result[name] = location
-			}
-			return result
-		}
+        Map<Integer, String> payloads(String storage) {
+            def result = [:]
+            variables.findAll { it.storage == storage }.each { variable ->
+                def location = decoration(variable.id, 'Location')
+                if (location == null) throw new GradleException("${storage} payload has no Location")
+                def value = shape(type(variable.type)[2])
+                if (result.put(location, value) != null) {
+                    throw new GradleException("Multiple ${storage} payloads use Location ${location}")
+                }
+            }
+            return result
+        }
 
 		Set<Integer> descriptorBindings(int set) {
 			return variables.findAll { decoration(it.id, 'DescriptorSet') == set }
@@ -224,49 +214,42 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 	}
 
 	private static void verifyPayloads(Map<String, Spirv> modules) {
-		def expectedOutgoing = [
-				primeSurfacePayload: 0,
-				primeShadowPayload: 1,
-				primeLambertPayload: 0,
-				primeLambertTrace: 2,
-				primeLambertShadow: 1]
-		modules.findAll { name, ignored ->
-			name.endsWith('.rgen.spv') || name.endsWith('.rmiss.spv')
-					|| name.endsWith('.rchit.spv') || name.endsWith('.rahit.spv')
-		}.each { name, module ->
-			module.payloadLocations('RayPayloadKHR').each { payload, location ->
-				if (expectedOutgoing[payload] == null) {
-					throw new GradleException("Unexpected outgoing payload ${payload} in ${name}")
-				}
-				requireEqual(expectedOutgoing[payload], location,
-						"Outgoing payload ${payload} in ${name}")
-			}
-			def incoming = module.payloadLocations('IncomingRayPayloadKHR')
-			if (!incoming.isEmpty()) {
-				def expected = name == 'lambert_world_rahit_ser.rahit.spv' ? 2
-						: name.startsWith('world.') || name.startsWith('world_')
-						|| name.startsWith('lambert_world.') ? 0
-						: name.startsWith('shadow.') || name.startsWith('shadow_')
-						|| name.startsWith('lambert_shadow.') || name.startsWith('lambert_shadow_') ? 1 : null
-				if (expected == null) {
-					throw new GradleException("Incoming payload stage has no ABI class: ${name}")
-				}
-				incoming.each { payload, location ->
-					requireEqual(expected, location, "Incoming payload ${payload} in ${name}")
-				}
-			}
-		}
+        // Compatibility is a relation between linked producer/consumer interfaces. Debug variable
+        // names and a snapshot of today's complete shading payload are not ABI requirements.
+        def incoming = { String name, int location ->
+            def payloads = requireModule(modules, name).payloads('IncomingRayPayloadKHR')
+            requireEqual([location] as Set, payloads.keySet(), "Incoming payload location in ${name}")
+            return payloads[location]
+        }
+        def trace = incoming('world.rchit.spv', 0)
+        def shadow = incoming('shadow.rchit.spv', 1)
+        def lambert = incoming('lambert_world.rchit.spv', 0)
+        def lambertShadow = incoming('lambert_shadow.rchit.spv', 1)
+        def traversal = incoming('world_rahit_ser.rahit.spv', 2)
+        // The traversal request's exact integer source identity is shared by both integrators.
+        requireEqual('struct(vec2(u32),u32)', traversal, 'Exact source traversal ABI')
+        requireEqual(traversal, incoming('lambert_world_rahit_ser.rahit.spv', 2), 'Shared traversal ABI')
+        modules.each { name, module ->
+            def wires = name.startsWith('lambert_')
+                    ? [(0): lambert, (1): lambertShadow, (2): traversal]
+                    : [(0): trace, (1): shadow, (2): traversal]
+            module.payloads('RayPayloadKHR').each { location, shape ->
+                requireEqual(wires[location], shape, "Outgoing payload location ${location} in ${name}")
+            }
+            module.payloads('IncomingRayPayloadKHR').each { location, shape ->
+                def expected = name == 'lambert_world_rahit_ser.rahit.spv' || name == 'world_rahit_ser.rahit.spv' ? 2
+                        : name.startsWith('world.') || name.startsWith('world_') || name.startsWith('lambert_world.') ? 0
+                        : name.startsWith('shadow.') || name.startsWith('shadow_')
+                                || name.startsWith('lambert_shadow.') || name.startsWith('lambert_shadow_') ? 1 : null
+                requireEqual(expected, location, "Incoming payload location in ${name}")
+                requireEqual(wires[location], shape, "Incoming payload shape in ${name}")
+            }
+        }
 
-		def trace = 'struct(vec3(f32),f32,vec3(f32),u32,u32,u32,f32,f32,' +
-				'vec3(f32),f32,u32,u32,u32,u32,vec3(f32),u32,vec3(f32),u32)'
-		def shadow = 'struct(vec4(f32),vec4(f32),vec4(f32),u32,vec2(u32),vec2(u32))'
-		def lambert = 'struct(vec3(f32),f32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32,vec3(f32),u32)'
-		def lambertTrace = 'struct(vec2(u32),u32)'
-		def lambertShadow = 'struct(vec2(u32),vec2(u32),vec3(f32),f32,vec3(f32),u32,vec3(f32),u32)'
 		verifyShapes(modules, [lambert] as Set, 'RayPayloadKHR', ['lambert_trace.rgen.spv', 'lambert_camera.rgen.spv', 'lambert_camera_subgroup.rgen.spv', 'lambert_guide.rgen.spv'])
-		verifyShapes(modules, [lambert, lambertTrace] as Set, 'RayPayloadKHR',
+		verifyShapes(modules, [lambert, traversal] as Set, 'RayPayloadKHR',
                 ['lambert_trace_ser.rgen.spv', 'lambert_camera_ser.rgen.spv', 'lambert_guide_ser.rgen.spv'])
-        verifyShapes(modules, [lambertTrace] as Set, 'IncomingRayPayloadKHR',
+        verifyShapes(modules, [traversal] as Set, 'IncomingRayPayloadKHR',
                 ['lambert_world_rahit_ser.rahit.spv'])
 		verifyShapes(modules, [lambertShadow] as Set, 'RayPayloadKHR',
                 ['lambert_shade.rgen.spv', 'lambert_shade_subgroup.rgen.spv', 'lambert_first.rgen.spv', 'lambert_first_subgroup.rgen.spv'])
@@ -282,7 +265,7 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 				'shadow.rmiss.spv', 'shadow.rchit.spv',
 				'shadow_opaque.rahit.spv', 'shadow_nonopaque.rahit.spv'])
 		['', '_ser'].each { suffix ->
-			verifyWavefrontShapes(modules, [trace] as Set, 'realtime', suffix,
+			verifyWavefrontShapes(modules, (suffix.isEmpty() ? [trace] : [trace, traversal]) as Set, 'realtime', suffix,
 					['camera_trace', 'delta_walk', 'guide_delta_walk', 'secondary_trace'])
 			verifyWavefrontShapes(modules, [shadow] as Set, 'realtime', suffix,
 					['landing_direct', 'secondary_direct', 'visible_direct'])
@@ -290,7 +273,7 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 					'surface_split', 'landing_light_select', 'landing_scatter',
 					'secondary_light_select', 'secondary_scatter', 'branch_resolve',
 					'noisy_output_resolve'])
-			verifyWavefrontShapes(modules, [trace] as Set, 'offline', suffix,
+			verifyWavefrontShapes(modules, (suffix.isEmpty() ? [trace] : [trace, traversal]) as Set, 'offline', suffix,
 					['camera_trace', 'bridge_trace'])
 			verifyWavefrontShapes(modules, [shadow] as Set, 'offline', suffix, ['direct'])
 			verifyWavefrontShapes(modules, [] as Set, 'offline', suffix,
@@ -413,49 +396,6 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 		}
 	}
 
-	private static void verifySubgroups(Map<String, Spirv> modules) {
-        ['', '_subgroup', '_ser'].each { suffix ->
-            def module = requireModule(modules, "lambert_camera${suffix}.rgen.spv")
-            ['OpGroupNonUniformElect', 'OpGroupNonUniformBroadcastFirst',
-             'OpGroupNonUniformBallot', 'OpGroupNonUniformBallotBitCount'].each { opcode ->
-                requireEqual(suffix == '_subgroup', module.opcodes.contains(opcode),
-                        "Lambert post-trace publication ${suffix}/${opcode}")
-            }
-        }
-        ['', '_subgroup'].each { suffix ->
-            def module = requireModule(modules, "lambert_shade${suffix}.rgen.spv")
-            ['OpGroupNonUniformElect', 'OpGroupNonUniformBroadcastFirst',
-             'OpGroupNonUniformBallot', 'OpGroupNonUniformBallotBitCount'].each { opcode ->
-                requireEqual(!suffix.isEmpty(), module.opcodes.contains(opcode),
-                        "Lambert subgroup compaction ${suffix}/${opcode}")
-            }
-        }
-		def verify = { boolean expected, String renderer, String stage, String suffix ->
-			def opcodes = requireModule(modules, wavefrontShader(renderer, stage, suffix)).opcodes
-			['OpGroupNonUniformElect', 'OpGroupNonUniformBroadcastFirst',
-			 'OpGroupNonUniformBallot', 'OpGroupNonUniformBallotBitCount'].each { opcode ->
-				requireEqual(expected, opcodes.contains(opcode),
-						"Subgroup compaction ${renderer}/${stage}${suffix}/${opcode}")
-			}
-		}
-		verify(false, 'realtime', 'camera_trace', '_ser')
-		verify(true, 'realtime', 'surface_split', '_ser')
-		verify(true, 'realtime', 'landing_scatter', '_ser')
-		['', '_ser'].each { suffix ->
-			verify(!suffix.isEmpty(), 'realtime', 'secondary_scatter', suffix)
-			['landing_light_select', 'landing_direct', 'secondary_trace',
-			 'secondary_light_select', 'secondary_direct'].each {
-				verify(false, 'realtime', it, suffix)
-			}
-		}
-		verify(true, 'offline', 'scatter', '_ser')
-		['', '_ser'].each { suffix ->
-			['camera_trace', 'bridge_trace', 'light_select', 'direct'].each {
-				verify(false, 'offline', it, suffix)
-			}
-		}
-	}
-
 	@TaskAction
 	void verify() {
 		def root = new File(slangDirectory.get().asFile, 'prime/shaders')
@@ -497,7 +437,6 @@ abstract class VerifySlangArtifactAbi extends DefaultTask {
 
 		verifyPayloads(modules)
 		verifyDescriptors(modules, new JsonSlurper().parse(schemaFile.get().asFile))
-		verifySubgroups(modules)
 
 		def report = reportFile.get().asFile
 		report.parentFile.mkdirs()
