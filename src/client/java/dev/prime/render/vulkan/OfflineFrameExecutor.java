@@ -15,11 +15,13 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 /** Device side effects for one native offline sample. */
 public final class OfflineFrameExecutor {
     private final VulkanContext context;
+    private final TraceBackend backend;
     private final VulkanImageInitializationBatch imageInitialization =
             new VulkanImageInitializationBatch();
 
-    public OfflineFrameExecutor(VulkanContext context) {
+    public OfflineFrameExecutor(VulkanContext context, TraceBackend backend) {
         this.context = Objects.requireNonNull(context, "context");
+        this.backend = Objects.requireNonNull(backend, "backend");
     }
 
     public void execute(
@@ -79,6 +81,10 @@ public final class OfflineFrameExecutor {
             completion.onCommit(2, () -> materialTextures.submitted(materialFrame));
             completion.onAbandon(2, failure -> ResourceCleanup.run(
                     () -> materialTextures.abandon(materialFrame), failure));
+            if (this.backend.prepareShadowInteractions(commandBuffer, materialTextures.changedBaseTextures(materialFrame))) {
+                completion.onCommit(3, this.backend::submittedShadowInteractions);
+                completion.onAbandon(3, failure -> ResourceCleanup.run(this.backend::abandonShadowInteractions, failure));
+            }
             // The sun-cache raygen borrows the shared scene descriptor set prepared above.
             long atmosphereFrame = atmosphere.prepare(
                     commandBuffer,

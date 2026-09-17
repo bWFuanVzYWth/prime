@@ -1,6 +1,7 @@
 {
   "schema": 2,
   "artifacts": {
+    "shadow_interaction": "entry/material/shadow_interaction.compute.slang",
     "atmosphere_aerial_transmittance": "entry/atmosphere/atmosphere_aerial_transmittance.compute.slang",
     "atmosphere_aerial": "entry/atmosphere/atmosphere_aerial.compute.slang",
     "atmosphere_multi_scattering": "entry/atmosphere/atmosphere_multi_scattering.compute.slang",

@@ -469,6 +469,10 @@ tasks.register('shaderTest', Test) {
 	group = 'verification'
 	description = 'Runs GPU shader property tests and requires a usable Vulkan compute device.'
 	dependsOn 'verifyCompiledShaderTestManifest'
+	dependsOn 'compileSlangProgramShadowInteraction'
+	def shadowInteractionArtifact = layout.buildDirectory.file('shaderPrograms/shadow_interaction/shadow_interaction.comp.spv')
+	inputs.file(shadowInteractionArtifact)
+	systemProperty 'prime.test.shadowInteractionShader', shadowInteractionArtifact.get().asFile.absolutePath
 	inputs.dir(compiledSlangTestShaderRoot)
 	testClassesDirs = sourceSets.test.output.classesDirs
 	classpath = sourceSets.test.runtimeClasspath

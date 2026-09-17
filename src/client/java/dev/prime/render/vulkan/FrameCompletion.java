@@ -6,7 +6,7 @@ import dev.prime.infrastructure.ResourceCleanup;
 
 /** Orders resource/history commit or rollback without crossing submission ownership. */
 final class FrameCompletion {
-    private static final int ACTION_SLOTS = 6;
+    private static final int ACTION_SLOTS = 7;
 
     private final Runnable[] commits = new Runnable[ACTION_SLOTS];
     private final FailureAction[] abandons = new FailureAction[ACTION_SLOTS];

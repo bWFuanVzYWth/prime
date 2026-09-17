@@ -65,6 +65,7 @@ final class ShaderComputeRunner implements AutoCloseable {
     private final VkQueue queue;
     private final long commandPool;
     private final List<ImageBinding> images = new ArrayList<>();
+    private final List<BufferBinding> buffers = new ArrayList<>();
     private boolean closed;
 
     private ShaderComputeRunner(VulkanTestDevice testDevice) {
@@ -81,6 +82,48 @@ final class ShaderComputeRunner implements AutoCloseable {
 
     static ShaderComputeRunner openAddressed() throws UnavailableException {
         return new ShaderComputeRunner(VulkanTestDevice.openAddressed());
+    }
+
+    void bindStorageBuffer(int binding, ByteBuffer data) {
+        requireOpen();
+        if (binding < 2 || this.buffers.stream().anyMatch(value -> value.binding() == binding)) {
+            throw new IllegalArgumentException("Duplicate or reserved test buffer binding");
+        }
+        MappedBuffer buffer = createMappedBuffer(data.remaining());
+        buffer.bytes().put(data.duplicate());
+        this.buffers.add(new BufferBinding(binding, buffer));
+    }
+
+    void repeatImageDescriptor(int binding, int count) {
+        for (int i = 0; i < this.images.size(); i++) {
+            ImageBinding image = this.images.get(i);
+            if (image.binding() == binding) {
+                if (count < 1) throw new IllegalArgumentException("Empty descriptor array");
+                this.images.set(i, new ImageBinding(binding, image.resource(), count));
+                return;
+            }
+        }
+        throw new IllegalArgumentException("No test image at binding " + binding);
+    }
+
+    /** Runs the production compiler's two-address/count push ABI with real sampled resources. */
+    ByteBuffer dispatchShadowCompiler(Path shader, ByteBuffer requests, int outputBytes, int count)
+            throws IOException {
+        int usage = VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK12.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        try (MappedBuffer source = createMappedBuffer(requests.remaining(), usage);
+                MappedBuffer output = createMappedBuffer(outputBytes, usage);
+                MemoryStack stack = MemoryStack.stackPush()) {
+            source.bytes().put(requests.duplicate());
+            zero(output.bytes());
+            var info = org.lwjgl.vulkan.VkBufferDeviceAddressInfo.calloc(stack).sType$Default();
+            long sourceAddress = VK12.vkGetBufferDeviceAddress(this.device, info.buffer(source.buffer()));
+            long outputAddress = VK12.vkGetBufferDeviceAddress(this.device, info.buffer(output.buffer()));
+            ByteBuffer push = stack.calloc(24).putLong(0, sourceAddress).putLong(8, outputAddress).putInt(16, count);
+            dispatch(shader, source, output, new Workgroups((count + 63) / 64, 1, 1), push);
+            ByteBuffer result = ByteBuffer.allocateDirect(outputBytes).order(ByteOrder.LITTLE_ENDIAN);
+            result.put(output.bytes().duplicate().clear()).flip();
+            return result;
+        }
     }
 
     /** Relocates fixture pointers inside one owned allocation; push constants contain its base. */
@@ -221,7 +264,7 @@ final class ShaderComputeRunner implements AutoCloseable {
                 height,
                 depth,
                 source, mipLevels, repeatU);
-        this.images.add(new ImageBinding(binding, image));
+        this.images.add(new ImageBinding(binding, image, 1));
     }
 
     private ImageResource createImage(
@@ -375,7 +418,7 @@ final class ShaderComputeRunner implements AutoCloseable {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             LongBuffer handle = stack.mallocLong(1);
             VkDescriptorSetLayoutBinding.Buffer bindings =
-                    VkDescriptorSetLayoutBinding.calloc(2 + this.images.size(), stack);
+                    VkDescriptorSetLayoutBinding.calloc(2 + this.images.size() + this.buffers.size(), stack);
             bindings.get(0)
                     .binding(0)
                     .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
@@ -391,8 +434,13 @@ final class ShaderComputeRunner implements AutoCloseable {
                 bindings.get(index + 2)
                         .binding(image.binding())
                         .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                        .descriptorCount(1)
+                        .descriptorCount(image.count())
                         .stageFlags(COMPUTE_STAGE);
+            }
+            for (int i = 0; i < this.buffers.size(); i++) {
+                bindings.get(2 + this.images.size() + i).binding(this.buffers.get(i).binding())
+                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                        .descriptorCount(1).stageFlags(COMPUTE_STAGE);
             }
             check(
                     VK12.vkCreateDescriptorSetLayout(
@@ -450,11 +498,11 @@ final class ShaderComputeRunner implements AutoCloseable {
                     VkDescriptorPoolSize.calloc(poolTypeCount, stack);
             poolSizes.get(0)
                     .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                    .descriptorCount(2);
+                    .descriptorCount(2 + this.buffers.size());
             if (!this.images.isEmpty()) {
                 poolSizes.get(1)
                         .type(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                        .descriptorCount(this.images.size());
+                        .descriptorCount(this.images.stream().mapToInt(ImageBinding::count).sum());
             }
             handle.clear();
             check(
@@ -481,7 +529,7 @@ final class ShaderComputeRunner implements AutoCloseable {
                     "allocate shader-test descriptor set");
             long descriptorSet = handle.get(0);
             VkDescriptorBufferInfo.Buffer bufferInfos =
-                    VkDescriptorBufferInfo.calloc(2, stack);
+                    VkDescriptorBufferInfo.calloc(2 + this.buffers.size(), stack);
             bufferInfos.get(0)
                     .buffer(inputBuffer.buffer())
                     .offset(0L)
@@ -490,7 +538,7 @@ final class ShaderComputeRunner implements AutoCloseable {
                     .buffer(outputBuffer.buffer())
                     .offset(0L)
                     .range(outputBuffer.size());
-            int writeCount = 2 + this.images.size();
+            int writeCount = 2 + this.images.size() + this.buffers.size();
             VkWriteDescriptorSet.Buffer writes =
                     VkWriteDescriptorSet.calloc(writeCount, stack);
             writes.get(0)
@@ -510,21 +558,32 @@ final class ShaderComputeRunner implements AutoCloseable {
                     .pBufferInfo(VkDescriptorBufferInfo.create(
                             bufferInfos.get(1).address(), 1));
             VkDescriptorImageInfo.Buffer imageInfos =
-                    VkDescriptorImageInfo.calloc(this.images.size(), stack);
+                    VkDescriptorImageInfo.calloc(this.images.stream().mapToInt(ImageBinding::count).sum(), stack);
+            int imageCursor = 0;
             for (int index = 0; index < this.images.size(); index++) {
                 ImageBinding image = this.images.get(index);
-                imageInfos.get(index)
-                        .sampler(image.resource().sampler())
-                        .imageView(image.resource().view())
-                        .imageLayout(VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                int first = imageCursor;
+                for (int i = 0; i < image.count(); i++) {
+                    imageInfos.get(imageCursor++).sampler(image.resource().sampler())
+                            .imageView(image.resource().view())
+                            .imageLayout(VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                }
                 writes.get(index + 2)
                         .sType$Default()
                         .dstSet(descriptorSet)
                         .dstBinding(image.binding())
-                        .descriptorCount(1)
+                        .descriptorCount(image.count())
                         .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                         .pImageInfo(VkDescriptorImageInfo.create(
-                                imageInfos.get(index).address(), 1));
+                                imageInfos.get(first).address(), image.count()));
+            }
+            for (int i = 0; i < this.buffers.size(); i++) {
+                BufferBinding buffer = this.buffers.get(i);
+                bufferInfos.get(2 + i).buffer(buffer.resource().buffer()).offset(0).range(buffer.resource().size());
+                writes.get(2 + this.images.size() + i).sType$Default().dstSet(descriptorSet)
+                        .dstBinding(buffer.binding()).descriptorCount(1)
+                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                        .pBufferInfo(VkDescriptorBufferInfo.create(bufferInfos.get(2 + i).address(), 1));
             }
             VK12.vkUpdateDescriptorSets(this.device, writes, null);
 
@@ -900,6 +959,8 @@ final class ShaderComputeRunner implements AutoCloseable {
             }
         }
         this.images.clear();
+        for (BufferBinding buffer : this.buffers) buffer.resource().close();
+        this.buffers.clear();
         try {
             this.testDevice.close();
         } catch (RuntimeException | Error exception) {
@@ -1001,7 +1062,9 @@ final class ShaderComputeRunner implements AutoCloseable {
         }
     }
 
-    private record ImageBinding(int binding, ImageResource resource) {
+    private record BufferBinding(int binding, MappedBuffer resource) {}
+
+    private record ImageBinding(int binding, ImageResource resource, int count) {
     }
 
     private record ImageResource(

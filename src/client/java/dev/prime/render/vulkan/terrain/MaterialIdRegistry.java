@@ -53,6 +53,16 @@ final class MaterialIdRegistry {
         return this.nextId;
     }
 
+    int shadowTexture(int identity) {
+        int id = identity >>> 16;
+        if (id == 0) return 0;
+        int core = this.coreRecords[id * CORE_WORDS];
+        int control = core >>> ShaderAbi.MATERIAL_CORE_RECIPE_CONTROL_SHIFT;
+        return dev.prime.render.terrain.PrimitivePacking.isTransmissive(control)
+                && (control & dev.prime.render.terrain.PrimitivePacking.CONTROL_WATER_MEDIUM) == 0
+                ? core & ShaderAbi.MATERIAL_CORE_TEXTURE_ID_MASK : 0;
+    }
+
     int[] encodedCoreRecords(int firstId) {
         Objects.checkFromToIndex(firstId, this.nextId, this.nextId);
         return Arrays.copyOfRange(this.coreRecords, firstId * CORE_WORDS, this.nextId * CORE_WORDS);

@@ -161,6 +161,15 @@ public final class MaterialTexturePages implements AutoCloseable {
         return this.prepare(commandBuffer, false);
     }
 
+    /** Only accepted base-page writes in this command buffer invalidate derived shadow data. */
+    public int[] changedBaseTextures(FrameToken token) {
+        if (token == null) return new int[0];
+        if (token != this.pending) throw new IllegalArgumentException("Material frame is not pending");
+        return this.animationUpdates.subList(0, token.animationUpdateCount).stream()
+                .filter(update -> update.owner.frames(Channel.BASE_COLOR) != null)
+                .mapToInt(update -> update.owner.sprite.textureId()).toArray();
+    }
+
     private FrameToken prepare(VkCommandBuffer commandBuffer, boolean initialUpload) {
         if (this.pending != null) {
             throw new IllegalStateException(
@@ -824,6 +833,7 @@ public final class MaterialTexturePages implements AutoCloseable {
         long sourceStage = toTransfer
                 ? (initialized
                         ? KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                                | VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
                         : VK12.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT)
                 : VK12.VK_PIPELINE_STAGE_TRANSFER_BIT;
         long sourceAccess = toTransfer && initialized
@@ -831,7 +841,8 @@ public final class MaterialTexturePages implements AutoCloseable {
                 : toTransfer ? 0L : VK12.VK_ACCESS_TRANSFER_WRITE_BIT;
         long destinationStage = toTransfer
                 ? VK12.VK_PIPELINE_STAGE_TRANSFER_BIT
-                : KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+                : KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                        | VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
         long destinationAccess = toTransfer
                 ? VK12.VK_ACCESS_TRANSFER_WRITE_BIT
                 : VK12.VK_ACCESS_SHADER_READ_BIT;

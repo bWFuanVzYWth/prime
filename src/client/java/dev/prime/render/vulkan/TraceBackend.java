@@ -26,7 +26,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
  * offline, atmosphere and sun-shadow programs only borrow its descriptor set.
  */
 public final class TraceBackend implements Destroyable {
-    private static final int BINDING_COUNT = 27;
+    private static final int BINDING_COUNT = 28;
     private static final int STARMAP_UPLOAD = 1;
     private static final int BSDF_LOOKUP_UPLOAD = 1 << 1;
     private static final int REALTIME_STBN_UPLOAD = 1 << 2;
@@ -43,6 +43,7 @@ public final class TraceBackend implements Destroyable {
     private final TraceBindings bindings;
     private SunShadowPipeline sunShadowPipeline;
     private SceneBindings sceneBindings;
+    private ShadowInteractionPass shadowInteractions;
     private long nextFrameToken;
     private long pendingFrameToken;
     private int pendingUploads;
@@ -96,6 +97,22 @@ public final class TraceBackend implements Destroyable {
         return new SunShadowPipeline(this.context, this.bindings);
     }
 
+    public ShadowInteractionPass prepareShadowInteractionReload() {
+        return new ShadowInteractionPass(this.context);
+    }
+
+    public Destroyable replaceShadowInteractions(ShadowInteractionPass replacement) {
+        ShadowInteractionPass previous = this.shadowInteractions;
+        this.shadowInteractions = java.util.Objects.requireNonNull(replacement, "replacement");
+        // The replacement owns a new sidecar. Rebind before the next trace even if the scene
+        // and texture generation have not changed; the compiler will regenerate every entry.
+        if (this.sceneBindings != null) {
+            this.context.defer(this.sceneBindings);
+            this.sceneBindings = null;
+        }
+        return previous;
+    }
+
     /** Publishes a prepared replacement and returns the previous pipeline for deferred retirement. */
     public SunShadowPipeline replaceSunShadowPipeline(SunShadowPipeline replacement) {
         if (replacement == null || replacement == this.sunShadowPipeline) {
@@ -122,6 +139,8 @@ public final class TraceBackend implements Destroyable {
         if (!tintSamples.present()) {
             throw new IllegalArgumentException("Scene has no tint-sample binding");
         }
+        if (this.shadowInteractions == null) this.shadowInteractions = new ShadowInteractionPass(this.context);
+        this.shadowInteractions.ensure(materialTextures, surfaces, tintSamples, atlasSampler.vkSampler());
         if (this.sceneBindings != null
                 && this.sceneBindings.matches(
                         tlas,
@@ -149,7 +168,8 @@ public final class TraceBackend implements Destroyable {
                 atmosphere,
                 this.bsdfLookup,
                 this.starmap,
-                this.realtimeStbn);
+                this.realtimeStbn,
+                this.shadowInteractions.output());
         SceneBindings previous = this.sceneBindings;
         this.sceneBindings = replacement;
         this.bindings.publishDescriptorSet(replacement.descriptorSet);
@@ -202,6 +222,13 @@ public final class TraceBackend implements Destroyable {
             throw failure;
         }
     }
+
+    public boolean prepareShadowInteractions(VkCommandBuffer command, int[] changedTextures) {
+        return this.shadowInteractions.prepare(command, changedTextures);
+    }
+
+    public void submittedShadowInteractions() { this.shadowInteractions.submitted(); }
+    public void abandonShadowInteractions() { this.shadowInteractions.abandon(); }
 
     public void submitted(long token) {
         if (token == 0L) {
@@ -313,6 +340,10 @@ public final class TraceBackend implements Destroyable {
                 bindings.get(cursor++), ShaderAbi.DESCRIPTOR_TINT_SAMPLES,
                 VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, ALL_RT_STAGES);
         VulkanDescriptors.layoutBinding(
+                bindings.get(cursor++), ShaderAbi.DESCRIPTOR_SHADOW_INTERACTIONS,
+                VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
+                KHRRayTracingPipeline.VK_SHADER_STAGE_ANY_HIT_BIT_KHR);
+        VulkanDescriptors.layoutBinding(
                 bindings.get(cursor++), ShaderAbi.DESCRIPTOR_REALTIME_STBN,
                 VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 1, KHRRayTracingPipeline.VK_SHADER_STAGE_RAYGEN_BIT_KHR);
@@ -357,6 +388,7 @@ public final class TraceBackend implements Destroyable {
                 this.sceneBindings = null;
             }
             this.sunShadowPipeline.destroy();
+            if (this.shadowInteractions != null) this.shadowInteractions.destroy();
             this.bindings.close();
             VK12.vkDestroyDescriptorSetLayout(
                     this.context.vkDevice(), this.descriptorSetLayout, null);
@@ -441,7 +473,8 @@ public final class TraceBackend implements Destroyable {
                 AtmospherePipeline atmosphere,
                 StaticSampledTexture bsdfLookup,
                 StaticSampledTexture starmap,
-                RealtimeStbnTable realtimeStbn) {
+                RealtimeStbnTable realtimeStbn,
+                VulkanBuffer shadowInteractions) {
             List<VulkanImage> baseColorPages = materialTextures.baseColorPages();
             List<VulkanImage> normalPages = materialTextures.normalPages();
             List<VulkanImage> opticalPages = materialTextures.opticalPages();
@@ -466,7 +499,7 @@ public final class TraceBackend implements Destroyable {
                         .descriptorCount(1);
                 sizes.get(4)
                         .type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                        .descriptorCount(5);
+                        .descriptorCount(6);
                 long pool = VulkanDescriptors.createPool(
                         context,
                         stack,
@@ -577,7 +610,7 @@ public final class TraceBackend implements Destroyable {
                                     .sType$Default()
                                     .pAccelerationStructures(stack.longs(tlas));
                     VkDescriptorBufferInfo.Buffer bufferInfos =
-                            VkDescriptorBufferInfo.calloc(6, stack);
+                            VkDescriptorBufferInfo.calloc(7, stack);
                     VkDescriptorBufferInfo queryInfo = bufferInfos.get(0);
                     queryInfo
                                     .buffer(atmosphere.sunShadowQuery().handle())
@@ -605,6 +638,8 @@ public final class TraceBackend implements Destroyable {
                             .range(tintSamples.bytes());
                     VkDescriptorBufferInfo surfaceInfo = bufferInfos.get(5);
                     surfaceInfo.buffer(surfaces.buffer()).offset(0L).range(surfaces.bytes());
+                    VkDescriptorBufferInfo shadowInteractionInfo = bufferInfos.get(6);
+                    shadowInteractionInfo.buffer(shadowInteractions.handle()).offset(0L).range(shadowInteractions.size());
                     VkWriteDescriptorSet.Buffer writes =
                             VkWriteDescriptorSet.calloc(BINDING_COUNT, stack);
                     int write = 0;
@@ -667,6 +702,9 @@ public final class TraceBackend implements Destroyable {
                     VulkanDescriptors.writeBuffer(
                             writes.get(write++), set, ShaderAbi.DESCRIPTOR_SURFACE_RECORDS,
                             VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, surfaceInfo);
+                    VulkanDescriptors.writeBuffer(
+                            writes.get(write++), set, ShaderAbi.DESCRIPTOR_SHADOW_INTERACTIONS,
+                            VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, shadowInteractionInfo);
                     VulkanDescriptors.writeBuffer(
                             writes.get(write++), set, ShaderAbi.DESCRIPTOR_TINT_SAMPLES,
                             VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, tintSampleInfo);

@@ -760,6 +760,7 @@
     "baseColorPages": 51,
     "materialCoreRecords": 52,
     "surfaceRecords": 53,
+    "shadowInteractions": 54,
     "starmap": 34,
     "realtimeStbn": 35,
     "sunShadowDepth0": 38,
@@ -826,6 +827,10 @@
     "auxiliaryInfoOffset": 16,
     "opticalOriginOffset": 20,
     "auxiliaryExtentOffset": 24
+  },
+  "shadowInteractionContract": {
+    "recordSize": 16,
+    "stainedFlag": 1
   },
   "surfaceRecordContract": {
     "keySize": 4,
