@@ -55,16 +55,10 @@ PrimeWavefrontScatter primeSampleWavefrontHit(inout PrimeIntegratorContext conte
     PrimePreparedSampleBase prepared = primePreparePathSample(
             path.sampleSeed, primeSampleIndex(), primePathBounce(path.control) + 1u);
     float3 sample = primeSobolSample3D(prepared, PRIME_SAMPLE_EFFECT_SCATTER_BSDF, PRIME_SAMPLE_DIMENSION_PRIMARY);
-    if (result.guided) {
-        PrimeGuidedPathScatter guided = primeSampleGuidedPathSurface(context, surface, viewDirection,
-                sample, volume, primePathBounce(path.control), primeUsesAirGap());
-        result.scatter = guided.scatter;
-        result.albedos = guided.albedos;
-    } else {
-        result.scatter = primeSamplePathSurface(context, surface, viewDirection, sample, volume, primeUsesAirGap());
-        result.albedos.diffuse = float3(0.0);
-        result.albedos.specular = float3(0.0);
-    }
+    PrimeGuidedPathScatter sampled = primeSamplePathSurfaceWithAlbedos(
+            surface, viewDirection, sample, volume, result.guided, primeUsesAirGap());
+    result.scatter = sampled.scatter;
+    result.albedos = sampled.albedos;
     return result;
 }
 

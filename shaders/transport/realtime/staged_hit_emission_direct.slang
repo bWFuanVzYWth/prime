@@ -27,8 +27,7 @@ public float3 primeEvaluateStagedHitEmission(
                     * PRIME_LEVEL_15_BLOCK_INTENSITY
                     * primeBlockLightRadianceMultiplier();
     }
-    bool previousCannotUseMis = path.bounce == 0u
-            || (path.pathFlags & PRIME_PATH_PREVIOUS_DISCRETE) != 0u;
+    bool previousCannotUseMis = path.previousCannotUseMis;
     bool evaluateAreaPdf = previousUsedAreaNee && !previousCannotUseMis;
     LightEvaluation hitArea = primeEvaluateAreaLight(
             surface,

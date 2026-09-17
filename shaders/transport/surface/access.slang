@@ -14,12 +14,6 @@ public bool primeKnownHitKind(SurfaceInteraction surface) {
             || surface.hitKind == PRIME_HIT_SURFACE;
 }
 
-public bool primePreviousCannotUseMis(PathState path) {
-    return primePathBounce(path.control) == 0u
-            || (primePathFlags(path.control)
-                    & PRIME_PATH_PREVIOUS_DISCRETE) != 0u;
-}
-
 public float3 primeSurfaceOutwardShadingNormal(SurfaceInteraction surface) {
     float3 shadingNormal = surface.shadingNormal;
     return dot(shadingNormal, surface.geometricNormal) >= 0.0

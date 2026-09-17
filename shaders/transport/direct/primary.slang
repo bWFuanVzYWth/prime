@@ -50,14 +50,15 @@ public float primeSigmaPackDirectionalPenumbra(float distanceToOccluder) {
     return min(max(penumbraRadius, 0.0), 32768.0);
 }
 
-public PrimePrimarySunSample primeEstimatePrimaryDirectSun(
+PrimePrimarySunSample primeEstimateSunSample(
         inout PrimeIntegratorContext context,
         IntegratorRecord integrator,
         SurfaceInteraction surface,
         float3 viewDirection,
         float2 sampleValue,
         PrimeMedium medium,
-        bool conditionalTransparentBranch) {
+        bool conditionalTransparentBranch,
+        bool needsUnoccludedLighting) {
     PrimePrimarySunSample result;
     result.lighting.diffuse = float3(0.0);
     result.lighting.specular = float3(0.0);
@@ -75,8 +76,11 @@ public PrimePrimarySunSample primeEstimatePrimaryDirectSun(
     PrimeShadowTrace shadow = primeTraceShadow(
             context, surface, light,
             primeShadowStartingMedium(surface, viewDirection, light.direction, medium));
-    result.penumbra = primeSigmaPackDirectionalPenumbra(shadow.hitDistance);
     result.visibility = float(shadow.hitDistance >= PRIME_NRD_FP16_MAX);
+    if (!needsUnoccludedLighting && result.visibility == 0.0) return result;
+    if (needsUnoccludedLighting) {
+        result.penumbra = primeSigmaPackDirectionalPenumbra(shadow.hitDistance);
+    }
     float3 radiance = primeResolveSampledSunRadiance(
             integrator, light) * shadow.transmittance;
     result.lighting = primeEvaluateVisibleDirectSplit(
@@ -88,12 +92,11 @@ public PrimePrimarySunSample primeEstimatePrimaryDirectSun(
             radiance,
             medium,
             primeUsesAirGap(),
-            conditionalTransparentBranch,
-            true);
+            conditionalTransparentBranch);
     return result;
 }
 
-public PrimeDirectLightingSplit primeEstimatePrimaryDirectPreparedAreaLight(
+public PrimeDirectLightingSplit primeEstimateDirectAreaSplit(
         inout PrimeIntegratorContext context,
         SurfaceInteraction surface,
         float3 viewDirection,
@@ -132,8 +135,31 @@ public PrimeDirectLightingSplit primeEstimatePrimaryDirectPreparedAreaLight(
             radiance,
             medium,
             primeUsesAirGap(),
-            conditionalTransparentBranch,
-            false);
+            conditionalTransparentBranch);
+}
+
+public PrimePrimarySunSample primeEstimatePrimaryDirectSun(
+        inout PrimeIntegratorContext context,
+        IntegratorRecord integrator,
+        SurfaceInteraction surface,
+        float3 viewDirection,
+        float2 sampleValue,
+        PrimeMedium medium,
+        bool conditionalTransparentBranch) {
+    // Only the visible opaque surface stores unoccluded solar lighting for SIGMA.
+    return primeEstimateSunSample(context, integrator, surface, viewDirection, sampleValue,
+            medium, conditionalTransparentBranch, !conditionalTransparentBranch);
+}
+
+public PrimeDirectLightingSplit primeEstimateDirectSunSplit(
+        inout PrimeIntegratorContext context,
+        IntegratorRecord integrator,
+        SurfaceInteraction surface,
+        float3 viewDirection,
+        float2 sampleValue,
+        PrimeMedium medium) {
+    return primeEstimateSunSample(context, integrator, surface, viewDirection, sampleValue,
+            medium, false, false).lighting;
 }
 
 public float3 primeEstimateDirectPreparedAreaLight(
@@ -142,32 +168,11 @@ public float3 primeEstimateDirectPreparedAreaLight(
         float3 viewDirection,
         AreaLightSample area,
         PrimeMedium medium) {
-    float3 shadingNormal = primeSurfaceShadingNormal(surface, viewDirection);
-    if (!primeDirectSampleEligible(surface, shadingNormal, area.light)) {
-        return float3(0.0);
-    }
-    PrimeShadowTrace shadow = primeTraceShadow(
-            context,
-            surface,
-            area.light,
-            uint2(area.sectionIndex, area.emitterIndex),
-            primeShadowStartingMedium(surface, viewDirection, area.light.direction, medium));
-    if (shadow.hitDistance < PRIME_NRD_FP16_MAX) {
-        return float3(0.0);
-    }
-    float3 radiance =
-            primeResolveSampledAreaLightRadiance(area) * shadow.transmittance;
-    return primeEvaluateCompleteDirect(
-            context,
-            surface,
-            viewDirection,
-            shadingNormal,
-            area.light,
-            radiance,
-            medium,
-            primeUsesAirGap(),
-            true);
+    PrimeDirectLightingSplit result = primeEstimateDirectAreaSplit(
+            context, surface, viewDirection, area, medium, false);
+    return result.diffuse + result.specular;
 }
+
 public float3 primeEstimateDirectSun(
         inout PrimeIntegratorContext context,
         IntegratorRecord integrator,
@@ -175,30 +180,7 @@ public float3 primeEstimateDirectSun(
         float3 viewDirection,
         float2 sampleValue,
         PrimeMedium medium) {
-    LightSample light = primeSampleSun(integrator, sampleValue);
-    if (!primeAtmosphereDistantDirectionVisible(light.direction)) {
-        return float3(0.0);
-    }
-    float3 shadingNormal = primeSurfaceShadingNormal(surface, viewDirection);
-    if (!primeDirectSampleEligible(surface, shadingNormal, light)) {
-        return float3(0.0);
-    }
-    PrimeShadowTrace shadow = primeTraceShadow(
-            context, surface, light,
-            primeShadowStartingMedium(surface, viewDirection, light.direction, medium));
-    if (shadow.hitDistance < PRIME_NRD_FP16_MAX) {
-        return float3(0.0);
-    }
-    float3 radiance = primeResolveSampledSunRadiance(
-            integrator, light) * shadow.transmittance;
-    return primeEvaluateCompleteDirect(
-            context,
-            surface,
-            viewDirection,
-            shadingNormal,
-            light,
-            radiance,
-            medium,
-            primeUsesAirGap(),
-            true);
+    PrimeDirectLightingSplit result = primeEstimateDirectSunSplit(
+            context, integrator, surface, viewDirection, sampleValue, medium);
+    return result.diffuse + result.specular;
 }

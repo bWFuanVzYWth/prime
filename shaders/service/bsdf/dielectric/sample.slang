@@ -138,15 +138,7 @@ public PrimeTransmissiveBsdfSplit primeSampleMinecraftTransmissionSplitFromState
             localView,
             reflectionSample,
             medium);
-    // Both paths are evaluated, so neither PDF contains a branch-selection probability.
-    result.reflection.bsdfSample = primeSanitizeBsdfSample(result.reflection.bsdfSample);
-    if (result.reflection.bsdfSample.eventFlags == 0u) {
-        result.reflection.medium = medium;
-    }
-    result.transmission.bsdfSample = primeSanitizeBsdfSample(result.transmission.bsdfSample);
-    if (result.transmission.bsdfSample.eventFlags == 0u) {
-        result.transmission.medium = medium;
-    }
+    // Each conditional sampler already sanitizes its result and restores invalid media.
     return result;
 }
 

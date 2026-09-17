@@ -49,7 +49,7 @@ public PrimeDirectLightingSplit primeEstimatePrimaryDirectAreaLightSampled(
             primeAreaLightReceiverNormal(surface, viewDirection),
             treeSample,
             positionSample);
-    return primeEstimatePrimaryDirectPreparedAreaLight(
+    return primeEstimateDirectAreaSplit(
             context,
             surface,
             viewDirection,

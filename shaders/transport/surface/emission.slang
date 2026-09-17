@@ -7,6 +7,7 @@ import "contract/light_sample.slang";
 
 import "prime_abi_types.slang";
 import "state/path.slang";
+import "state/mis.slang";
 import "contract/path.slang";
 import "policy/runtime/config.slang";
 import "math/transport.slang";

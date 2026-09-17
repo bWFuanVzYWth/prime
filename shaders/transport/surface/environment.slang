@@ -14,6 +14,7 @@ import "service/atmosphere/starmap.slang";
 import "service/light/sample.slang";
 import "service/trace/context.slang";
 import "state/path.slang";
+import "state/mis.slang";
 import "transport/surface/access.slang";
 
 public float3 primeEvaluateEnvironmentContribution(
