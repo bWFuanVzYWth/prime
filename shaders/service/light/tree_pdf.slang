@@ -13,7 +13,6 @@ static const uint PRIME_LIGHT_PATH_TRAIL_MASK = 0x07ffffffu;
 
 public float primeLightTreeSelectionPdf(
         LightNode* nodes,
-        LightLeaf* leaves,
         SectionRecord* sections,
         uint64_t emitterAddress,
         uint entryLimit,
@@ -32,41 +31,35 @@ public float primeLightTreeSelectionPdf(
             || (depth < PRIME_LIGHT_TREE_MAX_DEPTH && (trail >> depth) != 0u)) {
         return 0.0;
     }
-    uint nodeIndex = root;
+    uint4 control = nodes[root].directionChildLeaf;
     float pdf = 1.0;
     [loop]
     for (uint level = 0u; level < PRIME_LIGHT_TREE_MAX_DEPTH; ++level) {
         if (level >= depth) break;
-        uint firstChild = primeLoadLightNodeChildOrLeaf(nodes, nodeIndex);
+        uint firstChild = control.y;
         if ((firstChild & PRIME_LIGHT_LEAF_FLAG) != 0u) {
             return 0.0;
         }
-        // Keep reverse MIS on the same two-read schedule as forward selection.
-        uint firstChildOrLeaf = primeLoadLightNodeChildOrLeaf(nodes, firstChild);
-        uint secondChildOrLeaf = primeLoadLightNodeChildOrLeaf(nodes, firstChild + 1u);
+        // Reuse the same compiled child records and probability order as forward selection.
+        LightNode first = nodes[firstChild];
+        LightNode secondNode = nodes[firstChild + 1u];
         float2 firstMetrics;
         float2 secondMetrics;
         if (!primeLoadLightChildMetrics(
-                    nodes,
-                    leaves,
+                    first,
                     sections,
                     emitterAddress,
                     entryLimit,
                     leafMode,
-                    firstChild,
-                    firstChildOrLeaf,
                     point,
                     receiverNormal,
                     firstMetrics)
                 || !primeLoadLightChildMetrics(
-                    nodes,
-                    leaves,
+                    secondNode,
                     sections,
                     emitterAddress,
                     entryLimit,
                     leafMode,
-                    firstChild + 1u,
-                    secondChildOrLeaf,
                     point,
                     receiverNormal,
                     secondMetrics)) {
@@ -78,10 +71,9 @@ public float primeLightTreeSelectionPdf(
         float branchProbability = second ? 1.0 - firstProbability : firstProbability;
         if (!(branchProbability > 0.0)) return 0.0;
         pdf *= branchProbability;
-        nodeIndex = firstChild + uint(second);
+        control = second ? secondNode.directionChildLeaf : first.directionChildLeaf;
     }
-    uint childOrLeaf = primeLoadLightNodeChildOrLeaf(nodes, nodeIndex);
+    uint childOrLeaf = control.y;
     if ((childOrLeaf & PRIME_LIGHT_LEAF_FLAG) == 0u) return 0.0;
-    LightLeaf leaf = leaves[childOrLeaf & PRIME_LIGHT_INDEX_MASK];
-    return leaf.index == expectedIndex && leaf.index < entryLimit ? pdf : 0.0;
+    return control.z == expectedIndex && control.z < entryLimit ? pdf : 0.0;
 }

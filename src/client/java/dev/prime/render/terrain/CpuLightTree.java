@@ -479,8 +479,12 @@ public final class CpuLightTree {
                 throw new IllegalStateException("Light tree siblings must be consecutive");
             }
             target[cursor++] = childOrLeaf;
-            target[cursor++] = 0;
-            target[cursor++] = 0;
+            // Inline the terminal payload in the existing 32-byte record. The leaf stream keeps
+            // its stable serialization, but GPU selection/MIS need no dependent leaf-table read.
+            int leaf = this.nodes.firstChildOrLeaf[node];
+            target[cursor++] = secondChild == NO_INDEX ? this.terminals.index[leaf] : 0;
+            target[cursor++] = secondChild == NO_INDEX
+                    ? Float.floatToRawIntBits(this.terminals.power[leaf]) : 0;
             return cursor;
         }
 

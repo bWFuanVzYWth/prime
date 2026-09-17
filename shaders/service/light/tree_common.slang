@@ -143,23 +143,24 @@ bool primeLoadWorldLeafEntryMetrics(
 // Terminal children use their exact section root or emitter bounds in the final branch decision.
 // Internal children retain the compact centroid target. Selection and reverse MIS share this load.
 public bool primeLoadLightChildMetrics(
-        LightNode* nodes,
-        LightLeaf* leaves,
+        LightNode node,
         SectionRecord* sections,
         uint64_t emitterAddress,
         uint entryLimit,
         uint leafMode,
-        uint nodeIndex,
-        uint childOrLeaf,
         float3 point,
         float3 receiverNormal,
         out float2 metrics) {
     metrics = float2(0.0);
-    if ((childOrLeaf & PRIME_LIGHT_LEAF_FLAG) == 0u) {
-        metrics = primeLoadLightNodeMetrics(nodes, nodeIndex, point, receiverNormal);
+    uint4 control = node.directionChildLeaf;
+    if ((control.y & PRIME_LIGHT_LEAF_FLAG) == 0u) {
+        metrics = primeLightNodeMetrics(
+                node.centroidPower.xyz, node.centroidPower.w, point, receiverNormal, control.x);
         return true;
     }
-    LightLeaf leaf = leaves[childOrLeaf & PRIME_LIGHT_INDEX_MASK];
+    LightLeaf leaf;
+    leaf.index = control.z;
+    leaf.power = asfloat(control.w);
     if (leaf.index >= entryLimit) return false;
     if (leafMode == PRIME_LIGHT_LEAF_WORLD) {
         return primeLoadWorldLeafEntryMetrics(

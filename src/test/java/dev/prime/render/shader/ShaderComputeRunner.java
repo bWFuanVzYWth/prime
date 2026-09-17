@@ -79,6 +79,36 @@ final class ShaderComputeRunner implements AutoCloseable {
         return new ShaderComputeRunner(VulkanTestDevice.open());
     }
 
+    static ShaderComputeRunner openAddressed() throws UnavailableException {
+        return new ShaderComputeRunner(VulkanTestDevice.openAddressed());
+    }
+
+    /** Relocates fixture pointers inside one owned allocation; push constants contain its base. */
+    ByteBuffer dispatchAddressed(
+            String artifact, ByteBuffer input, int[] pointerOffsets,
+            int outputBytes, int invocationCount) throws IOException {
+        requireOpen();
+        try (MappedBuffer source = createMappedBuffer(input.remaining(),
+                     VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK12.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+                MappedBuffer output = createMappedBuffer(outputBytes);
+                MemoryStack stack = MemoryStack.stackPush()) {
+            long address = VK12.vkGetBufferDeviceAddress(this.device,
+                    org.lwjgl.vulkan.VkBufferDeviceAddressInfo.calloc(stack)
+                            .sType$Default().buffer(source.buffer()));
+            source.bytes().put(input.duplicate());
+            for (int offset : pointerOffsets) {
+                source.bytes().putLong(offset, Math.addExact(address, source.bytes().getLong(offset)));
+            }
+            zero(output.bytes());
+            ByteBuffer push = stack.malloc(8).putLong(address).flip();
+            dispatch(shader(artifact), source, output,
+                    new Workgroups((invocationCount + LOCAL_SIZE - 1) / LOCAL_SIZE, 1, 1), push);
+            ByteBuffer result = ByteBuffer.allocateDirect(outputBytes).order(ByteOrder.LITTLE_ENDIAN);
+            result.put(output.bytes().duplicate().clear()).flip();
+            return result;
+        }
+    }
+
     private Path shader(String artifact) {
         String directory = System.getProperty("prime.test.slangShaderDirectory");
         if (directory == null || directory.isBlank()) {
@@ -744,13 +774,16 @@ final class ShaderComputeRunner implements AutoCloseable {
                             | VK12.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                     stack);
             handle.clear();
+            var allocation = VkMemoryAllocateInfo.calloc(stack)
+                    .sType$Default().allocationSize(requirements.size()).memoryTypeIndex(memoryType);
+            if ((usage & VK12.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0) {
+                allocation.pNext(org.lwjgl.vulkan.VkMemoryAllocateFlagsInfo.calloc(stack)
+                        .sType$Default().flags(VK12.VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT).address());
+            }
             check(
                     VK12.vkAllocateMemory(
                             this.device,
-                            VkMemoryAllocateInfo.calloc(stack)
-                                    .sType$Default()
-                                    .allocationSize(requirements.size())
-                                    .memoryTypeIndex(memoryType),
+                            allocation,
                             null,
                             handle),
                     "allocate shader-test buffer memory");
