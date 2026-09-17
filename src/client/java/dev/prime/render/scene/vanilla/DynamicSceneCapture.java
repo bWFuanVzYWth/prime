@@ -2,11 +2,11 @@
 
 package dev.prime.render.scene.vanilla;
 
-import com.mojang.blaze3d.PrimitiveTopology;
-import com.mojang.blaze3d.GpuFormat;
-import com.mojang.blaze3d.textures.GpuSampler;
-import com.mojang.blaze3d.textures.GpuTexture;
-import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+import com.mojang.renderpearl.api.GpuFormat;
+import com.mojang.renderpearl.api.textures.GpuSampler;
+import com.mojang.renderpearl.api.textures.GpuTexture;
+import com.mojang.renderpearl.api.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.QuadInstance;
 import dev.prime.render.shader.ShaderAbi;
@@ -27,7 +27,6 @@ import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
-import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.renderer.rendertype.PreparedRenderType;
 import net.minecraft.client.renderer.rendertype.RenderType;
@@ -36,6 +35,7 @@ import net.minecraft.client.renderer.state.level.QuadParticleRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.renderer.texture.UvMapping;
 import net.minecraft.client.resources.model.ModelBakery;
 import net.minecraft.data.AtlasIds;
 import net.minecraft.client.resources.model.geometry.BakedQuad;
@@ -117,9 +117,8 @@ public final class DynamicSceneCapture {
             int lightCoords,
             int overlayCoords,
             int tintedColor,
-            @Nullable TextureAtlasSprite sprite,
-            int outlineColor,
-            ModelFeatureRenderer.CrumblingOverlay crumblingOverlay) {
+            @Nullable UvMapping uvMapping,
+            int outlineColor) {
         Session session = activeSession();
         if (session == null || renderType.isOutline()) {
             return;
@@ -148,7 +147,7 @@ public final class DynamicSceneCapture {
                 lightCoords,
                 overlayCoords,
                 tintedColor,
-                sprite,
+                uvMapping,
                 submission);
     }
 
@@ -162,7 +161,7 @@ public final class DynamicSceneCapture {
             int lightCoords,
             int overlayCoords,
             int color,
-            @Nullable TextureAtlasSprite sprite,
+            @Nullable UvMapping uvMapping,
             int submission) {
         if (!part.visible) {
             return;
@@ -185,7 +184,7 @@ public final class DynamicSceneCapture {
                     submission,
                     partIndex,
                     transform);
-            var consumer = sprite == null ? sink : sprite.wrap(sink);
+            var consumer = uvMapping == null ? sink : uvMapping.wrap(sink);
             PoseStack identity = new PoseStack();
             ((PrimeModelPart) (Object) part).prime$compile(
                     transform == null ? poseStack.last() : identity.last(),
@@ -206,7 +205,7 @@ public final class DynamicSceneCapture {
                     lightCoords,
                     overlayCoords,
                     color,
-                    sprite,
+                    uvMapping,
                     submission);
         }
         poseStack.popPose();

@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-Prime is a client-side renderer mod for Minecraft 26.2. It redraws the game world with Vulkan
+Prime is a client-side renderer mod for Minecraft 26.3. It redraws the game world with Vulkan
 hardware ray tracing so sunlight, the sky, emissive blocks, glass, water, and ordinary materials
 participate in the same light transport.
 
@@ -62,9 +62,9 @@ tradeoffs.
 | Item | Requirement |
 | --- | --- |
 | Operating system | 64-bit Windows (x86-64) |
-| Minecraft | 26.2 |
-| Mod loader | Fabric Loader 0.19.3 or newer |
-| Dependency | Fabric API for Minecraft 26.2 |
+| Minecraft | 26.3 |
+| Mod loader | Fabric Loader 0.19.5 or newer |
+| Dependency | Fabric API for Minecraft 26.3 |
 | Java | 25 |
 | Primary GPU support | NVIDIA RTX GPU with Vulkan ray tracing and DLSS RR support |
 | Compatibility GPU support | Other GPUs with Vulkan KHR ray tracing pipeline and acceleration structure support |
@@ -83,10 +83,10 @@ compression and linear sampling of 16K BC6H textures.
 
 ## Installation
 
-1. Install and launch Minecraft 26.2 at least once.
+1. Install and launch Minecraft 26.3 at least once.
 2. Use the [official Fabric installer](https://fabricmc.net/use/installer/) to install Fabric Loader
-   0.19.3 or newer for Minecraft 26.2.
-3. Download [Fabric API for Minecraft 26.2](https://modrinth.com/mod/fabric-api/versions) and a
+   0.19.5 or newer for Minecraft 26.3.
+3. Download [Fabric API for Minecraft 26.3](https://modrinth.com/mod/fabric-api/versions) and a
    [Prime release](https://github.com/bWFuanVzYWth/prime/releases). Both downloads should be `.jar`
    files; do not extract them.
 4. Open the game folder for the Fabric instance in your launcher. Create a `mods` folder there if it
@@ -97,7 +97,7 @@ compression and linear sampling of 16K BC6H textures.
 8. Open Video Settings and look for sections whose names begin with `Prime:`.
 
 If the Prime settings do not appear, first check that you launched the correct Fabric instance, that
-its Minecraft version is 26.2, and that Fabric API and Prime are in the same instance's `mods`
+its Minecraft version is 26.3, and that Fabric API and Prime are in the same instance's `mods`
 folder.
 
 If Vulkan or a required ray-tracing feature is unavailable, Prime stops taking over the world view

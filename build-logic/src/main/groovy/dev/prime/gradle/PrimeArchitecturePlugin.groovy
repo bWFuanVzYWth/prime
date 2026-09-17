@@ -133,6 +133,8 @@ def forbiddenEdges = { Map<String, Set<String>> graph ->
                             || targetPackage.startsWith('net.minecraft.client.')
                             || targetPackage == 'com.mojang.blaze3d'
                             || targetPackage.startsWith('com.mojang.blaze3d.')
+                            || targetPackage == 'com.mojang.renderpearl'
+                            || targetPackage.startsWith('com.mojang.renderpearl.')
                             || targetPackage == 'org.lwjgl'
                             || targetPackage.startsWith('org.lwjgl.')
                             || targetPackage == 'org.spongepowered.asm.mixin'

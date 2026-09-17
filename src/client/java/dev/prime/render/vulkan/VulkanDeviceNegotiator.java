@@ -2,10 +2,10 @@
 
 package dev.prime.render.vulkan;
 
-import com.mojang.blaze3d.vulkan.VulkanBackend;
-import com.mojang.blaze3d.vulkan.VulkanPhysicalDevice;
-import com.mojang.blaze3d.vulkan.init.VulkanFeature;
-import com.mojang.blaze3d.vulkan.init.VulkanPNextStruct;
+import com.mojang.renderpearl.backend.vulkan.VulkanPhysicalDevice;
+import com.mojang.renderpearl.backend.vulkan.VulkanFeatureSets;
+import com.mojang.renderpearl.backend.vulkan.init.VulkanFeature;
+import com.mojang.renderpearl.backend.vulkan.init.VulkanPNextStruct;
 import dev.prime.render.shader.ShaderAbi;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -14,8 +14,6 @@ import java.util.Set;
 import dev.prime.render.vulkan.dlss.DlssRrBootstrap;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.*;
-
-import static org.lwjgl.vulkan.EXTPrivateData.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES_EXT;
 
 public final class VulkanDeviceNegotiator {
     private static final List<String> REQUIRED_EXTENSIONS = List.of(
@@ -29,99 +27,73 @@ public final class VulkanDeviceNegotiator {
             KHRDedicatedAllocation.VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME);
 
     private static final VulkanPNextStruct ACCELERATION_STRUCTURE_FEATURES = new VulkanPNextStruct(
-            KHRAccelerationStructure.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
-            VkPhysicalDeviceAccelerationStructureFeaturesKHR.SIZEOF);
+            VkPhysicalDeviceAccelerationStructureFeaturesKHR.class);
     private static final VulkanPNextStruct RAY_TRACING_PIPELINE_FEATURES = new VulkanPNextStruct(
-            KHRRayTracingPipeline.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
-            VkPhysicalDeviceRayTracingPipelineFeaturesKHR.SIZEOF);
+            VkPhysicalDeviceRayTracingPipelineFeaturesKHR.class);
     private static final VulkanPNextStruct INVOCATION_REORDER_FEATURES = new VulkanPNextStruct(
-            EXTRayTracingInvocationReorder
-                    .VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT,
-            VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT.SIZEOF);
+            VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT.class);
     private static final VulkanPNextStruct POSITION_FETCH_FEATURES = new VulkanPNextStruct(
-            KHRRayTracingPositionFetch.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_POSITION_FETCH_FEATURES_KHR,
-            VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR.SIZEOF);
+            VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR.class);
     private static final VulkanPNextStruct OPACITY_MICROMAP_FEATURES = new VulkanPNextStruct(
-            EXTOpacityMicromap.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT,
-            VkPhysicalDeviceOpacityMicromapFeaturesEXT.SIZEOF);
+            VkPhysicalDeviceOpacityMicromapFeaturesEXT.class);
     private static final VulkanPNextStruct PRIVATE_DATA_FEATURES = new VulkanPNextStruct(
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES_EXT,
-            VkPhysicalDevicePrivateDataFeaturesEXT.SIZEOF);
+            VkPhysicalDevicePrivateDataFeaturesEXT.class);
 
     private static final VulkanFeature SHADER_INT64 = new VulkanFeature(
-            VulkanBackend.VK10_FEATURES_STRUCT,
-            "shaderInt64",
-            VkPhysicalDeviceFeatures.SHADERINT64);
+            VulkanFeatureSets.VK10_FEATURES_STRUCT,
+            "shaderInt64");
     private static final VulkanFeature TEXTURE_COMPRESSION_BC = new VulkanFeature(
-            VulkanBackend.VK10_FEATURES_STRUCT,
-            "textureCompressionBC",
-            VkPhysicalDeviceFeatures.TEXTURECOMPRESSIONBC);
+            VulkanFeatureSets.VK10_FEATURES_STRUCT,
+            "textureCompressionBC");
     private static final VulkanFeature SHADER_INT16 = new VulkanFeature(
-            VulkanBackend.VK10_FEATURES_STRUCT,
-            "shaderInt16",
-            VkPhysicalDeviceFeatures.SHADERINT16);
+            VulkanFeatureSets.VK10_FEATURES_STRUCT,
+            "shaderInt16");
     private static final VulkanFeature STORAGE_IMAGE_EXTENDED_FORMATS = new VulkanFeature(
-            VulkanBackend.VK10_FEATURES_STRUCT,
-            "shaderStorageImageExtendedFormats",
-            VkPhysicalDeviceFeatures.SHADERSTORAGEIMAGEEXTENDEDFORMATS);
+            VulkanFeatureSets.VK10_FEATURES_STRUCT,
+            "shaderStorageImageExtendedFormats");
     private static final VulkanFeature STORAGE_IMAGE_READ_WITHOUT_FORMAT = new VulkanFeature(
-            VulkanBackend.VK10_FEATURES_STRUCT,
-            "shaderStorageImageReadWithoutFormat",
-            VkPhysicalDeviceFeatures.SHADERSTORAGEIMAGEREADWITHOUTFORMAT);
+            VulkanFeatureSets.VK10_FEATURES_STRUCT,
+            "shaderStorageImageReadWithoutFormat");
     private static final VulkanFeature STORAGE_IMAGE_WRITE_WITHOUT_FORMAT = new VulkanFeature(
-            VulkanBackend.VK10_FEATURES_STRUCT,
-            "shaderStorageImageWriteWithoutFormat",
-            VkPhysicalDeviceFeatures.SHADERSTORAGEIMAGEWRITEWITHOUTFORMAT);
+            VulkanFeatureSets.VK10_FEATURES_STRUCT,
+            "shaderStorageImageWriteWithoutFormat");
     private static final VulkanFeature BUFFER_DEVICE_ADDRESS = new VulkanFeature(
-            VulkanBackend.VK12_FEATURES_STRUCT,
-            "bufferDeviceAddress",
-            VkPhysicalDeviceVulkan12Features.BUFFERDEVICEADDRESS);
+            VulkanFeatureSets.VK12_FEATURES_STRUCT,
+            "bufferDeviceAddress");
     private static final VulkanFeature SAMPLED_IMAGE_ARRAY_NON_UNIFORM_INDEXING =
             new VulkanFeature(
-                    VulkanBackend.VK12_FEATURES_STRUCT,
-                    "shaderSampledImageArrayNonUniformIndexing",
-                    VkPhysicalDeviceVulkan12Features
-                            .SHADERSAMPLEDIMAGEARRAYNONUNIFORMINDEXING);
+                    VulkanFeatureSets.VK12_FEATURES_STRUCT,
+                    "shaderSampledImageArrayNonUniformIndexing");
     private static final VulkanFeature STORAGE_BUFFER_16_BIT_ACCESS = new VulkanFeature(
-            VulkanBackend.VK11_FEATURES_STRUCT,
-            "storageBuffer16BitAccess",
-            VkPhysicalDeviceVulkan11Features.STORAGEBUFFER16BITACCESS);
+            VulkanFeatureSets.VK11_FEATURES_STRUCT,
+            "storageBuffer16BitAccess");
     private static final VulkanFeature SHADER_FLOAT16 = new VulkanFeature(
-            VulkanBackend.VK12_FEATURES_STRUCT,
-            "shaderFloat16",
-            VkPhysicalDeviceVulkan12Features.SHADERFLOAT16);
+            VulkanFeatureSets.VK12_FEATURES_STRUCT,
+            "shaderFloat16");
     private static final VulkanFeature SHADER_SUBGROUP_EXTENDED_TYPES = new VulkanFeature(
-            VulkanBackend.VK12_FEATURES_STRUCT,
-            "shaderSubgroupExtendedTypes",
-            VkPhysicalDeviceVulkan12Features.SHADERSUBGROUPEXTENDEDTYPES);
+            VulkanFeatureSets.VK12_FEATURES_STRUCT,
+            "shaderSubgroupExtendedTypes");
     private static final VulkanFeature ACCELERATION_STRUCTURE = new VulkanFeature(
             ACCELERATION_STRUCTURE_FEATURES,
-            "accelerationStructure",
-            VkPhysicalDeviceAccelerationStructureFeaturesKHR.ACCELERATIONSTRUCTURE);
+            "accelerationStructure");
     private static final VulkanFeature RAY_TRACING_PIPELINE = new VulkanFeature(
             RAY_TRACING_PIPELINE_FEATURES,
-            "rayTracingPipeline",
-            VkPhysicalDeviceRayTracingPipelineFeaturesKHR.RAYTRACINGPIPELINE);
+            "rayTracingPipeline");
     private static final VulkanFeature RAY_TRACING_PIPELINE_INDIRECT = new VulkanFeature(
             RAY_TRACING_PIPELINE_FEATURES,
-            "rayTracingPipelineTraceRaysIndirect",
-            VkPhysicalDeviceRayTracingPipelineFeaturesKHR.RAYTRACINGPIPELINETRACERAYSINDIRECT);
+            "rayTracingPipelineTraceRaysIndirect");
     private static final VulkanFeature INVOCATION_REORDER = new VulkanFeature(
             INVOCATION_REORDER_FEATURES,
-            "rayTracingInvocationReorder",
-            VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT.RAYTRACINGINVOCATIONREORDER);
+            "rayTracingInvocationReorder");
     private static final VulkanFeature POSITION_FETCH = new VulkanFeature(
             POSITION_FETCH_FEATURES,
-            "rayTracingPositionFetch",
-            VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR.RAYTRACINGPOSITIONFETCH);
+            "rayTracingPositionFetch");
     private static final VulkanFeature OPACITY_MICROMAP = new VulkanFeature(
             OPACITY_MICROMAP_FEATURES,
-            "micromap",
-            VkPhysicalDeviceOpacityMicromapFeaturesEXT.MICROMAP);
+            "micromap");
     private static final VulkanFeature PRIVATE_DATA = new VulkanFeature(
             PRIVATE_DATA_FEATURES,
-            "privateData",
-            VkPhysicalDevicePrivateDataFeaturesEXT.PRIVATEDATA);
+            "privateData");
 
     private VulkanDeviceNegotiator() {
     }
@@ -162,7 +134,7 @@ public final class VulkanDeviceNegotiator {
                     VkPhysicalDeviceOpacityMicromapFeaturesEXT.calloc(stack).sType$Default();
             VkPhysicalDevicePrivateDataFeaturesEXT privateDataFeatures =
                     VkPhysicalDevicePrivateDataFeaturesEXT.calloc(stack)
-                            .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES_EXT);
+                            .sType(EXTPrivateData.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES_EXT);
             features.pNext(vulkan11.address());
             vulkan11.pNext(vulkan12.address());
             vulkan12.pNext(acceleration.address());
@@ -399,12 +371,10 @@ public final class VulkanDeviceNegotiator {
             // the divergence this path exists for. The reported record-index limit governs the
             // explicit hit-object override instruction, not the number of BLAS geometries; Prime
             // does not issue that instruction and retains its existing conservative index-1 check.
-            // LWJGL owns the shared EXT/NV reorder-mode enum alias in its older NV binding class;
-            // Prime does not query or enable VK_NV_ray_tracing_invocation_reorder.
             boolean invocationReorderSupported = invocationReorderExtension
                     && invocationReorder.rayTracingInvocationReorder()
                     && invocationReorderProperties.rayTracingInvocationReorderReorderingHint()
-                            == NVRayTracingInvocationReorder
+                            == EXTRayTracingInvocationReorder
                                     .VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_EXT
                     && supportsSbtRecordIndex(
                             invocationReorderProperties.maxShaderBindingTableRecordIndex(), 1);

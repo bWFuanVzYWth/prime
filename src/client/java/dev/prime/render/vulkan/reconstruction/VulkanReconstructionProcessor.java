@@ -2,7 +2,7 @@
 
 package dev.prime.render.vulkan.reconstruction;
 
-import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.RendererImageView;
 import dev.prime.render.post.PostProcessingMode;

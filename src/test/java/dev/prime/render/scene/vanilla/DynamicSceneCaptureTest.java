@@ -5,11 +5,13 @@ package dev.prime.render.scene.vanilla;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import com.mojang.blaze3d.GpuFormat;
-import com.mojang.blaze3d.PrimitiveTopology;
-import com.mojang.blaze3d.pipeline.RenderPipeline;
-import com.mojang.blaze3d.textures.GpuTextureView;
-import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.renderpearl.api.GpuFormat;
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+import com.mojang.renderpearl.api.pipeline.RenderPipeline;
+import com.mojang.renderpearl.api.textures.GpuTextureView;
+import com.mojang.renderpearl.api.textures.GpuTexture;
+import com.mojang.renderpearl.backend.common.BaseGpuTexture;
+import net.minecraft.resources.Identifier;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.font.TextRenderable;
@@ -35,7 +37,7 @@ final class DynamicSceneCaptureTest {
     }
 
     private static GpuTexture texture(int usage) {
-        return new GpuTexture(usage, "same label", GpuFormat.RGBA8_UNORM, 16, 16, 1, 1) {
+        return new BaseGpuTexture(usage, "same label", GpuFormat.RGBA8_UNORM, 16, 16, 1, 1) {
             @Override public void close() {}
             @Override public boolean isClosed() { return false; }
         };
@@ -88,7 +90,7 @@ final class DynamicSceneCaptureTest {
 
         @Override
         public RenderType renderType(Font.DisplayMode displayMode) {
-            return RenderTypes.textBackground();
+            return RenderTypes.text(Identifier.withDefaultNamespace("textures/font/test.png"));
         }
 
         @Override

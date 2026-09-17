@@ -2,7 +2,7 @@
 
 package dev.prime.render.vulkan;
 
-import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
+import com.mojang.renderpearl.backend.vulkan.VulkanGpuTextureView;
 
 /** Lazily materialized sRGB reinterpretation owned by a Minecraft Vulkan texture view. */
 public interface SrgbTextureView {

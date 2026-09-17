@@ -47,14 +47,15 @@ public abstract class LevelExtractorMixin {
             method = "isEntityVisible",
             at = @At(
                     value = "INVOKE",
-                    target = "Lnet/minecraft/client/renderer/entity/EntityRenderDispatcher;shouldRender(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/client/renderer/culling/Frustum;DDD)Z"))
+                    target = "Lnet/minecraft/client/renderer/entity/EntityRenderDispatcher;shouldRender(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/client/renderer/culling/Frustum;DDDF)Z"))
     private boolean prime$routeEntityFrustum(
             EntityRenderDispatcher dispatcher,
             Entity entity,
             Frustum frustum,
             double cameraX,
             double cameraY,
-            double cameraZ) {
+            double cameraZ,
+            float partialTick) {
         return dispatcher.shouldRender(
                 entity,
                 PrimeRuntime.instance().shouldReplaceWorld()
@@ -62,19 +63,20 @@ public abstract class LevelExtractorMixin {
                         : frustum,
                 cameraX,
                 cameraY,
-                cameraZ);
+                cameraZ,
+                partialTick);
     }
 
     @Redirect(
             method = "isEntityVisible",
             at = @At(
                     value = "INVOKE",
-                    target = "Lnet/minecraft/client/renderer/LevelRenderer;isSectionCompiledAndVisible(Lnet/minecraft/core/BlockPos;)Z"))
+                    target = "Lnet/minecraft/client/renderer/LevelRenderer;isSectionCompiledAndVisible(Lnet/minecraft/core/BlockPos;J)Z"))
     private boolean prime$routeEntitySectionVisibility(
-            LevelRenderer renderer, BlockPos position) {
+            LevelRenderer renderer, BlockPos position, long section) {
         return VanillaSceneBoundary.includesEntitySection(
                 PrimeRuntime.instance().shouldReplaceWorld(),
-                renderer.isSectionCompiledAndVisible(position));
+                renderer.isSectionCompiledAndVisible(position, section));
     }
 
     @Inject(method = "extractVisibleBlockEntities", at = @At("RETURN"))

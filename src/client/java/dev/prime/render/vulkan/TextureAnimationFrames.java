@@ -2,7 +2,7 @@
 
 package dev.prime.render.vulkan;
 
-import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import dev.prime.render.terrain.CanonicalColorEncoding;
 import dev.prime.render.terrain.LabPbrAtlasFrame;
 import org.lwjgl.system.MemoryUtil;

@@ -253,8 +253,10 @@ final class ClusterSceneTranslatorTest {
                     bakedSprite,
                     ChunkSectionLayer.CUTOUT,
                     null,
+                    null,
+                    null,
                     0,
-                    false,
+                    null,
                     0);
             CuboidFace.UVs uvs = new CuboidFace.UVs(
                     0.0F, 0.0F, 16.0F, 16.0F);
@@ -575,15 +577,19 @@ final class ClusterSceneTranslatorTest {
                     bakedSprite,
                     ChunkSectionLayer.CUTOUT,
                     null,
+                    null,
+                    null,
                     0,
-                    false,
+                    null,
                     0);
             BakedQuad.MaterialInfo backMaterial = new BakedQuad.MaterialInfo(
                     bakedSprite,
                     ChunkSectionLayer.CUTOUT,
                     null,
+                    null,
+                    null,
                     0,
-                    false,
+                    null,
                     0);
             CuboidFace.UVs uvs = new CuboidFace.UVs(
                     0.0F, 0.0F, 16.0F, 16.0F);

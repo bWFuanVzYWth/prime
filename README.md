@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-Prime 是一个用于 Minecraft 26.2 的客户端渲染 Mod。它使用显卡提供的 Vulkan 硬件光线追踪
+Prime 是一个用于 Minecraft 26.3 的客户端渲染 Mod。它使用显卡提供的 Vulkan 硬件光线追踪
 重新绘制游戏世界，让阳光、天空、发光方块、玻璃、水和普通材质共同参与光线传播。
 
 Prime 首要支持兼容的 NVIDIA RTX 显卡，并通过 DLSS Ray Reconstruction 提供最佳体验。
@@ -51,9 +51,9 @@ Shader Pack 使用光栅化、屏幕空间效果或软件体素光线追踪，�
 | 项目 | 要求 |
 | --- | --- |
 | 操作系统 | Windows 64 位（x86-64） |
-| Minecraft | 26.2 |
-| Mod Loader | Fabric Loader 0.19.3 或更高版本 |
-| 依赖 | 与 Minecraft 26.2 对应的 Fabric API |
+| Minecraft | 26.3 |
+| Mod Loader | Fabric Loader 0.19.5 或更高版本 |
+| 依赖 | 与 Minecraft 26.3 对应的 Fabric API |
 | Java | 25 |
 | 首要支持 GPU | 支持 Vulkan 光线追踪和 DLSS RR 的 NVIDIA RTX 显卡 |
 | 兼容性支持 GPU | 支持 Vulkan KHR ray tracing pipeline、acceleration structure 与 position fetch 的其他显卡 |
@@ -69,10 +69,10 @@ Windows 原生库。Prime 对 GPU、显存和 CPU 场景流送的要求明显高
 
 ## 安装
 
-1. 安装并至少启动一次 Minecraft 26.2。
-2. 使用 [Fabric 官方安装器](https://fabricmc.net/use/installer/) 为 Minecraft 26.2 安装
-   Fabric Loader 0.19.3 或更高版本。
-3. 下载与 Minecraft 26.2 对应的 [Fabric API](https://modrinth.com/mod/fabric-api/versions)
+1. 安装并至少启动一次 Minecraft 26.3。
+2. 使用 [Fabric 官方安装器](https://fabricmc.net/use/installer/) 为 Minecraft 26.3 安装
+   Fabric Loader 0.19.5 或更高版本。
+3. 下载与 Minecraft 26.3 对应的 [Fabric API](https://modrinth.com/mod/fabric-api/versions)
    和 [Prime 发行版](https://github.com/bWFuanVzYWth/prime/releases)。下载的两个文件都应以
    `.jar` 结尾，不要解压。
 4. 打开启动器中当前 Fabric 实例的游戏文件夹。没有 `mods` 文件夹时，在该目录中新建一个。
@@ -82,7 +82,7 @@ Windows 原生库。Prime 对 GPU、显存和 CPU 场景流送的要求明显高
 8. 打开“视频设置”，找到带有 `Prime：` 前缀的设置。
 
 如果 Prime 设置没有出现，优先检查是否启动了正确的 Fabric 实例、Minecraft 版本是否为
-26.2，以及 Fabric API 和 Prime 是否位于同一个实例的 `mods` 文件夹。
+26.3，以及 Fabric API 和 Prime 是否位于同一个实例的 `mods` 文件夹。
 
 如果 Vulkan 或所需光线追踪功能不可用，Prime 会停止接管并保留原版世界渲染。日志会记录
 无法启用的原因。致命错误提示会在本次游戏会话中持续显示；标题直接包含已安装的 Prime

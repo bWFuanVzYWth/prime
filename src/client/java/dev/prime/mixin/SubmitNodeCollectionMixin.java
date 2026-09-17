@@ -12,12 +12,11 @@ import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.block.MovingBlockRenderState;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
-import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.state.level.QuadParticleRenderState;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
-import net.minecraft.client.resources.model.geometry.BakedQuad;
+import net.minecraft.client.renderer.texture.UvMapping;
+import net.minecraft.client.resources.model.geometry.ItemQuads;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemDisplayContext;
 import org.joml.Quaternionf;
@@ -90,9 +89,8 @@ public abstract class SubmitNodeCollectionMixin {
             int lightCoords,
             int overlayCoords,
             int tintedColor,
-            @Nullable TextureAtlasSprite sprite,
+            @Nullable UvMapping uvMapping,
             int outlineColor,
-            ModelFeatureRenderer.CrumblingOverlay crumblingOverlay,
             CallbackInfo ci) {
         DynamicSceneCapture.captureModel(
                 model,
@@ -102,9 +100,8 @@ public abstract class SubmitNodeCollectionMixin {
                 lightCoords,
                 overlayCoords,
                 tintedColor,
-                sprite,
-                outlineColor,
-                crumblingOverlay);
+                uvMapping,
+                outlineColor);
     }
 
     @Inject(method = "submitBlockModel", at = @At("HEAD"))
@@ -135,7 +132,7 @@ public abstract class SubmitNodeCollectionMixin {
             int overlayCoords,
             int outlineColor,
             int[] tintLayers,
-            List<BakedQuad> quads,
+            ItemQuads quads,
             ItemStackRenderState.FoilType foilType,
             CallbackInfo ci) {
         DynamicSceneCapture.captureItem(
@@ -145,7 +142,7 @@ public abstract class SubmitNodeCollectionMixin {
                 overlayCoords,
                 outlineColor,
                 tintLayers,
-                quads,
+                quads.all(),
                 foilType);
     }
 

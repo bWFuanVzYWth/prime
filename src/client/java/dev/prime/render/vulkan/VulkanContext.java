@@ -2,10 +2,10 @@
 
 package dev.prime.render.vulkan;
 
-import com.mojang.blaze3d.vulkan.Destroyable;
-import com.mojang.blaze3d.vulkan.VulkanCommandEncoder;
-import com.mojang.blaze3d.vulkan.VulkanDevice;
-import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.VulkanCommandEncoder;
+import com.mojang.renderpearl.backend.vulkan.VulkanDevice;
+import com.mojang.renderpearl.backend.vulkan.VulkanGpuTexture;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.vulkan.VulkanSharedPrograms.SharedComputeProgram;
 import dev.prime.render.vulkan.VulkanSharedPrograms.Program;

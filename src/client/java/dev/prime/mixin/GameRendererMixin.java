@@ -30,9 +30,9 @@ public abstract class GameRendererMixin {
 
     @WrapMethod(method = "renderLevel")
     private void prime$retireAfterHostSubmissionFailure(
-            DeltaTracker deltaTracker, Operation<Void> original) {
+            Operation<Void> original) {
         try {
-            original.call(deltaTracker);
+            original.call();
         } catch (RuntimeException exception) {
             PrimeRuntime.instance().minecraftHostSubmissionFailed(exception);
             throw exception;
@@ -46,10 +46,10 @@ public abstract class GameRendererMixin {
     }
 
     @ModifyArg(
-            method = "renderLevel(Lnet/minecraft/client/DeltaTracker;)V",
+            method = "renderLevel()V",
             at = @At(
                     value = "INVOKE",
-                    target = "Lnet/minecraft/client/renderer/ProjectionMatrixBuffer;getBuffer(Lorg/joml/Matrix4f;)Lcom/mojang/blaze3d/buffers/GpuBufferSlice;",
+                    target = "Lnet/minecraft/client/renderer/ProjectionMatrixBuffer;getBuffer(Lorg/joml/Matrix4f;)Lcom/mojang/renderpearl/api/buffers/GpuBufferSlice;",
                     ordinal = 0),
             index = 0)
     private Matrix4f prime$captureCamera(Matrix4f projection) {
@@ -66,33 +66,33 @@ public abstract class GameRendererMixin {
     }
 
     @Inject(
-            method = "render(Lnet/minecraft/client/DeltaTracker;Z)V",
+            method = "render()V",
             at = @At(
                     value = "INVOKE",
-                    target = "Lcom/mojang/blaze3d/systems/CommandEncoder;clearDepthTexture(Lcom/mojang/blaze3d/textures/GpuTexture;D)V"))
+                    target = "Lcom/mojang/renderpearl/api/commands/CommandEncoder;clearDepthTexture(Lcom/mojang/renderpearl/api/textures/GpuTexture;D)V"))
     private void prime$clearUiAlpha(
-            DeltaTracker deltaTracker, boolean advanceGameTime, CallbackInfo ci) {
+            CallbackInfo ci) {
         PrimeRuntime.instance().clearUiAlpha(this.mainRenderTarget);
     }
 
     @Inject(
-            method = "render(Lnet/minecraft/client/DeltaTracker;Z)V",
+            method = "render()V",
             at = @At(
                     value = "INVOKE",
                     target = "Lnet/minecraft/client/gui/render/GuiRenderer;render()V",
                     shift = At.Shift.AFTER))
     private void prime$captureUiAlpha(
-            DeltaTracker deltaTracker, boolean advanceGameTime, CallbackInfo ci) {
+            CallbackInfo ci) {
         PrimeRuntime.instance().captureUiAlpha(this.mainRenderTarget);
     }
 
     @Inject(
-            method = "renderLevel(Lnet/minecraft/client/DeltaTracker;)V",
+            method = "renderLevel()V",
             at = @At(
                     value = "INVOKE",
-                    target = "Lnet/minecraft/client/renderer/LevelRenderer;render(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;Lnet/minecraft/client/DeltaTracker;ZLnet/minecraft/client/renderer/state/level/CameraRenderState;Lorg/joml/Matrix4fc;Lcom/mojang/blaze3d/buffers/GpuBufferSlice;Lorg/joml/Vector4f;Z)V",
+                    target = "Lnet/minecraft/client/renderer/LevelRenderer;render(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;ZLnet/minecraft/client/renderer/state/level/CameraRenderState;Lcom/mojang/renderpearl/api/buffers/GpuBufferSlice;Lorg/joml/Vector4f;ZZ)V",
                     shift = At.Shift.AFTER))
-    private void prime$renderRayTracedWorld(DeltaTracker deltaTracker, CallbackInfo ci) {
+    private void prime$renderRayTracedWorld(CallbackInfo ci) {
         PrimeRuntime.instance().renderWorld(this.mainRenderTarget);
     }
 }

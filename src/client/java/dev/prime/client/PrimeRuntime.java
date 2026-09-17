@@ -28,7 +28,6 @@ import dev.prime.streamline.StreamlineReflex;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import org.joml.Matrix4fc;
-import org.lwjgl.glfw.GLFW;
 
 public final class PrimeRuntime {
     private static final PrimeRuntime INSTANCE = new PrimeRuntime();
@@ -217,9 +216,8 @@ public final class PrimeRuntime {
 
     public boolean handleScreenshotShortcut(
             Minecraft minecraft, InputConstants.Key key, boolean controlDown) {
-        long window = minecraft.getWindow().handle();
-        boolean alt = pressed(window, GLFW.GLFW_KEY_LEFT_ALT)
-                || pressed(window, GLFW.GLFW_KEY_RIGHT_ALT);
+        boolean alt = InputConstants.isKeyDown(InputConstants.KEY_LALT)
+                || InputConstants.isKeyDown(InputConstants.KEY_RALT);
         if (!controlDown
                 || !alt
                 || !minecraft.options.keyScreenshot.matches(key)
@@ -417,8 +415,7 @@ public final class PrimeRuntime {
     }
 
     private void updateSessionShortcuts(Minecraft minecraft) {
-        long window = minecraft.getWindow().handle();
-        boolean escape = pressed(window, GLFW.GLFW_KEY_ESCAPE);
+        boolean escape = InputConstants.isKeyDown(InputConstants.KEY_ESCAPE);
         if (escape
                 && !this.previousEscape
                 && (this.screenshotRequested || this.screenshotActive())) {
@@ -438,9 +435,5 @@ public final class PrimeRuntime {
                     this.rrResponsivity);
         }
         return this.sessionSnapshot;
-    }
-
-    private static boolean pressed(long window, int key) {
-        return GLFW.glfwGetKey(window, key) == GLFW.GLFW_PRESS;
     }
 }

@@ -6,16 +6,36 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.mojang.blaze3d.PrimitiveTopology;
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
 import dev.prime.render.terrain.CpuClusterMesh;
 import dev.prime.render.terrain.CpuMeshSegment;
 import dev.prime.render.terrain.PrimitivePacking;
 import java.util.List;
 import net.minecraft.util.LightCoordsUtil;
+import net.minecraft.client.renderer.texture.UvMapping;
 import org.joml.Matrix4f;
 import org.junit.jupiter.api.Test;
 
 final class DynamicMeshBuilderTest {
+    @Test
+    void modelUvMappingPreservesBaseUvsWhenGlintCoordinatesAreSubmitted() {
+        DynamicMeshBuilder builder = new DynamicMeshBuilder(0.0, 0.0, 0.0);
+        DynamicMeshBuilder.VertexSink sink = builder.open(PrimitiveTopology.TRIANGLES, 1, 0);
+        UvMapping mapping = new UvMapping() {
+            @Override public float getU(float offset) { return 0.25F + offset * 0.5F; }
+            @Override public float getV(float offset) { return 0.5F + offset * 0.25F; }
+        };
+        var consumer = mapping.wrap(sink);
+        consumer.addVertex(0.0F, 0.0F, 0.0F).setUv(0.0F, 0.0F).setUv3(7.0F, 8.0F);
+        consumer.addVertex(1.0F, 0.0F, 0.0F).setUv(1.0F, 0.0F).setUv3(9.0F, 10.0F);
+        consumer.addVertex(0.0F, 1.0F, 0.0F).setUv(0.0F, 1.0F).setUv3(11.0F, 12.0F);
+        sink.finish();
+        int[] records = builder.build(0, 0, 0, List.of()).mesh().segments().getFirst().primitiveRecords();
+        assertEquals(PrimitivePacking.packUv(0.25F, 0.5F), records[0]);
+        assertEquals(PrimitivePacking.packUv(0.75F, 0.5F), records[1]);
+        assertEquals(PrimitivePacking.packUv(0.25F, 0.75F), records[2]);
+    }
+
     @Test
     void capturesQuadForGiWithoutRegisteringVisibleEmissionAsALight() {
         DynamicMeshBuilder builder = new DynamicMeshBuilder(10.0, 20.0, 30.0);

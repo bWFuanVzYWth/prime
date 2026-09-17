@@ -2,7 +2,7 @@
 
 package dev.prime.render.vulkan.dlss;
 
-import com.mojang.blaze3d.vulkan.VulkanPhysicalDevice;
+import com.mojang.renderpearl.backend.vulkan.VulkanPhysicalDevice;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.vulkan.natives.NativeLibraries;
 import dev.prime.render.vulkan.VulkanContext;

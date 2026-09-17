@@ -4,7 +4,7 @@ package dev.prime.render.runtime;
 
 import dev.prime.render.*;
 
-import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import dev.prime.render.vulkan.terrain.TerrainScene;
 import dev.prime.render.vulkan.FrozenExposureState;
 import dev.prime.render.vulkan.TraceBackend;

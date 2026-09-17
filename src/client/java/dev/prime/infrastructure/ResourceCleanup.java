@@ -2,7 +2,7 @@
 
 package dev.prime.infrastructure;
 
-import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
 
 /** Failure-preserving cleanup for platform resource owners. */
 public final class ResourceCleanup {

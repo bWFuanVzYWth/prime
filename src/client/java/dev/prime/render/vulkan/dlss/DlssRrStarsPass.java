@@ -1,7 +1,7 @@
 // Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
 package dev.prime.render.vulkan.dlss;
 
-import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import dev.prime.render.AtmosphereCoordinates;
 import dev.prime.render.post.ReconstructionFrameParameters;
 import dev.prime.render.shader.ShaderAbi;

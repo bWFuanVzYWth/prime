@@ -227,7 +227,9 @@ processResources {
 
 tasks.withType(JavaCompile).configureEach {
 	options.release = 25
-	options.compilerArgs += ['-Xlint:all', '-Werror']
+	// Minecraft 26.3 bundles JOML 1.10.9 with type annotations in legacy classfiles.
+	// Suppress only dependency classfile diagnostics; source warnings remain errors.
+	options.compilerArgs += ['-Xlint:all,-classfile', '-Werror']
 }
 
 

@@ -2,9 +2,9 @@
 
 package dev.prime.render.vulkan;
 
-import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
-import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
-import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.VulkanGpuTexture;
+import com.mojang.renderpearl.backend.vulkan.VulkanGpuTextureView;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import dev.prime.render.IntegratorFrameInput;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.diagnostic.ImageDiagnosticSelection;

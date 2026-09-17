@@ -2,7 +2,7 @@
 
 package dev.prime.render.runtime;
 
-import com.mojang.blaze3d.vulkan.VulkanDevice;
+import com.mojang.renderpearl.backend.vulkan.VulkanDevice;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.RendererSettings;

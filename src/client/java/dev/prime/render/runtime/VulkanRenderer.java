@@ -5,10 +5,10 @@ package dev.prime.render.runtime;
 import dev.prime.render.*;
 
 import com.mojang.blaze3d.pipeline.RenderTarget;
-import com.mojang.blaze3d.vulkan.Destroyable;
-import com.mojang.blaze3d.vulkan.VulkanGpuSampler;
-import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
-import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.VulkanGpuSampler;
+import com.mojang.renderpearl.backend.vulkan.VulkanGpuTexture;
+import com.mojang.renderpearl.backend.vulkan.VulkanGpuTextureView;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.infrastructure.ResourceCleanup;
 import dev.prime.render.vulkan.terrain.TerrainScene;
@@ -235,7 +235,7 @@ public final class VulkanRenderer implements AutoCloseable {
                 || !(atlas.getSampler() instanceof VulkanGpuSampler atlasSampler)) {
             throw new IllegalStateException("Prime expected Vulkan block atlas resources");
         }
-        if (atlasView.texture().getFormat() != com.mojang.blaze3d.GpuFormat.RGBA8_UNORM
+        if (atlasView.texture().getFormat() != com.mojang.renderpearl.api.GpuFormat.RGBA8_UNORM
                 || atlasView.texture().getDepthOrLayers() != 1) {
             throw new IllegalStateException(
                     "Prime requires a two-dimensional RGBA8 block atlas for sRGB sampling");

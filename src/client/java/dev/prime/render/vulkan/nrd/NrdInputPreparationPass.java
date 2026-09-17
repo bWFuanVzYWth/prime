@@ -2,7 +2,7 @@
 
 package dev.prime.render.vulkan.nrd;
 
-import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import dev.prime.render.FrameCamera;
 import dev.prime.render.post.nrd.NrdCameraTransform;
 import dev.prime.render.shader.ShaderAbi;

@@ -2,7 +2,7 @@
 
 package dev.prime.render.scene.vanilla;
 
-import com.mojang.blaze3d.PrimitiveTopology;
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.prime.render.terrain.CpuClusterMesh;
 import dev.prime.render.terrain.CpuSectionLights;
@@ -483,6 +483,12 @@ final class DynamicMeshBuilder {
         @Override
         public VertexConsumer setUv2(int u, int v) {
             this.requireCurrent().light = u & 0xffff | v << 16;
+            return this;
+        }
+
+        @Override
+        public VertexConsumer setUv3(float u, float v) {
+            // UV3 is the separate enchantment glint overlay; base material UVs stay in UV0.
             return this;
         }
 

@@ -2,7 +2,7 @@
 
 package dev.prime.render.vulkan;
 
-import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import dev.prime.infrastructure.ResourceCleanup;
 import java.nio.LongBuffer;
 import org.lwjgl.system.MemoryStack;

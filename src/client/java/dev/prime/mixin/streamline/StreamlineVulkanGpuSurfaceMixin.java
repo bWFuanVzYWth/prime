@@ -3,15 +3,16 @@
 package dev.prime.mixin.streamline;
 
 import com.llamalad7.mixinextras.sugar.Local;
-import com.mojang.blaze3d.systems.GpuSurface;
-import com.mojang.blaze3d.systems.SurfaceException;
-import com.mojang.blaze3d.vulkan.VulkanGpuSurface;
+import com.mojang.renderpearl.api.device.GpuSurface;
+import com.mojang.renderpearl.api.device.SurfaceException;
+import com.mojang.renderpearl.backend.vulkan.VulkanGpuSurface;
 import dev.prime.PrimeClient;
 import dev.prime.streamline.StreamlineReflex;
 import java.nio.LongBuffer;
 import java.util.Locale;
-import org.lwjgl.glfw.GLFWNativeWin32;
-import org.lwjgl.glfw.GLFWVulkan;
+import org.lwjgl.sdl.SDLProperties;
+import org.lwjgl.sdl.SDLVideo;
+import org.lwjgl.sdl.SDLVulkan;
 import org.lwjgl.system.JNI;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
@@ -45,18 +46,20 @@ public class StreamlineVulkanGpuSurfaceMixin {
             method = "<init>",
             at = @At(
                     value = "INVOKE",
-                    target = "Lorg/lwjgl/glfw/GLFWVulkan;glfwCreateWindowSurface(Lorg/lwjgl/vulkan/VkInstance;JLorg/lwjgl/vulkan/VkAllocationCallbacks;Ljava/nio/LongBuffer;)I"))
-    private int prime$createHookedWindowSurface(
-            VkInstance instance,
+                    target = "Lorg/lwjgl/sdl/SDLVulkan;SDL_Vulkan_CreateSurface(JLorg/lwjgl/vulkan/VkInstance;Lorg/lwjgl/vulkan/VkAllocationCallbacks;Ljava/nio/LongBuffer;)Z"))
+    private boolean prime$createHookedWindowSurface(
             long window,
+            VkInstance instance,
             VkAllocationCallbacks allocator,
             LongBuffer surfacePointer) {
         if (!prime$usesStreamlineInterposer()) {
-            return GLFWVulkan.glfwCreateWindowSurface(
-                    instance, window, allocator, surfacePointer);
+            return SDLVulkan.SDL_Vulkan_CreateSurface(
+                    window, instance, allocator, surfacePointer);
         }
-        long hwnd = GLFWNativeWin32.glfwGetWin32Window(window);
-        long hinstance = User32.GetWindowLongPtr(hwnd, User32.GWL_HINSTANCE);
+        int properties = SDLVideo.SDL_GetWindowProperties(window);
+        long hwnd = properties == 0 ? 0L : SDLProperties.SDL_GetPointerProperty(
+                properties, SDLVideo.SDL_PROP_WINDOW_WIN32_HWND_POINTER, 0L);
+        long hinstance = hwnd == 0L ? 0L : User32.GetWindowLongPtr(hwnd, User32.GWL_HINSTANCE);
         if (hwnd == 0L || hinstance == 0L) {
             throw new IllegalStateException(
                     "Failed to resolve Win32 handles for the Vulkan presentation window");
@@ -70,12 +73,16 @@ public class StreamlineVulkanGpuSurfaceMixin {
                     .sType(KHRWin32Surface.VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR)
                     .hinstance(hinstance)
                     .hwnd(hwnd);
-            return JNI.callPPPPI(
+            int result = JNI.callPPPPI(
                     instance.address(),
                     createInfo.address(),
-                    0L,
+                    MemoryUtil.memAddressSafe(allocator),
                     MemoryUtil.memAddress(surfacePointer),
                     function);
+            if (result != VK10.VK_SUCCESS) {
+                throw new IllegalStateException("vkCreateWin32SurfaceKHR failed: " + result);
+            }
+            return true;
         }
     }
 

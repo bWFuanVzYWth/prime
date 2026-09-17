@@ -7,8 +7,8 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 import org.lwjgl.PointerBuffer;
-import org.lwjgl.glfw.GLFW;
-import org.lwjgl.glfw.GLFWNativeWin32;
+import org.lwjgl.sdl.SDLProperties;
+import org.lwjgl.sdl.SDLVideo;
 import org.lwjgl.system.JNI;
 import org.lwjgl.system.Library;
 import org.lwjgl.system.MemoryStack;
@@ -46,11 +46,11 @@ public final class WindowsHdrDisplay {
             return Snapshot.UNAVAILABLE;
         }
         try {
-            String displayName = currentDisplayName(window);
-            if (displayName == null) {
+            long monitor = currentMonitor(window);
+            if (monitor == MemoryUtil.NULL) {
                 return Snapshot.UNAVAILABLE;
             }
-            return queryDxgi(displayName);
+            return queryDxgi(monitor);
         } catch (RuntimeException | LinkageError exception) {
             if (!warned) {
                 warned = true;
@@ -62,61 +62,17 @@ public final class WindowsHdrDisplay {
         }
     }
 
-    private static String currentDisplayName(long window) {
-        long monitor = GLFW.glfwGetWindowMonitor(window);
-        if (monitor == MemoryUtil.NULL) {
-            monitor = overlappingMonitor(window);
-        }
-        return monitor == MemoryUtil.NULL
-                ? null
-                : GLFWNativeWin32.glfwGetWin32Adapter(monitor);
-    }
-
-    private static long overlappingMonitor(long window) {
-        PointerBuffer monitors = GLFW.glfwGetMonitors();
-        if (monitors == null || !monitors.hasRemaining()) {
+    private static long currentMonitor(long window) {
+        int display = SDLVideo.SDL_GetDisplayForWindow(window);
+        if (display == 0) {
             return MemoryUtil.NULL;
         }
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            IntBuffer windowX = stack.mallocInt(1);
-            IntBuffer windowY = stack.mallocInt(1);
-            IntBuffer windowWidth = stack.mallocInt(1);
-            IntBuffer windowHeight = stack.mallocInt(1);
-            GLFW.glfwGetWindowPos(window, windowX, windowY);
-            GLFW.glfwGetWindowSize(window, windowWidth, windowHeight);
-            int left = windowX.get(0);
-            int top = windowY.get(0);
-            int right = left + Math.max(windowWidth.get(0), 1);
-            int bottom = top + Math.max(windowHeight.get(0), 1);
-            long selected = monitors.get(monitors.position());
-            long largestArea = -1L;
-            IntBuffer monitorX = stack.mallocInt(1);
-            IntBuffer monitorY = stack.mallocInt(1);
-            IntBuffer monitorWidth = stack.mallocInt(1);
-            IntBuffer monitorHeight = stack.mallocInt(1);
-            for (int index = monitors.position(); index < monitors.limit(); index++) {
-                long candidate = monitors.get(index);
-                GLFW.glfwGetMonitorWorkarea(
-                        candidate, monitorX, monitorY, monitorWidth, monitorHeight);
-                int monitorLeft = monitorX.get(0);
-                int monitorTop = monitorY.get(0);
-                int monitorRight = monitorLeft + monitorWidth.get(0);
-                int monitorBottom = monitorTop + monitorHeight.get(0);
-                long overlapWidth = Math.max(
-                        0, Math.min(right, monitorRight) - Math.max(left, monitorLeft));
-                long overlapHeight = Math.max(
-                        0, Math.min(bottom, monitorBottom) - Math.max(top, monitorTop));
-                long area = overlapWidth * overlapHeight;
-                if (area > largestArea) {
-                    largestArea = area;
-                    selected = candidate;
-                }
-            }
-            return selected;
-        }
+        int properties = SDLVideo.SDL_GetDisplayProperties(display);
+        return properties == 0 ? MemoryUtil.NULL : SDLProperties.SDL_GetPointerProperty(
+                properties, SDLVideo.SDL_PROP_DISPLAY_WINDOWS_HMONITOR_POINTER, MemoryUtil.NULL);
     }
 
-    private static Snapshot queryDxgi(String requestedDisplayName) {
+    private static Snapshot queryDxgi(long requestedMonitor) {
         try (SharedLibrary dxgi = Library.loadNative(
                 WindowsHdrDisplay.class, "prime", "dxgi")) {
             long createFactory = requireFunction(dxgi, "CreateDXGIFactory1");
@@ -136,7 +92,7 @@ public final class WindowsHdrDisplay {
                         "CreateDXGIFactory1");
                 long factory = pointer.get(0);
                 try {
-                    return findOutput(factory, requestedDisplayName, stack);
+                    return findOutput(factory, requestedMonitor, stack);
                 } finally {
                     release(factory);
                 }
@@ -146,7 +102,7 @@ public final class WindowsHdrDisplay {
 
     private static Snapshot findOutput(
             long factory,
-            String requestedDisplayName,
+            long requestedMonitor,
             MemoryStack stack) {
         PointerBuffer pointer = stack.callocPointer(1);
         for (int adapterIndex = 0; ; adapterIndex++) {
@@ -163,7 +119,7 @@ public final class WindowsHdrDisplay {
             long adapter = pointer.get(0);
             try {
                 Snapshot found = findAdapterOutput(
-                        adapter, requestedDisplayName, stack, pointer);
+                        adapter, requestedMonitor, stack, pointer);
                 if (found.available()) {
                     return found;
                 }
@@ -176,7 +132,7 @@ public final class WindowsHdrDisplay {
 
     private static Snapshot findAdapterOutput(
             long adapter,
-            String requestedDisplayName,
+            long requestedMonitor,
             MemoryStack stack,
             PointerBuffer pointer) {
         ByteBuffer description = stack.calloc(OUTPUT_DESC_SIZE);
@@ -201,7 +157,8 @@ public final class WindowsHdrDisplay {
                                 vtable(output, 7)),
                         "IDXGIOutput::GetDesc");
                 String outputName = utf16(description, 0, 32);
-                if (requestedDisplayName.equalsIgnoreCase(outputName)) {
+                // DXGI_OUTPUT_DESC ends with the HMONITOR at byte 88 on Windows x64.
+                if (description.getLong(88) == requestedMonitor) {
                     return queryOutput6(output, outputName, stack, pointer);
                 }
             } finally {

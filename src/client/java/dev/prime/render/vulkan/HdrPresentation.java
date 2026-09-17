@@ -2,7 +2,7 @@
 
 package dev.prime.render.vulkan;
 
-import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
+import com.mojang.renderpearl.backend.vulkan.VulkanGpuTextureView;
 import dev.prime.render.HdrOutput;
 import java.util.Objects;
 import org.lwjgl.vulkan.VkCommandBuffer;

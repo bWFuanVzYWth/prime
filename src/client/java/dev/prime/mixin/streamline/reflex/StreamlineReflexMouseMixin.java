@@ -5,7 +5,7 @@ package dev.prime.mixin.streamline.reflex;
 import dev.prime.streamline.StreamlineReflex;
 import net.minecraft.client.MouseHandler;
 import net.minecraft.client.input.MouseButtonInfo;
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -20,7 +20,7 @@ public abstract class StreamlineReflexMouseMixin {
         if (!StreamlineReflex.pclAvailable()) {
             return;
         }
-        if (rawButtonInfo.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT && action == GLFW.GLFW_PRESS) {
+        if (rawButtonInfo.button() == InputConstants.MOUSE_BUTTON_LEFT && action == InputConstants.PRESS) {
             StreamlineReflex.onTriggerFlash();
         }
     }

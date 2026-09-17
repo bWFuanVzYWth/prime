@@ -2,7 +2,7 @@
 
 package dev.prime.render.vulkan;
 
-import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import java.util.Objects;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.util.vma.Vma;

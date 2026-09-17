@@ -1000,7 +1000,7 @@ public final class MaterialTexturePages implements AutoCloseable {
     }
 
     private static final class AnimatedMaterialSprite
-            implements com.mojang.blaze3d.vulkan.Destroyable {
+            implements com.mojang.renderpearl.backend.vulkan.Destroyable {
         private final LabPbrAtlasFrame.Sprite sprite;
         private final TextureAnimationFrames[] frames;
         private final int animationIndex;
@@ -1090,7 +1090,7 @@ public final class MaterialTexturePages implements AutoCloseable {
         }
     }
 
-    private static final class PageResource implements com.mojang.blaze3d.vulkan.Destroyable {
+    private static final class PageResource implements com.mojang.renderpearl.backend.vulkan.Destroyable {
         private final VulkanImage image;
         private final int bytesPerPixel;
         private VulkanBuffer upload;
@@ -1121,7 +1121,7 @@ public final class MaterialTexturePages implements AutoCloseable {
         }
     }
 
-    private static final class Resources implements com.mojang.blaze3d.vulkan.Destroyable {
+    private static final class Resources implements com.mojang.renderpearl.backend.vulkan.Destroyable {
         private final long sourceGeneration;
         private final long vanillaAtlasView;
         private final List<List<PageResource>> pages;

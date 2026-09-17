@@ -2,7 +2,7 @@
 
 package dev.prime.render.vulkan.dlss;
 
-import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import dev.prime.render.diagnostic.RrInputView;
 import dev.prime.render.vulkan.ImageDiagnosticPass;
 import dev.prime.render.vulkan.VulkanContext;

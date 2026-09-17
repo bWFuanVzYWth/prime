@@ -2,7 +2,7 @@
 
 package dev.prime.render.vulkan;
 
-import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.shader.ShaderAbi;
 import java.nio.ByteBuffer;

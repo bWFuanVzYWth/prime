@@ -2,7 +2,7 @@
 
 package dev.prime.render.vulkan.terrain;
 
-import com.mojang.blaze3d.vulkan.Destroyable;
+import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
