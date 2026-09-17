@@ -22,6 +22,7 @@ import dev.prime.render.vulkan.FrozenExposureState;
 import dev.prime.render.vulkan.MaterialTexturePages;
 import dev.prime.render.vulkan.StagingArena;
 import dev.prime.render.vulkan.SunShadowPipeline;
+import dev.prime.render.vulkan.ShadowInteractionPass;
 import dev.prime.render.vulkan.TraceBackend;
 import dev.prime.render.vulkan.VulkanContext;
 import dev.prime.render.vulkan.VulkanImageInitializationBatch;
@@ -887,18 +888,21 @@ public final class VulkanRenderer implements AutoCloseable {
         boolean offlineActive = this.screenshotActive();
         AtmospherePipeline replacementAtmosphere = null;
         SunShadowPipeline replacementSunShadow = null;
+        ShadowInteractionPass replacementShadowInteractions = null;
         boolean replacementAtmosphereSubmitted = false;
         try {
             this.context.invalidateSharedPrograms();
             this.context.prewarmSharedPrograms();
             replacementAtmosphere = new AtmospherePipeline(this.context);
             replacementSunShadow = this.traceBackend.prepareSunShadowReload();
+            replacementShadowInteractions = this.traceBackend.prepareShadowInteractionReload();
             this.submitBootstrapResources(replacementAtmosphere, false, false);
             replacementAtmosphereSubmitted = true;
             this.offlineRenderer.reload();
             this.realtimeRenderer.reload(replacementAtmosphere);
         } catch (RuntimeException exception) {
             ResourceCleanup.destroy(replacementSunShadow, exception);
+            ResourceCleanup.destroy(replacementShadowInteractions, exception);
             if (replacementAtmosphereSubmitted) {
                 AtmospherePipeline submittedAtmosphere = replacementAtmosphere;
                 ResourceCleanup.run(
@@ -911,11 +915,16 @@ public final class VulkanRenderer implements AutoCloseable {
         }
         SunShadowPipeline previousSunShadow =
                 this.traceBackend.replaceSunShadowPipeline(replacementSunShadow);
+        var previousShadowInteractions = this.traceBackend.replaceShadowInteractions(replacementShadowInteractions);
         AtmospherePipeline previousAtmosphere = this.atmosphere;
         this.atmosphere = replacementAtmosphere;
         this.shaderFingerprint = replacementFingerprint;
         RuntimeException retirementFailure = ResourceCleanup.run(
                 () -> this.context.defer(previousSunShadow), null);
+        if (previousShadowInteractions != null) {
+            retirementFailure = ResourceCleanup.run(
+                    () -> this.context.defer(previousShadowInteractions), retirementFailure);
+        }
         retirementFailure = ResourceCleanup.run(
                 () -> this.context.defer(previousAtmosphere), retirementFailure);
         ResourceCleanup.throwIfFailed(retirementFailure);

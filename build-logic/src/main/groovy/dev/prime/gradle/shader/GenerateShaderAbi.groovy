@@ -37,7 +37,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				java.security.MessageDigest.getInstance('SHA-256')
 						.digest(schemaFile.get().asFile.getText('UTF-8')
 								.replace('\r\n', '\n').getBytes('UTF-8')))
-		if (schemaSha256 != '3e8cb07c27910565663ace202e3ac713379937e8de11bbd675a1e571b28725c7') {
+		if (schemaSha256 != '222e6c9ce31b0305f92142600916f31681ccd148084dd32526a7a880ca1b213c') {
 			throw new GradleException(
 					'Prime shader ABI changed without updating its reviewed contract hash')
 		}
@@ -163,6 +163,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 		appendJava('TEXTURE', textureRecordContract)
 		appendJava('MATERIAL_CORE', materialCoreContract)
 		appendJava('SURFACE', schema.surfaceRecordContract)
+		appendJava('SHADOW_INTERACTION', schema.shadowInteractionContract)
 		def shadowDescriptorNames = (0..9).collectEntries {
 			[("sunShadowDepth${it}".toString()): "SUN_SHADOW_DEPTH_${it}".toString()]
 		}
@@ -363,6 +364,16 @@ ${javaConstants}${javaOffsets}
 
 		def slangDir = slangOutputDirectory.get().asFile
 		slangDir.mkdirs()
+		new File(slangDir, 'prime_shadow_interaction_abi.slang').text = """\
+// Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
+
+#language slang 2026
+module "prime_shadow_interaction_abi.slang";
+
+// Generated from shaders/abi.json. Do not edit by hand.
+${slangConstants('SHADOW_INTERACTION', schema.shadowInteractionContract)}
+public static const uint PRIME_SHADOW_INTERACTION_BINDING = ${schema.sharedDescriptors.shadowInteractions};
+"""
 		new File(slangDir, 'prime_surface_abi.slang').text = """\
 // Prime licensing and additional permissions: see LICENSE and LICENSE-EXCEPTIONS.
 

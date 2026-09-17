@@ -285,6 +285,33 @@ scene epoch 同时就绪后原子发布。Frame candidate 只在 host accept 后
 上表未列出的 normal/radiance/transport 连续数据、wavefront stride、SoA/AoS、medium 参数表和
 backend target alias 仍属可替换编码。在新门禁通过前保留当前较高精度基线。
 
+### 阴影交互预编译实验
+
+`shadowInteraction` 是 Scene 派生数据：记录参考 UV、TintId 和当前规范 base-color 页面共同决定的
+玻璃消光（linear Rec.2020 三通道，单位 m⁻¹）以及精确的 stained 判定位。生产者是独立 compute
+entry，消费者是实时/离线非不透明阴影 any-hit。`abi.json` 冻结 16-byte stride：三个 f32 与一个
+u32 标志，descriptor set 0 / binding 54，按完整 SurfaceKey 索引。几何、介质身份、路径状态与
+OpenPBR 参数均不存入这份记录；`PrimitiveRecord` 仍为 32 bytes。
+
+当前只编译 material-backed shared surface 的非水透射材质。关系备用材质、直接图元记录及
+BOUNDARY 另一侧继续原有求值。覆盖率、clear-glass 边框、thin/solid、法线、源/目标身份仍在命中时
+判断。派生表使用与原路径相同的参考 UV、LOD 0 采样器、tint 和消光函数，不改变采样分布。
+
+TraceBackend 是派生表与编译器的唯一 render-thread owner。SurfaceRecords 的 GPU lease 退休
+边界决定键复用；每次重新分配带独立 generation。新键增量编译，实际接受的 base-page 动画上传
+只使引用该 TextureId 的记录失效。材质输入快照具有独立的不可变对象身份；发布 TLAS 或 GPU
+binding 时直接借用该对象，不复制列表或重建材质索引。待编译集合只遍历当前挂起的键，不扫描
+首次全量编译留下的哈希表容量。页面 generation、sampler、tint binding、表扩容及 shader reload
+使当前记录重新编译。帧提交成功才清除待编译集合，放弃帧保留重试工作。compute 写入与 any-hit
+读取在已有队列中显式同步，旧 buffer/descriptor 随最后读者延迟退休。无变化帧不发出编译 dispatch。
+
+编码保留 f32：当前编译器可消去原有 canonical half pack/unpack，强制使用持久 f16 会额外降低
+实际精度。GPU oracle 直接执行生产编译产物，与原按命中求值对照 32,768 条包含不同页面内容、
+packed/constant UV、tint、clear/stained 的记录，消光及分支标志逐位一致；CPU 测试覆盖提交重试、
+纹理失效、lease 退休和键复用。表按最高玻璃 SurfaceKey 分配并按需增长，每槽 16 bytes；无玻璃时
+只保留空 descriptor 槽。用户实测：平均帧率提升，low 帧仍下降；当前保留实现，帧时间稳定性与
+显存成本仍需后续优化。快照复用修复不能视为已经消除全部帧时间波动。
+
 ## 10. 变更门禁与文档边界
 
 修改任一语义、编码、binding 或 lifetime 时，先更新契约和 oracle，再修改生产实现。至少验证：

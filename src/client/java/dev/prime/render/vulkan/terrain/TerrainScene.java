@@ -73,7 +73,7 @@ public final class TerrainScene implements AutoCloseable {
         VulkanBuffer newMaterials = null;
         TintSampleTable newTints = null;
         try {
-            newSurfaces = new SurfaceTable(context);
+            newSurfaces = new SurfaceTable(context, this.materialIds);
             newMaterials = context.createBuffer(
                     MaterialIdRegistry.BUFFER_BYTES,
                     VK12.VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -1644,9 +1644,23 @@ public final class TerrainScene implements AutoCloseable {
         }
     }
 
-    /** Stable fixed-width material-core descriptor owned by the renderer scene lifetime. */
-    public record SurfaceBinding(long buffer, long bytes) {
+    /** Exact slot lifetime distinguishes reuse even when the new record has identical bits. */
+    public record ShadowSurface(int key, int textureId, long generation) {}
+
+    /** One immutable material-input revision, shared unchanged across scene publications. */
+    public record ShadowSurfaces(List<ShadowSurface> entries) {
+        public static final ShadowSurfaces EMPTY = new ShadowSurfaces(List.of());
+
+        public ShadowSurfaces {
+            entries = List.copyOf(entries);
+        }
+    }
+
+    /** Immutable buffer identity and glass inputs sorted by SurfaceKey; PrimitiveRecord stays 32 B. */
+    public record SurfaceBinding(long buffer, long bytes, ShadowSurfaces shadows) {
+        public SurfaceBinding(long buffer, long bytes) { this(buffer, bytes, ShadowSurfaces.EMPTY); }
         public SurfaceBinding {
+            shadows = java.util.Objects.requireNonNull(shadows, "shadows");
             if (buffer == 0L || bytes <= 0L || bytes % 32L != 0L) {
                 throw new IllegalArgumentException("Surface binding is incomplete");
             }

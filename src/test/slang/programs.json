@@ -1,6 +1,10 @@
 {
   "programs": [
     {
+      "entry": "shadow_interaction_reference.compute.slang",
+      "artifact": "shadow_interaction_reference.comp.spv"
+    },
+    {
       "entry": "light_tree_replay.compute.slang",
       "artifact": "light_tree_replay.comp.spv"
     },

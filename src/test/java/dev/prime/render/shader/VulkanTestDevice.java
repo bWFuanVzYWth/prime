@@ -187,6 +187,9 @@ final class VulkanTestDevice implements AutoCloseable {
                             .textureCompressionBC(supportedFeatures.textureCompressionBC()));
             var address = VkPhysicalDeviceBufferDeviceAddressFeatures.calloc(stack)
                     .sType$Default().bufferDeviceAddress(true);
+            var indexing = org.lwjgl.vulkan.VkPhysicalDeviceDescriptorIndexingFeatures.calloc(stack)
+                    .sType$Default().shaderSampledImageArrayNonUniformIndexing(true);
+            if (addressed && !rayTracing) address.pNext(indexing.address());
             if (addressed) deviceInfo.pNext(address.address());
             if (rayTracing) {
                 var acceleration = VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack)

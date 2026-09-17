@@ -23,6 +23,24 @@ final class SurfaceRecords {
     private final ArrayDeque<Integer> free = new ArrayDeque<>();
     private final HashSet<Entry> dirty = new HashSet<>();
     private final ConcurrentLinkedQueue<Lease> completed = new ConcurrentLinkedQueue<>();
+    private final java.util.function.IntUnaryOperator shadowTexture;
+    private final HashMap<Integer, TerrainScene.ShadowSurface> shadowSurfaces = new HashMap<>();
+    private TerrainScene.ShadowSurfaces shadowSnapshot;
+    private long nextGeneration;
+
+    SurfaceRecords() { this(identity -> 0); }
+
+    SurfaceRecords(java.util.function.IntUnaryOperator shadowTexture) {
+        this.shadowTexture = shadowTexture;
+    }
+
+    TerrainScene.ShadowSurfaces shadowSurfaces() {
+        if (this.shadowSnapshot == null) {
+            this.shadowSnapshot = new TerrainScene.ShadowSurfaces(this.shadowSurfaces.values().stream()
+                    .sorted(java.util.Comparator.comparingInt(TerrainScene.ShadowSurface::key)).toList());
+        }
+        return this.shadowSnapshot;
+    }
 
     Lease lease() {
         drain();
@@ -37,6 +55,7 @@ final class SurfaceRecords {
                     this.slots.set(entry.key, null);
                     this.dirty.remove(entry);
                     this.free.addLast(entry.key);
+                    if (this.shadowSurfaces.remove(entry.key) != null) this.shadowSnapshot = null;
                 }
             }
             lease.entries.clear();
@@ -75,6 +94,11 @@ final class SurfaceRecords {
                     else slots.set(key, entry);
                     records.put(record, entry);
                     dirty.add(entry);
+                    int texture = shadowTexture.applyAsInt(record.identity);
+                    if (texture != 0) {
+                        shadowSurfaces.put(key, new TerrainScene.ShadowSurface(key, texture, ++nextGeneration));
+                        shadowSnapshot = null;
+                    }
                 }
                 if (this.entries.add(entry)) entry.references++;
                 keys[i] = entry.key;

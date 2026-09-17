@@ -14,13 +14,14 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 
 /** One fixed-stride GPU array. Growth preserves every index and publication owns buffer retirement. */
 final class SurfaceTable implements AutoCloseable {
-    final SurfaceRecords records = new SurfaceRecords();
+    final SurfaceRecords records;
     private final VulkanContext context;
     private VulkanBuffer buffer;
     private Upload pending;
 
-    SurfaceTable(VulkanContext context) {
+    SurfaceTable(VulkanContext context, MaterialIdRegistry materials) {
         this.context = context;
+        this.records = new SurfaceRecords(materials::shadowTexture);
         this.buffer = allocate(32L);
     }
 
@@ -32,7 +33,7 @@ final class SurfaceTable implements AutoCloseable {
 
     TerrainScene.SurfaceBinding binding() {
         VulkanBuffer effective = this.pending == null ? this.buffer : this.pending.target;
-        return new TerrainScene.SurfaceBinding(effective.handle(), effective.size());
+        return new TerrainScene.SurfaceBinding(effective.handle(), effective.size(), this.records.shadowSurfaces());
     }
 
     void upload(StagingArena.Batch staging, VkCommandBuffer command) {

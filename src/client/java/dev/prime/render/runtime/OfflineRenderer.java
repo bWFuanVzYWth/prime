@@ -35,7 +35,7 @@ final class OfflineRenderer implements Destroyable {
     OfflineRenderer(VulkanContext context, TraceBackend backend) {
         this.context = Objects.requireNonNull(context, "context");
         this.backend = Objects.requireNonNull(backend, "backend");
-        this.executor = new OfflineFrameExecutor(context);
+        this.executor = new OfflineFrameExecutor(context, backend);
         this.pipeline = new OfflineRayTracingPipeline(context, backend);
     }
 

@@ -25,13 +25,15 @@ import org.lwjgl.vulkan.VkCommandBuffer;
  */
 public final class RealtimeFrameExecutor implements Destroyable {
     private final VulkanContext context;
+    private final TraceBackend backend;
     private final VulkanImageInitializationBatch imageInitialization =
             new VulkanImageInitializationBatch();
     private StreamlineInputPass streamlineInputs;
     private boolean destroyed;
 
-    public RealtimeFrameExecutor(VulkanContext context) {
+    public RealtimeFrameExecutor(VulkanContext context, TraceBackend backend) {
         this.context = Objects.requireNonNull(context, "context");
+        this.backend = Objects.requireNonNull(backend, "backend");
     }
 
     public void execute(
@@ -102,6 +104,10 @@ public final class RealtimeFrameExecutor implements Destroyable {
             completion.onCommit(4, () -> materialTextures.submitted(materialFrame));
             completion.onAbandon(2, failure -> ResourceCleanup.run(
                     () -> materialTextures.abandon(materialFrame), failure));
+            if (this.backend.prepareShadowInteractions(commandBuffer, materialTextures.changedBaseTextures(materialFrame))) {
+                completion.onCommit(6, this.backend::submittedShadowInteractions);
+                completion.onAbandon(6, failure -> ResourceCleanup.run(this.backend::abandonShadowInteractions, failure));
+            }
             // Atmosphere preparation traces the sun cache through the shared RT descriptor set.
             // Every image named by that set must have its declared layout before this call.
             long atmosphereFrame = atmosphere.prepare(

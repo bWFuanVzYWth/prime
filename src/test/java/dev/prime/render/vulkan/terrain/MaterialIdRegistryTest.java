@@ -12,6 +12,20 @@ import dev.prime.render.terrain.PrimitivePacking;
 import org.junit.jupiter.api.Test;
 
 final class MaterialIdRegistryTest {
+    @Test void shadowCompilationSelectsOnlyMaterialBackedGlass() {
+        MaterialIdRegistry registry = new MaterialIdRegistry(new MediumIdRegistry());
+        int opaque = registry.resolve(new MaterialKey(1, null, 0));
+        int thin = registry.resolve(new MaterialKey(2, null, PrimitivePacking.CONTROL_DIELECTRIC_THIN));
+        int glass = registry.resolve(new MaterialKey(3,
+                new MediumKey(MediumKey.Kind.TEXTURE, 3, 0, false), PrimitivePacking.CONTROL_DIELECTRIC_SOLID));
+        int water = registry.resolve(new MaterialKey(4, MediumKey.CAMERA_WATER,
+                PrimitivePacking.CONTROL_DIELECTRIC_SOLID | PrimitivePacking.CONTROL_WATER_MEDIUM));
+        assertEquals(0, registry.shadowTexture(65535));
+        assertEquals(0, registry.shadowTexture(opaque << 16));
+        assertEquals(2, registry.shadowTexture(thin << 16 | 65535));
+        assertEquals(3, registry.shadowTexture(glass << 16 | 1));
+        assertEquals(0, registry.shadowTexture(water << 16));
+    }
     @Test
     void assignsDenseStableRendererLifetimeIds() {
         MediumIdRegistry mediumIds = new MediumIdRegistry();

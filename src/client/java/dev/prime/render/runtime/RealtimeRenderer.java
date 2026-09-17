@@ -63,7 +63,7 @@ final class RealtimeRenderer implements Destroyable {
         this.ngxContext = ngxContext;
         this.reconstructionRegistry = new ReconstructionBackendRegistry(context, ngxContext);
         this.pipeline = new RealtimeRayTracingPipeline(context, backend);
-        this.executor = new RealtimeFrameExecutor(context);
+        this.executor = new RealtimeFrameExecutor(context, backend);
         this.exposureDiagnostics = new DisplayExposureDiagnostics(context);
     }
 

@@ -1,6 +1,10 @@
 {
   "schema": 1,
   "entries": {
+    "entry/material/shadow_interaction.compute.slang": {
+      "maxFiles": 17,
+      "maxBytes": 43623
+    },
     "entry/atmosphere/atmosphere_aerial.compute.slang": {
       "maxFiles": 10,
       "maxBytes": 74276
@@ -26,8 +30,8 @@
       "maxBytes": 28840
     },
     "entry/hit/shadow_nonopaque.anyhit.slang": {
-      "maxFiles": 24,
-      "maxBytes": 73246
+      "maxFiles": 26,
+      "maxBytes": 75505
     },
     "entry/hit/shadow.closesthit.slang": {
       "maxFiles": 2,

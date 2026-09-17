@@ -296,7 +296,7 @@ public final class VulkanDescriptors {
         private final long set;
         private boolean destroyed;
 
-        private BoundSet(VulkanContext context, long pool, long set) {
+        BoundSet(VulkanContext context, long pool, long set) {
             this.context = context;
             this.pool = pool;
             this.set = set;

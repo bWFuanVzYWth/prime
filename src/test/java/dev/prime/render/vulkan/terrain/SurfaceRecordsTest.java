@@ -9,6 +9,32 @@ import java.util.Random;
 import org.junit.jupiter.api.Test;
 
 final class SurfaceRecordsTest {
+    @Test void shadowSnapshotKeepsLeasesAndDistinguishesReusedSlots() {
+        SurfaceRecords table = new SurfaceRecords(identity -> identity == 5 ? 17 : 0);
+        var first = table.lease();
+        var second = table.lease();
+        int[] words = {0, 0, 0, 0, 5, 0, 0, 0};
+        int key = first.encode(words)[0];
+        second.encode(words);
+        var snapshot = table.shadowSurfaces();
+        assertEquals(1, snapshot.entries().size());
+        assertEquals(17, snapshot.entries().getFirst().textureId());
+        assertSame(snapshot, table.shadowSurfaces());
+        // Scene publication may change TLAS/buffer identity without changing material inputs.
+        // The compiler's unchanged-snapshot path must survive that publication boundary.
+        assertSame(snapshot, new TerrainScene.SurfaceBinding(1L, 32L, snapshot).shadows());
+        assertSame(snapshot, new TerrainScene.SurfaceBinding(2L, 64L, snapshot).shadows());
+        first.destroy(); table.drain();
+        assertSame(snapshot, table.shadowSurfaces());
+        second.destroy(); table.drain();
+        assertTrue(table.shadowSurfaces().entries().isEmpty());
+        assertEquals(1, snapshot.entries().size());
+        var replacement = table.lease();
+        assertEquals(key, replacement.encode(words)[0]);
+        assertNotEquals(snapshot.entries().getFirst().generation(), table.shadowSurfaces().entries().getFirst().generation());
+        replacement.encode(new int[8]);
+        assertEquals(1, table.shadowSurfaces().entries().size());
+    }
     @Test void sharesAcrossClustersButWaitsForEveryGpuLeaseBeforeReuse() throws Exception {
         SurfaceRecords table = new SurfaceRecords();
         var first = table.lease();

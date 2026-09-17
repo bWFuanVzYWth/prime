@@ -22,6 +22,11 @@ import "service/trace/candidate_material.slang";
 import "service/trace/candidate.slang";
 import "service/trace/candidate_record.slang";
 import "contract/trace/shadow_payload.slang";
+import "model/material/shadow_interaction.slang";
+import "prime_shadow_interaction_abi.slang";
+
+[[vk::binding(PRIME_SHADOW_INTERACTION_BINDING, 0)]]
+ByteAddressBuffer primeShadowInteractions;
 
 layout(location = 1) rayPayloadInEXT PrimeShadowPayload primeShadowPayload;
 
@@ -97,6 +102,16 @@ void main(in BuiltInTriangleIntersectionAttributes attributes)
     float3 extinction;
     if ((recipeControl & PRIME_RECIPE_WATER) != 0u) {
         extinction = PRIME_PURE_WATER_ABSORPTION_M_INV;
+    } else if (surface.record.kind == 1u
+            && primeRecipeIsTransmissive(surface.core >> PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT)
+            && (surface.core & (PRIME_RECIPE_WATER << PRIME_MATERIAL_CORE_RECIPE_CONTROL_SHIFT)) == 0u) {
+        // Only material-backed shared surfaces have a compiled entry. Relation fallbacks and
+        // instance-tinted legacy records retain their original reference evaluation below.
+        uint4 interaction = primeShadowInteractions.Load4(
+                surface.record.index * PRIME_SHADOW_INTERACTION_RECORD_SIZE);
+        if (!primeShadowInteractionIsStained(interaction)
+                && primeGlassTexelIsRough(surfaceOpacity, primeUsesSeamlessGlass())) return;
+        extinction = primeShadowInteractionExtinction(interaction);
     } else {
         uint textureId = primeCandidateTextureId(surface.record, surface.core);
         float opacity;
