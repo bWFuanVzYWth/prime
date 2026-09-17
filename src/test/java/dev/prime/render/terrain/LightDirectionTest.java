@@ -14,7 +14,7 @@ final class LightDirectionTest {
     private static final float BOUND_EPSILON = 2.0E-5F;
     private static final int LIGHT_NODE_WORDS = ShaderAbi.LIGHT_NODE_SIZE / Integer.BYTES;
     private static final int LIGHT_NODE_DIRECTION_WORD =
-            ShaderAbi.LIGHT_NODE_DIRECTION_CHILD_RESERVED_OFFSET / Integer.BYTES;
+            ShaderAbi.LIGHT_NODE_DIRECTION_CHILD_LEAF_OFFSET / Integer.BYTES;
     private static final int LIGHT_NODE_CHILD_WORD = LIGHT_NODE_DIRECTION_WORD + 1;
 
     @Test

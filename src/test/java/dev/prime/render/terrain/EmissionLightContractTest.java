@@ -32,7 +32,7 @@ final class EmissionLightContractTest {
     private static final int LIGHT_NODE_CENTROID_WORD =
             ShaderAbi.LIGHT_NODE_CENTROID_POWER_OFFSET / Integer.BYTES;
     private static final int LIGHT_NODE_CONTROL_WORD =
-            ShaderAbi.LIGHT_NODE_DIRECTION_CHILD_RESERVED_OFFSET / Integer.BYTES;
+            ShaderAbi.LIGHT_NODE_DIRECTION_CHILD_LEAF_OFFSET / Integer.BYTES;
     private static final int LIGHT_NODE_CHILD_WORD = LIGHT_NODE_CONTROL_WORD + 1;
     private static final int LIGHT_NODE_RESERVED_WORD = LIGHT_NODE_CONTROL_WORD + 2;
 
@@ -228,6 +228,27 @@ final class EmissionLightContractTest {
             int descriptor = nodes[node * LIGHT_NODE_WORDS + LIGHT_NODE_CHILD_WORD];
             assertNotEquals(0, descriptor & CpuLightTree.LEAF_FLAG);
             assertLeafContains(terminals, descriptor & CpuLightTree.INDEX_MASK, leaf);
+            int payload = node * LIGHT_NODE_WORDS + LIGHT_NODE_CONTROL_WORD + 2;
+            int terminal = (descriptor & CpuLightTree.INDEX_MASK) * 2;
+            assertEquals(terminals[terminal], nodes[payload]);
+            assertEquals(terminals[terminal + 1], nodes[payload + 1]);
+        }
+    }
+
+    @Test
+    void terminalPayloadPreservesSparseIdentityAndPowerBits() {
+        List<CpuLightTree.Leaf> leaves = List.of(
+                leaf(8.0F, Float.MIN_NORMAL, 19),
+                leaf(-4.0F, 0x1.23456p18F, 2),
+                leaf(0.0F, 3.0F, 9));
+        CpuLightTree.Result tree = CpuLightTree.build(leaves, 20);
+        int[] nodes = tree.packNodes();
+        int[] terminals = tree.packLeaves();
+        for (int index : new int[] {19, 2, 9}) {
+            int node = tree.leafNode(index) * LIGHT_NODE_WORDS;
+            int terminal = (nodes[node + LIGHT_NODE_CHILD_WORD] & CpuLightTree.INDEX_MASK) * 2;
+            assertEquals(index, nodes[node + LIGHT_NODE_CONTROL_WORD + 2]);
+            assertEquals(terminals[terminal + 1], nodes[node + LIGHT_NODE_CONTROL_WORD + 3]);
         }
     }
 

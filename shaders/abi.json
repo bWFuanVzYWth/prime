@@ -148,7 +148,7 @@
           "offset": 0
         },
         {
-          "name": "directionChildReserved",
+          "name": "directionChildLeaf",
           "type": "uvec4",
           "offset": 16
         }

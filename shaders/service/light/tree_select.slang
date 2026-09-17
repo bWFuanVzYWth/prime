@@ -10,11 +10,11 @@ import "math/light_tree.slang";
 import "service/light/emission.slang";
 import "service/light/tree_common.slang";
 
-struct LightTreePick {
-    uint index;
-    float pdf;
-    float remapped;
-    uint valid;
+public struct LightTreePick {
+    public uint index;
+    public float pdf;
+    public float remapped;
+    public uint valid;
 };
 
 LightTreePick primeInvalidLightTreePick() {
@@ -26,9 +26,8 @@ LightTreePick primeInvalidLightTreePick() {
     return result;
 }
 
-LightTreePick primePickLightTree(
+public LightTreePick primePickLightTree(
         LightNode* nodes,
-        LightLeaf* leaves,
         SectionRecord* sections,
         uint64_t emitterAddress,
         uint entryLimit,
@@ -37,50 +36,42 @@ LightTreePick primePickLightTree(
         float3 point,
         float3 receiverNormal,
         float seed) {
-    uint nodeIndex = root;
+    uint4 control = nodes[root].directionChildLeaf;
     float remapped = clamp(seed, 0.0, asfloat(0x3f7fffffu));
     float pdf = 1.0;
     [loop]
     for (uint depth = 0u; depth <= PRIME_LIGHT_TREE_MAX_DEPTH; ++depth) {
-        uint childOrLeaf = primeLoadLightNodeChildOrLeaf(nodes, nodeIndex);
+        uint childOrLeaf = control.y;
         if ((childOrLeaf & PRIME_LIGHT_LEAF_FLAG) != 0u) {
-            uint leafIndex = childOrLeaf & PRIME_LIGHT_INDEX_MASK;
-            LightLeaf leaf = leaves[leafIndex];
-            if (leaf.index >= entryLimit) return primeInvalidLightTreePick();
+            if (control.z >= entryLimit) return primeInvalidLightTreePick();
             LightTreePick result;
-            result.index = leaf.index;
+            result.index = control.z;
             result.pdf = pdf;
             result.remapped = remapped;
             result.valid = 1u;
             return result;
         }
         uint firstChild = childOrLeaf;
-        // Issue both independent control reads before following either child's pointer chain.
-        uint firstChildOrLeaf = primeLoadLightNodeChildOrLeaf(nodes, firstChild);
-        uint secondChildOrLeaf = primeLoadLightNodeChildOrLeaf(nodes, firstChild + 1u);
+        // Each sibling record carries its metrics, next reference and terminal payload.
+        LightNode first = nodes[firstChild];
+        LightNode secondNode = nodes[firstChild + 1u];
         float2 firstMetrics;
         float2 secondMetrics;
         if (!primeLoadLightChildMetrics(
-                    nodes,
-                    leaves,
+                    first,
                     sections,
                     emitterAddress,
                     entryLimit,
                     leafMode,
-                    firstChild,
-                    firstChildOrLeaf,
                     point,
                     receiverNormal,
                     firstMetrics)
                 || !primeLoadLightChildMetrics(
-                    nodes,
-                    leaves,
+                    secondNode,
                     sections,
                     emitterAddress,
                     entryLimit,
                     leafMode,
-                    firstChild + 1u,
-                    secondChildOrLeaf,
                     point,
                     receiverNormal,
                     secondMetrics)) {
@@ -95,7 +86,7 @@ LightTreePick primePickLightTree(
                 ? (remapped - firstProbability) / branchProbability
                 : remapped / branchProbability;
         pdf *= branchProbability;
-        nodeIndex = firstChild + uint(second);
+        control = second ? secondNode.directionChildLeaf : first.directionChildLeaf;
     }
     return primeInvalidLightTreePick();
 }
@@ -122,10 +113,8 @@ public AreaLightSelection primeSelectAreaLight(
         return primeInvalidAreaLightSelection();
     }
     LightNode* worldNodes = primeWorldLightNodes(worldNodeAddress);
-    LightLeaf* worldLeaves = (LightLeaf*)worldLeafAddress;
     LightTreePick worldPick = primePickLightTree(
             worldNodes,
-            worldLeaves,
             sections,
             uint64_t(0),
             PRIME_NO_LIGHT_INDEX,
@@ -144,7 +133,6 @@ public AreaLightSelection primeSelectAreaLight(
     SectionLightHeader* sectionBuffer = (SectionLightHeader*)sectionLightAddress;
     LightTreePick sectionPick = primePickLightTree(
             (LightNode*)sectionBuffer[0].nodeAddress,
-            (LightLeaf*)sectionBuffer[0].leafAddress,
             sections,
             sectionBuffer[0].emitterAddress,
             sectionBuffer[0].emitterCount,

@@ -78,18 +78,22 @@ final class VulkanTestDevice implements AutoCloseable {
     }
 
     static VulkanTestDevice open() throws ShaderComputeRunner.UnavailableException {
-        return open(false, false);
+        return open(false, false, false);
+    }
+
+    static VulkanTestDevice openAddressed() throws ShaderComputeRunner.UnavailableException {
+        return open(false, false, true);
     }
 
     static VulkanTestDevice openRayTracing() throws ShaderComputeRunner.UnavailableException {
-        return open(true, false);
+        return open(true, false, true);
     }
 
     static VulkanTestDevice openRayTracing(boolean reorder) throws ShaderComputeRunner.UnavailableException {
-        return open(true, reorder);
+        return open(true, reorder, true);
     }
 
-    private static VulkanTestDevice open(boolean rayTracing, boolean reorder) throws ShaderComputeRunner.UnavailableException {
+    private static VulkanTestDevice open(boolean rayTracing, boolean reorder, boolean addressed) throws ShaderComputeRunner.UnavailableException {
         VkInstance instance = null;
         VkDevice device = null;
         long commandPool = 0L;
@@ -181,9 +185,10 @@ final class VulkanTestDevice implements AutoCloseable {
                     .pEnabledFeatures(VkPhysicalDeviceFeatures.calloc(stack)
                             .shaderInt64(true)
                             .textureCompressionBC(supportedFeatures.textureCompressionBC()));
+            var address = VkPhysicalDeviceBufferDeviceAddressFeatures.calloc(stack)
+                    .sType$Default().bufferDeviceAddress(true);
+            if (addressed) deviceInfo.pNext(address.address());
             if (rayTracing) {
-                var address = VkPhysicalDeviceBufferDeviceAddressFeatures.calloc(stack)
-                        .sType$Default().bufferDeviceAddress(true);
                 var acceleration = VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack)
                         .sType$Default().accelerationStructure(true);
                 var pipeline = VkPhysicalDeviceRayTracingPipelineFeaturesKHR.calloc(stack)
