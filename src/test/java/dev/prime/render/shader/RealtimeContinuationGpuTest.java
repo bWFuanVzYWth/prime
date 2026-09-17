@@ -6,11 +6,46 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 final class RealtimeContinuationGpuTest extends GpuShaderTest {
+    @BeforeAll
+    void reserveFixtureBindings() {
+        runner.useIoBindings(100, 101);
+    }
+
     private static ByteBuffer input(int words) {
         return ByteBuffer.allocateDirect(words * 4).order(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    @Test
+    void misHistorySurvivesLocalBounceResetsAndPreservesFullSourceIdentity() throws Exception {
+        int[][] sources = {{-1, -1}, {0, 0}, {1, 0}, {0, 1}, {0x80000000, 0},
+                {0, 0x80000000}, {-1, 17}, {23, -1}};
+        int count = sources.length * 4 * 256;
+        ByteBuffer input = input(4 + 4 * count).putInt(count).putInt(2).putLong(0);
+        for (int[] source : sources)
+            for (int flags = 0; flags < 4; ++flags)
+                for (int bounce = 0; bounce < 256; ++bounce)
+                    input.putInt(source[0]).putInt(source[1]).putInt(bounce).putInt(flags);
+        ByteBuffer output = runner.dispatch("realtime_continuation.comp.spv", input.flip(), count * 32, count);
+        int index = 0;
+        for (int[] source : sources) {
+            for (int flags = 0; flags < 4; ++flags) {
+                boolean excluded = (source[0] == -1 && source[1] == -1) || (flags & 1) != 0;
+                for (int bounce = 0; bounce < 256; ++bounce, ++index) {
+                    int offset = index * 32;
+                    assertEquals(excluded ? 1 : 0, output.getFloat(offset));
+                    assertEquals(excluded ? 1 : 0, output.getFloat(offset + 4));
+                    assertEquals(excluded ? 1 : 0.2f, output.getFloat(offset + 8), 1e-6f);
+                    if (!excluded) assertEquals(1, output.getFloat(offset + 8)
+                            + output.getFloat(offset + 12), 1e-6f);
+                    assertEquals(1, output.getFloat(offset + 16), "state at " + index);
+                    assertEquals(1, output.getFloat(offset + 20), "no competing NEE at " + index);
+                }
+            }
+        }
     }
 
     @Test

@@ -66,6 +66,8 @@ final class ShaderComputeRunner implements AutoCloseable {
     private final long commandPool;
     private final List<ImageBinding> images = new ArrayList<>();
     private final List<BufferBinding> buffers = new ArrayList<>();
+    private int inputBinding;
+    private int outputBinding = 1;
     private boolean closed;
 
     private ShaderComputeRunner(VulkanTestDevice testDevice) {
@@ -84,9 +86,21 @@ final class ShaderComputeRunner implements AutoCloseable {
         return new ShaderComputeRunner(VulkanTestDevice.openAddressed());
     }
 
+    /** Fixtures importing full production modules reserve I/O outside the scene binding range. */
+    void useIoBindings(int inputBinding, int outputBinding) {
+        requireOpen();
+        if (inputBinding < 0 || outputBinding < 0 || inputBinding == outputBinding
+                || !this.images.isEmpty() || !this.buffers.isEmpty()) {
+            throw new IllegalArgumentException("Set distinct I/O bindings before fixture resources");
+        }
+        this.inputBinding = inputBinding;
+        this.outputBinding = outputBinding;
+    }
+
     void bindStorageBuffer(int binding, ByteBuffer data) {
         requireOpen();
-        if (binding < 2 || this.buffers.stream().anyMatch(value -> value.binding() == binding)) {
+        if (binding < 0 || binding == this.inputBinding || binding == this.outputBinding
+                || this.buffers.stream().anyMatch(value -> value.binding() == binding)) {
             throw new IllegalArgumentException("Duplicate or reserved test buffer binding");
         }
         MappedBuffer buffer = createMappedBuffer(data.remaining());
@@ -392,9 +406,10 @@ final class ShaderComputeRunner implements AutoCloseable {
             int width,
             int height,
             int depth) {
-        if (binding < 2 || this.images.stream().anyMatch(value -> value.binding() == binding)) {
+        if (binding < 0 || binding == this.inputBinding || binding == this.outputBinding
+                || this.images.stream().anyMatch(value -> value.binding() == binding)) {
             throw new IllegalArgumentException(
-                    "Shader-test image binding must be unique and at least 2: " + binding);
+                    "Shader-test image binding must be unique and not reserved for I/O: " + binding);
         }
         if (width <= 0 || height <= 0 || depth <= 0
                 || (dimension == ImageDimension.TWO_D && depth != 1)) {
@@ -420,12 +435,12 @@ final class ShaderComputeRunner implements AutoCloseable {
             VkDescriptorSetLayoutBinding.Buffer bindings =
                     VkDescriptorSetLayoutBinding.calloc(2 + this.images.size() + this.buffers.size(), stack);
             bindings.get(0)
-                    .binding(0)
+                    .binding(this.inputBinding)
                     .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                     .descriptorCount(1)
                     .stageFlags(COMPUTE_STAGE);
             bindings.get(1)
-                    .binding(1)
+                    .binding(this.outputBinding)
                     .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                     .descriptorCount(1)
                     .stageFlags(COMPUTE_STAGE);
@@ -544,7 +559,7 @@ final class ShaderComputeRunner implements AutoCloseable {
             writes.get(0)
                     .sType$Default()
                     .dstSet(descriptorSet)
-                    .dstBinding(0)
+                    .dstBinding(this.inputBinding)
                     .descriptorCount(1)
                     .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                     .pBufferInfo(VkDescriptorBufferInfo.create(
@@ -552,7 +567,7 @@ final class ShaderComputeRunner implements AutoCloseable {
             writes.get(1)
                     .sType$Default()
                     .dstSet(descriptorSet)
-                    .dstBinding(1)
+                    .dstBinding(this.outputBinding)
                     .descriptorCount(1)
                     .descriptorType(VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                     .pBufferInfo(VkDescriptorBufferInfo.create(

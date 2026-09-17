@@ -34,7 +34,7 @@ import "model/realtime/transport.slang";
 import "transport/guide/queued_psr.slang";
 import "transport/scatter/ordinary.slang";
 import "transport/scatter/path_update.slang";
-import "transport/scatter/surface.slang";
+import "transport/scatter/visible.slang";
 import "transport/surface/access.slang";
 import "transport/surface/accumulate.slang";
 import "transport/surface/environment.slang";
@@ -392,8 +392,7 @@ public void primeSplitVisibleSurface(
                     primeEvaluateDeltaHitEmission(context, path, surface));
         }
         bool continuation = segmentAlive
-                && primeIntegrateWavefrontSurface(
-                        PrimeLandingTransportPhase(),
+                && primeIntegrateVisibleSurface(
                         context,
                         path,
                         medium,

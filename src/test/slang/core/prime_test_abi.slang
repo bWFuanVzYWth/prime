@@ -23,8 +23,12 @@ static const uint PRIME_TEST_FAILURE_VALUE = 1 << 13;
 static const uint PRIME_TEST_FAILURE_STATE = 1 << 14;
 static const uint PRIME_TEST_FAILURE_INDEX = 1 << 15;
 
-[[vk::binding(0, 0)]] StructuredBuffer<uint4> primeTestInput;
-[[vk::binding(1, 0)]] RWStructuredBuffer<uint4> primeTestOutput;
+#ifndef PRIME_TEST_INPUT_BINDING
+#define PRIME_TEST_INPUT_BINDING 0
+#define PRIME_TEST_OUTPUT_BINDING 1
+#endif
+[[vk::binding(PRIME_TEST_INPUT_BINDING, 0)]] StructuredBuffer<uint4> primeTestInput;
+[[vk::binding(PRIME_TEST_OUTPUT_BINDING, 0)]] RWStructuredBuffer<uint4> primeTestOutput;
 
 bool primeTestBegin(uint3 dispatchThreadId, out uint caseIndex)
 {

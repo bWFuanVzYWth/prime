@@ -52,8 +52,7 @@ public void primeAccumulateOfflineAreaDirect(
             area.light,
             sourceRadiance,
             medium,
-            primeUsesAirGap(),
-            true);
+            primeUsesAirGap());
     bool valid = area.light.pdf > 0.0
             && area.light.distance > 0.0
             && any(greaterThan(contribution, float3(0.0)));

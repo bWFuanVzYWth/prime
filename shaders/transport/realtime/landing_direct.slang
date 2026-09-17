@@ -60,64 +60,30 @@ public void primeEvaluateLandingDirect(
         integrator.sunDirectionIntensity = float4(
                 primePush.sunDirection,
                 ATM_SPACE_SUN_INTENSITY * primeSunRadianceMultiplier());
+        PrimeDirectLightingSplit sun = primeEstimateDirectSunSplit(
+                context, integrator, surface, path.viewDirection,
+                primeDirectSample2D(directSample, PRIME_DIRECT_SAMPLE_SUN), path.medium);
+        AreaLightSample area = primeSampleAreaLightSelection(
+                surface.position,
+                selection.area,
+                primeDirectDiscreteSample1D(directSample, primeDirectDiscreteSeed(
+                        pixel, primeSampleIndex(), primeSampleEpoch(), path.bounce + 1u,
+                        uint(recordIndex >= primeWavefrontPixelCount())), 1u),
+                primeDirectSample2D(directSample, PRIME_DIRECT_SAMPLE_AREA_SECONDARY));
+        PrimeDirectLightingSplit nonsun = primeEstimateDirectAreaSplit(
+                context, surface, path.viewDirection, area, path.medium, false);
+        // Guide routing only partitions the common estimator's output; it cannot select MIS.
         if (guideDual) {
-            PrimePrimarySunSample sun = primeEstimatePrimaryDirectSun(
-                    context,
-                    integrator,
-                    surface,
-                    path.viewDirection,
-                    primeDirectSample2D(
-                            directSample, PRIME_DIRECT_SAMPLE_SUN),
-                    path.medium,
-                    false);
-            AreaLightSample area = primeSampleAreaLightSelection(
-                    surface.position,
-                    selection.area,
-                    primeDirectDiscreteSample1D(directSample, primeDirectDiscreteSeed(pixel, primeSampleIndex(), primeSampleEpoch(),
-                        path.bounce + 1u, uint(recordIndex >= primeWavefrontPixelCount())), 1u),
-                    primeDirectSample2D(directSample, PRIME_DIRECT_SAMPLE_AREA_SECONDARY));
-            PrimeDirectLightingSplit nonsun =
-                    primeEstimatePrimaryDirectPreparedAreaLight(
-                            context,
-                            surface,
-                            path.viewDirection,
-                            area,
-                            path.medium,
-                            false);
             primeAccumulateTransparentPrimaryDirect(
-                    pixel,
-                    primeWavefrontTransmissionBranch(control),
-                    path.throughput
-                            * (sun.lighting.diffuse * sun.visibility
-                                    + nonsun.diffuse),
-                    path.throughput
-                            * (sun.lighting.specular * sun.visibility
-                                    + nonsun.specular));
+                    pixel, primeWavefrontTransmissionBranch(control),
+                    path.throughput * (sun.diffuse + nonsun.diffuse),
+                    path.throughput * (sun.specular + nonsun.specular));
         } else {
-            float3 direct = primeEstimateDirectSun(
-                    context,
-                    integrator,
-                    surface,
-                    path.viewDirection,
-                    primeDirectSample2D(
-                            directSample, PRIME_DIRECT_SAMPLE_SUN),
-                    path.medium);
-            AreaLightSample area = primeSampleAreaLightSelection(
-                    surface.position,
-                    selection.area,
-                    primeDirectDiscreteSample1D(directSample, primeDirectDiscreteSeed(pixel, primeSampleIndex(), primeSampleEpoch(),
-                        path.bounce + 1u, uint(recordIndex >= primeWavefrontPixelCount())), 1u),
-                    primeDirectSample2D(directSample, PRIME_DIRECT_SAMPLE_AREA_SECONDARY));
-            direct += primeEstimateDirectPreparedAreaLight(
-                    context,
-                    surface,
-                    path.viewDirection,
-                    area,
-                    path.medium);
+            float3 direct = sun.diffuse + sun.specular;
+            direct += nonsun.diffuse + nonsun.specular;
             float3 contribution = path.throughput * direct;
             if (any(contribution > float3(0.0))) {
-                primeAccumulateDeferredDirectLight(
-                        pixel, control, contribution);
+                primeAccumulateDeferredDirectLight(pixel, control, contribution);
             }
         }
     }
@@ -125,12 +91,10 @@ public void primeEvaluateLandingDirect(
     // Visible emission also covers dynamic geometry whose emitter lane is a motion identity.
     if ((surface.materialControl & PRIME_MATERIAL_VISIBLE_EMISSION) == 0u
             && primeSurfaceEmitterIndex(surface) == PRIME_NO_LIGHT_INDEX) return;
-    bool previousUsedAreaNee = !primeWavefrontTransparentBranch(control)
-            || path.bounce > 0u;
     PrimeWavefrontHitEmissionState hitPath =
             primeLoadWavefrontHitEmissionState(recordIndex);
     float3 emitted = primeEvaluateStagedHitEmission(
-            surface, hitPath, path.throughput, previousUsedAreaNee);
+            surface, hitPath, path.throughput, true);
     if (any(emitted > float3(0.0))) {
         bool diffuse = primeStagedHitEmissionDiffuse(
                 recordIndex, surface, hitPath, true);

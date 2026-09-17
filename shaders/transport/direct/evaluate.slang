@@ -21,7 +21,6 @@ import "service/bsdf/foliage/evaluate.slang";
 import "service/trace/context.slang";
 import "contract/light.slang";
 import "contract/material/normal.slang";
-import "transport/direct/shadow.slang";
 import "transport/surface/access.slang";
 import "contract/medium.slang";
 
@@ -34,8 +33,7 @@ public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
         float3 lightRadiance,
         PrimeMedium medium,
         bool usesAirGap,
-        bool conditionalTransparentBranch,
-        bool usesMis) {
+        bool conditionalTransparentBranch) {
     PrimeDirectLightingSplit result;
     result.diffuse = float3(0.0);
     result.specular = float3(0.0);
@@ -100,7 +98,7 @@ public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
                     light.direction);
         }
         float weightedInversePdf = primePowerHeuristicOverPdf(
-                light.pdf, usesMis ? evaluation.pdf : 0.0);
+                light.pdf, evaluation.pdf);
         float3 contribution = primeTripleProduct(
                 lightRadiance, evaluation.response, weightedInversePdf);
         if (reflection) {
@@ -126,7 +124,7 @@ public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
                 light.direction,
                 medium);
         float weightedInversePdf = primePowerHeuristicOverPdf(
-                light.pdf, usesMis ? components.pdf : 0.0);
+                light.pdf, components.pdf);
         result.diffuse = primeTripleProduct(
                 lightRadiance, components.diffuseResponse, weightedInversePdf);
         result.specular = primeTripleProduct(
@@ -146,7 +144,7 @@ public PrimeDirectLightingSplit primeEvaluateVisibleDirectSplit(
             light.direction,
             medium);
     float weightedInversePdf = primePowerHeuristicOverPdf(
-            light.pdf, usesMis ? components.pdf : 0.0);
+            light.pdf, components.pdf);
     result.diffuse = primeTripleProduct(
             lightRadiance, components.diffuseResponse, weightedInversePdf);
     result.specular = primeTripleProduct(
@@ -162,8 +160,7 @@ public float3 primeEvaluateCompleteDirect(
         LightSample light,
         float3 lightRadiance,
         PrimeMedium medium,
-        bool usesAirGap,
-        bool usesMis) {
+        bool usesAirGap) {
     PrimeDirectLightingSplit split = primeEvaluateVisibleDirectSplit(
             context,
             surface,
@@ -173,7 +170,6 @@ public float3 primeEvaluateCompleteDirect(
             lightRadiance,
             medium,
             usesAirGap,
-            false,
-            usesMis);
+            false);
     return split.diffuse + split.specular;
 }
