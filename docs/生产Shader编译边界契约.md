@@ -132,9 +132,10 @@ Slang `__exported import` 重导出同一个声明，原有生产消费者继续
 依赖图与架构门禁同样跟踪 exported import，并由每个 artifact 的实际 depfile 核验闭包。
 这是资源声明拆分，不新增 GPU 绑定、复制 push 数据或依赖链接期删除冲突 descriptor。
 
-大气光谱积分与光谱到 Rec.2020 的转换集中在 `model/atmosphere/spectrum.slang`，仅由 LUT
-生产者访问；架构门禁拒绝 RT entry 到达该模块。照明消费最终 RGB 表，几何与 LUT 坐标数学
-保持独立可见，不借助编译器从光谱实现中消除未用函数。
+大气光谱系数与光谱到 Rec.2020 的转换位于 `model/atmosphere/spectrum.slang`，仅由 LUT
+生产者访问；架构门禁拒绝 RT entry 到达光谱数据、源项求解、路径积分和 SkyView 逆 CDF。
+照明消费最终 RGB 表，几何与查表所需的正向坐标数学保持独立可见，不借助编译器从光谱
+实现中消除未用函数。
 
 材质类别不形成独立运行时 queue/group。引入这类编译岛会改变 GPU command 与队列流量，只有
 在用户实机上证明 frame/transport time 的 95% 置信上界、寄存器、occupancy 和显存均不回退时

@@ -12,13 +12,14 @@ import org.junit.jupiter.api.Test;
 final class AtmosphereCameraGpuTest extends GpuShaderTest {
     @Test
     void cameraDirectionTableBoundsInterpolationAndHalfStorageError() throws Exception {
+        runner.bindStorageBuffer(7, AtmosphereSolverGpuTest.resource("/prime/atmosphere/medium.bin.gz.b64"));
         ByteBuffer spectral = runner.dispatch("atmosphere_transmittance_table.comp.spv",
                 ByteBuffer.allocateDirect(4).order(ByteOrder.LITTLE_ENDIAN),
-                256 * 64 * 32, 256 * 64);
+                512 * 128 * 16, 512 * 128);
         int count = 32_769;
         float maximum = 0.0F;
-        for (float altitude : new float[] {0.001F, 0.008F, 0.016F, 0.064F, 0.256F,
-                0.448F, 2.0F, 10.0F, 50.0F, 99.999F}) {
+        for (float altitude : new float[] {0.0F, 0.001F, 0.008F, 0.016F, 0.064F, 0.256F, 0.3F, 0.428F, 10.128F,
+                0.448F, 2.0F, 10.0F, 50.0F, 119.999F}) {
             ByteBuffer push = ByteBuffer.allocateDirect(8).order(ByteOrder.LITTLE_ENDIAN)
                     .putFloat(6360.0F + altitude).putInt(count).flip();
             ByteBuffer result = runner.dispatch("atmosphere_camera_error.comp.spv", spectral,

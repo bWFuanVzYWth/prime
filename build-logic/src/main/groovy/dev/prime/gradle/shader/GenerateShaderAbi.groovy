@@ -37,7 +37,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 				java.security.MessageDigest.getInstance('SHA-256')
 						.digest(schemaFile.get().asFile.getText('UTF-8')
 								.replace('\r\n', '\n').getBytes('UTF-8')))
-		if (schemaSha256 != '222e6c9ce31b0305f92142600916f31681ccd148084dd32526a7a880ca1b213c') {
+		if (schemaSha256 != 'f41de99dda3b34d6421ebb76f42d0e6e82bcf83cb1d7f3bc9061043c230bb1a6') {
 			throw new GradleException(
 					'Prime shader ABI changed without updating its reviewed contract hash')
 		}
@@ -270,7 +270,7 @@ abstract class GenerateShaderAbi extends DefaultTask {
 			"public struct ${name}\n{\n${slangStructFields(pair[1])}\n};"
 		}.join('\n\n')
 		def environmentImages = slangImages(schema.sharedDescriptors, 0, [
-			skyView: ['RWTexture2D', 'float4', 'primeSkyView', 'rgba16f', 'readonly'],
+			skyView: ['RWTexture2D', 'float4', 'primeSkyView', 'rgba32f', 'readonly'],
 			cameraTransmittance: ['RWTexture2D', 'float4', 'primeCameraTransmittance', 'rgba16f', 'readonly'],
 			aerialRadiance: ['RWTexture3D', 'float4', 'primeAerialRadiance', 'rgba16f', 'readonly'],
 			aerialTransmittance: ['RWTexture3D', 'float4', 'primeAerialTransmittance', 'rgba16f', 'readonly']])

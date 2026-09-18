@@ -80,7 +80,7 @@ public final class VulkanRenderer implements AutoCloseable {
     private boolean screenshotRequestRejected;
     private volatile boolean acceptsResourceReloadEffects = true;
     private boolean closed;
-    public VulkanRenderer(VulkanContext context) {
+    public VulkanRenderer(VulkanContext context, AtmosphereSettings atmosphereSettings) {
         VulkanContext newContext = java.util.Objects.requireNonNull(context, "context");
         StagingArena newStagingArena = null;
         AtmospherePipeline newAtmosphere = null;
@@ -93,7 +93,7 @@ public final class VulkanRenderer implements AutoCloseable {
         try {
             newContext.prewarmSharedPrograms();
             newStagingArena = new StagingArena(newContext);
-            newAtmosphere = new AtmospherePipeline(newContext);
+            newAtmosphere = new AtmospherePipeline(newContext, atmosphereSettings.aerosolDensitySteps());
             newTraceBackend = new TraceBackend(newContext);
             newTerrain = new TerrainStreamer(newContext, newStagingArena);
             newMaterialTextures = new MaterialTexturePages(newContext, newStagingArena);
@@ -182,6 +182,10 @@ public final class VulkanRenderer implements AutoCloseable {
                 settings.surfaceDetailMode(),
                 settings.voxelTextureSurfaceStrengthSteps());
         this.terrain.setWorkerPercentage(settings.terrainWorkerPercentage());
+        // An offline session freezes its medium just like its lighting and camera settings.
+        if (!this.screenshotActive() && this.pendingOfflineSession == null) {
+            this.updateAtmosphere(settings.atmosphere());
+        }
         screenshotRequested = this.updateOfflineSession(
                 minecraft,
                 screenshotRequested
@@ -194,6 +198,7 @@ public final class VulkanRenderer implements AutoCloseable {
         if (this.pendingOfflineSession != null) {
             return screenshotRequested;
         }
+        this.updateAtmosphere(settings.atmosphere());
         FrameCamera frameCamera = this.camera;
         if (frameCamera != null) {
             this.terrain.update(minecraft, frameCamera.x(), frameCamera.y(), frameCamera.z());
@@ -893,7 +898,7 @@ public final class VulkanRenderer implements AutoCloseable {
         try {
             this.context.invalidateSharedPrograms();
             this.context.prewarmSharedPrograms();
-            replacementAtmosphere = new AtmospherePipeline(this.context);
+            replacementAtmosphere = new AtmospherePipeline(this.context, this.atmosphere.aerosolDensitySteps());
             replacementSunShadow = this.traceBackend.prepareSunShadowReload();
             replacementShadowInteractions = this.traceBackend.prepareShadowInteractionReload();
             this.submitBootstrapResources(replacementAtmosphere, false, false);
@@ -931,6 +936,25 @@ public final class VulkanRenderer implements AutoCloseable {
         PrimeInfo.LOGGER.info(
                 "Reloaded Prime {} ray tracing and atmosphere shaders",
                 offlineActive ? "offline" : "realtime");
+    }
+
+    private void updateAtmosphere(AtmosphereSettings settings) {
+        if (settings.aerosolDensitySteps() == this.atmosphere.aerosolDensitySteps()) {
+            return;
+        }
+        AtmospherePipeline replacement = new AtmospherePipeline(this.context, settings.aerosolDensitySteps());
+        try {
+            this.submitBootstrapResources(replacement, false, false);
+            this.realtimeRenderer.reloadAtmosphere(replacement);
+        } catch (RuntimeException exception) {
+            // Bootstrap may already have submitted commands before a later publication fails.
+            // The existing retirement queue is safe for both submitted and unsubmitted resources.
+            ResourceCleanup.run(() -> this.context.defer(replacement), exception);
+            throw exception;
+        }
+        AtmospherePipeline previous = this.atmosphere;
+        this.atmosphere = replacement;
+        this.context.defer(previous);
     }
 
     private void submitBootstrapResources(

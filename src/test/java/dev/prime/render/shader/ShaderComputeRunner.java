@@ -69,6 +69,9 @@ final class ShaderComputeRunner implements AutoCloseable {
     private int inputBinding;
     private int outputBinding = 1;
     private boolean closed;
+    private float timestampPeriod;
+    private int timestampBits;
+    private double lastGpuMillis;
 
     private ShaderComputeRunner(VulkanTestDevice testDevice) {
         this.testDevice = testDevice;
@@ -97,6 +100,21 @@ final class ShaderComputeRunner implements AutoCloseable {
         this.outputBinding = outputBinding;
     }
 
+    void enableGpuTiming() {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            var properties = org.lwjgl.vulkan.VkPhysicalDeviceProperties.calloc(stack);
+            VK12.vkGetPhysicalDeviceProperties(this.physicalDevice, properties);
+            var count = stack.mallocInt(1);
+            VK12.vkGetPhysicalDeviceQueueFamilyProperties(this.physicalDevice, count, null);
+            var queues = org.lwjgl.vulkan.VkQueueFamilyProperties.calloc(count.get(0), stack);
+            VK12.vkGetPhysicalDeviceQueueFamilyProperties(this.physicalDevice, count, queues);
+            this.timestampBits = queues.get(this.testDevice.queueFamily()).timestampValidBits();
+            this.timestampPeriod = this.timestampBits == 0 ? 0 : properties.limits().timestampPeriod();
+        }
+    }
+
+    double lastGpuMillis() { return this.lastGpuMillis; }
+
     void bindStorageBuffer(int binding, ByteBuffer data) {
         requireOpen();
         if (binding < 0 || binding == this.inputBinding || binding == this.outputBinding
@@ -108,12 +126,28 @@ final class ShaderComputeRunner implements AutoCloseable {
         this.buffers.add(new BufferBinding(binding, buffer));
     }
 
+    /** Dispatches complete before returning, so fixture uploads cannot race a previous dispatch. */
+    void writeStorageBuffer(int binding, ByteBuffer data) {
+        requireOpen();
+        for (BufferBinding buffer : this.buffers) {
+            if (buffer.binding() == binding) {
+                ByteBuffer target = buffer.resource().bytes().duplicate().clear();
+                if (target.remaining() != data.remaining()) {
+                    throw new IllegalArgumentException("Fixture buffer size changed");
+                }
+                target.put(data.duplicate());
+                return;
+            }
+        }
+        throw new IllegalArgumentException("No test buffer at binding " + binding);
+    }
+
     void repeatImageDescriptor(int binding, int count) {
         for (int i = 0; i < this.images.size(); i++) {
             ImageBinding image = this.images.get(i);
             if (image.binding() == binding) {
                 if (count < 1) throw new IllegalArgumentException("Empty descriptor array");
-                this.images.set(i, new ImageBinding(binding, image.resource(), count));
+                this.images.set(i, new ImageBinding(binding, image.resource(), count, image.type()));
                 return;
             }
         }
@@ -163,6 +197,45 @@ final class ShaderComputeRunner implements AutoCloseable {
             ByteBuffer result = ByteBuffer.allocateDirect(outputBytes).order(ByteOrder.LITTLE_ENDIAN);
             result.put(output.bytes().duplicate().clear()).flip();
             return result;
+        }
+    }
+
+    void bindStorageImage(int binding, ImageFormat format, int width, int height, int depth) {
+        requireOpen();
+        ImageDimension dimension = depth == 1 ? ImageDimension.TWO_D : ImageDimension.THREE_D;
+        validateImageBinding(binding, dimension, width, height, depth);
+        ImageResource image = createImage(dimension, format, width, height, depth,
+                ByteBuffer.allocateDirect(format.byteSize(width, height, depth)), 1, false, true);
+        this.images.add(new ImageBinding(binding, image, 1, VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE));
+    }
+
+    void aliasSampledImage(int sourceBinding, int binding) {
+        ImageResource image = this.images.stream().filter(i -> i.binding() == sourceBinding)
+                .findFirst().orElseThrow().resource();
+        if (this.images.stream().anyMatch(i -> i.binding() == binding)) {
+            throw new IllegalArgumentException("Duplicate image alias binding");
+        }
+        this.images.add(new ImageBinding(binding, image, 1, VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER));
+    }
+
+    void swapImages(int first, int second) {
+        int a = -1, b = -1;
+        for (int i = 0; i < this.images.size(); i++) {
+            if (this.images.get(i).binding() == first) a = i;
+            if (this.images.get(i).binding() == second) b = i;
+        }
+        if (a < 0 || b < 0) throw new IllegalArgumentException("Missing swap image");
+        ImageBinding x = this.images.get(a), y = this.images.get(b);
+        this.images.set(a, new ImageBinding(first, y.resource(), x.count(), x.type()));
+        this.images.set(b, new ImageBinding(second, x.resource(), y.count(), y.type()));
+    }
+
+    void dispatchProduction(String name, Workgroups groups, ByteBuffer push) throws IOException {
+        String directory = System.getProperty("prime.test.productionShaderDirectory");
+        if (directory == null) throw new IllegalStateException("Production shader directory is not configured");
+        Path path = Path.of(directory, name, name + ".comp.spv");
+        try (MappedBuffer input = createMappedBuffer(4); MappedBuffer output = createMappedBuffer(4)) {
+            dispatch(path, input, output, groups, push);
         }
     }
 
@@ -277,8 +350,8 @@ final class ShaderComputeRunner implements AutoCloseable {
                 width,
                 height,
                 depth,
-                source, mipLevels, repeatU);
-        this.images.add(new ImageBinding(binding, image, 1));
+                source, mipLevels, repeatU, false);
+        this.images.add(new ImageBinding(binding, image, 1, VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER));
     }
 
     private ImageResource createImage(
@@ -287,7 +360,7 @@ final class ShaderComputeRunner implements AutoCloseable {
             int width,
             int height,
             int depth,
-            ByteBuffer pixels, int mipLevels, boolean repeatU) {
+            ByteBuffer pixels, int mipLevels, boolean repeatU, boolean storage) {
         long image = 0L;
         long memory = 0L;
         long view = 0L;
@@ -307,7 +380,8 @@ final class ShaderComputeRunner implements AutoCloseable {
                     .samples(VK12.VK_SAMPLE_COUNT_1_BIT)
                     .tiling(VK12.VK_IMAGE_TILING_OPTIMAL)
                     .usage(VK12.VK_IMAGE_USAGE_TRANSFER_DST_BIT
-                            | VK12.VK_IMAGE_USAGE_SAMPLED_BIT)
+                            | VK12.VK_IMAGE_USAGE_SAMPLED_BIT
+                            | (storage ? VK12.VK_IMAGE_USAGE_STORAGE_BIT : 0))
                     .sharingMode(VK12.VK_SHARING_MODE_EXCLUSIVE)
                     .initialLayout(VK12.VK_IMAGE_LAYOUT_UNDEFINED);
             imageInfo.extent().set(width, height, depth);
@@ -375,9 +449,10 @@ final class ShaderComputeRunner implements AutoCloseable {
                     "create shader-test sampler");
             sampler = handle.get(0);
 
-            prepareImage(upload, image, width, height, depth, format, mipLevels);
+            prepareImage(upload, image, width, height, depth, format, mipLevels, storage);
             ImageResource result =
-                    new ImageResource(this.device, image, memory, view, sampler);
+                    new ImageResource(this.device, image, memory, view, sampler,
+                            storage ? VK12.VK_IMAGE_LAYOUT_GENERAL : VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             image = 0L;
             memory = 0L;
             view = 0L;
@@ -429,9 +504,17 @@ final class ShaderComputeRunner implements AutoCloseable {
         long shaderModule = 0L;
         long pipeline = 0L;
         long descriptorPool = 0L;
+        long timestamps = 0L;
         VkCommandBuffer commandBuffer = null;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             LongBuffer handle = stack.mallocLong(1);
+            if (this.timestampPeriod > 0) {
+                var query = org.lwjgl.vulkan.VkQueryPoolCreateInfo.calloc(stack).sType$Default()
+                        .queryType(VK12.VK_QUERY_TYPE_TIMESTAMP).queryCount(2);
+                check(VK12.vkCreateQueryPool(this.device, query, null, handle), "create test timestamps");
+                timestamps = handle.get(0);
+                handle.clear();
+            }
             VkDescriptorSetLayoutBinding.Buffer bindings =
                     VkDescriptorSetLayoutBinding.calloc(2 + this.images.size() + this.buffers.size(), stack);
             bindings.get(0)
@@ -448,7 +531,7 @@ final class ShaderComputeRunner implements AutoCloseable {
                 ImageBinding image = this.images.get(index);
                 bindings.get(index + 2)
                         .binding(image.binding())
-                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                        .descriptorType(image.type())
                         .descriptorCount(image.count())
                         .stageFlags(COMPUTE_STAGE);
             }
@@ -508,7 +591,7 @@ final class ShaderComputeRunner implements AutoCloseable {
             VK12.vkDestroyShaderModule(this.device, shaderModule, null);
             shaderModule = 0L;
 
-            int poolTypeCount = this.images.isEmpty() ? 1 : 2;
+            int poolTypeCount = this.images.isEmpty() ? 1 : 3;
             VkDescriptorPoolSize.Buffer poolSizes =
                     VkDescriptorPoolSize.calloc(poolTypeCount, stack);
             poolSizes.get(0)
@@ -517,7 +600,9 @@ final class ShaderComputeRunner implements AutoCloseable {
             if (!this.images.isEmpty()) {
                 poolSizes.get(1)
                         .type(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                        .descriptorCount(this.images.stream().mapToInt(ImageBinding::count).sum());
+                        .descriptorCount(Math.max(1, this.images.stream().filter(i -> i.type() == VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).mapToInt(ImageBinding::count).sum()));
+                poolSizes.get(2).type(VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                        .descriptorCount(Math.max(1, this.images.stream().filter(i -> i.type() == VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE).mapToInt(ImageBinding::count).sum()));
             }
             handle.clear();
             check(
@@ -581,14 +666,14 @@ final class ShaderComputeRunner implements AutoCloseable {
                 for (int i = 0; i < image.count(); i++) {
                     imageInfos.get(imageCursor++).sampler(image.resource().sampler())
                             .imageView(image.resource().view())
-                            .imageLayout(VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                            .imageLayout(image.resource().layout());
                 }
                 writes.get(index + 2)
                         .sType$Default()
                         .dstSet(descriptorSet)
                         .dstBinding(image.binding())
                         .descriptorCount(image.count())
-                        .descriptorType(VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                        .descriptorType(image.type())
                         .pImageInfo(VkDescriptorImageInfo.create(
                                 imageInfos.get(first).address(), image.count()));
             }
@@ -621,6 +706,11 @@ final class ShaderComputeRunner implements AutoCloseable {
                                     .sType$Default()
                                     .flags(VK12.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)),
                     "begin shader-test command buffer");
+            VkMemoryBarrier.Buffer previous = VkMemoryBarrier.calloc(1, stack).sType$Default()
+                    .srcAccessMask(VK12.VK_ACCESS_SHADER_WRITE_BIT)
+                    .dstAccessMask(VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
+            VK12.vkCmdPipelineBarrier(commandBuffer, VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, previous, null, null);
             VK12.vkCmdBindPipeline(
                     commandBuffer, VK12.VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
             VK12.vkCmdBindDescriptorSets(
@@ -638,11 +728,18 @@ final class ShaderComputeRunner implements AutoCloseable {
                         0,
                         pushConstants);
             }
+            if (timestamps != 0L) {
+                VK12.vkCmdResetQueryPool(commandBuffer, timestamps, 0, 2);
+                VK12.vkCmdWriteTimestamp(commandBuffer, VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestamps, 0);
+            }
             VK12.vkCmdDispatch(
                     commandBuffer,
                     workgroups.x(),
                     workgroups.y(),
                     workgroups.z());
+            if (timestamps != 0L) {
+                VK12.vkCmdWriteTimestamp(commandBuffer, VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestamps, 1);
+            }
             VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1, stack);
             barrier.get(0)
                     .sType$Default()
@@ -664,7 +761,15 @@ final class ShaderComputeRunner implements AutoCloseable {
                     .pCommandBuffers(stack.pointers(commandBuffer.address()));
             check(VK12.vkQueueSubmit(this.queue, submit, 0L), "submit shader-test dispatch");
             check(VK12.vkQueueWaitIdle(this.queue), "wait for shader-test dispatch");
+            if (timestamps != 0L) {
+                LongBuffer times = stack.mallocLong(2);
+                check(VK12.vkGetQueryPoolResults(this.device, timestamps, 0, 2, times, Long.BYTES,
+                        VK12.VK_QUERY_RESULT_64_BIT | VK12.VK_QUERY_RESULT_WAIT_BIT), "read test timestamps");
+                long mask = this.timestampBits == 64 ? -1L : (1L << this.timestampBits) - 1;
+                this.lastGpuMillis = ((times.get(1) - times.get(0)) & mask) * this.timestampPeriod * 1e-6;
+            }
         } finally {
+            if (timestamps != 0L) VK12.vkDestroyQueryPool(this.device, timestamps, null);
             if (commandBuffer != null) {
                 VK12.vkFreeCommandBuffers(this.device, this.commandPool, commandBuffer);
             }
@@ -691,7 +796,7 @@ final class ShaderComputeRunner implements AutoCloseable {
             long image,
             int width,
             int height,
-            int depth, ImageFormat format, int mipLevels) {
+            int depth, ImageFormat format, int mipLevels, boolean storage) {
         VkCommandBuffer commandBuffer = null;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             PointerBuffer commandPointer = stack.mallocPointer(1);
@@ -764,7 +869,7 @@ final class ShaderComputeRunner implements AutoCloseable {
                     VK12.VK_ACCESS_TRANSFER_WRITE_BIT,
                     VK12.VK_ACCESS_SHADER_READ_BIT,
                     VK12.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                    storage ? VK12.VK_IMAGE_LAYOUT_GENERAL : VK12.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             toShader.get(0).subresourceRange().levelCount(mipLevels);
             VK12.vkCmdPipelineBarrier(
                     commandBuffer,
@@ -962,9 +1067,9 @@ final class ShaderComputeRunner implements AutoCloseable {
         } catch (RuntimeException | Error exception) {
             failure = exception;
         }
-        for (ImageBinding image : this.images) {
+        for (ImageResource image : this.images.stream().map(ImageBinding::resource).distinct().toList()) {
             try {
-                image.resource().close();
+                image.close();
             } catch (RuntimeException | Error exception) {
                 if (failure == null) {
                     failure = exception;
@@ -1031,6 +1136,7 @@ final class ShaderComputeRunner implements AutoCloseable {
     }
 
     enum ImageFormat {
+        R32G32B32A32_SFLOAT(VK12.VK_FORMAT_R32G32B32A32_SFLOAT, 16),
         R8G8B8A8_UNORM(VK12.VK_FORMAT_R8G8B8A8_UNORM, 4),
         R8G8B8A8_SRGB(VK12.VK_FORMAT_R8G8B8A8_SRGB, 4),
         R16G16B16A16_SFLOAT(VK12.VK_FORMAT_R16G16B16A16_SFLOAT, 4 * Short.BYTES),
@@ -1079,7 +1185,7 @@ final class ShaderComputeRunner implements AutoCloseable {
 
     private record BufferBinding(int binding, MappedBuffer resource) {}
 
-    private record ImageBinding(int binding, ImageResource resource, int count) {
+    private record ImageBinding(int binding, ImageResource resource, int count, int type) {
     }
 
     private record ImageResource(
@@ -1087,7 +1193,7 @@ final class ShaderComputeRunner implements AutoCloseable {
             long image,
             long memory,
             long view,
-            long sampler)
+            long sampler, int layout)
             implements AutoCloseable {
         @Override
         public void close() {

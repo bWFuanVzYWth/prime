@@ -9,6 +9,7 @@ import dev.prime.mixin.MinecraftAccessor;
 import dev.prime.streamline.StreamlineFrameGeneration;
 import dev.prime.streamline.StreamlineReflex;
 import dev.prime.render.AstronomySettings;
+import dev.prime.render.AtmosphereSettings;
 import dev.prime.render.DisplaySettings;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.LightingSettings;
@@ -216,6 +217,22 @@ public final class PrimeVideoOptions {
                                 (caption, value) -> Options.genericValueLabel(
                                         caption, formatSolarLongitude(value)),
                                 PrimeConfig::setSolarLongitudeDegrees)),
+                                big(option(
+                                "prime.options.atmosphere.aerosol_density_scale",
+                                (caption, value) -> Options.genericValueLabel(caption,
+                                        Component.literal(String.format(Locale.ROOT, "%.2f",
+                                                AtmosphereSettings.densityScale(value)))),
+                                new OptionInstance.IntRange(AtmosphereSettings.MINIMUM_STEPS,
+                                        AtmosphereSettings.MAXIMUM_STEPS, false),
+                                settings.atmosphere().aerosolDensitySteps(),
+                                PrimeConfig::setAerosolDensitySteps)),
+                                big(integerOption(
+                                "prime.options.atmosphere.altitude_offset",
+                                settings.atmosphere().altitudeOffsetMeters(),
+                                AtmosphereSettings.MINIMUM_ALTITUDE_OFFSET_METERS,
+                                AtmosphereSettings.MAXIMUM_ALTITUDE_OFFSET_METERS,
+                                " m",
+                                PrimeConfig::setAtmosphereAltitudeOffsetMeters)),
                                 big(exposureOption(
                                 "prime.options.lighting.sun_ev",
                                 settings.lighting().sunQuarterSteps(),

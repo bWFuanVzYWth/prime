@@ -49,7 +49,7 @@ public final class RayTracingPushConstants {
                 (float) (input.camera().renderZ() - scene.originZ()));
         buffer.putFloat(
                 ShaderAbi.PUSH_ATMOSPHERE_EYE_RADIUS_KM_OFFSET,
-                AtmosphereCoordinates.eyeRadiusKm(input.camera().y()));
+                AtmosphereCoordinates.eyeRadiusKm(input.camera().y(), input.atmosphere()));
         buffer.putLong(
                 ShaderAbi.PUSH_SECTION_TABLE_ADDRESS_OFFSET,
                 scene.sectionTableAddress());

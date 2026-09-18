@@ -17,6 +17,7 @@ public record IntegratorFrameInput(
         int width,
         int height,
         AstronomyState astronomy,
+        AtmosphereSettings atmosphere,
         RayConeParameters rayCone,
         int additionalSpecularBounces,
         int minimumBounces,
@@ -36,6 +37,7 @@ public record IntegratorFrameInput(
     public IntegratorFrameInput {
         Objects.requireNonNull(camera, "camera");
         Objects.requireNonNull(astronomy, "astronomy");
+        Objects.requireNonNull(atmosphere, "atmosphere");
         Objects.requireNonNull(rayCone, "rayCone");
         Objects.requireNonNull(postProcessingMode, "postProcessingMode");
         Objects.requireNonNull(transparentGuideMode, "transparentGuideMode");

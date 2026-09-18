@@ -4,6 +4,7 @@ package dev.prime.config;
 
 import dev.prime.binding.streamline.ReflexMode;
 import dev.prime.render.AstronomySettings;
+import dev.prime.render.AtmosphereSettings;
 import dev.prime.render.DisplaySettings;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.LightingSettings;
@@ -30,6 +31,7 @@ final class PrimeConfigData {
     PostProcessingMode postProcessingMode = PostProcessingMode.DEFAULT;
     ReconstructionQualityMode reconstructionQuality = ReconstructionQualityMode.DEFAULT;
     AstronomySettings astronomy = AstronomySettings.defaults();
+    AtmosphereSettings atmosphere = AtmosphereSettings.defaults();
     LightingSettings.Snapshot lighting = new LightingSettings.Snapshot(
             LightingSettings.DEFAULT_SUN_QUARTER_STEPS,
             LightingSettings.DEFAULT_STAR_QUARTER_STEPS,

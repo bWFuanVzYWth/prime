@@ -286,7 +286,7 @@ final class RealtimeRenderer implements Destroyable {
                 sampleFrame.deltaMilliseconds(),
                 input.astronomy().sunDirection(),
                 settings.lighting().sunMultiplier(),
-                new StarsFrameParameters(input.astronomy().settings(),
+                new StarsFrameParameters(input.astronomy().settings(), settings.atmosphere(),
                         settings.lighting().starMultiplier(), input.cameraInWater()),
                 settings.display());
         ReconstructionDebugSettings debugSettings =
@@ -302,6 +302,7 @@ final class RealtimeRenderer implements Destroyable {
                     renderWidth,
                     renderHeight,
                     input.astronomy(),
+                    settings.atmosphere(),
                     selection.rayConeParameters(
                             input.camera().projection().m00(),
                             input.camera().projection().m11()),
@@ -434,6 +435,18 @@ final class RealtimeRenderer implements Destroyable {
         }
         this.pipeline.releaseSizedResourcesAfterIdle();
         this.sampleState = this.sampleState.invalidated();
+    }
+
+    void reloadAtmosphere(AtmospherePipeline atmosphere) {
+        VulkanReconstructionResources previous = this.resources;
+        if (previous != null) {
+            this.resources = this.reconstructionRegistry.createResources(
+                    atmosphere, this.backend.starmapImage(), this.backend.starmapSampler(), previous.selection());
+        }
+        this.sampleState = this.sampleState.invalidated();
+        if (previous != null) {
+            this.context.defer(previous);
+        }
     }
 
     void reload(AtmospherePipeline atmosphere) {

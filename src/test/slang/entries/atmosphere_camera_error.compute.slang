@@ -2,6 +2,8 @@
 
 import glsl;
 import "model/atmosphere/spectrum.slang";
+import "model/atmosphere/optical_mapping.slang";
+import "model/atmosphere/geometry.slang";
 
 import "prime_abi_types.slang";
 import "model/atmosphere/sky.slang";
@@ -12,12 +14,12 @@ struct Push { float radius; uint count; };
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
 float4 texel(int2 pixel, uint group) {
-    pixel = clamp(pixel, int2(0), int2(255, 63));
-    return spectralTable[(uint(pixel.y) * 256u + uint(pixel.x)) * 2u + group];
+    pixel = clamp(pixel, int2(0), int2(511, 127));
+    return spectralTable[(uint(pixel.y) * 512u + uint(pixel.x))];
 }
 
 float4 sampleSpectral(float2 uv, uint group) {
-    float2 coordinate = clamp(uv, float2(0), float2(1)) * float2(256, 64) - 0.5;
+    float2 coordinate = clamp(uv, float2(0), float2(1)) * float2(512, 128) - 0.5;
     int2 first = int2(floor(coordinate));
     float2 weight = frac(coordinate);
     return lerp(lerp(texel(first, group), texel(first + int2(1, 0), group), weight.x),
@@ -32,8 +34,9 @@ float3 quantize(float3 value) {
 float3 reference(float mu) {
     float radius = clamp(push.radius, ATM_BOTTOM_RADIUS_KM + ATM_WORLD_UNIT_SCALE_KM,
             ATM_TOP_RADIUS_KM - ATM_WORLD_UNIT_SCALE_KM);
-    float2 uv = atmTransmittanceUv(mu, (radius - ATM_BOTTOM_RADIUS_KM) / ATM_THICKNESS_KM);
-    return atmRec2020Transmittance(sampleSpectral(uv, 0u), sampleSpectral(uv, 1u));
+    float h = radius - ATM_BOTTOM_RADIUS_KM;
+    float2 uv = atmOpticalUv(h,mu);
+    return atmRec2020Transmittance(exp(-sampleSpectral(uv, 0u)));
 }
 
 [numthreads(64, 1, 1)]

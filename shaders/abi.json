@@ -948,11 +948,11 @@
     "level15BlockIntensity": 1.5
   },
   "atmosphereContract": {
-    "spectralModel": "hillaire-8wave-rec2020-d65",
+    "spectralModel": "sky-tracer-4wave-directional-rec2020-d65",
     "worldToAtmosphereScale": 1.0,
     "bottomRadiusKm": 6360.0,
-    "topRadiusKm": 6460.0,
-    "worldSeaLevelY": -128.0,
+    "topRadiusKm": 6480.0,
+    "worldGroundY": -64.0,
     "worldUnitScaleKm": 0.001,
     "spaceSunIntensity": 12.5,
     "sunAngularRadiusRadians": 0.00471,

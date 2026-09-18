@@ -252,7 +252,7 @@ final class AtmosphereGpuTest extends GpuShaderTest {
     }
 
     @Test
-    void coordinateScalePreservesAtmosphereAndMultipliesWorldOpticalDepth() throws IOException {
+    void stableGeometryPreservesTheWorldCoordinateScale() throws IOException {
         int caseFloats = 4;
         float altitude = 10.0F;
         float horizonRadius = 6_360.0F + altitude - 0.01F;
@@ -274,14 +274,16 @@ final class AtmosphereGpuTest extends GpuShaderTest {
                 cases.length * caseFloats * Float.BYTES,
                 new ShaderComputeRunner.Workgroups(1, 1, 1),
                 count(cases.length));
-        for (int caseIndex = 0; caseIndex < cases.length; ++caseIndex) {
-            int base = caseIndex * caseFloats * Float.BYTES;
-            for (int component = 0; component < caseFloats; ++component) {
-                float error = output.getFloat(base + component * Float.BYTES);
-                assertTrue(
-                        error <= 5.0e-4F,
-                        "coordinate-scale case " + caseIndex + " component " + component + ": " + error);
-            }
+        for (int i = 0; i < cases.length; i++) {
+            double h = cases[i][0], mu = cases[i][2], r = 6360.0 + h;
+            double distance = cases[i][3] * ShaderAbi.ATMOSPHERE_WORLD_UNIT_SCALE_KM;
+            double top = -r * mu + Math.sqrt(r * r * mu * mu + (120.0 - h) * (12720.0 + 120.0 + h));
+            double height = Math.max(0.0, Math.sqrt(r*r + distance*(distance+2*r*mu))-6360.0);
+            assertEquals(top, output.getFloat(i*16), Math.max(0.002, top*1e-6));
+            assertEquals(height, output.getFloat(i*16+4), 2e-5);
+            assertEquals(distance, output.getFloat(i*16+8), 1e-7);
+            double horizon = -Math.sqrt(h*(12720.0+h))/r;
+            assertEquals(mu < 0 && mu <= horizon ? 1F : 0F, output.getFloat(i*16+12));
         }
     }
 

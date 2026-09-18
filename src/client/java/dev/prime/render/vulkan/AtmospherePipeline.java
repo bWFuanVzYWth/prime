@@ -2,21 +2,20 @@
 
 package dev.prime.render.vulkan;
 
+import static dev.prime.render.vulkan.AtmospherePrecomputation.*;
+
 import com.mojang.renderpearl.backend.vulkan.Destroyable;
 import dev.prime.render.AerialEpipolarMapping;
 import dev.prime.render.AtmosphereCoordinates;
+import dev.prime.render.AtmosphereSettings;
 import dev.prime.render.FrameCamera;
 import dev.prime.render.IntegratorFrameInput;
 import dev.prime.render.SunDirection;
 import dev.prime.render.shader.ShaderAbi;
 import dev.prime.render.vulkan.terrain.TerrainScene;
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.LongBuffer;
-import java.util.Base64;
-import java.util.zip.GZIPInputStream;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.KHRRayTracingPipeline;
@@ -31,7 +30,7 @@ import org.lwjgl.vulkan.VkPushConstantRange;
  * Owns Prime's spectral atmosphere lookup tables and native Vulkan compute pipelines.
  *
  * <p>The transmittance and multiple-scattering tables depend only on the immutable atmosphere
- * model and are generated once. The sky table changes with eye altitude and sun elevation;
+ * model and are generated once per manual density setting. The sky table changes with eye altitude and sun elevation;
  * aerial perspective also changes with the relative camera projection and complete sun direction.
  * Atmosphere dispatch data travels through push constants. A separately synchronized 48-byte
  * uniform publishes the active directional-shadow bank and basis to later transport dispatches.
@@ -41,17 +40,18 @@ public final class AtmospherePipeline implements Destroyable {
 
     private static final int PUSH_CONSTANT_SIZE = 128;
     private enum ImageRole {
-        TRANSMITTANCE_LOW,
-        TRANSMITTANCE_HIGH,
-        MULTI_SCATTERING_LOW,
-        MULTI_SCATTERING_HIGH,
+        OPTICAL_DEPTH,
+        SOURCE,
+        MEAN,
+        GROUND,
         SKY_VIEW,
         AERIAL_RADIANCE,
         AERIAL_TRANSMITTANCE,
-        CAMERA_TRANSMITTANCE
+        CAMERA_TRANSMITTANCE,
+        HIGH
     }
     private static final int IMAGE_COUNT = ImageRole.values().length;
-    private static final int PHASE_LUT_BINDING = 7;
+    private static final int MEDIUM_BINDING = 7;
     private static final int SUN_SHADOW_BINDING = 8;
     private static final int SUN_SHADOW_HIERARCHY_BINDING =
             SUN_SHADOW_BINDING
@@ -61,8 +61,9 @@ public final class AtmospherePipeline implements Destroyable {
     private static final int SUN_SHADOW_HIERARCHY_HEIGHT = SunShadowClipmap.RESOLUTION;
     private static final int CAMERA_TRANSMITTANCE_BINDING =
             SUN_SHADOW_HIERARCHY_BINDING + SUN_SHADOW_HIERARCHY_COUNT;
-    private static final int BINDING_COUNT = CAMERA_TRANSMITTANCE_BINDING + 1;
-    private static final int PHASE_LUT_BYTE_SIZE = 131_072;
+    private static final int BINDING_COUNT = 33;
+    private static final int[] IMAGE_BINDINGS = {0, 1, 2, 3, 4, 5, 6, 23, 24};
+    private static final int[] FIELD_IMAGES = {1, 2, 3, 8};
     private static final int AERIAL_KEY_SIZE = 21;
     private static final int COMPUTE_STAGE = VK12.VK_SHADER_STAGE_COMPUTE_BIT;
     private enum PipelineRole {
@@ -72,6 +73,10 @@ public final class AtmospherePipeline implements Destroyable {
         MULTI_SCATTERING(
                 GeneratedShaderPrograms.resource("atmosphere_multi_scattering"),
                 "Prime atmosphere multiple scattering pipeline"),
+        DIRECTIONS(GeneratedShaderPrograms.resource("atmosphere_directions"), "Prime atmosphere directions"),
+        INCIDENT(GeneratedShaderPrograms.resource("atmosphere_incident"), "Prime atmosphere incident light"),
+        MOMENTS(GeneratedShaderPrograms.resource("atmosphere_moments"), "Prime atmosphere moments"),
+        GROUND(GeneratedShaderPrograms.resource("atmosphere_ground"), "Prime atmosphere ground"),
         SKY(
                 GeneratedShaderPrograms.resource("atmosphere_sky"),
                 "Prime atmosphere sky pipeline"),
@@ -95,18 +100,24 @@ public final class AtmospherePipeline implements Destroyable {
     }
 
     private final VulkanContext context;
+    private final int aerosolDensitySteps;
     private final VulkanImage[] images;
     private final SunShadowClipmap sunShadow;
     private final VulkanImage[] sunShadowHierarchies;
     private final VulkanBuffer sunShadowQuery;
-    private final VulkanBuffer phaseLut;
+    private final VulkanBuffer medium;
+    private final long sampler;
+    // Owned by this render-thread pipeline until the bootstrap submission transfers them to
+    // VulkanContext's existing deferred retirement queue. No frame may reuse solver scratch.
+    private final VulkanImage[] spare;
+    private final VulkanBuffer[] scratch;
+    private final VulkanDescriptors.BoundSet[] solverDescriptors;
+    private boolean solverRetired;
     private final long descriptorSetLayout;
     private final VulkanDescriptors.BoundSet descriptors;
     private final long pipelineLayout;
     private final long[] pipelines;
     private final VulkanImage[] initialImages;
-    private final VulkanImage[] transmittanceImages;
-    private final VulkanImage[] multiScatteringImages;
     private final VulkanImage[] skyImage;
     private final VulkanImage[] aerialImages;
     private final VulkanImage[] dynamicImages;
@@ -119,29 +130,47 @@ public final class AtmospherePipeline implements Destroyable {
     private boolean staticPreparationPending;
     private boolean destroyed;
 
-    public AtmospherePipeline(VulkanContext context) {
+    public AtmospherePipeline(VulkanContext context, int aerosolDensitySteps) {
         this.context = context;
+        AtmosphereSettings.densityScale(aerosolDensitySteps);
+        this.aerosolDensitySteps = aerosolDensitySteps;
         VulkanImage[] images = new VulkanImage[IMAGE_COUNT];
         VulkanImage[] sunShadowHierarchies =
                 new VulkanImage[SUN_SHADOW_HIERARCHY_COUNT];
         SunShadowClipmap newSunShadow = null;
         VulkanBuffer newSunShadowQuery = null;
-        VulkanBuffer newPhaseLut = null;
+        VulkanBuffer newMedium = null;
+        long newSampler = 0L;
+        VulkanImage[] spare = new VulkanImage[4];
+        VulkanBuffer[] scratch = new VulkanBuffer[3];
+        VulkanDescriptors.BoundSet[] solverDescriptors = new VulkanDescriptors.BoundSet[2];
         long newDescriptorSetLayout = 0L;
         VulkanDescriptors.BoundSet newDescriptors = null;
         long newPipelineLayout = 0L;
         long[] pipelines = new long[PipelineRole.values().length];
         try {
-            images[ImageRole.TRANSMITTANCE_LOW.ordinal()] = context.createAtmosphereImage2D(
-                    256, 64, "Prime atmosphere transmittance low");
-            images[ImageRole.TRANSMITTANCE_HIGH.ordinal()] = context.createAtmosphereImage2D(
-                    256, 64, "Prime atmosphere transmittance high");
-            images[ImageRole.MULTI_SCATTERING_LOW.ordinal()] = context.createAtmosphereImage2D(
-                    64, 64, "Prime atmosphere multiple scattering low");
-            images[ImageRole.MULTI_SCATTERING_HIGH.ordinal()] = context.createAtmosphereImage2D(
-                    64, 64, "Prime atmosphere multiple scattering high");
-            images[ImageRole.SKY_VIEW.ordinal()] = context.createAtmosphereImage2D(
-                    256, 256, "Prime atmosphere sky view");
+            images[ImageRole.OPTICAL_DEPTH.ordinal()] = staticImage(context, 512, 128,
+                    VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "Prime atmosphere optical depth");
+            for (int bank = 0; bank < 2; bank++) {
+                VulkanImage[] target = bank == 0 ? images : spare;
+                int[] indices = bank == 0 ? FIELD_IMAGES : new int[] {0, 1, 2, 3};
+                target[indices[0]] = staticImage(context, SUNS * PHASES, LOW_HEIGHTS * CONES,
+                        VK12.VK_FORMAT_R16G16B16A16_SFLOAT, "Prime atmosphere source " + bank);
+                target[indices[1]] = staticImage(context, SUNS, HEIGHTS,
+                        VK12.VK_FORMAT_R32G32B32A32_SFLOAT, "Prime atmosphere mean " + bank);
+                target[indices[2]] = staticImage(context, SUNS, 1,
+                        VK12.VK_FORMAT_R32G32B32A32_SFLOAT, "Prime atmosphere ground " + bank);
+                target[indices[3]] = staticImage(context, SUNS * 5, HEIGHTS - LOW_HEIGHTS + 1,
+                        VK12.VK_FORMAT_R32G32B32A32_SFLOAT, "Prime atmosphere Rayleigh " + bank);
+            }
+            for (int index = 0; index < scratch.length; index++) {
+                long vectors = (long) BATCH_HEIGHTS * SUNS * (index == 2 ? 7 : DIRECTIONS);
+                scratch[index] = context.createBuffer(vectors * 16,
+                        VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false, "Prime atmosphere scratch " + index);
+            }
+            images[ImageRole.SKY_VIEW.ordinal()] = context.createImage2D(256, 256,
+                    VK12.VK_FORMAT_R32G32B32A32_SFLOAT, VK12.VK_IMAGE_USAGE_STORAGE_BIT,
+                    "Prime atmosphere log sky view");
             images[ImageRole.CAMERA_TRANSMITTANCE.ordinal()] = context.createAtmosphereImage2D(
                     ShaderAbi.ATMOSPHERE_DIRECTION_TRANSMITTANCE_WIDTH,
                     1, "Prime atmosphere camera transmittance");
@@ -172,7 +201,8 @@ public final class AtmospherePipeline implements Destroyable {
                             | VK12.VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                     false,
                     "Prime sun-shadow query constants");
-            newPhaseLut = createPhaseLut(context);
+            newMedium = createMedium(context, aerosolDensitySteps);
+            newSampler = createSampler(context);
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 newDescriptorSetLayout = createDescriptorSetLayout(context, stack);
                 newPipelineLayout = createPipelineLayout(context, stack, newDescriptorSetLayout);
@@ -184,19 +214,28 @@ public final class AtmospherePipeline implements Destroyable {
                         images,
                         sunShadowHierarchies,
                         newSunShadow,
-                        newPhaseLut);
+                        newMedium, newSampler, spare, null, -1);
+                for (int bank = 0; bank < 2; bank++) {
+                    solverDescriptors[bank] = createDescriptors(context, stack, newDescriptorSetLayout,
+                            images, sunShadowHierarchies, newSunShadow, newMedium, newSampler,
+                            spare, scratch, bank);
+                }
             }
             this.images = images;
             this.sunShadow = newSunShadow;
             this.sunShadowHierarchies = sunShadowHierarchies;
             this.sunShadowQuery = newSunShadowQuery;
-            this.phaseLut = newPhaseLut;
+            this.medium = newMedium;
+            this.sampler = newSampler;
+            this.spare = spare;
+            this.scratch = scratch;
+            this.solverDescriptors = solverDescriptors;
             this.descriptorSetLayout = newDescriptorSetLayout;
             this.descriptors = newDescriptors;
             this.pipelineLayout = newPipelineLayout;
             this.pipelines = pipelines;
             this.initialImages = new VulkanImage[
-                    IMAGE_COUNT + SUN_SHADOW_HIERARCHY_COUNT];
+                    IMAGE_COUNT + SUN_SHADOW_HIERARCHY_COUNT + spare.length];
             System.arraycopy(images, 0, this.initialImages, 0, IMAGE_COUNT);
             System.arraycopy(
                     sunShadowHierarchies,
@@ -204,12 +243,8 @@ public final class AtmospherePipeline implements Destroyable {
                     this.initialImages,
                     IMAGE_COUNT,
                     SUN_SHADOW_HIERARCHY_COUNT);
-            this.transmittanceImages = new VulkanImage[] {
-                image(ImageRole.TRANSMITTANCE_LOW), image(ImageRole.TRANSMITTANCE_HIGH)
-            };
-            this.multiScatteringImages = new VulkanImage[] {
-                image(ImageRole.MULTI_SCATTERING_LOW), image(ImageRole.MULTI_SCATTERING_HIGH)
-            };
+            System.arraycopy(spare, 0, this.initialImages,
+                    IMAGE_COUNT + SUN_SHADOW_HIERARCHY_COUNT, spare.length);
             this.skyImage = new VulkanImage[] {
                 image(ImageRole.SKY_VIEW), image(ImageRole.CAMERA_TRANSMITTANCE)
             };
@@ -224,6 +259,10 @@ public final class AtmospherePipeline implements Destroyable {
             };
         } catch (RuntimeException exception) {
             if (newDescriptors != null) newDescriptors.destroy();
+            for (var set : solverDescriptors) if (set != null) set.destroy();
+            for (var buffer : scratch) if (buffer != null) buffer.destroy();
+            for (var image : spare) if (image != null) image.destroy();
+            if (newSampler != 0L) VK12.vkDestroySampler(context.vkDevice(), newSampler, null);
             for (int index = pipelines.length - 1; index >= 0; index--) {
                 destroyPipeline(context, pipelines[index]);
             }
@@ -233,8 +272,8 @@ public final class AtmospherePipeline implements Destroyable {
             if (newDescriptorSetLayout != 0L) {
                 VK12.vkDestroyDescriptorSetLayout(context.vkDevice(), newDescriptorSetLayout, null);
             }
-            if (newPhaseLut != null) {
-                newPhaseLut.destroy();
+            if (newMedium != null) {
+                newMedium.destroy();
             }
             if (newSunShadowQuery != null) {
                 newSunShadowQuery.destroy();
@@ -312,19 +351,16 @@ public final class AtmospherePipeline implements Destroyable {
             throw new IllegalStateException("Atmosphere preparation is already pending");
         }
         transitionAllToGeneral(commandBuffer);
-        dispatch(commandBuffer, pipeline(PipelineRole.TRANSMITTANCE), 32, 8, 1, null);
-        computeWriteBarrier(
-                commandBuffer,
-                this.transmittanceImages,
-                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-                        | KHRRayTracingPipeline.VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
-        // Split the two spectral groups along dispatch Z to keep the one-time invocation below
-        // Windows GPU-timeout risk while preserving the reference's 256 directions × 128 steps.
-        dispatch(commandBuffer, pipeline(PipelineRole.MULTI_SCATTERING), 8, 8, 2, null);
-        computeWriteBarrier(
-                commandBuffer,
-                this.multiScatteringImages,
-                VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            ByteBuffer push = stack.calloc(16).order(ByteOrder.nativeOrder());
+            for (var step : AtmospherePrecomputation.plan()) {
+                push.putInt(0, step.firstHeight()).putInt(4, step.heightCount()).putInt(8, step.iteration());
+                dispatchSolver(commandBuffer, PipelineRole.valueOf(step.stage().name()), step.bank(),
+                        step.x(), step.y(), push);
+                solverBarrier(commandBuffer);
+            }
+        }
+
         this.staticPreparationPending = true;
         return true;
     }
@@ -337,6 +373,8 @@ public final class AtmospherePipeline implements Destroyable {
             image.markInitialized();
         }
         this.history.staticSubmitted();
+        this.solverRetired = true;
+        this.context.defer(this::destroySolverResources);
         this.staticPreparationPending = false;
     }
 
@@ -372,7 +410,7 @@ public final class AtmospherePipeline implements Destroyable {
                     scene,
                     forceCompleteSunShadow);
             updateSunShadowQuery(commandBuffer);
-            eyeRadiusKm = AtmosphereCoordinates.eyeRadiusKm(camera.y());
+            eyeRadiusKm = AtmosphereCoordinates.eyeRadiusKm(camera.y(), input.atmosphere());
             eyeRadiusBits = Float.floatToIntBits(eyeRadiusKm);
             sunElevationBits = Float.floatToIntBits(sunDirection.y());
             fillAerialKey(
@@ -444,7 +482,7 @@ public final class AtmospherePipeline implements Destroyable {
                     pushConstants.putInt(76, epipoleYBits);
                 }
                 if (prepareSky) {
-                    dispatch(commandBuffer, pipeline(PipelineRole.SKY), 32, 32, 1, pushConstants);
+                    dispatch(commandBuffer, pipeline(PipelineRole.SKY), 1, 256, 1, pushConstants);
                 }
                 if (prepareAerial) {
                     dispatch(
@@ -517,6 +555,8 @@ public final class AtmospherePipeline implements Destroyable {
         if (!this.destroyed) {
             this.destroyed = true;
             this.descriptors.destroy();
+            if (!this.solverRetired) destroySolverResources();
+            VK12.vkDestroySampler(this.context.vkDevice(), this.sampler, null);
             for (int index = this.pipelines.length - 1; index >= 0; index--) {
                 VK12.vkDestroyPipeline(this.context.vkDevice(), this.pipelines[index], null);
             }
@@ -532,7 +572,7 @@ public final class AtmospherePipeline implements Destroyable {
             for (int index = this.images.length - 1; index >= 0; index--) {
                 this.images[index].destroy();
             }
-            this.phaseLut.destroy();
+            this.medium.destroy();
         }
     }
 
@@ -689,14 +729,18 @@ public final class AtmospherePipeline implements Destroyable {
     private static long createDescriptorSetLayout(VulkanContext context, MemoryStack stack) {
         VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(BINDING_COUNT, stack);
         for (int index = 0; index < IMAGE_COUNT; index++) {
-            int binding = index == ImageRole.CAMERA_TRANSMITTANCE.ordinal()
-                    ? CAMERA_TRANSMITTANCE_BINDING : index;
-            VulkanDescriptors.layoutBinding(
-                    bindings.get(binding), binding,
-                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, COMPUTE_STAGE);
+            int binding = IMAGE_BINDINGS[index];
+            int type = index < 2 ? VK12.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                    : VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            VulkanDescriptors.layoutBinding(bindings.get(binding), binding, type, 1, COMPUTE_STAGE);
+        }
+        for (int binding = 25; binding <= 32; binding++) {
+            int type = binding >= 29 && binding <= 31 ? VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+                    : VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            VulkanDescriptors.layoutBinding(bindings.get(binding), binding, type, 1, COMPUTE_STAGE);
         }
         VulkanDescriptors.layoutBinding(
-                bindings.get(PHASE_LUT_BINDING), PHASE_LUT_BINDING,
+                bindings.get(MEDIUM_BINDING), MEDIUM_BINDING,
                 VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, COMPUTE_STAGE);
         for (int index = 0;
                 index < SunShadowClipmap.BANK_COUNT * SunShadowClipmap.CASCADE_COUNT;
@@ -796,32 +840,49 @@ public final class AtmospherePipeline implements Destroyable {
             VulkanImage[] images,
             VulkanImage[] sunShadowHierarchies,
             SunShadowClipmap sunShadow,
-            VulkanBuffer phaseLut) {
+            VulkanBuffer medium, long sampler, VulkanImage[] spare, VulkanBuffer[] scratch, int bank) {
         VulkanDescriptors.Binding[] bindings =
                 new VulkanDescriptors.Binding[BINDING_COUNT];
         for (int index = 0; index < IMAGE_COUNT; index++) {
-            int binding = index == ImageRole.CAMERA_TRANSMITTANCE.ordinal()
-                    ? CAMERA_TRANSMITTANCE_BINDING : index;
-            bindings[binding] = VulkanDescriptors.image(
-                    binding,
-                    VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                    images[index].view(),
-                    VK12.VK_IMAGE_LAYOUT_GENERAL);
+            int binding = IMAGE_BINDINGS[index];
+            VulkanImage image = images[index];
+            if ((bank < 0 ? AtmospherePrecomputation.finalBank() : bank) == 1) {
+                for (int field = 0; field < FIELD_IMAGES.length; field++) {
+                    if (index == FIELD_IMAGES[field]) image = spare[field];
+                }
+            }
+            bindings[binding] = index < 2
+                    ? VulkanDescriptors.sampledImage(binding, image.view(), VK12.VK_IMAGE_LAYOUT_GENERAL, sampler)
+                    : VulkanDescriptors.image(binding, VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                            image.view(), VK12.VK_IMAGE_LAYOUT_GENERAL);
         }
-        bindings[PHASE_LUT_BINDING] = VulkanDescriptors.buffer(
-                PHASE_LUT_BINDING,
+        if (bank >= 0) {
+            for (int field = 0; field < FIELD_IMAGES.length; field++) {
+                VulkanImage image = bank == 0 ? spare[field] : images[FIELD_IMAGES[field]];
+                bindings[25 + field] = VulkanDescriptors.image(25 + field,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, image.view(), VK12.VK_IMAGE_LAYOUT_GENERAL);
+            }
+            for (int index = 0; index < scratch.length; index++) {
+                bindings[29 + index] = VulkanDescriptors.buffer(29 + index,
+                        VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, scratch[index].handle(), 0L, scratch[index].size());
+            }
+            bindings[32] = VulkanDescriptors.image(32, VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                    images[ImageRole.OPTICAL_DEPTH.ordinal()].view(), VK12.VK_IMAGE_LAYOUT_GENERAL);
+        }
+        bindings[MEDIUM_BINDING] = VulkanDescriptors.buffer(
+                MEDIUM_BINDING,
                 VK12.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                phaseLut.handle(),
+                medium.handle(),
                 0L,
-                phaseLut.size());
-        for (int bank = 0; bank < SunShadowClipmap.BANK_COUNT; bank++) {
+                medium.size());
+        for (int shadowBank = 0; shadowBank < SunShadowClipmap.BANK_COUNT; shadowBank++) {
             for (int cascade = 0; cascade < SunShadowClipmap.CASCADE_COUNT; cascade++) {
-                int index = bank * SunShadowClipmap.CASCADE_COUNT + cascade;
+                int index = shadowBank * SunShadowClipmap.CASCADE_COUNT + cascade;
                 int binding = SUN_SHADOW_BINDING + index;
                 bindings[binding] = VulkanDescriptors.image(
                         binding,
                         VK12.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                        sunShadow.depth(bank, cascade).view(),
+                        sunShadow.depth(shadowBank, cascade).view(),
                         VK12.VK_IMAGE_LAYOUT_GENERAL);
             }
         }
@@ -834,35 +895,22 @@ public final class AtmospherePipeline implements Destroyable {
                     VK12.VK_IMAGE_LAYOUT_GENERAL);
         }
         return VulkanDescriptors.bind(
-                context, stack, descriptorSetLayout, "Prime atmosphere", bindings);
+                context, stack, descriptorSetLayout, "Prime atmosphere",
+                java.util.Arrays.stream(bindings).filter(java.util.Objects::nonNull)
+                        .toArray(VulkanDescriptors.Binding[]::new));
     }
 
-    private static VulkanBuffer createPhaseLut(VulkanContext context) {
-        // The immutable payload is the reference engine's little-endian AoS table:
-        // 2048 entries × four species × RGBA wavelengths. Keeping it compressed textual source
-        // avoids platform-dependent generation while the hash test guards its physical meaning.
-        byte[] bytes;
-        try (InputStream encoded = AtmospherePipeline.class.getResourceAsStream(
-                        "/prime/atmosphere/phase_lut.bin.gz.b64")) {
-            if (encoded == null) {
-                throw new IllegalStateException("Missing Prime atmosphere phase LUT");
-            }
-            try (InputStream decoded = Base64.getMimeDecoder().wrap(encoded);
-                    GZIPInputStream decompressed = new GZIPInputStream(decoded)) {
-                bytes = decompressed.readAllBytes();
-            }
-        } catch (IOException exception) {
-            throw new IllegalStateException("Unable to read Prime atmosphere phase LUT", exception);
-        }
-        if (bytes.length != PHASE_LUT_BYTE_SIZE) {
-            throw new IllegalStateException(
-                    "Unexpected Prime atmosphere phase LUT size " + bytes.length);
-        }
+    public int aerosolDensitySteps() {
+        return this.aerosolDensitySteps;
+    }
+
+    private static VulkanBuffer createMedium(VulkanContext context, int aerosolDensitySteps) {
+        byte[] bytes = AtmosphereMedium.load(aerosolDensitySteps);
         VulkanBuffer buffer = context.createBuffer(
                 bytes.length,
                 VK12.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                 true,
-                "Prime atmosphere phase LUT");
+                "Prime atmosphere medium inputs");
         ByteBuffer data = MemoryUtil.memAlloc(bytes.length);
         try {
             data.put(bytes).flip();
@@ -879,6 +927,54 @@ public final class AtmospherePipeline implements Destroyable {
     private static void destroyPipeline(VulkanContext context, long pipeline) {
         if (pipeline != 0L) {
             VK12.vkDestroyPipeline(context.vkDevice(), pipeline, null);
+        }
+    }
+
+    private static VulkanImage staticImage(VulkanContext context, int width, int height, int format, String label) {
+        return context.createImage2D(width, height, format,
+                VK12.VK_IMAGE_USAGE_STORAGE_BIT | VK12.VK_IMAGE_USAGE_SAMPLED_BIT, label);
+    }
+
+    private static long createSampler(VulkanContext context) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            var info = org.lwjgl.vulkan.VkSamplerCreateInfo.calloc(stack).sType$Default()
+                    .magFilter(VK12.VK_FILTER_LINEAR).minFilter(VK12.VK_FILTER_LINEAR)
+                    .mipmapMode(VK12.VK_SAMPLER_MIPMAP_MODE_NEAREST)
+                    .addressModeU(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                    .addressModeV(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                    .addressModeW(VK12.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE).maxAnisotropy(1.0F);
+            LongBuffer pointer = stack.mallocLong(1);
+            VulkanContext.check(VK12.vkCreateSampler(context.vkDevice(), info, null, pointer),
+                    "create atmosphere interpolation sampler");
+            return pointer.get(0);
+        }
+    }
+
+    private void destroySolverResources() {
+        for (var set : this.solverDescriptors) set.destroy();
+        for (var buffer : this.scratch) buffer.destroy();
+        for (var image : this.spare) image.destroy();
+    }
+
+    private void dispatchSolver(VkCommandBuffer commandBuffer, PipelineRole role, int bank,
+            int x, int y, ByteBuffer push) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VK12.vkCmdBindPipeline(commandBuffer, VK12.VK_PIPELINE_BIND_POINT_COMPUTE, pipeline(role));
+            VK12.vkCmdBindDescriptorSets(commandBuffer, VK12.VK_PIPELINE_BIND_POINT_COMPUTE,
+                    this.pipelineLayout, 0, stack.longs(this.solverDescriptors[bank].handle()), null);
+            VK12.vkCmdPushConstants(commandBuffer, this.pipelineLayout, COMPUTE_STAGE, 0, push);
+            VK12.vkCmdDispatch(commandBuffer, x, y, 1);
+        }
+    }
+
+    private void solverBarrier(VkCommandBuffer commandBuffer) {
+        // Includes WAR between batches and ping-pong rounds, as well as RAW producer edges.
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            var barriers = org.lwjgl.vulkan.VkMemoryBarrier.calloc(1, stack).sType$Default()
+                    .srcAccessMask(VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT)
+                    .dstAccessMask(VK12.VK_ACCESS_SHADER_READ_BIT | VK12.VK_ACCESS_SHADER_WRITE_BIT);
+            VK12.vkCmdPipelineBarrier(commandBuffer, VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    VK12.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, barriers, null, null);
         }
     }
 

@@ -5,6 +5,7 @@ package dev.prime.config;
 import dev.prime.binding.streamline.ReflexMode;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.AstronomySettings;
+import dev.prime.render.AtmosphereSettings;
 import dev.prime.render.DisplaySettings;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.LightingSettings;
@@ -44,6 +45,8 @@ final class PrimeConfigCodec {
     private static final String MODE_KEY = "post_processing.mode";
     private static final String QUALITY_KEY = "post_processing.quality";
     private static final String SUN_EV_KEY = "lighting.sun_ev";
+    private static final String AEROSOL_DENSITY_SCALE_KEY = "atmosphere.aerosol_density_scale";
+    private static final String ATMOSPHERE_ALTITUDE_OFFSET_KEY = "atmosphere.altitude_offset_meters";
     private static final String STAR_EV_KEY = "lighting.star_ev";
     private static final String BLOCK_LIGHT_EV_KEY = "lighting.block_light_ev";
     private static final String TRANSPARENT_NEE_MODE_KEY = "lighting.transparent_nee_mode";
@@ -122,6 +125,11 @@ final class PrimeConfigCodec {
                 reader.value(
                         SOLAR_LONGITUDE_DEGREES_KEY, data.astronomy.solarLongitudeDegrees(),
                         PrimeConfigCodec::parseSolarLongitudeDegrees, "solar longitude"));
+        data.atmosphere = new AtmosphereSettings(reader.value(
+                AEROSOL_DENSITY_SCALE_KEY, data.atmosphere.aerosolDensitySteps(),
+                PrimeConfigCodec::parseAerosolDensitySteps, "aerosol density scale"),
+                reader.value(ATMOSPHERE_ALTITUDE_OFFSET_KEY, data.atmosphere.altitudeOffsetMeters(),
+                        PrimeConfigCodec::parseAtmosphereAltitudeOffsetMeters, "atmosphere altitude offset"));
         data.lighting = new LightingSettings.Snapshot(
                 reader.value(
                         SUN_EV_KEY, data.lighting.sunQuarterSteps(),
@@ -206,6 +214,9 @@ final class PrimeConfigCodec {
                 + SOLAR_LONGITUDE_DEGREES_KEY + "="
                 + data.astronomy.solarLongitudeDegrees() + "\n"
                 + SUN_EV_KEY + "=" + formatEv(data.lighting.sunQuarterSteps()) + "\n"
+                + AEROSOL_DENSITY_SCALE_KEY + "="
+                + formatAerosolDensityScale(data.atmosphere.aerosolDensitySteps()) + "\n"
+                + ATMOSPHERE_ALTITUDE_OFFSET_KEY + "=" + data.atmosphere.altitudeOffsetMeters() + "\n"
                 + STAR_EV_KEY + "=" + formatEv(data.lighting.starQuarterSteps()) + "\n"
                 + BLOCK_LIGHT_EV_KEY + "=" + formatEv(data.lighting.blockLightQuarterSteps()) + "\n"
                 + TRANSPARENT_NEE_MODE_KEY + "=" + data.lighting.transparentNeeMode().id() + "\n"
@@ -339,6 +350,20 @@ final class PrimeConfigCodec {
                         AstronomySettings.DEFAULT_LATITUDE_DEGREES,
                         longitude).solarLongitudeDegrees(),
                 "Solar longitude must be an integer degree");
+    }
+
+    static int parseAtmosphereAltitudeOffsetMeters(String value) {
+        return parseInteger(value, AtmosphereSettings::validateAltitudeOffsetMeters,
+                "Atmosphere altitude offset must be an integer number of meters");
+    }
+
+    static int parseAerosolDensitySteps(String value) {
+        return parseSteps(value, AtmosphereSettings.STEPS_PER_UNIT,
+                AtmosphereSettings::densityScale, "Aerosol density scale must be an exact 0.01 step");
+    }
+
+    static String formatAerosolDensityScale(int steps) {
+        return formatSteps(steps, AtmosphereSettings.STEPS_PER_UNIT, AtmosphereSettings::densityScale);
     }
 
     static int parseEvQuarterSteps(String value) {

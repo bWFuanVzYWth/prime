@@ -65,7 +65,7 @@ final class DlssRrStarsPass implements Destroyable {
             push.putFloat(64, parameters.sunDirection().x());
             push.putFloat(68, parameters.sunDirection().y());
             push.putFloat(72, parameters.sunDirection().z());
-            push.putFloat(76, AtmosphereCoordinates.eyeRadiusKm(parameters.camera().y()));
+            push.putFloat(76, AtmosphereCoordinates.eyeRadiusKm(parameters.camera().y(), stars.atmosphere()));
             push.putFloat(80, (float) Math.toRadians(stars.astronomy().latitudeDegrees()));
             push.putFloat(84, (float) Math.toRadians(stars.astronomy().solarLongitudeDegrees()));
             push.putFloat(88, stars.multiplier() * ShaderAbi.STARMAP_BASE_RADIANCE_SCALE);

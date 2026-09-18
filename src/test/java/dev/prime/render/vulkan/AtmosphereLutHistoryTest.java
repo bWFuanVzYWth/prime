@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Arrays;
+import dev.prime.render.AtmosphereCoordinates;
+import dev.prime.render.AtmosphereSettings;
 import org.junit.jupiter.api.Test;
 
 final class AtmosphereLutHistoryTest {
@@ -15,6 +17,22 @@ final class AtmosphereLutHistoryTest {
             AtmosphereLutHistory.STATIC
                     | AtmosphereLutHistory.SKY
                     | AtmosphereLutHistory.AERIAL;
+
+    @Test
+    void virtualAltitudeChangeRefreshesBothCameraTablesWithoutTheStaticSolver() {
+        AtmosphereLutHistory history = new AtmosphereLutHistory(1);
+        history.staticSubmitted();
+        for (int offset : new int[] {0, 300, 10_000}) {
+            int radius = Float.floatToIntBits(AtmosphereCoordinates.eyeRadiusKm(
+                    -64, new AtmosphereSettings(100, offset)));
+            history.beginCandidate()[0] = radius;
+            assertEquals(AtmosphereLutHistory.SKY | AtmosphereLutHistory.AERIAL,
+                    history.prepareCandidate(radius, 0));
+            history.commit();
+            history.beginCandidate()[0] = radius;
+            assertEquals(0, history.prepareCandidate(radius, 0));
+        }
+    }
 
     @Test
     void abandonedCandidateDoesNotAdvanceCommittedKeys() {

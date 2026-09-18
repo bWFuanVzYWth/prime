@@ -118,7 +118,7 @@ public final class RendererLifecycle {
             if (minecraft.level != null && minecraft.player != null) {
                 terrain.acquire(minecraft);
             }
-            createdRenderer = new VulkanRenderer(this.context);
+            createdRenderer = new VulkanRenderer(this.context, settings.atmosphere());
             createdRenderer.bootstrap(minecraft, settings);
             this.renderer = createdRenderer;
             this.failureReason = "";

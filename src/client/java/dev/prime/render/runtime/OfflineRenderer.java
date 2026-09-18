@@ -186,6 +186,7 @@ final class OfflineRenderer implements Destroyable {
                 width,
                 height,
                 current.astronomy(),
+                current.settings().atmosphere(),
                 RayConeParameters.fromProjection(
                         current.camera().projection().m00(),
                         current.camera().projection().m11(),

@@ -102,6 +102,7 @@ def verifyDistributionJar = tasks.register('verifyDistributionJar') {
 			'META-INF/licenses/STREAMLINE-LICENSE.txt',
 			'META-INF/licenses/ROBOCUTE-NOTICE.txt',
 			'META-INF/licenses/NASA-DEEP-STAR-MAPS-2020-NOTICE.md',
+			'META-INF/licenses/SKY-TRACER-NOTICE.md',
 			'prime/starmap/starmap_2020_16k.json',
 			'prime/starmap/starmap_2020_16k_0.bc6h.gz',
 			'prime/starmap/starmap_2020_16k_1.bc6h.gz',

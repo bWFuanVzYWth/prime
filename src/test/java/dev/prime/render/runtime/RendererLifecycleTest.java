@@ -93,6 +93,7 @@ final class RendererLifecycleTest {
                 PostProcessingMode.DISABLED,
                 ReconstructionQualityMode.DEFAULT,
                 AstronomySettings.defaults(),
+                dev.prime.render.AtmosphereSettings.defaults(),
                 new LightingSettings.Snapshot(
                         LightingSettings.DEFAULT_SUN_QUARTER_STEPS,
                         LightingSettings.DEFAULT_STAR_QUARTER_STEPS,

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.prime.render.AstronomySettings;
+import dev.prime.render.AtmosphereSettings;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.BounceSettings;
 import dev.prime.render.RendererSettings;
@@ -25,6 +26,101 @@ import java.util.function.ToIntFunction;
 import org.junit.jupiter.api.Test;
 
 final class PrimeConfigTest {
+    @Test
+    void altitudeOffsetDefaultsTo300MetersAndPersistsOnlyTheSupportedRange() throws Exception {
+        Properties properties = new Properties();
+        properties.load(new StringReader(PrimeConfig.serializedContents()));
+        String key = "atmosphere.altitude_offset_meters";
+        properties.remove(key);
+        var missing = PrimeConfigCodec.decode(properties);
+        assertTrue(missing.rewriteNeeded());
+        assertEquals(300, missing.data().atmosphere.altitudeOffsetMeters());
+        for (String value : new String[] {"0", "1", "300", "10000"}) {
+            properties.setProperty(key, value);
+            var decoded = PrimeConfigCodec.decode(properties);
+            assertFalse(decoded.rewriteNeeded());
+            assertEquals(Integer.parseInt(value), decoded.data().atmosphere.altitudeOffsetMeters());
+            Properties saved = new Properties();
+            saved.load(new StringReader(PrimeConfigCodec.encode(decoded.data())));
+            assertEquals(decoded.data().atmosphere, PrimeConfigCodec.decode(saved).data().atmosphere);
+        }
+        for (String invalid : new String[] {"-1", "10001", "0.5", "NaN", "Infinity", "bad"}) {
+            properties.setProperty(key, invalid);
+            var decoded = PrimeConfigCodec.decode(properties);
+            assertTrue(decoded.rewriteNeeded());
+            assertEquals(300, decoded.data().atmosphere.altitudeOffsetMeters());
+            assertThrows(IllegalArgumentException.class,
+                    () -> PrimeConfigCodec.parseAtmosphereAltitudeOffsetMeters(invalid));
+        }
+    }
+
+    @Test
+    void atmosphereControlsPreserveEachOtherAndAltitudeInvalidatesHistoryOnlyWhenChanged() {
+        var previous = PrimeConfig.rendererSettings().atmosphere();
+        int replacement = previous.altitudeOffsetMeters() == 0 ? 10_000 : 0;
+        long revision = PrimeConfig.rendererSettings().revision();
+        try {
+            PrimeConfig.setAtmosphereAltitudeOffsetMeters(replacement);
+            assertEquals(revision + 1, PrimeConfig.rendererSettings().revision());
+            assertEquals(previous.aerosolDensitySteps(), PrimeConfig.rendererSettings().atmosphere().aerosolDensitySteps());
+            PrimeConfig.setAtmosphereAltitudeOffsetMeters(replacement);
+            assertEquals(revision + 1, PrimeConfig.rendererSettings().revision());
+            assertThrows(IllegalArgumentException.class, () -> PrimeConfig.setAtmosphereAltitudeOffsetMeters(-1));
+            assertThrows(IllegalArgumentException.class, () -> PrimeConfig.setAtmosphereAltitudeOffsetMeters(10_001));
+            assertEquals(revision + 1, PrimeConfig.rendererSettings().revision());
+            PrimeConfig.setAerosolDensitySteps(previous.aerosolDensitySteps() == 0 ? 50 : 0);
+            assertEquals(replacement, PrimeConfig.rendererSettings().atmosphere().altitudeOffsetMeters());
+        } finally {
+            PrimeConfig.setAerosolDensitySteps(previous.aerosolDensitySteps());
+            PrimeConfig.setAtmosphereAltitudeOffsetMeters(previous.altitudeOffsetMeters());
+        }
+    }
+
+    @Test
+    void aerosolScaleDefaultsToOneAndPersistsOnlyValidManualValues() throws Exception {
+        Properties properties = new Properties();
+        properties.load(new StringReader(PrimeConfig.serializedContents()));
+        String key = "atmosphere.aerosol_density_scale";
+        properties.remove(key);
+        assertEquals(1.0F, PrimeConfigCodec.decode(properties).data().atmosphere.aerosolDensityScale());
+        for (String invalid : new String[] {"NaN", "Infinity", "-0.01", "16.01", "0.005", "bad"}) {
+            properties.setProperty(key, invalid);
+            var decoded = PrimeConfigCodec.decode(properties);
+            assertTrue(decoded.rewriteNeeded());
+            assertEquals(1.0F, decoded.data().atmosphere.aerosolDensityScale());
+            assertThrows(IllegalArgumentException.class, () -> PrimeConfigCodec.parseAerosolDensitySteps(invalid));
+        }
+        for (String value : new String[] {"0", "0.5", "1", "16"}) {
+            properties.setProperty(key, value);
+            var decoded = PrimeConfigCodec.decode(properties);
+            assertFalse(decoded.rewriteNeeded());
+            assertEquals(Float.parseFloat(value), decoded.data().atmosphere.aerosolDensityScale());
+            Properties saved = new Properties();
+            saved.load(new StringReader(PrimeConfigCodec.encode(decoded.data())));
+            assertEquals(decoded.data().atmosphere, PrimeConfigCodec.decode(saved).data().atmosphere);
+        }
+    }
+
+    @Test
+    void aerosolScaleChangeInvalidatesHistoryOnce() {
+        var previous = PrimeConfig.rendererSettings().atmosphere();
+        int replacement = previous.aerosolDensitySteps() == 0 ? 100 : 0;
+        long revision = PrimeConfig.rendererSettings().revision();
+        try {
+            PrimeConfig.setAerosolDensitySteps(replacement);
+            assertEquals(revision + 1, PrimeConfig.rendererSettings().revision());
+            assertEquals(replacement, PrimeConfig.rendererSettings().atmosphere().aerosolDensitySteps());
+            PrimeConfig.setAerosolDensitySteps(replacement);
+            assertEquals(revision + 1, PrimeConfig.rendererSettings().revision());
+            assertThrows(IllegalArgumentException.class, () -> PrimeConfig.setAerosolDensitySteps(-1));
+            assertThrows(IllegalArgumentException.class, () -> PrimeConfig.setAerosolDensitySteps(1601));
+            assertEquals(revision + 1, PrimeConfig.rendererSettings().revision());
+            assertEquals(1.0F, AtmosphereSettings.defaults().aerosolDensityScale());
+        } finally {
+            PrimeConfig.setAerosolDensitySteps(previous.aerosolDensitySteps());
+        }
+    }
+
     @Test
     void currentPropertiesRoundTripThroughTheSchemaCodec() throws Exception {
         String encoded = PrimeConfig.serializedContents();
@@ -187,9 +283,13 @@ final class PrimeConfigTest {
         PrimeConfig.setHdrEnabled(true);
         PrimeConfig.setReferenceWhiteNits(400);
         PrimeConfig.setDlssFrameGenerationUiRecomposition(false);
+        PrimeConfig.setAerosolDensitySteps(AtmosphereSettings.MAXIMUM_STEPS);
+        PrimeConfig.setAtmosphereAltitudeOffsetMeters(10_000);
         long revision = PrimeConfig.rendererSettings().revision();
 
         PrimeConfig.restoreDefaults();
+        assertEquals(1.0F, PrimeConfig.rendererSettings().atmosphere().aerosolDensityScale());
+        assertEquals(300, PrimeConfig.rendererSettings().atmosphere().altitudeOffsetMeters());
 
         assertEquals(revision + 1L, PrimeConfig.rendererSettings().revision());
         assertEquals(

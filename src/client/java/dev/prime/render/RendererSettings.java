@@ -17,6 +17,7 @@ public record RendererSettings(
         PostProcessingMode postProcessingMode,
         ReconstructionQualityMode reconstructionQuality,
         AstronomySettings astronomy,
+        AtmosphereSettings atmosphere,
         LightingSettings.Snapshot lighting,
         MaterialSettings.Snapshot material,
         DisplaySettings.Snapshot display,
@@ -31,6 +32,7 @@ public record RendererSettings(
         reconstructionQuality = Objects.requireNonNull(
                 reconstructionQuality, "reconstructionQuality");
         astronomy = Objects.requireNonNull(astronomy, "astronomy");
+        atmosphere = Objects.requireNonNull(atmosphere, "atmosphere");
         lighting = Objects.requireNonNull(lighting, "lighting");
         material = Objects.requireNonNull(material, "material");
         display = Objects.requireNonNull(display, "display");

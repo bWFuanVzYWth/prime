@@ -469,6 +469,12 @@ tasks.register('shaderTest', Test) {
 	description = 'Runs GPU shader property tests and requires a usable Vulkan compute device.'
 	dependsOn 'verifyCompiledShaderTestManifest'
 	dependsOn 'compileSlangProgramShadowInteraction'
+	[Transmittance: 'transmittance', Directions: 'directions', Incident: 'incident',
+	 Moments: 'moments', MultiScattering: 'multi_scattering', Ground: 'ground', Sky: 'sky'].each { task, name ->
+		dependsOn "compileSlangProgramAtmosphere${task}"
+		inputs.file(layout.buildDirectory.file("shaderPrograms/atmosphere_${name}/atmosphere_${name}.comp.spv"))
+	}
+	systemProperty 'prime.test.productionShaderDirectory', layout.buildDirectory.dir('shaderPrograms').get().asFile.absolutePath
 	def shadowInteractionArtifact = layout.buildDirectory.file('shaderPrograms/shadow_interaction/shadow_interaction.comp.spv')
 	inputs.file(shadowInteractionArtifact)
 	systemProperty 'prime.test.shadowInteractionShader', shadowInteractionArtifact.get().asFile.absolutePath

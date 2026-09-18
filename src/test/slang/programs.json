@@ -1,5 +1,9 @@
 {
   "programs": [
+    {"entry": "atmosphere_sky_sample.compute.slang", "artifact": "atmosphere_sky_sample.comp.spv"},
+    {"entry": "atmosphere_segment_properties.compute.slang", "artifact": "atmosphere_segment_properties.comp.spv"},
+    {"entry": "atmosphere_sky_read.compute.slang", "artifact": "atmosphere_sky_read.comp.spv"},
+    {"entry": "atmosphere_transport.compute.slang", "artifact": "atmosphere_transport.comp.spv"},
     {
       "entry": "stage_state.compute.slang",
       "artifact": "stage_state.comp.spv"

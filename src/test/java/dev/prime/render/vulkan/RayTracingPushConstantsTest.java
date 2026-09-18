@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.prime.render.AstronomySettings;
+import dev.prime.render.AtmosphereSettings;
 import dev.prime.render.AstronomyState;
 import dev.prime.render.FrameCamera;
 import dev.prime.render.IntegratorFrameInput;
@@ -28,6 +29,18 @@ import org.joml.Matrix4f;
 import org.junit.jupiter.api.Test;
 
 final class RayTracingPushConstantsTest {
+    @Test
+    void altitudeOffsetReachesTheIntegratorAbiWithoutMovingSceneGeometry() {
+        for (int offset : new int[] {0, 300, 10_000}) {
+            Fixture fixture = input(0, offset);
+            ByteBuffer bytes = ByteBuffer.allocate(ShaderAbi.PUSH_CONSTANT_SIZE).order(ByteOrder.nativeOrder());
+            RayTracingPushConstants.write(fixture.input(), fixture.scene(), bytes);
+            assertEquals((float) (6360.0 + (128.0 + offset) / 1000.0),
+                    bytes.getFloat(ShaderAbi.PUSH_ATMOSPHERE_EYE_RADIUS_KM_OFFSET), 0.0005F);
+            assertEquals(15.5F, bytes.getFloat(ShaderAbi.PUSH_CAMERA_POSITION_OFFSET + Float.BYTES));
+        }
+    }
+
     @Test
     void fiveProductionProfilesKeepTheirHistoricalRayConeAbiBits() {
         int[] widths = {3840, 2560, 2258, 1920, 1280};
@@ -111,6 +124,7 @@ final class RayTracingPushConstantsTest {
                         0,
                         valid.height(),
                         valid.astronomy(),
+                        valid.atmosphere(),
                         valid.rayCone(),
                         valid.additionalSpecularBounces(),
                         valid.minimumBounces(),
@@ -132,6 +146,7 @@ final class RayTracingPushConstantsTest {
                         (1 << 18) + 1,
                         valid.height(),
                         valid.astronomy(),
+                        valid.atmosphere(),
                         valid.rayCone(),
                         valid.additionalSpecularBounces(),
                         valid.minimumBounces(),
@@ -153,7 +168,7 @@ final class RayTracingPushConstantsTest {
         Fixture fixture = input(0);
         var p = fixture.input();
         for (PostProcessingMode mode : PostProcessingMode.values()) for (boolean water : new boolean[] {false, true}) {
-            var frame = new IntegratorFrameInput(p.camera(), p.width(), p.height(), p.astronomy(), p.rayCone(),
+            var frame = new IntegratorFrameInput(p.camera(), p.width(), p.height(), p.astronomy(), p.atmosphere(), p.rayCone(),
                     p.additionalSpecularBounces(), p.minimumBounces(), p.maximumBounces(), p.sampleIndex(),
                     p.sampleEpoch(), p.jitterPhase(), water, mode, p.transparentGuideMode(), p.lighting(),
                     p.material(), p.shInput(), p.historyValid());
@@ -169,6 +184,10 @@ final class RayTracingPushConstantsTest {
     }
 
     private static Fixture input(int sampleIndex) {
+        return input(sampleIndex, AtmosphereSettings.DEFAULT_ALTITUDE_OFFSET_METERS);
+    }
+
+    private static Fixture input(int sampleIndex, int altitudeOffsetMeters) {
         FrameCamera camera = new FrameCamera(
                 new Matrix4f().perspective(
                         (float) Math.toRadians(70.0), 16.0F / 9.0F, 512.0F, 0.05F, true),
@@ -206,6 +225,7 @@ final class RayTracingPushConstantsTest {
                 AstronomyState.atSolarHourAngle(
                         0.7F,
                         new AstronomySettings(-45, 270)),
+                new AtmosphereSettings(100, altitudeOffsetMeters),
                 new RayConeParameters(
                         Float.float16ToFloat((short) 0x5678),
                         Float.float16ToFloat((short) 0x1234)),

@@ -6,19 +6,15 @@ module "service/atmosphere/trace.slang";
 import "prime_abi.slang";
 import "prime_abi_types.slang";
 import "model/atmosphere/sky.slang";
+import "model/atmosphere/sky_view.slang";
 import "math/atmosphere_direction.slang";
 import "model/atmosphere/epipolar.slang";
 import "policy/runtime/config.slang";
 
 
 public float3 primeAtmosphereSky(float3 direction, float3 sunDirection) {
-    uint width;
-    uint height;
-    primeSkyView.GetDimensions(width, height);
-    float2 dimensions = float2(width, height);
-    float2 uv = atmSkyUvFromDirection(
-            direction, sunDirection, dimensions, primePush.atmosphereEyeRadiusKm);
-    return max(atmSample2D(primeSkyView, uv).rgb, float3(0.0));
+    return atmSampleSky(primeSkyView, direction, sunDirection,
+            primePush.atmosphereEyeRadiusKm - ATM_BOTTOM_RADIUS_KM);
 }
 
 public bool primeAtmosphereDistantDirectionVisible(float3 direction) {

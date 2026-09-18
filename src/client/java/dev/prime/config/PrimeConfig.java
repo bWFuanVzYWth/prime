@@ -5,6 +5,7 @@ package dev.prime.config;
 import dev.prime.binding.streamline.ReflexMode;
 import dev.prime.infrastructure.PrimeInfo;
 import dev.prime.render.AstronomySettings;
+import dev.prime.render.AtmosphereSettings;
 import dev.prime.render.DisplaySettings;
 import dev.prime.render.HdrOutput;
 import dev.prime.render.LightingSettings;
@@ -63,6 +64,7 @@ public final class PrimeConfig {
                 data.postProcessingMode,
                 data.reconstructionQuality,
                 data.astronomy,
+                data.atmosphere,
                 data.lighting,
                 data.material,
                 data.display,
@@ -240,6 +242,22 @@ public final class PrimeConfig {
         AstronomySettings replacement = data.astronomy.withSolarLongitudeDegrees(value);
         if (replacement != data.astronomy) {
             data.astronomy = replacement;
+            rendererChanged();
+        }
+    }
+
+    public static void setAerosolDensitySteps(int value) {
+        AtmosphereSettings replacement = new AtmosphereSettings(value, data.atmosphere.altitudeOffsetMeters());
+        if (!replacement.equals(data.atmosphere)) {
+            data.atmosphere = replacement;
+            rendererChanged();
+        }
+    }
+
+    public static void setAtmosphereAltitudeOffsetMeters(int value) {
+        AtmosphereSettings replacement = new AtmosphereSettings(data.atmosphere.aerosolDensitySteps(), value);
+        if (!replacement.equals(data.atmosphere)) {
+            data.atmosphere = replacement;
             rendererChanged();
         }
     }
