@@ -18,7 +18,8 @@
 - **2 mesh**：替换一个 `(section, layer)`；revision 必须大于同层已有 revision 和该 section 删除 revision。
 - **3 remove section**：头后 `section:u64, revision:u64`；删除全部层，记录 tombstone。revision 必须大于已有层。
 - **4 texture**：头后 `id:u32, width:u32, height:u32, reserved:u32`，然后恰好 `width*height*4` 字节源编码 RGBA8。id=0 保留给白纹理。
-- **6 dynamic snapshot**：原子替换这一帧的全部动态几何，格式见下文；序号独立于静态区块 revision。
+- **6 dynamic snapshot**：原子替换原始动态回退几何，格式见下文；序号独立于静态区块 revision。
+- **7 instance delta**：原子发布局部几何原型及实例增量，格式见下文；与 op6 分别维护序号和场景。
 
 Mesh 的固定部分含头共 **104 字节**：
 
@@ -58,6 +59,30 @@ op=6 的固定头共 **64 字节**：
 Java `DynamicFrame` 保留一个按需增长的 confined native arena，相邻同描述 span 可合并。FFM 每帧借用一次 sealed segment；Rust 在返回前完成解码并拥有结果。借用只覆盖该次同步调用，不能跨下一次 `begin`、扩容或 `close`；GPU 完成与这段源字节的寿命无关。源纹理变化仍通过独立 op=4 增量提交。
 
 material=2 表示随机 alpha 覆盖：alpha=0 不遮挡，alpha=1 完全覆盖，中间值按覆盖率接受交点；接受后仍使用当前表面材质。它不是折射、介质吸收或物理透射率。
+
+## 原型与实例增量
+
+op=7 的固定头共 **48 字节**，公共头后为 `sequence:u64`，以及四个 u32 计数：`prototype_upserts, prototype_removes, instance_upserts, instance_removes`。四组记录紧接在后，顺序与计数一致，无 padding。sequence 在当前 epoch 内严格递增、非零，**本批每条记录的 revision 必须等于 sequence**。同一类身份不能在一批中重复或同时 upsert/remove；原型与实例各有自己的非零 u64 身份空间。
+
+原型 upsert 先写 `id:u64, revision:u64, span_count:u32, reserved:u32=0`，再跟 op6 格式的 span 和局部顶点字节；原型必须非空。移除记录统一为 `id:u64, revision:u64`，共 16 字节。
+
+实例 upsert 共 **128 字节**：
+
+| Offset | 类型 | 语义 |
+| --- | --- | --- |
+| 0 / 8 / 16 | u64 | 实例 id / revision / 原型 id |
+| 24 / 32 / 40 | f64 | 世界原点 XYZ |
+| 48 | f32×12 | row-major 3×4 仿射矩阵；局部点先乘矩阵，再加世界原点 |
+| 96 / 100 | u32 | texture / material 覆盖；各自 UINT32_MAX 表示继承原型 |
+| 104 | RGBA8 | 实例 tint，按 R/G/B/A 字节顺序 |
+| 108 | u32 | reserved=0 |
+| 112 | f32×4 | UV 的 scaleU、scaleV、offsetU、offsetV |
+
+texture=0 是明确的白纹理；material=0/1/2 与静态语义一致。仿射矩阵和 UV 必须有限，仿射线性部分须可逆，支持镜像、非均匀缩放和剪切。UV 按 `sourceUV*scale+offset` 求值。源顶点 RGBA 与 tint 在编码域按 `floor(source*tint/255)` 组合，再进入插值与后续颜色处理；不能先将两者各自线性化相乘。
+
+Rust 先完整验证，再发布整个批次。实例引用以最终批状态为准，允许同批新增原型并引用，或迁移/删除实例后移除旧原型；仍被存活实例引用的原型不可移除。所有实际非零纹理引用须已上传。失败不改变序号、引用计数、原型或实例。删除不存在的身份只推进输入序号，不使渲染状态失效。整体有序和批 revision 约束防止旧包复活对象，无需永久保存已删除实例的 tombstone；同一身份重新可见时须使用新的批序号。
+
+无变化时 Java 不提交空增量。`InstanceCapture` 持有资源/实例记录及可复用的 confined arena，`sealDelta` 后借用至同步 FFM 返回，成功后 `acknowledge` 才确认已发送状态；被跳过的 native hook 不丢失脏记录。原型只上传变更的局部源数据，实例新增/变化只发送固定记录，GPU 生命周期不依赖这些 Java 地址。op6 清空只影响回退几何，实例须通过 op7 删除或 epoch reset 清除。
 
 ## 帧操作
 
@@ -99,6 +124,6 @@ material=2 表示随机 alpha 覆盖：alpha=0 不遮挡，alpha=1 完全覆盖�
 
 ## 边界与容量
 
-当前明确拒绝：超过 256 MiB 的单包、超过 800 万三角形的 CPU 场景、超过 512 MiB 的纹理总量、超过 262144 的 mesh/section history、超过 4096×4096 的输出，以及不有限/越域位置、未知 flags、未知拓扑和尾随字节。GPU 还验证实际 storage buffer 上限、24 位材质槽位偏移和设备内存分配数量预算；上限来自当前实现而非 Minecraft 功能承诺。解析失败不修改场景 revision 或已有数据。
+当前明确拒绝：超过 256 MiB 的单包、超过 800 万唯一三角形的 CPU 场景、超过 512 MiB 的纹理总量、超过 262144 的 mesh/section history、各超过 262144 的常驻原型或实例、超过 4096×4096 的输出，以及不有限/越域位置、未知 flags、未知拓扑和尾随字节。唯一三角形预算由地形、op6 回退与 op7 原型共享，同一原型不按实例数重复计费。GPU 还验证实际 storage buffer 上限、custom index 的 23 位有效索引和设备内存分配数量预算；上限来自当前实现而非 Minecraft 功能承诺。解析失败不修改场景 revision 或已有数据。
 
 Mesh 可先于引用的 texture 提交，但渲染前必须补齐所有引用；缺失引用明确报错。所有调用必须在创建 handle 的 OS 线程进行。`prime_destroy` 退休身份，重复释放会报错。调用方必须保证原生指针指向有效读写区域；长度校验不能验证任意地址。

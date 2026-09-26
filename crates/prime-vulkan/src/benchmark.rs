@@ -165,6 +165,16 @@ impl HostBenchmark {
             .profile_snapshot()
     }
 
+    pub fn instance_work(&self) -> InstanceWork {
+        self.state
+            .as_ref()
+            .unwrap()
+            .renderer
+            .as_ref()
+            .unwrap()
+            .instance_work()
+    }
+
     /// Apply a new target extent in the next recording, without draining prior
     /// frames. The old image is retained until its last submitted serial retires.
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
@@ -179,17 +189,27 @@ impl HostBenchmark {
         Ok(())
     }
 
-    /// Wait only when the two-frame ring is full; never waits for this new frame.
     pub fn enqueue(
         &mut self,
         scene: &Scene,
         camera: &Camera,
         sample: u32,
     ) -> Result<HostSample, String> {
+        self.enqueue_with_instances(scene, &InstanceScene::default(), camera, sample)
+    }
+
+    /// Wait only when the two-frame ring is full; never waits for this new frame.
+    pub fn enqueue_with_instances(
+        &mut self,
+        scene: &Scene,
+        instances: &InstanceScene,
+        camera: &Camera,
+        sample: u32,
+    ) -> Result<HostSample, String> {
         if self.poisoned {
             return Err("Benchmark host is quarantined".into());
         }
-        let result = self.enqueue_inner(scene, camera, sample);
+        let result = self.enqueue_inner(scene, instances, camera, sample);
         if result.is_err() {
             self.poisoned = true;
         }
@@ -199,6 +219,7 @@ impl HostBenchmark {
     fn enqueue_inner(
         &mut self,
         scene: &Scene,
+        instances: &InstanceScene,
         camera: &Camera,
         sample: u32,
     ) -> Result<HostSample, String> {
@@ -262,17 +283,22 @@ impl HostBenchmark {
                 state.image_extent = (self.width, self.height);
             }
             let image = state.image.as_ref().unwrap();
-            state.renderer.as_mut().unwrap().record_host(
-                scene,
-                camera,
-                self.width,
-                self.height,
-                sample,
-                command.as_raw(),
-                image.image.as_raw(),
-                image.view.as_raw(),
-                serial,
-            )?;
+            state
+                .renderer
+                .as_mut()
+                .unwrap()
+                .record_host_with_instances(
+                    scene,
+                    instances,
+                    camera,
+                    self.width,
+                    self.height,
+                    sample,
+                    command.as_raw(),
+                    image.image.as_raw(),
+                    image.view.as_raw(),
+                    serial,
+                )?;
             state.owner.device.cmd_write_timestamp(
                 command,
                 vk::PipelineStageFlags::BOTTOM_OF_PIPE,
@@ -428,6 +454,104 @@ impl Drop for HostBenchmark {
 mod tests {
     use super::*;
     use prime_scene::scene::{SceneMesh, Texture, Triangle};
+
+    #[test]
+    #[ignore = "requires an exclusive Vulkan ray-query GPU; run with synchronization validation"]
+    fn host_instanced_prototypes_retire_across_growth_rebase_epoch_and_removal() {
+        use crate::plan::{INHERIT, translation};
+        use prime_scene::scene::{Instance, Prototype};
+        let mut host = HostBenchmark::new(32, 24).unwrap();
+        let mut scene = Scene {
+            epoch: 1,
+            ..Default::default()
+        };
+        let mut source = InstanceScene {
+            epoch: 1,
+            resource_revision: 1,
+            instance_revision: 1,
+            ..Default::default()
+        };
+        let mut camera = Camera {
+            position: [0.0, 0.0, 5.0],
+            forward: [0.0, 0.0, -1.0],
+            right: [1.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            vertical_fov_radians: 1.0,
+        };
+        for (frame, count) in [2, 4096, 16, 8192, 3, 32, 2, 0].into_iter().enumerate() {
+            if count == 0 {
+                source.prototypes.clear();
+                source.instances.clear();
+            } else {
+                let triangles: Vec<_> = (0..count)
+                    .map(|i| {
+                        let x = (i % 64) as f32 * 0.01;
+                        let y = (i / 64) as f32 * 0.01;
+                        Triangle {
+                            positions: [[x, y, 0.0], [x + 0.005, y, 0.0], [x, y + 0.005, 0.0]],
+                            colors: [[1.0; 4]; 3],
+                            uvs: [[0.0; 2]; 3],
+                            texture_id: 0,
+                            flags: 0,
+                        }
+                    })
+                    .collect();
+                source.prototypes.insert(
+                    1,
+                    Prototype {
+                        revision: frame as u64 + 1,
+                        triangles: triangles.into(),
+                        bounds: [[0.0; 3], [1.0, 2.0, 0.0]],
+                    },
+                );
+                for id in 0..(frame + 1) as u64 {
+                    source.instances.insert(
+                        id,
+                        Instance {
+                            revision: frame as u64 + 1,
+                            prototype_id: 1,
+                            origin: [id as f64, 0.0, 0.0],
+                            transform: translation([0.0; 3]),
+                            texture_id: INHERIT,
+                            flags: INHERIT,
+                            tint: [255; 4],
+                            uv_transform: [1.0, 1.0, 0.0, 0.0],
+                        },
+                    );
+                }
+            }
+            if frame == 3 {
+                scene.anchor[0] = 256.0;
+                camera.position[0] -= 256.0;
+                host.resize(48, 32).unwrap();
+            }
+            if frame == 5 {
+                scene.epoch += 1;
+                source.epoch = scene.epoch;
+            }
+            source.resource_revision += 1;
+            source.instance_revision += 1;
+            host.enqueue_with_instances(&scene, &source, &camera, frame as u32)
+                .unwrap();
+        }
+        assert_eq!(host.drain().unwrap().len(), 8);
+        let geometry = host
+            .state
+            .as_ref()
+            .unwrap()
+            .renderer
+            .as_ref()
+            .unwrap()
+            .geometry
+            .as_ref()
+            .unwrap();
+        assert!(geometry.objects.instances.is_empty());
+        assert!(geometry.objects.addresses().is_empty());
+        if let Some(profile) = host.profile_snapshot() {
+            assert_eq!(profile.readback_bytes, 0);
+            assert_eq!(profile.submissions, 0);
+        }
+    }
 
     #[test]
     #[ignore = "requires a Vulkan ray-query GPU; do not run alongside game performance tests"]

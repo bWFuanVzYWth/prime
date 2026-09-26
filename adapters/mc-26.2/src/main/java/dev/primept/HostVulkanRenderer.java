@@ -24,7 +24,7 @@ public final class HostVulkanRenderer implements AutoCloseable {
     private final VulkanCommandEncoder encoder;
     private boolean closed;
     private long readinessGeneration;
-    private boolean completedTerrainFrame;
+    private boolean completedWorldFrame;
 
     public HostVulkanRenderer() throws IOException {
         var backend = ((GpuDeviceAccessor) (Object) RenderSystem.getDevice()).primept$backend();
@@ -49,11 +49,11 @@ public final class HostVulkanRenderer implements AutoCloseable {
     public void submitDynamic(long epoch) { dev.primept.capture.DynamicCapture.submit(epoch, bridge); }
     public ByteBuffer frameBuffer() { return bridge.frameBuffer(); }
     public long lastGpuTimeNanos() { return bridge.lastGpuTimeNanos(); }
-    public boolean hasCompletedTerrainFrame() { return !closed && completedTerrainFrame; }
+    public boolean hasCompletedWorldFrame() { return !closed && completedWorldFrame; }
 
     public void resetReadiness() {
         ++readinessGeneration;
-        completedTerrainFrame = false;
+        completedWorldFrame = false;
     }
 
     public void enableWorldReplacementAfterCompletion() {
@@ -61,8 +61,8 @@ public final class HostVulkanRenderer implements AutoCloseable {
         // The host rotates this queue only after the corresponding submission's timeline wait succeeds.
         encoder.queueForDestroy(() -> {
             if (!closed && generation == readinessGeneration) {
-                completedTerrainFrame = true;
-                PrimeClient.LOGGER.info("Prime PT terrain frame completed on GPU; vanilla world raster bypass is ready");
+                completedWorldFrame = true;
+                PrimeClient.LOGGER.info("Prime PT world frame completed on GPU; vanilla world raster bypass is ready");
             }
         });
     }

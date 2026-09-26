@@ -23,7 +23,17 @@
     "SourceTextureMixin",
     "DynamicTextureMixin",
     "SourceTextureLifetimeMixin",
-    "FluidRendererMixin"
+    "FluidRendererMixin",
+    "SourceIdentityMixin",
+    "ModelSubmissionMixin",
+    "ModelFeatureMixin",
+    "ModelCubeMixin",
+    "BufferBuilderAccessor",
+    "StagedBuilderMixin",
+    "SpriteConsumerAccessor",
+    "BlockEntitySourceMixin",
+    "EntitySourceMixin",
+    "ModelSourceOwnerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

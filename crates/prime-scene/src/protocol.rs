@@ -1,10 +1,14 @@
 //! Versioned byte protocol. All reads are little endian and alignment independent.
-use crate::scene::{Camera, DynamicMesh, Mesh, SourceScene, Texture, Triangle};
+use crate::{
+    instances::InstanceContext,
+    scene::{Camera, DynamicMesh, Instance, Mesh, Prototype, SourceScene, Texture, Triangle},
+};
+use std::collections::BTreeMap;
 
 pub const ABI_VERSION: u32 = 1;
 pub const MAGIC: u32 = 0x5450_5250;
 pub const MAX_PACKET_BYTES: usize = 256 * 1024 * 1024;
-const MAX_TRIANGLES: usize = 8_000_000;
+pub(crate) const MAX_TRIANGLES: usize = 8_000_000;
 const MAX_TEXTURE_BYTES: usize = 512 * 1024 * 1024;
 const MAX_SECTIONS: usize = 262_144;
 
@@ -88,6 +92,13 @@ impl SourceScene {
     pub fn submit(&mut self, bytes: &[u8]) -> Result<(), String> {
         let mut input = Reader::new(bytes)?;
         let (op, epoch) = input.header()?;
+        if op == 7 {
+            return self.instances.submit(
+                bytes,
+                &self.textures,
+                self.triangle_count + self.dynamic.triangles.len(),
+            );
+        }
         let revision = if op == 6 {
             self.revision
         } else {
@@ -103,6 +114,7 @@ impl SourceScene {
             *self = SourceScene {
                 epoch,
                 revision,
+                instances: InstanceContext::new(epoch),
                 ..Default::default()
             };
             return Ok(());
@@ -158,7 +170,10 @@ impl SourceScene {
                     .meshes
                     .get(&(key, layer))
                     .map_or(0, |m| m.triangles.len());
-                if self.triangle_count - old_count + triangle_count + self.dynamic.triangles.len()
+                if self.triangle_count - old_count
+                    + triangle_count
+                    + self.dynamic.triangles.len()
+                    + self.instances.triangle_count()
                     > MAX_TRIANGLES
                 {
                     return Err("scene exceeds 8 million triangle capacity".into());
@@ -282,7 +297,12 @@ impl SourceScene {
                             .ok_or("vertex byte count overflow")?,
                     )?;
                     let triangle_count = count / topology * (topology - 2);
-                    if self.triangle_count + triangles.len() + triangle_count > MAX_TRIANGLES {
+                    if self.triangle_count
+                        + triangles.len()
+                        + triangle_count
+                        + self.instances.triangle_count()
+                        > MAX_TRIANGLES
+                    {
                         return Err("scene exceeds 8 million triangle capacity".into());
                     }
                     triangles
@@ -306,6 +326,177 @@ impl SourceScene {
         }
         Ok(())
     }
+}
+
+/// Owned decoding result, independent of all current scene state.
+/// Publication uses InstanceContext's read-only validation followed by one mutation phase.
+pub struct InstanceBatch {
+    pub(crate) epoch: u64,
+    pub(crate) sequence: u64,
+    pub(crate) prototypes: BTreeMap<u64, Prototype>,
+    pub(crate) prototype_removals: Vec<(u64, u64)>,
+    pub(crate) instances: BTreeMap<u64, Instance>,
+    pub(crate) instance_removals: Vec<(u64, u64)>,
+}
+
+impl InstanceBatch {
+    pub fn parse(bytes: &[u8]) -> Result<Self, String> {
+        let mut input = Reader::new(bytes)?;
+        let (op, epoch) = input.header()?;
+        if op != 7 {
+            return Err("expected instance batch operation 7".into());
+        }
+        let sequence = input.u64()?;
+        let counts = [input.u32()?, input.u32()?, input.u32()?, input.u32()?];
+        let minimum_bytes = counts
+            .into_iter()
+            .zip([24_u64, 16, 128, 16])
+            .map(|(count, stride)| u64::from(count) * stride)
+            .sum::<u64>();
+        if minimum_bytes == 0 {
+            return Err("empty instance batches must not be submitted".into());
+        }
+        if minimum_bytes > (input.data.len() - input.offset) as u64 {
+            return Err("truncated instance batch records".into());
+        }
+        let mut prototypes = BTreeMap::new();
+        let mut triangle_count = 0;
+        for _ in 0..counts[0] {
+            let id = input.u64()?;
+            let revision = input.u64()?;
+            let span_count = input.u32()?;
+            input.zero()?;
+            if span_count as usize > (input.data.len() - input.offset) / 32 {
+                return Err("truncated prototype span descriptors".into());
+            }
+            let mut triangles = Vec::new();
+            let mut bounds = [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]];
+            for _ in 0..span_count {
+                let texture_id = input.u32()?;
+                let flags = input.u32()?;
+                let layout = VertexLayout {
+                    topology: input.u32()? as usize,
+                    count: input.u32()? as usize,
+                    stride: input.u32()? as usize,
+                    position_offset: input.u32()? as usize,
+                    color_offset: input.u32()? as usize,
+                    uv_offset: input.u32()? as usize,
+                };
+                validate_flags(flags)?;
+                layout.validate()?;
+                let raw = input.take(
+                    layout
+                        .count
+                        .checked_mul(layout.stride)
+                        .ok_or("vertex byte count overflow")?,
+                )?;
+                let count = layout.count / layout.topology * (layout.topology - 2);
+                triangle_count += count;
+                if triangle_count > MAX_TRIANGLES {
+                    return Err("prototype batch exceeds 8 million triangle capacity".into());
+                }
+                triangles
+                    .try_reserve(count)
+                    .map_err(|_| "prototype allocation failed")?;
+                decode_vertices(raw, &layout, texture_id, flags, &mut triangles, &mut bounds)?;
+            }
+            if triangles.is_empty() {
+                return Err("prototype must contain at least one triangle".into());
+            }
+            if prototypes
+                .insert(
+                    id,
+                    Prototype {
+                        revision,
+                        triangles: triangles.into(),
+                        bounds,
+                    },
+                )
+                .is_some()
+            {
+                return Err("duplicate prototype upsert identity".into());
+            }
+        }
+        let mut prototype_removals = Vec::new();
+        for _ in 0..counts[1] {
+            prototype_removals.push((input.u64()?, input.u64()?));
+        }
+        let mut instances = BTreeMap::new();
+        for _ in 0..counts[2] {
+            let id = input.u64()?;
+            let revision = input.u64()?;
+            let prototype_id = input.u64()?;
+            let origin = input.origin()?;
+            let mut transform = [0.0; 12];
+            for value in &mut transform {
+                *value = input.f32()?;
+            }
+            validate_affine(transform)?;
+            let texture_id = input.u32()?;
+            let flags = input.u32()?;
+            if flags != u32::MAX {
+                validate_flags(flags)?;
+            }
+            let tint = input.take(4)?.try_into().unwrap();
+            input.zero()?;
+            let uv_transform = [input.f32()?, input.f32()?, input.f32()?, input.f32()?];
+            if instances
+                .insert(
+                    id,
+                    Instance {
+                        revision,
+                        prototype_id,
+                        origin,
+                        transform,
+                        texture_id,
+                        flags,
+                        tint,
+                        uv_transform,
+                    },
+                )
+                .is_some()
+            {
+                return Err("duplicate instance upsert identity".into());
+            }
+        }
+        let mut instance_removals = Vec::new();
+        for _ in 0..counts[3] {
+            instance_removals.push((input.u64()?, input.u64()?));
+        }
+        input.finish()?;
+        Ok(Self {
+            epoch,
+            sequence,
+            prototypes,
+            prototype_removals,
+            instances,
+            instance_removals,
+        })
+    }
+}
+
+fn validate_affine(transform: [f32; 12]) -> Result<(), String> {
+    let m = transform.map(f64::from);
+    let cofactors = [
+        m[5] * m[10] - m[6] * m[9],
+        m[6] * m[8] - m[4] * m[10],
+        m[4] * m[9] - m[5] * m[8],
+        m[2] * m[9] - m[1] * m[10],
+        m[0] * m[10] - m[2] * m[8],
+        m[1] * m[8] - m[0] * m[9],
+        m[1] * m[6] - m[2] * m[5],
+        m[2] * m[4] - m[0] * m[6],
+        m[0] * m[5] - m[1] * m[4],
+    ];
+    let determinant = m[0] * cofactors[0] + m[1] * cofactors[1] + m[2] * cofactors[2];
+    if determinant == 0.0
+        || cofactors
+            .iter()
+            .any(|cofactor| !((*cofactor / determinant) as f32).is_finite())
+    {
+        return Err("instance affine must have a finite representable inverse".into());
+    }
+    Ok(())
 }
 
 fn validate_flags(flags: u32) -> Result<(), String> {

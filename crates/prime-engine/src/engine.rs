@@ -53,8 +53,9 @@ impl Engine {
                 if self.renderer.is_none() {
                     self.renderer = Some(prime_vulkan::Renderer::new()?);
                 }
-                self.renderer.as_mut().unwrap().render(
+                self.renderer.as_mut().unwrap().render_with_instances(
                     &self.translated.as_ref().unwrap().2,
+                    self.source.instances(),
                     &frame.relative_camera(anchor),
                     frame.width,
                     frame.height,
@@ -85,8 +86,9 @@ impl Engine {
                 .as_mut()
                 .ok_or("Attach a Vulkan host before recording")?;
             unsafe {
-                renderer.record_host(
+                renderer.record_host_with_instances(
                     &self.translated.as_ref().unwrap().2,
+                    self.source.instances(),
                     &frame.relative_camera(anchor),
                     frame.width,
                     frame.height,

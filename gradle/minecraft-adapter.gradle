@@ -38,11 +38,13 @@ loom {
             vmArgs "-Dprimept.enabled=${providers.gradleProperty('primeptEnabled').getOrElse('false')}"
             vmArgs "-Dprimept.profile=${providers.gradleProperty('primeptProfile').getOrElse('false')}"
             vmArgs "-Dprimept.capture.audit=${providers.gradleProperty('primeptCaptureAudit').getOrElse('false')}"
+            if (providers.gradleProperty('primeptProfileCsv').isPresent()) vmArgs "-Dprimept.profile.csv=${providers.gradleProperty('primeptProfileCsv').get()}"
             programArgs '--graphicsBackend', 'VULKAN', '--width', '1920', '--height', '1080'
             if (providers.gradleProperty('primeptValidation').getOrElse('false').toBoolean()) programArgs '--vulkanValidation'
             if (providers.gradleProperty('primeptProfile').getOrElse('false').toBoolean()) environmentVariable 'PRIME_PROFILE', '1'
             if (providers.gradleProperty('primeptWorld').isPresent()) programArgs '--quickPlaySingleplayer', providers.gradleProperty('primeptWorld').get()
             if (providers.gradleProperty('primeptUsername').isPresent()) programArgs '--username', providers.gradleProperty('primeptUsername').get()
+            if (providers.gradleProperty('primeptUuid').isPresent()) programArgs '--uuid', providers.gradleProperty('primeptUuid').get()
         }
     }
 }
@@ -73,4 +75,29 @@ tasks.register('bundledNativeSmoke', JavaExec) {
     jvmArgs '--enable-native-access=ALL-UNNAMED'
     args 'bundled', layout.buildDirectory.file('bundled-ffm-smoke.png').get().asFile.absolutePath
     if (minecraftVersion == '26.3') mustRunAfter ':mc-26.2:bundledNativeSmoke'
+}
+
+// A separate test mod exits its own JVM from Fabric preLaunch, before any window or GPU initialization.
+sourceSets {
+    cpuSmoke {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+}
+tasks.register('cpuSmokeJar', Jar) {
+    dependsOn tasks.named('cpuSmokeClasses')
+    archiveClassifier = 'cpu-test'
+    from sourceSets.cpuSmoke.output
+}
+tasks.register('cpuSmoke', JavaExec) {
+    dependsOn tasks.named('classes'), tasks.named('cpuSmokeJar')
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'net.fabricmc.loader.impl.launch.knot.KnotClient'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    systemProperty 'fabric.development', 'true'
+    systemProperty 'primept.enabled', 'true'
+    systemProperty 'fabric.addMods', tasks.named('cpuSmokeJar').get().archiveFile.get().asFile.absolutePath
+    systemProperty 'fabric.classPathGroups', sourceSets.main.output.files.collect { it.absolutePath }.join(File.pathSeparator)
+    workingDir layout.buildDirectory.dir('cpu-smoke')
+    doFirst { workingDir.mkdirs() }
 }

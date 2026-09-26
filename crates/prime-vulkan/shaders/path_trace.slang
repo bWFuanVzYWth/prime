@@ -20,6 +20,8 @@ struct Frame {
 [[vk::binding(4, 0)]] [[vk::image_format("rgba8")]] RWTexture2D<float4> outputImage;
 [[vk::binding(5, 0)]] RWStructuredBuffer<float4> accumulation;
 [[vk::binding(6, 0)]] StructuredBuffer<Triangle> dynamicTriangles;
+struct InstanceMaterial { uint first; uint texture; uint flags; uint tint; float4 uv; };
+[[vk::binding(7, 0)]] StructuredBuffer<InstanceMaterial> instanceMaterials;
 [[vk::push_constant]] ConstantBuffer<Frame> frame;
 
 uint hash(uint x) {
@@ -44,7 +46,22 @@ float3 displayColor(float3 linear) {
     return select(mapped <= 0.0031308, mapped * 12.92, 1.055 * pow(mapped, 1.0 / 2.4) - 0.055);
 }
 Triangle loadTriangle(uint instance, uint primitive) {
-    return instance == 0x00ffffff ? dynamicTriangles[primitive] : triangles[instance + primitive];
+    if ((instance & 0x00800000) == 0) return triangles[instance + primitive];
+    InstanceMaterial material = instanceMaterials[instance & 0x007fffff];
+    Triangle tri = dynamicTriangles[material.first + primitive];
+    if (material.texture != 0xffffffff) tri.texture = material.texture;
+    if (material.flags != 0xffffffff) tri.flags = material.flags;
+    // Source vertices and instance tint are encoded bytes. Match vanilla's
+    // integer channel product BEFORE interpolation, then texture and EOTF.
+    float4 tint = float4(material.tint & 255, (material.tint >> 8) & 255,
+        (material.tint >> 16) & 255, material.tint >> 24);
+    tri.c0 = floor(round(tri.c0 * 255.0) * tint / 255.0) / 255.0;
+    tri.c1 = floor(round(tri.c1 * 255.0) * tint / 255.0) / 255.0;
+    tri.c2 = floor(round(tri.c2 * 255.0) * tint / 255.0) / 255.0;
+    tri.uv01.xy = tri.uv01.xy * material.uv.xy + material.uv.zw;
+    tri.uv01.zw = tri.uv01.zw * material.uv.xy + material.uv.zw;
+    tri.uv2 = tri.uv2 * material.uv.xy + material.uv.zw;
+    return tri;
 }
 bool acceptsCoverage(Triangle tri, float2 bary, float3 point, uint raySeed) {
     if (tri.flags == 0) return true;
@@ -57,7 +74,7 @@ bool acceptsCoverage(Triangle tri, float2 bary, float3 point, uint raySeed) {
     uint event = hash(raySeed ^ hash(cell.x) ^ hash(cell.y + 0x9e3779b9) ^ hash(cell.z + 0x85ebca6b));
     return float(event >> 8) * (1.0 / 16777216.0) < alpha;
 }
-struct Hit { uint instance; uint primitive; float2 bary; float3 instanceOrigin; bool found; };
+struct Hit { uint instance; uint primitive; float2 bary; float3x4 objectToWorld; bool found; };
 Hit trace(float3 origin, float3 direction, inout uint state) {
     state = hash(state + 0x9e3779b9u);
     RayDesc ray; ray.Origin = origin; ray.Direction = direction; ray.TMin = 0.0; ray.TMax = 100000.0;
@@ -75,11 +92,7 @@ Hit trace(float3 origin, float3 direction, inout uint state) {
     hit.instance = hit.found ? query.CommittedInstanceID() : 0;
     hit.primitive = hit.found ? query.CommittedPrimitiveIndex() : 0;
     hit.bary = hit.found ? query.CommittedTriangleBarycentrics() : float2(0.0);
-    hit.instanceOrigin = float3(0.0);
-    if (hit.found) {
-        float3x4 transform = query.CommittedObjectToWorld3x4();
-        hit.instanceOrigin = float3(transform[0][3], transform[1][3], transform[2][3]);
-    }
+    if (hit.found) hit.objectToWorld = query.CommittedObjectToWorld3x4();
     return hit;
 }
 bool occluded(float3 origin, float3 direction, inout uint state) {
@@ -106,8 +119,7 @@ float3 cosineHemisphere(float3 normal, inout uint state) {
 }
 // Conservative camera-relative offset. This MVP does not yet implement the
 // complete transform error bound from Prime's production precision contract.
-float3 offsetOrigin(float3 position, float3 normal, Triangle tri) {
-    float extent = max(length(tri.p1.xyz - tri.p0.xyz), length(tri.p2.xyz - tri.p0.xyz));
+float3 offsetOrigin(float3 position, float3 normal, float extent) {
     float error = max(0.00001, (max(max(abs(position.x), abs(position.y)), abs(position.z)) + extent) * 0.0000005);
     return position + normal * error;
 }
@@ -129,11 +141,19 @@ void main(uint3 id : SV_DispatchThreadID) {
         if (!hit.found) { radiance += throughput * sky(direction); break; }
         Triangle tri = loadTriangle(hit.instance, hit.primitive);
         float3 b = float3(1.0 - hit.bary.x - hit.bary.y, hit.bary.x, hit.bary.y);
-        float3 position = tri.p0.xyz * b.x + tri.p1.xyz * b.y + tri.p2.xyz * b.z + hit.instanceOrigin;
-        float3 normal = normalize(cross(tri.p1.xyz - tri.p0.xyz, tri.p2.xyz - tri.p0.xyz));
+        // Translation must not enter edge differences: small local geometry can
+        // disappear when subtracting separately rounded large world positions.
+        float3 localPosition = tri.p0.xyz * b.x + tri.p1.xyz * b.y + tri.p2.xyz * b.z;
+        float3 position = mul(hit.objectToWorld, float4(localPosition, 1.0));
+        float3 edge1 = mul(hit.objectToWorld, float4(tri.p1.xyz - tri.p0.xyz, 0.0));
+        float3 edge2 = mul(hit.objectToWorld, float4(tri.p2.xyz - tri.p0.xyz, 0.0));
+        float3 normal = normalize(cross(edge1, edge2));
+        // All three edges make the scale estimate independent of triangle corner
+        // order, including the shared diagonal of an affine-transformed quad.
+        float extent = max(length(edge1), max(length(edge2), length(edge2 - edge1)));
         if (dot(normal, direction) > 0.0) normal = -normal;
         float3 albedo = linearColor(saturate(sourceColor(tri, hit.bary).rgb));
-        origin = offsetOrigin(position, normal, tri);
+        origin = offsetOrigin(position, normal, extent);
         float cosine = saturate(dot(normal, sunDirection));
         if (cosine > 0.0 && !occluded(origin, sunDirection, state))
             radiance += throughput * albedo * float3(3.8, 3.5, 3.0) * (cosine / 3.14159265359);

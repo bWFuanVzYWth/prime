@@ -19,6 +19,16 @@ uint64_t prime_create(uint32_t abi_version);
 // Flags cannot be combined. Coverage is diffuse surface/transmission selection,
 // not refraction or medium absorption. Coincident surfaces share coverage events.
 // Capture every referenced nonzero texture with op4 before submitting op6.
+// Scene op7: atomic prototype/instance delta. Header[24], sequence:u64, then
+// prototype_upserts/prototype_removes/instance_upserts/instance_removes:u32[4].
+// Four corresponding groups follow. Prototype upsert: id/revision:u64[2],
+// span_count/reserved:u32[2], then op6 spans with local geometry. Remove: id/revision:u64[2].
+// Instance upsert[128]: id/revision/prototype:u64[3], world_origin:f64[3],
+// row_major_affine:f32[12], texture/flags:u32[2], tint:RGBA8, reserved:u32,
+// uv_scale_u/uv_scale_v/uv_offset_u/uv_offset_v:f32[4]. Texture/flags UINT32_MAX inherit.
+// Geometry identity is independent of instance identity. Sequence strictly increases;
+// every record revision equals its batch sequence. No permanent dead-ID history is needed.
+// Empty delta is not submitted. Borrow ends on CPU return; GPU retirement remains timeline-based.
 int32_t prime_submit(uint64_t handle, const uint8_t *packet, uint64_t length);
 int32_t prime_render(uint64_t handle, const uint8_t *frame, uint64_t length,
                      uint8_t *rgba, uint64_t capacity);

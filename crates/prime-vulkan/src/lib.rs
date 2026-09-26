@@ -1,8 +1,10 @@
 //! Hardware ray-query renderer. Production records into the host Vulkan
 //! submission and target; synchronous readback is restricted to offline diagnostics.
 mod benchmark;
+mod context;
 mod dynamic;
 mod geometry;
+mod plan;
 mod resources;
 mod target;
 mod textures;
@@ -11,12 +13,23 @@ use geometry::Geometry;
 pub use resources::GpuProfile;
 
 use ash::vk::{self, Handle};
-use prime_scene::scene::{Camera, Scene};
+use prime_scene::scene::{Camera, InstanceScene, Scene};
 use resources::{Buffer, Context, error};
 use std::{io::Cursor, sync::Arc};
 use target::Image;
 
 const FRAME_SLOTS: usize = 3;
+
+/// Last recorded frame's object work; independent of opt-in timing instrumentation.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct InstanceWork {
+    pub resident_blas: u32,
+    pub rebuilt_blas: u32,
+    pub instances: u32,
+}
+
+#[cfg(test)]
+mod object_tests;
 
 struct Pipeline {
     context: Arc<Context>,
@@ -53,7 +66,7 @@ impl Pipeline {
                 descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
                 pipeline: vk::Pipeline::null(),
             };
-            let bindings: Vec<_> = (0..7)
+            let bindings: Vec<_> = (0..8)
                 .map(|binding| {
                     vk::DescriptorSetLayoutBinding::default()
                         .binding(binding)
@@ -96,7 +109,7 @@ impl Pipeline {
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_BUFFER,
-                    descriptor_count: 5 * FRAME_SLOTS as u32,
+                    descriptor_count: 6 * FRAME_SLOTS as u32,
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_IMAGE,
@@ -186,7 +199,7 @@ pub struct Renderer {
     host_query: vk::QueryPool,
     last_gpu_ns: u64,
     last_gpu_serial: u64,
-    descriptor_keys: [[u64; 7]; FRAME_SLOTS],
+    descriptor_keys: [[u64; 8]; FRAME_SLOTS],
 }
 #[cfg(test)]
 mod tests {

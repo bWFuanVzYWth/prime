@@ -1,10 +1,12 @@
 //! Persistent 64-block clusters: section updates never repack the complete world.
-use super::dynamic::{DYNAMIC_INSTANCE, DynamicGeometry, TopLevel};
+use super::dynamic::TopLevel;
 use super::resources::{Acceleration, Buffer, Context};
 use super::textures::Textures;
 use super::{float, float4, uint};
+use crate::context::objects::Objects;
+use crate::plan::Slots;
 use ash::vk;
-use prime_scene::scene::{MeshKey, Scene, SceneMesh};
+use prime_scene::scene::{InstanceScene, MeshKey, Scene, SceneMesh};
 use std::{collections::BTreeMap, sync::Arc};
 
 type ClusterKey = ([i32; 3], u32);
@@ -18,54 +20,6 @@ struct Cluster {
     acceleration: Acceleration,
 }
 
-#[derive(Default)]
-struct Slots {
-    end: u32,
-    free: BTreeMap<u32, u32>,
-}
-impl Slots {
-    fn allocate(&mut self, count: u32) -> Result<u32, String> {
-        if let Some((first, available)) = self
-            .free
-            .iter()
-            .find(|(_, n)| **n >= count)
-            .map(|(&p, &n)| (p, n))
-        {
-            self.free.remove(&first);
-            if available > count {
-                self.free.insert(first + count, available - count);
-            }
-            return Ok(first);
-        }
-        let first = self.end;
-        let end = first
-            .checked_add(count)
-            .ok_or("Triangle address overflow")?;
-        if end > 0x00ff_ffff {
-            return Err("Triangle arena exceeds the 24-bit TLAS instance offset".into());
-        }
-        self.end = end;
-        Ok(first)
-    }
-    fn release(&mut self, mut first: u32, mut count: u32) {
-        if let Some((&previous, &length)) = self.free.range(..first).next_back()
-            && previous + length == first
-        {
-            self.free.remove(&previous);
-            first = previous;
-            count += length;
-        }
-        if let Some(length) = self.free.remove(&(first + count)) {
-            count += length;
-        }
-        if first + count == self.end {
-            self.end = first;
-        } else {
-            self.free.insert(first, count);
-        }
-    }
-}
-
 pub(super) struct Geometry {
     pub revision: u64,
     epoch: u64,
@@ -74,10 +28,7 @@ pub(super) struct Geometry {
     // Retire TLAS before any BLAS whose address it contains.
     pub top: TopLevel,
     clusters: BTreeMap<ClusterKey, Cluster>,
-    dynamic: Option<DynamicGeometry>,
-    dynamic_revision: Option<(u64, u64)>,
-    dynamic_count: u32,
-    dynamic_origin: [f32; 3],
+    pub objects: Objects,
     instances: Vec<vk::AccelerationStructureInstanceKHR>,
     top_dirty: bool,
     static_count: u32,
@@ -96,10 +47,7 @@ impl Geometry {
             triangle_count: 0,
             top: TopLevel::default(),
             clusters: BTreeMap::new(),
-            dynamic: None,
-            dynamic_revision: None,
-            dynamic_count: 0,
-            dynamic_origin: [0.0; 3],
+            objects: Objects::new(context)?,
             instances: Vec::new(),
             top_dirty: true,
             static_count: 0,
@@ -376,72 +324,34 @@ impl Geometry {
         &mut self,
         context: &Arc<Context>,
         scene: &Scene,
+        objects: &InstanceScene,
         slot: usize,
     ) -> Result<(bool, bool), String> {
-        let source = &scene.dynamic;
-        let count =
-            u32::try_from(source.triangles.len()).map_err(|_| "Too many dynamic triangles")?;
-        if source.origin.iter().any(|value| !value.is_finite()) {
-            return Err("Invalid dynamic origin".into());
-        }
-        let changed = self.dynamic_revision != Some((scene.epoch, source.revision));
-        let origin_changed = self.dynamic_origin != source.origin;
-        let visible_change = (changed || origin_changed) && (count > 0 || self.dynamic_count > 0);
-        let mut bindings_changed = false;
-        if changed && count > 0 {
-            if self
-                .dynamic
-                .as_ref()
-                .is_none_or(|geometry| count > geometry.capacity)
-            {
-                self.dynamic = Some(DynamicGeometry::new(context, count)?);
-                bindings_changed = true;
-            }
-            self.dynamic.as_mut().unwrap().upload(
-                context,
-                &source.triangles,
-                &self.textures,
-                slot,
-            )?;
-        }
-        self.dynamic_revision = Some((scene.epoch, source.revision));
-        self.dynamic_origin = source.origin;
-        self.dynamic_count = count;
-        if self.top_dirty || visible_change {
-            if count > 0 {
-                let [x, y, z] = source.origin;
-                self.instances.push(vk::AccelerationStructureInstanceKHR {
-                    transform: vk::TransformMatrixKHR {
-                        matrix: [1.0, 0.0, 0.0, x, 0.0, 1.0, 0.0, y, 0.0, 0.0, 1.0, z],
-                    },
-                    instance_custom_index_and_mask: vk::Packed24_8::new(DYNAMIC_INSTANCE, 0xff),
-                    instance_shader_binding_table_record_offset_and_flags: vk::Packed24_8::new(
-                        0,
-                        vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE.as_raw() as u8,
-                    ),
-                    acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
-                        device_handle: self.dynamic.as_ref().unwrap().address(),
-                    },
-                });
-            }
+        let (changed, mut bindings) = self.objects.prepare(
+            context,
+            scene,
+            objects,
+            &self.textures,
+            slot,
+            self.clusters.len(),
+        )?;
+        if self.top_dirty || changed {
+            let count = self.instances.len();
+            self.instances.extend_from_slice(&self.objects.instances);
             let result = self.top.rebuild(context, &self.instances, slot);
-            if count > 0 {
-                self.instances.pop();
-            }
-            bindings_changed |= result?;
+            self.instances.truncate(count);
+            bindings |= result?;
             self.top_dirty = false;
         }
         self.triangle_count = self
             .static_count
-            .checked_add(count)
+            .checked_add(self.objects.triangle_count)
             .ok_or("Triangle count overflow")?;
-        Ok((visible_change, bindings_changed))
+        Ok((changed, bindings))
     }
 
     pub fn dynamic_buffer(&self) -> &Buffer {
-        self.dynamic
-            .as_ref()
-            .map_or(&self.triangles, |geometry| &geometry.data)
+        &self.objects.data
     }
 }
 
@@ -469,6 +379,7 @@ pub(super) unsafe fn transfer_barrier(context: &Context, command: vk::CommandBuf
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plan::OBJECT_BIT;
     #[test]
     fn material_slots_reuse_and_coalesce_without_aliasing_live_ranges() {
         let mut slots = Slots::default();
@@ -485,12 +396,12 @@ mod tests {
     }
 
     #[test]
-    fn static_material_slots_never_allocate_dynamic_instance_sentinel() {
+    fn static_material_slots_never_alias_object_instance_indices() {
         let mut slots = Slots::default();
-        assert_eq!(slots.allocate(DYNAMIC_INSTANCE).unwrap(), 0);
+        assert_eq!(slots.allocate(OBJECT_BIT).unwrap(), 0);
         assert!(slots.allocate(1).is_err());
-        slots.release(DYNAMIC_INSTANCE - 1, 1);
-        assert_eq!(slots.allocate(1).unwrap(), DYNAMIC_INSTANCE - 1);
+        slots.release(OBJECT_BIT - 1, 1);
+        assert_eq!(slots.allocate(1).unwrap(), OBJECT_BIT - 1);
         assert!(slots.allocate(1).is_err());
     }
 }

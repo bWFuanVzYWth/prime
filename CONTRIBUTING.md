@@ -52,8 +52,10 @@
 | `-PnativeLibrary=绝对路径` | 指定引擎库，适合同一不可变 DLL 的双版本验证 |
 | `-PprimeptValidation=true` | 启用宿主 Vulkan validation |
 | `-PprimeptProfile=true` | 开启 Java 汇总和 native GPU profiling |
+| `-PprimeptProfileCsv=绝对路径` | 配合 profile 保存逐帧 CPU 节奏、阶段及源计数，保留离群值 |
 | `-PprimeptCaptureAudit=true` | 记录源 quad、实际 tint 与被排除的原版明暗；用于正确性检查 |
 | `-PprimeptWorld=存档目录名` | 使用 quick play 进入该版本 run 目录下的测试世界 |
+| `-PprimeptUuid=玩家UUID` | 在测试副本中读取指定已有玩家的位置和状态 |
 
 外部启动器对应的 JVM 参数见 README；不要将 Gradle 的 `-P` 属性直接交给 Java。
 
@@ -89,6 +91,12 @@ cargo test -p prime_vulkan --lib --locked -- --ignored --nocapture --test-thread
 ```
 
 这些测试覆盖 cutout、累积、尺寸变化、增量场景和宿主资源退休；小尺寸/奇数尺寸用于边界检查，不是性能数据。改变宿主集成或捕获时，还需在对应 MC 适配器实际运行，检查主图像与 HUD、资源重载、世界退出等相关生命周期。更新公共接口时验证受影响的两个适配器；编译通过不证明 Mixin 注入或实际 GPU 功能正常。
+
+实例相关 GPU 测试还覆盖局部原型共享、仿射/颜色/UV 与烘焙几何等价、批量增删、空间回退桶局部失效，以及多帧在途的 resize、重定位和 epoch 切换。Java 版本模块另有独立 `cpuSmoke` Fabric 测试源集，在真实 Mixin 转换后的类上执行标准 Cube、同帧源突变与未知路径回退；它在 preLaunch 退出，不创建窗口或设备，也不能代替实际游戏验证。
+
+```powershell
+.\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke --no-parallel
+```
 
 独立图像诊断入口：
 
@@ -129,6 +137,8 @@ cargo run --release --locked -p prime_tools --bin perf -- --frames 120 --warmup 
 
 动态捕获的游戏 profile 另给出 `dynamicCapture`（额外材质绑定和 mesh 拷贝 CPU 均值，包含于 `mcBeforePT`）、`dynamicSubmit`（纹理增量与整帧 FFM 解码 CPU 均值，包含于 `hook`）。`dynamicSpansTotal`、`dynamicVerticesTotal`、`dynamicBytesTotal`、`modelMeshesTotal` 和 `particleMeshesTotal` 是该窗口总量，除以 `frames` 才是每帧均值；mesh 数是原版批次数，不是实体数。`dynamicCapacity` 为保留 packet 容量，`dynamicGrowthsTotal` 是该 writer 自创建起的累计扩容次数。原版动画/模型准备时间没有混入 `dynamicCapture`；原版 GPU 上传仍需单独分析。
 
+标准模型还记录实际 `beSources/entitySources/modelSubmits`、标准/回退叶节点、源引用检查数与几何顶点读取数，以及 op7 的原型/实例 upsert/remove 和字节数。对象数、模型提交数、Cube 叶节点数与 TLAS 实例数不是同一单位，报告中分别标注。逐帧 CSV 的 hook 间隔是 CPU 帧节奏，包含两个 hook 之间的原版工作和等待；不是 GPU 执行时间或显示器呈现时间。阶段总和与端到端间隔的差额不能无证据地归因于某一 GPU pass。详细 profile 对每个实际 Cube 调用前后计时，会增加大量叶节点场景的 CPU 成本；正式结论须标注其状态，必要时用关闭 profile 的同场景游戏 FPS 对照，不能把不同指标直接相减归因为计时成本。
+
 大量方块实体的源协议成本可先用无 GPU 依赖的局部夹具定位：
 
 ```powershell
@@ -136,6 +146,26 @@ cargo run --release --no-default-features --locked -p prime_tools --bin capture-
 ```
 
 每个代理对象是 24 个四边形，使用实际 op6 字节流；同材质单 span，每个样本仅改变序号和一个源顶点。分别计时 `SourceScene::submit`、`translate_dynamic` 与旧快照最后一个 Arc 的释放，模拟替换期间仍保留旧快照。CSV 保留预热、各样本、Rust 分配请求与峰值；分配统计不是进程 RSS。该工具不包含 Minecraft 模型生成、Java/FFM、GPU 打包或渲染，不能换算成游戏 FPS。CPU 局部测试没有输出分辨率；后续实际渲染验收仍须原生 1920×1080，并记录实际提交数量，不能用放置数量或少量合并 span 代替万级可见对象负载。
+
+持久实例的 CPU 夹具使用真实 op7 包，分别测首次发布、静止借用、1% 姿态更新和 1% 持续增删：
+
+```powershell
+cargo run --release --no-default-features --locked -p prime_tools --bin instance-cpu -- --objects 1000,10000,20000 --warmup 3 --samples 21 --csv artifacts/cpu-instances.csv
+```
+
+静止阶段不发送空包，其访问计时仅证明该 accessor 的成本，不代表整个 Java 捕获或完整渲染帧。每条记录的 revision 必须等于当前 batch sequence；源码工具、Java writer 与协议测试共同验证这个约束。测试参数和输出单位以各工具 `--help` 为准。
+
+原生实例 GPU 夹具使用同一宿主录制接口，固定 1920×1080、相机、种子、一个 48 三角形原型及 1k/10k/20k 实例，覆盖静止、1% 姿态更新和 1% 身份增删：
+
+```powershell
+$env:PRIME_PROFILE = '1'
+$env:PRIME_VK_VALIDATION = '0'
+$env:VK_LAYER_VALIDATE_SYNC = '0'
+$env:PRIME_PROFILE_TRACE = '0'
+cargo run --release --locked -p prime_tools --bin instance-perf -- --samples 60 --warmup 8 --rounds 3 --csv artifacts/gpu-instances.csv
+```
+
+该夹具直接构造 `InstanceScene`，不含 op7 解码、Java、游戏和呈现。身份增删在相同位置替换以隔离成员变化的成本，不代表移动或重叠几何的最坏情况；简单 opaque 代理模型也不能代表复杂 Minecraft 画面的射线成本。CSV 保留每帧 CPU 录制、提交、反压等待、完整 GPU 区间、上传字节与实际 BLAS 重建数。需要确认输入画面时可用工具 `--diagnostic` 在计时之外输出同一夹具图像，不把读回混入生产性能数据。
 
 ## 文档与本地产物
 

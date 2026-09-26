@@ -1,4 +1,5 @@
 //! Renderer values contain no Minecraft objects, borrowed FFM memory or Vulkan handles.
+use crate::instances::InstanceContext;
 use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone, Copy, Debug)]
@@ -34,6 +35,42 @@ pub struct DynamicScene {
     pub revision: u64,
     pub origin: [f32; 3],
     pub triangles: Arc<[Triangle]>,
+}
+
+/// Immutable local geometry, shared by any number of persistent instances.
+#[derive(Clone, Debug)]
+pub struct Prototype {
+    pub revision: u64,
+    pub triangles: Arc<[Triangle]>,
+    pub bounds: [[f32; 3]; 2],
+}
+
+/// Actual source transform and material values. The camera is never part of this identity.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Instance {
+    pub revision: u64,
+    pub prototype_id: u64,
+    pub origin: [f64; 3],
+    /// Row-major 3x4 affine: world = origin + transform * [local, 1].
+    pub transform: [f32; 12],
+    /// u32::MAX inherits the prototype triangle's texture; zero means white.
+    pub texture_id: u32,
+    /// u32::MAX inherits the prototype triangle's material flags.
+    pub flags: u32,
+    /// Source RGBA bytes, multiplied with each vertex using integer floor(a*b/255).
+    pub tint: [u8; 4],
+    /// [scale_u, scale_v, offset_u, offset_v], applied to prototype UVs.
+    pub uv_transform: [f32; 4],
+}
+
+/// Borrowed by the renderer; maps stay in their CPU owner and are never cloned per frame.
+#[derive(Default, Debug)]
+pub struct InstanceScene {
+    pub epoch: u64,
+    pub resource_revision: u64,
+    pub instance_revision: u64,
+    pub prototypes: BTreeMap<u64, Prototype>,
+    pub instances: BTreeMap<u64, Instance>,
 }
 
 #[derive(Default)]
@@ -94,9 +131,18 @@ pub struct SourceScene {
     pub(crate) triangle_count: usize,
     pub(crate) texture_bytes: usize,
     pub(crate) dynamic: DynamicMesh,
+    pub(crate) instances: InstanceContext,
 }
 
 impl SourceScene {
+    pub fn instances(&self) -> &InstanceScene {
+        self.instances.scene()
+    }
+
+    pub fn instance_sequence(&self) -> u64 {
+        self.instances.sequence()
+    }
+
     pub fn translate(&self, anchor: [f64; 3]) -> Result<Scene, String> {
         let mut meshes = BTreeMap::new();
         for (key, mesh) in &self.meshes {

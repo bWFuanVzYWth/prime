@@ -35,6 +35,8 @@ flowchart TD
 
 `prime_engine` 是 native 入口和会话所有者，协调源状态、翻译缓存和 renderer。`prime_vulkan` 拥有具体 GPU 资源与其退休规则；宿主 instance/device/queue/image 始终由 Minecraft 拥有。引擎默认启用 `vulkan` feature；只测试协议和引擎错误边界时可关闭它，完全不编译 Slang。单独选中 `prime_vulkan` 则必然需要 GPU 构建工具，但其普通 CPU 单测无需实际创建 GPU 设备。
 
+实例通路明确分离状态和副作用：`prime_scene::instances::InstanceContext` 拥有版本无关的原型、实例和引用计数，先准备验证计划再应用；`prime_vulkan::plan` 计算资源变化、原始几何分桶和放置，`context::objects` 持有 Vulkan 资源并执行计划。每个会话显式借用这些上下文，未引入异步任务或内部可变的全局缓存。此边界不表示旧有全部 renderer 模块已经完成相同拆分。
+
 `prime_tools` 持有离线 PNG 输出与性能夹具入口，图像编码库不进入引擎 DLL 的依赖。诊断用 C 导出 `prime_render` 仍存在，实际游戏只调用宿主录制接口，不回读输出。
 
 `adapters/common` 的生产代码不依赖 Minecraft、Fabric 或 LWJGL。它只写稳定的源描述与 FFM ABI，不能增加 MC enum ordinal、宿主私有类或 shader buffer 布局。版本模块负责实际 MC 模型/tint 调用的观察、区块任务/epoch、纹理来源、相机和宿主 Vulkan 特性与句柄。复制少量版本适配代码比把变化的私有签名装进反射层更容易编译检查；新版本通过增加模块验证，不能更改 Rust 使其识别版本号。
@@ -52,7 +54,11 @@ flowchart TD
 
 没有第二次模型随机、面剔除或 tint 查询；Java 不把颜色转换到线性空间，也不构造 GPU 材质。发布依然是变更区块级，FFM 不按 quad 调用。当前仍保留 MC 编译与上传以维持数据来源，并非已经实现独立完整光追覆盖窗口。
 
-动态捕获位于各版本 `StagedVertexBuffer.Draw.append` 的真实批量结果。版本层在原版准备材质时绑定 Draw 与纹理/alpha，particle 按实际 layer 使用对应图集。`common/DynamicFrame` 只复制布局描述和顶点字节到持久 native arena；相邻同布局材质批次合并，整个世界准备结束后以 op=6 同步借用提交。动态对象不逐个建立跨语言身份或调用 native。模型、动画与粒子回调不重放，静态和动态输入在 Rust 保持独立 revision，详见 [abi.md](abi.md) 与 [architecture.md](architecture.md)。
+标准模型捕获观察实际 `ModelPart.Cube.compile`。版本层的 `ModelGeometryContext` 识别原版不可变 Vertex 与数组引用变化；`ModelCapture` 关联实体/方块实体源、实际 Model 提交、叶节点、局部几何和已求值姿态。共享 `InstanceCapture` 管理原型、实例和封包生命周期，不依赖 MC 类型。资源变化读取顶点，稳定帧只检查源引用及实例有效值；原版 setupAnim、渲染回调和顶点输出仍执行一次。世界源对象通过自身附加字段持有上下文，不靠 equals/hashCode 或全局实体缓存确定身份。
+
+只有已知标准 Cube、consumer 和 UV 变换才能进入实例通路。已知相关类存在第三方 Mixin、Cube 子类、未知 consumer 或不可逆变换时保留原始几何回退；这个检测不构成任意未注解字节码变换的兼容承诺。姿态来自实际原版矩阵，源世界原点为 f64，但原版已经计算过的相机相对 f32 平移不能无损逆推；相机运动仍可能使实例记录变化，不使用容差吞掉真实微小运动。
+
+原始回退继续观察各版本 `StagedVertexBuffer.Draw.append` 的真实批量结果。版本层绑定 Draw 与纹理/alpha，particle 使用实际 layer 图集；已经作为实例接受的顶点区间从原始包排除。`common/DynamicFrame` 复制其余源布局和顶点至复用的 native arena，相邻同描述 span 合并。整个世界准备结束后闭合捕获，进入 native hook 时先提交资源变化，再提交一个 op7 增量和必要的 op6 回退快照，无逐对象 FFI。两条通路均不重放模型、动画或粒子回调，详见 [abi.md](abi.md) 与 [architecture.md](architecture.md)。
 
 ## 矩形分解的接入范围
 

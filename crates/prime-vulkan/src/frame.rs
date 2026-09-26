@@ -84,7 +84,7 @@ impl Renderer {
             host_query: vk::QueryPool::null(),
             last_gpu_ns: 0,
             last_gpu_serial: 0,
-            descriptor_keys: [[0; 7]; FRAME_SLOTS],
+            descriptor_keys: [[0; 8]; FRAME_SLOTS],
         };
         if result.context.is_borrowed()
             && result.context.timestamp_bits > 0
@@ -114,6 +114,15 @@ impl Renderer {
     pub fn profile_snapshot(&self) -> Option<GpuProfile> {
         self.context.profile_snapshot()
     }
+    pub fn instance_work(&self) -> InstanceWork {
+        self.geometry
+            .as_ref()
+            .map_or(InstanceWork::default(), |geometry| InstanceWork {
+                resident_blas: geometry.objects.count() as u32,
+                rebuilt_blas: geometry.objects.rebuilt,
+                instances: geometry.objects.instances.len() as u32,
+            })
+    }
     pub fn last_gpu_time_ns(&self) -> u64 {
         self.last_gpu_ns
     }
@@ -125,10 +134,63 @@ impl Renderer {
         Ok(())
     }
 
-    /// Explicit image diagnostic only; production uses record_host without readback.
+    /// Compatibility diagnostic with no persistent object instances.
     pub fn render(
         &mut self,
         scene: &Scene,
+        camera: &Camera,
+        width: u32,
+        height: u32,
+        sample_index: u32,
+    ) -> Result<Vec<u8>, String> {
+        self.render_with_instances(
+            scene,
+            &InstanceScene::default(),
+            camera,
+            width,
+            height,
+            sample_index,
+        )
+    }
+
+    /// Compatibility host recording with no persistent object instances.
+    /// # Safety
+    /// The same handle, ordering and completion contract as record_host_with_instances applies.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn record_host(
+        &mut self,
+        scene: &Scene,
+        camera: &Camera,
+        width: u32,
+        height: u32,
+        sample_index: u32,
+        command: u64,
+        image: u64,
+        view: u64,
+        serial: u64,
+    ) -> Result<(), String> {
+        unsafe {
+            self.record_host_with_instances(
+                scene,
+                &InstanceScene::default(),
+                camera,
+                width,
+                height,
+                sample_index,
+                command,
+                image,
+                view,
+                serial,
+            )
+        }
+    }
+
+    /// Explicit image diagnostic only; production uses record_host without readback.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_with_instances(
+        &mut self,
+        scene: &Scene,
+        instances: &InstanceScene,
         camera: &Camera,
         width: u32,
         height: u32,
@@ -140,16 +202,18 @@ impl Renderer {
             );
         }
         self.failed = true;
-        let result = self.render_offline(scene, camera, width, height, sample_index);
+        let result = self.render_offline(scene, instances, camera, width, height, sample_index);
         if result.is_ok() {
             self.failed = false;
         }
         result
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn prepare(
         &mut self,
         scene: &Scene,
+        instances: &InstanceScene,
         camera: &Camera,
         width: u32,
         height: u32,
@@ -169,7 +233,7 @@ impl Renderer {
             return Err("Camera contains invalid vectors or vertical FOV".into());
         }
         if self.geometry.as_ref().is_none_or(|g| g.needs_update(scene)) {
-            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
+            self.descriptor_keys = [[0; 8]; FRAME_SLOTS];
             if let Some(geometry) = &mut self.geometry {
                 geometry.update(&self.context, scene)?;
             } else {
@@ -177,24 +241,25 @@ impl Renderer {
             }
             self.samples = 0;
         }
-        let (dynamic_changed, bindings_changed) =
-            self.geometry
-                .as_mut()
-                .unwrap()
-                .prepare_dynamic(&self.context, scene, slot)?;
+        let (dynamic_changed, bindings_changed) = self.geometry.as_mut().unwrap().prepare_dynamic(
+            &self.context,
+            scene,
+            instances,
+            slot,
+        )?;
         if dynamic_changed {
             self.samples = 0;
         }
         if bindings_changed {
             // A freed raw handle can reappear in an older descriptor slot's key.
-            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
+            self.descriptor_keys = [[0; 8]; FRAME_SLOTS];
         }
         if self
             .output
             .as_ref()
             .is_none_or(|o| o.width != width || o.height != height)
         {
-            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
+            self.descriptor_keys = [[0; 8]; FRAME_SLOTS];
             self.output = Some(Output::new(&self.context, width, height)?);
             self.samples = 0;
         }
@@ -202,7 +267,7 @@ impl Renderer {
             self.samples = 0;
         }
         self.camera = Some(*camera);
-        self.frame_seed = if scene.dynamic.triangles.is_empty() {
+        self.frame_seed = if scene.dynamic.triangles.is_empty() && instances.instances.is_empty() {
             self.samples
         } else {
             sample_index
@@ -221,6 +286,7 @@ impl Renderer {
             output.accumulation.buffer.as_raw(),
             view.as_raw(),
             geometry.dynamic_buffer().buffer.as_raw(),
+            geometry.objects.metadata.buffer.as_raw(),
         ];
         let descriptor = self.pipeline.descriptors[slot];
         let image = [vk::DescriptorImageInfo::default()
@@ -250,6 +316,7 @@ impl Renderer {
             &geometry.textures.texels,
             &output.accumulation,
             geometry.dynamic_buffer(),
+            &geometry.objects.metadata,
         ];
         let infos = buffers.map(|b| {
             [vk::DescriptorBufferInfo::default()
@@ -293,6 +360,11 @@ impl Renderer {
                 .dst_binding(6)
                 .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                 .buffer_info(&infos[4]),
+            vk::WriteDescriptorSet::default()
+                .dst_set(descriptor)
+                .dst_binding(7)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&infos[5]),
         ];
         unsafe {
             self.context.device.update_descriptor_sets(&writes, &[]);
@@ -387,9 +459,11 @@ impl Renderer {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_offline(
         &mut self,
         scene: &Scene,
+        instances: &InstanceScene,
         camera: &Camera,
         width: u32,
         height: u32,
@@ -401,7 +475,7 @@ impl Renderer {
             .submit_named("diagnostic_prepare_barrier", |command| {
                 self.before_frame(command)
             })?;
-        self.prepare(scene, camera, width, height, sample_index, 0)?;
+        self.prepare(scene, instances, camera, width, height, sample_index, 0)?;
         let view = self.output.as_ref().unwrap().image.as_ref().unwrap().view;
         self.descriptors(0, view);
         let output = self.output.as_ref().unwrap();
@@ -470,9 +544,10 @@ impl Renderer {
     /// device/graphics family. Target stays GENERAL. The caller submits this buffer in
     /// host order, signals the attached timeline at serial, and retains the target until then.
     #[allow(clippy::too_many_arguments)]
-    pub unsafe fn record_host(
+    pub unsafe fn record_host_with_instances(
         &mut self,
         scene: &Scene,
+        instances: &InstanceScene,
         camera: &Camera,
         width: u32,
         height: u32,
@@ -496,6 +571,7 @@ impl Renderer {
         let _scope = HostRecordScope(self.context.clone());
         let result = self.record_host_frame(
             scene,
+            instances,
             camera,
             width,
             height,
@@ -514,6 +590,7 @@ impl Renderer {
     fn record_host_frame(
         &mut self,
         scene: &Scene,
+        instances: &InstanceScene,
         camera: &Camera,
         width: u32,
         height: u32,
@@ -557,7 +634,7 @@ impl Renderer {
             }
         }
         self.before_frame(command);
-        self.prepare(scene, camera, width, height, sample_index, slot)?;
+        self.prepare(scene, instances, camera, width, height, sample_index, slot)?;
         self.descriptors(slot, view);
         self.dispatch(command, slot, true);
         unsafe {

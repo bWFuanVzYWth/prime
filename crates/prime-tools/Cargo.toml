@@ -27,5 +27,9 @@ path = "src/perf.rs"
 name = "capture-cpu"
 path = "src/capture_cpu.rs"
 
+[[bin]]
+name = "instance-cpu"
+path = "src/instance_cpu.rs"
+
 [lints]
 workspace = true

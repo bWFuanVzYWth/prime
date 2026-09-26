@@ -2,6 +2,7 @@ package dev.primept;
 
 import dev.primept.capture.Packets;
 import dev.primept.capture.DynamicFrame;
+import dev.primept.capture.InstanceCapture;
 import java.util.Arrays;
 import java.awt.image.BufferedImage;
 import java.nio.ByteBuffer;
@@ -75,6 +76,38 @@ public final class NativeSmoke {
                 if (!Arrays.equals(baseline, dynamicPixels))
                     throw new AssertionError("Alpha-zero dynamic surface changed visibility or shadowing");
             }
+            try (var instances = new InstanceCapture(1)) {
+                ByteBuffer local = ByteBuffer.allocate(96).order(ByteOrder.LITTLE_ENDIAN);
+                for (float[] point : new float[][] { {-1, 0}, {1, 0}, {1, 2}, {-1, 2} })
+                    local.putFloat(point[0]).putFloat(point[1]).putFloat(0).putInt(-1).putFloat(.5f).putFloat(.5f);
+                local.flip();
+                var prototype = instances.prototype(4, 4, 24, 0, 12, 16, local);
+                var wall = instances.instance();
+                float[] transform = {2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1, 0};
+                float[] uv = {1, 1, 0, 0};
+                instances.beginFrame();
+                instances.observe(wall, prototype, 0, 0, 2, transform, 7, 0, -1, uv);
+                instances.endFrame();
+                bridge.submit(instances.sealDelta());
+                instances.acknowledge();
+                bridge.renderDiagnostic(frame, rgba);
+                int center = ((height / 2) * width + width / 2) * 4;
+                if (Byte.toUnsignedInt(rgba.get(center + 2)) <= Byte.toUnsignedInt(rgba.get(center)))
+                    throw new AssertionError("Persistent instance texture or affine transform is not visible");
+                instances.beginFrame();
+                instances.observe(wall, prototype, 0, 0, 2, transform, 7, 0, -1, uv);
+                instances.endFrame();
+                if (instances.sealDelta() != null) throw new AssertionError("Stable instances must not cross FFM again");
+                instances.release(prototype);
+                instances.beginFrame(); instances.endFrame();
+                bridge.submit(instances.sealDelta());
+                instances.acknowledge();
+                bridge.renderDiagnostic(frame, rgba);
+                byte[] removed = new byte[baseline.length];
+                rgba.get(0, removed);
+                if (!Arrays.equals(baseline, removed))
+                    throw new AssertionError("Atomic prototype/instance removal did not restore the scene");
+            }
             var crossThreadError = new AtomicReference<Throwable>();
             Thread thread = Thread.ofPlatform().start(() -> {
                 try { bridge.submit(Packets.reset(2)); }
@@ -87,7 +120,7 @@ public final class NativeSmoke {
             try { bridge.submit(new byte[8]); }
             catch (IllegalStateException expected) { rejected = true; }
             if (!rejected) throw new AssertionError("Malformed packet must fail at the native boundary");
-            System.out.println("FFM Vulkan smoke passed: raw quad and batched native dynamic packet -> Rust triangles -> Slang -> RGBA; dynamic texture/visibility, empty-frame removal, alpha-zero visibility/shadows, owner-thread check, malformed-packet rejection; " + args[1]);
+            System.out.println("FFM Vulkan smoke passed: raw and persistent-instance packets -> Rust -> Slang -> RGBA; dynamic visibility, affine/texture instance, unchanged-frame zero-submit, atomic removal, alpha-zero visibility/shadows, owner-thread and malformed-input checks; " + args[1]);
         }
     }
 

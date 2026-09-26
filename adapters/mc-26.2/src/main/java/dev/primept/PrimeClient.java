@@ -49,8 +49,8 @@ public final class PrimeClient implements ClientModInitializer {
 
     public static boolean skipWorldRaster() {
         boolean ready = INSTANCE.enabled && !INSTANCE.failed && INSTANCE.reportedFrame
-                && INSTANCE.renderer != null && INSTANCE.renderer.hasCompletedTerrainFrame()
-                && INSTANCE.sentEpoch == CAPTURE.epoch() && CAPTURE.failure() == null;
+                && INSTANCE.renderer != null && INSTANCE.renderer.hasCompletedWorldFrame()
+                && INSTANCE.sentEpoch == CAPTURE.epoch() && CAPTURE.failure() == null && DynamicCapture.healthy();
         INSTANCE.skippedWorldRaster = ready;
         return ready;
     }
@@ -126,8 +126,8 @@ public final class PrimeClient implements ClientModInitializer {
             phaseStart = timing == null ? 0 : System.nanoTime();
             renderer.record(destination);
             if (timing != null) timing.nativeRender = System.nanoTime() - phaseStart;
-            if (!reportedFrame && submittedSections > 0) {
-                LOGGER.info("Prime PT first terrain frame recorded: {}x{}, {} captured section batches, resource epoch {}",
+            if (!reportedFrame) {
+                LOGGER.info("Prime PT first world frame recorded: {}x{}, {} captured section batches, resource epoch {}",
                         width, height, submittedSections, epoch);
                 reportedFrame = true;
                 renderer.enableWorldReplacementAfterCompletion();
@@ -136,7 +136,9 @@ public final class PrimeClient implements ClientModInitializer {
         } catch (Exception | LinkageError exception) {
             failed = true;
             CAPTURE.disable();
-            LOGGER.error("Prime PT disabled; vanilla rendering remains active", exception);
+            LOGGER.error(skippedWorldRaster
+                    ? "Prime PT disabled after world raster was skipped; this frame may be incomplete, full vanilla rendering resumes next frame"
+                    : "Prime PT disabled; full vanilla rendering resumes next frame", exception);
             closeResources();
         }
     }
@@ -172,7 +174,10 @@ public final class PrimeClient implements ClientModInitializer {
         INSTANCE.reportedProjectionWait = false;
         if (INSTANCE.profile != null) INSTANCE.profile.reset();
     }
-    public static void close() { CAPTURE.disable(); INSTANCE.closeResources(); }
+    public static void close() {
+        CAPTURE.disable(); INSTANCE.closeResources();
+        if (INSTANCE.profile != null) INSTANCE.profile.closeSamples();
+    }
 
     private void closeResources() {
         DynamicCapture.close();
