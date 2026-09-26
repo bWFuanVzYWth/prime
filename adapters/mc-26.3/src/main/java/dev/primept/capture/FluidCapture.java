@@ -18,7 +18,8 @@ public final class FluidCapture implements AutoCloseable, FluidRenderer.Output {
         this.terrain = terrain;
         delegate = output;
         previous = ACTIVE.get();
-        if (previous != null) previous.flush();
+        if (previous != null)
+            previous.flush();
         ACTIVE.set(this);
     }
 
@@ -29,37 +30,53 @@ public final class FluidCapture implements AutoCloseable, FluidRenderer.Output {
 
     public static void observedTint(int color) {
         var scope = ACTIVE.get();
-        if (scope != null) scope.tint = color;
+        if (scope != null)
+            scope.tint = color;
     }
 
     /** The vanilla vertex helper receives cardinal-shaded color; custom emitters supply source color. */
     public static void vanillaVertex(boolean active) {
         var scope = ACTIVE.get();
-        if (scope != null) scope.vanillaVertex = active;
+        if (scope != null)
+            scope.vanillaVertex = active;
     }
 
-    @Override public VertexConsumer getBuilder(ChunkSectionLayer layer) {
+    @Override
+    public VertexConsumer getBuilder(ChunkSectionLayer layer) {
         Sink sink = sinks[layer.ordinal()];
         if (sink == null) {
             VertexConsumer original = delegate.getBuilder(layer);
             // Fabric may call vanilla tesselate recursively with the same Output. Never capture twice.
-            while (original instanceof Sink wrapped) original = wrapped.delegate;
+            while (original instanceof Sink wrapped)
+                original = wrapped.delegate;
             sink = sinks[layer.ordinal()] = new Sink(original, layer);
         }
         return sink;
     }
 
-    private void flush() { for (Sink sink : sinks) if (sink != null) sink.flush(); }
+    private void flush() {
+        for (Sink sink : sinks)
+            if (sink != null)
+                sink.flush();
+    }
 
-    @Override public void close() {
-        if (closed) return;
+    @Override
+    public void close() {
+        if (closed)
+            return;
         closed = true;
         try {
             flush();
-            for (Sink sink : sinks) if (sink != null && sink.vertices % 4 != 0)
-                terrain.failed(new IllegalStateException("Fluid renderer emitted an incomplete quad"));
+            for (Sink sink : sinks)
+                if (sink != null && sink.vertices % 4 != 0)
+                    terrain.failed(
+                            new IllegalStateException("Fluid renderer emitted an incomplete quad"));
+        } finally {
+            if (previous == null)
+                ACTIVE.remove();
+            else
+                ACTIVE.set(previous);
         }
-        finally { if (previous == null) ACTIVE.remove(); else ACTIVE.set(previous); }
     }
 
     private final class Sink implements VertexConsumer {
@@ -74,53 +91,87 @@ public final class FluidCapture implements AutoCloseable, FluidRenderer.Output {
         }
 
         private void flush() {
-            if (attributes == 0) return;
-            if (attributes != 7) terrain.failed(new IllegalStateException("Fluid source vertex lacks position, color or UV"));
-            else { terrain.fluidVertex(layer, x, y, z, color, u, v); ++vertices; }
+            if (attributes == 0)
+                return;
+            if (attributes != 7)
+                terrain.failed(new IllegalStateException(
+                        "Fluid source vertex lacks position, color or UV"));
+            else {
+                terrain.fluidVertex(layer, x, y, z, color, u, v);
+                ++vertices;
+            }
             attributes = 0;
         }
 
-        @Override public void addVertex(float x, float y, float z, int color, float u, float v,
-                int overlay, int light, float nx, float ny, float nz) {
+        @Override
+        public void addVertex(float x, float y, float z, int color, float u, float v, int overlay,
+                              int light, float nx, float ny, float nz) {
             flush();
             terrain.fluidVertex(layer, x, y, z, vanillaVertex ? tint : color, u, v);
             ++vertices;
             delegate.addVertex(x, y, z, color, u, v, overlay, light, nx, ny, nz);
         }
 
-        @Override public VertexConsumer addVertex(float x, float y, float z) {
+        @Override
+        public VertexConsumer addVertex(float x, float y, float z) {
             flush();
-            this.x = x; this.y = y; this.z = z;
+            this.x = x;
+            this.y = y;
+            this.z = z;
             attributes = 1;
             delegate.addVertex(x, y, z);
             return this;
         }
 
-        @Override public VertexConsumer setColor(int color) {
+        @Override
+        public VertexConsumer setColor(int color) {
             this.color = vanillaVertex ? tint : color;
             attributes |= 2;
             delegate.setColor(color);
             return this;
         }
 
-        @Override public VertexConsumer setColor(int r, int g, int b, int a) {
+        @Override
+        public VertexConsumer setColor(int r, int g, int b, int a) {
             color = vanillaVertex ? tint : (a << 24 | r << 16 | g << 8 | b);
             attributes |= 2;
             delegate.setColor(r, g, b, a);
             return this;
         }
 
-        @Override public VertexConsumer setUv(float u, float v) {
-            this.u = u; this.v = v;
+        @Override
+        public VertexConsumer setUv(float u, float v) {
+            this.u = u;
+            this.v = v;
             attributes |= 4;
             delegate.setUv(u, v);
             return this;
         }
 
-        @Override public VertexConsumer setUv1(int u, int v) { delegate.setUv1(u, v); return this; }
-        @Override public VertexConsumer setUv2(int u, int v) { delegate.setUv2(u, v); return this; }
-        @Override public VertexConsumer setUv3(float u, float v) { delegate.setUv3(u, v); return this; }
-        @Override public VertexConsumer setNormal(float x, float y, float z) { delegate.setNormal(x, y, z); return this; }
-        @Override public VertexConsumer setLineWidth(float width) { delegate.setLineWidth(width); return this; }
+        @Override
+        public VertexConsumer setUv1(int u, int v) {
+            delegate.setUv1(u, v);
+            return this;
+        }
+        @Override
+        public VertexConsumer setUv2(int u, int v) {
+            delegate.setUv2(u, v);
+            return this;
+        }
+        @Override
+        public VertexConsumer setUv3(float u, float v) {
+            delegate.setUv3(u, v);
+            return this;
+        }
+        @Override
+        public VertexConsumer setNormal(float x, float y, float z) {
+            delegate.setNormal(x, y, z);
+            return this;
+        }
+        @Override
+        public VertexConsumer setLineWidth(float width) {
+            delegate.setLineWidth(width);
+            return this;
+        }
     }
 }

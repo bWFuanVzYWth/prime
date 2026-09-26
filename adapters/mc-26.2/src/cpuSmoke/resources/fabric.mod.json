@@ -1,1 +1,1 @@
-{"schemaVersion":1,"id":"primept_cpu_smoke","version":"1","environment":"client","entrypoints":{"preLaunch":["dev.primept.capture.PrototypeCpuSmoke"]}}
+{"schemaVersion": 1, "id": "primept_cpu_smoke", "version": "1", "environment": "client", "entrypoints": {"preLaunch": ["dev.primept.capture.PrototypeCpuSmoke"]}, "mixins": ["primept.foreign-smoke.mixins.json", "primept.capture-smoke.mixins.json"]}

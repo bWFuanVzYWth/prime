@@ -27,7 +27,8 @@ class TerrainCaptureTest {
     private static final SectionPos SECTION = SectionPos.of(-7, 3, 9);
     private static final BlockPos POSITION = new BlockPos(-112, 48, 144);
 
-    @Test void fabricPreservesAuthoredCornersAndUsesObservedTintWithoutRasterShade() throws Exception {
+    @Test
+    void fabricPreservesAuthoredCornersAndUsesObservedTintWithoutRasterShade() throws Exception {
         int[] authored = {0xffabcdef, 0x7f123456, 0x80402010, 0xff020304};
         int[] mutable = authored.clone();
         int tint = 0x9b7ea3d9;
@@ -36,7 +37,8 @@ class TerrainCaptureTest {
         try (var scope = TerrainCapture.open(inbox, SECTION, true)) {
             TerrainCapture.beginFabricQuad(quad);
             // Simulate Indigo mutating the same quad in place, including 8-bit rounding.
-            for (int i = 0; i < 4; i++) mutable[i] = ARGB.multiply(ARGB.scaleRGB(mutable[i], .2f), tint);
+            for (int i = 0; i < 4; i++)
+                mutable[i] = ARGB.multiply(ARGB.scaleRGB(mutable[i], .2f), tint);
             TerrainCapture.fabricTint(tint);
             TerrainCapture.finishFabricQuad(quad, true);
             scope.publish();
@@ -49,18 +51,20 @@ class TerrainCaptureTest {
             assertNotEquals(mutable[i], color(packet, i));
         }
         var bytes = ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN);
-        assertEquals(24, bytes.getInt(68));
-        assertEquals(1, bytes.getInt(92)); // Stable wire flag and layer, not an MC ordinal.
-        assertEquals(SourceQuads.CUTOUT, bytes.getInt(96));
+        assertEquals(24, bytes.getInt(92));
+        assertEquals(1, bytes.getInt(80)); // Stable wire flag and layer, not an MC ordinal.
+        assertEquals(SourceQuads.CUTOUT, bytes.getInt(72));
         assertEquals(-112d, bytes.getDouble(40));
         assertEquals(48d, bytes.getDouble(48));
         assertEquals(144d, bytes.getDouble(56));
-        assertEquals(10.25f, bytes.getFloat(104)); // Accepted, already translated local position.
-        System.out.println("Prime PT pre-light source fixture SHA256="
-                + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(packet)));
+        assertEquals(10.25f, bytes.getFloat(112)); // Accepted, already translated local position.
+        System.out.println(
+                "Prime PT pre-light source fixture SHA256=" +
+                HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(packet)));
     }
 
-    @Test void rejectedFabricQuadDoesNotRequireTintOrEmitGeometry() {
+    @Test
+    void rejectedFabricQuadDoesNotRequireTintOrEmitGeometry() {
         var inbox = new CaptureInbox(true);
         try (var scope = TerrainCapture.open(inbox, SECTION, true)) {
             var rejected = quad(new int[] {-1, -1, -1, -1}, 2);
@@ -74,7 +78,8 @@ class TerrainCaptureTest {
         assertEquals(0x7fabcdef, color(onlyMesh(inbox), 0));
     }
 
-    @Test void missingObservedTintFailsInsteadOfGuessingFinalColor() {
+    @Test
+    void missingObservedTintFailsInsteadOfGuessingFinalColor() {
         var inbox = new CaptureInbox(true);
         try (var scope = TerrainCapture.open(inbox, SECTION, true)) {
             var quad = quad(new int[] {-1, -1, -1, -1}, 0);
@@ -86,7 +91,8 @@ class TerrainCaptureTest {
         assertNull(inbox.poll());
     }
 
-    @Test void vanillaUsesSourceTintAndOffsetWithoutQuadInstanceLightingForEveryDirection() {
+    @Test
+    void vanillaUsesSourceTintAndOffsetWithoutQuadInstanceLightingForEveryDirection() {
         var inbox = new CaptureInbox(true);
         int tint = 0x7f8ab3d9;
         try (var scope = TerrainCapture.open(inbox, SECTION, true)) {
@@ -100,12 +106,14 @@ class TerrainCaptureTest {
         }
         var packet = onlyMesh(inbox);
         var bytes = ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN);
-        assertEquals(6 * 4, bytes.getInt(64));
-        for (int i = 0; i < 6 * 4; i++) assertEquals(tint, color(packet, i));
-        assertEquals(2.5f, bytes.getFloat(104));
+        assertEquals(6 * 4, bytes.getInt(88));
+        for (int i = 0; i < 6 * 4; i++)
+            assertEquals(tint, color(packet, i));
+        assertEquals(2.5f, bytes.getFloat(112));
     }
 
-    @Test void abortedScopePublishesNothingAndCannotLeakIntoTheNextCompile() {
+    @Test
+    void abortedScopePublishesNothingAndCannotLeakIntoTheNextCompile() {
         var inbox = new CaptureInbox(true);
         assertThrows(IllegalArgumentException.class, () -> {
             try (var ignored = TerrainCapture.open(inbox, SECTION, true)) {
@@ -125,7 +133,8 @@ class TerrainCaptureTest {
         assertNull(inbox.failure());
     }
 
-    @Test void resetDuringScopeRejectsItsFixedEpochAndPendingGeometry() {
+    @Test
+    void resetDuringScopeRejectsItsFixedEpochAndPendingGeometry() {
         var inbox = new CaptureInbox(true);
         try (var scope = TerrainCapture.open(inbox, SECTION, true)) {
             TerrainCapture.beginVanilla(POSITION, -1);
@@ -137,7 +146,8 @@ class TerrainCaptureTest {
         assertNull(inbox.failure());
     }
 
-    @Test void fastLeavesKeepIndigosActualCutoutLayerWhileVanillaUsesItsSolidOutput() {
+    @Test
+    void fastLeavesKeepIndigosActualCutoutLayerWhileVanillaUsesItsSolidOutput() {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         var leaves = Blocks.OAK_LEAVES.defaultBlockState();
@@ -150,28 +160,34 @@ class TerrainCaptureTest {
             TerrainCapture.beginFabricQuad(quad);
             TerrainCapture.finishFabricQuad(quad, true);
             TerrainCapture.beginVanilla(POSITION, -1);
-            TerrainCapture.vanillaQuad(0, 0, 0, leaves, baked(Direction.UP, -1, ChunkSectionLayer.CUTOUT));
+            TerrainCapture.vanillaQuad(0, 0, 0, leaves,
+                                       baked(Direction.UP, -1, ChunkSectionLayer.CUTOUT));
             scope.publish();
         }
         assertNull(inbox.failure());
         var batch = inbox.poll();
-        assertEquals(3, batch.packets().size()); // Removal, vanilla SOLID, then Indigo CUTOUT.
-        var opaque = ByteBuffer.wrap(batch.packets().get(1)).order(ByteOrder.LITTLE_ENDIAN);
-        var cutout = ByteBuffer.wrap(batch.packets().get(2)).order(ByteOrder.LITTLE_ENDIAN);
-        assertEquals(4, opaque.getInt(64));
-        assertEquals(0, opaque.getInt(92));
-        assertEquals(SourceQuads.OPAQUE, opaque.getInt(96));
-        assertEquals(4, cutout.getInt(64));
-        assertEquals(1, cutout.getInt(92));
-        assertEquals(SourceQuads.CUTOUT, cutout.getInt(96));
+        assertEquals(1, batch.packets().size());
+        var wire = ByteBuffer.wrap(batch.packets().getFirst()).order(ByteOrder.LITTLE_ENDIAN);
+        assertEquals(8, wire.getInt(8));
+        assertEquals(
+                2, wire.getInt(64)); // One atomic section, vanilla SOLID followed by Indigo CUTOUT.
+        int opaque = 72, cutout = opaque + 40 + 4 * 24;
+        assertEquals(4, wire.getInt(opaque + 16));
+        assertEquals(0, wire.getInt(opaque + 8));
+        assertEquals(SourceQuads.OPAQUE, wire.getInt(opaque));
+        assertEquals(4, wire.getInt(cutout + 16));
+        assertEquals(1, wire.getInt(cutout + 8));
+        assertEquals(SourceQuads.CUTOUT, wire.getInt(cutout));
     }
 
-    @Test void translucentVanillaAndFabricQuadsKeepSourceAlphaAndShareOneSectionLayer() {
+    @Test
+    void translucentVanillaAndFabricQuadsKeepSourceAlphaAndShareOneSectionLayer() {
         var inbox = new CaptureInbox(true);
         try (var scope = TerrainCapture.open(inbox, SECTION, true)) {
             TerrainCapture.beginVanilla(POSITION, 2);
             TerrainCapture.vanillaTint(POSITION, 2, 0x80776655);
-            TerrainCapture.vanillaQuad(0, 0, 0, null, baked(Direction.UP, 2, ChunkSectionLayer.TRANSLUCENT));
+            TerrainCapture.vanillaQuad(0, 0, 0, null,
+                                       baked(Direction.UP, 2, ChunkSectionLayer.TRANSLUCENT));
             var quad = quad(new int[] {0x40402010, -1, -1, -1}, -1, ChunkSectionLayer.TRANSLUCENT);
             TerrainCapture.beginFabricQuad(quad);
             TerrainCapture.finishFabricQuad(quad, true);
@@ -179,9 +195,9 @@ class TerrainCaptureTest {
         }
         byte[] packet = onlyMesh(inbox);
         var wire = ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN);
-        assertEquals(8, wire.getInt(64));
-        assertEquals(2, wire.getInt(92));
-        assertEquals(SourceQuads.TRANSLUCENT, wire.getInt(96));
+        assertEquals(8, wire.getInt(88));
+        assertEquals(2, wire.getInt(80));
+        assertEquals(SourceQuads.TRANSLUCENT, wire.getInt(72));
         assertEquals(0x80776655, color(packet, 0));
         assertEquals(0x40402010, color(packet, 4));
     }
@@ -193,8 +209,8 @@ class TerrainCaptureTest {
     private static BakedQuad baked(Direction direction, int tintIndex, ChunkSectionLayer layer) {
         var material = new BakedQuad.MaterialInfo(null, layer, null, tintIndex, true, 0);
         return new BakedQuad(new Vector3f(0, 0, 0), new Vector3f(1, 0, 0), new Vector3f(1, 1, 0),
-                new Vector3f(0, 1, 0), UVPair.pack(.1f, .2f), UVPair.pack(.3f, .2f),
-                UVPair.pack(.3f, .4f), UVPair.pack(.1f, .4f), direction, material);
+                             new Vector3f(0, 1, 0), UVPair.pack(.1f, .2f), UVPair.pack(.3f, .2f),
+                             UVPair.pack(.3f, .4f), UVPair.pack(.1f, .4f), direction, material);
     }
 
     private static MutableQuadView quad(int[] colors, int tintIndex) {
@@ -202,16 +218,17 @@ class TerrainCaptureTest {
     }
 
     private static MutableQuadView quad(int[] colors, int tintIndex, ChunkSectionLayer layer) {
-        return (MutableQuadView) Proxy.newProxyInstance(MutableQuadView.class.getClassLoader(),
-                new Class<?>[] {MutableQuadView.class}, (_, method, args) -> switch (method.getName()) {
-                    case "color" -> colors[(int) args[0]];
+        return (MutableQuadView)Proxy.newProxyInstance(
+                MutableQuadView.class.getClassLoader(), new Class<?>[] {MutableQuadView.class},
+                (_, method, args) -> switch (method.getName()) {
+                    case "color" -> colors[(int)args[0]];
                     case "tintIndex" -> tintIndex;
                     case "atlas" -> QuadAtlas.BLOCK;
                     case "chunkLayer" -> layer;
-                    case "x" -> 10.25f + (int) args[0];
+                    case "x" -> 10.25f + (int)args[0];
                     case "y" -> 2f;
                     case "z" -> 3f;
-                    case "u" -> .1f + (int) args[0] * .01f;
+                    case "u" -> .1f + (int)args[0] * .01f;
                     case "v" -> .2f;
                     default -> throw new UnsupportedOperationException(method.getName());
                 });
@@ -221,14 +238,18 @@ class TerrainCaptureTest {
         assertNull(inbox.failure());
         var batch = inbox.poll();
         assertNotNull(batch);
-        assertEquals(2, batch.packets().size());
+        assertEquals(1, batch.packets().size());
         assertNull(inbox.poll());
-        return batch.packets().get(1);
+        byte[] packet = batch.packets().getFirst();
+        var wire = ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN);
+        assertEquals(8, wire.getInt(8));
+        assertEquals(1, wire.getInt(64));
+        return packet;
     }
 
     private static int color(byte[] packet, int vertex) {
-        int p = 104 + vertex * SourceQuads.STRIDE + 12;
-        return (packet[p + 3] & 255) << 24 | (packet[p] & 255) << 16
-                | (packet[p + 1] & 255) << 8 | packet[p + 2] & 255;
+        int p = 112 + vertex * SourceQuads.STRIDE + 12;
+        return (packet[p + 3] & 255) << 24 | (packet[p] & 255) << 16 | (packet[p + 1] & 255) << 8 |
+                packet[p + 2] & 255;
     }
 }

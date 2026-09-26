@@ -1,4 +1,5 @@
 use super::*;
+use crate::cpu_profile::{CpuProfile, FrameCpu, Stage};
 
 struct HostRecordScope(Arc<Context>);
 impl Drop for HostRecordScope {
@@ -69,6 +70,7 @@ impl Renderer {
     }
 
     fn from_context(context: Arc<Context>) -> Result<Self, String> {
+        let cpu_profile = context.cpu_upload_bytes().map(|_| CpuProfile::default());
         let pipeline = Pipeline::new(&context)?;
         let mut result = Self {
             context,
@@ -84,7 +86,8 @@ impl Renderer {
             host_query: vk::QueryPool::null(),
             last_gpu_ns: 0,
             last_gpu_serial: 0,
-            descriptor_keys: [[0; 8]; FRAME_SLOTS],
+            descriptor_keys: [[0; 7]; FRAME_SLOTS],
+            cpu_profile,
         };
         if result.context.is_borrowed()
             && result.context.timestamp_bits > 0
@@ -219,6 +222,7 @@ impl Renderer {
         height: u32,
         sample_index: u32,
         slot: usize,
+        cpu: &mut FrameCpu,
     ) -> Result<(), String> {
         if camera
             .position
@@ -232,8 +236,10 @@ impl Renderer {
         {
             return Err("Camera contains invalid vectors or vertical FOV".into());
         }
+        let started = cpu.start();
         if self.geometry.as_ref().is_none_or(|g| g.needs_update(scene)) {
-            self.descriptor_keys = [[0; 8]; FRAME_SLOTS];
+            cpu.static_updates += 1;
+            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
             if let Some(geometry) = &mut self.geometry {
                 geometry.update(&self.context, scene)?;
             } else {
@@ -241,25 +247,28 @@ impl Renderer {
             }
             self.samples = 0;
         }
+        cpu.finish(Stage::Static, started);
         let (dynamic_changed, bindings_changed) = self.geometry.as_mut().unwrap().prepare_dynamic(
             &self.context,
             scene,
             instances,
             slot,
+            cpu,
         )?;
+        let started = cpu.start();
         if dynamic_changed {
             self.samples = 0;
         }
         if bindings_changed {
             // A freed raw handle can reappear in an older descriptor slot's key.
-            self.descriptor_keys = [[0; 8]; FRAME_SLOTS];
+            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
         }
         if self
             .output
             .as_ref()
             .is_none_or(|o| o.width != width || o.height != height)
         {
-            self.descriptor_keys = [[0; 8]; FRAME_SLOTS];
+            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
             self.output = Some(Output::new(&self.context, width, height)?);
             self.samples = 0;
         }
@@ -272,6 +281,7 @@ impl Renderer {
         } else {
             sample_index
         };
+        cpu.finish(Stage::Output, started);
         Ok(())
     }
 
@@ -280,13 +290,12 @@ impl Renderer {
         let output = self.output.as_ref().unwrap();
         let key = [
             geometry.top.handle().as_raw(),
-            geometry.triangles.buffer.as_raw(),
             geometry.textures.metadata.buffer.as_raw(),
             geometry.textures.texels.buffer.as_raw(),
             output.accumulation.buffer.as_raw(),
             view.as_raw(),
-            geometry.dynamic_buffer().buffer.as_raw(),
             geometry.objects.metadata.buffer.as_raw(),
+            geometry.static_bases.buffer.as_raw(),
         ];
         let descriptor = self.pipeline.descriptors[slot];
         let image = [vk::DescriptorImageInfo::default()
@@ -311,12 +320,11 @@ impl Renderer {
         let mut acceleration = vk::WriteDescriptorSetAccelerationStructureKHR::default()
             .acceleration_structures(&handles);
         let buffers = [
-            &geometry.triangles,
             &geometry.textures.metadata,
             &geometry.textures.texels,
             &output.accumulation,
-            geometry.dynamic_buffer(),
             &geometry.objects.metadata,
+            &geometry.static_bases,
         ];
         let infos = buffers.map(|b| {
             [vk::DescriptorBufferInfo::default()
@@ -332,19 +340,14 @@ impl Renderer {
                 .push_next(&mut acceleration),
             vk::WriteDescriptorSet::default()
                 .dst_set(descriptor)
-                .dst_binding(1)
+                .dst_binding(2)
                 .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                 .buffer_info(&infos[0]),
             vk::WriteDescriptorSet::default()
                 .dst_set(descriptor)
-                .dst_binding(2)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&infos[1]),
-            vk::WriteDescriptorSet::default()
-                .dst_set(descriptor)
                 .dst_binding(3)
                 .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&infos[2]),
+                .buffer_info(&infos[1]),
             vk::WriteDescriptorSet::default()
                 .dst_set(descriptor)
                 .dst_binding(4)
@@ -354,17 +357,17 @@ impl Renderer {
                 .dst_set(descriptor)
                 .dst_binding(5)
                 .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&infos[3]),
-            vk::WriteDescriptorSet::default()
-                .dst_set(descriptor)
-                .dst_binding(6)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&infos[4]),
+                .buffer_info(&infos[2]),
             vk::WriteDescriptorSet::default()
                 .dst_set(descriptor)
                 .dst_binding(7)
                 .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&infos[5]),
+                .buffer_info(&infos[3]),
+            vk::WriteDescriptorSet::default()
+                .dst_set(descriptor)
+                .dst_binding(8)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&infos[4]),
         ];
         unsafe {
             self.context.device.update_descriptor_sets(&writes, &[]);
@@ -401,7 +404,7 @@ impl Renderer {
             output.width,
             output.height,
             self.samples,
-            self.geometry.as_ref().unwrap().triangle_count,
+            u32::from(self.geometry.as_ref().unwrap().triangle_count != 0),
             u32::from(bottom_up),
             self.frame_seed,
             0,
@@ -475,7 +478,16 @@ impl Renderer {
             .submit_named("diagnostic_prepare_barrier", |command| {
                 self.before_frame(command)
             })?;
-        self.prepare(scene, instances, camera, width, height, sample_index, 0)?;
+        self.prepare(
+            scene,
+            instances,
+            camera,
+            width,
+            height,
+            sample_index,
+            0,
+            &mut FrameCpu::default(),
+        )?;
         let view = self.output.as_ref().unwrap().image.as_ref().unwrap().view;
         self.descriptors(0, view);
         let output = self.output.as_ref().unwrap();
@@ -566,6 +578,9 @@ impl Renderer {
         {
             return Err("Invalid host recording state or Vulkan handles".into());
         }
+        let mut cpu = FrameCpu::new(self.cpu_profile.is_some());
+        let started = cpu.start();
+        let uploaded_before = self.context.cpu_upload_bytes();
         self.failed = true;
         // A contained FFI panic must still release the recording scope.
         let _scope = HostRecordScope(self.context.clone());
@@ -579,9 +594,22 @@ impl Renderer {
             vk::CommandBuffer::from_raw(command),
             vk::ImageView::from_raw(view),
             serial,
+            &mut cpu,
         );
+        drop(_scope);
+        cpu.finish(Stage::Total, started);
         if result.is_ok() {
             self.failed = false;
+            if let Some(profile) = &mut self.cpu_profile {
+                let uploaded = self.context.cpu_upload_bytes().unwrap() - uploaded_before.unwrap();
+                profile.observe(
+                    &cpu,
+                    self.geometry
+                        .as_ref()
+                        .unwrap()
+                        .cpu_load(scene, instances, &cpu, uploaded),
+                );
+            }
         }
         result
     }
@@ -598,20 +626,29 @@ impl Renderer {
         command: vk::CommandBuffer,
         view: vk::ImageView,
         serial: u64,
+        cpu: &mut FrameCpu,
     ) -> Result<(), String> {
-        self.context.begin_host_record(command, serial)?;
-        let mut completed = self.context.completed_serial()?;
+        let started = cpu.start();
+        let mut completed = self.context.begin_host_record(command, serial)?;
+        cpu.finish(Stage::BeginRetire, started);
+        let started = cpu.start();
         self.collect_timing(completed)?;
+        cpu.finish(Stage::Collect, started);
         if self.host_serials.contains(&serial) {
             return Err("A PT frame is already recorded into this host submission".into());
         }
         if self.host_serials.iter().all(|v| *v > completed) {
+            let started = cpu.start();
             // Only pool exhaustion adds backpressure, never an unconditional frame wait.
-            self.context
+            completed = self
+                .context
                 .wait_host_serial(*self.host_serials.iter().min().unwrap())?;
-            completed = self.context.completed_serial()?;
+            cpu.finish(Stage::SlotWait, started);
+            let started = cpu.start();
             self.collect_timing(completed)?;
+            cpu.finish(Stage::Collect, started);
         }
+        let started = cpu.start();
         let slot = self
             .host_serials
             .iter()
@@ -634,8 +671,21 @@ impl Renderer {
             }
         }
         self.before_frame(command);
-        self.prepare(scene, instances, camera, width, height, sample_index, slot)?;
+        cpu.finish(Stage::FrameSetup, started);
+        self.prepare(
+            scene,
+            instances,
+            camera,
+            width,
+            height,
+            sample_index,
+            slot,
+            cpu,
+        )?;
+        let started = cpu.start();
         self.descriptors(slot, view);
+        cpu.finish(Stage::Descriptors, started);
+        let started = cpu.start();
         self.dispatch(command, slot, true);
         unsafe {
             let after = [vk::MemoryBarrier::default()
@@ -662,6 +712,7 @@ impl Renderer {
         }
         self.host_serials[slot] = serial;
         self.samples = self.samples.saturating_add(1);
+        cpu.finish(Stage::Dispatch, started);
         Ok(())
     }
 

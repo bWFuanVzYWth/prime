@@ -13,5 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class SourceTextureLifetimeMixin {
     @Shadow protected GpuTexture texture;
     @Inject(method = "releaseTextures", at = @At("HEAD"))
-    private void primept$release(CallbackInfo callback) { DynamicTextures.release(texture); }
+    private void primept$release(CallbackInfo callback) {
+        DynamicTextures.release(texture);
+    }
 }

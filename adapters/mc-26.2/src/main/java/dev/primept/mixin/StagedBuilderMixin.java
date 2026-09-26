@@ -11,7 +11,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(StagedVertexBuffer.class)
 public abstract class StagedBuilderMixin {
     @Inject(method = "getVertexBuilder", at = @At("RETURN"))
-    private void primept$builder(StagedVertexBuffer.Draw draw, CallbackInfoReturnable<VertexConsumer> callback) {
+    private void primept$builder(StagedVertexBuffer.Draw draw,
+                                 CallbackInfoReturnable<VertexConsumer> callback) {
         DynamicCapture.builder(draw, callback.getReturnValue());
     }
 }

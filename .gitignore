@@ -5,6 +5,7 @@
 /run/
 /logs/
 /adapters/*/build/
+/adapters/*/bin/
 /adapters/*/run/
 /adapters/*/logs/
 *.iml

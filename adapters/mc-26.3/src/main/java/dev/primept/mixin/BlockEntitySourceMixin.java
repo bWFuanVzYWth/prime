@@ -20,18 +20,28 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(BlockEntityRenderDispatcher.class)
 public abstract class BlockEntitySourceMixin {
     @Inject(method = "tryExtractRenderState", at = @At("RETURN"))
-    private <E extends BlockEntity, S extends BlockEntityRenderState> void primept$identity(E entity, float partial,
-            ModelFeatureRenderer.CrumblingOverlay overlay, boolean flag, CallbackInfoReturnable<S> callback) {
-        if (callback.getReturnValue() != null) ((SourceIdentity) callback.getReturnValue()).primept$source(entity);
+    private <E extends BlockEntity, S extends BlockEntityRenderState> void
+    primept$identity(E entity, float partial, ModelFeatureRenderer.CrumblingOverlay overlay,
+                     boolean flag, CallbackInfoReturnable<S> callback) {
+        if (callback.getReturnValue() != null)
+            ((SourceIdentity)callback.getReturnValue()).primept$source(entity);
     }
     @WrapMethod(method = "submit")
-    private <S extends BlockEntityRenderState> void primept$source(S state, PoseStack pose,
-            SubmitNodeCollector collector, CameraRenderState camera, Operation<Void> original) {
-        if (!DynamicCapture.active()) { original.call(state, pose, collector, camera); return; }
+    private <S extends BlockEntityRenderState> void
+    primept$source(S state, PoseStack pose, SubmitNodeCollector collector, CameraRenderState camera,
+                   Operation<Void> original) {
+        if (!DynamicCapture.active()) {
+            original.call(state, pose, collector, camera);
+            return;
+        }
         var pos = state.blockPos;
-        var previous = ModelCapture.beginSource(((SourceIdentity) state).primept$source(),
-                pos.getX(), pos.getY(), pos.getZ(), pose.last().pose(), true);
-        try { original.call(state, pose, collector, camera); }
-        finally { ModelCapture.endSource(previous); }
+        var previous =
+                ModelCapture.beginSource(((SourceIdentity)state).primept$source(), pos.getX(),
+                                         pos.getY(), pos.getZ(), pose.last().pose(), true);
+        try {
+            original.call(state, pose, collector, camera);
+        } finally {
+            ModelCapture.endSource(previous);
+        }
     }
 }

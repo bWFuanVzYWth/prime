@@ -520,7 +520,7 @@ fn continuous_birth_and_death_does_not_retain_dead_identity_history() {
 }
 
 #[test]
-fn unique_geometry_capacity_is_shared_with_other_streams_and_not_multiplied_by_instance_count() {
+fn unique_geometry_address_bytes_include_other_streams_but_not_instance_multiplicity() {
     let mut context = InstanceContext::new(1);
     let textures = BTreeMap::new();
     let initial = batch(
@@ -531,17 +531,164 @@ fn unique_geometry_capacity_is_shared_with_other_streams_and_not_multiplied_by_i
         &[(20, instance(1, 10))],
         &[],
     );
-    assert!(context.submit(&initial, &textures, 7_999_999).is_err());
+    let capacity = usize::MAX / std::mem::size_of::<prime_scene::scene::Triangle>();
+    assert!(context.submit(&initial, &textures, capacity - 1).is_err());
     assert_eq!(context.sequence(), 0);
-    context.submit(&initial, &textures, 7_999_998).unwrap();
+    context.submit(&initial, &textures, capacity - 2).unwrap();
     assert_eq!(context.triangle_count(), 2);
     let many: Vec<_> = (21..=10_020).map(|id| (id, instance(1, 10))).collect();
     context
-        .submit(&batch(1, 2, &[], &[], &many, &[]), &textures, 7_999_998)
+        .submit(&batch(1, 2, &[], &[], &many, &[]), &textures, capacity - 2)
         .unwrap();
     assert_eq!(context.triangle_count(), 2);
     assert_eq!(context.scene().instances.len(), 10_001);
     let replacement = batch(1, 3, &[prototype(11, 1, 0, 2.0)], &[], &[], &[]);
-    assert!(context.submit(&replacement, &textures, 7_999_998).is_err());
+    assert!(
+        context
+            .submit(&replacement, &textures, capacity - 2)
+            .is_err()
+    );
     assert_eq!(context.sequence(), 2);
+}
+
+#[test]
+fn unsorted_mixed_batches_and_late_plan_failures_leave_no_scratch_or_reference_residue() {
+    let mut source = initialized();
+    source
+        .submit(&batch(
+            1,
+            2,
+            &[prototype(12, 2, 0, 1.0), prototype(11, 2, 0, 1.0)],
+            &[],
+            &[
+                (23, instance(2, 12)),
+                (21, instance(2, 10)),
+                (22, instance(2, 11)),
+            ],
+            &[],
+        ))
+        .unwrap();
+    let original = source.instances().instances.clone();
+    let original_geometry = source.instances().prototypes[&10].triangles.clone();
+    let updates = [
+        (30, instance(3, 13)),
+        (21, instance(3, 11)),
+        (20, instance(3, 12)),
+    ];
+    for bad_prototype in [false, true] {
+        let mut late = instance(3, if bad_prototype { 999 } else { 11 });
+        if !bad_prototype {
+            late.texture_id = 999;
+        }
+        let mut bad = updates.to_vec();
+        bad.insert(0, (31, late)); // Sorting places the failure after successful reference deltas.
+        assert!(
+            source
+                .submit(&batch(
+                    1,
+                    3,
+                    &[prototype(13, 3, 0, 1.0)],
+                    &[(10, 3)],
+                    &bad,
+                    &[(998, 3), (23, 3), (22, 3)],
+                ))
+                .is_err()
+        );
+        assert_eq!(source.instance_sequence(), 2);
+        assert_eq!(source.instances().resource_revision, 2);
+        assert_eq!(source.instances().instance_revision, 2);
+        assert_eq!(source.instances().instances, original);
+        assert_eq!(source.instances().prototypes.len(), 3);
+        assert!(Arc::ptr_eq(
+            &source.instances().prototypes[&10].triangles,
+            &original_geometry
+        ));
+    }
+    source
+        .submit(&batch(
+            1,
+            3,
+            &[prototype(13, 3, 0, 1.0)],
+            &[(10, 3)],
+            &updates,
+            &[(998, 3), (23, 3), (22, 3)],
+        ))
+        .unwrap();
+    assert_eq!(source.instances().instances.len(), 3);
+    assert!(!source.instances().prototypes.contains_key(&10));
+    for (id, value) in updates {
+        assert_eq!(source.instances().instances[&id], value);
+    }
+    // Same-prototype updates must not bypass final validation of a removed prototype.
+    assert!(
+        source
+            .submit(&batch(1, 4, &[], &[(13, 4)], &[(30, instance(4, 13))], &[],))
+            .is_err()
+    );
+    assert_eq!(source.instance_sequence(), 3);
+    // Correct reference counts permit removing all survivors and all resources together.
+    source
+        .submit(&batch(
+            1,
+            4,
+            &[],
+            &[(13, 4), (11, 4), (12, 4)],
+            &[],
+            &[(30, 4), (21, 4), (20, 4)],
+        ))
+        .unwrap();
+    assert!(source.instances().instances.is_empty());
+    assert!(source.instances().prototypes.is_empty());
+}
+
+#[test]
+fn nonadjacent_duplicate_conflicts_and_late_record_errors_preserve_the_next_valid_batch() {
+    let mut source = initialized();
+    let updates = [
+        (42, instance(2, 10)),
+        (5, instance(2, 10)),
+        (31, instance(2, 10)),
+    ];
+    let original = source.instances().instances.clone();
+    let mut duplicate = updates.to_vec();
+    duplicate.push((42, instance(2, 10)));
+    let mut bad_packets = vec![
+        batch(1, 2, &[], &[], &duplicate, &[]),
+        batch(1, 2, &[], &[], &updates, &[(999, 2), (5, 2)]),
+        batch(1, 2, &[], &[], &updates, &[(999, 2), (998, 2), (999, 2)]),
+        batch(
+            1,
+            2,
+            &[
+                prototype(12, 2, 0, 1.0),
+                prototype(11, 2, 0, 1.0),
+                prototype(12, 2, 0, 1.0),
+            ],
+            &[],
+            &updates,
+            &[],
+        ),
+    ];
+    let valid = batch(1, 2, &[], &[], &updates, &[(999, 2), (20, 2)]);
+    let mut wrong_revision = valid.clone();
+    let end = wrong_revision.len();
+    wrong_revision[end - 8..].copy_from_slice(&3_u64.to_le_bytes());
+    bad_packets.push(wrong_revision);
+    bad_packets.push(valid[..valid.len() - 1].to_vec());
+    let mut trailing = valid.clone();
+    trailing.push(0);
+    bad_packets.push(trailing);
+    for bad in bad_packets {
+        assert!(source.submit(&bad).is_err());
+        assert_eq!(source.instance_sequence(), 1);
+        assert_eq!(source.instances().instances, original);
+        assert_eq!(source.instances().resource_revision, 1);
+        assert_eq!(source.instances().instance_revision, 1);
+    }
+    source.submit(&valid).unwrap();
+    assert_eq!(source.instances().instances.len(), 3);
+    assert!(!source.instances().instances.contains_key(&20));
+    for (id, value) in updates {
+        assert_eq!(source.instances().instances[&id], value);
+    }
 }

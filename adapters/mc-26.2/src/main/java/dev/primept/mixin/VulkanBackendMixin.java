@@ -14,17 +14,21 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(VulkanBackend.class)
 public abstract class VulkanBackendMixin {
-    @Inject(method = "createDevice(Ljava/util/Collection;Lcom/mojang/blaze3d/vulkan/VulkanPhysicalDevice;Ljava/util/Set;)Lorg/lwjgl/vulkan/VkDevice;",
+    @Inject(method =
+                    "createDevice(Ljava/util/Collection;Lcom/mojang/blaze3d/vulkan/VulkanPhysicalDevice;Ljava/util/Set;)Lorg/lwjgl/vulkan/VkDevice;",
             at = @At("HEAD"))
-    private static void primept$negotiate(Collection<String> extensions, VulkanPhysicalDevice physical,
-            Set<VulkanFeature> features, CallbackInfoReturnable<VkDevice> callback) {
+    private static void
+    primept$negotiate(Collection<String> extensions, VulkanPhysicalDevice physical,
+                      Set<VulkanFeature> features, CallbackInfoReturnable<VkDevice> callback) {
         VulkanBootstrap.negotiate(extensions, physical, features);
     }
 
-    @Inject(method = "createDevice(Ljava/util/Collection;Lcom/mojang/blaze3d/vulkan/VulkanPhysicalDevice;Ljava/util/Set;)Lorg/lwjgl/vulkan/VkDevice;",
+    @Inject(method =
+                    "createDevice(Ljava/util/Collection;Lcom/mojang/blaze3d/vulkan/VulkanPhysicalDevice;Ljava/util/Set;)Lorg/lwjgl/vulkan/VkDevice;",
             at = @At("RETURN"))
-    private static void primept$created(Collection<String> extensions, VulkanPhysicalDevice physical,
-            Set<VulkanFeature> features, CallbackInfoReturnable<VkDevice> callback) {
+    private static void
+    primept$created(Collection<String> extensions, VulkanPhysicalDevice physical,
+                    Set<VulkanFeature> features, CallbackInfoReturnable<VkDevice> callback) {
         VulkanBootstrap.deviceCreated(callback.getReturnValue(), extensions, features);
     }
 }

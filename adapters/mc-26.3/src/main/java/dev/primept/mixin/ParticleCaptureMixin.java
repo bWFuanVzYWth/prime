@@ -12,10 +12,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(QuadParticleFeatureRenderer.class)
 public abstract class ParticleCaptureMixin {
-    @Inject(method = "prepareGroup", at = @At(value = "INVOKE",
-            target = "Lnet/minecraft/client/renderer/StagedVertexBuffer;getVertexBuilder(Lnet/minecraft/client/renderer/StagedVertexBuffer$Draw;)Lcom/mojang/blaze3d/vertex/VertexConsumer;"))
-    private void primept$particle(CallbackInfo callback, @Local SingleQuadParticle.Layer layer,
-            @Local StagedVertexBuffer.Draw draw) {
+    @Inject(method = "prepareGroup",
+            at = @At(
+                    value = "INVOKE",
+                    target =
+                            "Lnet/minecraft/client/renderer/StagedVertexBuffer;getVertexBuilder(Lnet/minecraft/client/renderer/StagedVertexBuffer$Draw;)Lcom/mojang/blaze3d/vertex/VertexConsumer;"))
+    private void
+    primept$particle(CallbackInfo callback, @Local SingleQuadParticle.Layer layer,
+                     @Local StagedVertexBuffer.Draw draw) {
         DynamicCapture.particle(draw, layer);
     }
 }

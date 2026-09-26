@@ -126,12 +126,14 @@ pub struct SourceScene {
     pub epoch: u64,
     pub revision: u64,
     pub(crate) meshes: BTreeMap<(u64, u32), Mesh>,
+    /// Latest complete replacement/removal sequence, independent of content revisions.
     pub(crate) removed: BTreeMap<u64, u64>,
     pub(crate) textures: BTreeMap<u32, Texture>,
     pub(crate) triangle_count: usize,
     pub(crate) texture_bytes: usize,
     pub(crate) dynamic: DynamicMesh,
     pub(crate) instances: InstanceContext,
+    pub(crate) section_scratch: crate::protocol::SectionScratch,
 }
 
 impl SourceScene {

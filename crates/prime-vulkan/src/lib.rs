@@ -2,8 +2,10 @@
 //! submission and target; synchronous readback is restricted to offline diagnostics.
 mod benchmark;
 mod context;
+mod cpu_profile;
 mod dynamic;
 mod geometry;
+mod material_arena;
 mod plan;
 mod resources;
 mod target;
@@ -66,7 +68,8 @@ impl Pipeline {
                 descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
                 pipeline: vk::Pipeline::null(),
             };
-            let bindings: Vec<_> = (0..8)
+            let bindings: Vec<_> = [0, 2, 3, 4, 5, 7, 8]
+                .into_iter()
                 .map(|binding| {
                     vk::DescriptorSetLayoutBinding::default()
                         .binding(binding)
@@ -109,7 +112,7 @@ impl Pipeline {
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_BUFFER,
-                    descriptor_count: 6 * FRAME_SLOTS as u32,
+                    descriptor_count: 5 * FRAME_SLOTS as u32,
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_IMAGE,
@@ -199,7 +202,8 @@ pub struct Renderer {
     host_query: vk::QueryPool,
     last_gpu_ns: u64,
     last_gpu_serial: u64,
-    descriptor_keys: [[u64; 8]; FRAME_SLOTS],
+    descriptor_keys: [[u64; 7]; FRAME_SLOTS],
+    cpu_profile: Option<cpu_profile::CpuProfile>,
 }
 #[cfg(test)]
 mod tests {
@@ -259,7 +263,7 @@ mod tests {
             },
         );
         let sky = renderer.render(&scene, &camera, 64, 48, 0).unwrap();
-        let static_buffer = renderer.geometry.as_ref().unwrap().triangles.buffer;
+        let static_buffer = renderer.geometry.as_ref().unwrap().static_bases.buffer;
         let static_revision = renderer.geometry.as_ref().unwrap().revision;
         scene.dynamic = DynamicScene {
             revision: 1,
@@ -267,7 +271,12 @@ mod tests {
             triangles: quad(0.0).into(),
         };
         assert_eq!(renderer.render(&scene, &camera, 64, 48, 0).unwrap(), sky);
-        let dynamic_buffer = renderer.geometry.as_ref().unwrap().dynamic_buffer().buffer;
+        let dynamic_buffer = renderer
+            .geometry
+            .as_ref()
+            .unwrap()
+            .objects
+            .material_addresses();
         let top = renderer.geometry.as_ref().unwrap().top.handle();
         let allocations = renderer
             .profile_snapshot()
@@ -319,7 +328,7 @@ mod tests {
             "coincident reversed fluid faces must share their alpha event"
         );
         assert_eq!(
-            renderer.geometry.as_ref().unwrap().triangles.buffer,
+            renderer.geometry.as_ref().unwrap().static_bases.buffer,
             static_buffer
         );
         assert_eq!(
@@ -327,7 +336,12 @@ mod tests {
             static_revision
         );
         assert_eq!(
-            renderer.geometry.as_ref().unwrap().dynamic_buffer().buffer,
+            renderer
+                .geometry
+                .as_ref()
+                .unwrap()
+                .objects
+                .material_addresses(),
             dynamic_buffer
         );
         assert_eq!(renderer.geometry.as_ref().unwrap().top.handle(), top);

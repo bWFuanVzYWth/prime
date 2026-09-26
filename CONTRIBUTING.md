@@ -2,6 +2,8 @@
 
 玩家安装和使用见 [README](README.md)。模块、数据流和接口契约见 [架构索引](docs/README.md)，协作约定见 [AGENTS.md](AGENTS.md)。以下命令从项目根目录执行，示例使用 Windows PowerShell。
 
+源码格式与行尾遵循[统一规范](docs/guides/git-line-endings.md)，使用 `.\scripts\format.ps1` 应用、`.\scripts\format.ps1 -Check` 检查。当前 CPU 优化属于 [TODO](TODO.md) 中的非阻塞待办。
+
 ## 开发环境
 
 | 工具 | 用途 |
@@ -37,9 +39,11 @@
 
 ## 开发客户端
 
+本节命令供用户手动执行。自动化默认只做格式、编译和无窗口单元测试；没有用户新的明确请求，不运行 `runClient`、启动游戏验收或占用前台。
+
 ```powershell
-.\gradlew.bat buildNative :mc-26.2:runClient -PprimeptEnabled=true
-.\gradlew.bat buildNative :mc-26.3:runClient -PprimeptEnabled=true
+.\gradlew.bat buildNative :mc-26.2:runClient -PprimeptEnabled=true -PprimeptGeometryCache=true -PprimeptValidation=true -PprimeptProfile=true
+.\gradlew.bat buildNative :mc-26.3:runClient -PprimeptEnabled=true -PprimeptGeometryCache=true -PprimeptValidation=true -PprimeptProfile=true
 ```
 
 按版本单独运行。各适配器的 `run/` 保存日志、选项、截图和存档。使用独立测试存档或副本，不让较新版本直接升级旧版验证存档。启动默认请求 Vulkan 和 1920×1080；仍需从实际设备日志和主 target 尺寸确认后端与分辨率。
@@ -49,15 +53,29 @@
 | Gradle 属性 | 用途 |
 | --- | --- |
 | `-PprimeptEnabled=true` | 启用 PT，默认关闭 |
+| `-PprimeptRenderer=vanilla` | 启动时选择原版；配合 enabled=true 保留之后切换 Prime 所需设备能力，默认 path_trace |
 | `-PnativeLibrary=绝对路径` | 指定引擎库，适合同一不可变 DLL 的双版本验证 |
 | `-PprimeptValidation=true` | 启用宿主 Vulkan validation |
 | `-PprimeptProfile=true` | 开启 Java 汇总和 native GPU profiling |
+| `-PprimeptProfileLeaves=true` | 配合 profile 开启逐 Cube 细计时，默认关闭；只用于成本归因 |
 | `-PprimeptProfileCsv=绝对路径` | 配合 profile 保存逐帧 CPU 节奏、阶段及源计数，保留离群值 |
 | `-PprimeptCaptureAudit=true` | 记录源 quad、实际 tint 与被排除的原版明暗；用于正确性检查 |
+| `-PprimeptGeometryCache=true` | 试行 Fabric wrapper 的 geometry-key 缓存；用 false 做同构建对照，保持其他配置一致 |
 | `-PprimeptWorld=存档目录名` | 使用 quick play 进入该版本 run 目录下的测试世界 |
 | `-PprimeptUuid=玩家UUID` | 在测试副本中读取指定已有玩家的位置和状态 |
 
 外部启动器对应的 JVM 参数见 README；不要将 Gradle 的 `-P` 属性直接交给 Java。
+
+客户端命令 `/primept renderer vanilla` 与 `/primept renderer path_trace` 只请求切换，实际资源移交在下一外层帧边界执行。验证时覆盖 Prime→原版→Prime、世界退出/重进、标题界面资源重载及退休失败；等待资源加载完成再采样，不把切换暂停计入稳态。首个 Prime 后端使用真实源编译调度，加载完成的判据包括地形待编译队列清空，不能仅等待首帧输出。新增后端通过惰性工厂注册，并遵守公共 `RendererSlot` 的完成/失败契约。
+
+### 用户手动检查重点
+
+1. 两版分别使用对应版本的测试存档或副本，确认实际 Vulkan 后端与原生 `1920×1080` 主图像，等待地形加载完成。较新版本保存过的世界不要交给旧版本验证。
+2. 观察地形、透明表面、实体/方块实体、框内物品、掉落物和粒子是否缺失或重复；检查旋转/移动、物品内容变化与持续增删，以及手部/HUD 是否正常。特殊文字、glint、outline 和折射仍按当前支持范围判断。
+3. 依次切换到 `vanilla` 和 `path_trace`，等待各自就绪；检查原版地形恢复、PT 重新加载，以及皮肤、地图等动态纹理。再检查世界退出/重进与资源重载后是否正常。
+4. 检查对应 `adapters/mc-*/run/logs/latest.log`，记录异常、Vulkan `VUID` / `SYNC-HAZARD`、缺失纹理或后端恢复失败。反馈版本、操作步骤、场景与日志，截图/日志副本放 `artifacts/`。
+
+上述启动命令开启 validation 用于正确性检查，不用于性能结论。需要性能采样时，将 `-PprimeptValidation=false`，保持细叶计时和 capture audit 关闭，另加 `-PprimeptProfileCsv=绝对路径` 保存逐帧数据；固定场景、相机、画质、射线预算与分辨率。先确认 CSV 的 `terrain_pending=0`，再记录稳态及更新阶段；CPU 优化目前非阻塞，不以即时 FPS 达标作为本轮检查的前提。
 
 ## 按改动选择验证
 
@@ -135,9 +153,17 @@ cargo run --release --locked -p prime_tools --bin perf -- --frames 120 --warmup 
 
 异步入队耗时不等于完整帧耗时。游戏日志中的 `gpuLast` 是最近完成帧样本，不是汇总窗口均值；任务管理器 GPU 百分比也不能代替阶段计时。图像正确性由独立测试与实机检查验证，性能夹具不以读回图像计算 checksum。
 
-动态捕获的游戏 profile 另给出 `dynamicCapture`（额外材质绑定和 mesh 拷贝 CPU 均值，包含于 `mcBeforePT`）、`dynamicSubmit`（纹理增量与整帧 FFM 解码 CPU 均值，包含于 `hook`）。`dynamicSpansTotal`、`dynamicVerticesTotal`、`dynamicBytesTotal`、`modelMeshesTotal` 和 `particleMeshesTotal` 是该窗口总量，除以 `frames` 才是每帧均值；mesh 数是原版批次数，不是实体数。`dynamicCapacity` 为保留 packet 容量，`dynamicGrowthsTotal` 是该 writer 自创建起的累计扩容次数。原版动画/模型准备时间没有混入 `dynamicCapture`；原版 GPU 上传仍需单独分析。
+需要归因原生 CPU 成本时，可在启动进程前设置 `$env:PRIME_PROFILE_CPU = '1'`。此开关默认关闭，独立于 `PRIME_PROFILE`；关闭时不读取阶段时钟，开启后每 120 次成功准备/录制输出一次 `[Prime CPU engine]` 和 `[Prime CPU renderer]`。前者记录场景快照翻译与动态刷新，后者拆分退休检查、计时结果回收、已有槽位反压、静态更新、对象计划/执行、TLAS、描述符和命令录制。每项输出 sum/mean/max；子项属于对应 total，不能再与 total 相加，也不包含 Java/FFM、宿主提交或 GPU 执行。未满批次和失败录制不输出。
 
-标准模型还记录实际 `beSources/entitySources/modelSubmits`、标准/回退叶节点、源引用检查数与几何顶点读取数，以及 op7 的原型/实例 upsert/remove 和字节数。对象数、模型提交数、Cube 叶节点数与 TLAS 实例数不是同一单位，报告中分别标注。逐帧 CSV 的 hook 间隔是 CPU 帧节奏，包含两个 hook 之间的原版工作和等待；不是 GPU 执行时间或显示器呈现时间。阶段总和与端到端间隔的差额不能无证据地归因于某一 GPU pass。详细 profile 对每个实际 Cube 调用前后计时，会增加大量叶节点场景的 CPU 成本；正式结论须标注其状态，必要时用关闭 profile 的同场景游戏 FPS 对照，不能把不同指标直接相减归因为计时成本。
+原生 CPU 日志同时记录三角形、实例、簇、材质页和重建数量，读取已有计数，不为统计逐帧扫描场景。`cpu_upload_bytes` 是成功的 CPU mapped-buffer 写入字节，包含 staging 和 AS 输入，不是 PCIe 带宽或 GPU copy 量。阶段探针运行用于归因，正式性能对比另记其启用状态；测量后从运行环境移除该变量。实际客户端验证采用有界动作或采样窗口，完成后及时正常退出，再分析日志，避免持续占用用户前台。
+
+动态捕获的游戏 profile 另给出 `dynamicCapture`（额外材质绑定和 mesh 拷贝 CPU 均值，包含于 `mcBeforePT`）、`dynamicSubmit`（纹理增量与整帧 FFM 解码 CPU 均值，包含于 `hook`）。`dynamicSpansTotal`、`dynamicVerticesTotal`、`dynamicBytesTotal`、`modelMeshesTotal` 和 `particleMeshesTotal` 是该窗口总量，除以 `frames` 才是每帧均值；mesh 数是原版批次数，不是实体数。`dynamicCapacity` 为保留 packet 容量，`dynamicGrowthsTotal` 是该 writer 自创建起的累计扩容次数。原版动画/模型准备时间没有混入 `dynamicCapture`；Prime 独占世界时省去该批世界 staged 输出的原版 GPU 上传，手部与 HUD 上传仍属于宿主。
+
+标准模型还记录实际 `beSources/entitySources/modelSubmits`、标准/回退叶节点、源引用检查数与几何顶点读取数，以及 op7 的原型/实例 upsert/remove 和字节数。对象数、模型提交数、Cube 叶节点数与 TLAS 实例数不是同一单位，报告中分别标注。逐帧 CSV 的 hook 间隔是 CPU 帧节奏，包含两个 hook 之间的原版工作和等待；不是 GPU 执行时间或显示器呈现时间。阶段总和与端到端间隔的差额不能无证据地归因于某一 GPU pass。
+
+普通物品的 `item_*` CSV 字段与日志分别记录提交、分组、实际检查/省去展开的顶点数、回退 quad 数、新建原型顶点数及几何共享命中。检查源值不等于重新发布几何，回退 quad 也不等于回退实体；必须与实际 raw 顶点和 op7 字节一同判断收益。方块实体每 120 次提取记录加载候选数、提前排除的远处对象、未知语义回退、立方体幸存者及局部/全局 `tryExtract` 调用量。`beSources` 是进入模型捕获的源数，不是遍历过的方块实体候选数；方块实体提取发生在世界 render hook 之前，也不能从 `mcBeforePT` 单独推算其成本。
+
+逐 Cube 细计时单独由 `-PprimeptProfileLeaves=true`（JVM `-Dprimept.profile.leaves=true`）开启，默认关闭，计数仍保留。关闭时 CSV `refs_pose_ns` 与日志 `refsPose` 为 -1，表示未测，不是零成本。正式比较关闭该细计时；批次 profile/CSV 本身是否开启仍需记录。必要时另用关闭全部 profile 的同场景游戏 FPS 对照，不能把不同指标直接相减归因为探针成本。geometry cache 的 hit/miss/null/emit 为窗口或逐帧增量；`avoidedCopyBytes` 是避免的 Mesh 编码复制字节，不是全进程分配量，也不表示下游 raw/FFM 字节已减少。
 
 大量方块实体的源协议成本可先用无 GPU 依赖的局部夹具定位：
 
@@ -147,13 +173,21 @@ cargo run --release --no-default-features --locked -p prime_tools --bin capture-
 
 每个代理对象是 24 个四边形，使用实际 op6 字节流；同材质单 span，每个样本仅改变序号和一个源顶点。分别计时 `SourceScene::submit`、`translate_dynamic` 与旧快照最后一个 Arc 的释放，模拟替换期间仍保留旧快照。CSV 保留预热、各样本、Rust 分配请求与峰值；分配统计不是进程 RSS。该工具不包含 Minecraft 模型生成、Java/FFM、GPU 打包或渲染，不能换算成游戏 FPS。CPU 局部测试没有输出分辨率；后续实际渲染验收仍须原生 1920×1080，并记录实际提交数量，不能用放置数量或少量合并 span 代替万级可见对象负载。
 
-持久实例的 CPU 夹具使用真实 op7 包，分别测首次发布、静止借用、1% 姿态更新和 1% 持续增删：
+持久实例的 CPU 夹具使用真实 op7 包，分别测首次发布、静止借用、1% / 100% 姿态更新和 1% 持续增删：
 
 ```powershell
-cargo run --release --no-default-features --locked -p prime_tools --bin instance-cpu -- --objects 1000,10000,20000 --warmup 3 --samples 21 --csv artifacts/cpu-instances.csv
+cargo run --release --no-default-features --locked -p prime_tools --bin instance-cpu -- --objects 1000,10000,20000,56133 --warmup 3 --samples 21 --csv artifacts/cpu-instances.csv
 ```
 
 静止阶段不发送空包，其访问计时仅证明该 accessor 的成本，不代表整个 Java 捕获或完整渲染帧。每条记录的 revision 必须等于当前 batch sequence；源码工具、Java writer 与协议测试共同验证这个约束。测试参数和输出单位以各工具 `--help` 为准。
+
+公共 Java 层另有实际 `InstanceCapture → NativeBridge.submit(MemorySegment) → SourceScene` 的 CPU 夹具，用同一 Java 构建、独立 JVM 和固定 DLL 比较跨语言提交成本：
+
+```powershell
+.\gradlew.bat :common:instanceSubmitPerf -PnativeLibrary=C:\absolute\prime_engine.dll -PinstanceObjects=56133 -PinstanceWarmup=64 -PinstanceSamples=120 -PinstanceCsv=C:\absolute\instance-submit.csv
+```
+
+七个局部 quad 原型由全部对象共享，覆盖静止、1% 和 100% 姿态变化。每帧仍观察所有常驻 handle，分别记录 begin/observe/end、seal 连续写包、一次直接 FFM 调用和成功后的 acknowledge；按实际更新数核验包大小。每阶段首次发布独立保留，不能当成稳态分布。CSV 保留预热与全部样本，旁文件记录 DLL SHA256 和 JVM；文件输出与哈希在计时之外。该工具不创建 Vulkan 设备，不含 Minecraft 动画/网格生成、GPU 或帧呈现，也不代表整条管线零复制。对照时交错运行旧/新 DLL，避免与构建或游戏争用 CPU。
 
 原生实例 GPU 夹具使用同一宿主录制接口，固定 1920×1080、相机、种子、一个 48 三角形原型及 1k/10k/20k 实例，覆盖静止、1% 姿态更新和 1% 身份增删：
 
@@ -170,9 +204,11 @@ cargo run --release --locked -p prime_tools --bin instance-perf -- --samples 60 
 ## 文档与本地产物
 
 - `README.md`：玩家安装、使用和可见限制。
-- `docs/`：当前稳定架构与接口契约，不保存试验日志、待讨论设计或阶段总结。
+- `docs/`：已采用的架构、接口契约与长期工程规范，明确区分接入状态与目标；不保存试验日志、待讨论设计或阶段总结。
 - `CONTRIBUTING.md`：可重复使用的开发入口与测量方法。
 - `HACK.md`：当前技术债、影响和完成条件。
+- `TODO.md`：后续工作与验收条件，CPU 性能优化当前非阻塞。
+- `docs/guides/git-line-endings.md`：长期行尾与格式约定；具体开发操作仍由本文件索引。
 - `artifacts/`：本地调查、方案、性能/验收报告、截图、日志和 CSV；整个目录由 Git 忽略。
 
 报告可放在 `artifacts/reports/<日期或任务>/`，保留环境、输入、结论和限制；不要从需提交的文档链接某次本地产物。设计落地后只提炼有效契约到架构文档。需要长期回归的最小测试 fixture 放到对应测试目录，注明来源与语义，不把一次运行的完整输出转成 fixture。

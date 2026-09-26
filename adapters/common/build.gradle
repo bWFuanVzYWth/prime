@@ -1,5 +1,18 @@
 base { archivesName = 'prime-common' }
 
+// CPU-only real Java capture/FFM/native transaction. Use a fresh JVM per DLL comparison.
+tasks.register('instanceSubmitPerf', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.primept.InstanceSubmitPerf'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    args providers.gradleProperty('nativeLibrary').getOrElse(rootProject.file('target/release/prime_engine.dll').absolutePath)
+    args providers.gradleProperty('instanceObjects').getOrElse('56133')
+    args providers.gradleProperty('instanceWarmup').getOrElse('64')
+    args providers.gradleProperty('instanceSamples').getOrElse('120')
+    args providers.gradleProperty('instanceCsv').getOrElse(rootProject.file('artifacts/instance-submit.csv').absolutePath)
+}
+
 tasks.register('nativeSmoke', JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath

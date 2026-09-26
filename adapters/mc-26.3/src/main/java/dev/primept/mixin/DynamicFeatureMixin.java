@@ -14,13 +14,18 @@ import org.spongepowered.asm.mixin.Mixin;
 @Mixin(RenderTypeFeatureRenderer.class)
 public abstract class DynamicFeatureMixin {
     @WrapMethod(method = "prepareGroup")
-    private void primept$sourceGroup(FeatureFrameContext context, List<? extends SubmitNode> submits,
-            boolean reorder, Operation<Void> original) {
+    private void primept$sourceGroup(FeatureFrameContext context,
+                                     List<? extends SubmitNode> submits, boolean reorder,
+                                     Operation<Void> original) {
         // These two renderers bake directional/AO shading on the CPU before Draw.append.
         Object renderer = this;
-        boolean previous = DynamicCapture.sourceGroup(!(renderer instanceof MovingBlockFeatureRenderer)
-                && !(renderer instanceof LeashFeatureRenderer));
-        try { original.call(context, submits, reorder); }
-        finally { DynamicCapture.sourceGroup(previous); }
+        boolean previous =
+                DynamicCapture.sourceGroup(!(renderer instanceof MovingBlockFeatureRenderer) &&
+                                           !(renderer instanceof LeashFeatureRenderer));
+        try {
+            original.call(context, submits, reorder);
+        } finally {
+            DynamicCapture.sourceGroup(previous);
+        }
     }
 }

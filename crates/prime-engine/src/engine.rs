@@ -1,4 +1,5 @@
 //! Owns one source scene and its translated/GPU state. The FFI confines it to one OS thread.
+use crate::cpu_profile::{PrepareProfile, elapsed};
 use prime_scene::{
     protocol::Frame,
     scene::{Scene, SourceScene},
@@ -9,6 +10,7 @@ pub(crate) struct Engine {
     pub(crate) source: SourceScene,
     translated: Option<(u64, [f64; 3], Scene)>,
     translation_revision: u64,
+    cpu_profile: PrepareProfile,
     pub(crate) failed: bool,
     #[cfg(feature = "vulkan")]
     pub(crate) renderer: Option<prime_vulkan::Renderer>,
@@ -16,6 +18,7 @@ pub(crate) struct Engine {
 
 impl Engine {
     fn prepare(&mut self, frame: &Frame) -> Result<[f64; 3], String> {
+        let started = self.cpu_profile.start();
         if self.failed {
             return Err("renderer failed; destroy and recreate the session".into());
         }
@@ -23,6 +26,10 @@ impl Engine {
             return Err("frame resource epoch mismatch".into());
         }
         let anchor = frame.anchor();
+        let mut snapshot_ns = 0;
+        let mut dynamic_ns = 0;
+        let mut snapshot_changed = false;
+        let mut dynamic_changed = false;
         if self
             .translated
             .as_ref()
@@ -30,6 +37,7 @@ impl Engine {
                 *revision != self.source.revision || *origin != anchor
             })
         {
+            let snapshot_start = self.cpu_profile.start();
             let mut translated = self.source.translate(anchor)?;
             self.translation_revision = self
                 .translation_revision
@@ -37,11 +45,23 @@ impl Engine {
                 .ok_or("translation revision exhausted")?;
             translated.revision = self.translation_revision;
             self.translated = Some((self.source.revision, anchor, translated));
+            snapshot_ns = elapsed(snapshot_start);
+            snapshot_changed = true;
         }
         let scene = &mut self.translated.as_mut().unwrap().2;
         if scene.dynamic.revision != self.source.dynamic_revision() {
+            let dynamic_start = self.cpu_profile.start();
             scene.dynamic = self.source.translate_dynamic(anchor)?;
+            dynamic_ns = elapsed(dynamic_start);
+            dynamic_changed = true;
         }
+        self.cpu_profile.observe(
+            started,
+            snapshot_ns,
+            dynamic_ns,
+            snapshot_changed,
+            dynamic_changed,
+        );
         Ok(anchor)
     }
 
@@ -231,5 +251,68 @@ mod tests {
         assert_eq!(scene.dynamic.revision, 2);
         assert!(scene.dynamic.triangles.is_empty());
         assert_eq!(dynamic_vertices.len(), 2);
+    }
+
+    #[test]
+    fn identical_complete_section_recompile_keeps_translated_snapshot_and_mesh_generation() {
+        fn section(sequence: u64, red: u8) -> Vec<u8> {
+            let mut bytes = header(8);
+            bytes.extend(91_u64.to_le_bytes());
+            bytes.extend(sequence.to_le_bytes());
+            for value in [0_f64; 3] {
+                bytes.extend(value.to_le_bytes());
+            }
+            bytes.extend(2_u32.to_le_bytes());
+            bytes.extend(0_u32.to_le_bytes());
+            for layer in 0..2_u32 {
+                for value in [layer, 0, layer, 4, 4, 24, 0, 12, 16, 0] {
+                    bytes.extend(value.to_le_bytes());
+                }
+                let start = bytes.len();
+                vertices(&mut bytes);
+                if layer == 0 {
+                    bytes[start + 12] = red;
+                }
+            }
+            bytes
+        }
+        let mut engine = Engine::default();
+        engine.source.submit(&header(1)).unwrap();
+        engine.source.submit(&section(1, 255)).unwrap();
+        let frame = Frame {
+            epoch: 1,
+            world_position: [0.0; 3],
+            camera: Camera {
+                position: [0.0; 3],
+                forward: [0.0, 0.0, -1.0],
+                right: [1.0, 0.0, 0.0],
+                up: [0.0, 1.0, 0.0],
+                vertical_fov_radians: 1.0,
+            },
+            width: 1920,
+            height: 1080,
+            sample_index: 0,
+        };
+        engine.prepare(&frame).unwrap();
+        let scene = &engine.translated.as_ref().unwrap().2;
+        let before_revision = engine.translation_revision;
+        let before_node = std::ptr::from_ref(&scene.meshes[&(91, 0)]);
+        let first = scene.meshes[&(91, 0)].triangles.clone();
+        let other = scene.meshes[&(91, 1)].triangles.clone();
+        engine.source.submit(&section(2, 255)).unwrap();
+        engine.prepare(&frame).unwrap();
+        let scene = &engine.translated.as_ref().unwrap().2;
+        assert_eq!(engine.translation_revision, before_revision);
+        assert_eq!(std::ptr::from_ref(&scene.meshes[&(91, 0)]), before_node);
+        assert_eq!(scene.meshes[&(91, 0)].revision, 1);
+        assert!(Arc::ptr_eq(&first, &scene.meshes[&(91, 0)].triangles));
+        engine.source.submit(&section(3, 128)).unwrap();
+        engine.prepare(&frame).unwrap();
+        let scene = &engine.translated.as_ref().unwrap().2;
+        assert_eq!(engine.translation_revision, before_revision + 1);
+        assert_eq!(scene.meshes[&(91, 0)].revision, 3);
+        assert!(!Arc::ptr_eq(&first, &scene.meshes[&(91, 0)].triangles));
+        assert_eq!(scene.meshes[&(91, 1)].revision, 1);
+        assert!(Arc::ptr_eq(&other, &scene.meshes[&(91, 1)].triangles));
     }
 }

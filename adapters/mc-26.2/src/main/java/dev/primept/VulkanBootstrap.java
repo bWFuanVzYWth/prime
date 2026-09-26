@@ -25,29 +25,34 @@ import org.slf4j.LoggerFactory;
 /** Negotiates before host device creation; a supported physical GPU alone is not an enabled device. */
 public final class VulkanBootstrap {
     private static final Logger LOGGER = LoggerFactory.getLogger("PrimePT");
-    private static final List<String> EXTENSIONS = List.of(
-            KHRAccelerationStructure.VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-            KHRDeferredHostOperations.VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-            KHRRayQuery.VK_KHR_RAY_QUERY_EXTENSION_NAME);
+    private static final List<String> EXTENSIONS =
+            List.of(KHRAccelerationStructure.VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+                    KHRDeferredHostOperations.VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+                    KHRRayQuery.VK_KHR_RAY_QUERY_EXTENSION_NAME);
     private static final List<VulkanFeature> FEATURES = List.of(
             new VulkanFeature(VulkanBackend.VK12_FEATURES_STRUCT, "bufferDeviceAddress",
-                    VkPhysicalDeviceVulkan12Features.BUFFERDEVICEADDRESS),
-            new VulkanFeature(new VulkanPNextStruct(
-                    KHRAccelerationStructure.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
-                    VkPhysicalDeviceAccelerationStructureFeaturesKHR.SIZEOF), "accelerationStructure",
+                              VkPhysicalDeviceVulkan12Features.BUFFERDEVICEADDRESS),
+            new VulkanFeature(
+                    new VulkanPNextStruct(
+                            KHRAccelerationStructure
+                                    .VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+                            VkPhysicalDeviceAccelerationStructureFeaturesKHR.SIZEOF),
+                    "accelerationStructure",
                     VkPhysicalDeviceAccelerationStructureFeaturesKHR.ACCELERATIONSTRUCTURE),
-            new VulkanFeature(new VulkanPNextStruct(
-                    KHRRayQuery.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
-                    VkPhysicalDeviceRayQueryFeaturesKHR.SIZEOF), "rayQuery",
-                    VkPhysicalDeviceRayQueryFeaturesKHR.RAYQUERY));
+            new VulkanFeature(
+                    new VulkanPNextStruct(
+                            KHRRayQuery.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+                            VkPhysicalDeviceRayQueryFeaturesKHR.SIZEOF),
+                    "rayQuery", VkPhysicalDeviceRayQueryFeaturesKHR.RAYQUERY));
 
     // Device creation publishes one immutable result; the render thread only observes it.
-    private static volatile Status status = new Status(0, 0, false, "Host Vulkan device has not been negotiated");
+    private static volatile Status status =
+            new Status(0, 0, false, "Host Vulkan device has not been negotiated");
 
-    private VulkanBootstrap() { }
+    private VulkanBootstrap() {}
 
     public static void negotiate(Collection<String> extensions, VulkanPhysicalDevice physical,
-            Set<VulkanFeature> features) {
+                                 Set<VulkanFeature> features) {
         long physicalHandle = physical.vkPhysicalDevice().address();
         if (!Boolean.getBoolean("primept.enabled")) {
             status = new Status(physicalHandle, 0, false, "Prime PT is disabled");
@@ -57,66 +62,83 @@ public final class VulkanBootstrap {
         if (physical.vkPhysicalDeviceProperties().apiVersion() < VK12.VK_API_VERSION_1_2)
             missing.add("Vulkan 1.2");
         for (String extension : EXTENSIONS)
-            if (!physical.hasDeviceExtension(extension)) missing.add(extension);
+            if (!physical.hasDeviceExtension(extension))
+                missing.add(extension);
         // Vulkan 1.2 supplies the promoted dependencies of acceleration_structure/ray_query.
         if (missing.isEmpty()) {
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 var address = VkPhysicalDeviceVulkan12Features.calloc(stack).sType$Default();
-                var acceleration = VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack).sType$Default();
+                var acceleration = VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack)
+                                           .sType$Default();
                 var query = VkPhysicalDeviceRayQueryFeaturesKHR.calloc(stack).sType$Default();
-                var available = VkPhysicalDeviceFeatures2.calloc(stack).sType$Default()
-                        .pNext(address).pNext(acceleration).pNext(query);
+                var available = VkPhysicalDeviceFeatures2.calloc(stack)
+                                        .sType$Default()
+                                        .pNext(address)
+                                        .pNext(acceleration)
+                                        .pNext(query);
                 VK12.vkGetPhysicalDeviceFeatures2(physical.vkPhysicalDevice(), available);
-                if (!address.bufferDeviceAddress()) missing.add("bufferDeviceAddress");
-                if (!acceleration.accelerationStructure()) missing.add("accelerationStructure");
-                if (!query.rayQuery()) missing.add("rayQuery");
+                if (!address.bufferDeviceAddress())
+                    missing.add("bufferDeviceAddress");
+                if (!acceleration.accelerationStructure())
+                    missing.add("accelerationStructure");
+                if (!query.rayQuery())
+                    missing.add("rayQuery");
 
                 var count = stack.mallocInt(1);
-                VK12.vkGetPhysicalDeviceQueueFamilyProperties(physical.vkPhysicalDevice(), count, null);
+                VK12.vkGetPhysicalDeviceQueueFamilyProperties(physical.vkPhysicalDevice(), count,
+                                                              null);
                 var queues = org.lwjgl.vulkan.VkQueueFamilyProperties.calloc(count.get(0), stack);
-                VK12.vkGetPhysicalDeviceQueueFamilyProperties(physical.vkPhysicalDevice(), count, queues);
+                VK12.vkGetPhysicalDeviceQueueFamilyProperties(physical.vkPhysicalDevice(), count,
+                                                              queues);
                 int graphicsFamily = physical.graphicsQueueFamilyAndIndex().leftInt();
                 if ((queues.get(graphicsFamily).queueFlags() & VK12.VK_QUEUE_COMPUTE_BIT) == 0)
                     missing.add("compute operations on the host graphics queue");
             }
         }
         if (!missing.isEmpty()) {
-            String reason = "Host GPU " + physical.deviceName() + " lacks " + String.join(", ", missing);
+            String reason =
+                    "Host GPU " + physical.deviceName() + " lacks " + String.join(", ", missing);
             status = new Status(physicalHandle, 0, false, reason);
             LOGGER.warn("Prime PT host Vulkan integration unavailable: {}", reason);
             return;
         }
         extensions.addAll(EXTENSIONS);
         features.addAll(FEATURES);
-        status = new Status(physicalHandle, 0, true, "Host Vulkan device creation has not completed");
+        status = new Status(physicalHandle, 0, true,
+                            "Host Vulkan device creation has not completed");
     }
 
     /** Called only after Minecraft's vkCreateDevice succeeded with the negotiated collections. */
     public static void deviceCreated(VkDevice device, Collection<String> extensions,
-            Set<VulkanFeature> features) {
+                                     Set<VulkanFeature> features) {
         Status previous = status;
-        if (!previous.requested || !Boolean.getBoolean("primept.enabled")
-                || previous.physical != device.getPhysicalDevice().address()
-                || !extensions.containsAll(EXTENSIONS) || !features.containsAll(FEATURES)) return;
+        if (!previous.requested || !Boolean.getBoolean("primept.enabled") ||
+            previous.physical != device.getPhysicalDevice().address() ||
+            !extensions.containsAll(EXTENSIONS) || !features.containsAll(FEATURES))
+            return;
         status = new Status(previous.physical, device.address(), true, "");
-        LOGGER.info("Prime PT enabled rayQuery, accelerationStructure and bufferDeviceAddress on Minecraft's Vulkan device");
+        LOGGER.info(
+                "Prime PT enabled rayQuery, accelerationStructure and bufferDeviceAddress on Minecraft's Vulkan device");
     }
 
     public static boolean isEnabled(VulkanDevice device) {
         Status current = status;
-        return current.device != 0 && current.device == device.vkDevice().address()
-                && current.physical == device.vkDevice().getPhysicalDevice().address();
+        return current.device != 0 && current.device == device.vkDevice().address() &&
+                current.physical == device.vkDevice().getPhysicalDevice().address();
     }
 
     public static void requireEnabled(VulkanDevice device) {
         if (!isEnabled(device)) {
             String reason = unavailableReason();
-            throw new IllegalStateException(reason.isEmpty()
-                    ? "Prime PT was not negotiated for this host Vulkan device" : reason);
+            throw new IllegalStateException(
+                    reason.isEmpty() ? "Prime PT was not negotiated for this host Vulkan device"
+                                     : reason);
         }
     }
 
-    public static String unavailableReason() { return status.reason; }
+    public static String unavailableReason() {
+        return status.reason;
+    }
 
-    private record Status(long physical, long device, boolean requested, String reason) { }
+    private record Status(long physical, long device, boolean requested, String reason) {}
 }

@@ -1,3 +1,29 @@
+# Repository policy, independent of each contributor's core.autocrlf setting.
+* text=auto eol=lf
+
+# Windows command scripts retain CRLF in the working tree.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# Binary assets and build inputs must never undergo line-ending conversion.
+*.jar -text
+*.zip -text
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.webp -text
+*.ico -text
+*.ttf -text
+*.otf -text
+*.woff -text
+*.woff2 -text
+*.bin -text
+*.spv -text
+*.dll -text
+*.so -text
+*.dylib -text
+*.exe -text
+*.pdf -text
 crates/prime-vulkan/assets/**/*.ktx2 filter=lfs diff=lfs merge=lfs -text
 crates/prime-vulkan/assets/**/*.bc6h.gz filter=lfs diff=lfs merge=lfs -text
 crates/prime-vulkan/assets/**/*.bytes filter=lfs diff=lfs merge=lfs -text

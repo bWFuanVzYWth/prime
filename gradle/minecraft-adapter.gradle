@@ -36,7 +36,10 @@ loom {
             vmArgs '--enable-native-access=ALL-UNNAMED'
             vmArgs "-Dprimept.native.path=${providers.gradleProperty('nativeLibrary').getOrElse(rootProject.file("target/release/${hostLibraryName}").absolutePath)}"
             vmArgs "-Dprimept.enabled=${providers.gradleProperty('primeptEnabled').getOrElse('false')}"
+            vmArgs "-Dprimept.renderer=${providers.gradleProperty('primeptRenderer').getOrElse('path_trace')}"
+            vmArgs "-Dprimept.profile.leaves=${providers.gradleProperty('primeptProfileLeaves').getOrElse('false')}"
             vmArgs "-Dprimept.profile=${providers.gradleProperty('primeptProfile').getOrElse('false')}"
+            vmArgs "-Dprimept.geometryCache=${providers.gradleProperty('primeptGeometryCache').getOrElse('false')}"
             vmArgs "-Dprimept.capture.audit=${providers.gradleProperty('primeptCaptureAudit').getOrElse('false')}"
             if (providers.gradleProperty('primeptProfileCsv').isPresent()) vmArgs "-Dprimept.profile.csv=${providers.gradleProperty('primeptProfileCsv').get()}"
             programArgs '--graphicsBackend', 'VULKAN', '--width', '1920', '--height', '1080'
@@ -96,6 +99,8 @@ tasks.register('cpuSmoke', JavaExec) {
     jvmArgs '--enable-native-access=ALL-UNNAMED'
     systemProperty 'fabric.development', 'true'
     systemProperty 'primept.enabled', 'true'
+    systemProperty 'primept.geometryCache', 'true'
+    systemProperty 'primept.smoke.foreignWrapper', providers.gradleProperty('primeptSmokeForeign').getOrElse('false')
     systemProperty 'fabric.addMods', tasks.named('cpuSmokeJar').get().archiveFile.get().asFile.absolutePath
     systemProperty 'fabric.classPathGroups', sourceSets.main.output.files.collect { it.absolutePath }.join(File.pathSeparator)
     workingDir layout.buildDirectory.dir('cpu-smoke')

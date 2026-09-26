@@ -636,6 +636,14 @@ mod tests {
             host.enqueue(&scene, &camera, frame as u32).unwrap();
         }
         assert_eq!(host.drain().unwrap().len(), 8);
+        let renderer = host.state.as_ref().unwrap().renderer.as_ref().unwrap();
+        if let Some(cpu) = &renderer.cpu_profile {
+            assert_eq!(cpu.pending_counters().0, 14);
+            assert!(cpu.pending_counters().1 > 0);
+            if !std::env::var_os("PRIME_PROFILE").is_some_and(|value| value != "0") {
+                assert_eq!(renderer.host_query, vk::QueryPool::null());
+            }
+        }
         if let Some(profile) = host.profile_snapshot() {
             assert_eq!(profile.readback_bytes, 0);
             assert_eq!(

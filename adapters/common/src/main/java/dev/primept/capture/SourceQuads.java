@@ -15,25 +15,37 @@ public final class SourceQuads {
     private boolean sealed;
 
     public void vertex(int layer, float x, float y, float z, int argb, float u, float v) {
-        if (sealed) throw new IllegalStateException("Source batch is sealed");
-        if (layer < 0 || layer >= layers.length) throw new IllegalArgumentException("Unsupported source layer");
-        if (bytes > MAX_BYTES - STRIDE) throw new IllegalStateException("Source section exceeds 64 MiB");
+        if (sealed)
+            throw new IllegalStateException("Source batch is sealed");
+        if (layer < 0 || layer >= layers.length)
+            throw new IllegalArgumentException("Unsupported source layer");
+        if (bytes > MAX_BYTES - STRIDE)
+            throw new IllegalStateException("Source section exceeds 64 MiB");
         ByteBuffer target = layers[layer];
-        if (target == null) target = layers[layer] = ByteBuffer.allocate(4096).order(ByteOrder.LITTLE_ENDIAN);
+        if (target == null)
+            target = layers[layer] = ByteBuffer.allocate(4096).order(ByteOrder.LITTLE_ENDIAN);
         if (target.remaining() < STRIDE) {
-            ByteBuffer grown = ByteBuffer.allocate(Math.min(MAX_BYTES, target.capacity() * 2)).order(ByteOrder.LITTLE_ENDIAN);
+            ByteBuffer grown = ByteBuffer.allocate(Math.min(MAX_BYTES, target.capacity() * 2))
+                                       .order(ByteOrder.LITTLE_ENDIAN);
             target.flip();
             grown.put(target);
             target = layers[layer] = grown;
         }
-        target.putFloat(x).putFloat(y).putFloat(z)
-                .put((byte) (argb >>> 16)).put((byte) (argb >>> 8)).put((byte) argb).put((byte) (argb >>> 24))
-                .putFloat(u).putFloat(v);
+        target.putFloat(x)
+                .putFloat(y)
+                .putFloat(z)
+                .put((byte)(argb >>> 16))
+                .put((byte)(argb >>> 8))
+                .put((byte)argb)
+                .put((byte)(argb >>> 24))
+                .putFloat(u)
+                .putFloat(v);
         bytes += STRIDE;
     }
 
     public void seal() {
-        if (sealed) throw new IllegalStateException("Source batch already sealed");
+        if (sealed)
+            throw new IllegalStateException("Source batch already sealed");
         for (ByteBuffer layer : layers) {
             if (layer != null && layer.position() % (4 * STRIDE) != 0)
                 throw new IllegalStateException("Incomplete source quad");
@@ -43,9 +55,10 @@ public final class SourceQuads {
 
     /** Borrowed only until the worker encodes its immutable publication packet. */
     public ByteBuffer vertices(int layer) {
-        if (!sealed) throw new IllegalStateException("Source batch is still being written");
+        if (!sealed)
+            throw new IllegalStateException("Source batch is still being written");
         ByteBuffer result = layers[layer];
         return result == null ? ByteBuffer.allocate(0)
-                : result.asReadOnlyBuffer().flip().order(ByteOrder.LITTLE_ENDIAN);
+                              : result.asReadOnlyBuffer().flip().order(ByteOrder.LITTLE_ENDIAN);
     }
 }

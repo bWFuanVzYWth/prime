@@ -9,6 +9,10 @@ import org.spongepowered.asm.mixin.Unique;
 @Mixin({EntityRenderState.class, BlockEntityRenderState.class})
 public abstract class SourceIdentityMixin implements SourceIdentity {
     @Unique private Object primept$source;
-    public Object primept$source() { return primept$source; }
-    public void primept$source(Object source) { primept$source = source; }
+    public Object primept$source() {
+        return primept$source;
+    }
+    public void primept$source(Object source) {
+        primept$source = source;
+    }
 }

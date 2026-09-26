@@ -1,5 +1,7 @@
 # FFM ABI v1
 
+Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本号用于边界校验，不承诺不同发布之间的二进制兼容；不可仅凭版本号相同混用新旧 JAR 和引擎。双 Minecraft 适配器共享该构建的同一核心，不意味着共享不同发布的内部协议。
+
 导出原型以 [`prime.h`](../crates/prime-engine/include/prime.h) 为准。库名为 `prime_engine`，C 导出 `prime_*` 不变；26.2/26.3 适配器使用同一引擎。全部整数 little-endian，浮点 IEEE754，结构通过字节读取而非 C 对齐结构读取。长度为字节数，所有保留字段必须为零。`prime_create(1)` 返回非零 handle；status=0 成功，-1 失败。`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），输出容量允许时写入终止 NUL。
 
 ## 公共头（24 字节）
@@ -20,6 +22,7 @@
 - **4 texture**：头后 `id:u32, width:u32, height:u32, reserved:u32`，然后恰好 `width*height*4` 字节源编码 RGBA8。id=0 保留给白纹理。
 - **6 dynamic snapshot**：原子替换原始动态回退几何，格式见下文；序号独立于静态区块 revision。
 - **7 instance delta**：原子发布局部几何原型及实例增量，格式见下文；与 op6 分别维护序号和场景。
+- **8 replace section**：一次原子替换 section 全部层；源操作顺序与内容 revision 分离，格式见下文。
 
 Mesh 的固定部分含头共 **104 字节**：
 
@@ -39,6 +42,14 @@ Mesh 的固定部分含头共 **104 字节**：
 | 104 | bytes | `vertex_count * stride` 原始字节 |
 
 Position 为 f32×3，UV 为 f32×2。当前两个 Java 适配器的静态地形和流体都输出 **stride24、position0、color12、uv16**；RGBA8 按 R/G/B/A 字节顺序保存作者颜色与源 tint 的编码域组合，排除原版 AO/方向明暗和 UV2 光照。source layer 使用公共协议常量 opaque=0、cutout=1、translucent=2，不传 MC enum ordinal。旧 26.2 BLOCK28 布局仍被显式 stride/offset 解码器支持并留有回归测试。quads 在 Rust 展开为 `(0,1,2), (2,3,0)`。
+
+## 原子 section 替换
+
+op=8 固定头共 **72 字节**：公共头后为 `section:u64`（24）、`sequence:u64`（32）、世界原点 `f64×3`（40/48/56）、`layer_count:u32`（64）、`reserved:u32=0`（68）。sequence 必须非零，并晚于该 section 的全部已有层与完整操作屏障。
+
+每层为 **40 字节描述 + 紧接的顶点字节**，无 padding。十个 u32 依次是 `layer_id, texture_id, material, topology, vertex_count, stride, position_offset, color_offset, uv_offset, reserved=0`。顶点及材质约束与 op2 相同，layer ID 不可重复。`layer_count=0` 清空整个 section；零顶点层等价于该层缺失。
+
+完整包、最终容量及引用验证成功后才原子发布。源序列始终推进；三角形、源 RGBA/UV、纹理/材质与原点逐字段相同的层保留原 Arc 和内容 revision，不使渲染 scene 失效。忽略的布局 padding 与层顺序不参与内容身份。移除的层被清除，只有新增或变化层发布新内容。这个序列屏障也约束后续旧式 op2/op3，不能混用旧序列复活遗漏层。适配器用一个 op8 代替先 remove、再逐层 upsert。
 
 ## 动态完整快照
 
@@ -124,6 +135,10 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 
 ## 边界与容量
 
-当前明确拒绝：超过 256 MiB 的单包、超过 800 万唯一三角形的 CPU 场景、超过 512 MiB 的纹理总量、超过 262144 的 mesh/section history、各超过 262144 的常驻原型或实例、超过 4096×4096 的输出，以及不有限/越域位置、未知 flags、未知拓扑和尾随字节。唯一三角形预算由地形、op6 回退与 op7 原型共享，同一原型不按实例数重复计费。GPU 还验证实际 storage buffer 上限、custom index 的 23 位有效索引和设备内存分配数量预算；上限来自当前实现而非 Minecraft 功能承诺。解析失败不修改场景 revision 或已有数据。
+全场景三角形总量不再受 800 万或带符号 32 位上限约束。64 位宿主累计地形、op6 回退与 op7 原型的唯一几何数量及派生字节，同一原型不按实例数重复计费；超过宿主可寻址字节范围明确失败。`count:u32` 仍描述单个 span，单包仍限 256 MiB；大量独立 section/prototype 分批发布，与一个含数十亿顶点的连续包是不同契约。
+
+当前仍明确拒绝：超过 512 MiB 的纹理总量、超过 262144 的 mesh/section history、各超过 262144 的常驻原型或实例、超过 4096×4096 的输出，以及不有限/越域位置、未知 flags、未知拓扑和尾随字节。op6 是完整回退帧，op7 是一批原子增量，op8 是完整 section 替换；它们尚未提供跨包事务，不能用重复替换包伪装无界分页。GPU 的局部 AS/实例索引、设备内存分配数量与实际内存也构成独立边界。以上不表示已经支持任意视距、任意单资源或任意驻留总量。协议验证失败不修改场景 revision 或已有数据；部分分配使用 `try_reserve`，尚不能保证所有 Rust 系统内存耗尽均可恢复。
+
+当前 Slang 局部指针下标以 32 位字节偏移计算，单个被寻址的材质范围最多 `2^25` 条 128 字节记录；各局部范围的设备基址为 64 位，总量可以跨页。超过单范围限制需要拆分该几何及对应 BLAS，不能让乘法回绕，也不能以此单资源限制代替全场景数量契约。实例展开后的三角形统计使用 u64，GPU 帧参数只传“是否有几何”，避免大计数收窄后误判为空场景。
 
 Mesh 可先于引用的 texture 提交，但渲染前必须补齐所有引用；缺失引用明确报错。所有调用必须在创建 handle 的 OS 线程进行。`prime_destroy` 退休身份，重复释放会报错。调用方必须保证原生指针指向有效读写区域；长度校验不能验证任意地址。

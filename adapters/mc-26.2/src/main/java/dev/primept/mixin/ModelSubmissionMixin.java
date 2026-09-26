@@ -13,7 +13,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class ModelSubmissionMixin implements ModelSubmission {
     @Unique private ModelCapture.Submission primept$submission;
     @Inject(method = "<init>", at = @At("RETURN"))
-    private void primept$source(CallbackInfo callback) { primept$submission = ModelCapture.tagSubmission(); }
-    public ModelCapture.Submission primept$submission() { return primept$submission; }
-    public void primept$submission(ModelCapture.Submission source) { primept$submission = source; }
+    private void primept$source(CallbackInfo callback) {
+        primept$submission = ModelCapture.tagSubmission();
+    }
+    public ModelCapture.Submission primept$submission() {
+        return primept$submission;
+    }
+    public void primept$submission(ModelCapture.Submission source) {
+        primept$submission = source;
+    }
 }

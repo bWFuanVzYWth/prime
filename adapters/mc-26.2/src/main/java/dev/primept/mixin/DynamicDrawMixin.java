@@ -12,6 +12,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class DynamicDrawMixin {
     @Inject(method = "append", at = @At("HEAD"))
     private void primept$capture(MeshData data, CallbackInfo callback) {
-        DynamicCapture.mesh((StagedVertexBuffer.Draw) (Object) this, data);
+        DynamicCapture.mesh((StagedVertexBuffer.Draw)(Object)this, data);
     }
 }

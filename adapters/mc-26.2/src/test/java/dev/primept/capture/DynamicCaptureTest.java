@@ -10,13 +10,19 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DynamicCaptureTest {
-    @Test void actualEntityMeshRetainsSourceRgbaWhileLightAndNormalsStaySeparate() {
+    @Test
+    void actualEntityMeshRetainsSourceRgbaWhileLightAndNormalsStaySeparate() {
         try (var storage = new ByteBufferBuilder(256); var frame = new DynamicFrame(256)) {
             frame.begin(1, 1, 100, 70, -20);
-            var builder = new BufferBuilder(storage, PrimitiveTopology.QUADS, DefaultVertexFormat.ENTITY);
+            var builder =
+                    new BufferBuilder(storage, PrimitiveTopology.QUADS, DefaultVertexFormat.ENTITY);
             for (int i = 0; i < 4; ++i)
-                builder.addVertex(i, i + 1, -i).setColor(0x804080C0).setUv(0.25f, 0.75f)
-                        .setOverlay(0).setLight(i == 0 ? 0 : 0x00F000F0).setNormal(0, 1, 0);
+                builder.addVertex(i, i + 1, -i)
+                        .setColor(0x804080C0)
+                        .setUv(0.25f, 0.75f)
+                        .setOverlay(0)
+                        .setLight(i == 0 ? 0 : 0x00F000F0)
+                        .setNormal(0, 1, 0);
             try (MeshData mesh = builder.buildOrThrow()) {
                 assertTrue(DynamicCapture.appendMesh(frame, 2, 2, mesh));
                 var bytes = frame.seal().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
@@ -35,28 +41,41 @@ class DynamicCaptureTest {
         }
     }
 
-    @Test void missingTextureCoordinatesAreRejectedInsteadOfAssumingOffsets() {
+    @Test
+    void missingTextureCoordinatesAreRejectedInsteadOfAssumingOffsets() {
         try (var storage = new ByteBufferBuilder(256); var frame = new DynamicFrame(256)) {
             frame.begin(1, 1, 0, 0, 0);
-            var builder = new BufferBuilder(storage, PrimitiveTopology.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-            for (int i = 0; i < 3; ++i) builder.addVertex(i, 0, 0).setColor(-1);
+            var builder = new BufferBuilder(storage, PrimitiveTopology.TRIANGLES,
+                                            DefaultVertexFormat.POSITION_COLOR);
+            for (int i = 0; i < 3; ++i)
+                builder.addVertex(i, 0, 0).setColor(-1);
             try (MeshData mesh = builder.buildOrThrow()) {
-                assertThrows(IllegalArgumentException.class, () -> DynamicCapture.appendMesh(frame, 0, 0, mesh));
+                assertThrows(IllegalArgumentException.class,
+                             () -> DynamicCapture.appendMesh(frame, 0, 0, mesh));
                 assertEquals(0, frame.spanCount());
             }
         }
     }
-    @Test void instancedRangesAreExcludedWithoutChangingOriginalMeshOrRemainingRawOrder() {
+    @Test
+    void instancedRangesAreExcludedWithoutChangingOriginalMeshOrRemainingRawOrder() {
         try (var storage = new ByteBufferBuilder(2048); var frame = new DynamicFrame(256)) {
             frame.begin(1, 1, 0, 0, 0);
-            var builder = new BufferBuilder(storage, PrimitiveTopology.QUADS, DefaultVertexFormat.ENTITY);
+            var builder =
+                    new BufferBuilder(storage, PrimitiveTopology.QUADS, DefaultVertexFormat.ENTITY);
             for (int i = 0; i < 16; ++i)
-                builder.addVertex(i, 0, 0).setColor(-1).setUv(0, 0).setOverlay(0).setLight(0).setNormal(0, 1, 0);
+                builder.addVertex(i, 0, 0)
+                        .setColor(-1)
+                        .setUv(0, 0)
+                        .setOverlay(0)
+                        .setLight(0)
+                        .setNormal(0, 1, 0);
             try (var mesh = builder.buildOrThrow()) {
                 var excluded = new DynamicCapture.ExcludedRanges();
-                excluded.add(4, 8); excluded.add(8, 12);
+                excluded.add(4, 8);
+                excluded.add(8, 12);
                 assertTrue(DynamicCapture.appendMesh(frame, 2, 1, mesh, excluded));
-                assertEquals(16, mesh.drawState().vertexCount()); // Original raster buffer is untouched.
+                assertEquals(
+                        16, mesh.drawState().vertexCount()); // Original raster buffer is untouched.
                 assertEquals(8, frame.vertexCount());
                 var packet = frame.seal().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
                 int stride = packet.getInt(80);

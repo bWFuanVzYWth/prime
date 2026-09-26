@@ -10,6 +10,10 @@ import org.spongepowered.asm.mixin.Unique;
 @Mixin({Entity.class, BlockEntity.class})
 public abstract class ModelSourceOwnerMixin implements ModelSourceOwner {
     @Unique private ModelCapture.Source primept$modelSource;
-    public ModelCapture.Source primept$modelSource() { return primept$modelSource; }
-    public void primept$modelSource(ModelCapture.Source source) { primept$modelSource = source; }
+    public ModelCapture.Source primept$modelSource() {
+        return primept$modelSource;
+    }
+    public void primept$modelSource(ModelCapture.Source source) {
+        primept$modelSource = source;
+    }
 }

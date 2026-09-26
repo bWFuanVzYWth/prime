@@ -17,20 +17,26 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class ModelBlockRendererMixin {
     @Inject(method = "putQuadWithTint", at = @At("HEAD"))
     private void primept$beginQuad(BlockQuadOutput output, float x, float y, float z,
-            BlockAndTintGetter level, BlockState state, BlockPos position, BakedQuad quad, CallbackInfo callback) {
+                                   BlockAndTintGetter level, BlockState state, BlockPos position,
+                                   BakedQuad quad, CallbackInfo callback) {
         TerrainCapture.beginVanilla(position, quad.materialInfo().tintIndex());
     }
 
     @Inject(method = "getTintColor", at = @At("RETURN"))
     private void primept$observeTint(BlockAndTintGetter level, BlockState state, BlockPos position,
-            int tintIndex, CallbackInfoReturnable<Integer> callback) {
+                                     int tintIndex, CallbackInfoReturnable<Integer> callback) {
         TerrainCapture.vanillaTint(position, tintIndex, callback.getReturnValueI());
     }
 
-    @Inject(method = "putQuadWithTint", at = @At(value = "INVOKE", target =
-            "Lnet/minecraft/client/renderer/block/BlockQuadOutput;put(FFFLnet/minecraft/client/resources/model/geometry/BakedQuad;Lcom/mojang/blaze3d/vertex/QuadInstance;)V"))
-    private void primept$acceptedQuad(BlockQuadOutput output, float x, float y, float z,
-            BlockAndTintGetter level, BlockState state, BlockPos position, BakedQuad quad, CallbackInfo callback) {
+    @Inject(method = "putQuadWithTint",
+            at = @At(
+                    value = "INVOKE",
+                    target =
+                            "Lnet/minecraft/client/renderer/block/BlockQuadOutput;put(FFFLnet/minecraft/client/resources/model/geometry/BakedQuad;Lcom/mojang/blaze3d/vertex/QuadInstance;)V"))
+    private void
+    primept$acceptedQuad(BlockQuadOutput output, float x, float y, float z,
+                         BlockAndTintGetter level, BlockState state, BlockPos position,
+                         BakedQuad quad, CallbackInfo callback) {
         // QuadInstance already contains lighting; immutable BakedQuad and the observed tint do not.
         TerrainCapture.vanillaQuad(x, y, z, state, quad);
     }

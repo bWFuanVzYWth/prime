@@ -80,7 +80,7 @@ impl Options {
         while let Some(key) = args.next() {
             if key == "--help" {
                 println!(
-                    "instance-cpu [--objects 1000,10000,20000] [--samples 21] [--warmup 3] [--steady-iterations 10000] [--csv artifacts/instances/cpu.csv]\nCPU-only actual op7 submit: one 48-triangle prototype; initial N instances, stationary borrowed scene with no packet, 1% pose delta, and 1% simultaneous removal/birth churn. Packet generation, source/FFM/GPU work and final scene destruction are excluded. Stationary rows are one batch of repeated O(1) borrowed metadata reads; divide total_ns by operations. Allocator instrumentation records requested Rust allocations, not RSS. Use --no-default-features."
+                    "instance-cpu [--objects 1000,10000,20000,56133] [--samples 21] [--warmup 3] [--steady-iterations 10000] [--csv artifacts/instances/cpu.csv]\nCPU-only actual op7 submit: one 48-triangle prototype; initial N instances, stationary borrowed scene with no packet, separately labelled 1% and 100% pose deltas, and 1% simultaneous removal/birth churn. Default counts remain 1000,10000,20000; explicitly add 56133 for the all-animated workload size (not a replay of its model/ID distribution). Packet generation, source/FFM/GPU work and final scene destruction are excluded. Stationary rows are one batch of repeated O(1) borrowed metadata reads; divide total_ns by operations. Allocator instrumentation records requested Rust allocations, not RSS. Use --no-default-features."
                 );
                 std::process::exit(0);
             }
@@ -257,9 +257,19 @@ fn measure(
 fn run_case(options: &Options, objects: u32) -> Result<Vec<Sample>, String> {
     let initial = initial_packet(objects);
     let rounds = options.samples + options.warmup;
-    let mut samples = Vec::with_capacity(rounds as usize * 4);
-    let changed = objects.div_ceil(100);
-    for stage in ["initial", "steady_no_submit", "pose_1pct", "churn_1pct"] {
+    let mut samples = Vec::with_capacity(rounds as usize * 5);
+    for stage in [
+        "initial",
+        "steady_no_submit",
+        "pose_1pct",
+        "pose_100pct",
+        "churn_1pct",
+    ] {
+        let changed = if stage == "pose_100pct" {
+            objects
+        } else {
+            objects.div_ceil(100)
+        };
         let mut source = SourceScene::default();
         source.submit(&header(1))?;
         if stage != "initial" {
@@ -275,7 +285,7 @@ fn run_case(options: &Options, objects: u32) -> Result<Vec<Sample>, String> {
                     initial.clone()
                 }
                 "steady_no_submit" => Vec::new(),
-                "pose_1pct" => {
+                "pose_1pct" | "pose_100pct" => {
                     let mut bytes = batch_header(u64::from(frame) + 2, [0, 0, changed, 0]);
                     for position in 0..changed {
                         write_instance(
@@ -357,7 +367,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     for &objects in &options.objects {
         let samples = run_case(&options, objects)?;
-        for stage in ["initial", "steady_no_submit", "pose_1pct", "churn_1pct"] {
+        for stage in [
+            "initial",
+            "steady_no_submit",
+            "pose_1pct",
+            "pose_100pct",
+            "churn_1pct",
+        ] {
             let selected: Vec<_> = samples
                 .iter()
                 .filter(|s| s.stage == stage && !s.warmup)
@@ -411,7 +427,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_four_stages_use_real_atomic_packets_and_preserve_instance_count() {
+    fn all_five_stages_use_real_atomic_packets_and_preserve_instance_count() {
         let options = Options {
             objects: vec![200],
             samples: 2,
@@ -420,12 +436,13 @@ mod tests {
             csv: String::new(),
         };
         let samples = run_case(&options, 200).unwrap();
-        assert_eq!(samples.len(), 12);
+        assert_eq!(samples.len(), 15);
         for sample in samples {
             let expected_bytes = match sample.stage {
                 "initial" => 48 + 24 + 32 + 96 * 24 + 200 * 128,
                 "steady_no_submit" => 0,
                 "pose_1pct" => 48 + 2 * 128,
+                "pose_100pct" => 48 + 200 * 128,
                 "churn_1pct" => 48 + 2 * (128 + 16),
                 _ => unreachable!(),
             };

@@ -45,6 +45,8 @@ flowchart TD
 
 ## 捕获边界
 
+不同源类型的目标接管位置、geometry-key 缓存契约和后续 GPU 批量工作见 [捕获边界与批量数据流](capture-boundaries.md)。以下描述已有源通路；目标边界不代表所有路径已经完成接入。
+
 捕获在同一个真实 `SectionCompiler` compile 作用域内观察已接受 quad。最终 BLOCK mesh 的颜色已经混入原版 AO/方向明暗，不能作为未照明源颜色：
 
 1. vanilla 保留实际 BakedQuad，并观察本次 `getTintColor` 的返回值。
@@ -52,9 +54,9 @@ flowchart TD
 3. 输出稳定 opaque/cutout/translucent 标识与 24 字节顶点（position 0、RGBA 12、UV 16），不输出烘焙光照。流体使用其实际输出 consumer，观察已求值 tint 排除原版方向明暗；嵌套 Fabric 默认处理器不重复捕获。Rust 使用 stride/offset 描述解析。
 4. compile 开始固定 section/epoch/revision，成功返回后完整发布；`try/finally` 清理线程作用域，迟到结果继续受旧有 tombstone/epoch 检查约束。
 
-没有第二次模型随机、面剔除或 tint 查询；Java 不把颜色转换到线性空间，也不构造 GPU 材质。发布依然是变更区块级，FFM 不按 quad 调用。当前仍保留 MC 编译与上传以维持数据来源，并非已经实现独立完整光追覆盖窗口。
+没有第二次模型随机、面剔除或 tint 查询；Java 不把颜色转换到线性空间，也不构造 GPU 材质。发布依然是变更区块级，FFM 不按 quad 调用。PT 独占时由自己的已加载区块窗口调度真实 MC compiler，编译结果捕获后释放，不创建原版地形 GPU 网格；这仍不承诺任意模组的可见性或回调均已覆盖。
 
-标准模型捕获观察实际 `ModelPart.Cube.compile`。版本层的 `ModelGeometryContext` 识别原版不可变 Vertex 与数组引用变化；`ModelCapture` 关联实体/方块实体源、实际 Model 提交、叶节点、局部几何和已求值姿态。共享 `InstanceCapture` 管理原型、实例和封包生命周期，不依赖 MC 类型。资源变化读取顶点，稳定帧只检查源引用及实例有效值；原版 setupAnim、渲染回调和顶点输出仍执行一次。世界源对象通过自身附加字段持有上下文，不靠 equals/hashCode 或全局实体缓存确定身份。
+标准模型捕获观察实际 `ModelPart.Cube.compile`。版本层的 `ModelGeometryContext` 识别原版不可变 Vertex 与数组引用变化；`ModelCapture` 关联实体/方块实体源、实际 Model 提交、叶节点、局部几何和已求值姿态。共享 `InstanceCapture` 管理原型、实例和封包生命周期，不依赖 MC 类型。资源变化读取顶点，稳定帧只检查源引用及实例有效值；原版 setupAnim 和渲染回调执行原来的一次。PT 独占且满足已知纯叶节点与 consumer 契约时，省去已实例化 Cube 的机械顶点展开，未知路径继续实际输出。世界源对象通过自身附加字段持有上下文，不靠 equals/hashCode 或全局实体缓存确定身份。
 
 只有已知标准 Cube、consumer 和 UV 变换才能进入实例通路。已知相关类存在第三方 Mixin、Cube 子类、未知 consumer 或不可逆变换时保留原始几何回退；这个检测不构成任意未注解字节码变换的兼容承诺。姿态来自实际原版矩阵，源世界原点为 f64，但原版已经计算过的相机相对 f32 平移不能无损逆推；相机运动仍可能使实例记录变化，不使用容差吞掉真实微小运动。
 

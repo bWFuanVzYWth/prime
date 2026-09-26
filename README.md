@@ -49,11 +49,11 @@ Minecraft、Fabric API 和 Prime PT 的版本必须匹配。当前验证组合�
 
 6. 启动这个 Fabric 实例并进入世界。首次加载地形时可能出现短暂停顿；场景稳定、视角静止后，噪点会逐渐减少。移动视角或地形变化会重新开始累积。
 
-当前没有 Prime PT 专用的游戏内设置页面或快捷开关。仅把 JAR 放入 `mods`，但没有添加启用参数时，仍使用原版渲染。
+游戏内可在聊天栏输入 `/primept renderer vanilla` 切回原版，输入 `/primept renderer path_trace` 切回路径追踪。切回 Prime 时会重新加载资源，期间需要等待。当前没有专用设置页面；仅把 JAR 放入 `mods`，但没有添加启用参数时，仍使用原版渲染，游戏内命令也不能补开启动时未启用的显卡功能。
 
 ## 关闭 Prime PT
 
-退出游戏，把 JVM 参数中的 `-Dprimept.enabled=true` 改为 `-Dprimept.enabled=false`，或直接删除这一项，再重新启动。也可以退出游戏后从 `mods` 中移走 Prime PT 的 JAR。
+本次游玩可用 `/primept renderer vanilla` 切回原版。要让之后启动也保持关闭，退出游戏，把 JVM 参数中的 `-Dprimept.enabled=true` 改为 `-Dprimept.enabled=false`，或直接删除这一项，再重新启动。也可以退出游戏后从 `mods` 中移走 Prime PT 的 JAR。
 
 关闭 Prime PT 后可以继续使用原版 Vulkan 渲染。若还要恢复之前的图形后端，删除游戏参数 `--graphicsBackend VULKAN`，再按启动器或游戏的图形设置选择。
 
@@ -78,11 +78,12 @@ Minecraft、Fabric API 和 Prime PT 的版本必须匹配。当前验证组合�
 | 日志内容 | 含义与下一步 |
 | --- | --- |
 | `enabled=false` | 没有启用；检查 JVM 参数 `-Dprimept.enabled=true` |
-| `Prime PT terrain frame completed on GPU` | 已有一帧路径追踪地形在显卡上完成 |
-| `Prime PT disabled` 或 `integration unavailable` | 本次运行未能继续使用路径追踪；查看紧随其后的原因和异常，常见原因包括图形后端、显卡能力或安装包不匹配 |
+| `Prime PT world frame completed on GPU` | 已有一帧路径追踪世界在显卡上完成 |
+| `Prime renderer failed` 或 `integration unavailable` | 本次运行未能继续使用路径追踪；查看紧随其后的原因和异常，常见原因包括图形后端、显卡能力或安装包不匹配 |
+| `retirement is unresolved` 或 `replacement remains blocked` | 旧渲染资源未能安全释放，无法继续切换；请保留日志并重启游戏 |
 | `Native library missing` | 确认使用的是包含原生库的 `-native.jar`，而非普通 Java JAR |
 
-遇到被捕获的初始化或渲染错误时，Prime PT 会停用路径追踪并保留原版世界绘制。修正原因后需要重新启动游戏。若游戏崩溃，请同时保留实例目录里的 `crash-reports` 报告（如果有）。
+遇到被捕获的初始化或渲染错误时，Prime PT 会尝试释放当前渲染器，再恢复原版；出错当帧可能不完整。若资源释放失败，切换会停止，需要重新启动游戏。若游戏崩溃，请同时保留实例目录里的 `crash-reports` 报告（如果有）。
 
 反馈时请向项目维护者或安装包提供者附上：Minecraft、Prime PT、Fabric Loader、Fabric API 和 Java 版本，显卡型号与驱动版本，使用的其他 Mod／资源包，复现步骤，以及完整的 `latest.log`。画面问题最好附截图，并说明关闭 Prime PT 后是否仍然出现。
 

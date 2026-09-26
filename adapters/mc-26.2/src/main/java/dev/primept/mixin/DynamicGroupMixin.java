@@ -13,8 +13,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(targets = "net.minecraft.client.renderer.feature.RenderTypeFeatureRenderer$Group")
 public abstract class DynamicGroupMixin {
     @Inject(method = "getOrAddDraw", at = @At("RETURN"))
-    private void primept$material(RenderType type, CallbackInfoReturnable<StagedVertexBuffer.Draw> callback,
-            @Local PreparedRenderType prepared) {
+    private void primept$material(RenderType type,
+                                  CallbackInfoReturnable<StagedVertexBuffer.Draw> callback,
+                                  @Local PreparedRenderType prepared) {
         DynamicCapture.register(callback.getReturnValue(), type, prepared);
     }
 }

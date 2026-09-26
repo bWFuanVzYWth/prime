@@ -9,9 +9,13 @@ import org.spongepowered.asm.mixin.Mixin;
 @Mixin(ModelFeatureRenderer.class)
 public abstract class ModelFeatureMixin {
     @WrapMethod(method = "prepareModel")
-    private <S> void primept$model(ModelFeatureRenderer.Submit<S> submit, Operation<Void> original) {
+    private <S> void primept$model(ModelFeatureRenderer.Submit<S> submit,
+                                   Operation<Void> original) {
         var previous = ModelCapture.beginModel(submit);
-        try { original.call(submit); }
-        finally { ModelCapture.endModel(previous); }
+        try {
+            original.call(submit);
+        } finally {
+            ModelCapture.endModel(previous);
+        }
     }
 }

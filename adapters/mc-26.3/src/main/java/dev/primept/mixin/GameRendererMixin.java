@@ -10,20 +10,36 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
-    @Inject(method = "renderLevel", at = @At("HEAD"))
-    private void primept$profileStart(CallbackInfo callback) { PrimeClient.beginWorldRender(); }
+    @Inject(method = "extract", at = @At("HEAD"))
+    private void primept$selectRenderer(CallbackInfo callback) {
+        PrimeClient.beginFrame();
+    }
 
-    @Inject(method = "renderLevel", at = @At(value = "INVOKE",
-            target = "Lnet/minecraft/client/renderer/LevelRenderer;render(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;ZLnet/minecraft/client/renderer/state/level/CameraRenderState;Lcom/mojang/renderpearl/api/buffers/GpuBufferSlice;Lorg/joml/Vector4f;ZZ)V",
-            shift = At.Shift.AFTER))
-    private void primept$render(CallbackInfo callback) {
-        var renderer = (GameRenderer) (Object) this;
-        PrimeClient.render(renderer.gameRenderState().levelRenderState.cameraRenderState, renderer.mainRenderTarget());
+    @Inject(method = "renderLevel", at = @At("HEAD"))
+    private void primept$profileStart(CallbackInfo callback) {
+        PrimeClient.beginWorldRender();
+    }
+
+    @Inject(method = "renderLevel",
+            at = @At(
+                    value = "INVOKE",
+                    target =
+                            "Lnet/minecraft/client/renderer/LevelRenderer;render(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;ZLnet/minecraft/client/renderer/state/level/CameraRenderState;Lcom/mojang/renderpearl/api/buffers/GpuBufferSlice;Lorg/joml/Vector4f;ZZ)V",
+                    shift = At.Shift.AFTER))
+    private void
+    primept$render(CallbackInfo callback) {
+        var renderer = (GameRenderer)(Object)this;
+        PrimeClient.render(renderer.gameRenderState().levelRenderState.cameraRenderState,
+                           renderer.mainRenderTarget());
     }
 
     @Inject(method = "setLevel", at = @At("HEAD"))
-    private void primept$reset(ClientLevel level, CallbackInfo callback) { PrimeClient.resetWorld(); }
+    private void primept$reset(ClientLevel level, CallbackInfo callback) {
+        PrimeClient.resetWorld();
+    }
 
     @Inject(method = "close", at = @At("HEAD"))
-    private void primept$close(CallbackInfo callback) { PrimeClient.close(); }
+    private void primept$close(CallbackInfo callback) {
+        PrimeClient.close();
+    }
 }

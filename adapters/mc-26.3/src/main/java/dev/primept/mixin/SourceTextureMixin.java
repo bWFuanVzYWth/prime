@@ -12,6 +12,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class SourceTextureMixin {
     @Inject(method = "doLoad", at = @At("RETURN"))
     private void primept$sourcePixels(NativeImage image, CallbackInfo callback) {
-        DynamicTextures.image(((ReloadableTexture) (Object) this).getTexture(), image);
+        DynamicTextures.image(((ReloadableTexture)(Object)this).getTexture(), image);
     }
 }

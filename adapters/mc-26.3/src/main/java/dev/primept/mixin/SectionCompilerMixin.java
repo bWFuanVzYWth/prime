@@ -18,8 +18,9 @@ public abstract class SectionCompilerMixin {
     @Shadow @Final private boolean cutoutLeaves;
 
     @WrapMethod(method = "compile")
-    private SectionCompiler.Results primept$capture(SectionPos section, RenderSectionRegion region,
-            VertexSorting sorting, SectionBufferBuilderPack buffers, Operation<SectionCompiler.Results> original) {
+    private SectionCompiler.Results
+    primept$capture(SectionPos section, RenderSectionRegion region, VertexSorting sorting,
+                    SectionBufferBuilderPack buffers, Operation<SectionCompiler.Results> original) {
         try (var capture = TerrainCapture.open(PrimeClient.CAPTURE, section, cutoutLeaves)) {
             var result = original.call(section, region, sorting, buffers);
             capture.publish();

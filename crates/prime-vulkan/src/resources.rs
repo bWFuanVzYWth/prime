@@ -134,6 +134,9 @@ pub(super) struct Context {
     pub timestamp_bits: u32,
     pub live_allocations: AtomicU64,
     pub name: String,
+    // CPU diagnostics are independent of GPU queries/PRIME_PROFILE. Count only
+    // successful mapped writes; these bytes do not claim PCIe traffic.
+    cpu_uploaded_bytes: Option<AtomicU64>,
     profile: Option<Profile>,
     host: Option<Host>,
     // If both fence wait and device drain fail without DEVICE_LOST, Vulkan gives
@@ -427,6 +430,7 @@ impl Context {
                 timestamp_bits,
                 live_allocations: AtomicU64::new(0),
                 name,
+                cpu_uploaded_bytes: crate::cpu_profile::enabled().then(|| AtomicU64::new(0)),
                 profile,
                 host: None,
                 uncertain_submission: AtomicBool::new(false),
@@ -530,6 +534,7 @@ impl Context {
                 timestamp_bits: queue_properties.timestamp_valid_bits,
                 live_allocations: AtomicU64::new(0),
                 name,
+                cpu_uploaded_bytes: crate::cpu_profile::enabled().then(|| AtomicU64::new(0)),
                 profile,
                 host: Some(Host {
                     timeline,
@@ -554,7 +559,11 @@ impl Context {
 
     /// Begin recording into the host's transient command buffer, whose completion
     /// is identified by a future value on the host submission timeline.
-    pub fn begin_host_record(&self, command: vk::CommandBuffer, serial: u64) -> Result<(), String> {
+    pub fn begin_host_record(
+        &self,
+        command: vk::CommandBuffer,
+        serial: u64,
+    ) -> Result<u64, String> {
         if !self.can_destroy() {
             return Err("Host Vulkan context is quarantined".into());
         }
@@ -580,7 +589,9 @@ impl Context {
             state.command = command;
             state.last_serial = serial;
         }
-        Ok(())
+        // Reuse this completion proof for slot selection; another poll here is
+        // unnecessary. A later completion can only make this value conservative.
+        Ok(completed)
     }
 
     pub fn end_host_record(&self) {
@@ -628,9 +639,9 @@ impl Context {
         Ok(completed)
     }
 
-    pub fn wait_host_serial(&self, serial: u64) -> Result<(), String> {
+    pub fn wait_host_serial(&self, serial: u64) -> Result<u64, String> {
         let Some(host) = &self.host else {
-            return Ok(());
+            return Ok(u64::MAX);
         };
         if !self.can_destroy() {
             return Err(
@@ -644,7 +655,7 @@ impl Context {
                 .unwrap_or_else(|p| p.into_inner())
                 .last_serial;
             return if serial <= last {
-                Ok(())
+                Ok(last)
             } else {
                 Err("Cannot wait for a new submission after host recording is closed".into())
             };
@@ -663,8 +674,7 @@ impl Context {
             self.uncertain_submission.store(true, Ordering::Relaxed);
             return Err(error("Host Vulkan work did not retire within 5 seconds", e));
         }
-        self.completed_serial()?;
-        Ok(())
+        self.completed_serial()
     }
 
     pub fn wait_host_idle(&self) -> Result<(), String> {
@@ -687,7 +697,7 @@ impl Context {
             self.uncertain_submission.store(true, Ordering::Relaxed);
             return Err("Cannot retire host Vulkan resources while recording is active".into());
         }
-        self.wait_host_serial(serial)
+        self.wait_host_serial(serial).map(|_| ())
     }
 
     /// Permanently close recording after proving every recorded command complete.
@@ -884,6 +894,12 @@ impl Context {
         !self.uncertain_submission.load(Ordering::Relaxed)
     }
 
+    pub fn cpu_upload_bytes(&self) -> Option<u64> {
+        self.cpu_uploaded_bytes
+            .as_ref()
+            .map(|counter| counter.load(Ordering::Relaxed))
+    }
+
     pub fn profile_snapshot(&self) -> Option<GpuProfile> {
         self.profile.as_ref().map(|p| {
             let c = &p.counters;
@@ -910,6 +926,8 @@ pub(super) struct Buffer {
     pub buffer: vk::Buffer,
     pub memory: vk::DeviceMemory,
     pub size: u64,
+    // This owner never rebinds its allocation. Zero for buffers without BDA usage.
+    device_address: u64,
 }
 impl Drop for Buffer {
     fn drop(&mut self) {
@@ -1017,16 +1035,22 @@ impl Buffer {
                     return Err(error("Allocate Vulkan memory", e));
                 }
             };
-            let result = Self {
+            let mut result = Self {
                 context: context.clone(),
                 buffer,
                 memory,
                 size,
+                device_address: 0,
             };
             context
                 .device
                 .bind_buffer_memory(buffer, memory, 0)
                 .map_err(|e| error("Bind Vulkan buffer memory", e))?;
+            if usage.contains(vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS) {
+                result.device_address = context.device.get_buffer_device_address(
+                    &vk::BufferDeviceAddressInfo::default().buffer(buffer),
+                );
+            }
             if let Some(profile) = &context.profile {
                 profile.counters.allocations.fetch_add(1, Ordering::Relaxed);
                 profile
@@ -1109,6 +1133,9 @@ impl Buffer {
                 .map_err(|e| error("Map Vulkan upload buffer", e))?;
             std::ptr::copy_nonoverlapping(bytes.as_ptr(), mapped.cast(), bytes.len());
             self.context.device.unmap_memory(self.memory);
+            if let Some(counter) = &self.context.cpu_uploaded_bytes {
+                counter.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            }
             if let Some(profile) = &self.context.profile {
                 profile
                     .counters
@@ -1149,11 +1176,7 @@ impl Buffer {
         }
     }
     pub fn address(&self) -> u64 {
-        unsafe {
-            self.context.device.get_buffer_device_address(
-                &vk::BufferDeviceAddressInfo::default().buffer(self.buffer),
-            )
-        }
+        self.device_address
     }
 }
 
@@ -1161,6 +1184,8 @@ pub(super) struct Acceleration {
     pub context: Arc<Context>,
     pub handle: vk::AccelerationStructureKHR,
     _buffer: Buffer,
+    // AS addresses are queried from the AS, never inferred from its storage buffer.
+    device_address: u64,
 }
 
 /// Owns scratch and the destination AS until the caller completes its batched
@@ -1288,6 +1313,12 @@ impl Acceleration {
                 context: context.clone(),
                 handle,
                 _buffer: buffer,
+                device_address: context
+                    .acceleration
+                    .get_acceleration_structure_device_address(
+                        &vk::AccelerationStructureDeviceAddressInfoKHR::default()
+                            .acceleration_structure(handle),
+                    ),
             };
             let scratch = Buffer::new(
                 context,
@@ -1324,14 +1355,7 @@ impl Acceleration {
         }
     }
     pub fn address(&self) -> u64 {
-        unsafe {
-            self.context
-                .acceleration
-                .get_acceleration_structure_device_address(
-                    &vk::AccelerationStructureDeviceAddressInfoKHR::default()
-                        .acceleration_structure(self.handle),
-                )
-        }
+        self.device_address
     }
 }
 
@@ -1347,6 +1371,7 @@ mod host_tests {
     struct FakeCalls {
         waits: usize,
         queries: usize,
+        completed: u64,
         reject_queries: bool,
         destroyed: Vec<&'static str>,
     }
@@ -1355,10 +1380,16 @@ mod host_tests {
     }
     unsafe extern "system" fn fake_wait(
         _: vk::Device,
-        _: *const vk::SemaphoreWaitInfo<'_>,
+        info: *const vk::SemaphoreWaitInfo<'_>,
         _: u64,
     ) -> vk::Result {
-        FAKE_CALLS.with(|calls| calls.borrow_mut().waits += 1);
+        FAKE_CALLS.with(|calls| {
+            let mut calls = calls.borrow_mut();
+            calls.waits += 1;
+            unsafe {
+                calls.completed = calls.completed.max(*(*info).p_values);
+            }
+        });
         vk::Result::SUCCESS
     }
     unsafe extern "system" fn fake_counter(
@@ -1373,7 +1404,7 @@ mod host_tests {
                 vk::Result::ERROR_OUT_OF_HOST_MEMORY
             } else {
                 unsafe {
-                    *output = 7;
+                    *output = calls.completed;
                 }
                 vk::Result::SUCCESS
             }
@@ -1413,7 +1444,12 @@ mod host_tests {
         None
     }
     fn fake_context() -> Arc<Context> {
-        FAKE_CALLS.with(|calls| *calls.borrow_mut() = FakeCalls::default());
+        FAKE_CALLS.with(|calls| {
+            *calls.borrow_mut() = FakeCalls {
+                completed: 7,
+                ..Default::default()
+            };
+        });
         unsafe {
             // CPU-only dispatch: a missing function panics if teardown ever calls
             // into Vulkan outside the deliberately supplied test operations.
@@ -1462,6 +1498,7 @@ mod host_tests {
                 timestamp_bits: 0,
                 live_allocations: AtomicU64::new(2),
                 name: "CPU teardown test".into(),
+                cpu_uploaded_bytes: None,
                 profile: None,
                 host: Some(Host {
                     timeline: vk::Semaphore::null(),
@@ -1482,7 +1519,39 @@ mod host_tests {
             buffer: vk::Buffer::null(),
             memory: vk::DeviceMemory::null(),
             size: 4,
+            device_address: 0,
         }
+    }
+
+    #[test]
+    fn recording_and_wait_return_their_completion_proof_without_an_extra_query() {
+        let context = fake_context();
+        let completed = context
+            .begin_host_record(vk::CommandBuffer::from_raw(1), 8)
+            .unwrap();
+        assert_eq!(completed, 7);
+        FAKE_CALLS.with(|calls| assert_eq!(calls.borrow().queries, 1));
+        context.end_host_record();
+        assert_eq!(context.wait_host_serial(8).unwrap(), 8);
+        FAKE_CALLS.with(|calls| {
+            let calls = calls.borrow();
+            assert_eq!((calls.waits, calls.queries), (1, 2));
+        });
+        context.finish_host().unwrap();
+    }
+
+    #[test]
+    fn buffer_address_reads_use_the_owner_cache_without_a_driver_function() {
+        let context = fake_context();
+        let mut buffer = fake_buffer(&context);
+        assert_eq!(buffer.address(), 0);
+        buffer.device_address = 0x12345678abcdef00;
+        assert_eq!(buffer.address(), 0x12345678abcdef00);
+        // Fake dispatch has no vkGetBufferDeviceAddress entry; a lookup here
+        // would fail. The full 64-bit cached address remains valid until drop.
+        assert_eq!(buffer.address(), buffer.device_address);
+        drop(buffer);
+        context.finish_host().unwrap();
     }
 
     #[test]
@@ -1579,9 +1648,10 @@ mod host_tests {
                 .device
                 .begin_command_buffer(command, &vk::CommandBufferBeginInfo::default())
                 .unwrap();
-            borrowed.begin_host_record(command, 1).unwrap();
+            assert_eq!(borrowed.begin_host_record(command, 1).unwrap(), 0);
             let buffer =
                 Buffer::new(&borrowed, 16, vk::BufferUsageFlags::TRANSFER_DST, false).unwrap();
+            assert_eq!(buffer.address(), 0);
             borrowed
                 .submit_named("host_fill", |cmd| {
                     borrowed
@@ -1589,9 +1659,18 @@ mod host_tests {
                         .cmd_fill_buffer(cmd, buffer.buffer, 0, 16, 0xabcdef01)
                 })
                 .unwrap();
-            let uploaded =
-                Buffer::upload_device(&borrowed, &[0x42; 16], vk::BufferUsageFlags::STORAGE_BUFFER)
-                    .unwrap();
+            let uploaded = Buffer::upload_device(
+                &borrowed,
+                &[0x42; 16],
+                vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+            )
+            .unwrap();
+            let queried = borrowed.device.get_buffer_device_address(
+                &vk::BufferDeviceAddressInfo::default().buffer(uploaded.buffer),
+            );
+            assert_ne!(queried, 0);
+            assert_eq!(uploaded.address(), queried);
+            assert_eq!(uploaded.address(), queried);
             drop(uploaded);
             drop(buffer);
             borrowed.end_host_record();

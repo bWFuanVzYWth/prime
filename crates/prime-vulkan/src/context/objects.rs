@@ -1,8 +1,10 @@
 //! Persistent prototype/bucket BLAS and shared shading arenas.
+use crate::cpu_profile::{FrameCpu, Stage};
 use crate::dynamic::slot_buffer;
-use crate::geometry::transfer_barrier;
+use crate::material_arena::{Allocation, MaterialArena};
 use crate::plan::{
-    INHERIT, OBJECT_BIT, ObjectKey, Planner, ScenePlan, Slots, pack_material, pack_triangle,
+    INHERIT, MAX_MATERIAL_RECORDS, OBJECT_BIT, ObjectKey, Planner, ScenePlan, arena_capacity,
+    pack_material, pack_triangle, validate_material_count,
 };
 use crate::resources::{Acceleration, Buffer, Context, PreparedAcceleration};
 use crate::textures::Textures;
@@ -13,7 +15,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 struct Object {
     build: PreparedAcceleration<'static>,
-    first: u32,
+    allocation: Allocation,
     capacity: u32,
     count: u32,
     opaque: bool,
@@ -23,14 +25,13 @@ pub(crate) struct Objects {
     // Acceleration objects retire before their arena and shared index input.
     objects: BTreeMap<ObjectKey, Object>,
     planner: Planner,
-    slots: Slots,
-    pub data: Buffer,
+    materials: MaterialArena,
     indices: Buffer,
     pub metadata: Buffer,
     uploads: [Option<Buffer>; FRAME_SLOTS],
     bytes: Vec<u8>,
     pub instances: Vec<vk::AccelerationStructureInstanceKHR>,
-    pub triangle_count: u32,
+    pub triangle_count: u64,
     pub rebuilt: u32,
 }
 
@@ -39,12 +40,11 @@ impl Objects {
         Ok(Self {
             objects: BTreeMap::new(),
             planner: Planner::default(),
-            slots: Slots::default(),
-            data: arena(context, 1024)?,
+            materials: MaterialArena::new(),
             indices: index_buffer(context, 16)?,
             metadata: Buffer::new(
                 context,
-                32,
+                48,
                 vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                 false,
             )?,
@@ -56,6 +56,7 @@ impl Objects {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare(
         &mut self,
         context: &Arc<Context>,
@@ -64,13 +65,18 @@ impl Objects {
         textures: &Textures,
         slot: usize,
         static_clusters: usize,
+        cpu: &mut FrameCpu,
     ) -> Result<(bool, bool), String> {
+        let started = cpu.start();
         let plan = self.planner.plan(scene, source)?;
-        let changed = plan.placements.is_some();
+        cpu.finish(Stage::Plan, started);
+        let started = cpu.start();
+        let changed = plan.placements_changed;
         let result = self.execute(context, &plan, textures, slot, static_clusters);
         self.triangle_count = plan.triangle_count;
         self.planner.recycle(plan);
         let bindings = result?;
+        cpu.finish(Stage::Execute, started);
         Ok((changed, bindings))
     }
 
@@ -83,12 +89,12 @@ impl Objects {
         static_clusters: usize,
     ) -> Result<bool, String> {
         self.rebuilt = plan.geometry.len() as u32;
-        if plan.geometry.is_empty() && plan.removed.is_empty() && plan.placements.is_none() {
+        if plan.geometry.is_empty() && plan.removed.is_empty() && !plan.placements_changed {
             return Ok(false);
         }
         for key in &plan.removed {
             if let Some(old) = self.objects.remove(key) {
-                self.slots.release(old.first, old.capacity);
+                self.materials.free(old.allocation);
             }
         }
         let additions = plan
@@ -105,78 +111,61 @@ impl Objects {
         let mut locations = Vec::with_capacity(plan.geometry.len());
         let mut upload_capacity = 0u64;
         for item in &plan.geometry {
-            let count =
-                u32::try_from(item.triangles.len()).map_err(|_| "Object triangle overflow")?;
-            let capacity = count
-                .max(16)
-                .checked_next_power_of_two()
-                .ok_or("Object capacity overflow")?;
+            let count = u32::try_from(self.planner.triangles(item).len())
+                .map_err(|_| "Object triangle overflow")?;
+            validate_material_count(count)?;
+            let capacity = arena_capacity(count.max(16), MAX_MATERIAL_RECORDS)?;
             largest = largest.max(capacity);
             let replace = self
                 .objects
                 .get(&item.key)
                 .is_none_or(|old| old.capacity < capacity);
-            let first = if replace {
+            let allocation = if replace {
                 if let Some(old) = self.objects.remove(&item.key) {
-                    self.slots.release(old.first, old.capacity);
+                    self.materials.free(old.allocation);
                 }
-                self.slots.allocate(capacity)?
+                self.materials.allocate(context, capacity)?
             } else {
-                self.objects[&item.key].first
+                self.objects[&item.key].allocation
             };
             upload_capacity += u64::from(capacity) * 128;
-            locations.push((item.key, first, count, capacity, replace));
+            locations.push((item.key, allocation, count, capacity, replace));
         }
         let mut bindings = false;
-        if u64::from(self.slots.end) * 128 > self.data.size {
-            let replacement = arena(
-                context,
-                self.slots
-                    .end
-                    .checked_next_power_of_two()
-                    .ok_or("Object arena overflow")?,
-            )?;
-            context.submit_named("grow_object_arena", |command| unsafe {
-                context.device.cmd_copy_buffer(
-                    command,
-                    self.data.buffer,
-                    replacement.buffer,
-                    &[vk::BufferCopy::default().size(self.data.size)],
-                );
-                transfer_barrier(context, command);
-            })?;
-            self.data = replacement;
-            bindings = true;
-        }
         if u64::from(largest) * 12 > self.indices.size {
             self.indices = index_buffer(context, largest)?;
         }
         self.bytes.clear();
-        let mut copies = Vec::with_capacity(locations.len());
-        for (item, &(key, first, count, capacity, replace)) in plan.geometry.iter().zip(&locations)
+        let mut copies: BTreeMap<vk::Buffer, Vec<vk::BufferCopy>> = BTreeMap::new();
+        for (item, &(key, allocation, count, capacity, replace)) in
+            plan.geometry.iter().zip(&locations)
         {
             let offset = self.bytes.len() as u64;
-            for triangle in item.triangles.iter() {
+            let triangles = self.planner.triangles(item);
+            for triangle in triangles {
                 pack_triangle(
                     &mut self.bytes,
                     triangle,
                     textures.index(triangle.texture_id)?,
                 );
             }
-            copies.push(
-                vk::BufferCopy::default()
-                    .src_offset(offset)
-                    .dst_offset(u64::from(first) * 128)
-                    .size(u64::from(count) * 128),
-            );
-            let opaque = item.triangles.iter().all(|triangle| triangle.flags == 0);
+            copies
+                .entry(self.materials.buffer(allocation).buffer)
+                .or_default()
+                .push(
+                    vk::BufferCopy::default()
+                        .src_offset(offset)
+                        .dst_offset(u64::from(allocation.first) * 128)
+                        .size(u64::from(count) * 128),
+                );
+            let opaque = triangles.iter().all(|triangle| triangle.flags == 0);
             if replace {
                 // Nonopaque geometry permits per-instance material overrides. A
                 // uniform opaque placement uses FORCE_OPAQUE in the TLAS instead.
                 let build = Acceleration::prepare_with_flags(
                     context,
                     geometry(
-                        self.data.address() + u64::from(first) * 128,
+                        self.materials.address(allocation),
                         self.indices.address(),
                         capacity,
                     ),
@@ -192,7 +181,7 @@ impl Objects {
                     key,
                     Object {
                         build,
-                        first,
+                        allocation,
                         count,
                         capacity,
                         opaque,
@@ -206,7 +195,8 @@ impl Objects {
         }
         let metadata_offset = self.bytes.len() as u64;
         let mut metadata_bytes = 0;
-        if let Some(placements) = &plan.placements {
+        if plan.placements_changed {
+            let placements = self.planner.placements();
             self.instances.clear();
             self.instances.reserve(placements.len());
             for (index, placement) in placements.iter().enumerate() {
@@ -219,7 +209,12 @@ impl Objects {
                 } else {
                     textures.index(placement.texture_id)?
                 };
-                pack_material(&mut self.bytes, object.first, texture, placement);
+                pack_material(
+                    &mut self.bytes,
+                    self.materials.address(object.allocation),
+                    texture,
+                    placement,
+                );
                 let opaque = placement.flags == 0 || placement.flags == INHERIT && object.opaque;
                 let flags = vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE
                     | if opaque {
@@ -244,9 +239,9 @@ impl Objects {
                     },
                 });
             }
-            metadata_bytes = (placements.len() as u64 * 32).max(32);
+            metadata_bytes = (placements.len() as u64 * 48).max(48);
             if placements.is_empty() {
-                self.bytes.extend_from_slice(&[0; 32]);
+                self.bytes.extend_from_slice(&[0; 48]);
             }
             if metadata_bytes > self.metadata.size {
                 self.metadata = Buffer::new(
@@ -272,10 +267,10 @@ impl Objects {
         )?;
         staging.write(&self.bytes)?;
         context.submit_named("object_updates", |command| unsafe {
-            if !copies.is_empty() {
+            for (destination, regions) in &copies {
                 context
                     .device
-                    .cmd_copy_buffer(command, staging.buffer, self.data.buffer, &copies);
+                    .cmd_copy_buffer(command, staging.buffer, *destination, regions);
             }
             if metadata_bytes > 0 {
                 context.device.cmd_copy_buffer(
@@ -302,12 +297,12 @@ impl Objects {
                 &[],
                 &[],
             );
-            for &(key, first, count, _, _) in &locations {
+            for &(key, allocation, count, _, _) in &locations {
                 let object = &self.objects[&key];
                 object.build.record_geometry(
                     command,
                     geometry(
-                        self.data.address() + u64::from(first) * 128,
+                        self.materials.address(allocation),
                         self.indices.address(),
                         object.capacity,
                     ),
@@ -329,28 +324,30 @@ impl Objects {
             .collect()
     }
 
+    #[cfg(test)]
+    pub fn material_addresses(&self) -> BTreeMap<ObjectKey, u64> {
+        self.objects
+            .iter()
+            .map(|(key, object)| (*key, self.materials.address(object.allocation)))
+            .collect()
+    }
+
     pub fn count(&self) -> usize {
         self.objects.len()
     }
-}
 
-fn arena(context: &Arc<Context>, capacity: u32) -> Result<Buffer, String> {
-    Buffer::new(
-        context,
-        u64::from(capacity) * 128,
-        vk::BufferUsageFlags::STORAGE_BUFFER
-            | vk::BufferUsageFlags::TRANSFER_SRC
-            | vk::BufferUsageFlags::TRANSFER_DST
-            | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
-            | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-        false,
-    )
+    pub fn page_count(&self) -> usize {
+        self.materials.page_count()
+    }
 }
 
 fn index_buffer(context: &Arc<Context>, capacity: u32) -> Result<Buffer, String> {
+    validate_material_count(capacity)?;
     let mut bytes = Vec::with_capacity(capacity as usize * 12);
     for primitive in 0..capacity {
         for corner in 0..3 {
+            // The validated <= 4 GiB pointed range has at most 2^25 records,
+            // so its 16-byte-stride vertex indices remain below 2^28.
             uint(&mut bytes, primitive * 8 + corner);
         }
     }
@@ -370,7 +367,10 @@ fn geometry(
     let triangles = vk::AccelerationStructureGeometryTrianglesDataKHR::default()
         .vertex_format(vk::Format::R32G32B32_SFLOAT)
         .vertex_stride(16)
-        .max_vertex(capacity * 8 - 1)
+        .max_vertex(
+            u32::try_from(u64::from(capacity) * 8 - 1)
+                .expect("validated material capacity fits the Vulkan vertex index"),
+        )
         .vertex_data(vk::DeviceOrHostAddressConstKHR {
             device_address: address,
         })

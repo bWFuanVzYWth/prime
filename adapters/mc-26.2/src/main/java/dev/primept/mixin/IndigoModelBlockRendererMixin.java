@@ -18,24 +18,26 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class IndigoModelBlockRendererMixin {
     @Inject(method = "tesselateBlock", at = @At("HEAD"))
     private void primept$beginBlock(QuadEmitter output, float x, float y, float z,
-            BlockAndTintGetter level, BlockPos position, BlockState state, BlockStateModel model,
-            long seed, CallbackInfo callback) {
+                                    BlockAndTintGetter level, BlockPos position, BlockState state,
+                                    BlockStateModel model, long seed, CallbackInfo callback) {
         TerrainCapture.beginFabricBlock(state);
     }
 
     @Inject(method = "transform", at = @At("HEAD"))
-    private void primept$sourceColors(MutableQuadView quad, CallbackInfoReturnable<Boolean> callback) {
+    private void primept$sourceColors(MutableQuadView quad,
+                                      CallbackInfoReturnable<Boolean> callback) {
         TerrainCapture.beginFabricQuad(quad);
     }
 
     @Inject(method = "getTintColor", at = @At("RETURN"))
     private void primept$observeTint(BlockAndTintGetter level, BlockState state, BlockPos position,
-            int tintIndex, CallbackInfoReturnable<Integer> callback) {
+                                     int tintIndex, CallbackInfoReturnable<Integer> callback) {
         TerrainCapture.fabricTint(callback.getReturnValueI());
     }
 
     @Inject(method = "transform", at = @At("RETURN"))
-    private void primept$acceptedQuad(MutableQuadView quad, CallbackInfoReturnable<Boolean> callback) {
+    private void primept$acceptedQuad(MutableQuadView quad,
+                                      CallbackInfoReturnable<Boolean> callback) {
         TerrainCapture.finishFabricQuad(quad, callback.getReturnValueZ());
     }
 }

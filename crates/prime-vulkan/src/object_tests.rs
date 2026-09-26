@@ -299,7 +299,12 @@ fn gpu_affine_material_instances_match_baked_source_and_ten_thousand_share_one_b
     );
     scene.dynamic = DynamicScene::default();
     let address = renderer.geometry.as_ref().unwrap().objects.addresses();
-    let material_buffer = renderer.geometry.as_ref().unwrap().objects.data.buffer;
+    let material_buffer = renderer
+        .geometry
+        .as_ref()
+        .unwrap()
+        .objects
+        .material_addresses();
     for id in 4..=10_000 {
         source
             .instances
@@ -313,7 +318,7 @@ fn gpu_affine_material_instances_match_baked_source_and_ten_thousand_share_one_b
     assert_eq!(geometry.objects.instances.len(), 10_000);
     assert_eq!(geometry.objects.addresses(), address);
     assert_eq!(geometry.objects.rebuilt, 0);
-    assert_eq!(geometry.objects.data.buffer, material_buffer);
+    assert_eq!(geometry.objects.material_addresses(), material_buffer);
     source.instances.get_mut(&123).unwrap().transform[3] = 0.25;
     source.instance_revision += 1;
     renderer
@@ -388,4 +393,52 @@ fn gpu_raw_spatial_buckets_preserve_unaffected_blas_on_birth_move_and_remove() {
         geometry.objects.addresses()[&ObjectKey::Raw([0, 0, 0], 0)],
         before[&ObjectKey::Raw([0, 0, 0], 0)]
     );
+
+    scene.dynamic.revision += 1;
+    renderer.render(&scene, &camera(), 16, 16, 0).unwrap();
+    assert_eq!(renderer.geometry.as_ref().unwrap().objects.rebuilt, 0);
+    scene.dynamic.triangles = (0..17)
+        .map(|index| triangle(1.0 + index as f32 / 32.0))
+        .collect::<Vec<_>>()
+        .into();
+    scene.dynamic.revision += 1;
+    renderer.render(&scene, &camera(), 16, 16, 0).unwrap();
+    let grown = renderer.geometry.as_ref().unwrap().objects.addresses();
+    assert_eq!(grown.len(), 1);
+    scene.dynamic.triangles = vec![triangle(1.0)].into();
+    scene.dynamic.revision += 1;
+    renderer.render(&scene, &camera(), 16, 16, 0).unwrap();
+    assert_eq!(
+        renderer.geometry.as_ref().unwrap().objects.triangle_count,
+        1
+    );
+    assert_eq!(
+        renderer.geometry.as_ref().unwrap().objects.addresses(),
+        grown
+    );
+    scene.dynamic.triangles = Arc::from([]);
+    scene.dynamic.revision += 1;
+    renderer.render(&scene, &camera(), 16, 16, 0).unwrap();
+    assert!(
+        renderer
+            .geometry
+            .as_ref()
+            .unwrap()
+            .objects
+            .addresses()
+            .is_empty()
+    );
+
+    // A late plan failure may mutate private CPU buckets. The public renderer
+    // must reject reuse instead of treating a partial cache as a completed frame.
+    let mut invalid = triangle(1.0);
+    invalid.flags = 3;
+    scene.dynamic.triangles = vec![triangle(1.25), invalid].into();
+    scene.dynamic.revision += 1;
+    let error = renderer.render(&scene, &camera(), 16, 16, 0).unwrap_err();
+    assert!(error.contains("Invalid raw dynamic geometry"), "{error}");
+    scene.dynamic.triangles = vec![triangle(1.25)].into();
+    scene.dynamic.revision += 1;
+    let error = renderer.render(&scene, &camera(), 16, 16, 0).unwrap_err();
+    assert!(error.contains("healthy"), "{error}");
 }
