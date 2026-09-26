@@ -1,0 +1,20 @@
+[package]
+name = "prime_engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Native scene sessions, rendering lifecycle and the Java FFM entry points"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["vulkan"]
+vulkan = ["dep:prime_vulkan"]
+
+[dependencies]
+prime_scene.workspace = true
+prime_vulkan = { workspace = true, optional = true }
+
+[lints]
+workspace = true

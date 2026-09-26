@@ -1,0 +1,1622 @@
+use ash::vk::Handle;
+use ash::{Device, Entry, Instance, vk};
+use std::{
+    collections::VecDeque,
+    ffi::CStr,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::Instant,
+};
+
+/// Cumulative opt-in counters. GPU time comes from timestamp queries around each
+/// command buffer; CPU waiting includes submission latency and GPU execution.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GpuProfile {
+    pub submissions: u64,
+    pub record_ns: u64,
+    pub submit_ns: u64,
+    pub wait_ns: u64,
+    pub gpu_ns: u64,
+    pub allocations: u64,
+    pub allocation_ns: u64,
+    pub allocated_bytes: u64,
+    pub upload_ns: u64,
+    pub uploaded_bytes: u64,
+    pub readback_ns: u64,
+    pub readback_bytes: u64,
+}
+
+#[derive(Default)]
+struct ProfileCounters {
+    submissions: AtomicU64,
+    record_ns: AtomicU64,
+    submit_ns: AtomicU64,
+    wait_ns: AtomicU64,
+    gpu_ns: AtomicU64,
+    allocations: AtomicU64,
+    allocation_ns: AtomicU64,
+    allocated_bytes: AtomicU64,
+    upload_ns: AtomicU64,
+    uploaded_bytes: AtomicU64,
+    readback_ns: AtomicU64,
+    readback_bytes: AtomicU64,
+}
+
+struct Profile {
+    query_pool: vk::QueryPool,
+    timestamp_period: f64,
+    timestamp_mask: u64,
+    trace: bool,
+    counters: ProfileCounters,
+}
+
+fn elapsed_ns(started: Option<Instant>) -> u64 {
+    started.map_or(0, |start| {
+        start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
+    })
+}
+
+pub(super) fn error(context: &str, error: vk::Result) -> String {
+    format!("{context}: {error:?}")
+}
+
+struct InstanceOwner {
+    _entry: Entry,
+    instance: Instance,
+    debug: Option<(ash::ext::debug_utils::Instance, vk::DebugUtilsMessengerEXT)>,
+    owned: bool,
+}
+impl Drop for InstanceOwner {
+    fn drop(&mut self) {
+        unsafe {
+            if let Some((loader, messenger)) = &self.debug {
+                loader.destroy_debug_utils_messenger(*messenger, None);
+            }
+            if self.owned {
+                self.instance.destroy_instance(None);
+            }
+        }
+    }
+}
+
+enum RetiredResource {
+    Acceleration(vk::AccelerationStructureKHR),
+    Buffer(vk::Buffer, vk::DeviceMemory),
+}
+
+struct HostState {
+    command: vk::CommandBuffer,
+    last_serial: u64,
+    retired: VecDeque<(u64, RetiredResource)>,
+}
+
+struct Host {
+    timeline: vk::Semaphore,
+    // Once the final submission is proven complete, teardown must not consult
+    // the host again: another failing query could otherwise split ownership.
+    finished: AtomicBool,
+    // Host rendering remains thread-confined. This one short metadata lock keeps
+    // Arc resource drops sound without UnsafeCell; no Vulkan call holds the lock.
+    state: Mutex<HostState>,
+}
+unsafe extern "system" fn validation(
+    severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+    _kind: vk::DebugUtilsMessageTypeFlagsEXT,
+    data: *const vk::DebugUtilsMessengerCallbackDataEXT<'_>,
+    _user: *mut std::ffi::c_void,
+) -> vk::Bool32 {
+    if !data.is_null() {
+        unsafe {
+            eprintln!(
+                "[Prime Vulkan {severity:?}] {}",
+                CStr::from_ptr((*data).p_message).to_string_lossy()
+            );
+        }
+    }
+    vk::FALSE
+}
+
+pub(super) struct Context {
+    _instance: Arc<InstanceOwner>,
+    pub device: Device,
+    pub physical: vk::PhysicalDevice,
+    pub acceleration: ash::khr::acceleration_structure::Device,
+    pub queue: vk::Queue,
+    pub queue_family: u32,
+    pub pool: vk::CommandPool,
+    pub memory: vk::PhysicalDeviceMemoryProperties,
+    pub scratch_alignment: u64,
+    pub max_storage_buffer_range: u64,
+    pub max_memory_allocations: u32,
+    pub timestamp_period: f32,
+    pub timestamp_bits: u32,
+    pub live_allocations: AtomicU64,
+    pub name: String,
+    profile: Option<Profile>,
+    host: Option<Host>,
+    // If both fence wait and device drain fail without DEVICE_LOST, Vulkan gives
+    // no proof of completion. Retain native objects rather than free live work.
+    pub uncertain_submission: AtomicBool,
+}
+impl Drop for Context {
+    fn drop(&mut self) {
+        unsafe {
+            if self.host.is_some()
+                && self.can_destroy()
+                && let Err(message) = self.wait_host_idle()
+            {
+                self.uncertain_submission.store(true, Ordering::Relaxed);
+                eprintln!("[Prime PT] Retaining pending host Vulkan resources: {message}");
+            }
+            if self.uncertain_submission.load(Ordering::Relaxed) {
+                std::mem::forget(self._instance.clone());
+                eprintln!(
+                    "[Prime PT] Retaining Vulkan device after an unconfirmed submission failure"
+                );
+                return;
+            }
+            if self.host.is_none() {
+                let _ = self.device.device_wait_idle();
+            }
+            if let Some(profile) = &self.profile {
+                self.device.destroy_query_pool(profile.query_pool, None);
+            }
+            self.device.destroy_command_pool(self.pool, None);
+            if self.host.is_none() {
+                self.device.destroy_device(None);
+            }
+        }
+    }
+}
+impl Context {
+    pub fn new() -> Result<Arc<Self>, String> {
+        unsafe {
+            let entry = Entry::load().map_err(|e| format!("Load Vulkan loader: {e}"))?;
+            let application = vk::ApplicationInfo::default()
+                .application_name(c"Prime PT")
+                .api_version(vk::API_VERSION_1_2);
+            let validation_enabled =
+                std::env::var_os("PRIME_VK_VALIDATION").is_some_and(|v| v != "0");
+            let layer = c"VK_LAYER_KHRONOS_validation";
+            if validation_enabled
+                && !entry
+                    .enumerate_instance_layer_properties()
+                    .map_err(|e| error("Enumerate Vulkan layers", e))?
+                    .iter()
+                    .any(|p| CStr::from_ptr(p.layer_name.as_ptr()) == layer)
+            {
+                return Err(
+                    "PRIME_VK_VALIDATION requested but VK_LAYER_KHRONOS_validation is unavailable"
+                        .into(),
+                );
+            }
+            let layers = if validation_enabled {
+                vec![layer.as_ptr()]
+            } else {
+                vec![]
+            };
+            let extensions = if validation_enabled {
+                vec![ash::ext::debug_utils::NAME.as_ptr()]
+            } else {
+                vec![]
+            };
+            let instance = entry
+                .create_instance(
+                    &vk::InstanceCreateInfo::default()
+                        .application_info(&application)
+                        .enabled_layer_names(&layers)
+                        .enabled_extension_names(&extensions),
+                    None,
+                )
+                .map_err(|e| error("Create Vulkan instance", e))?;
+            let mut owner = InstanceOwner {
+                _entry: entry,
+                instance,
+                debug: None,
+                owned: true,
+            };
+            if validation_enabled {
+                let loader = ash::ext::debug_utils::Instance::new(&owner._entry, &owner.instance);
+                let messenger = loader
+                    .create_debug_utils_messenger(
+                        &vk::DebugUtilsMessengerCreateInfoEXT::default()
+                            .message_severity(
+                                vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                                    | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                            )
+                            .message_type(
+                                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                                    | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+                            )
+                            .pfn_user_callback(Some(validation)),
+                        None,
+                    )
+                    .map_err(|e| error("Create Vulkan validation messenger", e))?;
+                owner.debug = Some((loader, messenger));
+            }
+            let owner = Arc::new(owner);
+            let required = [
+                ash::khr::acceleration_structure::NAME,
+                ash::khr::ray_query::NAME,
+                ash::khr::deferred_host_operations::NAME,
+            ];
+            let mut selected = None;
+            for physical in owner
+                .instance
+                .enumerate_physical_devices()
+                .map_err(|e| error("Enumerate Vulkan GPUs", e))?
+            {
+                let properties = owner.instance.get_physical_device_properties(physical);
+                if properties.api_version < vk::API_VERSION_1_2 {
+                    continue;
+                }
+                let available = owner
+                    .instance
+                    .enumerate_device_extension_properties(physical)
+                    .map_err(|e| error("Enumerate Vulkan extensions", e))?;
+                if !required.iter().all(|r| {
+                    available
+                        .iter()
+                        .any(|a| CStr::from_ptr(a.extension_name.as_ptr()) == *r)
+                }) {
+                    continue;
+                }
+                let mut address = vk::PhysicalDeviceBufferDeviceAddressFeatures::default();
+                let mut acceleration =
+                    vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default();
+                let mut query = vk::PhysicalDeviceRayQueryFeaturesKHR::default();
+                let mut timeline = vk::PhysicalDeviceTimelineSemaphoreFeatures::default();
+                let mut features = vk::PhysicalDeviceFeatures2::default()
+                    .push_next(&mut address)
+                    .push_next(&mut acceleration)
+                    .push_next(&mut query)
+                    .push_next(&mut timeline);
+                owner
+                    .instance
+                    .get_physical_device_features2(physical, &mut features);
+                if address.buffer_device_address == 0
+                    || acceleration.acceleration_structure == 0
+                    || query.ray_query == 0
+                    || timeline.timeline_semaphore == 0
+                {
+                    continue;
+                }
+                let family = owner
+                    .instance
+                    .get_physical_device_queue_family_properties(physical)
+                    .iter()
+                    .position(|p| {
+                        p.queue_count > 0 && p.queue_flags.contains(vk::QueueFlags::COMPUTE)
+                    });
+                if let Some(family) = family {
+                    let discrete = properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU;
+                    if selected.is_none() || discrete {
+                        selected = Some((physical, family as u32, properties));
+                    }
+                    if discrete {
+                        break;
+                    }
+                }
+            }
+            let (physical, family, properties) = selected.ok_or("No Vulkan 1.2 device supports accelerationStructure, rayQuery, bufferDeviceAddress and timelineSemaphore")?;
+            let priorities = [1.0];
+            let queues = [vk::DeviceQueueCreateInfo::default()
+                .queue_family_index(family)
+                .queue_priorities(&priorities)];
+            let names: Vec<_> = required.iter().map(|n| n.as_ptr()).collect();
+            let mut address = vk::PhysicalDeviceBufferDeviceAddressFeatures::default()
+                .buffer_device_address(true);
+            let mut acceleration = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default()
+                .acceleration_structure(true);
+            let mut query = vk::PhysicalDeviceRayQueryFeaturesKHR::default().ray_query(true);
+            let mut timeline =
+                vk::PhysicalDeviceTimelineSemaphoreFeatures::default().timeline_semaphore(true);
+            let device = owner
+                .instance
+                .create_device(
+                    physical,
+                    &vk::DeviceCreateInfo::default()
+                        .queue_create_infos(&queues)
+                        .enabled_extension_names(&names)
+                        .push_next(&mut address)
+                        .push_next(&mut acceleration)
+                        .push_next(&mut query)
+                        .push_next(&mut timeline),
+                    None,
+                )
+                .map_err(|e| error("Create Vulkan ray-query device", e))?;
+            let pool = match device.create_command_pool(
+                &vk::CommandPoolCreateInfo::default()
+                    .queue_family_index(family)
+                    .flags(vk::CommandPoolCreateFlags::TRANSIENT),
+                None,
+            ) {
+                Ok(pool) => pool,
+                Err(e) => {
+                    device.destroy_device(None);
+                    return Err(error("Create Vulkan command pool", e));
+                }
+            };
+            let acceleration_loader =
+                ash::khr::acceleration_structure::Device::new(&owner.instance, &device);
+            let mut acceleration_properties =
+                vk::PhysicalDeviceAccelerationStructurePropertiesKHR::default();
+            owner.instance.get_physical_device_properties2(
+                physical,
+                &mut vk::PhysicalDeviceProperties2::default()
+                    .push_next(&mut acceleration_properties),
+            );
+            let memory = owner
+                .instance
+                .get_physical_device_memory_properties(physical);
+            let queue = device.get_device_queue(family, 0);
+            let name = CStr::from_ptr(properties.device_name.as_ptr())
+                .to_string_lossy()
+                .into_owned();
+            let timestamp_bits = owner
+                .instance
+                .get_physical_device_queue_family_properties(physical)[family as usize]
+                .timestamp_valid_bits;
+            let profile = if std::env::var_os("PRIME_PROFILE").is_some_and(|v| v != "0") {
+                let bits = owner
+                    .instance
+                    .get_physical_device_queue_family_properties(physical)[family as usize]
+                    .timestamp_valid_bits;
+                let query_pool = if bits > 0 {
+                    match device.create_query_pool(
+                        &vk::QueryPoolCreateInfo::default()
+                            .query_type(vk::QueryType::TIMESTAMP)
+                            .query_count(2),
+                        None,
+                    ) {
+                        Ok(pool) => pool,
+                        Err(e) => {
+                            device.destroy_command_pool(pool, None);
+                            device.destroy_device(None);
+                            return Err(error("Create profiling timestamp queries", e));
+                        }
+                    }
+                } else {
+                    vk::QueryPool::null()
+                };
+                eprintln!(
+                    "[Prime PT profile] GPU={name}, timestamp_bits={bits}, timestamp_period_ns={}",
+                    properties.limits.timestamp_period
+                );
+                for (index, memory_type) in memory.memory_types[..memory.memory_type_count as usize]
+                    .iter()
+                    .enumerate()
+                {
+                    eprintln!(
+                        "[Prime PT profile] memory_type={index} heap={} flags={:?}",
+                        memory_type.heap_index, memory_type.property_flags
+                    );
+                }
+                Some(Profile {
+                    query_pool,
+                    timestamp_period: f64::from(properties.limits.timestamp_period),
+                    timestamp_mask: if bits >= 64 {
+                        u64::MAX
+                    } else {
+                        (1u64 << bits) - 1
+                    },
+                    trace: std::env::var_os("PRIME_PROFILE_TRACE").is_some_and(|v| v != "0"),
+                    counters: ProfileCounters::default(),
+                })
+            } else {
+                None
+            };
+            Ok(Arc::new(Self {
+                _instance: owner,
+                device,
+                physical,
+                acceleration: acceleration_loader,
+                queue,
+                queue_family: family,
+                pool,
+                memory,
+                scratch_alignment: u64::from(
+                    acceleration_properties.min_acceleration_structure_scratch_offset_alignment,
+                ),
+                max_storage_buffer_range: u64::from(properties.limits.max_storage_buffer_range),
+                max_memory_allocations: properties.limits.max_memory_allocation_count,
+                timestamp_period: properties.limits.timestamp_period,
+                timestamp_bits,
+                live_allocations: AtomicU64::new(0),
+                name,
+                profile,
+                host: None,
+                uncertain_submission: AtomicBool::new(false),
+            }))
+        }
+    }
+
+    /// Borrow a host device with accelerationStructure, bufferDeviceAddress,
+    /// rayQuery and timelineSemaphore already enabled.
+    ///
+    /// # Safety
+    /// Handles must be live and belong to the supplied instance/device/queue
+    /// family. The host owns queue synchronization and must flush the command
+    /// encoder and keep all handles alive until this context has been destroyed.
+    pub unsafe fn borrowed(
+        instance: u64,
+        physical: u64,
+        device: u64,
+        queue: u64,
+        family: u32,
+        timeline: u64,
+    ) -> Result<Arc<Self>, String> {
+        if [instance, physical, device, queue, timeline].contains(&0) {
+            return Err("Borrowed Vulkan handles must be non-null".into());
+        }
+        unsafe {
+            let entry = Entry::load().map_err(|e| format!("Load host Vulkan loader: {e}"))?;
+            let instance = Instance::load(entry.static_fn(), vk::Instance::from_raw(instance));
+            let owner = Arc::new(InstanceOwner {
+                _entry: entry,
+                instance,
+                debug: None,
+                owned: false,
+            });
+            let physical = vk::PhysicalDevice::from_raw(physical);
+            let properties = owner.instance.get_physical_device_properties(physical);
+            let families = owner
+                .instance
+                .get_physical_device_queue_family_properties(physical);
+            let queue_properties = families
+                .get(family as usize)
+                .ok_or("Host Vulkan queue family is out of range")?;
+            if !queue_properties
+                .queue_flags
+                .contains(vk::QueueFlags::COMPUTE)
+            {
+                return Err("Host Vulkan queue does not support compute".into());
+            }
+            let device = Device::load(owner.instance.fp_v1_0(), vk::Device::from_raw(device));
+            let timeline = vk::Semaphore::from_raw(timeline);
+            device
+                .get_semaphore_counter_value(timeline)
+                .map_err(|e| error("Read host timeline", e))?;
+            let pool = device
+                .create_command_pool(
+                    &vk::CommandPoolCreateInfo::default()
+                        .queue_family_index(family)
+                        .flags(vk::CommandPoolCreateFlags::TRANSIENT),
+                    None,
+                )
+                .map_err(|e| error("Create owned command pool on host Vulkan device", e))?;
+            let acceleration =
+                ash::khr::acceleration_structure::Device::new(&owner.instance, &device);
+            let mut acceleration_properties =
+                vk::PhysicalDeviceAccelerationStructurePropertiesKHR::default();
+            owner.instance.get_physical_device_properties2(
+                physical,
+                &mut vk::PhysicalDeviceProperties2::default()
+                    .push_next(&mut acceleration_properties),
+            );
+            let memory = owner
+                .instance
+                .get_physical_device_memory_properties(physical);
+            let name = CStr::from_ptr(properties.device_name.as_ptr())
+                .to_string_lossy()
+                .into_owned();
+            let profile = std::env::var_os("PRIME_PROFILE")
+                .is_some_and(|v| v != "0")
+                .then(|| Profile {
+                    query_pool: vk::QueryPool::null(),
+                    timestamp_period: f64::from(properties.limits.timestamp_period),
+                    timestamp_mask: 0,
+                    trace: false,
+                    counters: ProfileCounters::default(),
+                });
+            Ok(Arc::new(Self {
+                _instance: owner,
+                device,
+                physical,
+                acceleration,
+                queue: vk::Queue::from_raw(queue),
+                queue_family: family,
+                pool,
+                memory,
+                scratch_alignment: u64::from(
+                    acceleration_properties.min_acceleration_structure_scratch_offset_alignment,
+                ),
+                max_storage_buffer_range: u64::from(properties.limits.max_storage_buffer_range),
+                max_memory_allocations: properties.limits.max_memory_allocation_count,
+                timestamp_period: properties.limits.timestamp_period,
+                timestamp_bits: queue_properties.timestamp_valid_bits,
+                live_allocations: AtomicU64::new(0),
+                name,
+                profile,
+                host: Some(Host {
+                    timeline,
+                    finished: AtomicBool::new(false),
+                    state: Mutex::new(HostState {
+                        command: vk::CommandBuffer::null(),
+                        last_serial: 0,
+                        retired: VecDeque::new(),
+                    }),
+                }),
+                uncertain_submission: AtomicBool::new(false),
+            }))
+        }
+    }
+
+    pub fn is_borrowed(&self) -> bool {
+        self.host.is_some()
+    }
+    pub fn instance_handle(&self) -> u64 {
+        self._instance.instance.handle().as_raw()
+    }
+
+    /// Begin recording into the host's transient command buffer, whose completion
+    /// is identified by a future value on the host submission timeline.
+    pub fn begin_host_record(&self, command: vk::CommandBuffer, serial: u64) -> Result<(), String> {
+        if !self.can_destroy() {
+            return Err("Host Vulkan context is quarantined".into());
+        }
+        let host = self
+            .host
+            .as_ref()
+            .ok_or("This renderer owns its Vulkan device")?;
+        if host.finished.load(Ordering::Relaxed) {
+            return Err("Host Vulkan recording has been permanently closed".into());
+        }
+        let completed = self.completed_serial()?;
+        if command == vk::CommandBuffer::null() || serial == 0 || serial <= completed {
+            return Err("Host command buffer requires a future nonzero completion serial".into());
+        }
+        {
+            let mut state = host.state.lock().unwrap_or_else(|p| p.into_inner());
+            if state.command != vk::CommandBuffer::null() {
+                return Err("Host Vulkan recording is already active".into());
+            }
+            if serial < state.last_serial {
+                return Err("Host Vulkan completion serial regressed".into());
+            }
+            state.command = command;
+            state.last_serial = serial;
+        }
+        Ok(())
+    }
+
+    pub fn end_host_record(&self) {
+        if let Some(host) = &self.host {
+            let mut state = host.state.lock().unwrap_or_else(|p| p.into_inner());
+            state.command = vk::CommandBuffer::null();
+        }
+    }
+
+    pub fn completed_serial(&self) -> Result<u64, String> {
+        let Some(host) = &self.host else {
+            return Ok(u64::MAX);
+        };
+        if !self.can_destroy() {
+            return Err(
+                "Host Vulkan resources are quarantined after an earlier completion failure".into(),
+            );
+        }
+        if host.finished.load(Ordering::Relaxed) {
+            return Ok(host
+                .state
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .last_serial);
+        }
+        let completed =
+            unsafe { self.device.get_semaphore_counter_value(host.timeline) }.map_err(|e| {
+                self.uncertain_submission.store(true, Ordering::Relaxed);
+                error("Query host Vulkan completion", e)
+            })?;
+        let mut ready = Vec::new();
+        {
+            let mut state = host.state.lock().unwrap_or_else(|p| p.into_inner());
+            while state
+                .retired
+                .front()
+                .is_some_and(|(serial, _)| *serial <= completed)
+            {
+                ready.push(state.retired.pop_front().unwrap().1);
+            }
+        }
+        for resource in ready {
+            self.destroy_resource(resource);
+        }
+        Ok(completed)
+    }
+
+    pub fn wait_host_serial(&self, serial: u64) -> Result<(), String> {
+        let Some(host) = &self.host else {
+            return Ok(());
+        };
+        if !self.can_destroy() {
+            return Err(
+                "Host Vulkan resources are quarantined; no further GPU wait is attempted".into(),
+            );
+        }
+        if host.finished.load(Ordering::Relaxed) {
+            let last = host
+                .state
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .last_serial;
+            return if serial <= last {
+                Ok(())
+            } else {
+                Err("Cannot wait for a new submission after host recording is closed".into())
+            };
+        }
+        let semaphores = [host.timeline];
+        let values = [serial];
+        let result = unsafe {
+            self.device.wait_semaphores(
+                &vk::SemaphoreWaitInfo::default()
+                    .semaphores(&semaphores)
+                    .values(&values),
+                5_000_000_000,
+            )
+        };
+        if let Err(e) = result {
+            self.uncertain_submission.store(true, Ordering::Relaxed);
+            return Err(error("Host Vulkan work did not retire within 5 seconds", e));
+        }
+        self.completed_serial()?;
+        Ok(())
+    }
+
+    pub fn wait_host_idle(&self) -> Result<(), String> {
+        let Some(host) = &self.host else {
+            return Ok(());
+        };
+        if !self.can_destroy() {
+            return Err(
+                "Host Vulkan resources are quarantined; no further GPU wait is attempted".into(),
+            );
+        }
+        let (active, serial) = {
+            let state = host.state.lock().unwrap_or_else(|p| p.into_inner());
+            (
+                state.command != vk::CommandBuffer::null(),
+                state.last_serial,
+            )
+        };
+        if active {
+            self.uncertain_submission.store(true, Ordering::Relaxed);
+            return Err("Cannot retire host Vulkan resources while recording is active".into());
+        }
+        self.wait_host_serial(serial)
+    }
+
+    /// Permanently close recording after proving every recorded command complete.
+    /// Later resource drops and context teardown are local; they cannot introduce
+    /// a new timeline failure after the caller starts destroying host objects.
+    pub fn finish_host(&self) -> Result<(), String> {
+        self.wait_host_idle()?;
+        if let Some(host) = &self.host {
+            host.finished.store(true, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
+    fn retire(&self, resource: RetiredResource) {
+        if let Some(host) = &self.host
+            && !host.finished.load(Ordering::Relaxed)
+        {
+            let mut state = host.state.lock().unwrap_or_else(|p| p.into_inner());
+            let serial = state.last_serial;
+            state.retired.push_back((serial, resource));
+        } else {
+            self.destroy_resource(resource);
+        }
+    }
+
+    fn destroy_resource(&self, resource: RetiredResource) {
+        unsafe {
+            match resource {
+                RetiredResource::Acceleration(handle) => self
+                    .acceleration
+                    .destroy_acceleration_structure(handle, None),
+                RetiredResource::Buffer(buffer, memory) => {
+                    self.device.destroy_buffer(buffer, None);
+                    self.device.free_memory(memory, None);
+                    self.live_allocations.fetch_sub(1, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
+    // Owned mode completes each submission. Host mode appends to the active
+    // encoder and retires resources against the host timeline instead.
+    pub fn submit_named(
+        &self,
+        label: &str,
+        record: impl FnOnce(vk::CommandBuffer),
+    ) -> Result<(), String> {
+        unsafe {
+            if !self.can_destroy() {
+                return Err("Vulkan device has an unconfirmed failed submission".into());
+            }
+            if let Some(host) = &self.host {
+                let command = host.state.lock().unwrap_or_else(|p| p.into_inner()).command;
+                if command == vk::CommandBuffer::null() {
+                    return Err(
+                        "Borrowed Vulkan work requires an active host command buffer".into(),
+                    );
+                }
+                let started = self.profile.as_ref().map(|_| Instant::now());
+                record(command);
+                if let Some(profile) = &self.profile {
+                    profile
+                        .counters
+                        .record_ns
+                        .fetch_add(elapsed_ns(started), Ordering::Relaxed);
+                }
+                return Ok(());
+            }
+            let started = self.profile.as_ref().map(|_| Instant::now());
+            let command = self
+                .device
+                .allocate_command_buffers(
+                    &vk::CommandBufferAllocateInfo::default()
+                        .command_pool(self.pool)
+                        .level(vk::CommandBufferLevel::PRIMARY)
+                        .command_buffer_count(1),
+                )
+                .map_err(|e| error("Allocate command buffer", e))?[0];
+            let result = (|| {
+                self.device
+                    .begin_command_buffer(
+                        command,
+                        &vk::CommandBufferBeginInfo::default()
+                            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+                    )
+                    .map_err(|e| error("Begin command buffer", e))?;
+                if let Some(profile) = &self.profile
+                    && profile.query_pool != vk::QueryPool::null()
+                {
+                    self.device
+                        .cmd_reset_query_pool(command, profile.query_pool, 0, 2);
+                    self.device.cmd_write_timestamp(
+                        command,
+                        vk::PipelineStageFlags::TOP_OF_PIPE,
+                        profile.query_pool,
+                        0,
+                    );
+                }
+                record(command);
+                if let Some(profile) = &self.profile
+                    && profile.query_pool != vk::QueryPool::null()
+                {
+                    self.device.cmd_write_timestamp(
+                        command,
+                        vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                        profile.query_pool,
+                        1,
+                    );
+                }
+                self.device
+                    .end_command_buffer(command)
+                    .map_err(|e| error("End command buffer", e))?;
+                let fence = self
+                    .device
+                    .create_fence(&vk::FenceCreateInfo::default(), None)
+                    .map_err(|e| error("Create submission fence", e))?;
+                let commands = [command];
+                let record_ns = elapsed_ns(started);
+                let submitted_at = self.profile.as_ref().map(|_| Instant::now());
+                let submitted = self.device.queue_submit(
+                    self.queue,
+                    &[vk::SubmitInfo::default().command_buffers(&commands)],
+                    fence,
+                );
+                let submit_ns = elapsed_ns(submitted_at);
+                let waiting_at = self.profile.as_ref().map(|_| Instant::now());
+                let completed = submitted.and_then(|_| {
+                    let waited = self.device.wait_for_fences(&[fence], true, u64::MAX);
+                    if waited.is_err()
+                        && waited != Err(vk::Result::ERROR_DEVICE_LOST)
+                        && let Err(e) = self.device.device_wait_idle()
+                        && e != vk::Result::ERROR_DEVICE_LOST
+                    {
+                        self.uncertain_submission.store(true, Ordering::Relaxed);
+                    }
+                    waited
+                });
+                let wait_ns = elapsed_ns(waiting_at);
+                if self.can_destroy() {
+                    self.device.destroy_fence(fence, None);
+                }
+                if completed.is_ok()
+                    && let Some(profile) = &self.profile
+                {
+                    let mut timestamps = [0u64; 2];
+                    let gpu_ns = if profile.query_pool != vk::QueryPool::null() {
+                        self.device
+                            .get_query_pool_results(
+                                profile.query_pool,
+                                0,
+                                &mut timestamps,
+                                vk::QueryResultFlags::TYPE_64,
+                            )
+                            .map_err(|e| error("Read completed GPU timestamps", e))?;
+                        ((timestamps[1].wrapping_sub(timestamps[0]) & profile.timestamp_mask)
+                            as f64
+                            * profile.timestamp_period) as u64
+                    } else {
+                        0
+                    };
+                    profile.counters.submissions.fetch_add(1, Ordering::Relaxed);
+                    profile
+                        .counters
+                        .record_ns
+                        .fetch_add(record_ns, Ordering::Relaxed);
+                    profile
+                        .counters
+                        .submit_ns
+                        .fetch_add(submit_ns, Ordering::Relaxed);
+                    profile
+                        .counters
+                        .wait_ns
+                        .fetch_add(wait_ns, Ordering::Relaxed);
+                    profile.counters.gpu_ns.fetch_add(gpu_ns, Ordering::Relaxed);
+                    if profile.trace {
+                        eprintln!(
+                            "[Prime PT profile] submit={label} record_ms={:.3} submit_ms={:.3} wait_ms={:.3} gpu_ms={:.3}",
+                            record_ns as f64 / 1e6,
+                            submit_ns as f64 / 1e6,
+                            wait_ns as f64 / 1e6,
+                            gpu_ns as f64 / 1e6
+                        );
+                    }
+                }
+                completed.map_err(|e| error("Submit/wait Vulkan work", e))
+            })();
+            if self.can_destroy() {
+                self.device.free_command_buffers(self.pool, &[command]);
+            }
+            result
+        }
+    }
+    pub fn can_destroy(&self) -> bool {
+        !self.uncertain_submission.load(Ordering::Relaxed)
+    }
+
+    pub fn profile_snapshot(&self) -> Option<GpuProfile> {
+        self.profile.as_ref().map(|p| {
+            let c = &p.counters;
+            GpuProfile {
+                submissions: c.submissions.load(Ordering::Relaxed),
+                record_ns: c.record_ns.load(Ordering::Relaxed),
+                submit_ns: c.submit_ns.load(Ordering::Relaxed),
+                wait_ns: c.wait_ns.load(Ordering::Relaxed),
+                gpu_ns: c.gpu_ns.load(Ordering::Relaxed),
+                allocations: c.allocations.load(Ordering::Relaxed),
+                allocation_ns: c.allocation_ns.load(Ordering::Relaxed),
+                allocated_bytes: c.allocated_bytes.load(Ordering::Relaxed),
+                upload_ns: c.upload_ns.load(Ordering::Relaxed),
+                uploaded_bytes: c.uploaded_bytes.load(Ordering::Relaxed),
+                readback_ns: c.readback_ns.load(Ordering::Relaxed),
+                readback_bytes: c.readback_bytes.load(Ordering::Relaxed),
+            }
+        })
+    }
+}
+
+pub(super) struct Buffer {
+    pub context: Arc<Context>,
+    pub buffer: vk::Buffer,
+    pub memory: vk::DeviceMemory,
+    pub size: u64,
+}
+impl Drop for Buffer {
+    fn drop(&mut self) {
+        if self.context.can_destroy() {
+            self.context
+                .retire(RetiredResource::Buffer(self.buffer, self.memory));
+        }
+    }
+}
+impl Buffer {
+    pub fn new(
+        context: &Arc<Context>,
+        size: u64,
+        usage: vk::BufferUsageFlags,
+        host: bool,
+    ) -> Result<Self, String> {
+        Self::allocate(context, size, usage, host, vk::MemoryPropertyFlags::empty())
+    }
+
+    /// Readback is CPU-read-heavy: prefer a coherent, cached system-memory type.
+    /// The first merely HOST_VISIBLE type can be uncached on discrete GPUs.
+    pub fn new_readback(context: &Arc<Context>, size: u64) -> Result<Self, String> {
+        Self::allocate(
+            context,
+            size,
+            vk::BufferUsageFlags::TRANSFER_DST,
+            true,
+            vk::MemoryPropertyFlags::HOST_CACHED,
+        )
+    }
+
+    fn allocate(
+        context: &Arc<Context>,
+        size: u64,
+        usage: vk::BufferUsageFlags,
+        host: bool,
+        preferred: vk::MemoryPropertyFlags,
+    ) -> Result<Self, String> {
+        unsafe {
+            let started = context.profile.as_ref().map(|_| Instant::now());
+            let size = size.max(16);
+            if usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER)
+                && size > context.max_storage_buffer_range
+            {
+                return Err(format!(
+                    "Storage buffer {size} exceeds device limit {}",
+                    context.max_storage_buffer_range
+                ));
+            }
+            let buffer = context
+                .device
+                .create_buffer(
+                    &vk::BufferCreateInfo::default()
+                        .size(size)
+                        .usage(usage)
+                        .sharing_mode(vk::SharingMode::EXCLUSIVE),
+                    None,
+                )
+                .map_err(|e| error("Create Vulkan buffer", e))?;
+            let requirements = context.device.get_buffer_memory_requirements(buffer);
+            let required = if host {
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT
+            } else {
+                vk::MemoryPropertyFlags::DEVICE_LOCAL
+            };
+            let compatible = |i: &u32| {
+                (requirements.memory_type_bits & (1 << i)) != 0
+                    && context.memory.memory_types[*i as usize]
+                        .property_flags
+                        .contains(required)
+            };
+            let memory_index = (0..context.memory.memory_type_count)
+                .find(|i| {
+                    compatible(i)
+                        && context.memory.memory_types[*i as usize]
+                            .property_flags
+                            .contains(preferred)
+                })
+                .or_else(|| (0..context.memory.memory_type_count).find(compatible));
+            let Some(memory_index) = memory_index else {
+                context.device.destroy_buffer(buffer, None);
+                return Err(format!("No Vulkan memory type for {required:?}"));
+            };
+            let mut flags = vk::MemoryAllocateFlagsInfo::default()
+                .flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
+            let mut allocate = vk::MemoryAllocateInfo::default()
+                .allocation_size(requirements.size)
+                .memory_type_index(memory_index);
+            if usage.contains(vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS) {
+                allocate = allocate.push_next(&mut flags);
+            }
+            // Retired host resources still occupy allocations until their serial
+            // completes. Count them, not just the current cluster batch.
+            let previous = context.live_allocations.fetch_add(1, Ordering::Relaxed);
+            if previous >= u64::from(context.max_memory_allocations) {
+                context.live_allocations.fetch_sub(1, Ordering::Relaxed);
+                context.device.destroy_buffer(buffer, None);
+                return Err("Native Vulkan allocation limit reached; host submissions must retire before more scene uploads".into());
+            }
+            let memory = match context.device.allocate_memory(&allocate, None) {
+                Ok(memory) => memory,
+                Err(e) => {
+                    context.live_allocations.fetch_sub(1, Ordering::Relaxed);
+                    context.device.destroy_buffer(buffer, None);
+                    return Err(error("Allocate Vulkan memory", e));
+                }
+            };
+            let result = Self {
+                context: context.clone(),
+                buffer,
+                memory,
+                size,
+            };
+            context
+                .device
+                .bind_buffer_memory(buffer, memory, 0)
+                .map_err(|e| error("Bind Vulkan buffer memory", e))?;
+            if let Some(profile) = &context.profile {
+                profile.counters.allocations.fetch_add(1, Ordering::Relaxed);
+                profile
+                    .counters
+                    .allocated_bytes
+                    .fetch_add(size, Ordering::Relaxed);
+                profile
+                    .counters
+                    .allocation_ns
+                    .fetch_add(elapsed_ns(started), Ordering::Relaxed);
+                if profile.trace {
+                    eprintln!(
+                        "[Prime PT profile] allocate bytes={size} usage={usage:?} memory_type={memory_index} flags={:?}",
+                        context.memory.memory_types[memory_index as usize].property_flags
+                    );
+                }
+            }
+            Ok(result)
+        }
+    }
+    pub fn upload(
+        context: &Arc<Context>,
+        bytes: &[u8],
+        usage: vk::BufferUsageFlags,
+    ) -> Result<Self, String> {
+        let buffer = Self::new(context, bytes.len() as u64, usage, true)?;
+        buffer.write(bytes)?;
+        Ok(buffer)
+    }
+
+    /// Stage immutable shader/geometry input into local GPU memory. Retaining a
+    /// mapped upload allocation makes every subsequent shader read cross PCIe.
+    pub fn upload_device(
+        context: &Arc<Context>,
+        bytes: &[u8],
+        usage: vk::BufferUsageFlags,
+    ) -> Result<Self, String> {
+        let destination = Self::new(
+            context,
+            bytes.len() as u64,
+            usage | vk::BufferUsageFlags::TRANSFER_DST,
+            false,
+        )?;
+        if bytes.is_empty() {
+            return Ok(destination);
+        }
+        let staging = Self::upload(context, bytes, vk::BufferUsageFlags::TRANSFER_SRC)?;
+        context.submit_named("upload", |command| unsafe {
+            context.device.cmd_copy_buffer(
+                command,
+                staging.buffer,
+                destination.buffer,
+                &[vk::BufferCopy::default().size(bytes.len() as u64)],
+            );
+            let barrier = [vk::MemoryBarrier::default()
+                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(vk::AccessFlags::MEMORY_READ)];
+            context.device.cmd_pipeline_barrier(
+                command,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::DependencyFlags::empty(),
+                &barrier,
+                &[],
+                &[],
+            );
+        })?;
+        Ok(destination)
+    }
+    pub fn write(&self, bytes: &[u8]) -> Result<(), String> {
+        unsafe {
+            let started = self.context.profile.as_ref().map(|_| Instant::now());
+            if bytes.len() as u64 > self.size {
+                return Err("Upload exceeds Vulkan allocation".into());
+            }
+            let mapped = self
+                .context
+                .device
+                .map_memory(self.memory, 0, self.size, vk::MemoryMapFlags::empty())
+                .map_err(|e| error("Map Vulkan upload buffer", e))?;
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), mapped.cast(), bytes.len());
+            self.context.device.unmap_memory(self.memory);
+            if let Some(profile) = &self.context.profile {
+                profile
+                    .counters
+                    .upload_ns
+                    .fetch_add(elapsed_ns(started), Ordering::Relaxed);
+                profile
+                    .counters
+                    .uploaded_bytes
+                    .fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            }
+            Ok(())
+        }
+    }
+    pub fn read(&self, count: usize) -> Result<Vec<u8>, String> {
+        unsafe {
+            let started = self.context.profile.as_ref().map(|_| Instant::now());
+            if count as u64 > self.size {
+                return Err("Readback exceeds Vulkan allocation".into());
+            }
+            let mapped = self
+                .context
+                .device
+                .map_memory(self.memory, 0, self.size, vk::MemoryMapFlags::empty())
+                .map_err(|e| error("Map Vulkan readback buffer", e))?;
+            let bytes = std::slice::from_raw_parts(mapped.cast::<u8>(), count).to_vec();
+            self.context.device.unmap_memory(self.memory);
+            if let Some(profile) = &self.context.profile {
+                profile
+                    .counters
+                    .readback_ns
+                    .fetch_add(elapsed_ns(started), Ordering::Relaxed);
+                profile
+                    .counters
+                    .readback_bytes
+                    .fetch_add(count as u64, Ordering::Relaxed);
+            }
+            Ok(bytes)
+        }
+    }
+    pub fn address(&self) -> u64 {
+        unsafe {
+            self.context.device.get_buffer_device_address(
+                &vk::BufferDeviceAddressInfo::default().buffer(self.buffer),
+            )
+        }
+    }
+}
+
+pub(super) struct Acceleration {
+    pub context: Arc<Context>,
+    pub handle: vk::AccelerationStructureKHR,
+    _buffer: Buffer,
+}
+
+/// Owns scratch and the destination AS until the caller completes its batched
+/// submission. Input vertex/instance buffers must also outlive that submission.
+pub(super) struct PreparedAcceleration<'a> {
+    acceleration: Acceleration,
+    scratch: Buffer,
+    geometry: vk::AccelerationStructureGeometryKHR<'a>,
+    count: u32,
+    kind: vk::AccelerationStructureTypeKHR,
+}
+
+impl PreparedAcceleration<'_> {
+    /// Record an independent build. The batch owner inserts one read barrier
+    /// after all independent BLAS builds, before a dependent TLAS or tracing.
+    pub fn record_unbarriered(&self, command: vk::CommandBuffer) {
+        let context = &self.acceleration.context;
+        let geometries = [self.geometry];
+        let address =
+            self.scratch.address().div_ceil(context.scratch_alignment) * context.scratch_alignment;
+        let info = vk::AccelerationStructureBuildGeometryInfoKHR::default()
+            .ty(self.kind)
+            .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
+            .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
+            .geometries(&geometries)
+            .dst_acceleration_structure(self.acceleration.handle)
+            .scratch_data(vk::DeviceOrHostAddressKHR {
+                device_address: address,
+            });
+        let ranges =
+            [vk::AccelerationStructureBuildRangeInfoKHR::default().primitive_count(self.count)];
+        unsafe {
+            context
+                .acceleration
+                .cmd_build_acceleration_structures(command, &[info], &[&ranges]);
+        }
+    }
+
+    pub fn record(&self, command: vk::CommandBuffer) {
+        self.record_unbarriered(command);
+        Acceleration::read_barrier(&self.acceleration.context, command);
+    }
+
+    /// Call only after the submission containing record() has completed. This
+    /// releases temporary scratch while retaining the built acceleration object.
+    pub fn finish(self) -> Acceleration {
+        self.acceleration
+    }
+}
+
+impl Drop for Acceleration {
+    fn drop(&mut self) {
+        if self.context.can_destroy() {
+            self.context
+                .retire(RetiredResource::Acceleration(self.handle));
+        }
+    }
+}
+impl Acceleration {
+    pub fn build(
+        context: &Arc<Context>,
+        geometry: vk::AccelerationStructureGeometryKHR<'_>,
+        count: u32,
+        kind: vk::AccelerationStructureTypeKHR,
+    ) -> Result<Self, String> {
+        let prepared = Self::prepare(context, geometry, count, kind)?;
+        context.submit_named(
+            if kind == vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL {
+                "blas"
+            } else {
+                "tlas"
+            },
+            |command| prepared.record(command),
+        )?;
+        Ok(prepared.finish())
+    }
+
+    pub fn prepare<'a>(
+        context: &Arc<Context>,
+        geometry: vk::AccelerationStructureGeometryKHR<'a>,
+        count: u32,
+        kind: vk::AccelerationStructureTypeKHR,
+    ) -> Result<PreparedAcceleration<'a>, String> {
+        unsafe {
+            let geometries = [geometry];
+            let info = vk::AccelerationStructureBuildGeometryInfoKHR::default()
+                .ty(kind)
+                .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
+                .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
+                .geometries(&geometries);
+            let mut sizes = vk::AccelerationStructureBuildSizesInfoKHR::default();
+            context.acceleration.get_acceleration_structure_build_sizes(
+                vk::AccelerationStructureBuildTypeKHR::DEVICE,
+                &info,
+                &[count],
+                &mut sizes,
+            );
+            let buffer = Buffer::new(
+                context,
+                sizes.acceleration_structure_size,
+                vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR
+                    | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                false,
+            )?;
+            let handle = context
+                .acceleration
+                .create_acceleration_structure(
+                    &vk::AccelerationStructureCreateInfoKHR::default()
+                        .buffer(buffer.buffer)
+                        .size(sizes.acceleration_structure_size)
+                        .ty(kind),
+                    None,
+                )
+                .map_err(|e| error("Create acceleration structure", e))?;
+            let result = Self {
+                context: context.clone(),
+                handle,
+                _buffer: buffer,
+            };
+            let scratch = Buffer::new(
+                context,
+                sizes.build_scratch_size + context.scratch_alignment,
+                vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                false,
+            )?;
+            Ok(PreparedAcceleration {
+                acceleration: result,
+                scratch,
+                geometry,
+                count,
+                kind,
+            })
+        }
+    }
+
+    pub fn read_barrier(context: &Context, command: vk::CommandBuffer) {
+        let barrier = [vk::MemoryBarrier::default()
+            .src_access_mask(vk::AccessFlags::ACCELERATION_STRUCTURE_WRITE_KHR)
+            .dst_access_mask(vk::AccessFlags::ACCELERATION_STRUCTURE_READ_KHR)];
+        unsafe {
+            context.device.cmd_pipeline_barrier(
+                command,
+                vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_KHR,
+                vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_KHR
+                    | vk::PipelineStageFlags::COMPUTE_SHADER,
+                vk::DependencyFlags::empty(),
+                &barrier,
+                &[],
+                &[],
+            );
+        }
+    }
+    pub fn address(&self) -> u64 {
+        unsafe {
+            self.context
+                .acceleration
+                .get_acceleration_structure_device_address(
+                    &vk::AccelerationStructureDeviceAddressInfoKHR::default()
+                        .acceleration_structure(self.handle),
+                )
+        }
+    }
+}
+
+#[cfg(test)]
+mod host_tests {
+    use super::*;
+    use std::{
+        cell::RefCell,
+        ffi::{c_char, c_void},
+    };
+
+    #[derive(Default)]
+    struct FakeCalls {
+        waits: usize,
+        queries: usize,
+        reject_queries: bool,
+        destroyed: Vec<&'static str>,
+    }
+    thread_local! {
+        static FAKE_CALLS: RefCell<FakeCalls> = RefCell::new(FakeCalls::default());
+    }
+    unsafe extern "system" fn fake_wait(
+        _: vk::Device,
+        _: *const vk::SemaphoreWaitInfo<'_>,
+        _: u64,
+    ) -> vk::Result {
+        FAKE_CALLS.with(|calls| calls.borrow_mut().waits += 1);
+        vk::Result::SUCCESS
+    }
+    unsafe extern "system" fn fake_counter(
+        _: vk::Device,
+        _: vk::Semaphore,
+        output: *mut u64,
+    ) -> vk::Result {
+        FAKE_CALLS.with(|calls| {
+            let mut calls = calls.borrow_mut();
+            calls.queries += 1;
+            if calls.reject_queries {
+                vk::Result::ERROR_OUT_OF_HOST_MEMORY
+            } else {
+                unsafe {
+                    *output = 7;
+                }
+                vk::Result::SUCCESS
+            }
+        })
+    }
+    unsafe extern "system" fn fake_destroy_pool(
+        _: vk::Device,
+        _: vk::CommandPool,
+        _: *const vk::AllocationCallbacks<'_>,
+    ) {
+        FAKE_CALLS.with(|calls| calls.borrow_mut().destroyed.push("pool"));
+    }
+    unsafe extern "system" fn fake_destroy_buffer(
+        _: vk::Device,
+        _: vk::Buffer,
+        _: *const vk::AllocationCallbacks<'_>,
+    ) {
+        FAKE_CALLS.with(|calls| calls.borrow_mut().destroyed.push("buffer"));
+    }
+    unsafe extern "system" fn fake_free_memory(
+        _: vk::Device,
+        _: vk::DeviceMemory,
+        _: *const vk::AllocationCallbacks<'_>,
+    ) {
+        FAKE_CALLS.with(|calls| calls.borrow_mut().destroyed.push("memory"));
+    }
+    unsafe extern "system" fn fake_instance_proc(
+        _: vk::Instance,
+        _: *const c_char,
+    ) -> vk::PFN_vkVoidFunction {
+        None
+    }
+    unsafe extern "system" fn fake_device_proc(
+        _: vk::Device,
+        _: *const c_char,
+    ) -> vk::PFN_vkVoidFunction {
+        None
+    }
+    fn fake_context() -> Arc<Context> {
+        FAKE_CALLS.with(|calls| *calls.borrow_mut() = FakeCalls::default());
+        unsafe {
+            // CPU-only dispatch: a missing function panics if teardown ever calls
+            // into Vulkan outside the deliberately supplied test operations.
+            let instance = Instance::load_with(
+                |name| {
+                    if name == c"vkGetDeviceProcAddr" {
+                        fake_device_proc as *const () as *const c_void
+                    } else {
+                        std::ptr::null()
+                    }
+                },
+                vk::Instance::null(),
+            );
+            let device = Device::load_with(
+                |name| match name.to_bytes() {
+                    b"vkWaitSemaphores" => fake_wait as *const () as *const c_void,
+                    b"vkGetSemaphoreCounterValue" => fake_counter as *const () as *const c_void,
+                    b"vkDestroyCommandPool" => fake_destroy_pool as *const () as *const c_void,
+                    b"vkDestroyBuffer" => fake_destroy_buffer as *const () as *const c_void,
+                    b"vkFreeMemory" => fake_free_memory as *const () as *const c_void,
+                    _ => std::ptr::null(),
+                },
+                vk::Device::null(),
+            );
+            let acceleration = ash::khr::acceleration_structure::Device::new(&instance, &device);
+            Arc::new(Context {
+                _instance: Arc::new(InstanceOwner {
+                    _entry: Entry::from_static_fn(ash::StaticFn {
+                        get_instance_proc_addr: fake_instance_proc,
+                    }),
+                    instance,
+                    debug: None,
+                    owned: false,
+                }),
+                device,
+                physical: vk::PhysicalDevice::null(),
+                acceleration,
+                queue: vk::Queue::null(),
+                queue_family: 0,
+                pool: vk::CommandPool::null(),
+                memory: vk::PhysicalDeviceMemoryProperties::default(),
+                scratch_alignment: 1,
+                max_storage_buffer_range: 1,
+                max_memory_allocations: 1,
+                timestamp_period: 1.0,
+                timestamp_bits: 0,
+                live_allocations: AtomicU64::new(2),
+                name: "CPU teardown test".into(),
+                profile: None,
+                host: Some(Host {
+                    timeline: vk::Semaphore::null(),
+                    finished: AtomicBool::new(false),
+                    state: Mutex::new(HostState {
+                        command: vk::CommandBuffer::null(),
+                        last_serial: 7,
+                        retired: VecDeque::new(),
+                    }),
+                }),
+                uncertain_submission: AtomicBool::new(false),
+            })
+        }
+    }
+    fn fake_buffer(context: &Arc<Context>) -> Buffer {
+        Buffer {
+            context: context.clone(),
+            buffer: vk::Buffer::null(),
+            memory: vk::DeviceMemory::null(),
+            size: 4,
+        }
+    }
+
+    #[test]
+    fn finished_host_teardown_never_requeries_and_retires_late_drops_locally() {
+        let context = fake_context();
+        let surviving = fake_buffer(&context);
+        drop(fake_buffer(&context));
+        assert_eq!(context.live_allocations.load(Ordering::Relaxed), 2);
+        context.finish_host().unwrap();
+        // Any subsequent driver completion query would fail. Renderer::drop's
+        // wait and the final Context::drop must use the stored completion proof.
+        FAKE_CALLS.with(|calls| calls.borrow_mut().reject_queries = true);
+        context.wait_host_idle().unwrap();
+        context.finish_host().unwrap();
+        assert_eq!(context.completed_serial().unwrap(), 7);
+        assert!(context.wait_host_serial(8).is_err());
+        assert!(
+            context
+                .begin_host_record(vk::CommandBuffer::from_raw(1), 8)
+                .is_err()
+        );
+        drop(surviving);
+        assert_eq!(context.live_allocations.load(Ordering::Relaxed), 0);
+        drop(context);
+        FAKE_CALLS.with(|calls| {
+            let calls = calls.borrow();
+            assert_eq!((calls.waits, calls.queries), (1, 1));
+            assert_eq!(
+                calls.destroyed,
+                ["buffer", "memory", "buffer", "memory", "pool"]
+            );
+        });
+    }
+
+    #[test]
+    fn failed_host_finish_preserves_quarantine_and_does_not_free_resources() {
+        let context = fake_context();
+        let surviving = fake_buffer(&context);
+        drop(fake_buffer(&context));
+        FAKE_CALLS.with(|calls| calls.borrow_mut().reject_queries = true);
+        assert!(context.finish_host().is_err());
+        assert!(!context.can_destroy());
+        assert!(
+            !context
+                .host
+                .as_ref()
+                .unwrap()
+                .finished
+                .load(Ordering::Relaxed)
+        );
+        assert!(context.finish_host().is_err());
+        drop(surviving);
+        drop(context);
+        FAKE_CALLS.with(|calls| {
+            let calls = calls.borrow();
+            assert_eq!((calls.waits, calls.queries), (1, 1));
+            assert!(calls.destroyed.is_empty());
+        });
+    }
+
+    #[test]
+    #[ignore = "requires a Vulkan ray-query GPU; validates host resource retirement"]
+    fn borrowed_resources_wait_for_host_timeline_and_do_not_destroy_device() {
+        let owner = Context::new().unwrap();
+        unsafe {
+            let mut timeline_type =
+                vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE);
+            let timeline = owner
+                .device
+                .create_semaphore(
+                    &vk::SemaphoreCreateInfo::default().push_next(&mut timeline_type),
+                    None,
+                )
+                .unwrap();
+            let borrowed = Context::borrowed(
+                owner.instance_handle(),
+                owner.physical.as_raw(),
+                owner.device.handle().as_raw(),
+                owner.queue.as_raw(),
+                owner.queue_family,
+                timeline.as_raw(),
+            )
+            .unwrap();
+            let command = owner
+                .device
+                .allocate_command_buffers(
+                    &vk::CommandBufferAllocateInfo::default()
+                        .command_pool(owner.pool)
+                        .level(vk::CommandBufferLevel::PRIMARY)
+                        .command_buffer_count(1),
+                )
+                .unwrap()[0];
+            owner
+                .device
+                .begin_command_buffer(command, &vk::CommandBufferBeginInfo::default())
+                .unwrap();
+            borrowed.begin_host_record(command, 1).unwrap();
+            let buffer =
+                Buffer::new(&borrowed, 16, vk::BufferUsageFlags::TRANSFER_DST, false).unwrap();
+            borrowed
+                .submit_named("host_fill", |cmd| {
+                    borrowed
+                        .device
+                        .cmd_fill_buffer(cmd, buffer.buffer, 0, 16, 0xabcdef01)
+                })
+                .unwrap();
+            let uploaded =
+                Buffer::upload_device(&borrowed, &[0x42; 16], vk::BufferUsageFlags::STORAGE_BUFFER)
+                    .unwrap();
+            drop(uploaded);
+            drop(buffer);
+            borrowed.end_host_record();
+            assert_eq!(borrowed.completed_serial().unwrap(), 0);
+            assert_eq!(
+                borrowed.live_allocations.load(Ordering::Relaxed),
+                3,
+                "recorded storage must survive Rust drop before the host submits it"
+            );
+            owner.device.end_command_buffer(command).unwrap();
+            let values = [1];
+            let signals = [timeline];
+            let commands = [command];
+            let mut timeline_submit =
+                vk::TimelineSemaphoreSubmitInfo::default().signal_semaphore_values(&values);
+            owner
+                .device
+                .queue_submit(
+                    owner.queue,
+                    &[vk::SubmitInfo::default()
+                        .command_buffers(&commands)
+                        .signal_semaphores(&signals)
+                        .push_next(&mut timeline_submit)],
+                    vk::Fence::null(),
+                )
+                .unwrap();
+            borrowed.wait_host_idle().unwrap();
+            assert_eq!(borrowed.live_allocations.load(Ordering::Relaxed), 0);
+            drop(borrowed);
+            // Borrowed context destruction must leave the owning device usable.
+            let still_live =
+                Buffer::new(&owner, 16, vk::BufferUsageFlags::TRANSFER_DST, false).unwrap();
+            drop(still_live);
+            owner.device.free_command_buffers(owner.pool, &[command]);
+            owner.device.destroy_semaphore(timeline, None);
+        }
+    }
+}

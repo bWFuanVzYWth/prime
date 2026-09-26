@@ -1,0 +1,9 @@
+[package]
+name = "prime_scene"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Version-neutral source protocol, scene values and CPU scene translation"
+
+[lints]
+workspace = true

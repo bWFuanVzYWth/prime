@@ -1,0 +1,12 @@
+base { archivesName = 'prime-common' }
+
+tasks.register('nativeSmoke', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.primept.NativeSmoke'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    String library = System.getProperty('os.name').toLowerCase(Locale.ROOT).startsWith('windows')
+            ? 'prime_engine.dll' : 'libprime_engine.so'
+    args providers.gradleProperty('nativeLibrary').getOrElse(rootProject.file("target/debug/${library}").absolutePath)
+    args layout.buildDirectory.file('ffm-smoke.png').get().asFile.absolutePath
+}

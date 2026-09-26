@@ -1,0 +1,7 @@
+crates/prime-vulkan/assets/**/*.ktx2 filter=lfs diff=lfs merge=lfs -text
+crates/prime-vulkan/assets/**/*.bc6h.gz filter=lfs diff=lfs merge=lfs -text
+crates/prime-vulkan/assets/**/*.bytes filter=lfs diff=lfs merge=lfs -text
+crates/prime-vulkan/assets/**/*.safetensors filter=lfs diff=lfs merge=lfs -text
+crates/prime-vulkan/assets/**/*.zst filter=lfs diff=lfs merge=lfs -text
+crates/prime-vulkan/tests/fixtures/*.bin filter=lfs diff=lfs merge=lfs -text
+third_party/streamline/bin/x64/*.dll filter=lfs diff=lfs merge=lfs -text

@@ -1,0 +1,27 @@
+[package]
+name = "prime_tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Standalone native-1080p diagnostics and GPU-only performance fixtures"
+
+[features]
+default = ["vulkan"]
+vulkan = ["dep:prime_vulkan", "dep:png"]
+
+[dependencies]
+prime_scene.workspace = true
+prime_vulkan = { workspace = true, optional = true }
+png = { workspace = true, optional = true }
+
+[[bin]]
+name = "prime-pt-smoke"
+path = "src/smoke.rs"
+
+[[bin]]
+name = "perf"
+path = "src/perf.rs"
+
+[lints]
+workspace = true

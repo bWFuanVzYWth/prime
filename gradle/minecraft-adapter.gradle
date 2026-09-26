@@ -1,0 +1,76 @@
+apply plugin: 'net.fabricmc.fabric-loom'
+
+def hostLibraryName = System.getProperty('os.name').toLowerCase(Locale.ROOT).startsWith('windows')
+        ? 'prime_engine.dll' : 'libprime_engine.so'
+
+base { archivesName = "prime-pt-mc-${minecraftVersion}" }
+dependencies {
+    minecraft "com.mojang:minecraft:${minecraftVersion}"
+    implementation "net.fabricmc:fabric-loader:${rootProject.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${fabricApiVersion}"
+    implementation project(':common')
+}
+
+processResources {
+    inputs.property 'version', project.version
+    inputs.property 'minecraftVersion', minecraftVersion
+    inputs.property 'fabricApiVersion', fabricApiVersion
+    filesMatching('fabric.mod.json') {
+        expand(version: project.version, minecraftVersion: minecraftVersion, fabricApiVersion: fabricApiVersion)
+    }
+}
+
+// Shared classes are compiled once. Each installable adapter JAR includes the common output.
+def common = project(':common')
+tasks.named('jar') {
+    dependsOn common.tasks.named('classes')
+    from common.sourceSets.main.output
+}
+tasks.named('sourcesJar') { from common.sourceSets.main.allSource }
+
+loom {
+    runs {
+        client {
+            client()
+            runDir = 'run'
+            vmArgs '--enable-native-access=ALL-UNNAMED'
+            vmArgs "-Dprimept.native.path=${providers.gradleProperty('nativeLibrary').getOrElse(rootProject.file("target/release/${hostLibraryName}").absolutePath)}"
+            vmArgs "-Dprimept.enabled=${providers.gradleProperty('primeptEnabled').getOrElse('false')}"
+            vmArgs "-Dprimept.profile=${providers.gradleProperty('primeptProfile').getOrElse('false')}"
+            vmArgs "-Dprimept.capture.audit=${providers.gradleProperty('primeptCaptureAudit').getOrElse('false')}"
+            programArgs '--graphicsBackend', 'VULKAN', '--width', '1920', '--height', '1080'
+            if (providers.gradleProperty('primeptValidation').getOrElse('false').toBoolean()) programArgs '--vulkanValidation'
+            if (providers.gradleProperty('primeptProfile').getOrElse('false').toBoolean()) environmentVariable 'PRIME_PROFILE', '1'
+            if (providers.gradleProperty('primeptWorld').isPresent()) programArgs '--quickPlaySingleplayer', providers.gradleProperty('primeptWorld').get()
+            if (providers.gradleProperty('primeptUsername').isPresent()) programArgs '--username', providers.gradleProperty('primeptUsername').get()
+        }
+    }
+}
+
+tasks.register('nativeJar', Jar) {
+    dependsOn classes, common.tasks.named('classes'), rootProject.tasks.named('buildNative')
+    archiveClassifier = 'native'
+    doFirst {
+        if (!rootProject.file("target/release/${hostLibraryName}").isFile())
+            throw new GradleException("Native build did not produce ${hostLibraryName}")
+    }
+    from sourceSets.main.output
+    from common.sourceSets.main.output
+    from(rootProject.file('target/release')) {
+        include 'prime_engine.dll'
+        into 'natives/windows-x86_64'
+    }
+    from(rootProject.file('target/release')) {
+        include 'libprime_engine.so'
+        into 'natives/linux-x86_64'
+    }
+}
+
+tasks.register('bundledNativeSmoke', JavaExec) {
+    dependsOn common.tasks.named('testClasses'), tasks.named('nativeJar')
+    classpath = files(tasks.named('nativeJar')) + common.sourceSets.test.runtimeClasspath
+    mainClass = 'dev.primept.NativeSmoke'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    args 'bundled', layout.buildDirectory.file('bundled-ffm-smoke.png').get().asFile.absolutePath
+    if (minecraftVersion == '26.3') mustRunAfter ':mc-26.2:bundledNativeSmoke'
+}

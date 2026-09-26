@@ -1,0 +1,23 @@
+{
+  "required": true,
+  "package": "dev.primept.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "SectionCompilerMixin",
+    "GameRendererMixin",
+    "LevelRendererMixin",
+    "TextureAtlasMixin",
+    "SpriteContentsAccessor",
+    "ClientChunkCacheMixin",
+    "GpuDeviceAccessor",
+    "VulkanCommandEncoderAccessor",
+    "MainTargetMixin",
+    "VulkanGpuTextureMixin",
+    "VulkanBackendMixin",
+    "ModelBlockRendererMixin",
+    "IndigoModelBlockRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

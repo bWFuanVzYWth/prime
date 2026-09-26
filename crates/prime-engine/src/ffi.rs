@@ -1,0 +1,328 @@
+//! The caller owns argument pointers; all retained data belongs to the engine.
+use crate::engine::Engine;
+#[cfg(test)]
+use crate::engine::poison_on_failure;
+use prime_scene::protocol::{ABI_VERSION, Frame, MAX_PACKET_BYTES};
+use std::{
+    cell::RefCell,
+    collections::BTreeMap,
+    panic::{AssertUnwindSafe, catch_unwind},
+    sync::atomic::{AtomicU64, Ordering},
+};
+// Each handle and its Vulkan queue live exclusively on the creating OS thread. Only
+// the monotonic identity counter is shared; no scene or GPU state crosses threads.
+static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
+thread_local! {
+    static SESSIONS: RefCell<BTreeMap<u64, Engine>> = const { RefCell::new(BTreeMap::new()) };
+    static ERROR: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+fn boundary<T>(fallback: T, work: impl FnOnce() -> Result<T, String>) -> T {
+    match catch_unwind(AssertUnwindSafe(work)) {
+        Ok(Ok(value)) => {
+            ERROR.with(|e| e.borrow_mut().clear());
+            value
+        }
+        Ok(Err(message)) => {
+            ERROR.with(|e| *e.borrow_mut() = message);
+            fallback
+        }
+        Err(payload) => {
+            let detail = payload
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("unknown panic");
+            ERROR.with(|e| {
+                *e.borrow_mut() = format!("native panic contained at FFM boundary: {detail}")
+            });
+            fallback
+        }
+    }
+}
+
+fn session<T>(
+    handle: u64,
+    work: impl FnOnce(&mut Engine) -> Result<T, String>,
+) -> Result<T, String> {
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions
+            .try_borrow_mut()
+            .map_err(|_| "reentrant native call")?;
+        work(
+            sessions
+                .get_mut(&handle)
+                .ok_or("invalid handle or call from a different OS thread")?,
+        )
+    })
+}
+
+/// Returns the supported wire protocol version, without creating GPU resources.
+#[unsafe(no_mangle)]
+pub extern "C" fn prime_abi_version() -> u32 {
+    ABI_VERSION
+}
+
+/// Creates a thread-confined session; zero means failure (see prime_last_error).
+#[unsafe(no_mangle)]
+pub extern "C" fn prime_create(version: u32) -> u64 {
+    boundary(0, || {
+        if version != ABI_VERSION {
+            return Err(format!(
+                "ABI mismatch: expected {ABI_VERSION}, received {version}"
+            ));
+        }
+        // fetch_update is supported by our stable MSRV; newer nightlies rename it.
+        #[allow(deprecated)]
+        let handle = NEXT_HANDLE
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
+            .map_err(|_| "handle identity exhausted")?;
+        SESSIONS.with(|sessions| {
+            let mut sessions = sessions
+                .try_borrow_mut()
+                .map_err(|_| "reentrant native call")?;
+            if sessions.len() >= 8 {
+                return Err("at most eight sessions per thread are supported".into());
+            }
+            sessions.insert(handle, Engine::default());
+            Ok(handle)
+        })
+    })
+}
+
+/// Copies and validates one scene command. Returns zero on success, -1 on error.
+///
+/// # Safety
+/// `data` must reference `length` readable bytes for this synchronous call. Arbitrary
+/// invalid native addresses cannot be validated by the ABI. No pointer is retained.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_submit(handle: u64, data: *const u8, length: u64) -> i32 {
+    boundary(-1, || {
+        if data.is_null() || length > MAX_PACKET_BYTES as u64 {
+            return Err("null or oversized input packet".into());
+        }
+        // SAFETY: Caller guarantees a live readable region; length is bounded above.
+        let bytes = unsafe { std::slice::from_raw_parts(data, length as usize) };
+        session(handle, |s| s.source.submit(bytes))?;
+        Ok(0)
+    })
+}
+
+/// Renders top-left-origin RGBA8 synchronously; bytes after required output remain untouched.
+///
+/// # Safety
+/// `data` must reference `length` readable bytes and `output` must reference
+/// `capacity` writable bytes. Neither region may be concurrently accessed by other
+/// threads during the call. Native work completes before these buffers are released.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_render(
+    handle: u64,
+    data: *const u8,
+    length: u64,
+    output: *mut u8,
+    capacity: u64,
+) -> i32 {
+    boundary(-1, || {
+        if data.is_null() || output.is_null() || length != 104 {
+            return Err("frame must contain exactly 104 bytes and non-null buffers".into());
+        }
+        // SAFETY: Valid live input storage is part of the caller's ABI contract.
+        let frame = Frame::parse(unsafe { std::slice::from_raw_parts(data, length as usize) })?;
+        if capacity < frame.output_len() as u64 {
+            return Err("output buffer is too small".into());
+        }
+        let rgba = session(handle, |s| s.render(&frame))?;
+        if rgba.len() != frame.output_len() {
+            return Err("renderer returned an invalid output extent".into());
+        }
+        // SAFETY: RGBA is a separate native allocation; output capacity was checked.
+        unsafe {
+            std::ptr::copy_nonoverlapping(rgba.as_ptr(), output, rgba.len());
+        }
+        Ok(0)
+    })
+}
+
+/// Borrows the host instance, physical device, logical device, graphics queue and
+/// completion timeline. All handles remain owned by Minecraft.
+/// # Safety
+/// `data` must address 48 readable bytes. Handles/features/lifetimes must satisfy
+/// Renderer::borrowed, including flushing the host encoder before prime_destroy.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const u8, length: u64) -> i32 {
+    boundary(-1, || {
+        if data.is_null() || length != 48 {
+            return Err("Vulkan host descriptor must contain 48 bytes".into());
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(data, 48) };
+        let value = |offset| u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+        let handles = [value(0), value(8), value(16), value(24), value(32)];
+        let family = u32::from_le_bytes(bytes[40..44].try_into().unwrap());
+        if handles.contains(&0) || bytes[44..48] != [0; 4] {
+            return Err("Invalid Vulkan host handles or reserved field".into());
+        }
+        #[cfg(feature = "vulkan")]
+        {
+            session(handle, |s| {
+                if s.failed || s.renderer.is_some() {
+                    return Err("Engine already attached or failed".into());
+                }
+                s.renderer = Some(unsafe {
+                    prime_vulkan::Renderer::borrowed(
+                        handles[0], handles[1], handles[2], handles[3], family, handles[4],
+                    )?
+                });
+                Ok(0)
+            })
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            let _ = (handle, family);
+            Err("Native library built without Vulkan".into())
+        }
+    })
+}
+
+/// Records GPU work in the host command buffer, directly writing the host color image.
+/// # Safety
+/// The packet is readable for length bytes. Vulkan arguments meet record_host's
+/// contract; the caller must submit this command in order and signal the host timeline.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_record(
+    handle: u64,
+    data: *const u8,
+    length: u64,
+    command: u64,
+    image: u64,
+    view: u64,
+    serial: u64,
+) -> i32 {
+    boundary(-1, || {
+        if data.is_null() || length != 104 || [command, image, view, serial].contains(&0) {
+            return Err("Invalid host frame packet or Vulkan recording handles".into());
+        }
+        let frame = Frame::parse(unsafe { std::slice::from_raw_parts(data, length as usize) })?;
+        #[cfg(feature = "vulkan")]
+        {
+            session(handle, |s| unsafe {
+                s.record(&frame, command, image, view, serial)
+            })?;
+            Ok(0)
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            let _ = (handle, frame);
+            Err("Native library built without Vulkan".into())
+        }
+    })
+}
+
+/// Last completed host PT timestamp duration in ns; zero when profiling is unavailable.
+#[unsafe(no_mangle)]
+pub extern "C" fn prime_gpu_time(handle: u64) -> u64 {
+    boundary(0, || {
+        session(handle, |s| {
+            #[cfg(feature = "vulkan")]
+            {
+                Ok(s.renderer
+                    .as_ref()
+                    .map_or(0, prime_vulkan::Renderer::last_gpu_time_ns))
+            }
+            #[cfg(not(feature = "vulkan"))]
+            {
+                let _ = s;
+                Ok(0)
+            }
+        })
+    })
+}
+
+/// Waits for owned GPU work and destroys the session on its creating thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn prime_destroy(handle: u64) -> i32 {
+    boundary(-1, || {
+        #[cfg(feature = "vulkan")]
+        session(handle, |s| {
+            if let Some(renderer) = &mut s.renderer {
+                renderer.shutdown()?;
+            }
+            Ok(())
+        })?;
+        SESSIONS.with(|sessions| {
+            let value = sessions
+                .try_borrow_mut()
+                .map_err(|_| "reentrant native call")?
+                .remove(&handle)
+                .ok_or("invalid handle or call from a different OS thread")?;
+            drop(value);
+            Ok(0)
+        })
+    })
+}
+
+/// Copies the thread's last error as UTF-8, NUL terminated when capacity > 0.
+/// Returns the full UTF-8 byte length excluding NUL. Reading does not clear it.
+///
+/// # Safety
+/// With nonzero capacity, output must be writable for capacity bytes. Null is
+/// accepted only for querying length with capacity zero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_last_error(output: *mut u8, capacity: u64) -> u64 {
+    ERROR.with(|error| {
+        let error = error.borrow();
+        if !output.is_null() && capacity > 0 {
+            let count = error
+                .len()
+                .min((capacity - 1).min(isize::MAX as u64) as usize);
+            // SAFETY: Caller guarantees capacity; source is independent native storage.
+            unsafe {
+                std::ptr::copy_nonoverlapping(error.as_ptr(), output, count);
+                output.add(count).write(0);
+            }
+        }
+        error.len() as u64
+    })
+}
+
+#[cfg(test)]
+mod abi_tests {
+    use super::*;
+    #[test]
+    fn handles_are_thread_confined_and_retired() {
+        let handle = prime_create(ABI_VERSION);
+        assert_ne!(handle, 0);
+        assert_eq!(
+            std::thread::spawn(move || prime_destroy(handle))
+                .join()
+                .unwrap(),
+            -1
+        );
+        assert_eq!(prime_destroy(handle), 0);
+        assert_eq!(prime_destroy(handle), -1);
+        assert!(unsafe { prime_last_error(std::ptr::null_mut(), 0) } > 0);
+    }
+    #[test]
+    fn errors_are_queryable_and_inputs_checked() {
+        assert_eq!(prime_create(99), 0);
+        let mut bytes = [0xcc; 8];
+        assert!(unsafe { prime_last_error(bytes.as_mut_ptr(), bytes.len() as u64) } > 8);
+        assert_eq!(bytes[7], 0);
+        assert_eq!(unsafe { prime_submit(1, std::ptr::null(), 24) }, -1);
+    }
+    #[test]
+    fn gpu_error_and_panic_poison_session_before_return() {
+        let mut failed = false;
+        assert_eq!(poison_on_failure(&mut failed, || Ok(7)), Ok(7));
+        assert!(!failed);
+        let panic = catch_unwind(AssertUnwindSafe(|| {
+            let _: Result<(), String> =
+                poison_on_failure(&mut failed, || panic!("simulated driver failure"));
+        }));
+        assert!(panic.is_err());
+        assert!(failed);
+        assert!(poison_on_failure(&mut failed, || Ok(())).is_err());
+        failed = false;
+        assert!(poison_on_failure::<()>(&mut failed, || Err("device lost".into())).is_err());
+        assert!(failed);
+    }
+}

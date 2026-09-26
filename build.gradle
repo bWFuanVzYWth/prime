@@ -1,0 +1,80 @@
+plugins {
+    id 'base'
+    id 'net.fabricmc.fabric-loom' version "${loom_version}" apply false
+}
+
+allprojects {
+    version = rootProject.mod_version
+    group = 'dev.primept'
+    repositories { mavenCentral() }
+}
+
+subprojects {
+    apply plugin: 'java-library'
+    java {
+        toolchain.languageVersion = JavaLanguageVersion.of(25)
+        withSourcesJar()
+    }
+    tasks.withType(JavaCompile).configureEach {
+        options.release = 25
+        options.encoding = 'UTF-8'
+    }
+    dependencies {
+        testImplementation platform('org.junit:junit-bom:5.13.4')
+        testImplementation 'org.junit.jupiter:junit-jupiter'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+        jvmArgs '--enable-native-access=ALL-UNNAMED'
+    }
+}
+
+// One native engine is shared byte-for-byte by both Minecraft adapters.
+tasks.register('buildNative', Exec) {
+    workingDir rootDir
+    commandLine 'cargo', 'build', '--release', '--locked', '--package', 'prime_engine'
+}
+
+def adapters = [':mc-26.2', ':mc-26.3']
+tasks.register('test') { dependsOn subprojects.collect { "${it.path}:test" } }
+tasks.named('build') { dependsOn subprojects.collect { "${it.path}:build" } }
+tasks.named('clean') { dependsOn subprojects.collect { "${it.path}:clean" } }
+tasks.register('nativeJar') { dependsOn adapters.collect { "${it}:nativeJar" } }
+tasks.register('verifyNativeJars') {
+    dependsOn tasks.named('nativeJar')
+    doLast {
+        String entryName = System.getProperty('os.name').toLowerCase(Locale.ROOT).startsWith('windows')
+                ? 'natives/windows-x86_64/prime_engine.dll' : 'natives/linux-x86_64/libprime_engine.so'
+        byte[] referenceNative = null
+        byte[] referenceBridge = null
+        adapters.each { path ->
+            def adapter = project(path)
+            def archive = adapter.tasks.named('nativeJar').get().archiveFile.get().asFile
+            new java.util.zip.ZipFile(archive).withCloseable { zip ->
+                def nativeEntry = zip.getEntry(entryName)
+                def bridgeEntry = zip.getEntry('dev/primept/NativeBridge.class')
+                if (nativeEntry == null || bridgeEntry == null) throw new GradleException("Missing engine/common classes in ${archive}")
+                byte[] nativeBytes = zip.getInputStream(nativeEntry).withCloseable { it.readAllBytes() }
+                byte[] bridgeBytes = zip.getInputStream(bridgeEntry).withCloseable { it.readAllBytes() }
+                if (nativeBytes.length == 0) throw new GradleException("Empty native engine in ${archive}")
+                if (referenceNative != null && !Arrays.equals(referenceNative, nativeBytes)) throw new GradleException('Adapters packaged different native engines')
+                if (referenceBridge != null && !Arrays.equals(referenceBridge, bridgeBytes)) throw new GradleException('Adapters packaged different common bridge classes')
+                referenceNative = nativeBytes
+                referenceBridge = bridgeBytes
+                def metadata = zip.getInputStream(zip.getEntry('fabric.mod.json')).withCloseable {
+                    new groovy.json.JsonSlurper().parse(it)
+                }
+                if (metadata.depends.minecraft != "=${adapter.minecraftVersion}") throw new GradleException("Wrong Minecraft constraint in ${archive}")
+                if (metadata.depends.'fabric-api' != "=${adapter.fabricApiVersion}") throw new GradleException("Wrong Fabric API constraint in ${archive}")
+                logger.lifecycle("Verified ${archive.name}: Minecraft ${adapter.minecraftVersion}, common FFM classes, ${nativeBytes.length}-byte shared engine")
+            }
+        }
+    }
+}
+tasks.register('nativeSmoke') { dependsOn ':common:nativeSmoke' }
+tasks.register('bundledNativeSmoke') { dependsOn ':mc-26.2:bundledNativeSmoke', ':mc-26.3:bundledNativeSmoke' }
+// The explicit version tasks isolate game files; this alias retains the previous 26.2 workflow.
+tasks.register('runClient') { dependsOn ':mc-26.2:runClient' }
+tasks.register('runClient26_2') { dependsOn ':mc-26.2:runClient' }
+tasks.register('runClient26_3') { dependsOn ':mc-26.3:runClient' }

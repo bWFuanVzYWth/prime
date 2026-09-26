@@ -1,0 +1,29 @@
+[workspace]
+members = [
+    "crates/prime-scene",
+    "crates/prime-vulkan",
+    "crates/prime-engine",
+    "crates/prime-tools",
+    "crates/rectangle-decomposition",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+
+[workspace.dependencies]
+prime_scene = { path = "crates/prime-scene" }
+prime_vulkan = { path = "crates/prime-vulkan" }
+ash = "0.38"
+png = "0.18.1"
+criterion = "0.8.2"
+test-case = "3.3.1"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

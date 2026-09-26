@@ -1,0 +1,12 @@
+pluginManagement {
+    repositories {
+        maven { url = 'https://maven.fabricmc.net/' }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+rootProject.name = 'prime-pt'
+include 'common', 'mc-26.2', 'mc-26.3'
+project(':common').projectDir = file('adapters/common')
+project(':mc-26.2').projectDir = file('adapters/mc-26.2')
+project(':mc-26.3').projectDir = file('adapters/mc-26.3')

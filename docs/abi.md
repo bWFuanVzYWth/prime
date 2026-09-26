@@ -1,0 +1,83 @@
+# FFM ABI v1
+
+导出原型以 [`prime.h`](../crates/prime-engine/include/prime.h) 为准。库名为 `prime_engine`，C 导出 `prime_*` 不变；26.2/26.3 适配器使用同一引擎。全部整数 little-endian，浮点 IEEE754，结构通过字节读取而非 C 对齐结构读取。长度为字节数，所有保留字段必须为零。`prime_create(1)` 返回非零 handle；status=0 成功，-1 失败。`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），输出容量允许时写入终止 NUL。
+
+## 公共头（24 字节）
+
+| Offset | 类型 | 语义 |
+| --- | --- | --- |
+| 0 | u32 | magic `0x54505250`，字节 `PRPT` |
+| 4 | u32 | ABI version=1 |
+| 8 | u32 | operation |
+| 12 | u32 | reserved=0 |
+| 16 | u64 | epoch；0 无效 |
+
+## 场景操作
+
+- **1 reset**：仅头部，epoch 必须严格增加；清空几何、纹理与 tombstone。
+- **2 mesh**：替换一个 `(section, layer)`；revision 必须大于同层已有 revision 和该 section 删除 revision。
+- **3 remove section**：头后 `section:u64, revision:u64`；删除全部层，记录 tombstone。revision 必须大于已有层。
+- **4 texture**：头后 `id:u32, width:u32, height:u32, reserved:u32`，然后恰好 `width*height*4` 字节源编码 RGBA8。id=0 保留给白纹理。
+
+Mesh 的固定部分含头共 **104 字节**：
+
+| Offset | 类型 | 语义 |
+| --- | --- | --- |
+| 24 | u64 | section key（精确保留 Minecraft 打包身份） |
+| 32 | u64 | revision |
+| 40 | f64×3 | section 原点 XYZ（世界格单位） |
+| 64 | u32 | vertex_count |
+| 68 | u32 | vertex_stride |
+| 72 / 76 / 80 | u32 | position / RGBA8 color / UV offset |
+| 84 | u32 | topology：3 triangle，4 quad |
+| 88 | u32 | texture ID |
+| 92 | u32 | flags：bit0 alpha cutout；其他位拒绝 |
+| 96 | u32 | source layer |
+| 100 | u32 | reserved |
+| 104 | bytes | `vertex_count * stride` 原始字节 |
+
+Position 为 f32×3，UV 为 f32×2。当前两个 Java 适配器都输出 **stride24、position0、color12、uv16**；RGBA8 按 R/G/B/A 字节顺序保存作者颜色与源 tint 的编码域组合，排除原版 AO/方向明暗和 UV2 光照。source layer 使用公共协议常量 opaque=0、cutout=1，不传 MC enum ordinal。旧 26.2 BLOCK28 布局仍被显式 stride/offset 解码器支持并留有回归测试。quads 在 Rust 展开为 `(0,1,2), (2,3,0)`。
+
+## 帧操作
+
+`prime_record` 和诊断用 `prime_render` 共用 **104 字节** op=5 包：
+
+| Offset | 类型 | 语义 |
+| --- | --- | --- |
+| 24 | f64×3 | 世界相机位置 |
+| 48 / 60 / 72 | f32×3 | forward / right / up；单位正交向量 |
+| 84 | f32 | 垂直 FOV，弧度 |
+| 88 / 92 | u32 | width / height |
+| 96 | u32 | sample index，0 请求重置累积 |
+| 100 | u32 | reserved |
+
+原生在相机、场景、尺寸变化或 sample index=0 时重置累积；其余样本计数由 renderer 自己维护。
+
+## 宿主 Vulkan 生产路径
+
+创建 session 后、首次渲染前调用一次 `prime_attach_vulkan(handle, descriptor, 48)`。descriptor 不是场景操作包；布局如下：
+
+| Offset | 类型 | 借用句柄 |
+| --- | --- | --- |
+| 0 / 8 | u64 | instance / physical device |
+| 16 / 24 | u64 | device / graphics queue |
+| 32 | u64 | 宿主提交完成 timeline semaphore |
+| 40 / 44 | u32 | queue family index / reserved=0 |
+
+调用方须已在实际逻辑设备启用 buffer device address、acceleration structure、ray query 与所需扩展，并保证 queue family 支持 graphics+compute。仅查询物理设备支持不够。Rust 不销毁这些宿主对象，也不为 PT 调用 queue submit。
+
+每帧调用 `prime_record(handle, frame, 104, command, image, image_view, serial)`。command 是已开始录制、尚未结束的宿主 primary command buffer；目标为带 STORAGE 用途、GENERAL layout 的 RGBA8_UNORM 主颜色图像及其 view，尺寸必须等于 frame。serial 是将包含此 command 的实际提交完成值，同一 session 每个 serial 最多录制一次。宿主在同队列依次提交，并在所有命令完成后 signal timeline 到该 serial；Rust 自己的描述符槽与退休资源依赖此保证。
+
+`prime_record` 同步完成输入复制与命令录制，正常返回时 GPU 可以尚未执行；没有像素返回。只在所有描述符槽仍在途时等待最旧 serial，有界反压不同于每帧等待当前帧。shader 在 GPU 上处理宿主输出行方向。`prime_gpu_time(handle)` 返回最近一个已收集的完成帧 GPU 纳秒数；未启用 `PRIME_PROFILE=1` 或没有结果时为 0，不是当前 CPU 调用耗时或窗口平均。
+
+调用 `prime_destroy` 前宿主必须提交所有已录制的 PT command；native 等待最后相关 serial 后销毁 PT 资源。若无法证明完成，返回失败并保留 session/资源以隔离风险。宿主 device、timeline、图像等必须覆盖其全部使用寿命。
+
+## 同步诊断路径
+
+不 attach 宿主的 session 可调用 `prime_render`：创建独立设备，同步返回恰好 `width*height*4` RGBA8 字节，左上角首像素、行连续无 padding。此接口仅供离线图像与 FFM 行为测试，不能在宿主 session 上调用，也不能代表生产路径性能。游戏合成不使用该接口。
+
+## 边界与容量
+
+当前明确拒绝：超过 256 MiB 的单包、超过 800 万三角形的 CPU 场景、超过 512 MiB 的纹理总量、超过 262144 的 mesh/section history、超过 4096×4096 的输出，以及不有限/越域位置、未知 flags、未知拓扑和尾随字节。GPU 还验证实际 storage buffer 上限、24 位材质槽位偏移和设备内存分配数量预算；上限来自当前实现而非 Minecraft 功能承诺。解析失败不修改场景 revision 或已有数据。
+
+Mesh 可先于引用的 texture 提交，但渲染前必须补齐所有引用；缺失引用明确报错。所有调用必须在创建 handle 的 OS 线程进行。`prime_destroy` 退休身份，重复释放会报错。调用方必须保证原生指针指向有效读写区域；长度校验不能验证任意地址。

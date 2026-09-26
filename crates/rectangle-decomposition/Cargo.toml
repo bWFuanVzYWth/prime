@@ -1,0 +1,23 @@
+[package]
+name = "rectangle_decomposition"
+version = "0.1.0"
+edition = "2024"
+description = "64x64 稀疏 quad 的矩形分解"
+
+[features]
+profile = []
+
+[dev-dependencies]
+criterion = { workspace = true }
+test-case = { workspace = true }
+
+[[bench]]
+name = "worst_case"
+harness = false
+
+[[example]]
+name = "worst_case_profile"
+required-features = ["profile"]
+
+[lints]
+workspace = true
