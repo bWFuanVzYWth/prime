@@ -50,11 +50,11 @@ public final class CaptureInbox {
             source.seal();
             var packets = new ArrayList<byte[]>();
             packets.add(Packets.remove(token.epoch, token.section, token.revision));
-            for (int layer = SourceQuads.OPAQUE; layer <= SourceQuads.CUTOUT; layer++) {
+            for (int layer = SourceQuads.OPAQUE; layer <= SourceQuads.TRANSLUCENT; layer++) {
                 ByteBuffer vertices = source.vertices(layer);
                 if (vertices.hasRemaining()) packets.add(Packets.mesh(token.epoch, token.section, token.revision + 1,
                         token.x, token.y, token.z, vertices.remaining() / SourceQuads.STRIDE, SourceQuads.STRIDE,
-                        0, 12, 16, 4, layer == SourceQuads.CUTOUT ? 1 : 0, layer, vertices));
+                        0, 12, 16, 4, layer, layer, vertices));
             }
             synchronized (this) {
                 if (!accepts(token)) return;

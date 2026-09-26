@@ -1171,27 +1171,39 @@ pub(super) struct PreparedAcceleration<'a> {
     geometry: vk::AccelerationStructureGeometryKHR<'a>,
     count: u32,
     kind: vk::AccelerationStructureTypeKHR,
+    flags: vk::BuildAccelerationStructureFlagsKHR,
 }
 
 impl PreparedAcceleration<'_> {
     /// Record an independent build. The batch owner inserts one read barrier
     /// after all independent BLAS builds, before a dependent TLAS or tracing.
     pub fn record_unbarriered(&self, command: vk::CommandBuffer) {
+        self.record_geometry(command, self.geometry, self.count);
+    }
+
+    /// Rebuild into retained capacity. The owner orders prior trace/build users
+    /// before this write and supplies the same geometry format used at allocation.
+    pub fn record_geometry(
+        &self,
+        command: vk::CommandBuffer,
+        geometry: vk::AccelerationStructureGeometryKHR<'_>,
+        count: u32,
+    ) {
+        assert!(count <= self.count);
         let context = &self.acceleration.context;
-        let geometries = [self.geometry];
+        let geometries = [geometry];
         let address =
             self.scratch.address().div_ceil(context.scratch_alignment) * context.scratch_alignment;
         let info = vk::AccelerationStructureBuildGeometryInfoKHR::default()
             .ty(self.kind)
-            .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
+            .flags(self.flags)
             .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
             .geometries(&geometries)
             .dst_acceleration_structure(self.acceleration.handle)
             .scratch_data(vk::DeviceOrHostAddressKHR {
                 device_address: address,
             });
-        let ranges =
-            [vk::AccelerationStructureBuildRangeInfoKHR::default().primitive_count(self.count)];
+        let ranges = [vk::AccelerationStructureBuildRangeInfoKHR::default().primitive_count(count)];
         unsafe {
             context
                 .acceleration
@@ -1199,13 +1211,12 @@ impl PreparedAcceleration<'_> {
         }
     }
 
-    pub fn record(&self, command: vk::CommandBuffer) {
-        self.record_unbarriered(command);
-        Acceleration::read_barrier(&self.acceleration.context, command);
+    pub fn acceleration(&self) -> &Acceleration {
+        &self.acceleration
     }
 
-    /// Call only after the submission containing record() has completed. This
-    /// releases temporary scratch while retaining the built acceleration object.
+    /// The caller has recorded its build. Scratch is either synchronously complete
+    /// or retained by Context's host timeline retirement before physical destruction.
     pub fn finish(self) -> Acceleration {
         self.acceleration
     }
@@ -1220,35 +1231,33 @@ impl Drop for Acceleration {
     }
 }
 impl Acceleration {
-    pub fn build(
-        context: &Arc<Context>,
-        geometry: vk::AccelerationStructureGeometryKHR<'_>,
-        count: u32,
-        kind: vk::AccelerationStructureTypeKHR,
-    ) -> Result<Self, String> {
-        let prepared = Self::prepare(context, geometry, count, kind)?;
-        context.submit_named(
-            if kind == vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL {
-                "blas"
-            } else {
-                "tlas"
-            },
-            |command| prepared.record(command),
-        )?;
-        Ok(prepared.finish())
-    }
-
     pub fn prepare<'a>(
         context: &Arc<Context>,
         geometry: vk::AccelerationStructureGeometryKHR<'a>,
         count: u32,
         kind: vk::AccelerationStructureTypeKHR,
     ) -> Result<PreparedAcceleration<'a>, String> {
+        Self::prepare_with_flags(
+            context,
+            geometry,
+            count,
+            kind,
+            vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE,
+        )
+    }
+
+    pub fn prepare_with_flags<'a>(
+        context: &Arc<Context>,
+        geometry: vk::AccelerationStructureGeometryKHR<'a>,
+        count: u32,
+        kind: vk::AccelerationStructureTypeKHR,
+        flags: vk::BuildAccelerationStructureFlagsKHR,
+    ) -> Result<PreparedAcceleration<'a>, String> {
         unsafe {
             let geometries = [geometry];
             let info = vk::AccelerationStructureBuildGeometryInfoKHR::default()
                 .ty(kind)
-                .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
+                .flags(flags)
                 .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
                 .geometries(&geometries);
             let mut sizes = vk::AccelerationStructureBuildSizesInfoKHR::default();
@@ -1292,6 +1301,7 @@ impl Acceleration {
                 geometry,
                 count,
                 kind,
+                flags,
             })
         }
     }

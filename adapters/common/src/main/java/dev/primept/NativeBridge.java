@@ -78,6 +78,16 @@ public final class NativeBridge implements AutoCloseable {
         } catch (Throwable failure) { throw rethrow(failure); }
     }
 
+    /** Borrows an owner-thread native packet only for this call; Rust retains no source pointer. */
+    public void submit(MemorySegment packet) {
+        checkOwner();
+        if (!packet.isNative()) throw new IllegalArgumentException("Native packet storage is required");
+        try {
+            int status = (int) submit.invokeExact(handle, packet, packet.byteSize());
+            if (status != 0) throw new IllegalStateException("prime_submit (" + status + "): " + error());
+        } catch (Throwable failure) { throw rethrow(failure); }
+    }
+
     public void attachVulkan(long instance, long physicalDevice, long device, long queue, long timeline, int queueFamily) {
         checkOwner();
         var descriptor = host.asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);

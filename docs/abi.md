@@ -18,6 +18,7 @@
 - **2 mesh**：替换一个 `(section, layer)`；revision 必须大于同层已有 revision 和该 section 删除 revision。
 - **3 remove section**：头后 `section:u64, revision:u64`；删除全部层，记录 tombstone。revision 必须大于已有层。
 - **4 texture**：头后 `id:u32, width:u32, height:u32, reserved:u32`，然后恰好 `width*height*4` 字节源编码 RGBA8。id=0 保留给白纹理。
+- **6 dynamic snapshot**：原子替换这一帧的全部动态几何，格式见下文；序号独立于静态区块 revision。
 
 Mesh 的固定部分含头共 **104 字节**：
 
@@ -31,12 +32,32 @@ Mesh 的固定部分含头共 **104 字节**：
 | 72 / 76 / 80 | u32 | position / RGBA8 color / UV offset |
 | 84 | u32 | topology：3 triangle，4 quad |
 | 88 | u32 | texture ID |
-| 92 | u32 | flags：bit0 alpha cutout；其他位拒绝 |
+| 92 | u32 | material：0 opaque、1 alpha cutout、2 stochastic alpha coverage；其他值拒绝 |
 | 96 | u32 | source layer |
 | 100 | u32 | reserved |
 | 104 | bytes | `vertex_count * stride` 原始字节 |
 
-Position 为 f32×3，UV 为 f32×2。当前两个 Java 适配器都输出 **stride24、position0、color12、uv16**；RGBA8 按 R/G/B/A 字节顺序保存作者颜色与源 tint 的编码域组合，排除原版 AO/方向明暗和 UV2 光照。source layer 使用公共协议常量 opaque=0、cutout=1，不传 MC enum ordinal。旧 26.2 BLOCK28 布局仍被显式 stride/offset 解码器支持并留有回归测试。quads 在 Rust 展开为 `(0,1,2), (2,3,0)`。
+Position 为 f32×3，UV 为 f32×2。当前两个 Java 适配器的静态地形和流体都输出 **stride24、position0、color12、uv16**；RGBA8 按 R/G/B/A 字节顺序保存作者颜色与源 tint 的编码域组合，排除原版 AO/方向明暗和 UV2 光照。source layer 使用公共协议常量 opaque=0、cutout=1、translucent=2，不传 MC enum ordinal。旧 26.2 BLOCK28 布局仍被显式 stride/offset 解码器支持并留有回归测试。quads 在 Rust 展开为 `(0,1,2), (2,3,0)`。
+
+## 动态完整快照
+
+op=6 的固定头共 **64 字节**：
+
+| Offset | 类型 | 语义 |
+| --- | --- | --- |
+| 0–23 | 公共头 | 当前资源 epoch，operation=6 |
+| 24 | u64 | sequence；同一 epoch 内严格递增且非零 |
+| 32 / 40 / 48 | f64 | 此批几何的世界原点 XYZ |
+| 56 | u32 | span_count |
+| 60 | u32 | reserved=0 |
+
+每个 span 是 **32 字节描述 + 紧接的顶点字节**，span 之间不填充。描述按顺序为八个 u32：`texture_id, material, topology, vertex_count, stride, position_offset, color_offset, uv_offset`。布局约束与静态 mesh 相同；material 只接受 0/1/2，不能按位组合。适配器保留实际源格式和拓扑，不在 Java 展开三角形。当前动态原点为相机世界位置，顶点为已执行模型变换的相机相对世界坐标，尚未应用视图旋转。
+
+整个包验证成功后才替换旧快照；尾随字节、缺失纹理、旧 epoch/sequence 或中间 span 无效均不改变已有场景。`span_count=0` 是有效的清空操作，防止对象消失后留下旧几何。texture_id=0 仅表示明确的无纹理白色，非零引用必须在提交快照前上传。静态区块与动态快照不共用对象 ID；动态更新不递增静态 revision，也不重新翻译静态 mesh 表。
+
+Java `DynamicFrame` 保留一个按需增长的 confined native arena，相邻同描述 span 可合并。FFM 每帧借用一次 sealed segment；Rust 在返回前完成解码并拥有结果。借用只覆盖该次同步调用，不能跨下一次 `begin`、扩容或 `close`；GPU 完成与这段源字节的寿命无关。源纹理变化仍通过独立 op=4 增量提交。
+
+material=2 表示随机 alpha 覆盖：alpha=0 不遮挡，alpha=1 完全覆盖，中间值按覆盖率接受交点；接受后仍使用当前表面材质。它不是折射、介质吸收或物理透射率。
 
 ## 帧操作
 

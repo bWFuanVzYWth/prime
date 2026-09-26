@@ -1,6 +1,7 @@
 package dev.primept;
 
 import dev.primept.capture.CaptureInbox;
+import dev.primept.capture.DynamicCapture;
 import java.util.Arrays;
 import java.util.Locale;
 
@@ -12,10 +13,12 @@ final class RenderProfile {
     private int frames, intervals, rasterSkipped;
     private long interval, vanilla, submit, drain, prune, nativeRender, total;
     private long batches, packets, bytes;
+    private long dynamicCapture, dynamicSubmit, dynamicSpans, dynamicVertices, dynamicBytes;
+    private long modelMeshes, particleMeshes;
 
     static final class Frame {
         final long start;
-        long submit, drain, prune, nativeRender;
+        long submit, drain, prune, nativeRender, dynamicSubmit;
         long batches, packets, bytes;
         Frame(long start) { this.start = start; }
     }
@@ -40,17 +43,26 @@ final class RenderProfile {
         batches += frame.batches;
         packets += frame.packets;
         bytes += frame.bytes;
+        var dynamic = DynamicCapture.stats();
+        dynamicCapture += dynamic.captureNanos();
+        dynamicSubmit += frame.dynamicSubmit;
+        dynamicSpans += dynamic.spans();
+        dynamicVertices += dynamic.vertices();
+        dynamicBytes += dynamic.bytes();
+        modelMeshes += dynamic.models();
+        particleMeshes += dynamic.particles();
         if (frames != WINDOW) return;
         long[] sorted = hookTimes.clone();
         Arrays.sort(sorted);
         var capture = inbox.profileSnapshot();
         PrimeClient.LOGGER.info(String.format(Locale.ROOT,
-                "Prime PT CPU profile frames=%d size=%dx%d interval=%.3fms mcBeforePT=%.3fms hook=%.3fms p95=%.3fms max=%.3fms nativeSubmit=%.3fms drainIncludingSubmit=%.3fms prune=%.3fms nativeRecord=%.3fms gpuLast=%.3fms outputCpuBytes=0 rasterSkipped=%d batches=%d packets=%d bytes=%d trackedSections=%d queuedBatches=%d queuedBytes=%d",
+                "Prime PT CPU profile frames=%d size=%dx%d interval=%.3fms mcBeforePT=%.3fms hook=%.3fms p95=%.3fms max=%.3fms nativeSubmit=%.3fms drainIncludingSubmit=%.3fms prune=%.3fms nativeRecord=%.3fms gpuLast=%.3fms outputCpuBytes=0 rasterSkipped=%d batches=%d packets=%d bytes=%d trackedSections=%d queuedBatches=%d queuedBytes=%d dynamicCapture=%.3fms dynamicSubmit=%.3fms dynamicSpansTotal=%d dynamicVerticesTotal=%d dynamicBytesTotal=%d modelMeshesTotal=%d particleMeshesTotal=%d dynamicCapacity=%d dynamicGrowthsTotal=%d",
                 frames, width, height, intervals == 0 ? 0 : interval / (intervals * 1_000_000.0),
                 mean(vanilla), mean(total), sorted[(int) (WINDOW * .95) - 1] / 1_000_000.0,
                 sorted[WINDOW - 1] / 1_000_000.0, mean(submit), mean(drain), mean(prune), mean(nativeRender),
                 renderer.lastGpuTimeNanos() / 1_000_000.0, rasterSkipped, batches, packets, bytes,
-                capture.sections(), capture.batches(), capture.bytes()));
+                capture.sections(), capture.batches(), capture.bytes(), mean(dynamicCapture), mean(dynamicSubmit),
+                dynamicSpans, dynamicVertices, dynamicBytes, modelMeshes, particleMeshes, dynamic.capacity(), dynamic.growthCount()));
         clearWindow();
     }
 
@@ -59,6 +71,8 @@ final class RenderProfile {
         frames = intervals = rasterSkipped = 0;
         interval = vanilla = submit = drain = prune = nativeRender = total = 0;
         batches = packets = bytes = 0;
+        dynamicCapture = dynamicSubmit = dynamicSpans = dynamicVertices = dynamicBytes = 0;
+        modelMeshes = particleMeshes = 0;
     }
     void reset() { lastStart = 0; clearWindow(); }
 }

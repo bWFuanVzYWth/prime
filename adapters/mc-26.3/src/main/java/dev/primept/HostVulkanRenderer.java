@@ -46,6 +46,7 @@ public final class HostVulkanRenderer implements AutoCloseable {
     }
 
     public void submit(byte[] packet) { bridge.submit(packet); }
+    public void submitDynamic(long epoch) { dev.primept.capture.DynamicCapture.submit(epoch, bridge); }
     public ByteBuffer frameBuffer() { return bridge.frameBuffer(); }
     public long lastGpuTimeNanos() { return bridge.lastGpuTimeNanos(); }
     public boolean hasCompletedTerrainFrame() { return !closed && completedTerrainFrame; }

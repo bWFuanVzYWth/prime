@@ -160,7 +160,7 @@ fn malformed_input_cannot_partially_replace_geometry() {
         (104, f32::NAN.to_bits()),
         (68, 0u32),
         (64, u32::MAX),
-        (92, 2u32),
+        (92, 3u32),
     ] {
         let mut bytes = mesh(2, 0);
         bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
@@ -265,4 +265,217 @@ fn frame_rejects_non_orthogonal_camera_and_invalid_extent() {
     bytes[88..92].copy_from_slice(&640u32.to_le_bytes());
     bytes[60..64].copy_from_slice(&0.0_f32.to_le_bytes());
     assert!(Frame::parse(&bytes).is_err());
+}
+
+fn dynamic_span(texture: u32, flags: u32, topology: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for value in [texture, flags, topology, topology, 24, 0, 12, 16] {
+        bytes.extend(value.to_le_bytes());
+    }
+    for vertex in 0..topology {
+        for value in [vertex as f32 + 0.125, 2.0, -3.0] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend([128 + vertex as u8, 64, 32, 127]);
+        bytes.extend(0.25_f32.to_le_bytes());
+        bytes.extend(0.75_f32.to_le_bytes());
+    }
+    bytes
+}
+
+fn dynamic(epoch: u64, sequence: u64, spans: &[Vec<u8>]) -> Vec<u8> {
+    let mut bytes = header(6, epoch);
+    bytes.extend(sequence.to_le_bytes());
+    for value in [29_999_984.0_f64, 64.0, -16.0] {
+        bytes.extend(value.to_le_bytes());
+    }
+    bytes.extend((spans.len() as u32).to_le_bytes());
+    bytes.extend(0_u32.to_le_bytes());
+    for span in spans {
+        bytes.extend(span);
+    }
+    bytes
+}
+
+#[test]
+fn dynamic_frames_replace_atomically_without_invalidating_static_geometry() {
+    let anchor = [29_999_984.0, 64.0, -16.0];
+    let mut source = initialized();
+    source.submit(&mesh(1, 0)).unwrap();
+    let static_revision = source.revision;
+    let static_scene = source.translate(anchor).unwrap();
+    source
+        .submit(&dynamic(
+            1,
+            1,
+            &[
+                dynamic_span(0, 0, 3),
+                dynamic_span(0, 1, 4),
+                dynamic_span(0, 2, 4),
+            ],
+        ))
+        .unwrap();
+    let scene = source.translate(anchor).unwrap();
+    assert_eq!(source.revision, static_revision);
+    assert_eq!(scene.dynamic.revision, 1);
+    assert_eq!(scene.dynamic.triangles.len(), 5);
+    assert_eq!(scene.triangle_count(), 7);
+    assert!(std::sync::Arc::ptr_eq(
+        &static_scene.meshes[&(91, 0)].triangles,
+        &scene.meshes[&(91, 0)].triangles
+    ));
+    assert_eq!(
+        scene
+            .dynamic
+            .triangles
+            .iter()
+            .map(|t| t.flags)
+            .collect::<Vec<_>>(),
+        [0, 1, 1, 2, 2]
+    );
+    let quad_second = &scene.dynamic.triangles[2];
+    assert_eq!(
+        quad_second.positions,
+        [[2.125, 2.0, -3.0], [3.125, 2.0, -3.0], [0.125, 2.0, -3.0]]
+    );
+    assert_eq!(
+        quad_second.colors[0],
+        [130.0 / 255.0, 64.0 / 255.0, 32.0 / 255.0, 127.0 / 255.0]
+    );
+    assert_eq!(quad_second.uvs[0], [0.25, 0.75]);
+    let rebased = source
+        .translate_dynamic([29_999_728.0, 64.0, -16.0])
+        .unwrap();
+    assert_eq!(rebased.origin, [256.0, 0.0, 0.0]);
+    assert!(std::sync::Arc::ptr_eq(
+        &scene.dynamic.triangles,
+        &rebased.triangles
+    ));
+    assert!(source.translate_dynamic([0.0; 3]).is_err());
+
+    source.submit(&dynamic(1, 2, &[])).unwrap();
+    let empty = source.translate(anchor).unwrap();
+    assert_eq!(source.revision, static_revision);
+    assert_eq!(empty.dynamic.revision, 2);
+    assert_eq!(empty.triangle_count(), 2);
+    assert!(empty.dynamic.triangles.is_empty());
+    assert_eq!(scene.dynamic.triangles.len(), 5); // Earlier snapshots keep their own immutable lease.
+}
+
+#[test]
+fn every_truncated_dynamic_frame_and_late_invalid_span_preserves_the_previous_frame() {
+    let anchor = [29_999_984.0, 64.0, -16.0];
+    let mut source = initialized();
+    source
+        .submit(&dynamic(1, 7, &[dynamic_span(0, 1, 4)]))
+        .unwrap();
+    let before = source.translate_dynamic(anchor).unwrap();
+    let static_revision = source.revision;
+    let candidate = dynamic(1, 8, &[dynamic_span(0, 2, 4), dynamic_span(0, 0, 3)]);
+    for length in 0..candidate.len() {
+        assert!(
+            source.submit(&candidate[..length]).is_err(),
+            "accepted prefix {length}"
+        );
+        assert_eq!(source.dynamic_revision(), 7);
+        assert_eq!(source.revision, static_revision);
+    }
+    let second_span = 64 + 32 + 4 * 24;
+    let mut bad = candidate.clone();
+    bad[second_span + 32..second_span + 36].copy_from_slice(&f32::NAN.to_le_bytes());
+    assert!(source.submit(&bad).is_err());
+    let mut trailing = candidate.clone();
+    trailing.push(0);
+    assert!(source.submit(&trailing).is_err());
+    let after = source.translate_dynamic(anchor).unwrap();
+    assert_eq!(after.revision, 7);
+    assert!(std::sync::Arc::ptr_eq(&before.triangles, &after.triangles));
+    source.submit(&candidate).unwrap(); // Failed publication did not consume its sequence.
+    assert_eq!(source.dynamic_revision(), 8);
+}
+
+#[test]
+fn dynamic_layout_flags_and_nonfinite_values_are_rejected_without_publication() {
+    let mut source = initialized();
+    let valid = dynamic(1, 1, &[dynamic_span(0, 1, 4)]);
+    for (offset, value) in [
+        (60, 1_u32),
+        (68, 3),
+        (72, 0),
+        (76, 5),
+        (80, 0),
+        (84, u32::MAX),
+        (88, u32::MAX),
+        (92, u32::MAX),
+        (96, f32::NAN.to_bits()),
+        (96, 4096.5_f32.to_bits()),
+        (112, f32::INFINITY.to_bits()),
+    ] {
+        let mut bad = valid.clone();
+        bad[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        assert!(
+            source.submit(&bad).is_err(),
+            "accepted invalid field at {offset}"
+        );
+        assert_eq!(source.dynamic_revision(), 0);
+        assert_eq!(source.revision, 1);
+    }
+    for origin in [f64::NAN, f64::INFINITY, 32_000_001.0] {
+        let mut bad = valid.clone();
+        bad[32..40].copy_from_slice(&origin.to_le_bytes());
+        assert!(source.submit(&bad).is_err());
+    }
+    source.submit(&valid).unwrap();
+}
+
+#[test]
+fn dynamic_sequences_are_independent_and_restart_only_after_epoch_reset() {
+    let mut source = initialized();
+    source.revision = u64::MAX; // The independent dynamic stream must not increment this counter.
+    source.submit(&dynamic(1, 2, &[])).unwrap();
+    assert_eq!(source.revision, u64::MAX);
+    for (epoch, sequence) in [(1, 0), (1, 1), (1, 2), (0, 3), (2, 3)] {
+        assert!(source.submit(&dynamic(epoch, sequence, &[])).is_err());
+    }
+    source.revision = 100;
+    source.submit(&header(1, 2)).unwrap();
+    assert_eq!(source.dynamic_revision(), 0);
+    assert!(source.submit(&dynamic(1, 3, &[])).is_err());
+    source.submit(&dynamic(2, 1, &[])).unwrap();
+    assert_eq!(source.dynamic_revision(), 1);
+    assert_eq!(source.revision, 101);
+}
+
+#[test]
+fn dynamic_texture_references_require_prior_capture_and_do_not_partially_replace() {
+    let mut source = initialized();
+    let packet = dynamic(1, 1, &[dynamic_span(0, 0, 3), dynamic_span(17, 2, 4)]);
+    assert!(source.submit(&packet).is_err());
+    assert_eq!(source.dynamic_revision(), 0);
+    let mut texture = header(4, 1);
+    for value in [17_u32, 1, 1, 0] {
+        texture.extend(value.to_le_bytes());
+    }
+    texture.extend([20, 40, 80, 128]);
+    source.submit(&texture).unwrap();
+    source.submit(&packet).unwrap();
+    let scene = source.translate([29_999_984.0, 64.0, -16.0]).unwrap();
+    assert_eq!(scene.dynamic.triangles[1].texture_id, 17);
+    assert_eq!(scene.dynamic.triangles[1].flags, 2);
+}
+
+#[test]
+fn static_alpha_blend_is_distinct_from_cutout() {
+    let mut source = initialized();
+    let mut translucent = mesh(1, 2);
+    translucent[92..96].copy_from_slice(&2_u32.to_le_bytes());
+    source.submit(&translucent).unwrap();
+    let scene = source.translate([29_999_984.0, 64.0, -16.0]).unwrap();
+    assert_eq!(scene.meshes[&(91, 2)].flags, 2);
+    assert!(
+        scene.meshes[&(91, 2)]
+            .triangles
+            .iter()
+            .all(|triangle| triangle.flags == 2)
+    );
 }

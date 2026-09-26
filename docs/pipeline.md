@@ -52,7 +52,7 @@ Java 从 `VulkanCommandEncoder.allocateAndBeginTransientCommandBuffer()` 获得�
 宿主 encoder 有提交 timeline 和在途命令池管理。原生资源必须跟随实际完成值退休，不能仅凭“已经过两帧”推断 GPU 完成。描述符、相机/参数存储、上传暂存区和被替换的 BLAS/TLAS 都受同样约束：
 
 - 每个在途提交使用自己的可变参数与描述符，或者证明写入前相应 GPU 访问已完成。
-- 场景快照及旧 GPU 资源保留到最后引用它们的提交完成，随后才能复用或销毁。
+- 被 GPU 命令引用的资源保留到最后引用它们的提交完成，随后才能复用或销毁；CPU 源页与场景快照按各自最后一个 CPU 消费者释放，不因异步 GPU 执行而一律延长其寿命。
 - 可通过宿主 timeline 的提交值跟踪，或在同一 encoder 追加自己的 timeline signal；追加 signal 不应额外调用 submit。
 - resize、资源重载与世界切换改变资源 generation；不能让旧尺寸或旧 epoch 的待执行命令引用新资源。
 - 关闭 PT 时先排空或可靠退休自己的在途使用，再释放原生资源；宿主设备生命周期继续由 Minecraft 管理。
@@ -61,7 +61,11 @@ Java 从 `VulkanCommandEncoder.allocateAndBeginTransientCommandBuffer()` 获得�
 
 ## 尚存的 CPU 成本
 
-消除图像回读只解决输出传递。Java 仍编码捕获的源 quad，再形成不可变区块包，FFM 仍有 staging、调用和输入验证成本；Rust 仍解码变化网格、维护 mesh/cluster 索引、生成变化部分的上传数据、准备 AS 构建和描述符。24 字节源顶点消除了复制原版 light 字段，也解决了输入颜色已混入光照的问题，但当前尚不是直接填 native lease 的零中转捕获。资源首次上传与局部更新也仍需 GPU 工作。
+消除图像回读只解决输出传递。地形更新仍经历 Java 源 quad 编码、不可变区块包和 FFM staging；24 字节源顶点排除原版 AO/light 数据。动态数据直接从实际准备的批量 mesh 复制到可复用 native arena，随后一次 FFM 调用同步解码，省去每帧 heap 包和二次 staging。它仍有一次源字节复制，原版动态准备及 GPU 上传也仍保留，不是整条输入路径零复制。
+
+Rust 对动态批次展开三角形、产生独立 GPU 材质及索引数据，批量上传并构建一个动态 BLAS，随后重建综合 TLAS。静态 mesh 翻译、BLAS 与材质不因动态 sequence 变化而重建。CPU 解码数组的分配、逐三角形打包和 MC 原本的模型准备成本仍需测量；对象数量少而几何复杂时，批量接口本身不能保证低成本。
+
+大量装饰性方块实体即使局部模型完全相同，当前也随每帧总顶点量重复上述工作。Draw 合并减少跨语言调用和资源对象数量，没有保留源模型原型、实例身份或不变性证明；因此不能据此宣称适合万级长期不变方块实体，也不能仅凭对象身份或 block state 省略实际渲染回调。
 
 现有增量 Scene 通过不可变三角形数组共享、持久 cluster BLAS 和原点变换减少重建范围；它不意味着区块流送完全没有 CPU 成本。性能报告应把稳定帧、相机移动、区块修改、重定位与首次构建分开。
 
@@ -69,7 +73,7 @@ Java 从 `VulkanCommandEncoder.allocateAndBeginTransientCommandBuffer()` 获得�
 
 ## 当前性能边界
 
-稳定帧复用场景与 BLAS，但变化帧仍有资源分配和数据搬运。上传暂存、AS storage/scratch 与 TLAS 实例输入尚未统一池化；原点重定位复用 BLAS，仍可能重新分配 TLAS 相关资源。不能把异步提交或直接输出等同于整个流水线零分配、零复制。
+动态 BLAS、材质/索引 buffer、TLAS storage/scratch 与实例输入按容量复用；可写 staging 按已完成的在途槽复用。扩容依旧需要分配，旧资源依据完成值退休。静态脏簇和纹理更新的上传暂存、AS 分配尚未统一池化。不能把异步提交、单个动态批次或直接输出等同于整个流水线零分配、零复制。
 
 独立的 `HostBenchmark` 通过相同 `Renderer::borrowed` / `record_host` 接口模拟宿主设备、主图像和 timeline，测量时不回读输出。它不包含 Minecraft 捕获、Java FFM、HUD 或窗口呈现，因此不能将其吞吐直接称为游戏 FPS。`Renderer::render` 是同步回读的图像诊断接口，不用于评价生产合成路径。
 

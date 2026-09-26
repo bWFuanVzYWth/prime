@@ -77,13 +77,14 @@ impl Renderer {
             output: None,
             camera: None,
             samples: 0,
+            frame_seed: 0,
             failed: false,
             host_serials: [0; FRAME_SLOTS],
             query_serials: [0; FRAME_SLOTS],
             host_query: vk::QueryPool::null(),
             last_gpu_ns: 0,
             last_gpu_serial: 0,
-            descriptor_keys: [[0; 6]; FRAME_SLOTS],
+            descriptor_keys: [[0; 7]; FRAME_SLOTS],
         };
         if result.context.is_borrowed()
             && result.context.timestamp_bits > 0
@@ -153,6 +154,7 @@ impl Renderer {
         width: u32,
         height: u32,
         sample_index: u32,
+        slot: usize,
     ) -> Result<(), String> {
         if camera
             .position
@@ -167,7 +169,7 @@ impl Renderer {
             return Err("Camera contains invalid vectors or vertical FOV".into());
         }
         if self.geometry.as_ref().is_none_or(|g| g.needs_update(scene)) {
-            self.descriptor_keys = [[0; 6]; FRAME_SLOTS];
+            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
             if let Some(geometry) = &mut self.geometry {
                 geometry.update(&self.context, scene)?;
             } else {
@@ -175,12 +177,24 @@ impl Renderer {
             }
             self.samples = 0;
         }
+        let (dynamic_changed, bindings_changed) =
+            self.geometry
+                .as_mut()
+                .unwrap()
+                .prepare_dynamic(&self.context, scene, slot)?;
+        if dynamic_changed {
+            self.samples = 0;
+        }
+        if bindings_changed {
+            // A freed raw handle can reappear in an older descriptor slot's key.
+            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
+        }
         if self
             .output
             .as_ref()
             .is_none_or(|o| o.width != width || o.height != height)
         {
-            self.descriptor_keys = [[0; 6]; FRAME_SLOTS];
+            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
             self.output = Some(Output::new(&self.context, width, height)?);
             self.samples = 0;
         }
@@ -188,6 +202,11 @@ impl Renderer {
             self.samples = 0;
         }
         self.camera = Some(*camera);
+        self.frame_seed = if scene.dynamic.triangles.is_empty() {
+            self.samples
+        } else {
+            sample_index
+        };
         Ok(())
     }
 
@@ -195,12 +214,13 @@ impl Renderer {
         let geometry = self.geometry.as_ref().unwrap();
         let output = self.output.as_ref().unwrap();
         let key = [
-            geometry.top.as_ref().unwrap().handle.as_raw(),
+            geometry.top.handle().as_raw(),
             geometry.triangles.buffer.as_raw(),
             geometry.textures.metadata.buffer.as_raw(),
             geometry.textures.texels.buffer.as_raw(),
             output.accumulation.buffer.as_raw(),
             view.as_raw(),
+            geometry.dynamic_buffer().buffer.as_raw(),
         ];
         let descriptor = self.pipeline.descriptors[slot];
         let image = [vk::DescriptorImageInfo::default()
@@ -221,7 +241,7 @@ impl Renderer {
             }
             return;
         }
-        let handles = [geometry.top.as_ref().unwrap().handle];
+        let handles = [geometry.top.handle()];
         let mut acceleration = vk::WriteDescriptorSetAccelerationStructureKHR::default()
             .acceleration_structures(&handles);
         let buffers = [
@@ -229,6 +249,7 @@ impl Renderer {
             &geometry.textures.metadata,
             &geometry.textures.texels,
             &output.accumulation,
+            geometry.dynamic_buffer(),
         ];
         let infos = buffers.map(|b| {
             [vk::DescriptorBufferInfo::default()
@@ -267,6 +288,11 @@ impl Renderer {
                 .dst_binding(5)
                 .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                 .buffer_info(&infos[3]),
+            vk::WriteDescriptorSet::default()
+                .dst_set(descriptor)
+                .dst_binding(6)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&infos[4]),
         ];
         unsafe {
             self.context.device.update_descriptor_sets(&writes, &[]);
@@ -305,7 +331,7 @@ impl Renderer {
             self.samples,
             self.geometry.as_ref().unwrap().triangle_count,
             u32::from(bottom_up),
-            0,
+            self.frame_seed,
             0,
             0,
         ];
@@ -369,7 +395,13 @@ impl Renderer {
         height: u32,
         sample_index: u32,
     ) -> Result<Vec<u8>, String> {
-        self.prepare(scene, camera, width, height, sample_index)?;
+        // Offline preparation also rebuilds retained dynamic buffers/AS. The
+        // production caller has already inserted this dependency in its command.
+        self.context
+            .submit_named("diagnostic_prepare_barrier", |command| {
+                self.before_frame(command)
+            })?;
+        self.prepare(scene, camera, width, height, sample_index, 0)?;
         let view = self.output.as_ref().unwrap().image.as_ref().unwrap().view;
         self.descriptors(0, view);
         let output = self.output.as_ref().unwrap();
@@ -525,7 +557,7 @@ impl Renderer {
             }
         }
         self.before_frame(command);
-        self.prepare(scene, camera, width, height, sample_index)?;
+        self.prepare(scene, camera, width, height, sample_index, slot)?;
         self.descriptors(slot, view);
         self.dispatch(command, slot, true);
         unsafe {

@@ -1,6 +1,8 @@
 package dev.primept;
 
 import dev.primept.capture.Packets;
+import dev.primept.capture.DynamicFrame;
+import java.util.Arrays;
 import java.awt.image.BufferedImage;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -44,6 +46,35 @@ public final class NativeSmoke {
             }
             if (!varied) throw new AssertionError("Native renderer returned a constant image");
             ImageIO.write(image, "png", Path.of(args[1]).toFile());
+            byte[] baseline = new byte[width * height * 4];
+            rgba.get(0, baseline);
+            bridge.submit(Packets.texture(1, 7, 1, 1, new byte[] { 0, 50, -1, -1 }));
+            bridge.submit(Packets.texture(1, 8, 1, 1, new byte[] { -1, 0, 0, 0 }));
+            try (var dynamic = new DynamicFrame(64)) {
+                dynamic.begin(1, 1, 0, 0, 0);
+                wall(dynamic, 7, 0);
+                bridge.submit(dynamic.seal());
+                bridge.renderDiagnostic(frame, rgba);
+                int center = ((height / 2) * width + width / 2) * 4;
+                if (Byte.toUnsignedInt(rgba.get(center + 2)) <= Byte.toUnsignedInt(rgba.get(center)))
+                    throw new AssertionError("Batched dynamic blue wall is not visible at the center");
+                byte[] dynamicPixels = new byte[baseline.length];
+                rgba.get(0, dynamicPixels);
+                if (Arrays.equals(baseline, dynamicPixels)) throw new AssertionError("Dynamic frame did not affect output");
+                dynamic.begin(1, 2, 0, 0, 0);
+                bridge.submit(dynamic.seal());
+                bridge.renderDiagnostic(frame, rgba);
+                rgba.get(0, dynamicPixels);
+                if (!Arrays.equals(baseline, dynamicPixels))
+                    throw new AssertionError("Empty dynamic frame did not restore the static scene");
+                dynamic.begin(1, 3, 0, 0, 0);
+                wall(dynamic, 8, 2);
+                bridge.submit(dynamic.seal());
+                bridge.renderDiagnostic(frame, rgba);
+                rgba.get(0, dynamicPixels);
+                if (!Arrays.equals(baseline, dynamicPixels))
+                    throw new AssertionError("Alpha-zero dynamic surface changed visibility or shadowing");
+            }
             var crossThreadError = new AtomicReference<Throwable>();
             Thread thread = Thread.ofPlatform().start(() -> {
                 try { bridge.submit(Packets.reset(2)); }
@@ -56,7 +87,16 @@ public final class NativeSmoke {
             try { bridge.submit(new byte[8]); }
             catch (IllegalStateException expected) { rejected = true; }
             if (!rejected) throw new AssertionError("Malformed packet must fail at the native boundary");
-            System.out.println("FFM Vulkan smoke passed: raw quad -> Rust triangles -> Slang -> RGBA, owner-thread check, malformed-packet rejection; " + args[1]);
+            System.out.println("FFM Vulkan smoke passed: raw quad and batched native dynamic packet -> Rust triangles -> Slang -> RGBA; dynamic texture/visibility, empty-frame removal, alpha-zero visibility/shadows, owner-thread check, malformed-packet rejection; " + args[1]);
         }
+    }
+
+    private static void wall(DynamicFrame dynamic, int texture, int flags) {
+        dynamic.beginSpan(texture, flags, 4);
+        dynamic.vertex(-2, 0, 2, -1, 0, 0);
+        dynamic.vertex(2, 0, 2, -1, 1, 0);
+        dynamic.vertex(2, 4, 2, -1, 1, 1);
+        dynamic.vertex(-2, 4, 2, -1, 0, 1);
+        dynamic.endSpan();
     }
 }

@@ -1,4 +1,4 @@
-// GPU ABI is packed explicitly in vulkan/mod.rs; colors remain source-encoded
+// GPU ABI is packed explicitly in geometry.rs/dynamic.rs; colors remain source-encoded
 // until texture * interpolated tint has been evaluated at the hit point.
 struct Triangle {
     float4 p0; float4 p1; float4 p2;
@@ -11,7 +11,7 @@ struct Frame {
     float4 right;
     float4 up;
     uint4 dimensions; // width, height, sample index, triangle count
-    uint4 target; // x: write bottom-up for the Minecraft main target
+    uint4 target; // x: host bottom-up; y: RNG sample independent of accumulation reset
 };
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure scene;
 [[vk::binding(1, 0)]] StructuredBuffer<Triangle> triangles;
@@ -19,6 +19,7 @@ struct Frame {
 [[vk::binding(3, 0)]] StructuredBuffer<uint> texels;
 [[vk::binding(4, 0)]] [[vk::image_format("rgba8")]] RWTexture2D<float4> outputImage;
 [[vk::binding(5, 0)]] RWStructuredBuffer<float4> accumulation;
+[[vk::binding(6, 0)]] StructuredBuffer<Triangle> dynamicTriangles;
 [[vk::push_constant]] ConstantBuffer<Frame> frame;
 
 uint hash(uint x) {
@@ -42,20 +43,37 @@ float3 displayColor(float3 linear) {
     float3 mapped = linear / (1.0 + linear); // explicit Reinhard exposure/display MVP
     return select(mapped <= 0.0031308, mapped * 12.92, 1.055 * pow(mapped, 1.0 / 2.4) - 0.055);
 }
-struct Hit { uint primitive; float2 bary; float3 instanceOrigin; bool found; };
-Hit trace(float3 origin, float3 direction) {
+Triangle loadTriangle(uint instance, uint primitive) {
+    return instance == 0x00ffffff ? dynamicTriangles[primitive] : triangles[instance + primitive];
+}
+bool acceptsCoverage(Triangle tri, float2 bary, float3 point, uint raySeed) {
+    if (tri.flags == 0) return true;
+    float alpha = saturate(sourceColor(tri, bary).a);
+    if (tri.flags == 1) return alpha >= 0.1;
+    // Alpha blend is stochastic coverage, not refraction/absorption. Quantized
+    // coincident hits share one event, including emitted front/back fluid faces.
+    // Intentionally correlates distinct surfaces at the same quantized position.
+    uint3 cell = asuint(int3(floor(point * 256.0 + 0.5)));
+    uint event = hash(raySeed ^ hash(cell.x) ^ hash(cell.y + 0x9e3779b9) ^ hash(cell.z + 0x85ebca6b));
+    return float(event >> 8) * (1.0 / 16777216.0) < alpha;
+}
+struct Hit { uint instance; uint primitive; float2 bary; float3 instanceOrigin; bool found; };
+Hit trace(float3 origin, float3 direction, inout uint state) {
+    state = hash(state + 0x9e3779b9u);
     RayDesc ray; ray.Origin = origin; ray.Direction = direction; ray.TMin = 0.0; ray.TMax = 100000.0;
     RayQuery<RAY_FLAG_NONE> query;
     query.TraceRayInline(scene, RAY_FLAG_NONE, 0xff, ray);
     while (query.Proceed()) {
         if (query.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) {
-            Triangle candidate = triangles[query.CandidateInstanceID() + query.CandidatePrimitiveIndex()];
-            if ((candidate.flags & 1) == 0 || sourceColor(candidate, query.CandidateTriangleBarycentrics()).a >= 0.1)
+            Triangle candidate = loadTriangle(query.CandidateInstanceID(), query.CandidatePrimitiveIndex());
+            if (acceptsCoverage(candidate, query.CandidateTriangleBarycentrics(),
+                    origin + direction * query.CandidateTriangleRayT(), state))
                 query.CommitNonOpaqueTriangleHit();
         }
     }
     Hit hit; hit.found = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
-    hit.primitive = hit.found ? query.CommittedInstanceID() + query.CommittedPrimitiveIndex() : 0;
+    hit.instance = hit.found ? query.CommittedInstanceID() : 0;
+    hit.primitive = hit.found ? query.CommittedPrimitiveIndex() : 0;
     hit.bary = hit.found ? query.CommittedTriangleBarycentrics() : float2(0.0);
     hit.instanceOrigin = float3(0.0);
     if (hit.found) {
@@ -64,14 +82,16 @@ Hit trace(float3 origin, float3 direction) {
     }
     return hit;
 }
-bool occluded(float3 origin, float3 direction) {
+bool occluded(float3 origin, float3 direction, inout uint state) {
+    state = hash(state + 0x9e3779b9u);
     RayDesc ray; ray.Origin = origin; ray.Direction = direction; ray.TMin = 0.0; ray.TMax = 100000.0;
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
     query.TraceRayInline(scene, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff, ray);
     while (query.Proceed()) {
         if (query.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) {
-            Triangle tri = triangles[query.CandidateInstanceID() + query.CandidatePrimitiveIndex()];
-            if (sourceColor(tri, query.CandidateTriangleBarycentrics()).a >= 0.1) query.CommitNonOpaqueTriangleHit();
+            Triangle tri = loadTriangle(query.CandidateInstanceID(), query.CandidatePrimitiveIndex());
+            if (acceptsCoverage(tri, query.CandidateTriangleBarycentrics(),
+                    origin + direction * query.CandidateTriangleRayT(), state)) query.CommitNonOpaqueTriangleHit();
         }
     }
     return query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
@@ -97,7 +117,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     uint width = frame.dimensions.x, height = frame.dimensions.y;
     if (id.x >= width || id.y >= height) return;
     uint pixel = id.y * width + id.x;
-    uint state = hash(pixel ^ hash(frame.dimensions.z + 1));
+    uint state = hash(pixel ^ hash(frame.target.y + 1));
     float2 jitter = float2(random(state), random(state));
     float2 screen = ((float2(id.xy) + jitter) / float2(width, height)) * 2.0 - 1.0;
     float3 origin = frame.position.xyz;
@@ -105,9 +125,9 @@ void main(uint3 id : SV_DispatchThreadID) {
     float3 radiance = float3(0.0), throughput = float3(1.0);
     float3 sunDirection = normalize(float3(-0.45, 0.83, 0.33));
     for (uint bounce = 0; bounce < 4; ++bounce) {
-        Hit hit = trace(origin, direction);
+        Hit hit = trace(origin, direction, state);
         if (!hit.found) { radiance += throughput * sky(direction); break; }
-        Triangle tri = triangles[hit.primitive];
+        Triangle tri = loadTriangle(hit.instance, hit.primitive);
         float3 b = float3(1.0 - hit.bary.x - hit.bary.y, hit.bary.x, hit.bary.y);
         float3 position = tri.p0.xyz * b.x + tri.p1.xyz * b.y + tri.p2.xyz * b.z + hit.instanceOrigin;
         float3 normal = normalize(cross(tri.p1.xyz - tri.p0.xyz, tri.p2.xyz - tri.p0.xyz));
@@ -115,7 +135,7 @@ void main(uint3 id : SV_DispatchThreadID) {
         float3 albedo = linearColor(saturate(sourceColor(tri, hit.bary).rgb));
         origin = offsetOrigin(position, normal, tri);
         float cosine = saturate(dot(normal, sunDirection));
-        if (cosine > 0.0 && !occluded(origin, sunDirection))
+        if (cosine > 0.0 && !occluded(origin, sunDirection, state))
             radiance += throughput * albedo * float3(3.8, 3.5, 3.0) * (cosine / 3.14159265359);
         throughput *= albedo;
         direction = cosineHemisphere(normal, state);

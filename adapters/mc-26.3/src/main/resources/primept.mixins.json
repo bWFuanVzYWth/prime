@@ -15,7 +15,15 @@
     "VulkanGpuTextureMixin",
     "VulkanBackendMixin",
     "ModelBlockRendererMixin",
-    "IndigoModelBlockRendererMixin"
+    "IndigoModelBlockRendererMixin",
+    "DynamicDrawMixin",
+    "DynamicGroupMixin",
+    "DynamicFeatureMixin",
+    "ParticleCaptureMixin",
+    "SourceTextureMixin",
+    "DynamicTextureMixin",
+    "SourceTextureLifetimeMixin",
+    "FluidRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

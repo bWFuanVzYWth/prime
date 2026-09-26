@@ -47,10 +47,12 @@ flowchart TD
 
 1. vanilla 保留实际 BakedQuad，并观察本次 `getTintColor` 的返回值。
 2. Indigo 保存光照修改前的作者 RGBA；在转换返回后使用被接受的几何和本次原版 tint，按 MC 的编码域 8 位乘法组合。
-3. 输出稳定 opaque/cutout 标识与 24 字节顶点（position 0、RGBA 12、UV 16），不输出烘焙光照。Rust 使用已有 stride/offset 描述解析，因此不改变 ABI。
+3. 输出稳定 opaque/cutout/translucent 标识与 24 字节顶点（position 0、RGBA 12、UV 16），不输出烘焙光照。流体使用其实际输出 consumer，观察已求值 tint 排除原版方向明暗；嵌套 Fabric 默认处理器不重复捕获。Rust 使用 stride/offset 描述解析。
 4. compile 开始固定 section/epoch/revision，成功返回后完整发布；`try/finally` 清理线程作用域，迟到结果继续受旧有 tombstone/epoch 检查约束。
 
 没有第二次模型随机、面剔除或 tint 查询；Java 不把颜色转换到线性空间，也不构造 GPU 材质。发布依然是变更区块级，FFM 不按 quad 调用。当前仍保留 MC 编译与上传以维持数据来源，并非已经实现独立完整光追覆盖窗口。
+
+动态捕获位于各版本 `StagedVertexBuffer.Draw.append` 的真实批量结果。版本层在原版准备材质时绑定 Draw 与纹理/alpha，particle 按实际 layer 使用对应图集。`common/DynamicFrame` 只复制布局描述和顶点字节到持久 native arena；相邻同布局材质批次合并，整个世界准备结束后以 op=6 同步借用提交。动态对象不逐个建立跨语言身份或调用 native。模型、动画与粒子回调不重放，静态和动态输入在 Rust 保持独立 revision，详见 [abi.md](abi.md) 与 [architecture.md](architecture.md)。
 
 ## 矩形分解的接入范围
 

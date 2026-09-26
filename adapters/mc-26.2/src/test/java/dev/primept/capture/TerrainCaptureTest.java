@@ -166,6 +166,26 @@ class TerrainCaptureTest {
         assertEquals(SourceQuads.CUTOUT, cutout.getInt(96));
     }
 
+    @Test void translucentVanillaAndFabricQuadsKeepSourceAlphaAndShareOneSectionLayer() {
+        var inbox = new CaptureInbox(true);
+        try (var scope = TerrainCapture.open(inbox, SECTION, true)) {
+            TerrainCapture.beginVanilla(POSITION, 2);
+            TerrainCapture.vanillaTint(POSITION, 2, 0x80776655);
+            TerrainCapture.vanillaQuad(0, 0, 0, null, baked(Direction.UP, 2, ChunkSectionLayer.TRANSLUCENT));
+            var quad = quad(new int[] {0x40402010, -1, -1, -1}, -1, ChunkSectionLayer.TRANSLUCENT);
+            TerrainCapture.beginFabricQuad(quad);
+            TerrainCapture.finishFabricQuad(quad, true);
+            scope.publish();
+        }
+        byte[] packet = onlyMesh(inbox);
+        var wire = ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN);
+        assertEquals(8, wire.getInt(64));
+        assertEquals(2, wire.getInt(92));
+        assertEquals(SourceQuads.TRANSLUCENT, wire.getInt(96));
+        assertEquals(0x80776655, color(packet, 0));
+        assertEquals(0x40402010, color(packet, 4));
+    }
+
     private static BakedQuad baked(Direction direction, int tintIndex) {
         return baked(direction, tintIndex, ChunkSectionLayer.SOLID);
     }
@@ -178,12 +198,16 @@ class TerrainCaptureTest {
     }
 
     private static MutableQuadView quad(int[] colors, int tintIndex) {
+        return quad(colors, tintIndex, ChunkSectionLayer.CUTOUT);
+    }
+
+    private static MutableQuadView quad(int[] colors, int tintIndex, ChunkSectionLayer layer) {
         return (MutableQuadView) Proxy.newProxyInstance(MutableQuadView.class.getClassLoader(),
                 new Class<?>[] {MutableQuadView.class}, (_, method, args) -> switch (method.getName()) {
                     case "color" -> colors[(int) args[0]];
                     case "tintIndex" -> tintIndex;
                     case "atlas" -> QuadAtlas.BLOCK;
-                    case "chunkLayer" -> ChunkSectionLayer.CUTOUT;
+                    case "chunkLayer" -> layer;
                     case "x" -> 10.25f + (int) args[0];
                     case "y" -> 2f;
                     case "z" -> 3f;

@@ -15,6 +15,7 @@ mod benchmark {
         seed: u32,
         label: String,
         csv: Option<String>,
+        dynamic_counts: Vec<u32>,
     }
 
     impl Options {
@@ -28,12 +29,13 @@ mod benchmark {
                 seed: 0x1357_2468,
                 label: "baseline".into(),
                 csv: None,
+                dynamic_counts: Vec::new(),
             };
             let mut args = std::env::args().skip(1);
             while let Some(arg) = args.next() {
                 if arg == "--help" {
                     println!(
-                        "perf [--grid 128] [--widths 1920] [--frames 20] [--warmup 3] [--cutout-every 0] [--seed 324478056] [--label baseline] [--csv output.csv]\nNative 1920×1080 only. Deterministic cubes; grid²×12+2 triangles. Every Nth cube is cutout when N>0. Two submissions in flight; direct storage image; no pixel readback, checksum or extra presentation copy. GPU timestamps always enabled; PRIME_PROFILE=1 adds resource counters. Isolated updates drain before/after; steady/camera drain only at phase boundaries. No performance assertions."
+                        "perf [--grid 128] [--widths 1920] [--frames 20] [--warmup 3] [--cutout-every 0] [--seed 324478056] [--dynamic-counts 1000,10000,50000] [--label baseline] [--csv output.csv]\nNative 1920×1080 only. Deterministic cubes; grid²×12+2 static triangles. Optional dynamic counts add mixed opaque/cutout/alpha triangles, updated in one complete snapshot per frame. Every Nth static cube is cutout when N>0. Two submissions in flight; direct storage image; no pixel readback, checksum or extra presentation copy. GPU timestamps always enabled; PRIME_PROFILE=1 adds resource counters. Isolated updates drain before/after; steady/camera/dynamic drain only at phase boundaries. Direct Scene input excludes Minecraft, FFM and protocol decoding; fixture_update_ns separately measures synthetic mutation, not decode. Dynamic batch completion includes that mutation. No performance assertions."
                     );
                     std::process::exit(0);
                 }
@@ -52,6 +54,10 @@ mod benchmark {
                     "--seed" => options.seed = value.parse()?,
                     "--label" => options.label = value,
                     "--csv" => options.csv = Some(value),
+                    "--dynamic-counts" => {
+                        options.dynamic_counts =
+                            value.split(',').map(str::parse).collect::<Result<_, _>>()?;
+                    }
                     _ => return Err(format!("Unknown argument {arg}; use --help").into()),
                 }
             }
@@ -59,9 +65,14 @@ mod benchmark {
                 || options.widths != [1920]
                 || !(1..=1000).contains(&options.frames)
                 || options.warmup > 100
+                || options
+                    .dynamic_counts
+                    .iter()
+                    .any(|count| !(1..=500_000).contains(count))
+                || options.dynamic_counts.len() > 8
             {
                 return Err(
-                    "Require grid=1..192, widths=1920 (native 1920×1080 only), frames=1..1000, warmup=0..100".into(),
+                    "Require grid=1..192, widths=1920 (native 1920×1080 only), frames=1..1000, warmup=0..100, at most eight dynamic counts in 1..500000".into(),
                 );
             }
             Ok(options)
@@ -258,7 +269,7 @@ mod benchmark {
 
     struct Record {
         device: String,
-        phase: &'static str,
+        phase: String,
         iteration: u32,
         wall_ms: f64,
         serial: u64,
@@ -269,13 +280,16 @@ mod benchmark {
         isolated_completion_ms: Option<f64>,
         batch_frames: u32,
         profile: Option<[u64; 6]>,
+        dynamic_triangles: usize,
+        dynamic_snapshots: u32,
+        fixture_update_ns: Option<u64>,
     }
 
     impl Record {
-        fn cpu(device: &str, phase: &'static str, wall_ms: f64) -> Self {
+        fn cpu(device: &str, phase: &str, wall_ms: f64) -> Self {
             Self {
                 device: device.into(),
-                phase,
+                phase: phase.into(),
                 iteration: 0,
                 wall_ms,
                 serial: 0,
@@ -286,6 +300,9 @@ mod benchmark {
                 isolated_completion_ms: None,
                 batch_frames: 0,
                 profile: None,
+                dynamic_triangles: 0,
+                dynamic_snapshots: 0,
+                fixture_update_ns: None,
             }
         }
     }
@@ -305,7 +322,7 @@ mod benchmark {
         renderer: &mut HostBenchmark,
         scene: &Scene,
         camera: &Camera,
-        phase: &'static str,
+        phase: &str,
         iteration: u32,
         sample: u32,
     ) -> Result<Record, String> {
@@ -318,7 +335,7 @@ mod benchmark {
         });
         Ok(Record {
             device: renderer.device_name().into(),
-            phase,
+            phase: phase.into(),
             iteration,
             wall_ms: frame.wall_ns as f64 / 1e6,
             serial: frame.serial,
@@ -329,6 +346,9 @@ mod benchmark {
             isolated_completion_ms: None,
             batch_frames: 0,
             profile,
+            dynamic_triangles: scene.dynamic.triangles.len(),
+            dynamic_snapshots: u32::from(scene.dynamic.revision != 0),
+            fixture_update_ns: None,
         })
     }
 
@@ -347,7 +367,7 @@ mod benchmark {
         renderer: &mut HostBenchmark,
         scene: &Scene,
         camera: &Camera,
-        phase: &'static str,
+        phase: &str,
         sample: u32,
         records: &mut Vec<Record>,
     ) -> Result<(), String> {
@@ -364,6 +384,107 @@ mod benchmark {
         format!("\"{}\"", value.replace('"', "\"\""))
     }
 
+    fn dynamic_triangles(count: u32, seed: u32) -> Arc<[Triangle]> {
+        (0..count)
+            .map(|index| {
+                let noise = hash(index ^ seed);
+                let x = (noise & 1023) as f32 / 1023.0 * 16.0 - 8.0;
+                let y = ((noise >> 10) & 1023) as f32 / 1023.0 * 6.0 - 5.0;
+                let z = -4.0 - ((noise >> 20) & 1023) as f32 / 1023.0 * 32.0;
+                let flags = index % 3;
+                Triangle {
+                    positions: [[x, y, z], [x + 0.15, y, z], [x, y + 0.2, z]],
+                    colors: [[0.9, 0.7, 0.4, if flags == 2 { 0.35 } else { 1.0 }]; 3],
+                    uvs: [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                    texture_id: if flags == 1 { 2 } else { 1 },
+                    flags,
+                }
+            })
+            .collect::<Vec<_>>()
+            .into()
+    }
+
+    fn mutate_dynamic(scene: &mut Scene, frame: u32) -> u64 {
+        let start = Instant::now();
+        // Actual local vertex changes exercise the single dynamic upload/build.
+        // This is synthetic scene mutation, explicitly outside native record time.
+        let delta = (((frame + 1) as f32 * 0.07).sin() - (frame as f32 * 0.07).sin()) * 0.1;
+        for triangle in Arc::make_mut(&mut scene.dynamic.triangles) {
+            triangle.positions[2][1] += delta;
+        }
+        scene.dynamic.revision += 1;
+        start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
+    }
+
+    fn dynamic_phase(
+        renderer: &mut HostBenchmark,
+        scene: &mut Scene,
+        camera: &Camera,
+        options: &Options,
+        count: u32,
+        records: &mut Vec<Record>,
+    ) -> Result<String, String> {
+        complete(renderer, records)?;
+        let phase = format!("dynamic_{count}");
+        let start = Instant::now();
+        scene.dynamic.triangles = dynamic_triangles(count, options.seed);
+        scene.dynamic.origin = camera.position;
+        scene.dynamic.revision += 1;
+        let mut generated = Record::cpu(
+            renderer.device_name(),
+            &format!("{phase}_fixture_cpu"),
+            start.elapsed().as_secs_f64() * 1000.0,
+        );
+        generated.dynamic_triangles = count as usize;
+        records.push(generated);
+        isolated_frame(
+            renderer,
+            scene,
+            camera,
+            &format!("{phase}_initial"),
+            options.seed,
+            records,
+        )?;
+        for frame in 0..options.warmup {
+            let mutation = mutate_dynamic(scene, frame);
+            let mut record = timed_frame(
+                renderer,
+                scene,
+                camera,
+                &format!("{phase}_warmup"),
+                frame,
+                options.seed.wrapping_add(frame + 1),
+            )?;
+            record.fixture_update_ns = Some(mutation);
+            records.push(record);
+        }
+        complete(renderer, records)?;
+        let start = Instant::now();
+        for frame in 0..options.frames {
+            let mutation = mutate_dynamic(scene, frame + options.warmup);
+            let mut record = timed_frame(
+                renderer,
+                scene,
+                camera,
+                &phase,
+                frame,
+                options.seed.wrapping_add(frame + options.warmup + 1),
+            )?;
+            record.fixture_update_ns = Some(mutation);
+            records.push(record);
+        }
+        complete(renderer, records)?;
+        let mut batch = Record::cpu(
+            renderer.device_name(),
+            &format!("{phase}_batch_completion"),
+            start.elapsed().as_secs_f64() * 1000.0,
+        );
+        batch.batch_frames = options.frames;
+        batch.dynamic_triangles = count as usize;
+        records.push(batch);
+        Ok(phase)
+    }
+
     pub fn run() -> Result<(), Box<dyn Error>> {
         let options = Options::parse()?;
         let triangle_count = options.grid * options.grid * 12 + 2;
@@ -378,6 +499,10 @@ mod benchmark {
             options.frames,
             options.warmup,
             std::env::var_os("PRIME_VK_VALIDATION")
+        );
+        eprintln!(
+            "[perf] source=direct_scene dynamic_counts={:?}; excludes MC/FFM/protocol decode; four-bounce shader budget unchanged; dynamic frames reset accumulation, fixture_update_ns is synthetic mutation only",
+            options.dynamic_counts
         );
         let (mut scene, mut camera) = fixture(&options);
         let start = Instant::now();
@@ -496,13 +621,39 @@ mod benchmark {
             1,
             &mut records,
         )?;
-        for phase in [
+        let mut phases: Vec<String> = [
             "initial_build_and_frame",
             "steady",
             "camera_move",
             "section_change_build_and_frame",
             "rebase_build_and_frame",
-        ] {
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        for &count in &options.dynamic_counts {
+            phases.push(dynamic_phase(
+                &mut renderer,
+                &mut scene,
+                &camera,
+                &options,
+                count,
+                &mut records,
+            )?);
+        }
+        if !options.dynamic_counts.is_empty() {
+            scene.dynamic.triangles = Arc::from([]);
+            scene.dynamic.revision += 1;
+            isolated_frame(
+                &mut renderer,
+                &scene,
+                &camera,
+                "dynamic_clear",
+                options.seed,
+                &mut records,
+            )?;
+        }
+        for phase in phases {
             let rows: Vec<_> = records.iter().filter(|r| r.phase == phase).collect();
             let mut values: Vec<_> = rows.iter().map(|r| r.wall_ms).collect();
             values.sort_by(f64::total_cmp);
@@ -528,7 +679,7 @@ mod benchmark {
             );
         }
         let mut csv = String::from(
-            "mode,label,device,grid,triangles,cutout_every,width,height,phase,iteration,seed,serial,cpu_enqueue_wall_ms,cpu_event_wall_ms,cpu_slot_wait_ns,cpu_record_ns,cpu_submit_ns,completed_gpu_ns,isolated_completion_ms,batch_frames,batch_completion_ms,output_bytes,checksum,allocations,allocation_ns,allocated_bytes,upload_ns,uploaded_bytes,readback_bytes\n",
+            "mode,label,device,grid,triangles,cutout_every,width,height,phase,iteration,seed,serial,cpu_enqueue_wall_ms,cpu_event_wall_ms,cpu_slot_wait_ns,cpu_record_ns,cpu_submit_ns,completed_gpu_ns,isolated_completion_ms,batch_frames,batch_completion_ms,output_bytes,checksum,allocations,allocation_ns,allocated_bytes,upload_ns,uploaded_bytes,readback_bytes,dynamic_triangles,dynamic_snapshots,fixture_update_ns,source_mode,protocol_decode_ns\n",
         );
         for record in records {
             if record.serial != 0 && record.gpu_ns.is_none() {
@@ -543,7 +694,7 @@ mod benchmark {
                 options.cutout_every.to_string(),
                 "1920".into(),
                 "1080".into(),
-                record.phase.into(),
+                record.phase,
                 record.iteration.to_string(),
                 options.seed.to_string(),
                 record.serial.to_string(),
@@ -580,6 +731,16 @@ mod benchmark {
                     .map(|v| v.map(|n| n.to_string()))
                     .unwrap_or_else(|| std::array::from_fn(|_| String::new())),
             );
+            cells.extend([
+                record.dynamic_triangles.to_string(),
+                record.dynamic_snapshots.to_string(),
+                record
+                    .fixture_update_ns
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                "direct_scene".into(),
+                String::new(), // The fixture does not execute protocol decoding.
+            ]);
             csv.push_str(&cells.join(","));
             csv.push('\n');
         }
@@ -592,6 +753,41 @@ mod benchmark {
             std::fs::write(path, csv)?;
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn dynamic_fixture_is_prefix_deterministic_and_mutation_preserves_static_scene() {
+            let small = dynamic_triangles(3, 123);
+            let large = dynamic_triangles(10, 123);
+            for (a, b) in small.iter().zip(large.iter()) {
+                assert_eq!(a.positions, b.positions);
+                assert_eq!(a.flags, b.flags);
+            }
+            assert_eq!(
+                small
+                    .iter()
+                    .map(|triangle| triangle.flags)
+                    .collect::<Vec<_>>(),
+                [0, 1, 2]
+            );
+            let mut scene = Scene {
+                revision: 77,
+                ..Default::default()
+            };
+            scene.dynamic.triangles = large;
+            let allocation = scene.dynamic.triangles.as_ptr();
+            let before = scene.dynamic.triangles[0].positions;
+            mutate_dynamic(&mut scene, 0);
+            assert_eq!(scene.revision, 77);
+            assert_eq!(scene.dynamic.revision, 1);
+            assert_eq!(scene.dynamic.triangles.as_ptr(), allocation);
+            assert_eq!(scene.dynamic.triangles[0].positions[0], before[0]);
+            assert_ne!(scene.dynamic.triangles[0].positions[2], before[2]);
+        }
     }
 }
 

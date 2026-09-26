@@ -1,9 +1,11 @@
 //! Hardware ray-query renderer. Production records into the host Vulkan
 //! submission and target; synchronous readback is restricted to offline diagnostics.
 mod benchmark;
+mod dynamic;
 mod geometry;
 mod resources;
 mod target;
+mod textures;
 pub use benchmark::HostBenchmark;
 use geometry::Geometry;
 pub use resources::GpuProfile;
@@ -51,7 +53,7 @@ impl Pipeline {
                 descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
                 pipeline: vk::Pipeline::null(),
             };
-            let bindings: Vec<_> = (0..6)
+            let bindings: Vec<_> = (0..7)
                 .map(|binding| {
                     vk::DescriptorSetLayoutBinding::default()
                         .binding(binding)
@@ -94,7 +96,7 @@ impl Pipeline {
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_BUFFER,
-                    descriptor_count: 4 * FRAME_SLOTS as u32,
+                    descriptor_count: 5 * FRAME_SLOTS as u32,
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_IMAGE,
@@ -177,18 +179,191 @@ pub struct Renderer {
     output: Option<Output>,
     camera: Option<Camera>,
     samples: u32,
+    frame_seed: u32,
     failed: bool,
     host_serials: [u64; FRAME_SLOTS],
     query_serials: [u64; FRAME_SLOTS],
     host_query: vk::QueryPool,
     last_gpu_ns: u64,
     last_gpu_serial: u64,
-    descriptor_keys: [[u64; 6]; FRAME_SLOTS],
+    descriptor_keys: [[u64; 7]; FRAME_SLOTS],
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     use prime_scene::scene::{SceneMesh, Texture, Triangle};
+
+    #[test]
+    #[ignore = "requires a Vulkan ray-query GPU; run with synchronization validation"]
+    fn gpu_dynamic_snapshot_alpha_coverage_and_incremental_textures() {
+        use prime_scene::scene::DynamicScene;
+        let mut renderer = Renderer::new().unwrap();
+        let camera = Camera {
+            position: [0.0, 0.0, 2.0],
+            forward: [0.0, 0.0, -1.0],
+            right: [1.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            vertical_fov_radians: 1.0,
+        };
+        let quad = |alpha| {
+            vec![
+                Triangle {
+                    positions: [[-20.0, -20.0, 0.0], [20.0, -20.0, 0.0], [20.0, 20.0, 0.0]],
+                    colors: [[0.0, 0.0, 0.0, alpha]; 3],
+                    uvs: [[0.5; 2]; 3],
+                    texture_id: 7,
+                    flags: 2,
+                },
+                Triangle {
+                    positions: [[-20.0, -20.0, 0.0], [20.0, 20.0, 0.0], [-20.0, 20.0, 0.0]],
+                    colors: [[0.0, 0.0, 0.0, alpha]; 3],
+                    uvs: [[0.5; 2]; 3],
+                    texture_id: 7,
+                    flags: 2,
+                },
+            ]
+        };
+        let mut scene = Scene {
+            revision: 1,
+            epoch: 1,
+            ..Default::default()
+        };
+        scene.textures.insert(
+            7,
+            Texture {
+                width: 1,
+                height: 1,
+                pixels: vec![255; 4].into(),
+            },
+        );
+        scene.meshes.insert(
+            (7, 0),
+            SceneMesh {
+                revision: 1,
+                flags: 2,
+                origin: [128.0, 0.0, 0.0],
+                triangles: quad(1.0).into(),
+            },
+        );
+        let sky = renderer.render(&scene, &camera, 64, 48, 0).unwrap();
+        let static_buffer = renderer.geometry.as_ref().unwrap().triangles.buffer;
+        let static_revision = renderer.geometry.as_ref().unwrap().revision;
+        scene.dynamic = DynamicScene {
+            revision: 1,
+            origin: [0.0; 3],
+            triangles: quad(0.0).into(),
+        };
+        assert_eq!(renderer.render(&scene, &camera, 64, 48, 0).unwrap(), sky);
+        let dynamic_buffer = renderer.geometry.as_ref().unwrap().dynamic_buffer().buffer;
+        let top = renderer.geometry.as_ref().unwrap().top.handle();
+        let allocations = renderer
+            .profile_snapshot()
+            .map(|profile| profile.allocations);
+        scene.dynamic.revision += 1;
+        scene.dynamic.triangles = quad(1.0).into();
+        let opaque = renderer.render(&scene, &camera, 64, 48, 0).unwrap();
+        assert!(
+            opaque
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == [0, 0, 0, 255])
+        );
+        scene.dynamic.revision += 1;
+        scene.dynamic.triangles = quad(0.5).into();
+        let half = renderer.render(&scene, &camera, 64, 48, 0).unwrap();
+        let covered = half
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| **pixel == [0, 0, 0, 255])
+            .count();
+        assert!(
+            (1300..1800).contains(&covered),
+            "half-alpha coverage was {covered}/3072"
+        );
+        scene.dynamic.revision += 1;
+        let different_seed = renderer.render(&scene, &camera, 64, 48, 1).unwrap();
+        assert_ne!(
+            different_seed, half,
+            "dynamic coverage seed must advance independently of reset"
+        );
+        let mut doubled = quad(0.5);
+        let back_faces: Vec<_> = doubled
+            .iter()
+            .map(|triangle| {
+                let mut back = *triangle;
+                back.positions.swap(0, 2);
+                back
+            })
+            .collect();
+        doubled.extend(back_faces);
+        scene.dynamic.revision += 1;
+        scene.dynamic.triangles = doubled.into();
+        assert_eq!(
+            renderer.render(&scene, &camera, 64, 48, 0).unwrap(),
+            half,
+            "coincident reversed fluid faces must share their alpha event"
+        );
+        assert_eq!(
+            renderer.geometry.as_ref().unwrap().triangles.buffer,
+            static_buffer
+        );
+        assert_eq!(
+            renderer.geometry.as_ref().unwrap().revision,
+            static_revision
+        );
+        assert_eq!(
+            renderer.geometry.as_ref().unwrap().dynamic_buffer().buffer,
+            dynamic_buffer
+        );
+        assert_eq!(renderer.geometry.as_ref().unwrap().top.handle(), top);
+        assert_eq!(
+            renderer
+                .profile_snapshot()
+                .map(|profile| profile.allocations),
+            allocations,
+            "same-capacity snapshots must not allocate new GPU buffers or AS storage"
+        );
+        let original_index = renderer
+            .geometry
+            .as_ref()
+            .unwrap()
+            .textures
+            .index(7)
+            .unwrap();
+        scene.textures.insert(
+            3,
+            Texture {
+                width: 2,
+                height: 2,
+                pixels: vec![128; 16].into(),
+            },
+        );
+        scene.revision += 1;
+        assert_eq!(renderer.render(&scene, &camera, 64, 48, 0).unwrap(), half);
+        assert_eq!(
+            renderer
+                .geometry
+                .as_ref()
+                .unwrap()
+                .textures
+                .index(7)
+                .unwrap(),
+            original_index
+        );
+        assert_eq!(renderer.geometry.as_ref().unwrap().rebuilt_clusters, 0);
+        scene.textures.get_mut(&7).unwrap().pixels = vec![255, 255, 255, 0].into();
+        scene.revision += 1;
+        assert_eq!(
+            renderer.render(&scene, &camera, 64, 48, 0).unwrap(),
+            sky,
+            "texture delta must affect the existing dynamic material without a geometry update"
+        );
+        scene.dynamic.revision += 1;
+        scene.dynamic.triangles = Arc::from([]);
+        assert_eq!(renderer.render(&scene, &camera, 64, 48, 0).unwrap(), sky);
+    }
 
     #[test]
     #[ignore = "requires a Vulkan ray-query GPU"]

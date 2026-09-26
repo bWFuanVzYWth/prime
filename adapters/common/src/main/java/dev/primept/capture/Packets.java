@@ -32,10 +32,14 @@ public final class Packets {
     }
 
     public static byte[] texture(long epoch, int width, int height, byte[] rgba) {
+        return texture(epoch, 1, width, height, rgba);
+    }
+
+    public static byte[] texture(long epoch, int id, int width, int height, byte[] rgba) {
         if (rgba.length != Math.multiplyExact(Math.multiplyExact(width, height), 4))
             throw new IllegalArgumentException("Unexpected texture byte count");
         return packet(4, epoch, Math.addExact(16, rgba.length))
-                .putInt(1).putInt(width).putInt(height).putInt(0).put(rgba).array();
+                .putInt(id).putInt(width).putInt(height).putInt(0).put(rgba).array();
     }
 
     public static byte[] frame(long epoch, double x, double y, double z,

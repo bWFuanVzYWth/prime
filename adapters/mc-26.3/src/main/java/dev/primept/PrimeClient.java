@@ -3,6 +3,7 @@ package dev.primept;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import dev.primept.capture.CaptureInbox;
 import dev.primept.capture.Packets;
+import dev.primept.capture.DynamicCapture;
 import net.fabricmc.api.ClientModInitializer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
@@ -32,12 +33,14 @@ public final class PrimeClient implements ClientModInitializer {
 
     @Override public void onInitializeClient() {
         LOGGER.info("Prime PT 26.3: Java thin capture → FFM → Rust → Vulkan/Slang; enabled={}", enabled);
-        if (enabled) LOGGER.warn("Experimental terrain renderer: opaque/cutout source geometry and color are captured before vanilla lighting; animated atlas uses its first frame; entities, translucent terrain and full physical materials are not yet supported");
+        if (enabled) LOGGER.warn("Experimental PT: terrain/fluid source capture and batched entity/block-entity/particle meshes; transparency uses alpha coverage, no refraction/media; animated atlases use their first frame; special shader effects remain unsupported");
     }
 
     public static void render(CameraRenderState camera, RenderTarget destination) {
         INSTANCE.renderFrame(camera, destination);
     }
+
+    public static boolean captureEnabled() { return INSTANCE.enabled && !INSTANCE.failed; }
 
     public static void beginWorldRender() {
         INSTANCE.skippedWorldRaster = false;
@@ -111,6 +114,9 @@ public final class PrimeClient implements ClientModInitializer {
             }
             if (timing != null) timing.prune = System.nanoTime() - phaseStart;
             int width = destination.width, height = destination.height;
+            phaseStart = timing == null ? 0 : System.nanoTime();
+            renderer.submitDynamic(epoch);
+            if (timing != null) timing.dynamicSubmit = System.nanoTime() - phaseStart;
             var inverse = new Matrix4f(camera.viewRotationMatrix).invert();
             var forward = inverse.transformDirection(new Vector3f(0, 0, -1)).normalize();
             var right = inverse.transformDirection(new Vector3f(1, 0, 0)).normalize();
@@ -169,6 +175,7 @@ public final class PrimeClient implements ClientModInitializer {
     public static void close() { CAPTURE.disable(); INSTANCE.closeResources(); }
 
     private void closeResources() {
+        DynamicCapture.close();
         try { if (renderer != null) renderer.close(); }
         catch (RuntimeException exception) { LOGGER.error("Native renderer shutdown failed", exception); }
         finally { renderer = null; }

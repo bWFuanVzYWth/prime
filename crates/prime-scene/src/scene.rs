@@ -28,6 +28,14 @@ pub struct SceneMesh {
     pub triangles: Arc<[Triangle]>,
 }
 
+/// One complete dynamic frame; its identity is independent of static scene changes.
+#[derive(Clone, Default)]
+pub struct DynamicScene {
+    pub revision: u64,
+    pub origin: [f32; 3],
+    pub triangles: Arc<[Triangle]>,
+}
+
 #[derive(Default)]
 pub struct Scene {
     pub revision: u64,
@@ -35,11 +43,16 @@ pub struct Scene {
     pub anchor: [f64; 3],
     pub meshes: BTreeMap<MeshKey, SceneMesh>,
     pub textures: BTreeMap<u32, Texture>,
+    pub dynamic: DynamicScene,
 }
 
 impl Scene {
     pub fn triangle_count(&self) -> usize {
-        self.meshes.values().map(|mesh| mesh.triangles.len()).sum()
+        self.meshes
+            .values()
+            .map(|mesh| mesh.triangles.len())
+            .sum::<usize>()
+            + self.dynamic.triangles.len()
     }
 }
 
@@ -64,6 +77,14 @@ pub(crate) struct Mesh {
 }
 
 #[derive(Default)]
+pub(crate) struct DynamicMesh {
+    pub revision: u64,
+    pub origin: [f64; 3],
+    pub triangles: Arc<[Triangle]>,
+    pub bounds: [[f32; 3]; 2],
+}
+
+#[derive(Default)]
 pub struct SourceScene {
     pub epoch: u64,
     pub revision: u64,
@@ -72,6 +93,7 @@ pub struct SourceScene {
     pub(crate) textures: BTreeMap<u32, Texture>,
     pub(crate) triangle_count: usize,
     pub(crate) texture_bytes: usize,
+    pub(crate) dynamic: DynamicMesh,
 }
 
 impl SourceScene {
@@ -110,6 +132,33 @@ impl SourceScene {
             anchor,
             meshes,
             textures: self.textures.clone(),
+            dynamic: self.translate_dynamic(anchor)?,
+        })
+    }
+
+    pub fn dynamic_revision(&self) -> u64 {
+        self.dynamic.revision
+    }
+
+    /// Constant work: vertices and texture references were validated when the frame was submitted.
+    pub fn translate_dynamic(&self, anchor: [f64; 3]) -> Result<DynamicScene, String> {
+        let offset = std::array::from_fn::<_, 3, _>(|i| self.dynamic.origin[i] - anchor[i]);
+        if !self.dynamic.triangles.is_empty() {
+            for bound in self.dynamic.bounds {
+                for i in 0..3 {
+                    if (offset[i] + f64::from(bound[i])).abs() > 1_048_576.0 {
+                        return Err(
+                            "dynamic scene exceeds the supported camera-relative coordinate range"
+                                .into(),
+                        );
+                    }
+                }
+            }
+        }
+        Ok(DynamicScene {
+            revision: self.dynamic.revision,
+            origin: offset.map(|p| p as f32),
+            triangles: self.dynamic.triangles.clone(),
         })
     }
 }

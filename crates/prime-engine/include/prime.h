@@ -9,6 +9,16 @@ extern "C" {
 // Zero status means success. On -1 call prime_last_error on the same thread.
 uint32_t prime_abi_version(void);
 uint64_t prime_create(uint32_t abi_version);
+// Scene op6: complete dynamic snapshot in one prime_submit; empty spans clear it.
+// Common LE packet header[24], then sequence:u64, origin:f64[3], span_count:u32,
+// reserved:u32=0 (64 bytes total). Sequence strictly increases within each epoch.
+// Each span: texture_id/flags/topology/count/stride/position/color/uv u32[8],
+// immediately followed by count*stride raw vertex bytes, with no padding.
+// Position=f32[3], color=RGBA8 bytes, uv=f32[2]; topology=3 triangles or 4 quads.
+// Flags for static/dynamic: 0 opaque, 1 alpha cutout, 2 stochastic alpha coverage.
+// Flags cannot be combined. Coverage is diffuse surface/transmission selection,
+// not refraction or medium absorption. Coincident surfaces share coverage events.
+// Capture every referenced nonzero texture with op4 before submitting op6.
 int32_t prime_submit(uint64_t handle, const uint8_t *packet, uint64_t length);
 int32_t prime_render(uint64_t handle, const uint8_t *frame, uint64_t length,
                      uint8_t *rgba, uint64_t capacity);

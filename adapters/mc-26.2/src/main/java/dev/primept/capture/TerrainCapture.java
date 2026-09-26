@@ -32,7 +32,7 @@ public final class TerrainCapture implements AutoCloseable {
     private long vanillaTintPosition;
     private int vanillaTintIndex;
     private RuntimeException failure;
-    private int vanillaQuads, fabricQuads, tintCalls, shadedQuads, fastLeafCutoutQuads;
+    private int vanillaQuads, fabricQuads, fluidVertices, tintCalls, shadedQuads, fastLeafCutoutQuads;
     private boolean closed;
 
     private TerrainCapture(CaptureInbox inbox, SectionPos section, boolean cutoutLeaves) {
@@ -48,7 +48,7 @@ public final class TerrainCapture implements AutoCloseable {
         return new TerrainCapture(inbox, section, cutoutLeaves);
     }
 
-    private static TerrainCapture current() {
+    static TerrainCapture current() {
         TerrainCapture scope = ACTIVE.get();
         return scope == null || scope.token == null || scope.failure != null ? null : scope;
     }
@@ -152,9 +152,21 @@ public final class TerrainCapture implements AutoCloseable {
     private int layer(ChunkSectionLayer layer) {
         if (layer == ChunkSectionLayer.SOLID) return SourceQuads.OPAQUE;
         if (layer == ChunkSectionLayer.CUTOUT) return SourceQuads.CUTOUT;
-        // Existing supported scope: opaque + cutout terrain; water/glass transport remains unsupported.
+        if (layer == ChunkSectionLayer.TRANSLUCENT) return SourceQuads.TRANSLUCENT;
         return -1;
     }
+
+    void fluidVertex(ChunkSectionLayer sourceLayer, float x, float y, float z, int color, float u, float v) {
+        if (failure != null) return;
+        try {
+            int layer = layer(sourceLayer);
+            if (layer < 0) throw new IllegalArgumentException("Unsupported fluid source layer");
+            source.vertex(layer, x, y, z, color, u, v);
+            ++fluidVertices;
+        } catch (RuntimeException exception) { failure = exception; }
+    }
+
+    void failed(RuntimeException exception) { if (failure == null) failure = exception; }
 
     /** Only the original compiler's successful return can publish this fixed-identity batch. */
     public void publish() {
@@ -163,13 +175,13 @@ public final class TerrainCapture implements AutoCloseable {
         if (fabricPending && failure == null) failure = new IllegalStateException("Unfinished Indigo source quad");
         if (failure != null) { inbox.captureFailed(token, failure); return; }
         inbox.capture(token, source);
-        if (vanillaQuads + fabricQuads == 0) return;
+        if (vanillaQuads + fabricQuads + fluidVertices == 0) return;
         long vanilla = VANILLA.addAndGet(vanillaQuads), fabric = FABRIC.addAndGet(fabricQuads);
         long tints = TINTS.addAndGet(tintCalls), shaded = SHADED.addAndGet(shadedQuads);
         long fastLeaves = FAST_LEAF_CUTOUT.addAndGet(fastLeafCutoutQuads);
         long sections = SECTIONS.incrementAndGet();
         if (sections == 1 || AUDIT && sections % 256 == 0)
-            PrimeClient.LOGGER.info("Prime PT source capture: source=pre-light stride=24 sections={} vanillaQuads={} fabricQuads={} observedTintCalls={} shadedQuadsExcluded={} fastLeafCutoutQuads={} audit={}; translucent terrain omitted",
+            PrimeClient.LOGGER.info("Prime PT source capture: source=pre-light stride=24 sections={} vanillaQuads={} fabricQuads={} observedTintCalls={} shadedQuadsExcluded={} fastLeafCutoutQuads={} audit={}; opaque/cutout/alpha terrain and fluid sources enabled",
                     sections, vanilla, fabric, tints, shaded, fastLeaves, AUDIT);
     }
 

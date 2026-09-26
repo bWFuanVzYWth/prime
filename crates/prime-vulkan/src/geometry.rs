@@ -1,8 +1,10 @@
 //! Persistent 64-block clusters: section updates never repack the complete world.
+use super::dynamic::{DYNAMIC_INSTANCE, DynamicGeometry, TopLevel};
 use super::resources::{Acceleration, Buffer, Context};
+use super::textures::Textures;
 use super::{float, float4, uint};
 use ash::vk;
-use prime_scene::scene::{MeshKey, Scene, SceneMesh, Texture};
+use prime_scene::scene::{MeshKey, Scene, SceneMesh};
 use std::{collections::BTreeMap, sync::Arc};
 
 type ClusterKey = ([i32; 3], u32);
@@ -14,62 +16,6 @@ struct Cluster {
     first: u32,
     count: u32,
     acceleration: Acceleration,
-}
-
-pub(super) struct Textures {
-    source: BTreeMap<u32, Texture>,
-    indices: BTreeMap<u32, u32>,
-    pub metadata: Buffer,
-    pub texels: Buffer,
-}
-impl Textures {
-    fn new(context: &Arc<Context>, source: &BTreeMap<u32, Texture>) -> Result<Self, String> {
-        let mut indices = BTreeMap::from([(0, 0)]);
-        let mut metadata = Vec::new();
-        for value in [0, 1, 1, 0] {
-            uint(&mut metadata, value);
-        }
-        let mut pixels = vec![255; 4];
-        for (id, texture) in source {
-            if *id == 0 {
-                continue;
-            }
-            let expected = u64::from(texture.width)
-                .checked_mul(u64::from(texture.height))
-                .and_then(|n| n.checked_mul(4))
-                .ok_or("Texture dimensions overflow")?;
-            if texture.width == 0 || texture.height == 0 || expected != texture.pixels.len() as u64
-            {
-                return Err(format!("Texture {id} has invalid RGBA8 dimensions"));
-            }
-            indices.insert(*id, (metadata.len() / 16) as u32);
-            let offset = u32::try_from(pixels.len() / 4).map_err(|_| "Texture address overflow")?;
-            for value in [offset, texture.width, texture.height, 0] {
-                uint(&mut metadata, value);
-            }
-            pixels.extend_from_slice(&texture.pixels);
-        }
-        Ok(Self {
-            source: source.clone(),
-            indices,
-            metadata: Buffer::upload_device(
-                context,
-                &metadata,
-                vk::BufferUsageFlags::STORAGE_BUFFER,
-            )?,
-            texels: Buffer::upload_device(context, &pixels, vk::BufferUsageFlags::STORAGE_BUFFER)?,
-        })
-    }
-    fn matches(&self, source: &BTreeMap<u32, Texture>) -> bool {
-        source.len() == self.source.len()
-            && source.iter().all(|(id, texture)| {
-                self.source.get(id).is_some_and(|old| {
-                    old.width == texture.width
-                        && old.height == texture.height
-                        && Arc::ptr_eq(&old.pixels, &texture.pixels)
-                })
-            })
-    }
 }
 
 #[derive(Default)]
@@ -95,7 +41,7 @@ impl Slots {
         let end = first
             .checked_add(count)
             .ok_or("Triangle address overflow")?;
-        if end > 0x0100_0000 {
+        if end > 0x00ff_ffff {
             return Err("Triangle arena exceeds the 24-bit TLAS instance offset".into());
         }
         self.end = end;
@@ -126,8 +72,15 @@ pub(super) struct Geometry {
     anchor: [f64; 3],
     pub triangle_count: u32,
     // Retire TLAS before any BLAS whose address it contains.
-    pub top: Option<Acceleration>,
+    pub top: TopLevel,
     clusters: BTreeMap<ClusterKey, Cluster>,
+    dynamic: Option<DynamicGeometry>,
+    dynamic_revision: Option<(u64, u64)>,
+    dynamic_count: u32,
+    dynamic_origin: [f32; 3],
+    instances: Vec<vk::AccelerationStructureInstanceKHR>,
+    top_dirty: bool,
+    static_count: u32,
     slots: Slots,
     pub triangles: Buffer,
     pub textures: Textures,
@@ -141,8 +94,15 @@ impl Geometry {
             epoch: scene.epoch,
             anchor: scene.anchor,
             triangle_count: 0,
-            top: None,
+            top: TopLevel::default(),
             clusters: BTreeMap::new(),
+            dynamic: None,
+            dynamic_revision: None,
+            dynamic_count: 0,
+            dynamic_origin: [0.0; 3],
+            instances: Vec::new(),
+            top_dirty: true,
+            static_count: 0,
             slots: Slots::default(),
             triangles: Self::arena(context, 1024)?,
             textures: Textures::new(context, &scene.textures)?,
@@ -168,19 +128,17 @@ impl Geometry {
         if scene.anchor.iter().any(|v| !v.is_finite()) {
             return Err("Invalid scene anchor".into());
         }
-        let texture_changed = !self.textures.matches(&scene.textures);
-        let mut material_indices_changed = false;
-        if texture_changed {
-            let replacement = Textures::new(context, &scene.textures)?;
-            material_indices_changed = replacement.indices != self.textures.indices;
-            self.textures = replacement;
+        if self.epoch != scene.epoch {
+            self.textures = Textures::new(context, &scene.textures)?;
+        } else {
+            self.textures.update(context, &scene.textures)?;
         }
         let mut groups: BTreeMap<ClusterKey, GroupMembers<'_>> = BTreeMap::new();
         for (id, mesh) in &scene.meshes {
             if mesh.triangles.is_empty() {
                 continue;
             }
-            if mesh.flags & !1 != 0 {
+            if mesh.flags > 2 {
                 return Err("Unsupported mesh material flags".into());
             }
             let world: [f64; 3] =
@@ -203,7 +161,7 @@ impl Geometry {
         if groups.len().saturating_add(160) > context.max_memory_allocations as usize {
             return Err("Scene exceeds the device memory allocation budget".into());
         }
-        self.top.take();
+        self.top_dirty = true;
         if self.epoch != scene.epoch {
             self.clusters.clear();
             self.slots = Slots::default();
@@ -225,11 +183,10 @@ impl Geometry {
                 .iter()
                 .map(|(id, mesh, local)| (*id, mesh.revision, *local))
                 .collect();
-            if !material_indices_changed
-                && self
-                    .clusters
-                    .get(key)
-                    .is_some_and(|old| old.signature == signature)
+            if self
+                .clusters
+                .get(key)
+                .is_some_and(|old| old.signature == signature)
             {
                 continue;
             }
@@ -307,14 +264,7 @@ impl Geometry {
                                 float(&mut materials, value);
                             }
                         }
-                        uint(
-                            &mut materials,
-                            *self
-                                .textures
-                                .indices
-                                .get(&triangle.texture_id)
-                                .ok_or("Unknown texture")?,
-                        );
+                        uint(&mut materials, self.textures.index(triangle.texture_id)?);
                         uint(&mut materials, triangle.flags);
                     }
                 }
@@ -387,11 +337,12 @@ impl Geometry {
                 );
             }
         }
-        let mut instances = Vec::with_capacity(self.clusters.len());
+        self.instances.clear();
+        self.instances.reserve(self.clusters.len() + 1);
         for ((cell, _), cluster) in &self.clusters {
             let origin: [f32; 3] =
                 std::array::from_fn(|i| (f64::from(cell[i]) * 64.0 - scene.anchor[i]) as f32);
-            instances.push(vk::AccelerationStructureInstanceKHR {
+            self.instances.push(vk::AccelerationStructureInstanceKHR {
                 transform: vk::TransformMatrixKHR {
                     matrix: [
                         1.0, 0.0, 0.0, origin[0], 0.0, 1.0, 0.0, origin[1], 0.0, 0.0, 1.0,
@@ -408,37 +359,93 @@ impl Geometry {
                 },
             });
         }
-        let bytes = unsafe {
-            std::slice::from_raw_parts(instances.as_ptr().cast::<u8>(), instances.len() * 64)
-        };
-        let instance_buffer = Buffer::upload(
-            context,
-            bytes,
-            vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
-                | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-        )?;
-        let data = vk::AccelerationStructureGeometryInstancesDataKHR::default().data(
-            vk::DeviceOrHostAddressConstKHR {
-                device_address: instance_buffer.address(),
-            },
-        );
-        self.top = Some(Acceleration::build(
-            context,
-            vk::AccelerationStructureGeometryKHR::default()
-                .geometry_type(vk::GeometryTypeKHR::INSTANCES)
-                .geometry(vk::AccelerationStructureGeometryDataKHR { instances: data }),
-            instances.len() as u32,
-            vk::AccelerationStructureTypeKHR::TOP_LEVEL,
-        )?);
-        self.triangle_count =
-            u32::try_from(scene.triangle_count()).map_err(|_| "Too many triangles")?;
+        self.static_count = u32::try_from(
+            scene
+                .meshes
+                .values()
+                .map(|mesh| mesh.triangles.len())
+                .sum::<usize>(),
+        )
+        .map_err(|_| "Too many static triangles")?;
         self.revision = scene.revision;
         self.anchor = scene.anchor;
         Ok(())
     }
+
+    pub fn prepare_dynamic(
+        &mut self,
+        context: &Arc<Context>,
+        scene: &Scene,
+        slot: usize,
+    ) -> Result<(bool, bool), String> {
+        let source = &scene.dynamic;
+        let count =
+            u32::try_from(source.triangles.len()).map_err(|_| "Too many dynamic triangles")?;
+        if source.origin.iter().any(|value| !value.is_finite()) {
+            return Err("Invalid dynamic origin".into());
+        }
+        let changed = self.dynamic_revision != Some((scene.epoch, source.revision));
+        let origin_changed = self.dynamic_origin != source.origin;
+        let visible_change = (changed || origin_changed) && (count > 0 || self.dynamic_count > 0);
+        let mut bindings_changed = false;
+        if changed && count > 0 {
+            if self
+                .dynamic
+                .as_ref()
+                .is_none_or(|geometry| count > geometry.capacity)
+            {
+                self.dynamic = Some(DynamicGeometry::new(context, count)?);
+                bindings_changed = true;
+            }
+            self.dynamic.as_mut().unwrap().upload(
+                context,
+                &source.triangles,
+                &self.textures,
+                slot,
+            )?;
+        }
+        self.dynamic_revision = Some((scene.epoch, source.revision));
+        self.dynamic_origin = source.origin;
+        self.dynamic_count = count;
+        if self.top_dirty || visible_change {
+            if count > 0 {
+                let [x, y, z] = source.origin;
+                self.instances.push(vk::AccelerationStructureInstanceKHR {
+                    transform: vk::TransformMatrixKHR {
+                        matrix: [1.0, 0.0, 0.0, x, 0.0, 1.0, 0.0, y, 0.0, 0.0, 1.0, z],
+                    },
+                    instance_custom_index_and_mask: vk::Packed24_8::new(DYNAMIC_INSTANCE, 0xff),
+                    instance_shader_binding_table_record_offset_and_flags: vk::Packed24_8::new(
+                        0,
+                        vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE.as_raw() as u8,
+                    ),
+                    acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
+                        device_handle: self.dynamic.as_ref().unwrap().address(),
+                    },
+                });
+            }
+            let result = self.top.rebuild(context, &self.instances, slot);
+            if count > 0 {
+                self.instances.pop();
+            }
+            bindings_changed |= result?;
+            self.top_dirty = false;
+        }
+        self.triangle_count = self
+            .static_count
+            .checked_add(count)
+            .ok_or("Triangle count overflow")?;
+        Ok((visible_change, bindings_changed))
+    }
+
+    pub fn dynamic_buffer(&self) -> &Buffer {
+        self.dynamic
+            .as_ref()
+            .map_or(&self.triangles, |geometry| &geometry.data)
+    }
 }
 
-unsafe fn transfer_barrier(context: &Context, command: vk::CommandBuffer) {
+pub(super) unsafe fn transfer_barrier(context: &Context, command: vk::CommandBuffer) {
     let barrier = [vk::MemoryBarrier::default()
         .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
         .dst_access_mask(
@@ -475,5 +482,15 @@ mod tests {
         slots.release(c, 7);
         assert_eq!(slots.allocate(7).unwrap(), c);
         assert_eq!(slots.end, 16);
+    }
+
+    #[test]
+    fn static_material_slots_never_allocate_dynamic_instance_sentinel() {
+        let mut slots = Slots::default();
+        assert_eq!(slots.allocate(DYNAMIC_INSTANCE).unwrap(), 0);
+        assert!(slots.allocate(1).is_err());
+        slots.release(DYNAMIC_INSTANCE - 1, 1);
+        assert_eq!(slots.allocate(1).unwrap(), DYNAMIC_INSTANCE - 1);
+        assert!(slots.allocate(1).is_err());
     }
 }

@@ -8,8 +8,9 @@ public final class SourceQuads {
     public static final int STRIDE = 24;
     public static final int OPAQUE = 0;
     public static final int CUTOUT = 1;
+    public static final int TRANSLUCENT = 2;
     private static final int MAX_BYTES = 64 << 20;
-    private final ByteBuffer[] layers = new ByteBuffer[2];
+    private final ByteBuffer[] layers = new ByteBuffer[3];
     private int bytes;
     private boolean sealed;
 

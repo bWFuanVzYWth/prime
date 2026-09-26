@@ -1,6 +1,7 @@
 package dev.primept.mixin;
 
 import dev.primept.PrimeClient;
+import dev.primept.capture.DynamicTextures;
 import net.minecraft.client.renderer.texture.SpriteLoader;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import org.spongepowered.asm.mixin.Mixin;
@@ -14,5 +15,6 @@ public abstract class TextureAtlasMixin {
     private void primept$captureAtlas(SpriteLoader.Preparations preparations, CallbackInfo callback) {
         if (((TextureAtlas) (Object) this).location().equals(TextureAtlas.LOCATION_BLOCKS))
             PrimeClient.CAPTURE.captureAtlas(preparations);
+        DynamicTextures.atlas((TextureAtlas) (Object) this, preparations);
     }
 }

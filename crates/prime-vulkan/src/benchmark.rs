@@ -503,6 +503,15 @@ mod tests {
         );
         assert!(host.drain().unwrap().is_empty());
         assert!(host.state.as_ref().unwrap().retired_targets.is_empty());
+        // Batch sizes grow/shrink while previous snapshots are still in flight.
+        // Static geometry stays absent and its identity does not change.
+        for (frame, count) in [2, 4096, 17, 8192, 0, 32, 2, 0].into_iter().enumerate() {
+            scene.dynamic.revision += 1;
+            scene.dynamic.triangles = make_mesh(count, 1).triangles;
+            scene.dynamic.origin = [frame as f32 * 0.01, 0.0, 0.0];
+            host.enqueue(&scene, &camera, frame as u32).unwrap();
+        }
+        assert_eq!(host.drain().unwrap().len(), 8);
         if let Some(profile) = host.profile_snapshot() {
             assert_eq!(profile.readback_bytes, 0);
             assert_eq!(
