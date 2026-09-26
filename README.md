@@ -96,3 +96,5 @@ Minecraft、Fabric API 和 Prime PT 的版本必须匹配。当前验证组合�
 ```
 
 两个版本的安装包分别生成在 `adapters/mc-26.2/build/libs/` 和 `adapters/mc-26.3/build/libs/`，选择以 `-native.jar` 结尾的文件。开发启动、测试和调试方法统一见 [CONTRIBUTING.md](CONTRIBUTING.md)；实现原理见 [架构文档](docs/README.md)。
+
+本项目使用 [GPL-3.0-only](LICENSE)，附加许可见 [LICENSE-EXCEPTIONS](LICENSE-EXCEPTIONS)。第三方代码保留各自许可，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

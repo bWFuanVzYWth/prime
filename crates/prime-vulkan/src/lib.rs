@@ -3,7 +3,9 @@
 mod benchmark;
 mod context;
 mod cpu_profile;
+mod display;
 mod dynamic;
+pub use display::{PrimeDrtParameters, PrimeDrtSettings};
 mod geometry;
 mod material_arena;
 mod plan;
@@ -32,6 +34,9 @@ pub struct InstanceWork {
 
 #[cfg(test)]
 mod object_tests;
+
+#[cfg(all(test, feature = "shader-tests"))]
+mod shader_tests;
 
 struct Pipeline {
     context: Arc<Context>,
@@ -95,7 +100,7 @@ impl Pipeline {
             let push = [vk::PushConstantRange::default()
                 .stage_flags(vk::ShaderStageFlags::COMPUTE)
                 .offset(0)
-                .size(96)];
+                .size(128)];
             result.layout = context
                 .device
                 .create_pipeline_layout(
@@ -196,6 +201,7 @@ pub struct Renderer {
     camera: Option<Camera>,
     samples: u32,
     frame_seed: u32,
+    display: PrimeDrtParameters,
     failed: bool,
     host_serials: [u64; FRAME_SLOTS],
     query_serials: [u64; FRAME_SLOTS],
@@ -581,5 +587,54 @@ mod tests {
             cleared, sky,
             "geometry replacement must reset accumulation and remove old occluders"
         );
+    }
+
+    #[test]
+    #[ignore = "requires Vulkan; tests real output, accumulation and display control lifetime"]
+    fn gpu_resize_resets_history_and_display_controls_preserve_linear_history() {
+        let mut renderer = Renderer::new().unwrap();
+        let mut fresh = Renderer::new().unwrap();
+        let scene = Scene::default();
+        let camera = Camera {
+            position: [0.0; 3],
+            forward: [0.0, 0.0, -1.0],
+            right: [1.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            vertical_fov_radians: 1.0,
+        };
+        for (width, height) in [(31, 17), (17, 31), (1, 1), (4097, 3), (1919, 17), (31, 17)] {
+            let resized = renderer.render(&scene, &camera, width, height, 99).unwrap();
+            let reference = fresh.render(&scene, &camera, width, height, 0).unwrap();
+            assert_eq!(
+                resized, reference,
+                "resize must refresh aspect, Sobol domain and history"
+            );
+            assert_eq!(resized.len(), width as usize * height as usize * 4);
+            assert_eq!(renderer.samples, 1);
+            renderer
+                .render(&scene, &camera, width, height, 100)
+                .unwrap();
+            assert_eq!(renderer.samples, 2);
+            assert_eq!(renderer.frame_seed, 1);
+        }
+        renderer
+            .set_prime_drt(PrimeDrtSettings {
+                exposure_multiplier: 0.25,
+                ..Default::default()
+            })
+            .unwrap();
+        let darker = renderer.render(&scene, &camera, 31, 17, 101).unwrap();
+        fresh.render(&scene, &camera, 31, 17, 100).unwrap();
+        let regular = fresh.render(&scene, &camera, 31, 17, 101).unwrap();
+        assert_eq!(
+            renderer.samples, 3,
+            "display-only settings must preserve accumulation"
+        );
+        assert!(
+            darker[0..3].iter().map(|&v| u32::from(v)).sum::<u32>()
+                < regular[0..3].iter().map(|&v| u32::from(v)).sum::<u32>()
+        );
+        assert!(renderer.context.render_extent(0, 1).is_err());
+        assert!(renderer.context.render_extent(65536, 65536).is_err());
     }
 }

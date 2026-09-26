@@ -1,4 +1,5 @@
 [package]
+license.workspace = true
 name = "prime_scene"
 version.workspace = true
 edition.workspace = true

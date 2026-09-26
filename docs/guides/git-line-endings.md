@@ -11,10 +11,13 @@
 | [rustfmt.toml](../../rustfmt.toml) | Rust 使用 rustfmt，Unix 行尾、四空格、100 列 |
 | [.clang-format](../../.clang-format) | Java 与 Slang 使用 clang-format，四空格、100 列；保留 import 顺序和注释内容 |
 | [scripts/format.ps1](../../scripts/format.ps1) | 格式化或只读检查全部受维护的 Rust、Java、Slang 源码 |
+| [.githooks/pre-commit](../../.githooks/pre-commit) | 提交前检查 Git 暂存快照中的源文件和格式配置 |
 
 Java 按 `.java` 语言模式处理，Slang 按 C++ 风格词法格式化。当前使用 clang-format 22.1.8；Rust 使用所选工具链提供的 rustfmt。100 列是工具的换行目标，不要求手工拆分字符串、注释或改变表达式语义。没有必须遵循的额外手工风格，统一交给配置与工具；升级格式工具时检查产生的差异。
 
-脚本不处理 `artifacts`、游戏运行目录、生成的 Java class 或构建产物，也不启动游戏、下载工具、安装 hook 或暂存文件。格式化不能代替 javac、Rust 与生产 Slang 的编译校验；Slang 的属性、指针和射线查询扩展以实际 slangc 编译为准，不能为迎合格式器修改 shader 语义。
+Slang 的 `public`/`internal` 用 AttributeMacros 配置识别为声明修饰词，结构体显式使用分号，避免 C++ 格式器将相邻声明连接。可见性仍由 Slang 编译器检查。
+
+格式脚本不处理 `artifacts`、游戏运行目录、生成的 Java class 或构建产物，也不启动游戏、下载工具、安装 hook 或暂存文件；hook 由独立安装脚本配置。格式化不能代替 javac、Rust 与生产 Slang 的编译校验；Slang 的属性、指针和射线查询扩展以实际 slangc 编译为准，不能为迎合格式器修改 shader 语义。
 
 ## 日常使用
 
@@ -37,6 +40,8 @@ git diff --cached --numstat --ignore-cr-at-eol
 纯 CRLF/LF 转换在 `--ignore-cr-at-eol` 下应消失；新增文件末尾换行和真正的格式调整仍会显示差异，需要分别核对。不要默认使用范围更大的 `-w` 隐藏其他修改。新增二进制类型应补充 attributes 与 EditorConfig 排除，不对二进制执行文本重写。
 
 ## 首次规范化与提交
+
+每个新 checkout 用 `scripts/install-hooks.ps1` 配置仓库本地 `core.hooksPath=.githooks`，不修改全局 Git 设置。pre-commit 将 index 导出到唯一临时目录，用快照内的 `scripts/format.ps1 -Check` 检查并清理临时目录。检查不修改工作区/index，正确支持部分暂存：工作区已修正不能掩盖暂存区的坏格式，未暂存的编辑也不会被代入提交检查。缺少格式工具或检查失败会阻止提交。可用 `git hook run pre-commit` 手动执行。
 
 添加 attributes 不会自动重写现有暂存区。提交规范化时，先确认普通修改、新增和删除的提交范围，再按需运行 `git add --renormalize .`，检查暂存差异。该命令只重新清理受跟踪文件，不代替新增/删除处理，也不能用来顺带暂存未确认的工作。
 

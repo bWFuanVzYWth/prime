@@ -53,10 +53,13 @@ impl Geometry {
             top_dirty: true,
             static_count: 0,
             materials: MaterialArena::new(),
-            static_bases: Buffer::upload_device(
+            // update() publishes every entry before TLAS use. An initial zero
+            // upload would be overwritten in the same host command buffer.
+            static_bases: Buffer::new(
                 context,
-                &[0; 8],
-                vk::BufferUsageFlags::STORAGE_BUFFER,
+                8,
+                vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+                false,
             )?,
             textures: Textures::new(context, &scene.textures)?,
             rebuilt_clusters: 0,

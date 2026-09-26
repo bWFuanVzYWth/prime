@@ -23,11 +23,16 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
     @Override
     public void onPreLaunch() {
         try {
+            if (Boolean.getBoolean("primept.smoke.targetResize")) {
+                TargetResizeCpuSmoke.run();
+                System.exit(0);
+            }
             if (Boolean.getBoolean("primept.smoke.foreignWrapper")) {
                 GeometryCacheCpuSmoke.foreign();
                 ItemCpuSmoke.foreign();
                 System.exit(0);
             }
+            TargetResizeCpuSmoke.run();
             GeometryCacheCpuSmoke.run();
             CanonicalTextureCpuSmoke.run();
             FabricMeshCpuSmoke.run();

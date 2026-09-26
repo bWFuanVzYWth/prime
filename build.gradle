@@ -58,6 +58,16 @@ tasks.register('verifyNativeJars') {
                 byte[] nativeBytes = zip.getInputStream(nativeEntry).withCloseable { it.readAllBytes() }
                 byte[] bridgeBytes = zip.getInputStream(bridgeEntry).withCloseable { it.readAllBytes() }
                 if (nativeBytes.length == 0) throw new GradleException("Empty native engine in ${archive}")
+                def notices = ['LICENSE', 'LICENSE-EXCEPTIONS', 'META-INF/THIRD_PARTY_NOTICES.md',
+                        'META-INF/licenses/nvidia-self-intersection-BSD-3-Clause.txt',
+                        'META-INF/licenses/pbrt-Apache-2.0.txt']
+                notices.each { name ->
+                    def entry = zip.getEntry(name)
+                    if (entry == null) throw new GradleException("Missing ${name} in ${archive}")
+                    byte[] actual = zip.getInputStream(entry).withCloseable { it.readAllBytes() }
+                    String source = name.startsWith('META-INF/') ? name.substring('META-INF/'.length()) : name
+                    if (!Arrays.equals(rootProject.file(source).bytes, actual)) throw new GradleException("Mismatched ${name} in ${archive}")
+                }
                 if (referenceNative != null && !Arrays.equals(referenceNative, nativeBytes)) throw new GradleException('Adapters packaged different native engines')
                 if (referenceBridge != null && !Arrays.equals(referenceBridge, bridgeBytes)) throw new GradleException('Adapters packaged different common bridge classes')
                 referenceNative = nativeBytes

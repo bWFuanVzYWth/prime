@@ -11,3 +11,5 @@ SortIncludes: Never
 ReflowComments: Never
 BreakStringLiterals: false
 LineEnding: LF
+AttributeMacros: [public, internal]
+AccessModifierOffset: 0

@@ -1,6 +1,7 @@
 //! Version-neutral source decoding and scene translation, without GPU or Minecraft APIs.
 #![forbid(unsafe_code)]
 
+pub mod extent;
 pub mod instances;
 pub mod protocol;
 pub mod scene;

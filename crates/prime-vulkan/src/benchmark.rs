@@ -68,10 +68,8 @@ pub struct HostBenchmark {
 
 impl HostBenchmark {
     pub fn new(width: u32, height: u32) -> Result<Self, String> {
-        if width == 0 || height == 0 || width > 4096 || height > 4096 {
-            return Err("Benchmark dimensions must be within 1..4096".into());
-        }
         let owner = Context::new()?;
+        owner.render_extent(width, height)?;
         if owner.timestamp_bits == 0 {
             return Err("Benchmark queue does not support GPU timestamps".into());
         }
@@ -181,9 +179,11 @@ impl HostBenchmark {
         if self.poisoned {
             return Err("Benchmark host is quarantined".into());
         }
-        if width == 0 || height == 0 || width > 4096 || height > 4096 {
-            return Err("Benchmark dimensions must be within 1..4096".into());
-        }
+        self.state
+            .as_ref()
+            .unwrap()
+            .owner
+            .render_extent(width, height)?;
         self.width = width;
         self.height = height;
         Ok(())

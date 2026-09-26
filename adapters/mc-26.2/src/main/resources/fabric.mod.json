@@ -3,6 +3,7 @@
   "id": "primept",
   "version": "${version}",
   "name": "Prime PT",
+  "license": "GPL-3.0-only",
   "description": "Minecraft ${minecraftVersion} thin scene capture, shared Rust engine, Vulkan and Slang path tracing.",
   "environment": "client",
   "entrypoints": { "client": ["dev.primept.PrimeClient"] },

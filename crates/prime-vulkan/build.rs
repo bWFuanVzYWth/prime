@@ -1,7 +1,9 @@
 use std::{env, path::PathBuf, process::Command};
 
 fn main() {
-    println!("cargo:rerun-if-changed=shaders/path_trace.slang");
+    // Cargo tracks directory contents recursively, including imported modules.
+    println!("cargo:rerun-if-changed=shaders");
+    println!("cargo:rerun-if-changed=tests/shaders");
     println!("cargo:rerun-if-env-changed=SLANGC");
     println!("cargo:rerun-if-env-changed=VULKAN_SDK");
     let compiler = env::var_os("SLANGC")
@@ -16,11 +18,25 @@ fn main() {
             })
         })
         .unwrap_or_else(|| PathBuf::from("slangc"));
-    let output =
-        PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR")).join("path_trace.spv");
-    let result = Command::new(&compiler)
+    compile(&compiler, "shaders/path_trace.slang", "path_trace.spv");
+    if env::var_os("CARGO_FEATURE_SHADER_TESTS").is_some() {
+        for name in ["foundations", "intersection", "display"] {
+            compile(
+                &compiler,
+                &format!("tests/shaders/{name}.slang"),
+                &format!("{name}.spv"),
+            );
+        }
+    }
+}
+
+fn compile(compiler: &std::path::Path, source: &str, name: &str) {
+    let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR")).join(name);
+    let result = Command::new(compiler)
         .args([
-            "shaders/path_trace.slang",
+            source,
+            "-I",
+            "shaders",
             "-entry",
             "main",
             "-stage",
@@ -44,7 +60,7 @@ fn main() {
         });
     if !result.status.success() {
         panic!(
-            "Slang compilation failed:\n{}\n{}",
+            "Slang compilation failed for {source}:\n{}\n{}",
             String::from_utf8_lossy(&result.stdout),
             String::from_utf8_lossy(&result.stderr)
         );

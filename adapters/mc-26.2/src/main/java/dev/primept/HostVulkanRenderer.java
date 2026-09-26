@@ -57,6 +57,16 @@ public final class HostVulkanRenderer implements AutoCloseable {
                 VulkanDevice;
     }
 
+    /** Every main color allocation needs this, including resize while vanilla is selected. */
+    public static int mainColorUsage(int usage) {
+        if (!Boolean.getBoolean("primept.enabled"))
+            return usage;
+        var backend = ((GpuDeviceAccessor)(Object)RenderSystem.getDevice()).primept$backend();
+        return backend instanceof VulkanDevice device && VulkanBootstrap.isEnabled(device)
+                ? usage | USAGE_STORAGE
+                : usage;
+    }
+
     /** Capability check creates no backend resources and may run before retiring vanilla. */
     public static void requireAvailable() {
         availableDevice();
@@ -167,12 +177,20 @@ public final class HostVulkanRenderer implements AutoCloseable {
     public void record(RenderTarget destination) {
         if (closed)
             throw new IllegalStateException("Host renderer is closed");
-        if (!(destination.getColorTexture() instanceof VulkanGpuTexture texture) ||
-            !(destination.getColorTextureView() instanceof VulkanGpuTextureView view) ||
+        var color = destination.getColorTexture();
+        var colorView = destination.getColorTextureView();
+        if (!(color instanceof VulkanGpuTexture texture) ||
+            !(colorView instanceof VulkanGpuTextureView view) ||
             texture.getFormat() != GpuFormat.RGBA8_UNORM ||
             (texture.usage() & USAGE_STORAGE) == 0) {
             throw new IllegalStateException(
-                    "Prime PT requires an RGBA8 Vulkan main target with storage-image usage");
+                    "Prime PT requires an RGBA8 Vulkan main target with storage-image usage; size=" +
+                    destination.width + "x" + destination.height + ", color=" +
+                    (color == null ? "missing"
+                                   : color.getClass().getSimpleName() + "/" + color.getFormat() +
+                                             "/usage=0x" + Integer.toHexString(color.usage())) +
+                    ", view=" +
+                    (colorView == null ? "missing" : colorView.getClass().getSimpleName()));
         }
         var command = encoder.allocateAndBeginTransientCommandBuffer();
         long submitValue =

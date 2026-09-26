@@ -28,6 +28,13 @@ tasks.named('jar') {
 }
 tasks.named('sourcesJar') { from common.sourceSets.main.allSource }
 
+// Adapted shader source also lives in the embedded native binary.
+tasks.withType(Jar).configureEach {
+    from rootProject.file('LICENSE'), rootProject.file('LICENSE-EXCEPTIONS')
+    from(rootProject.file('THIRD_PARTY_NOTICES.md')) { into 'META-INF' }
+    from(rootProject.file('licenses')) { into 'META-INF/licenses' }
+}
+
 loom {
     runs {
         client {
@@ -93,14 +100,15 @@ tasks.register('cpuSmokeJar', Jar) {
     from sourceSets.cpuSmoke.output
 }
 tasks.register('cpuSmoke', JavaExec) {
-    dependsOn tasks.named('classes'), tasks.named('cpuSmokeJar')
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'net.fabricmc.loader.impl.launch.knot.KnotClient'
+    dependsOn tasks.named('classes'), tasks.named('cpuSmokeJar'), common.tasks.named('testClasses')
+    classpath = sourceSets.main.runtimeClasspath + common.sourceSets.test.output
+    mainClass = 'dev.primept.FabricCpuTestLauncher'
     jvmArgs '--enable-native-access=ALL-UNNAMED'
     systemProperty 'fabric.development', 'true'
     systemProperty 'primept.enabled', 'true'
     systemProperty 'primept.geometryCache', 'true'
     systemProperty 'primept.smoke.foreignWrapper', providers.gradleProperty('primeptSmokeForeign').getOrElse('false')
+    systemProperty 'primept.smoke.targetResize', providers.gradleProperty('primeptSmokeTargetResize').getOrElse('false')
     systemProperty 'fabric.addMods', tasks.named('cpuSmokeJar').get().archiveFile.get().asFile.absolutePath
     systemProperty 'fabric.classPathGroups', sourceSets.main.output.files.collect { it.absolutePath }.join(File.pathSeparator)
     workingDir layout.buildDirectory.dir('cpu-smoke')

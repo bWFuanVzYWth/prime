@@ -83,6 +83,8 @@ Opaque 几何由硬件直接接受命中；cutout 和 alpha 覆盖执行候选�
 
 累积位于 renderer 自己的显存 buffer；Slang 直接向宿主 RGBA8 storage image 写最终颜色。主图像保持宿主的 GENERAL layout，前后 barrier 衔接原版图像访问与手/HUD。生产路径没有输出 buffer、回读 buffer 或整帧复制。独立 `prime_render` 诊断接口仍可同步回读 PNG，Java 桥保留该诊断绑定，但游戏合成不调用它。
 
+主颜色图像的 storage 用途必须在每次分配前声明，包括首次创建及窗口尺寸变化后的重建。26.2/26.3 的 `MainTarget` 构造路径与继承的 `RenderTarget.resize/createBuffers` 分别适配，只修改主颜色附件，深度及离屏 target 保持原用途。能力取决于宿主设备已完成的协商；选择原版渲染器时也保留共享主图像的此项能力，以支持随后切回 Prime。图像和 view 的关闭、延迟销毁继续由宿主负责。
+
 Java 使用宿主 transient command buffer，将 native 录制结果交还 `encoder.execute`，最终由 Minecraft 在既有提交中执行。Rust 借用宿主 timeline，三个描述符槽只在原 serial 完成后复用；槽耗尽才等待最旧提交形成有界反压。小型帧参数使用命令内 push constants，宿主 image view 的 descriptor 每帧重写；场景或累积资源变化会清掉描述符缓存，避免句柄复用误判。稳定路径无逐帧完成等待、无 PT 专用队列提交。
 
 世界输出由选定所有者决定，不以首帧完成为条件同时维持两个后端。PT 接管时原版世界 FrameGraph、网格上传与其地形调度已退出；动态源准备与后续手部/HUD 继续使用宿主流程。首帧 GPU 完成回调用于诊断，不能作为资源回收以外的“两个后端可共存”许可。当前未实现完整世界深度等价。详细数据流见 [pipeline.md](pipeline.md)。
@@ -100,7 +102,7 @@ Java 使用宿主 transient command buffer，将 native 录制结果交还 `enco
 
 ## 当前渲染范围
 
-路径追踪使用硬件 Ray Query、Lambert 材质、线性 Rec.709 工作空间、固定太阳/梯度天空、四次反弹和 Reinhard 显示映射。纹理使用图集 UV、动画首帧与基础 mip 最近点采样；源 RGBA 与 tint 先按 Minecraft 编码域语义组合，shader 再进行所需的线性化。
+路径追踪使用硬件 Ray Query、Lambert 材质、线性 Rec.2020 工作空间、固定太阳/梯度天空、四次反弹和 primeDRT 显示映射；Z-Sobol、起点误差与颜色契约见 [Slang 基础库](shaders.md)。纹理使用图集 UV、动画首帧与基础 mip 最近点采样；源 RGBA 与 tint 先按 Minecraft 编码域语义组合，shader 再进行所需的线性化。
 
 场景覆盖依赖原版可见性和准备过程。地形接收 opaque/cutout/translucent 与流体几何；动态接收常规模型、方块实体、物品、自定义几何的支持布局及 quad 粒子。已混入 CPU 光照的 moving/falling block、leash，以及文字、glint、outline 等特殊路径尚不作为普通表面材质接收；不能将批量入口等同于所有模组渲染器兼容。
 

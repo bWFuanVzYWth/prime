@@ -8,6 +8,7 @@ import dev.primept.capture.DynamicTextures;
 import dev.primept.capture.BlockGeometryCache;
 import dev.primept.capture.ExclusiveTerrainCapture;
 import dev.primept.render.RendererSlot;
+import dev.primept.render.FrameSequence;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -46,7 +47,7 @@ public final class PrimeClient implements ClientModInitializer {
     private long worldRenderStart;
     private HostVulkanRenderer renderer;
     private long sentEpoch, sentAtlas;
-    private int sample;
+    private final FrameSequence frames = new FrameSequence();
     private int submittedSections;
     private boolean reportedFrame;
     private boolean reportedProjectionWait;
@@ -193,8 +194,10 @@ public final class PrimeClient implements ClientModInitializer {
             RuntimeException captureFailure = CAPTURE.failure();
             if (captureFailure != null)
                 throw captureFailure;
-            if (!camera.initialized || destination.width <= 0 || destination.height <= 0)
+            if (!camera.initialized || destination.width <= 0 || destination.height <= 0) {
+                frames.reset();
                 return;
+            }
             float fov = (float)(2 * Math.atan(1.0 / Math.abs(camera.projectionMatrix.m11())));
             // initialized describes the camera entity; its perspective matrix can still be zero during world entry.
             if (!Float.isFinite(fov) || fov < 0.01f || fov >= 3.0f) {
@@ -213,7 +216,7 @@ public final class PrimeClient implements ClientModInitializer {
                 submit(Packets.reset(epoch), timing);
                 sentEpoch = epoch;
                 sentAtlas = 0;
-                sample = 0;
+                frames.reset();
                 submittedSections = 0;
                 reportedFrame = false;
                 renderer.resetReadiness();
@@ -221,7 +224,7 @@ public final class PrimeClient implements ClientModInitializer {
             if (sentAtlas != atlas.version()) {
                 submit(Packets.texture(epoch, atlas.width(), atlas.height(), atlas.rgba()), timing);
                 sentAtlas = atlas.version();
-                sample = 0;
+                frames.reset();
             }
             // A section replacement is drained atomically relative to rendering.
             long drained = 0;
@@ -251,7 +254,7 @@ public final class PrimeClient implements ClientModInitializer {
             var up = inverse.transformDirection(new Vector3f(0, 1, 0)).normalize();
             Packets.writeFrame(renderer.frameBuffer(), epoch, camera.pos.x, camera.pos.y,
                                camera.pos.z, components(forward), components(right), components(up),
-                               fov, width, height, sample++);
+                               fov, width, height, frames.next(width, height));
             phaseStart = timing == null ? 0 : System.nanoTime();
             renderer.record(destination);
             if (timing != null)
@@ -369,7 +372,8 @@ public final class PrimeClient implements ClientModInitializer {
     }
     private void resetFrameState() {
         sentEpoch = sentAtlas = worldRenderStart = 0;
-        submittedSections = sample = 0;
+        submittedSections = 0;
+        frames.reset();
         reportedProjectionWait = reportedFrame = false;
     }
     public static void close() {

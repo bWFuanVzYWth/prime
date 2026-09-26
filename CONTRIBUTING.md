@@ -4,6 +4,8 @@
 
 源码格式与行尾遵循[统一规范](docs/guides/git-line-endings.md)，使用 `.\scripts\format.ps1` 应用、`.\scripts\format.ps1 -Check` 检查。当前 CPU 优化属于 [TODO](TODO.md) 中的非阻塞待办。
 
+首次克隆后运行 `.\scripts\install-hooks.ps1`，为本仓库启用 pre-commit 格式检查。钩子只检查暂存快照，不自动格式化或暂存文件；已有其他 hooksPath 时停止，避免覆盖现有钩子。
+
 ## 开发环境
 
 | 工具 | 用途 |
@@ -74,6 +76,7 @@
 2. 观察地形、透明表面、实体/方块实体、框内物品、掉落物和粒子是否缺失或重复；检查旋转/移动、物品内容变化与持续增删，以及手部/HUD 是否正常。特殊文字、glint、outline 和折射仍按当前支持范围判断。
 3. 依次切换到 `vanilla` 和 `path_trace`，等待各自就绪；检查原版地形恢复、PT 重新加载，以及皮肤、地图等动态纹理。再检查世界退出/重进与资源重载后是否正常。
 4. 检查对应 `adapters/mc-*/run/logs/latest.log`，记录异常、Vulkan `VUID` / `SYNC-HAZARD`、缺失纹理或后端恢复失败。反馈版本、操作步骤、场景与日志，截图/日志副本放 `artifacts/`。
+5. 在两版分别拖动窗口、切换全屏、最小化/恢复；覆盖横/竖/奇数尺寸并回到 1920×1080。检查宽高比、边缘覆盖、历史残影和 HUD 方位；调整尺寸时允许重建累积，稳定后应继续收敛。观察高饱和材质、灰阶和亮部的 primeDRT 输出，以及细缝/斜面是否自遮挡或漏光。HDR 呈现和自动曝光仍未接入。
 
 上述启动命令开启 validation 用于正确性检查，不用于性能结论。需要性能采样时，将 `-PprimeptValidation=false`，保持细叶计时和 capture audit 关闭，另加 `-PprimeptProfileCsv=绝对路径` 保存逐帧数据；固定场景、相机、画质、射线预算与分辨率。先确认 CSV 的 `terrain_pending=0`，再记录稳态及更新阶段；CPU 优化目前非阻塞，不以即时 FPS 达标作为本轮检查的前提。
 
@@ -105,15 +108,20 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```powershell
 $env:PRIME_VK_VALIDATION = '1'
 $env:VK_LAYER_VALIDATE_SYNC = '1'
-cargo test -p prime_vulkan --lib --locked -- --ignored --nocapture --test-threads=1
+cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --nocapture --test-threads=1
 ```
 
 这些测试覆盖 cutout、累积、尺寸变化、增量场景和宿主资源退休；小尺寸/奇数尺寸用于边界检查，不是性能数据。改变宿主集成或捕获时，还需在对应 MC 适配器实际运行，检查主图像与 HUD、资源重载、世界退出等相关生命周期。更新公共接口时验证受影响的两个适配器；编译通过不证明 Mixin 注入或实际 GPU 功能正常。
 
-实例相关 GPU 测试还覆盖局部原型共享、仿射/颜色/UV 与烘焙几何等价、批量增删、空间回退桶局部失效，以及多帧在途的 resize、重定位和 epoch 切换。Java 版本模块另有独立 `cpuSmoke` Fabric 测试源集，在真实 Mixin 转换后的类上执行标准 Cube、同帧源突变与未知路径回退；它在 preLaunch 退出，不创建窗口或设备，也不能代替实际游戏验证。
+`shader-tests` 另编译无窗口测试入口，直接验证生产 Slang 的 Z-Sobol、颜色、primeDRT 与安全起点；正常发行构建不包含测试入口。所有 imported shader 的改动都会触发重编译。同步验证日志出现 `Prime Vulkan ERROR`、`VUID` 或 hazard 时，即使 Rust test harness 返回通过也不能视为 GPU 检查通过。Slang 模块/数学支持边界及可替换的显示策略见 [模块说明](docs/shaders.md)。
+
+实例相关 GPU 测试还覆盖局部原型共享、仿射/颜色/UV 与烘焙几何等价、批量增删、空间回退桶局部失效，以及多帧在途的 resize、重定位和 epoch 切换。Java 版本模块另有独立 `cpuSmoke` Fabric 测试源集，在真实 Mixin 转换后的类上执行标准 Cube、同帧源突变、未知路径回退及主 target 创建/缩放。测试启动器只初始化 Fabric/Mixin，测试在 preLaunch 退出；即使入口缺失也会失败退出，不调用游戏 main、不创建窗口或设备。这些测试不能代替实际游戏验证。
 
 ```powershell
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke --no-parallel
+
+# 仅验证宿主 target 生命周期；CPU 记录设备替代图像分配，不调用 Vulkan
+.\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeTargetResize=true --no-parallel
 ```
 
 独立图像诊断入口：

@@ -129,6 +129,8 @@ pub(super) struct Context {
     pub memory: vk::PhysicalDeviceMemoryProperties,
     pub scratch_alignment: u64,
     pub max_storage_buffer_range: u64,
+    max_image_dimension_2d: u32,
+    max_compute_work_group_count: [u32; 3],
     pub max_memory_allocations: u32,
     pub timestamp_period: f32,
     pub timestamp_bits: u32,
@@ -425,6 +427,8 @@ impl Context {
                     acceleration_properties.min_acceleration_structure_scratch_offset_alignment,
                 ),
                 max_storage_buffer_range: u64::from(properties.limits.max_storage_buffer_range),
+                max_image_dimension_2d: properties.limits.max_image_dimension2_d,
+                max_compute_work_group_count: properties.limits.max_compute_work_group_count,
                 max_memory_allocations: properties.limits.max_memory_allocation_count,
                 timestamp_period: properties.limits.timestamp_period,
                 timestamp_bits,
@@ -529,6 +533,8 @@ impl Context {
                     acceleration_properties.min_acceleration_structure_scratch_offset_alignment,
                 ),
                 max_storage_buffer_range: u64::from(properties.limits.max_storage_buffer_range),
+                max_image_dimension_2d: properties.limits.max_image_dimension2_d,
+                max_compute_work_group_count: properties.limits.max_compute_work_group_count,
                 max_memory_allocations: properties.limits.max_memory_allocation_count,
                 timestamp_period: properties.limits.timestamp_period,
                 timestamp_bits: queue_properties.timestamp_valid_bits,
@@ -548,6 +554,24 @@ impl Context {
                 uncertain_submission: AtomicBool::new(false),
             }))
         }
+    }
+
+    pub fn render_extent(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> Result<prime_scene::extent::RenderExtent, String> {
+        let extent = prime_scene::extent::RenderExtent::new(width, height)?;
+        if width.max(height) > self.max_image_dimension_2d
+            || width.div_ceil(8) > self.max_compute_work_group_count[0]
+            || height.div_ceil(8) > self.max_compute_work_group_count[1]
+            || extent.pixels() * 16 > self.max_storage_buffer_range
+        {
+            return Err(format!(
+                "Render extent {width}x{height} exceeds device image/dispatch/accumulation limits"
+            ));
+        }
+        Ok(extent)
     }
 
     pub fn is_borrowed(&self) -> bool {
@@ -1493,6 +1517,8 @@ mod host_tests {
                 memory: vk::PhysicalDeviceMemoryProperties::default(),
                 scratch_alignment: 1,
                 max_storage_buffer_range: 1,
+                max_image_dimension_2d: 1,
+                max_compute_work_group_count: [1; 3],
                 max_memory_allocations: 1,
                 timestamp_period: 1.0,
                 timestamp_bits: 0,

@@ -1,9 +1,13 @@
 [package]
+license.workspace = true
 name = "prime_vulkan"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Vulkan resource ownership and Slang path-tracing execution for Prime"
+
+[features]
+shader-tests = []
 
 [dependencies]
 ash = { workspace = true }

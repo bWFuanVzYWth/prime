@@ -880,9 +880,7 @@ impl Frame {
         let sample_index = input.u32()?;
         input.zero()?;
         input.finish()?;
-        if width == 0 || height == 0 || width > 4096 || height > 4096 {
-            return Err("frame dimensions must be 1..4096".into());
-        }
+        crate::extent::RenderExtent::new(width, height)?;
         Ok(Self {
             epoch,
             world_position,

@@ -260,6 +260,11 @@ fn frame_rejects_non_orthogonal_camera_and_invalid_extent() {
         frame.relative_camera(frame.anchor()).position,
         [128.0, 70.0, 246.0]
     );
+    for width in [4097_u32, 65536] {
+        bytes[88..92].copy_from_slice(&width.to_le_bytes());
+        let wide = Frame::parse(&bytes).unwrap();
+        assert_eq!(wide.output_len(), width as usize * 360 * 4);
+    }
     bytes[88..92].copy_from_slice(&u32::MAX.to_le_bytes());
     assert!(Frame::parse(&bytes).is_err());
     bytes[88..92].copy_from_slice(&640u32.to_le_bytes());

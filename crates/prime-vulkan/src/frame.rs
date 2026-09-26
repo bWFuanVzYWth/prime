@@ -11,6 +11,7 @@ impl Drop for HostRecordScope {
 pub(super) struct Output {
     width: u32,
     height: u32,
+    log2_resolution: u32,
     // These exist only for explicit offline image diagnostics.
     image: Option<Image>,
     readback: Option<Buffer>,
@@ -19,14 +20,13 @@ pub(super) struct Output {
 
 impl Output {
     fn new(context: &Arc<Context>, width: u32, height: u32) -> Result<Self, String> {
-        if width == 0 || height == 0 || width > 4096 || height > 4096 {
-            return Err("Render dimensions must be within 1..4096".into());
-        }
-        let bytes = u64::from(width) * u64::from(height);
+        let extent = context.render_extent(width, height)?;
+        let bytes = extent.pixels();
         let offline = !context.is_borrowed();
         Ok(Self {
             width,
             height,
+            log2_resolution: extent.log2_resolution(),
             image: if offline {
                 Some(Image::new(context, width, height)?)
             } else {
@@ -80,6 +80,7 @@ impl Renderer {
             camera: None,
             samples: 0,
             frame_seed: 0,
+            display: PrimeDrtSettings::default().prepare(1.0)?,
             failed: false,
             host_serials: [0; FRAME_SLOTS],
             query_serials: [0; FRAME_SLOTS],
@@ -113,6 +114,13 @@ impl Renderer {
 
     pub fn device_name(&self) -> &str {
         &self.context.name
+    }
+
+    /// Changes only the display transform. Scene-linear history remains valid.
+    /// The current host target is SDR RGBA8, so surface headroom is fixed at one.
+    pub fn set_prime_drt(&mut self, settings: PrimeDrtSettings) -> Result<(), String> {
+        self.display = settings.prepare(1.0)?;
+        Ok(())
     }
     pub fn profile_snapshot(&self) -> Option<GpuProfile> {
         self.context.profile_snapshot()
@@ -272,7 +280,9 @@ impl Renderer {
             self.output = Some(Output::new(&self.context, width, height)?);
             self.samples = 0;
         }
-        if self.camera != Some(*camera) || sample_index == 0 {
+        // Float accumulation loses unit sample precision beyond 2^24; start a
+        // fresh history before then, without overflowing sample + 1 in the shader.
+        if self.camera != Some(*camera) || sample_index == 0 || self.samples >= (1 << 24) {
             self.samples = 0;
         }
         self.camera = Some(*camera);
@@ -378,7 +388,7 @@ impl Renderer {
     fn dispatch(&self, command: vk::CommandBuffer, slot: usize, bottom_up: bool) {
         let camera = self.camera.unwrap();
         let output = self.output.as_ref().unwrap();
-        let mut push = [0u8; 96];
+        let mut push = [0u8; 128];
         let values = [
             camera.position[0],
             camera.position[1],
@@ -407,10 +417,18 @@ impl Renderer {
             u32::from(self.geometry.as_ref().unwrap().triangle_count != 0),
             u32::from(bottom_up),
             self.frame_seed,
-            0,
-            0,
+            output.log2_resolution,
+            0x1357_2468,
         ];
-        for (destination, value) in push[64..].as_chunks_mut::<4>().0.iter_mut().zip(integers) {
+        for (destination, value) in push[64..96].as_chunks_mut::<4>().0.iter_mut().zip(integers) {
+            *destination = value.to_le_bytes();
+        }
+        for (destination, value) in push[96..]
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(self.display.values)
+        {
             *destination = value.to_le_bytes();
         }
         unsafe {
