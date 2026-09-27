@@ -39,7 +39,7 @@ public final class TerrainCapture implements AutoCloseable {
     private TerrainCapture(CaptureInbox inbox, SectionPos section, boolean cutoutLeaves) {
         this.inbox = inbox;
         token = inbox.begin(section);
-        source = token == null ? null : new SourceQuads();
+        source = token == null ? null : TerrainRasterOutput.borrowSource();
         this.cutoutLeaves = cutoutLeaves;
         previous = ACTIVE.get();
         ACTIVE.set(this);

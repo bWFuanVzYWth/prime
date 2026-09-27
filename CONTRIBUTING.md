@@ -202,6 +202,17 @@ cargo test --release -p prime_vulkan --lib --locked packing_cost_matrix -- --ign
 
 动态捕获的游戏 profile 另给出 `dynamicCapture`（额外材质绑定和 mesh 拷贝 CPU 均值，包含于 `mcBeforePT`）、`dynamicSubmit`（纹理增量与整帧 FFM 解码 CPU 均值，包含于 `hook`）。`dynamicSpansTotal`、`dynamicVerticesTotal`、`dynamicBytesTotal`、`modelMeshesTotal` 和 `particleMeshesTotal` 是该窗口总量，除以 `frames` 才是每帧均值；mesh 数是原版批次数，不是实体数。`dynamicCapacity` 为保留 packet 容量，`dynamicGrowthsTotal` 是该 writer 自创建起的累计扩容次数。原版动画/模型准备时间没有混入 `dynamicCapture`；Prime 独占世界时省去该批世界 staged 输出的原版 GPU 上传，手部与 HUD 上传仍属于宿主。
 
+地形 profile 单独记录脏通知、进入窗口/收到数据/卸载列、全量失效次数、本次选中段数、首次空段发布、保留空段和实际编译数。`snapshot` 包括 owner 分类、空段封包与邻域快照，`compileJoin` 是工作线程编译到全部汇合的墙钟时间，二者包含在 `total` 中；`max` 保留单次源准备峰值。CSV 的 `terrain_*_ns` 和相应计数逐帧保存；原有 `terrain_compilations` 是累计实际 compiler 调用量。窗口维护发生在提取阶段，不包含在这组源准备计时中，`mcBeforePT` 也不能代表完整 Minecraft CPU 时间。
+
+空段路径可用真实 Fabric 变换后的 CPU 夹具检查，仍在 preLaunch 退出，不启动游戏：
+
+```powershell
+.\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeTerrainPerf=true --no-parallel
+.\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeForeign=true --no-parallel
+```
+
+可选性能样本交错比较 256 次实际全空气 compiler 与直接空段发布；每组 5 次预热、21 次样本，逐条保留耗时。两者使用相同已准备的空气源，排除邻域复制、非空模型、FFM/GPU 和游戏；只用于局部 CPU 成本归因，不是场景帧率。外部注入夹具验证未知 compiler 仍进入完整编译路径。
+
 标准模型还记录实际 `beSources/entitySources/modelSubmits`、标准/回退叶节点、源引用检查数与几何顶点读取数，以及 op7 的原型/实例 upsert/remove 和字节数。对象数、模型提交数、Cube 叶节点数与 TLAS 实例数不是同一单位，报告中分别标注。逐帧 CSV 的 hook 间隔是 CPU 帧节奏，包含两个 hook 之间的原版工作和等待；不是 GPU 执行时间或显示器呈现时间。阶段总和与端到端间隔的差额不能无证据地归因于某一 GPU pass。
 
 普通物品的 `item_*` CSV 字段与日志分别记录提交、分组、实际检查/省去展开的顶点数、回退 quad 数、新建原型顶点数及几何共享命中。检查源值不等于重新发布几何，回退 quad 也不等于回退实体；必须与实际 raw 顶点和 op7 字节一同判断收益。方块实体每 120 次提取记录加载候选数、提前排除的远处对象、未知语义回退、立方体幸存者及局部/全局 `tryExtract` 调用量。`beSources` 是进入模型捕获的源数，不是遍历过的方块实体候选数；方块实体提取发生在世界 render hook 之前，也不能从 `mcBeforePT` 单独推算其成本。

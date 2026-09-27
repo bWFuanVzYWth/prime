@@ -211,6 +211,19 @@ public final class BlockEntityCandidates {
                         origin.equals(
                                 "net.fabricmc.fabric.mixin.client.renderer.block.render.SectionCompilerMixin"))
                         continue;
+                    // Pinned block-getter hooks copy attachment data and expose biome/attachment getters.
+                    // They do not synthesize blocks or compile geometry in an all-air section.
+                    if ((type == net.minecraft.client.renderer.chunk.RenderRegionCache.class &&
+                         origin.equals(
+                                 "net.fabricmc.fabric.mixin.blockgetter.client.RenderRegionCacheMixin")) ||
+                        (type == net.minecraft.client.renderer.chunk.RenderSectionRegion.class &&
+                         origin.equals(
+                                 "net.fabricmc.fabric.mixin.blockgetter.client.RenderSectionRegionMixin")))
+                        continue;
+                    // Pinned block API preserves modded air states on writes; hasOnlyAir is unchanged.
+                    if (type == net.minecraft.world.level.chunk.LevelChunkSection.class &&
+                        origin.equals("net.fabricmc.fabric.mixin.block.LevelChunkSectionMixin"))
+                        continue;
                     if (!origin.startsWith("dev.primept.mixin."))
                         return false;
                 } catch (ReflectiveOperationException exception) {

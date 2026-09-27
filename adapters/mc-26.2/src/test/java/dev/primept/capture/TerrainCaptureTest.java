@@ -28,6 +28,40 @@ class TerrainCaptureTest {
     private static final BlockPos POSITION = new BlockPos(-112, 48, 144);
 
     @Test
+    void privateWorkspaceReuseKeepsPacketsOwnedAndNestedCaptureIsolated() {
+        var workspace = new SourceQuads();
+        byte[] retained = null;
+        for (int cycle = 0; cycle < 16; cycle++) {
+            int color = 0xff123450 + cycle;
+            var inbox = new CaptureInbox(true);
+            try (var output = TerrainRasterOutput.open(workspace);
+                 var outer = TerrainCapture.open(inbox, SECTION, true)) {
+                var quad = quad(new int[] {color, color, color, color}, -1);
+                TerrainCapture.beginFabricQuad(quad);
+                TerrainCapture.finishFabricQuad(quad, true);
+                var nestedInbox = new CaptureInbox(true);
+                try (var nested = TerrainCapture.open(nestedInbox, SECTION, true)) {
+                    var inner = quad(new int[] {-1, -1, -1, -1}, -1);
+                    TerrainCapture.beginFabricQuad(inner);
+                    TerrainCapture.finishFabricQuad(inner, true);
+                    nested.publish();
+                }
+                assertEquals(-1, color(onlyMesh(nestedInbox), 0));
+                TerrainCapture.beginFabricQuad(quad);
+                TerrainCapture.finishFabricQuad(quad, true);
+                outer.publish();
+            }
+            byte[] packet = onlyMesh(inbox);
+            assertEquals(8, ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN).getInt(88));
+            for (int i = 0; i < 8; i++)
+                assertEquals(color, color(packet, i));
+            if (retained == null)
+                retained = packet;
+            assertEquals(0xff123450, color(retained, 0));
+        }
+    }
+
+    @Test
     void fabricPreservesAuthoredCornersAndUsesObservedTintWithoutRasterShade() throws Exception {
         int[] authored = {0xffabcdef, 0x7f123456, 0x80402010, 0xff020304};
         int[] mutable = authored.clone();

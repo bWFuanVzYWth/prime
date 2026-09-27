@@ -111,6 +111,7 @@ tasks.register('cpuSmoke', JavaExec) {
     systemProperty 'primept.geometryCache', 'true'
     systemProperty 'primept.smoke.foreignWrapper', providers.gradleProperty('primeptSmokeForeign').getOrElse('false')
     systemProperty 'primept.smoke.targetResize', providers.gradleProperty('primeptSmokeTargetResize').getOrElse('false')
+    systemProperty 'primept.smoke.terrainPerf', providers.gradleProperty('primeptSmokeTerrainPerf').getOrElse('false')
     systemProperty 'fabric.addMods', tasks.named('cpuSmokeJar').get().archiveFile.get().asFile.absolutePath
     systemProperty 'fabric.classPathGroups', sourceSets.main.output.files.collect { it.absolutePath }.join(File.pathSeparator)
     workingDir layout.buildDirectory.dir('cpu-smoke')

@@ -548,6 +548,21 @@ impl SourceScene {
             if count != 0 && texture_id != 0 && !self.textures.contains_key(&texture_id) {
                 return Err("section references a texture that has not been captured".into());
             }
+            if count == 0 {
+                continue;
+            }
+            present[layer as usize] = true;
+            // Compare source fields directly with the validated resident triangles. An exact match
+            // proves the same finite/range-checked values without decoding another expanded mesh.
+            // No source packet cache, hash collision assumption, or extra retained vertex copy.
+            if self.meshes.get(&(key, layer)).is_some_and(|old| {
+                old.origin.map(f64::to_bits) == origin.map(f64::to_bits)
+                    && old.texture_id == texture_id
+                    && old.flags == flags
+                    && equal_source_triangles(raw, &layout, &old.triangles)
+            }) {
+                continue;
+            }
             scratch.vertices.clear();
             scratch
                 .vertices
@@ -562,29 +577,17 @@ impl SourceScene {
                 &mut scratch.vertices,
                 &mut bounds,
             )?;
-            if count == 0 {
-                continue;
-            }
-            present[layer as usize] = true;
-            let unchanged = self.meshes.get(&(key, layer)).is_some_and(|old| {
-                old.origin.map(f64::to_bits) == origin.map(f64::to_bits)
-                    && old.texture_id == texture_id
-                    && old.flags == flags
-                    && equal_triangles(&old.triangles, &scratch.vertices)
-            });
-            if !unchanged {
-                scratch.replacements.push((
-                    layer,
-                    Mesh {
-                        revision: MeshVersion::captured(sequence),
-                        origin,
-                        triangles: scratch.vertices.as_slice().into(),
-                        bounds,
-                        texture_id,
-                        flags,
-                    },
-                ));
-            }
+            scratch.replacements.push((
+                layer,
+                Mesh {
+                    revision: MeshVersion::captured(sequence),
+                    origin,
+                    triangles: scratch.vertices.as_slice().into(),
+                    bounds,
+                    texture_id,
+                    flags,
+                },
+            ));
         }
         input.finish()?;
         let changed = self.sections.origin(key) != Some(&origin)
@@ -612,15 +615,35 @@ impl SourceScene {
 
 /// Bit equality is deliberately conservative (even signed zero differs), never hash-only.
 /// Irrelevant padding, normals and source stride are not rendered material/geometry fields.
-fn equal_triangles(left: &[Triangle], right: &[Triangle]) -> bool {
-    left.len() == right.len()
-        && left.iter().zip(right).all(|(a, b)| {
-            a.texture_id == b.texture_id
-                && a.flags == b.flags
-                && a.positions.map(|p| p.map(f32::to_bits))
-                    == b.positions.map(|p| p.map(f32::to_bits))
-                && a.colors.map(|p| p.map(f32::to_bits)) == b.colors.map(|p| p.map(f32::to_bits))
-                && a.uvs.map(|p| p.map(f32::to_bits)) == b.uvs.map(|p| p.map(f32::to_bits))
+fn equal_source_triangles(raw: &[u8], layout: &VertexLayout, old: &[Triangle]) -> bool {
+    let per_primitive = layout.topology - 2;
+    if old.len() != layout.count / layout.topology * per_primitive {
+        return false;
+    }
+    raw.chunks_exact(layout.stride * layout.topology)
+        .zip(old.chunks_exact(per_primitive))
+        .all(|(primitive, triangles)| {
+            triangles.iter().enumerate().all(|(triangle, old)| {
+                let indices = if triangle == 0 { [0, 1, 2] } else { [2, 3, 0] };
+                indices.into_iter().enumerate().all(|(corner, index)| {
+                    let source = &primitive[index * layout.stride..][..layout.stride];
+                    let position = &source[layout.position_offset..][..12];
+                    let uv = &source[layout.uv_offset..][..8];
+                    old.positions[corner]
+                        .iter()
+                        .zip(position.as_chunks::<4>().0)
+                        .all(|(old, value)| old.to_bits() == u32::from_le_bytes(*value))
+                        && old.uvs[corner]
+                            .iter()
+                            .zip(uv.as_chunks::<4>().0)
+                            .all(|(old, value)| old.to_bits() == u32::from_le_bytes(*value))
+                        && old.colors[corner].iter().enumerate().all(|(channel, old)| {
+                            old.to_bits()
+                                == (f32::from(source[layout.color_offset + channel]) / 255.0)
+                                    .to_bits()
+                        })
+                })
+            })
         })
 }
 

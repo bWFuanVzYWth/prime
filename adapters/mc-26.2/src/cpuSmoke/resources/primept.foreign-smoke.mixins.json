@@ -1,1 +1,1 @@
-{"required":true,"package":"dev.primept.fixture","plugin":"dev.primept.fixture.SmokeMixinPlugin","compatibilityLevel":"JAVA_25","client":["ForeignWrapperMixin","ForeignItemMixin"],"injectors":{"defaultRequire":1}}
+{"required":true,"package":"dev.primept.fixture","plugin":"dev.primept.fixture.SmokeMixinPlugin","compatibilityLevel":"JAVA_25","client":["ForeignWrapperMixin","ForeignItemMixin","ForeignTerrainCompilerMixin"],"injectors":{"defaultRequire":1}}

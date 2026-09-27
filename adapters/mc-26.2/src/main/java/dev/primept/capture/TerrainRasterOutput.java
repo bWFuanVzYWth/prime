@@ -11,12 +11,27 @@ public final class TerrainRasterOutput implements AutoCloseable {
                                          BlockEntityCandidates.known(SectionCompiler.class);
     final VertexSorting sorting = VertexSorting.byDistance(0, 0, 0);
     private final TerrainRasterOutput previous;
-    private TerrainRasterOutput() {
+    private final SourceQuads source;
+    private boolean sourceBorrowed;
+    private TerrainRasterOutput(SourceQuads source) {
+        this.source = source;
         previous = ACTIVE.get();
         ACTIVE.set(this);
     }
     static TerrainRasterOutput open() {
-        return new TerrainRasterOutput();
+        return open(null);
+    }
+    static TerrainRasterOutput open(SourceQuads source) {
+        return new TerrainRasterOutput(source);
+    }
+    static SourceQuads borrowSource() {
+        var scope = ACTIVE.get();
+        // A nested foreign compile cannot overwrite the outer compile's unsealed vertices.
+        if (scope == null || scope.source == null || scope.sourceBorrowed)
+            return new SourceQuads();
+        scope.sourceBorrowed = true;
+        scope.source.clear();
+        return scope.source;
     }
     public static boolean omitSort(MeshData mesh, VertexSorting sorting) {
         var scope = ACTIVE.get();

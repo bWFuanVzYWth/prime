@@ -14,6 +14,15 @@ public final class SourceQuads {
     private int bytes;
     private boolean sealed;
 
+    /** The previous publication must have copied its borrowed views before this workspace is reused. */
+    public void clear() {
+        for (ByteBuffer layer : layers)
+            if (layer != null)
+                layer.clear();
+        bytes = 0;
+        sealed = false;
+    }
+
     public void vertex(int layer, float x, float y, float z, int argb, float u, float v) {
         if (sealed)
             throw new IllegalStateException("Source batch is sealed");

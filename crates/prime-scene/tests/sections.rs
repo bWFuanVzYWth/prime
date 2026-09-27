@@ -136,6 +136,104 @@ fn source_layout_and_equivalent_triangulation_do_not_invent_content_changes() {
 }
 
 #[test]
+fn source_equality_checks_every_triangle_corner_and_invalid_suffix() {
+    let quad = layer(0);
+    let mut triangles = quad[..40].to_vec();
+    triangles[12..16].copy_from_slice(&3_u32.to_le_bytes());
+    triangles[16..20].copy_from_slice(&6_u32.to_le_bytes());
+    for vertex in [0, 1, 2, 2, 3, 0] {
+        triangles.extend(&quad[40 + vertex * 24..40 + (vertex + 1) * 24]);
+    }
+    for original in [quad, triangles] {
+        let count = (original.len() - 40) / 24;
+        for corner in 0..count {
+            for (field, value) in [
+                (0, 0.25_f32.to_bits()),
+                (4, (-0.0_f32).to_bits()),
+                (8, (-2.0_f32).to_bits()),
+                (12, 0xff123456),
+                (16, (-0.5_f32).to_bits()),
+                (20, 1.25_f32.to_bits()),
+            ] {
+                let mut source = source();
+                source
+                    .submit(&section(1, 1, std::slice::from_ref(&original)))
+                    .unwrap();
+                let before = snapshot(&source);
+                let mut changed = original.clone();
+                let offset = 40 + corner * 24 + field;
+                changed[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+                source.submit(&section(1, 2, &[changed])).unwrap();
+                let after = snapshot(&source);
+                assert_eq!(
+                    after.revision,
+                    before.revision + 1,
+                    "corner {corner}, field {field}"
+                );
+                assert!(!Arc::ptr_eq(
+                    &before.meshes[&(91, 0)].triangles,
+                    &after.meshes[&(91, 0)].triangles
+                ));
+            }
+        }
+        let mut source = source();
+        source
+            .submit(&section(1, 1, std::slice::from_ref(&original)))
+            .unwrap();
+        let before = snapshot(&source);
+        for (field, values) in [
+            (0, vec![f32::NAN, f32::INFINITY, -4097.0]),
+            (20, vec![f32::NAN, f32::NEG_INFINITY]),
+        ] {
+            for value in values {
+                let mut bad = original.clone();
+                let offset = 40 + (count - 1) * 24 + field;
+                bad[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+                assert!(source.submit(&section(1, 2, &[bad])).is_err());
+                assert_same(&before, &snapshot(&source));
+            }
+        }
+        let mut trailing = section(1, 2, std::slice::from_ref(&original));
+        trailing.push(0); // Matching geometry still requires whole-packet validation.
+        assert!(source.submit(&trailing).is_err());
+        source.submit(&section(1, 2, &[original])).unwrap();
+        assert_same(&before, &snapshot(&source));
+    }
+}
+
+#[test]
+fn source_equality_preserves_all_unorm_colors_with_shifted_vertex_fields() {
+    for color in 0..=255_u8 {
+        let mut original = layer(0);
+        for corner in 0..4 {
+            original[52 + corner * 24..56 + corner * 24].copy_from_slice(&[
+                color,
+                color.wrapping_add(1),
+                color.wrapping_add(127),
+                color.wrapping_add(255),
+            ]);
+        }
+        let mut shifted = original[..40].to_vec();
+        for (offset, value) in [(20, 36_u32), (24, 8), (28, 0), (32, 24)] {
+            shifted[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        for vertex in original[40..].as_chunks::<24>().0 {
+            shifted.extend(&vertex[12..16]);
+            shifted.extend([0xff; 4]); // Irrelevant padding need not represent finite floats.
+            shifted.extend(&vertex[..12]);
+            shifted.extend([0xff; 4]);
+            shifted.extend(&vertex[16..24]);
+            shifted.extend([0xff; 4]);
+        }
+        let mut source = source();
+        source.submit(&section(1, 1, &[original])).unwrap();
+        let before = snapshot(&source);
+        source.submit(&section(1, 2, &[shifted])).unwrap();
+        assert_same(&before, &snapshot(&source));
+    }
+}
+
+#[test]
 fn every_rendered_field_change_is_published_and_unaffected_layer_is_shared() {
     for (offset, value) in [
         (4, 1_u32),
