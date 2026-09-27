@@ -12,6 +12,19 @@ final class TerrainRasterCpuSmoke {
         var compiler = blank(SectionCompiler.class);
         var mesh = blank(MeshData.class);
         var marker = blank(MeshData.SortState.class);
+        var graph = new net.minecraft.client.renderer.chunk.VisGraph();
+        var visibility = new net.minecraft.client.renderer.chunk.VisibilitySet();
+        var visibilityMethod =
+                java.util.Arrays.stream(SectionCompiler.class.getDeclaredMethods())
+                        .filter(m -> m.getName().endsWith("primept$discardVisibility"))
+                        .findFirst()
+                        .orElseThrow();
+        visibilityMethod.setAccessible(true);
+        int[] visibilityCalls = {0};
+        Operation<net.minecraft.client.renderer.chunk.VisibilitySet> resolve = arguments -> {
+            visibilityCalls[0]++;
+            return visibility;
+        };
         var method = java.util.Arrays.stream(SectionCompiler.class.getDeclaredMethods())
                              .filter(m -> m.getName().endsWith("primept$discardSort"))
                              .findFirst()
@@ -23,6 +36,8 @@ final class TerrainRasterCpuSmoke {
             return marker;
         };
         try (var output = TerrainRasterOutput.open()) {
+            check(visibilityMethod.invoke(compiler, graph, resolve, output.sorting) == visibility,
+                  "No capture retains actual raster visibility");
             check(method.invoke(compiler, mesh, null, output.sorting, original) == marker,
                   "No capture keeps original sort");
             try (var capture = TerrainCapture.open(new CaptureInbox(true), SectionPos.of(0, 0, 0),
@@ -30,11 +45,21 @@ final class TerrainRasterCpuSmoke {
                 check(method.invoke(compiler, mesh, null, output.sorting, original) == null,
                       "Known discarded sort omitted");
                 check(calls[0] == 1, "No original callback replay");
+                check(visibilityMethod.invoke(compiler, graph, resolve, output.sorting) == null &&
+                              visibilityCalls[0] == 1,
+                      "Private result has no raster visibility consumer");
+                check(visibilityMethod.invoke(compiler, graph, resolve,
+                                              VertexSorting.byDistance(1, 2, 3)) == visibility,
+                      "Foreign compiler invocation keeps visibility even inside an owner scope");
                 check(method.invoke(compiler, mesh, null, VertexSorting.byDistance(1, 2, 3),
                                     original) == marker,
                       "Foreign sorting input retains original path");
             }
         }
+        check(visibilityMethod.invoke(compiler, graph, resolve,
+                                      VertexSorting.byDistance(0, 0, 0)) == visibility &&
+                      visibilityCalls[0] == 3,
+              "Visibility scope exit restores original behavior");
         check(method.invoke(compiler, mesh, null, VertexSorting.byDistance(0, 0, 0), original) ==
                               marker &&
                       calls[0] == 3,

@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vertex.VertexSorting;
 import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Local;
 import dev.primept.capture.TerrainRasterOutput;
 import org.spongepowered.asm.mixin.injection.At;
 import dev.primept.PrimeClient;
@@ -13,6 +14,9 @@ import dev.primept.capture.TerrainCapture;
 import net.minecraft.client.renderer.SectionBufferBuilderPack;
 import net.minecraft.client.renderer.chunk.RenderSectionRegion;
 import net.minecraft.client.renderer.chunk.SectionCompiler;
+import net.minecraft.client.renderer.chunk.VisGraph;
+import net.minecraft.client.renderer.chunk.VisibilitySet;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -43,5 +47,31 @@ public abstract class SectionCompilerMixin {
                         Operation<MeshData.SortState> original) {
         return TerrainRasterOutput.omitSort(mesh, sorting) ? null
                                                            : original.call(mesh, buffer, sorting);
+    }
+
+    @WrapOperation(
+            method = "compile",
+            at = @At(
+                    value = "INVOKE",
+                    target =
+                            "Lnet/minecraft/client/renderer/chunk/VisGraph;setOpaque(Lnet/minecraft/core/BlockPos;)V"))
+    private void
+    primept$discardOccluder(VisGraph graph, BlockPos position, Operation<Void> original,
+                            @Local(argsOnly = true) VertexSorting sorting) {
+        if (!TerrainRasterOutput.omitVisibility(sorting))
+            original.call(graph, position);
+    }
+
+    @WrapOperation(
+            method = "compile",
+            at = @At(
+                    value = "INVOKE",
+                    target =
+                            "Lnet/minecraft/client/renderer/chunk/VisGraph;resolve()Lnet/minecraft/client/renderer/chunk/VisibilitySet;"))
+    private VisibilitySet
+    primept$discardVisibility(VisGraph graph, Operation<VisibilitySet> original,
+                              @Local(argsOnly = true) VertexSorting sorting) {
+        // The private owner consumes only release(); no raster occlusion graph consumes this result.
+        return TerrainRasterOutput.omitVisibility(sorting) ? null : original.call(graph);
     }
 }

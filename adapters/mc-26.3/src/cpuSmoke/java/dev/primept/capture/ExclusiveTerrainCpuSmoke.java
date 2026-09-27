@@ -25,6 +25,7 @@ final class ExclusiveTerrainCpuSmoke {
         BlockEntityCandidatesCpuSmoke.run();
         TerrainRasterCpuSmoke.run();
         TerrainEmptyCpuSmoke.run();
+        TerrainCompilerCpuSmoke.run();
         var changes = new SectionChanges();
         long a = SectionPos.asLong(1, 4, 2), b = SectionPos.asLong(1, 5, 2),
              c = SectionPos.asLong(3, 4, 2);

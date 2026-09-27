@@ -190,7 +190,7 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             if (PROFILE)
                 snapshotTime += System.nanoTime() - snapshotStart;
             long compileStart = PROFILE ? System.nanoTime() : 0;
-            workers.run(inputs.size(), 8, (workspace, start, end) -> {
+            workers.runBalanced(inputs.size(), 1, (workspace, start, end) -> {
                 for (int i = start; i < end; i++) {
                     var input = inputs.get(i);
                     if (input.region == null) {

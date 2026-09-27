@@ -70,7 +70,7 @@ op7 仍以每条 128 字节传输本次变化实例的完整源状态；native �
 
 方块实体由列加载/卸载、真实成员增删和资源 epoch 驱动索引。默认纯距离类型仅检索邻近列；无 renderer 的已知类型不进入候选。真实 dispatcher 仍处理球形范围、removed/global、破坏覆盖与提取回调，原列/成员顺序保留。未知类、源 getter、自定义距离及外部可变 map 别名不使用该缓存；全局对象保持独立路径。成员变化在下一次候选封批时求值，不每帧重新遍历全部加载列。
 
-私有源 compiler 的排序参数及 `MeshData`/compiler 能力均得到证明时，可省去不会被消费的透明索引排序。实际几何、tint、cull、模型选择与回调已经执行；未知改写或外部排序参数回到原始调用，普通 raster 顶点编码并未全面省略。
+私有源 compiler 的排序参数及 `MeshData`/compiler 能力均得到证明时，可省去不会被消费的透明索引排序。compiler、Results 与 VisGraph 能力也得到证明时，私有结果不构造原版 section 遮挡连通图，省略 setOpaque/resolve 并留下未消费的空 visibilitySet；owner 只调用结果的 release，不交给原版遮挡图。实际几何、tint、面 cull、模型选择与回调保持执行；未知改写或外部排序参数回到原始调用，普通 raster 顶点编码与光栅光照计算并未全面省略。
 
 ## GPU 批量工作的范围
 

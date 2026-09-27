@@ -138,7 +138,7 @@ cargo run -p prime_tools --bin prime-pt-smoke -- smoke artifacts/smoke.png 32
 
 ## 同步工作池
 
-Rust 的 `PRIME_CPU_THREADS` 环境变量控制 native 私有 CPU 工作池；Java 的 `-PprimeptCompilerThreads=N`（对应 JVM `-Dprimept.compilerThreads=N`）控制私有地形编译工作池。二者默认取可用 CPU 数与 8 的较小值，设为 1 可验证串行路径，非法非正值拒绝。小批次直接执行；Java 按 MC 已确认的编译 worker 契约运行，模型实体和未知 consumer 不转移线程。每批所有任务在调用返回前汇合，GPU 资源分配/命令录制由 owner 执行。
+Rust 的 `PRIME_CPU_THREADS` 环境变量控制 native 私有 CPU 工作池；Java 的 `-PprimeptCompilerThreads=N`（对应 JVM `-Dprimept.compilerThreads=N`）控制私有地形编译工作池。二者默认取可用 CPU 数与 8 的较小值，设为 1 可验证串行路径，非法非正值拒绝。Rust 小批次直接执行；Java 地形的单项或单线程直接执行，多项按 section 逐项领取以平衡不均匀成本，仍按 MC 已确认的编译 worker 契约运行，模型实体和未知 consumer 不转移线程。每批所有任务在调用返回前汇合，GPU 资源分配/命令录制由 owner 执行。
 
 封闭源批次没有人为的跨帧工作配额。完整首载或大范围修改可能形成真实长帧，应记录其成本；工作池线程数、几何批次、在途 GPU 页与当前活跃内容不是同一数量。空闲池页保留历史峰值，renderer 销毁时再释放。
 
@@ -204,7 +204,7 @@ cargo test --release -p prime_vulkan --lib --locked packing_cost_matrix -- --ign
 
 地形 profile 单独记录脏通知、进入窗口/收到数据/卸载列、全量失效次数、本次选中段数、首次空段发布、保留空段和实际编译数。`snapshot` 包括 owner 分类、空段封包与邻域快照，`compileJoin` 是工作线程编译到全部汇合的墙钟时间，二者包含在 `total` 中；`max` 保留单次源准备峰值。CSV 的 `terrain_*_ns` 和相应计数逐帧保存；原有 `terrain_compilations` 是累计实际 compiler 调用量。窗口维护发生在提取阶段，不包含在这组源准备计时中，`mcBeforePT` 也不能代表完整 Minecraft CPU 时间。
 
-空段路径可用真实 Fabric 变换后的 CPU 夹具检查，仍在 preLaunch 退出，不启动游戏：
+空段路径可用真实 Fabric 变换后的 CPU 夹具检查，仍在 preLaunch 退出，不启动游戏。相同入口还比较连续分段/逐项领取及保留/丢弃原版遮挡图的四种组合，覆盖负载集中、交错、均匀与小批次。模型、染色与裁面走实际 compiler；逐 section 比较完整源包和回调数量。计时不包含邻域快照、FFM 或 GPU，不代表游戏 FPS：
 
 ```powershell
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeTerrainPerf=true --no-parallel

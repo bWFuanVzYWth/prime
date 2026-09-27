@@ -84,4 +84,70 @@ class SynchronousWorkersTest {
         }
         assertEquals(Integer.MAX_VALUE, count.get());
     }
+
+    @Test
+    void balancedItemsDoNotWaitForOneSlowPartitionAndNeverShareWorkspaces() throws Exception {
+        var remaining = new CountDownLatch(127);
+        var visits = new java.util.concurrent.atomic.AtomicIntegerArray(128);
+        var using = new java.util.concurrent.atomic.AtomicIntegerArray(4);
+        Thread owner = Thread.currentThread();
+        try (var workers = new SynchronousWorkers<>(4, index -> {
+                 assertSame(owner, Thread.currentThread());
+                 return new Workspace(index, new AtomicInteger());
+             })) {
+            for (int repeat = 0; repeat < 2; repeat++) {
+                workers.runBalanced(128, 1, (workspace, first, end) -> {
+                    assertEquals(1, using.incrementAndGet(workspace.index));
+                    try {
+                        for (int i = first; i < end; i++) {
+                            if (i == 0) {
+                                try {
+                                    assertTrue(remaining.await(5, TimeUnit.SECONDS),
+                                               "Later items must progress while the first is busy");
+                                } catch (InterruptedException error) {
+                                    throw new AssertionError(error);
+                                }
+                            } else
+                                remaining.countDown();
+                            visits.incrementAndGet(i);
+                        }
+                    } finally {
+                        using.decrementAndGet(workspace.index);
+                    }
+                });
+                for (int i = 0; i < visits.length(); i++)
+                    assertEquals(repeat + 1, visits.get(i));
+            }
+        }
+    }
+
+    @Test
+    void balancedFailureStillJoinsAndWideFinalGrainDoesNotOverflow() {
+        var finished = new AtomicInteger();
+        try (var workers =
+                     new SynchronousWorkers<>(4, i -> new Workspace(i, new AtomicInteger()))) {
+            Thread.currentThread().interrupt();
+            try {
+                assertThrows(IllegalStateException.class,
+                             () -> workers.runBalanced(128, 1, (workspace, first, end) -> {
+                                 if (first == 0)
+                                     throw new IllegalStateException("Injected item failure");
+                                 finished.addAndGet(end - first);
+                             }));
+                assertTrue(Thread.currentThread().isInterrupted());
+                assertEquals(127, finished.get());
+            } finally {
+                Thread.interrupted();
+            }
+            var count = new java.util.concurrent.atomic.AtomicLong();
+            workers.runBalanced(Integer.MAX_VALUE, 1 << 28, (workspace, first, end) -> {
+                assertTrue(first >= 0 && end > first);
+                count.addAndGet(end - (long)first);
+            });
+            assertEquals(Integer.MAX_VALUE, count.get());
+            workers.runBalanced(0, 1, (workspace, first, end) -> fail("Empty work"));
+            assertThrows(IllegalArgumentException.class,
+                         () -> workers.runBalanced(1, 0, (workspace, first, end) -> {}));
+        }
+    }
 }

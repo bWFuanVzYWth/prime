@@ -117,14 +117,17 @@ final class TerrainEmptyCpuSmoke {
         var chunk = chunk(blank(ClientLevel.class), 0, 0);
         check(!ExclusiveTerrainCapture.knownEmpty(chunk, SectionPos.asLong(0, -4, 0), false),
               "An actual foreign compiler injection disables empty elision");
+        PrimeClient.CAPTURE.enable();
         int before = ForeignHookProbe.terrainCalls;
         try (var buffers = new SectionBufferBuilderPack();
              var output = TerrainRasterOutput.open()) {
-            new SectionCompiler(false, false, null, null, null)
-                    .compile(SectionPos.of(0, -4, 0),
-                             airRegion((ClientLevel)chunk.getLevel(), chunk), output.sorting,
-                             buffers)
-                    .release();
+            var result = new SectionCompiler(false, false, null, null, null)
+                                 .compile(SectionPos.of(0, -4, 0),
+                                          airRegion((ClientLevel)chunk.getLevel(), chunk),
+                                          output.sorting, buffers);
+            check(result.visibilitySet != null,
+                  "Unknown compiler consumers retain the actual raster visibility result");
+            result.release();
         }
         check(ForeignHookProbe.terrainCalls == before + 1,
               "Foreign compile callback executes exactly once");

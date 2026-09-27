@@ -5,6 +5,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntFunction;
 
 /** Explicit private workspaces; every submitted task is joined before returning, even on failure. */
@@ -23,6 +24,19 @@ public final class SynchronousWorkers<W extends AutoCloseable> implements AutoCl
             throw new IllegalArgumentException("Worker count must be positive");
         this.threads = threads;
         this.factory = factory;
+    }
+
+    /** Irregular independent items share a finite cursor; workspace ownership and the join stay local. */
+    public void runBalanced(int count, int grain, Work<W> work) {
+        if (threads == 1 || (long)count < 2L * grain) {
+            run(count, grain, work);
+            return;
+        }
+        var next = new AtomicLong();
+        run(count, grain, (workspace, first, end) -> {
+            for (long index; (index = next.getAndAdd(grain)) < count;)
+                work.run(workspace, (int)index, (int)Math.min((long)count, index + grain));
+        });
     }
 
     public void run(int count, int minimumChunk, Work<W> work) {
