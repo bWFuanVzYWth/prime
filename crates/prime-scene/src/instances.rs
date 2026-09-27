@@ -1,9 +1,11 @@
 //! Persistent instance state: pure batch validation, then one explicit mutation phase.
+use crate::incremental::ContextId;
 use crate::{
     protocol::{InstanceBatch, validate_triangle_capacity},
-    scene::{InstanceScene, Texture},
+    scene::{Instance, InstanceScene, Texture},
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Deref;
 
 const MAX_IDENTITIES: usize = 262_144;
 
@@ -14,6 +16,78 @@ pub struct InstanceContext {
     state: InstanceState,
     batch: InstanceBatch,
     scratch: PlanScratch,
+    publication: Publication,
+    pub(crate) texture_lifetime: crate::texture_lifetime::TextureLifetime,
+}
+
+/// A publication cursor cannot be manufactured from a source sequence or another owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InstanceCursor {
+    owner: ContextId,
+    sequence: u64,
+}
+
+#[derive(Default)]
+struct Changes {
+    prototypes: BTreeSet<u64>,
+    instances: BTreeSet<u64>,
+}
+
+#[derive(Default)]
+struct Publication {
+    owner: ContextId,
+    from: u64,
+    sequence: u64,
+    changes: Changes,
+    pending: Changes,
+}
+
+/// Read-only, owner-certified changes; standalone fixtures explicitly use full comparison.
+#[derive(Clone, Copy)]
+pub struct InstanceInput<'a> {
+    scene: &'a InstanceScene,
+    publication: Option<&'a Publication>,
+}
+impl Deref for InstanceInput<'_> {
+    type Target = InstanceScene;
+    fn deref(&self) -> &Self::Target {
+        self.scene
+    }
+}
+impl<'a> From<&'a InstanceScene> for InstanceInput<'a> {
+    fn from(scene: &'a InstanceScene) -> Self {
+        Self {
+            scene,
+            publication: None,
+        }
+    }
+}
+impl<'a> InstanceInput<'a> {
+    pub(crate) fn cursor(self) -> Option<InstanceCursor> {
+        self.publication.map(|p| InstanceCursor {
+            owner: p.owner,
+            sequence: p.sequence,
+        })
+    }
+    pub(crate) fn changes(
+        self,
+        cursor: Option<InstanceCursor>,
+    ) -> Option<(&'a BTreeSet<u64>, &'a BTreeSet<u64>)> {
+        let p = self.publication?;
+        let cursor = cursor?;
+        (cursor.owner == p.owner && cursor.sequence == p.from)
+            .then_some((&p.changes.prototypes, &p.changes.instances))
+    }
+}
+
+fn same_content(a: &Instance, b: &Instance) -> bool {
+    a.prototype_id == b.prototype_id
+        && a.origin == b.origin
+        && a.transform == b.transform
+        && a.texture_id == b.texture_id
+        && a.flags == b.flags
+        && a.tint == b.tint
+        && a.uv_transform == b.uv_transform
 }
 
 /// Published state is separate from reusable preparation storage, so planning can
@@ -71,6 +145,29 @@ impl InstanceContext {
         &self.state.scene
     }
 
+    /// Seal all accepted changes. No CPU consumer is allowed to mutate this publication.
+    /// A skipped consumer detects the cursor gap and resynchronizes from the resident state.
+    pub fn publish(&mut self) {
+        let p = &mut self.publication;
+        if p.pending.prototypes.is_empty() && p.pending.instances.is_empty() {
+            return;
+        }
+        std::mem::swap(&mut p.changes, &mut p.pending);
+        p.pending.prototypes.clear();
+        p.pending.instances.clear();
+        p.from = p.sequence;
+        p.sequence = self.state.sequence;
+    }
+
+    pub fn input(&self) -> InstanceInput<'_> {
+        let p = &self.publication;
+        InstanceInput {
+            scene: self.scene(),
+            publication: (p.pending.prototypes.is_empty() && p.pending.instances.is_empty())
+                .then_some(p),
+        }
+    }
+
     pub fn sequence(&self) -> u64 {
         self.state.sequence
     }
@@ -106,16 +203,52 @@ impl InstanceContext {
     fn apply(&mut self, plan: Plan) {
         let state = &mut self.state;
         for (id, prototype) in self.batch.prototypes.drain(..) {
+            for triangle in &*prototype.triangles {
+                self.texture_lifetime.acquire(triangle.texture_id);
+            }
+            if let Some(old) = state.scene.prototypes.get(&id) {
+                for triangle in &*old.triangles {
+                    self.texture_lifetime.release(triangle.texture_id);
+                }
+            }
+            self.publication.pending.prototypes.insert(id);
             state.scene.prototypes.insert(id, prototype);
         }
         for (id, _) in &self.batch.prototype_removals {
-            state.scene.prototypes.remove(id);
+            if let Some(old) = state.scene.prototypes.remove(id) {
+                for triangle in &*old.triangles {
+                    self.texture_lifetime.release(triangle.texture_id);
+                }
+                self.publication.pending.prototypes.insert(*id);
+            }
         }
         for (id, instance) in self.batch.instances.drain(..) {
+            if state
+                .scene
+                .instances
+                .get(&id)
+                .is_none_or(|old| !same_content(old, &instance))
+            {
+                self.publication.pending.instances.insert(id);
+            }
+            if state
+                .scene
+                .instances
+                .get(&id)
+                .is_none_or(|old| old.texture_id != instance.texture_id)
+            {
+                self.texture_lifetime.acquire(instance.texture_id);
+                if let Some(old) = state.scene.instances.get(&id) {
+                    self.texture_lifetime.release(old.texture_id);
+                }
+            }
             state.scene.instances.insert(id, instance);
         }
         for (id, _) in &self.batch.instance_removals {
-            state.scene.instances.remove(id);
+            if let Some(old) = state.scene.instances.remove(id) {
+                self.texture_lifetime.release(old.texture_id);
+                self.publication.pending.instances.insert(*id);
+            }
         }
         for &(id, count) in &self.scratch.counts {
             if count == 0 {

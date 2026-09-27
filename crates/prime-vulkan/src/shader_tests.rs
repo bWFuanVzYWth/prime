@@ -616,7 +616,12 @@ fn gpu_spawn_avoids_self_hits_without_skipping_nearby_occluders() {
                 },
             );
             let scene = Scene::default();
-            let mut geometry = Geometry::new(&context, (&scene).into()).unwrap();
+            let mut geometry = Geometry::new(
+                &context,
+                (&scene).into(),
+                Arc::new(prime_scene::workers::CpuWorkers::new(1).unwrap()),
+            )
+            .unwrap();
             geometry
                 .prepare_dynamic(
                     &context,

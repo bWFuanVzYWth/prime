@@ -4,6 +4,8 @@
   "compatibilityLevel": "JAVA_25",
   "client": [
     "SectionCompilerMixin",
+    "SectionCopyMixin",
+    "BlockEntityMembershipMixin",
     "GameRendererMixin",
     "LevelRendererMixin",
     "ExclusiveLevelExtractorMixin",

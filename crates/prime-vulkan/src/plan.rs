@@ -1,5 +1,8 @@
 //! GPU arena ranges and shader record packing. Spatial planning lives in prime_scene.
-use crate::{float, float4, uint};
+#[cfg(test)]
+use crate::float;
+use crate::{float4, uint};
+#[cfg(test)]
 use prime_scene::scene::Triangle;
 pub(crate) use prime_scene::translation::{ObjectKey, Placement, Planner, ScenePlan};
 use std::collections::BTreeMap;
@@ -54,6 +57,9 @@ impl Slots {
             free: BTreeMap::new(),
             limit,
         }
+    }
+    pub(crate) fn limit_value(&self) -> u32 {
+        self.limit
     }
     #[cfg(test)]
     pub(crate) fn limit(&self) -> u32 {
@@ -110,6 +116,7 @@ impl Slots {
 
 /// Slang Triangle ABI: position float4 x3, encoded tint float4 x3, UV x3,
 /// resolved texture index and source flags. The buffer is owned CPU scratch.
+#[cfg(test)]
 pub(crate) fn pack_triangle(bytes: &mut Vec<u8>, triangle: &Triangle, texture: u32) {
     for [x, y, z] in triangle.positions {
         float4(bytes, [x, y, z, 0.0]);

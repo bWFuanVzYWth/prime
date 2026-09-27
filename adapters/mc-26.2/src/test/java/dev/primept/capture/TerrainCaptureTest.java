@@ -88,7 +88,7 @@ class TerrainCaptureTest {
             scope.publish();
         }
         assertNotNull(inbox.failure());
-        assertNull(inbox.poll());
+        assertNull(CaptureInboxTest.take(inbox));
     }
 
     @Test
@@ -123,7 +123,7 @@ class TerrainCaptureTest {
         });
         // No active capture: a callback outside compile must neither publish nor complete the old quad.
         TerrainCapture.fabricTint(-1);
-        assertNull(inbox.poll());
+        assertNull(CaptureInboxTest.take(inbox));
         try (var scope = TerrainCapture.open(inbox, SECTION, true)) {
             TerrainCapture.beginVanilla(POSITION, -1);
             TerrainCapture.vanillaQuad(0, 0, 0, null, baked(Direction.UP, -1));
@@ -142,7 +142,7 @@ class TerrainCaptureTest {
             inbox.reset();
             scope.publish();
         }
-        assertNull(inbox.poll());
+        assertNull(CaptureInboxTest.take(inbox));
         assertNull(inbox.failure());
     }
 
@@ -165,7 +165,7 @@ class TerrainCaptureTest {
             scope.publish();
         }
         assertNull(inbox.failure());
-        var batch = inbox.poll();
+        var batch = CaptureInboxTest.take(inbox);
         assertEquals(1, batch.packets().size());
         var wire = ByteBuffer.wrap(batch.packets().getFirst()).order(ByteOrder.LITTLE_ENDIAN);
         assertEquals(8, wire.getInt(8));
@@ -236,10 +236,10 @@ class TerrainCaptureTest {
 
     private static byte[] onlyMesh(CaptureInbox inbox) {
         assertNull(inbox.failure());
-        var batch = inbox.poll();
+        var batch = CaptureInboxTest.take(inbox);
         assertNotNull(batch);
         assertEquals(1, batch.packets().size());
-        assertNull(inbox.poll());
+        assertNull(CaptureInboxTest.take(inbox));
         byte[] packet = batch.packets().getFirst();
         var wire = ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN);
         assertEquals(8, wire.getInt(8));

@@ -21,6 +21,10 @@ pub struct CompletedSample {
     pub serial: u64,
     /// Completed Vulkan timestamps, including incremental copies/AS builds.
     pub gpu_ns: u64,
+    /// Optional renderer intervals; require PRIME_PROFILE. Include dependencies,
+    /// and must not be interpreted as isolated AS or ray-tracing active time.
+    pub preparation_ns: Option<u64>,
+    pub render_ns: Option<u64>,
 }
 
 struct HostState {
@@ -63,7 +67,7 @@ pub struct HostBenchmark {
     height: u32,
     next_serial: u64,
     pending: [u64; IN_FLIGHT],
-    completed: BTreeMap<u64, u64>,
+    completed: BTreeMap<u64, CompletedSample>,
     poisoned: bool,
 }
 
@@ -203,14 +207,14 @@ impl HostBenchmark {
     pub fn enqueue_with_instances<'a>(
         &mut self,
         scene: impl Into<SceneInput<'a>>,
-        instances: &InstanceScene,
+        instances: impl Into<InstanceInput<'a>>,
         camera: &Camera,
         sample: u32,
     ) -> Result<HostSample, String> {
         if self.poisoned {
             return Err("Benchmark host is quarantined".into());
         }
-        let result = self.enqueue_inner(scene.into(), instances, camera, sample);
+        let result = self.enqueue_inner(scene.into(), instances.into(), camera, sample);
         if result.is_err() {
             self.poisoned = true;
         }
@@ -220,7 +224,7 @@ impl HostBenchmark {
     fn enqueue_inner(
         &mut self,
         scene: SceneInput<'_>,
-        instances: &InstanceScene,
+        instances: InstanceInput<'_>,
         camera: &Camera,
         sample: u32,
     ) -> Result<HostSample, String> {
@@ -370,6 +374,8 @@ impl HostBenchmark {
         state
             .retired_targets
             .retain(|(serial, _)| *serial > completed);
+        let renderer = state.renderer.as_mut().unwrap();
+        renderer.collect_timing(completed)?;
         for slot in 0..IN_FLIGHT {
             let serial = self.pending[slot];
             if serial == 0 || serial > completed {
@@ -390,7 +396,19 @@ impl HostBenchmark {
                 .unwrap_or(0);
             let gpu_ns = ((stamps[1].wrapping_sub(stamps[0]) & mask) as f64
                 * f64::from(state.owner.timestamp_period)) as u64;
-            self.completed.insert(serial, gpu_ns);
+            let intervals = renderer
+                .gpu_intervals
+                .iter()
+                .find(|value| value.serial == serial);
+            self.completed.insert(
+                serial,
+                CompletedSample {
+                    serial,
+                    gpu_ns,
+                    preparation_ns: intervals.map(|value| value.preparation_ns),
+                    render_ns: intervals.map(|value| value.render_ns),
+                },
+            );
             self.pending[slot] = 0;
         }
         Ok(())
@@ -413,10 +431,7 @@ impl HostBenchmark {
                 .as_mut()
                 .unwrap()
                 .collect_timing(self.next_serial - 1)?;
-            Ok(std::mem::take(&mut self.completed)
-                .into_iter()
-                .map(|(serial, gpu_ns)| CompletedSample { serial, gpu_ns })
-                .collect())
+            Ok(std::mem::take(&mut self.completed).into_values().collect())
         })();
         if result.is_err() {
             self.poisoned = true;
@@ -455,6 +470,251 @@ impl Drop for HostBenchmark {
 mod tests {
     use super::*;
     use prime_scene::scene::{SceneMesh, Texture, Triangle};
+
+    fn packet(op: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for value in [
+            prime_scene::protocol::MAGIC,
+            prime_scene::protocol::ABI_VERSION,
+            op,
+            0,
+        ] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(1_u64.to_le_bytes());
+        bytes
+    }
+    fn instance_batch(
+        sequence: u64,
+        ids: &[u64],
+        prototype: bool,
+        texture: u32,
+        offset: f32,
+        old: &[u64],
+    ) -> Vec<u8> {
+        let mut bytes = packet(7);
+        bytes.extend(sequence.to_le_bytes());
+        for count in [
+            if prototype { ids.len() } else { 0 },
+            old.len(),
+            ids.len(),
+            old.len(),
+        ] {
+            bytes.extend((count as u32).to_le_bytes());
+        }
+        if prototype {
+            for &id in ids {
+                bytes.extend(id.to_le_bytes());
+                bytes.extend(sequence.to_le_bytes());
+                bytes.extend(1_u32.to_le_bytes());
+                bytes.extend(0_u32.to_le_bytes());
+                for n in [0_u32, 0, 4, 96, 24, 0, 12, 16] {
+                    bytes.extend(n.to_le_bytes());
+                }
+                for face in 0..24 {
+                    for [x, y] in [[0_f32, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]] {
+                        // Distinct actual geometry, not just distinct prototype IDs.
+                        for v in [
+                            x * (1.0 + (id % 11) as f32 * 0.01),
+                            y,
+                            face as f32 * 0.01 + id as f32 * 0.000001,
+                        ] {
+                            bytes.extend(v.to_le_bytes());
+                        }
+                        bytes.extend([255; 4]);
+                        bytes.extend([0_u8; 8]);
+                    }
+                }
+            }
+        }
+        for &id in old {
+            bytes.extend(id.to_le_bytes());
+            bytes.extend(sequence.to_le_bytes());
+        }
+        for &id in ids {
+            for n in [id, sequence, id] {
+                bytes.extend(n.to_le_bytes());
+            }
+            for v in [
+                ((id - 1) % 32) as f64 * 2.0,
+                ((id - 1) / 32 % 32) as f64 * 2.0,
+                0.0,
+            ] {
+                bytes.extend(v.to_le_bytes());
+            }
+            for v in [
+                1_f32, 0.0, 0.0, offset, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+            ] {
+                bytes.extend(v.to_le_bytes());
+            }
+            bytes.extend(texture.to_le_bytes());
+            bytes.extend(0_u32.to_le_bytes());
+            bytes.extend([255; 4]);
+            bytes.extend(0_u32.to_le_bytes());
+            for v in [1_f32, 1.0, 0.0, 0.0] {
+                bytes.extend(v.to_le_bytes());
+            }
+        }
+        for &id in old {
+            bytes.extend(id.to_le_bytes());
+            bytes.extend(sequence.to_le_bytes());
+        }
+        bytes
+    }
+    #[test]
+    #[ignore = "requires a Vulkan ray-query GPU; native-1080p, two host submissions in flight"]
+    fn host_typed_deltas_texture_and_unique_prototype_churn_reuse_completed_pages() {
+        use prime_scene::{SourceScene, incremental::TranslatedScene};
+        let mut host = HostBenchmark::new(1920, 1080).unwrap();
+        let mut source = SourceScene::default();
+        source.submit(&packet(1)).unwrap();
+        let mut translated = TranslatedScene::default();
+        let camera = Camera {
+            position: [10.0, 10.0, 15.0],
+            forward: [0.0, 0.0, -1.0],
+            right: [1.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            vertical_fov_radians: 1.0,
+        };
+        let mut ids: Vec<u64> = (1..=1000).collect();
+        let mut old = Vec::new();
+        let mut peak_allocations = 0;
+        let mut peak_bytes = 0;
+        let mut peak_pages = 0;
+        let mut samples = Vec::new();
+        for frame in 0..40_u64 {
+            let texture = frame as u32 + 2;
+            let mut image = packet(4);
+            for n in [texture, 2, 2, 0] {
+                image.extend(n.to_le_bytes());
+            }
+            image.extend([texture as u8, 80, 100, 255].repeat(4));
+            source.submit(&image).unwrap();
+            if frame > 0 {
+                let mut retire = packet(9);
+                for n in [1, 0, texture - 1] {
+                    retire.extend(n.to_le_bytes());
+                }
+                source.submit(&retire).unwrap();
+            }
+            let replace = frame % 8 == 0;
+            if frame > 0 && replace {
+                old = std::mem::take(&mut ids);
+                ids = old.iter().map(|id| id + 1000).collect();
+            }
+            source
+                .submit(&instance_batch(
+                    frame * 2 + 1,
+                    &ids,
+                    replace,
+                    texture,
+                    0.0,
+                    if replace { &old } else { &[] },
+                ))
+                .unwrap();
+            // Mixed material-only changes above and sparse/full pose changes below share the same sealed publication.
+            let touched = [0, 1, 10, 1000][frame as usize % 4];
+            if touched > 0 {
+                source
+                    .submit(&instance_batch(
+                        frame * 2 + 2,
+                        &ids[..touched],
+                        false,
+                        texture,
+                        (frame + 1) as f32 * 0.001,
+                        &[],
+                    ))
+                    .unwrap();
+            }
+            translated.update(&mut source, [0.0; 3]).unwrap();
+            let sample = host
+                .enqueue_with_instances(
+                    translated.input(),
+                    source.instance_input(),
+                    &camera,
+                    324478056,
+                )
+                .unwrap();
+            samples.push((frame, touched, replace, sample));
+            let renderer = host.state.as_ref().unwrap().renderer.as_ref().unwrap();
+            let geometry = renderer.geometry.as_ref().unwrap();
+            let (pages, bytes) = geometry.assert_incremental_workspaces();
+            peak_pages = peak_pages.max(pages);
+            peak_bytes = peak_bytes.max(bytes);
+            peak_allocations = peak_allocations.max(
+                renderer
+                    .context
+                    .live_allocations
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            );
+            assert_eq!(
+                geometry.textures.retained_slots(),
+                (2, 5),
+                "retired texture slots reused across 40 distinct IDs"
+            );
+            assert_eq!(geometry.objects.instances.len(), 1000);
+            assert_eq!(geometry.objects.rebuilt, if replace { 1000 } else { 0 });
+        }
+        let completed: BTreeMap<_, _> = host
+            .drain()
+            .unwrap()
+            .into_iter()
+            .map(|s| (s.serial, s))
+            .collect();
+        let profiled = host
+            .state
+            .as_ref()
+            .unwrap()
+            .renderer
+            .as_ref()
+            .unwrap()
+            .host_query
+            != vk::QueryPool::null();
+        for sample in completed.values() {
+            assert_eq!(sample.preparation_ns.is_some(), profiled);
+            assert_eq!(sample.render_ns.is_some(), profiled);
+            if profiled {
+                assert!(
+                    sample.preparation_ns.unwrap() + sample.render_ns.unwrap() <= sample.gpu_ns + 2
+                );
+            }
+        }
+        if let Some(path) = std::env::var_os("PRIME_TYPED_HOST_CSV") {
+            use std::fmt::Write;
+            let mut csv = String::from(
+                "frame,serial,instances,changed_pose,rebuilt_blas,width,height,seed,cpu_record_ns,cpu_submit_ns,cpu_slot_wait_ns,gpu_ns,gpu_preparation_ns,gpu_render_ns\n",
+            );
+            for (frame, touched, replace, sample) in samples {
+                let gpu = &completed[&sample.serial];
+                writeln!(
+                    csv,
+                    "{frame},{},1000,{touched},{},1920,1080,324478056,{},{},{},{},{},{}",
+                    sample.serial,
+                    if replace { 1000 } else { 0 },
+                    sample.record_ns,
+                    sample.submit_ns,
+                    sample.slot_wait_ns,
+                    gpu.gpu_ns,
+                    gpu.preparation_ns
+                        .map_or_else(String::new, |v| v.to_string()),
+                    gpu.render_ns.map_or_else(String::new, |v| v.to_string())
+                )
+                .unwrap();
+            }
+            std::fs::write(path, csv).unwrap();
+        }
+        assert!(
+            peak_allocations < 80,
+            "physical allocations must not scale with 1000 BLAS: {peak_allocations}"
+        );
+        assert!(
+            peak_pages <= 6,
+            "churn cannot accumulate one page per generation: {peak_pages}"
+        );
+        println!(
+            "typed_host unique_blas=1000 triangles_per_blas=48 texture_ids=40 resident_textures=1 frames=40 in_flight=2 peak_vk_allocations={peak_allocations} peak_working_pages={peak_pages} peak_working_bytes={peak_bytes}"
+        );
+    }
 
     #[test]
     #[ignore = "requires an exclusive Vulkan ray-query GPU; run with synchronization validation"]
@@ -637,7 +897,7 @@ mod tests {
         // Static geometry stays absent and its identity does not change.
         for (frame, count) in [2, 4096, 17, 8192, 0, 32, 2, 0].into_iter().enumerate() {
             scene.dynamic.revision += 1;
-            scene.dynamic.triangles = make_mesh(count, 1).triangles;
+            scene.dynamic.triangles = Arc::new(make_mesh(count, 1).triangles.to_vec());
             scene.dynamic.origin = [frame as f64 * 0.01, 0.0, 0.0];
             host.enqueue(&scene, &camera, frame as u32).unwrap();
         }

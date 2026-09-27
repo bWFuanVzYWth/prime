@@ -202,7 +202,7 @@ public final class NativeSmoke {
             if (!rejected)
                 throw new AssertionError("Malformed packet must fail at the native boundary");
             System.out.println(
-                    "FFM Vulkan smoke passed: 63/64-section visibility gate, withdrawal/reload, complete-section, raw and persistent-instance packets -> Rust -> Slang -> RGBA; multi-layer op8/unchanged/material change/late rejection/removal, dynamic visibility, affine/texture instance, unchanged-frame zero-submit, atomic removal, alpha-zero visibility/shadows, owner-thread and malformed-input checks; " +
+                    "FFM Vulkan smoke passed: 63/64-section visibility gate, withdrawal/reload, complete-section, raw and persistent-instance packets -> Rust -> Slang -> RGBA; multi-layer op8/unchanged/material change/late rejection/removal, texture owner/reference retirement, bulk section removal and completion watermark, dynamic visibility, affine/texture instance, unchanged-frame zero-submit, atomic removal, alpha-zero visibility/shadows, owner-thread and malformed-input checks; " +
                     args[1]);
         }
     }
@@ -236,6 +236,9 @@ public final class NativeSmoke {
         if (Byte.toUnsignedInt(green[center + 1]) <= Byte.toUnsignedInt(green[center + 2]) ||
             Arrays.equals(blue, green))
             throw new AssertionError("Section material change was not visible");
+        bridge.submit(Packets.retireTextures(1, new int[] {9}));
+        if (!Arrays.equals(green, pixels(bridge, frame, output)))
+            throw new AssertionError("Texture owner retirement invalidated a live scene reference");
         // The first candidate layer differs. A failure in the final layer must publish neither change.
         ByteBuffer changedFloor =
                 ByteBuffer.allocate(floor.remaining()).order(ByteOrder.LITTLE_ENDIAN);
@@ -256,14 +259,30 @@ public final class NativeSmoke {
         byte[] empty = pixels(bridge, frame, output);
         if (Arrays.equals(baseline, empty))
             throw new AssertionError("Empty complete section did not clear geometry");
-        reject(bridge, Packets.mesh(1, 1, 5, 0, 0, 0, 4, 28, 0, 12, 16, 4, 0, 2, floor));
+        reject(bridge, Packets.sectionReplace(1, 1, 5, 0, 0, 0,
+                                              java.util.List.of(new Packets.SectionLayer(
+                                                      2, 1, 0, 4, 4, 28, 0, 12, 16, floor))));
         if (!Arrays.equals(empty, pixels(bridge, frame, output)))
             throw new AssertionError(
-                    "Legacy packet resurrected a layer after a newer complete section removal");
+                    "Stale packet resurrected a layer after a newer complete section removal");
         bridge.submit(Packets.sectionReplace(1, 1, 7, 0, 0, 0, List.of(ground)));
         if (!Arrays.equals(baseline, pixels(bridge, frame, output)))
             throw new AssertionError(
                     "Newer complete section did not restore the original geometry");
+        reject(bridge, Packets.sectionReplace(1, 1, 8, 0, 0, 0, List.of(ground, greenWall)));
+        if (!Arrays.equals(baseline, pixels(bridge, frame, output)))
+            throw new AssertionError("Collected texture was still accepted or changed the scene");
+
+        bridge.submit(Packets.removeSections(1, new long[] {1001, 1002}, new long[] {20, 21}));
+        bridge.submit(Packets.sectionWatermark(1, 21));
+        if (Arrays.equals(baseline, pixels(bridge, frame, output)))
+            throw new AssertionError("Bulk removal left a partially ready terrain cell visible");
+        reject(bridge, Packets.sectionReplace(1, 1001, 20, 0, 0, 16, List.of()));
+        bridge.submit(Packets.sectionReplace(1, 1001, 22, 0, 0, 16, List.of()));
+        bridge.submit(Packets.sectionReplace(1, 1002, 23, 0, 0, 32, List.of()));
+        if (!Arrays.equals(baseline, pixels(bridge, frame, output)))
+            throw new AssertionError(
+                    "New producers did not restore terrain after completed history retirement");
     }
 
     private static byte[] pixels(NativeBridge bridge, byte[] frame, ByteBuffer output) {

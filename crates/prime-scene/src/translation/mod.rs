@@ -2,6 +2,7 @@
 //! never source section coordinates, grid sizes, or capture callback semantics.
 
 mod objects;
+mod placements;
 mod terrain;
 
 pub use objects::{GeometryUpdate, ObjectKey, Placement, Planner, ScenePlan};

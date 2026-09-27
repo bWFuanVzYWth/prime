@@ -389,7 +389,7 @@ mod benchmark {
         format!("\"{}\"", value.replace('"', "\"\""))
     }
 
-    fn dynamic_triangles(count: u32, seed: u32) -> Arc<[Triangle]> {
+    fn dynamic_triangles(count: u32, seed: u32) -> Arc<Vec<Triangle>> {
         (0..count)
             .map(|index| {
                 let noise = hash(index ^ seed);
@@ -645,7 +645,7 @@ mod benchmark {
             )?);
         }
         if !options.dynamic_counts.is_empty() {
-            scene.dynamic.triangles = Arc::from([]);
+            scene.dynamic.triangles = Arc::default();
             scene.dynamic.revision += 1;
             isolated_frame(
                 &mut renderer,

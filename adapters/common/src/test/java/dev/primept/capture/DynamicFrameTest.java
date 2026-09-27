@@ -19,7 +19,7 @@ class DynamicFrameTest {
             var wire = frame.seal().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
             assertEquals(240, wire.remaining());
             assertEquals(Packets.MAGIC, wire.getInt(0));
-            assertEquals(1, wire.getInt(4));
+            assertEquals(Packets.ABI_VERSION, wire.getInt(4));
             assertEquals(6, wire.getInt(8));
             assertEquals(7, wire.getLong(16));
             assertEquals(19, wire.getLong(24));

@@ -56,7 +56,6 @@ fn allocations() -> [u64; 3] {
 }
 
 struct Options {
-    atomic: bool,
     sections: u32,
     updates: u32,
     quads: u32,
@@ -67,7 +66,6 @@ struct Options {
 impl Options {
     fn parse() -> Result<Self, Box<dyn Error>> {
         let mut options = Self {
-            atomic: false,
             sections: 1024,
             updates: 36,
             quads: 64,
@@ -79,19 +77,12 @@ impl Options {
         while let Some(key) = args.next() {
             if key == "--help" {
                 println!(
-                    "terrain-cpu --mode legacy|atomic [--sections 1024 --updates 36 --quads 64 --samples 60 --warmup 10 --csv output.csv]\nThree layers per section, deterministic fixture; same content, one layer tint change, all layers geometry change. Measures SourceScene.submit plus conditional translate when source revision changes, including prior snapshot retirement. Packet construction, retained-Arc checks, CSV, Java/FFM/GPU excluded; never interpreted as FPS. Use --no-default-features."
+                    "terrain-cpu [--sections 1024 --updates 36 --quads 64 --samples 60 --warmup 10 --csv output.csv]\nThree layers per section, deterministic fixture; same content, one layer tint change, all layers geometry change. Measures SourceScene.submit plus conditional translate when source revision changes, including prior snapshot retirement. Packet construction, retained-Arc checks, CSV, Java/FFM/GPU excluded; never interpreted as FPS. Use --no-default-features."
                 );
                 std::process::exit(0);
             }
             let value = args.next().ok_or("missing argument value")?;
             match key.as_str() {
-                "--mode" => {
-                    options.atomic = match value.as_str() {
-                        "legacy" => false,
-                        "atomic" => true,
-                        _ => return Err("mode must be legacy or atomic".into()),
-                    }
-                }
                 "--sections" => options.sections = value.parse()?,
                 "--updates" => options.updates = value.parse()?,
                 "--quads" => options.quads = value.parse()?,
@@ -116,7 +107,7 @@ impl Options {
 }
 fn header(op: u32) -> Vec<u8> {
     let mut bytes = Vec::new();
-    for value in [MAGIC, 1, op, 0] {
+    for value in [MAGIC, prime_scene::protocol::ABI_VERSION, op, 0] {
         bytes.extend(value.to_le_bytes());
     }
     bytes.extend(1_u64.to_le_bytes());
@@ -154,12 +145,6 @@ fn packets(options: &Options, key: u64, sequence: u64, stage: &str, variant: boo
     }
     whole.extend(3_u32.to_le_bytes());
     whole.extend(0_u32.to_le_bytes());
-    if !options.atomic {
-        let mut remove = header(3);
-        remove.extend(key.to_le_bytes());
-        remove.extend((sequence - 1).to_le_bytes());
-        packets.push(remove);
-    }
     for layer in 0..3_u32 {
         let raw = vertices(
             options.quads,
@@ -170,33 +155,17 @@ fn packets(options: &Options, key: u64, sequence: u64, stage: &str, variant: boo
             },
             stage == "geometry_all_layers" && variant,
         );
-        if options.atomic {
-            for value in [layer, 0, layer, 4, options.quads * 4, 24, 0, 12, 16, 0] {
-                whole.extend(value.to_le_bytes());
-            }
-            whole.extend(raw);
-        } else {
-            let mut bytes = header(2);
-            bytes.extend(key.to_le_bytes());
-            bytes.extend(sequence.to_le_bytes());
-            for value in origin {
-                bytes.extend(value.to_le_bytes());
-            }
-            for value in [options.quads * 4, 24, 0, 12, 16, 4, 0, layer, layer, 0] {
-                bytes.extend(value.to_le_bytes());
-            }
-            bytes.extend(raw);
-            packets.push(bytes);
+        for value in [layer, 0, layer, 4, options.quads * 4, 24, 0, 12, 16, 0] {
+            whole.extend(value.to_le_bytes());
         }
+        whole.extend(raw);
     }
-    if options.atomic {
-        packets.push(whole);
-    }
+    packets.push(whole);
     packets
 }
 fn main() -> Result<(), Box<dyn Error>> {
     let options = Options::parse()?;
-    let mode = if options.atomic { "atomic" } else { "legacy" };
+    let mode = "atomic";
     let mut csv = String::from(
         "mode,stage,sections,updated_sections,quads_per_layer,sample,warmup,packets,wire_bytes,submit_ns,translate_ns,total_ns,allocations,reallocations,requested_bytes,source_revision_delta,retained_updated_layers\n",
     );
@@ -245,14 +214,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .iter()
                 .filter(|(key, lease)| Arc::ptr_eq(lease, &translated.meshes[key].triangles))
                 .count();
-            let expected_retained = if options.atomic {
+            let expected_retained = {
                 match stage {
                     "identical" => options.updates * 3,
                     "tint_one_layer" => options.updates * 2,
                     _ => 0,
                 }
-            } else {
-                0
             };
             assert_eq!(retained, expected_retained as usize);
             assert_eq!(

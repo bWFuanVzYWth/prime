@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 fn header(op: u32, epoch: u64) -> Vec<u8> {
     let mut bytes = Vec::new();
-    for value in [MAGIC, 1, op, 0] {
+    for value in [MAGIC, prime_scene::protocol::ABI_VERSION, op, 0] {
         bytes.extend(value.to_le_bytes());
     }
     bytes.extend(epoch.to_le_bytes());
@@ -690,5 +690,233 @@ fn nonadjacent_duplicate_conflicts_and_late_record_errors_preserve_the_next_vali
     assert!(!source.instances().instances.contains_key(&20));
     for (id, value) in updates {
         assert_eq!(source.instances().instances[&id], value);
+    }
+}
+
+#[test]
+fn typed_instance_publications_preserve_field_work_and_stable_slots() {
+    use prime_scene::{
+        Scene,
+        translation::{BatchLimits, Planner},
+    };
+    let mut context = InstanceContext::new(1);
+    let textures = BTreeMap::new();
+    let mut values: Vec<_> = (1..=10_000).map(|id| (id, instance(1, 10))).collect();
+    context
+        .submit(
+            &batch(1, 1, &[prototype(10, 1, 0, 1.0)], &[], &values, &[]),
+            &textures,
+            0,
+        )
+        .unwrap();
+    context.publish();
+    let mut planner = Planner::new(BatchLimits {
+        triangles: 1024,
+        placements: 20_000,
+    })
+    .unwrap();
+    let mut scene = Scene {
+        epoch: 1,
+        anchor: [29_999_744.0, 0.0, 0.0],
+        ..Default::default()
+    };
+    let initial = planner.plan(&scene, context.input()).unwrap();
+    assert_eq!(initial.poses_evaluated, 10_000);
+    planner.recycle(initial);
+    let mut sequence = 1;
+    for changed in [0, 1, 100, 10_000] {
+        sequence += 1;
+        for (_, value) in &mut values[..changed] {
+            value.transform[3] += 0.125;
+        }
+        if changed != 0 {
+            context
+                .submit(
+                    &batch(1, sequence, &[], &[], &values[..changed], &[]),
+                    &textures,
+                    0,
+                )
+                .unwrap();
+        }
+        context.publish();
+        let plan = planner.plan(&scene, context.input()).unwrap();
+        assert_eq!(plan.instances_visited, changed);
+        assert_eq!(plan.poses_evaluated, changed);
+        assert_eq!(plan.changes.len(), changed);
+        assert!(plan.changes.iter().all(|c| c.transform && !c.material));
+        assert!(plan.geometry.is_empty());
+        planner.recycle(plan);
+    }
+    values[7].1.tint = [11, 22, 33, 44];
+    values[7].1.uv_transform[2] = 0.75;
+    sequence += 1;
+    context
+        .submit(
+            &batch(1, sequence, &[], &[], &values[7..8], &[]),
+            &textures,
+            0,
+        )
+        .unwrap();
+    context.publish();
+    let material = planner.plan(&scene, context.input()).unwrap();
+    assert_eq!(
+        (material.instances_visited, material.poses_evaluated),
+        (1, 0)
+    );
+    assert!(!material.tlas_changed);
+    assert_eq!(material.changes.len(), 1);
+    assert!(material.changes[0].material && !material.changes[0].transform);
+    let stable = material.changes[0].slot;
+    planner.recycle(material);
+    values[7].1.origin[0] += 128.0;
+    values[7].1.transform[0] = -2.0;
+    sequence += 1;
+    context
+        .submit(
+            &batch(1, sequence, &[], &[], &values[7..8], &[]),
+            &textures,
+            0,
+        )
+        .unwrap();
+    context.publish();
+    let moved = planner.plan(&scene, context.input()).unwrap();
+    assert_eq!(moved.changes[0].slot, stable);
+    assert_eq!(moved.poses_evaluated, 1);
+    assert_eq!(planner.instance_cells().count(), 2);
+    planner.recycle(moved);
+    sequence += 1;
+    context
+        .submit(
+            &batch(1, sequence, &[], &[], &[], &[(1, sequence)]),
+            &textures,
+            0,
+        )
+        .unwrap();
+    context.publish();
+    let removed = planner.plan(&scene, context.input()).unwrap();
+    assert_eq!((removed.instances_visited, removed.poses_evaluated), (1, 0));
+    assert_eq!(removed.changes.len(), 1); // swap only the tail, no full compaction
+    assert_eq!(planner.placement_count(), 9_999);
+    planner.recycle(removed);
+    scene.anchor[0] += 256.0;
+    let rebase = planner.plan(&scene, context.input()).unwrap();
+    assert_eq!(rebase.poses_evaluated, 9_999);
+    assert!(rebase.changes.iter().all(|c| c.transform && !c.material));
+}
+
+#[test]
+fn instance_cursor_gaps_and_failed_batches_cannot_lose_invalidations() {
+    use prime_scene::{
+        Scene,
+        translation::{BatchLimits, Planner},
+    };
+    let mut context = InstanceContext::new(1);
+    let textures = BTreeMap::new();
+    let scene = Scene {
+        epoch: 1,
+        anchor: [29_999_744.0, 0.0, 0.0],
+        ..Default::default()
+    };
+    let mut planner = Planner::new(BatchLimits {
+        triangles: 1024,
+        placements: 100,
+    })
+    .unwrap();
+    context
+        .submit(
+            &batch(
+                1,
+                1,
+                &[prototype(10, 1, 0, 1.0)],
+                &[],
+                &[(1, instance(1, 10)), (2, instance(1, 10))],
+                &[],
+            ),
+            &textures,
+            0,
+        )
+        .unwrap();
+    context.publish();
+    let first = planner.plan(&scene, context.input()).unwrap();
+    planner.recycle(first);
+    context
+        .submit(&batch(1, 2, &[], &[], &[], &[(1, 2)]), &textures, 0)
+        .unwrap();
+    context.publish();
+    let mut value = instance(3, 10);
+    value.tint = [0, 2, 3, 4];
+    context
+        .submit(&batch(1, 3, &[], &[], &[(2, value)], &[]), &textures, 0)
+        .unwrap();
+    context.publish();
+    let mut invalid = batch(1, 4, &[], &[], &[(2, instance(4, 10))], &[]);
+    invalid.pop();
+    assert!(context.submit(&invalid, &textures, 0).is_err());
+    let gap = planner.plan(&scene, context.input()).unwrap();
+    assert_eq!(planner.placement_count(), 1);
+    assert_eq!(planner.placements().next().unwrap().tint, [0, 2, 3, 4]);
+    planner.recycle(gap);
+    let clean = planner.plan(&scene, context.input()).unwrap();
+    assert_eq!(clean.instances_visited, 0);
+    assert!(clean.changes.is_empty());
+}
+
+#[test]
+fn retired_textures_survive_every_scene_reference_and_old_cpu_snapshot() {
+    use prime_scene::incremental::TranslatedScene;
+    let mut source = initialized();
+    source.submit(&texture(2)).unwrap();
+    source.submit(&texture(3)).unwrap();
+    let mut value = instance(2, 10);
+    value.texture_id = 3;
+    source
+        .submit(&batch(
+            1,
+            2,
+            &[prototype(10, 2, 2, 1.0)],
+            &[],
+            &[(20, value.clone())],
+            &[],
+        ))
+        .unwrap();
+    let frozen = source.translate([29_999_744.0, 0.0, 0.0]).unwrap();
+    let mut retired = header(9, 1);
+    for n in [2u32, 0, 2, 3] {
+        retired.extend(n.to_le_bytes());
+    }
+    source.submit(&retired).unwrap();
+    let mut translated = TranslatedScene::default();
+    translated
+        .update(&mut source, [29_999_744.0, 0.0, 0.0])
+        .unwrap();
+    assert_eq!(translated.input().textures.len(), 2);
+    value.texture_id = 0;
+    source
+        .submit(&batch(1, 3, &[], &[], &[(20, value)], &[]))
+        .unwrap();
+    translated
+        .update(&mut source, [29_999_744.0, 0.0, 0.0])
+        .unwrap();
+    assert!(translated.input().textures.contains_key(&2));
+    assert!(!translated.input().textures.contains_key(&3));
+    source
+        .submit(&batch(1, 4, &[], &[(10, 4)], &[], &[(20, 4)]))
+        .unwrap();
+    translated
+        .update(&mut source, [29_999_744.0, 0.0, 0.0])
+        .unwrap();
+    assert!(translated.input().textures.is_empty());
+    assert_eq!(&*frozen.textures[&2].pixels, &[20, 40, 80, 128]);
+    for id in 4..1004 {
+        source.submit(&texture(id)).unwrap();
+        let mut retire = header(9, 1);
+        for n in [1u32, 0, id] {
+            retire.extend(n.to_le_bytes());
+        }
+        source.submit(&retire).unwrap();
+        translated
+            .update(&mut source, [29_999_744.0, 0.0, 0.0])
+            .unwrap();
+        assert!(translated.input().textures.is_empty());
     }
 }

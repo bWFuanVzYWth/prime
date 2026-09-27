@@ -6,6 +6,10 @@ import net.minecraft.world.level.chunk.LevelChunk;
 
 /** Read-only access to shared world source data, used once when restoring a retired raster renderer. */
 public interface LoadedTerrainSnapshot {
+    default void primept$bindSourceWindow(java.util.function.Supplier<ColumnWindow> window) {}
+    default ColumnWindow primept$sourceWindow() {
+        return null;
+    }
     void primept$bindChunkStorage(AtomicReferenceArray<LevelChunk> chunks);
     void primept$restoreTerrainSnapshot(SectionOcclusionGraph graph);
 }

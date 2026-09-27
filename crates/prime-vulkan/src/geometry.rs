@@ -2,12 +2,12 @@
 use super::dynamic::TopLevel;
 use super::resources::{Acceleration, Buffer, Context};
 use super::textures::Textures;
-use super::{float, float4, uint};
 use crate::context::objects::Objects;
 use crate::cpu_profile::{FrameCpu, Stage};
 use crate::material_arena::{Allocation, MaterialArena};
 use crate::plan::{MAX_MATERIAL_RECORDS, OBJECT_BIT, validate_material_count};
 use ash::vk;
+use prime_scene::instances::InstanceInput;
 use prime_scene::{
     incremental::{SceneInput, ScenePublication},
     scene::{InstanceScene, Scene},
@@ -22,6 +22,11 @@ struct Cluster {
 }
 
 pub(super) struct Geometry {
+    workers: Arc<prime_scene::workers::CpuWorkers>,
+    pack_scratch: Vec<u8>,
+    indices: Buffer,
+    builds: crate::arena::Arena,
+    uploads: crate::arena::Arena,
     pub revision: ScenePublication,
     epoch: u64,
     anchor: [f64; 3],
@@ -41,8 +46,19 @@ pub(super) struct Geometry {
 }
 
 impl Geometry {
-    pub fn new(context: &Arc<Context>, scene: SceneInput<'_>) -> Result<Self, String> {
+    pub fn new(
+        context: &Arc<Context>,
+        scene: SceneInput<'_>,
+        workers: Arc<prime_scene::workers::CpuWorkers>,
+    ) -> Result<Self, String> {
+        let mut uploads = crate::arena::Arena::new(context, true);
+        let textures = Textures::new(context, scene.texture_input(), &mut uploads)?;
         let mut geometry = Self {
+            workers: workers.clone(),
+            pack_scratch: Vec::new(),
+            indices: crate::context::objects::index_buffer(context, 16)?,
+            builds: crate::arena::Arena::new(context, false),
+            uploads,
             revision: scene.publication(),
             epoch: scene.epoch,
             anchor: scene.anchor,
@@ -53,7 +69,7 @@ impl Geometry {
                 triangles_per_geometry: MAX_MATERIAL_RECORDS,
                 geometry_records: OBJECT_BIT - 1,
             })?,
-            objects: Objects::new(context)?,
+            objects: Objects::new(context, workers)?,
             instances: Vec::new(),
             top_dirty: true,
             static_count: 0,
@@ -66,11 +82,25 @@ impl Geometry {
                 vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                 false,
             )?,
-            textures: Textures::new(context, scene.texture_input())?,
+            textures,
             rebuilt_clusters: 0,
         };
         geometry.update(context, scene)?;
         Ok(geometry)
+    }
+    pub fn begin_frame(&mut self, context: &Context, completed: u64) {
+        let serial = context.retirement_serial();
+        self.builds.begin(completed, serial);
+        self.uploads.begin(completed, serial);
+    }
+    #[cfg(test)]
+    pub fn assert_incremental_workspaces(&self) -> (usize, u64) {
+        self.top
+            .assert_current_input(&self.instances, &self.objects.instances);
+        (
+            self.builds.page_count() + self.uploads.page_count(),
+            self.builds.reserved_bytes() + self.uploads.reserved_bytes(),
+        )
     }
     pub fn needs_update(&self, scene: SceneInput<'_>) -> bool {
         self.revision != scene.publication() || self.anchor != scene.anchor
@@ -84,25 +114,23 @@ impl Geometry {
             return Err("Invalid scene anchor".into());
         }
         if self.epoch != scene.epoch {
-            self.textures = Textures::new(context, scene.texture_input())?;
+            self.textures = Textures::new(context, scene.texture_input(), &mut self.uploads)?;
         } else {
-            self.textures.update(context, scene.texture_input())?;
+            self.textures
+                .update(context, scene.texture_input(), &mut self.uploads)?;
         }
         let plan = self.static_planner.plan_input(scene)?;
-        // The executor owns device budgets; translation owns spatial membership and splitting.
-        if self.static_planner.placements().len().saturating_add(160)
-            > context.max_memory_allocations as usize
-        {
-            return Err("Scene exceeds the device memory allocation budget".into());
-        }
         self.top_dirty |= plan.placements_changed;
         if self.epoch != scene.epoch {
-            self.clusters.clear();
+            for (_, old) in std::mem::take(&mut self.clusters) {
+                old.acceleration.retire(&mut self.builds);
+            }
             self.materials = MaterialArena::new();
             self.epoch = scene.epoch;
         }
         for key in &plan.removed {
             if let Some(old) = self.clusters.remove(key) {
+                old.acceleration.retire(&mut self.builds);
                 for allocation in old.allocations {
                     self.materials.free(allocation);
                 }
@@ -111,6 +139,7 @@ impl Geometry {
         let mut allocated_changes = Vec::with_capacity(plan.geometry.len());
         for update in &plan.geometry {
             if let Some(old) = self.clusters.remove(&update.key) {
+                old.acceleration.retire(&mut self.builds);
                 for allocation in old.allocations {
                     self.materials.free(allocation);
                 }
@@ -126,10 +155,18 @@ impl Geometry {
             allocated_changes.push((update, allocations));
         }
         self.rebuilt_clusters = allocated_changes.len() as u32;
-        // Bound transient VkDeviceMemory allocations; clusters retain one BLAS allocation.
-        // This batches independently prepared builds rather than waiting per section.
+        let largest = allocated_changes
+            .iter()
+            .flat_map(|(update, _)| &update.geometries)
+            .map(|g| g.triangle_count)
+            .max()
+            .unwrap_or(0);
+        if u64::from(largest) * 12 > self.indices.size {
+            self.indices = crate::context::objects::index_buffer(context, largest)?;
+        }
+        // Each wave completes CPU preparation synchronously. Its GPU resources retain
+        // their real submission lifetime; wave size is not a live-allocation bound.
         for batch in allocated_changes.chunks(32) {
-            let mut inputs = Vec::new();
             let mut uploads = Vec::new();
             let mut prepared = Vec::new();
             for (update, allocations) in batch {
@@ -138,75 +175,44 @@ impl Geometry {
                     .iter()
                     .map(|g| g.triangle_count as usize)
                     .sum();
-                let mut vertices = Vec::with_capacity(count * 36);
-                let mut materials = Vec::with_capacity(count * 128);
-                for geometry in &update.geometries {
-                    for member in &geometry.members {
-                        let offset = member.offset;
-                        for triangle in &member.triangles[member.range.clone()] {
-                            if triangle.flags != geometry.flags {
-                                return Err("Mesh material flags must be uniform".into());
-                            }
-                            for position in triangle.positions {
-                                let position =
-                                    std::array::from_fn::<_, 3, _>(|i| position[i] + offset[i]);
-                                if position.iter().any(|p| !p.is_finite()) {
-                                    return Err("Non-finite vertex".into());
-                                }
-                                for value in position {
-                                    float(&mut vertices, value);
-                                }
-                                float4(
-                                    &mut materials,
-                                    [position[0], position[1], position[2], 0.0],
-                                );
-                            }
-                            for color in triangle.colors {
-                                if color
-                                    .iter()
-                                    .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
-                                {
-                                    return Err("Invalid vertex tint".into());
-                                }
-                                float4(&mut materials, color);
-                            }
-                            for uv in triangle.uvs {
-                                if uv.iter().any(|v| !v.is_finite()) {
-                                    return Err("Invalid texture coordinate".into());
-                                }
-                                for value in uv {
-                                    float(&mut materials, value);
-                                }
-                            }
-                            uint(&mut materials, self.textures.index(triangle.texture_id)?);
-                            uint(&mut materials, triangle.flags);
-                        }
-                    }
-                }
-                let input = Buffer::upload(
-                    context,
-                    &vertices,
-                    vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
-                        | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                self.pack_scratch.resize(
+                    count
+                        .checked_mul(128)
+                        .ok_or("Static packing byte overflow")?,
+                    0,
+                );
+                let sources: Vec<_> = update
+                    .geometries
+                    .iter()
+                    .flat_map(|geometry| {
+                        geometry.members.iter().map(|member| crate::packing::Input {
+                            triangles: &member.triangles[member.range.clone()],
+                            offset: Some(member.offset),
+                            flags: Some(geometry.flags),
+                        })
+                    })
+                    .collect();
+                crate::packing::pack_ranges(
+                    &self.workers,
+                    &mut self.pack_scratch,
+                    &sources,
+                    &self.textures.indices,
                 )?;
                 let mut geometries = Vec::with_capacity(update.geometries.len());
                 let mut counts = Vec::with_capacity(update.geometries.len());
-                let mut vertex_offset = 0u64;
-                for geometry in &update.geometries {
+                for (geometry, &allocation) in update.geometries.iter().zip(allocations) {
                     let count = geometry.triangle_count;
                     let triangles = vk::AccelerationStructureGeometryTrianglesDataKHR::default()
                         .vertex_format(vk::Format::R32G32B32_SFLOAT)
                         .vertex_data(vk::DeviceOrHostAddressConstKHR {
-                            device_address: input.address() + vertex_offset,
+                            device_address: self.materials.address(allocation),
                         })
-                        .vertex_stride(12)
-                        .max_vertex(
-                            count
-                                .checked_mul(3)
-                                .and_then(|n| n.checked_sub(1))
-                                .ok_or("Static BLAS vertex index overflow")?,
-                        )
-                        .index_type(vk::IndexType::NONE_KHR);
+                        .vertex_stride(16)
+                        .max_vertex(count * 8 - 1)
+                        .index_type(vk::IndexType::UINT32)
+                        .index_data(vk::DeviceOrHostAddressConstKHR {
+                            device_address: self.indices.address(),
+                        });
                     geometries.push(
                         vk::AccelerationStructureGeometryKHR::default()
                             .geometry_type(vk::GeometryTypeKHR::TRIANGLES)
@@ -218,19 +224,22 @@ impl Geometry {
                             .geometry(vk::AccelerationStructureGeometryDataKHR { triangles }),
                     );
                     counts.push(count);
-                    vertex_offset += u64::from(count) * 36;
                 }
                 prepared.push((
                     update.key,
                     allocations,
-                    Acceleration::prepare_geometries(context, geometries, &counts)?,
+                    Acceleration::prepare_geometries(
+                        context,
+                        &mut self.builds,
+                        geometries,
+                        &counts,
+                    )?,
                 ));
-                uploads.push(Buffer::upload(
-                    context,
-                    &materials,
-                    vk::BufferUsageFlags::TRANSFER_SRC,
-                )?);
-                inputs.push(input);
+                let upload = self
+                    .uploads
+                    .allocate(context, self.pack_scratch.len() as u64, 16)?;
+                upload.write(&self.pack_scratch)?;
+                uploads.push(upload);
             }
             context.submit_named("dirty_clusters", |command| unsafe {
                 for ((_, allocations, _), upload) in prepared.iter().zip(&uploads) {
@@ -239,28 +248,31 @@ impl Geometry {
                         let size = u64::from(allocation.count) * 128;
                         context.device.cmd_copy_buffer(
                             command,
-                            upload.buffer,
+                            upload.buffer.buffer,
                             self.materials.buffer(allocation).buffer,
                             &[vk::BufferCopy::default()
-                                .src_offset(offset)
+                                .src_offset(upload.offset + offset)
                                 .dst_offset(u64::from(allocation.first) * 128)
                                 .size(size)],
                         );
                         offset += size;
                     }
                 }
+                transfer_barrier(context, command);
                 for (_, _, build) in &prepared {
                     build.record_unbarriered(command);
                 }
                 Acceleration::read_barrier(context, command);
-                transfer_barrier(context, command);
             })?;
+            for upload in uploads {
+                self.uploads.retire(upload);
+            }
             for (key, allocations, build) in prepared {
                 self.clusters.insert(
                     key,
                     Cluster {
                         allocations: allocations.clone(),
-                        acceleration: build.finish(),
+                        acceleration: build.finish(&mut self.builds),
                     },
                 );
             }
@@ -308,17 +320,22 @@ impl Geometry {
                 false,
             )?;
         }
-        let bases_upload =
-            Buffer::upload(context, &static_bases, vk::BufferUsageFlags::TRANSFER_SRC)?;
+        let bases_upload = self
+            .uploads
+            .allocate(context, static_bases.len() as u64, 16)?;
+        bases_upload.write(&static_bases)?;
         context.submit_named("static_cluster_bases", |command| unsafe {
             context.device.cmd_copy_buffer(
                 command,
-                bases_upload.buffer,
+                bases_upload.buffer.buffer,
                 self.static_bases.buffer,
-                &[vk::BufferCopy::default().size(static_bases.len() as u64)],
+                &[vk::BufferCopy::default()
+                    .src_offset(bases_upload.offset)
+                    .size(static_bases.len() as u64)],
             );
             transfer_barrier(context, command);
         })?;
+        self.uploads.retire(bases_upload);
         self.static_count = plan.triangle_count;
         self.static_planner.recycle(plan);
         self.revision = scene.publication();
@@ -326,30 +343,34 @@ impl Geometry {
         Ok(())
     }
 
-    pub fn prepare_dynamic(
+    pub fn prepare_dynamic<'a>(
         &mut self,
         context: &Arc<Context>,
         scene: &Scene,
-        objects: &InstanceScene,
+        objects: impl Into<InstanceInput<'a>>,
         slot: usize,
         cpu: &mut FrameCpu,
     ) -> Result<(bool, bool), String> {
         let (changed, mut bindings) = self.objects.prepare(
             context,
             scene,
-            objects,
+            objects.into(),
             &self.textures,
             slot,
-            self.clusters.len(),
+            &mut self.builds,
             cpu,
         )?;
         if self.top_dirty || changed {
             let started = cpu.start();
-            let count = self.instances.len();
-            self.instances.extend_from_slice(&self.objects.instances);
-            let result = self.top.rebuild(context, &self.instances, slot);
-            self.instances.truncate(count);
-            bindings |= result?;
+            bindings |= self.top.rebuild(
+                context,
+                &self.instances,
+                &self.objects.instances,
+                &self.objects.changed_instances,
+                self.top_dirty,
+                slot,
+                &mut self.builds,
+            )?;
             self.top_dirty = false;
             cpu.tlas_rebuilds += 1;
             cpu.finish(Stage::Tlas, started);
@@ -395,7 +416,8 @@ pub(super) unsafe fn transfer_barrier(context: &Context, command: vk::CommandBuf
     let barrier = [vk::MemoryBarrier::default()
         .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
         .dst_access_mask(
-            vk::AccessFlags::SHADER_READ
+            vk::AccessFlags::ACCELERATION_STRUCTURE_READ_KHR
+                | vk::AccessFlags::SHADER_READ
                 | vk::AccessFlags::TRANSFER_READ
                 | vk::AccessFlags::TRANSFER_WRITE,
         )];
@@ -403,7 +425,9 @@ pub(super) unsafe fn transfer_barrier(context: &Context, command: vk::CommandBuf
         context.device.cmd_pipeline_barrier(
             command,
             vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::COMPUTE_SHADER | vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_KHR
+                | vk::PipelineStageFlags::COMPUTE_SHADER
+                | vk::PipelineStageFlags::TRANSFER,
             vk::DependencyFlags::empty(),
             &barrier,
             &[],
@@ -456,7 +480,7 @@ mod tests {
         };
         fn header(op: u32) -> Vec<u8> {
             let mut bytes = Vec::new();
-            for value in [MAGIC, 1, op, 0] {
+            for value in [MAGIC, prime_scene::protocol::ABI_VERSION, op, 0] {
                 bytes.extend(value.to_le_bytes());
             }
             bytes.extend(1_u64.to_le_bytes());
@@ -676,7 +700,7 @@ mod tests {
         scene.dynamic = prime_scene::scene::DynamicScene {
             revision: 1,
             origin: [16.0, 16.0, 10.0],
-            triangles: mesh(0.0, 0, [0.8, 0.5, 0.1, 1.0]).triangles,
+            triangles: Arc::new(mesh(0.0, 0, [0.8, 0.5, 0.1, 1.0]).triangles.to_vec()),
         };
         scene
             .ready_terrain
@@ -726,7 +750,7 @@ mod tests {
         scene.dynamic.revision += 1;
         renderer.render(&scene, &camera, 96, 64, 0).unwrap();
         assert_eq!(addresses(renderer.geometry.as_ref().unwrap()), retained);
-        scene.dynamic.triangles = Arc::from([]);
+        scene.dynamic.triangles = Arc::default();
         scene.dynamic.revision += 1;
         renderer.render(&scene, &camera, 96, 64, 0).unwrap();
         assert_eq!(addresses(renderer.geometry.as_ref().unwrap()), retained);

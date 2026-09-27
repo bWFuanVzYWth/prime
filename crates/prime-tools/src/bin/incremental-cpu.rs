@@ -13,6 +13,9 @@ use std::{
     time::Instant,
 };
 
+#[path = "../incremental_instances.rs"]
+mod instances;
+
 struct Allocator;
 static COUNT: AtomicBool = AtomicBool::new(false);
 static CALLS: AtomicU64 = AtomicU64::new(0);
@@ -46,7 +49,7 @@ static ALLOCATOR: Allocator = Allocator;
 
 fn header(op: u32) -> Vec<u8> {
     let mut bytes = Vec::new();
-    for value in [MAGIC, 1, op, 0] {
+    for value in [MAGIC, prime_scene::protocol::ABI_VERSION, op, 0] {
         bytes.extend(value.to_le_bytes());
     }
     bytes.extend(1_u64.to_le_bytes());
@@ -161,15 +164,17 @@ fn run(
 fn main() -> Result<(), Box<dyn Error>> {
     let mut csv_path = "artifacts/incremental-cpu.csv".to_string();
     let mut samples = 100_usize;
+    let mut instance_mode = false;
     let mut args = std::env::args().skip(1);
     while let Some(key) = args.next() {
         match key.as_str() {
             "--help" => {
                 println!(
-                    "incremental-cpu [--samples 100 --csv artifacts/incremental-cpu.csv]\nCompares complete snapshot and production incremental paths in the same build; fixed one-mesh edits at 1/16/512 cells, density 1/64. Every cell has 64 real source positions. Separate timed and allocation-counted passes; 10 warmups, raw samples retained. Setup/packets/CSV excluded; submit+translation+terrain planning+plan recycling included. This is a CPU microbenchmark, not game FPS or GPU rendering performance."
+                    "incremental-cpu [--instances] [--samples 100 --csv artifacts/incremental-cpu.csv]\nCompares complete snapshot and production incremental paths in the same build; fixed one-mesh edits at 1/16/512 cells, density 1/64. Every cell has 64 real source positions. Separate timed and allocation-counted passes; 10 warmups, raw samples retained. Setup/packets/CSV excluded; submit+translation+terrain planning+plan recycling included. This is a CPU microbenchmark, not game FPS or GPU rendering performance."
                 );
                 return Ok(());
             }
+            "--instances" => instance_mode = true,
             "--samples" => samples = args.next().ok_or("missing samples")?.parse()?,
             "--csv" => csv_path = args.next().ok_or("missing CSV path")?,
             _ => return Err(format!("unknown option {key}").into()),
@@ -178,18 +183,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     if !(1..=10_000).contains(&samples) {
         return Err("samples must be in 1..=10000".into());
     }
-    let mut csv = String::from(
-        "mode,cells,density,sample,warmup,allocation_instrumentation,submit_ns,translate_ns,plan_ns,total_ns,allocation_requests,requested_bytes,meshes_published,meshes_grouped,cells_grouped\n",
-    );
-    for count in [false, true] {
-        for cells in [1, 16, 512] {
-            for density in [1, 64] {
-                for incremental in [false, true] {
-                    run(cells, density, samples, incremental, count, &mut csv)?;
+    let csv = if instance_mode {
+        instances::measure(samples)?
+    } else {
+        let mut csv = String::from(
+            "mode,cells,density,sample,warmup,allocation_instrumentation,submit_ns,translate_ns,plan_ns,total_ns,allocation_requests,requested_bytes,meshes_published,meshes_grouped,cells_grouped\n",
+        );
+        for count in [false, true] {
+            for cells in [1, 16, 512] {
+                for density in [1, 64] {
+                    for incremental in [false, true] {
+                        run(cells, density, samples, incremental, count, &mut csv)?;
+                    }
                 }
             }
         }
-    }
+        csv
+    };
     let path = std::path::Path::new(&csv_path);
     if let Some(parent) = path
         .parent()

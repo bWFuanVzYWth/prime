@@ -271,7 +271,7 @@ public final class InstanceCapture implements AutoCloseable {
         frame.begin(size);
         ByteBuffer bytes = frame.bytes;
         bytes.putInt(Packets.MAGIC)
-                .putInt(1)
+                .putInt(Packets.ABI_VERSION)
                 .putInt(7)
                 .putInt(0)
                 .putLong(epoch)

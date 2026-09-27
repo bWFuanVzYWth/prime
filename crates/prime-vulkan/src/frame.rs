@@ -138,6 +138,7 @@ impl Renderer {
             context,
             pipeline,
             geometry: None,
+            workers: Arc::new(prime_scene::workers::CpuWorkers::configured()?),
             output: None,
             camera: None,
             samples: 0,
@@ -151,6 +152,7 @@ impl Renderer {
             failed: false,
             host_serials: [0; FRAME_SLOTS],
             query_serials: [0; FRAME_SLOTS],
+            gpu_intervals: [GpuIntervals::default(); FRAME_SLOTS],
             host_query: vk::QueryPool::null(),
             last_gpu_ns: 0,
             last_gpu_serial: 0,
@@ -165,7 +167,7 @@ impl Renderer {
                 result.context.device.create_query_pool(
                     &vk::QueryPoolCreateInfo::default()
                         .query_type(vk::QueryType::TIMESTAMP)
-                        .query_count((FRAME_SLOTS * 2) as u32),
+                        .query_count((FRAME_SLOTS * 3) as u32),
                     None,
                 )
             }
@@ -312,13 +314,14 @@ impl Renderer {
     pub fn render_with_instances<'a>(
         &mut self,
         scene: impl Into<SceneInput<'a>>,
-        instances: &InstanceScene,
+        instances: impl Into<InstanceInput<'a>>,
         camera: &Camera,
         width: u32,
         height: u32,
         sample_index: u32,
     ) -> Result<Vec<u8>, String> {
         let scene = scene.into();
+        let instances = instances.into();
         if self.failed || self.context.is_borrowed() {
             return Err(
                 "Readback requires a healthy, independently owned diagnostic renderer".into(),
@@ -336,12 +339,13 @@ impl Renderer {
     fn prepare(
         &mut self,
         scene: SceneInput<'_>,
-        instances: &InstanceScene,
+        instances: InstanceInput<'_>,
         camera: &Camera,
         width: u32,
         height: u32,
         sample_index: u32,
         slot: usize,
+        completed: u64,
         cpu: &mut FrameCpu,
     ) -> Result<(), String> {
         if camera
@@ -356,6 +360,9 @@ impl Renderer {
         {
             return Err("Camera contains invalid vectors or vertical FOV".into());
         }
+        if let Some(geometry) = &mut self.geometry {
+            geometry.begin_frame(&self.context, completed);
+        }
         if !self.scene_frozen || self.geometry.is_none() {
             let started = cpu.start();
             if self.geometry.as_ref().is_none_or(|g| g.needs_update(scene)) {
@@ -369,7 +376,8 @@ impl Renderer {
                     // End the previous CPU owner before constructing another cache domain.
                     // Borrowed GPU resources still retire by their recorded completion serials.
                     self.geometry.take();
-                    self.geometry = Some(Geometry::new(&self.context, scene)?);
+                    self.geometry =
+                        Some(Geometry::new(&self.context, scene, self.workers.clone())?);
                 }
                 self.samples = 0;
             }
@@ -657,7 +665,7 @@ impl Renderer {
     fn render_offline(
         &mut self,
         scene: SceneInput<'_>,
-        instances: &InstanceScene,
+        instances: InstanceInput<'_>,
         camera: &Camera,
         width: u32,
         height: u32,
@@ -677,6 +685,7 @@ impl Renderer {
             height,
             sample_index,
             0,
+            u64::MAX,
             &mut FrameCpu::default(),
         )?;
         let view = self.output.as_ref().unwrap().image.as_ref().unwrap().view;
@@ -750,7 +759,7 @@ impl Renderer {
     pub unsafe fn record_host_with_instances<'a>(
         &mut self,
         scene: impl Into<SceneInput<'a>>,
-        instances: &InstanceScene,
+        instances: impl Into<InstanceInput<'a>>,
         camera: &Camera,
         width: u32,
         height: u32,
@@ -761,6 +770,7 @@ impl Renderer {
         serial: u64,
     ) -> Result<(), String> {
         let scene = scene.into();
+        let instances = instances.into();
         if self.failed
             || !self.context.is_borrowed()
             || command == 0
@@ -799,7 +809,7 @@ impl Renderer {
                     self.geometry
                         .as_ref()
                         .unwrap()
-                        .cpu_load(&scene, instances, &cpu, uploaded),
+                        .cpu_load(&scene, &instances, &cpu, uploaded),
                 );
             }
         }
@@ -810,7 +820,7 @@ impl Renderer {
     fn record_host_frame(
         &mut self,
         scene: SceneInput<'_>,
-        instances: &InstanceScene,
+        instances: InstanceInput<'_>,
         camera: &Camera,
         width: u32,
         height: u32,
@@ -851,14 +861,14 @@ impl Renderer {
                 self.context.device.cmd_reset_query_pool(
                     command,
                     self.host_query,
-                    slot as u32 * 2,
-                    2,
+                    slot as u32 * 3,
+                    3,
                 );
                 self.context.device.cmd_write_timestamp(
                     command,
                     vk::PipelineStageFlags::TOP_OF_PIPE,
                     self.host_query,
-                    slot as u32 * 2,
+                    slot as u32 * 3,
                 );
             }
         }
@@ -872,12 +882,25 @@ impl Renderer {
             height,
             sample_index,
             slot,
+            completed,
             cpu,
         )?;
         let started = cpu.start();
         self.descriptors(slot, view);
         cpu.finish(Stage::Descriptors, started);
         let started = cpu.start();
+        if self.host_query != vk::QueryPool::null() {
+            // An interval boundary after upload/AS dependencies. This is elapsed
+            // queue time, not a sum of shader-active cycles or an isolated AS timer.
+            unsafe {
+                self.context.device.cmd_write_timestamp(
+                    command,
+                    vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                    self.host_query,
+                    slot as u32 * 3 + 1,
+                );
+            }
+        }
         self.dispatch(command, slot, true);
         unsafe {
             let after = [vk::MemoryBarrier::default()
@@ -897,7 +920,7 @@ impl Renderer {
                     command,
                     vk::PipelineStageFlags::BOTTOM_OF_PIPE,
                     self.host_query,
-                    slot as u32 * 2 + 1,
+                    slot as u32 * 3 + 2,
                 );
                 self.query_serials[slot] = serial;
             }
@@ -917,11 +940,11 @@ impl Renderer {
             if serial == 0 || serial > completed {
                 continue;
             }
-            let mut stamps = [0u64; 2];
+            let mut stamps = [0u64; 3];
             unsafe {
                 self.context.device.get_query_pool_results(
                     self.host_query,
-                    slot as u32 * 2,
+                    slot as u32 * 3,
                     &mut stamps,
                     vk::QueryResultFlags::TYPE_64,
                 )
@@ -930,10 +953,17 @@ impl Renderer {
             let mask = u64::MAX
                 .checked_shr(64 - self.context.timestamp_bits)
                 .unwrap_or(0);
+            let elapsed = |first: usize, last: usize| {
+                ((stamps[last].wrapping_sub(stamps[first]) & mask) as f64
+                    * f64::from(self.context.timestamp_period)) as u64
+            };
+            self.gpu_intervals[(serial % FRAME_SLOTS as u64) as usize] = GpuIntervals {
+                serial,
+                preparation_ns: elapsed(0, 1),
+                render_ns: elapsed(1, 2),
+            };
             if serial > self.last_gpu_serial {
-                self.last_gpu_ns = ((stamps[1].wrapping_sub(stamps[0]) & mask) as f64
-                    * f64::from(self.context.timestamp_period))
-                    as u64;
+                self.last_gpu_ns = elapsed(0, 2);
                 self.last_gpu_serial = serial;
             }
             self.query_serials[slot] = 0;

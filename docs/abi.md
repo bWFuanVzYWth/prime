@@ -1,15 +1,15 @@
-# FFM ABI v1
+# FFM ABI v2
 
 Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本号用于边界校验，不承诺不同发布之间的二进制兼容；不可仅凭版本号相同混用新旧 JAR 和引擎。双 Minecraft 适配器共享该构建的同一核心，不意味着共享不同发布的内部协议。
 
-导出原型以 [`prime.h`](../crates/prime-engine/include/prime.h) 为准。库名为 `prime_engine`，C 导出 `prime_*` 不变；26.2/26.3 适配器使用同一引擎。全部整数 little-endian，浮点 IEEE754，结构通过字节读取而非 C 对齐结构读取。长度为字节数，所有保留字段必须为零。`prime_create(1)` 返回非零 handle；status=0 成功，-1 失败。`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），输出容量允许时写入终止 NUL。
+导出原型以 [`prime.h`](../crates/prime-engine/include/prime.h) 为准。库名为 `prime_engine`，C 导出 `prime_*` 不变；26.2/26.3 适配器使用同一引擎。全部整数 little-endian，浮点 IEEE754，结构通过字节读取而非 C 对齐结构读取。长度为字节数，所有保留字段必须为零。`prime_create(2)` 返回非零 handle；status=0 成功，-1 失败。`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），输出容量允许时写入终止 NUL。
 
 ## 公共头（24 字节）
 
 | Offset | 类型 | 语义 |
 | --- | --- | --- |
 | 0 | u32 | magic `0x54505250`，字节 `PRPT` |
-| 4 | u32 | ABI version=1 |
+| 4 | u32 | ABI version=2 |
 | 8 | u32 | operation |
 | 12 | u32 | reserved=0 |
 | 16 | u64 | epoch；0 无效 |
@@ -17,39 +17,44 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本�
 ## 场景操作
 
 - **1 reset**：仅头部，epoch 必须严格增加；清空几何、纹理与 tombstone。
-- **2 mesh**：替换一个 `(section, layer)`；revision 必须大于同层已有 revision 和该 section 删除 revision。
-- **3 remove section**：头后 `section:u64, revision:u64`；删除全部层并撤销该段可用性，记录 tombstone。revision 必须大于已有层。
-- **4 texture**：头后 `id:u32, width:u32, height:u32, reserved:u32`，然后恰好 `width*height*4` 字节源编码 RGBA8。id=0 保留给白纹理。
+- **3 remove section**：头后 `section:u64, revision:u64`；删除全部层并撤销该段可用性，记录 tombstone。revision 必须晚于该段已有操作与完成水位。
+- **4 texture**：头后 `id:u32, width:u32, height:u32, reserved:u32`，然后恰好 `width*height*4` 字节源编码 RGBA8。id=0 保留给白纹理，UINT32_MAX 保留给实例继承标记；两者均不可上传。id=1 是当前 block atlas。
 - **6 dynamic snapshot**：原子替换原始动态回退几何，格式见下文；序号独立于静态区块 revision。
 - **7 instance delta**：原子发布局部几何原型及实例增量，格式见下文；与 op6 分别维护序号和场景。
 - **8 replace section**：一次原子替换 section 全部层；源操作顺序与内容 revision 分离，格式见下文。
+- **9 retire textures**：源 owner 释放纹理，实际回收还须等待场景引用消失。
+- **10 section completion**：生产者完成水位，允许回收已不可能被迟到工作引用的历史。
+- **11 remove sections**：同一包批量撤销多个 section，完整验证后发布。
 
-Mesh 的固定部分含头共 **104 字节**：
+ABI v2 删除无生产消费者的 op2，未知操作及历史 ABI 直接拒绝。
 
-| Offset | 类型 | 语义 |
-| --- | --- | --- |
-| 24 | u64 | section key（精确保留 Minecraft 打包身份） |
-| 32 | u64 | revision |
-| 40 | f64×3 | section 原点 XYZ（世界格单位） |
-| 64 | u32 | vertex_count |
-| 68 | u32 | vertex_stride |
-| 72 / 76 / 80 | u32 | position / RGBA8 color / UV offset |
-| 84 | u32 | topology：3 triangle，4 quad |
-| 88 | u32 | texture ID |
-| 92 | u32 | material：0 opaque、1 alpha cutout、2 stochastic alpha coverage；其他值拒绝 |
-| 96 | u32 | source layer |
-| 100 | u32 | reserved |
-| 104 | bytes | `vertex_count * stride` 原始字节 |
+## 公共顶点与材质语义
 
-Position 为 f32×3，UV 为 f32×2。当前两个 Java 适配器的静态地形和流体都输出 **stride24、position0、color12、uv16**；RGBA8 按 R/G/B/A 字节顺序保存作者颜色与源 tint 的编码域组合，排除原版 AO/方向明暗和 UV2 光照。source layer 使用公共协议常量 opaque=0、cutout=1、translucent=2，不传 MC enum ordinal。旧 26.2 BLOCK28 布局仍被显式 stride/offset 解码器支持并留有回归测试。quads 在 Rust 展开为 `(0,1,2), (2,3,0)`。
+各源 span 显式给出顶点数量、stride 和字段 offset；数据为恰好 `vertex_count*stride` 字节。topology=3 表示三角形、4 表示四边形；material=0 opaque、1 alpha cutout、2 stochastic alpha coverage，其他值拒绝。
+
+Position 为 f32×3，UV 为 f32×2。当前两个 Java 适配器的静态地形和流体都输出 **stride24、position0、color12、uv16**；RGBA8 按 R/G/B/A 字节顺序保存作者颜色与源 tint 的编码域组合，排除原版 AO/方向明暗和 UV2 光照。source layer 使用公共协议常量 opaque=0、cutout=1、translucent=2，不传 MC enum ordinal。显式 stride/offset 解码器也支持 BLOCK28 等合法源布局，并有行为回归测试；这不表示兼容旧 ABI。quads 在 Rust 展开为 `(0,1,2), (2,3,0)`。
 
 ## 原子 section 替换
 
-op=8 固定头共 **72 字节**：公共头后为 `section:u64`（24）、`sequence:u64`（32）、世界原点 `f64×3`（40/48/56）、`layer_count:u32`（64）、`reserved:u32=0`（68）。sequence 必须非零，并晚于该 section 的全部已有层与完整操作屏障。
+op=8 固定头共 **72 字节**：公共头后为 `section:u64`（24）、`sequence:u64`（32）、世界原点 `f64×3`（40/48/56）、`layer_count:u32`（64）、`reserved:u32=0`（68）。sequence 必须非零，并晚于该 section 的全部已有层、完整操作屏障以及 op10 完成水位。
 
-每层为 **40 字节描述 + 紧接的顶点字节**，无 padding。十个 u32 依次是 `layer_id, texture_id, material, topology, vertex_count, stride, position_offset, color_offset, uv_offset, reserved=0`。顶点及材质约束与 op2 相同，layer ID 不可重复。`layer_count=0` 清空几何并发布一个已完成的空 section，不能代替 op3 卸载；零顶点层等价于该层缺失。
+每层为 **40 字节描述 + 紧接的顶点字节**，无 padding。十个 u32 依次是 `layer_id, texture_id, material, topology, vertex_count, stride, position_offset, color_offset, uv_offset, reserved=0`。顶点及材质遵循上述公共语义，layer ID 不可重复。`layer_count=0` 清空几何并发布一个已完成的空 section，不能代替 op3 卸载；零顶点层等价于该层缺失。
 
-完整包、最终容量及引用验证成功后才原子发布。源序列始终推进；三角形、源 RGBA/UV、纹理/材质与原点逐字段相同的层保留原 Arc 和内容 revision，在可用性不变时不使渲染 scene 失效。首次完成的空段也会推进 scene revision，因为它可能使 64 段单元完整。忽略的布局 padding 与层顺序不参与内容身份。移除的层被清除，只有新增或变化层发布新内容。这个序列屏障也约束后续旧式 op2/op3，不能混用旧序列复活遗漏层。适配器用一个 op8 代替先 remove、再逐层 upsert。CPU 持有逐段快照；64 段就绪门槛和后续整格替换见 [空间合批](spatial-batching.md)。op2 单层更新本身不能声明完整段已就绪。
+完整包、最终容量及引用验证成功后才原子发布。源序列始终推进；三角形、源 RGBA/UV、纹理/材质与原点逐字段相同的层保留原 Arc 和内容 revision，在可用性不变时不使渲染 scene 失效。首次完成的空段也会推进 scene revision，因为它可能使 64 段单元完整。忽略的布局 padding 与层顺序不参与内容身份。移除的层被清除，只有新增或变化层发布新内容。这个序列屏障也约束 op3/op11，不能混用旧序列复活遗漏层。适配器用一个 op8 代替先 remove、再逐层 upsert。CPU 持有逐段快照；64 段就绪门槛和后续整格替换见 [空间合批](spatial-batching.md)。
+
+## 批量撤销与生产者完成证明
+
+op=11 公共头后为 `count:u32, reserved:u32=0`，再跟 count 条 `section:u64, sequence:u64`，每条 16 字节。同包 section 不得重复；每条序列必须晚于该段已有操作和完成水位。完整校验后一起撤销可用性与几何。跨包不提供事务；按 256 MiB 协议包上限分片不是逐帧工作配额。
+
+op=10 公共头后仅为 `completed_sequence:u64`。水位单调不减，表示此 epoch 内所有不晚于该值的生产者都已完成或取消，而且这些生产者被接受的结果已全部提交 native。Java 先提交封闭批次，再提交水位；失败不能确认。新回调进入下一批。水位不根据时间、渲染帧数或最大已见 sequence 猜测，也允许覆盖只产生撤销/取消的序列。
+
+Rust 丢弃不晚于水位的删除历史，后续对应旧包仍被全局水位拒绝；存活段保留其当前内容和顺序。历史存储取决于尚未完成的源前缀，不依赖累计流送过的身份总量。生产者 token、输入顺序、内容 revision、CPU 发布 cursor 与 GPU serial 各自独立。
+
+## 纹理 owner 与引用
+
+op=9 公共头后为 `count:u32, reserved:u32=0`，紧接 count 个 `id:u32`。0、1、UINT32_MAX 为保留身份，不可退休；不存在的普通 ID 忽略。整个包通过校验后才撤销 owner，重复退休无额外效果。
+
+纹理同时由静态层、原型、实例覆盖和 raw 快照持有引用。只有 owner 已退休且当前源引用为零，下一次 CPU 发布才删除纹理并输出显式 removal；op4 重新上传会恢复 owner。冻结/旧 CPU 快照继续持有不可变像素所有权。GPU 元数据与像素槽在同队列的最后读取依赖之后复用，被替换的缓冲按实际提交完成证明回收。FFM 返回和 op9 均不是 GPU 完成证明。
 
 ## 动态完整快照
 
@@ -67,7 +72,7 @@ op=6 的固定头共 **64 字节**：
 
 整个包验证成功后才替换旧快照；尾随字节、缺失纹理、旧 epoch/sequence 或中间 span 无效均不改变已有场景。`span_count=0` 是有效的清空操作，防止对象消失后留下旧几何。texture_id=0 仅表示明确的无纹理白色，非零引用必须在提交快照前上传。静态区块与动态快照不共用对象 ID；动态更新不递增静态 revision，也不重新翻译静态 mesh 表。
 
-Java `DynamicFrame` 保留一个按需增长的 confined native arena，相邻同描述 span 可合并。FFM 每帧借用一次 sealed segment；Rust 在返回前完成解码并拥有结果。借用只覆盖该次同步调用，不能跨下一次 `begin`、扩容或 `close`；GPU 完成与这段源字节的寿命无关。源纹理变化仍通过独立 op=4 增量提交。
+Java `DynamicFrame` 保留一个按需增长的 confined native arena，相邻同描述 span 可合并。FFM 每帧借用一次 sealed segment；Rust 在返回前完成解码并拥有结果；raw 使用可复用 Vec 工作区，发布后通过 Arc 保持只读。仅在真实消费者全部释放后才重新借用工作区，失败包不覆盖旧帧。借用只覆盖该次同步调用，不能跨下一次 `begin`、扩容或 `close`；GPU 完成与这段源字节的寿命无关。源纹理变化仍通过独立 op=4 增量提交。
 
 material=2 表示随机 alpha 覆盖：alpha=0 不遮挡，alpha=1 完全覆盖，中间值按覆盖率接受交点；接受后仍使用当前表面材质。它不是折射、介质吸收或物理透射率。
 
@@ -125,7 +130,7 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 
 每帧调用 `prime_record(handle, frame, 104, command, image, image_view, serial)`。command 是已开始录制、尚未结束的宿主 primary command buffer；目标为带 STORAGE 用途、GENERAL layout 的 RGBA8_UNORM 主颜色图像及其 view，尺寸必须等于 frame。serial 是将包含此 command 的实际提交完成值，同一 session 每个 serial 最多录制一次。宿主在同队列依次提交，并在所有命令完成后 signal timeline 到该 serial；Rust 自己的描述符槽与退休资源依赖此保证。
 
-`prime_record` 同步完成输入复制与命令录制，正常返回时 GPU 可以尚未执行；没有像素返回。只在所有描述符槽仍在途时等待最旧 serial，有界反压不同于每帧等待当前帧。shader 在 GPU 上处理宿主输出行方向。`prime_gpu_time(handle)` 返回最近一个已收集的完成帧 GPU 纳秒数；未启用 `PRIME_PROFILE=1` 或没有结果时为 0，不是当前 CPU 调用耗时或窗口平均。
+`prime_record` 同步完成输入复制与命令录制，正常返回时 GPU 可以尚未执行；没有像素返回。只在所有描述符槽仍在途时等待最旧 serial，这是 GPU 资源复用的必要完成等待，不是向 MC 上游施加工作配额或主动背压。shader 在 GPU 上处理宿主输出行方向。`prime_gpu_time(handle)` 返回最近一个已收集的完成帧 GPU 纳秒数；未启用 `PRIME_PROFILE=1` 或没有结果时为 0，不是当前 CPU 调用耗时或窗口平均。
 
 调用 `prime_destroy` 前宿主必须提交所有已录制的 PT command；native 等待最后相关 serial 后销毁 PT 资源。若无法证明完成，返回失败并保留 session/资源以隔离风险。宿主 device、timeline、图像等必须覆盖其全部使用寿命。
 
@@ -137,11 +142,11 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 
 全场景三角形总量不再受 800 万或带符号 32 位上限约束。64 位宿主累计地形、op6 回退与 op7 原型的唯一几何数量及派生字节，同一原型不按实例数重复计费；超过宿主可寻址字节范围明确失败。`count:u32` 仍描述单个 span，单包仍限 256 MiB；大量独立 section/prototype 分批发布，与一个含数十亿顶点的连续包是不同契约。
 
-当前仍明确拒绝：超过 512 MiB 的纹理总量、超过 262144 的 mesh/section history、各超过 262144 的常驻原型或实例、超出每轴 1..65536 或设备 image/dispatch/累积 storage range 的输出，以及不有限/越域位置、未知 flags、未知拓扑和尾随字节。op6 是完整回退帧，op7 是一批原子增量，op8 是完整 section 替换；它们尚未提供跨包事务，不能用重复替换包伪装无界分页。GPU 的局部 AS/实例索引、设备内存分配数量与实际内存也构成独立边界。以上不表示已经支持任意视距、任意单资源或任意驻留总量。协议验证失败不修改场景 revision 或已有数据；部分分配使用 `try_reserve`，尚不能保证所有 Rust 系统内存耗尽均可恢复。
+当前仍明确拒绝：超过 512 MiB 的纹理总量、各超过 262144 的常驻原型或实例、超出每轴 1..65536 或设备 image/dispatch/累积 storage range 的输出，以及不有限/越域位置、未知 flags、未知拓扑和尾随字节。op6 是完整回退帧，op7 是一批原子增量，op8 是完整 section 替换；它们尚未提供跨包事务，不能用重复替换包伪装无界分页。GPU 的局部 AS/实例索引、设备内存分配数量与实际内存也构成独立边界。以上不表示已经支持任意视距、任意单资源或任意驻留总量。协议验证失败不修改场景 revision 或已有数据；部分分配使用 `try_reserve`，尚不能保证所有 Rust 系统内存耗尽均可恢复。
 
 当前 Slang 局部指针下标以 32 位字节偏移计算，单个被寻址的材质范围最多 `2^25` 条 128 字节记录；各局部范围的设备基址为 64 位，总量可以跨页。翻译层按此局部上限划分寻址范围：静态增加同一 BLAS 内的 geometry，raw 回退拆成多个 BLAS；单个共享原型超限仍明确失败，不能让乘法回绕，也不能以此单资源限制代替全场景数量契约。实例展开后的三角形统计使用 u64，GPU 帧参数只传“是否有几何”，避免大计数收窄后误判为空场景。
 
-Mesh 可先于引用的 texture 提交，但渲染前必须补齐所有引用；缺失引用明确报错。所有调用必须在创建 handle 的 OS 线程进行。`prime_destroy` 退休身份，重复释放会报错。调用方必须保证原生指针指向有效读写区域；长度校验不能验证任意地址。
+非空静态层、raw 和原型/实例在提交前必须上传引用的纹理；缺失引用明确报错。所有调用必须在创建 handle 的 OS 线程进行。`prime_destroy` 退休身份，重复释放会报错。调用方必须保证原生指针指向有效读写区域；长度校验不能验证任意地址。
 
 ## 设置包（独立 schema v1）
 

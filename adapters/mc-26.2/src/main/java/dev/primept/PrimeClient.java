@@ -51,7 +51,7 @@ public final class PrimeClient implements ClientModInitializer {
             Boolean.getBoolean("primept.profile") ? new RenderProfile() : null;
     private long worldRenderStart;
     private HostVulkanRenderer renderer;
-    private long sentEpoch, sentAtlas;
+    private long sentEpoch, sentAtlas, sentSectionWatermark;
     private final FrameSequence frames = new FrameSequence();
     private int submittedSections;
     private boolean reportedFrame;
@@ -336,6 +336,7 @@ public final class PrimeClient implements ClientModInitializer {
             if (sentEpoch != epoch) {
                 submit(Packets.reset(epoch), timing);
                 sentEpoch = epoch;
+                sentSectionWatermark = 0;
                 sentAtlas = 0;
                 frames.reset();
                 submittedSections = 0;
@@ -347,20 +348,21 @@ public final class PrimeClient implements ClientModInitializer {
                 sentAtlas = atlas.version();
                 frames.reset();
             }
-            // A section replacement is drained atomically relative to rendering.
-            long drained = 0;
             long phaseStart = timing == null ? 0 : System.nanoTime();
-            CaptureInbox.Batch batch;
-            while (drained < (16L << 20) && (batch = CAPTURE.poll()) != null) {
+            var sealed = CAPTURE.seal();
+            for (var batch : sealed.batches()) {
                 if (batch.epoch() != epoch)
                     continue;
                 for (byte[] packet : batch.packets())
                     submit(packet, timing);
                 if (!batch.removal())
                     ++submittedSections;
-                drained += batch.bytes();
                 if (timing != null)
                     ++timing.batches;
+            }
+            if (sealed.completedSequence() > sentSectionWatermark) {
+                submit(Packets.sectionWatermark(epoch, sealed.completedSequence()), timing);
+                sentSectionWatermark = sealed.completedSequence();
             }
             if (timing != null)
                 timing.drain = System.nanoTime() - phaseStart;

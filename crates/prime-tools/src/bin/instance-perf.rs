@@ -218,6 +218,8 @@ mod benchmark {
         wait: u64,
         submit: u64,
         gpu: u64,
+        preparation: Option<u64>,
+        render: Option<u64>,
         allocations: u64,
         upload: u64,
         rebuilt: u32,
@@ -267,6 +269,8 @@ mod benchmark {
             wait: sample.slot_wait_ns,
             submit: sample.submit_ns,
             gpu: 0,
+            preparation: None,
+            render: None,
             allocations: after.allocations - before.allocations,
             upload: after.uploaded_bytes - before.uploaded_bytes,
             rebuilt: work.rebuilt_blas,
@@ -277,10 +281,13 @@ mod benchmark {
         let completed: BTreeMap<_, _> = host
             .drain()?
             .into_iter()
-            .map(|sample| (sample.serial, sample.gpu_ns))
+            .map(|sample| (sample.serial, sample))
             .collect();
         for row in rows {
-            row.gpu = *completed.get(&row.serial).ok_or("Missing GPU sample")?;
+            let sample = completed.get(&row.serial).ok_or("Missing GPU sample")?;
+            row.gpu = sample.gpu_ns;
+            row.preparation = sample.preparation_ns;
+            row.render = sample.render_ns;
         }
         Ok(())
     }
@@ -371,12 +378,12 @@ mod benchmark {
             }
         }
         let mut csv = String::from(
-            "round,instances,phase,kind,frame,serial,width,height,seed,prototype_triangles,fixture_update_ns,enqueue_ns,record_ns,slot_wait_ns,submit_ns,gpu_ns,allocations,uploaded_bytes,rebuilt_blas,resident_blas,source_mode,protocol_decode_ns\n",
+            "round,instances,phase,kind,frame,serial,width,height,seed,prototype_triangles,fixture_update_ns,enqueue_ns,record_ns,slot_wait_ns,submit_ns,gpu_ns,allocations,uploaded_bytes,rebuilt_blas,resident_blas,source_mode,protocol_decode_ns,gpu_preparation_ns,gpu_render_ns\n",
         );
         for row in rows {
             writeln!(
                 csv,
-                "{},{},{},{},{},{},1920,1080,{SEED},48,{},{},{},{},{},{},{},{},{},{},direct_scene,",
+                "{},{},{},{},{},{},1920,1080,{SEED},48,{},{},{},{},{},{},{},{},{},{},direct_scene,,{},{}",
                 row.round,
                 row.count,
                 row.phase,
@@ -392,7 +399,9 @@ mod benchmark {
                 row.allocations,
                 row.upload,
                 row.rebuilt,
-                row.resident
+                row.resident,
+                row.preparation.map_or_else(String::new, |v| v.to_string()),
+                row.render.map_or_else(String::new, |v| v.to_string()),
             )?;
         }
         if let Some(parent) = std::path::Path::new(&options.csv).parent() {

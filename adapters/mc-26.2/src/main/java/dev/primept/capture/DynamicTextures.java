@@ -15,6 +15,8 @@ import net.minecraft.client.renderer.texture.TextureAtlas;
 public final class DynamicTextures {
     private static final IdentityHashMap<GpuTexture, Texture> SOURCES = new IdentityHashMap<>();
     private static final LinkedHashSet<Texture> NEEDED = new LinkedHashSet<>();
+    private static final java.util.LinkedHashMap<Integer, Long> RETIRED =
+            new java.util.LinkedHashMap<>();
     private static int nextId = 2;
     private static long retainedBytes;
     private static RuntimeException failure;
@@ -118,8 +120,11 @@ public final class DynamicTextures {
     public static void release(GpuTexture texture) {
         CanonicalTextureSources.release(texture);
         Texture previous = SOURCES.remove(texture);
-        if (previous != null)
+        if (previous != null) {
             retainedBytes -= previous.rgba.length;
+            if (previous.id != 1)
+                RETIRED.put(previous.id, PrimeClient.CAPTURE.epoch());
+        }
     }
 
     public static void beginFrame() {
@@ -130,6 +135,7 @@ public final class DynamicTextures {
         NEEDED.clear();
         retainedBytes = 0;
         nextId = 2;
+        RETIRED.clear();
         failure = null;
         reportedRecoveries = 0;
     }
@@ -173,6 +179,16 @@ public final class DynamicTextures {
             bridge.submit(
                     Packets.texture(epoch, source.id, source.width, source.height, source.rgba));
             source.sentEpoch = epoch;
+        }
+        if (!RETIRED.isEmpty()) {
+            int[] ids = RETIRED.entrySet()
+                                .stream()
+                                .filter(entry -> entry.getValue() == epoch)
+                                .mapToInt(java.util.Map.Entry::getKey)
+                                .toArray();
+            if (ids.length != 0)
+                bridge.submit(Packets.retireTextures(epoch, ids));
+            RETIRED.clear();
         }
     }
 }

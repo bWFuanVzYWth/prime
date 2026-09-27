@@ -104,11 +104,12 @@ public abstract class ExclusiveLevelExtractorMixin implements ExclusiveLevelExtr
         var globals = level.getGloballyRenderedBlockEntities();
         var pose = new PoseStack();
         var cameraPos = camera.position();
-        primept$blockEntityCandidates.prepare(dispatcher, PrimeClient.CAPTURE.epoch());
         // PT coverage follows loaded source columns, not visibility of an absent raster mesh. The actual renderer's
         // distance predicate still runs in tryExtractRenderState. Global BEs retain vanilla's separate global path.
-        for (var chunk : ExclusiveTerrainCapture.loadedChunks())
-            for (var blockEntity : chunk.getBlockEntities().values()) {
+        for (var candidates : ExclusiveTerrainCapture.blockEntityCandidates(
+                     primept$blockEntityCandidates, dispatcher, PrimeClient.CAPTURE.epoch(),
+                     cameraPos))
+            for (var blockEntity : candidates) {
                 if (primept$blockEntityCandidates.outsideDefaultRange(blockEntity, cameraPos))
                     continue;
                 if (blockEntity.isRemoved() || globals.contains(blockEntity))

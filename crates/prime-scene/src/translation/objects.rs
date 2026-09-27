@@ -1,10 +1,19 @@
 //! Persistent prototype reuse and dynamic geometry ownership, without GPU operations.
-use super::{BatchLimits, translation};
+pub use super::placements::PlacementChange;
+use super::{
+    BatchLimits,
+    placements::{Identity, Placements, coalesce},
+    translation,
+};
+use crate::instances::{InstanceCursor, InstanceInput};
 use crate::{
-    scene::{Instance, InstanceScene, Scene, Triangle},
+    scene::{Instance, Scene, Triangle},
     spatial::{BatchKey, Cell},
 };
 use std::{collections::BTreeMap, sync::Arc};
+
+#[cfg(test)]
+use crate::scene::InstanceScene;
 
 const INHERIT: u32 = u32::MAX;
 
@@ -52,6 +61,10 @@ pub struct ScenePlan {
     pub removed: Vec<ObjectKey>,
     pub geometry: Vec<GeometryUpdate>,
     pub placements_changed: bool,
+    pub tlas_changed: bool,
+    pub changes: Vec<PlacementChange>,
+    pub instances_visited: usize,
+    pub poses_evaluated: usize,
     pub triangle_count: u64,
 }
 
@@ -65,10 +78,10 @@ pub struct Planner {
     anchor: [f64; 3],
     prototypes: BTreeMap<u64, u64>,
     raw: BTreeMap<(Cell, u32), RawCell>,
-    instance_cells: BTreeMap<Cell, Vec<Placement>>,
-    raw_placements: Vec<Placement>,
-    prototype_placements: usize,
-    prototype_triangles: u64,
+    placements: Placements,
+    instance_cursor: Option<InstanceCursor>,
+    spare_changes: Vec<PlacementChange>,
+    touched: Vec<u64>,
     triangle_count: u64,
     spare_geometry: Vec<GeometryUpdate>,
     spare_removed: Vec<ObjectKey>,
@@ -87,10 +100,10 @@ impl Planner {
             anchor: [0.0; 3],
             prototypes: BTreeMap::new(),
             raw: BTreeMap::new(),
-            instance_cells: BTreeMap::new(),
-            raw_placements: Vec::new(),
-            prototype_placements: 0,
-            prototype_triangles: 0,
+            placements: Placements::default(),
+            instance_cursor: None,
+            spare_changes: Vec::new(),
+            touched: Vec::new(),
             triangle_count: 0,
             spare_geometry: Vec::new(),
             spare_removed: Vec::new(),
@@ -100,28 +113,45 @@ impl Planner {
     /// Execution must consume this plan before planning another frame. Like GPU
     /// execution, a late error can leave private caches changed: the enclosing
     /// renderer remains poisoned and must be discarded, never retried in place.
-    pub fn plan(&mut self, scene: &Scene, objects: &InstanceScene) -> Result<ScenePlan, String> {
+    pub fn plan<'a>(
+        &mut self,
+        scene: &Scene,
+        input: impl Into<InstanceInput<'a>>,
+    ) -> Result<ScenePlan, String> {
+        let input = input.into();
+        let objects = &*input;
         if objects.epoch != scene.epoch
             && (!objects.prototypes.is_empty() || !objects.instances.is_empty())
         {
             return Err("Instance scene epoch does not match the terrain scene".into());
         }
         let reset = self.epoch != Some(scene.epoch);
-        let resources = reset || self.resource_revision != Some(objects.resource_revision);
+        let delta = input.changes(self.instance_cursor);
+        let gap =
+            input.cursor().is_some() && input.cursor() != self.instance_cursor && delta.is_none();
+        let resources = reset || gap || self.resource_revision != Some(objects.resource_revision);
+        let rebase = reset || self.anchor != scene.anchor;
+        let instances = reset
+            || gap
+            || resources
+            || rebase
+            || self.instance_revision != Some(objects.instance_revision);
         let origin = scene.dynamic.origin;
         let raw_changed = reset
             || self.dynamic_revision != Some(scene.dynamic.revision)
             || self.dynamic_origin != origin;
-        let instances = reset
-            || resources
-            || self.instance_revision != Some(objects.instance_revision)
-            || self.anchor != scene.anchor;
+        let previous_count = self.placement_count();
         let mut result = ScenePlan {
             removed: std::mem::take(&mut self.spare_removed),
             geometry: std::mem::take(&mut self.spare_geometry),
+            changes: std::mem::take(&mut self.spare_changes),
             placements_changed: false,
+            tlas_changed: false,
+            instances_visited: 0,
+            poses_evaluated: 0,
             triangle_count: self.triangle_count,
         };
+        self.touched.clear();
         if reset {
             result
                 .removed
@@ -129,19 +159,25 @@ impl Planner {
             result.removed.extend(self.raw_keys());
             self.prototypes.clear();
             self.raw.clear();
-            self.instance_cells.clear();
+            self.placements.clear();
         }
         if resources {
-            self.prototypes.retain(|id, _| {
-                if objects.prototypes.contains_key(id) {
-                    true
-                } else {
-                    result.removed.push(ObjectKey::Prototype(*id));
-                    false
-                }
-            });
-            for (&id, prototype) in &objects.prototypes {
-                if self.prototypes.get(&id) != Some(&prototype.revision) {
+            let mut keys: Vec<u64> = if let Some((prototypes, _)) = delta.filter(|_| !reset) {
+                prototypes.iter().copied().collect()
+            } else {
+                self.prototypes
+                    .keys()
+                    .chain(objects.prototypes.keys())
+                    .copied()
+                    .collect()
+            };
+            keys.sort_unstable();
+            keys.dedup();
+            for id in keys {
+                if let Some(prototype) = objects.prototypes.get(&id) {
+                    if self.prototypes.get(&id) == Some(&prototype.revision) && !gap {
+                        continue;
+                    }
                     if prototype.triangles.is_empty() {
                         return Err("Empty prototype".into());
                     }
@@ -153,7 +189,60 @@ impl Planner {
                         source: GeometrySource::Prototype(prototype.triangles.clone()),
                     });
                     self.prototypes.insert(id, prototype.revision);
+                    if let Some(ids) = self.placements.dependencies.get(&id) {
+                        self.touched.extend(ids);
+                    }
+                } else if self.prototypes.remove(&id).is_some() {
+                    result.removed.push(ObjectKey::Prototype(id));
                 }
+            }
+        }
+        let mut changed_keys: std::collections::BTreeSet<_> =
+            result.geometry.iter().map(|g| g.key).collect();
+        if instances {
+            if let Some((_, ids)) = delta.filter(|_| !reset && !rebase) {
+                self.touched.extend(ids);
+            } else {
+                self.touched.extend(objects.instances.keys());
+                self.touched.extend(self.placements.instance_ids());
+            }
+            self.touched.sort_unstable();
+            self.touched.dedup();
+            for &id in &self.touched {
+                result.instances_visited += 1;
+                let Some(instance) = objects.instances.get(&id) else {
+                    self.placements
+                        .remove(Identity::Instance(id), &mut result.changes);
+                    continue;
+                };
+                let prototype = objects
+                    .prototypes
+                    .get(&instance.prototype_id)
+                    .ok_or("Instance references missing prototype")?;
+                let geometry_changed =
+                    changed_keys.contains(&ObjectKey::Prototype(instance.prototype_id));
+                let spatial = if rebase
+                    || geometry_changed
+                    || self.placements.source(id).is_none_or(|old| {
+                        old.prototype_id != instance.prototype_id
+                            || old.origin != instance.origin
+                            || old.transform != instance.transform
+                    }) {
+                    result.poses_evaluated += 1;
+                    let transform = relative_transform(instance, scene.anchor)?;
+                    validate_transformed_bounds(transform, prototype.bounds)?;
+                    Some((instance_cell(instance, prototype.bounds)?, transform))
+                } else {
+                    None
+                };
+                self.placements.set_instance(
+                    id,
+                    instance,
+                    spatial,
+                    prototype.triangles.len() as u64,
+                    &mut result.changes,
+                    geometry_changed,
+                )?;
             }
         }
         if raw_changed {
@@ -162,81 +251,71 @@ impl Planner {
         let raw_geometry_changed = result
             .geometry
             .iter()
-            .any(|item| matches!(item.key, ObjectKey::Raw(..)))
+            .any(|g| matches!(g.key, ObjectKey::Raw(..)))
             || result
                 .removed
                 .iter()
                 .any(|key| matches!(key, ObjectKey::Raw(..)));
-        if instances {
-            let mut count = 0u64;
-            for placements in self.instance_cells.values_mut() {
-                placements.clear();
+        changed_keys.extend(result.geometry.iter().map(|g| g.key));
+        if raw_geometry_changed || rebase {
+            let removed: Vec<_> = self
+                .placements
+                .raw_keys()
+                .filter(|key| {
+                    let ObjectKey::Raw(batch) = key else {
+                        unreachable!()
+                    };
+                    self.raw
+                        .get(&(batch.cell, batch.flags))
+                        .is_none_or(|cell| cell.parts.len() <= batch.part as usize)
+                })
+                .collect();
+            for key in removed {
+                self.placements
+                    .remove(Identity::Raw(key), &mut result.changes);
             }
-            for instance in objects.instances.values() {
-                let prototype = objects
-                    .prototypes
-                    .get(&instance.prototype_id)
-                    .ok_or("Instance references missing prototype")?;
-                let transform = relative_transform(instance, scene.anchor)?;
-                validate_transformed_bounds(transform, prototype.bounds)?;
-                // Partition placements, not shared local geometry. Each leaf occurs exactly once,
-                // even if its transformed bounds cross a cell plane.
-                let cell = instance_cell(instance, prototype.bounds)?;
-                count = count
-                    .checked_add(prototype.triangles.len() as u64)
-                    .ok_or("Instanced triangle count overflow")?;
-                self.instance_cells
-                    .entry(cell)
-                    .or_default()
-                    .push(Placement {
-                        key: ObjectKey::Prototype(instance.prototype_id),
-                        transform,
-                        texture_id: instance.texture_id,
-                        flags: instance.flags,
-                        tint: instance.tint,
-                        uv: instance.uv_transform,
-                    });
-            }
-            self.instance_cells
-                .retain(|_, placements| !placements.is_empty());
-            self.prototype_placements = objects.instances.len();
-            self.prototype_triangles = count;
-        }
-        if instances || raw_geometry_changed {
-            // Raw-only changes retain the already validated prototype cells.
-            // Do not repeat affine/bounds work for unrelated persistent models.
-            self.raw_placements.clear();
-            self.raw_placements
-                .reserve(self.raw.values().map(|cell| cell.parts.len()).sum());
             for (&(cell, flags), data) in &self.raw {
-                let origin = cell.relative_origin(scene.anchor);
                 for part in 0..data.parts.len() {
-                    self.raw_placements.push(Placement {
-                        key: ObjectKey::Raw(BatchKey {
-                            cell,
-                            flags,
-                            part: part as u32,
-                        }),
-                        transform: translation(origin),
-                        texture_id: INHERIT,
-                        flags: INHERIT,
-                        tint: [255; 4],
-                        uv: [1.0, 1.0, 0.0, 0.0],
+                    let key = ObjectKey::Raw(BatchKey {
+                        cell,
+                        flags,
+                        part: part as u32,
                     });
+                    let force = changed_keys.contains(&key);
+                    self.placements.set(
+                        Identity::Raw(key),
+                        Placement {
+                            key,
+                            transform: translation(cell.relative_origin(scene.anchor)),
+                            texture_id: INHERIT,
+                            flags: INHERIT,
+                            tint: [255; 4],
+                            uv: [1.0, 1.0, 0.0, 0.0],
+                        },
+                        &mut result.changes,
+                        force,
+                    );
                 }
             }
-            if self.placement_count() > self.limits.placements as usize {
-                return Err("Too many object instances".into());
-            }
-            result.triangle_count = self
-                .prototype_triangles
-                .checked_add(scene.dynamic.triangles.len() as u64)
-                .ok_or("Instanced triangle count overflow")?;
-            result.placements_changed = true;
         }
+        if self.placement_count() > self.limits.placements as usize {
+            return Err("Too many object instances".into());
+        }
+        coalesce(&mut result.changes, self.placement_count());
+        result.placements_changed =
+            reset || previous_count != self.placement_count() || !result.changes.is_empty();
+        result.tlas_changed = reset
+            || previous_count != self.placement_count()
+            || result.changes.iter().any(|c| c.transform);
+        result.triangle_count = self
+            .placements
+            .triangles
+            .checked_add(scene.dynamic.triangles.len() as u64)
+            .ok_or("Instanced triangle count overflow")?;
         self.epoch = Some(scene.epoch);
         self.resource_revision = Some(objects.resource_revision);
         self.instance_revision = Some(objects.instance_revision);
+        self.instance_cursor = input.cursor();
         self.dynamic_revision = Some(scene.dynamic.revision);
         self.dynamic_origin = origin;
         self.anchor = scene.anchor;
@@ -271,22 +350,20 @@ impl Planner {
     }
 
     pub fn placement_count(&self) -> usize {
-        self.prototype_placements + self.raw_placements.len()
+        self.placements.values.len()
     }
 
-    /// Traverse retained cell storage directly; no intermediate flattened copy per frame.
     pub fn placements(&self) -> impl Iterator<Item = &Placement> {
-        self.instance_cells
-            .values()
-            .flatten()
-            .chain(&self.raw_placements)
+        self.placements.values.iter()
     }
 
-    /// CPU-side spatial membership; the executor consumes only placement values.
-    pub fn instance_cells(&self) -> impl Iterator<Item = (Cell, &[Placement])> {
-        self.instance_cells
-            .iter()
-            .map(|(&cell, placements)| (cell, placements.as_slice()))
+    pub fn placement(&self, slot: usize) -> &Placement {
+        &self.placements.values[slot]
+    }
+
+    /// Membership is retained independently of compact executor slots.
+    pub fn instance_cells(&self) -> impl Iterator<Item = (Cell, &std::collections::BTreeSet<u64>)> {
+        self.placements.cells.iter().map(|(&cell, ids)| (cell, ids))
     }
 
     /// Return owned CPU scratch after execution; the next delta reuses capacity.
@@ -294,6 +371,8 @@ impl Planner {
     pub fn recycle(&mut self, mut plan: ScenePlan) {
         plan.geometry.clear();
         plan.removed.clear();
+        plan.changes.clear();
+        self.spare_changes = plan.changes;
         self.spare_geometry = plan.geometry;
         self.spare_removed = plan.removed;
     }
@@ -738,7 +817,7 @@ mod tests {
         scene.dynamic.revision += 1;
         let raw_update = planner.plan(&scene, &source).unwrap();
         assert_eq!(raw_update.triangle_count, 3);
-        assert_eq!(planner.prototype_placements, 2);
+        assert_eq!(planner.placements.instance_ids().count(), 2);
         assert_eq!(planner.placement_count(), 3);
         assert_eq!(planner.placements().next().unwrap().transform, prefix[0]);
         assert_eq!(planner.placements().nth(1).unwrap().transform, prefix[1]);
@@ -760,15 +839,29 @@ mod tests {
         let remove = planner.plan(&scene, &source).unwrap();
         assert!(remove.geometry.is_empty() && remove.placements_changed);
         assert_eq!(remove.triangle_count, 2);
-        assert_eq!(planner.prototype_placements, 1);
+        assert_eq!(planner.placements.instance_ids().count(), 1);
         assert_eq!(planner.placement_count(), 2);
-        assert_eq!(planner.placements().next().unwrap().transform[3], -248.0);
-        assert_eq!(planner.placements().nth(1).unwrap().transform[3], -256.0);
+        assert_eq!(
+            planner
+                .placements()
+                .find(|p| p.key == ObjectKey::Prototype(7))
+                .unwrap()
+                .transform[3],
+            -248.0
+        );
+        assert_eq!(
+            planner
+                .placements()
+                .find(|p| matches!(p.key, ObjectKey::Raw(_)))
+                .unwrap()
+                .transform[3],
+            -256.0
+        );
         planner.recycle(remove);
 
         // A new world cannot reuse either raw buckets or the old prototype prefix.
         scene.epoch = 2;
-        scene.dynamic.triangles = Arc::from([]);
+        scene.dynamic.triangles = Arc::default();
         scene.dynamic.revision += 1;
         let reset = planner.plan(&scene, &InstanceScene::default()).unwrap();
         assert!(reset.placements_changed);
@@ -803,17 +896,14 @@ mod tests {
         };
         let mut planner = planner();
         let initial = planner.plan(&scene, &source).unwrap();
-        let allocation = planner.instance_cells.values().next().unwrap().as_ptr();
+        let allocation = planner.placements.values.as_ptr();
         planner.recycle(initial);
         source.instances.get_mut(&1).unwrap().tint = [1, 2, 3, 4];
         source.instance_revision += 1;
         let update = planner.plan(&scene, &source).unwrap();
         assert!(update.geometry.is_empty());
         assert!(update.placements_changed);
-        assert_eq!(
-            planner.instance_cells.values().next().unwrap().as_ptr(),
-            allocation
-        );
+        assert_eq!(planner.placements.values.as_ptr(), allocation);
         let placement = planner.placements().next().unwrap();
         assert_eq!(placement.tint, [1, 2, 3, 4]);
         assert_eq!(placement.uv, [1.0, 1.0, 0.0, 0.0]);
@@ -881,7 +971,7 @@ mod tests {
         let mut scene = Scene {
             dynamic: DynamicScene {
                 revision: 1,
-                triangles: input.into(),
+                triangles: input.to_vec().into(),
                 ..Default::default()
             },
             ..Default::default()

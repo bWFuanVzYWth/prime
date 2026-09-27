@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 fn header(op: u32) -> Vec<u8> {
     let mut bytes = Vec::new();
-    for value in [MAGIC, 1, op, 0] {
+    for value in [MAGIC, crate::protocol::ABI_VERSION, op, 0] {
         bytes.extend(value.to_le_bytes());
     }
     bytes.extend(1_u64.to_le_bytes());

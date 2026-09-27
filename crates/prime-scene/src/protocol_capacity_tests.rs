@@ -125,3 +125,39 @@ fn content_revision_exhaustion_does_not_consume_source_sequences_or_independent_
     assert_eq!(source.dynamic_revision(), 1);
     assert_eq!(source.instance_sequence(), 1);
 }
+
+#[test]
+fn completed_source_watermarks_bound_history_without_permanent_identity_limits() {
+    use crate::protocol::MAGIC;
+    fn packet(op: u32, values: &[u64]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for n in [MAGIC, crate::protocol::ABI_VERSION, op, 0] {
+            bytes.extend(n.to_le_bytes());
+        }
+        bytes.extend(1u64.to_le_bytes());
+        for n in values {
+            bytes.extend(n.to_le_bytes());
+        }
+        bytes
+    }
+    let mut source = SourceScene::default();
+    source.submit(&packet(1, &[])).unwrap();
+    for batch in 0..65u64 {
+        let mut bytes = packet(11, &[]);
+        bytes.extend(4097u32.to_le_bytes());
+        bytes.extend(0u32.to_le_bytes());
+        for i in 0..4097u64 {
+            let id = batch * 4097 + i + 1;
+            bytes.extend(id.to_le_bytes());
+            bytes.extend(id.to_le_bytes());
+        }
+        source.submit(&bytes).unwrap();
+        assert_eq!(source.removed.len(), 4097);
+        let end = (batch + 1) * 4097;
+        source.submit(&packet(10, &[end])).unwrap();
+        assert!(source.removed.is_empty());
+        assert!(source.submit(&bytes).is_err());
+        assert!(source.removed.is_empty());
+    }
+    assert!(source.section_completed.0 > 262_144);
+}

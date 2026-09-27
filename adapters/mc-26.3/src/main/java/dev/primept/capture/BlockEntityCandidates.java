@@ -13,7 +13,7 @@ import net.minecraft.world.phys.Vec3;
 public final class BlockEntityCandidates {
     private final IdentityHashMap<Class<?>, Boolean> entityClasses = new IdentityHashMap<>();
     private final IdentityHashMap<Class<?>, Boolean> rendererClasses = new IdentityHashMap<>();
-    private final IdentityHashMap<BlockEntityType<?>, Boolean> types = new IdentityHashMap<>();
+    private final IdentityHashMap<BlockEntityType<?>, Kind> types = new IdentityHashMap<>();
     private BlockEntityRenderDispatcher dispatcher;
     private long resourceEpoch;
     private boolean supported;
@@ -22,9 +22,9 @@ public final class BlockEntityCandidates {
     private long inspected, rejectedFar, unknownFallback, nearCube, localExtractions,
             globalExtractions;
 
-    public void prepare(BlockEntityRenderDispatcher current, long epoch) {
+    public boolean prepare(BlockEntityRenderDispatcher current, long epoch) {
         if (dispatcher == current && resourceEpoch == epoch)
-            return;
+            return false;
         dispatcher = current;
         resourceEpoch = epoch;
         entityClasses.clear();
@@ -34,6 +34,7 @@ public final class BlockEntityCandidates {
         supported = current.getClass() == BlockEntityRenderDispatcher.class &&
                     known(BlockEntityRenderDispatcher.class) && known(BlockEntity.class) &&
                     known(BlockEntityType.class) && known(BlockEntityRenderer.class);
+        return true;
     }
 
     public void clear() {
@@ -48,25 +49,7 @@ public final class BlockEntityCandidates {
     public boolean outsideDefaultRange(BlockEntity entity, Vec3 camera) {
         if (profile)
             ++inspected;
-        if (!supported)
-            return fallback();
-        Class<?> entityClass = entity.getClass();
-        Boolean pureEntity = entityClasses.get(entityClass);
-        if (pureEntity == null) {
-            pureEntity = standardEntity(entityClass);
-            entityClasses.put(entityClass, pureEntity);
-        }
-        if (!pureEntity)
-            return fallback();
-        BlockEntityType<?> type = entity.getType();
-        Boolean eligible = types.get(type);
-        if (eligible == null) {
-            var renderer = dispatcher.getRenderer(entity);
-            eligible = type.getClass() == BlockEntityType.class && renderer != null &&
-                       standardRenderer(renderer.getClass());
-            types.put(type, eligible);
-        }
-        if (!eligible)
+        if (kind(entity) != Kind.BOUNDED)
             return fallback();
         var pos = entity.getBlockPos();
         // The default predicate uses block-center distance strictly below 64.
@@ -82,6 +65,34 @@ public final class BlockEntityCandidates {
                 ++nearCube;
         }
         return outside;
+    }
+
+    enum Kind { BOUNDED, ABSENT, UNKNOWN }
+    Kind kind(BlockEntity entity) {
+        if (!supported)
+            return Kind.UNKNOWN;
+        Class<?> entityClass = entity.getClass();
+        Boolean pure = entityClasses.get(entityClass);
+        if (pure == null) {
+            pure = standardEntity(entityClass);
+            entityClasses.put(entityClass, pure);
+        }
+        if (!pure)
+            return Kind.UNKNOWN;
+        BlockEntityType<?> type = entity.getType();
+        Kind kind = types.get(type);
+        if (kind == null) {
+            if (type.getClass() != BlockEntityType.class)
+                kind = Kind.UNKNOWN;
+            else {
+                var renderer = dispatcher.getRenderer(entity);
+                kind = renderer == null                        ? Kind.ABSENT
+                       : standardRenderer(renderer.getClass()) ? Kind.BOUNDED
+                                                               : Kind.UNKNOWN;
+            }
+            types.put(type, kind);
+        }
+        return kind;
     }
 
     private boolean fallback() {
@@ -149,7 +160,7 @@ public final class BlockEntityCandidates {
         return true;
     }
 
-    private static boolean known(Class<?> type) {
+    public static boolean known(Class<?> type) {
         for (var method : type.getDeclaredMethods())
             for (var annotation : method.getDeclaredAnnotations()) {
                 if (!annotation.annotationType().getName().equals(
@@ -183,6 +194,22 @@ public final class BlockEntityCandidates {
                     if (type == BaseContainerBlockEntity.class &&
                         origin.equals(
                                 "net.fabricmc.fabric.mixin.transfer.BaseContainerBlockEntityMixin"))
+                        continue;
+                    // Pinned attachment hooks manage attachment data; they do not mutate BE membership.
+                    if ((type == net.minecraft.world.level.chunk.ChunkAccess.class &&
+                         (origin.equals(
+                                  "net.fabricmc.fabric.mixin.attachment.AttachmentTargetsMixin") ||
+                          origin.equals(
+                                  "net.fabricmc.fabric.mixin.attachment.ChunkAccessMixin"))) ||
+                        (type == net.minecraft.world.level.chunk.LevelChunk.class &&
+                         (origin.equals("net.fabricmc.fabric.mixin.attachment.LevelChunkMixin") ||
+                          origin.equals(
+                                  "net.fabricmc.fabric.mixin.event.lifecycle.client.LevelChunkMixin"))))
+                        continue;
+                    // The pinned renderer API wraps only real model/tint emission, before raster sorting.
+                    if (type == net.minecraft.client.renderer.chunk.SectionCompiler.class &&
+                        origin.equals(
+                                "net.fabricmc.fabric.mixin.client.renderer.block.render.SectionCompilerMixin"))
                         continue;
                     if (!origin.startsWith("dev.primept.mixin."))
                         return false;

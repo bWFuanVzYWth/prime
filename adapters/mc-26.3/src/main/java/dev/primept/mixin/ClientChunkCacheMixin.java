@@ -19,6 +19,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ClientChunkCache.class)
 public abstract class ClientChunkCacheMixin implements LoadedTerrainSnapshot {
     @Unique private AtomicReferenceArray<LevelChunk> primept$chunkStorage;
+    @Unique private java.util.function.Supplier<dev.primept.capture.ColumnWindow> primept$window;
+    @Override
+    public void
+    primept$bindSourceWindow(java.util.function.Supplier<dev.primept.capture.ColumnWindow> window) {
+        primept$window = window;
+    }
+    @Override
+    public dev.primept.capture.ColumnWindow primept$sourceWindow() {
+        return primept$window == null ? null : primept$window.get();
+    }
 
     @Override
     public void primept$bindChunkStorage(AtomicReferenceArray<LevelChunk> chunks) {

@@ -123,8 +123,118 @@ final class BlockEntityCandidatesCpuSmoke {
         gate.clear();
         check(!gate.outsideDefaultRange(far, camera),
               "Renderer retirement clears eligibility and owner references");
+        indexChecks(dispatcher, standard, camera);
         System.out.println(
                 "PRIME_PT_BE_CANDIDATES_CPU_OK: actual dispatcher and vanilla ChestRenderer; strict boundary/cube survivors; custom distance/visibility/global/getter/dispatcher fallback; callback and overlay identity; resource/owner reset; no GPU");
+    }
+
+    private static void indexChecks(BlockEntityRenderDispatcher dispatcher,
+                                    StandardRenderer standard, Vec3 camera) throws Exception {
+        install(dispatcher, standard);
+        var index = new BlockEntityIndex();
+        var gate = new BlockEntityCandidates();
+        var near = chest(new BlockPos(1, 0, 0));
+        var nearMap = new java.util.LinkedHashMap<BlockPos, BlockEntity>();
+        nearMap.put(near.getBlockPos(), near);
+        var nearChunk = chunk(0, 0, nearMap);
+        index.add(nearChunk);
+        for (int i = 0; i < 10000; i++) {
+            var remote = chest(new BlockPos((100 + i) * 16, 0, 0));
+            index.add(chunk(100 + i, 0,
+                            new java.util.LinkedHashMap<>(Map.of(remote.getBlockPos(), remote))));
+        }
+        check(selected(index, gate, dispatcher, 20, camera).equals(java.util.List.of(near)),
+              "10k remote known columns absent from active candidates " + sourceState());
+        long refreshed = index.refreshedColumns();
+        for (int i = 0; i < 10; i++)
+            selected(index, gate, dispatcher, 20, camera);
+        check(refreshed == index.refreshedColumns(), "Clean resident membership never rescanned");
+        var second = chest(new BlockPos(2, 0, 0));
+        nearMap.put(second.getBlockPos(), second);
+        index.changed(nearChunk);
+        check(selected(index, gate, dispatcher, 20, camera).equals(java.util.List.of(near, second)),
+              "Dirty membership preserves actual map order");
+        check(refreshed + 1 == index.refreshedColumns(), "Only changed column refreshed");
+        // The getter retains its real mutable map identity. Once escaped, in-place edits need no lifecycle event.
+        check(nearChunk.getBlockEntities() == nearMap, "No map wrapper or identity replacement");
+        index.changed(nearChunk);
+        check(((BlockEntityMapAccess.Membership)nearChunk).primept$escapedBlockEntities(),
+              "Real getter marks escaped membership");
+        selected(index, gate, dispatcher, 20, camera);
+        nearMap.remove(near.getBlockPos());
+        check(selected(index, gate, dispatcher, 20, camera).equals(java.util.List.of(second)),
+              "Unknown map writes stay observable");
+        index.remove(0, 0);
+        check(selected(index, gate, dispatcher, 20, camera).isEmpty(),
+              "Lifecycle retirement removes candidates");
+        install(dispatcher, new AlwaysRenderer());
+        check(selected(index, gate, dispatcher, 21, camera).size() == 10000,
+              "Unknown visibility preserves all source candidates");
+        field(BlockEntityRenderDispatcher.class, "renderers").set(dispatcher, Map.of());
+        check(selected(index, gate, dispatcher, 22, camera).isEmpty(),
+              "Renderer-absent known types filtered once per resource epoch");
+        index.clear();
+        var constructor = ExclusiveTerrainCapture.class.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        var owner = constructor.newInstance();
+        var current = field(ExclusiveTerrainCapture.class, "current");
+        Object previous = current.get(null);
+        current.set(null, owner);
+        try {
+            index = (BlockEntityIndex)field(ExclusiveTerrainCapture.class, "blockEntities")
+                            .get(owner);
+            install(dispatcher, standard);
+            var stale = chest(new BlockPos(16, 0, 0));
+            stale.setLevel(null);
+            var realChunk =
+                    chunk(1, 0, new java.util.LinkedHashMap<>(Map.of(stale.getBlockPos(), stale)));
+            index.add(realChunk);
+            check(selected(index, gate, dispatcher, 23, camera).size() == 1,
+                  "Actual lifecycle fixture admitted");
+            long before = index.refreshedColumns();
+            stale.setRemoved();
+            check(realChunk.getBlockEntity(stale.getBlockPos()) == null,
+                  "Real LevelChunk removed stale source");
+            check(selected(index, gate, dispatcher, 23, camera).isEmpty() &&
+                          index.refreshedColumns() == before + 1,
+                  "Real membership hook invalidates only its column");
+        } finally {
+            current.set(null, previous);
+            owner.close();
+        }
+    }
+    private static String sourceState() {
+        var result = new StringBuilder();
+        for (Class<?> type : new Class<?>[] {net.minecraft.world.level.chunk.LevelChunk.class,
+                                             net.minecraft.world.level.chunk.ChunkAccess.class}) {
+            result.append(type.getSimpleName())
+                    .append('=')
+                    .append(BlockEntityCandidates.known(type));
+            for (var method : type.getDeclaredMethods())
+                for (var annotation : method.getDeclaredAnnotations())
+                    if (annotation.annotationType().getName().endsWith("MixinMerged"))
+                        result.append(method.getName()).append(annotation);
+        }
+        return result.toString();
+    }
+    private static java.util.List<BlockEntity> selected(BlockEntityIndex index,
+                                                        BlockEntityCandidates gate,
+                                                        BlockEntityRenderDispatcher dispatcher,
+                                                        long epoch, Vec3 camera) {
+        var result = new java.util.ArrayList<BlockEntity>();
+        for (var column : index.select(gate, dispatcher, epoch, camera))
+            for (var entity : column)
+                result.add(entity);
+        return result;
+    }
+    private static net.minecraft.world.level.chunk.LevelChunk
+    chunk(int x, int z, Map<BlockPos, BlockEntity> entities) throws Exception {
+        var chunk = blank(net.minecraft.world.level.chunk.LevelChunk.class);
+        field(net.minecraft.world.level.chunk.ChunkAccess.class, "chunkPos")
+                .set(chunk, new net.minecraft.world.level.ChunkPos(x, z));
+        field(net.minecraft.world.level.chunk.ChunkAccess.class, "blockEntities")
+                .set(chunk, entities);
+        return chunk;
     }
 
     private static ChestBlockEntity chest(BlockPos pos) throws Exception {

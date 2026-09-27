@@ -110,7 +110,7 @@ impl Engine {
                 }
                 let result = self.renderer.as_mut().unwrap().render_with_instances(
                     &self.translated,
-                    self.source.instances(),
+                    self.source.instance_input(),
                     &frame.relative_camera(anchor),
                     frame.width,
                     frame.height,
@@ -150,7 +150,7 @@ impl Engine {
             unsafe {
                 renderer.record_host_with_instances(
                     &self.translated,
-                    self.source.instances(),
+                    self.source.instance_input(),
                     &frame.relative_camera(anchor),
                     frame.width,
                     frame.height,
@@ -195,7 +195,7 @@ mod tests {
 
     fn header(operation: u32) -> Vec<u8> {
         let mut bytes = Vec::new();
-        for value in [MAGIC, 1, operation, 0] {
+        for value in [MAGIC, prime_scene::protocol::ABI_VERSION, operation, 0] {
             bytes.extend(value.to_le_bytes());
         }
         bytes.extend(1_u64.to_le_bytes());
@@ -239,13 +239,13 @@ mod tests {
     fn dynamic_publication_reuses_the_static_snapshot_and_rebase_shares_vertices() {
         let mut engine = Engine::default();
         engine.source.submit(&header(1)).unwrap();
-        let mut mesh = header(2);
+        let mut mesh = header(8);
         mesh.extend(91_u64.to_le_bytes());
         mesh.extend(1_u64.to_le_bytes());
         for value in [0_f64; 3] {
             mesh.extend(value.to_le_bytes());
         }
-        for value in [4_u32, 24, 0, 12, 16, 4, 0, 0, 0, 0] {
+        for value in [1_u32, 0, 0, 0, 0, 4, 4, 24, 0, 12, 16, 0] {
             mesh.extend(value.to_le_bytes());
         }
         vertices(&mut mesh);

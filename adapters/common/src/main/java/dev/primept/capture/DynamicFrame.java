@@ -40,7 +40,7 @@ public final class DynamicFrame implements AutoCloseable {
             throw new IllegalArgumentException("Invalid dynamic identity");
         bytes.clear();
         bytes.putInt(Packets.MAGIC)
-                .putInt(1)
+                .putInt(Packets.ABI_VERSION)
                 .putInt(6)
                 .putInt(0)
                 .putLong(epoch)

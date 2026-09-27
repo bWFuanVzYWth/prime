@@ -9,6 +9,16 @@ extern "C" {
 // Zero status means success. On -1 call prime_last_error on the same thread.
 uint32_t prime_abi_version(void);
 uint64_t prime_create(uint32_t abi_version);
+// ABI v2. Scene op2 is removed; use complete op8 sections.
+// op8: header[24], section/sequence:u64[2], origin:f64[3], layer_count/reserved:u32[2],
+// then each layer's layer/texture/flags/topology/count/stride/position/color/uv/reserved:u32[10]
+// and raw vertices. Empty complete sections count toward terrain readiness.
+// op9: header[24], count/reserved:u32[2], texture IDs:u32[count]. Owner retirement
+// waits for current scene references; IDs 0/1/UINT32_MAX cannot retire.
+// op10: header[24], completed_sequence:u64. All earlier producers are finished or
+// cancelled and their accepted results already submitted. Old source packets reject.
+// op11: header[24], count/reserved:u32[2], then section/sequence:u64[2] per removal.
+// Section sequences, raw/instance sequences and GPU completion serials are distinct.
 // Scene op6: complete dynamic snapshot in one prime_submit; empty spans clear it.
 // Common LE packet header[24], then sequence:u64, origin:f64[3], span_count:u32,
 // reserved:u32=0 (64 bytes total). Sequence strictly increases within each epoch.

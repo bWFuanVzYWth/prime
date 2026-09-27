@@ -17,6 +17,13 @@ final class TerrainRestoreCpuSmoke {
     static void run() throws Exception {
         var cache = blank(ClientChunkCache.class);
         Object storage = storage(cache, 2);
+        var source = (LoadedTerrainSnapshot)cache;
+        check(source.primept$sourceWindow().equals(ColumnWindow.centered(0, 0, 2)),
+              "Actual storage window bound");
+        cache.updateViewCenter(5, -7);
+        check(source.primept$sourceWindow().equals(ColumnWindow.centered(5, -7, 2)),
+              "Storage center updates live without rescanning slots");
+        cache.updateViewCenter(0, 0);
         put(storage, chunk(0, 0, -4, true, false, true));
         put(storage, chunk(-1, 1, -4, false, true));
         put(storage,
@@ -47,6 +54,8 @@ final class TerrainRestoreCpuSmoke {
               "Shared event journals remain untouched");
 
         Object replacement = storage(cache, 3);
+        check(source.primept$sourceWindow().equals(ColumnWindow.centered(0, 0, 3)),
+              "Replacement storage rebinds source bounds");
         put(replacement, chunk(2, 0, 2, false, true));
         graph.waitAndReset(null);
         ((LoadedTerrainSnapshot)cache).primept$restoreTerrainSnapshot(graph);

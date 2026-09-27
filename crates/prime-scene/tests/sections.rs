@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 fn header(op: u32, epoch: u64) -> Vec<u8> {
     let mut bytes = Vec::new();
-    for value in [MAGIC, 1, op, 0] {
+    for value in [MAGIC, prime_scene::protocol::ABI_VERSION, op, 0] {
         bytes.extend(value.to_le_bytes());
     }
     bytes.extend(epoch.to_le_bytes());
@@ -47,19 +47,6 @@ fn remove(sequence: u64) -> Vec<u8> {
     bytes.extend(sequence.to_le_bytes());
     bytes
 }
-fn legacy(sequence: u64, id: u32) -> Vec<u8> {
-    let mut bytes = header(2, 1);
-    bytes.extend(91_u64.to_le_bytes());
-    bytes.extend(sequence.to_le_bytes());
-    for value in [29_999_984_f64, 64.0, -16.0] {
-        bytes.extend(value.to_le_bytes());
-    }
-    for value in [4_u32, 24, 0, 12, 16, 4, 0, id % 3, id, 0] {
-        bytes.extend(value.to_le_bytes());
-    }
-    bytes.extend(&layer(id)[40..]);
-    bytes
-}
 fn source() -> SourceScene {
     let mut source = SourceScene::default();
     source.submit(&header(1, 1)).unwrap();
@@ -99,17 +86,13 @@ fn exact_content_keeps_leases_and_generation_while_source_order_advances() {
         .unwrap();
     assert_same(&before, &snapshot(&source));
     // The old content generation is not the source admission sequence.
-    for packet in [
-        section(1, 10, &[layer(0)]),
-        section(1, 9, &[]),
-        legacy(9, 2),
-        legacy(10, 0),
-        remove(10),
-    ] {
+    for packet in [section(1, 10, &[layer(0)]), section(1, 9, &[]), remove(10)] {
         assert!(source.submit(&packet).is_err());
     }
     assert_same(&before, &snapshot(&source));
-    source.submit(&legacy(11, 2)).unwrap();
+    source
+        .submit(&section(1, 11, &[layer(0), layer(1), layer(2)]))
+        .unwrap();
     assert!(source.submit(&section(1, 11, &[layer(0)])).is_err());
     source
         .submit(&section(1, 12, &[layer(0), layer(1), layer(2)]))
@@ -118,7 +101,7 @@ fn exact_content_keeps_leases_and_generation_while_source_order_advances() {
     assert_eq!(after.meshes[&(91, 0)].revision, 1);
     assert_eq!(after.meshes[&(91, 2)].revision, 11);
     source.submit(&remove(13)).unwrap();
-    for packet in [legacy(12, 3), section(1, 13, &[layer(0)])] {
+    for packet in [section(1, 12, &[layer(3)]), section(1, 13, &[layer(0)])] {
         assert!(source.submit(&packet).is_err());
     }
     source.submit(&section(1, 14, &[layer(0)])).unwrap();
@@ -220,7 +203,7 @@ fn replacing_all_layers_clearing_and_empty_recompiles_are_atomic() {
     empty_layer[16..20].copy_from_slice(&0_u32.to_le_bytes());
     source.submit(&section(1, 4, &[empty_layer])).unwrap();
     assert_same(&empty, &snapshot(&source));
-    assert!(source.submit(&legacy(4, 2)).is_err());
+    assert!(source.submit(&section(1, 4, &[layer(2)])).is_err());
     source.submit(&section(1, 5, &[layer(0)])).unwrap();
     assert_eq!(snapshot(&source).triangle_count(), 2);
     assert_eq!(before.triangle_count(), 4);

@@ -21,6 +21,12 @@ class CaptureInboxTest {
         return source;
     }
 
+    static CaptureInbox.Batch take(CaptureInbox inbox) {
+        var batches = inbox.seal().batches();
+        assertTrue(batches.size() <= 1, "Fixture expected a single sealed batch");
+        return batches.isEmpty() ? null : batches.getFirst();
+    }
+
     @Test
     void residentSectionsCanExceedTheOldCountLimitWhenTheQueueIsDrained() {
         var inbox = new CaptureInbox(true);
@@ -28,7 +34,7 @@ class CaptureInboxTest {
         for (int x = 0; x < count; ++x) {
             var section = SectionPos.of(x, 0, 0);
             inbox.capture(inbox.begin(section), quad());
-            var publication = inbox.poll();
+            var publication = CaptureInboxTest.take(inbox);
             assertNotNull(publication, "Every admitted source must publish its actual geometry");
             assertEquals(section.asLong(), publication.section());
             assertFalse(publication.removal());
@@ -52,19 +58,20 @@ class CaptureInboxTest {
         long epoch = inbox.epoch();
         for (int x = 0; x <= 32768; ++x) {
             inbox.dropChunk(x, 0);
-            assertNull(inbox.poll());
+            assertNull(CaptureInboxTest.take(inbox));
         }
         assertNull(inbox.failure());
         assertEquals(epoch, inbox.epoch(),
                      "History growth must not reset or disable the resource epoch");
         inbox.capture(oldFirst, quad());
         inbox.capture(oldLast, quad());
-        assertNull(inbox.poll(), "Both early and recent old-generation workers remain invalid");
+        assertNull(CaptureInboxTest.take(inbox),
+                   "Both early and recent old-generation workers remain invalid");
         var fresh = inbox.begin(first);
         assertNotNull(fresh);
         inbox.capture(fresh, quad());
-        assertEquals(fresh.revision(), inbox.poll().revision());
-        assertNull(inbox.poll());
+        assertEquals(fresh.revision(), CaptureInboxTest.take(inbox).revision());
+        assertNull(CaptureInboxTest.take(inbox));
         assertNull(inbox.failure());
     }
 
@@ -74,12 +81,12 @@ class CaptureInboxTest {
         var beforeReset = inbox.begin(SECTION);
         inbox.reset();
         inbox.capture(beforeReset, empty());
-        assertNull(inbox.poll());
+        assertNull(CaptureInboxTest.take(inbox));
         var beforeReload = inbox.begin(SECTION);
         inbox.captureAtlas(new SpriteLoader.Preparations(1, 1, 0, null, Map.of(),
                                                          CompletableFuture.completedFuture(null)));
         inbox.capture(beforeReload, empty());
-        assertNull(inbox.poll());
+        assertNull(CaptureInboxTest.take(inbox));
         assertNotNull(inbox.atlas());
         assertNull(inbox.failure());
     }
@@ -91,15 +98,15 @@ class CaptureInboxTest {
         var pendingWorker = inbox.begin(SECTION);
         inbox.dropChunk(-7, 9);
         inbox.capture(pendingWorker, empty());
-        var removal = inbox.poll();
+        var removal = CaptureInboxTest.take(inbox);
         assertNotNull(removal);
         assertTrue(removal.removal());
         assertEquals(1, removal.packets().size());
         var packet = java.nio.ByteBuffer.wrap(removal.packets().getFirst())
                              .order(java.nio.ByteOrder.LITTLE_ENDIAN);
-        assertEquals(3, packet.getInt(8),
+        assertEquals(11, packet.getInt(8),
                      "Unload must revoke availability, not publish a complete empty section");
-        assertNull(inbox.poll());
+        assertNull(CaptureInboxTest.take(inbox));
         assertTrue(inbox.sections().isEmpty());
     }
 
@@ -121,27 +128,32 @@ class CaptureInboxTest {
         inbox.capture(survivingWorker, empty());
         assertEquals(java.util.Set.of(otherColumn.asLong()),
                      new java.util.HashSet<>(inbox.sections()));
-        var batches = new java.util.ArrayList<CaptureInbox.Batch>();
-        for (var batch = inbox.poll(); batch != null; batch = inbox.poll())
-            batches.add(batch);
-        assertEquals(3, batches.size(),
-                     "Repeated publications must not duplicate column membership");
+        var batches = inbox.seal().batches();
+        assertEquals(2, batches.size(), "One live replacement plus one bulk withdrawal");
+        var removed = java.nio.ByteBuffer
+                              .wrap(batches.stream()
+                                            .filter(CaptureInbox.Batch::removal)
+                                            .findFirst()
+                                            .orElseThrow()
+                                            .packets()
+                                            .getFirst())
+                              .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        assertEquals(2, removed.getInt(24));
         assertEquals(java.util.Set.of(SECTION.asLong(), sameColumn.asLong()),
-                     batches.stream()
-                             .filter(CaptureInbox.Batch::removal)
-                             .map(CaptureInbox.Batch::section)
-                             .collect(java.util.stream.Collectors.toSet()));
+                     java.util.Set.of(removed.getLong(32), removed.getLong(48)));
         var survivor = batches.stream().filter(batch -> !batch.removal()).findFirst().orElseThrow();
         assertEquals(otherColumn.asLong(), survivor.section());
         assertEquals(survivingWorker.revision(), survivor.revision());
 
         inbox.capture(inbox.begin(SECTION), empty());
-        assertEquals(SECTION.asLong(), inbox.poll().section());
+        assertEquals(SECTION.asLong(), CaptureInboxTest.take(inbox).section());
         inbox.dropChunk(SECTION.x(), SECTION.z());
-        var removal = inbox.poll();
+        var removal = CaptureInboxTest.take(inbox);
         assertTrue(removal.removal());
-        assertEquals(SECTION.asLong(), removal.section());
-        assertNull(inbox.poll());
+        assertEquals(SECTION.asLong(), java.nio.ByteBuffer.wrap(removal.packets().getFirst())
+                                               .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                                               .getLong(32));
+        assertNull(CaptureInboxTest.take(inbox));
         assertEquals(java.util.Set.of(otherColumn.asLong()),
                      new java.util.HashSet<>(inbox.sections()));
         assertNull(inbox.failure());
@@ -154,26 +166,64 @@ class CaptureInboxTest {
         var fresh = inbox.begin(SECTION);
         inbox.capture(fresh, empty());
         inbox.capture(old, empty());
-        assertEquals(fresh.revision(), inbox.poll().revision());
-        assertNull(inbox.poll());
+        assertEquals(fresh.revision(), CaptureInboxTest.take(inbox).revision());
+        assertNull(CaptureInboxTest.take(inbox));
 
         inbox.capture(inbox.begin(SECTION), empty());
         var newest = inbox.begin(SECTION);
         inbox.capture(newest, empty());
-        assertEquals(newest.revision(), inbox.poll().revision());
-        assertNull(inbox.poll());
+        assertEquals(newest.revision(), CaptureInboxTest.take(inbox).revision());
+        assertNull(CaptureInboxTest.take(inbox));
     }
 
     @Test
-    void queueOverflowDisablesCaptureInsteadOfDroppingVisibleGeometry() {
+    void sealedBatchExceedsOldQuotaAndBulkUnloadRetiresCompletedHistory() {
         var inbox = new CaptureInbox(true);
-        for (int x = 0; x < 4097; x++) {
-            var section = SectionPos.of(x, 0, 0);
-            inbox.capture(inbox.begin(section), empty());
+        for (int x = 0; x < 5000; x++)
+            inbox.capture(inbox.begin(SectionPos.of(x, 0, 0)), empty());
+        var first = inbox.seal();
+        assertEquals(5000, first.batches().size());
+        assertTrue(first.completedSequence() > 0);
+        for (int x = 0; x < 5000; x++)
+            inbox.dropChunk(x, 0);
+        var removed = inbox.seal();
+        assertEquals(1, removed.batches().size());
+        var packet = java.nio.ByteBuffer.wrap(removed.batches().getFirst().packets().getFirst())
+                             .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        assertEquals(11, packet.getInt(8));
+        assertEquals(5000, packet.getInt(24));
+        assertNull(inbox.failure());
+        assertEquals(0, inbox.sections().size());
+        var pending = inbox.begin(SECTION);
+        inbox.dropChunk(SECTION.x(), SECTION.z());
+        assertEquals(pending.revision() - 1, inbox.seal().completedSequence());
+        inbox.complete(pending);
+        assertTrue(inbox.seal().completedSequence() > pending.revision());
+        inbox.capture(pending, quad());
+        assertTrue(inbox.seal().batches().isEmpty());
+    }
+
+    @Test
+    void longStreamingHistoryIsBoundedByLiveSourcesAndUnfinishedTokens() throws Exception {
+        var inbox = new CaptureInbox(true);
+        for (int batch = 0; batch < 65; batch++) {
+            for (int item = 0; item < 4097; item++) {
+                int x = batch * 4097 + item;
+                inbox.capture(inbox.begin(SectionPos.of(x, 0, 0)), empty());
+                inbox.dropChunk(x, 0);
+            }
+            var sealed = inbox.seal();
+            assertEquals(1, sealed.batches().size());
+            assertTrue(sealed.completedSequence() > 0);
+            assertTrue(inbox.sections().isEmpty());
+            for (String name : new String[] {"revisions", "chunkSections", "chunkRevisions",
+                                             "producers", "inFlight", "pending"}) {
+                var field = CaptureInbox.class.getDeclaredField(name);
+                field.setAccessible(true);
+                assertTrue(((Map<?,?>)field.get(inbox)).isEmpty(),name+" must release completed history");
+            }
         }
-        assertNotNull(inbox.failure());
-        assertNull(inbox.begin(SECTION));
-        assertNull(inbox.poll());
+        assertNull(inbox.failure());
     }
 
     @Test
@@ -199,9 +249,9 @@ class CaptureInboxTest {
         inbox.enable();
         assertSame(reloaded, inbox.atlas(), "The next world uses the actual latest source upload");
         inbox.capture(oldWorld, empty());
-        assertNull(inbox.poll());
+        assertNull(CaptureInboxTest.take(inbox));
         inbox.capture(inbox.begin(SECTION), empty());
-        assertNotNull(inbox.poll());
+        assertNotNull(CaptureInboxTest.take(inbox));
         assertNull(inbox.failure());
     }
 
@@ -221,7 +271,7 @@ class CaptureInboxTest {
         inbox.enable();
         assertNull(inbox.atlas(), "Enabling capture cannot reconstruct a released source asset");
         inbox.capture(old, empty());
-        assertNull(inbox.poll());
+        assertNull(CaptureInboxTest.take(inbox));
         inbox.captureAtlas(upload);
         assertEquals(8, inbox.atlas().rgba().length);
         assertNull(inbox.failure());

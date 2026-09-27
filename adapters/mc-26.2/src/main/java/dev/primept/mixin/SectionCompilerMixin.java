@@ -3,6 +3,11 @@ package dev.primept.mixin;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.mojang.blaze3d.vertex.VertexSorting;
+import com.mojang.blaze3d.vertex.MeshData;
+import com.mojang.blaze3d.vertex.ByteBufferBuilder;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import dev.primept.capture.TerrainRasterOutput;
+import org.spongepowered.asm.mixin.injection.At;
 import dev.primept.PrimeClient;
 import dev.primept.capture.TerrainCapture;
 import net.minecraft.client.renderer.SectionBufferBuilderPack;
@@ -26,5 +31,17 @@ public abstract class SectionCompilerMixin {
             capture.publish();
             return result;
         }
+    }
+    @WrapOperation(
+            method = "compile",
+            at = @At(
+                    value = "INVOKE",
+                    target =
+                            "Lcom/mojang/blaze3d/vertex/MeshData;sortQuads(Lcom/mojang/blaze3d/vertex/ByteBufferBuilder;Lcom/mojang/blaze3d/vertex/VertexSorting;)Lcom/mojang/blaze3d/vertex/MeshData$SortState;"))
+    private MeshData.SortState
+    primept$discardSort(MeshData mesh, ByteBufferBuilder buffer, VertexSorting sorting,
+                        Operation<MeshData.SortState> original) {
+        return TerrainRasterOutput.omitSort(mesh, sorting) ? null
+                                                           : original.call(mesh, buffer, sorting);
     }
 }

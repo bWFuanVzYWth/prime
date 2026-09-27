@@ -1,5 +1,6 @@
 //! Hardware ray-query renderer. Production records into the host Vulkan
 //! submission and target; synchronous readback is restricted to offline diagnostics.
+mod arena;
 mod benchmark;
 mod context;
 mod cpu_profile;
@@ -8,6 +9,7 @@ mod dynamic;
 pub use display::{PrimeDrtParameters, PrimeDrtSettings};
 mod geometry;
 mod material_arena;
+mod packing;
 mod plan;
 mod resources;
 mod target;
@@ -17,6 +19,7 @@ use geometry::Geometry;
 pub use resources::GpuProfile;
 
 use ash::vk::{self, Handle};
+use prime_scene::instances::InstanceInput;
 use prime_scene::scene::{Camera, InstanceScene, Scene};
 use prime_scene::settings::{RenderMode, RenderSettings};
 use resources::{Buffer, Context, error};
@@ -213,7 +216,15 @@ fn float4(bytes: &mut Vec<u8>, value: [f32; 4]) {
 mod frame;
 use frame::Output;
 
+#[derive(Clone, Copy, Debug, Default)]
+struct GpuIntervals {
+    serial: u64,
+    preparation_ns: u64,
+    render_ns: u64,
+}
+
 pub struct Renderer {
+    workers: Arc<prime_scene::workers::CpuWorkers>,
     context: Arc<Context>,
     // Only the selected backend's pipeline and sized output exist; scene geometry is shared.
     pipeline: Option<Pipeline>,
@@ -228,6 +239,7 @@ pub struct Renderer {
     failed: bool,
     host_serials: [u64; FRAME_SLOTS],
     query_serials: [u64; FRAME_SLOTS],
+    gpu_intervals: [GpuIntervals; FRAME_SLOTS],
     host_query: vk::QueryPool,
     last_gpu_ns: u64,
     last_gpu_serial: u64,
@@ -425,7 +437,7 @@ mod tests {
             "texture delta must affect the existing dynamic material without a geometry update"
         );
         scene.dynamic.revision += 1;
-        scene.dynamic.triangles = Arc::from([]);
+        scene.dynamic.triangles = Arc::default();
         assert_eq!(renderer.render(&scene, &camera, 64, 48, 0).unwrap(), sky);
     }
 

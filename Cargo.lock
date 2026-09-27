@@ -438,6 +438,9 @@ dependencies = [
 [[package]]
 name = "prime_scene"
 version = "0.1.0"
+dependencies = [
+ "rayon",
+]
 
 [[package]]
 name = "prime_tools"

@@ -112,7 +112,7 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```powershell
 $env:PRIME_VK_VALIDATION = '1'
 $env:VK_LAYER_VALIDATE_SYNC = '1'
-cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --nocapture --test-threads=1
+cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip packing_cost_matrix --nocapture --test-threads=1
 ```
 
 这些测试覆盖 cutout、累积、尺寸变化、增量场景和宿主资源退休；小尺寸/奇数尺寸用于边界检查，不是性能数据。改变宿主集成或捕获时，还需在对应 MC 适配器实际运行，检查主图像与 HUD、资源重载、世界退出等相关生命周期。更新公共接口时验证受影响的两个适配器；编译通过不证明 Mixin 注入或实际 GPU 功能正常。
@@ -136,6 +136,12 @@ cargo run -p prime_tools --bin prime-pt-smoke -- smoke artifacts/smoke.png 32
 
 需要直接调试 FFM 时，可 `cargo build -p prime_engine` 后运行 `.\gradlew.bat nativeSmoke`；也可通过 `-PnativeLibrary=绝对路径` 选择库。
 
+## 同步工作池
+
+Rust 的 `PRIME_CPU_THREADS` 环境变量控制 native 私有 CPU 工作池；Java 的 `-PprimeptCompilerThreads=N`（对应 JVM `-Dprimept.compilerThreads=N`）控制私有地形编译工作池。二者默认取可用 CPU 数与 8 的较小值，设为 1 可验证串行路径，非法非正值拒绝。小批次直接执行；Java 按 MC 已确认的编译 worker 契约运行，模型实体和未知 consumer 不转移线程。每批所有任务在调用返回前汇合，GPU 资源分配/命令录制由 owner 执行。
+
+封闭源批次没有人为的跨帧工作配额。完整首载或大范围修改可能形成真实长帧，应记录其成本；工作池线程数、几何批次、在途 GPU 页与当前活跃内容不是同一数量。空闲池页保留历史峰值，renderer 销毁时再释放。
+
 ## 性能测量
 
 正式性能测试使用原生 **1920×1080**，记录实际主 target 尺寸；降分辨率、动态分辨率或重建后的输出不能标为原生 1080p。固定场景、相机、种子、渲染参数、帧率上限和 VSync，记录构建、GPU/驱动、预热与采样范围。关闭 validation、capture audit 和逐调用 trace；计时 profiling 是否启用也属于测量条件。测量期间避免另一游戏或 GPU 测试争用设备。
@@ -158,14 +164,15 @@ cargo run --release --locked -p prime_tools --bin perf -- --frames 120 --warmup 
 | --- | --- |
 | `cpu_record_ns` | native 资源准备、命令池复用与命令录制 |
 | `cpu_submit_ns` | 模拟宿主入队成本 |
-| `cpu_slot_wait_ns` | 在途槽满时的反压等待 |
+| `cpu_slot_wait_ns` | 在途槽满时的 GPU 完成等待 |
+| `gpu_preparation_ns` / `gpu_render_ns` | `instance-perf` 在启用 PRIME_PROFILE 时提供的上传/AS 准备区间和 PT/输出区间；关闭时留空，含阶段依赖和时间戳开销，不是孤立 AS/射线活跃时间 |
 | `completed_gpu_ns` | 已完成提交的 GPU 时间戳区间，含上传、AS、依赖与 PT |
 | `isolated_completion_ms` | 隔离变化事件从 CPU 开始到 GPU 完成的延迟 |
 | `batch_completion_ms / batch_frames` | 阶段排空后的批次平均吞吐时间 |
 
 异步入队耗时不等于完整帧耗时。游戏日志中的 `gpuLast` 是最近完成帧样本，不是汇总窗口均值；任务管理器 GPU 百分比也不能代替阶段计时。图像正确性由独立测试与实机检查验证，性能夹具不以读回图像计算 checksum。
 
-需要归因原生 CPU 成本时，可在启动进程前设置 `$env:PRIME_PROFILE_CPU = '1'`。此开关默认关闭，独立于 `PRIME_PROFILE`；关闭时不读取阶段时钟，开启后每 120 次成功准备/录制输出一次 `[Prime CPU engine]` 和 `[Prime CPU renderer]`。前者记录 `incremental_translate`（含本次动态引用刷新）与实际发布的 mesh/纹理数量，后者拆分退休检查、计时结果回收、已有槽位反压、静态更新、对象计划/执行、TLAS、描述符和命令录制。每项输出 sum/mean/max；子项属于对应 total，不能再与 total 相加，也不包含 Java/FFM、宿主提交或 GPU 执行。未满批次和失败录制不输出。
+需要归因原生 CPU 成本时，可在启动进程前设置 `$env:PRIME_PROFILE_CPU = '1'`。此开关默认关闭，独立于 `PRIME_PROFILE`；关闭时不读取阶段时钟，开启后每 120 次成功准备/录制输出一次 `[Prime CPU engine]` 和 `[Prime CPU renderer]`。前者记录 `incremental_translate`（含本次动态引用刷新）与实际发布的 mesh/纹理数量，后者拆分退休检查、计时结果回收、在途槽位完成等待、静态更新、对象计划/执行、TLAS、描述符和命令录制。每项输出 sum/mean/max；子项属于对应 total，不能再与 total 相加，也不包含 Java/FFM、宿主提交或 GPU 执行。未满批次和失败录制不输出。
 
 静态增量链可用无 GPU 夹具比较相同构建的完整快照路径与生产增量路径：
 
@@ -174,6 +181,22 @@ cargo run --release --no-default-features --locked -p prime_tools --bin incremen
 ```
 
 夹具在 1/16/512 个格、每格 1/64 个非空 mesh 下固定修改一个 mesh；每格均提交 64 个真实位置，包括空段。CSV 保留预热、全部样本、提交/翻译/分组耗时、发布/访问数量和分配请求。计时与分配计数分两轮，比较耗时时过滤 `allocation_instrumentation=false`、`warmup=false`；分配轮只用于归因。包含解码、翻译、分组与计划回收，排除包生成、Java/FFM、GPU 和游戏调度。它是 CPU 微基准，既不是历史构建对照，也不代表游戏 FPS；实际渲染性能仍按原生 1080p 检查。
+
+持久实例也可使用同一构建、相同 op7 输入，比较完整快照诊断路径与生产增量输入：
+
+```powershell
+cargo run --release --no-default-features --locked -p prime_tools --bin incremental-cpu -- --instances --samples 100 --csv artifacts/instance-incremental-cpu.csv
+```
+
+固定 1k/10k/50k 常驻实例，覆盖 0、1、1% 和全量姿态变化。计时包含解码、发布和放置规划，另记实际访问/姿态数；源包构造、Java/FFM 和 GPU 不在其中。与静态夹具一样，计时轮和分配统计轮分开，完整快照路径是本构建诊断对照，不是旧提交的历史基线。
+
+CPU 打包的线程数/批次矩阵单独执行，不混入 GPU validation 测试：
+
+```powershell
+cargo test --release -p prime_vulkan --lib --locked packing_cost_matrix -- --ignored --nocapture
+```
+
+该测试保留 1/2/4/8 线程及小、中、大批次的预热与逐样本 CSV 到 `artifacts/packing-cpu.csv`。输入分配和准备在计时之外，观察直接写入复用输出切片的成本；它没有 Vulkan 命令或游戏场景，不能外推整体吞吐量。
 
 原生 CPU 日志同时记录三角形、实例、簇、材质页和重建数量，读取已有计数，不为统计逐帧扫描场景。`cpu_upload_bytes` 是成功的 CPU mapped-buffer 写入字节，包含 staging 和 AS 输入，不是 PCIe 带宽或 GPU copy 量。阶段探针运行用于归因，正式性能对比另记其启用状态；测量后从运行环境移除该变量。实际客户端验证采用有界动作或采样窗口，完成后及时正常退出，再分析日志，避免持续占用用户前台。
 
@@ -219,7 +242,7 @@ $env:PRIME_PROFILE_TRACE = '0'
 cargo run --release --locked -p prime_tools --bin instance-perf -- --samples 60 --warmup 8 --rounds 3 --csv artifacts/gpu-instances.csv
 ```
 
-该夹具直接构造 `InstanceScene`，不含 op7 解码、Java、游戏和呈现。身份增删在相同位置替换以隔离成员变化的成本，不代表移动或重叠几何的最坏情况；简单 opaque 代理模型也不能代表复杂 Minecraft 画面的射线成本。CSV 保留每帧 CPU 录制、提交、反压等待、完整 GPU 区间、上传字节与实际 BLAS 重建数。需要确认输入画面时可用工具 `--diagnostic` 在计时之外输出同一夹具图像，不把读回混入生产性能数据。
+该夹具直接构造 `InstanceScene`，不含 op7 解码、Java、游戏和呈现。身份增删在相同位置替换以隔离成员变化的成本，不代表移动或重叠几何的最坏情况；简单 opaque 代理模型也不能代表复杂 Minecraft 画面的射线成本。CSV 保留每帧 CPU 录制、提交、在途槽位完成等待、完整 GPU 区间、上传字节与实际 BLAS 重建数。需要确认输入画面时可用工具 `--diagnostic` 在计时之外输出同一夹具图像，不把读回混入生产性能数据。
 
 ## 文档与本地产物
 

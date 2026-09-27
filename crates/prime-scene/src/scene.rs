@@ -40,7 +40,7 @@ pub struct DynamicScene {
     pub revision: u64,
     /// Absolute source origin; camera rebasing does not change spatial membership.
     pub origin: [f64; 3],
-    pub triangles: Arc<[Triangle]>,
+    pub triangles: Arc<Vec<Triangle>>,
 }
 
 /// Immutable local geometry, shared by any number of persistent instances.
@@ -145,9 +145,10 @@ impl MeshVersion {
 
 #[derive(Default)]
 pub(crate) struct DynamicMesh {
+    pub texture_ids: BTreeSet<u32>,
     pub revision: u64,
     pub origin: [f64; 3],
-    pub triangles: Arc<[Triangle]>,
+    pub triangles: Arc<Vec<Triangle>>,
     pub bounds: [[f32; 3]; 2],
 }
 
@@ -161,10 +162,13 @@ pub struct SourceScene {
     pub(crate) sections: TerrainAvailability,
     /// Latest complete replacement/removal sequence, independent of content revisions.
     pub(crate) removed: BTreeMap<u64, SectionSequence>,
+    pub(crate) section_completed: SectionSequence,
     pub(crate) textures: BTreeMap<u32, Texture>,
     pub(crate) triangle_count: usize,
     pub(crate) texture_bytes: usize,
+    pub(crate) texture_lifetime: crate::texture_lifetime::TextureLifetime,
     pub(crate) dynamic: DynamicMesh,
+    pub(crate) dynamic_spares: Vec<Arc<Vec<Triangle>>>,
     pub(crate) instances: InstanceContext,
     pub(crate) section_scratch: crate::protocol::SectionScratch,
     pub(crate) edits: crate::incremental::SourceEdits,
@@ -181,6 +185,10 @@ impl SourceScene {
 
     pub fn instances(&self) -> &InstanceScene {
         self.instances.scene()
+    }
+
+    pub fn instance_input(&self) -> crate::instances::InstanceInput<'_> {
+        self.instances.input()
     }
 
     pub fn instance_sequence(&self) -> u64 {

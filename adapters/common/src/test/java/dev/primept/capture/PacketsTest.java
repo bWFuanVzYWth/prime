@@ -59,22 +59,24 @@ class PacketsTest {
         for (int i = 0; i < source.capacity(); i++)
             source.put((byte)i);
         source.flip();
-        byte[] packet = Packets.mesh(7, -91, 12, -32, 64, 160, 4, 28, 0, 12, 16, 4, 1, 1, source);
+        byte[] packet = Packets.sectionReplace(
+                7, -91, 12, -32, 64, 160,
+                List.of(new Packets.SectionLayer(1, 1, 1, 4, 4, 28, 0, 12, 16, source)));
         assertEquals(0, source.position(), "Capture must not mutate Minecraft's buffer cursor");
         var wire = ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN);
-        assertEquals(216, packet.length);
+        assertEquals(224, packet.length);
         assertEquals(Packets.MAGIC, wire.getInt(0));
-        assertEquals(2, wire.getInt(8));
+        assertEquals(8, wire.getInt(8));
         assertEquals(7, wire.getLong(16));
         assertEquals(-91, wire.getLong(24));
         assertEquals(-32, wire.getDouble(40));
-        assertEquals(4, wire.getInt(64));
-        assertEquals(28, wire.getInt(68));
-        assertEquals(12, wire.getInt(76));
-        assertEquals(16, wire.getInt(80));
-        assertEquals(1, wire.getInt(96));
+        assertEquals(4, wire.getInt(88));
+        assertEquals(28, wire.getInt(92));
+        assertEquals(12, wire.getInt(100));
+        assertEquals(16, wire.getInt(104));
+        assertEquals(1, wire.getInt(72));
         byte[] captured = new byte[source.remaining()];
-        wire.position(104).get(captured);
+        wire.position(112).get(captured);
         source.put(0, (byte)99);
         assertEquals(0, captured[0],
                      "Packet owns bytes independently of vanilla MeshData lifetime");
@@ -125,7 +127,9 @@ class PacketsTest {
         assertThrows(IllegalArgumentException.class, () -> Packets.texture(1, 2, 2, new byte[15]));
         assertThrows(IllegalArgumentException.class,
                      ()
-                             -> Packets.mesh(1, 1, 1, 0, 0, 0, 4, 28, 0, 12, 16, 4, 0, 0,
-                                             ByteBuffer.allocate(111)));
+                             -> Packets.sectionReplace(
+                                     1, 1, 1, 0, 0, 0,
+                                     List.of(new Packets.SectionLayer(0, 1, 0, 4, 4, 28, 0, 12, 16,
+                                                                      ByteBuffer.allocate(111)))));
     }
 }

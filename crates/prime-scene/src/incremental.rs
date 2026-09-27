@@ -105,12 +105,12 @@ impl TextureUpdates<'_> {
 }
 
 impl<'a> Iterator for TextureUpdates<'a> {
-    type Item = (&'a u32, &'a crate::scene::Texture);
+    type Item = (&'a u32, Option<&'a crate::scene::Texture>);
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.keys {
             TextureKeys::None => None,
-            TextureKeys::All(all) => all.next(),
-            TextureKeys::Changed(keys) => keys.next().map(|key| (key, &self.source[key])),
+            TextureKeys::All(all) => all.next().map(|(id, t)| (id, Some(t))),
+            TextureKeys::Changed(keys) => keys.next().map(|key| (key, self.source.get(key))),
         }
     }
 }
@@ -305,6 +305,8 @@ impl TranslatedScene {
         if anchor.iter().any(|value| !value.is_finite()) {
             return Err("Invalid scene anchor".into());
         }
+        source.collect_textures()?;
+        source.instances.publish();
         let reset = self.source_id != Some(source.id) || self.scene.epoch != source.epoch;
         let changed = reset || self.source_revision != Some(source.revision);
         let resync = reset || (changed && self.source_revision != Some(source.edits.base));
@@ -423,9 +425,11 @@ impl TranslatedScene {
                 self.terrain.changed.insert(cell);
             }
             for &key in &source.edits.textures {
-                self.scene
-                    .textures
-                    .insert(key, source.textures[&key].clone());
+                if let Some(texture) = source.textures.get(&key) {
+                    self.scene.textures.insert(key, texture.clone());
+                } else {
+                    self.scene.textures.remove(&key);
+                }
                 work.textures_published += 1;
             }
         }

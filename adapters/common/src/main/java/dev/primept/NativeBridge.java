@@ -1,6 +1,7 @@
 package dev.primept;
 
 import dev.primept.settings.RenderSettings;
+import dev.primept.capture.Packets;
 
 import java.io.IOException;
 import java.lang.foreign.Arena;
@@ -42,7 +43,7 @@ public final class NativeBridge implements AutoCloseable {
             // Keep executable code loaded for process lifetime, including quarantined GPU callbacks after device failure.
             var lookup = SymbolLookup.libraryLookup(library.toAbsolutePath(), Arena.global());
             var abi = bind(lookup, "prime_abi_version", FunctionDescriptor.of(JAVA_INT));
-            if ((int)abi.invokeExact() != 1)
+            if ((int)abi.invokeExact() != Packets.ABI_VERSION)
                 throw new IllegalStateException("Native ABI version mismatch");
             var create = bind(lookup, "prime_create", FunctionDescriptor.of(JAVA_LONG, JAVA_INT));
             submit = bind(lookup, "prime_submit",
@@ -62,7 +63,7 @@ public final class NativeBridge implements AutoCloseable {
             destroy = bind(lookup, "prime_destroy", FunctionDescriptor.of(JAVA_INT, JAVA_LONG));
             lastError = bind(lookup, "prime_last_error",
                              FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG));
-            handle = (long)create.invokeExact(1);
+            handle = (long)create.invokeExact(Packets.ABI_VERSION);
             if (handle == 0)
                 throw new IllegalStateException(error());
         } catch (Throwable failure) {

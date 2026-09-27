@@ -18,6 +18,7 @@ rust-version = "1.89"
 prime_scene = { path = "crates/prime-scene" }
 prime_vulkan = { path = "crates/prime-vulkan" }
 ash = "0.38"
+rayon = "1.12"
 png = "0.18.1"
 criterion = "0.8.2"
 test-case = "3.3.1"

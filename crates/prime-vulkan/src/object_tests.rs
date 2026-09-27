@@ -417,7 +417,7 @@ fn gpu_raw_spatial_buckets_preserve_unaffected_blas_on_birth_move_and_remove() {
         renderer.geometry.as_ref().unwrap().objects.addresses(),
         grown
     );
-    scene.dynamic.triangles = Arc::from([]);
+    scene.dynamic.triangles = Arc::default();
     scene.dynamic.revision += 1;
     renderer.render(&scene, &camera(), 16, 16, 0).unwrap();
     assert!(

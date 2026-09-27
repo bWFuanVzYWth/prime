@@ -76,7 +76,7 @@ class FluidCaptureTest {
             terrain.publish();
         }
         assertNotNull(inbox.failure());
-        assertNull(inbox.poll());
+        assertNull(CaptureInboxTest.take(inbox));
         assertNull(FluidCapture.open(layer -> sink(new int[2])));
     }
 
@@ -95,7 +95,7 @@ class FluidCaptureTest {
 
     private static ByteBuffer onlyMesh(CaptureInbox inbox) {
         assertNull(inbox.failure());
-        var batch = inbox.poll();
+        var batch = CaptureInboxTest.take(inbox);
         assertNotNull(batch);
         assertEquals(1, batch.packets().size());
         var wire = ByteBuffer.wrap(batch.packets().getFirst()).order(ByteOrder.LITTLE_ENDIAN);

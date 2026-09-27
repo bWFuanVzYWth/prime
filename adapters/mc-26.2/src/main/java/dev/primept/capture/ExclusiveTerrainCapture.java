@@ -1,6 +1,5 @@
 package dev.primept.capture;
 
-import com.mojang.blaze3d.vertex.VertexSorting;
 import dev.primept.PrimeClient;
 import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongCollection;
@@ -22,20 +21,27 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
     private static boolean vanillaSuspended;
     private static boolean sourceFrame;
     private static ClientLevel vanillaSnapshotPending;
-    private static final int SECTIONS_PER_FRAME = 8;
-    private static final long BUDGET_NS = 3_000_000;
-    private final SectionWorkQueue work = new SectionWorkQueue();
+    private final SectionChanges work = new SectionChanges();
     private final Long2ObjectLinkedOpenHashMap<LevelChunk> chunks =
             new Long2ObjectLinkedOpenHashMap<>();
     private final LongOpenHashSet compiled = new LongOpenHashSet();
-    private final SectionBufferBuilderPack buffers = new SectionBufferBuilderPack();
+    private final BlockEntityIndex blockEntities = new BlockEntityIndex();
+    private SynchronousWorkers<CompilerWorkspace> workers;
     private ClientLevel world;
-    private SectionCompiler compiler;
+    private record CompilerWorkspace(SectionCompiler compiler, SectionBufferBuilderPack buffers)
+            implements AutoCloseable {
+        public void close() {
+            buffers.close();
+        }
+    }
+    private record
+            Compilation(long key, net.minecraft.client.renderer.chunk.RenderSectionRegion region) {}
     private int centerX = Integer.MIN_VALUE, centerZ, radius = -1;
     private long epoch;
     private RuntimeException failure;
     private long compilations;
     private boolean cacheWindowChanged;
+    private ColumnWindow window;
 
     private ExclusiveTerrainCapture() {}
     public static boolean active() {
@@ -121,40 +127,50 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         synchronizeWindow(camera.pos);
         if (world == null)
             return;
-        var minecraft = Minecraft.getInstance();
-        long deadline = System.nanoTime() + BUDGET_NS;
-        for (int count = 0; count < SECTIONS_PER_FRAME && !work.isEmpty(); ++count) {
-            long key = work.poll();
-            if (!chunks.containsKey(ChunkPos.pack(SectionPos.x(key), SectionPos.z(key))))
-                continue;
-            // Each snapshot is fresh for this actual compile; never cache neighboring block state across dirties.
-            var region = new RenderRegionCache().createRegion(world, key);
-            if (region == null) {
-                try (var capture = TerrainCapture.open(PrimeClient.CAPTURE, SectionPos.of(key),
-                                                       minecraft.options.cutoutLeaves().get())) {
-                    capture.publish();
-                }
-            } else {
-                boolean success = false;
-                try {
-                    var result = compiler.compile(SectionPos.of(key), region,
-                                                  VertexSorting.byDistance(0, 0, 0), buffers);
-                    result.release();
-                    success = true;
-                } finally {
-                    if (success)
-                        buffers.clearAll();
-                    else
-                        buffers.discardAll();
-                }
+        long[] sealed = work.seal();
+        boolean cutout = Minecraft.getInstance().options.cutoutLeaves().get();
+        // Snapshot bounded waves on the owner, then join each wave. All sealed work
+        // finishes in this call; a wave is workspace sizing, never a frame quota.
+        for (int first = 0; first < sealed.length; first += 256) {
+            var inputs = new java.util.ArrayList<Compilation>();
+            var regions = new RenderRegionCache();
+            for (int i = first; i < Math.min(sealed.length, first + 256); i++) {
+                long key = sealed[i];
+                if (!chunks.containsKey(ChunkPos.pack(SectionPos.x(key), SectionPos.z(key))))
+                    continue;
+                inputs.add(new Compilation(key, regions.createRegion(world, key)));
             }
-            compiled.add(key);
-            ++compilations;
+            workers.run(inputs.size(), 8, (workspace, start, end) -> {
+                for (int i = start; i < end; i++) {
+                    var input = inputs.get(i);
+                    if (input.region == null) {
+                        try (var capture = TerrainCapture.open(PrimeClient.CAPTURE,
+                                                               SectionPos.of(input.key), cutout)) {
+                            capture.publish();
+                        }
+                    } else {
+                        boolean success = false;
+                        try (var output = TerrainRasterOutput.open()) {
+                            var result = workspace.compiler.compile(SectionPos.of(input.key),
+                                                                    input.region, output.sorting,
+                                                                    workspace.buffers);
+                            result.release();
+                            success = true;
+                        } finally {
+                            if (success)
+                                workspace.buffers.clearAll();
+                            else
+                                workspace.buffers.discardAll();
+                        }
+                    }
+                }
+            });
+            for (var input : inputs) {
+                compiled.add(input.key);
+                ++compilations;
+            }
             if (PrimeClient.CAPTURE.failure() != null)
                 throw PrimeClient.CAPTURE.failure();
-            // A mod callback is not preemptible; this is a soft budget with a hard section-count cap.
-            if (System.nanoTime() >= deadline)
-                break;
         }
     }
     /** Runs before BE extraction so first-frame and moved-window callbacks see the current loaded set. */
@@ -176,8 +192,10 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             epoch = PrimeClient.CAPTURE.epoch();
             work.clear();
             chunks.clear();
+            blockEntities.clear();
             compiled.clear();
             centerX = Integer.MIN_VALUE;
+            window = null;
             configureCompiler();
         }
         int x = SectionPos.blockToSectionCoord(camera.x),
@@ -190,47 +208,52 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         var minecraft = Minecraft.getInstance();
         net.minecraft.world.level.block.LeavesBlock.setCutoutLeaves(
                 minecraft.options.cutoutLeaves().get());
-        compiler = new SectionCompiler(
-                minecraft.options.ambientOcclusion().get(), minecraft.options.cutoutLeaves().get(),
-                minecraft.getModelManager().getBlockStateModelSet(),
-                minecraft.getModelManager().getFluidStateModelSet(), minecraft.getBlockColors());
+        if (workers != null)
+            workers.close();
+        boolean ao = minecraft.options.ambientOcclusion().get(),
+                cutout = minecraft.options.cutoutLeaves().get();
+        var blocks = minecraft.getModelManager().getBlockStateModelSet();
+        var fluids = minecraft.getModelManager().getFluidStateModelSet();
+        var colors = minecraft.getBlockColors();
+        int threads = Integer.getInteger("primept.compilerThreads",
+                                         Math.min(8, Runtime.getRuntime().availableProcessors()));
+        workers = new SynchronousWorkers<>(
+                threads,
+                ignored
+                -> new CompilerWorkspace(new SectionCompiler(ao, cutout, blocks, fluids, colors),
+                                         new SectionBufferBuilderPack()));
     }
     private void updateWindow(int x, int z, int distance) {
+        var next = ColumnWindow.centered(x, z, distance);
+        var source = ((LoadedTerrainSnapshot)world.getChunkSource()).primept$sourceWindow();
+        if (source != null)
+            next = next.intersect(source);
+        var previous = window;
+        window = next;
         centerX = x;
         centerZ = z;
         radius = distance;
-        var iterator = chunks.long2ObjectEntrySet().iterator();
-        while (iterator.hasNext()) {
-            var entry = iterator.next();
-            long key = entry.getLongKey();
-            int columnX = ChunkPos.getX(key), columnZ = ChunkPos.getZ(key);
-            if (!inside(columnX, columnZ) ||
-                world.getChunkSource().getChunk(columnX, columnZ, ChunkStatus.FULL, false) !=
-                        entry.getValue()) {
-                retireChunk(columnX, columnZ);
-                iterator.remove();
-            }
-        }
-        // Only window movement/reconfiguration scans the loaded window. Near chunks enter the queue first.
-        for (int ring = 0; ring <= radius; ++ring)
-            for (int dz = -ring; dz <= ring; ++dz)
-                for (int dx = -ring; dx <= ring; ++dx) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring)
-                        continue;
-                    long key = ChunkPos.pack(x + dx, z + dz);
-                    if (chunks.containsKey(key))
-                        continue;
-                    var chunk = world.getChunkSource().getChunk(x + dx, z + dz, ChunkStatus.FULL,
-                                                                false);
-                    if (chunk != null) {
-                        chunks.put(key, chunk);
-                        dirtyChunkContents(chunk, false);
-                    }
-                }
+        if (previous != null)
+            previous.difference(next, (columnX, columnZ) -> {
+                if (chunks.remove(ChunkPos.pack(columnX, columnZ)) != null)
+                    retireChunk(columnX, columnZ);
+            });
+        next.difference(previous, this::visitColumn);
         cacheWindowChanged = false;
     }
+    private void visitColumn(int x, int z) {
+        long key = ChunkPos.pack(x, z);
+        if (chunks.containsKey(key))
+            return;
+        var chunk = world.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false);
+        if (chunk != null) {
+            chunks.put(key, chunk);
+            blockEntities.add(chunk);
+            dirtyChunkContents(chunk, false);
+        }
+    }
     private boolean inside(int x, int z) {
-        return Math.abs((long)x - centerX) <= radius && Math.abs((long)z - centerZ) <= radius;
+        return window != null && window.contains(x, z);
     }
     private void dirtyChunkContents(LevelChunk chunk, boolean includeEmpty) {
         var pos = chunk.getPos();
@@ -248,6 +271,7 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         PrimeClient.CAPTURE.dropChunk(x, z);
     }
     private void forgetColumn(int x, int z) {
+        blockEntities.remove(x, z);
         if (world == null)
             return;
         work.removeChunk(x, z, world.getMinSectionY(), world.getMaxSectionY());
@@ -270,6 +294,7 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         if (chunk == null)
             return;
         current.chunks.put(ChunkPos.pack(x, z), chunk);
+        current.blockEntities.add(chunk);
         current.dirtyChunkContents(chunk, true);
         // A changed neighbor alters culling/fluid geometry on the bordering column.
         for (int dz = -1; dz <= 1; ++dz)
@@ -305,6 +330,18 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         for (var chunk : current.chunks.values())
             current.dirtyChunkContents(chunk, true);
     }
+    public static void blockEntitiesChanged(LevelChunk chunk) {
+        if (current != null)
+            current.blockEntities.changed(chunk);
+    }
+    public static Iterable<? extends Iterable<net.minecraft.world.level.block.entity.BlockEntity>>
+    blockEntityCandidates(
+            BlockEntityCandidates gate,
+            net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher dispatcher,
+            long epoch, net.minecraft.world.phys.Vec3 camera) {
+        return current == null ? java.util.List.of()
+                               : current.blockEntities.select(gate, dispatcher, epoch, camera);
+    }
     public static Iterable<LevelChunk> loadedChunks() {
         return current == null ? java.util.List.of() : current.chunks.values();
     }
@@ -323,9 +360,11 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
     }
     @Override
     public void close() {
-        buffers.close();
+        if (workers != null)
+            workers.close();
         work.clear();
         chunks.clear();
+        blockEntities.clear();
         compiled.clear();
     }
 }

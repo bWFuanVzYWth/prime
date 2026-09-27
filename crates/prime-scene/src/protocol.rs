@@ -2,8 +2,8 @@
 use crate::{
     instances::InstanceContext,
     scene::{
-        Camera, DynamicMesh, Instance, Mesh, MeshVersion, Prototype, SectionSequence, SourceScene,
-        Texture, Triangle,
+        Camera, Instance, Mesh, MeshVersion, Prototype, SectionSequence, SourceScene, Texture,
+        Triangle,
     },
 };
 
@@ -11,11 +11,10 @@ use crate::{
 #[path = "protocol_capacity_tests.rs"]
 mod capacity_tests;
 
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 pub const MAGIC: u32 = 0x5450_5250;
 pub const MAX_PACKET_BYTES: usize = 256 * 1024 * 1024;
 const MAX_TEXTURE_BYTES: usize = 512 * 1024 * 1024;
-const MAX_SECTIONS: usize = 262_144;
 
 pub(crate) fn validate_triangle_capacity(total: usize) -> Result<(), String> {
     // Scene counts are independent of per-packet counts and GPU page addresses.
@@ -107,17 +106,42 @@ impl SourceScene {
         let mut input = Reader::new(bytes)?;
         let (op, epoch) = input.header()?;
         if op == 7 {
-            return self.instances.submit(
+            std::mem::swap(
+                &mut self.texture_lifetime,
+                &mut self.instances.texture_lifetime,
+            );
+            let result = self.instances.submit(
                 bytes,
                 &self.textures,
                 self.triangle_count + self.dynamic.triangles.len(),
             );
+            std::mem::swap(
+                &mut self.texture_lifetime,
+                &mut self.instances.texture_lifetime,
+            );
+            return result;
         }
         if op == 8 {
             if epoch == 0 || epoch != self.epoch {
                 return Err("stale or uninitialized resource epoch".into());
             }
             return self.replace_section(input);
+        }
+        if op == 10 || op == 11 {
+            if epoch == 0 || epoch != self.epoch {
+                return Err("stale or uninitialized resource epoch".into());
+            }
+            if op == 11 {
+                return self.remove_sections(input);
+            }
+            let completed = SectionSequence(input.u64()?);
+            input.finish()?;
+            if completed < self.section_completed {
+                return Err("section completion watermark regressed".into());
+            }
+            self.section_completed = completed;
+            self.removed.retain(|_, sequence| *sequence > completed);
+            return Ok(());
         }
         let revision = if op == 6 {
             self.revision
@@ -144,96 +168,18 @@ impl SourceScene {
         }
         let mut changed = true;
         match op {
-            2 => {
-                let key = input.u64()?;
-                let mesh_revision = SectionSequence(input.u64()?);
-                let origin = input.origin()?;
-                let count = input.u32()? as usize;
-                let stride = input.u32()? as usize;
-                let position_offset = input.u32()? as usize;
-                let color_offset = input.u32()? as usize;
-                let uv_offset = input.u32()? as usize;
-                let topology = input.u32()? as usize;
-                let texture_id = input.u32()?;
-                let flags = input.u32()?;
-                let layer = input.u32()?;
-                input.zero()?;
-                validate_flags(flags)?;
-                if layer > 255 {
-                    return Err("source layer out of range".into());
-                }
-                let layout = VertexLayout {
-                    count,
-                    stride,
-                    position_offset,
-                    color_offset,
-                    uv_offset,
-                    topology,
-                };
-                layout.validate()?;
-                if mesh_revision <= self.removed.get(&key).copied().unwrap_or_default()
-                    || self
-                        .meshes
-                        .get(&(key, layer))
-                        .is_some_and(|m| mesh_revision <= m.revision.observed_at())
-                {
-                    return Err("stale mesh revision".into());
-                }
-                let raw = input.take(
-                    count
-                        .checked_mul(stride)
-                        .ok_or("vertex byte count overflow")?,
-                )?;
-                input.finish()?;
-                let triangle_count = count / topology * (topology - 2);
-                let old_count = self
-                    .meshes
-                    .get(&(key, layer))
-                    .map_or(0, |m| m.triangles.len());
-                validate_triangle_capacity(
-                    self.triangle_count - old_count
-                        + triangle_count
-                        + self.dynamic.triangles.len()
-                        + self.instances.triangle_count(),
-                )?;
-                if self.meshes.len() >= MAX_SECTIONS && !self.meshes.contains_key(&(key, layer)) {
-                    return Err("mesh capacity exceeded".into());
-                }
-                let mut triangles = Vec::new();
-                triangles
-                    .try_reserve(triangle_count)
-                    .map_err(|_| "source mesh allocation failed")?;
-                let mut bounds = [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]];
-                decode_vertices(raw, &layout, texture_id, flags, &mut triangles, &mut bounds)?;
-                self.triangle_count = self.triangle_count - old_count + triangle_count;
-                changed = old_count != 0 || triangle_count != 0;
-                self.meshes.insert(
-                    (key, layer),
-                    Mesh {
-                        revision: MeshVersion::captured(mesh_revision),
-                        origin,
-                        triangles: triangles.into(),
-                        bounds,
-                        texture_id,
-                        flags,
-                    },
-                );
-                self.edits.meshes.insert((key, layer));
-            }
             3 => {
                 let key = input.u64()?;
                 let mesh_revision = SectionSequence(input.u64()?);
                 input.finish()?;
-                if mesh_revision <= self.removed.get(&key).copied().unwrap_or_default()
+                if mesh_revision <= self.section_completed
+                    || mesh_revision <= self.removed.get(&key).copied().unwrap_or_default()
                     || self
                         .meshes
                         .range((key, 0)..=(key, u32::MAX))
                         .any(|(_, m)| m.revision.observed_at() >= mesh_revision)
                 {
                     return Err("stale section removal".into());
-                }
-                if self.removed.len() >= MAX_SECTIONS && !self.removed.contains_key(&key) {
-                    return Err("section history capacity exceeded; reset the scene".into());
                 }
                 let keys: Vec<_> = self
                     .meshes
@@ -246,6 +192,7 @@ impl SourceScene {
                 changed = self.sections.remove(key);
                 for mesh_key in keys {
                     let mesh = self.meshes.remove(&mesh_key).unwrap();
+                    self.texture_lifetime.release(mesh.texture_id);
                     self.triangle_count -= mesh.triangles.len();
                     changed |= !mesh.triangles.is_empty();
                     self.edits.meshes.insert(mesh_key);
@@ -257,7 +204,13 @@ impl SourceScene {
                 let width = input.u32()?;
                 let height = input.u32()?;
                 input.zero()?;
-                if id == 0 || width == 0 || height == 0 || width > 16384 || height > 16384 {
+                if id == 0
+                    || id == u32::MAX
+                    || width == 0
+                    || height == 0
+                    || width > 16384
+                    || height > 16384
+                {
                     return Err("invalid texture identity or extent".into());
                 }
                 let len = width as usize * height as usize * 4;
@@ -268,6 +221,7 @@ impl SourceScene {
                 if current - old + len > MAX_TEXTURE_BYTES {
                     return Err("texture capacity exceeded".into());
                 }
+                self.texture_lifetime.owned(id);
                 self.texture_bytes = current - old + len;
                 self.textures.insert(
                     id,
@@ -278,6 +232,25 @@ impl SourceScene {
                     },
                 );
                 self.edits.textures.insert(id);
+            }
+            9 => {
+                let count = input.u32()? as usize;
+                input.zero()?;
+                let mut ids = Vec::with_capacity(count.min((input.data.len() - input.offset) / 4));
+                for _ in 0..count {
+                    let id = input.u32()?;
+                    if id <= 1 || id == u32::MAX {
+                        return Err("cannot retire a reserved texture identity".into());
+                    }
+                    ids.push(id);
+                }
+                input.finish()?;
+                for id in ids {
+                    if self.textures.contains_key(&id) {
+                        self.texture_lifetime.retire(id);
+                    }
+                }
+                changed = false;
             }
             6 => {
                 let sequence = input.u64()?;
@@ -292,56 +265,91 @@ impl SourceScene {
                 if span_count > (input.data.len() - input.offset) / 32 {
                     return Err("truncated dynamic span descriptors".into());
                 }
-                let mut triangles = Vec::new();
-                let mut bounds = [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]];
-                for _ in 0..span_count {
-                    let texture_id = input.u32()?;
-                    let flags = input.u32()?;
-                    let topology = input.u32()? as usize;
-                    let count = input.u32()? as usize;
-                    let stride = input.u32()? as usize;
-                    let position_offset = input.u32()? as usize;
-                    let color_offset = input.u32()? as usize;
-                    let uv_offset = input.u32()? as usize;
-                    validate_flags(flags)?;
-                    let layout = VertexLayout {
-                        count,
-                        stride,
-                        position_offset,
-                        color_offset,
-                        uv_offset,
-                        topology,
-                    };
-                    layout.validate()?;
-                    if count != 0 && texture_id != 0 && !self.textures.contains_key(&texture_id) {
-                        return Err(
-                            "dynamic frame references a texture that has not been captured".into(),
-                        );
+                // Only reclaim allocations with no published CPU borrower. A failed decode
+                // returns its private workspace without changing the visible snapshot.
+                let spare = self
+                    .dynamic_spares
+                    .iter()
+                    .position(|s| std::sync::Arc::strong_count(s) == 1);
+                let mut storage = spare
+                    .map(|i| self.dynamic_spares.swap_remove(i))
+                    .unwrap_or_default();
+                // Surplus workspaces can leave only after their last published CPU borrower.
+                self.dynamic_spares
+                    .retain(|spare| std::sync::Arc::strong_count(spare) != 1);
+                let triangles = std::sync::Arc::get_mut(&mut storage).unwrap();
+                triangles.clear();
+                let mut texture_ids = std::collections::BTreeSet::new();
+                let decoded = (|| {
+                    let mut bounds = [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]];
+                    for _ in 0..span_count {
+                        let texture_id = input.u32()?;
+                        let flags = input.u32()?;
+                        let topology = input.u32()? as usize;
+                        let count = input.u32()? as usize;
+                        let stride = input.u32()? as usize;
+                        let position_offset = input.u32()? as usize;
+                        let color_offset = input.u32()? as usize;
+                        let uv_offset = input.u32()? as usize;
+                        validate_flags(flags)?;
+                        let layout = VertexLayout {
+                            count,
+                            stride,
+                            position_offset,
+                            color_offset,
+                            uv_offset,
+                            topology,
+                        };
+                        layout.validate()?;
+                        if count != 0 && texture_id != 0 && !self.textures.contains_key(&texture_id)
+                        {
+                            return Err(
+                                "dynamic frame references a texture that has not been captured"
+                                    .into(),
+                            );
+                        }
+                        let raw = input.take(
+                            count
+                                .checked_mul(stride)
+                                .ok_or("vertex byte count overflow")?,
+                        )?;
+                        if count > 0 {
+                            texture_ids.insert(texture_id);
+                        }
+                        let triangle_count = count / topology * (topology - 2);
+                        validate_triangle_capacity(
+                            self.triangle_count
+                                + triangles.len()
+                                + triangle_count
+                                + self.instances.triangle_count(),
+                        )?;
+                        triangles
+                            .try_reserve(triangle_count)
+                            .map_err(|_| "dynamic frame allocation failed")?;
+                        decode_vertices(raw, &layout, texture_id, flags, triangles, &mut bounds)?;
                     }
-                    let raw = input.take(
-                        count
-                            .checked_mul(stride)
-                            .ok_or("vertex byte count overflow")?,
-                    )?;
-                    let triangle_count = count / topology * (topology - 2);
-                    validate_triangle_capacity(
-                        self.triangle_count
-                            + triangles.len()
-                            + triangle_count
-                            + self.instances.triangle_count(),
-                    )?;
-                    triangles
-                        .try_reserve(triangle_count)
-                        .map_err(|_| "dynamic frame allocation failed")?;
-                    decode_vertices(raw, &layout, texture_id, flags, &mut triangles, &mut bounds)?;
-                }
-                input.finish()?;
-                self.dynamic = DynamicMesh {
-                    revision: sequence,
-                    origin,
-                    triangles: triangles.into(),
-                    bounds,
+                    input.finish()?;
+                    Ok::<_, String>(bounds)
+                })();
+                let bounds = match decoded {
+                    Ok(bounds) => bounds,
+                    Err(error) => {
+                        self.dynamic_spares.push(storage);
+                        return Err(error);
+                    }
                 };
+                for &id in &texture_ids {
+                    self.texture_lifetime.acquire(id);
+                }
+                for &id in &self.dynamic.texture_ids {
+                    self.texture_lifetime.release(id);
+                }
+                self.dynamic.texture_ids = texture_ids;
+                self.dynamic_spares
+                    .push(std::mem::replace(&mut self.dynamic.triangles, storage));
+                self.dynamic.revision = sequence;
+                self.dynamic.origin = origin;
+                self.dynamic.bounds = bounds;
                 changed = false;
             }
             _ => return Err("unknown scene operation".into()),
@@ -379,18 +387,85 @@ struct SectionPlan {
 }
 
 impl SourceScene {
+    fn remove_sections(&mut self, mut input: Reader<'_>) -> Result<(), String> {
+        let count = input.u32()? as usize;
+        input.zero()?;
+        if count > (input.data.len() - input.offset) / 16 {
+            return Err("truncated section removals".into());
+        }
+        let mut removals = Vec::with_capacity(count);
+        for _ in 0..count {
+            removals.push((input.u64()?, SectionSequence(input.u64()?)));
+        }
+        input.finish()?;
+        removals.sort_unstable_by_key(|r| r.0);
+        if removals.windows(2).any(|w| w[0].0 == w[1].0) {
+            return Err("duplicate section removal".into());
+        }
+        let mut changed = false;
+        for &(key, sequence) in &removals {
+            if sequence <= self.section_completed
+                || sequence <= self.removed.get(&key).copied().unwrap_or_default()
+                || self
+                    .meshes
+                    .range((key, 0)..=(key, u32::MAX))
+                    .any(|(_, m)| m.revision.observed_at() >= sequence)
+            {
+                return Err("stale section removal".into());
+            }
+            changed |= self.sections.origin(key).is_some()
+                || self
+                    .meshes
+                    .range((key, 0)..=(key, u32::MAX))
+                    .any(|(_, m)| !m.triangles.is_empty());
+        }
+        let revision = if changed {
+            self.revision
+                .checked_add(1)
+                .ok_or("scene revision exhausted")?
+        } else {
+            self.revision
+        };
+        for (key, sequence) in removals {
+            if let Some(&origin) = self.sections.origin(key) {
+                self.edits.availability(origin);
+            }
+            self.sections.remove(key);
+            self.section_scratch.old_layers.clear();
+            self.section_scratch.old_layers.extend(
+                self.meshes
+                    .range((key, 0)..=(key, u32::MAX))
+                    .map(|(key, _)| key.1),
+            );
+            for &layer in &self.section_scratch.old_layers {
+                let mesh = self.meshes.remove(&(key, layer)).unwrap();
+                self.triangle_count -= mesh.triangles.len();
+                self.texture_lifetime.release(mesh.texture_id);
+                self.edits.meshes.insert((key, layer));
+            }
+            self.removed.insert(key, sequence);
+        }
+        self.revision = revision;
+        Ok(())
+    }
+
     fn replace_section(&mut self, mut input: Reader<'_>) -> Result<(), String> {
         // The planner may reuse owned scratch, but cannot mutate the published source scene.
         let mut scratch = std::mem::take(&mut self.section_scratch);
         let result = self.plan_section(&mut input, &mut scratch).map(|plan| {
             for layer in &scratch.old_layers {
                 if !plan.present[*layer as usize] {
-                    self.meshes.remove(&(plan.key, *layer));
+                    if let Some(old) = self.meshes.remove(&(plan.key, *layer)) {
+                        self.texture_lifetime.release(old.texture_id);
+                    }
                     self.edits.meshes.insert((plan.key, *layer));
                 }
             }
             for (layer, mesh) in scratch.replacements.drain(..) {
-                self.meshes.insert((plan.key, layer), mesh);
+                self.texture_lifetime.acquire(mesh.texture_id);
+                if let Some(old) = self.meshes.insert((plan.key, layer), mesh) {
+                    self.texture_lifetime.release(old.texture_id);
+                }
                 self.edits.meshes.insert((plan.key, layer));
             }
             self.triangle_count = plan.triangle_count;
@@ -423,11 +498,10 @@ impl SourceScene {
         if layers > 256 || layers > (input.data.len() - input.offset) / 40 {
             return Err("invalid or truncated section layer count".into());
         }
-        if sequence <= self.removed.get(&key).copied().unwrap_or_default() {
+        if sequence <= self.section_completed
+            || sequence <= self.removed.get(&key).copied().unwrap_or_default()
+        {
             return Err("stale complete section sequence".into());
-        }
-        if self.removed.len() >= MAX_SECTIONS && !self.removed.contains_key(&key) {
-            return Err("section history capacity exceeded; reset the scene".into());
         }
         let mut old_triangles = 0;
         for ((_, layer), mesh) in self.meshes.range((key, 0)..=(key, u32::MAX)) {
@@ -512,10 +586,6 @@ impl SourceScene {
             }
         }
         input.finish()?;
-        let new_layers = present.iter().filter(|&&p| p).count();
-        if self.meshes.len() - scratch.old_layers.len() + new_layers > MAX_SECTIONS {
-            return Err("mesh capacity exceeded".into());
-        }
         let changed = self.sections.origin(key) != Some(&origin)
             || !scratch.replacements.is_empty()
             || scratch.old_layers.iter().any(|layer| {

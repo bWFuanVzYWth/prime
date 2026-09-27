@@ -240,6 +240,7 @@ public final class TerrainCapture implements AutoCloseable {
         if (closed)
             return;
         closed = true;
+        inbox.complete(token);
         if (previous == null)
             ACTIVE.remove();
         else

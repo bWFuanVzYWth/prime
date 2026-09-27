@@ -1,3 +1,4 @@
+use crate::arena::{Arena, Lease};
 use ash::vk::Handle;
 use ash::{Device, Entry, Instance, vk};
 use std::{
@@ -751,6 +752,15 @@ impl Context {
         self.retire(RetiredResource::Image(image, view, memory));
     }
 
+    pub(crate) fn retirement_serial(&self) -> u64 {
+        self.host.as_ref().map_or(0, |host| {
+            host.state
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .last_serial
+        })
+    }
+
     fn retire(&self, resource: RetiredResource) {
         if let Some(host) = &self.host
             && !host.finished.load(Ordering::Relaxed)
@@ -973,9 +983,15 @@ pub(super) struct Buffer {
     pub size: u64,
     // This owner never rebinds its allocation. Zero for buffers without BDA usage.
     device_address: u64,
+    mapped: Option<std::ptr::NonNull<u8>>,
 }
 impl Drop for Buffer {
     fn drop(&mut self) {
+        if self.mapped.is_some() {
+            unsafe {
+                self.context.device.unmap_memory(self.memory);
+            }
+        }
         if self.context.can_destroy() {
             self.context
                 .retire(RetiredResource::Buffer(self.buffer, self.memory));
@@ -1086,11 +1102,21 @@ impl Buffer {
                 memory,
                 size,
                 device_address: 0,
+                mapped: None,
             };
             context
                 .device
                 .bind_buffer_memory(buffer, memory, 0)
                 .map_err(|e| error("Bind Vulkan buffer memory", e))?;
+            if host {
+                result.mapped = std::ptr::NonNull::new(
+                    context
+                        .device
+                        .map_memory(memory, 0, size, vk::MemoryMapFlags::empty())
+                        .map_err(|e| error("Map persistent upload", e))?
+                        .cast(),
+                );
+            }
             if usage.contains(vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS) {
                 result.device_address = context.device.get_buffer_device_address(
                     &vk::BufferDeviceAddressInfo::default().buffer(buffer),
@@ -1166,33 +1192,41 @@ impl Buffer {
         Ok(destination)
     }
     pub fn write(&self, bytes: &[u8]) -> Result<(), String> {
-        unsafe {
-            let started = self.context.profile.as_ref().map(|_| Instant::now());
-            if bytes.len() as u64 > self.size {
-                return Err("Upload exceeds Vulkan allocation".into());
-            }
-            let mapped = self
-                .context
-                .device
-                .map_memory(self.memory, 0, self.size, vk::MemoryMapFlags::empty())
-                .map_err(|e| error("Map Vulkan upload buffer", e))?;
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), mapped.cast(), bytes.len());
-            self.context.device.unmap_memory(self.memory);
-            if let Some(counter) = &self.context.cpu_uploaded_bytes {
-                counter.fetch_add(bytes.len() as u64, Ordering::Relaxed);
-            }
-            if let Some(profile) = &self.context.profile {
-                profile
-                    .counters
-                    .upload_ns
-                    .fetch_add(elapsed_ns(started), Ordering::Relaxed);
-                profile
-                    .counters
-                    .uploaded_bytes
-                    .fetch_add(bytes.len() as u64, Ordering::Relaxed);
-            }
-            Ok(())
+        self.write_at(0, bytes)
+    }
+
+    // The owner proves this upload slot is complete before mutation; mapping lifetime is
+    // independent of GPU use. Workers never receive this allocation or its mapped pointer.
+    pub fn write_at(&self, offset: u64, bytes: &[u8]) -> Result<(), String> {
+        let started = self.context.profile.as_ref().map(|_| Instant::now());
+        if offset
+            .checked_add(bytes.len() as u64)
+            .is_none_or(|end| end > self.size)
+        {
+            return Err("Upload exceeds Vulkan allocation".into());
         }
+        let mapped = self.mapped.ok_or("Buffer is not host visible")?;
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                mapped.as_ptr().add(offset as usize),
+                bytes.len(),
+            );
+        }
+        if let Some(counter) = &self.context.cpu_uploaded_bytes {
+            counter.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+        }
+        if let Some(profile) = &self.context.profile {
+            profile
+                .counters
+                .upload_ns
+                .fetch_add(elapsed_ns(started), Ordering::Relaxed);
+            profile
+                .counters
+                .uploaded_bytes
+                .fetch_add(bytes.len() as u64, Ordering::Relaxed);
+        }
+        Ok(())
     }
     pub fn read(&self, count: usize) -> Result<Vec<u8>, String> {
         unsafe {
@@ -1200,13 +1234,8 @@ impl Buffer {
             if count as u64 > self.size {
                 return Err("Readback exceeds Vulkan allocation".into());
             }
-            let mapped = self
-                .context
-                .device
-                .map_memory(self.memory, 0, self.size, vk::MemoryMapFlags::empty())
-                .map_err(|e| error("Map Vulkan readback buffer", e))?;
-            let bytes = std::slice::from_raw_parts(mapped.cast::<u8>(), count).to_vec();
-            self.context.device.unmap_memory(self.memory);
+            let mapped = self.mapped.ok_or("Buffer is not host visible")?;
+            let bytes = std::slice::from_raw_parts(mapped.as_ptr(), count).to_vec();
             if let Some(profile) = &self.context.profile {
                 profile
                     .counters
@@ -1228,7 +1257,7 @@ impl Buffer {
 pub(super) struct Acceleration {
     pub context: Arc<Context>,
     pub handle: vk::AccelerationStructureKHR,
-    _buffer: Buffer,
+    storage: Option<Lease>,
     // AS addresses are queried from the AS, never inferred from its storage buffer.
     device_address: u64,
 }
@@ -1237,7 +1266,8 @@ pub(super) struct Acceleration {
 /// submission. Input vertex/instance buffers must also outlive that submission.
 pub(super) struct PreparedAcceleration<'a> {
     acceleration: Acceleration,
-    scratch: Buffer,
+    scratch: Option<Lease>,
+    scratch_size: u64,
     geometries: Vec<vk::AccelerationStructureGeometryKHR<'a>>,
     ranges: Vec<vk::AccelerationStructureBuildRangeInfoKHR>,
     kind: vk::AccelerationStructureTypeKHR,
@@ -1272,8 +1302,11 @@ impl PreparedAcceleration<'_> {
         ranges: &[vk::AccelerationStructureBuildRangeInfoKHR],
     ) {
         let context = &self.acceleration.context;
-        let address =
-            self.scratch.address().div_ceil(context.scratch_alignment) * context.scratch_alignment;
+        let address = self
+            .scratch
+            .as_ref()
+            .expect("prepared build scratch")
+            .address();
         let info = vk::AccelerationStructureBuildGeometryInfoKHR::default()
             .ty(self.kind)
             .flags(self.flags)
@@ -1296,7 +1329,27 @@ impl PreparedAcceleration<'_> {
 
     /// The caller has recorded its build. Scratch is either synchronously complete
     /// or retained by Context's host timeline retirement before physical destruction.
-    pub fn finish(self) -> Acceleration {
+    pub fn ensure_scratch(&mut self, arena: &mut Arena) -> Result<(), String> {
+        if self.scratch.is_none() {
+            self.scratch = Some(arena.allocate(
+                &self.acceleration.context,
+                self.scratch_size,
+                self.acceleration.context.scratch_alignment,
+            )?);
+        }
+        Ok(())
+    }
+    pub fn release_scratch(&mut self, arena: &mut Arena) {
+        if let Some(scratch) = self.scratch.take() {
+            arena.retire(scratch);
+        }
+    }
+    pub fn retire(mut self, arena: &mut Arena) {
+        self.release_scratch(arena);
+        self.acceleration.retire(arena);
+    }
+    pub fn finish(mut self, arena: &mut Arena) -> Acceleration {
+        self.release_scratch(arena);
         self.acceleration
     }
 }
@@ -1310,13 +1363,20 @@ impl Drop for Acceleration {
     }
 }
 impl Acceleration {
+    pub fn retire(mut self, arena: &mut Arena) {
+        if let Some(storage) = self.storage.take() {
+            arena.retire(storage);
+        }
+    }
     pub fn prepare_geometries<'a>(
         context: &Arc<Context>,
+        arena: &mut Arena,
         geometries: Vec<vk::AccelerationStructureGeometryKHR<'a>>,
         counts: &[u32],
     ) -> Result<PreparedAcceleration<'a>, String> {
         Self::prepare_ranges(
             context,
+            arena,
             geometries,
             counts,
             vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL,
@@ -1326,16 +1386,18 @@ impl Acceleration {
 
     pub fn prepare_with_flags<'a>(
         context: &Arc<Context>,
+        arena: &mut Arena,
         geometry: vk::AccelerationStructureGeometryKHR<'a>,
         count: u32,
         kind: vk::AccelerationStructureTypeKHR,
         flags: vk::BuildAccelerationStructureFlagsKHR,
     ) -> Result<PreparedAcceleration<'a>, String> {
-        Self::prepare_ranges(context, vec![geometry], &[count], kind, flags)
+        Self::prepare_ranges(context, arena, vec![geometry], &[count], kind, flags)
     }
 
     fn prepare_ranges<'a>(
         context: &Arc<Context>,
+        arena: &mut Arena,
         geometries: Vec<vk::AccelerationStructureGeometryKHR<'a>>,
         counts: &[u32],
         kind: vk::AccelerationStructureTypeKHR,
@@ -1361,18 +1423,13 @@ impl Acceleration {
                 counts,
                 &mut sizes,
             );
-            let buffer = Buffer::new(
-                context,
-                sizes.acceleration_structure_size,
-                vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR
-                    | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                false,
-            )?;
+            let storage = arena.allocate(context, sizes.acceleration_structure_size, 256)?;
             let handle = context
                 .acceleration
                 .create_acceleration_structure(
                     &vk::AccelerationStructureCreateInfoKHR::default()
-                        .buffer(buffer.buffer)
+                        .buffer(storage.buffer.buffer)
+                        .offset(storage.offset)
                         .size(sizes.acceleration_structure_size)
                         .ty(kind),
                     None,
@@ -1381,7 +1438,7 @@ impl Acceleration {
             let result = Self {
                 context: context.clone(),
                 handle,
-                _buffer: buffer,
+                storage: Some(storage),
                 device_address: context
                     .acceleration
                     .get_acceleration_structure_device_address(
@@ -1389,15 +1446,12 @@ impl Acceleration {
                             .acceleration_structure(handle),
                     ),
             };
-            let scratch = Buffer::new(
-                context,
-                sizes.build_scratch_size + context.scratch_alignment,
-                vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                false,
-            )?;
+            let scratch =
+                arena.allocate(context, sizes.build_scratch_size, context.scratch_alignment)?;
             Ok(PreparedAcceleration {
                 acceleration: result,
-                scratch,
+                scratch: Some(scratch),
+                scratch_size: sizes.build_scratch_size,
                 geometries,
                 ranges: counts
                     .iter()
@@ -1598,6 +1652,7 @@ mod host_tests {
             memory: vk::DeviceMemory::null(),
             size: 4,
             device_address: 0,
+            mapped: None,
         }
     }
 

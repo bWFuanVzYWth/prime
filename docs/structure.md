@@ -35,7 +35,9 @@ flowchart TD
 
 `prime_engine` 是 native 入口和会话所有者，协调源状态、翻译缓存和 renderer。`prime_vulkan` 拥有具体 GPU 资源与其退休规则；宿主 instance/device/queue/image 始终由 Minecraft 拥有。引擎默认启用 `vulkan` feature；只测试协议和引擎错误边界时可关闭它，完全不编译 Slang。单独选中 `prime_vulkan` 则必然需要 GPU 构建工具，但其普通 CPU 单测无需实际创建 GPU 设备。
 
-实例通路明确分离状态和副作用：`prime_scene::instances::InstanceContext` 拥有版本无关的原型、实例和引用计数，先准备验证计划再应用；`prime_scene::spatial` 定义统一空间网格，`prime_scene::translation` 的两个显式上下文分别计算地形合批与对象分桶/放置。`prime_vulkan` 的 `geometry` 和 `context::objects` 持有 GPU 资源并执行计划；`plan` 只保留设备范围分配和 shader 记录打包。每个会话显式借用这些上下文，未引入异步任务或内部可变的全局缓存。此边界不表示旧有全部 renderer 模块已经完成相同拆分。
+实例通路明确分离状态和副作用：`prime_scene::instances::InstanceContext` 拥有版本无关的原型、实例和引用计数，先准备验证计划再应用；`prime_scene::spatial` 定义统一空间网格，`prime_scene::translation` 的两个显式上下文分别计算地形合批与对象分桶/放置。`prime_vulkan` 的 `geometry` 和 `context::objects` 持有 GPU 资源并执行计划；`plan` 保留局部范围分配与元数据编码，`packing` 写入复用的材质记录，`arena` 依据完成值管理 storage/scratch/上传页。每个会话显式借用这些上下文，未引入异步任务或内部可变的全局缓存。此边界不表示旧有全部 renderer 模块已经完成相同拆分。
+
+`prime_scene::workers::CpuWorkers` 封装私有同步 Rayon 池，由当前 renderer 持有并显式借给打包工作；worker 仅获得只读源数据与互不重叠的输出切片。`adapters/common::SynchronousWorkers` 提供同步汇合与私有工作区的通用机制；MC compiler、邻接快照和回调线程规则仍留在版本层。`ColumnWindow` 只表达整数列矩形，方块实体能力索引不进入 common。
 
 `prime_tools` 持有离线 PNG 输出与性能夹具入口，图像编码库不进入引擎 DLL 的依赖。诊断用 C 导出 `prime_render` 仍存在，实际游戏只调用宿主录制接口，不回读输出。
 
@@ -52,7 +54,7 @@ flowchart TD
 1. vanilla 保留实际 BakedQuad，并观察本次 `getTintColor` 的返回值。
 2. Indigo 保存光照修改前的作者 RGBA；在转换返回后使用被接受的几何和本次原版 tint，按 MC 的编码域 8 位乘法组合。
 3. 输出稳定 opaque/cutout/translucent 标识与 24 字节顶点（position 0、RGBA 12、UV 16），不输出烘焙光照。流体使用其实际输出 consumer，观察已求值 tint 排除原版方向明暗；嵌套 Fabric 默认处理器不重复捕获。Rust 使用 stride/offset 描述解析。
-4. compile 开始固定 section/epoch/revision，成功返回后完整发布；`try/finally` 清理线程作用域，迟到结果继续受旧有 tombstone/epoch 检查约束。
+4. compile 开始固定 section/epoch/revision，成功返回后完整发布；`try/finally` 清理线程作用域，迟到结果受有效 token、epoch 与已完成源水位约束。
 
 没有第二次模型随机、面剔除或 tint 查询；Java 不把颜色转换到线性空间，也不构造 GPU 材质。发布依然是变更区块级，FFM 不按 quad 调用。PT 独占时由自己的已加载区块窗口调度真实 MC compiler，编译结果捕获后释放，不创建原版地形 GPU 网格；这仍不承诺任意模组的可见性或回调均已覆盖。
 

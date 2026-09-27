@@ -6,5 +6,8 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Version-neutral source protocol, scene values and CPU scene translation"
 
+[dependencies]
+rayon.workspace = true
+
 [lints]
 workspace = true
