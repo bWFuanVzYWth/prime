@@ -362,6 +362,7 @@ impl SourceScene {
 }
 
 /// Temporary owned decoding memory; never aliases the caller's FFM packet or published meshes.
+/// Every operation consumes or clears its contents before return, retaining only capacity.
 #[derive(Default)]
 pub(crate) struct SectionScratch {
     vertices: Vec<Triangle>,
@@ -437,7 +438,7 @@ impl SourceScene {
                     .range((key, 0)..=(key, u32::MAX))
                     .map(|(key, _)| key.1),
             );
-            for &layer in &self.section_scratch.old_layers {
+            for layer in self.section_scratch.old_layers.drain(..) {
                 let mesh = self.meshes.remove(&(key, layer)).unwrap();
                 self.triangle_count -= mesh.triangles.len();
                 self.texture_lifetime.release(mesh.texture_id);

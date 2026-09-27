@@ -273,13 +273,19 @@ public final class NativeSmoke {
         if (!Arrays.equals(baseline, pixels(bridge, frame, output)))
             throw new AssertionError("Collected texture was still accepted or changed the scene");
 
+        // The last removed section has a layer absent from the unchanged surviving floor.
+        // Its reusable removal scratch must not contaminate the following op8 transaction.
+        bridge.submit(Packets.sectionReplace(
+                1, 1002, 10, 0, 0, 32,
+                List.of(new Packets.SectionLayer(1, 1, 0, 4, 4, 28, 0, 12, 16, floor))));
         bridge.submit(Packets.removeSections(1, new long[] {1001, 1002}, new long[] {20, 21}));
         bridge.submit(Packets.sectionWatermark(1, 21));
+        bridge.submit(Packets.sectionReplace(1, 1, 22, 0, 0, 0, List.of(ground)));
         if (Arrays.equals(baseline, pixels(bridge, frame, output)))
             throw new AssertionError("Bulk removal left a partially ready terrain cell visible");
         reject(bridge, Packets.sectionReplace(1, 1001, 20, 0, 0, 16, List.of()));
-        bridge.submit(Packets.sectionReplace(1, 1001, 22, 0, 0, 16, List.of()));
-        bridge.submit(Packets.sectionReplace(1, 1002, 23, 0, 0, 32, List.of()));
+        bridge.submit(Packets.sectionReplace(1, 1001, 23, 0, 0, 16, List.of()));
+        bridge.submit(Packets.sectionReplace(1, 1002, 24, 0, 0, 32, List.of()));
         if (!Arrays.equals(baseline, pixels(bridge, frame, output)))
             throw new AssertionError(
                     "New producers did not restore terrain after completed history retirement");

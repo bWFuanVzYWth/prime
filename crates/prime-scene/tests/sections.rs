@@ -279,6 +279,51 @@ fn malformed_headers_never_consume_sequence() {
 }
 
 #[test]
+fn bulk_unload_then_unchanged_section_preserves_only_its_own_layers() {
+    fn other(key: u64, sequence: u64, layer_id: u32) -> Vec<u8> {
+        let mut bytes = section(1, sequence, &[layer(layer_id)]);
+        bytes[24..32].copy_from_slice(&key.to_le_bytes());
+        bytes[40..48].copy_from_slice(&(29_999_984_f64 - (key - 91) as f64 * 16.0).to_le_bytes());
+        bytes
+    }
+    for live_layers in [vec![], vec![layer(0)], vec![layer(0), layer(1)]] {
+        for complete in [false, true] {
+            let mut source = source();
+            source.submit(&section(1, 1, &live_layers)).unwrap();
+            for cycle in 0..32 {
+                let sequence = cycle * 10 + 2;
+                source.submit(&other(92, sequence, 1)).unwrap();
+                source.submit(&other(93, sequence + 1, 2)).unwrap();
+                let mut unload = header(11, 1);
+                unload.extend(2_u32.to_le_bytes());
+                unload.extend(0_u32.to_le_bytes());
+                // Input order differs from the source-key order used to apply removals.
+                for (key, revision) in [(93_u64, sequence + 3), (92, sequence + 2)] {
+                    unload.extend(key.to_le_bytes());
+                    unload.extend(revision.to_le_bytes());
+                }
+                source.submit(&unload).unwrap();
+                if complete {
+                    let mut watermark = header(10, 1);
+                    watermark.extend((sequence + 3).to_le_bytes());
+                    source.submit(&watermark).unwrap();
+                }
+                let before = snapshot(&source);
+                assert_eq!(before.meshes.len(), live_layers.len());
+                assert_eq!(before.triangle_count(), live_layers.len() * 2);
+                source
+                    .submit(&section(1, sequence + 4, &live_layers))
+                    .unwrap();
+                assert_same(&before, &snapshot(&source));
+                // The successful no-op still advances source order, without a content revision.
+                assert!(source.submit(&section(1, sequence + 4, &[])).is_err());
+                assert_same(&before, &snapshot(&source));
+            }
+        }
+    }
+}
+
+#[test]
 fn complete_cell_waits_for_64_distinct_sections_and_keeps_source_caches_after_publication() {
     use prime_scene::{
         spatial::Cell,
