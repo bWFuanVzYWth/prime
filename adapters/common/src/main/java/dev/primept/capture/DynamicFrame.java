@@ -73,6 +73,34 @@ public final class DynamicFrame implements AutoCloseable {
         endSpan();
     }
 
+    /** Billboard parameters are source appearance; native owns rotation and corner expansion. */
+    public void beginParticles(int textureId, int flags) {
+        checkWriting();
+        openSpan(textureId, flags, 1, 52, 0, 48, 32);
+    }
+    public void particle(float x, float y, float z, float qx, float qy, float qz, float qw,
+                         float scale, float u0, float u1, float v0, float v1, int argb, int light) {
+        if (spanStart < 0 || openTopology != 1)
+            throw new IllegalStateException("No particle source span is open");
+        ensure(52);
+        bytes.putFloat(x)
+                .putFloat(y)
+                .putFloat(z)
+                .putFloat(qx)
+                .putFloat(qy)
+                .putFloat(qz)
+                .putFloat(qw)
+                .putFloat(scale)
+                .putFloat(u0)
+                .putFloat(u1)
+                .putFloat(v0)
+                .putFloat(v1)
+                .put((byte)(argb >>> 16))
+                .put((byte)(argb >>> 8))
+                .put((byte)argb)
+                .put((byte)(argb >>> 24));
+    }
+
     public void beginSpan(int textureId, int flags, int topology) {
         checkWriting();
         openSpan(textureId, flags, topology, SourceQuads.STRIDE, 0, 12, 16);
@@ -106,7 +134,8 @@ public final class DynamicFrame implements AutoCloseable {
             --spanCount;
         } else {
             bytes.putInt(spanStart + 12, Math.addExact(initialCount, count));
-            vertexCount = Math.addExact(vertexCount, count);
+            vertexCount = Math.addExact(vertexCount,
+                                        Math.multiplyExact(count, openTopology == 1 ? 4 : 1));
             previousSpan = spanStart;
         }
         spanStart = -1;
@@ -141,9 +170,11 @@ public final class DynamicFrame implements AutoCloseable {
                           int colorOffset, int uvOffset) {
         if (spanStart >= 0)
             throw new IllegalStateException("Dynamic span is already open");
-        if (flags < 0 || flags > 2 || (topology != 3 && topology != 4) || stride < 24 ||
-            stride > 256 || positionOffset < 0 || positionOffset > stride - 12 || colorOffset < 0 ||
-            colorOffset > stride - 4 || uvOffset < 0 || uvOffset > stride - 8)
+        if (flags < 0 || flags > 2 || (topology != 1 && topology != 3 && topology != 4) ||
+            (topology == 1 &&
+             (stride != 52 || positionOffset != 0 || colorOffset != 48 || uvOffset != 32)) ||
+            stride < 24 || stride > 256 || positionOffset < 0 || positionOffset > stride - 12 ||
+            colorOffset < 0 || colorOffset > stride - 4 || uvOffset < 0 || uvOffset > stride - 8)
             throw new IllegalArgumentException("Unsupported source layout or material");
         if (previousSpan >= 0 && bytes.getInt(previousSpan) == textureId &&
             bytes.getInt(previousSpan + 4) == flags && bytes.getInt(previousSpan + 8) == topology &&

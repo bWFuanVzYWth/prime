@@ -182,6 +182,7 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
                            " elapsedMs=" + ((System.nanoTime() - started) / 1_000_000.0));
     }
     private static void unknownLeafFallback(CameraRenderState camera) throws Exception {
+        ItemCpuSmoke.exclusive = true;
         DynamicCapture.begin(camera);
         try (var staged = new StagedVertexBuffer(() -> "unknown leaf", 1024)) {
             var draw = staged.appendDraw(DefaultVertexFormat.ENTITY, PrimitiveTopology.QUADS);
@@ -191,7 +192,14 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
             var consumer = staged.getVertexBuilder(draw);
             var pose = new PoseStack();
             var custom = new ModelPart.Cube(0, 0, 0, 0, 0, 16, 16, 16, 0, 0, 0, false, 64, 64,
-                                            EnumSet.allOf(Direction.class)) {};
+                                            EnumSet.allOf(Direction.class)) {
+                @Override
+                public void compile(PoseStack.Pose pose,
+                                    com.mojang.blaze3d.vertex.VertexConsumer consumer, int light,
+                                    int overlay, int color) {
+                    throw new AssertionError("Downstream override must be cut off");
+                }
+            };
             var counting = new CountingModel(custom);
             var oldSource = ModelCapture.beginSource(new Owner(), 0, 0, 0, new Matrix4f(), true);
             var submit = new ModelFeatureRenderer.Submit<>(null, pose.last().copy(), counting, null,
@@ -204,12 +212,13 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
             var finish = StagedVertexBuffer.class.getDeclaredMethod("finishLastVertexBuilder");
             finish.setAccessible(true);
             finish.invoke(staged);
-            check(ModelCapture.stats().leaves() == 0 && ModelCapture.stats().fallbackLeaves() == 1,
-                  "Unknown Cube subclass uses fallback");
-            check(DynamicCapture.stats().vertices() == 24,
-                  "Fallback preserves actual complete output");
+            check(ModelCapture.stats().leaves() == 1 && ModelCapture.stats().fallbackLeaves() == 0,
+                  "Custom local model geometry is routed");
+            check(DynamicCapture.stats().vertices() == 0,
+                  "No downstream expansion or duplicate raw output");
             check(counting.calls == 1, "Unknown callback is not replayed");
         } finally {
+            ItemCpuSmoke.exclusive = false;
             DynamicCapture.end();
         }
     }

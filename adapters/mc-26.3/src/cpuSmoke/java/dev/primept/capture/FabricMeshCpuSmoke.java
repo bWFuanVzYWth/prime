@@ -67,25 +67,25 @@ final class FabricMeshCpuSmoke {
                       context.stats().instanceUpserts() == 2,
               "Actual tint/affine changes update only instance state");
         context.acknowledge();
-        frame(mesh(true), true, -1, 2);
-        check(DynamicCapture.stats().vertices() == 8 && FabricMeshCapture.stats().submits() == 0,
-              "Mixed layers use complete actual Indigo output");
+        frame(mesh(true), true, -1, 2, true, 2);
+        check(DynamicCapture.stats().vertices() == 0 && FabricMeshCapture.stats().submits() == 1,
+              "Mixed source layers route independently");
         int[] unknownCalls = {0};
         Mesh unknown = new Mesh() {
             public int size() {
                 return mesh.size();
             }
             public void forEach(java.util.function.Consumer<? super net.fabricmc.fabric.api.client.renderer.v1.mesh.QuadView> action) {
-                throw new AssertionError("Unknown implementation must not be read speculatively");
+                ++unknownCalls[0];
+                mesh.forEach(action);
             }
             public void outputTo(QuadEmitter emitter) {
-                ++unknownCalls[0];
-                mesh.outputTo(emitter);
+                throw new AssertionError("Downstream outputTo must not execute");
             }
         };
         frame(unknown, true, -1, 2, true, 1);
-        check(unknownCalls[0] == 1 && DynamicCapture.stats().vertices() == 8,
-              "Unknown Mesh keeps its actual emitter callback exactly once");
+        check(unknownCalls[0] == 1 && DynamicCapture.stats().vertices() == 0,
+              "Custom immutable Mesh is read once through the source contract");
         frame(mesh, true, -1, 2, false, 1);
         check(FabricMeshCapture.stats().submits() == 0,
               "Unrecognized material is not silently made into white geometry");
@@ -148,7 +148,7 @@ final class FabricMeshCpuSmoke {
                 set(ExtendedBlockModelFeatureRenderer.class, "submit", RENDERER, submit);
                 QuadEmitter emitter =
                         value(ExtendedBlockModelFeatureRenderer.class, "emitter", RENDERER);
-                if (!FabricMeshCapture.output(RENDERER, submit, mesh, emitter, true))
+                if (!FabricMeshCapture.output(submit, mesh, true))
                     mesh.outputTo(emitter);
             } else {
                 var build = ExtendedBlockModelFeatureRenderer.class.getDeclaredMethod(
@@ -162,12 +162,13 @@ final class FabricMeshCpuSmoke {
             check(bindings == expectedBindings,
                   "Actual layer material callbacks are not replayed: " + bindings);
             if (!knownMaterial)
-                check(((BufferBuilderAccessor)consumer).primept$vertices() == 8,
-                      "Failed material capability check still emits all original vertices");
+                check(((BufferBuilderAccessor)consumer).primept$vertices() == 0,
+                      "Unsupported material never triggers downstream expansion");
             var finish = StagedVertexBuffer.class.getDeclaredMethod("finishLastVertexBuilder");
             finish.setAccessible(true);
             finish.invoke(staged);
-            check(DynamicCapture.healthy(), "Source capture stays healthy");
+            check(DynamicCapture.healthy() == knownMaterial,
+                  "Known material routes; missing material reports explicit failure");
             if (FabricMeshCapture.stats().submits() > 0)
                 check(((BufferBuilderAccessor)consumer).primept$vertices() == 0,
                       "No mechanical vertex output in exclusive instance path");

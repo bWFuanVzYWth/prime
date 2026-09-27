@@ -13,7 +13,7 @@ import net.minecraft.client.renderer.texture.SpriteLoader;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.ChunkPos;
 
-/** Finite, coalesced source changes. Tokens prove which compilers can still publish. */
+/** Finite, coalesced source changes. Tokens prove which source observations can still publish. */
 public final class CaptureInbox {
     private final LinkedHashMap<Long, Batch> pending = new LinkedHashMap<>();
     private final TreeMap<Long, Token> inFlight = new TreeMap<>();
@@ -27,6 +27,10 @@ public final class CaptureInbox {
     private RuntimeException failure;
     private Atlas atlas;
     private long atlasVersion;
+    private long routeIdentity;
+    private final RouteBuffer routeBatch = new RouteBuffer();
+    private final List<byte[]> routeResources = new ArrayList<>();
+    private final List<Long> routeRetirements = new ArrayList<>();
 
     public CaptureInbox() {
         this(Boolean.getBoolean("primept.enabled"));
@@ -65,6 +69,28 @@ public final class CaptureInbox {
             chunkRevisions.remove(token.chunk);
         } else
             producers.put(token.chunk, count);
+    }
+
+    synchronized long routeIdentity() {
+        return routeIdentity = Math.incrementExact(routeIdentity);
+    }
+    synchronized void routeResource(long sourceEpoch, byte[] packet) {
+        if (active && sourceEpoch == epoch) {
+            routeResources.add(packet);
+            bytes += packet.length;
+        }
+    }
+    synchronized void retireRouteResource(long sourceEpoch, long id) {
+        if (active && sourceEpoch == epoch)
+            routeRetirements.add(id);
+    }
+    synchronized void route(Token token, byte[] packet) {
+        if (!accepts(token))
+            return;
+        if (revisions.put(token.section, token.revision) == null)
+            chunkSections.computeIfAbsent(token.chunk, ignored -> new ArrayList<>())
+                    .add(token.section);
+        enqueue(token.section, token.revision, false, List.of(packet));
     }
 
     /** Encoding is worker-private; the monitor protects only admission and publication. */
@@ -125,6 +151,28 @@ public final class CaptureInbox {
     /** Detach exactly this batch. Later/reentrant events belong to the next call. */
     public synchronized Sealed seal() {
         var batches = new ArrayList<Batch>();
+        // Resource packets must survive section coalescing. All definitions precede uses;
+        // handle retirements follow every section in this sealed batch.
+        var definitions = routeBatch.header(13, epoch).i(0).i(0);
+        int definitionCount = 0;
+        for (byte[] resource : routeResources) {
+            // Each producer packet contains exactly one definition. Batch records, not FFM calls.
+            if (definitions.size() > (256 << 20) - (resource.length - 32)) {
+                definitions.integerAt(24, definitionCount);
+                byte[] packet = definitions.seal();
+                batches.add(new Batch(epoch, 0, 0, false, List.of(packet), packet.length));
+                definitions.header(13, epoch).i(0).i(0);
+                definitionCount = 0;
+            }
+            definitions.append(resource, 32, resource.length - 32);
+            ++definitionCount;
+        }
+        if (definitionCount != 0) {
+            definitions.integerAt(24, definitionCount);
+            byte[] packet = definitions.seal();
+            batches.add(new Batch(epoch, 0, 0, false, List.of(packet), packet.length));
+        }
+        routeResources.clear();
         var removals = new ArrayList<Batch>();
         for (var batch : pending.values()) {
             if (batch.removal)
@@ -144,6 +192,16 @@ public final class CaptureInbox {
             byte[] packet = Packets.removeSections(epoch, sections, sequences);
             batches.add(new Batch(epoch, 0, 0, true, List.of(packet), packet.length));
         }
+        int retirementCapacity = ((256 << 20) - 32) / 8;
+        for (int first = 0; first < routeRetirements.size(); first += retirementCapacity) {
+            int count = Math.min(retirementCapacity, routeRetirements.size() - first);
+            var retired = routeBatch.header(13, epoch).i(0).i(count);
+            for (int i = 0; i < count; ++i)
+                retired.l(routeRetirements.get(first + i));
+            byte[] packet = retired.seal();
+            batches.add(new Batch(epoch, 0, 0, false, List.of(packet), packet.length));
+        }
+        routeRetirements.clear();
         pending.clear();
         bytes = 0;
         long completed = inFlight.isEmpty() ? revision : inFlight.firstKey() - 1;
@@ -227,6 +285,9 @@ public final class CaptureInbox {
 
     public synchronized void reset() {
         ++epoch;
+        routeResources.clear();
+        routeRetirements.clear();
+        routeIdentity = 0;
         pending.clear();
         revisions.clear();
         chunkSections.clear();

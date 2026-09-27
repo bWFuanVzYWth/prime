@@ -1,13 +1,15 @@
 # 架构与所有权
 
+地形、标准模型和粒子的源描述经版本适配层路由到 Rust，接受提交后截断对应 Java 展开。源回调与纯几何编译有独立职责，当前支持边界见 [源路由](capture-boundaries.md)。
+
 ```text
 Minecraft 26.2 / 26.3 / 各版本 Fabric Mixins
-  实际 quad + tint / 模型局部几何与实例 / staged raw mesh / CPU texture source
+  局部模型定义 + 放置 / 流体邻接 / 模型实例 / 粒子参数 / 直接网格与纹理来源
           │ 原始不可变字节、源身份、相机
 Java CaptureInbox + InstanceCapture + DynamicFrame → NativeBridge（Java 25 FFM）
           │ 调用期间借用；返回前所有输入完成复制
 prime_engine → prime_scene: protocol → SourceScene / InstanceContext → TranslatedScene / SceneInput / Camera
-          │ Rust 解码、三角化、全局空间合批、坐标重定位、纹理身份绑定
+          │ Rust 同步源编译、三角化、全局空间合批、坐标重定位、纹理身份绑定
 prime_vulkan → Slang SPIR-V
           │ BLAS / TLAS / RayQuery / realtime or frozen accumulation
 imageStore → Minecraft 主 RGBA8 图像 → hand / HUD → 宿主提交与呈现
@@ -15,23 +17,29 @@ imageStore → Minecraft 主 RGBA8 图像 → hand / HUD → 宿主提交与呈�
 
 ## 边界
 
-Java 保留实际接受的 quad 几何、源颜色/tint、拓扑和图集字节；封包属于捕获边界，不产生渲染材质或 GPU ABI。两个版本共享 `common` 的 24 字节顶点编码与 FFM。Rust `prime_scene::protocol` 是不信任数据到可信值的边界，验证完成后才发布更新；该 crate 不依赖 ash、Fabric 或 Minecraft。`prime_engine` 拥有会话、源状态、翻译缓存和 renderer 生命周期；`prime_vulkan` 管理具体 PT descriptor、GPU 数据布局、分配、barrier 与退休。宿主拥有 device、queue、命令池、主图像及提交。Java 的宿主适配仅协商设备特性并转交原版句柄，不翻译场景或录制 PT 渲染命令。完整目录、依赖图与矩形算法边界见 [structure.md](structure.md)。
+Java 在足以描述对象外观的位置路由源数据，保留第三方自定义模型、模型选择、姿态与变换设置的结果和必要顺序，接受提交后截断相应的下游 Java 计算。顶点变换、展开、三角化及其实现上的第三方修改不属于兼容范围。Prime 自有的 CPU 工作池、活跃工作集、依赖失效传播、section 几何编译与渲染资源管理归 Rust；适配器不拥有另一套地形编译调度器。Rust worker 只消费版本无关的纯数据，不访问 MC 对象或反向调用 Java compiler，具体边界见 [源路由与截断](capture-boundaries.md#路由与截断)。
+
+路由是单向边界，包含输入接管与对应下游计算的截断，不能只复制数据后让两边各算一次。原版中所需的纯计算可以在 Rust 重写；路由后的编译与渲染只依赖已发布的源数据，不依赖原版继续计算，也不在缺少输入时反向查询。世界、资源、邻接和宿主选项的后续变化通过新的显式增量传递。语义自足与内存所有权分别成立：跨调用保留的数据由 native 拥有，或按 ABI 持有明确的只读所有者，不能把 Java 对象或临时地址当成可随时查询的来源。
+
+直接网格来源仍可提交源顶点，但不能用它为已接管的标准模型下游修改兜底。完整源描述一经接收就省去对应 Java 计算，不保证自定义 downstream renderer/consumer 的实现或副作用。
+
+当前 Java 保留局部源几何、可见性、源颜色/tint、流体邻接、姿态和图集字节；封包不产生渲染材质或 GPU ABI。两个版本共享 `common` 的 24 字节顶点编码与 FFM。Rust `prime_scene::protocol` 是不信任数据到可信值的边界，验证完成后才发布更新；该 crate 不依赖 ash、Fabric 或 Minecraft。`prime_engine` 拥有会话、源状态、翻译缓存和 renderer 生命周期；`prime_vulkan` 管理具体 PT descriptor、GPU 数据布局、分配、barrier 与退休。宿主拥有 device、queue、命令池、主图像及提交。Java 的宿主适配仅协商设备特性并转交原版句柄，不翻译场景或录制 PT 渲染命令。完整目录、依赖图与矩形算法边界见 [structure.md](structure.md)。
 
 源身份是 `(section_key:u64, layer:u32)`，不转换为浮点。世界位置保持 `f64 source origin + f32 local vertex`；静态/原型快照共享不可变 `Arc<[Triangle]>`，raw 使用只读发布的 `Arc<Vec<Triangle>>`，纹理共享不可变像素。只有没有发布消费者的 raw 工作区才可重新取得独占写入；旧快照保留期间另用工作区，消费者结束后释放多余备用区。翻译层先确定全局 64 格单元，再生成相对相机附近 256 格 frame anchor 的 f32 放置，职责见 [全局空间网格](spatial-batching.md)。容量与纹理引用计数随实际源操作更新；卸载历史依生产者完成水位回收。
 
-实体输入分为持久原型/实例和原始几何回退两条通路。版本层在实际标准 `ModelPart.Cube.compile` 调用中观察局部几何、姿态、纹理、颜色与 UV；不可变顶点的引用发生变化时才读取并发布几何原型。实体/方块实体自身持有源上下文，实际模型提交与叶节点确定实例身份。模型、动画和渲染回调仍执行原来的一次。PT 独占世界且精确源、consumer 与纯叶节点契约成立时，发布实例后省去机械顶点展开；未知路径保留实际输出，不重播回调来猜测画面。
+实体输入分为持久原型/实例和原始几何回退两条通路。版本层在 `ModelPart` 调用 `Cube.compile` 前观察局部几何、姿态、纹理、颜色与 UV；不可变顶点的引用发生变化时才读取并发布几何原型。实体/方块实体自身持有源上下文，实际模型提交与叶节点确定实例身份。模型、动画和渲染回调仍执行原来的一次。PT 独占世界时，受支持源发布实例后截断该次 compile 虚调用，包括其下游覆盖；外层回调继续执行，无法解释的源明确报告，不重播回调来猜测画面。
 
-独立的 Fabric wrapper 几何缓存按正式 geometry-key 契约复用不可变 Mesh，命中时省去该契约允许缓存的 emit 和重复复制；本次 tint、材质标记与变换仍参与实际提交。实际 Indigo 提交的受支持单层不可变 Mesh 按 tint 分组建立局部原型；实际材质回调只执行一次，实例承载本次仿射和颜色。多层、特殊输出或未知实现局部回退。
+独立的 Fabric wrapper 几何缓存按正式 geometry-key 契约复用不可变 Mesh，命中时省去该契约允许缓存的 emit 和重复复制；本次 tint、材质标记与变换仍参与实际提交。实际 Indigo 提交的不可变 Mesh 按源 layer/tint 连续分组建立局部原型；实际材质回调只执行一次，实例承载本次仿射和颜色。多层与自定义 Mesh 实现通过同一源接口路由；特殊投影和未识别材质不作完整支持承诺。
 
-普通 item 提交在真实 quad 输出叶节点读取本次局部位置和 UV，按材质、统一 tint 与姿态分组；内容精确相同时跨实例共享几何原型。可变源值仍每次观察，不能只凭容器身份复用。组改变或 submit 不再出现时，帧生命周期显式解除几何引用；无须等待 GC。ExtendedItem 和未识别的输出继续原始回退，详细接管范围见 [捕获边界与批量数据流](capture-boundaries.md)。
+普通 item 提交在真实 quad 输出叶节点读取本次局部位置和 UV，按材质、tint 与姿态分组，非统一 tint 作为逐角源颜色；内容精确相同时跨实例共享几何原型。可变源值仍每次观察，不能只凭容器身份复用。组改变或 submit 不再出现时，帧生命周期显式解除几何引用；无须等待 GC。ExtendedItem 和未识别的输出继续原始回退，详细接管范围见 [捕获边界与批量数据流](capture-boundaries.md)。
 
 公共 `InstanceCapture` 显式持有资源、世界实例与帧封包上下文：原型按资源变化发布，实例只在出现、消失或有效值变化时写入 op7。没有变化时不产生包、不调用 FFM；一个变化帧最多一个实例增量调用。世界准备结束即闭合捕获帧，暂未进入 native hook 的脏记录保留到成功提交；只有 FFM 成功返回才确认序号和清理源字节。原型释放须等所有实例引用消失，可以在同一批中迁移实例并删除旧原型。
 
-未知模型或 consumer、特殊 UV 包装及粒子保留实际 `StagedVertexBuffer.Draw.append(MeshData)` 的 op6 原始几何快照。已实例化的顶点范围从该快照排除；其余范围一次复制到复用的 native arena。非空回退仍逐帧捕获，变为空时提交一次清除，连续空帧不重复提交。两条输入的序号独立于地形 revision，更新不会重译静态 mesh。纹理按实际 GPU texture 身份关联 CPU 上传来源，并先于引用它的几何增量提交。
+标准粒子在 buildLayer 前路由52字节参数记录，由 Rust 展开。尚无早期源描述的直接网格仍使用 `StagedVertexBuffer.Draw.append(MeshData)` 的 op6 来源；它不提供对标准模型下游 consumer 改写的兼容承诺。已实例化的顶点范围从该快照排除；其余范围一次复制到复用的 native arena。非空回退仍逐帧捕获，变为空时提交一次清除，连续空帧不重复提交。两条输入的序号独立于地形 revision，更新不会重译静态 mesh。纹理按实际 GPU texture 身份关联 CPU 上传来源，并先于引用它的几何增量提交。
 
 Rust `InstanceContext` 先借用旧状态验证整批及最终引用关系，再显式修改持久场景；只访问变化记录和受影响原型的引用计数，不复制全实例表。解码记录与引用计划使用上下文持有的连续工作区，容量跨提交复用；在工作区内排序、检查重复及更新/删除冲突，不依赖线序。相同原型的姿态更新不产生无效的引用减增，失败也清除未发布值并保留可复用容量。常驻映射依然有查找和写入成本，这不是 O(1) 的全量更新。每条记录的 revision 等于该批 sequence，整体严格有序，因而无需永久保存死亡实体 ID。常驻容量有界，持续出生/删除不会仅因历史身份增长而耗尽容量。`prime_scene::translation` 计算静态合批、动态分桶和实例放置，`prime_vulkan` 的几何执行器与 `context::objects` 执行资源分配、上传和 AS 命令；两者通过显式借用协作，不引入后台任务或共享可变缓存。
 
-资源重载与世界切换推进 epoch。捕获开始注册源序列 token；成功、失败或取消都结束该 token，结束后的 token 不能再次发布。卸载使当前列的未完成 token 失效；没有未完成生产者时释放列历史。op8 原子替换 section 全部层，实际空段仍完成就绪；op11 批量卸载撤销可用性。适配器先提交本批全部变化，再用 op10 声明没有尚可发布的序列早于或等于该水位。native 删除已覆盖的身份历史，以水位拒绝迟到包。CPU 来源完成与 GPU timeline 是两个独立证明。
+资源重载与世界切换推进 epoch。捕获开始注册源序列 token；成功、失败或取消都结束该 token，结束后的 token 不能再次发布。卸载使当前列的未完成 token 失效；没有未完成生产者时释放列历史。op12 经 native 编译后原子替换 section 全部层，实际空段仍完成就绪；op11 批量卸载撤销可用性。适配器先提交本批全部变化，再用 op10 声明没有尚可发布的序列早于或等于该水位。native 删除已覆盖的身份历史，以水位拒绝迟到包。CPU 来源完成与 GPU timeline 是两个独立证明。
 
 ## 静态增量发布
 
@@ -63,9 +71,11 @@ Java 观察纹理的真实上传与关闭，关闭发送 op9 owner 退休。nati
 
 切换在 `GameRenderer.extract` 开始、宿主提取本帧世界状态之前执行：停止旧后端接收工作，证明 CPU 消费者结束和 GPU 提交完成，关闭旧后端专属资源，再启动新后端。同一帧的提取与绘制必须属于同一后端；若等到 `render` 开始才切换，新原版后端将缺少当帧提取准备的 ViewArea 和可见状态。任何退休失败都会保留旧所有者并阻断后续创建；不能把捕获异常、Java 方法返回或经过几帧当成销毁证明。渲染中途出错只申请下一帧切换，不在活跃 render pass 内提交，也不重放该帧回调补画。
 
-共享宿主设备、队列、窗口、主输出、手部/HUD 资源及仍被真实源对象引用的不可变数据。原版的地形 dispatcher、ViewArea 与世界 GPU 网格归原版；Prime 的源编译上下文、FFM 场景、BLAS/TLAS、材质与累积资源归选定后端。Prime 之间可共享明确的规范源资源上下文，不能共享未声明的后端私有翻译缓存。进入原版时释放 PT 自持的纹理副本和 geometry lookup；宿主仍借用的不可变 Mesh 按最后源消费者释放，不为清缓存复制或破坏宿主结果。
+共享宿主设备、队列、窗口、主输出、手部/HUD 资源及仍被真实源对象引用的不可变数据。原版的地形 dispatcher、ViewArea 与世界 GPU 网格归原版；Prime 的源编译上下文、FFM 场景、BLAS/TLAS、材质与累积资源归选定后端，其计算和资源所有权落在 Rust。Prime 之间可共享明确的规范源资源上下文，不能共享未声明的后端私有翻译缓存。进入原版时释放 PT 自持的纹理副本和 geometry lookup；宿主仍借用的不可变 Mesh 按最后源消费者释放，不为清缓存复制或破坏宿主结果。
 
-PT 根据实际加载事件、脏 section 与覆盖窗口封闭有限的本批变化。窗口只枚举进入/离开的条带；区块自身的加载/卸载事件补充同窗口内变化。相邻源快照在 owner 线程取得，私有 Java 工作池复用各自的 compiler/builder，按 MC 的原有编译工作线程契约运行。section 成本不均匀，线程在有限批内逐项领取，工作区独占，所有已提交任务在成功或失败返回前汇合；单线程与单项直接执行。工作区可分波，但没有 8 段、3 ms 或 16 MiB 的跨帧配额。封批后重入的新事件留给下一批；原版 dispatcher/世界网格上传停止。实际模型/tint 回调保留，经能力证明且没有 raster 消费者的透明排序与地形遮挡图可省略；这不省略源面的 cull 判断，未知路径原样执行。动态世界 staged 输出捕获完成后释放 CPU 结果，手部与 HUD 保持宿主流程。
+CPU 源处理保持同步：Java 按宿主生命周期取得必要的源观察，Rust 从封闭批次确定工作集、执行纯数据并行计算，返回前汇合后发布。所有者显式持有工作区，没有 8 段、3 ms 或 16 MiB 的跨帧配额；封批后重入的新事件属于下一批。原版 dispatcher/世界网格上传停止，手部与 HUD 保持宿主流程。
+
+`ExclusiveTerrainCapture` 合并宿主加载/脏事件并取得实际邻接源；`TerrainRouter` 只路由定义、源可见性/tint和放置，`FluidRouter` 路由材质及邻接。Prime 自有 Java compiler/builder/工作池已经移除；`prime_scene::routing` 编译为拥有独立寿命的逐段结果。未知源仍需真实读取，不能因少执行回调而假装吞吐提高。
 
 恢复原版时，在新 ViewArea 和遮挡图建立后，从实际 `ClientChunkCache` 一次性补入已加载列与空 section，再继续正常增量通知。旧遮挡图会清除这些状态，PT 期间又可能消费源更新日志，因此不能仅依赖切换之后的新事件恢复已有地形；此快照不增加稳态逐帧扫描。
 
@@ -77,7 +87,7 @@ PT 根据实际加载事件、脏 section 与覆盖窗口封闭有限的本批�
 
 翻译层统一使用世界原点对齐的 4×4×4 区块段（64×64×64 格）网格，静态地形、动态几何和未来光源树遵循同一空间划分，详见 [空间合批决策](spatial-batching.md)。静态与动态保持不同资源所有者和更新世代；静态每格只在 64 段完整后发布一个局部坐标 BLAS，内部按 opaque/cutout/alpha 与局部材质容量划分 geometry。CPU 保留逐段缓存，后续变化整格替换；动态仍使用独立 BLAS。TLAS 实例变换负责簇原点到帧 anchor 的平移。缓存签名包含源 mesh 身份、revision、簇内偏移与三角形范围，epoch 变化会清空簇身份。anchor 变化只重建 TLAS，不重建静态 BLAS，也不上传静态顶点或整份材质。
 
-源操作序列与几何内容世代分离。op8 将源字段与已验证的原层逐字段、按浮点位模式比较；相同几何、材质、原点和属性保留旧 Arc 与内容 revision，真实变化层使所属簇整格失效；首次空段完成或卸载也更新单元完整性。不用哈希相等代替内容证明；重复操作也不请求清空采样历史。完全相同的层直接复用，只有不同的层才展开解码与重算边界；比较本身仍需读取本次源数据，不能把避免 BLAS 重建称为零 CPU 成本。
+源操作序列与几何内容世代分离。op12 编译后按浮点位模式比较完整结果；相同几何、材质、原点和属性保留旧 Arc 与内容 revision，真实变化层使所属簇整格失效；首次空段完成或卸载也更新单元完整性。不用哈希相等代替内容证明，重复内容不清空采样历史。目前重复源包仍会编译再比较；op8 显式网格输入另有展开前比较，不能将该快路径外推到 op12，也不能把避免 BLAS 重建称为零 CPU 成本。
 
 材质记录保存在按需分配的设备地址页中，普通页为 64 MiB，较大的单个局部几何可使用较大页。页内区间删除后合并复用；区间碎片不足时另开页，不搬迁全部保留材质或重建无关 BLAS。各 owner 显式持有页与分配表，当前空页保留供复用，随 owner 退休，因此仍有历史峰值占用。
 
@@ -111,9 +121,9 @@ Java 使用宿主 transient command buffer，将 native 录制结果交还 `enco
 
 ## 生命周期与线程
 
-- `CaptureInbox` 以自身 monitor 序列化本批变化、token、epoch 和 revision。每次真实 compile 有独立 worker 捕获作用域，只观察该次实际 quad/tint 调用；成功返回后封包，render thread 取走不可变批次。异常与正常返回都清理线程作用域；边界不持有 native/GPU 对象。
+- `CaptureInbox` 以自身 monitor 序列化本批源变化、token、epoch 和 revision。宿主 owner 顺序读取源状态，成功后发布自持包；封批合并资源定义并保证定义、使用、退休的顺序。token 在正常与异常退出时均完成，失败批次不确认水位；边界不持有 native/GPU 对象。
 - 标准模型资源缓存以 Cube 弱身份关联已观察几何，在帧边界显式处理 ReferenceQueue，避免临时 Cube 永久积累；该操作只释放 CPU 源所有权。存活实例引用仍保留原型，GPU 资源另依 timeline 退休，不能以 GC 通知充当 GPU 完成证明。
-- FFM confined arena 可重复使用：帧与错误缓冲固定分配，输入 staging 按需增长。Rust 在调用返回前复制所有输入，不保存 Java 地址；GPU 执行异步不延长输入字节借用期。生产 FFM 不传输输出像素。
+- FFM confined arena 可重复使用：帧与错误缓冲固定分配，输入 staging 按需增长。Rust 在调用返回前完成输入消费，跨调用数据持有独立存储，不保存 Java 地址；同步 worker 可借用本次包，GPU 执行异步不延长输入字节借用期。生产 FFM 不传输输出像素。
 - native handle 存在创建 OS 线程的 TLS 表中。全局原子计数器仅分配不可复用身份；跨线程、已释放或伪造 handle 明确失败。没有全局共享可变场景。
 - native DLL 具有进程生命周期，session 仍显式销毁。这样异常隔离中的 driver/debug 回调不会跳转到已卸载的 Rust 代码。
 - 被替换的 GPU buffer、AS 和上传暂存资源保留至最后关联的宿主 timeline serial 完成。场景更新可以在先前帧在途时录制；同队列 barrier 保护持久 arena 的原位更新。关闭时 Java 先提交尚未入队的宿主命令，再等待 PT 最后 serial；之后才能销毁 descriptor/pipeline 等资源，宿主设备继续有效。

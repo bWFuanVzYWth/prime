@@ -9,13 +9,7 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import net.fabricmc.fabric.api.client.renderer.v1.mesh.Mesh;
-import net.fabricmc.fabric.api.client.renderer.v1.mesh.QuadEmitter;
 import net.fabricmc.fabric.api.client.renderer.v1.render.submit.ExtendedBlockModelSubmit;
-import net.fabricmc.fabric.impl.client.indigo.renderer.mesh.MeshImpl;
-import net.fabricmc.fabric.impl.client.indigo.renderer.mesh.MeshViewImpl;
-import net.fabricmc.fabric.impl.client.indigo.renderer.mesh.MutableQuadViewImpl;
-import net.fabricmc.fabric.impl.client.indigo.renderer.mesh.QuadViewImpl;
-import net.fabricmc.fabric.impl.client.indigo.renderer.render.ExtendedBlockModelFeatureRenderer;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.util.ARGB;
 
@@ -46,15 +40,10 @@ public final class FabricMeshCapture {
         binding = null;
     }
 
-    public static boolean output(Object renderer, ExtendedBlockModelSubmit submit, Mesh mesh,
-                                 QuadEmitter emitter, boolean exclusive) {
+    public static boolean output(ExtendedBlockModelSubmit submit, Mesh mesh, boolean exclusive) {
         if (!exclusive || !DynamicCapture.active() || context == null || binding == null)
             return false;
-        if (renderer.getClass() != ExtendedBlockModelFeatureRenderer.class ||
-            mesh.getClass() != MeshImpl.class || !Gate.SUPPORTED ||
-            !emitter.getClass().getName().equals(ExtendedBlockModelFeatureRenderer.class.getName() +
-                                                 "$1") ||
-            !submit.modelParts().isEmpty() || submit.sheetedDecalPose() != null) {
+        if (submit.sheetedDecalPose() != null) {
             ++fallbacks;
             return false;
         }
@@ -68,37 +57,26 @@ public final class FabricMeshCapture {
             geometry = context.geometry(mesh);
         } catch (RuntimeException failure) {
             DynamicCapture.fail(failure);
-            return false;
-        }
-        // A single layer lets a failed capability check reuse Indigo's already resolved lastBuffer.
-        // Thus fallback never invokes the model's renderTypeFunction a second time.
-        if (geometry.layer == null || geometry.parts.isEmpty()) {
-            ++fallbacks;
-            return false;
-        }
-        var matrix = submit.pose().pose();
-        if (!matrix.isFinite() || matrix.determinant3x3() == 0) {
-            ++fallbacks;
-            return false;
-        }
-        VertexConsumer consumer =
-                binding.primept$buffer(geometry.layer); // The actual source callback, exactly once.
-        if (consumer == null)
             return true;
-        if (consumer.getClass() != BufferBuilder.class) {
-            ++fallbacks;
-            return false;
         }
-        var material = DynamicCapture.material((BufferBuilder)consumer);
-        if (material == null || material.particle()) {
-            ++fallbacks;
-            return false;
-        }
+        if (geometry.parts.isEmpty())
+            return true;
+        var matrix = submit.pose().pose();
         try {
             while (source.meshes.size() < geometry.parts.size())
                 source.meshes.add(new Instance(context.owner.instance()));
             for (int i = 0; i < geometry.parts.size(); ++i) {
                 Part part = geometry.parts.get(i);
+                // Invoke the real material callback in source run order. BufferCache itself
+                // preserves adjacent layer reuse; no model callback is replayed.
+                VertexConsumer consumer = binding.primept$buffer(part.layer);
+                if (consumer == null)
+                    continue;
+                if (!(consumer instanceof BufferBuilder builder))
+                    throw new IllegalArgumentException("Unsupported routed mesh consumer");
+                var material = DynamicCapture.material(builder);
+                if (material == null || material.particle())
+                    throw new IllegalArgumentException("Missing routed mesh material");
                 if (part.prototype == null)
                     part.prototype = context.owner.prototype(4, part.vertices.remaining() / 24, 24,
                                                              0, 12, 16, part.vertices);
@@ -130,7 +108,7 @@ public final class FabricMeshCapture {
             return true;
         } catch (RuntimeException failure) {
             DynamicCapture.fail(failure);
-            return false;
+            return true;
         }
     }
 
@@ -159,14 +137,11 @@ public final class FabricMeshCapture {
             Geometry result = new Geometry();
             // Only the declared immutable Mesh contract permits this one-time source read.
             mesh.forEach(quad -> {
-                if (result.count == 0)
-                    result.layer = quad.chunkLayer();
-                else if (result.layer != quad.chunkLayer())
-                    result.mixed = true;
                 if (quad.tintIndex() < -1)
-                    result.mixed = true;
-                if (result.parts.isEmpty() || result.parts.getLast().tint != quad.tintIndex())
-                    result.parts.add(new Part(quad.tintIndex()));
+                    throw new IllegalArgumentException("Invalid mesh tint index");
+                if (result.parts.isEmpty() || result.parts.getLast().tint != quad.tintIndex() ||
+                    result.parts.getLast().layer != quad.chunkLayer())
+                    result.parts.add(new Part(quad.tintIndex(), quad.chunkLayer()));
                 Part part = result.parts.getLast();
                 part.reserveQuad();
                 for (int v = 0; v < 4; ++v) {
@@ -181,12 +156,8 @@ public final class FabricMeshCapture {
                 result.count += 4;
             });
             geometryVertices += result.count;
-            if (result.mixed) {
-                result.layer = null;
-                result.parts.clear();
-            } else
-                for (Part part : result.parts)
-                    part.vertices.flip();
+            for (Part part : result.parts)
+                part.vertices.flip();
             geometries.put(new Key(mesh, collected), result);
             return result;
         }
@@ -203,16 +174,16 @@ public final class FabricMeshCapture {
     }
     private static final class Geometry {
         final ArrayList<Part> parts = new ArrayList<>();
-        ChunkSectionLayer layer;
-        boolean mixed;
         int count;
     }
     private static final class Part {
         final int tint;
+        final ChunkSectionLayer layer;
         ByteBuffer vertices = ByteBuffer.allocate(576).order(ByteOrder.LITTLE_ENDIAN);
         InstanceCapture.Prototype prototype;
-        Part(int tint) {
+        Part(int tint, ChunkSectionLayer layer) {
             this.tint = tint;
+            this.layer = layer;
         }
         void reserveQuad() {
             if (vertices.remaining() >= 96)
@@ -248,41 +219,6 @@ public final class FabricMeshCapture {
         @Override
         public boolean equals(Object value) {
             return value instanceof Key key && mesh == key.get();
-        }
-    }
-    private static final class Gate {
-        static final boolean SUPPORTED =
-                ordinary(ExtendedBlockModelFeatureRenderer.class) && ordinary(MeshImpl.class) &&
-                ordinary(MeshViewImpl.class) && ordinary(MutableQuadViewImpl.class) &&
-                ordinary(QuadViewImpl.class) && ordinary(BufferBuilder.class) &&
-                ordinary(VertexConsumer.class) &&
-                named(ExtendedBlockModelFeatureRenderer.class.getName() + "$1") &&
-                named(ExtendedBlockModelFeatureRenderer.class.getName() + "$BufferCache");
-        private static boolean named(String name) {
-            try {
-                return ordinary(
-                        Class.forName(name, false, FabricMeshCapture.class.getClassLoader()));
-            } catch (ClassNotFoundException failure) {
-                return false;
-            }
-        }
-        private static boolean ordinary(Class<?> type) {
-            for (var method : type.getDeclaredMethods())
-                for (var annotation : method.getDeclaredAnnotations()) {
-                    if (!annotation.annotationType().getName().equals(
-                                "org.spongepowered.asm.mixin.transformer.meta.MixinMerged"))
-                        continue;
-                    try {
-                        String origin =
-                                (String)annotation.annotationType().getMethod("mixin").invoke(
-                                        annotation);
-                        if (!origin.startsWith("dev.primept.mixin."))
-                            return false;
-                    } catch (ReflectiveOperationException failure) {
-                        return false;
-                    }
-                }
-            return true;
         }
     }
 }

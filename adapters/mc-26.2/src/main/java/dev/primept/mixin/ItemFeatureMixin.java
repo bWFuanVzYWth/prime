@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.At;
 public abstract class ItemFeatureMixin {
     @WrapMethod(method = "prepareMainSubmit")
     private void primept$submit(ItemFeatureRenderer.Submit submit, Operation<Void> original) {
-        var previous = ItemCapture.enter(this, submit, PrimeClient.exclusiveFrameReady());
+        var previous = ItemCapture.enter(submit, PrimeClient.exclusiveFrameReady());
         boolean completed = false;
         try {
             original.call(submit);

@@ -9,12 +9,10 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import net.minecraft.client.renderer.feature.ItemFeatureRenderer;
-import net.minecraft.client.renderer.feature.RenderTypeFeatureRenderer;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.client.model.geom.builders.UVPair;
 import org.joml.Matrix4fc;
-import org.joml.Vector3f;
 
 /** Observes the one real item submit; mutable quad values are checked, never inferred from identity. */
 public final class ItemCapture {
@@ -68,13 +66,11 @@ public final class ItemCapture {
         current = null;
     }
 
-    public static Scope enter(Object renderer, ItemFeatureRenderer.Submit submit,
-                              boolean exclusive) {
+    public static Scope enter(ItemFeatureRenderer.Submit submit, boolean exclusive) {
         Scope previous = current;
         current = null;
-        if (!exclusive || !DynamicCapture.active() || context == null || !Gate.SUPPORTED ||
-            renderer.getClass() != ItemFeatureRenderer.class || submit.outlineColor() != 0 ||
-            submit.foilType() != ItemStackRenderState.FoilType.NONE)
+        if (!exclusive || !DynamicCapture.active() || context == null ||
+            submit.outlineColor() != 0 || submit.foilType() != ItemStackRenderState.FoilType.NONE)
             return previous;
         var source = ((ModelSubmission)(Object)submit).primept$submission();
         if (source == null || source.itemFrame == context.frame)
@@ -124,29 +120,23 @@ public final class ItemCapture {
                 ++fallbackQuads;
             return false;
         }
-        if (consumer.getClass() != BufferBuilder.class || colors.getClass() != QuadInstance.class) {
+        if (consumer.getClass() != BufferBuilder.class) {
             ++fallbackQuads;
-            return false;
+            DynamicCapture.fail(new IllegalArgumentException("Unsupported routed item consumer"));
+            return true;
         }
         var material = DynamicCapture.material((BufferBuilder)consumer);
         Matrix4fc matrix = pose.pose();
-        if (material == null || material.particle() || !matrix.isFinite() ||
-            matrix.determinant3x3() == 0) {
+        if (material == null || material.particle()) {
             ++fallbackQuads;
-            return false;
+            return true;
         }
         int tint = colors.getColor(0);
-        if (colors.getColor(1) != tint || colors.getColor(2) != tint ||
-            colors.getColor(3) != tint) {
-            ++fallbackQuads;
-            return false;
-        }
-        // Unknown Vector3fc implementations may have stateful getters; retain their actual leaf call.
-        for (int i = 0; i < 4; ++i)
-            if (quad.position(i).getClass() != Vector3f.class) {
-                ++fallbackQuads;
-                return false;
-            }
+        int c1 = colors.getColor(1), c2 = colors.getColor(2), c3 = colors.getColor(3);
+        boolean uniform = tint == c1 && tint == c2 && tint == c3;
+        int c0 = tint;
+        if (!uniform)
+            tint = -1;
         try {
             Group group = current.group(material, tint, matrix);
             for (int i = 0; i < 4; ++i) {
@@ -155,8 +145,13 @@ public final class ItemCapture {
                 group.value(Float.floatToRawIntBits(position.x()));
                 group.value(Float.floatToRawIntBits(position.y()));
                 group.value(Float.floatToRawIntBits(position.z()));
-                group.value(
-                        -1); // The actual uniform tint is instance state, not baked into reusable geometry.
+                int argb = uniform ? -1 : switch (i) {
+                    case 0 -> c0;
+                    case 1 -> c1;
+                    case 2 -> c2;
+                    default -> c3;
+                };
+                group.value((argb & 0xff00ff00) | ((argb >>> 16) & 255) | ((argb & 255) << 16));
                 group.value(Float.floatToRawIntBits(UVPair.unpackU(uv)));
                 group.value(Float.floatToRawIntBits(UVPair.unpackV(uv)));
             }
@@ -166,7 +161,7 @@ public final class ItemCapture {
             return true;
         } catch (RuntimeException failure) {
             DynamicCapture.fail(failure);
-            return false;
+            return true;
         }
     }
 
@@ -330,33 +325,6 @@ public final class ItemCapture {
             if (bucket.isEmpty())
                 pool.remove(geometry.hash);
             owner.release(geometry.prototype);
-        }
-    }
-    private static final class Gate {
-        static final boolean SUPPORTED =
-                ordinary(ItemFeatureRenderer.class) && ordinary(BakedQuad.class) &&
-                ordinary(QuadInstance.class) && ordinary(VertexConsumer.class) &&
-                ordinary(BufferBuilder.class) && ordinary(RenderTypeFeatureRenderer.class);
-        private static boolean ordinary(Class<?> type) {
-            for (var method : type.getDeclaredMethods())
-                for (var annotation : method.getDeclaredAnnotations()) {
-                    if (!annotation.annotationType().getName().equals(
-                                "org.spongepowered.asm.mixin.transformer.meta.MixinMerged"))
-                        continue;
-                    try {
-                        String origin =
-                                (String)annotation.annotationType().getMethod("mixin").invoke(
-                                        annotation);
-                        // Verified API version: this accessor only exposes computeFoilDecalPose; it does not alter output.
-                        if (!origin.startsWith("dev.primept.mixin.") &&
-                            !origin.equals(
-                                    "net.fabricmc.fabric.mixin.client.indigo.renderer.ItemFeatureRendererAccessor"))
-                            return false;
-                    } catch (ReflectiveOperationException failure) {
-                        return false;
-                    }
-                }
-            return true;
         }
     }
 }

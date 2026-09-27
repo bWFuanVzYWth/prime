@@ -6,16 +6,14 @@ import it.unimi.dsi.fastutil.longs.LongCollection;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.renderer.SectionBufferBuilderPack;
 import net.minecraft.client.renderer.chunk.RenderRegionCache;
-import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 
-/** Sole PT terrain producer. Reuses the actual MC compiler without a raster dispatcher or GPU mesh. */
+/** Host source events and object access only. Geometry construction is routed to Rust. */
 public final class ExclusiveTerrainCapture implements AutoCloseable {
     private static ExclusiveTerrainCapture current;
     private static boolean vanillaSuspended;
@@ -24,28 +22,19 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
     private final SectionChanges work = new SectionChanges();
     private final Long2ObjectLinkedOpenHashMap<LevelChunk> chunks =
             new Long2ObjectLinkedOpenHashMap<>();
-    private final LongOpenHashSet compiled = new LongOpenHashSet();
-    private final LongOpenHashSet compiledEmpty = new LongOpenHashSet();
+    private final LongOpenHashSet observed = new LongOpenHashSet();
+    private final LongOpenHashSet observedEmpty = new LongOpenHashSet();
     private final BlockEntityIndex blockEntities = new BlockEntityIndex();
-    private SynchronousWorkers<CompilerWorkspace> workers;
+    private TerrainRouter router;
     private ClientLevel world;
-    private record CompilerWorkspace(SectionCompiler compiler, SectionBufferBuilderPack buffers,
-                                     SourceQuads source) implements AutoCloseable {
-        public void close() {
-            buffers.close();
-        }
-    }
-    private record
-            Compilation(long key, net.minecraft.client.renderer.chunk.RenderSectionRegion region) {}
     private int centerX = Integer.MIN_VALUE, centerZ, radius = -1;
     private long epoch;
     private RuntimeException failure;
-    private long compilations;
+    private long routedSections;
     private boolean cacheWindowChanged;
     private ColumnWindow window;
     private static final boolean PROFILE = Boolean.getBoolean("primept.profile");
     private static final boolean KNOWN_EMPTY =
-            BlockEntityCandidates.known(SectionCompiler.class) &&
             BlockEntityCandidates.known(RenderRegionCache.class) &&
             BlockEntityCandidates.known(
                     net.minecraft.client.renderer.chunk.RenderSectionRegion.class) &&
@@ -55,8 +44,8 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             BlockEntityCandidates.known(net.minecraft.world.level.chunk.ChunkAccess.class);
     private Stats stats = Stats.EMPTY;
     public record Stats(long dirty, long entered, long loaded, long unloaded, long invalidations,
-                        long selected, long emptyPublished, long emptyRetained, long compiled,
-                        long snapshotNanos, long compileNanos, long totalNanos) {
+                        long selected, long emptyPublished, long emptyRetained, long routed,
+                        long snapshotNanos, long routingNanos, long totalNanos) {
         private static final Stats EMPTY = new Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
     private long dirtyEvents, enteredColumns, loadedColumns, unloadedColumns, invalidations;
@@ -87,8 +76,8 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
     public static RuntimeException failure() {
         return current == null ? null : current.failure;
     }
-    public static long compilations() {
-        return current == null ? 0 : current.compilations;
+    public static long routedSections() {
+        return current == null ? 0 : current.routedSections;
     }
     public static int pendingSections() {
         return current == null ? 0 : current.work.size();
@@ -144,7 +133,7 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             current.prepare(camera);
         } catch (RuntimeException exception) {
             current.failure = exception;
-            PrimeClient.LOGGER.error("Exclusive terrain stopped after a source compilation failure",
+            PrimeClient.LOGGER.error("Exclusive terrain stopped after a source routing failure",
                                      exception);
         }
     }
@@ -152,19 +141,17 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         synchronizeWindow(camera.pos);
         if (world == null)
             return;
-        prepareSections(Minecraft.getInstance().options.cutoutLeaves().get(), world.isDebug());
+        prepareSections(world.isDebug());
     }
-    /** Owner snapshots; workers finish the entire sealed batch before returning. */
-    void prepareSections(boolean cutout, boolean debugWorld) {
+    /** Owner routes source callbacks; native submission performs the pure geometry compilation. */
+    void prepareSections(boolean debugWorld) {
         long prepareStart = PROFILE ? System.nanoTime() : 0;
         long[] sealed = work.seal();
-        long emptyPublished = 0, emptyRetained = 0, compiledCount = 0, snapshotTime = 0,
-             compileTime = 0;
-        // Snapshot bounded waves on the owner, then join each wave. All sealed work
-        // finishes in this call; a wave is workspace sizing, never a frame quota.
+        long emptyPublished = 0, emptyRetained = 0, routedCount = 0, snapshotTime = 0,
+             routingTime = 0;
+        // Bound host snapshot retention, never the amount of accepted work per frame.
         for (int first = 0; first < sealed.length; first += 256) {
             long snapshotStart = PROFILE ? System.nanoTime() : 0;
-            var inputs = new java.util.ArrayList<Compilation>();
             var regions = new RenderRegionCache();
             for (int i = first; i < Math.min(sealed.length, first + 256); i++) {
                 long key = sealed[i];
@@ -172,55 +159,27 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
                 if (chunk == null)
                     continue;
                 if (knownEmpty(chunk, key, debugWorld)) {
-                    if (compiledEmpty.add(key)) {
-                        try (var capture = TerrainCapture.open(PrimeClient.CAPTURE,
-                                                               SectionPos.of(key), cutout)) {
-                            capture.publish();
-                        }
-                        compiled.add(key);
+                    if (observedEmpty.add(key)) {
+                        router.route(SectionPos.of(key), null);
+                        observed.add(key);
                         ++emptyPublished;
                     } else {
                         ++emptyRetained;
                     }
                     continue;
                 }
-                compiledEmpty.remove(key);
-                inputs.add(new Compilation(key, regions.createRegion(world, key)));
-            }
-            if (PROFILE)
-                snapshotTime += System.nanoTime() - snapshotStart;
-            long compileStart = PROFILE ? System.nanoTime() : 0;
-            workers.runBalanced(inputs.size(), 1, (workspace, start, end) -> {
-                for (int i = start; i < end; i++) {
-                    var input = inputs.get(i);
-                    if (input.region == null) {
-                        try (var capture = TerrainCapture.open(PrimeClient.CAPTURE,
-                                                               SectionPos.of(input.key), cutout)) {
-                            capture.publish();
-                        }
-                    } else {
-                        boolean success = false;
-                        try (var output = TerrainRasterOutput.open(workspace.source)) {
-                            var result = workspace.compiler.compile(SectionPos.of(input.key),
-                                                                    input.region, output.sorting,
-                                                                    workspace.buffers);
-                            result.release();
-                            success = true;
-                        } finally {
-                            if (success)
-                                workspace.buffers.clearAll();
-                            else
-                                workspace.buffers.discardAll();
-                        }
-                    }
-                }
-            });
-            if (PROFILE)
-                compileTime += System.nanoTime() - compileStart;
-            compiledCount += inputs.size();
-            for (var input : inputs) {
-                compiled.add(input.key);
-                ++compilations;
+                observedEmpty.remove(key);
+                var region = regions.createRegion(world, key);
+                long sourceStart = PROFILE ? System.nanoTime() : 0;
+                if (PROFILE)
+                    snapshotTime += sourceStart - snapshotStart;
+                router.route(SectionPos.of(key), region);
+                if (PROFILE)
+                    routingTime += System.nanoTime() - sourceStart;
+                snapshotStart = PROFILE ? System.nanoTime() : 0;
+                observed.add(key);
+                ++routedCount;
+                ++routedSections;
             }
             if (PrimeClient.CAPTURE.failure() != null)
                 throw PrimeClient.CAPTURE.failure();
@@ -228,7 +187,7 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         if (PROFILE) {
             stats = new Stats(dirtyEvents, enteredColumns, loadedColumns, unloadedColumns,
                               invalidations, sealed.length, emptyPublished, emptyRetained,
-                              compiledCount, snapshotTime, compileTime,
+                              routedCount, snapshotTime, routingTime,
                               System.nanoTime() - prepareStart);
             dirtyEvents = enteredColumns = loadedColumns = unloadedColumns = invalidations = 0;
         }
@@ -259,11 +218,11 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             work.clear();
             chunks.clear();
             blockEntities.clear();
-            compiled.clear();
-            compiledEmpty.clear();
+            observed.clear();
+            observedEmpty.clear();
             centerX = Integer.MIN_VALUE;
             window = null;
-            configureCompiler();
+            configureRouter();
         }
         int x = SectionPos.blockToSectionCoord(camera.x),
             z = SectionPos.blockToSectionCoord(camera.z);
@@ -271,24 +230,16 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         if (cacheWindowChanged || x != centerX || z != centerZ || distance != radius)
             updateWindow(x, z, distance);
     }
-    private void configureCompiler() {
+    private void configureRouter() {
         var minecraft = Minecraft.getInstance();
         net.minecraft.world.level.block.LeavesBlock.setCutoutLeaves(
                 minecraft.options.cutoutLeaves().get());
-        if (workers != null)
-            workers.close();
-        boolean ao = minecraft.options.ambientOcclusion().get(),
-                cutout = minecraft.options.cutoutLeaves().get();
+        if (router != null)
+            router.close();
         var blocks = minecraft.getModelManager().getBlockStateModelSet();
         var fluids = minecraft.getModelManager().getFluidStateModelSet();
         var colors = minecraft.getBlockColors();
-        int threads = Integer.getInteger("primept.compilerThreads",
-                                         Math.min(8, Runtime.getRuntime().availableProcessors()));
-        workers = new SynchronousWorkers<>(
-                threads,
-                ignored
-                -> new CompilerWorkspace(new SectionCompiler(ao, cutout, blocks, fluids, colors),
-                                         new SectionBufferBuilderPack(), new SourceQuads()));
+        router = new TerrainRouter(PrimeClient.CAPTURE, blocks, fluids, colors);
     }
     private void updateWindow(int x, int z, int distance) {
         var next = ColumnWindow.centered(x, z, distance);
@@ -328,9 +279,9 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         var pos = chunk.getPos();
         for (int y = world.getMinSectionY(); y <= world.getMaxSectionY(); ++y) {
             long key = SectionPos.asLong(pos.x(), y, pos.z());
-            // An observed empty compile is a complete source snapshot, not a missing section.
+            // An observed empty section is a complete source snapshot, not a missing section.
             // Capture does not know which snapshots the native translator will batch together.
-            if (!compiled.contains(key) ||
+            if (!observed.contains(key) ||
                 !chunk.getSection(y - world.getMinSectionY()).hasOnlyAir() || includeEmpty)
                 work.add(key);
         }
@@ -348,8 +299,8 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         work.removeChunk(x, z, world.getMinSectionY(), world.getMaxSectionY());
         for (int y = world.getMinSectionY(); y <= world.getMaxSectionY(); ++y) {
             long key = SectionPos.asLong(x, y, z);
-            compiled.remove(key);
-            compiledEmpty.remove(key);
+            observed.remove(key);
+            observedEmpty.remove(key);
         }
     }
     public static void dirtySection(int x, int y, int z) {
@@ -407,8 +358,8 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             return;
         if (PROFILE)
             ++current.invalidations;
-        current.compiledEmpty.clear();
-        current.configureCompiler();
+        current.observedEmpty.clear();
+        current.configureRouter();
         for (var chunk : current.chunks.values())
             current.dirtyChunkContents(chunk, true);
     }
@@ -436,18 +387,18 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             return false;
         var chunk = current.chunks.get(ChunkPos.pack(SectionPos.x(section), SectionPos.z(section)));
         int index = SectionPos.y(section) - current.world.getMinSectionY();
-        return chunk != null && (current.compiled.contains(section) ||
+        return chunk != null && (current.observed.contains(section) ||
                                  index >= 0 && index < chunk.getSections().length &&
                                          chunk.getSection(index).hasOnlyAir());
     }
     @Override
     public void close() {
-        if (workers != null)
-            workers.close();
+        if (router != null)
+            router.close();
         work.clear();
         chunks.clear();
         blockEntities.clear();
-        compiled.clear();
-        compiledEmpty.clear();
+        observed.clear();
+        observedEmpty.clear();
     }
 }

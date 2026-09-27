@@ -132,6 +132,25 @@ public final class DynamicCapture {
         }
     }
 
+    public static boolean
+    particles(net.minecraft.client.renderer.state.level.QuadParticleRenderState state,
+              SingleQuadParticle.Layer layer, VertexConsumer consumer) {
+        if (!active())
+            return false;
+        if (!(consumer instanceof BufferBuilder builder))
+            throw new IllegalStateException("Particle routing requires a bound source material");
+        Material material = material(builder);
+        if (material == null || !material.particle())
+            throw new IllegalStateException("Missing particle source material");
+        int before = frame.vertexCount();
+        frame.beginParticles(material.texture(), material.flags());
+        ((ParticleSource)state).primept$route(layer, frame::particle);
+        frame.endSpan();
+        if (frame.vertexCount() != before)
+            ++particleMeshes;
+        return true;
+    }
+
     public static void mesh(StagedVertexBuffer.Draw draw, MeshData data) {
         if (!active())
             return;

@@ -5,6 +5,7 @@ pub mod extent;
 pub mod incremental;
 pub mod instances;
 pub mod protocol;
+mod routing;
 pub mod scene;
 pub mod settings;
 pub mod spatial;

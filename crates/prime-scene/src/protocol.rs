@@ -11,7 +11,7 @@ use crate::{
 #[path = "protocol_capacity_tests.rs"]
 mod capacity_tests;
 
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 pub const MAGIC: u32 = 0x5450_5250;
 pub const MAX_PACKET_BYTES: usize = 256 * 1024 * 1024;
 const MAX_TEXTURE_BYTES: usize = 512 * 1024 * 1024;
@@ -25,9 +25,9 @@ pub(crate) fn validate_triangle_capacity(total: usize) -> Result<(), String> {
     Ok(())
 }
 
-struct Reader<'a> {
-    data: &'a [u8],
-    offset: usize,
+pub(crate) struct Reader<'a> {
+    pub(crate) data: &'a [u8],
+    pub(crate) offset: usize,
 }
 impl<'a> Reader<'a> {
     fn new(data: &'a [u8]) -> Result<Self, String> {
@@ -36,7 +36,7 @@ impl<'a> Reader<'a> {
         }
         Ok(Self { data, offset: 0 })
     }
-    fn take(&mut self, size: usize) -> Result<&'a [u8], String> {
+    pub(crate) fn take(&mut self, size: usize) -> Result<&'a [u8], String> {
         let end = self
             .offset
             .checked_add(size)
@@ -45,37 +45,37 @@ impl<'a> Reader<'a> {
         self.offset = end;
         Ok(value)
     }
-    fn u32(&mut self) -> Result<u32, String> {
+    pub(crate) fn u32(&mut self) -> Result<u32, String> {
         Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
     }
-    fn u64(&mut self) -> Result<u64, String> {
+    pub(crate) fn u64(&mut self) -> Result<u64, String> {
         Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
     }
-    fn f32(&mut self) -> Result<f32, String> {
+    pub(crate) fn f32(&mut self) -> Result<f32, String> {
         let value = f32::from_bits(self.u32()?);
         if !value.is_finite() {
             return Err("non-finite f32 in packet".into());
         }
         Ok(value)
     }
-    fn f64(&mut self) -> Result<f64, String> {
+    pub(crate) fn f64(&mut self) -> Result<f64, String> {
         let value = f64::from_bits(self.u64()?);
         if !value.is_finite() {
             return Err("non-finite f64 in packet".into());
         }
         Ok(value)
     }
-    fn vector(&mut self) -> Result<[f32; 3], String> {
+    pub(crate) fn vector(&mut self) -> Result<[f32; 3], String> {
         Ok([self.f32()?, self.f32()?, self.f32()?])
     }
-    fn origin(&mut self) -> Result<[f64; 3], String> {
+    pub(crate) fn origin(&mut self) -> Result<[f64; 3], String> {
         let value = [self.f64()?, self.f64()?, self.f64()?];
         if value.iter().any(|x| x.abs() > 32_000_000.0) {
             return Err("world position out of range".into());
         }
         Ok(value)
     }
-    fn zero(&mut self) -> Result<(), String> {
+    pub(crate) fn zero(&mut self) -> Result<(), String> {
         if self.u32()? != 0 {
             return Err("reserved field must be zero".into());
         }
@@ -92,7 +92,7 @@ impl<'a> Reader<'a> {
         self.zero()?;
         Ok((op, self.u64()?))
     }
-    fn finish(&self) -> Result<(), String> {
+    pub(crate) fn finish(&self) -> Result<(), String> {
         if self.offset != self.data.len() {
             return Err("trailing bytes in packet".into());
         }
@@ -105,6 +105,16 @@ impl SourceScene {
     pub fn submit(&mut self, bytes: &[u8]) -> Result<(), String> {
         let mut input = Reader::new(bytes)?;
         let (op, epoch) = input.header()?;
+        if op == 12 || op == 13 {
+            if epoch == 0 || epoch != self.epoch {
+                return Err("stale or uninitialized resource epoch".into());
+            }
+            return if op == 13 {
+                self.routing.resources(input)
+            } else {
+                self.route_section(input)
+            };
+        }
         if op == 7 {
             std::mem::swap(
                 &mut self.texture_lifetime,
@@ -300,7 +310,17 @@ impl SourceScene {
                             uv_offset,
                             topology,
                         };
-                        layout.validate()?;
+                        if topology == 1 {
+                            if stride != 52
+                                || position_offset != 0
+                                || color_offset != 48
+                                || uv_offset != 32
+                            {
+                                return Err("invalid billboard source layout".into());
+                            }
+                        } else {
+                            layout.validate()?;
+                        }
                         if count != 0 && texture_id != 0 && !self.textures.contains_key(&texture_id)
                         {
                             return Err(
@@ -316,7 +336,11 @@ impl SourceScene {
                         if count > 0 {
                             texture_ids.insert(texture_id);
                         }
-                        let triangle_count = count / topology * (topology - 2);
+                        let triangle_count = if topology == 1 {
+                            count.checked_mul(2).ok_or("billboard count overflow")?
+                        } else {
+                            count / topology * (topology - 2)
+                        };
                         validate_triangle_capacity(
                             self.triangle_count
                                 + triangles.len()
@@ -326,7 +350,24 @@ impl SourceScene {
                         triangles
                             .try_reserve(triangle_count)
                             .map_err(|_| "dynamic frame allocation failed")?;
-                        decode_vertices(raw, &layout, texture_id, flags, triangles, &mut bounds)?;
+                        if topology == 1 {
+                            self.routing.billboards(
+                                raw,
+                                texture_id,
+                                flags,
+                                triangles,
+                                &mut bounds,
+                            )?;
+                        } else {
+                            decode_vertices(
+                                raw,
+                                &layout,
+                                texture_id,
+                                flags,
+                                triangles,
+                                &mut bounds,
+                            )?;
+                        }
                     }
                     input.finish()?;
                     Ok::<_, String>(bounds)

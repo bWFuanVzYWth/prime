@@ -23,8 +23,7 @@ public abstract class FabricMeshFeatureMixin {
                             "Lnet/fabricmc/fabric/api/client/renderer/v1/mesh/Mesh;outputTo(Lnet/fabricmc/fabric/api/client/renderer/v1/mesh/QuadEmitter;)V"))
     private void
     primept$mesh(Mesh mesh, QuadEmitter emitter, Operation<Void> original) {
-        if (!FabricMeshCapture.output(this, submit, mesh, emitter,
-                                      PrimeClient.exclusiveFrameReady()))
+        if (!FabricMeshCapture.output(submit, mesh, PrimeClient.exclusiveFrameReady()))
             original.call(mesh, emitter);
     }
 }

@@ -24,8 +24,7 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 final class TerrainEmptyCpuSmoke {
     static void run() throws Exception {
         for (Class<?> type :
-             new Class<?>[] {SectionCompiler.class,
-                             net.minecraft.client.renderer.chunk.RenderRegionCache.class,
+             new Class<?>[] {net.minecraft.client.renderer.chunk.RenderRegionCache.class,
                              RenderSectionRegion.class, SectionCopy.class, LevelChunkSection.class,
                              LevelChunk.class, ChunkAccess.class}) {
             if (!BlockEntityCandidates.known(type)) {
@@ -41,16 +40,14 @@ final class TerrainEmptyCpuSmoke {
         PrimeClient.CAPTURE.enable();
         var level = blank(ClientLevel.class);
         try (var owner = constructor.newInstance()) {
-            var workers = new SynchronousWorkers<>(1, ignored -> {
-                throw new AssertionError("Empty sections must not acquire a compiler workspace");
-            });
-            field(ExclusiveTerrainCapture.class, "workers").set(owner, workers);
+            field(ExclusiveTerrainCapture.class, "router")
+                    .set(owner, new TerrainRouter(PrimeClient.CAPTURE, null, null, null));
             @SuppressWarnings("unchecked")
             var chunks = (Long2ObjectLinkedOpenHashMap<LevelChunk>)field(
                                  ExclusiveTerrainCapture.class, "chunks")
                                  .get(owner);
             var work = (SectionChanges)field(ExclusiveTerrainCapture.class, "work").get(owner);
-            var empty = (LongOpenHashSet)field(ExclusiveTerrainCapture.class, "compiledEmpty")
+            var empty = (LongOpenHashSet)field(ExclusiveTerrainCapture.class, "observedEmpty")
                                 .get(owner);
             // A full entering strip at render distance 16, including all actual vertical positions.
             for (int x = -16; x <= 16; x++) {
@@ -59,20 +56,20 @@ final class TerrainEmptyCpuSmoke {
                 for (int y = -4; y <= 19; y++)
                     work.add(SectionPos.asLong(x, y, 0));
             }
-            owner.prepareSections(false, false);
+            owner.prepareSections(false);
             var first = PrimeClient.CAPTURE.seal();
             check(first.batches().size() == 33 * 24 && empty.size() == 33 * 24,
                   "All actual empty positions published exactly once without snapshot/compile");
             for (var batch : first.batches()) {
                 var packet =
                         ByteBuffer.wrap(batch.packets().getFirst()).order(ByteOrder.LITTLE_ENDIAN);
-                check(packet.remaining() == 72 && packet.getInt(8) == 8 && packet.getInt(64) == 0,
-                      "Empty source is a complete op8 publication, never missing availability");
+                check(packet.remaining() == 72 && packet.getInt(8) == 12 && packet.getInt(64) == 0,
+                      "Empty source is a complete op12 publication, never missing availability");
             }
             for (int repeat = 0; repeat < 32; repeat++) {
                 for (long key : empty)
                     work.add(key);
-                owner.prepareSections(false, false);
+                owner.prepareSections(false);
                 var next = PrimeClient.CAPTURE.seal();
                 check(next.batches().isEmpty() &&
                               next.completedSequence() == first.completedSequence(),
@@ -95,17 +92,15 @@ final class TerrainEmptyCpuSmoke {
             PrimeClient.CAPTURE.seal();
             field(LevelChunkSection.class, "nonEmptyBlockCount").setShort(section, (short)0);
             work.add(key);
-            owner.prepareSections(false, false);
+            owner.prepareSections(false);
             var removed = PrimeClient.CAPTURE.seal();
             check(removed.batches().size() == 1 && removed.batches().getFirst().bytes() == 72,
                   "Solid-to-air atomically clears the previous geometry");
             empty.clear(); // Epoch/resource retirement discards the same owner-held proof set.
             work.add(key);
-            owner.prepareSections(false, false);
+            owner.prepareSections(false);
             check(PrimeClient.CAPTURE.seal().batches().size() == 1,
                   "A retired proof cannot suppress a new publication");
-            if (Boolean.getBoolean("primept.smoke.terrainPerf"))
-                compareAirCompile(owner, work, empty, level, chunk, key);
         } finally {
             PrimeClient.CAPTURE.reset();
         }
@@ -114,64 +109,14 @@ final class TerrainEmptyCpuSmoke {
     }
 
     static void foreign() throws Exception {
-        var chunk = chunk(blank(ClientLevel.class), 0, 0);
-        check(!ExclusiveTerrainCapture.knownEmpty(chunk, SectionPos.asLong(0, -4, 0), false),
-              "An actual foreign compiler injection disables empty elision");
-        PrimeClient.CAPTURE.enable();
+        check(ExclusiveTerrainCapture.knownEmpty(chunk(blank(ClientLevel.class), 0, 0),
+                                                 SectionPos.asLong(0, -4, 0), false),
+              "Downstream compiler hooks cannot disable source routing");
         int before = ForeignHookProbe.terrainCalls;
-        try (var buffers = new SectionBufferBuilderPack();
-             var output = TerrainRasterOutput.open()) {
-            var result = new SectionCompiler(false, false, null, null, null)
-                                 .compile(SectionPos.of(0, -4, 0),
-                                          airRegion((ClientLevel)chunk.getLevel(), chunk),
-                                          output.sorting, buffers);
-            check(result.visibilitySet != null,
-                  "Unknown compiler consumers retain the actual raster visibility result");
-            result.release();
-        }
-        check(ForeignHookProbe.terrainCalls == before + 1,
-              "Foreign compile callback executes exactly once");
-        PrimeClient.CAPTURE.reset();
+        run();
+        check(ForeignHookProbe.terrainCalls == before, "Java compiler is never entered");
         System.out.println(
-                "PRIME_PT_TERRAIN_FOREIGN_CPU_OK: transformed foreign compiler retains empty compile path; real callback once");
-    }
-
-    private static void compareAirCompile(ExclusiveTerrainCapture owner, SectionChanges work,
-                                          LongOpenHashSet empty, ClientLevel level,
-                                          LevelChunk chunk, long key) throws Exception {
-        var region = airRegion(level, chunk);
-        var compiler = new SectionCompiler(false, false, null, null, null);
-        var pos = SectionPos.of(key);
-        try (var buffers = new SectionBufferBuilderPack()) {
-            for (int round = 0; round < 26; round++) {
-                for (int variant = 0; variant < 2; variant++) {
-                    boolean fast = (round + variant) % 2 == 0;
-                    PrimeClient.CAPTURE.reset();
-                    empty.clear();
-                    long start = System.nanoTime();
-                    for (int i = 0; i < 256; i++) {
-                        if (fast) {
-                            empty.clear(); // First publication, not a retained-empty shortcut.
-                            work.add(key);
-                            owner.prepareSections(false, false);
-                        } else {
-                            try (var output = TerrainRasterOutput.open()) {
-                                compiler.compile(pos, region, output.sorting, buffers).release();
-                                buffers.clearAll();
-                            }
-                        }
-                    }
-                    long elapsed = System.nanoTime() - start;
-                    var result = PrimeClient.CAPTURE.seal();
-                    check(result.batches().size() == 1 && result.batches().getFirst().bytes() == 72,
-                          "Both paths produce exactly the same empty wire result");
-                    System.out.println("PRIME_PT_AIR_CPU_SAMPLE round=" + round +
-                                       " warmup=" + (round < 5) +
-                                       " mode=" + (fast ? "observed_empty" : "actual_compiler") +
-                                       " sections=256 ns=" + elapsed);
-                }
-            }
-        }
+                "PRIME_PT_TERRAIN_FOREIGN_CPU_OK: downstream compiler hooks never execute");
     }
 
     private static RenderSectionRegion airRegion(ClientLevel level, LevelChunk chunk)

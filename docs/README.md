@@ -5,8 +5,8 @@
 | 文档 | 内容 |
 | --- | --- |
 | [整体架构与所有权](architecture.md) | 源数据到场景和 GPU 的数据流、增量更新、线程与资源生命周期 |
-| [工程结构与捕获边界](structure.md) | Rust crate、Java 版本适配、公共层依赖、源 quad/tint 与矩形分解边界 |
-| [捕获边界与批量数据流](capture-boundaries.md) | 已采用的分类边界、缓存契约、更新频率、GPU 工作范围与分步接入状态 |
+| [工程结构与路由边界](structure.md) | Rust crate、Java 版本适配、公共层依赖、当前 quad/tint 捕获与矩形分解边界 |
+| [源路由边界与批量数据流](capture-boundaries.md) | 外观描述与下游计算的分界、接管后的 Java 截断、兼容范围、缓存与接入状态 |
 | [全局空间网格与几何合批](spatial-batching.md) | 4×4×4 区块段对齐、翻译层归属、静态/动态分离及未来光源树边界 |
 | [设置与渲染模式](renderers.md) | 当前配置版本、冻结快照、互斥资源、实时噪声与深度/法线诊断 |
 | [FFM ABI](abi.md) | 字节协议、输入验证、指针借用、宿主 Vulkan 录制接口 |

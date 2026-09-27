@@ -68,7 +68,7 @@
 
 外部启动器对应的 JVM 参数见 README；不要将 Gradle 的 `-P` 属性直接交给 Java。
 
-客户端命令 `/primept renderer vanilla` 与 `/primept renderer path_trace` 只请求切换，实际资源移交在下一外层帧边界执行。验证时覆盖 Prime→原版→Prime、世界退出/重进、标题界面资源重载及退休失败；等待资源加载完成再采样，不把切换暂停计入稳态。首个 Prime 后端使用真实源编译调度，加载完成的判据包括地形待编译队列清空，不能仅等待首帧输出。新增后端通过惰性工厂注册，并遵守公共 `RendererSlot` 的完成/失败契约。
+客户端命令 `/primept renderer vanilla` 与 `/primept renderer path_trace` 只请求切换，实际资源移交在下一外层帧边界执行。验证时覆盖 Prime→原版→Prime、世界退出/重进、标题界面资源重载及退休失败；等待资源加载完成再采样，不把切换暂停计入稳态。首个 Prime 后端使用宿主事件驱动的源路由，加载完成的判据包括待路由地形事件清空，不能仅等待首帧输出。新增后端通过惰性工厂注册，并遵守公共 `RendererSlot` 的完成/失败契约。
 
 ### 用户手动检查重点
 
@@ -119,7 +119,7 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored -
 
 `shader-tests` 另编译无窗口测试入口，直接验证生产 Slang 的 Z-Sobol、颜色、primeDRT 与安全起点；正常发行构建不包含测试入口。所有 imported shader 的改动都会触发重编译。同步验证日志出现 `Prime Vulkan ERROR`、`VUID` 或 hazard 时，即使 Rust test harness 返回通过也不能视为 GPU 检查通过。Slang 模块/数学支持边界及可替换的显示策略见 [模块说明](docs/shaders.md)。
 
-实例相关 GPU 测试还覆盖局部原型共享、仿射/颜色/UV 与烘焙几何等价、批量增删、空间回退桶局部失效，以及多帧在途的 resize、重定位和 epoch 切换。Java 版本模块另有独立 `cpuSmoke` Fabric 测试源集，在真实 Mixin 转换后的类上执行标准 Cube、同帧源突变、未知路径回退及主 target 创建/缩放。测试启动器只初始化 Fabric/Mixin，测试在 preLaunch 退出；即使入口缺失也会失败退出，不调用游戏 main、不创建窗口或设备。这些测试不能代替实际游戏验证。
+实例相关 GPU 测试还覆盖局部原型共享、仿射/颜色/UV 与烘焙几何等价、批量增删、空间回退桶局部失效，以及多帧在途的 resize、重定位和 epoch 切换。Java 版本模块另有独立 `cpuSmoke` Fabric 测试源集，在真实 Mixin 转换后的类上执行标准 Cube、同帧源突变、自定义源、下游截断及主 target 创建/缩放。测试启动器只初始化 Fabric/Mixin，测试在 preLaunch 退出；即使入口缺失也会失败退出，不调用游戏 main、不创建窗口或设备。这些测试不能代替实际游戏验证。
 
 ```powershell
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke --no-parallel
@@ -127,6 +127,16 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored -
 # 仅验证宿主 target 生命周期；CPU 记录设备替代图像分配，不调用 Vulkan
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeTargetResize=true --no-parallel
 ```
+
+路由改动还应执行以下检查。`cpuSmoke` 会在各适配器 `build/routing-fixtures/` 写入实际源数据与独立参考输出；fixture 缺失时报错，不把未运行算通过。覆盖静态 tint/geometry key、8类流体形状以及5000个标准参数粒子，CPU 容差见 ABI。夹具流体世界使用显式空标签集，不能替代真实资源包/模组世界验证。
+
+```powershell
+.\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke --no-parallel
+cargo test -p prime_scene --lib --locked java_routing_matches_both_versions_actual_source_and_fluid_particle_oracles -- --ignored --nocapture
+.\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeForeign=true --no-parallel
+```
+
+手动重点检查水/岩浆、含水半砖/楼梯、透明地形；实体/方块实体与物品的自定义姿态、混合材质；标准粒子朝向/尺寸/颜色；放置/破坏、跨区块移动、资源重载和原版↔PT 切换。启动前重建 `buildNative`，ABI v3 不能混用旧 DLL。普通游戏验证仍遵循原生1080p，不启动自动游戏测试。
 
 独立图像诊断入口：
 
@@ -138,7 +148,9 @@ cargo run -p prime_tools --bin prime-pt-smoke -- smoke artifacts/smoke.png 32
 
 ## 同步工作池
 
-Rust 的 `PRIME_CPU_THREADS` 环境变量控制 native 私有 CPU 工作池；Java 的 `-PprimeptCompilerThreads=N`（对应 JVM `-Dprimept.compilerThreads=N`）控制私有地形编译工作池。二者默认取可用 CPU 数与 8 的较小值，设为 1 可验证串行路径，非法非正值拒绝。Rust 小批次直接执行；Java 地形的单项或单线程直接执行，多项按 section 逐项领取以平衡不均匀成本，仍按 MC 已确认的编译 worker 契约运行，模型实体和未知 consumer 不转移线程。每批所有任务在调用返回前汇合，GPU 资源分配/命令录制由 owner 执行。
+Prime 自有 CPU 工作池全部在 Rust。`PRIME_CPU_THREADS` 控制源编译与后端打包私有同步池的线程数，默认取可用 CPU 数与 8 的较小值；设为 1 可验证串行路径，非法非正值拒绝。小批直接运行，多线程仅写各自独占输出，返回前全部 join。Java 不再有 `primeptCompilerThreads` 参数或 Prime section compiler，源回调留在宿主 owner。
+
+Java CSV 中 `terrain_routed_total` / `terrain_routed` 统计已路由源段，`terrain_routing_ns` 统计源读取与封包，`terrain_snapshot_ns` 统计宿主快照获取；这些不是 native 几何编译时间。native 编译发生在同步 submit 中，包含于 drain/FFM 阶段；不可把迁移前的 `terrain_compile_join_ns` 与新字段直接视作同一成本。
 
 封闭源批次没有人为的跨帧工作配额。完整首载或大范围修改可能形成真实长帧，应记录其成本；工作池线程数、几何批次、在途 GPU 页与当前活跃内容不是同一数量。空闲池页保留历史峰值，renderer 销毁时再释放。
 
@@ -202,16 +214,9 @@ cargo test --release -p prime_vulkan --lib --locked packing_cost_matrix -- --ign
 
 动态捕获的游戏 profile 另给出 `dynamicCapture`（额外材质绑定和 mesh 拷贝 CPU 均值，包含于 `mcBeforePT`）、`dynamicSubmit`（纹理增量与整帧 FFM 解码 CPU 均值，包含于 `hook`）。`dynamicSpansTotal`、`dynamicVerticesTotal`、`dynamicBytesTotal`、`modelMeshesTotal` 和 `particleMeshesTotal` 是该窗口总量，除以 `frames` 才是每帧均值；mesh 数是原版批次数，不是实体数。`dynamicCapacity` 为保留 packet 容量，`dynamicGrowthsTotal` 是该 writer 自创建起的累计扩容次数。原版动画/模型准备时间没有混入 `dynamicCapture`；Prime 独占世界时省去该批世界 staged 输出的原版 GPU 上传，手部与 HUD 上传仍属于宿主。
 
-地形 profile 单独记录脏通知、进入窗口/收到数据/卸载列、全量失效次数、本次选中段数、首次空段发布、保留空段和实际编译数。`snapshot` 包括 owner 分类、空段封包与邻域快照，`compileJoin` 是工作线程编译到全部汇合的墙钟时间，二者包含在 `total` 中；`max` 保留单次源准备峰值。CSV 的 `terrain_*_ns` 和相应计数逐帧保存；原有 `terrain_compilations` 是累计实际 compiler 调用量。窗口维护发生在提取阶段，不包含在这组源准备计时中，`mcBeforePT` 也不能代表完整 Minecraft CPU 时间。
+地形 profile 记录脏通知、进入窗口/收到数据/卸载列、全量失效次数、选中段数、空段发布/保留和路由数。`snapshot` 包括 owner 分类、空段封包与邻域快照；`routing` 是 Java 源观察与封包，二者包含在 `total` 中；`max` 保留单次源准备峰值。native 编译计入同步 drain/FFM，窗口维护发生在提取阶段，不包含在这组准备计时中，`mcBeforePT` 也不能代表完整 Minecraft CPU 时间。
 
-空段路径可用真实 Fabric 变换后的 CPU 夹具检查，仍在 preLaunch 退出，不启动游戏。相同入口还比较连续分段/逐项领取及保留/丢弃原版遮挡图的四种组合，覆盖负载集中、交错、均匀与小批次。模型、染色与裁面走实际 compiler；逐 section 比较完整源包和回调数量。计时不包含邻域快照、FFM 或 GPU，不代表游戏 FPS：
-
-```powershell
-.\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeTerrainPerf=true --no-parallel
-.\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeForeign=true --no-parallel
-```
-
-可选性能样本交错比较 256 次实际全空气 compiler 与直接空段发布；每组 5 次预热、21 次样本，逐条保留耗时。两者使用相同已准备的空气源，排除邻域复制、非空模型、FFM/GPU 和游戏；只用于局部 CPU 成本归因，不是场景帧率。外部注入夹具验证未知 compiler 仍进入完整编译路径。
+空段与源路由的双版本 CPU 入口见上方测试命令。普通夹具检查真实源模型/tint、资源定义顺序和下游不执行，外部注入夹具验证修改下游 compiler 不会恢复 Java 编译。已删除的 Java compiler 调度/遮挡图矩阵与 `primeptSmokeTerrainPerf` 参数不再作为当前基线；原生1080p游戏对照仍需手动完成。
 
 标准模型还记录实际 `beSources/entitySources/modelSubmits`、标准/回退叶节点、源引用检查数与几何顶点读取数，以及 op7 的原型/实例 upsert/remove 和字节数。对象数、模型提交数、Cube 叶节点数与 TLAS 实例数不是同一单位，报告中分别标注。逐帧 CSV 的 hook 间隔是 CPU 帧节奏，包含两个 hook 之间的原版工作和等待；不是 GPU 执行时间或显示器呈现时间。阶段总和与端到端间隔的差额不能无证据地归因于某一 GPU pass。
 

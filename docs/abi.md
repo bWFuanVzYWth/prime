@@ -1,15 +1,15 @@
-# FFM ABI v2
+# FFM ABI v3
 
 Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本号用于边界校验，不承诺不同发布之间的二进制兼容；不可仅凭版本号相同混用新旧 JAR 和引擎。双 Minecraft 适配器共享该构建的同一核心，不意味着共享不同发布的内部协议。
 
-导出原型以 [`prime.h`](../crates/prime-engine/include/prime.h) 为准。库名为 `prime_engine`，C 导出 `prime_*` 不变；26.2/26.3 适配器使用同一引擎。全部整数 little-endian，浮点 IEEE754，结构通过字节读取而非 C 对齐结构读取。长度为字节数，所有保留字段必须为零。`prime_create(2)` 返回非零 handle；status=0 成功，-1 失败。`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），输出容量允许时写入终止 NUL。
+导出原型以 [`prime.h`](../crates/prime-engine/include/prime.h) 为准。库名为 `prime_engine`，C 导出 `prime_*` 不变；26.2/26.3 适配器使用同一引擎。全部整数 little-endian，浮点 IEEE754，结构通过字节读取而非 C 对齐结构读取。长度为字节数，所有保留字段必须为零。`prime_create(3)` 返回非零 handle；status=0 成功，-1 失败。`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），输出容量允许时写入终止 NUL。
 
 ## 公共头（24 字节）
 
 | Offset | 类型 | 语义 |
 | --- | --- | --- |
 | 0 | u32 | magic `0x54505250`，字节 `PRPT` |
-| 4 | u32 | ABI version=2 |
+| 4 | u32 | ABI version=3 |
 | 8 | u32 | operation |
 | 12 | u32 | reserved=0 |
 | 16 | u64 | epoch；0 无效 |
@@ -19,20 +19,22 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本�
 - **1 reset**：仅头部，epoch 必须严格增加；清空几何、纹理与 tombstone。
 - **3 remove section**：头后 `section:u64, revision:u64`；删除全部层并撤销该段可用性，记录 tombstone。revision 必须晚于该段已有操作与完成水位。
 - **4 texture**：头后 `id:u32, width:u32, height:u32, reserved:u32`，然后恰好 `width*height*4` 字节源编码 RGBA8。id=0 保留给白纹理，UINT32_MAX 保留给实例继承标记；两者均不可上传。id=1 是当前 block atlas。
-- **6 dynamic snapshot**：原子替换原始动态回退几何，格式见下文；序号独立于静态区块 revision。
+- **6 dynamic snapshot**：原子替换显式动态网格与参数粒子，格式见下文；序号独立于静态区块 revision。
 - **7 instance delta**：原子发布局部几何原型及实例增量，格式见下文；与 op6 分别维护序号和场景。
 - **8 replace section**：一次原子替换 section 全部层；源操作顺序与内容 revision 分离，格式见下文。
 - **9 retire textures**：源 owner 释放纹理，实际回收还须等待场景引用消失。
 - **10 section completion**：生产者完成水位，允许回收已不可能被迟到工作引用的历史。
 - **11 remove sections**：同一包批量撤销多个 section，完整验证后发布。
+- **12 route section**：本次局部模型放置与流体源描述，native 编译后原子替换全部层。
+- **13 routed resources**：局部模型定义与源 owner 退休，先完整验证再修改字典。
 
-ABI v2 删除无生产消费者的 op2，未知操作及历史 ABI 直接拒绝。
+ABI v3 引入 op12/op13 和参数粒子 span；op2 无生产消费者，未知操作及历史 ABI 直接拒绝。
 
 ## 公共顶点与材质语义
 
 各源 span 显式给出顶点数量、stride 和字段 offset；数据为恰好 `vertex_count*stride` 字节。topology=3 表示三角形、4 表示四边形；material=0 opaque、1 alpha cutout、2 stochastic alpha coverage，其他值拒绝。
 
-Position 为 f32×3，UV 为 f32×2。当前两个 Java 适配器的静态地形和流体都输出 **stride24、position0、color12、uv16**；RGBA8 按 R/G/B/A 字节顺序保存作者颜色与源 tint 的编码域组合，排除原版 AO/方向明暗和 UV2 光照。source layer 使用公共协议常量 opaque=0、cutout=1、translucent=2，不传 MC enum ordinal。显式 stride/offset 解码器也支持 BLOCK28 等合法源布局，并有行为回归测试；这不表示兼容旧 ABI。quads 在 Rust 展开为 `(0,1,2), (2,3,0)`。
+Position 为 f32×3，UV 为 f32×2。局部原型和显式原始网格可输出 **stride24、position0、color12、uv16**；地形/流体生产通路使用下文 op12/op13。RGBA8 按 R/G/B/A 字节顺序保存作者颜色与源 tint 的编码域组合，排除原版 AO/方向明暗和 UV2 光照。source layer 使用公共协议常量 opaque=0、cutout=1、translucent=2，不传 MC enum ordinal。显式 stride/offset 解码器也支持 BLOCK28 等合法源布局，并有行为回归测试；这不表示兼容旧 ABI。quads 在 Rust 展开为 `(0,1,2), (2,3,0)`。
 
 ## 原子 section 替换
 
@@ -40,7 +42,32 @@ op=8 固定头共 **72 字节**：公共头后为 `section:u64`（24）、`seque
 
 每层为 **40 字节描述 + 紧接的顶点字节**，无 padding。十个 u32 依次是 `layer_id, texture_id, material, topology, vertex_count, stride, position_offset, color_offset, uv_offset, reserved=0`。顶点及材质遵循上述公共语义，layer ID 不可重复。`layer_count=0` 清空几何并发布一个已完成的空 section，不能代替 op3 卸载；零顶点层等价于该层缺失。
 
-完整包、最终容量及引用验证成功后才原子发布。源序列始终推进；三角形、源 RGBA/UV、纹理/材质与原点逐字段相同的层保留原 Arc 和内容 revision，在可用性不变时不使渲染 scene 失效。首次完成的空段也会推进 scene revision，因为它可能使 64 段单元完整。忽略的布局 padding 与层顺序不参与内容身份。移除的层被清除，只有新增或变化层发布新内容。这个序列屏障也约束 op3/op11，不能混用旧序列复活遗漏层。适配器用一个 op8 代替先 remove、再逐层 upsert。CPU 持有逐段快照；64 段就绪门槛和后续整格替换见 [空间合批](spatial-batching.md)。
+完整包、最终容量及引用验证成功后才原子发布。源序列始终推进；三角形、源 RGBA/UV、纹理/材质与原点逐字段相同的层保留原 Arc 和内容 revision，在可用性不变时不使渲染 scene 失效。首次完成的空段也会推进 scene revision，因为它可能使 64 段单元完整。忽略的布局 padding 与层顺序不参与内容身份。移除的层被清除，只有新增或变化层发布新内容。这个序列屏障也约束 op3/op11，不能混用旧序列复活遗漏层。op8 保留为显式网格输入与诊断对照；生产地形使用 op12，二者共享顺序/可用性和内容世代契约。CPU 持有逐段快照；64 段就绪门槛和后续整格替换见 [空间合批](spatial-batching.md)。
+
+## 源资源和路由 section
+
+op13 公共头后为 `definition_count:u32, retirement_count:u32`。每个定义是 `id:u64, quad_count:u32, tint_count:u32`，再跟 quad_count 条记录，每条 **108 字节**：`material:u32, cull_face:u32, tint_slot:u32`，随后四个 `position:f32×3, RGBA8, UV:f32×2`。face=0/1/2/3/4/5 依次为下/上/北/南/西/东，6 表示不按邻面剔除；tint_slot=UINT32_MAX 表示无 tint，其余小于 tint_count。局部坐标有限且每轴绝对值不超过 4096。
+
+定义后紧接 retirement_count 个非零 u64 身份。定义不能重复或覆盖仍存活定义；退休必须对应已有定义且不重复、不与本包新增冲突。资源身份限定在 epoch 内，不能作为 Java 地址解释。整个包验证后才应用。Java 按封批合并多条定义；定义先于所有使用它的 section、退休晚于最后使用。新定义不是 GPU 对象，退休不直接释放已编译的逐段网格或 GPU 数据。
+
+op12 固定头为 **72 字节**：公共头后 `section:u64, sequence:u64, origin:f64×3, placement_count:u32, fluid_count:u32`。section/sequence/origin 的含义与 op8 相同。随后是全部放置，再跟全部流体描述；两计数为零时发布已完成的空段。
+
+放置为 `geometry_id:u64, offset:f32×3, visible_faces:u32, tint_count:u32`，再跟 tint_count 个 RGBA8。可见位只用 bit0..6，bit6 必须置位，tint_count 必须与定义匹配。offset 有限且每轴绝对值不超过 4096。Rust 筛选面并执行 `offset + localPosition`、`floor(sourceRGBA*tintRGBA/255)` 和四边形三角化，纹理引用固定为当前 block atlas（id=1），material 只接受 0/1/2。
+
+流体描述依次为：
+
+| 字段 | 编码与语义 |
+| --- | --- |
+| material / tint / offset | u32 / RGBA8 / f32×3 |
+| visible / overlay / backward_up | 三个 u32；前两项为 bit0..5，最后只能为 0/1 |
+| heights | 九个 f32，z=-1..1 外层、x=-1..1 内层，中心索引4；[-1,1]，中心须大于0。-1 为非流体实心，0 为非实心，1 表示上方同类流体，其余为实际高度 |
+| flow | f64×2，水平 x/z |
+| sprites | still、flow、overlay 各 f32×4，顺序 u0/v0/u1/v1 |
+| coverage | 12 个面区域：自身六面，随后邻居对应反面；顺序同 face 0..5 |
+
+每个 coverage 用 u32 标签：0 空、1 完整、2 为矩形列表。标签2后为 `count:u32`，再跟 count 个 `minA/minB/maxA/maxB:f64×4`；Y 面投影到 XZ，Z 面到 XY，X 面到 ZY。源层负责提取实际形状；Rust 做遮挡覆盖测试、加权角高度、偏移、双面和 UV 构造。流向 UV 使用数学三角函数，对照 MC 近似查表时允许 UV 绝对差 5e-5；几何 float 对照容差2e-6用于运算次序，不用于吞掉源更新。
+
+op12 的失败不发布层、可用性或源序列。相同最终内容保留原 Arc/内容 revision，但源序列仍推进。资源校验、三角总量、纹理引用和全部源数据通过之后才同步编译/发布；工作池返回前汇合。编译结果不再依赖源定义的寿命。
 
 ## 批量撤销与生产者完成证明
 
@@ -68,7 +95,9 @@ op=6 的固定头共 **64 字节**：
 | 56 | u32 | span_count |
 | 60 | u32 | reserved=0 |
 
-每个 span 是 **32 字节描述 + 紧接的顶点字节**，span 之间不填充。描述按顺序为八个 u32：`texture_id, material, topology, vertex_count, stride, position_offset, color_offset, uv_offset`。布局约束与静态 mesh 相同；material 只接受 0/1/2，不能按位组合。适配器保留实际源格式和拓扑，不在 Java 展开三角形。当前动态原点为相机世界位置，顶点为已执行模型变换的相机相对世界坐标，尚未应用视图旋转。
+每个 span 是 **32 字节描述 + 紧接的顶点字节**，span 之间不填充。描述按顺序为八个 u32：`texture_id, material, topology, vertex_count, stride, position_offset, color_offset, uv_offset`。topology=3/4 的布局约束与静态 mesh 相同；material 只接受 0/1/2，不能按位组合。适配器保留实际源格式和拓扑，不在 Java 展开三角形。当前动态原点为相机世界位置，顶点为已执行模型变换的相机相对世界坐标，尚未应用视图旋转。
+
+op6 另外接受 **topology=1 的参数 billboard**，该变体不用于 op7 原型。此时 count 是粒子数，固定 stride=52、position_offset=0、color_offset=48、uv_offset=32。每条记录为中心 f32×3、四元数 xyzw f32×4、scale:f32、u0/u1/v0/v1:f32×4、RGBA8。四元数可非单位但必须可归一化；Rust 保持 q*v*q⁻¹ 的旋转语义，再乘 scale、加中心。局部角依次为 (1,-1)、(1,1)、(-1,1)、(-1,-1)，UV 对应 (u1,v1)、(u1,v0)、(u0,v0)、(u0,v1)。原版光栅 light 不传递。相邻同材质参数 span 合并，不逐粒子 FFM。
 
 整个包验证成功后才替换旧快照；尾随字节、缺失纹理、旧 epoch/sequence 或中间 span 无效均不改变已有场景。`span_count=0` 是有效的清空操作，防止对象消失后留下旧几何。texture_id=0 仅表示明确的无纹理白色，非零引用必须在提交快照前上传。静态区块与动态快照不共用对象 ID；动态更新不递增静态 revision，也不重新翻译静态 mesh 表。
 
@@ -80,7 +109,7 @@ material=2 表示随机 alpha 覆盖：alpha=0 不遮挡，alpha=1 完全覆盖�
 
 op=7 的固定头共 **48 字节**，公共头后为 `sequence:u64`，以及四个 u32 计数：`prototype_upserts, prototype_removes, instance_upserts, instance_removes`。四组记录紧接在后，顺序与计数一致，无 padding。sequence 在当前 epoch 内严格递增、非零，**本批每条记录的 revision 必须等于 sequence**。同一类身份不能在一批中重复或同时 upsert/remove；原型与实例各有自己的非零 u64 身份空间。
 
-原型 upsert 先写 `id:u64, revision:u64, span_count:u32, reserved:u32=0`，再跟 op6 格式的 span 和局部顶点字节；原型必须非空。移除记录统一为 `id:u64, revision:u64`，共 16 字节。
+原型仅接受 topology=3/4 的局部网格。原型 upsert 先写 `id:u64, revision:u64, span_count:u32, reserved:u32=0`，再跟 op6 格式的 span 和局部顶点字节；原型必须非空。移除记录统一为 `id:u64, revision:u64`，共 16 字节。
 
 实例 upsert 共 **128 字节**：
 
@@ -142,7 +171,7 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 
 全场景三角形总量不再受 800 万或带符号 32 位上限约束。64 位宿主累计地形、op6 回退与 op7 原型的唯一几何数量及派生字节，同一原型不按实例数重复计费；超过宿主可寻址字节范围明确失败。`count:u32` 仍描述单个 span，单包仍限 256 MiB；大量独立 section/prototype 分批发布，与一个含数十亿顶点的连续包是不同契约。
 
-当前仍明确拒绝：超过 512 MiB 的纹理总量、各超过 262144 的常驻原型或实例、超出每轴 1..65536 或设备 image/dispatch/累积 storage range 的输出，以及不有限/越域位置、未知 flags、未知拓扑和尾随字节。op6 是完整回退帧，op7 是一批原子增量，op8 是完整 section 替换；它们尚未提供跨包事务，不能用重复替换包伪装无界分页。GPU 的局部 AS/实例索引、设备内存分配数量与实际内存也构成独立边界。以上不表示已经支持任意视距、任意单资源或任意驻留总量。协议验证失败不修改场景 revision 或已有数据；部分分配使用 `try_reserve`，尚不能保证所有 Rust 系统内存耗尽均可恢复。
+当前仍明确拒绝：超过 512 MiB 的纹理总量、各超过 262144 的常驻原型或实例、超出每轴 1..65536 或设备 image/dispatch/累积 storage range 的输出，以及不有限/越域位置、未知 flags、未知拓扑和尾随字节。op6 是完整动态快照，op7 是一批原子增量，op8/op12 是完整 section 替换，op13 是资源批次；它们尚未提供跨包事务，不能用重复替换包伪装无界分页。GPU 的局部 AS/实例索引、设备内存分配数量与实际内存也构成独立边界。以上不表示已经支持任意视距、任意单资源或任意驻留总量。协议验证失败不修改场景 revision 或已有数据；部分分配使用 `try_reserve`，尚不能保证所有 Rust 系统内存耗尽均可恢复。
 
 当前 Slang 局部指针下标以 32 位字节偏移计算，单个被寻址的材质范围最多 `2^25` 条 128 字节记录；各局部范围的设备基址为 64 位，总量可以跨页。翻译层按此局部上限划分寻址范围：静态增加同一 BLAS 内的 geometry，raw 回退拆成多个 BLAS；单个共享原型超限仍明确失败，不能让乘法回绕，也不能以此单资源限制代替全场景数量契约。实例展开后的三角形统计使用 u64，GPU 帧参数只传“是否有几何”，避免大计数收窄后误判为空场景。
 

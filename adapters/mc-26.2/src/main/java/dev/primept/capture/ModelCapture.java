@@ -150,6 +150,10 @@ public final class ModelCapture {
         model = previous;
     }
 
+    public static boolean routedModel() {
+        return model != null && DynamicCapture.active();
+    }
+
     public static Leaf beforeCube(ModelPart.Cube cube, PoseStack.Pose pose, VertexConsumer consumer,
                                   int color) {
         if (model == null || !DynamicCapture.active())
@@ -157,22 +161,20 @@ public final class ModelCapture {
         int slot = model.cursor++;
         long start = PROFILE ? System.nanoTime() : 0;
         try {
-            if (cube.getClass() != ModelPart.Cube.class || !StandardLeafGate.SUPPORTED) {
-                ++fallbackLeaves;
-                return null;
-            }
             TextureAtlasSprite sprite = null;
             if (consumer.getClass() == SpriteCoordinateExpander.class) {
                 var wrapper = (SpriteConsumerAccessor)consumer;
                 sprite = wrapper.primept$sprite();
                 if (sprite == null || sprite.getClass() != TextureAtlasSprite.class) {
                     ++fallbackLeaves;
-                    return null;
+                    throw new IllegalArgumentException("Unsupported routed model UV mapping");
                 }
                 consumer = wrapper.primept$delegate();
             }
             if (consumer.getClass() != BufferBuilder.class) {
                 ++fallbackLeaves;
+                DynamicCapture.fail(
+                        new IllegalArgumentException("Unsupported routed model consumer"));
                 return null;
             }
             BufferBuilder buffer = (BufferBuilder)consumer;
@@ -183,7 +185,10 @@ public final class ModelCapture {
             }
             var local = geometry.observe(cube);
             if (local == null) {
-                ++fallbackLeaves;
+                if (cube.polygons.length != 0) {
+                    ++fallbackLeaves;
+                    throw new IllegalArgumentException("Unsupported routed model polygon layout");
+                }
                 return null;
             }
             if (local.prototype == null)
@@ -212,11 +217,7 @@ public final class ModelCapture {
             m[9] = matrix.m12();
             m[10] = matrix.m22();
             m[11] = matrix.m32() - model.bz;
-            // Singular affine transforms emit degenerate geometry; preserve them in the raw fallback.
-            if (!matrix.isFinite() || matrix.determinant3x3() == 0) {
-                ++fallbackLeaves;
-                return null;
-            }
+            // Native validates affine finiteness and invertibility at the input boundary.
             leaf.uv[0] = sprite == null ? 1 : sprite.getU1() - sprite.getU0();
             leaf.uv[1] = sprite == null ? 1 : sprite.getV1() - sprite.getV0();
             leaf.uv[2] = sprite == null ? 0 : sprite.getU0();
@@ -317,33 +318,6 @@ public final class ModelCapture {
         int start, texture, flags, color;
         Leaf(InstanceCapture.Instance instance) {
             this.instance = instance;
-        }
-    }
-    private static final class StandardLeafGate {
-        static final boolean SUPPORTED =
-                ordinary(ModelPart.Cube.class) && ordinary(ModelPart.Vertex.class) &&
-                ordinary(ModelPart.Polygon.class) && ordinary(BufferBuilder.class) &&
-                ordinary(VertexConsumer.class) && ordinary(SpriteCoordinateExpander.class) &&
-                ordinary(TextureAtlasSprite.class);
-        private static boolean ordinary(Class<?> type) {
-            // The installed MixinMerged annotation has RUNTIME retention. Foreign mixin handlers/overwrites
-            // make this path unknown; no assumption is made from mixin ordering or renderer class identity.
-            for (var method : type.getDeclaredMethods())
-                for (var annotation : method.getDeclaredAnnotations()) {
-                    if (!annotation.annotationType().getName().equals(
-                                "org.spongepowered.asm.mixin.transformer.meta.MixinMerged"))
-                        continue;
-                    try {
-                        String origin =
-                                (String)annotation.annotationType().getMethod("mixin").invoke(
-                                        annotation);
-                        if (!origin.startsWith("dev.primept.mixin."))
-                            return false;
-                    } catch (ReflectiveOperationException exception) {
-                        return false;
-                    }
-                }
-            return true;
         }
     }
 }

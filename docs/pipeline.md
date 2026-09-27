@@ -78,11 +78,11 @@ Java 从 `VulkanCommandEncoder.allocateAndBeginTransientCommandBuffer()` 获得�
 
 ## 尚存的 CPU 成本
 
-消除图像回读只解决输出传递。地形更新仍经历 Java 源 quad 编码、不可变 section 包和 FFM staging；24 字节源顶点排除原版 AO/light 数据。op8 原子替换 CPU 缓存中该 section 的全部层，完整验证后才发布源状态。翻译层等待 64 个不同位置的段全部就绪，才合批和上传一个整格静态 BLAS，之后仍保留逐段 CPU 缓存用于整体替换。实际空段计入就绪，op11 批量卸载撤销就绪。源 sequence 推进与渲染内容 revision 分离；段可用性不变，且位置、源 RGBA、UV、纹理、材质和原点精确相同时保留 Arc、场景 revision 与 GPU 几何身份，不依赖哈希碰撞假设。原始 bytes 仍需传输和解码比较，变化时仍有分配及 translation 成本。
+消除图像回读只解决输出传递。Java 路由局部模型定义、放置、源可见性/tint 和流体邻接，经 op13/op12 交给 Rust 编译，原子替换 CPU 缓存中该 section 的全部层。完整验证后才发布源状态，原版 AO/light 与 Java section compiler 不参与此通路。翻译层等待 64 个不同位置的段全部就绪，才合批和上传一个整格静态 BLAS，之后仍保留逐段 CPU 缓存用于整体替换。实际空段计入就绪，op11 批量卸载撤销就绪。源 sequence 推进与渲染内容 revision 分离；段可用性不变，且位置、源 RGBA、UV、纹理、材质和原点精确相同时保留 Arc、场景 revision 与 GPU 几何身份，不依赖哈希碰撞假设。源描述仍需传输、解码和编译，再比较结果；资源 key 复用不代表脏段编译本身免费，变化时另有 translation 成本。
 
 原始动态回退数据从实际准备的批量 mesh 复制到可复用 native arena，随后一次 FFM 调用同步解码，省去该快照的 heap 包和二次 staging。PT 独占世界 pass 时保留实际 prepare/finishPrepare 回调，并在捕获后释放原始源页，省去原版世界 GPU upload/draw；未知输出仍有原版 CPU 展开和一次捕获复制。手/HUD 继续原版路径。这不是整条输入路径零复制。
 
-标准模型使用持久局部原型与实例。Java 在真实动画和 render 遍历中检查源顶点引用、实际 pose 与材质；只有已识别的纯 Cube 输出及普通 consumer 在 PT 独占 pass 下可省去机械顶点展开，未知路径继续真实原始输出。受支持的不可变 Fabric Mesh 也可按 tint 分组建立持久原型，后续只观察实际 pose/tint/material。普通 item 在真实输出处每次比较可变 quad 内容，并按材质/tint/pose 分组复用原型，省去受支持叶节点的变换、打包和 raw 传输。无变化帧没有 op7 或对应 FFI，少量姿态/颜色变化只传变化记录；ExtendedItem、粒子和特殊 consumer 仍有原始回退成本。
+标准模型使用持久局部原型与实例。Java 保留真实动画和模型遍历，在 Cube.compile 虚调用前路由实际局部几何、pose 与材质并截断该次计算；自定义 Cube 下游覆盖不执行。不可变 Fabric Mesh 按源 layer/tint 连续分组；普通 item 每次观察可变局部 quad，按材质/tint/pose 复用原型。无变化帧没有 op7 或对应 FFI，姿态/颜色变化只传变化记录。标准 quad 粒子传参数 span，由 Rust 展开；其他明确的直接网格来源仍有 op6 成本。未知 consumer 不用于恢复已接管的 Java 展开，ExtendedItem 和特殊投影仍待专门接入。
 
 Rust 验证完整变化批次后更新源状态，局部原型共享持久 BLAS；同一原型的纯姿态更新不反复修改引用计数。实例出生、消失和运动不重建其他对象的 BLAS。快路径必须建立在正式资源契约和当前真实回调结果上，不能仅凭对象类型或连续几帧不变推定可缓存。
 
@@ -98,7 +98,7 @@ Rust 验证完整变化批次后更新源状态，局部原型共享持久 BLAS�
 
 现有增量 Scene 通过不可变三角形数组共享、持久 cluster BLAS 和原点变换减少重建范围；它不意味着区块流送完全没有 CPU 成本。性能报告应把稳定帧、相机移动、区块修改、重定位与首次构建分开。
 
-PT 的覆盖窗口与实际加载事件共同维护源集合，稳定窗口不重扫内部，移动仅枚举进入/离开条带。封闭去重的本批脏 section 后，owner 冻结邻接输入，私有 compiler/builder 工作池同步完成全部本批任务；有状态模型回调依 MC 编译任务的既有 worker 契约执行，实体/BE 回调保持原线程。没有软时间预算或跨帧字节配额，首次加载/大更新的真实长帧不被调度掩盖。新事件进入下一批；任务失败先汇合，停止该后端，不能发布半帧或重放回调补画。
+CPU 阶段同步完成封闭批次，没有软时间预算或跨帧字节配额；新事件进入下一批，失败不能发布未完成结果或重放回调补画。Java 路由足够描述外观的源输入后截断相应几何计算，模型定义/选择与姿态/变换设置的源能力保留；工作集、具体几何编译和 Prime 私有工作池归 Rust。路由可在 Java 先封批再统一 FFM，不引入逐模型 native 调用。Java 合并源事件并在宿主 owner 读取实际对象；Rust `routing` 持有局部定义和同步编译池，具体分工见 [源路由边界](capture-boundaries.md#地形源输入与编译职责)。首次加载/大更新的真实长帧仍需测量，不能由线程数或 GPU 利用率推断成本已经消除。
 
 ## 当前性能边界
 

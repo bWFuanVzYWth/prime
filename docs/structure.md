@@ -1,6 +1,6 @@
 # 多版本工程结构
 
-`prime_engine` 负责场景、渲染会话和资源生命周期，C ABI 使用 `prime_*` 导出。Minecraft 版本差异留在 Java 适配器，Rust 不按 MC 版本编译。
+`prime_engine` 负责场景、渲染会话和资源生命周期，C ABI 使用 `prime_*` 导出。Minecraft 版本差异留在 Java 适配器，Rust 不按 MC 版本编译。Java 的目标职责是路由足以描述外观的源数据并截断对应下游计算，保留模型定义、选择和姿态/变换设置的扩展能力；下游顶点变换与展开实现由 Prime 接管。
 
 ```text
 adapters/
@@ -31,38 +31,27 @@ flowchart TD
     R[rectangle_decomposition: 独立可复用算法]
 ```
 
-`prime_scene` 不认识 Minecraft、FFM 指针或 Vulkan。它验证输入，再发布带 epoch/revision 的源快照，进行三角化与大坐标重定位。当前规模适合把协议和 CPU 编译放在一个 crate，模块边界已经分开；不为少量类型再加多层转发 crate。
+`prime_scene` 不认识 Minecraft、FFM 指针或 Vulkan。它验证输入，再发布带 epoch/revision 的源快照，进行三角化与大坐标重定位。前端编译接管所需的原版纯算法也放在这里，以自足的源语义为输入，捕获后不再依赖原版执行或查询。当前规模适合把协议和 CPU 编译放在一个 crate，模块边界已经分开；不为少量类型再加多层转发 crate。
 
 `prime_engine` 是 native 入口和会话所有者，协调源状态、翻译缓存和 renderer。`prime_vulkan` 拥有具体 GPU 资源与其退休规则；宿主 instance/device/queue/image 始终由 Minecraft 拥有。引擎默认启用 `vulkan` feature；只测试协议和引擎错误边界时可关闭它，完全不编译 Slang。单独选中 `prime_vulkan` 则必然需要 GPU 构建工具，但其普通 CPU 单测无需实际创建 GPU 设备。
 
 实例通路明确分离状态和副作用：`prime_scene::instances::InstanceContext` 拥有版本无关的原型、实例和引用计数，先准备验证计划再应用；`prime_scene::spatial` 定义统一空间网格，`prime_scene::translation` 的两个显式上下文分别计算地形合批与对象分桶/放置。`prime_vulkan` 的 `geometry` 和 `context::objects` 持有 GPU 资源并执行计划；`plan` 保留局部范围分配与元数据编码，`packing` 写入复用的材质记录，`arena` 依据完成值管理 storage/scratch/上传页。每个会话显式借用这些上下文，未引入异步任务或内部可变的全局缓存。此边界不表示旧有全部 renderer 模块已经完成相同拆分。
 
-`prime_scene::workers::CpuWorkers` 封装私有同步 Rayon 池，由当前 renderer 持有并显式借给打包工作；worker 仅获得只读源数据与互不重叠的输出切片。`adapters/common::SynchronousWorkers` 提供同步汇合与私有工作区的通用机制；MC compiler、邻接快照和回调线程规则仍留在版本层。`ColumnWindow` 只表达整数列矩形，方块实体能力索引不进入 common。
+Prime 的 CPU 并行机制归 Rust，`prime_scene::routing` 持有源定义和惰性创建的私有 `CpuWorkers`，负责地形、流体与粒子编译。`prime_vulkan` 的打包上下文也显式持有同步池；两阶段顺序执行，不引入跨帧后台任务。worker 只读纯数据、写互不重叠范围，不访问 MC 或回调 Java。源读取与宿主线程规则仍由版本层适配，Prime 不再包含 Java compiler 工作池。
 
 `prime_tools` 持有离线 PNG 输出与性能夹具入口，图像编码库不进入引擎 DLL 的依赖。诊断用 C 导出 `prime_render` 仍存在，实际游戏只调用宿主录制接口，不回读输出。
 
-`adapters/common` 的生产代码不依赖 Minecraft、Fabric 或 LWJGL。它持有版本无关的设置和源描述，并封装 FFM ABI，不能增加 MC enum ordinal、宿主私有类或 shader buffer 布局。版本模块负责实际 MC 模型/tint 调用的观察、区块任务/epoch、纹理来源、相机和宿主 Vulkan 特性与句柄。复制少量版本适配代码比把变化的私有签名装进反射层更容易编译检查；新版本通过增加模块验证，不能更改 Rust 使其识别版本号。
+`adapters/common` 的生产代码不依赖 Minecraft、Fabric 或 LWJGL。它持有版本无关的设置和源描述，并封装 FFM ABI，不能增加 MC enum ordinal、宿主私有类或 shader buffer 布局。版本模块负责实际 MC 模型/tint 调用的观察、源生命周期与变化通知、纹理来源、相机和宿主 Vulkan 特性与句柄；源通知不等于在 Java 管理编译任务。复制少量版本适配代码比把变化的私有签名装进反射层更容易编译检查；新版本通过增加模块验证，不能更改 Rust 使其识别版本号。
 
 两个安装包都打入公共层的同一编译产物和同一 `target/release/prime_engine.dll`。`verifyNativeJars` 检查引擎字节、桥接类字节和精确 MC 版本约束。每版有独立 `run/` 与存档目录，避免新版存档升级污染旧版验证。
 
-## 捕获边界
+## 源路由边界
 
-不同源类型的目标接管位置、geometry-key 缓存契约和后续 GPU 批量工作见 [捕获边界与批量数据流](capture-boundaries.md)。以下描述已有源通路；目标边界不代表所有路径已经完成接入。
+版本层的 `TerrainRouter` 读取模型、源 tint、面可见性和放置，`FluidRouter` 读取流体材质与邻接。`CaptureInbox` 合并资源/section 事件，op13 定义先于 op12 使用，定义退休在最后使用之后。没有完整 Java section 编译或 raster 几何缓存。地形持久局部定义、纯表面构造、三角化、逐段结果及空间分组在 Rust。
 
-捕获在同一个真实 `SectionCompiler` compile 作用域内观察已接受 quad。最终 BLOCK mesh 的颜色已经混入原版 AO/方向明暗，不能作为未照明源颜色：
+模型、普通 item 和 Fabric Mesh 在单次几何提交前读取局部定义与姿态，由 `InstanceCapture` 合并 op7；源引用/可变值变化决定是否重新封包。标准粒子路由紧凑参数 span，由 Rust 展开；其余直接网格来源使用显式 op6 原始几何。源定义与机械展开有不同兼容边界，详见 [源路由与批量数据流](capture-boundaries.md)。
 
-1. vanilla 保留实际 BakedQuad，并观察本次 `getTintColor` 的返回值。
-2. Indigo 保存光照修改前的作者 RGBA；在转换返回后使用被接受的几何和本次原版 tint，按 MC 的编码域 8 位乘法组合。
-3. 输出稳定 opaque/cutout/translucent 标识与 24 字节顶点（position 0、RGBA 12、UV 16），不输出烘焙光照。流体使用其实际输出 consumer，观察已求值 tint 排除原版方向明暗；嵌套 Fabric 默认处理器不重复捕获。Rust 使用 stride/offset 描述解析。
-4. compile 开始固定 section/epoch/revision，成功返回后完整发布；`try/finally` 清理线程作用域，迟到结果受有效 token、epoch 与已完成源水位约束。
-
-没有第二次模型随机、面剔除或 tint 查询；Java 不把颜色转换到线性空间，也不构造 GPU 材质。发布依然是变更区块级，FFM 不按 quad 调用。PT 独占时由自己的已加载区块窗口调度真实 MC compiler，编译结果捕获后释放，不创建原版地形 GPU 网格；这仍不承诺任意模组的可见性或回调均已覆盖。
-
-标准模型捕获观察实际 `ModelPart.Cube.compile`。版本层的 `ModelGeometryContext` 识别原版不可变 Vertex 与数组引用变化；`ModelCapture` 关联实体/方块实体源、实际 Model 提交、叶节点、局部几何和已求值姿态。共享 `InstanceCapture` 管理原型、实例和封包生命周期，不依赖 MC 类型。资源变化读取顶点，稳定帧只检查源引用及实例有效值；原版 setupAnim 和渲染回调执行原来的一次。PT 独占且满足已知纯叶节点与 consumer 契约时，省去已实例化 Cube 的机械顶点展开，未知路径继续实际输出。世界源对象通过自身附加字段持有上下文，不靠 equals/hashCode 或全局实体缓存确定身份。
-
-只有已知标准 Cube、consumer 和 UV 变换才能进入实例通路。已知相关类存在第三方 Mixin、Cube 子类、未知 consumer 或不可逆变换时保留原始几何回退；这个检测不构成任意未注解字节码变换的兼容承诺。姿态来自实际原版矩阵，源世界原点为 f64，但原版已经计算过的相机相对 f32 平移不能无损逆推；相机运动仍可能使实例记录变化，不使用容差吞掉真实微小运动。
-
-原始回退继续观察各版本 `StagedVertexBuffer.Draw.append` 的真实批量结果。版本层绑定 Draw 与纹理/alpha，particle 使用实际 layer 图集；已经作为实例接受的顶点区间从原始包排除。`common/DynamicFrame` 复制其余源布局和顶点至复用的 native arena，相邻同描述 span 合并。整个世界准备结束后闭合捕获，进入 native hook 时先提交资源变化，再提交一个 op7 增量和必要的 op6 回退快照，无逐对象 FFI。两条通路均不重放模型、动画或粒子回调，详见 [abi.md](abi.md) 与 [architecture.md](architecture.md)。
+`DynamicFrame` 与实例封包使用可复用 native arena，同步调用结束前完成借用消费。几何与纹理顺序、资源 epoch、源输入序列和 GPU 完成不能混为同一个寿命。协议与宿主集成分别见 [ABI](abi.md) 和 [架构](architecture.md)。
 
 ## 矩形分解的接入范围
 

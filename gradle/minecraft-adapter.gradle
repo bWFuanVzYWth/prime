@@ -47,7 +47,6 @@ loom {
                 vmArgs "-Dprimept.renderer=${providers.gradleProperty('primeptRenderer').get()}"
             vmArgs "-Dprimept.profile.leaves=${providers.gradleProperty('primeptProfileLeaves').getOrElse('false')}"
             vmArgs "-Dprimept.profile=${providers.gradleProperty('primeptProfile').getOrElse('false')}"
-            if (providers.gradleProperty('primeptCompilerThreads').isPresent()) vmArgs "-Dprimept.compilerThreads=${providers.gradleProperty('primeptCompilerThreads').get()}"
             vmArgs "-Dprimept.geometryCache=${providers.gradleProperty('primeptGeometryCache').getOrElse('false')}"
             vmArgs "-Dprimept.capture.audit=${providers.gradleProperty('primeptCaptureAudit').getOrElse('false')}"
             if (providers.gradleProperty('primeptProfileCsv').isPresent()) vmArgs "-Dprimept.profile.csv=${providers.gradleProperty('primeptProfileCsv').get()}"
@@ -111,7 +110,7 @@ tasks.register('cpuSmoke', JavaExec) {
     systemProperty 'primept.geometryCache', 'true'
     systemProperty 'primept.smoke.foreignWrapper', providers.gradleProperty('primeptSmokeForeign').getOrElse('false')
     systemProperty 'primept.smoke.targetResize', providers.gradleProperty('primeptSmokeTargetResize').getOrElse('false')
-    systemProperty 'primept.smoke.terrainPerf', providers.gradleProperty('primeptSmokeTerrainPerf').getOrElse('false')
+    systemProperty 'primept.smoke.routingDirectory', layout.buildDirectory.dir('routing-fixtures').get().asFile.absolutePath
     systemProperty 'fabric.addMods', tasks.named('cpuSmokeJar').get().archiveFile.get().asFile.absolutePath
     systemProperty 'fabric.classPathGroups', sourceSets.main.output.files.collect { it.absolutePath }.join(File.pathSeparator)
     workingDir layout.buildDirectory.dir('cpu-smoke')

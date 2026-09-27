@@ -6,7 +6,7 @@ import java.util.List;
 
 /** Wire encoding only. Geometry/material interpretation belongs to Rust. */
 public final class Packets {
-    public static final int ABI_VERSION = 2;
+    public static final int ABI_VERSION = 3;
     public static final int MAGIC = 0x54505250;
     private Packets() {}
 

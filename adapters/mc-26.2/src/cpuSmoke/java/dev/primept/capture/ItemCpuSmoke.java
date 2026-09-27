@@ -31,7 +31,8 @@ public final class ItemCpuSmoke {
     public static int foreignCalls;
     private static final CameraRenderState CAMERA = new CameraRenderState();
     private static final RenderType TYPE = Sheets.cutoutBlockItemSheet();
-    private static final ItemFeatureRenderer RENDERER = new ItemFeatureRenderer();
+    // The routing boundary depends on the actual source submit, not renderer identity.
+    private static final ItemFeatureRenderer RENDERER = new ItemFeatureRenderer() {};
     private static final Owner FIRST = new Owner(), SECOND = new Owner();
     private static int emitted;
     private static byte[] baseline;
@@ -105,8 +106,8 @@ public final class ItemCpuSmoke {
               "Switch to raw path retires unseen scope");
         context.acknowledge();
         frame(quads, true, false, FoilType.NONE, 0, -1, 2, 1, null);
-        check(emitted == 8 && ItemCapture.stats().submits() == 0,
-              "Unknown material keeps full original output");
+        check(emitted == 0 && ItemCapture.stats().submits() == 0,
+              "Unbound/excluded material never expands or invents a surface");
         frame(quads, true, true, FoilType.NONE, 123, -1, 2, 1, null);
         check(emitted == 8 && ItemCapture.stats().submits() == 0,
               "Outline cannot enter semantic path");
@@ -137,8 +138,9 @@ public final class ItemCpuSmoke {
             }
         };
         frame(List.of(quad(unusual)), true, true, FoilType.NONE, 0, -1, 2, 1, null);
-        check(emitted == 4 && ItemCapture.stats().submits() == 0 && getters[0] == 1,
-              "Unknown position implementation is read only by its one original callback");
+        check(emitted == 0 && ItemCapture.stats().submits() == 1 && getters[0] == 1,
+              "Custom source getter is read once before routing");
+        cornerColors();
         unknownConsumer();
         exclusive = false;
         DynamicCapture.close();
@@ -148,12 +150,12 @@ public final class ItemCpuSmoke {
     public static void foreign() throws Exception {
         CAMERA.pos = Vec3.ZERO;
         frame(List.of(quad(new Vector3f())), true, true, FoilType.NONE, 0, -1, 2, 1, null);
-        check(foreignCalls == 1 && emitted == 4 && ItemCapture.stats().submits() == 0,
-              "Foreign renderer callback executes once with complete original output");
+        check(foreignCalls == 1 && emitted == 0 && ItemCapture.stats().submits() == 1,
+              "Foreign source callback executes once without downstream expansion");
         exclusive = false;
         DynamicCapture.close();
         System.out.println(
-                "PRIME_PT_ITEM_FOREIGN_CPU_OK: foreign actual callback once, original vertices retained");
+                "PRIME_PT_ITEM_FOREIGN_CPU_OK: source callback once, downstream expansion skipped");
     }
     private static BakedQuad quad(Vector3f position) {
         var material = new BakedQuad.MaterialInfo(null, ChunkSectionLayer.CUTOUT, TYPE, 0, true, 0);
@@ -234,6 +236,51 @@ public final class ItemCpuSmoke {
                   "Actual UV source equivalence");
         }
     }
+    private static void cornerColors() throws Exception {
+        DynamicCapture.close();
+        exclusive = true;
+        DynamicCapture.begin(CAMERA);
+        try (var staged = new StagedVertexBuffer(() -> "Item corner colors", 1024)) {
+            var draw = staged.appendDraw(DefaultVertexFormat.ENTITY, PrimitiveTopology.QUADS);
+            Map<StagedVertexBuffer.Draw, DynamicCapture.Material> materials =
+                    value(DynamicCapture.class, "DRAWS", null);
+            materials.put(draw, new DynamicCapture.Material(0, 1, false, true));
+            var consumer = staged.getVertexBuilder(draw);
+            var pose = new PoseStack();
+            var previous = ModelCapture.beginSource(FIRST, 0, 0, 0, new Matrix4f(), false);
+            var q = quad(new Vector3f());
+            var submit = new ItemFeatureRenderer.Submit(pose.last(), ItemDisplayContext.FIXED, 0, 0,
+                                                        0, new int[0], List.of(q), FoilType.NONE);
+            ModelCapture.endSource(previous);
+            var before = ItemCapture.enter(submit, true);
+            var colors = new com.mojang.blaze3d.vertex.QuadInstance();
+            int[] authored = {0xff123456, 0x80432165, 0x10102030, 0xfedcba98};
+            for (int i = 0; i < 4; ++i)
+                colors.setColor(i, authored[i]);
+            check(ItemCapture.quad(consumer, pose.last(), q, colors),
+                  "Per-corner source is routed");
+            ItemCapture.leave(before, true);
+            DynamicCapture.end();
+            var context = context();
+            var wire = context.sealDelta().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
+            check(context.stats().prototypeUpserts() == 1 && context.stats().instanceUpserts() == 1,
+                  "Per-corner source retains one prototype and instance");
+            for (int i = 0; i < 4; ++i) {
+                int offset = 104 + i * 24 + 12, color = authored[i];
+                check(Byte.toUnsignedInt(wire.get(offset)) == ((color >>> 16) & 255) &&
+                              Byte.toUnsignedInt(wire.get(offset + 1)) == ((color >>> 8) & 255) &&
+                              Byte.toUnsignedInt(wire.get(offset + 2)) == (color & 255) &&
+                              Byte.toUnsignedInt(wire.get(offset + 3)) == (color >>> 24),
+                      "Authored RGBA is preserved at corner " + i);
+            }
+            check(wire.getInt(104 + 4 * 24 + 104) == -1, "No duplicate instance tint");
+            check(((BufferBuilderAccessor)consumer).primept$vertices() == 0,
+                  "Per-corner colors do not restore downstream expansion");
+            context.acknowledge();
+        } finally {
+            DynamicCapture.end();
+        }
+    }
     private static void unknownConsumer() throws Exception {
         exclusive = true;
         DynamicCapture.begin(CAMERA);
@@ -244,7 +291,7 @@ public final class ItemCpuSmoke {
             var submit = new ItemFeatureRenderer.Submit(pose.last(), ItemDisplayContext.FIXED, 0, 0,
                                                         0, new int[0], List.of(q), FoilType.NONE);
             ModelCapture.endSource(previous);
-            var before = ItemCapture.enter(RENDERER, submit, true);
+            var before = ItemCapture.enter(submit, true);
             int[] calls = {0};
             var unknown =
                     (com.mojang.blaze3d.vertex.VertexConsumer)
@@ -256,10 +303,10 @@ public final class ItemCpuSmoke {
                                         throw new AssertionError(
                                                 "Must not inspect unknown consumer");
                                     });
-            check(!ItemCapture.quad(unknown, pose.last(), q,
-                                    new com.mojang.blaze3d.vertex.QuadInstance()) &&
+            check(ItemCapture.quad(unknown, pose.last(), q,
+                                   new com.mojang.blaze3d.vertex.QuadInstance()) &&
                           calls[0] == 0,
-                  "Unknown consumer is untouched and requests original leaf fallback");
+                  "Unknown downstream consumer is untouched, rejected explicitly, and never called");
             ItemCapture.leave(before, true);
         } finally {
             DynamicCapture.end();

@@ -9,7 +9,7 @@ extern "C" {
 // Zero status means success. On -1 call prime_last_error on the same thread.
 uint32_t prime_abi_version(void);
 uint64_t prime_create(uint32_t abi_version);
-// ABI v2. Scene op2 is removed; use complete op8 sections.
+// ABI v3. Routed terrain uses op12/op13; op6 also supports parametric billboards.
 // op8: header[24], section/sequence:u64[2], origin:f64[3], layer_count/reserved:u32[2],
 // then each layer's layer/texture/flags/topology/count/stride/position/color/uv/reserved:u32[10]
 // and raw vertices. Empty complete sections count toward terrain readiness.
