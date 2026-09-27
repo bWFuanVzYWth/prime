@@ -274,7 +274,7 @@ fn all_truncations_and_late_invalid_layers_preserve_content_and_admission_sequen
 }
 
 #[test]
-fn malformed_headers_and_content_revision_overflow_never_consume_sequence() {
+fn malformed_headers_never_consume_sequence() {
     let mut source = source();
     source.submit(&section(1, 1, &[layer(0)])).unwrap();
     let before = snapshot(&source);
@@ -290,12 +290,9 @@ fn malformed_headers_and_content_revision_overflow_never_consume_sequence() {
         assert!(source.submit(&bad).is_err());
     }
     assert_same(&before, &snapshot(&source));
-    source.revision = u64::MAX;
     source.submit(&candidate).unwrap();
-    assert_eq!(source.revision, u64::MAX);
-    assert!(source.submit(&section(1, 3, &[])).is_err());
     source.submit(&section(1, 3, &[layer(0)])).unwrap();
-    assert_eq!(source.revision, u64::MAX);
+    assert_same(&before, &snapshot(&source));
 }
 
 #[test]

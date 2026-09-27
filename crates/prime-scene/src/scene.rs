@@ -114,12 +114,33 @@ pub struct Camera {
 /// CPU source mesh retains section-local positions until frame-space translation.
 #[derive(Clone)]
 pub(crate) struct Mesh {
-    pub revision: u64,
+    pub revision: MeshVersion,
     pub origin: [f64; 3],
     pub triangles: Arc<[Triangle]>,
     pub bounds: [[f32; 3]; 2],
     pub texture_id: u32,
     pub flags: u32,
+}
+
+/// Admission order, including identical content observations and removals.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct SectionSequence(pub(crate) u64);
+
+/// The observation that last changed rendered content. An identical observation
+/// advances SectionSequence without replacing this value or the immutable mesh.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MeshVersion(SectionSequence);
+
+impl MeshVersion {
+    pub fn captured(sequence: SectionSequence) -> Self {
+        Self(sequence)
+    }
+    pub fn observed_at(self) -> SectionSequence {
+        self.0
+    }
+    pub fn number(self) -> u64 {
+        self.0.0
+    }
 }
 
 #[derive(Default)]
@@ -132,22 +153,32 @@ pub(crate) struct DynamicMesh {
 
 #[derive(Default)]
 pub struct SourceScene {
-    pub epoch: u64,
-    pub revision: u64,
+    pub(crate) id: crate::incremental::ContextId,
+    pub(crate) epoch: u64,
+    pub(crate) revision: u64,
     pub(crate) meshes: BTreeMap<(u64, u32), Mesh>,
     /// Complete source snapshots, including observed empty sections; absence is unknown.
     pub(crate) sections: TerrainAvailability,
     /// Latest complete replacement/removal sequence, independent of content revisions.
-    pub(crate) removed: BTreeMap<u64, u64>,
+    pub(crate) removed: BTreeMap<u64, SectionSequence>,
     pub(crate) textures: BTreeMap<u32, Texture>,
     pub(crate) triangle_count: usize,
     pub(crate) texture_bytes: usize,
     pub(crate) dynamic: DynamicMesh,
     pub(crate) instances: InstanceContext,
     pub(crate) section_scratch: crate::protocol::SectionScratch,
+    pub(crate) edits: crate::incremental::SourceEdits,
 }
 
 impl SourceScene {
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     pub fn instances(&self) -> &InstanceScene {
         self.instances.scene()
     }
@@ -178,7 +209,7 @@ impl SourceScene {
             meshes.insert(
                 *key,
                 SceneMesh {
-                    revision: mesh.revision,
+                    revision: mesh.revision.number(),
                     flags: mesh.flags,
                     origin: mesh.origin,
                     triangles: mesh.triangles.clone(),

@@ -4,10 +4,12 @@ use super::resources::{Buffer, Context};
 use super::uint;
 use ash::vk;
 use prime_scene::Texture;
+use prime_scene::incremental::{TextureCursor, TextureInput};
 use std::{collections::BTreeMap, sync::Arc};
 
 pub(super) struct Textures {
     source: BTreeMap<u32, Texture>,
+    cursor: Option<TextureCursor>,
     pub indices: BTreeMap<u32, u32>,
     allocations: BTreeMap<u32, (u32, u32)>,
     pixel_end: u32,
@@ -16,13 +18,17 @@ pub(super) struct Textures {
 }
 
 impl Textures {
-    pub fn new(context: &Arc<Context>, source: &BTreeMap<u32, Texture>) -> Result<Self, String> {
+    pub fn new<'a>(
+        context: &Arc<Context>,
+        source: impl Into<TextureInput<'a>>,
+    ) -> Result<Self, String> {
         let mut metadata = Vec::new();
         for value in [0, 1, 1, 0] {
             uint(&mut metadata, value);
         }
         let mut result = Self {
             source: BTreeMap::new(),
+            cursor: None,
             indices: BTreeMap::from([(0, 0)]),
             allocations: BTreeMap::from([(0, (0, 1))]),
             pixel_end: 1,
@@ -43,16 +49,21 @@ impl Textures {
             .ok_or_else(|| "Unknown texture".into())
     }
 
-    pub fn update(
+    pub fn update<'a>(
         &mut self,
         context: &Arc<Context>,
-        source: &BTreeMap<u32, Texture>,
+        source: impl Into<TextureInput<'a>>,
     ) -> Result<(), String> {
+        let (cursor, updates) = source.into().updates(self.cursor);
+        // Do not scan resident identities for a certified incremental input.
+        if updates.is_snapshot() {
+            self.source.retain(|id, _| updates.retains(*id));
+        }
         let mut pixels = Vec::new();
         let mut metadata = Vec::new();
         let mut pixel_copies = Vec::new();
         let mut metadata_copies = Vec::new();
-        for (id, texture) in source {
+        for (id, texture) in updates {
             if *id == 0 {
                 return Err("Texture zero is reserved for explicit untextured white".into());
             }
@@ -97,6 +108,7 @@ impl Textures {
             for value in [offset, texture.width, texture.height, 0] {
                 uint(&mut metadata, value);
             }
+            self.source.insert(*id, texture.clone());
         }
         if !pixels.is_empty() {
             grow(context, &mut self.texels, u64::from(self.pixel_end) * 4)?;
@@ -121,7 +133,7 @@ impl Textures {
                 transfer_barrier(context, command);
             })?;
         }
-        self.source = source.clone();
+        self.cursor = cursor;
         Ok(())
     }
 }

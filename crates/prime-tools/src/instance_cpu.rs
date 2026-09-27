@@ -328,7 +328,7 @@ fn run_case(options: &Options, objects: u32) -> Result<Vec<Sample>, String> {
             assert_eq!(source.instances().instances.len(), objects as usize);
             assert_eq!(source.instances().prototypes[&1].triangles.len(), 48);
             assert_eq!(source.instances().resource_revision, 1);
-            assert_eq!(source.revision, 1);
+            assert_eq!(source.revision(), 1);
             samples.push(Sample {
                 stage,
                 objects,

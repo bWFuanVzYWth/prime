@@ -1,6 +1,7 @@
 //! A small host simulator for measuring the production recording path. No pixels
 //! leave the device. Two submissions may be in flight on one queue/timeline.
 use super::*;
+use prime_scene::incremental::SceneInput;
 use std::{collections::BTreeMap, time::Instant};
 
 const IN_FLIGHT: usize = 2;
@@ -199,9 +200,9 @@ impl HostBenchmark {
     }
 
     /// Wait only when the two-frame ring is full; never waits for this new frame.
-    pub fn enqueue_with_instances(
+    pub fn enqueue_with_instances<'a>(
         &mut self,
-        scene: &Scene,
+        scene: impl Into<SceneInput<'a>>,
         instances: &InstanceScene,
         camera: &Camera,
         sample: u32,
@@ -209,7 +210,7 @@ impl HostBenchmark {
         if self.poisoned {
             return Err("Benchmark host is quarantined".into());
         }
-        let result = self.enqueue_inner(scene, instances, camera, sample);
+        let result = self.enqueue_inner(scene.into(), instances, camera, sample);
         if result.is_err() {
             self.poisoned = true;
         }
@@ -218,7 +219,7 @@ impl HostBenchmark {
 
     fn enqueue_inner(
         &mut self,
-        scene: &Scene,
+        scene: SceneInput<'_>,
         instances: &InstanceScene,
         camera: &Camera,
         sample: u32,

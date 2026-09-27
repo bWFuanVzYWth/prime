@@ -1,7 +1,10 @@
 //! Versioned byte protocol. All reads are little endian and alignment independent.
 use crate::{
     instances::InstanceContext,
-    scene::{Camera, DynamicMesh, Instance, Mesh, Prototype, SourceScene, Texture, Triangle},
+    scene::{
+        Camera, DynamicMesh, Instance, Mesh, MeshVersion, Prototype, SectionSequence, SourceScene,
+        Texture, Triangle,
+    },
 };
 
 #[cfg(test)]
@@ -143,7 +146,7 @@ impl SourceScene {
         match op {
             2 => {
                 let key = input.u64()?;
-                let mesh_revision = input.u64()?;
+                let mesh_revision = SectionSequence(input.u64()?);
                 let origin = input.origin()?;
                 let count = input.u32()? as usize;
                 let stride = input.u32()? as usize;
@@ -168,11 +171,11 @@ impl SourceScene {
                     topology,
                 };
                 layout.validate()?;
-                if mesh_revision <= self.removed.get(&key).copied().unwrap_or(0)
+                if mesh_revision <= self.removed.get(&key).copied().unwrap_or_default()
                     || self
                         .meshes
                         .get(&(key, layer))
-                        .is_some_and(|m| mesh_revision <= m.revision)
+                        .is_some_and(|m| mesh_revision <= m.revision.observed_at())
                 {
                     return Err("stale mesh revision".into());
                 }
@@ -207,7 +210,7 @@ impl SourceScene {
                 self.meshes.insert(
                     (key, layer),
                     Mesh {
-                        revision: mesh_revision,
+                        revision: MeshVersion::captured(mesh_revision),
                         origin,
                         triangles: triangles.into(),
                         bounds,
@@ -215,16 +218,17 @@ impl SourceScene {
                         flags,
                     },
                 );
+                self.edits.meshes.insert((key, layer));
             }
             3 => {
                 let key = input.u64()?;
-                let mesh_revision = input.u64()?;
+                let mesh_revision = SectionSequence(input.u64()?);
                 input.finish()?;
-                if mesh_revision <= self.removed.get(&key).copied().unwrap_or(0)
+                if mesh_revision <= self.removed.get(&key).copied().unwrap_or_default()
                     || self
                         .meshes
                         .range((key, 0)..=(key, u32::MAX))
-                        .any(|(_, m)| m.revision >= mesh_revision)
+                        .any(|(_, m)| m.revision.observed_at() >= mesh_revision)
                 {
                     return Err("stale section removal".into());
                 }
@@ -236,11 +240,15 @@ impl SourceScene {
                     .range((key, 0)..=(key, u32::MAX))
                     .map(|(k, _)| *k)
                     .collect();
+                if let Some(&origin) = self.sections.origin(key) {
+                    self.edits.availability(origin);
+                }
                 changed = self.sections.remove(key);
                 for mesh_key in keys {
                     let mesh = self.meshes.remove(&mesh_key).unwrap();
                     self.triangle_count -= mesh.triangles.len();
                     changed |= !mesh.triangles.is_empty();
+                    self.edits.meshes.insert(mesh_key);
                 }
                 self.removed.insert(key, mesh_revision);
             }
@@ -269,6 +277,7 @@ impl SourceScene {
                         pixels: pixels.into(),
                     },
                 );
+                self.edits.textures.insert(id);
             }
             6 => {
                 let sequence = input.u64()?;
@@ -363,7 +372,7 @@ impl SectionScratch {
 struct SectionPlan {
     key: u64,
     origin: [f64; 3],
-    sequence: u64,
+    sequence: SectionSequence,
     present: [bool; 256],
     triangle_count: usize,
     revision: u64,
@@ -377,15 +386,23 @@ impl SourceScene {
             for layer in &scratch.old_layers {
                 if !plan.present[*layer as usize] {
                     self.meshes.remove(&(plan.key, *layer));
+                    self.edits.meshes.insert((plan.key, *layer));
                 }
             }
             for (layer, mesh) in scratch.replacements.drain(..) {
                 self.meshes.insert((plan.key, layer), mesh);
+                self.edits.meshes.insert((plan.key, layer));
             }
             self.triangle_count = plan.triangle_count;
             self.revision = plan.revision;
             self.removed.insert(plan.key, plan.sequence);
-            self.sections.publish(plan.key, plan.origin);
+            if self.sections.origin(plan.key) != Some(&plan.origin) {
+                if let Some(&old) = self.sections.origin(plan.key) {
+                    self.edits.availability(old);
+                }
+                self.edits.availability(plan.origin);
+                self.sections.publish(plan.key, plan.origin);
+            }
         });
         // Failed plans cannot leave geometry or pending edits for the next packet.
         scratch.clear();
@@ -399,14 +416,14 @@ impl SourceScene {
         scratch: &mut SectionScratch,
     ) -> Result<SectionPlan, String> {
         let key = input.u64()?;
-        let sequence = input.u64()?;
+        let sequence = SectionSequence(input.u64()?);
         let origin = input.origin()?;
         let layers = input.u32()? as usize;
         input.zero()?;
         if layers > 256 || layers > (input.data.len() - input.offset) / 40 {
             return Err("invalid or truncated section layer count".into());
         }
-        if sequence <= self.removed.get(&key).copied().unwrap_or(0) {
+        if sequence <= self.removed.get(&key).copied().unwrap_or_default() {
             return Err("stale complete section sequence".into());
         }
         if self.removed.len() >= MAX_SECTIONS && !self.removed.contains_key(&key) {
@@ -414,7 +431,7 @@ impl SourceScene {
         }
         let mut old_triangles = 0;
         for ((_, layer), mesh) in self.meshes.range((key, 0)..=(key, u32::MAX)) {
-            if sequence <= mesh.revision {
+            if sequence <= mesh.revision.observed_at() {
                 return Err("complete section sequence predates a resident layer".into());
             }
             scratch.old_layers.push(*layer);
@@ -484,7 +501,7 @@ impl SourceScene {
                 scratch.replacements.push((
                     layer,
                     Mesh {
-                        revision: sequence,
+                        revision: MeshVersion::captured(sequence),
                         origin,
                         triangles: scratch.vertices.as_slice().into(),
                         bounds,

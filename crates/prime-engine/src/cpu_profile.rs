@@ -1,14 +1,17 @@
 //! Scene preparation CPU diagnostics; independent from native renderer timings.
+use prime_scene::incremental::TranslationWork;
 use std::time::Instant;
 
 #[derive(Default)]
 struct Batch {
     frames: u64,
     completed: u64,
-    sum_ns: [u64; 3],
-    max_ns: [u64; 3],
+    sum_ns: [u64; 2],
+    max_ns: [u64; 2],
     snapshots: u64,
     dynamics: u64,
+    meshes: u64,
+    textures: u64,
 }
 
 pub(crate) struct PrepareProfile(Option<Batch>);
@@ -27,20 +30,15 @@ impl PrepareProfile {
         self.0.as_ref().map(|_| Instant::now())
     }
 
-    pub fn observe(
-        &mut self,
-        start: Option<Instant>,
-        snapshot_ns: u64,
-        dynamic_ns: u64,
-        snapshot: bool,
-        dynamic: bool,
-    ) {
+    pub fn observe(&mut self, start: Option<Instant>, update_ns: u64, work: TranslationWork) {
         let Some(batch) = &mut self.0 else { return };
-        let values = [elapsed(start), snapshot_ns, dynamic_ns];
+        let values = [elapsed(start), update_ns];
         batch.frames += 1;
         batch.completed += 1;
-        batch.snapshots += u64::from(snapshot);
-        batch.dynamics += u64::from(dynamic);
+        batch.snapshots += u64::from(work.snapshot_changed);
+        batch.dynamics += u64::from(work.dynamic_changed);
+        batch.meshes += work.meshes_published as u64;
+        batch.textures += work.textures_published as u64;
         for (index, ns) in values.into_iter().enumerate() {
             batch.sum_ns[index] = batch.sum_ns[index].saturating_add(ns);
             batch.max_ns[index] = batch.max_ns[index].max(ns);
@@ -58,12 +56,12 @@ impl PrepareProfile {
 
 impl Batch {
     fn report(&self) -> String {
-        let values: [[f64; 3]; 3] = std::array::from_fn(|i| {
+        let values: [[f64; 3]; 2] = std::array::from_fn(|i| {
             let sum = self.sum_ns[i] as f64 / 1e6;
             [sum, sum / self.frames as f64, self.max_ns[i] as f64 / 1e6]
         });
         format!(
-            "[Prime CPU engine] completed={} frames={} timing_ms=sum/mean/max children=disjoint_within_prepare_total excludes=renderer,FFM,source_submit,log prepare_total={:.3}/{:.3}/{:.3} snapshot_translate={:.3}/{:.3}/{:.3} dynamic_refresh={:.3}/{:.3}/{:.3} snapshot_updates={} dynamic_updates={} snapshot_includes_dynamic_on_rebuild=1",
+            "[Prime CPU engine] completed={} frames={} timing_ms=sum/mean/max excludes=renderer,FFM,source_submit,log prepare_total={:.3}/{:.3}/{:.3} incremental_translate={:.3}/{:.3}/{:.3} snapshot_updates={} dynamic_updates={} meshes_published={} textures_published={}",
             self.completed,
             self.frames,
             values[0][0],
@@ -72,11 +70,10 @@ impl Batch {
             values[1][0],
             values[1][1],
             values[1][2],
-            values[2][0],
-            values[2][1],
-            values[2][2],
             self.snapshots,
-            self.dynamics
+            self.dynamics,
+            self.meshes,
+            self.textures
         )
     }
 }
@@ -98,7 +95,14 @@ mod tests {
         assert!(disabled.start().is_none());
         let mut profile = PrepareProfile(Some(Batch::default()));
         for _ in 0..119 {
-            profile.observe(None, 1000, 0, true, false);
+            profile.observe(
+                None,
+                1000,
+                TranslationWork {
+                    snapshot_changed: true,
+                    ..Default::default()
+                },
+            );
         }
         let batch = profile.0.as_ref().unwrap();
         assert_eq!(batch.snapshots, 119);
@@ -109,11 +113,18 @@ mod tests {
                 .report()
                 .contains("snapshot_updates=119 dynamic_updates=0")
         );
-        profile.observe(None, 0, 1000, false, true);
+        profile.observe(
+            None,
+            1000,
+            TranslationWork {
+                dynamic_changed: true,
+                ..Default::default()
+            },
+        );
         let batch = profile.0.as_ref().unwrap();
         assert_eq!(batch.completed, 120);
         assert_eq!(batch.frames, 0);
-        assert_eq!(batch.sum_ns, [0; 3]);
+        assert_eq!(batch.sum_ns, [0; 2]);
         assert_eq!((batch.snapshots, batch.dynamics), (0, 0));
     }
 }

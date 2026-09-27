@@ -165,7 +165,15 @@ cargo run --release --locked -p prime_tools --bin perf -- --frames 120 --warmup 
 
 异步入队耗时不等于完整帧耗时。游戏日志中的 `gpuLast` 是最近完成帧样本，不是汇总窗口均值；任务管理器 GPU 百分比也不能代替阶段计时。图像正确性由独立测试与实机检查验证，性能夹具不以读回图像计算 checksum。
 
-需要归因原生 CPU 成本时，可在启动进程前设置 `$env:PRIME_PROFILE_CPU = '1'`。此开关默认关闭，独立于 `PRIME_PROFILE`；关闭时不读取阶段时钟，开启后每 120 次成功准备/录制输出一次 `[Prime CPU engine]` 和 `[Prime CPU renderer]`。前者记录场景快照翻译与动态刷新，后者拆分退休检查、计时结果回收、已有槽位反压、静态更新、对象计划/执行、TLAS、描述符和命令录制。每项输出 sum/mean/max；子项属于对应 total，不能再与 total 相加，也不包含 Java/FFM、宿主提交或 GPU 执行。未满批次和失败录制不输出。
+需要归因原生 CPU 成本时，可在启动进程前设置 `$env:PRIME_PROFILE_CPU = '1'`。此开关默认关闭，独立于 `PRIME_PROFILE`；关闭时不读取阶段时钟，开启后每 120 次成功准备/录制输出一次 `[Prime CPU engine]` 和 `[Prime CPU renderer]`。前者记录 `incremental_translate`（含本次动态引用刷新）与实际发布的 mesh/纹理数量，后者拆分退休检查、计时结果回收、已有槽位反压、静态更新、对象计划/执行、TLAS、描述符和命令录制。每项输出 sum/mean/max；子项属于对应 total，不能再与 total 相加，也不包含 Java/FFM、宿主提交或 GPU 执行。未满批次和失败录制不输出。
+
+静态增量链可用无 GPU 夹具比较相同构建的完整快照路径与生产增量路径：
+
+```powershell
+cargo run --release --no-default-features --locked -p prime_tools --bin incremental-cpu -- --samples 100 --csv artifacts/incremental-cpu.csv
+```
+
+夹具在 1/16/512 个格、每格 1/64 个非空 mesh 下固定修改一个 mesh；每格均提交 64 个真实位置，包括空段。CSV 保留预热、全部样本、提交/翻译/分组耗时、发布/访问数量和分配请求。计时与分配计数分两轮，比较耗时时过滤 `allocation_instrumentation=false`、`warmup=false`；分配轮只用于归因。包含解码、翻译、分组与计划回收，排除包生成、Java/FFM、GPU 和游戏调度。它是 CPU 微基准，既不是历史构建对照，也不代表游戏 FPS；实际渲染性能仍按原生 1080p 检查。
 
 原生 CPU 日志同时记录三角形、实例、簇、材质页和重建数量，读取已有计数，不为统计逐帧扫描场景。`cpu_upload_bytes` 是成功的 CPU mapped-buffer 写入字节，包含 staging 和 AS 输入，不是 PCIe 带宽或 GPU copy 量。阶段探针运行用于归因，正式性能对比另记其启用状态；测量后从运行环境移除该变量。实际客户端验证采用有界动作或采样窗口，完成后及时正常退出，再分析日志，避免持续占用用户前台。
 

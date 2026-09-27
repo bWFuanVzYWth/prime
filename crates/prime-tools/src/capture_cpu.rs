@@ -279,7 +279,8 @@ fn run_case(options: &Options, objects: u32, stride: u32) -> Result<Vec<Sample>,
         let allocation = allocation.finish();
         assert_eq!(previous.triangles.len(), objects as usize * 48);
         assert_eq!(
-            source.revision, 2,
+            source.revision(),
+            2,
             "dynamic updates must leave static revision unchanged"
         );
         black_box(&previous);

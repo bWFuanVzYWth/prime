@@ -226,14 +226,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .flat_map(|key| (0..3).map(move |layer| (key, layer)))
                 .map(|key| (key, translated.meshes[&key].triangles.clone()))
                 .collect();
-            let previous_revision = source.revision;
+            let previous_revision = source.revision();
             let before = allocations();
             let start = Instant::now();
             for packet in &packets {
                 source.submit(black_box(packet))?;
             }
             let submitted = Instant::now();
-            if previous_revision != source.revision {
+            if previous_revision != source.revision() {
                 translated = source.translate([0.0; 3])?;
             }
             black_box(&translated);
@@ -260,7 +260,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 options.sections as usize * options.quads as usize * 6
             );
             let wire: usize = packets.iter().map(Vec::len).sum();
-            csv.push_str(&format!("{mode},{stage},{},{},{},{sample},{},{},{wire},{submit_ns},{translate_ns},{},{},{},{},{},{retained}\n",options.sections,options.updates,options.quads,u32::from(sample<options.warmup),packets.len(),submit_ns+translate_ns,after[0]-before[0],after[1]-before[1],after[2]-before[2],source.revision-previous_revision));
+            csv.push_str(&format!("{mode},{stage},{},{},{},{sample},{},{},{wire},{submit_ns},{translate_ns},{},{},{},{},{},{retained}\n",options.sections,options.updates,options.quads,u32::from(sample<options.warmup),packets.len(),submit_ns+translate_ns,after[0]-before[0],after[1]-before[1],after[2]-before[2],source.revision()-previous_revision));
             if sample >= options.warmup {
                 times.push(submit_ns + translate_ns);
             }

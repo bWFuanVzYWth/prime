@@ -9,6 +9,7 @@ use crate::material_arena::{Allocation, MaterialArena};
 use crate::plan::{MAX_MATERIAL_RECORDS, OBJECT_BIT, validate_material_count};
 use ash::vk;
 use prime_scene::{
+    incremental::{SceneInput, ScenePublication},
     scene::{InstanceScene, Scene},
     spatial::Cell,
     translation::{TerrainLimits, TerrainPlanner},
@@ -21,7 +22,7 @@ struct Cluster {
 }
 
 pub(super) struct Geometry {
-    pub revision: u64,
+    pub revision: ScenePublication,
     epoch: u64,
     anchor: [f64; 3],
     pub triangle_count: u64,
@@ -40,9 +41,9 @@ pub(super) struct Geometry {
 }
 
 impl Geometry {
-    pub fn new(context: &Arc<Context>, scene: &Scene) -> Result<Self, String> {
+    pub fn new(context: &Arc<Context>, scene: SceneInput<'_>) -> Result<Self, String> {
         let mut geometry = Self {
-            revision: 0,
+            revision: scene.publication(),
             epoch: scene.epoch,
             anchor: scene.anchor,
             triangle_count: 0,
@@ -65,25 +66,29 @@ impl Geometry {
                 vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                 false,
             )?,
-            textures: Textures::new(context, &scene.textures)?,
+            textures: Textures::new(context, scene.texture_input())?,
             rebuilt_clusters: 0,
         };
         geometry.update(context, scene)?;
         Ok(geometry)
     }
-    pub fn needs_update(&self, scene: &Scene) -> bool {
-        self.revision != scene.revision || self.epoch != scene.epoch || self.anchor != scene.anchor
+    pub fn needs_update(&self, scene: SceneInput<'_>) -> bool {
+        self.revision != scene.publication() || self.anchor != scene.anchor
     }
-    pub fn update(&mut self, context: &Arc<Context>, scene: &Scene) -> Result<(), String> {
+
+    pub fn same_owner(&self, scene: SceneInput<'_>) -> bool {
+        self.revision.same_owner(scene.publication())
+    }
+    pub fn update(&mut self, context: &Arc<Context>, scene: SceneInput<'_>) -> Result<(), String> {
         if scene.anchor.iter().any(|v| !v.is_finite()) {
             return Err("Invalid scene anchor".into());
         }
         if self.epoch != scene.epoch {
-            self.textures = Textures::new(context, &scene.textures)?;
+            self.textures = Textures::new(context, scene.texture_input())?;
         } else {
-            self.textures.update(context, &scene.textures)?;
+            self.textures.update(context, scene.texture_input())?;
         }
-        let plan = self.static_planner.plan(scene)?;
+        let plan = self.static_planner.plan_input(scene)?;
         // The executor owns device budgets; translation owns spatial membership and splitting.
         if self.static_planner.placements().len().saturating_add(160)
             > context.max_memory_allocations as usize
@@ -261,7 +266,7 @@ impl Geometry {
             }
         }
         if !plan.placements_changed {
-            self.revision = scene.revision;
+            self.revision = scene.publication();
             self.anchor = scene.anchor;
             self.static_count = plan.triangle_count;
             self.static_planner.recycle(plan);
@@ -316,7 +321,7 @@ impl Geometry {
         })?;
         self.static_count = plan.triangle_count;
         self.static_planner.recycle(plan);
-        self.revision = scene.revision;
+        self.revision = scene.publication();
         self.anchor = scene.anchor;
         Ok(())
     }
@@ -441,6 +446,151 @@ mod tests {
                 })
                 .into(),
         }
+    }
+
+    #[test]
+    #[ignore = "requires a Vulkan ray-query GPU; run with synchronization validation"]
+    fn gpu_incremental_source_matches_fresh_snapshots_and_retains_unaffected_blas() {
+        use prime_scene::{
+            SourceScene, incremental::TranslatedScene, protocol::MAGIC, settings::RenderMode,
+        };
+        fn header(op: u32) -> Vec<u8> {
+            let mut bytes = Vec::new();
+            for value in [MAGIC, 1, op, 0] {
+                bytes.extend(value.to_le_bytes());
+            }
+            bytes.extend(1_u64.to_le_bytes());
+            bytes
+        }
+        fn section(id: u64, sequence: u64, color: Option<[u8; 4]>) -> Vec<u8> {
+            let mut bytes = header(8);
+            bytes.extend(id.to_le_bytes());
+            bytes.extend(sequence.to_le_bytes());
+            let slot = id % 64;
+            for value in [
+                ((id / 64) * 64 + (slot / 16) * 16) as f64,
+                ((slot / 4 % 4) * 16) as f64,
+                ((slot % 4) * 16) as f64,
+            ] {
+                bytes.extend(value.to_le_bytes());
+            }
+            bytes.extend(u32::from(color.is_some()).to_le_bytes());
+            bytes.extend(0_u32.to_le_bytes());
+            if let Some(color) = color {
+                for value in [0_u32, 7, 0, 4, 4, 24, 0, 12, 16, 0] {
+                    bytes.extend(value.to_le_bytes());
+                }
+                for position in [
+                    [-20_f32, -20., 0.],
+                    [20., -20., 0.],
+                    [20., 20., 0.],
+                    [-20., 20., 0.],
+                ] {
+                    for value in position {
+                        bytes.extend(value.to_le_bytes());
+                    }
+                    bytes.extend(color);
+                    bytes.extend([0_u8; 8]);
+                }
+            }
+            bytes
+        }
+        fn texture(color: [u8; 4]) -> Vec<u8> {
+            let mut bytes = header(4);
+            for value in [7_u32, 1, 1, 0] {
+                bytes.extend(value.to_le_bytes());
+            }
+            bytes.extend(color);
+            bytes
+        }
+        let camera = Camera {
+            position: [32., 0., 160.],
+            forward: [0., 0., -1.],
+            right: [1., 0., 0.],
+            up: [0., 1., 0.],
+            vertical_fov_radians: 1.0,
+        };
+        let mut source = SourceScene::default();
+        source.submit(&header(1)).unwrap();
+        source.submit(&texture([255; 4])).unwrap();
+        for id in 0..128 {
+            source
+                .submit(&section(
+                    id,
+                    1,
+                    (id % 64 == 0).then_some([255, 180, 100, 255]),
+                ))
+                .unwrap();
+        }
+        let mut translated = TranslatedScene::default();
+        let mut renderer = Renderer::with_mode(RenderMode::Realtime).unwrap();
+        let mut host = crate::HostBenchmark::new(96, 64).unwrap();
+        let mut retained = None;
+        let mut previous = Vec::new();
+        for stage in 0..6 {
+            match stage {
+                1 => source
+                    .submit(&section(0, 2, Some([64, 255, 64, 255])))
+                    .unwrap(),
+                2 => source.submit(&texture([64, 180, 255, 255])).unwrap(),
+                3 => {
+                    let mut packet = header(3);
+                    for value in [63_u64, 2] {
+                        packet.extend(value.to_le_bytes());
+                    }
+                    source.submit(&packet).unwrap();
+                }
+                4 => source.submit(&section(63, 3, None)).unwrap(),
+                5 => {
+                    let mut reset = header(1);
+                    reset[16..24].copy_from_slice(&2_u64.to_le_bytes());
+                    source.submit(&reset).unwrap();
+                }
+                _ => {}
+            }
+            translated.update(&mut source, [0.; 3]).unwrap();
+            let pixels = renderer
+                .render_with_instances(&translated, source.instances(), &camera, 96, 64, 0)
+                .unwrap();
+            host.enqueue_with_instances(&translated, source.instances(), &camera, stage)
+                .unwrap();
+            let mut fresh = Renderer::with_mode(RenderMode::Realtime).unwrap();
+            let expected = fresh
+                .render(&source.translate([0.; 3]).unwrap(), &camera, 96, 64, 0)
+                .unwrap();
+            assert_eq!(
+                pixels, expected,
+                "stage {stage}: source delta must match a fresh full snapshot"
+            );
+            if stage > 0 {
+                assert_ne!(pixels, previous, "stage {stage} must have visible coverage");
+            }
+            previous = pixels;
+            let geometry = renderer.geometry.as_ref().unwrap();
+            if stage < 5 {
+                let blas = geometry.clusters[&cell([1, 0, 0])].acceleration.address();
+                if let Some(retained) = retained {
+                    assert_eq!(blas, retained);
+                }
+                retained = Some(blas);
+            } else {
+                assert!(geometry.clusters.is_empty());
+            }
+            assert_eq!(
+                geometry.rebuilt_clusters,
+                match stage {
+                    0 => 2,
+                    1 | 4 => 1,
+                    _ => 0,
+                }
+            );
+        }
+        let completed = host.drain().unwrap();
+        assert_eq!(
+            completed.len(),
+            6,
+            "Every borrowed-host submission must have completion proof"
+        );
     }
 
     #[test]

@@ -57,7 +57,7 @@ fn source_section_publication_crosses_signed_32_bit_total_without_large_allocati
         source.meshes.insert(
             (key, 0),
             Mesh {
-                revision: 1,
+                revision: MeshVersion::captured(SectionSequence(1)),
                 origin: [0.0; 3],
                 triangles,
                 bounds: [[0.0; 3], [1.0, 1.0, 0.0]],
@@ -88,4 +88,40 @@ fn source_capacity_checks_address_bytes_without_a_small_scene_budget() {
     validate_triangle_capacity((1_usize << 31) + 1).unwrap();
     assert!(validate_triangle_capacity(usize::MAX / std::mem::size_of::<Triangle>()).is_ok());
     assert!(validate_triangle_capacity(usize::MAX / std::mem::size_of::<Triangle>() + 1).is_err());
+}
+
+#[test]
+fn content_revision_exhaustion_does_not_consume_source_sequences_or_independent_streams() {
+    let mut source = SourceScene {
+        epoch: 1,
+        instances: InstanceContext::new(1),
+        ..Default::default()
+    };
+    source.submit(&section(1, 1)).unwrap();
+    source.revision = u64::MAX;
+    source.submit(&section(1, 2)).unwrap();
+    let mut changed = section(1, 3);
+    *changed.last_mut().unwrap() = 1;
+    assert!(source.submit(&changed).is_err());
+    source.submit(&section(1, 3)).unwrap();
+    for op in [6_u32, 7] {
+        let mut bytes = Vec::new();
+        for value in [MAGIC, ABI_VERSION, op, 0] {
+            bytes.extend(value.to_le_bytes());
+        }
+        for value in [1_u64, 1] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.resize(if op == 6 { 64 } else { 48 }, 0);
+        if op == 7 {
+            bytes[36..40].copy_from_slice(&1_u32.to_le_bytes());
+            for value in [1_u64, 1] {
+                bytes.extend(value.to_le_bytes());
+            }
+        }
+        source.submit(&bytes).unwrap();
+    }
+    assert_eq!(source.revision, u64::MAX);
+    assert_eq!(source.dynamic_revision(), 1);
+    assert_eq!(source.instance_sequence(), 1);
 }

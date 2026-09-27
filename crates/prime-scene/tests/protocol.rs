@@ -135,13 +135,13 @@ fn every_truncated_mesh_is_rejected_without_publication() {
     let bytes = mesh(2, 0);
     let mut source = initialized();
     source.submit(&mesh(1, 0)).unwrap();
-    let revision = source.revision;
+    let revision = source.revision();
     for length in 0..bytes.len() {
         assert!(
             source.submit(&bytes[..length]).is_err(),
             "accepted prefix {length}"
         );
-        assert_eq!(source.revision, revision);
+        assert_eq!(source.revision(), revision);
     }
     assert_eq!(
         source
@@ -166,7 +166,7 @@ fn malformed_input_cannot_partially_replace_geometry() {
         bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
         assert!(source.submit(&bytes).is_err());
     }
-    assert_eq!(source.revision, 2);
+    assert_eq!(source.revision(), 2);
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn texture_length_and_identity_are_checked() {
     assert_eq!(scene.textures[&1].pixels.as_ref(), &[20, 40, 80, 128]);
     bytes.push(0);
     assert!(source.submit(&bytes).is_err());
-    assert_eq!(source.revision, 2);
+    assert_eq!(source.revision(), 2);
 }
 
 #[test]
@@ -229,12 +229,12 @@ fn snapshots_share_immutable_vertices_across_rebases_and_keep_old_versions_alive
 #[test]
 fn absent_section_removal_preserves_render_revision_but_blocks_stale_geometry() {
     let mut source = initialized();
-    let revision = source.revision;
+    let revision = source.revision();
     let mut remove = header(3, 1);
     remove.extend(91u64.to_le_bytes());
     remove.extend(3u64.to_le_bytes());
     source.submit(&remove).unwrap();
-    assert_eq!(source.revision, revision);
+    assert_eq!(source.revision(), revision);
     assert!(source.submit(&mesh(2, 0)).is_err());
     source.submit(&mesh(4, 0)).unwrap();
     assert_eq!(
@@ -311,7 +311,7 @@ fn dynamic_frames_replace_atomically_without_invalidating_static_geometry() {
     let anchor = [29_999_984.0, 64.0, -16.0];
     let mut source = initialized();
     source.submit(&mesh(1, 0)).unwrap();
-    let static_revision = source.revision;
+    let static_revision = source.revision();
     let static_scene = source.translate(anchor).unwrap();
     source
         .submit(&dynamic(
@@ -325,7 +325,7 @@ fn dynamic_frames_replace_atomically_without_invalidating_static_geometry() {
         ))
         .unwrap();
     let scene = source.translate(anchor).unwrap();
-    assert_eq!(source.revision, static_revision);
+    assert_eq!(source.revision(), static_revision);
     assert_eq!(scene.dynamic.revision, 1);
     assert_eq!(scene.dynamic.triangles.len(), 5);
     assert_eq!(scene.triangle_count(), 7);
@@ -364,7 +364,7 @@ fn dynamic_frames_replace_atomically_without_invalidating_static_geometry() {
 
     source.submit(&dynamic(1, 2, &[])).unwrap();
     let empty = source.translate(anchor).unwrap();
-    assert_eq!(source.revision, static_revision);
+    assert_eq!(source.revision(), static_revision);
     assert_eq!(empty.dynamic.revision, 2);
     assert_eq!(empty.triangle_count(), 2);
     assert!(empty.dynamic.triangles.is_empty());
@@ -379,7 +379,7 @@ fn every_truncated_dynamic_frame_and_late_invalid_span_preserves_the_previous_fr
         .submit(&dynamic(1, 7, &[dynamic_span(0, 1, 4)]))
         .unwrap();
     let before = source.translate_dynamic(anchor).unwrap();
-    let static_revision = source.revision;
+    let static_revision = source.revision();
     let candidate = dynamic(1, 8, &[dynamic_span(0, 2, 4), dynamic_span(0, 0, 3)]);
     for length in 0..candidate.len() {
         assert!(
@@ -387,7 +387,7 @@ fn every_truncated_dynamic_frame_and_late_invalid_span_preserves_the_previous_fr
             "accepted prefix {length}"
         );
         assert_eq!(source.dynamic_revision(), 7);
-        assert_eq!(source.revision, static_revision);
+        assert_eq!(source.revision(), static_revision);
     }
     let second_span = 64 + 32 + 4 * 24;
     let mut bad = candidate.clone();
@@ -427,7 +427,7 @@ fn dynamic_layout_flags_and_nonfinite_values_are_rejected_without_publication() 
             "accepted invalid field at {offset}"
         );
         assert_eq!(source.dynamic_revision(), 0);
-        assert_eq!(source.revision, 1);
+        assert_eq!(source.revision(), 1);
     }
     for origin in [f64::NAN, f64::INFINITY, 32_000_001.0] {
         let mut bad = valid.clone();
@@ -440,19 +440,18 @@ fn dynamic_layout_flags_and_nonfinite_values_are_rejected_without_publication() 
 #[test]
 fn dynamic_sequences_are_independent_and_restart_only_after_epoch_reset() {
     let mut source = initialized();
-    source.revision = u64::MAX; // The independent dynamic stream must not increment this counter.
+    let revision = source.revision();
     source.submit(&dynamic(1, 2, &[])).unwrap();
-    assert_eq!(source.revision, u64::MAX);
+    assert_eq!(source.revision(), revision);
     for (epoch, sequence) in [(1, 0), (1, 1), (1, 2), (0, 3), (2, 3)] {
         assert!(source.submit(&dynamic(epoch, sequence, &[])).is_err());
     }
-    source.revision = 100;
     source.submit(&header(1, 2)).unwrap();
     assert_eq!(source.dynamic_revision(), 0);
     assert!(source.submit(&dynamic(1, 3, &[])).is_err());
     source.submit(&dynamic(2, 1, &[])).unwrap();
     assert_eq!(source.dynamic_revision(), 1);
-    assert_eq!(source.revision, 101);
+    assert_eq!(source.revision(), revision + 1);
 }
 
 #[test]

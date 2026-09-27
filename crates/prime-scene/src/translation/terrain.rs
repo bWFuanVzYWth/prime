@@ -1,6 +1,7 @@
 //! Incremental static batch planning. Source identities are opaque; placement comes from origins.
 use super::translation;
 use crate::{
+    incremental::{ContextId, SceneInput, TerrainGeneration, TerrainIndex},
     scene::{MeshKey, Scene, SceneMesh, Triangle},
     spatial::Cell,
 };
@@ -36,6 +37,9 @@ pub struct TerrainPlan {
     pub geometry: Vec<TerrainUpdate>,
     pub placements_changed: bool,
     pub triangle_count: u64,
+    /// Actual grouping work, useful for deterministic complexity regression tests.
+    pub meshes_visited: usize,
+    pub cells_visited: usize,
 }
 
 #[derive(Default)]
@@ -53,8 +57,11 @@ pub struct TerrainPlanner {
     signatures: BTreeMap<Cell, Vec<(u32, Signature)>>,
     placements: Vec<TerrainPlacement>,
     triangle_count: u64,
+    geometry_records: u64,
     spare_geometry: Vec<TerrainUpdate>,
     spare_removed: Vec<Cell>,
+    cursor: Option<TerrainGeneration>,
+    source: Option<ContextId>,
 }
 
 #[derive(Clone, Copy)]
@@ -76,28 +83,31 @@ impl TerrainPlanner {
             signatures: BTreeMap::new(),
             placements: Vec::new(),
             triangle_count: 0,
+            geometry_records: 0,
             spare_geometry: Vec::new(),
             spare_removed: Vec::new(),
+            cursor: None,
+            source: None,
         })
     }
 
+    /// Mutable diagnostics have no producer certificate: validate and index their full snapshot.
     pub fn plan(&mut self, scene: &Scene) -> Result<TerrainPlan, String> {
         if scene.anchor.iter().any(|value| !value.is_finite()) {
             return Err("Invalid scene anchor".into());
         }
-        let mut plan = TerrainPlan {
-            removed: std::mem::take(&mut self.spare_removed),
-            geometry: std::mem::take(&mut self.spare_geometry),
-            placements_changed: false,
-            triangle_count: self.triangle_count,
-        };
-        let reset = self.epoch != Some(scene.epoch);
-        if !reset && self.revision == Some(scene.revision) && self.anchor == scene.anchor {
-            return Ok(plan);
+        if self.epoch == Some(scene.epoch)
+            && self.revision == Some(scene.revision)
+            && self.anchor == scene.anchor
+        {
+            return Ok(self.empty_plan());
         }
-        let mut groups: BTreeMap<Cell, [Vec<Group<'_>>; 3]> = BTreeMap::new();
-        let mut geometry_records = 0u64;
-        let mut total = 0u64;
+        let mut index = TerrainIndex {
+            from: self.cursor.unwrap_or_default(),
+            generation: self.cursor.unwrap_or_default().next()?,
+            reset: true,
+            ..Default::default()
+        };
         for (&id, mesh) in &scene.meshes {
             if mesh.triangles.is_empty() {
                 continue;
@@ -105,80 +115,145 @@ impl TerrainPlanner {
             if mesh.flags > 2 {
                 return Err("Unsupported mesh material flags".into());
             }
-            let world = mesh.origin;
-            if world
+            if mesh
+                .origin
                 .iter()
                 .any(|value| !value.is_finite() || value.abs() > 33_000_000.0)
             {
                 return Err("Invalid mesh world origin".into());
             }
-            let cell = Cell::containing(world)?;
-            // Keep partial source snapshots on the CPU; never publish a partial static BLAS.
-            if !scene.ready_terrain.contains(&cell) {
-                continue;
-            }
-            let offset = std::array::from_fn(|i| (world[i] - cell.origin()[i]) as f32);
-            let parts = &mut groups.entry(cell).or_default()[mesh.flags as usize];
-            let mut first = 0;
-            while first < mesh.triangles.len() {
-                if parts
-                    .last()
-                    .is_none_or(|part| part.triangle_count == self.limits.triangles_per_geometry)
-                {
-                    parts.push(Group::default());
-                    geometry_records += 1;
+            index
+                .cells
+                .entry(Cell::containing(mesh.origin)?)
+                .or_default()
+                .insert(id);
+        }
+        let plan = self.plan_incremental(scene.into(), &index)?;
+        self.revision = Some(scene.revision);
+        self.cursor = None;
+        Ok(plan)
+    }
+
+    fn empty_plan(&mut self) -> TerrainPlan {
+        TerrainPlan {
+            removed: std::mem::take(&mut self.spare_removed),
+            geometry: std::mem::take(&mut self.spare_geometry),
+            placements_changed: false,
+            triangle_count: self.triangle_count,
+            meshes_visited: 0,
+            cells_visited: 0,
+        }
+    }
+
+    pub fn plan_input(&mut self, scene: SceneInput<'_>) -> Result<TerrainPlan, String> {
+        match scene.terrain() {
+            None => self.plan(&scene),
+            Some(index) => self.plan_incremental(scene, index),
+        }
+    }
+
+    fn plan_incremental(
+        &mut self,
+        scene: SceneInput<'_>,
+        index: &TerrainIndex,
+    ) -> Result<TerrainPlan, String> {
+        let reset = self.epoch != Some(scene.epoch) || self.source != index.source;
+        let changed = reset || self.cursor != Some(index.generation);
+        let resync = reset
+            || self.cursor.is_none()
+            || (changed && (index.reset || self.cursor != Some(index.from)));
+        let rebase = reset || self.anchor != scene.anchor;
+        let mut plan = self.empty_plan();
+        if !changed && !rebase {
+            return Ok(plan);
+        }
+
+        // A cursor gap is an explicit resynchronization, never a guessed delta.
+        // The normal path visits only cells affected since the previous publication.
+        let full;
+        let cells = if resync {
+            full = index
+                .cells
+                .keys()
+                .chain(self.signatures.keys())
+                .copied()
+                .collect();
+            &full
+        } else if changed {
+            &index.changed
+        } else {
+            &std::collections::BTreeSet::new()
+        };
+        let mut replacements = Vec::new();
+        let mut total = self.triangle_count;
+        let mut records = self.geometry_records;
+        for &key in cells {
+            plan.cells_visited += 1;
+            let mut materials: [Vec<Group<'_>>; 3] = Default::default();
+            if scene.ready_terrain.contains(&key)
+                && let Some(members) = index.cells.get(&key)
+            {
+                for id in members {
+                    let mesh = &scene.meshes[id];
+                    plan.meshes_visited += 1;
+                    let offset = std::array::from_fn(|i| (mesh.origin[i] - key.origin()[i]) as f32);
+                    let parts = &mut materials[mesh.flags as usize];
+                    let mut first = 0;
+                    while first < mesh.triangles.len() {
+                        if parts.last().is_none_or(|part| {
+                            part.triangle_count == self.limits.triangles_per_geometry
+                        }) {
+                            parts.push(Group::default());
+                        }
+                        let group = parts.last_mut().unwrap();
+                        let count = (mesh.triangles.len() - first).min(
+                            (self.limits.triangles_per_geometry - group.triangle_count) as usize,
+                        );
+                        let range = first..first + count;
+                        group
+                            .signature
+                            .push((*id, mesh.revision, offset, range.clone()));
+                        group.members.push((mesh, range, offset));
+                        group.triangle_count += count as u32;
+                        first += count;
+                    }
                 }
-                let group = parts.last_mut().unwrap();
-                let count = (mesh.triangles.len() - first)
-                    .min((self.limits.triangles_per_geometry - group.triangle_count) as usize);
-                let range = first..first + count;
-                group
-                    .signature
-                    .push((id, mesh.revision, offset, range.clone()));
-                group.members.push((mesh, range, offset));
-                group.triangle_count += count as u32;
-                first += count;
             }
-            total = total
-                .checked_add(mesh.triangles.len() as u64)
-                .ok_or("Static triangle count overflow")?;
-        }
-        if geometry_records > u64::from(self.limits.geometry_records) {
-            return Err("Too many static geometry metadata records".into());
-        }
-        if reset {
-            plan.removed.extend(self.signatures.keys().copied());
-            self.signatures.clear();
-        }
-        self.signatures.retain(|key, _| {
-            if groups.contains_key(key) {
-                true
-            } else {
-                plan.removed.push(*key);
-                false
-            }
-        });
-        for (key, materials) in groups {
-            let count = materials.iter().map(Vec::len).sum();
-            let unchanged = self.signatures.get(&key).is_some_and(|previous| {
-                previous.len() == count
-                    && previous
-                        .iter()
-                        .zip(materials.iter().enumerate().flat_map(|(flags, parts)| {
-                            parts.iter().map(move |part| (flags as u32, part))
-                        }))
-                        .all(|((old_flags, signature), (flags, group))| {
-                            *old_flags == flags && *signature == group.signature
-                        })
-            });
-            if unchanged {
+            let previous = self.signatures.get(&key);
+            let count: usize = materials.iter().map(Vec::len).sum();
+            let unchanged = !reset
+                && previous.is_some_and(|old| {
+                    old.len() == count
+                        && old
+                            .iter()
+                            .zip(materials.iter().enumerate().flat_map(|(flags, parts)| {
+                                parts.iter().map(move |part| (flags as u32, part))
+                            }))
+                            .all(|((flags, signature), (new_flags, group))| {
+                                *flags == new_flags && *signature == group.signature
+                            })
+                });
+            if unchanged || (count == 0 && previous.is_none()) {
                 continue;
             }
-            let mut signature = Vec::with_capacity(count);
+            if let Some(old) = previous {
+                records -= old.len() as u64;
+                for (_, members) in old {
+                    total -= members
+                        .iter()
+                        .map(|(_, _, _, range)| range.len() as u64)
+                        .sum::<u64>();
+                }
+            }
+            records += count as u64;
+            let mut signatures = Vec::with_capacity(count);
             let mut geometries = Vec::with_capacity(count);
             for (flags, parts) in materials.into_iter().enumerate() {
                 for group in parts {
-                    signature.push((flags as u32, group.signature));
+                    total = total
+                        .checked_add(u64::from(group.triangle_count))
+                        .ok_or("Static triangle count overflow")?;
+                    signatures.push((flags as u32, group.signature));
                     geometries.push(TerrainGeometry {
                         flags: flags as u32,
                         members: group
@@ -194,15 +269,30 @@ impl TerrainPlanner {
                     });
                 }
             }
-            self.signatures.insert(key, signature);
-            plan.geometry.push(TerrainUpdate { key, geometries });
+            replacements.push((key, signatures, geometries));
         }
-        // Texture-only revisions do not change acceleration structures or their metadata.
-        plan.placements_changed = reset
-            || self.anchor != scene.anchor
-            || !plan.geometry.is_empty()
-            || !plan.removed.is_empty();
-        if plan.placements_changed {
+        if records > u64::from(self.limits.geometry_records) {
+            return Err("Too many static geometry metadata records".into());
+        }
+        let mut membership_changed = reset;
+        if reset {
+            plan.removed.extend(self.signatures.keys().copied());
+        }
+        // All checks precede mutation of the consumer state/cursor.
+        for (key, signature, geometries) in replacements {
+            if signature.is_empty() {
+                self.signatures.remove(&key);
+                if !reset {
+                    plan.removed.push(key);
+                }
+                membership_changed = true;
+            } else {
+                membership_changed |= self.signatures.insert(key, signature).is_none();
+                plan.geometry.push(TerrainUpdate { key, geometries });
+            }
+        }
+        plan.placements_changed = rebase || !plan.geometry.is_empty() || !plan.removed.is_empty();
+        if membership_changed || rebase {
             self.placements.clear();
             self.placements
                 .extend(self.signatures.keys().map(|&key| TerrainPlacement {
@@ -211,9 +301,12 @@ impl TerrainPlanner {
                 }));
         }
         self.epoch = Some(scene.epoch);
-        self.revision = Some(scene.revision);
+        self.revision = None; // A later diagnostic snapshot must validate independently.
+        self.cursor = Some(index.generation);
+        self.source = index.source;
         self.anchor = scene.anchor;
         self.triangle_count = total;
+        self.geometry_records = records;
         plan.triangle_count = total;
         Ok(plan)
     }

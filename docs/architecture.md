@@ -6,7 +6,7 @@ Minecraft 26.2 / 26.3 / 各版本 Fabric Mixins
           │ 原始不可变字节、源身份、相机
 Java CaptureInbox + InstanceCapture + DynamicFrame → NativeBridge（Java 25 FFM）
           │ 调用期间借用；返回前所有输入完成复制
-prime_engine → prime_scene: protocol → SourceScene / InstanceContext → Scene / Camera
+prime_engine → prime_scene: protocol → SourceScene / InstanceContext → TranslatedScene / SceneInput / Camera
           │ Rust 解码、三角化、全局空间合批、坐标重定位、纹理身份绑定
 prime_vulkan → Slang SPIR-V
           │ BLAS / TLAS / RayQuery / realtime or frozen accumulation
@@ -32,6 +32,16 @@ Java 保留实际接受的 quad 几何、源颜色/tint、拓扑和图集字节�
 Rust `InstanceContext` 先借用旧状态验证整批及最终引用关系，再显式修改持久场景；只访问变化记录和受影响原型的引用计数，不复制全实例表。解码记录与引用计划使用上下文持有的连续工作区，容量跨提交复用；在工作区内排序、检查重复及更新/删除冲突，不依赖线序。相同原型的姿态更新不产生无效的引用减增，失败也清除未发布值并保留可复用容量。常驻映射依然有查找和写入成本，这不是 O(1) 的全量更新。每条记录的 revision 等于该批 sequence，整体严格有序，因而无需永久保存死亡实体 ID。常驻容量有界，持续出生/删除不会仅因历史身份增长而耗尽容量。`prime_scene::translation` 计算静态合批、动态分桶和实例放置，`prime_vulkan` 的几何执行器与 `context::objects` 执行资源分配、上传和 AS 命令；两者通过显式借用协作，不引入后台任务或共享可变缓存。
 
 资源重载与世界切换推进 epoch。捕获开始时记录 epoch 和源序列；完成时再次验证。旧 epoch、已卸载 chunk 的 worker、早于已发布序列的结果会被丢弃。op8 一次原子替换 section 的全部层，空结果清除旧层并保留“已完成空段”；op3 卸载撤销该段可用性。native 完整验证后再发布，并保留完整操作的序列屏障，阻止旧层被迟到结果复活。
+
+## 静态增量发布
+
+`SourceScene` 的身份与计数器不允许仓库外直接修改，源更新只能经过协议的校验和发布。`SectionSequence` 表示完整源观察/卸载的准入顺序，`MeshVersion` 表示上次实际改变几何或材质内容的观察；相同内容只推进前者。协议成功提交时分别合并 mesh、就绪状态和纹理身份的变更，不维护重复工作的队列。源身份迁移同时使旧格和新格失效，空段的首次完成与撤销也必须传播。
+
+`TranslatedScene` 持有持续维护的只读快照与格成员索引。普通变化只校验、替换受影响的 mesh/纹理记录，未变化的节点和不可变源数组保持有效；首次绑定、源切换或丢失增量时从完整驻留状态同步。anchor 改变仍需校验驻留几何的相对坐标范围，随后只修改放置。所有可返回错误的校验在发布之前完成；成功发布后才确认源变更，失败保留旧快照与未消费变更。这个确认只说明 CPU 已消费，与 GPU timeline 完成无关。
+
+生产渲染器消费 `SceneInput`；它没有可变场景访问，只有 `TranslatedScene` 能提供带增量证明的输入。可变 `Scene` 和 `SourceScene::translate` 用于显式诊断/参考快照，不携带可信增量。消费者游标包含上下文身份，地形世代与 `TextureCursor` 是不同类型；不把源序列、相机变化或 GPU serial 当作内容世代。数字相同但所有者不同的输入不能命中旧缓存；所有者转换先结束旧缓存的 CPU 所有权，GPU 资源仍按实际完成证明退休。全局原子计数器只在上下文创建时分配不复用的身份，不调度工作、不存储场景。
+
+地形规划只重组本次受影响且完整的格；不完整格保留 CPU 成员，向执行器发布撤销或不发布几何。同一发布重复消费直接复用，漏过发布则显式重新同步，包括已消失的格。纹理有独立的变化集合和游标，普通地形更新不遍历或克隆纹理表，单个纹理变化只发布该纹理。诊断快照和游标缺口使用完整校验/同步路径。这些规则不改变 64 段就绪门槛，也不把局部增量推断为全帧 O(变化数)：实际整格打包、静态放置表、TLAS 和实例路径仍有各自成本。
 
 ## 规模与容量契约
 

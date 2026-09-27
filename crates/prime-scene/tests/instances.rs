@@ -210,7 +210,7 @@ fn ten_thousand_instances_share_one_prototype_and_stationary_frames_do_no_work()
     assert_eq!(source.instances().resource_revision, 1);
     assert_eq!(source.instances().instance_revision, 2);
     assert_eq!(source.instances().instances[&1], moved);
-    assert_eq!(source.revision, 1);
+    assert_eq!(source.revision(), 1);
 }
 
 #[test]
@@ -462,7 +462,7 @@ fn duplicate_ids_zero_ids_empty_batches_and_conflicting_commands_are_rejected() 
 #[test]
 fn absent_removals_and_revision_only_instance_updates_preserve_render_versions() {
     let mut source = initialized();
-    source.revision = u64::MAX; // The persistent stream does not spend terrain generations.
+    let revision = source.revision();
     source
         .submit(&batch(
             1,
@@ -476,7 +476,7 @@ fn absent_removals_and_revision_only_instance_updates_preserve_render_versions()
     assert_eq!(source.instances().resource_revision, 1);
     assert_eq!(source.instances().instance_revision, 1);
     assert_eq!(source.instances().instances[&20].revision, 2);
-    assert_eq!(source.revision, u64::MAX);
+    assert_eq!(source.revision(), revision);
     // Old batches cannot resurrect removed identities; a genuinely new batch can.
     assert!(
         source

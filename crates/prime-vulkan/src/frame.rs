@@ -1,5 +1,6 @@
 use super::*;
 use crate::cpu_profile::{CpuProfile, FrameCpu, Stage};
+use prime_scene::incremental::SceneInput;
 
 struct HostRecordScope(Arc<Context>);
 impl Drop for HostRecordScope {
@@ -308,15 +309,16 @@ impl Renderer {
 
     /// Explicit image diagnostic only; production uses record_host without readback.
     #[allow(clippy::too_many_arguments)]
-    pub fn render_with_instances(
+    pub fn render_with_instances<'a>(
         &mut self,
-        scene: &Scene,
+        scene: impl Into<SceneInput<'a>>,
         instances: &InstanceScene,
         camera: &Camera,
         width: u32,
         height: u32,
         sample_index: u32,
     ) -> Result<Vec<u8>, String> {
+        let scene = scene.into();
         if self.failed || self.context.is_borrowed() {
             return Err(
                 "Readback requires a healthy, independently owned diagnostic renderer".into(),
@@ -333,7 +335,7 @@ impl Renderer {
     #[allow(clippy::too_many_arguments)]
     fn prepare(
         &mut self,
-        scene: &Scene,
+        scene: SceneInput<'_>,
         instances: &InstanceScene,
         camera: &Camera,
         width: u32,
@@ -359,9 +361,14 @@ impl Renderer {
             if self.geometry.as_ref().is_none_or(|g| g.needs_update(scene)) {
                 cpu.static_updates += 1;
                 self.descriptor_keys = [[0; 10]; FRAME_SLOTS];
-                if let Some(geometry) = &mut self.geometry {
+                if let Some(geometry) = &mut self.geometry
+                    && geometry.same_owner(scene)
+                {
                     geometry.update(&self.context, scene)?;
                 } else {
+                    // End the previous CPU owner before constructing another cache domain.
+                    // Borrowed GPU resources still retire by their recorded completion serials.
+                    self.geometry.take();
                     self.geometry = Some(Geometry::new(&self.context, scene)?);
                 }
                 self.samples = 0;
@@ -371,7 +378,7 @@ impl Renderer {
                 .geometry
                 .as_mut()
                 .unwrap()
-                .prepare_dynamic(&self.context, scene, instances, slot, cpu)?;
+                .prepare_dynamic(&self.context, &scene, instances, slot, cpu)?;
             if dynamic_changed {
                 self.samples = 0;
             }
@@ -649,7 +656,7 @@ impl Renderer {
     #[allow(clippy::too_many_arguments)]
     fn render_offline(
         &mut self,
-        scene: &Scene,
+        scene: SceneInput<'_>,
         instances: &InstanceScene,
         camera: &Camera,
         width: u32,
@@ -740,9 +747,9 @@ impl Renderer {
     /// device/graphics family. Target stays GENERAL. The caller submits this buffer in
     /// host order, signals the attached timeline at serial, and retains the target until then.
     #[allow(clippy::too_many_arguments)]
-    pub unsafe fn record_host_with_instances(
+    pub unsafe fn record_host_with_instances<'a>(
         &mut self,
-        scene: &Scene,
+        scene: impl Into<SceneInput<'a>>,
         instances: &InstanceScene,
         camera: &Camera,
         width: u32,
@@ -753,6 +760,7 @@ impl Renderer {
         view: u64,
         serial: u64,
     ) -> Result<(), String> {
+        let scene = scene.into();
         if self.failed
             || !self.context.is_borrowed()
             || command == 0
@@ -791,7 +799,7 @@ impl Renderer {
                     self.geometry
                         .as_ref()
                         .unwrap()
-                        .cpu_load(scene, instances, &cpu, uploaded),
+                        .cpu_load(&scene, instances, &cpu, uploaded),
                 );
             }
         }
@@ -801,7 +809,7 @@ impl Renderer {
     #[allow(clippy::too_many_arguments)]
     fn record_host_frame(
         &mut self,
-        scene: &Scene,
+        scene: SceneInput<'_>,
         instances: &InstanceScene,
         camera: &Camera,
         width: u32,
