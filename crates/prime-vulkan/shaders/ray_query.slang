@@ -58,9 +58,9 @@ float4 sourceColor(TraceScene resources, Triangle tri, float2 bary) {
             float4(packed & 255, (packed >> 8) & 255, (packed >> 16) & 255, packed >> 24) / 255.0;
     return texel * (tri.c0 * b.x + tri.c1 * b.y + tri.c2 * b.z);
 }
-Triangle loadTriangle(TraceScene resources, uint instance, uint primitive) {
+Triangle loadTriangle(TraceScene resources, uint instance, uint geometry, uint primitive) {
     if ((instance & 0x00800000) == 0)
-        return resources.staticTrianglePages[instance].triangles[primitive];
+        return resources.staticTrianglePages[instance + geometry].triangles[primitive];
     InstanceMaterial material = resources.instanceMaterials[instance & 0x007fffff];
     Triangle tri = material.triangles[primitive];
     if (material.texture != 0xffffffff)
@@ -105,8 +105,9 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
     query.TraceRayInline(resources.acceleration, RAY_FLAG_NONE, 0xff, ray);
     while (query.Proceed()) {
         if (query.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) {
-            Triangle candidate = loadTriangle(resources, query.CandidateInstanceID(),
-                                              query.CandidatePrimitiveIndex());
+            Triangle candidate =
+                    loadTriangle(resources, query.CandidateInstanceID(),
+                                 query.CandidateGeometryIndex(), query.CandidatePrimitiveIndex());
             if (acceptsCoverage(resources, candidate, query.CandidateTriangleBarycentrics(),
                                 origin + direction * query.CandidateTriangleRayT(), coverageSeed))
                 query.CommitNonOpaqueTriangleHit();
@@ -115,8 +116,9 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
     SurfaceHit hit;
     hit.found = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
     if (hit.found) {
-        Triangle tri = loadTriangle(resources, query.CommittedInstanceID(),
-                                    query.CommittedPrimitiveIndex());
+        Triangle tri =
+                loadTriangle(resources, query.CommittedInstanceID(), query.CommittedGeometryIndex(),
+                             query.CommittedPrimitiveIndex());
         float2 bary = query.CommittedTriangleBarycentrics();
         hit.surface = reconstructSurface(tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary,
                                          query.CommittedObjectToWorld3x4(),
@@ -137,8 +139,9 @@ public bool traceOcclusion(TraceScene resources, float3 origin, float3 direction
                          ray);
     while (query.Proceed()) {
         if (query.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) {
-            Triangle tri = loadTriangle(resources, query.CandidateInstanceID(),
-                                        query.CandidatePrimitiveIndex());
+            Triangle tri =
+                    loadTriangle(resources, query.CandidateInstanceID(),
+                                 query.CandidateGeometryIndex(), query.CandidatePrimitiveIndex());
             if (acceptsCoverage(resources, tri, query.CandidateTriangleBarycentrics(),
                                 origin + direction * query.CandidateTriangleRayT(), coverageSeed))
                 query.CommitNonOpaqueTriangleHit();

@@ -133,6 +133,8 @@ pub(super) struct Context {
     max_image_dimension_2d: u32,
     max_compute_work_group_count: [u32; 3],
     pub max_memory_allocations: u32,
+    max_blas_geometries: u64,
+    max_blas_primitives: u64,
     pub timestamp_period: f32,
     pub timestamp_bits: u32,
     pub live_allocations: AtomicU64,
@@ -431,6 +433,8 @@ impl Context {
                 max_image_dimension_2d: properties.limits.max_image_dimension2_d,
                 max_compute_work_group_count: properties.limits.max_compute_work_group_count,
                 max_memory_allocations: properties.limits.max_memory_allocation_count,
+                max_blas_geometries: acceleration_properties.max_geometry_count,
+                max_blas_primitives: acceleration_properties.max_primitive_count,
                 timestamp_period: properties.limits.timestamp_period,
                 timestamp_bits,
                 live_allocations: AtomicU64::new(0),
@@ -537,6 +541,8 @@ impl Context {
                 max_image_dimension_2d: properties.limits.max_image_dimension2_d,
                 max_compute_work_group_count: properties.limits.max_compute_work_group_count,
                 max_memory_allocations: properties.limits.max_memory_allocation_count,
+                max_blas_geometries: acceleration_properties.max_geometry_count,
+                max_blas_primitives: acceleration_properties.max_primitive_count,
                 timestamp_period: properties.limits.timestamp_period,
                 timestamp_bits: queue_properties.timestamp_valid_bits,
                 live_allocations: AtomicU64::new(0),
@@ -1232,8 +1238,8 @@ pub(super) struct Acceleration {
 pub(super) struct PreparedAcceleration<'a> {
     acceleration: Acceleration,
     scratch: Buffer,
-    geometry: vk::AccelerationStructureGeometryKHR<'a>,
-    count: u32,
+    geometries: Vec<vk::AccelerationStructureGeometryKHR<'a>>,
+    ranges: Vec<vk::AccelerationStructureBuildRangeInfoKHR>,
     kind: vk::AccelerationStructureTypeKHR,
     flags: vk::BuildAccelerationStructureFlagsKHR,
 }
@@ -1242,7 +1248,7 @@ impl PreparedAcceleration<'_> {
     /// Record an independent build. The batch owner inserts one read barrier
     /// after all independent BLAS builds, before a dependent TLAS or tracing.
     pub fn record_unbarriered(&self, command: vk::CommandBuffer) {
-        self.record_geometry(command, self.geometry, self.count);
+        self.record_geometries(command, &self.geometries, &self.ranges);
     }
 
     /// Rebuild into retained capacity. The owner orders prior trace/build users
@@ -1253,25 +1259,34 @@ impl PreparedAcceleration<'_> {
         geometry: vk::AccelerationStructureGeometryKHR<'_>,
         count: u32,
     ) {
-        assert!(count <= self.count);
-        let context = &self.acceleration.context;
+        assert!(self.ranges.len() == 1 && count <= self.ranges[0].primitive_count);
         let geometries = [geometry];
+        let ranges = [vk::AccelerationStructureBuildRangeInfoKHR::default().primitive_count(count)];
+        self.record_geometries(command, &geometries, &ranges);
+    }
+
+    fn record_geometries(
+        &self,
+        command: vk::CommandBuffer,
+        geometries: &[vk::AccelerationStructureGeometryKHR<'_>],
+        ranges: &[vk::AccelerationStructureBuildRangeInfoKHR],
+    ) {
+        let context = &self.acceleration.context;
         let address =
             self.scratch.address().div_ceil(context.scratch_alignment) * context.scratch_alignment;
         let info = vk::AccelerationStructureBuildGeometryInfoKHR::default()
             .ty(self.kind)
             .flags(self.flags)
             .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
-            .geometries(&geometries)
+            .geometries(geometries)
             .dst_acceleration_structure(self.acceleration.handle)
             .scratch_data(vk::DeviceOrHostAddressKHR {
                 device_address: address,
             });
-        let ranges = [vk::AccelerationStructureBuildRangeInfoKHR::default().primitive_count(count)];
         unsafe {
             context
                 .acceleration
-                .cmd_build_acceleration_structures(command, &[info], &[&ranges]);
+                .cmd_build_acceleration_structures(command, &[info], &[ranges]);
         }
     }
 
@@ -1295,17 +1310,16 @@ impl Drop for Acceleration {
     }
 }
 impl Acceleration {
-    pub fn prepare<'a>(
+    pub fn prepare_geometries<'a>(
         context: &Arc<Context>,
-        geometry: vk::AccelerationStructureGeometryKHR<'a>,
-        count: u32,
-        kind: vk::AccelerationStructureTypeKHR,
+        geometries: Vec<vk::AccelerationStructureGeometryKHR<'a>>,
+        counts: &[u32],
     ) -> Result<PreparedAcceleration<'a>, String> {
-        Self::prepare_with_flags(
+        Self::prepare_ranges(
             context,
-            geometry,
-            count,
-            kind,
+            geometries,
+            counts,
+            vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL,
             vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE,
         )
     }
@@ -1317,8 +1331,24 @@ impl Acceleration {
         kind: vk::AccelerationStructureTypeKHR,
         flags: vk::BuildAccelerationStructureFlagsKHR,
     ) -> Result<PreparedAcceleration<'a>, String> {
+        Self::prepare_ranges(context, vec![geometry], &[count], kind, flags)
+    }
+
+    fn prepare_ranges<'a>(
+        context: &Arc<Context>,
+        geometries: Vec<vk::AccelerationStructureGeometryKHR<'a>>,
+        counts: &[u32],
+        kind: vk::AccelerationStructureTypeKHR,
+        flags: vk::BuildAccelerationStructureFlagsKHR,
+    ) -> Result<PreparedAcceleration<'a>, String> {
+        assert_eq!(geometries.len(), counts.len());
+        if kind == vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL
+            && (geometries.len() as u64 > context.max_blas_geometries
+                || counts.iter().map(|&n| u64::from(n)).sum::<u64>() > context.max_blas_primitives)
+        {
+            return Err("Static/dynamic BLAS exceeds device geometry or primitive capacity".into());
+        }
         unsafe {
-            let geometries = [geometry];
             let info = vk::AccelerationStructureBuildGeometryInfoKHR::default()
                 .ty(kind)
                 .flags(flags)
@@ -1328,7 +1358,7 @@ impl Acceleration {
             context.acceleration.get_acceleration_structure_build_sizes(
                 vk::AccelerationStructureBuildTypeKHR::DEVICE,
                 &info,
-                &[count],
+                counts,
                 &mut sizes,
             );
             let buffer = Buffer::new(
@@ -1368,8 +1398,13 @@ impl Acceleration {
             Ok(PreparedAcceleration {
                 acceleration: result,
                 scratch,
-                geometry,
-                count,
+                geometries,
+                ranges: counts
+                    .iter()
+                    .map(|&count| {
+                        vk::AccelerationStructureBuildRangeInfoKHR::default().primitive_count(count)
+                    })
+                    .collect(),
                 kind,
                 flags,
             })
@@ -1535,6 +1570,8 @@ mod host_tests {
                 max_image_dimension_2d: 1,
                 max_compute_work_group_count: [1; 3],
                 max_memory_allocations: 1,
+                max_blas_geometries: u64::MAX,
+                max_blas_primitives: u64::MAX,
                 timestamp_period: 1.0,
                 timestamp_bits: 0,
                 live_allocations: AtomicU64::new(2),

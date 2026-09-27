@@ -78,7 +78,7 @@ Java 从 `VulkanCommandEncoder.allocateAndBeginTransientCommandBuffer()` 获得�
 
 ## 尚存的 CPU 成本
 
-消除图像回读只解决输出传递。地形更新仍经历 Java 源 quad 编码、不可变 section 包和 FFM staging；24 字节源顶点排除原版 AO/light 数据。op8 原子替换该 section 的全部层，完整验证后才发布。源 sequence 推进与渲染内容 revision 分离；位置、源 RGBA、UV、纹理、材质和原点精确相同时保留 Arc、场景 revision 与 GPU 几何身份，不依赖哈希碰撞假设。原始 bytes 仍需传输和解码比较，变化时仍有分配及 translation 成本。
+消除图像回读只解决输出传递。地形更新仍经历 Java 源 quad 编码、不可变 section 包和 FFM staging；24 字节源顶点排除原版 AO/light 数据。op8 原子替换 CPU 缓存中该 section 的全部层，完整验证后才发布源状态。翻译层等待 64 个不同位置的段全部就绪，才合批和上传一个整格静态 BLAS，之后仍保留逐段 CPU 缓存用于整体替换。实际空段计入就绪，op3 卸载撤销就绪。源 sequence 推进与渲染内容 revision 分离；段可用性不变，且位置、源 RGBA、UV、纹理、材质和原点精确相同时保留 Arc、场景 revision 与 GPU 几何身份，不依赖哈希碰撞假设。原始 bytes 仍需传输和解码比较，变化时仍有分配及 translation 成本。
 
 原始动态回退数据从实际准备的批量 mesh 复制到可复用 native arena，随后一次 FFM 调用同步解码，省去该快照的 heap 包和二次 staging。PT 独占世界 pass 时保留实际 prepare/finishPrepare 回调，并在捕获后释放原始源页，省去原版世界 GPU upload/draw；未知输出仍有原版 CPU 展开和一次捕获复制。手/HUD 继续原版路径。这不是整条输入路径零复制。
 
@@ -86,7 +86,7 @@ Java 从 `VulkanCommandEncoder.allocateAndBeginTransientCommandBuffer()` 获得�
 
 Rust 验证完整变化批次后更新源状态，局部原型共享持久 BLAS；同一原型的纯姿态更新不反复修改引用计数。实例出生、消失和运动不重建其他对象的 BLAS。快路径必须建立在正式资源契约和当前真实回调结果上，不能仅凭对象类型或连续几帧不变推定可缓存。
 
-原始回退仍有全量源复制、Rust 解码和分桶比较；GPU 按 16 格重心桶仅更新变化几何。静态 mesh 翻译、BLAS 与材质不因动态序号变化而重建。实例变化时仍遍历常驻实例、上传完整元数据和 AS 实例输入，并 BUILD 综合 TLAS。稳定帧、局部变化帧与大量原型变化帧的成本因此不同，不能由低 FFI 字节数推断整帧恒定成本。
+原始回退仍有全量源复制、Rust 解码和分桶比较；翻译层按统一的 64 格世界网格生成变化桶及局部容量分段，GPU 执行这些更新且不识别 MC 区块。静态/动态分离及未来光源树的对齐约定见 [空间合批](spatial-batching.md)。静态 mesh 翻译、BLAS 与材质不因动态序号变化而重建。实例变化时仍遍历常驻实例、上传完整元数据和 AS 实例输入，并 BUILD 综合 TLAS。稳定帧、局部变化帧与大量原型变化帧的成本因此不同，不能由低 FFI 字节数推断整帧恒定成本。
 
 | 生命周期 | 捕获与提交 | 持久状态和剩余成本 |
 | --- | --- | --- |

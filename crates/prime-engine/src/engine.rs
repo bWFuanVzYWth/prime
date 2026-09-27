@@ -314,7 +314,7 @@ mod tests {
         engine.prepare(&frame).unwrap();
         let scene = &engine.translated.as_ref().unwrap().2;
         assert_eq!(engine.translation_revision, translation_revision + 1);
-        assert_eq!(scene.dynamic.origin, [-512.0, 0.0, 0.0]);
+        assert_eq!(scene.dynamic.origin, [0.0; 3]);
         assert!(Arc::ptr_eq(&dynamic_vertices, &scene.dynamic.triangles));
         assert!(Arc::ptr_eq(
             &static_vertices,

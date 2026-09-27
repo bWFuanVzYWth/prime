@@ -462,6 +462,9 @@ mod tests {
         use prime_scene::scene::{Instance, Prototype};
         let mut host = HostBenchmark::new(32, 24).unwrap();
         let mut scene = Scene {
+            ready_terrain: [[0.0; 3], [128.0, 0.0, 0.0]]
+                .map(|origin| prime_scene::spatial::Cell::containing(origin).unwrap())
+                .into(),
             epoch: 1,
             ..Default::default()
         };
@@ -558,6 +561,9 @@ mod tests {
     fn host_benchmark_retires_slots_and_reports_every_serial() {
         let mut host = HostBenchmark::new(64, 48).unwrap();
         let mut scene = Scene {
+            ready_terrain: [[0.0; 3], [128.0, 0.0, 0.0]]
+                .map(|origin| prime_scene::spatial::Cell::containing(origin).unwrap())
+                .into(),
             revision: 1,
             epoch: 1,
             ..Scene::default()
@@ -608,7 +614,6 @@ mod tests {
         assert_eq!(host.enqueue(&scene, &camera, 0).unwrap().serial, 2);
         host.resize(97, 61).unwrap();
         assert_eq!(host.enqueue(&scene, &camera, 0).unwrap().serial, 3);
-        scene.meshes.get_mut(&(1, 0)).unwrap().origin[0] -= 256.0;
         scene.anchor[0] += 256.0;
         camera.position[0] -= 256.0;
         scene.revision += 1;
@@ -632,7 +637,7 @@ mod tests {
         for (frame, count) in [2, 4096, 17, 8192, 0, 32, 2, 0].into_iter().enumerate() {
             scene.dynamic.revision += 1;
             scene.dynamic.triangles = make_mesh(count, 1).triangles;
-            scene.dynamic.origin = [frame as f32 * 0.01, 0.0, 0.0];
+            scene.dynamic.origin = [frame as f64 * 0.01, 0.0, 0.0];
             host.enqueue(&scene, &camera, frame as u32).unwrap();
         }
         assert_eq!(host.drain().unwrap().len(), 8);

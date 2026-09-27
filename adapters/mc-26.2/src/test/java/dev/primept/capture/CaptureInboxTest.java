@@ -95,6 +95,10 @@ class CaptureInboxTest {
         assertNotNull(removal);
         assertTrue(removal.removal());
         assertEquals(1, removal.packets().size());
+        var packet = java.nio.ByteBuffer.wrap(removal.packets().getFirst())
+                             .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        assertEquals(3, packet.getInt(8),
+                     "Unload must revoke availability, not publish a complete empty section");
         assertNull(inbox.poll());
         assertTrue(inbox.sections().isEmpty());
     }

@@ -114,7 +114,7 @@ fn decode_java_source_quads_24_byte_fixture_preserves_every_corner() {
     let captured = &scene.meshes[&(91, 1)];
     assert_eq!(captured.revision, 3);
     assert_eq!(captured.flags, 1);
-    assert_eq!(captured.origin, [256.0, 0.0, 0.0]);
+    assert_eq!(captured.origin, [29_999_984.0, 64.0, -16.0]);
     for (triangle, corners) in captured.triangles.iter().zip([[0, 1, 2], [2, 3, 0]]) {
         assert_eq!(triangle.texture_id, 1);
         assert_eq!(triangle.flags, 1);
@@ -213,7 +213,11 @@ fn snapshots_share_immutable_vertices_across_rebases_and_keep_old_versions_alive
         &first.meshes[&(91, 0)].triangles,
         &shifted.meshes[&(91, 0)].triangles
     ));
-    assert_eq!(shifted.meshes[&(91, 0)].origin, [256.0, 0.0, 0.0]);
+    assert_eq!(
+        shifted.meshes[&(91, 0)].origin,
+        first.meshes[&(91, 0)].origin
+    );
+    assert_eq!(shifted.meshes[&(91, 0)].origin, [29_999_984.0, 64.0, -16.0]);
     let mut changed = mesh(2, 0);
     changed[104..108].copy_from_slice(&0.5_f32.to_le_bytes());
     source.submit(&changed).unwrap();
@@ -351,7 +355,7 @@ fn dynamic_frames_replace_atomically_without_invalidating_static_geometry() {
     let rebased = source
         .translate_dynamic([29_999_728.0, 64.0, -16.0])
         .unwrap();
-    assert_eq!(rebased.origin, [256.0, 0.0, 0.0]);
+    assert_eq!(rebased.origin, [29_999_984.0, 64.0, -16.0]);
     assert!(std::sync::Arc::ptr_eq(
         &scene.dynamic.triangles,
         &rebased.triangles

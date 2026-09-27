@@ -1,6 +1,7 @@
 use super::*;
 use crate::plan::{INHERIT, ObjectKey, translation};
 use prime_scene::scene::{DynamicScene, Instance, Prototype, Texture, Triangle};
+use prime_scene::spatial::{BatchKey, CELL_EDGE, Cell};
 
 fn quad() -> Vec<Triangle> {
     let corners = [
@@ -387,11 +388,11 @@ fn gpu_raw_spatial_buckets_preserve_unaffected_blas_on_birth_move_and_remove() {
         !geometry
             .objects
             .addresses()
-            .contains_key(&ObjectKey::Raw([62, 0, 0], 0))
+            .contains_key(&raw_key([15, 0, 0], 0))
     );
     assert_eq!(
-        geometry.objects.addresses()[&ObjectKey::Raw([0, 0, 0], 0)],
-        before[&ObjectKey::Raw([0, 0, 0], 0)]
+        geometry.objects.addresses()[&raw_key([0, 0, 0], 0)],
+        before[&raw_key([0, 0, 0], 0)]
     );
 
     scene.dynamic.revision += 1;
@@ -441,4 +442,12 @@ fn gpu_raw_spatial_buckets_preserve_unaffected_blas_on_birth_move_and_remove() {
     scene.dynamic.revision += 1;
     let error = renderer.render(&scene, &camera(), 16, 16, 0).unwrap_err();
     assert!(error.contains("healthy"), "{error}");
+}
+
+fn raw_key(coordinates: [i32; 3], flags: u32) -> ObjectKey {
+    ObjectKey::Raw(BatchKey {
+        cell: Cell::containing(coordinates.map(|v| f64::from(v) * CELL_EDGE)).unwrap(),
+        flags,
+        part: 0,
+    })
 }

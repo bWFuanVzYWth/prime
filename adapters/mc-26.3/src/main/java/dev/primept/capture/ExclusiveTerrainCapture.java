@@ -236,8 +236,10 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         var pos = chunk.getPos();
         for (int y = world.getMinSectionY(); y <= world.getMaxSectionY(); ++y) {
             long key = SectionPos.asLong(pos.x(), y, pos.z());
-            if (!chunk.getSection(y - world.getMinSectionY()).hasOnlyAir() ||
-                includeEmpty && compiled.contains(key))
+            // An observed empty compile is a complete source snapshot, not a missing section.
+            // Capture does not know which snapshots the native translator will batch together.
+            if (!compiled.contains(key) ||
+                !chunk.getSection(y - world.getMinSectionY()).hasOnlyAir() || includeEmpty)
                 work.add(key);
         }
     }

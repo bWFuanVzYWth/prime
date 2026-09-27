@@ -29,12 +29,33 @@ public final class NativeSmoke {
                 vertices.putFloat(0.5f).putFloat(0.5f).putInt(0);
             }
             vertices.flip();
-            bridge.submit(Packets.mesh(1, 1, 1, 0, 0, 0, 4, 28, 0, 12, 16, 4, 0, 0, vertices));
+            bridge.submit(Packets.sectionReplace(
+                    1, 1, 1, 0, 0, 0,
+                    List.of(new Packets.SectionLayer(0, 1, 0, 4, 4, 28, 0, 12, 16, vertices))));
             byte[] frame = Packets.frame(
                     1, 0, 2, 4, new float[] {0, -.4472136f, -.8944272f}, new float[] {1, 0, 0},
                     new float[] {0, .8944272f, -.4472136f}, 1.05f, width, height, 0);
             ByteBuffer rgba = ByteBuffer.allocateDirect(width * height * 4);
-            bridge.renderDiagnostic(frame, rgba);
+            byte[] waiting = pixels(bridge, frame, rgba);
+            for (int slot = 1; slot < 63; ++slot)
+                bridge.submit(Packets.sectionReplace(1, 1000 + slot, 1, (slot / 16) * 16,
+                                                     (slot / 4 % 4) * 16, (slot % 4) * 16,
+                                                     List.of()));
+            if (!Arrays.equals(waiting, pixels(bridge, frame, rgba)))
+                throw new AssertionError("Incomplete 63-section cell published terrain");
+            bridge.submit(Packets.sectionReplace(1, 1063, 1, 48, 48, 48, List.of()));
+            byte[] complete = pixels(bridge, frame, rgba);
+            if (Arrays.equals(waiting, complete))
+                throw new AssertionError(
+                        "64th complete empty section did not publish cached terrain");
+            bridge.submit(Packets.remove(1, 1063, 2));
+            if (!Arrays.equals(waiting, pixels(bridge, frame, rgba)))
+                throw new AssertionError(
+                        "Withdrawing a section left a partial or stale cell visible");
+            bridge.submit(Packets.sectionReplace(1, 1063, 3, 48, 48, 48, List.of()));
+            if (!Arrays.equals(complete, pixels(bridge, frame, rgba)))
+                throw new AssertionError(
+                        "Recompleted cell did not restore its CPU-cached geometry");
             var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
             int firstColor = 0;
             boolean varied = false;
@@ -181,7 +202,7 @@ public final class NativeSmoke {
             if (!rejected)
                 throw new AssertionError("Malformed packet must fail at the native boundary");
             System.out.println(
-                    "FFM Vulkan smoke passed: complete-section, raw and persistent-instance packets -> Rust -> Slang -> RGBA; multi-layer op8/unchanged/material change/late rejection/removal, dynamic visibility, affine/texture instance, unchanged-frame zero-submit, atomic removal, alpha-zero visibility/shadows, owner-thread and malformed-input checks; " +
+                    "FFM Vulkan smoke passed: 63/64-section visibility gate, withdrawal/reload, complete-section, raw and persistent-instance packets -> Rust -> Slang -> RGBA; multi-layer op8/unchanged/material change/late rejection/removal, dynamic visibility, affine/texture instance, unchanged-frame zero-submit, atomic removal, alpha-zero visibility/shadows, owner-thread and malformed-input checks; " +
                     args[1]);
         }
     }

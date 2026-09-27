@@ -16,6 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("samples must be 1..4096".into());
     }
     let mut scene = Scene {
+        ready_terrain: [prime_scene::spatial::Cell::containing([0.0; 3])?].into(),
         revision: 1,
         ..Default::default()
     };

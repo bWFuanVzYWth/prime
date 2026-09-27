@@ -13,6 +13,9 @@ fn camera() -> Camera {
 }
 fn plane() -> Scene {
     let mut scene = Scene {
+        ready_terrain: [[0.0; 3], [128.0, 0.0, 0.0]]
+            .map(|origin| prime_scene::spatial::Cell::containing(origin).unwrap())
+            .into(),
         revision: 1,
         epoch: 1,
         ..Default::default()
@@ -101,8 +104,10 @@ fn guide(renderer: &Renderer, image: &Image, components: usize) -> Vec<f32> {
     readback
         .read(bytes)
         .unwrap()
-        .chunks_exact(4)
-        .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|bytes| f32::from_le_bytes(*bytes))
         .collect()
 }
 fn guides(renderer: &Renderer) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
@@ -129,9 +134,9 @@ fn gpu_realtime_guides_match_primary_visibility_and_have_no_history() {
     let first = renderer.render(&scene, &camera, 31, 17, 0).unwrap();
     let (noise, depth, normal) = guides(&renderer);
     assert!(noise.iter().all(|v| v.is_finite() && *v >= 0.0));
-    for (z, n) in depth.iter().zip(normal.chunks_exact(4)) {
+    for (z, n) in depth.iter().zip(normal.as_chunks::<4>().0.iter()) {
         assert!((*z - 2.0).abs() < 2e-5, "linear view Z: {z}");
-        assert_eq!(n, [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(*n, [0.0, 0.0, 1.0, 1.0]);
     }
     renderer.render(&scene, &camera, 31, 17, 23).unwrap();
     let (next, _, _) = guides(&renderer);
@@ -157,7 +162,13 @@ fn gpu_realtime_guides_match_primary_visibility_and_have_no_history() {
             })
             .unwrap();
         let image = renderer.render(&scene, &camera, 31, 17, 0).unwrap();
-        assert!(image.chunks_exact(4).all(|rgba| rgba == expected));
+        assert!(
+            image
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|rgba| *rgba == expected)
+        );
         assert_eq!(
             guides(&renderer).0,
             noise,
@@ -177,7 +188,12 @@ fn gpu_realtime_guides_match_primary_visibility_and_have_no_history() {
     scene.revision += 1;
     renderer.render(&scene, &camera, 31, 17, 0).unwrap();
     let (sky, depth, normal) = guides(&renderer);
-    assert!(sky.chunks_exact(4).all(|p| p[0] > 0.0 && p[3] == 1.0));
+    assert!(
+        sky.as_chunks::<4>()
+            .0
+            .iter()
+            .all(|p| p[0] > 0.0 && p[3] == 1.0)
+    );
     assert!(depth.iter().all(|z| *z == f32::MAX));
     assert!(normal.iter().all(|n| *n == 0.0));
     renderer.render(&scene, &camera, 17, 31, 1).unwrap();

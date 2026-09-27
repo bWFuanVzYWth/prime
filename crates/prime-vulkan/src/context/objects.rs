@@ -11,6 +11,7 @@ use crate::textures::Textures;
 use crate::{FRAME_SLOTS, uint};
 use ash::vk;
 use prime_scene::scene::{InstanceScene, Scene};
+use prime_scene::translation::BatchLimits;
 use std::{collections::BTreeMap, sync::Arc};
 
 struct Object {
@@ -39,7 +40,10 @@ impl Objects {
     pub fn new(context: &Arc<Context>) -> Result<Self, String> {
         Ok(Self {
             objects: BTreeMap::new(),
-            planner: Planner::default(),
+            planner: Planner::new(BatchLimits {
+                triangles: MAX_MATERIAL_RECORDS,
+                placements: OBJECT_BIT - 1,
+            })?,
             materials: MaterialArena::new(),
             indices: index_buffer(context, 16)?,
             metadata: Buffer::new(
@@ -196,10 +200,10 @@ impl Objects {
         let metadata_offset = self.bytes.len() as u64;
         let mut metadata_bytes = 0;
         if plan.placements_changed {
-            let placements = self.planner.placements();
+            let count = self.planner.placement_count();
             self.instances.clear();
-            self.instances.reserve(placements.len());
-            for (index, placement) in placements.iter().enumerate() {
+            self.instances.reserve(count);
+            for (index, placement) in self.planner.placements().enumerate() {
                 let object = self
                     .objects
                     .get(&placement.key)
@@ -239,8 +243,8 @@ impl Objects {
                     },
                 });
             }
-            metadata_bytes = (placements.len() as u64 * 48).max(48);
-            if placements.is_empty() {
+            metadata_bytes = (count as u64 * 48).max(48);
+            if count == 0 {
                 self.bytes.extend_from_slice(&[0; 48]);
             }
             if metadata_bytes > self.metadata.size {

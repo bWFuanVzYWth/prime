@@ -270,6 +270,14 @@ mod tests {
             ]
         };
         let mut scene = Scene {
+            ready_terrain: [
+                [-64.0, 0.0, 0.0],
+                [0.0; 3],
+                [64.0, 0.0, 0.0],
+                [128.0, 0.0, 0.0],
+            ]
+            .map(|origin| prime_scene::spatial::Cell::containing(origin).unwrap())
+            .into(),
             revision: 1,
             epoch: 1,
             ..Default::default()
@@ -426,6 +434,14 @@ mod tests {
     fn gpu_cluster_identity_incremental_update_rebase_epoch_and_texture_lifetimes() {
         let mut renderer = Renderer::new().unwrap();
         let mut scene = Scene {
+            ready_terrain: [
+                [-64.0, 0.0, 0.0],
+                [0.0; 3],
+                [64.0, 0.0, 0.0],
+                [128.0, 0.0, 0.0],
+            ]
+            .map(|origin| prime_scene::spatial::Cell::containing(origin).unwrap())
+            .into(),
             revision: 1,
             ..Default::default()
         };
@@ -500,9 +516,6 @@ mod tests {
         assert_eq!(renderer.geometry.as_ref().unwrap().rebuilt_clusters, 1);
         // Anchor changes preserve local BLAS even without a separate scene revision bump.
         scene.anchor[0] += 256.0;
-        for mesh in scene.meshes.values_mut() {
-            mesh.origin[0] -= 256.0;
-        }
         camera.position[0] -= 256.0;
         assert_eq!(
             center(&renderer.render(&scene, &camera, 64, 48, 0).unwrap()),
@@ -546,6 +559,14 @@ mod tests {
             vertical_fov_radians: 1.0,
         };
         let mut scene = Scene {
+            ready_terrain: [
+                [-64.0, 0.0, 0.0],
+                [0.0; 3],
+                [64.0, 0.0, 0.0],
+                [128.0, 0.0, 0.0],
+            ]
+            .map(|origin| prime_scene::spatial::Cell::containing(origin).unwrap())
+            .into(),
             revision: 1,
             ..Scene::default()
         };

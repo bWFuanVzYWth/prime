@@ -251,7 +251,7 @@ mod benchmark {
                 SceneMesh {
                     revision: 1,
                     flags,
-                    origin,
+                    origin: origin.map(f64::from),
                     triangles: triangles.into(),
                 },
             );
@@ -264,6 +264,11 @@ mod benchmark {
             up: [0.0, pitch.cos(), -pitch.sin()],
             vertical_fov_radians: 65.0_f32.to_radians(),
         };
+        scene.ready_terrain = scene
+            .meshes
+            .values()
+            .map(|mesh| prime_scene::spatial::Cell::containing(mesh.origin).unwrap())
+            .collect();
         (scene, camera)
     }
 
@@ -428,7 +433,8 @@ mod benchmark {
         let phase = format!("dynamic_{count}");
         let start = Instant::now();
         scene.dynamic.triangles = dynamic_triangles(count, options.seed);
-        scene.dynamic.origin = camera.position;
+        scene.dynamic.origin =
+            std::array::from_fn(|i| scene.anchor[i] + f64::from(camera.position[i]));
         scene.dynamic.revision += 1;
         let mut generated = Record::cpu(
             renderer.device_name(),
@@ -602,9 +608,6 @@ mod benchmark {
             &mut records,
         )?;
         let start = Instant::now();
-        for mesh in scene.meshes.values_mut() {
-            mesh.origin[0] -= 256.0;
-        }
         scene.anchor[0] += 256.0;
         camera.position[0] -= 256.0;
         scene.revision += 1;

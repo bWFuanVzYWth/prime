@@ -236,7 +236,7 @@ impl SourceScene {
                     .range((key, 0)..=(key, u32::MAX))
                     .map(|(k, _)| *k)
                     .collect();
-                changed = false;
+                changed = self.sections.remove(key);
                 for mesh_key in keys {
                     let mesh = self.meshes.remove(&mesh_key).unwrap();
                     self.triangle_count -= mesh.triangles.len();
@@ -362,6 +362,7 @@ impl SectionScratch {
 
 struct SectionPlan {
     key: u64,
+    origin: [f64; 3],
     sequence: u64,
     present: [bool; 256],
     triangle_count: usize,
@@ -384,6 +385,7 @@ impl SourceScene {
             self.triangle_count = plan.triangle_count;
             self.revision = plan.revision;
             self.removed.insert(plan.key, plan.sequence);
+            self.sections.publish(plan.key, plan.origin);
         });
         // Failed plans cannot leave geometry or pending edits for the next packet.
         scratch.clear();
@@ -497,7 +499,8 @@ impl SourceScene {
         if self.meshes.len() - scratch.old_layers.len() + new_layers > MAX_SECTIONS {
             return Err("mesh capacity exceeded".into());
         }
-        let changed = !scratch.replacements.is_empty()
+        let changed = self.sections.origin(key) != Some(&origin)
+            || !scratch.replacements.is_empty()
             || scratch.old_layers.iter().any(|layer| {
                 !present[*layer as usize] && !self.meshes[&(key, *layer)].triangles.is_empty()
             });
@@ -510,6 +513,7 @@ impl SourceScene {
         };
         Ok(SectionPlan {
             key,
+            origin,
             sequence,
             present,
             triangle_count: other_triangles + triangles,

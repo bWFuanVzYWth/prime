@@ -1,6 +1,10 @@
 //! Renderer values contain no Minecraft objects, borrowed FFM memory or Vulkan handles.
 use crate::instances::InstanceContext;
-use std::{collections::BTreeMap, sync::Arc};
+use crate::spatial::{Cell, TerrainAvailability};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Triangle {
@@ -25,7 +29,8 @@ pub type MeshKey = (u64, u32);
 pub struct SceneMesh {
     pub revision: u64,
     pub flags: u32,
-    pub origin: [f32; 3],
+    /// Absolute source origin. Grid ownership is resolved before camera-relative narrowing.
+    pub origin: [f64; 3],
     pub triangles: Arc<[Triangle]>,
 }
 
@@ -33,7 +38,8 @@ pub struct SceneMesh {
 #[derive(Clone, Default)]
 pub struct DynamicScene {
     pub revision: u64,
-    pub origin: [f32; 3],
+    /// Absolute source origin; camera rebasing does not change spatial membership.
+    pub origin: [f64; 3],
     pub triangles: Arc<[Triangle]>,
 }
 
@@ -79,6 +85,9 @@ pub struct Scene {
     pub epoch: u64,
     pub anchor: [f64; 3],
     pub meshes: BTreeMap<MeshKey, SceneMesh>,
+    /// Only cells with all 64 complete source sections may publish static geometry.
+    /// Direct renderer fixtures must explicitly declare their complete cells too.
+    pub ready_terrain: BTreeSet<Cell>,
     pub textures: BTreeMap<u32, Texture>,
     pub dynamic: DynamicScene,
 }
@@ -126,6 +135,8 @@ pub struct SourceScene {
     pub epoch: u64,
     pub revision: u64,
     pub(crate) meshes: BTreeMap<(u64, u32), Mesh>,
+    /// Complete source snapshots, including observed empty sections; absence is unknown.
+    pub(crate) sections: TerrainAvailability,
     /// Latest complete replacement/removal sequence, independent of content revisions.
     pub(crate) removed: BTreeMap<u64, u64>,
     pub(crate) textures: BTreeMap<u32, Texture>,
@@ -169,7 +180,7 @@ impl SourceScene {
                 SceneMesh {
                     revision: mesh.revision,
                     flags: mesh.flags,
-                    origin: offset.map(|p| p as f32),
+                    origin: mesh.origin,
                     triangles: mesh.triangles.clone(),
                 },
             );
@@ -179,6 +190,7 @@ impl SourceScene {
             epoch: self.epoch,
             anchor,
             meshes,
+            ready_terrain: self.sections.ready.clone(),
             textures: self.textures.clone(),
             dynamic: self.translate_dynamic(anchor)?,
         })
@@ -205,7 +217,7 @@ impl SourceScene {
         }
         Ok(DynamicScene {
             revision: self.dynamic.revision,
-            origin: offset.map(|p| p as f32),
+            origin: self.dynamic.origin,
             triangles: self.dynamic.triangles.clone(),
         })
     }

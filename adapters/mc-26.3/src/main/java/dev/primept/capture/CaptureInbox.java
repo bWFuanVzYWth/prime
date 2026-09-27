@@ -137,11 +137,7 @@ public final class CaptureInbox {
                 for (long key : sections) {
                     revisions.remove(key);
                     long sequence = ++revision;
-                    enqueue(key, sequence, true,
-                            List.of(Packets.sectionReplace(epoch, key, sequence,
-                                                           SectionPos.x(key) * 16.0,
-                                                           SectionPos.y(key) * 16.0,
-                                                           SectionPos.z(key) * 16.0, List.of())));
+                    enqueue(key, sequence, true, List.of(Packets.remove(epoch, key, sequence)));
                 }
         } catch (RuntimeException exception) {
             fail(exception);

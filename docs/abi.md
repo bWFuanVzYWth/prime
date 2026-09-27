@@ -18,7 +18,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本�
 
 - **1 reset**：仅头部，epoch 必须严格增加；清空几何、纹理与 tombstone。
 - **2 mesh**：替换一个 `(section, layer)`；revision 必须大于同层已有 revision 和该 section 删除 revision。
-- **3 remove section**：头后 `section:u64, revision:u64`；删除全部层，记录 tombstone。revision 必须大于已有层。
+- **3 remove section**：头后 `section:u64, revision:u64`；删除全部层并撤销该段可用性，记录 tombstone。revision 必须大于已有层。
 - **4 texture**：头后 `id:u32, width:u32, height:u32, reserved:u32`，然后恰好 `width*height*4` 字节源编码 RGBA8。id=0 保留给白纹理。
 - **6 dynamic snapshot**：原子替换原始动态回退几何，格式见下文；序号独立于静态区块 revision。
 - **7 instance delta**：原子发布局部几何原型及实例增量，格式见下文；与 op6 分别维护序号和场景。
@@ -47,9 +47,9 @@ Position 为 f32×3，UV 为 f32×2。当前两个 Java 适配器的静态地形
 
 op=8 固定头共 **72 字节**：公共头后为 `section:u64`（24）、`sequence:u64`（32）、世界原点 `f64×3`（40/48/56）、`layer_count:u32`（64）、`reserved:u32=0`（68）。sequence 必须非零，并晚于该 section 的全部已有层与完整操作屏障。
 
-每层为 **40 字节描述 + 紧接的顶点字节**，无 padding。十个 u32 依次是 `layer_id, texture_id, material, topology, vertex_count, stride, position_offset, color_offset, uv_offset, reserved=0`。顶点及材质约束与 op2 相同，layer ID 不可重复。`layer_count=0` 清空整个 section；零顶点层等价于该层缺失。
+每层为 **40 字节描述 + 紧接的顶点字节**，无 padding。十个 u32 依次是 `layer_id, texture_id, material, topology, vertex_count, stride, position_offset, color_offset, uv_offset, reserved=0`。顶点及材质约束与 op2 相同，layer ID 不可重复。`layer_count=0` 清空几何并发布一个已完成的空 section，不能代替 op3 卸载；零顶点层等价于该层缺失。
 
-完整包、最终容量及引用验证成功后才原子发布。源序列始终推进；三角形、源 RGBA/UV、纹理/材质与原点逐字段相同的层保留原 Arc 和内容 revision，不使渲染 scene 失效。忽略的布局 padding 与层顺序不参与内容身份。移除的层被清除，只有新增或变化层发布新内容。这个序列屏障也约束后续旧式 op2/op3，不能混用旧序列复活遗漏层。适配器用一个 op8 代替先 remove、再逐层 upsert。
+完整包、最终容量及引用验证成功后才原子发布。源序列始终推进；三角形、源 RGBA/UV、纹理/材质与原点逐字段相同的层保留原 Arc 和内容 revision，在可用性不变时不使渲染 scene 失效。首次完成的空段也会推进 scene revision，因为它可能使 64 段单元完整。忽略的布局 padding 与层顺序不参与内容身份。移除的层被清除，只有新增或变化层发布新内容。这个序列屏障也约束后续旧式 op2/op3，不能混用旧序列复活遗漏层。适配器用一个 op8 代替先 remove、再逐层 upsert。CPU 持有逐段快照；64 段就绪门槛和后续整格替换见 [空间合批](spatial-batching.md)。op2 单层更新本身不能声明完整段已就绪。
 
 ## 动态完整快照
 
@@ -139,7 +139,7 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 
 当前仍明确拒绝：超过 512 MiB 的纹理总量、超过 262144 的 mesh/section history、各超过 262144 的常驻原型或实例、超出每轴 1..65536 或设备 image/dispatch/累积 storage range 的输出，以及不有限/越域位置、未知 flags、未知拓扑和尾随字节。op6 是完整回退帧，op7 是一批原子增量，op8 是完整 section 替换；它们尚未提供跨包事务，不能用重复替换包伪装无界分页。GPU 的局部 AS/实例索引、设备内存分配数量与实际内存也构成独立边界。以上不表示已经支持任意视距、任意单资源或任意驻留总量。协议验证失败不修改场景 revision 或已有数据；部分分配使用 `try_reserve`，尚不能保证所有 Rust 系统内存耗尽均可恢复。
 
-当前 Slang 局部指针下标以 32 位字节偏移计算，单个被寻址的材质范围最多 `2^25` 条 128 字节记录；各局部范围的设备基址为 64 位，总量可以跨页。超过单范围限制需要拆分该几何及对应 BLAS，不能让乘法回绕，也不能以此单资源限制代替全场景数量契约。实例展开后的三角形统计使用 u64，GPU 帧参数只传“是否有几何”，避免大计数收窄后误判为空场景。
+当前 Slang 局部指针下标以 32 位字节偏移计算，单个被寻址的材质范围最多 `2^25` 条 128 字节记录；各局部范围的设备基址为 64 位，总量可以跨页。翻译层按此局部上限划分寻址范围：静态增加同一 BLAS 内的 geometry，raw 回退拆成多个 BLAS；单个共享原型超限仍明确失败，不能让乘法回绕，也不能以此单资源限制代替全场景数量契约。实例展开后的三角形统计使用 u64，GPU 帧参数只传“是否有几何”，避免大计数收窄后误判为空场景。
 
 Mesh 可先于引用的 texture 提交，但渲染前必须补齐所有引用；缺失引用明确报错。所有调用必须在创建 handle 的 OS 线程进行。`prime_destroy` 退休身份，重复释放会报错。调用方必须保证原生指针指向有效读写区域；长度校验不能验证任意地址。
 

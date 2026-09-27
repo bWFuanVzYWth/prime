@@ -191,7 +191,7 @@ fn every_rendered_field_change_is_published_and_unaffected_layer_is_shared() {
     source.submit(&moved).unwrap();
     let after = snapshot(&source);
     assert_eq!(after.revision, before.revision + 1);
-    assert_eq!(after.meshes[&(91, 0)].origin, [1.0, 0.0, 0.0]);
+    assert_eq!(after.meshes[&(91, 0)].origin, [29_999_985.0, 64.0, -16.0]);
 }
 
 #[test]
@@ -296,4 +296,99 @@ fn malformed_headers_and_content_revision_overflow_never_consume_sequence() {
     assert!(source.submit(&section(1, 3, &[])).is_err());
     source.submit(&section(1, 3, &[layer(0)])).unwrap();
     assert_eq!(source.revision, u64::MAX);
+}
+
+#[test]
+fn complete_cell_waits_for_64_distinct_sections_and_keeps_source_caches_after_publication() {
+    use prime_scene::{
+        spatial::Cell,
+        translation::{TerrainLimits, TerrainPlanner},
+    };
+    fn packet(slot: u64, sequence: u64, layers: &[Vec<u8>]) -> Vec<u8> {
+        let mut bytes = section(1, sequence, layers);
+        bytes[24..32].copy_from_slice(&slot.to_le_bytes());
+        for (i, value) in [
+            -64.0 + (slot / 16) as f64 * 16.0,
+            (slot / 4 % 4) as f64 * 16.0,
+            64.0 + (slot % 4) as f64 * 16.0,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            bytes[40 + i * 8..48 + i * 8].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes
+    }
+    let mut source = source();
+    let mut planner = TerrainPlanner::new(TerrainLimits {
+        triangles_per_geometry: 1024,
+        geometry_records: 1024,
+    })
+    .unwrap();
+    let cell = Cell::containing([-64.0, 0.0, 64.0]).unwrap();
+    let origin = [-64.0, 0.0, 64.0];
+    let captured = [layer(0)];
+    for slot in 0..63 {
+        source
+            .submit(&packet(slot, 1, if slot == 0 { &captured } else { &[] }))
+            .unwrap();
+        let scene = source.translate(origin).unwrap();
+        assert!(scene.ready_terrain.is_empty());
+        let plan = planner.plan(&scene).unwrap();
+        assert!(plan.geometry.is_empty() && plan.triangle_count == 0);
+        planner.recycle(plan);
+    }
+    let cached = source.translate(origin).unwrap().meshes[&(0, 0)]
+        .triangles
+        .clone();
+    // A different source identity at an already known position cannot stand in for the missing slot.
+    let mut duplicate = packet(1, 1, &[]);
+    duplicate[24..32].copy_from_slice(&1000u64.to_le_bytes());
+    source.submit(&duplicate).unwrap();
+    assert!(source.translate(origin).unwrap().ready_terrain.is_empty());
+    source.submit(&packet(63, 1, &[])).unwrap();
+    let scene = source.translate(origin).unwrap();
+    assert_eq!(scene.ready_terrain, [cell].into());
+    let first = planner.plan(&scene).unwrap();
+    assert_eq!(first.geometry.len(), 1);
+    assert_eq!(first.triangle_count, 2);
+    assert!(Arc::ptr_eq(&cached, &scene.meshes[&(0, 0)].triangles));
+    planner.recycle(first);
+    // Two section updates arriving before execution produce one complete replacement.
+    source.submit(&packet(2, 2, &[layer(1)])).unwrap();
+    source.submit(&packet(62, 2, &[layer(2)])).unwrap();
+    let scene = source.translate(origin).unwrap();
+    assert!(Arc::ptr_eq(&cached, &scene.meshes[&(0, 0)].triangles));
+    let updated = planner.plan(&scene).unwrap();
+    assert_eq!(updated.geometry.len(), 1);
+    assert_eq!(updated.geometry[0].geometries.len(), 3);
+    assert_eq!(updated.triangle_count, 6);
+    planner.recycle(updated);
+    source.submit(&packet(63, 2, &[])).unwrap();
+    let unchanged = planner.plan(&source.translate(origin).unwrap()).unwrap();
+    assert!(unchanged.geometry.is_empty() && !unchanged.placements_changed);
+    planner.recycle(unchanged);
+    let mut remove = remove(3);
+    remove[24..32].copy_from_slice(&63u64.to_le_bytes());
+    source.submit(&remove).unwrap();
+    let scene = source.translate(origin).unwrap();
+    assert!(scene.ready_terrain.is_empty());
+    assert_eq!(
+        scene.meshes.len(),
+        3,
+        "GPU withdrawal must not discard other source caches"
+    );
+    let absent = planner.plan(&scene).unwrap();
+    assert_eq!(absent.removed, [cell]);
+    assert!(absent.geometry.is_empty());
+    planner.recycle(absent);
+    source.submit(&packet(63, 4, &[])).unwrap();
+    let restored = planner.plan(&source.translate(origin).unwrap()).unwrap();
+    assert_eq!(restored.geometry.len(), 1);
+    assert_eq!(restored.triangle_count, 6);
+    planner.recycle(restored);
+    source.submit(&header(1, 2)).unwrap();
+    let reset = planner.plan(&source.translate(origin).unwrap()).unwrap();
+    assert_eq!(reset.removed, [cell]);
+    assert!(reset.geometry.is_empty());
 }
