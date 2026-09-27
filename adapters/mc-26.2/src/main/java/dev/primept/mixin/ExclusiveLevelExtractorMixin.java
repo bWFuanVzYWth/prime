@@ -64,7 +64,8 @@ public abstract class ExclusiveLevelExtractorMixin implements ExclusiveLevelExtr
         primept$blockEntityCandidates.clear();
         if (ExclusiveTerrainCapture.vanillaSuspended()) {
             sectionUpdateTracker = null;
-            ExclusiveTerrainCapture.invalidateAll();
+            // The host's deferred invalidateCompiledGeometry call performs one source reset.
+            // Do not invalidate a second time before the same extraction reaches that call.
         }
     }
     @Inject(method = "setSectionDirty(IIIZ)V", at = @At("HEAD"), cancellable = true)

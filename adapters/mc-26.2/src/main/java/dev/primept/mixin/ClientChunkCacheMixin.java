@@ -63,6 +63,8 @@ public abstract class ClientChunkCacheMixin implements LoadedTerrainSnapshot {
 
     @Inject(method = "drop", at = @At("HEAD"))
     private void primept$drop(ChunkPos position, CallbackInfo callback) {
-        PrimeClient.CAPTURE.dropChunk(position.x(), position.z());
+        if (dev.primept.capture.ExclusiveTerrainCapture.ownsLevel(
+                    ((ClientChunkCache)(Object)this).getLevel()))
+            PrimeClient.CAPTURE.dropChunk(position.x(), position.z());
     }
 }

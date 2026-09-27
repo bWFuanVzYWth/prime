@@ -5,6 +5,8 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongCollection;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.SectionUpdateTracker;
+import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.chunk.RenderRegionCache;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
@@ -27,12 +29,13 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
     private final BlockEntityIndex blockEntities = new BlockEntityIndex();
     private TerrainRouter router;
     private ClientLevel world;
+    private SectionUpdateTracker sourceReadiness;
     private int centerX = Integer.MIN_VALUE, centerZ, radius = -1;
     private long epoch;
     private RuntimeException failure;
     private long routedSections;
     private boolean cacheWindowChanged;
-    private ColumnWindow window;
+    private ColumnWindow window, sourceWindow;
     private static final boolean PROFILE = Boolean.getBoolean("primept.profile");
     private static final boolean KNOWN_EMPTY =
             BlockEntityCandidates.known(RenderRegionCache.class) &&
@@ -45,8 +48,9 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
     private Stats stats = Stats.EMPTY;
     public record Stats(long dirty, long entered, long loaded, long unloaded, long invalidations,
                         long selected, long emptyPublished, long emptyRetained, long routed,
-                        long snapshotNanos, long routingNanos, long totalNanos) {
-        private static final Stats EMPTY = new Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                        long deferred, long waiting, long snapshotNanos, long routingNanos,
+                        long totalNanos) {
+        private static final Stats EMPTY = new Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
     private long dirtyEvents, enteredColumns, loadedColumns, unloadedColumns, invalidations;
     public static Stats takeStats() {
@@ -147,12 +151,11 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
     void prepareSections(boolean debugWorld) {
         long prepareStart = PROFILE ? System.nanoTime() : 0;
         long[] sealed = work.seal();
-        long emptyPublished = 0, emptyRetained = 0, routedCount = 0, snapshotTime = 0,
+        long emptyPublished = 0, emptyRetained = 0, routedCount = 0, deferred = 0, snapshotTime = 0,
              routingTime = 0;
         // Bound host snapshot retention, never the amount of accepted work per frame.
         for (int first = 0; first < sealed.length; first += 256) {
-            long snapshotStart = PROFILE ? System.nanoTime() : 0;
-            var regions = new RenderRegionCache();
+            RenderRegionCache regions = null;
             for (int i = first; i < Math.min(sealed.length, first + 256); i++) {
                 long key = sealed[i];
                 var chunk = chunks.get(ChunkPos.pack(SectionPos.x(key), SectionPos.z(key)));
@@ -168,7 +171,15 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
                     }
                     continue;
                 }
+                if (!sourceReady(key)) {
+                    work.awaitSource(key);
+                    ++deferred;
+                    continue;
+                }
                 observedEmpty.remove(key);
+                long snapshotStart = PROFILE ? System.nanoTime() : 0;
+                if (regions == null)
+                    regions = new RenderRegionCache();
                 var region = regions.createRegion(world, key);
                 long sourceStart = PROFILE ? System.nanoTime() : 0;
                 if (PROFILE)
@@ -176,7 +187,6 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
                 router.route(SectionPos.of(key), region);
                 if (PROFILE)
                     routingTime += System.nanoTime() - sourceStart;
-                snapshotStart = PROFILE ? System.nanoTime() : 0;
                 observed.add(key);
                 ++routedCount;
                 ++routedSections;
@@ -187,14 +197,27 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         if (PROFILE) {
             stats = new Stats(dirtyEvents, enteredColumns, loadedColumns, unloadedColumns,
                               invalidations, sealed.length, emptyPublished, emptyRetained,
-                              routedCount, snapshotTime, routingTime,
+                              routedCount, deferred, work.waitingSize(), snapshotTime, routingTime,
                               System.nanoTime() - prepareStart);
             dirtyEvents = enteredColumns = loadedColumns = unloadedColumns = invalidations = 0;
         }
     }
+    // Invoke the actual host prerequisite, including lightOnInColumn and third-party hooks.
+    // Already published sections follow vanilla's rebuild rule: they need no first-load gate.
+    boolean sourceReady(long section) {
+        return observed.contains(section) || sourceReadiness.hasAllNeighbors(world, section);
+    }
+    public static void lightStatusChanged(LevelLightEngine engine, int x, int z) {
+        var owner = current;
+        var level = owner == null ? null : owner.world;
+        // The common light-engine hook also runs in the integrated server. Only this
+        // renderer's actual client engine can wake its source requests.
+        if (level != null && level.getLightEngine() == engine)
+            owner.work.sourceColumnChanged(x, z);
+    }
     static boolean knownEmpty(LevelChunk chunk, long key, boolean debugWorld) {
         // RenderRegionCache in these versions always returns a region, even for air. Debug worlds
-        // synthesize blocks in SectionCopy; unknown compiler/region hooks retain their actual callbacks.
+        // synthesize blocks in SectionCopy; unknown region hooks retain their actual callbacks.
         return KNOWN_EMPTY && !debugWorld && chunk.getClass() == LevelChunk.class &&
                 chunk.getSection(chunk.getSectionIndexFromSectionY(SectionPos.y(key))).hasOnlyAir();
     }
@@ -214,6 +237,9 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             return;
         if (world != minecraft.level || epoch != PrimeClient.CAPTURE.epoch()) {
             world = minecraft.level;
+            // Only the host's readiness predicate is used. A zero-radius context avoids
+            // restoring its full raster view/scheduler or a second view-sized dirty table.
+            sourceReadiness = new SectionUpdateTracker(world, 0);
             epoch = PrimeClient.CAPTURE.epoch();
             work.clear();
             chunks.clear();
@@ -221,7 +247,7 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             observed.clear();
             observedEmpty.clear();
             centerX = Integer.MIN_VALUE;
-            window = null;
+            window = sourceWindow = null;
             configureRouter();
         }
         int x = SectionPos.blockToSectionCoord(camera.x),
@@ -257,6 +283,8 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
                     retireChunk(columnX, columnZ);
             });
         next.difference(previous, this::visitColumn);
+        work.sourceWindowChanged(sourceWindow, source);
+        sourceWindow = source;
         cacheWindowChanged = false;
     }
     private void visitColumn(int x, int z) {
@@ -269,22 +297,16 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
                 ++enteredColumns;
             chunks.put(key, chunk);
             blockEntities.add(chunk);
-            dirtyChunkContents(chunk, false);
+            requestInitialSources(chunk);
         }
     }
     private boolean inside(int x, int z) {
         return window != null && window.contains(x, z);
     }
-    private void dirtyChunkContents(LevelChunk chunk, boolean includeEmpty) {
+    private void requestInitialSources(LevelChunk chunk) {
         var pos = chunk.getPos();
-        for (int y = world.getMinSectionY(); y <= world.getMaxSectionY(); ++y) {
-            long key = SectionPos.asLong(pos.x(), y, pos.z());
-            // An observed empty section is a complete source snapshot, not a missing section.
-            // Capture does not know which snapshots the native translator will batch together.
-            if (!observed.contains(key) ||
-                !chunk.getSection(y - world.getMinSectionY()).hasOnlyAir() || includeEmpty)
-                work.add(key);
-        }
+        for (int y = world.getMinSectionY(); y <= world.getMaxSectionY(); ++y)
+            work.add(SectionPos.asLong(pos.x(), y, pos.z()));
     }
     private void retireChunk(int x, int z) {
         forgetColumn(x, z);
@@ -316,23 +338,23 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         }
     }
     public static void chunkLoaded(int x, int z) {
-        if (current == null || current.world == null || !current.inside(x, z))
+        if (current == null || current.world == null)
+            return;
+        // Source availability is separate from content dirtiness. Vanilla emits the
+        // latter after packet/light/biome application through setSectionDirty.
+        current.work.sourceColumnChanged(x, z);
+        if (!current.inside(x, z))
             return;
         var chunk = current.world.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false);
         if (chunk == null)
             return;
-        if (PROFILE)
-            ++current.loadedColumns;
-        current.chunks.put(ChunkPos.pack(x, z), chunk);
+        var previous = current.chunks.put(ChunkPos.pack(x, z), chunk);
         current.blockEntities.add(chunk);
-        current.dirtyChunkContents(chunk, true);
-        // A changed neighbor alters culling/fluid geometry on the bordering column.
-        for (int dz = -1; dz <= 1; ++dz)
-            for (int dx = -1; dx <= 1; ++dx) {
-                var neighbor = current.chunks.get(ChunkPos.pack(x + dx, z + dz));
-                if (neighbor != null && (dx != 0 || dz != 0))
-                    current.dirtyChunkContents(neighbor, false);
-            }
+        if (previous == null) {
+            if (PROFILE)
+                ++current.loadedColumns;
+            current.requestInitialSources(chunk);
+        }
     }
     public static boolean ownsLevel(Object level) {
         return current != null && current.world == level;
@@ -342,26 +364,20 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             current.cacheWindowChanged = true;
     }
     public static void chunkUnloaded(int x, int z) {
-        if (current == null)
-            return;
-        current.chunks.remove(ChunkPos.pack(x, z));
-        current.forgetColumn(x, z);
-        for (int dz = -1; dz <= 1; ++dz)
-            for (int dx = -1; dx <= 1; ++dx) {
-                var neighbor = current.chunks.get(ChunkPos.pack(x + dx, z + dz));
-                if (neighbor != null)
-                    current.dirtyChunkContents(neighbor, false);
-            }
+        if (current != null && current.chunks.remove(ChunkPos.pack(x, z)) != null)
+            current.forgetColumn(x, z);
     }
     public static void invalidateAll() {
         if (current == null || current.world == null)
             return;
         if (PROFILE)
             ++current.invalidations;
+        current.work.clear();
+        current.observed.clear();
         current.observedEmpty.clear();
         current.configureRouter();
         for (var chunk : current.chunks.values())
-            current.dirtyChunkContents(chunk, true);
+            current.requestInitialSources(chunk);
     }
     public static void blockEntitiesChanged(LevelChunk chunk) {
         if (current != null)

@@ -109,6 +109,7 @@ tasks.register('cpuSmoke', JavaExec) {
     systemProperty 'primept.enabled', 'true'
     systemProperty 'primept.geometryCache', 'true'
     systemProperty 'primept.smoke.foreignWrapper', providers.gradleProperty('primeptSmokeForeign').getOrElse('false')
+    systemProperty 'primept.smoke.routingCost', providers.gradleProperty('primeptSmokeRoutingCost').getOrElse('')
     systemProperty 'primept.smoke.targetResize', providers.gradleProperty('primeptSmokeTargetResize').getOrElse('false')
     systemProperty 'primept.smoke.routingDirectory', layout.buildDirectory.dir('routing-fixtures').get().asFile.absolutePath
     systemProperty 'fabric.addMods', tasks.named('cpuSmokeJar').get().archiveFile.get().asFile.absolutePath

@@ -161,6 +161,94 @@ fn native_workers_compile_identical_outputs_and_only_visible_layers() {
     assert!(one.meshes.is_empty());
 }
 
+#[test]
+fn retained_prefix_matches_fresh_compilation_for_sparse_attribute_and_resource_changes() {
+    let mut resource = geometry();
+    resource[32..40].copy_from_slice(&8u64.to_le_bytes());
+    // A second immutable source differs in both UV and material layer.
+    resource[48..52].copy_from_slice(&2u32.to_le_bytes());
+    resource[76..80].copy_from_slice(&0.375f32.to_le_bytes());
+    let mut uv = geometry();
+    uv[32..40].copy_from_slice(&9u64.to_le_bytes());
+    uv[148..152].copy_from_slice(&0.375f32.to_le_bytes()); // fourth corner only
+    let mut color = geometry();
+    color[32..40].copy_from_slice(&10u64.to_le_bytes());
+    color[144..148].copy_from_slice(&[11, 22, 33, 44]);
+    let mut equivalent = geometry();
+    equivalent[32..40].copy_from_slice(&11u64.to_le_bytes());
+    for at in [0usize, 2048, 4096] {
+        for field in [
+            "position",
+            "tint",
+            "geometry",
+            "origin",
+            "uv",
+            "color",
+            "equivalent",
+        ] {
+            let mut incremental = initialized();
+            let mut fresh = initialized();
+            for scene in [&mut incremental, &mut fresh] {
+                scene.submit(&geometry()).unwrap();
+                scene.submit(&resource).unwrap();
+                scene.submit(&uv).unwrap();
+                scene.submit(&color).unwrap();
+                scene.submit(&equivalent).unwrap();
+            }
+            incremental.submit(&section(1, 4097)).unwrap();
+            let retained = incremental.meshes[&(91, 1)].triangles.clone();
+            let mut update = section(2, 4097);
+            let first = 72 + at * 32;
+            match field {
+                "position" => {
+                    update[first + 8..first + 12].copy_from_slice(&(-2.5f32).to_le_bytes())
+                }
+                "tint" => update[first + 28..first + 32].copy_from_slice(&[11, 22, 33, 44]),
+                "geometry" => update[first..first + 8].copy_from_slice(&8u64.to_le_bytes()),
+                "origin" => update[40..48].copy_from_slice(&(-128f64).to_le_bytes()),
+                "uv" => update[first..first + 8].copy_from_slice(&9u64.to_le_bytes()),
+                "color" => update[first..first + 8].copy_from_slice(&10u64.to_le_bytes()),
+                "equivalent" => update[first..first + 8].copy_from_slice(&11u64.to_le_bytes()),
+                _ => unreachable!(),
+            }
+            incremental.submit(&update).unwrap();
+            fresh.submit(&update).unwrap();
+            assert_eq!(incremental.meshes.len(), fresh.meshes.len());
+            for (key, expected) in &fresh.meshes {
+                let actual = &incremental.meshes[key];
+                assert_eq!(actual.bounds, expected.bounds);
+                assert_eq!(actual.origin, expected.origin);
+                assert_eq!(actual.triangles.len(), expected.triangles.len());
+                for (a, b) in actual.triangles.iter().zip(expected.triangles.iter()) {
+                    assert_eq!(
+                        a.positions.map(|p| p.map(f32::to_bits)),
+                        b.positions.map(|p| p.map(f32::to_bits))
+                    );
+                    assert_eq!(
+                        a.colors.map(|p| p.map(f32::to_bits)),
+                        b.colors.map(|p| p.map(f32::to_bits))
+                    );
+                    assert_eq!(
+                        a.uvs.map(|p| p.map(f32::to_bits)),
+                        b.uvs.map(|p| p.map(f32::to_bits))
+                    );
+                    assert_eq!(a.flags, b.flags);
+                    assert_eq!(a.texture_id, b.texture_id);
+                }
+            }
+            assert_eq!(retained[0].positions[0], [2., 3., 4.]);
+            let current = incremental.meshes[&(91, 1)].triangles.clone();
+            assert_eq!(Arc::ptr_eq(&retained, &current), field == "equivalent");
+            update[32..40].copy_from_slice(&3u64.to_le_bytes());
+            incremental.submit(&update).unwrap();
+            assert!(Arc::ptr_eq(
+                &current,
+                &incremental.meshes[&(91, 1)].triangles
+            ));
+        }
+    }
+}
+
 fn particles(sequence: u64, count: u32) -> Vec<u8> {
     let mut b = header(6);
     b.extend(sequence.to_le_bytes());
@@ -309,4 +397,65 @@ fn java_routing_matches_both_versions_actual_source_and_fluid_particle_oracles()
             "Must cover all generated terrain, fluid and particle fixtures"
         );
     }
+}
+
+#[test]
+#[ignore = "explicit release CPU cost matrix; excludes Java, FFM, GPU and packet generation"]
+fn routing_cost_matrix() {
+    use std::{hint::black_box, time::Instant};
+    let label = std::env::var("PRIME_ROUTING_COST_LABEL").unwrap_or_else(|_| "current".into());
+    let mut csv = String::from("case,placements_per_section,sample,warmup,sections,submit_ns\n");
+    for count in [512, 4096] {
+        for case in ["unchanged", "last_edit", "all_edit"] {
+            let mut scene = initialized();
+            scene.routing.workers = Some(CpuWorkers::new(8).unwrap());
+            scene.submit(&geometry()).unwrap();
+            let mut packets: Vec<_> = (0..16u64)
+                .map(|id| {
+                    let mut packet = section(1, count);
+                    packet[24..32].copy_from_slice(&(100 + id).to_le_bytes());
+                    packet
+                })
+                .collect();
+            let warmup_start = Instant::now();
+            let mut sample = -1i32;
+            let mut sequence = 0u64;
+            while sample < 30 {
+                sequence += 1;
+                for packet in &mut packets {
+                    packet[32..40].copy_from_slice(&sequence.to_le_bytes());
+                    let changed = if sequence.is_multiple_of(2) {
+                        2.0f32
+                    } else {
+                        2.25
+                    };
+                    if case != "unchanged" {
+                        for index in 0..count as usize {
+                            if case == "all_edit" || index + 1 == count as usize {
+                                let offset = 72 + index * 32 + 8;
+                                packet[offset..offset + 4].copy_from_slice(&changed.to_le_bytes());
+                            }
+                        }
+                    }
+                }
+                let start = Instant::now();
+                for packet in &packets {
+                    black_box(&mut scene).submit(black_box(packet)).unwrap();
+                }
+                let elapsed = start.elapsed().as_nanos();
+                csv += &format!("{case},{count},{sample},{},16,{elapsed}\n", sample < 0);
+                sample = if sample >= 0 {
+                    sample + 1
+                } else if warmup_start.elapsed().as_millis() >= 500 {
+                    0
+                } else {
+                    sample - 1
+                };
+            }
+        }
+    }
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/routing-stutter");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("native-{label}.csv")), csv).unwrap();
 }

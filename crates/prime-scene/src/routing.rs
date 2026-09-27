@@ -45,6 +45,63 @@ struct QuadJob<'a> {
     tint: [u8; 4],
 }
 
+// Retention is proved against published content, with no second source cache or hash identity.
+enum LayerPlan {
+    Retain(u32),
+    Replace(u32, Mesh),
+}
+impl LayerPlan {
+    fn layer(&self) -> u32 {
+        match self {
+            Self::Retain(layer) | Self::Replace(layer, _) => *layer,
+        }
+    }
+}
+
+fn quad_triangles(job: &QuadJob<'_>, layer: u32) -> [Triangle; 2] {
+    let positions: [[f32; 3]; 4] = std::array::from_fn(|vertex| {
+        std::array::from_fn(|axis| job.offset[axis] + job.quad.positions[vertex][axis])
+    });
+    let colors: [[f32; 4]; 4] = std::array::from_fn(|vertex| {
+        std::array::from_fn(|channel| {
+            let encoded =
+                u32::from(job.quad.colors[vertex][channel]) * u32::from(job.tint[channel]) / 255;
+            encoded as f32 / 255.0
+        })
+    });
+    [[0, 1, 2], [2, 3, 0]].map(|corners| Triangle {
+        positions: corners.map(|i| positions[i]),
+        colors: corners.map(|i| colors[i]),
+        uvs: corners.map(|i| job.quad.uvs[i]),
+        texture_id: 1,
+        flags: layer,
+    })
+}
+fn matching_prefix(mesh: &Mesh, origin: [f64; 3], layer: u32, jobs: &[QuadJob<'_>]) -> usize {
+    if mesh.origin.map(f64::to_bits) != origin.map(f64::to_bits)
+        || mesh.texture_id != 1
+        || mesh.flags != layer
+        || mesh.triangles.len() != jobs.len() * 2
+    {
+        return 0;
+    }
+    let matches = |i: usize, job: &QuadJob<'_>| {
+        quad_triangles(job, layer)
+            .iter()
+            .zip(&mesh.triangles[i * 2..i * 2 + 2])
+            .all(|(a, b)| {
+                a.positions.map(|p| p.map(f32::to_bits)) == b.positions.map(|p| p.map(f32::to_bits))
+                    && a.colors.map(|p| p.map(f32::to_bits))
+                        == b.colors.map(|p| p.map(f32::to_bits))
+                    && a.uvs.map(|p| p.map(f32::to_bits)) == b.uvs.map(|p| p.map(f32::to_bits))
+            })
+    };
+    jobs.iter()
+        .enumerate()
+        .position(|(i, job)| !matches(i, job))
+        .unwrap_or(jobs.len())
+}
+
 const EMPTY_TRIANGLE: Triangle = Triangle {
     positions: [[0.0; 3]; 3],
     colors: [[0.0; 4]; 3],
@@ -224,43 +281,46 @@ impl SourceScene {
         if new_count != 0 && !self.textures.contains_key(&1) {
             return Err("routed terrain requires the block atlas".into());
         }
-        if new_count != 0 && self.routing.workers.is_none() {
-            self.routing.workers = Some(CpuWorkers::configured()?);
-        }
         let mut compiled = Vec::with_capacity(3);
         for (layer, jobs) in jobs.iter().enumerate() {
             if jobs.is_empty() {
                 continue;
             }
-            let mut triangles = vec![EMPTY_TRIANGLE; jobs.len() * 2];
+            let previous = self.meshes.get(&(key, layer as u32));
+            let retained =
+                previous.map_or(0, |old| matching_prefix(old, origin, layer as u32, jobs));
+            if retained == jobs.len() {
+                compiled.push(LayerPlan::Retain(layer as u32));
+                continue;
+            }
+            if self.routing.workers.is_none() {
+                self.routing.workers = Some(CpuWorkers::configured()?);
+            }
+            // A trusted-length iterator initializes the Arc allocation directly. No
+            // second full-size Vec allocation/copy is needed at publication.
+            let mut triangles: Arc<[Triangle]> =
+                std::iter::repeat_n(EMPTY_TRIANGLE, jobs.len() * 2).collect();
+            let output = Arc::get_mut(&mut triangles).unwrap();
+            if retained != 0 {
+                output[..retained * 2]
+                    .copy_from_slice(&previous.unwrap().triangles[..retained * 2]);
+            }
+            // A late mismatch must not cause already compared geometry to be expanded twice.
             self.routing.workers.as_ref().unwrap().chunks_mut(
-                &mut triangles,
+                &mut output[retained * 2..],
                 2048,
                 |start, output| {
-                    for (i, result) in output.iter_mut().enumerate() {
-                        let index = start + i;
-                        let job = &jobs[index / 2];
-                        let corners = if index % 2 == 0 { [0, 1, 2] } else { [2, 3, 0] };
-                        result.flags = layer as u32;
-                        for (to, from) in corners.into_iter().enumerate() {
-                            for axis in 0..3 {
-                                result.positions[to][axis] =
-                                    job.offset[axis] + job.quad.positions[from][axis];
-                            }
-                            for channel in 0..4 {
-                                let encoded = u32::from(job.quad.colors[from][channel])
-                                    * u32::from(job.tint[channel])
-                                    / 255;
-                                result.colors[to][channel] = encoded as f32 / 255.0;
-                            }
-                            result.uvs[to] = job.quad.uvs[from];
-                        }
+                    for (i, pair) in output.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                        pair.copy_from_slice(&quad_triangles(
+                            &jobs[retained + start / 2 + i],
+                            layer as u32,
+                        ));
                     }
                     Ok(())
                 },
             )?;
             let mut bounds = [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]];
-            for triangle in &triangles {
+            for triangle in triangles.iter() {
                 for position in triangle.positions {
                     for axis in 0..3 {
                         bounds[0][axis] = bounds[0][axis].min(position[axis]);
@@ -268,12 +328,12 @@ impl SourceScene {
                     }
                 }
             }
-            compiled.push((
+            compiled.push(LayerPlan::Replace(
                 layer as u32,
                 Mesh {
                     revision: MeshVersion::captured(sequence),
                     origin,
-                    triangles: Arc::from(triangles),
+                    triangles,
                     bounds,
                     texture_id: 1,
                     flags: layer as u32,
@@ -288,47 +348,22 @@ impl SourceScene {
         key: u64,
         sequence: SectionSequence,
         origin: [f64; 3],
-        compiled: Vec<(u32, Mesh)>,
+        compiled: Vec<LayerPlan>,
         new_count: usize,
         old_count: usize,
     ) -> Result<(), String> {
-        let same = |layer: &u32, mesh: &Mesh| {
-            self.meshes.get(&(key, *layer)).is_some_and(|old| {
-                old.origin.map(f64::to_bits) == origin.map(f64::to_bits)
-                    && old.texture_id == mesh.texture_id
-                    && old.flags == mesh.flags
-                    && old.triangles.len() == mesh.triangles.len()
-                    && old
-                        .triangles
-                        .iter()
-                        .zip(mesh.triangles.iter())
-                        .all(|(a, b)| {
-                            a.positions.map(|p| p.map(f32::to_bits))
-                                == b.positions.map(|p| p.map(f32::to_bits))
-                                && a.colors.map(|p| p.map(f32::to_bits))
-                                    == b.colors.map(|p| p.map(f32::to_bits))
-                                && a.uvs.map(|p| p.map(f32::to_bits))
-                                    == b.uvs.map(|p| p.map(f32::to_bits))
-                        })
-            })
-        };
-        let replacements: Vec<_> = compiled
-            .into_iter()
-            .map(|(layer, mesh)| {
-                let changed = !same(&layer, &mesh);
-                (layer, mesh, changed)
-            })
-            .collect();
         let removed: Vec<_> = self
             .meshes
             .range((key, 0)..=(key, u32::MAX))
-            .filter(|((_, layer), _)| !replacements.iter().any(|(next, _, _)| next == layer))
+            .filter(|((_, layer), _)| !compiled.iter().any(|next| next.layer() == *layer))
             .map(|(id, _)| *id)
             .collect();
         let moved = self.sections.origin(key) != Some(&origin);
         let revision = if moved
             || !removed.is_empty()
-            || replacements.iter().any(|(_, _, changed)| *changed)
+            || compiled
+                .iter()
+                .any(|plan| matches!(plan, LayerPlan::Replace(..)))
         {
             self.revision
                 .checked_add(1)
@@ -341,10 +376,10 @@ impl SourceScene {
             self.texture_lifetime.release(old.texture_id);
             self.edits.meshes.insert(id);
         }
-        for (layer, mesh, changed) in replacements {
-            if !changed {
+        for plan in compiled {
+            let LayerPlan::Replace(layer, mesh) = plan else {
                 continue;
-            }
+            };
             self.texture_lifetime.acquire(mesh.texture_id);
             if let Some(old) = self.meshes.insert((key, layer), mesh) {
                 self.texture_lifetime.release(old.texture_id);

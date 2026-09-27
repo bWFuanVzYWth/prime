@@ -82,9 +82,42 @@ final class TerrainRouterCpuSmoke {
             check(keyed == !inbox.seal().batches().isEmpty(),
                   "Source key ownership retires on close");
         }
+        hiddenPlacements();
         FluidRouterCpuSmoke.run();
         System.out.println(
                 "PRIME_PT_TERRAIN_ROUTER_CPU_OK: source callbacks once; model assets batched; no SectionCompiler, AO, lighting, BufferBuilder; detached native fixtures written");
+    }
+    private static void hiddenPlacements() throws Exception {
+        var region = FluidRouterCpuSmoke.blank(SolidRegion.class);
+        for (boolean keyed : new boolean[] {false, true}) {
+            var inbox = new CaptureInbox(true);
+            var model = new Model(keyed);
+            model.face = Direction.DOWN;
+            var models =
+                    new BlockStateModelSet(Map.of(Blocks.STONE.defaultBlockState(), model), model);
+            try (var router = new TerrainRouter(inbox, models, null, new BlockColors())) {
+                for (int iteration = 0; iteration < 2; ++iteration) {
+                    router.route(SectionPos.of(0, 0, 0), region);
+                    var batch = inbox.seal();
+                    var source = wire(batch.batches().getLast());
+                    check(source.getInt(8) == 12 && source.getInt(64) == 0 &&
+                                  source.remaining() == 72,
+                          "Fully hidden models publish empty availability without placements");
+                    check(batch.batches().size() == (keyed && iteration == 0 ? 2 : 1),
+                          "Invisible temporary definitions never enter the native resource dictionary");
+                    check(model.calls == (keyed ? 1 : 4096 * (iteration + 1)),
+                          "Visibility filtering retains required null-key source callbacks");
+                }
+            }
+        }
+    }
+    private static final class SolidRegion extends RenderSectionRegion {
+        SolidRegion() {
+            super(null, 0, 0, 0, null);
+        }
+        public BlockState getBlockState(BlockPos pos) {
+            return Blocks.STONE.defaultBlockState();
+        }
     }
     static void write(String name, CaptureInbox.Sealed actual, CaptureInbox.Sealed expected)
             throws Exception {
@@ -104,8 +137,9 @@ final class TerrainRouterCpuSmoke {
     private static ByteBuffer wire(CaptureInbox.Batch batch) {
         return ByteBuffer.wrap(batch.packets().getFirst()).order(ByteOrder.LITTLE_ENDIAN);
     }
-    private static final class Model implements BlockStateModel {
+    static final class Model implements BlockStateModel {
         final boolean keyed;
+        Direction face;
         int calls;
         Model(boolean keyed) {
             this.keyed = keyed;
@@ -127,7 +161,7 @@ final class TerrainRouterCpuSmoke {
                     .uv(3, 0, 1)
                     .color(0xffd0e0f0, 0xffd0e0f0, 0xffd0e0f0, 0xffd0e0f0)
                     .chunkLayer(ChunkSectionLayer.CUTOUT)
-                    .cullFace(null)
+                    .cullFace(face)
                     .tintIndex(0)
                     .emit();
         }

@@ -9,6 +9,7 @@
     "LevelRendererMixin",
     "ExclusiveLevelExtractorMixin",
     "ExclusiveChunkEventsMixin",
+    "TerrainLightReadinessMixin",
     "ExclusiveStagedBufferMixin",
     "ExclusiveStagedDrawAccess",
     "ExclusiveFeatureMixin",

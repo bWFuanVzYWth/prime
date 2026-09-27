@@ -23,6 +23,11 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
     @Override
     public void onPreLaunch() {
         try {
+            String routingCost = System.getProperty("primept.smoke.routingCost", "");
+            if (!routingCost.isEmpty()) {
+                TerrainRoutingCostCpuSmoke.run(routingCost);
+                System.exit(0);
+            }
             if (Boolean.getBoolean("primept.smoke.targetResize")) {
                 TargetResizeCpuSmoke.run();
                 System.exit(0);

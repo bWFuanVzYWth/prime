@@ -2,7 +2,6 @@ package dev.primept.mixin;
 
 import dev.primept.capture.ExclusiveTerrainCapture;
 import net.minecraft.client.multiplayer.ClientChunkCache;
-import net.minecraft.network.FriendlyByteBuf;
 
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -22,11 +21,6 @@ public abstract class ExclusiveChunkEventsMixin {
             var pos = callback.getReturnValue().getPos();
             ExclusiveTerrainCapture.chunkLoaded(pos.x(), pos.z());
         }
-    }
-    @Inject(method = "replaceBiomes", at = @At("RETURN"))
-    private void primept$biomes(int x, int z, FriendlyByteBuf bytes, CallbackInfo callback) {
-        if (ExclusiveTerrainCapture.ownsLevel(((ClientChunkCache)(Object)this).getLevel()))
-            ExclusiveTerrainCapture.chunkLoaded(x, z);
     }
     @Inject(method = "drop", at = @At("TAIL"))
     private void primept$unloaded(ChunkPos pos, CallbackInfo callback) {

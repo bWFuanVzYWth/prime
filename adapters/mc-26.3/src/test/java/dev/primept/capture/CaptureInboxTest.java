@@ -49,6 +49,28 @@ class CaptureInboxTest {
     }
 
     @Test
+    void inactiveUnloadsDoNotCreatePacketsOrAdvanceNativeWatermarks() {
+        var inbox = new CaptureInbox(true);
+        inbox.capture(inbox.begin(SECTION), quad());
+        long first = inbox.seal().completedSequence();
+        for (int x = 0; x < 10000; ++x)
+            inbox.dropChunk(x, 0);
+        var inactive = inbox.seal();
+        assertTrue(inactive.batches().isEmpty());
+        assertEquals(first, inactive.completedSequence(), "No spurious op10 FFM submission");
+        assertEquals(java.util.List.of(SECTION.asLong()), inbox.sections());
+        inbox.dropChunk(SECTION.x(), SECTION.z());
+        var removed = inbox.seal();
+        assertEquals(1, removed.batches().size());
+        assertTrue(removed.batches().getFirst().removal());
+        assertTrue(removed.completedSequence() > first, "Real withdrawals still advance history");
+        inbox.dropChunk(SECTION.x(), SECTION.z());
+        var repeated = inbox.seal();
+        assertTrue(repeated.batches().isEmpty());
+        assertEquals(removed.completedSequence(), repeated.completedSequence());
+    }
+
+    @Test
     void longChunkHistoryRetainsTheGenerationThatInvalidatesOldWorkers() {
         var inbox = new CaptureInbox(true);
         var first = SectionPos.of(0, 0, 0);

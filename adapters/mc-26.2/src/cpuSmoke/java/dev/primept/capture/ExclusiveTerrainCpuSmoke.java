@@ -25,6 +25,7 @@ final class ExclusiveTerrainCpuSmoke {
         BlockEntityCandidatesCpuSmoke.run();
         TerrainEmptyCpuSmoke.run();
         TerrainRouterCpuSmoke.run();
+        TerrainRequestsCpuSmoke.run();
         ParticleRouterCpuSmoke.run();
         var changes = new SectionChanges();
         long a = SectionPos.asLong(1, 4, 2), b = SectionPos.asLong(1, 5, 2),
@@ -38,7 +39,14 @@ final class ExclusiveTerrainCpuSmoke {
               "Finite deduplicated batch in source order");
         changes.add(a);
         check(changes.size() == 1 && sealed.length == 3, "Reentrant dirty belongs to next batch");
+        changes.awaitSource(a);
+        check(changes.size() == 1 && changes.waitingSize() == 0,
+              "Deferring old work cannot consume a newer dirty observation");
+        changes.awaitSource(b);
+        check(changes.size() == 1 && changes.waitingSize() == 1,
+              "Readiness waiting is separate from active dirty work");
         changes.add(b);
+        check(changes.waitingSize() == 0, "New dirtiness wakes only its own blocked source");
         changes.add(c);
         changes.removeChunk(1, 2, -4, 19);
         check(java.util.Arrays.equals(changes.seal(), new long[] {c}),

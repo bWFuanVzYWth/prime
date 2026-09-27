@@ -219,8 +219,12 @@ public final class CaptureInbox {
         if (!active)
             return;
         long chunk = ChunkPos.pack(x, z);
+        boolean producing = producers.containsKey(chunk);
+        // No published source or unfinished token: this host unload has no native consumer.
+        if (!producing && !chunkSections.containsKey(chunk))
+            return;
         revision = Math.incrementExact(revision);
-        if (producers.containsKey(chunk))
+        if (producing)
             chunkRevisions.put(chunk, revision);
         try {
             var sections = chunkSections.remove(chunk);

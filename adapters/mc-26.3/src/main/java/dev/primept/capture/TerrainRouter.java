@@ -26,6 +26,8 @@ import net.minecraft.world.level.block.state.BlockState;
 public final class TerrainRouter implements AutoCloseable {
     // This bounds host key associations, not native resident geometry or world capacity.
     private static final int SOURCE_KEYS = 4096;
+    private static final Direction[] FACES = {Direction.DOWN,  Direction.UP,   Direction.NORTH,
+                                              Direction.SOUTH, Direction.WEST, Direction.EAST};
     private final CaptureInbox inbox;
     private final long epoch;
     private final BlockStateModelSet models;
@@ -58,6 +60,7 @@ public final class TerrainRouter implements AutoCloseable {
         try {
             if (region != null) {
                 var origin = section.origin();
+                var neighbor = new BlockPos.MutableBlockPos();
                 for (var pos : BlockPos.betweenClosed(origin, origin.offset(15, 15, 15))) {
                     var state = region.getBlockState(pos);
                     if (state.isAir())
@@ -90,22 +93,32 @@ public final class TerrainRouter implements AutoCloseable {
                         geometry = new Geometry(
                                 id, tintIndices.stream().mapToInt(Integer::intValue).toArray(),
                                 tintFaces.stream().mapToInt(Integer::intValue).toArray(), faces);
-                        inbox.routeResource(epoch, definitions.seal());
                         if (key != null) {
+                            inbox.routeResource(epoch, definitions.seal());
                             if (handles.size() >= SOURCE_KEYS)
                                 retire(handles.pollFirstEntry().getValue());
                             handles.put(key, geometry);
                         }
                     }
                     int visible = 64;
-                    for (var direction : Direction.values()) {
-                        int bit = 1 << face(direction);
+                    for (int face = 0; face < FACES.length; ++face) {
+                        var direction = FACES[face];
+                        int bit = 1 << face;
                         if ((geometry.faces & bit) != 0 &&
-                            Block.shouldRenderFace(state,
-                                                   region.getBlockState(pos.relative(direction)),
-                                                   direction))
+                            Block.shouldRenderFace(
+                                    state,
+                                    region.getBlockState(neighbor.setWithOffset(pos, direction)),
+                                    direction))
                             visible |= bit;
                     }
+                    // The actual model and visibility callbacks already ran. No emitted face
+                    // survives: do not serialize a placement for native to discard again.
+                    if ((geometry.faces & visible) == 0)
+                        continue;
+                    // A null-key definition has no future owner. Publish it only if this
+                    // observation actually uses it; invisible temporary geometry never crosses FFM.
+                    if (key == null)
+                        inbox.routeResource(epoch, definitions.seal());
                     var offset = state.getOffset(pos);
                     draws.l(geometry.id)
                             .f((float)(SectionPos.sectionRelative(pos.getX()) + offset.x))

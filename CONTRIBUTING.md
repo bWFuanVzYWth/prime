@@ -82,7 +82,7 @@
 7. 世界加载完成后用 Ctrl+Alt+F2 进入离线，确认视角/实体/粒子固定、噪点持续减少；按 Esc 打开菜单仍保持离线。曝光、primeDRT 和每帧采样数可以修改，路径/光照固定。调整尺寸后重新累积；再次按快捷键应重新捕获当前世界，地图/动态纹理不能过期。覆盖冻结时 F3+T 重载、切原版、退出/重进世界。
 8. 实时诊断依次查看原始噪声色、线性深度、世界法线；检查物体边缘、alpha 表面和天空（深度/法线预览为黑）。修改深度范围只改变预览；回到最终输出后 primeDRT 正常。深度/法线尚不代表完整 DLSS RR 接入。
 
-上述启动命令开启 validation 用于正确性检查，不用于性能结论。需要性能采样时，将 `-PprimeptValidation=false`，保持细叶计时和 capture audit 关闭，另加 `-PprimeptProfileCsv=绝对路径` 保存逐帧数据；固定场景、相机、画质、射线预算与分辨率。先确认 CSV 的 `terrain_pending=0`，再记录稳态及更新阶段；CPU 优化目前非阻塞，不以即时 FPS 达标作为本轮检查的前提。
+上述启动命令开启 validation 用于正确性检查，不用于性能结论。需要性能采样时，将 `-PprimeptValidation=false`，保持细叶计时和 capture audit 关闭，另加 `-PprimeptProfileCsv=绝对路径` 保存逐帧数据；固定场景、相机、画质、射线预算与分辨率。记录 CSV 的 `terrain_pending`（待观察事件）与 `terrain_waiting`（首次来源等待宿主前提），区分事件已处理与来源已就绪。稳态应没有持续的路由/提交；覆盖边缘可能仍缺邻居，`terrain_pending=0` 不能独自证明整个加载窗口齐备。再分别记录稳态及更新阶段；CPU 优化目前非阻塞，不以即时 FPS 达标作为本轮检查的前提。
 
 ## 按改动选择验证
 
@@ -119,7 +119,7 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored -
 
 `shader-tests` 另编译无窗口测试入口，直接验证生产 Slang 的 Z-Sobol、颜色、primeDRT 与安全起点；正常发行构建不包含测试入口。所有 imported shader 的改动都会触发重编译。同步验证日志出现 `Prime Vulkan ERROR`、`VUID` 或 hazard 时，即使 Rust test harness 返回通过也不能视为 GPU 检查通过。Slang 模块/数学支持边界及可替换的显示策略见 [模块说明](docs/shaders.md)。
 
-实例相关 GPU 测试还覆盖局部原型共享、仿射/颜色/UV 与烘焙几何等价、批量增删、空间回退桶局部失效，以及多帧在途的 resize、重定位和 epoch 切换。Java 版本模块另有独立 `cpuSmoke` Fabric 测试源集，在真实 Mixin 转换后的类上执行标准 Cube、同帧源突变、自定义源、下游截断及主 target 创建/缩放。测试启动器只初始化 Fabric/Mixin，测试在 preLaunch 退出；即使入口缺失也会失败退出，不调用游戏 main、不创建窗口或设备。这些测试不能代替实际游戏验证。
+实例相关 GPU 测试还覆盖局部原型共享、仿射/颜色/UV 与烘焙几何等价、批量增删、空间回退桶局部失效，以及多帧在途的 resize、重定位和 epoch 切换。Java 版本模块另有独立 `cpuSmoke` Fabric 测试源集，在真实 Mixin 转换后的类上执行标准 Cube、同帧源突变、自定义源、下游截断及主 target 创建/缩放。测试启动器只初始化 Fabric/Mixin，测试在 preLaunch 退出；即使入口缺失也会失败退出，不调用游戏 main、不创建窗口或设备。地形源请求夹具还通过真实脏/光照钩子验证大批未就绪来源零包、空闲帧零就绪轮询、就绪后实际 region/model 路由、重入与卸载取消。人工方形窗口的段数不代表游戏视距的实际加载量。这些测试不能代替实际游戏验证。
 
 ```powershell
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke --no-parallel
@@ -150,13 +150,23 @@ cargo run -p prime_tools --bin prime-pt-smoke -- smoke artifacts/smoke.png 32
 
 Prime 自有 CPU 工作池全部在 Rust。`PRIME_CPU_THREADS` 控制源编译与后端打包私有同步池的线程数，默认取可用 CPU 数与 8 的较小值；设为 1 可验证串行路径，非法非正值拒绝。小批直接运行，多线程仅写各自独占输出，返回前全部 join。Java 不再有 `primeptCompilerThreads` 参数或 Prime section compiler，源回调留在宿主 owner。
 
-Java CSV 中 `terrain_routed_total` / `terrain_routed` 统计已路由源段，`terrain_routing_ns` 统计源读取与封包，`terrain_snapshot_ns` 统计宿主快照获取；这些不是 native 几何编译时间。native 编译发生在同步 submit 中，包含于 drain/FFM 阶段；不可把迁移前的 `terrain_compile_join_ns` 与新字段直接视作同一成本。
+Java CSV 中 `terrain_routed_total` / `terrain_routed` 统计已路由源段，`terrain_routing_ns` 统计取得 region 后的源读取与封包，`terrain_snapshot_ns` 统计宿主快照获取；空段快捷路径和准入检查计入 `terrain_total_ns`；这些不是 native 几何编译时间。`terrain_deferred` 统计本帧因首次前提未满足而暂缓的请求次数，`terrain_waiting` 是帧末等待数；前者可重复计数，后者是当前存量。`terrain_selected` 是本批取出的事件身份数，`terrain_routed_total` 是该 owner 的累计路由次数，都不能当作当前常驻段数。`terrain_loaded_columns` 只统计加载回调新增的活跃列。native 编译发生在同步 submit 中，包含于 drain/FFM 阶段；不可把迁移前的 `terrain_compile_join_ns` 与新字段直接视作同一成本。
 
 封闭源批次没有人为的跨帧工作配额。完整首载或大范围修改可能形成真实长帧，应记录其成本；工作池线程数、几何批次、在途 GPU 页与当前活跃内容不是同一数量。空闲池页保留历史峰值，renderer 销毁时再释放。
 
 ## 性能测量
 
 正式性能测试使用原生 **1920×1080**，记录实际主 target 尺寸；降分辨率、动态分辨率或重建后的输出不能标为原生 1080p。固定场景、相机、种子、渲染参数、帧率上限和 VSync，记录构建、GPU/驱动、预热与采样范围。关闭 validation、capture audit 和逐调用 trace；计时 profiling 是否启用也属于测量条件。测量期间避免另一游戏或 GPU 测试争用设备。
+
+地形源路由与 native 编译有独立的无窗口成本夹具，可用于相同硬件/工具链的版本对照。测试时串行运行，避免同时构建或测量另一路：
+
+```powershell
+.\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeRoutingCost=local --no-parallel
+$env:PRIME_ROUTING_COST_LABEL = 'local'
+cargo test --release -p prime_scene --locked routing_cost_matrix -- --ignored --nocapture
+```
+
+Java 输出到各适配器 `build/routing-fixtures/cost-local.csv`，覆盖完整遮挡、外露表面、交错可见和无 cull face 模型。每种场景每批 64 段，至少预热 2 秒后记录 30 批，保留预热与离群值；测实际模型/可见性路由、封批、当前 Java 线程分配及协议字节，使用已复用的 geometry key，不含 FFM/GPU 或真实世界加载。Rust 输出到 `artifacts/routing-stutter/native-local.csv`，固定私有 8 线程、每批 16 段和每段 512/4096 个放置，覆盖重复、末尾单处变化和全量变化；每种预热至少 500 ms 后记录 30 批，含解码/内容证明/编译/发布，不含生成输入、Java/FFM/GPU。这些数据只说明局部成本，不能当作原生1080p游戏帧率或尾延迟。
 
 在独立 PowerShell 会话中运行宿主路径夹具：
 
