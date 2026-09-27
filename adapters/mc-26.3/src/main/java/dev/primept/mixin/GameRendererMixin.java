@@ -33,6 +33,12 @@ public abstract class GameRendererMixin {
                            renderer.mainRenderTarget());
     }
 
+    @Inject(method = "renderItemInHand", at = @At("HEAD"), cancellable = true)
+    private void primept$frozenHand(CallbackInfo callback) {
+        if (PrimeClient.offlineActive())
+            callback.cancel();
+    }
+
     @Inject(method = "setLevel", at = @At("HEAD"))
     private void primept$reset(ClientLevel level, CallbackInfo callback) {
         PrimeClient.resetWorld();

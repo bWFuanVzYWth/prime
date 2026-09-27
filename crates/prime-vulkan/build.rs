@@ -19,6 +19,12 @@ fn main() {
         })
         .unwrap_or_else(|| PathBuf::from("slangc"));
     compile(&compiler, "shaders/path_trace.slang", "path_trace.spv");
+    compile(&compiler, "shaders/realtime.slang", "realtime.spv");
+    compile(
+        &compiler,
+        "shaders/realtime_display.slang",
+        "realtime_display.spv",
+    );
     if env::var_os("CARGO_FEATURE_SHADER_TESTS").is_some() {
         for name in ["foundations", "intersection", "display"] {
             compile(

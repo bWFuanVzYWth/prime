@@ -43,7 +43,8 @@ loom {
             vmArgs '--enable-native-access=ALL-UNNAMED'
             vmArgs "-Dprimept.native.path=${providers.gradleProperty('nativeLibrary').getOrElse(rootProject.file("target/release/${hostLibraryName}").absolutePath)}"
             vmArgs "-Dprimept.enabled=${providers.gradleProperty('primeptEnabled').getOrElse('false')}"
-            vmArgs "-Dprimept.renderer=${providers.gradleProperty('primeptRenderer').getOrElse('path_trace')}"
+            if (providers.gradleProperty('primeptRenderer').isPresent())
+                vmArgs "-Dprimept.renderer=${providers.gradleProperty('primeptRenderer').get()}"
             vmArgs "-Dprimept.profile.leaves=${providers.gradleProperty('primeptProfileLeaves').getOrElse('false')}"
             vmArgs "-Dprimept.profile=${providers.gradleProperty('primeptProfile').getOrElse('false')}"
             vmArgs "-Dprimept.geometryCache=${providers.gradleProperty('primeptGeometryCache').getOrElse('false')}"

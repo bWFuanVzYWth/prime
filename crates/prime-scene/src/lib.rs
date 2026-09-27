@@ -5,6 +5,7 @@ pub mod extent;
 pub mod instances;
 pub mod protocol;
 pub mod scene;
+pub mod settings;
 
 pub use scene::{
     Camera, Instance, InstanceScene, Prototype, Scene, SceneMesh, SourceScene, Texture, Triangle,

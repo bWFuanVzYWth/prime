@@ -11,7 +11,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class CaptureGateMixin {
     @Inject(method = "captureEnabled", at = @At("HEAD"), cancellable = true)
     private static void test$sourceWithoutDevice(CallbackInfoReturnable<Boolean> result) {
-        result.setReturnValue(true);
+        if (!Boolean.getBoolean("primept.smoke.realCaptureGates"))
+            result.setReturnValue(true);
     }
     @Inject(method = "exclusiveFrameReady", at = @At("HEAD"), cancellable = true)
     private static void test$itemExclusive(CallbackInfoReturnable<Boolean> result) {

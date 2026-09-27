@@ -36,6 +36,14 @@ int32_t prime_render(uint64_t handle, const uint8_t *frame, uint64_t length,
 // host[48] LE: instance/physical/device/queue/timeline u64, family u32, reserved u32=0.
 // Caller enables AS/rayQuery/BDA and timeline features; host objects remain caller-owned.
 int32_t prime_attach_vulkan(uint64_t handle, const uint8_t *host, uint64_t length);
+// Settings[48] LE: version=1/mode/bounces/offline_samples u32[4],
+// exposure/hue/saturation f32[3], diagnostic_view u32, sun/sky/depth_range f32[3], seed u32.
+// mode=0 realtime, 1 frozen offline; view=0 output, 1 noisy, 2 depth, 3 normal.
+// Mode changes occur outside recording: submit the host encoder first, then call.
+// Native waits for completion and destroys old mode resources before creating new ones.
+// Offline requires a recorded frame with no subsequent scene mutation. prime_submit
+// is rejected while frozen. Only incoming extent/sequence affect a frozen frame.
+int32_t prime_configure(uint64_t handle, const uint8_t *settings, uint64_t length);
 // Target is RGBA8_UNORM with STORAGE usage, GENERAL layout, bottom-up host coordinates.
 // Caller ends/enqueues command, signals the attached timeline at submit_value, and
 // retains target objects until completion. This call does not submit or read pixels;

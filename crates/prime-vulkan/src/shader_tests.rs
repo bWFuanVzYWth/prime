@@ -35,6 +35,7 @@ fn run(
         pool: vk::DescriptorPool::null(),
         descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
         pipeline: vk::Pipeline::null(),
+        resolve: vk::Pipeline::null(),
     };
     unsafe {
         let types: Vec<_> = (0..if geometry.is_some() { 7 } else { 2 })

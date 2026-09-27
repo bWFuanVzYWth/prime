@@ -4,7 +4,7 @@
 
 ```text
 adapters/
-  common/                 纯 Java 25：FFM、封包、源顶点编码、共同测试
+  common/                 纯 Java 25：设置、FFM、封包、源顶点编码、共同测试
   mc-26.2/                26.2 Fabric / Blaze3D 捕获与 Vulkan 宿主适配
   mc-26.3/                26.3 Fabric / RenderPearl 捕获与 Vulkan 宿主适配
 gradle/minecraft-adapter.gradle   共用构建、打包和开发运行约定
@@ -39,7 +39,7 @@ flowchart TD
 
 `prime_tools` 持有离线 PNG 输出与性能夹具入口，图像编码库不进入引擎 DLL 的依赖。诊断用 C 导出 `prime_render` 仍存在，实际游戏只调用宿主录制接口，不回读输出。
 
-`adapters/common` 的生产代码不依赖 Minecraft、Fabric 或 LWJGL。它只写稳定的源描述与 FFM ABI，不能增加 MC enum ordinal、宿主私有类或 shader buffer 布局。版本模块负责实际 MC 模型/tint 调用的观察、区块任务/epoch、纹理来源、相机和宿主 Vulkan 特性与句柄。复制少量版本适配代码比把变化的私有签名装进反射层更容易编译检查；新版本通过增加模块验证，不能更改 Rust 使其识别版本号。
+`adapters/common` 的生产代码不依赖 Minecraft、Fabric 或 LWJGL。它持有版本无关的设置和源描述，并封装 FFM ABI，不能增加 MC enum ordinal、宿主私有类或 shader buffer 布局。版本模块负责实际 MC 模型/tint 调用的观察、区块任务/epoch、纹理来源、相机和宿主 Vulkan 特性与句柄。复制少量版本适配代码比把变化的私有签名装进反射层更容易编译检查；新版本通过增加模块验证，不能更改 Rust 使其识别版本号。
 
 两个安装包都打入公共层的同一编译产物和同一 `target/release/prime_engine.dll`。`verifyNativeJars` 检查引擎字节、桥接类字节和精确 MC 版本约束。每版有独立 `run/` 与存档目录，避免新版存档升级污染旧版验证。
 

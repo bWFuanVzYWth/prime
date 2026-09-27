@@ -3,6 +3,7 @@ use crate::cpu_profile::{PrepareProfile, elapsed};
 use prime_scene::{
     protocol::Frame,
     scene::{Scene, SourceScene},
+    settings::{RenderMode, RenderSettings},
 };
 
 #[derive(Default)]
@@ -12,11 +13,73 @@ pub(crate) struct Engine {
     translation_revision: u64,
     cpu_profile: PrepareProfile,
     pub(crate) failed: bool,
+    pub(crate) settings: RenderSettings,
+    last_frame: Option<(Frame, RenderSettings)>,
+    frozen_frame: Option<(Frame, RenderSettings)>,
     #[cfg(feature = "vulkan")]
     pub(crate) renderer: Option<prime_vulkan::Renderer>,
 }
 
 impl Engine {
+    pub(crate) fn submit(&mut self, bytes: &[u8]) -> Result<(), String> {
+        if self.failed {
+            return Err("Renderer session is poisoned".into());
+        }
+        if self.frozen_frame.is_some() {
+            return Err("Cannot mutate a frozen offline scene".into());
+        }
+        self.source.submit(bytes)?;
+        // A scene mutation not yet rendered cannot be called the last displayed snapshot.
+        self.last_frame = None;
+        Ok(())
+    }
+
+    pub(crate) fn configure(&mut self, settings: RenderSettings) -> Result<(), String> {
+        settings.validate()?;
+        if self.failed {
+            return Err("Renderer session is poisoned".into());
+        }
+        let frozen = if settings.mode == RenderMode::Offline {
+            Some(match self.frozen_frame {
+                Some(snapshot) => snapshot,
+                None => self
+                    .last_frame
+                    .ok_or("Offline rendering needs a successfully recorded world frame")?,
+            })
+        } else {
+            None
+        };
+        #[cfg(feature = "vulkan")]
+        if let Some(renderer) = &mut self.renderer {
+            let mut active = settings;
+            if let Some((_, transport)) = frozen {
+                active.bounces = transport.bounces;
+                active.sun = transport.sun;
+                active.sky = transport.sky;
+                active.seed = transport.seed;
+            }
+            poison_on_failure(&mut self.failed, || renderer.configure(active))?;
+            renderer.set_scene_frozen(frozen.is_some());
+        }
+        self.settings = settings;
+        self.frozen_frame = frozen;
+        Ok(())
+    }
+
+    fn effective_frame(&self, frame: &Frame) -> Frame {
+        if let Some((fixed, _)) = self.frozen_frame {
+            // Resize changes only the image extent/aspect. Pose, FOV, epoch and lighting stay frozen.
+            Frame {
+                width: frame.width,
+                height: frame.height,
+                sample_index: frame.sample_index,
+                ..fixed
+            }
+        } else {
+            *frame
+        }
+    }
+
     fn prepare(&mut self, frame: &Frame) -> Result<[f64; 3], String> {
         let started = self.cpu_profile.start();
         if self.failed {
@@ -66,21 +129,30 @@ impl Engine {
     }
 
     pub(crate) fn render(&mut self, frame: &Frame) -> Result<Vec<u8>, String> {
+        let effective = self.effective_frame(frame);
+        let frame = &effective;
         let anchor = self.prepare(frame)?;
         #[cfg(feature = "vulkan")]
         {
             poison_on_failure(&mut self.failed, || {
                 if self.renderer.is_none() {
-                    self.renderer = Some(prime_vulkan::Renderer::new()?);
+                    let mut renderer = prime_vulkan::Renderer::with_mode(self.settings.mode)?;
+                    renderer.configure(self.settings)?;
+                    self.renderer = Some(renderer);
                 }
-                self.renderer.as_mut().unwrap().render_with_instances(
+                let result = self.renderer.as_mut().unwrap().render_with_instances(
                     &self.translated.as_ref().unwrap().2,
                     self.source.instances(),
                     &frame.relative_camera(anchor),
                     frame.width,
                     frame.height,
                     frame.sample_index,
-                )
+                )?;
+                self.last_frame = Some((
+                    *frame,
+                    self.frozen_frame.map_or(self.settings, |(_, fixed)| fixed),
+                ));
+                Ok(result)
             })
         }
         #[cfg(not(feature = "vulkan"))]
@@ -99,6 +171,8 @@ impl Engine {
         view: u64,
         serial: u64,
     ) -> Result<(), String> {
+        let effective = self.effective_frame(frame);
+        let frame = &effective;
         let anchor = self.prepare(frame)?;
         poison_on_failure(&mut self.failed, || {
             let renderer = self
@@ -117,8 +191,13 @@ impl Engine {
                     image,
                     view,
                     serial,
-                )
+                )?;
             }
+            self.last_frame = Some((
+                *frame,
+                self.frozen_frame.map_or(self.settings, |(_, fixed)| fixed),
+            ));
+            Ok(())
         })
     }
 }
@@ -314,5 +393,70 @@ mod tests {
         assert!(!Arc::ptr_eq(&first, &scene.meshes[&(91, 0)].triangles));
         assert_eq!(scene.meshes[&(91, 1)].revision, 1);
         assert!(Arc::ptr_eq(&other, &scene.meshes[&(91, 1)].triangles));
+    }
+    #[test]
+    fn frozen_scene_uses_last_recorded_pose_and_transport_until_explicit_thaw() {
+        let mut engine = Engine::default();
+        let offline = RenderSettings {
+            mode: RenderMode::Offline,
+            ..Default::default()
+        };
+        assert!(engine.configure(offline).is_err());
+        assert!(!engine.failed);
+        engine.submit(&header(1)).unwrap();
+        let frame = Frame {
+            epoch: 1,
+            world_position: [512.25, -20.5, 8192.75],
+            camera: Camera {
+                position: [0.0; 3],
+                forward: [0.0, 0.0, -1.0],
+                right: [1.0, 0.0, 0.0],
+                up: [0.0, 1.0, 0.0],
+                vertical_fov_radians: 1.1,
+            },
+            width: 1920,
+            height: 1080,
+            sample_index: 9,
+        };
+        engine.last_frame = Some((frame, engine.settings));
+        engine.configure(offline).unwrap();
+        assert!(engine.submit(&dynamic(1, true)).is_err());
+        assert!(engine.submit(&header(1)).is_err());
+        let mut moved = frame;
+        moved.world_position = [-9999.0; 3];
+        moved.camera.vertical_fov_radians = 0.5;
+        moved.epoch = 20;
+        moved.width = 701;
+        moved.height = 999;
+        moved.sample_index = 7;
+        let effective = engine.effective_frame(&moved);
+        assert_eq!(effective.world_position, frame.world_position);
+        assert_eq!(effective.camera, frame.camera);
+        assert_eq!(effective.epoch, 1);
+        assert_eq!(
+            (effective.width, effective.height, effective.sample_index),
+            (701, 999, 7)
+        );
+        engine
+            .configure(RenderSettings {
+                exposure: 2.0,
+                bounces: 20,
+                sky: 3.0,
+                ..offline
+            })
+            .unwrap();
+        assert_eq!(engine.settings.exposure, 2.0);
+        assert_eq!(engine.frozen_frame.unwrap().1, RenderSettings::default());
+        engine.configure(RenderSettings::default()).unwrap();
+        assert!(engine.frozen_frame.is_none());
+        assert_eq!(
+            engine.effective_frame(&moved).world_position,
+            moved.world_position
+        );
+        engine.submit(&dynamic(1, true)).unwrap();
+        assert!(
+            engine.configure(offline).is_err(),
+            "Unrecorded source mutations cannot freeze the previous frame"
+        );
     }
 }

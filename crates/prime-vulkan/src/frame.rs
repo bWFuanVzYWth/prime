@@ -15,11 +15,25 @@ pub(super) struct Output {
     // These exist only for explicit offline image diagnostics.
     image: Option<Image>,
     readback: Option<Buffer>,
-    accumulation: Buffer,
+    storage: OutputStorage,
+}
+
+enum OutputStorage {
+    Offline(Buffer),
+    Realtime {
+        noisy: Image,
+        depth: Image,
+        normal: Image,
+    },
 }
 
 impl Output {
-    fn new(context: &Arc<Context>, width: u32, height: u32) -> Result<Self, String> {
+    fn new(
+        context: &Arc<Context>,
+        width: u32,
+        height: u32,
+        mode: RenderMode,
+    ) -> Result<Self, String> {
         let extent = context.render_extent(width, height)?;
         let bytes = extent.pixels();
         let offline = !context.is_borrowed();
@@ -37,19 +51,40 @@ impl Output {
             } else {
                 None
             },
-            accumulation: Buffer::new(
-                context,
-                bytes * 16,
-                vk::BufferUsageFlags::STORAGE_BUFFER,
-                false,
-            )?,
+            storage: match mode {
+                RenderMode::Offline => OutputStorage::Offline(Buffer::new(
+                    context,
+                    bytes * 16,
+                    vk::BufferUsageFlags::STORAGE_BUFFER,
+                    false,
+                )?),
+                RenderMode::Realtime => OutputStorage::Realtime {
+                    noisy: Image::with_format(
+                        context,
+                        width,
+                        height,
+                        vk::Format::R32G32B32A32_SFLOAT,
+                    )?,
+                    depth: Image::with_format(context, width, height, vk::Format::R32_SFLOAT)?,
+                    normal: Image::with_format(
+                        context,
+                        width,
+                        height,
+                        vk::Format::R32G32B32A32_SFLOAT,
+                    )?,
+                },
+            },
         })
     }
 }
 
 impl Renderer {
     pub fn new() -> Result<Self, String> {
-        Self::from_context(Context::new()?)
+        Self::with_mode(RenderMode::Offline)
+    }
+
+    pub fn with_mode(mode: RenderMode) -> Result<Self, String> {
+        Self::from_context(Context::new()?, mode)
     }
 
     /// # Safety
@@ -64,14 +99,40 @@ impl Renderer {
         family: u32,
         timeline: u64,
     ) -> Result<Self, String> {
-        Self::from_context(unsafe {
-            Context::borrowed(instance, physical, device, queue, family, timeline)?
-        })
+        unsafe {
+            Self::borrowed_mode(
+                instance,
+                physical,
+                device,
+                queue,
+                family,
+                timeline,
+                RenderMode::Offline,
+            )
+        }
     }
 
-    fn from_context(context: Arc<Context>) -> Result<Self, String> {
+    /// # Safety
+    /// Same host ownership, feature and completion contract as `borrowed`.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn borrowed_mode(
+        instance: u64,
+        physical: u64,
+        device: u64,
+        queue: u64,
+        family: u32,
+        timeline: u64,
+        mode: RenderMode,
+    ) -> Result<Self, String> {
+        Self::from_context(
+            unsafe { Context::borrowed(instance, physical, device, queue, family, timeline)? },
+            mode,
+        )
+    }
+
+    fn from_context(context: Arc<Context>, mode: RenderMode) -> Result<Self, String> {
         let cpu_profile = context.cpu_upload_bytes().map(|_| CpuProfile::default());
-        let pipeline = Pipeline::new(&context)?;
+        let pipeline = Some(Pipeline::new(&context, mode)?);
         let mut result = Self {
             context,
             pipeline,
@@ -81,13 +142,18 @@ impl Renderer {
             samples: 0,
             frame_seed: 0,
             display: PrimeDrtSettings::default().prepare(1.0)?,
+            settings: RenderSettings {
+                mode,
+                ..Default::default()
+            },
+            scene_frozen: false,
             failed: false,
             host_serials: [0; FRAME_SLOTS],
             query_serials: [0; FRAME_SLOTS],
             host_query: vk::QueryPool::null(),
             last_gpu_ns: 0,
             last_gpu_serial: 0,
-            descriptor_keys: [[0; 7]; FRAME_SLOTS],
+            descriptor_keys: [[0; 10]; FRAME_SLOTS],
             cpu_profile,
         };
         if result.context.is_borrowed()
@@ -121,6 +187,50 @@ impl Renderer {
     pub fn set_prime_drt(&mut self, settings: PrimeDrtSettings) -> Result<(), String> {
         self.display = settings.prepare(1.0)?;
         Ok(())
+    }
+
+    /// A mode change is a frame-boundary operation. The host must submit its pending encoder first.
+    /// Shared geometry survives; exclusive old pipelines/images retire before the new pipeline is created.
+    pub fn configure(&mut self, settings: RenderSettings) -> Result<(), String> {
+        settings.validate()?;
+        if self.failed {
+            return Err("Cannot configure a failed renderer".into());
+        }
+        let display = PrimeDrtSettings {
+            exposure_multiplier: settings.exposure,
+            hue_compensation: settings.hue,
+            saturation_compensation: settings.saturation,
+        }
+        .prepare(1.0)?;
+        if settings.mode != self.settings.mode {
+            self.failed = true;
+            self.context.wait_host_idle()?;
+            drop(self.output.take());
+            drop(self.pipeline.take());
+            self.context.completed_serial()?; // Drain the retired images/buffers using completed host work.
+            self.pipeline = Some(Pipeline::new(&self.context, settings.mode)?);
+            self.descriptor_keys = [[0; 10]; FRAME_SLOTS];
+            self.samples = 0;
+            self.failed = false;
+        } else if !settings.transport_matches(self.settings) {
+            self.samples = 0;
+        }
+        self.display = display;
+        self.settings = settings;
+        Ok(())
+    }
+
+    fn samples_per_frame(&self) -> u32 {
+        if self.settings.mode == RenderMode::Offline {
+            self.settings.offline_samples
+        } else {
+            1
+        }
+    }
+
+    /// The scene owner must prohibit mutations until thawed. Geometry is reused without planning/scanning.
+    pub fn set_scene_frozen(&mut self, frozen: bool) {
+        self.scene_frozen = frozen;
     }
     pub fn profile_snapshot(&self) -> Option<GpuProfile> {
         self.context.profile_snapshot()
@@ -244,49 +354,58 @@ impl Renderer {
         {
             return Err("Camera contains invalid vectors or vertical FOV".into());
         }
-        let started = cpu.start();
-        if self.geometry.as_ref().is_none_or(|g| g.needs_update(scene)) {
-            cpu.static_updates += 1;
-            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
-            if let Some(geometry) = &mut self.geometry {
-                geometry.update(&self.context, scene)?;
-            } else {
-                self.geometry = Some(Geometry::new(&self.context, scene)?);
+        if !self.scene_frozen || self.geometry.is_none() {
+            let started = cpu.start();
+            if self.geometry.as_ref().is_none_or(|g| g.needs_update(scene)) {
+                cpu.static_updates += 1;
+                self.descriptor_keys = [[0; 10]; FRAME_SLOTS];
+                if let Some(geometry) = &mut self.geometry {
+                    geometry.update(&self.context, scene)?;
+                } else {
+                    self.geometry = Some(Geometry::new(&self.context, scene)?);
+                }
+                self.samples = 0;
             }
-            self.samples = 0;
+            cpu.finish(Stage::Static, started);
+            let (dynamic_changed, bindings_changed) = self
+                .geometry
+                .as_mut()
+                .unwrap()
+                .prepare_dynamic(&self.context, scene, instances, slot, cpu)?;
+            if dynamic_changed {
+                self.samples = 0;
+            }
+            if bindings_changed {
+                // A freed raw handle can reappear in an older descriptor slot's key.
+                self.descriptor_keys = [[0; 10]; FRAME_SLOTS];
+            }
         }
-        cpu.finish(Stage::Static, started);
-        let (dynamic_changed, bindings_changed) = self.geometry.as_mut().unwrap().prepare_dynamic(
-            &self.context,
-            scene,
-            instances,
-            slot,
-            cpu,
-        )?;
         let started = cpu.start();
-        if dynamic_changed {
-            self.samples = 0;
-        }
-        if bindings_changed {
-            // A freed raw handle can reappear in an older descriptor slot's key.
-            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
-        }
         if self
             .output
             .as_ref()
             .is_none_or(|o| o.width != width || o.height != height)
         {
-            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
-            self.output = Some(Output::new(&self.context, width, height)?);
+            self.descriptor_keys = [[0; 10]; FRAME_SLOTS];
+            self.output = Some(Output::new(
+                &self.context,
+                width,
+                height,
+                self.settings.mode,
+            )?);
             self.samples = 0;
         }
         // Float accumulation loses unit sample precision beyond 2^24; start a
         // fresh history before then, without overflowing sample + 1 in the shader.
-        if self.camera != Some(*camera) || sample_index == 0 || self.samples >= (1 << 24) {
+        if self.camera != Some(*camera)
+            || sample_index == 0
+            || self.samples > (1 << 24) - self.samples_per_frame()
+            || self.settings.mode == RenderMode::Realtime
+        {
             self.samples = 0;
         }
         self.camera = Some(*camera);
-        self.frame_seed = if scene.dynamic.triangles.is_empty() && instances.instances.is_empty() {
+        self.frame_seed = if self.settings.mode == RenderMode::Offline {
             self.samples
         } else {
             sample_index
@@ -298,31 +417,44 @@ impl Renderer {
     fn descriptors(&mut self, slot: usize, view: vk::ImageView) {
         let geometry = self.geometry.as_ref().unwrap();
         let output = self.output.as_ref().unwrap();
+        let (accumulation, guide_views) = match &output.storage {
+            OutputStorage::Offline(buffer) => (Some(buffer), [vk::ImageView::null(); 3]),
+            OutputStorage::Realtime {
+                noisy,
+                depth,
+                normal,
+            } => (None, [noisy.view, depth.view, normal.view]),
+        };
         let key = [
             geometry.top.handle().as_raw(),
             geometry.textures.metadata.buffer.as_raw(),
             geometry.textures.texels.buffer.as_raw(),
-            output.accumulation.buffer.as_raw(),
             view.as_raw(),
             geometry.objects.metadata.buffer.as_raw(),
             geometry.static_bases.buffer.as_raw(),
+            accumulation.map_or(0, |b| b.buffer.as_raw()),
+            guide_views[0].as_raw(),
+            guide_views[1].as_raw(),
+            guide_views[2].as_raw(),
         ];
-        let descriptor = self.pipeline.descriptors[slot];
-        let image = [vk::DescriptorImageInfo::default()
-            .image_view(view)
-            .image_layout(vk::ImageLayout::GENERAL)];
+        let descriptor = self.pipeline.as_ref().unwrap().descriptors[slot];
+        let image_info = |view| {
+            [vk::DescriptorImageInfo::default()
+                .image_view(view)
+                .image_layout(vk::ImageLayout::GENERAL)]
+        };
+        let host_image = image_info(view);
+        let host_write = vk::WriteDescriptorSet::default()
+            .dst_set(descriptor)
+            .dst_binding(4)
+            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+            .image_info(&host_image);
         if self.descriptor_keys[slot] == key {
-            // The host may recreate a view with the same raw handle. Refresh its
-            // binding even when renderer-owned immutable bindings remain cached.
+            // Refresh even when the host reuses a raw view handle after a resize.
             unsafe {
-                self.context.device.update_descriptor_sets(
-                    &[vk::WriteDescriptorSet::default()
-                        .dst_set(descriptor)
-                        .dst_binding(4)
-                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                        .image_info(&image)],
-                    &[],
-                );
+                self.context
+                    .device
+                    .update_descriptor_sets(&[host_write], &[]);
             }
             return;
         }
@@ -332,7 +464,6 @@ impl Renderer {
         let buffers = [
             &geometry.textures.metadata,
             &geometry.textures.texels,
-            &output.accumulation,
             &geometry.objects.metadata,
             &geometry.static_bases,
         ];
@@ -341,44 +472,50 @@ impl Renderer {
                 .buffer(b.buffer)
                 .range(b.size)]
         });
-        let writes = [
+        let mut writes = Vec::with_capacity(10);
+        writes.push(
             vk::WriteDescriptorSet::default()
                 .dst_set(descriptor)
                 .dst_binding(0)
                 .descriptor_count(1)
                 .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
                 .push_next(&mut acceleration),
-            vk::WriteDescriptorSet::default()
-                .dst_set(descriptor)
-                .dst_binding(2)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&infos[0]),
-            vk::WriteDescriptorSet::default()
-                .dst_set(descriptor)
-                .dst_binding(3)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&infos[1]),
-            vk::WriteDescriptorSet::default()
-                .dst_set(descriptor)
-                .dst_binding(4)
-                .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                .image_info(&image),
-            vk::WriteDescriptorSet::default()
-                .dst_set(descriptor)
-                .dst_binding(5)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&infos[2]),
-            vk::WriteDescriptorSet::default()
-                .dst_set(descriptor)
-                .dst_binding(7)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&infos[3]),
-            vk::WriteDescriptorSet::default()
-                .dst_set(descriptor)
-                .dst_binding(8)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&infos[4]),
-        ];
+        );
+        writes.push(host_write);
+        for (binding, info) in [2, 3, 7, 8].into_iter().zip(&infos) {
+            writes.push(
+                vk::WriteDescriptorSet::default()
+                    .dst_set(descriptor)
+                    .dst_binding(binding)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(info),
+            );
+        }
+        let accumulation_info = accumulation.map(|b| {
+            [vk::DescriptorBufferInfo::default()
+                .buffer(b.buffer)
+                .range(b.size)]
+        });
+        let guides = guide_views.map(image_info);
+        if let Some(info) = &accumulation_info {
+            writes.push(
+                vk::WriteDescriptorSet::default()
+                    .dst_set(descriptor)
+                    .dst_binding(5)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(info),
+            );
+        } else {
+            for (binding, info) in [9, 10, 11].into_iter().zip(&guides) {
+                writes.push(
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(descriptor)
+                        .dst_binding(binding)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .image_info(info),
+                );
+            }
+        }
         unsafe {
             self.context.device.update_descriptor_sets(&writes, &[]);
         }
@@ -386,6 +523,7 @@ impl Renderer {
     }
 
     fn dispatch(&self, command: vk::CommandBuffer, slot: usize, bottom_up: bool) {
+        let pipeline = self.pipeline.as_ref().unwrap();
         let camera = self.camera.unwrap();
         let output = self.output.as_ref().unwrap();
         let mut push = [0u8; 128];
@@ -401,11 +539,11 @@ impl Renderer {
             camera.right[0],
             camera.right[1],
             camera.right[2],
-            0.0,
+            self.settings.sun,
             camera.up[0],
             camera.up[1],
             camera.up[2],
-            0.0,
+            self.settings.sky,
         ];
         for (destination, value) in push[..64].as_chunks_mut::<4>().0.iter_mut().zip(values) {
             *destination = value.to_le_bytes();
@@ -414,11 +552,11 @@ impl Renderer {
             output.width,
             output.height,
             self.samples,
-            u32::from(self.geometry.as_ref().unwrap().triangle_count != 0),
+            self.samples_per_frame(),
             u32::from(bottom_up),
             self.frame_seed,
             output.log2_resolution,
-            0x1357_2468,
+            self.settings.seed,
         ];
         for (destination, value) in push[64..96].as_chunks_mut::<4>().0.iter_mut().zip(integers) {
             *destination = value.to_le_bytes();
@@ -431,23 +569,26 @@ impl Renderer {
         {
             *destination = value.to_le_bytes();
         }
+        push[116..120].copy_from_slice(&self.settings.depth_range.to_le_bytes());
+        push[120..124].copy_from_slice(&self.settings.bounces.to_le_bytes());
+        push[124..128].copy_from_slice(&(self.settings.view as u32).to_le_bytes());
         unsafe {
             self.context.device.cmd_bind_pipeline(
                 command,
                 vk::PipelineBindPoint::COMPUTE,
-                self.pipeline.pipeline,
+                pipeline.pipeline,
             );
             self.context.device.cmd_bind_descriptor_sets(
                 command,
                 vk::PipelineBindPoint::COMPUTE,
-                self.pipeline.layout,
+                pipeline.layout,
                 0,
-                &[self.pipeline.descriptors[slot]],
+                &[pipeline.descriptors[slot]],
                 &[],
             );
             self.context.device.cmd_push_constants(
                 command,
-                self.pipeline.layout,
+                pipeline.layout,
                 vk::ShaderStageFlags::COMPUTE,
                 0,
                 &push,
@@ -458,6 +599,31 @@ impl Renderer {
                 output.height.div_ceil(8),
                 1,
             );
+            if pipeline.resolve != vk::Pipeline::null() {
+                let barrier = [vk::MemoryBarrier::default()
+                    .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::SHADER_READ)];
+                self.context.device.cmd_pipeline_barrier(
+                    command,
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                    vk::DependencyFlags::empty(),
+                    &barrier,
+                    &[],
+                    &[],
+                );
+                self.context.device.cmd_bind_pipeline(
+                    command,
+                    vk::PipelineBindPoint::COMPUTE,
+                    pipeline.resolve,
+                );
+                self.context.device.cmd_dispatch(
+                    command,
+                    output.width.div_ceil(8),
+                    output.height.div_ceil(8),
+                    1,
+                );
+            }
         }
     }
 
@@ -563,7 +729,7 @@ impl Renderer {
                     &[],
                 );
             })?;
-        self.samples = self.samples.saturating_add(1);
+        self.samples = self.samples.saturating_add(self.samples_per_frame());
         readback.read(width as usize * height as usize * 4)
     }
 
@@ -729,7 +895,7 @@ impl Renderer {
             }
         }
         self.host_serials[slot] = serial;
-        self.samples = self.samples.saturating_add(1);
+        self.samples = self.samples.saturating_add(self.samples_per_frame());
         cpu.finish(Stage::Dispatch, started);
         Ok(())
     }
@@ -785,3 +951,7 @@ impl Drop for Renderer {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "mode_tests.rs"]
+mod tests;

@@ -48,6 +48,34 @@ final class CanonicalTextureCpuSmoke {
                   "Actual missing-image creator source");
             restored(missing);
 
+            // Preserve actual upload sources across freeze/thaw, including noncanonical mutable textures.
+            var offline =
+                    (dev.primept.render.OfflineMode)field(dev.primept.PrimeClient.class, "offline")
+                            .get(client);
+            requested.set(client, "path_trace");
+            try (var changing =
+                         new DynamicTexture(() -> "offline source", new NativeImage(2, 2, true))) {
+                int id = DynamicTextures.use(changing.getTexture());
+                offline.request(true);
+                offline.committed(true);
+                changing.getPixels().setPixel(0, 0, 0xff2468ac);
+                changing.upload();
+                var sources = (java.util.Map<?,?>)field(DynamicTextures.class,"SOURCES").get(null);
+                Object snapshot = sources.get(changing.getTexture());
+                check(snapshot != null &&
+                              Arrays.equals(
+                                      (byte[])field(snapshot.getClass(), "rgba").get(snapshot),
+                                      UPLOADED.get(changing.getTexture())),
+                      "Frozen actual resource upload remains available for thaw");
+                offline.reset();
+                check(DynamicTextures.use(changing.getTexture()) == id,
+                      "Thaw keeps source texture identity");
+            } finally {
+                offline.reset();
+                requested.set(client, "vanilla");
+                DynamicTextures.releaseSources();
+            }
+
             var skinImage = new NativeImage(4, 4, true);
             skinImage.setPixel(0, 0, 0xff123456);
             var asset = new ClientAsset.ResourceTexture(Identifier.parse("primept:cpu_skin"));

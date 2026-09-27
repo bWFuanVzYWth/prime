@@ -652,4 +652,105 @@ mod tests {
             );
         }
     }
+    #[test]
+    #[ignore = "requires Vulkan with synchronization validation; realtime guide retirement under in-flight resize"]
+    fn host_realtime_resize_and_offline_switch_retire_exclusive_resources() {
+        let mut host = HostBenchmark::new(64, 48).unwrap();
+        use crate::plan::{INHERIT, translation};
+        use prime_scene::scene::{Instance, Prototype};
+        let scene = Scene {
+            epoch: 1,
+            ..Default::default()
+        };
+        let mut instances = InstanceScene {
+            epoch: 1,
+            resource_revision: 1,
+            instance_revision: 1,
+            ..Default::default()
+        };
+        instances.prototypes.insert(
+            1,
+            Prototype {
+                revision: 1,
+                bounds: [[-1.0, -1.0, -2.0], [1.0, 1.0, -2.0]],
+                triangles: vec![Triangle {
+                    positions: [[-1.0, -1.0, -2.0], [1.0, -1.0, -2.0], [0.0, 1.0, -2.0]],
+                    colors: [[1.0; 4]; 3],
+                    uvs: [[0.0; 2]; 3],
+                    texture_id: 0,
+                    flags: 0,
+                }]
+                .into(),
+            },
+        );
+        for id in 0..100 {
+            instances.instances.insert(
+                id,
+                Instance {
+                    revision: 1,
+                    prototype_id: 1,
+                    origin: [id as f64 * 0.01, 0.0, 0.0],
+                    transform: translation([0.0; 3]),
+                    texture_id: INHERIT,
+                    flags: INHERIT,
+                    tint: [255; 4],
+                    uv_transform: [1.0, 1.0, 0.0, 0.0],
+                },
+            );
+        }
+        let camera = Camera {
+            position: [0.0; 3],
+            forward: [0.0, 0.0, -1.0],
+            right: [1.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            vertical_fov_radians: 1.0,
+        };
+        host.state
+            .as_mut()
+            .unwrap()
+            .renderer
+            .as_mut()
+            .unwrap()
+            .configure(RenderSettings::default())
+            .unwrap();
+        for (frame, (width, height)) in
+            [(64, 48), (97, 61), (31, 71), (1920, 1080), (1, 1), (64, 48)]
+                .into_iter()
+                .enumerate()
+        {
+            host.resize(width, height).unwrap();
+            host.enqueue_with_instances(&scene, &instances, &camera, frame as u32)
+                .unwrap();
+        }
+        // All encoders have been submitted; native retirement itself waits for the timeline.
+        let renderer = host.state.as_mut().unwrap().renderer.as_mut().unwrap();
+        let addresses = renderer.geometry.as_ref().unwrap().objects.addresses();
+        renderer
+            .configure(RenderSettings {
+                mode: RenderMode::Offline,
+                ..Default::default()
+            })
+            .unwrap();
+        renderer.set_scene_frozen(true);
+        host.enqueue_with_instances(&scene, &instances, &camera, 0)
+            .unwrap();
+        host.enqueue_with_instances(&scene, &instances, &camera, 1)
+            .unwrap();
+        let renderer = host.state.as_mut().unwrap().renderer.as_mut().unwrap();
+        assert_eq!(renderer.samples, 2);
+        assert_eq!(
+            renderer.geometry.as_ref().unwrap().objects.addresses(),
+            addresses
+        );
+        assert_eq!(renderer.instance_work().instances, 100);
+        renderer.configure(RenderSettings::default()).unwrap();
+        renderer.set_scene_frozen(false);
+        host.enqueue_with_instances(&scene, &instances, &camera, 0)
+            .unwrap();
+        assert_eq!(host.drain().unwrap().len(), 9);
+        if let Some(profile) = host.profile_snapshot() {
+            assert_eq!(profile.readback_bytes, 0);
+            assert_eq!(profile.submissions, 0);
+        }
+    }
 }

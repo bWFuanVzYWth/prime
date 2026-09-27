@@ -103,7 +103,7 @@ pub unsafe extern "C" fn prime_submit(handle: u64, data: *const u8, length: u64)
         }
         // SAFETY: Caller guarantees a live readable region; length is bounded above.
         let bytes = unsafe { std::slice::from_raw_parts(data, length as usize) };
-        session(handle, |s| s.source.submit(bytes))?;
+        session(handle, |s| s.submit(bytes))?;
         Ok(0)
     })
 }
@@ -168,10 +168,17 @@ pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const u8, lengt
                     return Err("Engine already attached or failed".into());
                 }
                 s.renderer = Some(unsafe {
-                    prime_vulkan::Renderer::borrowed(
-                        handles[0], handles[1], handles[2], handles[3], family, handles[4],
+                    prime_vulkan::Renderer::borrowed_mode(
+                        handles[0],
+                        handles[1],
+                        handles[2],
+                        handles[3],
+                        family,
+                        handles[4],
+                        s.settings.mode,
                     )?
                 });
+                s.renderer.as_mut().unwrap().configure(s.settings)?;
                 Ok(0)
             })
         }
@@ -180,6 +187,24 @@ pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const u8, lengt
             let _ = (handle, family);
             Err("Native library built without Vulkan".into())
         }
+    })
+}
+
+/// Applies a current-version settings packet. Mode changes retire exclusive GPU resources.
+/// # Safety
+/// Data must contain 48 readable bytes. Call outside recording, after submitting the host encoder
+/// when the renderer mode changes. This call may wait for that mode's last GPU consumer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_configure(handle: u64, data: *const u8, length: u64) -> i32 {
+    boundary(-1, || {
+        if data.is_null() || length != prime_scene::settings::RenderSettings::BYTES as u64 {
+            return Err("Settings require a non-null 48-byte packet".into());
+        }
+        let settings = prime_scene::settings::RenderSettings::parse(unsafe {
+            std::slice::from_raw_parts(data, length as usize)
+        })?;
+        session(handle, |s| s.configure(settings))?;
+        Ok(0)
     })
 }
 
@@ -324,5 +349,60 @@ mod abi_tests {
         failed = false;
         assert!(poison_on_failure::<()>(&mut failed, || Err("device lost".into())).is_err());
         assert!(failed);
+    }
+    #[test]
+    fn configuration_validates_version_borrow_and_thread_before_mutation() {
+        let handle = prime_create(ABI_VERSION);
+        let bytes: Vec<_> = [
+            1_u32,
+            0,
+            4,
+            1,
+            1_f32.to_bits(),
+            0.75_f32.to_bits(),
+            0.08_f32.to_bits(),
+            0,
+            1_f32.to_bits(),
+            1_f32.to_bits(),
+            128_f32.to_bits(),
+            0x13572468,
+        ]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 48) }, 0);
+        assert_eq!(unsafe { prime_configure(handle, std::ptr::null(), 48) }, -1);
+        assert_eq!(
+            unsafe { prime_configure(handle, bytes.as_ptr(), u64::MAX) },
+            -1
+        );
+        let mut invalid = bytes.clone();
+        invalid[0] = 2;
+        assert_eq!(unsafe { prime_configure(handle, invalid.as_ptr(), 48) }, -1);
+        let foreign = bytes.clone();
+        assert_eq!(
+            std::thread::spawn(move || unsafe { prime_configure(handle, foreign.as_ptr(), 48) })
+                .join()
+                .unwrap(),
+            -1
+        );
+        invalid = bytes.clone();
+        invalid[4] = 1;
+        assert_eq!(
+            unsafe { prime_configure(handle, invalid.as_ptr(), 48) },
+            -1,
+            "No rendered frame can be frozen"
+        );
+        session(handle, |engine| {
+            assert_eq!(
+                engine.settings,
+                prime_scene::settings::RenderSettings::default()
+            );
+            assert!(!engine.failed);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 48) }, 0);
+        assert_eq!(prime_destroy(handle), 0);
     }
 }

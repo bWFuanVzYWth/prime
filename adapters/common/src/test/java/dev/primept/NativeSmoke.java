@@ -1,6 +1,7 @@
 package dev.primept;
 
 import dev.primept.capture.Packets;
+import dev.primept.settings.RenderSettings;
 import dev.primept.capture.DynamicFrame;
 import dev.primept.capture.InstanceCapture;
 import java.util.Arrays;
@@ -18,6 +19,7 @@ public final class NativeSmoke {
         int width = 1920, height = 1080;
         Path library = args[0].equals("bundled") ? NativeBridge.resolveLibrary() : Path.of(args[0]);
         try (var bridge = new NativeBridge(library)) {
+            bridge.configure(RenderSettings.defaults(), false, RenderSettings.View.OUTPUT);
             bridge.submit(Packets.reset(1));
             bridge.submit(Packets.texture(1, 1, 1, new byte[] {-1, -1, -1, -1}));
             ByteBuffer vertices = ByteBuffer.allocate(112).order(ByteOrder.LITTLE_ENDIAN);
@@ -57,6 +59,32 @@ public final class NativeSmoke {
             ImageIO.write(image, "png", Path.of(args[1]).toFile());
             byte[] baseline = new byte[width * height * 4];
             rgba.get(0, baseline);
+            bridge.configure(RenderSettings.defaults(), true, RenderSettings.View.OUTPUT);
+            byte[] moved = Packets.frame(999, 80000, 90000, 70000, new float[] {1, 0, 0},
+                                         new float[] {0, 0, 1}, new float[] {0, 1, 0}, .5f, width,
+                                         height, 0);
+            bridge.configure(RenderSettings.defaults()
+                                     .with(RenderSettings.Control.BOUNCES, 1)
+                                     .with(RenderSettings.Control.SUN_EV, 4),
+                             true, RenderSettings.View.OUTPUT);
+            bridge.renderDiagnostic(moved, rgba);
+            byte[] frozen = new byte[baseline.length];
+            rgba.get(0, frozen);
+            if (!Arrays.equals(baseline, frozen))
+                throw new AssertionError("Frozen pose/epoch differs from the displayed snapshot");
+            try {
+                bridge.submit(Packets.reset(2));
+                throw new AssertionError("Frozen scene accepted a mutation");
+            } catch (IllegalStateException expected) {
+                if (!expected.getMessage().contains("frozen"))
+                    throw expected;
+            }
+            bridge.configure(RenderSettings.defaults(), false, RenderSettings.View.OUTPUT);
+            bridge.renderDiagnostic(frame, rgba);
+            rgba.get(0, frozen);
+            if (!Arrays.equals(baseline, frozen))
+                throw new AssertionError("Realtime did not resume after the snapshot");
+
             bridge.submit(Packets.texture(1, 7, 1, 1, new byte[] {0, 50, -1, -1}));
             bridge.submit(Packets.texture(1, 8, 1, 1, new byte[] {-1, 0, 0, 0}));
             bridge.submit(Packets.texture(1, 9, 1, 1, new byte[] {0, -1, 0, -1}));

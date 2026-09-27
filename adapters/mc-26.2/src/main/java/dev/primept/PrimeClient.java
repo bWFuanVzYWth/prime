@@ -9,6 +9,11 @@ import dev.primept.capture.BlockGeometryCache;
 import dev.primept.capture.ExclusiveTerrainCapture;
 import dev.primept.render.RendererSlot;
 import dev.primept.render.FrameSequence;
+import dev.primept.render.OfflineMode;
+import dev.primept.settings.RenderSettings;
+import dev.primept.settings.SettingsFile;
+import net.fabricmc.loader.api.FabricLoader;
+import com.mojang.blaze3d.platform.InputConstants;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -53,6 +58,64 @@ public final class PrimeClient implements ClientModInitializer {
     private boolean reportedProjectionWait;
     private boolean failed;
     private boolean skippedWorldRaster;
+    private RenderSettings settings = RenderSettings.defaults();
+    private RenderSettings.View diagnosticView = RenderSettings.View.OUTPUT;
+    private final OfflineMode offline = new OfflineMode();
+    private long frozenAtlasVersion;
+
+    public static RenderSettings settings() {
+        return INSTANCE.settings;
+    }
+    public static boolean controlsAvailable() {
+        return INSTANCE.enabled;
+    }
+    public static RenderSettings.View diagnosticView() {
+        return INSTANCE.diagnosticView;
+    }
+    public static void setDiagnosticView(RenderSettings.View view) {
+        INSTANCE.diagnosticView = view;
+    }
+    public static boolean offlineRequested() {
+        return INSTANCE.offline.requested();
+    }
+    public static boolean offlineActive() {
+        return INSTANCE.offline.active();
+    }
+    public static void requestOffline(boolean value) {
+        INSTANCE.offline.request(value && INSTANCE.enabled &&
+                                 !INSTANCE.requested.equals("vanilla"));
+    }
+    public static void updateSettings(RenderSettings settings) {
+        INSTANCE.settings = settings;
+        INSTANCE.requested = INSTANCE.enabled && settings.pathTracing() ? "path_trace" : "vanilla";
+        INSTANCE.failed = false;
+        if (!settings.pathTracing())
+            INSTANCE.offline.request(false);
+    }
+    public static void restoreSettings() {
+        updateSettings(RenderSettings.defaults());
+        INSTANCE.offline.request(false);
+        INSTANCE.diagnosticView = RenderSettings.View.OUTPUT;
+    }
+    public static void saveSettings() {
+        try {
+            SettingsFile.save(
+                    FabricLoader.getInstance().getConfigDir().resolve("primept.properties"),
+                    INSTANCE.settings);
+        } catch (java.io.IOException failure) {
+            LOGGER.error("Cannot save Prime settings", failure);
+        }
+    }
+    public static boolean offlineShortcut(InputConstants.Key key, boolean control) {
+        if (key.getValue() != InputConstants.KEY_F2 || !control)
+            return false;
+        var client = Minecraft.getInstance();
+        if (client.level == null || !INSTANCE.enabled || INSTANCE.requested.equals("vanilla"))
+            return false;
+        boolean alt = InputConstants.isKeyDown(client.getWindow(), InputConstants.KEY_LALT) ||
+                      InputConstants.isKeyDown(client.getWindow(), InputConstants.KEY_RALT);
+        return INSTANCE.offline.shortcut(true, control, alt);
+    }
 
     public PrimeClient() {
         backends.put("vanilla", () -> new VanillaBackend(false));
@@ -61,6 +124,19 @@ public final class PrimeClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        var loaded = SettingsFile.load(
+                FabricLoader.getInstance().getConfigDir().resolve("primept.properties"));
+        INSTANCE.settings = loaded.settings();
+        if (!loaded.resetReason().isEmpty())
+            LOGGER.warn(loaded.resetReason());
+        INSTANCE.requested =
+                enabled ? System.getProperty("primept.renderer", INSTANCE.settings.pathTracing()
+                                                                         ? "path_trace"
+                                                                         : "vanilla")
+                        : "vanilla";
+        if (enabled && System.getProperty("primept.renderer") != null)
+            INSTANCE.settings =
+                    INSTANCE.settings.withPathTracing(!INSTANCE.requested.equals("vanilla"));
         LOGGER.info("Prime PT 26.2: Java thin capture → FFM → Rust → Vulkan/Slang; enabled={}",
                     enabled);
         LOGGER.info(
@@ -80,6 +156,9 @@ public final class PrimeClient implements ClientModInitializer {
                         return 0;
                     }
                     INSTANCE.requested = key;
+                    INSTANCE.settings = INSTANCE.settings.withPathTracing(!key.equals("vanilla"));
+                    if (key.equals("vanilla"))
+                        INSTANCE.offline.request(false);
                     INSTANCE.failed = false;
                     context.getSource().sendFeedback(
                             Component.literal("Renderer requested: " + key));
@@ -110,8 +189,8 @@ public final class PrimeClient implements ClientModInitializer {
 
     /** This frame may omit known mechanical world output only while the selected PT backend owns it. */
     public static boolean exclusiveFrameReady() {
-        return !INSTANCE.failed && INSTANCE.slot != null && INSTANCE.slot.active() != null &&
-                INSTANCE.slot.active().readyForCapture();
+        return !INSTANCE.failed && !INSTANCE.offline.active() && INSTANCE.slot != null &&
+                INSTANCE.slot.active() != null && INSTANCE.slot.active().readyForCapture();
     }
 
     /** Before extraction: the selected owner must prepare this frame's world state as well as render it. */
@@ -163,9 +242,42 @@ public final class PrimeClient implements ClientModInitializer {
                     throw new IllegalStateException(
                             "Resource reload produced no captured block atlas");
             }
+            if (renderer != null && resourceReload == null)
+                advancePrimeMode();
         } catch (Exception | LinkageError exception) {
             failRenderer(exception);
         }
+    }
+
+    private void advancePrimeMode() {
+        var atlas = CAPTURE.atlas();
+        if (offline.active() && (atlas == null || atlas.version() != frozenAtlasVersion))
+            offline.request(
+                    false); // Resource reload ends the old snapshot at the next frame boundary.
+        boolean next = offline.desired(reportedFrame);
+        if (next == offline.active()) {
+            renderer.configure(settings, next, diagnosticView);
+            return;
+        }
+        if (next) {
+            frozenAtlasVersion = atlas.version();
+            CAPTURE.disable();
+            DynamicCapture.close();
+            // Resource uploads remain observed for thaw; frozen native textures are not mutated.
+            BlockGeometryCache.releaseToVanilla();
+            ExclusiveTerrainCapture.release();
+        }
+        renderer.configure(settings, next, diagnosticView);
+        if (!next) {
+            // The world may have changed while frozen; start a complete new source epoch.
+            CAPTURE.enable();
+            ExclusiveTerrainCapture.acquire();
+            resetFrameState();
+        }
+        frames.reset();
+        offline.committed(next);
+        LOGGER.info("Prime renderer mode: {} (previous exclusive resources retired)",
+                    next ? "offline" : "realtime");
     }
 
     public static void beginWorldRender() {
@@ -188,6 +300,15 @@ public final class PrimeClient implements ClientModInitializer {
         if (failed || resourceReload != null)
             return;
         try {
+            if (offline.active()) {
+                if (destination.width <= 0 || destination.height <= 0)
+                    return;
+                Packets.resizeFrozenFrame(renderer.frameBuffer(), destination.width,
+                                          destination.height,
+                                          frames.next(destination.width, destination.height));
+                renderer.record(destination);
+                return;
+            }
             RuntimeException terrainFailure = ExclusiveTerrainCapture.failure();
             if (terrainFailure != null)
                 throw terrainFailure;
@@ -346,6 +467,7 @@ public final class PrimeClient implements ClientModInitializer {
             ExclusiveTerrainCapture.release();
             renderer = null;
             resourceReload = null;
+            offline.reset();
         }
     }
 
@@ -365,6 +487,7 @@ public final class PrimeClient implements ClientModInitializer {
 
     public static void resetWorld() {
         INSTANCE.closeResources();
+        INSTANCE.offline.reset();
         CAPTURE.reset();
         INSTANCE.resetFrameState();
         if (INSTANCE.profile != null)

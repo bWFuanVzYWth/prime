@@ -1,5 +1,7 @@
 package dev.primept;
 
+import dev.primept.settings.RenderSettings;
+
 import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -21,11 +23,14 @@ import static java.lang.foreign.ValueLayout.*;
 /** One render-thread owner. Native code must copy every borrowed argument before returning. */
 public final class NativeBridge implements AutoCloseable {
     private final Thread owner = Thread.currentThread();
-    private final MethodHandle submit, renderDiagnostic, attachVulkan, record, gpuTime, destroy,
-            lastError;
+    private final MethodHandle submit, renderDiagnostic, attachVulkan, configure, record, gpuTime,
+            destroy, lastError;
     private final Arena fixedArena = Arena.ofConfined();
     private final MemorySegment frame = fixedArena.allocate(104, 8);
     private final MemorySegment host = fixedArena.allocate(48, 8);
+    private final MemorySegment settingsPacket = fixedArena.allocate(RenderSettings.WIRE_BYTES, 8);
+    private final ByteBuffer settingsBuffer =
+            settingsPacket.asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
     private final MemorySegment errorBuffer = fixedArena.allocate(4096);
     private final ByteBuffer frameBuffer = frame.asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
     private Arena packetArena;
@@ -47,6 +52,8 @@ public final class NativeBridge implements AutoCloseable {
                                                           ADDRESS, JAVA_LONG));
             attachVulkan = bind(lookup, "prime_attach_vulkan",
                                 FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_LONG));
+            configure = bind(lookup, "prime_configure",
+                             FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_LONG));
             record
             = bind(lookup, "prime_record",
                    FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_LONG, JAVA_LONG,
@@ -129,6 +136,20 @@ public final class NativeBridge implements AutoCloseable {
             int status = (int)attachVulkan.invokeExact(handle, host, 48L);
             if (status != 0)
                 throw new IllegalStateException("prime_attach_vulkan (" + status + "): " + error());
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    /** Settings are borrowed until return; mode switches require a submitted host encoder. */
+    public void configure(RenderSettings settings, boolean offline, RenderSettings.View view) {
+        checkOwner();
+        settings.write(settingsBuffer, offline, view);
+        try {
+            int status = (int)configure.invokeExact(handle, settingsPacket,
+                                                    (long)RenderSettings.WIRE_BYTES);
+            if (status != 0)
+                throw new IllegalStateException("prime_configure (" + status + "): " + error());
         } catch (Throwable failure) {
             throw rethrow(failure);
         }

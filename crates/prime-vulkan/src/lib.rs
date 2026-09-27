@@ -18,6 +18,7 @@ pub use resources::GpuProfile;
 
 use ash::vk::{self, Handle};
 use prime_scene::scene::{Camera, InstanceScene, Scene};
+use prime_scene::settings::{RenderMode, RenderSettings};
 use resources::{Buffer, Context, error};
 use std::{io::Cursor, sync::Arc};
 use target::Image;
@@ -45,12 +46,14 @@ struct Pipeline {
     pool: vk::DescriptorPool,
     descriptors: [vk::DescriptorSet; FRAME_SLOTS],
     pipeline: vk::Pipeline,
+    resolve: vk::Pipeline,
 }
 impl Drop for Pipeline {
     fn drop(&mut self) {
         if self.context.can_destroy() {
             unsafe {
                 self.context.device.destroy_pipeline(self.pipeline, None);
+                self.context.device.destroy_pipeline(self.resolve, None);
                 self.context.device.destroy_descriptor_pool(self.pool, None);
                 self.context
                     .device
@@ -63,7 +66,7 @@ impl Drop for Pipeline {
     }
 }
 impl Pipeline {
-    fn new(context: &Arc<Context>) -> Result<Self, String> {
+    fn new(context: &Arc<Context>, mode: RenderMode) -> Result<Self, String> {
         unsafe {
             let mut result = Self {
                 context: context.clone(),
@@ -72,9 +75,15 @@ impl Pipeline {
                 pool: vk::DescriptorPool::null(),
                 descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
                 pipeline: vk::Pipeline::null(),
+                resolve: vk::Pipeline::null(),
             };
-            let bindings: Vec<_> = [0, 2, 3, 4, 5, 7, 8]
-                .into_iter()
+            let binding_ids: &[u32] = match mode {
+                RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8],
+                RenderMode::Realtime => &[0, 2, 3, 4, 7, 8, 9, 10, 11],
+            };
+            let bindings: Vec<_> = binding_ids
+                .iter()
+                .copied()
                 .map(|binding| {
                     vk::DescriptorSetLayoutBinding::default()
                         .binding(binding)
@@ -82,7 +91,7 @@ impl Pipeline {
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
                         .descriptor_type(if binding == 0 {
                             vk::DescriptorType::ACCELERATION_STRUCTURE_KHR
-                        } else if binding == 4 {
+                        } else if binding == 4 || binding >= 9 {
                             vk::DescriptorType::STORAGE_IMAGE
                         } else {
                             vk::DescriptorType::STORAGE_BUFFER
@@ -117,11 +126,13 @@ impl Pipeline {
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_BUFFER,
-                    descriptor_count: 5 * FRAME_SLOTS as u32,
+                    descriptor_count: (if mode == RenderMode::Offline { 5 } else { 4 })
+                        * FRAME_SLOTS as u32,
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_IMAGE,
-                    descriptor_count: FRAME_SLOTS as u32,
+                    descriptor_count: (if mode == RenderMode::Offline { 1 } else { 4 })
+                        * FRAME_SLOTS as u32,
                 },
             ];
             result.pool = context
@@ -143,36 +154,45 @@ impl Pipeline {
                 .map_err(|e| error("Allocate path-tracing descriptors", e))?
                 .try_into()
                 .map_err(|_| "Invalid descriptor count")?;
-            let spirv = ash::util::read_spv(&mut Cursor::new(include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/path_trace.spv"
-            ))))
-            .map_err(|e| format!("Read compiled Slang SPIR-V: {e}"))?;
-            let shader = context
-                .device
-                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
-                .map_err(|e| error("Create Slang shader module", e))?;
-            let stage = vk::PipelineShaderStageCreateInfo::default()
-                .stage(vk::ShaderStageFlags::COMPUTE)
-                .module(shader)
-                .name(c"main");
-            let created = context.device.create_compute_pipelines(
-                vk::PipelineCache::null(),
-                &[vk::ComputePipelineCreateInfo::default()
-                    .stage(stage)
-                    .layout(result.layout)],
-                None,
-            );
-            context.device.destroy_shader_module(shader, None);
-            result.pipeline = match created {
-                Ok(pipelines) => pipelines[0],
-                Err((partial, e)) => {
-                    for pipeline in partial {
-                        context.device.destroy_pipeline(pipeline, None);
+            let create = |bytes: &[u8]| -> Result<vk::Pipeline, String> {
+                let spirv = ash::util::read_spv(&mut Cursor::new(bytes))
+                    .map_err(|e| format!("Read compiled Slang SPIR-V: {e}"))?;
+                let shader = context
+                    .device
+                    .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
+                    .map_err(|e| error("Create Slang shader module", e))?;
+                let stage = vk::PipelineShaderStageCreateInfo::default()
+                    .stage(vk::ShaderStageFlags::COMPUTE)
+                    .module(shader)
+                    .name(c"main");
+                let created = context.device.create_compute_pipelines(
+                    vk::PipelineCache::null(),
+                    &[vk::ComputePipelineCreateInfo::default()
+                        .stage(stage)
+                        .layout(result.layout)],
+                    None,
+                );
+                context.device.destroy_shader_module(shader, None);
+                Ok(match created {
+                    Ok(pipelines) => pipelines[0],
+                    Err((partial, e)) => {
+                        for pipeline in partial {
+                            context.device.destroy_pipeline(pipeline, None);
+                        }
+                        return Err(error("Create Slang compute pipeline", e));
                     }
-                    return Err(error("Create Slang path-tracing compute pipeline", e));
-                }
+                })
             };
+            result.pipeline = create(match mode {
+                RenderMode::Offline => include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv")),
+                RenderMode::Realtime => include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv")),
+            })?;
+            if mode == RenderMode::Realtime {
+                result.resolve = create(include_bytes!(concat!(
+                    env!("OUT_DIR"),
+                    "/realtime_display.spv"
+                )))?;
+            }
             Ok(result)
         }
     }
@@ -195,20 +215,23 @@ use frame::Output;
 
 pub struct Renderer {
     context: Arc<Context>,
-    pipeline: Pipeline,
+    // Only the selected backend's pipeline and sized output exist; scene geometry is shared.
+    pipeline: Option<Pipeline>,
     geometry: Option<Geometry>,
     output: Option<Output>,
     camera: Option<Camera>,
     samples: u32,
     frame_seed: u32,
     display: PrimeDrtParameters,
+    settings: RenderSettings,
+    scene_frozen: bool,
     failed: bool,
     host_serials: [u64; FRAME_SLOTS],
     query_serials: [u64; FRAME_SLOTS],
     host_query: vk::QueryPool,
     last_gpu_ns: u64,
     last_gpu_serial: u64,
-    descriptor_keys: [[u64; 7]; FRAME_SLOTS],
+    descriptor_keys: [[u64; 10]; FRAME_SLOTS],
     cpu_profile: Option<cpu_profile::CpuProfile>,
 }
 #[cfg(test)]

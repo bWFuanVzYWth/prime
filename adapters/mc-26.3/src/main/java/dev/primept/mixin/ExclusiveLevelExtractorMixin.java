@@ -28,6 +28,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(LevelExtractor.class)
 public abstract class ExclusiveLevelExtractorMixin implements ExclusiveLevelExtractorAccess {
     @Shadow @Final private LevelRenderer levelRenderer;
+    @Shadow @Final private LevelRenderState levelRenderState;
     @Shadow private ClientLevel level;
     @Shadow private SectionUpdateTracker sectionUpdateTracker;
     @Unique
@@ -39,9 +40,17 @@ public abstract class ExclusiveLevelExtractorMixin implements ExclusiveLevelExtr
         primept$blockEntityCandidates.clear();
     }
 
-    @Inject(method = "extract", at = @At("HEAD"))
+    @Inject(method = "extract", at = @At("HEAD"), cancellable = true)
     private void primept$window(DeltaTracker delta, Camera camera, float partial,
                                 CallbackInfo callback) {
+        if (PrimeClient.offlineActive()) {
+            // No world extraction runs to clear the preceding frame. Keep only the host camera state.
+            levelRenderState.reset();
+            if (level != null)
+                level.getChunkSource().flipUpdateTrackingSets();
+            callback.cancel();
+            return;
+        }
         ExclusiveTerrainCapture.prepareWindow(camera.position());
     }
     @Inject(method = "extract", at = @At("TAIL"))

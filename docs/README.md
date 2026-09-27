@@ -7,6 +7,7 @@
 | [整体架构与所有权](architecture.md) | 源数据到场景和 GPU 的数据流、增量更新、线程与资源生命周期 |
 | [工程结构与捕获边界](structure.md) | Rust crate、Java 版本适配、公共层依赖、源 quad/tint 与矩形分解边界 |
 | [捕获边界与批量数据流](capture-boundaries.md) | 已采用的分类边界、缓存契约、更新频率、GPU 工作范围与分步接入状态 |
+| [设置与渲染模式](renderers.md) | 当前配置版本、冻结快照、互斥资源、实时噪声与深度/法线诊断 |
 | [FFM ABI](abi.md) | 字节协议、输入验证、指针借用、宿主 Vulkan 录制接口 |
 | [宿主 Vulkan 流水线](pipeline.md) | 设备协商、直接输出、命令提交、同步、手部与 HUD 合成 |
 | [Slang 数学基础与显示策略](shaders.md) | 模块边界、可替换的 primeDRT、颜色空间、Z-Sobol、求交误差与尺寸历史 |

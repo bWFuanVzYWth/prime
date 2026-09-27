@@ -137,4 +137,10 @@ public final class Packets {
         }
         bytes.putFloat(fovY).putInt(width).putInt(height).putInt(sample).putInt(0);
     }
+
+    /** Reuses the last rendered camera packet; frozen frames transmit only the frame ABI, no scene data. */
+    public static void resizeFrozenFrame(ByteBuffer bytes, int width, int height, int sample) {
+        bytes.putInt(88, width).putInt(92, height).putInt(96, sample);
+        bytes.position(104);
+    }
 }

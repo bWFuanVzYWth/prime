@@ -84,6 +84,7 @@ impl Drop for InstanceOwner {
 enum RetiredResource {
     Acceleration(vk::AccelerationStructureKHR),
     Buffer(vk::Buffer, vk::DeviceMemory),
+    Image(vk::Image, vk::ImageView, vk::DeviceMemory),
 }
 
 struct HostState {
@@ -735,6 +736,15 @@ impl Context {
         Ok(())
     }
 
+    pub(super) fn retire_image(
+        &self,
+        image: vk::Image,
+        view: vk::ImageView,
+        memory: vk::DeviceMemory,
+    ) {
+        self.retire(RetiredResource::Image(image, view, memory));
+    }
+
     fn retire(&self, resource: RetiredResource) {
         if let Some(host) = &self.host
             && !host.finished.load(Ordering::Relaxed)
@@ -757,6 +767,11 @@ impl Context {
                     self.device.destroy_buffer(buffer, None);
                     self.device.free_memory(memory, None);
                     self.live_allocations.fetch_sub(1, Ordering::Relaxed);
+                }
+                RetiredResource::Image(image, view, memory) => {
+                    self.device.destroy_image_view(view, None);
+                    self.device.destroy_image(image, None);
+                    self.device.free_memory(memory, None);
                 }
             }
         }

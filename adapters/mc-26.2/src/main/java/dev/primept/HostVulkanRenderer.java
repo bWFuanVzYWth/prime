@@ -9,6 +9,7 @@ import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
 import com.mojang.blaze3d.vulkan.VulkanGpuTextureView;
 import dev.primept.mixin.GpuDeviceAccessor;
 import dev.primept.mixin.VulkanCommandEncoderAccessor;
+import dev.primept.settings.RenderSettings;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
@@ -28,6 +29,9 @@ public final class HostVulkanRenderer implements AutoCloseable {
     private boolean retired;
     private long readinessGeneration;
     private boolean completedWorldFrame;
+    private RenderSettings appliedSettings;
+    private RenderSettings.View appliedView;
+    private boolean offline;
 
     public HostVulkanRenderer() throws IOException {
         var device = availableDevice();
@@ -144,6 +148,17 @@ public final class HostVulkanRenderer implements AutoCloseable {
 
     public void submit(byte[] packet) {
         bridge.submit(packet);
+    }
+    /** Frame-boundary control updates; stable frames make no settings FFM call. */
+    public void configure(RenderSettings settings, boolean nextOffline, RenderSettings.View view) {
+        if (offline == nextOffline && settings.equals(appliedSettings) && view == appliedView)
+            return;
+        if (offline != nextOffline)
+            submitAndAwait(encoder);
+        bridge.configure(settings, nextOffline, view);
+        appliedSettings = settings;
+        appliedView = view;
+        offline = nextOffline;
     }
     public void submitDynamic(long epoch) {
         dev.primept.capture.DynamicCapture.submit(epoch, bridge);

@@ -47,11 +47,14 @@ flowchart LR
     B --> C[Rust 更新受影响场景资源]
     C --> D[借用宿主命令缓冲]
     D --> E[Slang 路径追踪]
-    E --> F[imageStore 直接写主颜色图像]
+    E --> R[实时: noisy/depth/normal 图像与显示 pass]
+    E --> O[离线: 线性累积与显示]
+    R --> F[imageStore 直接写主颜色图像]
+    O --> F
     F --> G[宿主绘制手部与 HUD 并提交]
 ```
 
-Java 给主颜色 target 增加 storage 用途，同时将该用途映射为 `VK_IMAGE_USAGE_STORAGE_BIT`；保留原有 attachment、sampling 和 transfer 用途。shader 通过 storage image descriptor 写入宿主 RGBA8 图像，累积历史仍是 renderer 自己的 GPU 资源。主图像不是交换链图像；最终呈现与手部/HUD 继续由 Minecraft 管理。
+Java 给主颜色 target 增加 storage 用途，同时将该用途映射为 `VK_IMAGE_USAGE_STORAGE_BIT`；保留原有 attachment、sampling 和 transfer 用途。shader 通过 storage image descriptor 写入宿主 RGBA8 图像，实时 guides 或离线累积仍是选中 renderer 自己的 GPU 资源，两种模式不同时分配。纹理语义、GPU 诊断与冻结规则见 [渲染模式](renderers.md)。主图像不是交换链图像；最终呈现与手部/HUD 继续由 Minecraft 管理。
 
 这一主路径不创建“PT 输出缓冲 → 主图像”的全屏复制步骤。不能把“没有 CPU 回读”误称为“没有复制”：如果仍调用 `vkCmdCopyBufferToImage` 或 blit 传递 PT 输出，1080p 每帧仍额外搬运至少约 8.29 MB 的 RGBA8 数据。直接写图像消除了这次传递。
 

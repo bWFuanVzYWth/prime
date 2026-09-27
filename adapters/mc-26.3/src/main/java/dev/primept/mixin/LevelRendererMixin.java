@@ -38,6 +38,8 @@ public abstract class LevelRendererMixin {
             original.call(allocator, outlines, camera, fog, fogColor, sky, distant);
             return;
         }
+        if (PrimeClient.offlineActive())
+            return;
         if (!ExclusiveTerrainCapture.active())
             return; // Retirement failed: never call an absent vanilla owner.
         ExclusiveTerrainCapture.prepareFrame(camera);

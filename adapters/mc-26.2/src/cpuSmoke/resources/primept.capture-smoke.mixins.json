@@ -1,1 +1,1 @@
-{"required":true,"package":"dev.primept.fixture","compatibilityLevel":"JAVA_25","client":["CaptureGateMixin"],"injectors":{"defaultRequire":1}}
+{"required":true,"package":"dev.primept.fixture","compatibilityLevel":"JAVA_25","client":["CaptureGateMixin","InputStateMixin"],"injectors":{"defaultRequire":1}}

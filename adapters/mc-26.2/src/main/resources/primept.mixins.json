@@ -52,7 +52,10 @@
     "BlockGeometryStateMixin",
     "FabricMeshSubmitMixin",
     "FabricMeshFeatureMixin",
-    "FabricBufferCacheMixin"
+    "FabricBufferCacheMixin",
+    "MinecraftMixin",
+    "VideoSettingsScreenMixin",
+    "OptionsSubScreenAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

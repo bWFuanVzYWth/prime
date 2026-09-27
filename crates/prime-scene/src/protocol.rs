@@ -840,7 +840,7 @@ fn decode_vertices(
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Frame {
     pub epoch: u64,
     pub world_position: [f64; 3],

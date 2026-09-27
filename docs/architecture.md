@@ -9,7 +9,7 @@ Java CaptureInbox + InstanceCapture + DynamicFrame → NativeBridge（Java 25 FF
 prime_engine → prime_scene: protocol → SourceScene / InstanceContext → Scene / Camera
           │ Rust 解码、三角化、坐标重定位、纹理身份绑定
 prime_vulkan → Slang SPIR-V
-          │ BLAS / TLAS / RayQuery / progressive path tracing
+          │ BLAS / TLAS / RayQuery / realtime or frozen accumulation
 imageStore → Minecraft 主 RGBA8 图像 → hand / HUD → 宿主提交与呈现
 ```
 
@@ -81,7 +81,7 @@ Buffer 完成绑定、AS 完成创建后由资源所有者保存对应设备地�
 
 Opaque 几何由硬件直接接受命中；cutout 和 alpha 覆盖执行候选命中检查，实例覆盖参与有效材质选择。太阳遮挡使用 accept-first-hit 查询，遵循同一 alpha 语义。Ray Query 仍使用硬件光追，不存在 CPU 三角形遍历路径。
 
-累积位于 renderer 自己的显存 buffer；Slang 直接向宿主 RGBA8 storage image 写最终颜色。主图像保持宿主的 GENERAL layout，前后 barrier 衔接原版图像访问与手/HUD。生产路径没有输出 buffer、回读 buffer 或整帧复制。独立 `prime_render` 诊断接口仍可同步回读 PNG，Java 桥保留该诊断绑定，但游戏合成不调用它。
+实时模式直接产生噪声/深度/法线 GPU 图像，显示 pass 再写宿主；离线累积位于所选 renderer 自己的显存 buffer，直接向宿主 RGBA8 storage image 写最终颜色。模式资源互斥，场景核心共用，详见 [设置与渲染模式](renderers.md)。主图像保持宿主的 GENERAL layout，前后 barrier 衔接原版图像访问与手/HUD。生产路径没有 CPU 回读 buffer 或整帧复制。独立 `prime_render` 诊断接口仍可同步回读 PNG，Java 桥保留该诊断绑定，但游戏合成不调用它。
 
 主颜色图像的 storage 用途必须在每次分配前声明，包括首次创建及窗口尺寸变化后的重建。26.2/26.3 的 `MainTarget` 构造路径与继承的 `RenderTarget.resize/createBuffers` 分别适配，只修改主颜色附件，深度及离屏 target 保持原用途。能力取决于宿主设备已完成的协商；选择原版渲染器时也保留共享主图像的此项能力，以支持随后切回 Prime。图像和 view 的关闭、延迟销毁继续由宿主负责。
 
@@ -102,8 +102,8 @@ Java 使用宿主 transient command buffer，将 native 录制结果交还 `enco
 
 ## 当前渲染范围
 
-路径追踪使用硬件 Ray Query、Lambert 材质、线性 Rec.2020 工作空间、固定太阳/梯度天空、四次反弹和 primeDRT 显示映射；Z-Sobol、起点误差与颜色契约见 [Slang 基础库](shaders.md)。纹理使用图集 UV、动画首帧与基础 mip 最近点采样；源 RGBA 与 tint 先按 Minecraft 编码域语义组合，shader 再进行所需的线性化。
+路径追踪使用硬件 Ray Query、Lambert 材质、线性 Rec.2020 工作空间、固定方向太阳/梯度天空、可调路径预算（默认四个路径顶点）和 primeDRT 显示映射；Z-Sobol、起点误差与颜色契约见 [Slang 基础库](shaders.md)。纹理使用图集 UV、动画首帧与基础 mip 最近点采样；源 RGBA 与 tint 先按 Minecraft 编码域语义组合，shader 再进行所需的线性化。
 
 场景覆盖依赖原版可见性和准备过程。地形接收 opaque/cutout/translucent 与流体几何；动态接收常规模型、方块实体、物品、自定义几何的支持布局及 quad 粒子。已混入 CPU 光照的 moving/falling block、leash，以及文字、glint、outline 等特殊路径尚不作为普通表面材质接收；不能将批量入口等同于所有模组渲染器兼容。
 
-cutout 当前使用固定 0.1 阈值；alpha 材质按源 alpha 随机覆盖，接受后仍是 Lambert 表面，没有水/玻璃折射或介质吸收。主射线和阴影使用同样覆盖语义，同射线的量化交点哈希使流体重合正反面共享判定；这也会关联几何重合而语义不同的透明面，是当前近似边界。动态更新重置累积但继续改变采样随机种子，避免拖影与冻结噪声；尚无动态重投影、降噪。完整动态纹理、PBR 和 HDR 仍待实现。未完成事项见 [HACK.md](../HACK.md)。
+cutout 当前使用固定 0.1 阈值；alpha 材质按源 alpha 随机覆盖，接受后仍是 Lambert 表面，没有水/玻璃折射或介质吸收。主射线和阴影使用同样覆盖语义，同射线的量化交点哈希使流体重合正反面共享判定；这也会关联几何重合而语义不同的透明面，是当前近似边界。实时模式逐帧推进样本序号且没有历史累积；离线冻结场景后纯累积，退出冻结时重建捕获 epoch。尚无动态重投影、降噪。完整动态纹理、PBR 和 HDR 仍待实现。未完成事项见 [HACK.md](../HACK.md)。

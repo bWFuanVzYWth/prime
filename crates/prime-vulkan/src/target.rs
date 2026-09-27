@@ -1,4 +1,4 @@
-//! Owned images are used only by offline diagnostics. The production target is borrowed.
+//! Owned guide/diagnostic images. The production presentation target is borrowed.
 use super::resources::{Context, error};
 use ash::vk;
 use std::sync::Arc;
@@ -12,6 +12,15 @@ pub(super) struct Image {
 
 impl Image {
     pub fn new(context: &Arc<Context>, width: u32, height: u32) -> Result<Self, String> {
+        Self::with_format(context, width, height, vk::Format::R8G8B8A8_UNORM)
+    }
+
+    pub fn with_format(
+        context: &Arc<Context>,
+        width: u32,
+        height: u32,
+        format: vk::Format,
+    ) -> Result<Self, String> {
         let mut result = Self {
             context: context.clone(),
             image: vk::Image::null(),
@@ -24,7 +33,7 @@ impl Image {
                 .create_image(
                     &vk::ImageCreateInfo::default()
                         .image_type(vk::ImageType::TYPE_2D)
-                        .format(vk::Format::R8G8B8A8_UNORM)
+                        .format(format)
                         .extent(vk::Extent3D {
                             width,
                             height,
@@ -34,7 +43,11 @@ impl Image {
                         .array_layers(1)
                         .samples(vk::SampleCountFlags::TYPE_1)
                         .tiling(vk::ImageTiling::OPTIMAL)
-                        .usage(vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC)
+                        .usage(
+                            vk::ImageUsageFlags::STORAGE
+                                | vk::ImageUsageFlags::SAMPLED
+                                | vk::ImageUsageFlags::TRANSFER_SRC,
+                        )
                         .sharing_mode(vk::SharingMode::EXCLUSIVE),
                     None,
                 )
@@ -67,7 +80,7 @@ impl Image {
                     &vk::ImageViewCreateInfo::default()
                         .image(result.image)
                         .view_type(vk::ImageViewType::TYPE_2D)
-                        .format(vk::Format::R8G8B8A8_UNORM)
+                        .format(format)
                         .subresource_range(color_range()),
                     None,
                 )
@@ -106,11 +119,8 @@ pub(super) fn color_range() -> vk::ImageSubresourceRange {
 impl Drop for Image {
     fn drop(&mut self) {
         if self.context.can_destroy() {
-            unsafe {
-                self.context.device.destroy_image_view(self.view, None);
-                self.context.device.destroy_image(self.image, None);
-                self.context.device.free_memory(self.memory, None);
-            }
+            self.context
+                .retire_image(self.image, self.view, self.memory);
         }
     }
 }
