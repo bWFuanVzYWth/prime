@@ -91,6 +91,73 @@ fn fragmented_preparation_preserves_order_bounds_and_snapshot_identity() {
 }
 
 #[test]
+fn compact_quads_preserve_corner_bits_winding_bounds_and_retention() {
+    let mut scene = scene();
+    let a = CompiledQuad {
+        positions: [[-0., 0., 0.], [2., -3., 0.], [1., 4., 5.], [-2., 1., 0.5]],
+        uvs: [[-0., 0.125], [0.25, 0.5], [0.875, 1.], [1.25, -0.5]],
+        color: [0.1, -0., 0.75, 0.25],
+        texture_id: 1,
+        flags: 0,
+    };
+    let mut b = a;
+    b.positions[3][1] = -7.;
+    b.color[0] = 0.5;
+    let triangles = |quad: CompiledQuad| {
+        [
+            Triangle {
+                positions: [quad.positions[0], quad.positions[1], quad.positions[2]],
+                uvs: [quad.uvs[0], quad.uvs[1], quad.uvs[2]],
+                colors: [quad.color; 3],
+                texture_id: quad.texture_id,
+                flags: quad.flags,
+            },
+            Triangle {
+                positions: [quad.positions[2], quad.positions[3], quad.positions[0]],
+                uvs: [quad.uvs[2], quad.uvs[3], quad.uvs[0]],
+                colors: [quad.color; 3],
+                texture_id: quad.texture_id,
+                flags: quad.flags,
+            },
+        ]
+    };
+    let expected = [a, b, a]
+        .into_iter()
+        .flat_map(triangles)
+        .collect::<Vec<_>>();
+    let first = plan(&scene, expected.clone());
+    scene.publish_compiled(1, 1, vec![first], &[]).unwrap();
+    let old = scene.meshes[&(7, 0)].triangles.clone();
+    let mut parts = [
+        [vec![a], vec![], vec![]],
+        [vec![], vec![], vec![]],
+        [vec![b, a], vec![], vec![]],
+    ];
+    let prepare = |scene: &SourceScene, parts: &[[Vec<CompiledQuad>; 3]; 3]| {
+        scene.prepare_compiled_quads(7, [0.; 3], &[&parts[0], &parts[1], &parts[2]])
+    };
+    let equal = prepare(&scene, &parts);
+    let result = scene.publish_compiled(1, 2, vec![equal], &[]).unwrap();
+    assert_eq!((result.replaced_layers, result.retained_layers), (0, 1));
+    assert!(Arc::ptr_eq(&old, &scene.meshes[&(7, 0)].triangles));
+    parts[2][0][1] = b;
+    let changed = prepare(&scene, &parts);
+    drop(parts);
+    scene.publish_compiled(1, 3, vec![changed], &[]).unwrap();
+    let mesh = &scene.meshes[&(7, 0)];
+    assert_eq!(mesh.triangles.len(), 6);
+    for (actual, expected) in mesh
+        .triangles
+        .iter()
+        .zip([a, b, b].into_iter().flat_map(triangles))
+    {
+        assert!(same_triangle(actual, &expected));
+    }
+    assert_eq!(mesh.bounds, [[-2., -7., 0.], [2., 4., 5.]]);
+    assert!(old.iter().zip(expected).all(|(a, b)| same_triangle(a, &b)));
+}
+
+#[test]
 fn each_rendered_attribute_and_origin_participates_in_retention() {
     for field in 0..7 {
         let mut scene = scene();

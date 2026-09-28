@@ -13,7 +13,11 @@ mod schedule;
 pub mod wire;
 
 use model::{Catalog, Hacks};
-use prime_scene::{SourceScene, Triangle, compiled::CompiledSection, workers::CpuWorkers};
+use prime_scene::{
+    SourceScene,
+    compiled::{CompiledQuad, CompiledSection},
+    workers::CpuWorkers,
+};
 use schedule::{Demand, FrameInput, Scheduler, Section};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -684,7 +688,7 @@ impl TerrainContext {
                             }
                         }
                         let parts: [_; 4] = std::array::from_fn(|i| &group[i].layers);
-                        let compiled = scene.prepare_compiled_parts(
+                        let compiled = scene.prepare_compiled_quads(
                             group[0].key.key(),
                             group[0].key.origin(),
                             &parts,
@@ -783,7 +787,7 @@ impl TerrainContext {
 struct Job {
     key: Section,
     first_y: usize,
-    layers: [Vec<Triangle>; 3],
+    layers: [Vec<CompiledQuad>; 3],
     hacks: Hacks,
     compiled: Option<CompiledSection>,
     tints: tint::Deferred,

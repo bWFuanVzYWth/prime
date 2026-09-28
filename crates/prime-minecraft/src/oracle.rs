@@ -2,6 +2,7 @@
 //! The resources and lighting are controlled; this is not the optimized kernel's scalar reference.
 use super::*;
 use crate::tests::{frame, requests, scene};
+use prime_scene::Triangle;
 
 /// Keep the section origin in f64. Casting it to f32 hides local geometry errors far from spawn.
 #[derive(Clone, Debug, PartialEq)]
@@ -111,6 +112,23 @@ fn suite_root(version: u32) -> std::path::PathBuf {
             ))
         })
 }
+
+fn workload_size(root: &std::path::Path, case: &str) -> (usize, usize) {
+    let path = root.join(format!("{case}.workload.properties"));
+    // Historical fixtures predate configurable workloads and always used 27 / 8 sections.
+    if !path.exists() {
+        return (27, 8);
+    }
+    let text = std::fs::read_to_string(path).unwrap();
+    let count = |name: &str| {
+        text.lines()
+            .find_map(|line| line.strip_prefix(name))
+            .unwrap()
+            .parse::<usize>()
+            .unwrap()
+    };
+    (count("requested="), count("edited="))
+}
 fn reference(bytes: &[u8]) -> SourceScene {
     let mut input = bytes;
     fn count(input: &mut &[u8]) -> usize {
@@ -208,7 +226,10 @@ fn actual_section_compilers_match_native_geometry() {
             let input = std::fs::read(root.join(format!("{case}.frame"))).unwrap();
             let mut context = TerrainContext::default();
             let mut output = scene();
-            assert_eq!(requests(&mut context, &input).len(), 27);
+            assert_eq!(
+                requests(&mut context, &input).len(),
+                workload_size(&root, case).0
+            );
             context.accept(&[&source], &mut output).unwrap();
             finish_tints(&mut context, &mut output, &root, case);
             let actual = triangles(&output);
@@ -337,10 +358,11 @@ fn benchmark_edits_match_original_and_unchanged_inputs_do_no_compile() {
             continue;
         }
         for name in names {
+            let (initial_count, edited_count) = workload_size(&root, name);
             let mut context = TerrainContext::default();
             let mut output = scene();
             let input = std::fs::read(root.join(format!("{name}.frame"))).unwrap();
-            assert_eq!(requests(&mut context, &input).len(), 27);
+            assert_eq!(requests(&mut context, &input).len(), initial_count);
             let source = std::fs::read(root.join(format!("{name}.source"))).unwrap();
             context.accept(&[&source], &mut output).unwrap();
             finish_tints(&mut context, &mut output, &root, name);
@@ -351,7 +373,7 @@ fn benchmark_edits_match_original_and_unchanged_inputs_do_no_compile() {
                 let suffix = if batch == 2 { "edit" } else { "unchanged" };
                 let input = std::fs::read(root.join(format!("{name}.{suffix}.frame"))).unwrap();
                 let edited = std::fs::read(root.join(format!("{name}.{suffix}.source"))).unwrap();
-                assert_eq!(requests(&mut context, &input).len(), 8);
+                assert_eq!(requests(&mut context, &input).len(), edited_count);
                 context.accept(&[&edited], &mut output).unwrap();
                 finish_tints(
                     &mut context,
@@ -360,8 +382,14 @@ fn benchmark_edits_match_original_and_unchanged_inputs_do_no_compile() {
                     &format!("{name}.{suffix}"),
                 );
                 difference(&expected, &triangles(&output)).unwrap();
-                assert_eq!(context.stats.changed, if batch == 2 { 8 } else { 0 });
-                assert_eq!(context.stats.compiled, if batch == 2 { 8 } else { 0 });
+                assert_eq!(
+                    context.stats.changed,
+                    if batch == 2 { edited_count } else { 0 }
+                );
+                assert_eq!(
+                    context.stats.compiled,
+                    if batch == 2 { edited_count } else { 0 }
+                );
             }
         }
     }

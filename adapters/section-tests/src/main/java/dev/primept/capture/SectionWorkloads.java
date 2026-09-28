@@ -20,12 +20,15 @@ final class SectionWorkloads {
                 fence, List.of(new MultiPartModel.Selector<BlockStateModel>(s -> true, post),
                                new MultiPartModel.Selector<BlockStateModel>(s -> true, arm)));
         var models = Map.of(stone, full, fence, fenceModel);
+        int side = Integer.getInteger("primept.section.side", 2);
+        if (side < 2 || side > 16)
+            throw new IllegalArgumentException("Section side must be in [2,16]");
         for (String kind : List.of("dense", "terraces", "multipart", "liquids", "checkerboard")) {
             var blocks = new HashMap<BlockPos, BlockState>();
-            // 2x2x2 populated sections with an empty halo; all 27 requested sections are compiled.
+            // side x 2 x side populated sections; the negative halo is explicit empty input.
             for (int y = 0; y < 32; ++y)
-                for (int z = 0; z < 32; ++z)
-                    for (int x = 0; x < 32; ++x) {
+                for (int z = 0; z < side * 16; ++z)
+                    for (int x = 0; x < side * 16; ++x) {
                         BlockState state = switch (kind) {
                             case "dense" -> stone;
                             case "terraces" -> y <= 5 + ((x * 13 + z * 7) % 19) ? stone : null;
@@ -40,10 +43,11 @@ final class SectionWorkloads {
                         if (state != null)
                             blocks.put(new BlockPos(x, y, z), state);
                     }
-            cases.add(new SectionCompilerOracle.Case("bench_" + kind, Map.copyOf(blocks), models));
-            // Interior edits touch no neighbor dependency; force exactly eight section rebuilds.
-            for (int x = 0; x < 2; ++x)
-                for (int z = 0; z < 2; ++z)
+            cases.add(new SectionCompilerOracle.Case("bench_" + kind, snapshot(blocks), models, -1,
+                                                     0, side));
+            // Interior edits touch no neighbor dependency; every populated section rebuilds.
+            for (int x = 0; x < side; ++x)
+                for (int z = 0; z < side; ++z)
                     for (int y = 0; y < 2; ++y) {
                         var pos = new BlockPos(x * 16 + 8, y * 16 + 8, z * 16 + 8);
                         if (blocks.containsKey(pos))
@@ -51,8 +55,13 @@ final class SectionWorkloads {
                         else
                             blocks.put(pos, stone);
                     }
-            cases.add(new SectionCompilerOracle.Case("bench_" + kind + "_edited",
-                                                     Map.copyOf(blocks), models));
+            cases.add(new SectionCompilerOracle.Case("bench_" + kind + "_edited", snapshot(blocks),
+                                                     models, -1, 0, side));
         }
+    }
+    private static Map<BlockPos, BlockState> snapshot(Map<BlockPos, BlockState> blocks) {
+        // Large regular coordinate grids cluster in MapN's open-addressed table. This copy is
+        // outside timing, and keeps the immutable fixture without quadratic Map.copyOf setup.
+        return java.util.Collections.unmodifiableMap(new HashMap<>(blocks));
     }
 }

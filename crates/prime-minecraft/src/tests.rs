@@ -1,4 +1,5 @@
 use super::*;
+use prime_scene::Triangle;
 use prime_scene::protocol::{ABI_VERSION, MAGIC as SCENE_MAGIC};
 
 pub(super) fn header(kind: u32, batch: u64) -> Vec<u8> {
@@ -509,7 +510,9 @@ fn lowered_slabs_match_scalar_geometry_for_models_palettes_and_halos() {
                         "model={model_id} bits={bits} first_y={first_y}"
                     );
                     for (a, b) in a.iter().zip(b) {
-                        same(a, b);
+                        for (a, b) in a.triangles().iter().zip(b.triangles().iter()) {
+                            same(a, b);
+                        }
                     }
                 }
             }

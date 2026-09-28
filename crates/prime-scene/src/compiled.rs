@@ -7,6 +7,28 @@ use crate::{
 };
 use std::sync::Arc;
 
+/// Closed quad with one source color. Producers retain four corners until immutable publication;
+/// expansion preserves the established 0-1-2 / 2-3-0 winding, including nonplanar quads.
+#[derive(Clone, Copy)]
+pub struct CompiledQuad {
+    pub positions: [[f32; 3]; 4],
+    pub uvs: [[f32; 2]; 4],
+    pub color: [f32; 4],
+    pub texture_id: u32,
+    pub flags: u32,
+}
+impl CompiledQuad {
+    pub fn triangles(&self) -> [Triangle; 2] {
+        [[0, 1, 2], [2, 3, 0]].map(|corners| Triangle {
+            positions: corners.map(|i| self.positions[i]),
+            colors: [self.color; 3],
+            uvs: corners.map(|i| self.uvs[i]),
+            texture_id: self.texture_id,
+            flags: self.flags,
+        })
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Base {
     owner: ContextId,
@@ -122,10 +144,47 @@ impl SourceScene {
         origin: [f64; 3],
         parts: &[&[Vec<Triangle>; 3]],
     ) -> CompiledSection {
+        self.prepare_compiled_layers(
+            key,
+            origin,
+            std::array::from_fn(|layer| {
+                let count: usize = parts.iter().map(|p| p[layer].len()).sum();
+                let mut triangles = parts.iter().flat_map(move |p| p[layer].iter().copied());
+                (0..count).map(move |_| triangles.next().unwrap())
+            }),
+        )
+    }
+
+    /// Expand compact, uniformly colored quads only while comparing or filling the final Arc.
+    /// Source fragments and tint results remain borrowed for this synchronous call only.
+    pub fn prepare_compiled_quads(
+        &self,
+        key: u64,
+        origin: [f64; 3],
+        parts: &[&[Vec<CompiledQuad>; 3]],
+    ) -> CompiledSection {
+        self.prepare_compiled_layers(
+            key,
+            origin,
+            std::array::from_fn(|layer| {
+                let count: usize = parts.iter().map(|p| p[layer].len() * 2).sum();
+                let mut triangles = parts
+                    .iter()
+                    .flat_map(move |p| p[layer].iter().flat_map(CompiledQuad::triangles));
+                (0..count).map(move |_| triangles.next().unwrap())
+            }),
+        )
+    }
+
+    fn prepare_compiled_layers<I: ExactSizeIterator<Item = Triangle> + Clone>(
+        &self,
+        key: u64,
+        origin: [f64; 3],
+        inputs: [I; 3],
+    ) -> CompiledSection {
         let layers = std::array::from_fn(|layer| {
             let index = layer as u32;
-            let count: usize = parts.iter().map(|p| p[layer].len()).sum();
-            let triangles = || parts.iter().flat_map(|p| p[layer].iter());
+            let count = inputs[layer].len();
             let previous = self.meshes.get(&(key, index));
             if count == 0 {
                 return if previous.is_some() {
@@ -142,18 +201,21 @@ impl SourceScene {
                 && old
                     .triangles
                     .iter()
-                    .zip(triangles())
-                    .all(|(a, b)| same_triangle(a, b))
+                    .zip(inputs[layer].clone())
+                    .all(|(a, b)| same_triangle(a, &b))
             {
                 return Layer::Retain(count);
             }
             let mut bounds = [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]];
-            let mut input = triangles();
             // Range + map is trusted-length: std initializes one Arc allocation directly.
             // Bounds are reduced while copying, rather than scanning the merged output again.
-            let triangles: Arc<[Triangle]> = (0..count)
-                .map(|_| {
-                    let triangle = *input.next().unwrap();
+            #[expect(
+                clippy::manual_inspect,
+                reason = "Keep the measured owned-value adapter for fused bounds and Arc construction"
+            )]
+            let triangles: Arc<[Triangle]> = inputs[layer]
+                .clone()
+                .map(|triangle| {
                     for p in triangle.positions {
                         for (axis, value) in p.into_iter().enumerate() {
                             bounds[0][axis] = bounds[0][axis].min(value);

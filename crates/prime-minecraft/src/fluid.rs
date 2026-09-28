@@ -3,7 +3,7 @@ use crate::{
     model::{Catalog, Hacks, Quad, State, cube, emit_quad},
     wire::Reader,
 };
-use prime_scene::Triangle;
+use prime_scene::compiled::CompiledQuad;
 #[derive(Clone, Copy, Default, PartialEq)]
 pub(crate) struct Fluid {
     pub kind: u32,
@@ -163,7 +163,7 @@ pub(crate) fn emit<'a>(
     state: &State,
     offset: [f32; 3],
     get: impl Fn(i32, i32, i32) -> &'a State,
-    layers: &mut [Vec<Triangle>; 3],
+    layers: &mut [Vec<CompiledQuad>; 3],
     hacks: &mut Hacks,
 ) {
     let kind = state.fluid.kind;

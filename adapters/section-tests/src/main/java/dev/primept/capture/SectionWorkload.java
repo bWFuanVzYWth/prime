@@ -57,10 +57,11 @@ final class SectionWorkload implements AutoCloseable {
         this.fluids = fluids;
         models = new BlockStateModelSet(fixture.models(), empty);
         region = FluidRouterCpuSmoke.blank(Region.class);
-        region.sections = new LevelChunkSection[27];
+        region.side = fixture.horizontalSections();
+        region.sections = new LevelChunkSection[(region.side + 1) * (region.side + 1) * 3];
         region.tintWorld = SectionTintCases.world(fixture.blendRadius(), fixture.biomePhase());
-        for (int x = -1; x <= 1; ++x)
-            for (int z = -1; z <= 1; ++z)
+        for (int x = -1; x < region.side; ++x)
+            for (int z = -1; z < region.side; ++z)
                 for (int y = -1; y <= 1; ++y) {
                     var key = SectionPos.of(x, y, z);
                     keys.add(key);
@@ -78,32 +79,32 @@ final class SectionWorkload implements AutoCloseable {
                                      .thenComparingInt(e -> e.getKey().getX()))
                      .toList()) {
             var p = e.getKey();
-            if (p.getX() < -16 || p.getX() > 31 || p.getY() < -16 || p.getY() > 31 ||
-                p.getZ() < -16 || p.getZ() > 31)
+            if (p.getX() < -16 || p.getX() >= region.side * 16 || p.getY() < -16 || p.getY() > 31 ||
+                p.getZ() < -16 || p.getZ() >= region.side * 16)
                 throw new AssertionError("Fixture outside closed source volume: " + p);
             region.sections[index(p.getX() >> 4, p.getY() >> 4, p.getZ() >> 4)].getStates().set(
                     p.getX() & 15, p.getY() & 15, p.getZ() & 15, e.getValue());
         }
         compiler = new SectionCompiler(false, true, models, fluids, colors);
     }
-    private static int index(int x, int y, int z) {
-        return ((x + 1) * 3 + z + 1) * 3 + y + 1;
+    private int index(int x, int y, int z) {
+        return region.index(x, y, z);
     }
 
     private void frame(SourcePages pages, long batch, String mode) {
         pages.header(SectionSources.GAME_VERSION, 1, 1, batch)
                 .d(0)
                 .d(0)
-                .i(1)
+                .i(region.side - 1)
                 .i(-1)
                 .i(1)
                 .i(-1)
-                .i(1)
+                .i(region.side - 1)
                 .i(-1)
-                .i(1);
+                .i(region.side - 1);
         if (batch == 1)
-            for (int x = -1; x <= 1; ++x)
-                for (int z = -1; z <= 1; ++z)
+            for (int x = -1; x < region.side; ++x)
+                for (int z = -1; z < region.side; ++z)
                     pages.i(1).i(x).i(0).i(z);
         else if (mode.equals("biome"))
             pages.i(7).i(0).i(0).i(0);
@@ -115,6 +116,9 @@ final class SectionWorkload implements AutoCloseable {
     }
 
     void write(Path directory) throws Exception {
+        Files.writeString(directory.resolve(fixture.name() + ".workload.properties"),
+                          "requested=" + keys.size() +
+                                  "\nedited=" + (region.side * region.side * 2) + "\n");
         var expected = new CaptureInbox(true);
         try (var source = new SourcePages(); var frame = new SourcePages();
              var bridge =
@@ -238,7 +242,7 @@ final class SectionWorkload implements AutoCloseable {
             throw new IllegalArgumentException("Need warmup>=1, samples>=3");
         var rows = new ArrayList<String>();
         rows.add(
-                "case,mode,sample,warmup,order,mc_threads,mc_ms,frame_ms,plan_ms,pack_ms,accept_ms,route_ms,request_count,source_bytes,mc_vertices,java_allocated_bytes,gc_count,gc_ms,tint_queries,tint_callback_ms,native_diagnostics");
+                "case,mode,sample,warmup,order,mc_threads,mc_ms,frame_ms,plan_ms,pack_ms,accept_ms,route_ms,request_count,source_bytes,mc_vertices,java_allocated_bytes,gc_count,gc_ms,tint_queries,tint_callback_ms,compiled_sections,native_triangles,workset_sections,native_diagnostics");
         var edited = keys.stream().filter(k -> k.x() >= 0 && k.y() >= 0 && k.z() >= 0).toList();
         var allocation = (com.sun.management.ThreadMXBean)ManagementFactory.getThreadMXBean();
         if (allocation.isThreadAllocatedMemorySupported())
@@ -315,24 +319,27 @@ final class SectionWorkload implements AutoCloseable {
                         }
                         String diagnostics =
                                 bridge.cpuDiagnostics(); // formatting and I/O are outside timed work
-                        long expectedRequests = sample < 0                                      ? 27
-                                                : (mode.equals("idle") || mode.equals("biome")) ? 0
-                                                                                                : 8;
+                        long expectedRequests = sample < 0 ? keys.size()
+                                                : (mode.equals("idle") || mode.equals("biome"))
+                                                        ? 0
+                                                        : edited.size();
                         if (count != expectedRequests)
                             throw new AssertionError("Unexpected workset " + diagnostics);
-                        int compiled = sample < 0                                      ? 27
-                                       : (mode.equals("edit") || mode.equals("biome")) ? 8
-                                                                                       : 0;
+                        int compiled = sample < 0 ? keys.size()
+                                       : (mode.equals("edit") || mode.equals("biome"))
+                                               ? edited.size()
+                                               : 0;
                         if (!diagnostics.contains("compiled=" + compiled + " "))
                             throw new AssertionError(diagnostics);
                         rows.add(String.format(
                                 Locale.ROOT,
-                                "%s,%s,%d,%s,%s,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%d,%d,%d,%d,%.6f,\"%s\"",
+                                "%s,%s,%d,%s,%s,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%d,%d,%d,%d,%.6f,%d,%d,%d,\"%s\"",
                                 fixture.name(), sample < 0 ? "cold_" + mode : mode, sample,
                                 sample < warmup, mcFirst ? "mc_first" : "native_first", threads,
                                 mc[0] / 1e6, (t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6,
                                 (t4 - t3) / 1e6, (t4 - t0) / 1e6, count, sourceBytes, mc[1], bytes,
-                                gc, gcMs, tintCount, tintNanos / 1e6, diagnostics));
+                                gc, gcMs, tintCount, tintNanos / 1e6, compiled,
+                                nativeCount(diagnostics, "triangles"), edited.size(), diagnostics));
                     }
                 }
             }
@@ -341,8 +348,8 @@ final class SectionWorkload implements AutoCloseable {
         Files.write(directory.resolve(fixture.name() + ".csv"), rows);
     }
     private void restore(boolean edit) {
-        for (int x = 0; x < 2; ++x)
-            for (int z = 0; z < 2; ++z)
+        for (int x = 0; x < region.side; ++x)
+            for (int z = 0; z < region.side; ++z)
                 for (int y = 0; y < 2; ++y) {
                     var pos = new BlockPos(x * 16 + 8, y * 16 + 8, z * 16 + 8);
                     var original =
@@ -353,6 +360,12 @@ final class SectionWorkload implements AutoCloseable {
                             : original.isAir() ? Blocks.STONE.defaultBlockState()
                                                : Blocks.AIR.defaultBlockState());
                 }
+    }
+    private static long nativeCount(String diagnostics, String name) {
+        String marker = " " + name + "=";
+        int start =
+                diagnostics.indexOf(marker, diagnostics.indexOf("mc_source[")) + marker.length();
+        return Long.parseLong(diagnostics.substring(start, diagnostics.indexOf(' ', start)));
     }
     /** Test-only parallel reference, one complete section per job. Never part of the mod JAR. */
     private final class Reference implements AutoCloseable {
@@ -422,6 +435,10 @@ final class SectionWorkload implements AutoCloseable {
     /** Uses the same packed palettes as routing. HashMap-per-block lookups would bias the reference benchmark. */
     private static final class Region extends RenderSectionRegion {
         LevelChunkSection[] sections;
+        int side;
+        int index(int x, int y, int z) {
+            return ((x + 1) * (side + 1) + z + 1) * 3 + y + 1;
+        }
         SectionTintCases.World tintWorld;
         @Override
         public int getBlockTint(BlockPos pos, net.minecraft.world.level.ColorResolver resolver) {
@@ -432,10 +449,10 @@ final class SectionWorkload implements AutoCloseable {
         }
         public BlockState getBlockState(BlockPos p) {
             int x = p.getX() >> 4, y = p.getY() >> 4, z = p.getZ() >> 4;
-            if (x < -1 || x > 1 || y < -1 || y > 1 || z < -1 || z > 1)
+            if (x < -1 || x >= side || y < -1 || y > 1 || z < -1 || z >= side)
                 return Blocks.AIR.defaultBlockState();
-            return sections[SectionWorkload.index(x, y, z)].getBlockState(
-                    p.getX() & 15, p.getY() & 15, p.getZ() & 15);
+            return sections[index(x, y, z)].getBlockState(p.getX() & 15, p.getY() & 15,
+                                                          p.getZ() & 15);
         }
         public net.minecraft.world.level.material.FluidState getFluidState(BlockPos p) {
             return getBlockState(p).getFluidState();

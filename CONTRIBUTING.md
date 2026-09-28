@@ -309,9 +309,16 @@ cargo run --release --locked -p prime_tools --bin instance-perf -- --samples 60 
 .\scripts\test-sections.ps1 -Bench -Threads 8 -Warmup 12 -Samples 40 -Rounds 3
 # 单线程用于区分算法成本与并行调度收益
 .\scripts\test-sections.ps1 -Bench -Threads 1 -Warmup 12 -Samples 40 -Rounds 3
+
+# 大批量端到端 CPU：8×2×8 个编辑段，优先看 route p95/max 和 sections/s
+.\scripts\test-sections.ps1 -Bench -Side 8 -Threads 8 -Warmup 12 -Samples 40 -Rounds 3
+# 基准汇总的 p95、吞吐量、工作集隔离检查
+python -B -m unittest discover -s scripts -p 'test_*.py'
 ```
 
 需要 JDK 25、Rust release 工具链、Python 3（仅标准库生成摘要）和现有 Gradle 依赖；不需要 GPU/Slang，不启动游戏。默认结果写入 `artifacts/section-suite/<时间>/`，可用 `-Output` 指定新目录。`run.json` 标记整轮通过/失败，`summary.md/json` 提供分场景 p50/p95/max，CSV 保留冷启动、预热、所有正式样本与细阶段。默认使用三轮独立 JVM，汇总保留轮次和两个编辑方向；用 `-Rounds` 调整。统一入口在测量前及每轮测量后均执行对拍，并保存 native/输入哈希；避免与编译、游戏或其他基准同时运行。
+
+`-Side` 默认2，扩大五个非群系基准的水平段数；编辑段数为 `2×Side²`，首次输入还包含显式空 halo。着色/群系基准固定8段，CSV 单列工作集，不与大批量混合汇总。优先比较同工作集、同线程数的完整 `route` p95，吞吐量按正式样本的编译段数总和除以 route 总时间计算；同时保留两个编辑方向、每轮分布、p50/max、三角形吞吐量和阶段计时。首次输入、静止、同内容以及几何/群系编辑分别比较，不把零编译控制组当作几何吞吐提升。
 
 该入口覆盖受控模型与中性光照，不能证明完整原版资源包、真实存档或模组等价。原版参照包含其光栅专属工作，CPU 局部结果不代表游戏 FPS。维护时将新行为加入共用场景；确有版本差异的绑定留在版本测试目录，不复制两份用例。
 

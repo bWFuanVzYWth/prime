@@ -226,10 +226,15 @@ final class SectionCompilerOracle {
                            " actual section compiler fixtures; neutral lighting, no GPU/window");
     }
     record Case(String name, Map<BlockPos, BlockState> blocks,
-                Map<BlockState, BlockStateModel> models, int blendRadius, int biomePhase) {
+                Map<BlockState, BlockStateModel> models, int blendRadius, int biomePhase,
+                int horizontalSections) {
         Case(String name, Map<BlockPos, BlockState> blocks,
              Map<BlockState, BlockStateModel> models) {
             this(name, blocks, models, -1, 0);
+        }
+        Case(String name, Map<BlockPos, BlockState> blocks, Map<BlockState, BlockStateModel> models,
+             int blendRadius, int biomePhase) {
+            this(name, blocks, models, blendRadius, biomePhase, 2);
         }
     }
     static BlockStateModel multipart(BlockState state,

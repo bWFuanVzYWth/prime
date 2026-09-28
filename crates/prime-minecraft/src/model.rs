@@ -4,7 +4,7 @@ use crate::{
     shape::{Face, FaceId},
     wire::Reader,
 };
-use prime_scene::Triangle;
+use prime_scene::compiled::CompiledQuad;
 use std::collections::HashMap;
 
 #[derive(Clone, Default, PartialEq)]
@@ -295,7 +295,7 @@ impl Catalog {
         state: &State,
         position: [i32; 3],
         visible: u32,
-        layers: &mut [Vec<Triangle>; 3],
+        layers: &mut [Vec<CompiledQuad>; 3],
         hacks: &mut Hacks,
         tints: &mut crate::tint::Deferred,
     ) {
@@ -328,7 +328,7 @@ impl Catalog {
         offset: [f32; 3],
         visible: u32,
         random: &mut Random,
-        layers: &mut [Vec<Triangle>; 3],
+        layers: &mut [Vec<CompiledQuad>; 3],
         hacks: &mut Hacks,
         tints: &mut crate::tint::Deferred,
         depth: u32,
@@ -408,24 +408,24 @@ pub(crate) fn emit_quad(
     offset: [f32; 3],
     color: [f32; 4],
     texture_id: u32,
-    layers: &mut [Vec<Triangle>; 3],
+    layers: &mut [Vec<CompiledQuad>; 3],
 ) {
-    for corners in [[0, 1, 2], [2, 3, 0]] {
-        layers[q.layer].push(Triangle {
-            positions: corners.map(|i| std::array::from_fn(|a| offset[a] + q.positions[i][a])),
-            colors: [color; 3],
-            uvs: corners.map(|i| q.uvs[i]),
-            texture_id,
-            flags: q.layer as u32,
-        });
-    }
+    layers[q.layer].push(CompiledQuad {
+        positions: q
+            .positions
+            .map(|p| std::array::from_fn(|a| offset[a] + p[a])),
+        color,
+        uvs: q.uvs,
+        texture_id,
+        flags: q.layer as u32,
+    });
 }
 pub(crate) fn cube(
     offset: [f32; 3],
     visible: u32,
     color: [f32; 4],
     layer: usize,
-    layers: &mut [Vec<Triangle>; 3],
+    layers: &mut [Vec<CompiledQuad>; 3],
 ) {
     let faces = [
         [[0., 0., 0.], [1., 0., 0.], [1., 0., 1.], [0., 0., 1.]],
