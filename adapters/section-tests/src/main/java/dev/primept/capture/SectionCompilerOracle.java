@@ -203,6 +203,7 @@ final class SectionCompilerOracle {
                     workload.bench(directory);
             }
         }
+        SectionTintOracle.write(directory);
         Files.writeString(directory.resolve("suite.properties"),
                           "format=1\nsourceVersion=" + SourcePages.VERSION +
                                   "\ngameVersion=" + SectionSources.GAME_VERSION +

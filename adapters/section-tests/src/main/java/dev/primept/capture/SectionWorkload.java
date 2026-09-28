@@ -106,6 +106,8 @@ final class SectionWorkload implements AutoCloseable {
             for (int x = -1; x < region.side; ++x)
                 for (int z = -1; z < region.side; ++z)
                     pages.i(1).i(x).i(0).i(z);
+        else if (mode.equals("reload"))
+            pages.i(4).i(0).i(0).i(0);
         else if (mode.equals("biome"))
             pages.i(7).i(0).i(0).i(0);
         else if (mode.equals("biome_columns"))
@@ -180,13 +182,21 @@ final class SectionWorkload implements AutoCloseable {
         for (int round = 0; request.byteSize() != 0; ++round) {
             if (round >= 2)
                 throw new AssertionError("Extra callback round");
-            String suffix = request.get(I, 28) == 0 ? ".tint" : ".biome";
+            String suffix = request.get(I, 28) == 3 ? ".biome" : ".tint";
             Files.write(directory.resolve(name + suffix + ".requests"),
                         request.toArray(ValueLayout.JAVA_BYTE));
-            SectionTints.respond(request, tintResponse, region, colors, fluids, region.tintWorld);
+            region.tintWorld.rejectColorCallbacks = true;
+            try {
+                SectionTints.respond(request, tintResponse, region, colors, fluids,
+                                     region.tintWorld);
+            } finally {
+                region.tintWorld.rejectColorCallbacks = false;
+            }
             SectionSourcesCpuSmoke.write(tintResponse, directory.resolve(name + suffix));
             request = bridge.sections(tintResponse);
         }
+        if (nativeCount(bridge.cpuDiagnostics(), "tint_callbacks") != 0)
+            throw new AssertionError("Known vanilla tint source invoked a color callback");
     }
     private static void writeExpected(CaptureInbox expected, Path output) throws Exception {
         var packets =
@@ -255,7 +265,7 @@ final class SectionWorkload implements AutoCloseable {
         try (var reference = new Reference(threads)) {
             for (String mode :
                  fixture.name().equals("bench_tinted")
-                         ? List.of("edit", "unchanged", "idle", "biome", "biome_columns")
+                         ? List.of("edit", "unchanged", "idle", "biome", "biome_columns", "reload")
                          : List.of("edit", "unchanged", "idle")) {
                 restore(false);
                 region.tintWorld.phase = fixture.biomePhase();
@@ -273,9 +283,9 @@ final class SectionWorkload implements AutoCloseable {
                             region.tintWorld.phase = (sample & 1);
                         if (mode.equals("edit") && sample >= 0)
                             restore((sample & 1) == 0);
-                        var selected = sample < 0            ? keys
-                                       : mode.equals("idle") ? List.<SectionPos>of()
-                                                             : edited;
+                        var selected = sample < 0 || mode.equals("reload") ? keys
+                                       : mode.equals("idle")               ? List.<SectionPos>of()
+                                                                           : edited;
                         // Alternate order to avoid always timing one compiler after the other's cache warming.
                         boolean mcFirst = (sample & 1) == 0;
                         long[] mc = new long[2];
@@ -290,6 +300,8 @@ final class SectionWorkload implements AutoCloseable {
                         long t1 = System.nanoTime();
                         var request = bridge.requestSections(events);
                         long t2 = System.nanoTime();
+                        if (mode.equals("reload"))
+                            router = new SectionSources(models, fluids);
                         long count = request.get(L, 8);
                         response.header(SectionSources.GAME_VERSION, 2, 1, batch);
                         for (long n = 0; n < count; ++n) {
@@ -323,13 +335,13 @@ final class SectionWorkload implements AutoCloseable {
                         }
                         String diagnostics =
                                 bridge.cpuDiagnostics(); // formatting and I/O are outside timed work
-                        long expectedRequests = sample < 0 ? keys.size()
+                        long expectedRequests = sample < 0 || mode.equals("reload") ? keys.size()
                                                 : (mode.equals("idle") || mode.startsWith("biome"))
                                                         ? 0
                                                         : edited.size();
                         if (count != expectedRequests)
                             throw new AssertionError("Unexpected workset " + diagnostics);
-                        int compiled = sample < 0 ? keys.size()
+                        int compiled = sample < 0 || mode.equals("reload") ? keys.size()
                                        : (mode.equals("edit") || mode.startsWith("biome"))
                                                ? edited.size()
                                                : 0;
@@ -354,7 +366,7 @@ final class SectionWorkload implements AutoCloseable {
     private void invalidateColors(String mode) {
         if (mode.equals("biome_columns"))
             region.tintWorld.clearColumns(region.side);
-        else if (mode.equals("biome"))
+        else if (mode.equals("biome") || mode.equals("reload"))
             region.tintWorld.clearColors();
     }
     private void restore(boolean edit) {

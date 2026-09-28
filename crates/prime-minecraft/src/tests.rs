@@ -782,6 +782,32 @@ fn tint_response(ctx: &TerrainContext, color: u32) -> Vec<u8> {
         u32_to(&mut response, 0);
         u32_to(&mut response, color);
     }
+    u32_to(&mut response, 0); // No biome definitions for evaluated colors.
+    response
+}
+fn biome_definitions(response: &mut Vec<u8>) {
+    u32_to(response, 1);
+    u64_to(response, 0);
+    for p in 0..256 {
+        u32_to(response, p);
+    }
+    for v in [0f64, 0., 1., 1.] {
+        u64_to(response, v.to_bits());
+    }
+    for _ in 0..3 {
+        u32_to(response, 0);
+    }
+}
+fn biome_response(ctx: &TerrainContext, color: u32) -> Vec<u8> {
+    let mut response = header(4, ctx.awaiting_colors.as_ref().unwrap().batch);
+    u64_to(&mut response, ctx.stats.biome_pages as u64);
+    u32_to(&mut response, 1); // One actual source biome with three explicit overrides.
+    for value in [0, 0, color, color, color, color, 7, 0] {
+        u32_to(&mut response, value);
+    }
+    for _ in 0..ctx.stats.biome_host_cells {
+        u32_to(&mut response, 0);
+    }
     response
 }
 #[test]
@@ -852,15 +878,20 @@ fn biome_stage_cannot_publish_incomplete_or_wrong_phase_results() {
         u32_to(&mut response, 1);
         u32_to(&mut response, 0);
     }
+    biome_definitions(&mut response);
     ctx.accept(&[&response], &mut scene).unwrap();
-    assert_eq!(ctx.tint_requests[28], 1);
+    assert_eq!(ctx.tint_requests[28], 3);
     assert!(ctx.stats.biome_samples > 0);
     assert_eq!(scene.revision(), rev);
     assert!(ctx.accept(&[&response], &mut scene).is_err());
-    response = header(4, 1);
-    u64_to(&mut response, ctx.stats.biome_samples as u64);
-    for _ in 0..ctx.stats.biome_samples {
-        u32_to(&mut response, 0xff1200ff);
+    response = biome_response(&ctx, 0xff1200ff);
+    // No definition or palette can become visible from a malformed source response.
+    for at in [68, 72, 76] {
+        // override flags, modifier and first source-biome ID
+        let mut invalid = response.clone();
+        invalid[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(ctx.accept(&[&invalid], &mut scene).is_err());
+        assert_eq!(scene.revision(), rev);
     }
     assert!(
         ctx.accept(&[&response[..response.len() - 1]], &mut scene)
@@ -912,6 +943,7 @@ fn cached_raw_biomes_finish_the_source_response_without_a_host_sample_round() {
             u32_to(&mut response, 1);
             u32_to(&mut response, 0);
         }
+        biome_definitions(&mut response);
         ctx.accept(&[&response], &mut output).unwrap();
         if warm {
             assert!(ctx.tint_requests().is_empty());
@@ -920,11 +952,7 @@ fn cached_raw_biomes_finish_the_source_response_without_a_host_sample_round() {
             assert_eq!(ctx.stats.response_batches, 2);
         } else {
             assert!(!ctx.tint_requests().is_empty());
-            let mut response = header(4, 1);
-            u64_to(&mut response, ctx.stats.biome_samples as u64);
-            for _ in 0..ctx.stats.biome_samples {
-                u32_to(&mut response, 0xff1270e4);
-            }
+            let response = biome_response(&ctx, 0xff1270e4);
             ctx.accept(&[&response], &mut output).unwrap();
             assert_eq!(ctx.stats.response_batches, 3);
         }

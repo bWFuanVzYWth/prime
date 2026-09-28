@@ -1,4 +1,4 @@
-//! Exact vanilla box filtering. The host supplies actual zoomed biome resolver samples;
+//! Exact vanilla box filtering over native zoomed biome colors;
 //! this module owns deduplication, integer sums and dependency-scoped cached outputs.
 use crate::{schedule::Section, tint::Request};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -20,7 +20,22 @@ impl Recipe {
     pub fn read(kind: u32, value: u32) -> Result<Self, String> {
         use Resolver::*;
         match (kind, value) {
-            (0, color) => Ok(Self::Color(color)),
+            (0 | 8, color) => Ok(Self::Color(color)),
+            (6, power @ 0..=15) => {
+                let p = power as f32 / 15.;
+                let r = p * 0.6 + if power > 0 { 0.4 } else { 0.3 };
+                let g = (p * p * 0.7 - 0.5).clamp(0., 1.);
+                let b = (p * p * 0.6 - 0.7).clamp(0., 1.);
+                Ok(Self::Color(
+                    0xff000000
+                        | ((r * 255.) as u32) << 16
+                        | ((g * 255.) as u32) << 8
+                        | (b * 255.) as u32,
+                ))
+            }
+            (7, age @ 0..=7) => Ok(Self::Color(
+                0xff000000 | (age * 32) << 16 | (255 - age * 8) << 8 | (age * 4),
+            )),
             (1, 0) => Ok(Self::Biome {
                 resolver: Grass,
                 below: false,

@@ -154,6 +154,44 @@ fn finish_tints(
 ) {
     replay_tints(context, output, root, case, None);
 }
+
+#[test]
+#[ignore = "generate actual dual-version biome math and tint source fixtures"]
+fn actual_vanilla_biome_math_and_tint_source_fields_match() {
+    for version in [262, 263] {
+        let root = suite_root(version);
+        for variant in 0..2 {
+            biome_source::check_math_fixture(
+                &std::fs::read(root.join(format!("biome-math-{variant}.bin"))).unwrap(),
+            );
+        }
+        let expected = std::fs::read(root.join("tint-sources.expected")).unwrap();
+        let bytes = std::fs::read(root.join("tint-sources.bin")).unwrap();
+        let pages = [bytes.as_slice()];
+        let mut r = Reader::new(&pages).unwrap();
+        assert_eq!(r.header(3).unwrap(), (version, 1, 1));
+        let count = r.u64().unwrap() as usize;
+        assert_eq!(count, 29);
+        assert_eq!(r.i32().unwrap(), 0);
+        let mut callbacks = 0;
+        for (index, expected) in expected[4..].as_chunks::<4>().0.iter().enumerate() {
+            let kind = r.u32().unwrap();
+            callbacks += usize::from(kind == 0);
+            let biome::Recipe::Color(value) = biome::Recipe::read(kind, r.u32().unwrap()).unwrap()
+            else {
+                panic!("unexpected biome source")
+            };
+            assert_eq!(
+                value,
+                u32::from_le_bytes(*expected),
+                "MC {version} source {index}"
+            );
+        }
+        assert_eq!(callbacks, 1); // The sole unknown source was called exactly once by the host oracle.
+        assert_eq!(r.u32().unwrap(), 0);
+        r.finish().unwrap();
+    }
+}
 fn replay_tints(
     context: &mut TerrainContext,
     output: &mut SourceScene,
@@ -165,10 +203,10 @@ fn replay_tints(
         if context.tint_requests().is_empty() {
             return;
         }
-        let suffix = if context.tint_requests()[28] == 0 {
-            "tint"
-        } else {
+        let suffix = if context.tint_requests()[28] == 3 {
             "biome"
+        } else {
+            "tint"
         };
         let mut requests = std::fs::read(root.join(format!("{case}.{suffix}.requests")))
             .expect("missing source requests");
@@ -495,26 +533,60 @@ fn replay_cached_tints(
         if request.is_empty() {
             return;
         }
-        let (suffix, key_size, value_size, prefix) = if request[28] == 0 {
-            ("tint", 20, 8, 44)
-        } else {
-            ("biome", 16, 4, 40)
-        };
+        let suffix = if request[28] == 3 { "biome" } else { "tint" };
         let keys = std::fs::read(root.join(format!("{case}.{suffix}.requests"))).unwrap();
         let values = std::fs::read(root.join(format!("{case}.{suffix}"))).unwrap();
-        let lookup: HashMap<_, _> = keys[32..]
-            .chunks_exact(key_size)
-            .zip(values[prefix..].chunks_exact(value_size))
-            .collect();
-        let mut response = values[..prefix].to_vec();
+        let mut response = values[..44].to_vec();
         response[24..32].copy_from_slice(&batch.to_le_bytes());
         response[32..40].copy_from_slice(&request[8..16]);
-        for key in request[32..].chunks_exact(key_size) {
-            response.extend_from_slice(
-                lookup
-                    .get(key)
-                    .expect("incremental query outside cold source union"),
-            );
+        if suffix == "tint" {
+            let count = (keys.len() - 32) / 20;
+            let end = 44 + count * 8;
+            let lookup: HashMap<_, _> = keys[32..]
+                .as_chunks::<20>()
+                .0
+                .iter()
+                .zip(values[44..end].as_chunks::<8>().0.iter())
+                .collect();
+            for key in request[32..].as_chunks::<20>().0 {
+                response.extend_from_slice(
+                    *lookup
+                        .get(key)
+                        .expect("incremental tint outside cold source union"),
+                );
+            }
+            if request[28] == 2 {
+                response.extend_from_slice(&values[end..]);
+            } else {
+                u32_to(&mut response, 0);
+            }
+        } else {
+            let count = u32::from_le_bytes(values[40..44].try_into().unwrap()) as usize;
+            let end = 44 + count * 32;
+            response.extend_from_slice(&values[44..end]);
+            let mut ids = values[end..].as_chunks::<4>().0.iter();
+            let mut lookup = HashMap::new();
+            for page in keys[32..].as_chunks::<20>().0 {
+                let section: [u8; 12] = page[..12].try_into().unwrap();
+                let mut mask = u64::from_le_bytes(page[12..20].try_into().unwrap());
+                while mask != 0 {
+                    lookup.insert((section, mask.trailing_zeros()), ids.next().unwrap());
+                    mask &= mask - 1;
+                }
+            }
+            assert!(ids.next().is_none());
+            for page in request[32..].as_chunks::<20>().0 {
+                let section: [u8; 12] = page[..12].try_into().unwrap();
+                let mut mask = u64::from_le_bytes(page[12..20].try_into().unwrap());
+                while mask != 0 {
+                    response.extend_from_slice(
+                        *lookup
+                            .get(&(section, mask.trailing_zeros()))
+                            .expect("incremental quart outside cold source union"),
+                    );
+                    mask &= mask - 1;
+                }
+            }
         }
         ctx.accept(&[&response], output).unwrap();
     }

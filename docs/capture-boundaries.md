@@ -12,7 +12,7 @@ Rust 的版本适配层解释宿主源字段并管理请求，场景和渲染核
 
 当前为 Rust section 原型。Java 在原版 section 编译之前接管，原版 `SectionCompiler`、地形 BufferBuilder、光栅 AO/明暗、透明排序与遮挡图仍被截断。`ExclusiveTerrainCapture` 只转录相机/视距设置、宿主缓存边界、加载/卸载/dirty/失效事件；活动范围和 dirty 合并由 `prime_minecraft::Scheduler` 决定。
 
-每个源帧调用一次 `prime_mc_plan`，Rust 返回实际需要读取的 section 及供动态源使用的活动列变化。Java 按坐标取得 palette/位存储与新增资源字段，用一次 `prime_mc_sections` 返回。Rust 展开可见几何时按实际 block tint slot / fluid source 收集需求，只有非空时再返回颜色源批次。Java 返回核验过的标准源类别/必要状态属性或实际回调 ARGB；标准群系颜色缓存未命中时，Rust 再批量请求去重的实际 biome/resolver 样本，自己完成精确混合。Java 不扫描颜色工作集、不计算几何，不进行逐段或逐 quad FFM。颜色未返回的片段保留在 Rust 明确的待响应所有者内，完整验证后才允许归并发布；编译 worker 始终不访问宿主。
+每个源帧调用一次 `prime_mc_plan`，Rust 返回实际需要读取的 section 及供动态源使用的活动列变化。Java 按坐标取得 palette/位存储与新增资源字段，用一次 `prime_mc_sections` 返回。Rust 展开可见几何时按实际 block tint slot / fluid source 收集需求，只有非空时再返回颜色源批次。Java 返回标准源类别、实际状态属性、常量字段及首次需要的群系 seed/色表/噪声字段；未知源保留真实回调 ARGB。Rust 自行完成原版红石/茎求色、群系 zoom、修色和混合，仅为缺失 quart 单元批量读取真实群系字段；已解析原版路径不执行宿主颜色回调。Java 不扫描颜色工作集、不计算几何，不进行逐段或逐 quad FFM。颜色未返回的片段保留在 Rust 明确的待响应所有者内，完整验证后才允许归并发布；编译 worker 始终不访问宿主。
 
 输入分为源页与资源定义：
 

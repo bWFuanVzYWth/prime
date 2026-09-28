@@ -193,16 +193,25 @@ final class SectionTintCases {
         BiomeManager biomes;
         int phase;
         boolean columnsOnly;
+        boolean rejectColorCallbacks;
         Map<ColorResolver, BlockTintCache> caches;
         private World() {
             super(null, null, null, null, 0, 0, null, false, 0, 0);
         }
         @Override
+        public BiomeManager getBiomeManager() {
+            return biomes;
+        }
+        @Override
         public Holder<Biome> getBiome(BlockPos pos) {
+            if (rejectColorCallbacks)
+                throw new AssertionError("Vanilla source preparation called getBiome");
             return biomes.getBiome(pos);
         }
         @Override
         public int getBlockTint(BlockPos pos, ColorResolver resolver) {
+            if (rejectColorCallbacks)
+                throw new AssertionError("Vanilla source preparation called getBlockTint");
             return caches.get(resolver).getColor(pos);
         }
         void clearColors() {

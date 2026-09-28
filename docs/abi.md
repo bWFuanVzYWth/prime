@@ -30,15 +30,15 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本�
 
 ABI v6 提供下面的 MC 原始源批次接口，保留场景协议、参数粒子与诊断查询。当前生产地形走 `prime_mc_plan` / `prime_mc_sections`；op8/10/11/12/13 保留给封闭网格输入和 CPU 对照夹具，不与新生产者混用。op2 无生产消费者，未知操作及历史 ABI 直接拒绝。
 
-## MC 源批次（source version 3）
+## MC 源批次（source version 4）
 
 该入口只由 `prime_minecraft` 解释，不能将 Minecraft 字段枚举、坐标规则或 palette 布局扩散到 `prime_scene` / GPU。当前识别 MC version 262、263；其他版本明确拒绝。临时语义替代见独立的 [原型 hack 清单](../PROTOTYPE_HACKS.md)。
 
-`prime_mc_plan(handle, pages, count, output)` 接收相机、半径输入、宿主实际来源范围和增量事件，返回 Rust 所有的 section 请求表。Java 在宿主 owner 线程按表封装，调用 `prime_mc_sections(handle, pages, count, output)`。该入口的 output 同样是 `prime_source_page`：长度为0表示本批已发布；非零表示一批颜色源需求。Java 在同一源帧按表返回 kind=3 的源结果/声明；标准群系颜色缓存未命中时，再按表返回 kind=4 的实际 resolver 样本。最多两个后续颜色批次，不按方块反复往返。没有逐段/逐 quad FFM、worker 回调或跨帧配额；冻结时不执行源请求。空闲帧仅交换 section 批次头，不读取已知 palette、不编译、不产生 tint 批次。
+`prime_mc_plan(handle, pages, count, output)` 接收相机、半径输入、宿主实际来源范围和增量事件，返回 Rust 所有的 section 请求表。Java 在宿主 owner 线程按表封装，调用 `prime_mc_sections(handle, pages, count, output)`。该入口的 output 同样是 `prime_source_page`：长度为0表示本批已发布；非零表示一批颜色源需求。Java 在同一源帧按表返回 kind=3 的源字段/结果；标准群系源缓存未命中时，再按表返回 kind=4 的实际 quart 群系字段。最多两个后续颜色批次，不按方块反复往返。没有逐段/逐 quad FFM、worker 回调或跨帧配额；冻结时不执行源请求。空闲帧仅交换 section 批次头，不读取已知 palette、不编译、不产生 tint 批次。
 
 输入 `prime_source_page` 是 16 字节 `{const uint8_t* data; uint64_t length;}`，描述表和每页均只借用到调用返回。页串接成一个逻辑流，字段允许跨页；每页最多 256 MiB，Java 复用 1 MiB native 页，禁止为合批再次拼接成巨型数组。必须保留的数据在返回前成为 Rust 所有；编译 worker 返回前全部汇合。响应错误使引擎失败，不重放源回调补画。
 
-四个输入流都有 32 字节头：`magic:u32=0x53434d50, source_version:u32=3, minecraft_version:u32, kind:u32, epoch:u64, batch:u64`。epoch 和 batch 非零；epoch 必须匹配场景，batch 在 epoch 内严格增加。请求期间不可再次 plan，响应必须恰好匹配该请求的身份和全部 section。
+四个输入流都有 32 字节头：`magic:u32=0x53434d50, source_version:u32=4, minecraft_version:u32, kind:u32, epoch:u64, batch:u64`。epoch 和 batch 非零；epoch 必须匹配场景，batch 在 epoch 内严格增加。请求期间不可再次 plan，响应必须恰好匹配该请求的身份和全部 section。
 
 kind=1 的头后为相机 `x/z:f64`、半径 `i32`、世界 `min_section_y/max_section_y:i32`（含端点）、宿主实际来源范围 `min_x/max_x/min_z/max_z:i32`，随后为事件流。每条非零事件为 `kind:u32, x/y/z:i32`；1 加载列、2 卸载列、3 段脏、4 全量资源失效、5 清空旧来源列清单（随后用1重建）、6 宿主颜色列失效（x/z及其相邻八列）、7 全部宿主颜色缓存失效。6/7只重编译实际消费过 tint 的活跃段，不重新请求其 palette；普通 dirty 与颜色失效不可互相代替。单个 `u32=0` 终止。Java 转发原始通知；Rust 合并、过滤并维护窗口、活跃段和完整一格邻域依赖。完整清单仅在 owner 建立/实际源范围变化时重发。
 
@@ -64,17 +64,23 @@ section 压缩数据为 `bits:u32, palette_count:u32, word_count:u32`、palette_
 
 ### 颜色源批次
 
-颜色请求共用头 `batch:u64, count:u64, epoch:u64, minecraft_version:u32, phase:u32`。phase=0 后接 count 条20字节 `{world_x/y/z:i32, state_id:u32, slot:i32}`；slot≥0表示实际 block tint index，-1表示实际 FluidModel tint source。只请求本轮实际产出的几何，同一位置/源 slot 在本次编译中去重；缺失 slot 按原版返回白色。模型选择和剔除仍属于 Rust，Java 不扫描 section 或模型图。
+颜色请求共用头 `batch:u64, count:u64, epoch:u64, minecraft_version:u32, phase:u32`。phase=0/2 后接 count 条20字节 `{world_x/y/z:i32, state_id:u32, slot:i32}`；slot≥0表示实际 block tint index，-1表示实际 FluidModel tint source。phase=2 另要求在出现群系源时提供尚未绑定的群系计算定义。只请求本轮实际产出的几何，同一位置/源 slot 在本次编译中去重；缺失 slot 按原版返回白色。模型选择和剔除仍属于 Rust，Java 不扫描 section 或模型图。
 
-kind=3 的头后为 `count:u64, biome_blend_radius:i32`，随后 count 个 `{source_kind:u32, value:u32}`。source_kind=0是已求值 ARGB；1/2/3/4是原版 grass/foliage/dry foliage/water resolver，value必须0；5是 double tall grass，value为实际 upper-half 属性（0/1），由 Rust 解释下方查询。半径为0..7。Java 仅通过与已核验原版工厂完全相同的实际 source 类绑定这些声明，不按方块名猜测、不执行回调后推断规则；其余实际 source 执行一次 `colorInWorld`，保留全部 ARGB 通道。对这些内置类/静态 resolver 的 Mixin 修改不在当前第三方兼容保证内。
+kind=3 的头后为 `count:u64, biome_blend_radius:i32`，随后 count 个 `{source_kind:u32, value:u32}`。source_kind=0是未知源实际回调的 ARGB；1/2/3/4是原版 grass/foliage/dry foliage/water，value必须0；5是 double tall grass，value为实际 upper-half 属性（0/1）；6是红石强度（0..15），7是茎年龄（0..7），8是实际常量 ARGB（包括缺失 slot 和 waterParticles 的世界白色）。Rust 解释状态规则和颜色算式，半径为0..7。Java 通过与已核验原版工厂完全相同的实际 source 类绑定字段，不按方块名猜测、不执行回调后推断规则；其余实际 source 执行一次 `colorInWorld`，保留全部 ARGB 通道。对这些内置类/静态颜色算法的 Mixin 修改不在当前第三方兼容保证内。
 
-Rust 按解析器、实际 Y 和局部平面查询范围组织带 halo 的小格；行位掩码保留每个查询混合方形的精确并集，重叠样本通过16×16源块索引去重，稀疏空洞不请求宿主。phase=1 请求 count 条16字节 `{world_x/y/z:i32, resolver:u32}`，resolver为1..4；Java 只调用实际 `ClientLevel.getBiome` 与对应 `ColorResolver.getColor`。kind=4 的头后为 `count:u64` 和 count 个原始 `ARGB:u32`。Rust 通过整数前缀和计算与原版逐点累加相同的 box filter、整数除法和 alpha；半径0直接读取原始 ARGB，不建立前缀和。样本顺序由查询分组及行列顺序确定，不依赖哈希表遍历；没有 Java 混合循环。
+记录末尾为 `definitions_present:u32`（0/1）。1只允许出现在请求定义的响应，随后为 `zoom_seed:u64, permutation:u32×256, offset_x/y:f64, input_scale/value_scale:f64`，再接 grass/foliage/dry foliage 三张表，各为 `count:u32 + ARGB:u32×count`，count≤65536。排列必须恰好包含0..255。Java 读取实际 BiomeManager seed、资源色表和噪声实例字段；26.2 绑定单 octave PerlinSimplexNoise，26.3 绑定 SimplexNoise。Rust 保留各版浮点求值与返回精度、色表索引、缺项默认色、覆盖色和修色语义；未知噪声布局拒绝，不静默替换。仅有常量/未知源的批次无需传表。
 
-标准混合结果按查询所在 section/局部位置/解析器保存在显式 Rust 上下文中；相同群系依赖下的几何编辑直接复用。原始 resolver 样本另按 section、解析器和实际 Y 分配16×16平面，以有效位区分未知值；只缓存完整验证过的响应，后续批次只请求缺失样本。混合半径变化撤销混合结果，保留半径无关的原始样本；全部原始样本命中时直接在 kind=3 响应内完成过滤和发布，无需 kind=4 往返。
+Rust 按解析器、实际 Y 和局部平面查询范围组织带 halo 的小格；行位掩码保留每个查询混合方形的精确并集，重叠样本通过16×16源块索引去重。Rust 先用源 seed 计算实际选中的 quart 坐标，只向宿主请求未缓存的单元。phase=3 请求 count 条20字节 `{section_x/y/z:i32, needed_mask:u64}`；位索引为 quart 的 `x | z<<2 | y<<4`，每轴0..3。Java 按页顺序、置位从低到高读取实际 `BiomeManager.getNoiseBiomeAtQuart`，不调用 `getBiome`、颜色 resolver 或混色函数。
 
-两版 BiomeManager 从 `(block-2)>>2` 及其 +1 的八个 quart 角点选取群系。因此颜色列更新或列卸载使该列水平方向外扩2格内的原始样本失效，混合结果再外扩当前混合半径；相邻列的其他位置保持有效。全局颜色失效、资源代次和世界切换清空两级缓存。移出活动/依赖范围回收对应混合条目和原始样本依赖页，包括双高植物向下一段查询及水平混合 halo；共享页允许保守回收，不能随跑图无界累积。常量及未知源结果不跨批缓存，不能假定任意外部回调纯净。
+kind=4 的头后为 `count:u64, biome_count:u32`，随后 biome_count 条32字节字段：`temperature/downfall:f32, water_argb:u32, grass/foliage/dry_override:u32, override_flags:u32, grass_modifier:u32`。flags位0/1/2分别表示三个覆盖色存在；modifier为0 NONE、1 DARK_FOREST、2 SWAMP。最后按请求页及置位顺序给出 `biome_id:u32`，引用本响应内从0开始的定义，数量恰好等于所有 mask 的 popcount 之和。Java 每个响应按实际 Biome 身份转录一次字段。Rust 计算原始颜色，再通过整数前缀和计算与原版逐点累加相同的 box filter、整数除法和 alpha；半径0保留原始 ARGB。请求顺序不依赖哈希表遍历。
+
+标准混合结果按查询所在 section/局部位置/解析器保存在显式 Rust 上下文中；相同群系依赖下的几何编辑直接复用。原始颜色另按 section、解析器和实际 Y 分配16×16平面；源 quart 页每64个单元共享有效位，不同解析器共用源字段。三层缓存只发布完整验证后的值，未知与黑色分开。混合半径变化撤销混合结果，保留半径无关的原始颜色；原始颜色或所需 quart 全部命中时在 kind=3 内完成计算和发布，无需 kind=4 往返。
+
+两版 BiomeManager 从 `(block-2)>>2` 及其 +1 的八个 quart 角点选取群系。因此颜色列更新或列卸载清除该列 quart 页，并使该列水平方向外扩2格内的原始颜色失效，混合结果再外扩当前混合半径；相邻列的其他位置保持有效。全局颜色失效、资源代次和世界切换清空三层缓存及源计算定义。移出活动/依赖范围回收对应条目，包括双高植物、水平混合 halo 和 zoom 的上下相邻 quart 页；共享页允许保守回收，不能随跑图无界累积。常量及未知源结果不跨批缓存，不能假定任意外部回调纯净。
 
 所有响应按请求顺序对应，没有终止记录，精确校验 epoch/version/batch/count、截断与多余数据。源指针仅借用到各次调用返回，待着色片段由 Rust 显式阶段所有者保存；全部颜色闭合前不能发布、推进完成水位或再次 plan。颜色回填与几何归并处于同一同步 worker 阶段。宿主在 owner 线程使用同一源帧的状态和世界；内核没有宿主回调或 MC 对象。
+
+zoom 的八个角点扰动按 quart cube 复用，每个 cube 的64个位置只计算实际需求，已选角点只依赖 seed。普通群系/色表失效可复用这些选择；实际 seed 改变、资源/世界重建清空，消费者退休按 halo 回收依赖页。它不缓存某个位置应属于哪个群系，quart 源变化仍重新取色。
 
 两版 `ClientLevel.onChunkLoaded`（包括 biome packet）及 `clearTintCaches` 转发颜色失效；Rust 先合并列，再过滤实际消费者。标准原版状态、群系、混合半径、资源代次及双高植物位置依赖已覆盖；未知回调依赖任意邻块、光照、时间或外部状态的失效尚无声明契约，不承诺第三方完整兼容。
 

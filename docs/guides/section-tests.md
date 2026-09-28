@@ -26,7 +26,11 @@ Rust 回放生产源协议、调度、编译与发布。比较最终三角形多
 
 记录 native 上下文首次发布、预热和每个正式样本（CSV 的 cold 指新上下文，不是整个 JVM/游戏冷启动），交替两侧测量次序。重复独立进程以观察堆布局/JIT/调度带来的波动，并分别保留两个编辑方向的分布；不能只选择较快的一轮。禁止删除离群值。负载覆盖首次发布、内部编辑、相同内容 dirty、无事件静止；密实体、阶梯地形、重复部件、液体和棋盘格默认编辑八段，可按水平边长扩展到大批量；密集着色体默认八段，支持独立水平边长，按实际工作集单独比较。着色体另测 biome 失效：交替群系输入，每次分别在两侧测量前清空实际宿主颜色缓存，缓存失效本身在计时之外；不让先测的一侧替另一侧预热颜色。固定区域批量编辑不等同于视距流送或实际移动尾延迟。
 
-原版区间为 compile 到结果 release/builder clear。Prime 区间包括事件封包、FFM plan、响应封包、FFM accept，按需包含颜色批次与宿主实际回调，覆盖 Rust 解码、展开、颜色回填、整理、发布和 CPU 退休 join；`tint_queries` / `tint_callback_ms` 单列实际需求与宿主回调，`tint_queries` 汇总颜色源和样本条目；native `tint_requests` / `biome_samples` 分列，`biome_hits` 给出已算混合颜色的命中数，`tint_pack` / `tint_decode` / `biome_plan` / `biome_filter` 记录阶段；回填耗时包含在 finalize。读取诊断、哈希、文件输出在计时之外。Java 分配及 GC 字段仅观察 Prime 区间的调用线程/进程 GC，不是 native 堆或原版工作池分配量。底层诊断以毫秒记录，细微阶段会受其显示精度限制。
+原版区间为 compile 到结果 release/builder clear。Prime 区间包括事件封包、FFM plan、响应封包、FFM accept，按需包含颜色批次与宿主源读取，覆盖 Rust 解码、展开、颜色回填、整理、发布和 CPU 退休 join。历史 CSV 字段 `tint_callback_ms` 现在表示 Java 颜色源准备总时间，包括字段读取；不能直接当成回调时间。`tint_queries` 汇总颜色源条目与 quart 请求页。native `tint_requests` 为源需求数，`tint_callbacks` 才是未知源实际回调次数；`biome_samples` 为需要重新求色的原始位置数，`biome_cached_samples` / `biome_hits` 分别为原始颜色和混合结果命中数。`biome_host_cells` / `biome_pages` 是实际读取的 quart 单元/页数，单位不同，不与位置命中数相加。`tint_pack` / `tint_decode` / `biome_plan` / `biome_source` / `biome_filter` 分列请求、解码、原始颜色需求规划、原生 zoom/源规划/求色和过滤；回填包含在 finalize。读取诊断、哈希、文件输出在计时之外。Java 分配及 GC 字段仅观察 Prime 区间的调用线程/进程 GC，不是 native 堆或原版工作池分配量。底层诊断以毫秒记录，细微阶段会受显示精度限制。
+
+`biome-math-*.bin` 保存两版实际 BiomeManager、颜色修饰和资源色表的独立数学参照，覆盖不同 seed、负坐标、大坐标、climate 截断、全部修色、带 alpha 的覆盖色及短色表缺项；Rust 同时核对首次和缓存后的 zoom。`tint-sources.*` 对照红石全部强度、茎年龄、两种常量来源、waterParticles 的世界语义及未知有状态回调；未知回调必须恰好执行一次。已知原版场景的源准备若访问 `getBiome` / `getBlockTint` 则直接失败，并要求实际回调计数为0。这些检查不纳入性能计时。
+
+着色负载另有 `reload` 模式：每个样本发送真实资源失效事件、重新建立宿主源字典并重发完整来源，原生颜色和 seed 选择缓存全部清空。它包括源准备、同步编译和完整冷着色，用于区分 `biome` 模式仍可复用的 seed 计算；不包含完整游戏资源加载或 GPU 重建。该模式统计的 compiled 包含来源窗口的空段，需与有色段数和三角形数一起解读。大小核平台应记录实际进程 affinity；若用固定性能核控制调度，原版与新旧 Prime 必须一致，不能与默认调度样本混合统计。
 
 输出保存工具链、实际运行 JVM/GC/最大堆配置、系统/CPU 标识、工作区版本/补丁、未跟踪源码、native SHA256、线程数、全部 CSV、输入与结果哈希，以及 p50/p95/max 摘要。p95 使用 nearest-rank。优化优先比较大批量完整 `route` 的 p95 和吞吐量，并保留 p50、最大值、阶段时长和较慢场景；阶段 p95 不能相加当作全链路 p95。吞吐量按正式样本的实际编译段数/三角形数总和除以 `route` 总时间计算，不平均各样本速率，不把未编译的控制组计作完成工作。不同工作集分开汇总，着色/群系负载不与其他场景混合。CPU 测试不含游戏世界加载、GPU、AS 构建和呈现，没有输出分辨率，不能换算为 FPS；正式渲染性能仍按原生 1920×1080 的游戏验收契约执行。
 
