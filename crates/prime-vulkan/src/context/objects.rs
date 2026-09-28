@@ -148,7 +148,7 @@ impl Objects {
             .geometry
             .iter()
             .map(|item| crate::packing::Input {
-                triangles: self.planner.triangles(item),
+                triangles: self.planner.triangles(item).into(),
                 offset: None,
                 flags: None,
             })

@@ -59,7 +59,7 @@ fn source_section_publication_crosses_signed_32_bit_total_without_large_allocati
             Mesh {
                 revision: MeshVersion::captured(SectionSequence(1)),
                 origin: [0.0; 3],
-                triangles,
+                triangles: triangles.into(),
                 bounds: [[0.0; 3], [1.0, 1.0, 0.0]],
                 texture_id: 0,
                 flags: 0,

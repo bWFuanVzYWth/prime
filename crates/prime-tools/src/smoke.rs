@@ -1,4 +1,6 @@
 //! Standalone GPU smoke path; no Minecraft installation or window is required.
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 #[cfg(feature = "vulkan")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use prime_scene::{Camera, Scene, SceneMesh, Texture, Triangle};

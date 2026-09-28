@@ -656,15 +656,20 @@ impl SourceScene {
 
 /// Bit equality is deliberately conservative (even signed zero differs), never hash-only.
 /// Irrelevant padding, normals and source stride are not rendered material/geometry fields.
-fn equal_source_triangles(raw: &[u8], layout: &VertexLayout, old: &[Triangle]) -> bool {
+fn equal_source_triangles(
+    raw: &[u8],
+    layout: &VertexLayout,
+    old: &crate::geometry::MeshGeometry,
+) -> bool {
     let per_primitive = layout.topology - 2;
     if old.len() != layout.count / layout.topology * per_primitive {
         return false;
     }
     raw.chunks_exact(layout.stride * layout.topology)
-        .zip(old.chunks_exact(per_primitive))
-        .all(|(primitive, triangles)| {
-            triangles.iter().enumerate().all(|(triangle, old)| {
+        .enumerate()
+        .all(|(index, primitive)| {
+            (0..per_primitive).all(|triangle| {
+                let old = old.triangle(index * per_primitive + triangle);
                 let indices = if triangle == 0 { [0, 1, 2] } else { [2, 3, 0] };
                 indices.into_iter().enumerate().all(|(corner, index)| {
                     let source = &primitive[index * layout.stride..][..layout.stride];

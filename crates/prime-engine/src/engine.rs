@@ -323,7 +323,7 @@ mod tests {
         assert_eq!(engine.translated.input().revision, translation_revision + 1);
         assert_eq!(scene.dynamic.origin, [0.0; 3]);
         assert!(Arc::ptr_eq(&dynamic_vertices, &scene.dynamic.triangles));
-        assert!(Arc::ptr_eq(
+        assert!(prime_scene::geometry::MeshGeometry::ptr_eq(
             &static_vertices,
             &scene.meshes[&(91, 0)].triangles
         ));
@@ -391,15 +391,15 @@ mod tests {
         assert_eq!(engine.translated.input().revision, before_revision);
         assert_eq!(std::ptr::from_ref(&scene.meshes[&(91, 0)]), before_node);
         assert_eq!(scene.meshes[&(91, 0)].revision, 1);
-        assert!(Arc::ptr_eq(&first, &scene.meshes[&(91, 0)].triangles));
+        assert!(first.ptr_eq(&scene.meshes[&(91, 0)].triangles));
         engine.source.submit(&section(3, 128)).unwrap();
         engine.prepare(&frame).unwrap();
         let scene = &engine.translated.input();
         assert_eq!(engine.translated.input().revision, before_revision + 1);
         assert_eq!(scene.meshes[&(91, 0)].revision, 3);
-        assert!(!Arc::ptr_eq(&first, &scene.meshes[&(91, 0)].triangles));
+        assert!(!first.ptr_eq(&scene.meshes[&(91, 0)].triangles));
         assert_eq!(scene.meshes[&(91, 1)].revision, 1);
-        assert!(Arc::ptr_eq(&other, &scene.meshes[&(91, 1)].triangles));
+        assert!(other.ptr_eq(&scene.meshes[&(91, 1)].triangles));
     }
     #[test]
     fn frozen_scene_uses_last_recorded_pose_and_transport_until_explicit_thaw() {

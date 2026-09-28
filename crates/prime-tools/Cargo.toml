@@ -12,6 +12,7 @@ default = ["vulkan"]
 vulkan = ["dep:prime_vulkan", "dep:png"]
 
 [dependencies]
+mimalloc.workspace = true
 prime_scene.workspace = true
 prime_vulkan = { workspace = true, optional = true }
 png = { workspace = true, optional = true }

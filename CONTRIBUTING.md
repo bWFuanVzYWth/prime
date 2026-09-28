@@ -16,7 +16,7 @@
 | Vulkan 驱动与兼容光追显卡 | 运行 GPU 测试和实际游戏 |
 | Vulkan validation layer / SPIR-V Tools | GPU 同步检查与 SPIR-V 验证 |
 
-使用仓库的 Gradle Wrapper，不必另装 Gradle。Windows 的 Rust 工具链还需要对应的 MSVC 链接工具。仅运行 Java 编译与测试不需要 Rust 或 Vulkan SDK；纯 CPU Rust 测试可排除 Vulkan crate。
+使用仓库的 Gradle Wrapper，不必另装 Gradle。Windows 的 Rust 工具链还需要对应的 MSVC 链接及 C 编译工具，后者用于构建 native 分配器。仅运行 Java 编译与测试不需要 Rust 或 Vulkan SDK；纯 CPU Rust 测试可排除 Vulkan crate。
 
 `prime_vulkan` 按以下顺序寻找 Slang：`SLANGC` 指向的可执行文件、`VULKAN_SDK` 下的 `Bin/slangc.exe`（Linux 为 `bin/slangc`）、`PATH` 中的 `slangc`。这些路径属于本机配置，不写入项目文件。当前运行支持范围见 README，不因存在 Linux 构建分支就视为已完成 Linux 验证。
 
@@ -112,7 +112,7 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```powershell
 $env:PRIME_VK_VALIDATION = '1'
 $env:VK_LAYER_VALIDATE_SYNC = '1'
-cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip packing_cost_matrix --nocapture --test-threads=1
+cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip packing_cost_matrix --skip terrain_upload_cost_matrix --nocapture --test-threads=1
 ```
 
 这些测试覆盖 cutout、累积、尺寸变化、增量场景和宿主资源退休；小尺寸/奇数尺寸用于边界检查，不是性能数据。改变宿主集成或捕获时，还需在对应 MC 适配器实际运行，检查主图像与 HUD、资源重载、世界退出等相关生命周期。更新公共接口时验证受影响的两个适配器；编译通过不证明 Mixin 注入或实际 GPU 功能正常。
@@ -134,7 +134,7 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored -
 
 ```powershell
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke --no-parallel
-cargo test -p prime_minecraft --locked -- --include-ignored --skip source_cost_matrix
+cargo test -p prime_minecraft --locked -- --include-ignored --skip source_cost_matrix --skip source_burst_cost
 # 旧封闭几何路径的独立对照
 cargo test -p prime_scene --lib --locked java_routing_matches_both_versions_actual_source_and_fluid_particle_oracles -- --ignored --nocapture
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeForeign=true --no-parallel
@@ -172,6 +172,32 @@ cargo test --release -p prime_minecraft --locked source_cost_matrix -- --ignored
 ```
 
 输出目录须存在。固定8个私有线程，dense/terrain/decorated 每批256段，分别测首次输入、相同 dirty 输入与各段单处内部编辑（dense 的编辑包仍相同，作为控制组）；另在约8.9万活跃空段窗口中往返移动一列。15次场景样本、24次窗口样本均保留，前三次标为预热。计时包括请求规划、响应解码、编译、输出准备和发布；排除夹具包生成、线程池初建、Java/FFM、GPU及游戏。三角形顺序/数值另外通过标量参照和1/4线程对照测试验证；此局部夹具不能换算游戏 FPS 或实际移动尾延迟。
+
+较大突发输入使用以下两个入口，须串行运行，避免与编译、游戏或另一基准争用资源：
+
+```powershell
+$env:PRIME_BURST_CSV = "$PWD/artifacts/source-bursts.csv"
+$env:PRIME_BURST_SIDE = '16'
+$env:PRIME_BURST_MODE = 'terrain'
+$env:PRIME_BURST_SAMPLES = '23'
+$env:PRIME_BURST_WARMUP = '3'
+cargo test --release -p prime_minecraft --locked source_burst_cost -- --ignored --nocapture
+
+$env:PRIME_CPU_THREADS = '8'
+$env:PRIME_VK_VALIDATION = '0'
+$env:VK_LAYER_VALIDATE_SYNC = '0'
+$env:PRIME_PROFILE = '1'
+$env:PRIME_UPLOAD_CSV = "$PWD/artifacts/terrain-upload.csv"
+$env:PRIME_UPLOAD_CELLS = '16'
+$env:PRIME_UPLOAD_QUADS = '1024'
+$env:PRIME_UPLOAD_SAMPLES = '33'
+$env:PRIME_UPLOAD_WARMUP = '3'
+cargo test --release -p prime_vulkan --lib --locked terrain_upload_cost_matrix -- --ignored --nocapture
+```
+
+`source_burst_cost` 固定8线程、每列4段，side 支持4/8/16/32（共64/256/1024/4096段），mode 支持 terrain/decorated。每次场景分别保留首载、编辑的两个方向和相同输入的原始样本及输入 hash。计时包括生产源规划、编译/颜色回填、发布、旧翻译快照最后引用的释放及整格计划；颜色响应为显式常量夹具，不包括实际宿主求色、Java/FFM、生成输入和 GPU。各阶段相加排除了阶段间的夹具构造；场景最终销毁不计入更新时间。此夹具、下述上传夹具及 `prime_tools` 入口与 native 引擎共用 MiMalloc 策略，计数包装仍统计真实分配请求；比较时记录锁定版本和分配器，另测进程峰值/保留内存，不能只记录逻辑几何字节。
+
+`terrain_upload_cost_matrix` 在原生1920×1080的无窗口宿主录制路径上，每次替换所有指定单元，固定网格、两种交替角点位置和默认射线预算。CPU 源整理/发布/翻译、录制和 GPU 时间分列；每个样本等待本次提交真正完成，`completed_ms` 包含等待，可据总时长计算吞吐量。每格64段，quads 是每段四边形数；不含 Minecraft、Java/FFM、源编译内核或图像读回。`upload_ns` 对直接打包的静态范围包含 CPU 记录初始化时间，对其他上传仍包含字节复制，不能将该计数解释为纯 memcpy 时间。用多轮不可变可执行文件交替对照 p95、最大值与吞吐量；两种夹具都不能替代真实存档的逐帧验收。
 
 地形源路由与 native 编译有独立的无窗口成本夹具，可用于相同硬件/工具链的版本对照。测试时串行运行，避免同时构建或测量另一路：
 

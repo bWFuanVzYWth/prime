@@ -3,6 +3,7 @@
 
 pub mod compiled;
 pub mod extent;
+pub mod geometry;
 pub mod incremental;
 pub mod instances;
 pub mod protocol;

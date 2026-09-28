@@ -3,6 +3,9 @@ use super::*;
 use crate::tests::{frame, header, requests, scene, string};
 use std::io::Write;
 
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn definitions(out: &mut Vec<u8>) {
     for v in [5, 1, 2, 0] {
         u32_to(out, v);
@@ -212,4 +215,115 @@ fn source_cost_matrix() {
         let accept = start.elapsed().as_secs_f64() * 1000.;
         sample("window_89k", n, &ctx, plan, accept);
     }
+}
+
+/// Includes the live renderer snapshot: the source publication is usually not the last owner
+/// of replaced geometry. Dropping that final reference belongs in update latency measurements.
+#[test]
+#[ignore = "large CPU burst matrix; explicit release run with preserved raw samples"]
+fn source_burst_cost() {
+    use prime_scene::{
+        incremental::TranslatedScene,
+        translation::{TerrainLimits, TerrainPlanner},
+    };
+    use std::{
+        collections::hash_map::DefaultHasher,
+        hash::{Hash, Hasher},
+    };
+    let number =
+        |key: &str, default: usize| std::env::var(key).map_or(default, |v| v.parse().unwrap());
+    let side = number("PRIME_BURST_SIDE", 16) as i32;
+    let samples = number("PRIME_BURST_SAMPLES", 23);
+    let warmup = number("PRIME_BURST_WARMUP", 3);
+    let mode = std::env::var("PRIME_BURST_MODE").unwrap_or("terrain".into());
+    assert!(matches!(side, 4 | 8 | 16 | 32));
+    assert!(matches!(mode.as_str(), "terrain" | "decorated"));
+    assert!(samples > warmup);
+    let mut file =
+        std::fs::File::create(std::env::var("PRIME_BURST_CSV").expect("set PRIME_BURST_CSV"))
+            .unwrap();
+    writeln!(file,"case,sample,warmup,threads,sections,input_hash,total_ms,plan_ms,accept_ms,translate_ms,group_ms,decode_ms,kernel_ms,finalize_ms,publish_ms,retire_ms,compiled,published_layers,retained_layers,resident_triangles,rebuilt_triangles,rebuilt_cells,biome_plan_ms,tint_requests").unwrap();
+    let low = -(side / 8) * 4; // Whole 4x4 columns, including the smallest single-cell fixture.
+    let loaded: Vec<_> = (low..low + side)
+        .flat_map(|x| (low..low + side).map(move |z| (1, Section(x, 0, z))))
+        .collect();
+    for sample in 0..samples {
+        let mut ctx = TerrainContext {
+            workers: Some(CpuWorkers::new(8).unwrap()),
+            ..Default::default()
+        };
+        let mut source = scene();
+        let mut translated = TranslatedScene::default();
+        let mut planner = TerrainPlanner::new(TerrainLimits {
+            triangles_per_geometry: 524_288,
+            geometry_records: 8_388_607,
+        })
+        .unwrap();
+        let mut dirty = Vec::new();
+        for (phase, mutation) in [
+            ("cold", false),
+            ("edit_on", true),
+            ("edit_off", false),
+            ("unchanged", false),
+        ] {
+            let batch = match phase {
+                "cold" => 1,
+                "edit_on" => 2,
+                "edit_off" => 3,
+                _ => 4,
+            };
+            let input = frame(
+                batch,
+                f64::from((low + side / 2) * 16),
+                side,
+                [0, 3],
+                if batch == 1 { &loaded } else { &dirty },
+            );
+            let start = Instant::now();
+            let req = requests(&mut ctx, &input);
+            let plan_ms = start.elapsed().as_secs_f64() * 1000.;
+            assert_eq!(req.len(), (side * side * 4) as usize);
+            let data = packet(batch, &req, &mode, mutation);
+            let mut hasher = DefaultHasher::new();
+            data.hash(&mut hasher);
+            let input_hash = hasher.finish();
+            let start = Instant::now();
+            ctx.accept(&[&data], &mut source).unwrap();
+            crate::tests::test_tints(&mut ctx, &mut source);
+            let accept_ms = start.elapsed().as_secs_f64() * 1000.;
+            let start = Instant::now();
+            translated.update(&mut source, [0.; 3]).unwrap();
+            let translate_ms = start.elapsed().as_secs_f64() * 1000.;
+            let start = Instant::now();
+            let plan = planner.plan_input(translated.input()).unwrap();
+            let cells = plan.geometry.len();
+            let rebuilt: u64 = plan
+                .geometry
+                .iter()
+                .flat_map(|b| &b.geometries)
+                .map(|g| u64::from(g.triangle_count))
+                .sum();
+            planner.recycle(plan);
+            let group_ms = start.elapsed().as_secs_f64() * 1000.;
+            let total_ms = plan_ms + accept_ms + translate_ms + group_ms;
+            let resident = translated.input().triangle_count();
+            if phase == "unchanged" {
+                assert_eq!(rebuilt, 0);
+            } else {
+                assert!(rebuilt > 0);
+            }
+            let s = &ctx.stats;
+            writeln!(file,"{mode}_{phase},{sample},{},8,{},{input_hash},{total_ms},{plan_ms},{accept_ms},{translate_ms},{group_ms},{},{},{},{},{},{},{},{},{resident},{rebuilt},{cells},{},{}",
+                sample < warmup, side * side * 4, s.decode_ms, s.kernel_ms, s.finalize_ms,
+                s.publish_ms, s.retire_ms, s.compiled, s.published_layers, s.retained_layers,
+                s.biome_plan_ms, s.tint_requests).unwrap();
+            if batch == 1 {
+                dirty = req.into_iter().map(|s| (3, s)).collect();
+            }
+        }
+        file.flush().unwrap();
+    }
+    println!(
+        "CPU source bursts saved; 8 workers, resident translated snapshots, synchronous grouping/retirement; fixture construction, Java/FFM, GPU and final scene teardown excluded"
+    );
 }

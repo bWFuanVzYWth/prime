@@ -1,4 +1,6 @@
 //! Native-1080p direct-scene instance benchmark. No Minecraft, FFM or op7 decoding.
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 #[cfg(feature = "vulkan")]
 mod benchmark {
     use prime_scene::{Camera, Instance, InstanceScene, Prototype, Scene, SceneMesh, Triangle};

@@ -1,16 +1,19 @@
 //! Incremental static batch planning. Source identities are opaque; placement comes from origins.
 use super::translation;
 use crate::{
+    geometry::MeshGeometry,
     incremental::{ContextId, SceneInput, TerrainGeneration, TerrainIndex},
-    scene::{MeshKey, Scene, SceneMesh, Triangle},
+    scene::{MeshKey, Scene, SceneMesh},
     spatial::Cell,
 };
-use std::{collections::BTreeMap, ops::Range, sync::Arc};
+use std::{collections::BTreeMap, ops::Range};
 
 type Signature = Vec<(MeshKey, u64, [f32; 3], Range<usize>)>;
+#[cfg(test)]
+use crate::Triangle;
 
 pub struct TerrainMember {
-    pub triangles: Arc<[Triangle]>,
+    pub triangles: MeshGeometry,
     pub range: Range<usize>,
     pub offset: [f32; 3],
 }
@@ -447,6 +450,52 @@ mod tests {
                 .iter()
                 .all(|p| p.transform == translation([-64.0, -64.0, 0.0]))
         );
+    }
+
+    #[test]
+    fn mixed_triangle_and_quad_members_keep_odd_capacity_splits() {
+        use crate::geometry::{CompiledQuad, MeshGeometry};
+        let mut scene = Scene::default();
+        scene.meshes.insert((1, 0), mesh([0.; 3], 1, 0));
+        let quad = CompiledQuad {
+            positions: [[0.; 3], [1., 0., 0.], [1., 1., 0.], [0., 1., 2.]],
+            uvs: [[0.; 2]; 4],
+            color: [1.; 4],
+            texture_id: 0,
+            flags: 0,
+        };
+        let compact = MeshGeometry::Quads(vec![quad; 2].into());
+        let mut member = mesh([16., 0., 0.], 1, 0);
+        member.triangles = compact.clone();
+        scene.meshes.insert((2, 0), member);
+        scene
+            .ready_terrain
+            .insert(Cell::containing([0.; 3]).unwrap());
+        for limit in [1, 3] {
+            let plan = planner(limit).plan(&scene).unwrap();
+            assert_eq!(plan.triangle_count, 5);
+            let members: Vec<_> = plan
+                .geometry
+                .iter()
+                .flat_map(|b| &b.geometries)
+                .flat_map(|g| &g.members)
+                .filter(|m| m.offset[0] == 16.)
+                .collect();
+            assert!(members.iter().all(|m| m.triangles.ptr_eq(&compact)));
+            let ranges: Vec<_> = members.iter().flat_map(|m| m.range.clone()).collect();
+            assert_eq!(ranges, vec![0, 1, 2, 3]);
+            let corners: Vec<_> = members
+                .iter()
+                .flat_map(|m| {
+                    let view = m.triangles.view(m.range.clone());
+                    (0..view.len()).map(move |i| view.triangle(i).positions)
+                })
+                .collect();
+            assert_eq!(
+                corners,
+                compact.iter().map(|t| t.positions).collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]

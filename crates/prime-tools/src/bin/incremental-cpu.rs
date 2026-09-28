@@ -6,7 +6,7 @@ use prime_scene::{
     translation::{TerrainLimits, TerrainPlanner},
 };
 use std::{
-    alloc::{GlobalAlloc, Layout, System},
+    alloc::{GlobalAlloc, Layout},
     error::Error,
     hint::black_box,
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
@@ -26,22 +26,22 @@ fn allocation(size: usize) {
         BYTES.fetch_add(size as u64, Ordering::Relaxed);
     }
 }
-// SAFETY: The instrumentation never accesses allocations; all operations delegate to System.
+// SAFETY: The instrumentation never accesses allocations; all operations delegate to mimalloc::MiMalloc.
 unsafe impl GlobalAlloc for Allocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         allocation(layout.size());
-        unsafe { System.alloc(layout) }
+        unsafe { mimalloc::MiMalloc.alloc(layout) }
     }
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         allocation(layout.size());
-        unsafe { System.alloc_zeroed(layout) }
+        unsafe { mimalloc::MiMalloc.alloc_zeroed(layout) }
     }
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
         allocation(size);
-        unsafe { System.realloc(pointer, layout, size) }
+        unsafe { mimalloc::MiMalloc.realloc(pointer, layout, size) }
     }
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(pointer, layout) };
+        unsafe { mimalloc::MiMalloc.dealloc(pointer, layout) };
     }
 }
 #[global_allocator]

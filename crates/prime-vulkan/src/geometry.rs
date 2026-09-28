@@ -23,7 +23,6 @@ struct Cluster {
 
 pub(super) struct Geometry {
     workers: Arc<prime_scene::workers::CpuWorkers>,
-    pack_scratch: Vec<u8>,
     indices: Buffer,
     builds: crate::arena::Arena,
     uploads: crate::arena::Arena,
@@ -55,7 +54,6 @@ impl Geometry {
         let textures = Textures::new(context, scene.texture_input(), &mut uploads)?;
         let mut geometry = Self {
             workers: workers.clone(),
-            pack_scratch: Vec::new(),
             indices: crate::context::objects::index_buffer(context, 16)?,
             builds: crate::arena::Arena::new(context, false),
             uploads,
@@ -177,29 +175,29 @@ impl Geometry {
                     .iter()
                     .map(|g| g.triangle_count as usize)
                     .sum();
-                self.pack_scratch.resize(
-                    count
-                        .checked_mul(128)
-                        .ok_or("Static packing byte overflow")?,
-                    0,
-                );
+                let bytes = count
+                    .checked_mul(128)
+                    .ok_or("Static packing byte overflow")?;
                 let sources: Vec<_> = update
                     .geometries
                     .iter()
                     .flat_map(|geometry| {
                         geometry.members.iter().map(|member| crate::packing::Input {
-                            triangles: &member.triangles[member.range.clone()],
+                            triangles: member.triangles.view(member.range.clone()),
                             offset: Some(member.offset),
                             flags: Some(geometry.flags),
                         })
                     })
                     .collect();
-                crate::packing::pack_ranges(
-                    &self.workers,
-                    &mut self.pack_scratch,
-                    &sources,
-                    &self.textures.indices,
-                )?;
+                let mut upload = self.uploads.allocate(context, bytes as u64, 16)?;
+                upload.write_with(|output| {
+                    crate::packing::pack_uninit_ranges(
+                        &self.workers,
+                        output,
+                        &sources,
+                        &self.textures.indices,
+                    )
+                })?;
                 let mut geometries = Vec::with_capacity(update.geometries.len());
                 let mut counts = Vec::with_capacity(update.geometries.len());
                 for (geometry, &allocation) in update.geometries.iter().zip(allocations) {
@@ -237,10 +235,6 @@ impl Geometry {
                         &counts,
                     )?,
                 ));
-                let upload = self
-                    .uploads
-                    .allocate(context, self.pack_scratch.len() as u64, 16)?;
-                upload.write(&self.pack_scratch)?;
                 uploads.push(upload);
             }
             context.submit_named("dirty_clusters", |command| unsafe {
@@ -683,6 +677,100 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a Vulkan ray-query GPU; compact source versus scalar triangle pixels"]
+    fn gpu_compact_terrain_matches_triangles_for_all_materials_and_replacements() {
+        use prime_scene::geometry::{CompiledQuad, MeshGeometry};
+        let mut scene = Scene {
+            revision: 1,
+            ..Default::default()
+        };
+        for flags in 0..3 {
+            let mut mesh = mesh(
+                flags as f32 * 64.,
+                flags,
+                [0.2, 0.6, 0.8, if flags == 2 { 0.6 } else { 1. }],
+            );
+            let a = mesh.triangles.triangle(0);
+            let b = mesh.triangles.triangle(1);
+            let mut quad = CompiledQuad {
+                positions: [
+                    a.positions[0],
+                    a.positions[1],
+                    a.positions[2],
+                    b.positions[1],
+                ],
+                uvs: [[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
+                color: a.colors[0],
+                texture_id: 0,
+                flags,
+            };
+            quad.positions[3][2] = 2.;
+            mesh.triangles = MeshGeometry::Quads(vec![quad].into());
+            scene.meshes.insert((flags as u64, flags), mesh);
+            scene.ready_terrain.insert(cell([flags as i32, 0, 0]));
+        }
+        let camera = Camera {
+            position: [64., 0., 160.],
+            forward: [0., 0., -1.],
+            right: [1., 0., 0.],
+            up: [0., 1., 0.],
+            vertical_fov_radians: 1.,
+        };
+        let mut compact = Renderer::new().unwrap();
+        let mut previous = Vec::new();
+        for step in 0..3 {
+            if step > 0 {
+                for mesh in scene.meshes.values_mut() {
+                    let MeshGeometry::Quads(quads) = &mut mesh.triangles else {
+                        unreachable!()
+                    };
+                    let quad = &mut Arc::make_mut(quads)[0];
+                    quad.color[0] += 0.2;
+                    quad.positions[3][2] += 3.;
+                    mesh.revision += 1;
+                }
+                scene.revision += 1;
+            }
+            let actual = compact.render(&scene, &camera, 96, 64, 0).unwrap();
+            let mut reference = Scene {
+                revision: scene.revision,
+                ready_terrain: scene.ready_terrain.clone(),
+                ..Default::default()
+            };
+            for (&key, mesh) in &scene.meshes {
+                let mut mesh = mesh.clone();
+                let MeshGeometry::Quads(quads) = &mesh.triangles else {
+                    unreachable!()
+                };
+                mesh.triangles = quads
+                    .iter()
+                    .flat_map(|q| {
+                        [[0, 1, 2], [2, 3, 0]].map(|c| Triangle {
+                            positions: c.map(|i| q.positions[i]),
+                            colors: [q.color; 3],
+                            uvs: c.map(|i| q.uvs[i]),
+                            texture_id: q.texture_id,
+                            flags: q.flags,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .into();
+                reference.meshes.insert(key, mesh);
+            }
+            let expected = Renderer::new()
+                .unwrap()
+                .render(&reference, &camera, 96, 64, 0)
+                .unwrap();
+            assert_eq!(actual, expected, "step {step}");
+            assert_ne!(
+                actual, previous,
+                "each replacement must visibly change pixels"
+            );
+            previous = actual;
+        }
+    }
+
+    #[test]
     #[ignore = "requires Vulkan; translated dense parts, shared cell, independent static/dynamic lifetime"]
     fn gpu_translated_parts_preserve_pixels_and_static_dynamic_resources_are_independent() {
         let mut scene = Scene {
@@ -702,7 +790,12 @@ mod tests {
         scene.dynamic = prime_scene::scene::DynamicScene {
             revision: 1,
             origin: [16.0, 16.0, 10.0],
-            triangles: Arc::new(mesh(0.0, 0, [0.8, 0.5, 0.1, 1.0]).triangles.to_vec()),
+            triangles: Arc::new(
+                mesh(0.0, 0, [0.8, 0.5, 0.1, 1.0])
+                    .triangles
+                    .iter()
+                    .collect(),
+            ),
         };
         scene
             .ready_terrain
@@ -802,7 +895,10 @@ mod tests {
             (3, 64.0, 0, 4.0, [0.8, 0.1, 0.8, 1.0]),
         ] {
             let mut value = mesh(x, flags, color.map(|v| (v * 255.0_f32).round() / 255.0));
-            for triangle in Arc::make_mut(&mut value.triangles) {
+            let prime_scene::geometry::MeshGeometry::Triangles(data) = &mut value.triangles else {
+                panic!("expected diagnostic triangle mesh")
+            };
+            for triangle in Arc::make_mut(data) {
                 for position in &mut triangle.positions {
                     position[0] += 32.0;
                     position[1] += 32.0;
@@ -824,7 +920,7 @@ mod tests {
             .values()
             .flat_map(|mesh| {
                 mesh.triangles.iter().map(|triangle| {
-                    let mut value = *triangle;
+                    let mut value = triangle;
                     for position in &mut value.positions {
                         for i in 0..3 {
                             position[i] += mesh.origin[i] as f32;

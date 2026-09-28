@@ -1,5 +1,4 @@
 use prime_scene::{Scene, SourceScene, protocol::MAGIC};
-use std::sync::Arc;
 
 fn header(op: u32, epoch: u64) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -62,7 +61,10 @@ fn assert_same(before: &Scene, after: &Scene) {
         let next = &after.meshes[key];
         assert_eq!(mesh.revision, next.revision);
         assert_eq!(mesh.origin, next.origin);
-        assert!(Arc::ptr_eq(&mesh.triangles, &next.triangles));
+        assert!(prime_scene::geometry::MeshGeometry::ptr_eq(
+            &mesh.triangles,
+            &next.triangles
+        ));
     }
 }
 fn texture(source: &mut SourceScene, id: u32) {
@@ -170,7 +172,7 @@ fn source_equality_checks_every_triangle_corner_and_invalid_suffix() {
                     before.revision + 1,
                     "corner {corner}, field {field}"
                 );
-                assert!(!Arc::ptr_eq(
+                assert!(!prime_scene::geometry::MeshGeometry::ptr_eq(
                     &before.meshes[&(91, 0)].triangles,
                     &after.meshes[&(91, 0)].triangles
                 ));
@@ -255,11 +257,11 @@ fn every_rendered_field_change_is_published_and_unaffected_layer_is_shared() {
         let after = snapshot(&source);
         assert_eq!(after.revision, before.revision + 1, "field {offset}");
         assert_eq!(after.meshes[&(91, 0)].revision, 2);
-        assert!(!Arc::ptr_eq(
+        assert!(!prime_scene::geometry::MeshGeometry::ptr_eq(
             &before.meshes[&(91, 0)].triangles,
             &after.meshes[&(91, 0)].triangles
         ));
-        assert!(Arc::ptr_eq(
+        assert!(prime_scene::geometry::MeshGeometry::ptr_eq(
             &before.meshes[&(91, 1)].triangles,
             &after.meshes[&(91, 1)].triangles
         ));
@@ -289,7 +291,7 @@ fn replacing_all_layers_clearing_and_empty_recompiles_are_atomic() {
     assert_eq!(after.meshes.len(), 2);
     assert!(!after.meshes.contains_key(&(91, 0)));
     assert_eq!(after.revision, before.revision + 1);
-    assert!(Arc::ptr_eq(
+    assert!(prime_scene::geometry::MeshGeometry::ptr_eq(
         &before.meshes[&(91, 1)].triangles,
         &after.meshes[&(91, 1)].triangles
     ));
@@ -475,13 +477,19 @@ fn complete_cell_waits_for_64_distinct_sections_and_keeps_source_caches_after_pu
     let first = planner.plan(&scene).unwrap();
     assert_eq!(first.geometry.len(), 1);
     assert_eq!(first.triangle_count, 2);
-    assert!(Arc::ptr_eq(&cached, &scene.meshes[&(0, 0)].triangles));
+    assert!(prime_scene::geometry::MeshGeometry::ptr_eq(
+        &cached,
+        &scene.meshes[&(0, 0)].triangles
+    ));
     planner.recycle(first);
     // Two section updates arriving before execution produce one complete replacement.
     source.submit(&packet(2, 2, &[layer(1)])).unwrap();
     source.submit(&packet(62, 2, &[layer(2)])).unwrap();
     let scene = source.translate(origin).unwrap();
-    assert!(Arc::ptr_eq(&cached, &scene.meshes[&(0, 0)].triangles));
+    assert!(prime_scene::geometry::MeshGeometry::ptr_eq(
+        &cached,
+        &scene.meshes[&(0, 0)].triangles
+    ));
     let updated = planner.plan(&scene).unwrap();
     assert_eq!(updated.geometry.len(), 1);
     assert_eq!(updated.geometry[0].geometries.len(), 3);

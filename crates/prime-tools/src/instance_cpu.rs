@@ -4,23 +4,23 @@ use prime_scene::{
     protocol::{ABI_VERSION, MAGIC},
 };
 use std::{
-    alloc::{GlobalAlloc, Layout, System},
+    alloc::{GlobalAlloc, Layout},
     error::Error,
     hint::black_box,
     sync::atomic::{AtomicU64, Ordering},
     time::Instant,
 };
 
-struct CountedSystem;
+struct CountedAllocator;
 static ALLOCATIONS: AtomicU64 = AtomicU64::new(0);
 static REALLOCATIONS: AtomicU64 = AtomicU64::new(0);
 static REQUESTED: AtomicU64 = AtomicU64::new(0);
 
 // SAFETY: The allocator delegates all operations and alignment requirements unchanged
-// to System. Counters use allocation-free atomics and never access allocated memory.
-unsafe impl GlobalAlloc for CountedSystem {
+// to mimalloc::MiMalloc. Counters use allocation-free atomics and never access allocated memory.
+unsafe impl GlobalAlloc for CountedAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let pointer = unsafe { System.alloc(layout) };
+        let pointer = unsafe { mimalloc::MiMalloc.alloc(layout) };
         if !pointer.is_null() {
             ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
             REQUESTED.fetch_add(layout.size() as u64, Ordering::Relaxed);
@@ -28,7 +28,7 @@ unsafe impl GlobalAlloc for CountedSystem {
         pointer
     }
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        let pointer = unsafe { System.alloc_zeroed(layout) };
+        let pointer = unsafe { mimalloc::MiMalloc.alloc_zeroed(layout) };
         if !pointer.is_null() {
             ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
             REQUESTED.fetch_add(layout.size() as u64, Ordering::Relaxed);
@@ -36,7 +36,7 @@ unsafe impl GlobalAlloc for CountedSystem {
         pointer
     }
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let pointer = unsafe { System.realloc(pointer, layout, new_size) };
+        let pointer = unsafe { mimalloc::MiMalloc.realloc(pointer, layout, new_size) };
         if !pointer.is_null() {
             REALLOCATIONS.fetch_add(1, Ordering::Relaxed);
             REQUESTED.fetch_add(new_size as u64, Ordering::Relaxed);
@@ -44,12 +44,12 @@ unsafe impl GlobalAlloc for CountedSystem {
         pointer
     }
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(pointer, layout) };
+        unsafe { mimalloc::MiMalloc.dealloc(pointer, layout) };
     }
 }
 
 #[global_allocator]
-static ALLOCATOR: CountedSystem = CountedSystem;
+static ALLOCATOR: CountedAllocator = CountedAllocator;
 
 fn allocation_counts() -> [u64; 3] {
     [

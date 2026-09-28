@@ -39,6 +39,9 @@ pub struct InstanceWork {
 #[cfg(test)]
 mod object_tests;
 
+#[cfg(test)]
+mod burst_perf;
+
 #[cfg(all(test, feature = "shader-tests"))]
 mod shader_tests;
 
@@ -549,7 +552,10 @@ mod tests {
             "wrong cutout instance mapping"
         );
         let mesh = scene.meshes.get_mut(&(2, 0)).unwrap();
-        for triangle in Arc::make_mut(&mut mesh.triangles) {
+        let prime_scene::geometry::MeshGeometry::Triangles(data) = &mut mesh.triangles else {
+            panic!("expected diagnostic triangle mesh")
+        };
+        for triangle in Arc::make_mut(data) {
             triangle.colors = [[0.0, 0.0, 1.0, 1.0]; 3];
         }
         mesh.revision += 1;
@@ -577,7 +583,10 @@ mod tests {
         // New epochs may reuse source revisions and keys with entirely different geometry.
         scene.epoch += 1;
         let mesh = scene.meshes.get_mut(&(2, 0)).unwrap();
-        for triangle in Arc::make_mut(&mut mesh.triangles) {
+        let prime_scene::geometry::MeshGeometry::Triangles(data) = &mut mesh.triangles else {
+            panic!("expected diagnostic triangle mesh")
+        };
+        for triangle in Arc::make_mut(data) {
             triangle.colors = [[1.0, 0.0, 0.0, 1.0]; 3];
         }
         camera.position[0] = -192.0;

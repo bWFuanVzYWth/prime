@@ -3,7 +3,6 @@ use crate::{
     protocol::MAGIC,
     translation::{TerrainLimits, TerrainPlanner},
 };
-use std::sync::Arc;
 
 fn header(op: u32) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -144,7 +143,7 @@ fn source_order_texture_pixels_and_camera_rebase_do_not_regroup_terrain() {
         (plan.geometry.len(), plan.meshes_visited, plan.cells_visited),
         (0, 0, 0)
     );
-    assert!(Arc::ptr_eq(
+    assert!(crate::geometry::MeshGeometry::ptr_eq(
         &vertices,
         &translated.input().meshes[&(0, 0)].triangles
     ));
@@ -179,7 +178,7 @@ fn missing_empty_slot_withdraws_whole_cell_and_reappearance_uses_cached_members(
     source.submit(&section(63, 3, origin(0, 63), None)).unwrap();
     translated.update(&mut source, [0.; 3]).unwrap();
     assert_eq!(consume(&mut planner, &translated), (1, 1, 1));
-    assert!(!Arc::ptr_eq(
+    assert!(!crate::geometry::MeshGeometry::ptr_eq(
         &vertices,
         &translated.input().meshes[&(0, 0)].triangles
     ));
@@ -197,13 +196,13 @@ fn failed_translation_keeps_source_edits_and_old_snapshot_until_successful_publi
         .unwrap();
     assert!(translated.update(&mut source, [2_000_000.; 3]).is_err());
     assert_eq!(translated.input().revision, revision);
-    assert!(Arc::ptr_eq(
+    assert!(crate::geometry::MeshGeometry::ptr_eq(
         &previous,
         &translated.input().meshes[&(0, 0)].triangles
     ));
     let work = translated.update(&mut source, [0.; 3]).unwrap();
     assert_eq!(work.meshes_published, 1);
-    assert!(!Arc::ptr_eq(
+    assert!(!crate::geometry::MeshGeometry::ptr_eq(
         &previous,
         &translated.input().meshes[&(0, 0)].triangles
     ));

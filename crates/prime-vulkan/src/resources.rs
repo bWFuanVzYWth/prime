@@ -1194,7 +1194,7 @@ impl Buffer {
     }
 
     // The owner proves this upload slot is complete before mutation; mapping lifetime is
-    // independent of GPU use. Workers never receive this allocation or its mapped pointer.
+    // independent of GPU use.
     pub fn write_at(&self, offset: u64, bytes: &[u8]) -> Result<(), String> {
         let started = self.context.profile.as_ref().map(|_| Instant::now());
         if offset
@@ -1223,6 +1223,48 @@ impl Buffer {
                 .counters
                 .uploaded_bytes
                 .fetch_add(bytes.len() as u64, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
+    /// Initialize an exclusively owned mapped range without an intermediate host copy.
+    /// The callback must initialize every byte on success; on failure no submission may read it.
+    ///
+    /// # Safety
+    /// The caller must own this range exclusively for the whole callback, including any joined
+    /// workers, and prove it has no unfinished GPU consumer. The slice cannot escape the call.
+    pub unsafe fn write_with(
+        &self,
+        offset: u64,
+        size: usize,
+        write: impl FnOnce(&mut [std::mem::MaybeUninit<u8>]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let started = self.context.profile.as_ref().map(|_| Instant::now());
+        if offset
+            .checked_add(size as u64)
+            .is_none_or(|end| end > self.size)
+        {
+            return Err("Upload exceeds Vulkan allocation".into());
+        }
+        let mapped = self.mapped.ok_or("Buffer is not host visible")?;
+        // SAFETY: The checked range is mapped for Buffer's lifetime. The caller proves exclusive
+        // CPU ownership and no GPU reader. MaybeUninit does not assume newly allocated bytes exist.
+        let bytes = unsafe {
+            std::slice::from_raw_parts_mut(mapped.as_ptr().add(offset as usize).cast(), size)
+        };
+        write(bytes)?;
+        self.context
+            .cpu_uploaded_bytes
+            .fetch_add(size as u64, Ordering::Relaxed);
+        if let Some(profile) = &self.context.profile {
+            profile
+                .counters
+                .upload_ns
+                .fetch_add(elapsed_ns(started), Ordering::Relaxed);
+            profile
+                .counters
+                .uploaded_bytes
+                .fetch_add(size as u64, Ordering::Relaxed);
         }
         Ok(())
     }

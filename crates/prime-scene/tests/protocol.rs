@@ -50,18 +50,21 @@ fn decode_real_block_layout_and_rebase_before_narrowing() {
     let scene = source.translate([29_999_984.0, 64.0, -16.0]).unwrap();
     assert_eq!(scene.triangle_count(), 2);
     assert_eq!(
-        scene.meshes[&(91, 0)].triangles[0].positions[0],
+        scene.meshes[&(91, 0)].triangles.triangle(0).positions[0],
         [0.125, 0.0, 0.0]
     );
     assert_eq!(
-        scene.meshes[&(91, 0)].triangles[1].positions,
+        scene.meshes[&(91, 0)].triangles.triangle(1).positions,
         [[1.0, 1.0, 0.0], [0.125, 1.0, 0.0], [0.125, 0.0, 0.0]]
     );
     assert_eq!(
-        scene.meshes[&(91, 0)].triangles[0].colors[0],
+        scene.meshes[&(91, 0)].triangles.triangle(0).colors[0],
         [128.0 / 255.0, 64.0 / 255.0, 32.0 / 255.0, 1.0]
     );
-    assert_eq!(scene.meshes[&(91, 0)].triangles[0].uvs[0], [0.25, 0.75]);
+    assert_eq!(
+        scene.meshes[&(91, 0)].triangles.triangle(0).uvs[0],
+        [0.25, 0.75]
+    );
 }
 
 #[test]
@@ -209,7 +212,7 @@ fn snapshots_share_immutable_vertices_across_rebases_and_keep_old_versions_alive
     source.submit(&mesh(1, 0)).unwrap();
     let first = source.translate([29_999_984.0, 64.0, -16.0]).unwrap();
     let shifted = source.translate([29_999_728.0, 64.0, -16.0]).unwrap();
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(prime_scene::geometry::MeshGeometry::ptr_eq(
         &first.meshes[&(91, 0)].triangles,
         &shifted.meshes[&(91, 0)].triangles
     ));
@@ -222,8 +225,14 @@ fn snapshots_share_immutable_vertices_across_rebases_and_keep_old_versions_alive
     changed[112..116].copy_from_slice(&0.5_f32.to_le_bytes());
     source.submit(&changed).unwrap();
     let latest = source.translate([29_999_984.0, 64.0, -16.0]).unwrap();
-    assert_eq!(first.meshes[&(91, 0)].triangles[0].positions[0][0], 0.125);
-    assert_eq!(latest.meshes[&(91, 0)].triangles[0].positions[0][0], 0.5);
+    assert_eq!(
+        first.meshes[&(91, 0)].triangles.triangle(0).positions[0][0],
+        0.125
+    );
+    assert_eq!(
+        latest.meshes[&(91, 0)].triangles.triangle(0).positions[0][0],
+        0.5
+    );
 }
 
 #[test]
@@ -329,7 +338,7 @@ fn dynamic_frames_replace_atomically_without_invalidating_static_geometry() {
     assert_eq!(scene.dynamic.revision, 1);
     assert_eq!(scene.dynamic.triangles.len(), 5);
     assert_eq!(scene.triangle_count(), 7);
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(prime_scene::geometry::MeshGeometry::ptr_eq(
         &static_scene.meshes[&(91, 0)].triangles,
         &scene.meshes[&(91, 0)].triangles
     ));

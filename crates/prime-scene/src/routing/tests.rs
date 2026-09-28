@@ -72,17 +72,20 @@ fn detached_geometry_retirement_noop_publication_empty_and_epoch_reset() {
     let first = s.meshes[&(91, 1)].triangles.clone();
     assert_eq!(first.len(), 2);
     assert_eq!(
-        first[0].positions,
+        first.triangle(0).positions,
         [[2., 3., 4.], [3., 3., 4.], [3., 4., 4.]]
     );
     assert_eq!(
-        first[0].colors[0],
+        first.triangle(0).colors[0],
         [91f32 / 255., 126f32 / 255., 59f32 / 255., 1.]
     );
     let revision = s.revision();
     s.submit(&section(2, 1)).unwrap();
     assert_eq!(s.revision(), revision);
-    assert!(Arc::ptr_eq(&first, &s.meshes[&(91, 1)].triangles));
+    assert!(crate::geometry::MeshGeometry::ptr_eq(
+        &first,
+        &s.meshes[&(91, 1)].triangles
+    ));
     assert!(s.submit(&section(2, 1)).is_err());
     let mut retired = header(13);
     retired.extend(0u32.to_le_bytes());
@@ -123,7 +126,10 @@ fn malformed_source_batches_are_atomic_and_do_not_consume_identity_or_sequence()
     let mut invalid = source.clone();
     invalid[72..80].copy_from_slice(&999u64.to_le_bytes());
     assert!(s.submit(&invalid).is_err());
-    assert!(Arc::ptr_eq(&first, &s.meshes[&(91, 1)].triangles));
+    assert!(crate::geometry::MeshGeometry::ptr_eq(
+        &first,
+        &s.meshes[&(91, 1)].triangles
+    ));
     s.submit(&source).unwrap();
     assert_eq!(s.meshes[&(91, 1)].triangles.len(), 4);
     let mut bad_resource = geometry();
@@ -236,12 +242,15 @@ fn retained_prefix_matches_fresh_compilation_for_sparse_attribute_and_resource_c
                     assert_eq!(a.texture_id, b.texture_id);
                 }
             }
-            assert_eq!(retained[0].positions[0], [2., 3., 4.]);
+            assert_eq!(retained.triangle(0).positions[0], [2., 3., 4.]);
             let current = incremental.meshes[&(91, 1)].triangles.clone();
-            assert_eq!(Arc::ptr_eq(&retained, &current), field == "equivalent");
+            assert_eq!(
+                crate::geometry::MeshGeometry::ptr_eq(&retained, &current),
+                field == "equivalent"
+            );
             update[32..40].copy_from_slice(&3u64.to_le_bytes());
             incremental.submit(&update).unwrap();
-            assert!(Arc::ptr_eq(
+            assert!(crate::geometry::MeshGeometry::ptr_eq(
                 &current,
                 &incremental.meshes[&(91, 1)].triangles
             ));
@@ -367,7 +376,7 @@ fn java_routing_matches_both_versions_actual_source_and_fluid_particle_oracles()
                 }
                 let mut triangles = Vec::new();
                 for mesh in s.meshes.values() {
-                    triangles.extend_from_slice(&mesh.triangles);
+                    triangles.extend(mesh.triangles.iter());
                 }
                 triangles.extend_from_slice(&s.dynamic.triangles);
                 scenes.push(triangles);

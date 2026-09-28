@@ -88,7 +88,7 @@ fn matching_prefix(mesh: &Mesh, origin: [f64; 3], layer: u32, jobs: &[QuadJob<'_
     let matches = |i: usize, job: &QuadJob<'_>| {
         quad_triangles(job, layer)
             .iter()
-            .zip(&mesh.triangles[i * 2..i * 2 + 2])
+            .zip((i * 2..i * 2 + 2).map(|index| mesh.triangles.triangle(index)))
             .all(|(a, b)| {
                 a.positions.map(|p| p.map(f32::to_bits)) == b.positions.map(|p| p.map(f32::to_bits))
                     && a.colors.map(|p| p.map(f32::to_bits))
@@ -302,8 +302,12 @@ impl SourceScene {
                 std::iter::repeat_n(EMPTY_TRIANGLE, jobs.len() * 2).collect();
             let output = Arc::get_mut(&mut triangles).unwrap();
             if retained != 0 {
-                output[..retained * 2]
-                    .copy_from_slice(&previous.unwrap().triangles[..retained * 2]);
+                for (target, triangle) in output[..retained * 2]
+                    .iter_mut()
+                    .zip(previous.unwrap().triangles.iter())
+                {
+                    *target = triangle;
+                }
             }
             // A late mismatch must not cause already compared geometry to be expanded twice.
             self.routing.workers.as_ref().unwrap().chunks_mut(
@@ -333,7 +337,7 @@ impl SourceScene {
                 Mesh {
                     revision: MeshVersion::captured(sequence),
                     origin,
-                    triangles,
+                    triangles: triangles.into(),
                     bounds,
                     texture_id: 1,
                     flags: layer as u32,

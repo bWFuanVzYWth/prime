@@ -1,5 +1,7 @@
 //! Reproducible native-1080p GPU-only benchmark of the borrowed host Vulkan path.
 //! Example: cargo run --release --bin perf -- --frames 20
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 #[cfg(feature = "vulkan")]
 mod benchmark {
     use prime_scene::{Camera, Scene, SceneMesh, Texture, Triangle};
@@ -583,7 +585,11 @@ mod benchmark {
         let start = Instant::now();
         for layer in 0..=1 {
             if let Some(mesh) = scene.meshes.get_mut(&(patch_key, layer)) {
-                for triangle in Arc::make_mut(&mut mesh.triangles) {
+                let prime_scene::geometry::MeshGeometry::Triangles(data) = &mut mesh.triangles
+                else {
+                    panic!("expected triangle fixture");
+                };
+                for triangle in Arc::make_mut(data) {
                     for position in &mut triangle.positions {
                         if position[1] > 0.0 {
                             position[1] += 0.25;

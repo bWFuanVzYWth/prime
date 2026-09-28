@@ -1,4 +1,6 @@
 //! Closed geometry produced by native source adapters. No host callbacks or MC layouts.
+pub use crate::geometry::CompiledQuad;
+use crate::geometry::MeshGeometry;
 use crate::{
     SourceScene, Triangle,
     incremental::ContextId,
@@ -6,28 +8,6 @@ use crate::{
     scene::{Mesh, MeshVersion, SectionSequence},
 };
 use std::sync::Arc;
-
-/// Closed quad with one source color. Producers retain four corners until immutable publication;
-/// expansion preserves the established 0-1-2 / 2-3-0 winding, including nonplanar quads.
-#[derive(Clone, Copy)]
-pub struct CompiledQuad {
-    pub positions: [[f32; 3]; 4],
-    pub uvs: [[f32; 2]; 4],
-    pub color: [f32; 4],
-    pub texture_id: u32,
-    pub flags: u32,
-}
-impl CompiledQuad {
-    pub fn triangles(&self) -> [Triangle; 2] {
-        [[0, 1, 2], [2, 3, 0]].map(|corners| Triangle {
-            positions: corners.map(|i| self.positions[i]),
-            colors: [self.color; 3],
-            uvs: corners.map(|i| self.uvs[i]),
-            texture_id: self.texture_id,
-            flags: self.flags,
-        })
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Base {
@@ -73,7 +53,7 @@ impl CompiledSection {
 pub struct Publication {
     pub replaced_layers: usize,
     pub retained_layers: usize,
-    retired: Vec<Option<Arc<[Triangle]>>>,
+    retired: Vec<Option<MeshGeometry>>,
 }
 impl Publication {
     /// Release this owner's references after publication, with a synchronous join. Other
@@ -89,7 +69,7 @@ impl Publication {
             .retired
             .iter()
             .flatten()
-            .map(|t| t.len() * size_of::<Triangle>())
+            .map(MeshGeometry::byte_len)
             .sum();
         if let Some(workers) = workers
             && bytes >= PARALLEL_RETIRE_BYTES
@@ -155,7 +135,7 @@ impl SourceScene {
         )
     }
 
-    /// Expand compact, uniformly colored quads only while comparing or filling the final Arc.
+    /// Retain uniformly colored quads through publication, translation and GPU packing.
     /// Source fragments and tint results remain borrowed for this synchronous call only.
     pub fn prepare_compiled_quads(
         &self,
@@ -163,17 +143,71 @@ impl SourceScene {
         origin: [f64; 3],
         parts: &[&[Vec<CompiledQuad>; 3]],
     ) -> CompiledSection {
-        self.prepare_compiled_layers(
+        let layers = std::array::from_fn(|layer| {
+            let count: usize = parts.iter().map(|p| p[layer].len()).sum();
+            let previous = self.meshes.get(&(key, layer as u32));
+            if count == 0 {
+                return if previous.is_some() {
+                    Layer::Remove
+                } else {
+                    Layer::Retain(0)
+                };
+            }
+            let input = || parts.iter().flat_map(|p| p[layer].iter());
+            if let Some(old) = previous
+                && old.origin.map(f64::to_bits) == origin.map(f64::to_bits)
+                && old.texture_id == 1
+                && old.flags == layer as u32
+                && old.triangles.len() == count * 2
+            {
+                let equal = match &old.triangles {
+                    MeshGeometry::Quads(quads) => quads.iter().zip(input()).all(|(a, b)| {
+                        a.texture_id == b.texture_id
+                            && a.flags == b.flags
+                            && a.positions.map(|p| p.map(f32::to_bits))
+                                == b.positions.map(|p| p.map(f32::to_bits))
+                            && a.uvs.map(|p| p.map(f32::to_bits))
+                                == b.uvs.map(|p| p.map(f32::to_bits))
+                            && a.color.map(f32::to_bits) == b.color.map(f32::to_bits)
+                    }),
+                    MeshGeometry::Triangles(triangles) => triangles
+                        .iter()
+                        .zip(input().flat_map(CompiledQuad::triangles))
+                        .all(|(a, b)| same_triangle(a, &b)),
+                };
+                if equal {
+                    return Layer::Retain(count * 2);
+                }
+            }
+            let mut bounds = [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]];
+            let mut input = input();
+            let quads: Arc<[CompiledQuad]> = (0..count)
+                .map(|_| {
+                    let quad = *input.next().unwrap();
+                    for p in quad.positions {
+                        for (axis, value) in p.into_iter().enumerate() {
+                            bounds[0][axis] = bounds[0][axis].min(value);
+                            bounds[1][axis] = bounds[1][axis].max(value);
+                        }
+                    }
+                    quad
+                })
+                .collect();
+            Layer::Replace(Mesh {
+                revision: MeshVersion::captured(SectionSequence(0)),
+                origin,
+                triangles: MeshGeometry::Quads(quads),
+                bounds,
+                texture_id: 1,
+                flags: layer as u32,
+            })
+        });
+        CompiledSection {
+            base: self.compiled_base(),
             key,
             origin,
-            std::array::from_fn(|layer| {
-                let count: usize = parts.iter().map(|p| p[layer].len() * 2).sum();
-                let mut triangles = parts
-                    .iter()
-                    .flat_map(move |p| p[layer].iter().flat_map(CompiledQuad::triangles));
-                (0..count).map(move |_| triangles.next().unwrap())
-            }),
-        )
+            layers,
+        }
     }
 
     fn prepare_compiled_layers<I: ExactSizeIterator<Item = Triangle> + Clone>(
@@ -202,7 +236,7 @@ impl SourceScene {
                     .triangles
                     .iter()
                     .zip(inputs[layer].clone())
-                    .all(|(a, b)| same_triangle(a, &b))
+                    .all(|(a, b)| same_triangle(&a, &b))
             {
                 return Layer::Retain(count);
             }
@@ -228,7 +262,7 @@ impl SourceScene {
             Layer::Replace(Mesh {
                 revision: MeshVersion::captured(SectionSequence(0)),
                 origin,
-                triangles,
+                triangles: triangles.into(),
                 bounds,
                 texture_id: 1,
                 flags: index,

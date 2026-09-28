@@ -13,5 +13,8 @@ shader-tests = []
 ash = { workspace = true }
 prime_scene = { workspace = true }
 
+[dev-dependencies]
+mimalloc.workspace = true
+
 [lints]
 workspace = true

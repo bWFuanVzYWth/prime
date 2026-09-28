@@ -1,4 +1,5 @@
 //! Renderer values contain no Minecraft objects, borrowed FFM memory or Vulkan handles.
+use crate::geometry::MeshGeometry;
 use crate::instances::InstanceContext;
 use crate::spatial::{Cell, TerrainAvailability};
 use std::{
@@ -31,7 +32,7 @@ pub struct SceneMesh {
     pub flags: u32,
     /// Absolute source origin. Grid ownership is resolved before camera-relative narrowing.
     pub origin: [f64; 3],
-    pub triangles: Arc<[Triangle]>,
+    pub triangles: MeshGeometry,
 }
 
 /// One complete dynamic frame; its identity is independent of static scene changes.
@@ -116,7 +117,7 @@ pub struct Camera {
 pub(crate) struct Mesh {
     pub revision: MeshVersion,
     pub origin: [f64; 3],
-    pub triangles: Arc<[Triangle]>,
+    pub triangles: MeshGeometry,
     pub bounds: [[f32; 3]; 2],
     pub texture_id: u32,
     pub flags: u32,

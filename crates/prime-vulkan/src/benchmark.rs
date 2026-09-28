@@ -897,7 +897,7 @@ mod tests {
         // Static geometry stays absent and its identity does not change.
         for (frame, count) in [2, 4096, 17, 8192, 0, 32, 2, 0].into_iter().enumerate() {
             scene.dynamic.revision += 1;
-            scene.dynamic.triangles = Arc::new(make_mesh(count, 1).triangles.to_vec());
+            scene.dynamic.triangles = Arc::new(make_mesh(count, 1).triangles.iter().collect());
             scene.dynamic.origin = [frame as f64 * 0.01, 0.0, 0.0];
             host.enqueue(&scene, &camera, frame as u32).unwrap();
         }

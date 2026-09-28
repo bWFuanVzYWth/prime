@@ -299,7 +299,7 @@ fn actual_mc_field_packets_produce_renderable_cells_and_exact_quad_values() {
         assert_eq!(translated.ready_terrain.len(), 1);
         assert_eq!(translated.triangle_count(), 2);
         let mesh = translated.meshes.values().next().unwrap();
-        let triangle = &mesh.triangles[0];
+        let triangle = &mesh.triangles.triangle(0);
         assert_eq!(
             triangle.positions,
             [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.]]
@@ -387,7 +387,7 @@ fn synchronous_workers_preserve_geometry_order_and_values() {
             .unwrap()
             .meshes
             .values()
-            .flat_map(|m| m.triangles.iter().copied())
+            .flat_map(|m| m.triangles.iter())
             .collect()
     }
     for mode in ["dense", "terrain", "decorated"] {

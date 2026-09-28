@@ -31,6 +31,19 @@ impl Lease {
         }
         self.buffer.write_at(self.offset, bytes)
     }
+    /// Fill a fresh upload lease. The writer joins all CPU workers before returning and must
+    /// initialize every byte on success. Failed writes are never submitted to the GPU.
+    pub fn write_with(
+        &mut self,
+        write: impl FnOnce(&mut [std::mem::MaybeUninit<u8>]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        // SAFETY: Arena allocations have disjoint ranges and are not recycled until completion.
+        // A fresh lease has no GPU consumer; its non-cloneable mutable borrow encloses all writes.
+        unsafe {
+            self.buffer
+                .write_with(self.offset, self.size as usize, write)
+        }
+    }
 }
 
 pub(crate) struct Arena {
@@ -149,6 +162,48 @@ impl Arena {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires Vulkan host-visible memory; checks exclusive mapped writes and failure reuse"]
+    fn gpu_mapped_writes_preserve_neighbor_leases_and_recover_unsubmitted_failures() {
+        let context = Context::new().unwrap();
+        let workers = prime_scene::workers::CpuWorkers::new(4).unwrap();
+        let mut arena = Arena::new(&context, true);
+        let mut a = arena.allocate(&context, 32_768, 16).unwrap();
+        let b = arena.allocate(&context, 32_768, 16).unwrap();
+        assert_eq!(a.buffer.buffer, b.buffer.buffer);
+        let len = (b.offset + b.size) as usize;
+        a.buffer.write(&vec![0xcd; len]).unwrap();
+        let before = context.cpu_upload_bytes();
+        assert!(
+            a.write_with(|out| {
+                out[0].write(0x12);
+                Err("unsubmitted test failure".into())
+            })
+            .is_err()
+        );
+        assert_eq!(context.cpu_upload_bytes(), before);
+        a.write_with(|out| {
+            workers.chunks_mut(out, 1024, |first, bytes| {
+                for (i, value) in bytes.iter_mut().enumerate() {
+                    value.write(((first + i) % 251) as u8);
+                }
+                Ok(())
+            })
+        })
+        .unwrap();
+        let bytes = a.buffer.read(len).unwrap();
+        let range = a.offset as usize..(a.offset + a.size) as usize;
+        assert!(bytes[..range.start].iter().all(|&v| v == 0xcd));
+        assert!(bytes[range.end..].iter().all(|&v| v == 0xcd));
+        assert!(
+            bytes[range]
+                .iter()
+                .enumerate()
+                .all(|(i, &v)| v == (i % 251) as u8)
+        );
+        assert_eq!(context.cpu_upload_bytes(), before + a.size);
+        // No GPU commands reference these leases; normal arena destruction owns their pages.
+    }
     #[test]
     #[ignore = "requires a Vulkan device; verifies allocator completion rules and bounded churn"]
     fn gpu_ranges_reuse_only_after_their_completion_proof() {
