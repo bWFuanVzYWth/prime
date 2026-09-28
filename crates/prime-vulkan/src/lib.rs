@@ -221,6 +221,16 @@ struct GpuIntervals {
     serial: u64,
     preparation_ns: u64,
     render_ns: u64,
+    total_ns: u64,
+}
+impl GpuIntervals {
+    fn retain_latest(&mut self, completed: Self) {
+        // Descriptor slots can retire out of serial order; unrelated host submissions
+        // also leave gaps. Keep the diagnostic sample independent of the modulo ring.
+        if completed.serial > self.serial {
+            *self = completed;
+        }
+    }
 }
 
 pub struct Renderer {
@@ -241,15 +251,37 @@ pub struct Renderer {
     query_serials: [u64; FRAME_SLOTS],
     gpu_intervals: [GpuIntervals; FRAME_SLOTS],
     host_query: vk::QueryPool,
-    last_gpu_ns: u64,
-    last_gpu_serial: u64,
+    last_gpu: GpuIntervals,
     descriptor_keys: [[u64; 10]; FRAME_SLOTS],
-    cpu_profile: Option<cpu_profile::CpuProfile>,
+    cpu_profile: cpu_profile::CpuProfile,
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     use prime_scene::scene::{SceneMesh, Texture, Triangle};
+
+    #[test]
+    fn gpu_diagnostic_keeps_latest_complete_interval_despite_slot_order_and_serial_gaps() {
+        let mut latest = GpuIntervals::default();
+        let mut ring = [GpuIntervals::default(); FRAME_SLOTS];
+        // The older sample aliases the newest one's modulo bucket and arrives later.
+        for (serial, preparation_ns, render_ns) in [(9, 20, 30), (9 - FRAME_SLOTS as u64, 2, 3)] {
+            let sample = GpuIntervals {
+                serial,
+                preparation_ns,
+                render_ns,
+                total_ns: preparation_ns + render_ns,
+            };
+            ring[(serial % FRAME_SLOTS as u64) as usize] = sample;
+            latest.retain_latest(sample);
+        }
+        assert_eq!(latest.serial, 9);
+        assert_eq!(
+            (latest.preparation_ns, latest.render_ns, latest.total_ns),
+            (20, 30, 50)
+        );
+        assert!(ring.iter().all(|sample| sample.serial != latest.serial));
+    }
 
     #[test]
     #[ignore = "requires a Vulkan ray-query GPU; run with synchronization validation"]

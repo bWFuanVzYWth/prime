@@ -14,25 +14,30 @@ struct Batch {
     textures: u64,
 }
 
-pub(crate) struct PrepareProfile(Option<Batch>);
+pub(crate) struct PrepareProfile {
+    batch: Option<Batch>,
+    last: Option<([u64; 2], TranslationWork)>,
+}
 impl Default for PrepareProfile {
     fn default() -> Self {
-        Self(
-            std::env::var_os("PRIME_PROFILE_CPU")
+        Self {
+            batch: std::env::var_os("PRIME_PROFILE_CPU")
                 .is_some_and(|value| value == "1")
                 .then(Batch::default),
-        )
+            last: None,
+        }
     }
 }
 impl PrepareProfile {
     #[inline]
-    pub fn start(&self) -> Option<Instant> {
-        self.0.as_ref().map(|_| Instant::now())
+    pub fn start(&self) -> Instant {
+        Instant::now()
     }
 
-    pub fn observe(&mut self, start: Option<Instant>, update_ns: u64, work: TranslationWork) {
-        let Some(batch) = &mut self.0 else { return };
+    pub fn observe(&mut self, start: Instant, update_ns: u64, work: TranslationWork) {
         let values = [elapsed(start), update_ns];
+        self.last = Some((values, work));
+        let Some(batch) = &mut self.batch else { return };
         batch.frames += 1;
         batch.completed += 1;
         batch.snapshots += u64::from(work.snapshot_changed);
@@ -51,6 +56,21 @@ impl PrepareProfile {
                 ..Default::default()
             };
         }
+    }
+    pub fn last_report(&self) -> String {
+        let Some((ns, work)) = self.last else {
+            return "available=false".into();
+        };
+        format!(
+            "prepare_total={:.3} incremental_translate={:.3} meshes_validated={} meshes_published={} textures_published={} snapshot_changed={} dynamic_changed={}",
+            ns[0] as f64 / 1e6,
+            ns[1] as f64 / 1e6,
+            work.meshes_validated,
+            work.meshes_published,
+            work.textures_published,
+            work.snapshot_changed,
+            work.dynamic_changed
+        )
     }
 }
 
@@ -79,10 +99,8 @@ impl Batch {
 }
 
 #[inline]
-pub(crate) fn elapsed(start: Option<Instant>) -> u64 {
-    start.map_or(0, |start| {
-        start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
-    })
+pub(crate) fn elapsed(start: Instant) -> u64 {
+    start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
 }
 
 #[cfg(test)]
@@ -90,13 +108,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn disabled_has_no_clock_and_completed_batches_clear_only_batch_state() {
-        let disabled = PrepareProfile(None);
-        assert!(disabled.start().is_none());
-        let mut profile = PrepareProfile(Some(Batch::default()));
+    fn coarse_clock_and_last_snapshot_do_not_require_verbose_aggregation() {
+        let mut quiet = PrepareProfile {
+            batch: None,
+            last: None,
+        };
+        quiet.observe(
+            quiet.start() - std::time::Duration::from_millis(1),
+            51_000_000,
+            TranslationWork {
+                meshes_published: 123,
+                ..Default::default()
+            },
+        );
+        assert!(quiet.last.unwrap().0[0] >= 1_000_000);
+        assert_eq!(quiet.last.unwrap().0[1], 51_000_000);
+        assert!(quiet.last_report().contains("meshes_published=123"));
+        let mut profile = PrepareProfile {
+            batch: Some(Batch::default()),
+            last: None,
+        };
         for _ in 0..119 {
             profile.observe(
-                None,
+                profile.start(),
                 1000,
                 TranslationWork {
                     snapshot_changed: true,
@@ -104,7 +138,7 @@ mod tests {
                 },
             );
         }
-        let batch = profile.0.as_ref().unwrap();
+        let batch = profile.batch.as_ref().unwrap();
         assert_eq!(batch.snapshots, 119);
         assert_eq!(batch.sum_ns[1], 119000);
         assert_eq!(batch.max_ns[1], 1000);
@@ -114,14 +148,14 @@ mod tests {
                 .contains("snapshot_updates=119 dynamic_updates=0")
         );
         profile.observe(
-            None,
+            profile.start(),
             1000,
             TranslationWork {
                 dynamic_changed: true,
                 ..Default::default()
             },
         );
-        let batch = profile.0.as_ref().unwrap();
+        let batch = profile.batch.as_ref().unwrap();
         assert_eq!(batch.completed, 120);
         assert_eq!(batch.frames, 0);
         assert_eq!(batch.sum_ns, [0; 2]);

@@ -10,6 +10,7 @@ use prime_scene::{
 #[derive(Default)]
 pub(crate) struct Engine {
     pub(crate) source: SourceScene,
+    pub(crate) minecraft: prime_minecraft::TerrainContext,
     translated: TranslatedScene,
     cpu_profile: PrepareProfile,
     pub(crate) failed: bool,
@@ -21,6 +22,43 @@ pub(crate) struct Engine {
 }
 
 impl Engine {
+    pub(crate) fn cpu_diagnostics(&self) -> String {
+        #[cfg(feature = "vulkan")]
+        let renderer = self.renderer.as_ref().map_or_else(
+            || "available=false".into(),
+            prime_vulkan::Renderer::cpu_diagnostics,
+        );
+        #[cfg(not(feature = "vulkan"))]
+        let renderer = "available=false built_without_vulkan=true";
+        format!(
+            "cpu_units=ms cpu_excludes=Java,FFM,host_submit,GPU,log prepare[{}] {} renderer[{}]",
+            self.cpu_profile.last_report(),
+            self.minecraft.diagnostics(),
+            renderer
+        )
+    }
+
+    pub(crate) fn plan_sections(&mut self, pages: &[&[u8]]) -> Result<&[u8], String> {
+        if self.failed || self.frozen_frame.is_some() {
+            return Err("renderer cannot request live sections".into());
+        }
+        self.minecraft.plan(pages, self.source.epoch())
+    }
+    pub(crate) fn accept_sections(&mut self, pages: &[&[u8]]) -> Result<(), String> {
+        if self.failed || self.frozen_frame.is_some() {
+            return Err("renderer cannot accept live sections".into());
+        }
+        let revision = self.source.revision();
+        let result = self.minecraft.accept(pages, &mut self.source);
+        if result.is_err() {
+            self.failed = true;
+        }
+        if self.source.revision() != revision {
+            self.last_frame = None;
+        }
+        result
+    }
+
     pub(crate) fn submit(&mut self, bytes: &[u8]) -> Result<(), String> {
         if self.failed {
             return Err("Renderer session is poisoned".into());

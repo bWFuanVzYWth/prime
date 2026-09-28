@@ -431,8 +431,16 @@ dependencies = [
 name = "prime_engine"
 version = "0.1.0"
 dependencies = [
+ "prime_minecraft",
  "prime_scene",
  "prime_vulkan",
+]
+
+[[package]]
+name = "prime_minecraft"
+version = "0.1.0"
+dependencies = [
+ "prime_scene",
 ]
 
 [[package]]

@@ -101,7 +101,7 @@ tasks.register('cpuSmokeJar', Jar) {
     from sourceSets.cpuSmoke.output
 }
 tasks.register('cpuSmoke', JavaExec) {
-    dependsOn tasks.named('classes'), tasks.named('cpuSmokeJar'), common.tasks.named('testClasses')
+    dependsOn tasks.named('classes'), tasks.named('cpuSmokeJar'), common.tasks.named('testClasses'), rootProject.tasks.named('buildSourceCpuNative')
     classpath = sourceSets.main.runtimeClasspath + common.sourceSets.test.output
     mainClass = 'dev.primept.FabricCpuTestLauncher'
     jvmArgs '--enable-native-access=ALL-UNNAMED'
@@ -112,6 +112,7 @@ tasks.register('cpuSmoke', JavaExec) {
     systemProperty 'primept.smoke.routingCost', providers.gradleProperty('primeptSmokeRoutingCost').getOrElse('')
     systemProperty 'primept.smoke.targetResize', providers.gradleProperty('primeptSmokeTargetResize').getOrElse('false')
     systemProperty 'primept.smoke.routingDirectory', layout.buildDirectory.dir('routing-fixtures').get().asFile.absolutePath
+    systemProperty 'primept.smoke.nativeLibrary', rootProject.file("build/source-cpu-native/debug/${hostLibraryName}").absolutePath
     systemProperty 'fabric.addMods', tasks.named('cpuSmokeJar').get().archiveFile.get().asFile.absolutePath
     systemProperty 'fabric.classPathGroups', sourceSets.main.output.files.collect { it.absolutePath }.join(File.pathSeparator)
     workingDir layout.buildDirectory.dir('cpu-smoke')

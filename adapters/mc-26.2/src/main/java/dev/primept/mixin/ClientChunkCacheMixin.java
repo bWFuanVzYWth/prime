@@ -31,6 +31,17 @@ public abstract class ClientChunkCacheMixin implements LoadedTerrainSnapshot {
     }
 
     @Override
+    public void primept$visitLoaded(java.util.function.Consumer<LevelChunk> visitor) {
+        if (primept$chunkStorage == null)
+            return;
+        for (int index = 0; index < primept$chunkStorage.length(); ++index) {
+            var chunk = primept$chunkStorage.get(index);
+            if (chunk != null)
+                visitor.accept(chunk);
+        }
+    }
+
+    @Override
     public void primept$bindChunkStorage(AtomicReferenceArray<LevelChunk> chunks) {
         primept$chunkStorage = chunks;
     }
@@ -61,10 +72,11 @@ public abstract class ClientChunkCacheMixin implements LoadedTerrainSnapshot {
                 loaded.size(), empty.size());
     }
 
-    @Inject(method = "drop", at = @At("HEAD"))
-    private void primept$drop(ChunkPos position, CallbackInfo callback) {
-        if (dev.primept.capture.ExclusiveTerrainCapture.ownsLevel(
-                    ((ClientChunkCache)(Object)this).getLevel()))
-            PrimeClient.CAPTURE.dropChunk(position.x(), position.z());
+    @Inject(method = "onLightUpdate", at = @At("HEAD"))
+    private void primept$lightNotification(net.minecraft.world.level.LightLayer layer,
+                                           SectionPos pos, CallbackInfo callback) {
+        dev.primept.capture.ExclusiveTerrainCapture.lightNotification(
+                ((ClientChunkCache)(Object)this).getLevel(),
+                dev.primept.capture.ExclusiveTerrainCapture.LightNotification.ENGINE);
     }
 }

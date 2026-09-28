@@ -36,6 +36,12 @@ tasks.register('buildNative', Exec) {
     commandLine 'cargo', 'build', '--release', '--locked', '--package', 'prime_engine'
 }
 
+// Isolated CPU library: never attaches Vulkan or replaces a DLL used by a running game.
+tasks.register('buildSourceCpuNative', Exec) {
+    workingDir rootDir
+    commandLine 'cargo', 'build', '--locked', '--no-default-features', '--package', 'prime_engine', '--target-dir', rootProject.file('build/source-cpu-native').absolutePath
+}
+
 def adapters = [':mc-26.2', ':mc-26.3']
 tasks.register('test') { dependsOn subprojects.collect { "${it.path}:test" } }
 tasks.named('build') { dependsOn subprojects.collect { "${it.path}:build" } }

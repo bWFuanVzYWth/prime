@@ -132,7 +132,7 @@ impl Renderer {
     }
 
     fn from_context(context: Arc<Context>, mode: RenderMode) -> Result<Self, String> {
-        let cpu_profile = context.cpu_upload_bytes().map(|_| CpuProfile::default());
+        let cpu_profile = CpuProfile::default();
         let pipeline = Some(Pipeline::new(&context, mode)?);
         let mut result = Self {
             context,
@@ -154,15 +154,11 @@ impl Renderer {
             query_serials: [0; FRAME_SLOTS],
             gpu_intervals: [GpuIntervals::default(); FRAME_SLOTS],
             host_query: vk::QueryPool::null(),
-            last_gpu_ns: 0,
-            last_gpu_serial: 0,
+            last_gpu: GpuIntervals::default(),
             descriptor_keys: [[0; 10]; FRAME_SLOTS],
             cpu_profile,
         };
-        if result.context.is_borrowed()
-            && result.context.timestamp_bits > 0
-            && std::env::var_os("PRIME_PROFILE").is_some_and(|v| v != "0")
-        {
+        if result.context.is_borrowed() && result.context.timestamp_bits > 0 {
             result.host_query = unsafe {
                 result.context.device.create_query_pool(
                     &vk::QueryPoolCreateInfo::default()
@@ -235,6 +231,19 @@ impl Renderer {
     pub fn set_scene_frozen(&mut self, frozen: bool) {
         self.scene_frozen = frozen;
     }
+    /// Last attempted host recording; fixed-size counters are retained, formatting is on demand.
+    pub fn cpu_diagnostics(&self) -> String {
+        format!(
+            "{} gpu_supported={} gpu_completed_serial={} gpu_preparation_ms={:.3} gpu_render_ms={:.3} gpu_total_ms={:.3} gpu_sample=delayed_completed_interval",
+            self.cpu_profile.last_report(),
+            self.host_query != vk::QueryPool::null(),
+            self.last_gpu.serial,
+            self.last_gpu.preparation_ns as f64 / 1e6,
+            self.last_gpu.render_ns as f64 / 1e6,
+            self.last_gpu.total_ns as f64 / 1e6
+        )
+    }
+
     pub fn profile_snapshot(&self) -> Option<GpuProfile> {
         self.context.profile_snapshot()
     }
@@ -248,7 +257,7 @@ impl Renderer {
             })
     }
     pub fn last_gpu_time_ns(&self) -> u64 {
-        self.last_gpu_ns
+        self.last_gpu.total_ns
     }
     pub fn shutdown(&mut self) -> Result<(), String> {
         if self.context.is_borrowed() {
@@ -780,7 +789,7 @@ impl Renderer {
         {
             return Err("Invalid host recording state or Vulkan handles".into());
         }
-        let mut cpu = FrameCpu::new(self.cpu_profile.is_some());
+        let mut cpu = FrameCpu::default();
         let started = cpu.start();
         let uploaded_before = self.context.cpu_upload_bytes();
         self.failed = true;
@@ -800,18 +809,13 @@ impl Renderer {
         );
         drop(_scope);
         cpu.finish(Stage::Total, started);
+        let uploaded = self.context.cpu_upload_bytes() - uploaded_before;
+        let load = self.geometry.as_ref().map_or([0; 14], |geometry| {
+            geometry.cpu_load(&scene, &instances, &cpu, uploaded)
+        });
+        self.cpu_profile.observe(&cpu, load, serial, result.is_ok());
         if result.is_ok() {
             self.failed = false;
-            if let Some(profile) = &mut self.cpu_profile {
-                let uploaded = self.context.cpu_upload_bytes().unwrap() - uploaded_before.unwrap();
-                profile.observe(
-                    &cpu,
-                    self.geometry
-                        .as_ref()
-                        .unwrap()
-                        .cpu_load(&scene, &instances, &cpu, uploaded),
-                );
-            }
         }
         result
     }
@@ -957,15 +961,14 @@ impl Renderer {
                 ((stamps[last].wrapping_sub(stamps[first]) & mask) as f64
                     * f64::from(self.context.timestamp_period)) as u64
             };
-            self.gpu_intervals[(serial % FRAME_SLOTS as u64) as usize] = GpuIntervals {
+            let sample = GpuIntervals {
                 serial,
                 preparation_ns: elapsed(0, 1),
                 render_ns: elapsed(1, 2),
+                total_ns: elapsed(0, 2),
             };
-            if serial > self.last_gpu_serial {
-                self.last_gpu_ns = elapsed(0, 2);
-                self.last_gpu_serial = serial;
-            }
+            self.gpu_intervals[(serial % FRAME_SLOTS as u64) as usize] = sample;
+            self.last_gpu.retain_latest(sample);
             self.query_serials[slot] = 0;
         }
         Ok(())

@@ -23,3 +23,14 @@ tasks.register('nativeSmoke', JavaExec) {
     args providers.gradleProperty('nativeLibrary').getOrElse(rootProject.file("target/debug/${library}").absolutePath)
     args layout.buildDirectory.file('ffm-smoke.png').get().asFile.absolutePath
 }
+
+// Actual FFM diagnostics ownership/UTF-8 contract, without attaching or creating a Vulkan device.
+tasks.register('cpuDiagnosticsSmoke', JavaExec) {
+    dependsOn testClasses, rootProject.tasks.named('buildNative')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.primept.CpuDiagnosticsSmoke'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    String library = System.getProperty('os.name').toLowerCase(Locale.ROOT).startsWith('windows')
+            ? 'prime_engine.dll' : 'libprime_engine.so'
+    args rootProject.file("target/release/${library}").absolutePath
+}

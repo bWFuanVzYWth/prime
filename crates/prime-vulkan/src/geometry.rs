@@ -89,6 +89,8 @@ impl Geometry {
         Ok(geometry)
     }
     pub fn begin_frame(&mut self, context: &Context, completed: u64) {
+        // Frozen frames do not execute an object plan; do not report the prior frame's rebuilds.
+        self.objects.rebuilt = 0;
         let serial = context.retirement_serial();
         self.builds.begin(completed, serial);
         self.uploads.begin(completed, serial);

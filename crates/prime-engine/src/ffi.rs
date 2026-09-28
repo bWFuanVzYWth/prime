@@ -108,6 +108,79 @@ pub unsafe extern "C" fn prime_submit(handle: u64, data: *const u8, length: u64)
     })
 }
 
+#[repr(C)]
+pub struct SourcePage {
+    pub data: *const u8,
+    pub length: u64,
+}
+
+/// # Safety
+/// The descriptor table and each page remain readable until return. No input pointer is retained.
+unsafe fn source_pages<'a>(pages: *const SourcePage, count: u64) -> Result<Vec<&'a [u8]>, String> {
+    if pages.is_null()
+        || count == 0
+        || count > (isize::MAX as usize / std::mem::size_of::<SourcePage>()) as u64
+    {
+        return Err("invalid source page table".into());
+    }
+    let table = unsafe { std::slice::from_raw_parts(pages, count as usize) };
+    table
+        .iter()
+        .map(|p| {
+            if p.data.is_null() || p.length > MAX_PACKET_BYTES as u64 {
+                return Err("invalid source page".into());
+            }
+            Ok(unsafe { std::slice::from_raw_parts(p.data, p.length as usize) })
+        })
+        .collect()
+}
+
+/// One synchronous demand batch per host frame, including empty batches.
+/// # Safety
+/// Input pages are borrowed until return. `output` points to a writable SourcePage.
+/// The returned read-only request view belongs to this session; it expires at the next
+/// plan/accept/destroy call. Java must finish reading it before returning its response.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_mc_plan(
+    handle: u64,
+    pages: *const SourcePage,
+    count: u64,
+    output: *mut SourcePage,
+) -> i32 {
+    boundary(-1, || {
+        if output.is_null() {
+            return Err("null source request result".into());
+        }
+        let pages = unsafe { source_pages(pages, count)? };
+        session(handle, |engine| {
+            let request = engine.plan_sections(&pages)?;
+            unsafe {
+                output.write(SourcePage {
+                    data: request.as_ptr(),
+                    length: request.len() as u64,
+                });
+            }
+            Ok(())
+        })?;
+        Ok(0)
+    })
+}
+
+/// # Safety
+/// Input pages remain readable through the synchronous decode/compile/join. No pointers escape.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_mc_sections(
+    handle: u64,
+    pages: *const SourcePage,
+    count: u64,
+) -> i32 {
+    boundary(-1, || {
+        let pages = unsafe { source_pages(pages, count)? };
+        session(handle, |engine| engine.accept_sections(&pages))?;
+        Ok(0)
+    })
+}
+
 /// Renders top-left-origin RGBA8 synchronously; bytes after required output remain untouched.
 ///
 /// # Safety
@@ -262,6 +335,31 @@ pub extern "C" fn prime_gpu_time(handle: u64) -> u64 {
     })
 }
 
+/// Copies a diagnostic UTF-8 snapshot of the last CPU preparation/recording, NUL terminated.
+/// Returns the full length excluding NUL, or u64::MAX on error. No GPU wait/readback.
+///
+/// # Safety
+/// For nonzero capacity, output must point to that many writable bytes. A null
+/// pointer is allowed only with zero capacity. Ownership/thread rules match prime_record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_cpu_diagnostics(handle: u64, output: *mut u8, capacity: u64) -> u64 {
+    boundary(u64::MAX, || {
+        if capacity > isize::MAX as u64 || (capacity != 0 && output.is_null()) {
+            return Err("Invalid CPU diagnostics buffer".into());
+        }
+        let report = session(handle, |s| Ok(s.cpu_diagnostics()))?;
+        if capacity != 0 {
+            let count = report.len().min(capacity as usize - 1);
+            // SAFETY: Caller owns a validated writable span. The report is independently owned.
+            unsafe {
+                std::ptr::copy_nonoverlapping(report.as_ptr(), output, count);
+                output.add(count).write(0);
+            }
+        }
+        Ok(report.len() as u64)
+    })
+}
+
 /// Waits for owned GPU work and destroys the session on its creating thread.
 #[unsafe(no_mangle)]
 pub extern "C" fn prime_destroy(handle: u64) -> i32 {
@@ -312,6 +410,45 @@ pub unsafe extern "C" fn prime_last_error(output: *mut u8, capacity: u64) -> u64
 #[cfg(test)]
 mod abi_tests {
     use super::*;
+    #[test]
+    fn cpu_diagnostics_are_thread_confined_bounded_and_gpu_independent() {
+        let handle = prime_create(ABI_VERSION);
+        let length = unsafe { prime_cpu_diagnostics(handle, std::ptr::null_mut(), 0) };
+        assert!(length > 0 && length < 8192);
+        let mut buffer = vec![0xa5; length as usize + 2];
+        assert_eq!(
+            unsafe { prime_cpu_diagnostics(handle, buffer.as_mut_ptr(), length + 1) },
+            length
+        );
+        assert_eq!(buffer[length as usize], 0);
+        assert_eq!(buffer[length as usize + 1], 0xa5);
+        let text = std::str::from_utf8(&buffer[..length as usize]).unwrap();
+        assert!(text.contains("available=false"));
+        let mut tiny = [0xa5; 2];
+        assert_eq!(
+            unsafe { prime_cpu_diagnostics(handle, tiny.as_mut_ptr(), 1) },
+            length
+        );
+        assert_eq!(tiny, [0, 0xa5]);
+        assert_eq!(
+            unsafe { prime_cpu_diagnostics(handle, std::ptr::null_mut(), 1) },
+            u64::MAX
+        );
+        assert_eq!(
+            std::thread::spawn(move || unsafe {
+                prime_cpu_diagnostics(handle, std::ptr::null_mut(), 0)
+            })
+            .join()
+            .unwrap(),
+            u64::MAX
+        );
+        assert_eq!(prime_destroy(handle), 0);
+        assert_eq!(
+            unsafe { prime_cpu_diagnostics(handle, std::ptr::null_mut(), 0) },
+            u64::MAX
+        );
+    }
+
     #[test]
     fn handles_are_thread_confined_and_retired() {
         let handle = prime_create(ABI_VERSION);

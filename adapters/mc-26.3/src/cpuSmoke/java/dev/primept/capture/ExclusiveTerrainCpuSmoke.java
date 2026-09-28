@@ -23,38 +23,9 @@ final class ExclusiveTerrainCpuSmoke {
         TerrainLeaseCpuSmoke.run();
         TerrainRestoreCpuSmoke.run();
         BlockEntityCandidatesCpuSmoke.run();
-        TerrainEmptyCpuSmoke.run();
+        SectionSourcesCpuSmoke.run();
         TerrainRouterCpuSmoke.run();
-        TerrainRequestsCpuSmoke.run();
         ParticleRouterCpuSmoke.run();
-        var changes = new SectionChanges();
-        long a = SectionPos.asLong(1, 4, 2), b = SectionPos.asLong(1, 5, 2),
-             c = SectionPos.asLong(3, 4, 2);
-        changes.add(a);
-        changes.add(b);
-        changes.add(a);
-        changes.add(c);
-        long[] sealed = changes.seal();
-        check(java.util.Arrays.equals(sealed, new long[] {a, b, c}),
-              "Finite deduplicated batch in source order");
-        changes.add(a);
-        check(changes.size() == 1 && sealed.length == 3, "Reentrant dirty belongs to next batch");
-        changes.awaitSource(a);
-        check(changes.size() == 1 && changes.waitingSize() == 0,
-              "Deferring old work cannot consume a newer dirty observation");
-        changes.awaitSource(b);
-        check(changes.size() == 1 && changes.waitingSize() == 1,
-              "Readiness waiting is separate from active dirty work");
-        changes.add(b);
-        check(changes.waitingSize() == 0, "New dirtiness wakes only its own blocked source");
-        changes.add(c);
-        changes.removeChunk(1, 2, -4, 19);
-        check(java.util.Arrays.equals(changes.seal(), new long[] {c}),
-              "Only unloaded work is withdrawn");
-        for (int i = 0; i < 262145; ++i)
-            changes.add(i);
-        check(changes.seal().length == 262145 && changes.isEmpty(), "No historical queue quota");
-
         var camera = new CameraRenderState();
         camera.pos = Vec3.ZERO;
         try (var staged = new StagedVertexBuffer(() -> "exclusive CPU drain", 1024)) {
@@ -99,7 +70,7 @@ final class ExclusiveTerrainCpuSmoke {
         }
         DynamicCapture.close();
         System.out.println(
-                "PRIME_PT_EXCLUSIVE_CPU_OK: sealed source changes; reentrant dirty/unload/epoch; actual 2-frame last-builder capture and source-page retirement without GPU upload");
+                "PRIME_PT_EXCLUSIVE_CPU_OK: native section source request/response; actual 2-frame last-builder capture and source-page retirement without GPU upload");
     }
     private static void quad(com.mojang.blaze3d.vertex.VertexConsumer out, float offset) {
         for (int i = 0; i < 4; ++i)

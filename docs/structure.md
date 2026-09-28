@@ -1,57 +1,36 @@
 # 多版本工程结构
 
-`prime_engine` 负责场景、渲染会话和资源生命周期，C ABI 使用 `prime_*` 导出。Minecraft 版本差异留在 Java 适配器，Rust 不按 MC 版本编译。Java 的目标职责是路由足以描述外观的源数据并截断对应下游计算，保留模型定义、选择和姿态/变换设置的扩展能力；下游顶点变换与展开实现由 Prime 接管。
+`prime_engine` 负责线程受限会话、资源与 renderer 生命周期，导出 `prime_*` C ABI。渲染相关的 Minecraft 源语义适配位于 `prime_minecraft`；Java 版本模块绑定真实宿主类、字段和事件，批量转发 Rust 请求的源输入。`prime_scene` 与 `prime_vulkan` 不识别 MC 版本或类布局。
 
 ```text
 adapters/
-  common/                 纯 Java 25：设置、FFM、封包、源顶点编码、共同测试
-  mc-26.2/                26.2 Fabric / Blaze3D 捕获与 Vulkan 宿主适配
-  mc-26.3/                26.3 Fabric / RenderPearl 捕获与 Vulkan 宿主适配
-gradle/minecraft-adapter.gradle   共用构建、打包和开发运行约定
+  common/                 Java 25：设置、FFM、复用 native 源页与动态封包
+  mc-26.2/                26.2 宿主字段/事件路由、动态源与 Vulkan 句柄绑定
+  mc-26.3/                26.3 宿主字段/事件路由、动态源与 Vulkan 句柄绑定
 crates/
-  prime-scene/            无 GPU 依赖的输入验证、源身份、场景编译与快照
-  prime-engine/           FFM 导出、线程受限会话、场景/renderer 生命周期
-  prime-vulkan/           Vulkan 资源、AS、命令、同步、退休与 Slang
-  prime-tools/            原生 1080p 诊断和宿主路径性能夹具
-  rectangle-decomposition/ 体素引擎矩形分解，独立 CPU 算法
+  prime-minecraft/         MC 源协议、渲染范围、dirty/邻域调度、模型解释与同步编译
+  prime-scene/             版本无关的场景、输入验证、增量与空间翻译
+  prime-engine/            FFM、源适配上下文、场景和 renderer 生命周期
+  prime-vulkan/            Vulkan 资源、AS、命令、同步、退休与 Slang
+  prime-tools/             诊断与性能夹具
+  rectangle-decomposition/ 体素引擎矩形分解
 ```
 
 ## 依赖与所有权
 
-```mermaid
-flowchart TD
-    J2[mc-26.2] --> J[common: FFM + source protocol]
-    J3[mc-26.3] --> J
-    J -->|同一 prime_engine 动态库| E[prime_engine]
-    E --> S[prime_scene]
-    E --> V[prime_vulkan]
-    V --> S
-    T[prime_tools] --> V
-    T --> S
-    R[rectangle_decomposition: 独立可复用算法]
-```
+`prime_engine → prime_minecraft → prime_scene` 构成地形源输入链，`prime_engine → prime_vulkan → prime_scene` 承担渲染。MC 适配 crate 不依赖 JVM、Fabric 或 Vulkan，只解释由宿主转录的版本化字段；它向场景核心交付闭合的 `CompiledSection`。GPU 不认识 section 或 MC 枚举。
 
-`prime_scene` 不认识 Minecraft、FFM 指针或 Vulkan。它验证输入，再发布带 epoch/revision 的源快照，进行三角化与大坐标重定位。前端编译接管所需的原版纯算法也放在这里，以自足的源语义为输入，捕获后不再依赖原版执行或查询。当前规模适合把协议和 CPU 编译放在一个 crate，模块边界已经分开；不为少量类型再加多层转发 crate。
+一个 `TerrainContext` 管理一个 renderer 的世界/资源世代、活动窗口、压缩源页缓存、资源表和私有同步 CPU 池。没有全局异步队列、Java compiler 池或逐体素反向调用。每帧一批请求和一批响应；响应借用结束前全部 worker join。静态地形4³合批、动态分桶和 GPU 生命周期继续由原来的场景/渲染上下文负责。
 
-`prime_engine` 是 native 入口和会话所有者，协调源状态、翻译缓存和 renderer。`prime_vulkan` 拥有具体 GPU 资源与其退休规则；宿主 instance/device/queue/image 始终由 Minecraft 拥有。引擎默认启用 `vulkan` feature；只测试协议和引擎错误边界时可关闭它，完全不编译 Slang。单独选中 `prime_vulkan` 则必然需要 GPU 构建工具，但其普通 CPU 单测无需实际创建 GPU 设备。
+Java `ExclusiveTerrainCapture` 转录宿主事件并响应请求，`SectionSources` 转录 palette、bit storage 和已烘焙资源字段，不逐位置选择模型、求 tint、剔面或展开几何。它保留资源身份到协议 ID 的关联，实际模型字典与源缓存由 Rust 持有。原先的 `TerrainRouter` / `FluidRouter` 只保留在 CPU 测试源集中，作为旧协议的参考产物生成器，不进入生产 JAR。
 
-实例通路明确分离状态和副作用：`prime_scene::instances::InstanceContext` 拥有版本无关的原型、实例和引用计数，先准备验证计划再应用；`prime_scene::spatial` 定义统一空间网格，`prime_scene::translation` 的两个显式上下文分别计算地形合批与对象分桶/放置。`prime_vulkan` 的 `geometry` 和 `context::objects` 持有 GPU 资源并执行计划；`plan` 保留局部范围分配与元数据编码，`packing` 写入复用的材质记录，`arena` 依据完成值管理 storage/scratch/上传页。每个会话显式借用这些上下文，未引入异步任务或内部可变的全局缓存。此边界不表示旧有全部 renderer 模块已经完成相同拆分。
+`adapters/common` 不依赖 Minecraft、Fabric 或 LWJGL；`SourcePages` 只负责 native 页编码。两版仍共享同一个引擎 DLL；MC 源协议显式带262/263版本身份，在 Rust 适配层校验。固定私有字段绑定由双版本无窗口夹具验证，未知来源与当前原型替代见独立的 [PROTOTYPE_HACKS](../PROTOTYPE_HACKS.md)。
 
-Prime 的 CPU 并行机制归 Rust，`prime_scene::routing` 持有源定义和惰性创建的私有 `CpuWorkers`，负责地形、流体与粒子编译。`prime_vulkan` 的打包上下文也显式持有同步池；两阶段顺序执行，不引入跨帧后台任务。worker 只读纯数据、写互不重叠范围，不访问 MC 或回调 Java。源读取与宿主线程规则仍由版本层适配，Prime 不再包含 Java compiler 工作池。
+## 动态源与宿主
 
-`prime_tools` 持有离线 PNG 输出与性能夹具入口，图像编码库不进入引擎 DLL 的依赖。诊断用 C 导出 `prime_render` 仍存在，实际游戏只调用宿主录制接口，不回读输出。
+本轮原型接管地形。实体/方块实体、普通 item、Fabric Mesh 与粒子保留各自的源入口和实际姿态回调，使用 op7 / op6；它们不能从 section 状态页还原。纹理源、相机和宿主 Vulkan 特性/句柄继续由对应 Java 版本绑定。
 
-`adapters/common` 的生产代码不依赖 Minecraft、Fabric 或 LWJGL。它持有版本无关的设置和源描述，并封装 FFM ABI，不能增加 MC enum ordinal、宿主私有类或 shader buffer 布局。版本模块负责实际 MC 模型/tint 调用的观察、源生命周期与变化通知、纹理来源、相机和宿主 Vulkan 特性与句柄；源通知不等于在 Java 管理编译任务。复制少量版本适配代码比把变化的私有签名装进反射层更容易编译检查；新版本通过增加模块验证，不能更改 Rust 使其识别版本号。
-
-两个安装包都打入公共层的同一编译产物和同一 `target/release/prime_engine.dll`。`verifyNativeJars` 检查引擎字节、桥接类字节和精确 MC 版本约束。每版有独立 `run/` 与存档目录，避免新版存档升级污染旧版验证。
-
-## 源路由边界
-
-版本层的 `TerrainRouter` 读取模型、源 tint、面可见性和放置，`FluidRouter` 读取流体材质与邻接。`CaptureInbox` 合并资源/section 事件，op13 定义先于 op12 使用，定义退休在最后使用之后。没有完整 Java section 编译或 raster 几何缓存。地形持久局部定义、纯表面构造、三角化、逐段结果及空间分组在 Rust。
-
-模型、普通 item 和 Fabric Mesh 在单次几何提交前读取局部定义与姿态，由 `InstanceCapture` 合并 op7；源引用/可变值变化决定是否重新封包。标准粒子路由紧凑参数 span，由 Rust 展开；其余直接网格来源使用显式 op6 原始几何。源定义与机械展开有不同兼容边界，详见 [源路由与批量数据流](capture-boundaries.md)。
-
-`DynamicFrame` 与实例封包使用可复用 native arena，同步调用结束前完成借用消费。几何与纹理顺序、资源 epoch、源输入序列和 GPU 完成不能混为同一个寿命。协议与宿主集成分别见 [ABI](abi.md) 和 [架构](architecture.md)。
+两个安装包包含公共层的同一编译产物和同一 `prime_engine`；`verifyNativeJars` 验证字节和精确版本约束。每版使用独立 `run/` 和存档。协议与宿主集成分别见 [ABI](abi.md) 和 [架构](architecture.md)。
 
 ## 矩形分解的接入范围
 

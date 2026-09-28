@@ -47,13 +47,12 @@ public final class PrimeClient implements ClientModInitializer {
             enabled ? System.getProperty("primept.renderer", "path_trace") : "vanilla";
     private boolean unavailable;
     private CompletableFuture<Void> resourceReload;
-    private final RenderProfile profile =
-            Boolean.getBoolean("primept.profile") ? new RenderProfile() : null;
+    private final RenderProfile profile = new RenderProfile();
     private long worldRenderStart;
+    private long sourceFrameSequence;
     private HostVulkanRenderer renderer;
-    private long sentEpoch, sentAtlas, sentSectionWatermark;
+    private long sentEpoch, sentAtlas;
     private final FrameSequence frames = new FrameSequence();
-    private int submittedSections;
     private boolean reportedFrame;
     private boolean reportedProjectionWait;
     private boolean failed;
@@ -144,7 +143,7 @@ public final class PrimeClient implements ClientModInitializer {
                 dev.primept.capture.BlockGeometryCache.enabled());
         if (enabled)
             LOGGER.warn(
-                    "Experimental PT: terrain/fluid source capture and batched entity/block-entity/particle meshes; transparency uses alpha coverage, no refraction/media; animated atlases use their first frame; special shader effects remain unsupported");
+                    "Section prototype: Rust owns radius/scheduling/model selection; one source request/response batch per frame. Temporary model/tint/fluid defaults are listed in PROTOTYPE_HACKS.md; visual parity is not claimed. Entity/block-entity/particle routing is retained.");
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
             var command = literal("primept");
             var renderers = literal("renderer");
@@ -194,8 +193,18 @@ public final class PrimeClient implements ClientModInitializer {
     }
 
     /** Before extraction: the selected owner must prepare this frame's world state as well as render it. */
+    public static long sourceFrameSequence() {
+        return INSTANCE.sourceFrameSequence;
+    }
+
     public static void beginFrame() {
+        INSTANCE.sourceFrameSequence = Math.incrementExact(INSTANCE.sourceFrameSequence);
+        INSTANCE.profile.beginExtraction();
         INSTANCE.advanceRenderer();
+    }
+
+    public static void endExtraction() {
+        INSTANCE.profile.endExtraction();
     }
 
     private void advanceRenderer() {
@@ -275,6 +284,7 @@ public final class PrimeClient implements ClientModInitializer {
             resetFrameState();
         }
         frames.reset();
+        profile.reset();
         offline.committed(next);
         LOGGER.info("Prime renderer mode: {} (previous exclusive resources retired)",
                     next ? "offline" : "realtime");
@@ -282,8 +292,7 @@ public final class PrimeClient implements ClientModInitializer {
 
     public static void beginWorldRender() {
         INSTANCE.skippedWorldRaster = ownsWorldRendering();
-        if (INSTANCE.profile != null)
-            INSTANCE.worldRenderStart = System.nanoTime();
+        INSTANCE.worldRenderStart = System.nanoTime();
     }
 
     public static boolean skipWorldRaster() {
@@ -296,6 +305,32 @@ public final class PrimeClient implements ClientModInitializer {
         return INSTANCE.skippedWorldRaster;
     }
 
+    /** Called before host extraction, so the native source owner can populate the same frame. */
+    public static NativeBridge prepareNativeSources() {
+        var owner = INSTANCE;
+        if (!exclusiveFrameReady() || owner.renderer == null || owner.resourceReload != null)
+            return null;
+        var atlas = CAPTURE.atlas();
+        if (atlas == null)
+            return null;
+        long epoch = CAPTURE.epoch();
+        if (owner.sentEpoch != epoch) {
+            owner.renderer.submit(Packets.reset(epoch));
+            owner.sentEpoch = epoch;
+            owner.sentAtlas = 0;
+            owner.frames.reset();
+            owner.reportedFrame = false;
+            owner.renderer.resetReadiness();
+        }
+        if (owner.sentAtlas != atlas.version()) {
+            owner.renderer.submit(
+                    Packets.texture(epoch, atlas.width(), atlas.height(), atlas.rgba()));
+            owner.sentAtlas = atlas.version();
+            owner.frames.reset();
+        }
+        return owner.renderer.sourceBridge();
+    }
+
     private void renderFrame(CameraRenderState camera, RenderTarget destination) {
         if (failed || resourceReload != null)
             return;
@@ -306,7 +341,11 @@ public final class PrimeClient implements ClientModInitializer {
                 Packets.resizeFrozenFrame(renderer.frameBuffer(), destination.width,
                                           destination.height,
                                           frames.next(destination.width, destination.height));
+                var timing = profile.begin(worldRenderStart);
+                long started = System.nanoTime();
                 renderer.record(destination);
+                timing.nativeRender = System.nanoTime() - started;
+                profile.finish(timing, CAPTURE, destination.width, destination.height, renderer);
                 return;
             }
             RuntimeException terrainFailure = ExclusiveTerrainCapture.failure();
@@ -331,15 +370,13 @@ public final class PrimeClient implements ClientModInitializer {
             var atlas = CAPTURE.atlas();
             if (atlas == null)
                 return;
-            RenderProfile.Frame timing = profile == null ? null : profile.begin(worldRenderStart);
+            RenderProfile.Frame timing = profile.begin(worldRenderStart);
             long epoch = CAPTURE.epoch();
             if (sentEpoch != epoch) {
                 submit(Packets.reset(epoch), timing);
                 sentEpoch = epoch;
-                sentSectionWatermark = 0;
                 sentAtlas = 0;
                 frames.reset();
-                submittedSections = 0;
                 reportedFrame = false;
                 renderer.resetReadiness();
             }
@@ -348,29 +385,12 @@ public final class PrimeClient implements ClientModInitializer {
                 sentAtlas = atlas.version();
                 frames.reset();
             }
-            long phaseStart = timing == null ? 0 : System.nanoTime();
-            var sealed = CAPTURE.seal();
-            for (var batch : sealed.batches()) {
-                if (batch.epoch() != epoch)
-                    continue;
-                for (byte[] packet : batch.packets())
-                    submit(packet, timing);
-                if (!batch.removal())
-                    ++submittedSections;
-                if (timing != null)
-                    ++timing.batches;
-            }
-            if (sealed.completedSequence() > sentSectionWatermark) {
-                submit(Packets.sectionWatermark(epoch, sealed.completedSequence()), timing);
-                sentSectionWatermark = sealed.completedSequence();
-            }
-            if (timing != null)
-                timing.drain = System.nanoTime() - phaseStart;
+            timing.resourceSubmit = timing.submit;
+            // Terrain is already synchronously published by the source request/response phase.
             int width = destination.width, height = destination.height;
-            phaseStart = timing == null ? 0 : System.nanoTime();
+            long phaseStart = System.nanoTime();
             renderer.submitDynamic(epoch);
-            if (timing != null)
-                timing.dynamicSubmit = System.nanoTime() - phaseStart;
+            timing.dynamicSubmit = System.nanoTime() - phaseStart;
             var inverse = new Matrix4f(camera.viewRotationMatrix).invert();
             var forward = inverse.transformDirection(new Vector3f(0, 0, -1)).normalize();
             var right = inverse.transformDirection(new Vector3f(1, 0, 0)).normalize();
@@ -378,19 +398,17 @@ public final class PrimeClient implements ClientModInitializer {
             Packets.writeFrame(renderer.frameBuffer(), epoch, camera.pos.x, camera.pos.y,
                                camera.pos.z, components(forward), components(right), components(up),
                                fov, width, height, frames.next(width, height));
-            phaseStart = timing == null ? 0 : System.nanoTime();
+            phaseStart = System.nanoTime();
             renderer.record(destination);
-            if (timing != null)
-                timing.nativeRender = System.nanoTime() - phaseStart;
+            timing.nativeRender = System.nanoTime() - phaseStart;
             if (!reportedFrame) {
                 LOGGER.info(
-                        "Prime PT first world frame recorded: {}x{}, {} captured section batches, resource epoch {}",
-                        width, height, submittedSections, epoch);
+                        "Prime PT first world frame recorded: {}x{}, {} routed source sections, resource epoch {}",
+                        width, height, ExclusiveTerrainCapture.routedSections(), epoch);
                 reportedFrame = true;
                 renderer.enableWorldReplacementAfterCompletion();
             }
-            if (timing != null)
-                profile.finish(timing, CAPTURE, width, height, renderer);
+            profile.finish(timing, CAPTURE, width, height, renderer);
         } catch (Exception | LinkageError exception) {
             failRenderer(exception);
         }
@@ -474,13 +492,11 @@ public final class PrimeClient implements ClientModInitializer {
     }
 
     private void submit(byte[] packet, RenderProfile.Frame timing) {
-        long start = timing == null ? 0 : System.nanoTime();
+        long start = System.nanoTime();
         renderer.submit(packet);
-        if (timing != null) {
-            timing.submit += System.nanoTime() - start;
-            ++timing.packets;
-            timing.bytes += packet.length;
-        }
+        timing.submit += System.nanoTime() - start;
+        ++timing.packets;
+        timing.bytes += packet.length;
     }
 
     private static float[] components(Vector3f vector) {
@@ -492,20 +508,17 @@ public final class PrimeClient implements ClientModInitializer {
         INSTANCE.offline.reset();
         CAPTURE.reset();
         INSTANCE.resetFrameState();
-        if (INSTANCE.profile != null)
-            INSTANCE.profile.reset();
     }
     private void resetFrameState() {
+        profile.reset();
         sentEpoch = sentAtlas = worldRenderStart = 0;
-        submittedSections = 0;
         frames.reset();
         reportedProjectionWait = reportedFrame = false;
     }
     public static void close() {
         CAPTURE.disable();
         INSTANCE.closeResources();
-        if (INSTANCE.profile != null)
-            INSTANCE.profile.closeSamples();
+        INSTANCE.profile.closeSamples();
     }
 
     private void closeResources() {

@@ -142,7 +142,7 @@ pub(super) struct Context {
     pub name: String,
     // CPU diagnostics are independent of GPU queries/PRIME_PROFILE. Count only
     // successful mapped writes; these bytes do not claim PCIe traffic.
-    cpu_uploaded_bytes: Option<AtomicU64>,
+    cpu_uploaded_bytes: AtomicU64,
     profile: Option<Profile>,
     host: Option<Host>,
     // If both fence wait and device drain fail without DEVICE_LOST, Vulkan gives
@@ -440,7 +440,7 @@ impl Context {
                 timestamp_bits,
                 live_allocations: AtomicU64::new(0),
                 name,
-                cpu_uploaded_bytes: crate::cpu_profile::enabled().then(|| AtomicU64::new(0)),
+                cpu_uploaded_bytes: AtomicU64::new(0),
                 profile,
                 host: None,
                 uncertain_submission: AtomicBool::new(false),
@@ -548,7 +548,7 @@ impl Context {
                 timestamp_bits: queue_properties.timestamp_valid_bits,
                 live_allocations: AtomicU64::new(0),
                 name,
-                cpu_uploaded_bytes: crate::cpu_profile::enabled().then(|| AtomicU64::new(0)),
+                cpu_uploaded_bytes: AtomicU64::new(0),
                 profile,
                 host: Some(Host {
                     timeline,
@@ -949,10 +949,8 @@ impl Context {
         !self.uncertain_submission.load(Ordering::Relaxed)
     }
 
-    pub fn cpu_upload_bytes(&self) -> Option<u64> {
-        self.cpu_uploaded_bytes
-            .as_ref()
-            .map(|counter| counter.load(Ordering::Relaxed))
+    pub fn cpu_upload_bytes(&self) -> u64 {
+        self.cpu_uploaded_bytes.load(Ordering::Relaxed)
     }
 
     pub fn profile_snapshot(&self) -> Option<GpuProfile> {
@@ -1213,9 +1211,9 @@ impl Buffer {
                 bytes.len(),
             );
         }
-        if let Some(counter) = &self.context.cpu_uploaded_bytes {
-            counter.fetch_add(bytes.len() as u64, Ordering::Relaxed);
-        }
+        self.context
+            .cpu_uploaded_bytes
+            .fetch_add(bytes.len() as u64, Ordering::Relaxed);
         if let Some(profile) = &self.context.profile {
             profile
                 .counters
@@ -1630,7 +1628,7 @@ mod host_tests {
                 timestamp_bits: 0,
                 live_allocations: AtomicU64::new(2),
                 name: "CPU teardown test".into(),
-                cpu_uploaded_bytes: None,
+                cpu_uploaded_bytes: AtomicU64::new(0),
                 profile: None,
                 host: Some(Host {
                     timeline: vk::Semaphore::null(),

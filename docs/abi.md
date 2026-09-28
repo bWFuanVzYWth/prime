@@ -1,15 +1,15 @@
-# FFM ABI v3
+# FFM ABI v5
 
 Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本号用于边界校验，不承诺不同发布之间的二进制兼容；不可仅凭版本号相同混用新旧 JAR 和引擎。双 Minecraft 适配器共享该构建的同一核心，不意味着共享不同发布的内部协议。
 
-导出原型以 [`prime.h`](../crates/prime-engine/include/prime.h) 为准。库名为 `prime_engine`，C 导出 `prime_*` 不变；26.2/26.3 适配器使用同一引擎。全部整数 little-endian，浮点 IEEE754，结构通过字节读取而非 C 对齐结构读取。长度为字节数，所有保留字段必须为零。`prime_create(3)` 返回非零 handle；status=0 成功，-1 失败。`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），输出容量允许时写入终止 NUL。
+导出原型以 [`prime.h`](../crates/prime-engine/include/prime.h) 为准。库名为 `prime_engine`，C 导出 `prime_*` 不变；26.2/26.3 适配器使用同一引擎。全部整数 little-endian，浮点 IEEE754，结构通过字节读取而非 C 对齐结构读取。长度为字节数，所有保留字段必须为零。`prime_create(5)` 返回非零 handle；status=0 成功，-1 失败。`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），输出容量允许时写入终止 NUL。
 
 ## 公共头（24 字节）
 
 | Offset | 类型 | 语义 |
 | --- | --- | --- |
 | 0 | u32 | magic `0x54505250`，字节 `PRPT` |
-| 4 | u32 | ABI version=3 |
+| 4 | u32 | ABI version=5 |
 | 8 | u32 | operation |
 | 12 | u32 | reserved=0 |
 | 16 | u64 | epoch；0 无效 |
@@ -28,13 +28,41 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本�
 - **12 route section**：本次局部模型放置与流体源描述，native 编译后原子替换全部层。
 - **13 routed resources**：局部模型定义与源 owner 退休，先完整验证再修改字典。
 
-ABI v3 引入 op12/op13 和参数粒子 span；op2 无生产消费者，未知操作及历史 ABI 直接拒绝。
+ABI v5 新增下面的 MC 原始源批次接口，保留场景协议、参数粒子与诊断查询。当前生产地形走 `prime_mc_plan` / `prime_mc_sections`；op8/10/11/12/13 保留给封闭网格输入和 CPU 对照夹具，不与新生产者混用。op2 无生产消费者，未知操作及历史 ABI 直接拒绝。
+
+## MC 源批次（source version 1）
+
+该入口只由 `prime_minecraft` 解释，不能将 Minecraft 字段枚举、坐标规则或 palette 布局扩散到 `prime_scene` / GPU。当前识别 MC version 262、263；其他版本明确拒绝。临时语义替代见独立的 [原型 hack 清单](../PROTOTYPE_HACKS.md)。
+
+`prime_mc_plan(handle, pages, count, output)` 接收相机、半径输入、宿主实际来源范围和增量事件，返回一份 Rust 所有的请求表。Java 在宿主 owner 线程按表封装，然后只调用一次 `prime_mc_sections(handle, pages, count)`。每个活跃源帧仅有这一个请求/响应批次，没有逐段调用、worker 回调、后续求值批次或跨帧工作配额；冻结时不执行源请求。空闲帧仍交换批次头，但不轮询已知 section、不传输其 palette 或重编译几何。
+
+输入 `prime_source_page` 是 16 字节 `{const uint8_t* data; uint64_t length;}`，描述表和每页均只借用到调用返回。页串接成一个逻辑流，字段允许跨页；每页最多 256 MiB，Java 复用 1 MiB native 页，禁止为合批再次拼接成巨型数组。必须保留的数据在返回前成为 Rust 所有；编译 worker 返回前全部汇合。响应错误使引擎失败，不重放源回调补画。
+
+两个输入流都有 32 字节头：`magic:u32=0x53434d50, source_version:u32=1, minecraft_version:u32, kind:u32, epoch:u64, batch:u64`。epoch 和 batch 非零；epoch 必须匹配场景，batch 在 epoch 内严格增加。请求期间不可再次 plan，响应必须恰好匹配该请求的身份和全部 section。
+
+kind=1 的头后为相机 `x/z:f64`、半径 `i32`、世界 `min_section_y/max_section_y:i32`（含端点）、宿主实际来源范围 `min_x/max_x/min_z/max_z:i32`，随后为事件流。每条非零事件为 `kind:u32, x/y/z:i32`；1 加载列、2 卸载列、3 段脏、4 全量资源失效、5 清空旧来源列清单（随后用1重建）。单个 `u32=0` 终止。Java 转发原始通知；Rust 合并、过滤并维护窗口、活跃段和六面邻接依赖。完整清单仅在 owner 建立/实际源范围变化时重发。
+
+输出请求流为 `batch:u64, request_count:u64, column_edit_count:u64, active_count:u64`，后接 request_count 条 `{x/y/z:i32, active:i32}`（16 字节），再接 column_edit_count 条 `{x/z:i32, active:i32}`（12 字节）。active 为0或1；请求中的0表示仅供邻接依赖，不能发布为渲染段；列编辑只用于 Java 镜像 Rust 选择结果，以支持现有方块实体提取。输出借用指针在下一次 plan、accept 或销毁时失效，Java 必须在提交响应之前读完，不得保留。
+
+kind=2 的头后是以下记录流，单个 `u32=0` 终止。所有字符串为 `byte_count:u32 + UTF-8 + 补零到4字节`。
+
+| 记录标签 | 字段 |
+| --- | --- |
+| 1 state | `state_id:u32, flags:u32, model_id:u32, block_name:string`；flags 位0=air、1=存在 offset 函数、2=缓存 solidRender、4=非 MODEL render shape，位3保留 |
+| 2 model | `id:u32, type:u32`；id非零，type0未知、1直接 quad、2权重选择、3multipart 子项、4别名 |
+| 3 section | `x/y/z:i32, available:u32`；0无源，1后跟压缩 palette 数据，不能以无源代替空段 |
+
+model type1 后为 `quad_count:u32` 和每个92字节 quad：`face:u32, tint_index:i32, raw_layer:u32`，四个 `{position:f32×3, packed_uv:u64}`；MC 的 U 在高32位、V 在低32位。face0..5为下/上/北/南/西/东，6无剔除面。raw_layer 是版本层的实际字段值，Rust 适配器解释后生成公共材质语义。type2 为 `count:u32` 和 `{weight:u32, child_id:u32}`；type3 为 `count:u32` 和 child_id 列表；type4 为单个 child_id。定义身份限定于 epoch/资源失效代次，已观察定义不逐帧重发。
+
+section 压缩数据为 `bits:u32, palette_count:u32, word_count:u32`、palette_count 个 registry state ID、word_count 个 u64。局部 palette 的存储值索引该列表；palette_count=0 表示全局 registry ID。零位存储恰好一个 palette 项且零 word；其余每个 word 存放 `floor(64/bits)` 个状态，不跨 word 拼接，顺序 `y*256+z*16+x`，恰好4096项。Java 只复制源列表/word，Rust 解包、比较与编译。
+
+完整验证响应后，Rust 更新活跃源缓存，只有实际源变化、资源失效或邻接/成员变化才进入编译。普通变化影响自身，仅边界遮挡结果变化才传播至对应活跃邻段；每个非空段分4个Y slab，由私有同步池完成。归并和精确内容比较也同步并行，最终向场景提交绑定当前 owner/epoch/revision/完成水位的版本无关 `CompiledSection`，发布前验证证明仍有效。源 batch 是唯一完成水位，静态仍等待64段完整后发布整格BLAS。资源重载强制重新解释相同 palette；不变压缩输入不重编译，重新编译但最终图层相同则保留 Arc 和内容版本，只推进源完成水位。
 
 ## 公共顶点与材质语义
 
 各源 span 显式给出顶点数量、stride 和字段 offset；数据为恰好 `vertex_count*stride` 字节。topology=3 表示三角形、4 表示四边形；material=0 opaque、1 alpha cutout、2 stochastic alpha coverage，其他值拒绝。
 
-Position 为 f32×3，UV 为 f32×2。局部原型和显式原始网格可输出 **stride24、position0、color12、uv16**；地形/流体生产通路使用下文 op12/op13。RGBA8 按 R/G/B/A 字节顺序保存作者颜色与源 tint 的编码域组合，排除原版 AO/方向明暗和 UV2 光照。source layer 使用公共协议常量 opaque=0、cutout=1、translucent=2，不传 MC enum ordinal。显式 stride/offset 解码器也支持 BLOCK28 等合法源布局，并有行为回归测试；这不表示兼容旧 ABI。quads 在 Rust 展开为 `(0,1,2), (2,3,0)`。
+Position 为 f32×3，UV 为 f32×2。局部原型和显式原始网格可输出 **stride24、position0、color12、uv16**；当前地形/流体生产通路使用上文 MC 源批次。RGBA8 按 R/G/B/A 字节顺序保存作者颜色与源 tint 的编码域组合，排除原版 AO/方向明暗和 UV2 光照。source layer 使用公共协议常量 opaque=0、cutout=1、translucent=2，不传 MC enum ordinal。显式 stride/offset 解码器也支持 BLOCK28 等合法源布局，并有行为回归测试；这不表示兼容旧 ABI。quads 在 Rust 展开为 `(0,1,2), (2,3,0)`。
 
 ## 原子 section 替换
 
@@ -42,9 +70,9 @@ op=8 固定头共 **72 字节**：公共头后为 `section:u64`（24）、`seque
 
 每层为 **40 字节描述 + 紧接的顶点字节**，无 padding。十个 u32 依次是 `layer_id, texture_id, material, topology, vertex_count, stride, position_offset, color_offset, uv_offset, reserved=0`。顶点及材质遵循上述公共语义，layer ID 不可重复。`layer_count=0` 清空几何并发布一个已完成的空 section，不能代替 op3 卸载；零顶点层等价于该层缺失。
 
-完整包、最终容量及引用验证成功后才原子发布。源序列始终推进；三角形、源 RGBA/UV、纹理/材质与原点逐字段相同的层保留原 Arc 和内容 revision，在可用性不变时不使渲染 scene 失效。首次完成的空段也会推进 scene revision，因为它可能使 64 段单元完整。忽略的布局 padding 与层顺序不参与内容身份。移除的层被清除，只有新增或变化层发布新内容。这个序列屏障也约束 op3/op11，不能混用旧序列复活遗漏层。op8 保留为显式网格输入与诊断对照；生产地形使用 op12，二者共享顺序/可用性和内容世代契约。CPU 持有逐段快照；64 段就绪门槛和后续整格替换见 [空间合批](spatial-batching.md)。
+完整包、最终容量及引用验证成功后才原子发布。源序列始终推进；三角形、源 RGBA/UV、纹理/材质与原点逐字段相同的层保留原 Arc 和内容 revision，在可用性不变时不使渲染 scene 失效。首次完成的空段也会推进 scene revision，因为它可能使 64 段单元完整。忽略的布局 padding 与层顺序不参与内容身份。移除的层被清除，只有新增或变化层发布新内容。这个序列屏障也约束 op3/op11，不能混用旧序列复活遗漏层。op8 保留为显式网格输入与诊断对照；生产地形由 MC 适配 crate 发布封闭网格，同一 renderer/epoch 只能有一个地形生产者。CPU 持有逐段快照；64 段就绪门槛和后续整格替换见 [空间合批](spatial-batching.md)。
 
-## 源资源和路由 section
+## 封闭路由夹具：源资源和 section
 
 op13 公共头后为 `definition_count:u32, retirement_count:u32`。每个定义是 `id:u64, quad_count:u32, tint_count:u32`，再跟 quad_count 条记录，每条 **108 字节**：`material:u32, cull_face:u32, tint_slot:u32`，随后四个 `position:f32×3, RGBA8, UV:f32×2`。face=0/1/2/3/4/5 依次为下/上/北/南/西/东，6 表示不按邻面剔除；tint_slot=UINT32_MAX 表示无 tint，其余小于 tint_count。局部坐标有限且每轴绝对值不超过 4096。
 
@@ -159,7 +187,11 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 
 每帧调用 `prime_record(handle, frame, 104, command, image, image_view, serial)`。command 是已开始录制、尚未结束的宿主 primary command buffer；目标为带 STORAGE 用途、GENERAL layout 的 RGBA8_UNORM 主颜色图像及其 view，尺寸必须等于 frame。serial 是将包含此 command 的实际提交完成值，同一 session 每个 serial 最多录制一次。宿主在同队列依次提交，并在所有命令完成后 signal timeline 到该 serial；Rust 自己的描述符槽与退休资源依赖此保证。
 
-`prime_record` 同步完成输入复制与命令录制，正常返回时 GPU 可以尚未执行；没有像素返回。只在所有描述符槽仍在途时等待最旧 serial，这是 GPU 资源复用的必要完成等待，不是向 MC 上游施加工作配额或主动背压。shader 在 GPU 上处理宿主输出行方向。`prime_gpu_time(handle)` 返回最近一个已收集的完成帧 GPU 纳秒数；未启用 `PRIME_PROFILE=1` 或没有结果时为 0，不是当前 CPU 调用耗时或窗口平均。
+`prime_record` 同步完成输入复制与命令录制，正常返回时 GPU 可以尚未执行；没有像素返回。只在所有描述符槽仍在途时等待最旧 serial，这是 GPU 资源复用的必要完成等待，不是向 MC 上游施加工作配额或主动背压。shader 在 GPU 上处理宿主输出行方向。`prime_gpu_time(handle)` 返回最近一个已收集的完成帧 GPU 纳秒数；宿主队列不支持时间戳或尚无结果时为 0；有能力的宿主常驻三个阶段时间戳，仅在完成证明后读取，不增加 GPU 等待。它不是当前 CPU 调用耗时或窗口平均。
+
+`prime_cpu_diagnostics(handle, output, capacity)` 在 owner 线程按需将最近一次 CPU 准备/录制快照格式化为 UTF-8。成功返回不含 NUL 的完整字节数；非零容量最多写入 `capacity-1` 字节并补 NUL，容量零时允许空指针查询长度；错误返回 `u64::MAX` 并设置 last error。输出指针只借用至调用返回。未发生准备/录制时明确输出 `available=false`，不使用零时间冒充已测量结果。
+
+此查询不访问游戏对象，不等待 GPU、不回读图像。正常帧只更新固定大小的 CPU 阶段与已有工作量计数；慢帧才查询和格式化。录制快照携带实际 host serial，Java 将它与自己的 serial 一起写入警告，可核对是否同次录制。附带的 GPU 区间明确标注最近完成的 serial，与当前 CPU 录制可能不同。诊断文本用于人工归因，不作为额外场景命令或稳定机器解析协议；Java 预留 8192 字节，超长或查询失败须明确报告，不能默默截断或令诊断失败触发渲染器回退。
 
 调用 `prime_destroy` 前宿主必须提交所有已录制的 PT command；native 等待最后相关 serial 后销毁 PT 资源。若无法证明完成，返回失败并保留 session/资源以隔离风险。宿主 device、timeline、图像等必须覆盖其全部使用寿命。
 

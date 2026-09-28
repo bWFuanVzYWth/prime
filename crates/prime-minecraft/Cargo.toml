@@ -1,0 +1,13 @@
+[package]
+name = "prime_minecraft"
+description = "Minecraft source adaptation and synchronous section scheduling"
+license.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+prime_scene.workspace = true
+
+[lints]
+workspace = true

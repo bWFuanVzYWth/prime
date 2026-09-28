@@ -1,5 +1,5 @@
-//! Opt-in host CPU recording diagnostics. Stage times are disjoint children of
-//! record_total; none measures GPU execution or the caller's eventual submission.
+//! Always-on coarse host CPU timings; aggregation output remains opt-in. Stages are
+//! disjoint children of record_total; none measures GPU execution or the caller's eventual submission.
 use std::{fmt::Write, time::Instant};
 
 pub(crate) fn enabled() -> bool {
@@ -57,33 +57,33 @@ const BATCH: u64 = 120;
 
 #[derive(Default)]
 pub(crate) struct FrameCpu {
-    enabled: bool,
     ns: [u64; STAGES.len()],
     pub static_updates: u64,
     pub tlas_rebuilds: u64,
 }
 impl FrameCpu {
-    pub fn new(enabled: bool) -> Self {
-        Self {
-            enabled,
-            ..Self::default()
-        }
+    #[inline]
+    pub fn start(&self) -> Instant {
+        Instant::now()
     }
     #[inline]
-    pub fn start(&self) -> Option<Instant> {
-        self.enabled.then(Instant::now)
-    }
-    #[inline]
-    pub fn finish(&mut self, stage: Stage, start: Option<Instant>) {
-        if let Some(start) = start {
-            let ns = start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
-            self.ns[stage as usize] = self.ns[stage as usize].saturating_add(ns);
-        }
+    pub fn finish(&mut self, stage: Stage, start: Instant) {
+        let ns = start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+        self.ns[stage as usize] = self.ns[stage as usize].saturating_add(ns);
     }
 }
 
 #[derive(Default)]
+struct Snapshot {
+    serial: u64,
+    success: bool,
+    ns: [u64; STAGES.len()],
+    load: [u64; LOADS.len()],
+}
+
 pub(crate) struct CpuProfile {
+    verbose: bool,
+    last: Option<Snapshot>,
     completed: u64,
     frames: u64,
     sum_ns: [u64; STAGES.len()],
@@ -91,6 +91,21 @@ pub(crate) struct CpuProfile {
     last_load: [u64; LOADS.len()],
     max_load: [u64; LOADS.len()],
     sum_upload_bytes: u64,
+}
+impl Default for CpuProfile {
+    fn default() -> Self {
+        Self {
+            verbose: enabled(),
+            last: None,
+            completed: 0,
+            frames: 0,
+            sum_ns: [0; STAGES.len()],
+            max_ns: [0; STAGES.len()],
+            last_load: [0; LOADS.len()],
+            max_load: [0; LOADS.len()],
+            sum_upload_bytes: 0,
+        }
+    }
 }
 impl CpuProfile {
     #[cfg(test)]
@@ -100,7 +115,22 @@ impl CpuProfile {
 
     /// Fixed-size aggregation: no scene traversal, allocation, or log until a
     /// complete batch. Failed recordings and unfinished teardown batches are omitted.
-    pub fn observe(&mut self, frame: &FrameCpu, load: [u64; LOADS.len()]) {
+    pub fn observe(
+        &mut self,
+        frame: &FrameCpu,
+        load: [u64; LOADS.len()],
+        serial: u64,
+        success: bool,
+    ) {
+        self.last = Some(Snapshot {
+            serial,
+            success,
+            ns: frame.ns,
+            load,
+        });
+        if !self.verbose || !success {
+            return;
+        }
         self.frames += 1;
         self.completed += 1;
         for (index, value) in frame.ns.iter().copied().enumerate() {
@@ -120,6 +150,26 @@ impl CpuProfile {
             self.max_load.fill(0);
             self.sum_upload_bytes = 0;
         }
+    }
+
+    // Only requested for a slow frame. No formatting, FFI query or allocation in normal frames.
+    pub fn last_report(&self) -> String {
+        let Some(last) = &self.last else {
+            return "available=false".into();
+        };
+        let mut line = format!(
+            "serial={} record_ok={} timing_ms children=disjoint_within_record_total",
+            last.serial, last.success
+        );
+        for (index, name) in STAGES.iter().enumerate() {
+            let _ = write!(line, " {name}={:.3}", last.ns[index] as f64 / 1e6);
+        }
+        let other = last.ns[0].saturating_sub(last.ns[1..].iter().sum::<u64>());
+        let _ = write!(line, " record_other={:.3}", other as f64 / 1e6);
+        for (index, name) in LOADS.iter().enumerate() {
+            let _ = write!(line, " {name}={}", last.load[index]);
+        }
+        line
     }
 
     fn report(&self) -> String {
@@ -160,18 +210,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn disabled_frame_has_no_timer_and_batch_aggregates_without_resetting_total() {
-        let disabled = FrameCpu::default();
-        assert!(disabled.start().is_none());
-        let mut frame = FrameCpu::new(true);
+    fn coarse_timing_is_always_on_and_snapshot_survives_batch_reset() {
+        let mut frame = FrameCpu::default();
+        frame.finish(
+            Stage::Total,
+            frame.start() - std::time::Duration::from_millis(1),
+        );
+        assert!(frame.ns[Stage::Total as usize] >= 1_000_000);
         frame.ns[Stage::Total as usize] = 4_000_000;
         frame.ns[Stage::Plan as usize] = 1_000_000;
-        let mut profile = CpuProfile::default();
+        let mut profile = CpuProfile {
+            verbose: true,
+            ..Default::default()
+        };
         let mut load = [0; LOADS.len()];
         load[0] = 1u64 << 33;
         load[13] = 4096;
         for _ in 0..119 {
-            profile.observe(&frame, load);
+            profile.observe(&frame, load, 91, true);
         }
         assert_eq!(profile.frames, 119);
         assert_eq!(profile.sum_ns[0], 476_000_000);
@@ -181,10 +237,20 @@ mod tests {
                 .report()
                 .contains("record_total=476.000/4.000/4.000")
         );
-        profile.observe(&frame, load);
+        profile.observe(&frame, load, 91, true);
         assert_eq!(profile.frames, 0);
         assert_eq!(profile.completed, 120);
         assert_eq!(profile.sum_ns, [0; STAGES.len()]);
         assert_eq!(profile.sum_upload_bytes, 0);
+        assert_eq!(profile.last.as_ref().unwrap().serial, 91);
+        assert_eq!(profile.last.as_ref().unwrap().ns[0], 4_000_000);
+        profile.verbose = false;
+        frame.ns[0] = 51_000_000;
+        profile.observe(&frame, load, 92, false);
+        assert_eq!(profile.frames, 0);
+        let report = profile.last_report();
+        assert!(report.contains("serial=92 record_ok=false"));
+        assert!(report.contains("record_total=51.000"));
+        assert!(report.contains("static_triangles=8589934592"));
     }
 }

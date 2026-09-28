@@ -105,6 +105,11 @@ final class TerrainRouterCpuSmoke {
                           "Fully hidden models publish empty availability without placements");
                     check(batch.batches().size() == (keyed && iteration == 0 ? 2 : 1),
                           "Invisible temporary definitions never enter the native resource dictionary");
+                    check(model.keyCalls == 4096 * (iteration + 1),
+                          "Real key callbacks are never skipped");
+                    if (keyed)
+                        check(model.hashCalls <= 8,
+                              "Repeated identity does not rehash 4096 keys per section");
                     check(model.calls == (keyed ? 1 : 4096 * (iteration + 1)),
                           "Visibility filtering retains required null-key source callbacks");
                 }
@@ -140,12 +145,18 @@ final class TerrainRouterCpuSmoke {
     static final class Model implements BlockStateModel {
         final boolean keyed;
         Direction face;
-        int calls;
+        int calls, keyCalls, hashCalls;
+        @Override
+        public int hashCode() {
+            ++hashCalls;
+            return System.identityHashCode(this);
+        }
         Model(boolean keyed) {
             this.keyed = keyed;
         }
         public Object createGeometryKey(BlockAndTintGetter level, BlockPos pos, BlockState state,
                                         RandomSource random) {
+            ++keyCalls;
             return keyed ? this : null;
         }
         public void emitQuads(QuadEmitter e, BlockAndTintGetter level, BlockPos pos,

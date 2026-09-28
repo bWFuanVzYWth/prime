@@ -61,6 +61,8 @@ public final class TerrainRouter implements AutoCloseable {
             if (region != null) {
                 var origin = section.origin();
                 var neighbor = new BlockPos.MutableBlockPos();
+                Object previousKey = null;
+                Geometry previousGeometry = null;
                 for (var pos : BlockPos.betweenClosed(origin, origin.offset(15, 15, 15))) {
                     var state = region.getBlockState(pos);
                     if (state.isAir())
@@ -76,7 +78,11 @@ public final class TerrainRouter implements AutoCloseable {
                     long seed = state.getSeed(pos);
                     random.setSeed(seed);
                     Object key = model.createGeometryKey(region, pos, state, random);
-                    Geometry geometry = key == null ? null : handles.get(key);
+                    // The real key callback still runs for every placement. An identical
+                    // consecutive key is already MRU, so it needs no hash lookup or LRU write.
+                    Geometry geometry = key == null          ? null
+                                        : key == previousKey ? previousGeometry
+                                                             : handles.get(key);
                     if (geometry == null) {
                         long id = inbox.routeIdentity();
                         definitions.header(13, epoch).i(1).i(0).l(id).i(0).i(0);
@@ -100,6 +106,8 @@ public final class TerrainRouter implements AutoCloseable {
                             handles.put(key, geometry);
                         }
                     }
+                    previousKey = key;
+                    previousGeometry = geometry;
                     int visible = 64;
                     for (int face = 0; face < FACES.length; ++face) {
                         var direction = FACES[face];

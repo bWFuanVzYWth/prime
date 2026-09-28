@@ -15,6 +15,11 @@ public abstract class GameRendererMixin {
         PrimeClient.beginFrame();
     }
 
+    @Inject(method = "extract", at = @At("RETURN"))
+    private void primept$extractionDone(CallbackInfo callback) {
+        PrimeClient.endExtraction();
+    }
+
     @Inject(method = "renderLevel", at = @At("HEAD"))
     private void primept$profileStart(CallbackInfo callback) {
         PrimeClient.beginWorldRender();

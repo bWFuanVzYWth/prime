@@ -10,6 +10,7 @@ public interface LoadedTerrainSnapshot {
     default ColumnWindow primept$sourceWindow() {
         return null;
     }
+    void primept$visitLoaded(java.util.function.Consumer<LevelChunk> visitor);
     void primept$bindChunkStorage(AtomicReferenceArray<LevelChunk> chunks);
     void primept$restoreTerrainSnapshot(SectionOcclusionGraph graph);
 }

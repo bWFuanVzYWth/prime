@@ -2,6 +2,7 @@ package dev.primept;
 
 import dev.primept.settings.RenderSettings;
 import dev.primept.capture.Packets;
+import dev.primept.capture.SourcePages;
 
 import java.io.IOException;
 import java.lang.foreign.Arena;
@@ -21,11 +22,11 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import static java.lang.foreign.ValueLayout.*;
 
-/** One render-thread owner. Native code must copy every borrowed argument before returning. */
+/** One render-thread owner. Native code consumes borrowed input before return and owns all retained data. */
 public final class NativeBridge implements AutoCloseable {
     private final Thread owner = Thread.currentThread();
     private final MethodHandle submit, renderDiagnostic, attachVulkan, configure, record, gpuTime,
-            destroy, lastError;
+            cpuDiagnostics, planSections, acceptSections, destroy, lastError;
     private final Arena fixedArena = Arena.ofConfined();
     private final MemorySegment frame = fixedArena.allocate(104, 8);
     private final MemorySegment host = fixedArena.allocate(48, 8);
@@ -33,6 +34,8 @@ public final class NativeBridge implements AutoCloseable {
     private final ByteBuffer settingsBuffer =
             settingsPacket.asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
     private final MemorySegment errorBuffer = fixedArena.allocate(4096);
+    private final MemorySegment cpuBuffer = fixedArena.allocate(8192);
+    private final MemorySegment sourceRequest = fixedArena.allocate(16, 8);
     private final ByteBuffer frameBuffer = frame.asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
     private Arena packetArena;
     private MemorySegment packetBuffer;
@@ -60,6 +63,13 @@ public final class NativeBridge implements AutoCloseable {
                    FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_LONG, JAVA_LONG,
                                          JAVA_LONG, JAVA_LONG, JAVA_LONG));
             gpuTime = bind(lookup, "prime_gpu_time", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG));
+            cpuDiagnostics = bind(lookup, "prime_cpu_diagnostics",
+                                  FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_LONG));
+            planSections =
+                    bind(lookup, "prime_mc_plan",
+                         FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
+            acceptSections = bind(lookup, "prime_mc_sections",
+                                  FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_LONG));
             destroy = bind(lookup, "prime_destroy", FunctionDescriptor.of(JAVA_INT, JAVA_LONG));
             lastError = bind(lookup, "prime_last_error",
                              FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG));
@@ -117,6 +127,32 @@ public final class NativeBridge implements AutoCloseable {
             int status = (int)submit.invokeExact(handle, packet, packet.byteSize());
             if (status != 0)
                 throw new IllegalStateException("prime_submit (" + status + "): " + error());
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    /** Exactly one synchronous Rust demand batch. Its view expires when sections() is called. */
+    public MemorySegment requestSections(SourcePages events) {
+        checkOwner();
+        try {
+            int status = (int)planSections.invokeExact(handle, events.table(), events.pageCount(),
+                                                       sourceRequest);
+            if (status != 0)
+                throw new IllegalStateException("prime_mc_plan: " + error());
+            long length = sourceRequest.get(JAVA_LONG, 8);
+            return sourceRequest.get(ADDRESS, 0).reinterpret(length);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+    public void sections(SourcePages response) {
+        checkOwner();
+        try {
+            int status =
+                    (int)acceptSections.invokeExact(handle, response.table(), response.pageCount());
+            if (status != 0)
+                throw new IllegalStateException("prime_mc_sections: " + error());
         } catch (Throwable failure) {
             throw rethrow(failure);
         }
@@ -180,6 +216,23 @@ public final class NativeBridge implements AutoCloseable {
         checkOwner();
         try {
             return (long)gpuTime.invokeExact(handle);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    /** Formats the last native CPU record only on demand; never waits for or reads back the GPU. */
+    public String cpuDiagnostics() {
+        checkOwner();
+        try {
+            long length = (long)cpuDiagnostics.invokeExact(handle, cpuBuffer, cpuBuffer.byteSize());
+            if (length < 0)
+                throw new IllegalStateException("prime_cpu_diagnostics: " + error());
+            if (length >= cpuBuffer.byteSize())
+                throw new IllegalStateException(
+                        "CPU diagnostic record exceeded its bounded buffer");
+            return new String(cpuBuffer.asSlice(0, length).toArray(JAVA_BYTE),
+                              java.nio.charset.StandardCharsets.UTF_8);
         } catch (Throwable failure) {
             throw rethrow(failure);
         }

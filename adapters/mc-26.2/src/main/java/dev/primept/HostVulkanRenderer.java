@@ -146,6 +146,10 @@ public final class HostVulkanRenderer implements AutoCloseable {
             retainedBridge = bridge;
     }
 
+    public NativeBridge sourceBridge() {
+        return bridge;
+    }
+
     public void submit(byte[] packet) {
         bridge.submit(packet);
     }
@@ -165,6 +169,13 @@ public final class HostVulkanRenderer implements AutoCloseable {
     }
     public ByteBuffer frameBuffer() {
         return bridge.frameBuffer();
+    }
+    private long lastCpuSerial;
+    public long lastCpuSerial() {
+        return lastCpuSerial;
+    }
+    public String cpuDiagnostics() {
+        return bridge.cpuDiagnostics();
     }
     public long lastGpuTimeNanos() {
         return bridge.lastGpuTimeNanos();
@@ -210,6 +221,7 @@ public final class HostVulkanRenderer implements AutoCloseable {
         var command = encoder.allocateAndBeginTransientCommandBuffer();
         long submitValue =
                 ((VulkanCommandEncoderAccessor)(Object)encoder).primept$currentSubmitIndex();
+        lastCpuSerial = submitValue;
         bridge.record(command.address(), texture.vkImage(), view.vkImageView(), submitValue);
         int status = VK10.vkEndCommandBuffer(command);
         if (status != VK10.VK_SUCCESS)

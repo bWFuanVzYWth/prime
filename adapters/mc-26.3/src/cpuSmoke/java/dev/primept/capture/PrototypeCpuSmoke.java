@@ -35,7 +35,7 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
             if (Boolean.getBoolean("primept.smoke.foreignWrapper")) {
                 GeometryCacheCpuSmoke.foreign();
                 ItemCpuSmoke.foreign();
-                TerrainEmptyCpuSmoke.foreign();
+                SectionSourcesCpuSmoke.run();
                 System.exit(0);
             }
             TargetResizeCpuSmoke.run();
@@ -45,6 +45,7 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
             FabricMeshCpuSmoke.run();
             ItemCpuSmoke.run();
             ExclusiveTerrainCpuSmoke.run();
+            dev.primept.RenderProfileCpuSmoke.run();
             run();
             System.out.println(
                     "PRIME_PT_CPU_SMOKE_OK: actual transformed Cube/Draw hooks, 10000 instances, unchanged frame=0B, mutation, skipped native submit, raw fallback");
