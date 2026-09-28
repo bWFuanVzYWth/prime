@@ -6,6 +6,79 @@ use std::io::Write;
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+#[test]
+#[ignore = "large exact biome sampling costs; run release alone with PRIME_BIOME_CSV"]
+fn biome_stream_cost() {
+    use crate::biome::{Cache, Recipe, Resolver};
+    let samples: usize = std::env::var("PRIME_BIOME_SAMPLES").map_or(33, |v| v.parse().unwrap());
+    let mut file = std::fs::File::create(std::env::var("PRIME_BIOME_CSV").unwrap()).unwrap();
+    writeln!(
+        file,
+        "case,radius,sample,warmup,requests,host_samples,plan_ms,filter_ms,total_ms,checksum"
+    )
+    .unwrap();
+    for mode in ["flat", "surface", "sparse"] {
+        let mut requests = Vec::new();
+        for z in -128_i32..128 {
+            for x in -128_i32..128 {
+                if mode == "sparse" && !matches!((x & 15, z & 15), (0, 0) | (15, 15)) {
+                    continue;
+                }
+                requests.push(tint::Request {
+                    position: [
+                        x,
+                        64 + if mode == "surface" {
+                            (x * 7 + z * 11) & 15
+                        } else {
+                            0
+                        },
+                        z,
+                    ],
+                    state: 0,
+                    slot: 0,
+                });
+            }
+        }
+        let recipes = vec![
+            Recipe::Biome {
+                resolver: Resolver::Grass,
+                below: false
+            };
+            requests.len()
+        ];
+        for radius in [0, 2, 7] {
+            for sample in 0..samples {
+                let mut cache = Cache::default();
+                let start = std::time::Instant::now();
+                let plan = cache.prepare(requests.iter().copied(), &recipes, radius);
+                let plan_ms = start.elapsed().as_secs_f64() * 1000.;
+                let host_samples = plan.samples.len();
+                // Explicit deterministic source response; host evaluation is outside the timer.
+                let colors: Vec<_> = plan
+                    .samples
+                    .iter()
+                    .map(|q| {
+                        let [x, y, z] = q.position;
+                        0xff00_0000
+                            | ((x.wrapping_mul(741103597)
+                                ^ y.wrapping_mul(341873128)
+                                ^ z.wrapping_mul(132897987)) as u32
+                                & 0x00ff_ffff)
+                    })
+                    .collect();
+                let start = std::time::Instant::now();
+                let result = cache.finish(plan, &colors);
+                let filter_ms = start.elapsed().as_secs_f64() * 1000.;
+                let checksum = result
+                    .iter()
+                    .fold(0u64, |h, &c| h.wrapping_mul(31).wrapping_add(c as u64));
+                writeln!(file, "{mode},{radius},{sample},{},{},{host_samples},{plan_ms},{filter_ms},{},{checksum}", sample < 3, requests.len(), plan_ms + filter_ms).unwrap();
+            }
+            file.flush().unwrap();
+        }
+    }
+}
+
 fn definitions(out: &mut Vec<u8>) {
     for v in [5, 1, 2, 0] {
         u32_to(out, v);

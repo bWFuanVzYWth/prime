@@ -147,7 +147,11 @@ impl MeshVersion {
 #[derive(Default)]
 pub(crate) struct DynamicMesh {
     pub texture_ids: BTreeSet<u32>,
+    /// Last accepted observation, independently of the last changed geometry.
+    pub sequence: u64,
     pub revision: u64,
+    /// Owned validated op6 payload (origin, descriptors and source bytes), excluding its sequence.
+    pub source: Vec<u8>,
     pub origin: [f64; 3],
     pub triangles: Arc<Vec<Triangle>>,
     pub bounds: [[f32; 3]; 2],
@@ -237,6 +241,7 @@ impl SourceScene {
         })
     }
 
+    /// Last changed op6 content. Identical observations still consume their source sequence.
     pub fn dynamic_revision(&self) -> u64 {
         self.dynamic.revision
     }

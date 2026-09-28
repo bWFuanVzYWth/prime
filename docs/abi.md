@@ -68,7 +68,7 @@ section 压缩数据为 `bits:u32, palette_count:u32, word_count:u32`、palette_
 
 kind=3 的头后为 `count:u64, biome_blend_radius:i32`，随后 count 个 `{source_kind:u32, value:u32}`。source_kind=0是已求值 ARGB；1/2/3/4是原版 grass/foliage/dry foliage/water resolver，value必须0；5是 double tall grass，value为实际 upper-half 属性（0/1），由 Rust 解释下方查询。半径为0..7。Java 仅通过与已核验原版工厂完全相同的实际 source 类绑定这些声明，不按方块名猜测、不执行回调后推断规则；其余实际 source 执行一次 `colorInWorld`，保留全部 ARGB 通道。对这些内置类/静态 resolver 的 Mixin 修改不在当前第三方兼容保证内。
 
-Rust 按解析器、Y 和局部平面查询范围组织带 halo 的小格；重叠原始样本按位置/解析器去重。phase=1 请求 count 条16字节 `{world_x/y/z:i32, resolver:u32}`，resolver为1..4；Java 只调用实际 `ClientLevel.getBiome` 与对应 `ColorResolver.getColor`。kind=4 的头后为 `count:u64` 和 count 个原始 `ARGB:u32`。Rust 通过整数前缀和计算与原版逐点累加相同的 box filter、整数除法和 alpha；半径0直接保留原始 ARGB。采样局限于实际查询形成的局部矩形及 halo，稀疏查询之间可能包含额外样本；没有 Java 混合循环。
+Rust 按解析器、实际 Y 和局部平面查询范围组织带 halo 的小格；行位掩码保留每个查询混合方形的精确并集，重叠样本通过16×16源块索引去重，稀疏空洞不请求宿主。phase=1 请求 count 条16字节 `{world_x/y/z:i32, resolver:u32}`，resolver为1..4；Java 只调用实际 `ClientLevel.getBiome` 与对应 `ColorResolver.getColor`。kind=4 的头后为 `count:u64` 和 count 个原始 `ARGB:u32`。Rust 通过整数前缀和计算与原版逐点累加相同的 box filter、整数除法和 alpha；半径0直接读取原始 ARGB，不建立前缀和。样本顺序由查询分组及行列顺序确定，不依赖哈希表遍历；没有 Java 混合循环。
 
 标准混合结果按查询所在 section/局部位置/解析器保存在显式 Rust 上下文中；相同群系依赖下的几何编辑直接复用。宿主颜色列/全局失效、混合半径变化、资源代次和世界切换撤销缓存；移出活动/依赖范围回收对应 section 条目，包括双高植物向下一段查询的依赖。常量及未知源结果不跨批缓存，不能假定任意外部回调纯净。
 
@@ -146,6 +146,8 @@ op=6 的固定头共 **64 字节**：
 op6 另外接受 **topology=1 的参数 billboard**，该变体不用于 op7 原型。此时 count 是粒子数，固定 stride=52、position_offset=0、color_offset=48、uv_offset=32。每条记录为中心 f32×3、四元数 xyzw f32×4、scale:f32、u0/u1/v0/v1:f32×4、RGBA8。四元数可非单位但必须可归一化；Rust 保持 q*v*q⁻¹ 的旋转语义，再乘 scale、加中心。局部角依次为 (1,-1)、(1,1)、(-1,1)、(-1,-1)，UV 对应 (u1,v1)、(u1,v0)、(u0,v0)、(u0,v1)。原版光栅 light 不传递。相邻同材质参数 span 合并，不逐粒子 FFM。
 
 整个包验证成功后才替换旧快照；尾随字节、缺失纹理、旧 epoch/sequence 或中间 span 无效均不改变已有场景。`span_count=0` 是有效的清空操作，防止对象消失后留下旧几何。texture_id=0 仅表示明确的无纹理白色，非零引用必须在提交快照前上传。静态区块与动态快照不共用对象 ID；动态更新不递增静态 revision，也不重新翻译静态 mesh 表。
+
+观察 sequence 与内容 revision 分开：Rust 自持最后一次成功验证的源 payload（原点、描述及源字节，不含 sequence），逐字节证明相同的局部输入可复用解码后的 Arc。原点也相同时只消费新 sequence，不重新翻译或分桶；仅原点变化时推进内容 revision，复用局部几何并重新进行位置相关规划。仍拒绝重复/倒退 sequence；失败包不更新证明或序号，epoch 重置清除两者。比较包括源 padding 等全部 payload 字节，可能保守地重算，不使用哈希碰撞或近似相等。持续变化的输入仍完整解码，并复制新的源证明，缓存容量保留历史最大单包大小。
 
 Java `DynamicFrame` 保留一个按需增长的 confined native arena，相邻同描述 span 可合并。FFM 每帧借用一次 sealed segment；Rust 在返回前完成解码并拥有结果；raw 使用可复用 Vec 工作区，发布后通过 Arc 保持只读。仅在真实消费者全部释放后才重新借用工作区，失败包不覆盖旧帧。借用只覆盖该次同步调用，不能跨下一次 `begin`、扩容或 `close`；GPU 完成与这段源字节的寿命无关。源纹理变化仍通过独立 op=4 增量提交。
 

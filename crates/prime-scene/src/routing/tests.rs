@@ -318,7 +318,10 @@ fn parameter_particles_join_before_atomic_publication_and_release_input_borrows(
         assert!(Arc::ptr_eq(&original, &many.dynamic.triangles));
     }
     many.submit(&good).unwrap();
-    assert_eq!(many.dynamic.revision, 2);
+    assert_eq!(many.dynamic.sequence, 2);
+    assert_eq!(many.dynamic.revision, 1);
+    assert!(many.submit(&good).is_err());
+    assert!(Arc::ptr_eq(&original, &many.dynamic.triangles));
     assert!(close(&many.dynamic.triangles[8199], &original[8199]));
     many.submit(&particles(3, 0)).unwrap();
     assert!(many.dynamic.triangles.is_empty());

@@ -267,13 +267,27 @@ impl SourceScene {
                 let origin = input.origin()?;
                 let span_count = input.u32()? as usize;
                 input.zero()?;
-                if sequence <= self.dynamic.revision {
+                if sequence <= self.dynamic.sequence {
                     return Err(
                         "dynamic frame sequence must increase within its resource epoch".into(),
                     );
                 }
                 if span_count > (input.data.len() - input.offset) / 32 {
                     return Err("truncated dynamic span descriptors".into());
+                }
+                // Exact bytes, not a hash or a frame-age heuristic. This owned payload was
+                // fully validated before publication and its texture references are still held.
+                // Source callbacks have already run; unchanged observations only advance ordering.
+                let payload = &bytes[32..];
+                if self.dynamic.source.get(24..) == Some(&payload[24..]) {
+                    self.dynamic.sequence = sequence;
+                    if self.dynamic.origin.map(f64::to_bits) != origin.map(f64::to_bits) {
+                        // The local geometry is unchanged even when its world origin moves.
+                        self.dynamic.revision = sequence;
+                        self.dynamic.origin = origin;
+                        self.dynamic.source[..24].copy_from_slice(&payload[..24]);
+                    }
+                    return Ok(());
                 }
                 // Only reclaim allocations with no published CPU borrower. A failed decode
                 // returns its private workspace without changing the visible snapshot.
@@ -379,6 +393,15 @@ impl SourceScene {
                         return Err(error);
                     }
                 };
+                if self
+                    .dynamic
+                    .source
+                    .try_reserve(payload.len().saturating_sub(self.dynamic.source.len()))
+                    .is_err()
+                {
+                    self.dynamic_spares.push(storage);
+                    return Err("dynamic source cache allocation failed".into());
+                }
                 for &id in &texture_ids {
                     self.texture_lifetime.acquire(id);
                 }
@@ -389,6 +412,9 @@ impl SourceScene {
                 self.dynamic_spares
                     .push(std::mem::replace(&mut self.dynamic.triangles, storage));
                 self.dynamic.revision = sequence;
+                self.dynamic.sequence = sequence;
+                self.dynamic.source.clear();
+                self.dynamic.source.extend_from_slice(payload);
                 self.dynamic.origin = origin;
                 self.dynamic.bounds = bounds;
                 changed = false;

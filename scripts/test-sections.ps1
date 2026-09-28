@@ -5,7 +5,8 @@ param(
     [ValidateRange(1, 10000)][int]$Warmup = 8,
     [ValidateRange(3, 10000)][int]$Samples = 25,
     [ValidateRange(1, 100)][int]$Rounds = 3,
-    [ValidateRange(2, 16)][int]$Side = 2
+    [ValidateRange(2, 16)][int]$Side = 2,
+    [ValidateRange(2, 16)][int]$TintSide = 2
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,7 +21,7 @@ $previousRoot = $env:PRIME_SECTION_SUITE_ROOT
 $previousThreads = $env:PRIME_CPU_THREADS
 $metadata = [ordered]@{
     format = 1; status = 'running'; startedUtc = [DateTime]::UtcNow.ToString('o')
-    threads = $Threads; warmup = $Warmup; samples = $Samples; rounds = $Rounds; bench = [bool]$Bench; side = $Side
+    threads = $Threads; warmup = $Warmup; samples = $Samples; rounds = $Rounds; bench = [bool]$Bench; side = $Side; tintSide = $TintSide
     scope = 'CPU only; actual MC SectionCompiler vs production Java/FFM/Rust source pipeline; controlled baked resources; neutral lighting; no game/window/GPU'
     processor = $env:PROCESSOR_IDENTIFIER; logicalProcessors = [Environment]::ProcessorCount
     os = [Environment]::OSVersion.VersionString
@@ -48,7 +49,7 @@ try {
         Copy-Item -LiteralPath (Join-Path $workspace $relative) -Destination $copy
     }
     Save-Metadata
-    $gradleArgs = @(':mc-26.2:cpuSmoke', ':mc-26.3:cpuSmoke', '--no-parallel', '-PprimeptSectionSuite=true', "-PprimeptSectionThreads=$Threads", "-PprimeptSectionSide=$Side", "-PprimeptSectionOutput=$Output")
+    $gradleArgs = @(':mc-26.2:cpuSmoke', ':mc-26.3:cpuSmoke', '--no-parallel', '-PprimeptSectionSuite=true', "-PprimeptSectionThreads=$Threads", "-PprimeptSectionSide=$Side", "-PprimeptSectionTintSide=$TintSide", "-PprimeptSectionOutput=$Output")
     Run-Checked 'generate' '.\gradlew.bat' $gradleArgs
     $dll = Join-Path $workspace 'build/section-bench-native/release/prime_engine.dll'
     $metadata.nativeSha256 = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash

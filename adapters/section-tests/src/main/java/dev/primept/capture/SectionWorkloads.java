@@ -59,7 +59,7 @@ final class SectionWorkloads {
                                                      models, -1, 0, side));
         }
     }
-    private static Map<BlockPos, BlockState> snapshot(Map<BlockPos, BlockState> blocks) {
+    static Map<BlockPos, BlockState> snapshot(Map<BlockPos, BlockState> blocks) {
         // Large regular coordinate grids cluster in MapN's open-addressed table. This copy is
         // outside timing, and keeps the immutable fixture without quadratic Map.copyOf setup.
         return java.util.Collections.unmodifiableMap(new HashMap<>(blocks));

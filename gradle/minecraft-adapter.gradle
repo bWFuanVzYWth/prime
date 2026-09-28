@@ -118,6 +118,7 @@ tasks.register('cpuSmoke', JavaExec) {
     systemProperty 'primept.section.warmup', providers.gradleProperty('primeptSectionWarmup').getOrElse('8')
     systemProperty 'primept.section.samples', providers.gradleProperty('primeptSectionSamples').getOrElse('25')
     systemProperty 'primept.section.side', providers.gradleProperty('primeptSectionSide').getOrElse('2')
+    systemProperty 'primept.section.tintSide', providers.gradleProperty('primeptSectionTintSide').getOrElse('2')
     systemProperty 'primept.smoke.routingDirectory', providers.gradleProperty('primeptSectionOutput').map { rootProject.file("${it}/mc-${minecraftVersion}").absolutePath }.getOrElse(layout.buildDirectory.dir('routing-fixtures').get().asFile.absolutePath)
     systemProperty 'primept.smoke.nativeLibrary', providers.gradleProperty('primeptSectionNativeLibrary').map { rootProject.file(it).absolutePath }.getOrElse(rootProject.file(providers.gradleProperty('primeptSectionSuite').isPresent() ? "build/section-bench-native/release/${hostLibraryName}" : "build/source-cpu-native/debug/${hostLibraryName}").absolutePath)
     systemProperty 'fabric.addMods', tasks.named('cpuSmokeJar').get().archiveFile.get().asFile.absolutePath

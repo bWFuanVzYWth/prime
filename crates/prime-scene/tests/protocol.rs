@@ -506,7 +506,9 @@ fn dynamic_storage_reuses_only_after_real_snapshot_consumers_release() {
     let spans = [dynamic_span(0, 0, 4)];
     let mut addresses = BTreeSet::new();
     for sequence in 1..=50 {
-        source.submit(&dynamic(1, sequence, &spans)).unwrap();
+        let mut packet = dynamic(1, sequence, &spans);
+        packet[96..100].copy_from_slice(&(sequence as f32 * 0.25).to_le_bytes());
+        source.submit(&packet).unwrap();
         translated
             .update(&mut source, [29_999_984.0, 64.0, -16.0])
             .unwrap();
@@ -519,7 +521,9 @@ fn dynamic_storage_reuses_only_after_real_snapshot_consumers_release() {
     let frozen = source.translate([29_999_984.0, 64.0, -16.0]).unwrap();
     let retained = frozen.dynamic.triangles.as_ptr();
     for sequence in 51..=60 {
-        source.submit(&dynamic(1, sequence, &spans)).unwrap();
+        let mut packet = dynamic(1, sequence, &spans);
+        packet[96..100].copy_from_slice(&(sequence as f32 * 0.25).to_le_bytes());
+        source.submit(&packet).unwrap();
         translated
             .update(&mut source, [29_999_984.0, 64.0, -16.0])
             .unwrap();
@@ -529,6 +533,89 @@ fn dynamic_storage_reuses_only_after_real_snapshot_consumers_release() {
     let invalid = dynamic(1, 61, &spans);
     assert!(source.submit(&invalid[..invalid.len() - 1]).is_err());
     assert_eq!(source.dynamic_revision(), 60);
+}
+
+#[test]
+fn identical_dynamic_observations_retain_content_but_consume_their_sequences() {
+    use prime_scene::{
+        incremental::TranslatedScene,
+        translation::{BatchLimits, Planner},
+    };
+    let anchor = [29_999_984.0, 64.0, -16.0];
+    let mut source = initialized();
+    let mut translated = TranslatedScene::default();
+    let mut planner = Planner::new(BatchLimits {
+        triangles: 1024,
+        placements: 1024,
+    })
+    .unwrap();
+    let spans = [dynamic_span(0, 0, 4), dynamic_span(0, 2, 3)];
+    let mut packet = dynamic(1, 1, &spans);
+    packet[96..100].copy_from_slice(&0f32.to_le_bytes());
+    source.submit(&packet).unwrap();
+    translated.update(&mut source, anchor).unwrap();
+    let frozen = source.translate_dynamic(anchor).unwrap();
+    let plan = planner
+        .plan(&translated.input(), source.instance_input())
+        .unwrap();
+    assert!(!plan.geometry.is_empty());
+    planner.recycle(plan);
+    for sequence in 2..=40u64 {
+        packet[24..32].copy_from_slice(&sequence.to_le_bytes());
+        source.submit(&packet).unwrap();
+        assert!(
+            !translated
+                .update(&mut source, anchor)
+                .unwrap()
+                .dynamic_changed
+        );
+        assert_eq!(source.dynamic_revision(), 1);
+        assert!(std::sync::Arc::ptr_eq(
+            &frozen.triangles,
+            &translated.input().dynamic.triangles
+        ));
+        let plan = planner
+            .plan(&translated.input(), source.instance_input())
+            .unwrap();
+        assert!(plan.geometry.is_empty() && !plan.tlas_changed);
+        planner.recycle(plan);
+        assert!(
+            source.submit(&packet).is_err(),
+            "identical content still consumes sequence"
+        );
+    }
+    // Failed input cannot overwrite the proof or consume the next observation.
+    packet[24..32].copy_from_slice(&41u64.to_le_bytes());
+    let mut invalid = packet.clone();
+    invalid[96..100].copy_from_slice(&f32::NAN.to_le_bytes());
+    assert!(source.submit(&invalid).is_err());
+    source.submit(&packet).unwrap();
+    assert_eq!(source.dynamic_revision(), 1);
+    // Origin and every source bit remain part of equality, including signed zero.
+    packet[24..32].copy_from_slice(&42u64.to_le_bytes());
+    packet[32..40].copy_from_slice(&29_999_985f64.to_le_bytes());
+    source.submit(&packet).unwrap();
+    assert!(
+        translated
+            .update(&mut source, anchor)
+            .unwrap()
+            .dynamic_changed
+    );
+    assert_eq!(source.dynamic_revision(), 42);
+    assert_eq!(translated.input().dynamic.origin, [29_999_985., 64., -16.]);
+    assert_eq!(frozen.origin, [29_999_984., 64., -16.]);
+    assert!(std::sync::Arc::ptr_eq(
+        &frozen.triangles,
+        &translated.input().dynamic.triangles
+    ));
+    packet[24..32].copy_from_slice(&43u64.to_le_bytes());
+    packet[96..100].copy_from_slice(&(-0f32).to_le_bytes());
+    source.submit(&packet).unwrap();
+    assert_eq!(source.dynamic_revision(), 43);
+    assert_eq!(
+        frozen.triangles[0].positions[0][0].to_bits(),
+        0f32.to_bits()
+    );
 }
 
 #[test]

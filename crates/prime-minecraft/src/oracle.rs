@@ -178,10 +178,16 @@ fn replay_tints(
             requests[..8].copy_from_slice(&batch.to_le_bytes());
             response[24..32].copy_from_slice(&batch.to_le_bytes());
         }
-        assert_eq!(
-            context.tint_requests(),
-            requests,
-            "host/native request ordering: {case}/{suffix}"
+        assert!(
+            context.tint_requests() == requests,
+            "host/native request ordering: {case}/{suffix}; first differing byte {:?}, lengths {}/{}",
+            context
+                .tint_requests()
+                .iter()
+                .zip(&requests)
+                .position(|(a, b)| a != b),
+            context.tint_requests().len(),
+            requests.len()
         );
         context.accept(&[&response], output).unwrap();
     }
@@ -447,7 +453,10 @@ fn biome_only_invalidation_matches_vanilla_without_resending_sections() {
                 difference(&before, &expected).is_err(),
                 "biome fixture must change actual colors"
             );
+            let window = input[32..76].to_vec();
             let mut input = frame(2, 0., 1, [-1, 1], &[(7, Section(0, 0, 0))]);
+            // Keep the generated workload's window when testing only color invalidation.
+            input[32..76].copy_from_slice(&window);
             input[8..12].copy_from_slice(&version.to_le_bytes());
             assert!(requests(&mut ctx, &input).is_empty());
             let mut source = crate::tests::header(2, 2);
@@ -455,11 +464,12 @@ fn biome_only_invalidation_matches_vanilla_without_resending_sections() {
             u32_to(&mut source, 0);
             ctx.accept(&[&source], &mut output).unwrap();
             assert_eq!(ctx.stats.changed, 0);
-            assert!(ctx.stats.compiled > 0 && ctx.stats.compiled < 27);
+            assert!(ctx.stats.compiled > 0 && ctx.stats.compiled < workload_size(&root, &base).0);
             replay_tints(&mut ctx, &mut output, &root, &changed, Some(2));
             difference(&expected, &triangles(&output)).unwrap();
             // An unrelated biome arrival cannot rebuild these sections.
             input = frame(3, 0., 1, [-1, 1], &[(6, Section(30, 0, 30))]);
+            input[32..76].copy_from_slice(&window);
             input[8..12].copy_from_slice(&version.to_le_bytes());
             assert!(requests(&mut ctx, &input).is_empty());
             source[24..32].copy_from_slice(&3u64.to_le_bytes());

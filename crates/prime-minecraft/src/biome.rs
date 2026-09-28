@@ -131,25 +131,54 @@ impl Cache {
             }
             tile.wanted.push((index, query));
         }
-        let mut unique = HashMap::new();
+        // Index a whole source row fragment at once, rather than hashing every sample.
+        // The value is separately allocated so growing the map does not move 256 indices.
+        let mut unique: HashMap<(Resolver, i32, i32, i32), Box<[usize; 256]>> = HashMap::new();
         let mut samples = Vec::new();
         let mut output = Vec::with_capacity(tiles.len());
         for ((resolver, y, _, _), mut tile) in tiles {
             tile.min = tile.min.map(|p| p - radius);
             tile.max = tile.max.map(|p| p + radius);
             tile.width = (tile.max[0] - tile.min[0] + 1) as usize;
-            for z in tile.min[1]..=tile.max[1] {
-                for x in tile.min[0]..=tile.max[0] {
-                    let query = Sample {
-                        position: [x, y, z],
-                        resolver,
-                    };
-                    let index = *unique.entry(query).or_insert_with(|| {
-                        let n = samples.len();
-                        samples.push(query);
-                        n
-                    });
-                    tile.samples.push(index);
+            let height = (tile.max[1] - tile.min[1] + 1) as usize;
+            // Queries occupy one 16x16 tile; the validated maximum radius is 7.
+            // Keep exactly the union of requested squares, including holes in sparse tiles.
+            let mut rows = [0u32; 30];
+            let side = (radius * 2 + 1) as usize;
+            for (_, query) in &tile.wanted {
+                let x = (query.position[0] - radius - tile.min[0]) as usize;
+                let z = (query.position[2] - radius - tile.min[1]) as usize;
+                let mask = ((1u32 << side) - 1) << x;
+                for row in &mut rows[z..z + side] {
+                    *row |= mask;
+                }
+            }
+            tile.samples.resize(tile.width * height, usize::MAX);
+            for (row, &mask) in rows[..height].iter().enumerate() {
+                let z = tile.min[1] + row as i32;
+                let mut pending = mask;
+                while pending != 0 {
+                    let x = tile.min[0] + pending.trailing_zeros() as i32;
+                    let end = ((x | 15) - tile.min[0] + 1).min(tile.width as i32);
+                    let mut fragment = pending & ((1u32 << end) - 1);
+                    pending &= !fragment;
+                    let indices = unique
+                        .entry((resolver, y, x >> 4, z >> 4))
+                        .or_insert_with(|| Box::new([usize::MAX; 256]));
+                    while fragment != 0 {
+                        let column = fragment.trailing_zeros() as usize;
+                        fragment &= fragment - 1;
+                        let x = tile.min[0] + column as i32;
+                        let index = &mut indices[((z & 15) * 16 + (x & 15)) as usize];
+                        if *index == usize::MAX {
+                            *index = samples.len();
+                            samples.push(Sample {
+                                position: [x, y, z],
+                                resolver,
+                            });
+                        }
+                        tile.samples[row * tile.width + column] = *index;
+                    }
                 }
             }
             output.push(tile);
@@ -168,11 +197,25 @@ impl Cache {
             let stride = tile.width + 1;
             let height = tile.samples.len() / tile.width;
             prefix.clear();
-            prefix.resize(stride * (height + 1), [0; 3]);
-            for y in 0..height {
+            prefix.resize(
+                if plan.radius == 0 {
+                    0
+                } else {
+                    stride * (height + 1)
+                },
+                [0; 3],
+            );
+            for y in 0..if plan.radius == 0 { 0 } else { height } {
                 let mut row = [0; 3];
                 for x in 0..tile.width {
-                    let color = samples[tile.samples[y * tile.width + x]];
+                    let index = tile.samples[y * tile.width + x];
+                    // Holes lie outside every requested filter square. Their zero contribution
+                    // cancels in the integral image without querying a fictitious source value.
+                    let color = if index == usize::MAX {
+                        0
+                    } else {
+                        samples[index]
+                    };
                     for (c, shift) in [16, 8, 0].into_iter().enumerate() {
                         row[c] += (color >> shift) & 255;
                         prefix[(y + 1) * stride + x + 1][c] =
@@ -328,5 +371,95 @@ mod tests {
         assert_eq!(cache.prepare(std::iter::once(request), &recipes, 2).hits, 1);
         cache.forget(Section(0, 0, 0));
         assert_eq!(cache.prepare(std::iter::once(request), &recipes, 2).hits, 0);
+    }
+
+    #[test]
+    fn sparse_sampling_is_the_exact_union_for_every_radius_resolver_and_height() {
+        let mut requests = Vec::new();
+        let mut recipes = Vec::new();
+        for resolver in [
+            Resolver::Grass,
+            Resolver::Foliage,
+            Resolver::DryFoliage,
+            Resolver::Water,
+        ] {
+            for position in [
+                [-17, -16, -17],
+                [-16, -1, -16],
+                [-1, -1, -1],
+                [0, 0, 0],
+                [15, 0, 15],
+                [16, 17, 16],
+            ] {
+                for below in [false, true] {
+                    requests.push(Request {
+                        position,
+                        state: 0,
+                        slot: 0,
+                    });
+                    recipes.push(Recipe::Biome { resolver, below });
+                }
+            }
+        }
+        requests.push(requests[0]);
+        recipes.push(recipes[0]);
+        requests.push(requests[0]);
+        recipes.push(Recipe::Color(0x12345678));
+        for radius in 0..=7i32 {
+            let mut needed = HashSet::new();
+            let expected: Vec<_> = requests
+                .iter()
+                .zip(&recipes)
+                .map(|(r, recipe)| {
+                    let Recipe::Biome { resolver, below } = *recipe else {
+                        let Recipe::Color(c) = *recipe else {
+                            unreachable!()
+                        };
+                        return c;
+                    };
+                    let [x, y, z] = r.position;
+                    let y = y - i32::from(below);
+                    let mut sum = [0u32; 3];
+                    for dz in -radius..=radius {
+                        for dx in -radius..=radius {
+                            let q = Sample {
+                                position: [x + dx, y, z + dz],
+                                resolver,
+                            };
+                            needed.insert(q);
+                            for (c, shift) in [16, 8, 0].into_iter().enumerate() {
+                                sum[c] += (color(q) >> shift) & 255;
+                            }
+                        }
+                    }
+                    if radius == 0 {
+                        color(Sample {
+                            position: [x, y, z],
+                            resolver,
+                        })
+                    } else {
+                        let count = (radius * 2 + 1).pow(2) as u32;
+                        0xff00_0000
+                            | (sum[0] / count) << 16
+                            | (sum[1] / count) << 8
+                            | (sum[2] / count)
+                    }
+                })
+                .collect();
+            let mut cache = Cache::default();
+            let plan = cache.prepare(requests.iter().copied(), &recipes, radius);
+            assert_eq!(plan.samples.len(), needed.len());
+            assert_eq!(plan.samples.iter().copied().collect::<HashSet<_>>(), needed);
+            let repeat = Cache::default().prepare(requests.iter().copied(), &recipes, radius);
+            assert_eq!(
+                plan.samples, repeat.samples,
+                "deterministic source callback order"
+            );
+            let values: Vec<_> = plan.samples.iter().copied().map(color).collect();
+            assert_eq!(cache.finish(plan, &values), expected);
+            let cached = cache.prepare(requests.iter().copied(), &recipes, radius);
+            assert!(cached.samples.is_empty());
+            assert_eq!(cache.finish(cached, &[]), expected);
+        }
     }
 }

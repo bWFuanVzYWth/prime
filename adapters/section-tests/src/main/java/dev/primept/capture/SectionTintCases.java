@@ -112,25 +112,30 @@ final class SectionTintCases {
         cases.add(new SectionCompilerOracle.Case("tint_slots_alpha_missing",
                                                  Map.of(new BlockPos(8, 8, 8), diamond),
                                                  Map.of(diamond, mixed)));
-        // Eight dense sections exercise only exposed tinted surfaces, not 32768 callbacks.
+        // Configurable dense workset; only exposed surfaces need source color evaluation.
+        int side = Integer.getInteger("primept.section.tintSide", 2);
+        if (side < 2 || side > 16)
+            throw new IllegalArgumentException("Tint section side must be in [2,16]");
         blocks.clear();
         models.clear();
         var grass = Blocks.GRASS_BLOCK.defaultBlockState();
         models.put(grass, tinted);
         for (int y = 0; y < 32; ++y)
-            for (int z = 0; z < 32; ++z)
-                for (int x = 0; x < 32; ++x)
+            for (int z = 0; z < side * 16; ++z)
+                for (int x = 0; x < side * 16; ++x)
                     blocks.put(new BlockPos(x, y, z), grass);
-        cases.add(new SectionCompilerOracle.Case("bench_tinted", Map.copyOf(blocks),
-                                                 Map.copyOf(models), 7, 0));
-        cases.add(new SectionCompilerOracle.Case("tint_dense_biome_changed", Map.copyOf(blocks),
-                                                 Map.copyOf(models), 7, 1));
-        for (int x = 0; x < 2; ++x)
+        cases.add(new SectionCompilerOracle.Case("bench_tinted", SectionWorkloads.snapshot(blocks),
+                                                 Map.copyOf(models), 7, 0, side));
+        cases.add(new SectionCompilerOracle.Case("tint_dense_biome_changed",
+                                                 SectionWorkloads.snapshot(blocks),
+                                                 Map.copyOf(models), 7, 1, side));
+        for (int x = 0; x < side; ++x)
             for (int y = 0; y < 2; ++y)
-                for (int z = 0; z < 2; ++z)
+                for (int z = 0; z < side; ++z)
                     blocks.remove(new BlockPos(x * 16 + 8, y * 16 + 8, z * 16 + 8));
-        cases.add(new SectionCompilerOracle.Case("bench_tinted_edited", Map.copyOf(blocks),
-                                                 Map.copyOf(models), 7, 0));
+        cases.add(new SectionCompilerOracle.Case("bench_tinted_edited",
+                                                 SectionWorkloads.snapshot(blocks),
+                                                 Map.copyOf(models), 7, 0, side));
     }
     static World world(int radius, int phase) throws Exception {
         var option = Minecraft.getInstance().options;

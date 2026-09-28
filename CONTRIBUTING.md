@@ -134,7 +134,7 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored -
 
 ```powershell
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke --no-parallel
-cargo test -p prime_minecraft --locked -- --include-ignored --skip source_cost_matrix --skip source_burst_cost
+cargo test -p prime_minecraft --locked -- --include-ignored --skip source_cost_matrix --skip source_burst_cost --skip biome_stream_cost
 # 旧封闭几何路径的独立对照
 cargo test -p prime_scene --lib --locked java_routing_matches_both_versions_actual_source_and_fluid_particle_oracles -- --ignored --nocapture
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeForeign=true --no-parallel
@@ -198,6 +198,25 @@ cargo test --release -p prime_vulkan --lib --locked terrain_upload_cost_matrix -
 `source_burst_cost` 固定8线程、每列4段，side 支持4/8/16/32（共64/256/1024/4096段），mode 支持 terrain/decorated。每次场景分别保留首载、编辑的两个方向和相同输入的原始样本及输入 hash。计时包括生产源规划、编译/颜色回填、发布、旧翻译快照最后引用的释放及整格计划；颜色响应为显式常量夹具，不包括实际宿主求色、Java/FFM、生成输入和 GPU。各阶段相加排除了阶段间的夹具构造；场景最终销毁不计入更新时间。此夹具、下述上传夹具及 `prime_tools` 入口与 native 引擎共用 MiMalloc 策略，计数包装仍统计真实分配请求；比较时记录锁定版本和分配器，另测进程峰值/保留内存，不能只记录逻辑几何字节。
 
 `terrain_upload_cost_matrix` 在原生1920×1080的无窗口宿主录制路径上，每次替换所有指定单元，固定网格、两种交替角点位置和默认射线预算。CPU 源整理/发布/翻译、录制和 GPU 时间分列；每个样本等待本次提交真正完成，`completed_ms` 包含等待，可据总时长计算吞吐量。每格64段，quads 是每段四边形数；不含 Minecraft、Java/FFM、源编译内核或图像读回。`upload_ns` 对直接打包的静态范围包含 CPU 记录初始化时间，对其他上传仍包含字节复制，不能将该计数解释为纯 memcpy 时间。用多轮不可变可执行文件交替对照 p95、最大值与吞吐量；两种夹具都不能替代真实存档的逐帧验收。
+
+群系样本规划及 raw 回退另有固定输入夹具；先构建，再按顺序执行：
+
+```powershell
+cargo build --release --locked -p prime_tools --bin raw-perf
+$env:PRIME_BIOME_CSV = "$PWD/artifacts/biome-stream.csv"
+cargo test --release -p prime_minecraft --locked biome_stream_cost -- --ignored --nocapture
+$env:PRIME_CPU_THREADS = '8'
+$env:PRIME_RAW_SAMPLES = '100'
+$env:PRIME_RAW_WARMUP = '10'
+.\target\release\raw-perf.exe artifacts/raw-cpu.csv
+$env:PRIME_PROFILE = '1'
+$env:PRIME_VK_VALIDATION = '0'
+$env:VK_LAYER_VALIDATE_SYNC = '0'
+$env:PRIME_RAW_WARMUP = '120'
+.\target\release\raw-perf.exe artifacts/raw-gpu.csv --gpu
+```
+
+`biome_stream_cost` 每例3次预热、30次正式样本，覆盖平面、变化高度和稀疏查询的半径0/2/7，保存样本数量和颜色 checksum；只计冷缓存规划及精确混合，确定性的宿主样本生成在计时外。`raw-perf` 覆盖2千/2万/10万三角形的相同快照、首尾顶点变化及仅原点变化，计时为真实 op6 解码、增量翻译和对象规划。GPU 模式使用原生1920×1080固定相机、默认4个路径顶点预算；采用宿主夹具的离线模式，每次 sample_index=0 重置为1 spp，固定采样输入，不等于游戏实时模式。它记录 CPU 录制和 GPU 时间，并等待每次提交实际完成；`total_ms` 是单次完成延迟，样本总时长可计算串行吞吐，不能当作流水游戏 FPS。CPU 模式不测的 GPU 字段及 GPU 模式不测的几何更新数留空。两者均不含 Java/FFM、源输入构造或实际游戏，须用相同夹具、充分预热及交替进程比较，保留持续变化输入的回退成本与离群值。
 
 地形源路由与 native 编译有独立的无窗口成本夹具，可用于相同硬件/工具链的版本对照。测试时串行运行，避免同时构建或测量另一路：
 
@@ -337,14 +356,14 @@ cargo run --release --locked -p prime_tools --bin instance-perf -- --samples 60 
 .\scripts\test-sections.ps1 -Bench -Threads 1 -Warmup 12 -Samples 40 -Rounds 3
 
 # 大批量端到端 CPU：8×2×8 个编辑段，优先看 route p95/max 和 sections/s
-.\scripts\test-sections.ps1 -Bench -Side 8 -Threads 8 -Warmup 12 -Samples 40 -Rounds 3
+.\scripts\test-sections.ps1 -Bench -Side 8 -TintSide 8 -Threads 8 -Warmup 12 -Samples 40 -Rounds 3
 # 基准汇总的 p95、吞吐量、工作集隔离检查
 python -B -m unittest discover -s scripts -p 'test_*.py'
 ```
 
 需要 JDK 25、Rust release 工具链、Python 3（仅标准库生成摘要）和现有 Gradle 依赖；不需要 GPU/Slang，不启动游戏。默认结果写入 `artifacts/section-suite/<时间>/`，可用 `-Output` 指定新目录。`run.json` 标记整轮通过/失败，`summary.md/json` 提供分场景 p50/p95/max，CSV 保留冷启动、预热、所有正式样本与细阶段。默认使用三轮独立 JVM，汇总保留轮次和两个编辑方向；用 `-Rounds` 调整。统一入口在测量前及每轮测量后均执行对拍，并保存 native/输入哈希；避免与编译、游戏或其他基准同时运行。
 
-`-Side` 默认2，扩大五个非群系基准的水平段数；编辑段数为 `2×Side²`，首次输入还包含显式空 halo。着色/群系基准固定8段，CSV 单列工作集，不与大批量混合汇总。优先比较同工作集、同线程数的完整 `route` p95，吞吐量按正式样本的编译段数总和除以 route 总时间计算；同时保留两个编辑方向、每轮分布、p50/max、三角形吞吐量和阶段计时。首次输入、静止、同内容以及几何/群系编辑分别比较，不把零编译控制组当作几何吞吐提升。
+`-Side` 默认2，扩大五个非群系基准的水平段数；编辑段数为 `2×Side²`，首次输入还包含显式空 halo。`-TintSide` 独立控制着色/群系基准，默认2（8段），同样支持2..16；8对应128段，CSV 按实际工作集分别汇总。Gradle 直接入口对应 `-PprimeptSectionSide` / `-PprimeptSectionTintSide`。优先比较同工作集、同线程数的完整 `route` p95，吞吐量按正式样本的编译段数总和除以 route 总时间计算；同时保留两个编辑方向、每轮分布、p50/max、三角形吞吐量和阶段计时。首次输入、静止、同内容以及几何/群系编辑分别比较，不把零编译控制组当作几何吞吐提升。
 
 该入口覆盖受控模型与中性光照，不能证明完整原版资源包、真实存档或模组等价。原版参照包含其光栅专属工作，CPU 局部结果不代表游戏 FPS。维护时将新行为加入共用场景；确有版本差异的绑定留在版本测试目录，不复制两份用例。
 
