@@ -1,7 +1,9 @@
 //! Prototype MC 26.2/26.3 adaptation. Java forwards fields and events; this owner plans demand.
 #![forbid(unsafe_code)]
 mod compile;
+mod fluid;
 mod model;
+mod shape;
 use compile::compile_slab;
 #[cfg(test)]
 mod reference;
@@ -89,51 +91,82 @@ impl SectionData {
     }
 }
 
+/// Mask of the exact neighboring section regions whose one-cell dependencies changed.
 fn changed_boundaries(
     before: Option<&SectionData>,
     after: Option<&SectionData>,
     catalog: &Catalog,
-) -> u8 {
-    let class = |id: Option<u32>| {
-        id.and_then(|id| catalog.states.get(&id))
-            .map_or(model::Occlusion::Open, model::State::occlusion)
-    };
+) -> u32 {
     let differs = |index| {
         let a = before.map(|d| d.state(index));
         let b = after.map(|d| d.state(index));
-        a != b && class(a) != class(b)
+        if a == b {
+            return false;
+        }
+        match (
+            a.and_then(|id| catalog.states.get(&id)),
+            b.and_then(|id| catalog.states.get(&id)),
+        ) {
+            (Some(a), Some(b)) => !a.same_boundary(b),
+            (None, None) => false,
+            (Some(s), None) | (None, Some(s)) => !s.same_boundary(&model::State::default()),
+        }
     };
+    const ALL: u32 = ((1 << 27) - 1) ^ (1 << 13);
     if before.is_none_or(|d| d.bits == 0) && after.is_none_or(|d| d.bits == 0) {
-        return if differs(0) { 63 } else { 0 };
+        return if differs(0) { ALL } else { 0 };
     }
     let mut changed = 0;
-    for face in 0..6 {
-        for i in 0..256 {
-            let index = match face {
-                0 => i,
-                1 => 3840 + i,
-                2 => (i / 16) * 256 + i % 16,
-                3 => (i / 16) * 256 + 240 + i % 16,
-                4 => (i / 16) * 256 + (i % 16) * 16,
-                5 => (i / 16) * 256 + (i % 16) * 16 + 15,
-                _ => unreachable!(),
-            };
-            if differs(index) {
-                changed |= 1 << face;
-                break;
+    for y in 0..16 {
+        for z in 0..16 {
+            for x in 0..16 {
+                if x != 0 && x != 15 && y != 0 && y != 15 && z != 0 && z != 15 {
+                    continue;
+                }
+                if !differs(y * 256 + z * 16 + x) {
+                    continue;
+                }
+                let dx = if x == 0 {
+                    -1
+                } else if x == 15 {
+                    1
+                } else {
+                    0
+                };
+                let dy = if y == 0 {
+                    -1
+                } else if y == 15 {
+                    1
+                } else {
+                    0
+                };
+                let dz = if z == 0 {
+                    -1
+                } else if z == 15 {
+                    1
+                } else {
+                    0
+                };
+                for ox in [0, dx] {
+                    for oy in [0, dy] {
+                        for oz in [0, dz] {
+                            changed |= 1 << ((oy + 1) * 9 + (oz + 1) * 3 + ox + 1);
+                        }
+                    }
+                }
             }
         }
     }
-    changed
+    changed & ALL
 }
 fn invalidate_neighbors(
     key: Section,
-    changed: u8,
+    changed: u32,
     active: &HashSet<Section>,
     compile: &mut HashSet<Section>,
 ) {
-    for (face, n) in key.neighbors().into_iter().enumerate() {
-        if changed & (1 << face) != 0 && active.contains(&n) {
+    for (i, n) in key.halo().into_iter().enumerate() {
+        if changed & (1 << i) != 0 && active.contains(&n) {
             compile.insert(n);
         }
     }
@@ -245,6 +278,8 @@ impl TerrainContext {
         let mut received = HashMap::with_capacity(requested.len());
         let mut states = HashMap::new();
         let mut models = HashMap::new();
+        let mut faces = HashMap::new();
+        let mut fluids = HashMap::new();
         loop {
             match r.u32()? {
                 0 => break,
@@ -272,6 +307,18 @@ impl TerrainContext {
                     };
                     received.insert(section, data);
                 }
+                4 => {
+                    let (id, face) = shape::Face::read(&mut r)?;
+                    if faces.insert(id, face).is_some() {
+                        return Err("duplicate face profile".into());
+                    }
+                }
+                5 => {
+                    let (id, fluid) = fluid::FluidMaterial::read(&mut r)?;
+                    if fluids.insert(id, fluid).is_some() {
+                        return Err("duplicate fluid material".into());
+                    }
+                }
                 _ => return Err("unknown section response record".into()),
             }
         }
@@ -279,11 +326,45 @@ impl TerrainContext {
         if received.len() != requested.len() {
             return Err("incomplete section response".into());
         }
+        // A resource ID denotes immutable content until the explicit catalog invalidation.
+        // Reject in-place changes before committing any source data or consuming Pending.
+        fn unchanged<T: PartialEq>(old: &HashMap<u32, T>, new: &HashMap<u32, T>) -> bool {
+            new.iter()
+                .all(|(id, value)| old.get(id).is_none_or(|previous| previous == value))
+        }
+        if !pending.demand.reset_catalog
+            && (!unchanged(&self.catalog.states, &states)
+                || !unchanged(&self.catalog.models, &models)
+                || !unchanged(&self.catalog.fluids, &fluids)
+                || faces
+                    .iter()
+                    .any(|(id, value)| self.catalog.faces.get(id).is_some_and(|old| old != value)))
+        {
+            return Err("resource definition changed without catalog invalidation".into());
+        }
+        for state in states.values() {
+            if state.faces.iter().any(|id| {
+                id.0 > 1
+                    && !faces.contains_key(id)
+                    && (pending.demand.reset_catalog || !self.catalog.faces.contains_key(id))
+            }) {
+                return Err("undefined face profile".into());
+            }
+            if state.fluid.kind != 0
+                && !fluids.contains_key(&state.fluid.material)
+                && (pending.demand.reset_catalog
+                    || !self.catalog.fluids.contains_key(&state.fluid.material))
+            {
+                return Err("undefined fluid material".into());
+            }
+        }
         let Pending { input, demand } = self.pending.take().unwrap();
         if demand.reset_catalog {
             self.catalog = Catalog::default();
         }
         self.catalog.states.extend(states);
+        self.catalog.faces.extend(faces);
+        self.catalog.fluids.extend(fluids);
         if !models.is_empty() {
             self.catalog.models.extend(models);
             self.catalog.prepare();
@@ -442,7 +523,7 @@ impl TerrainContext {
         let s = &self.stats;
         let h = s.hacks;
         format!(
-            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} triangles={} resident={} active={} hacks(model={},multipart={},tint={},offset={},fluid={})]",
+            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={})]",
             self.epoch,
             self.pending
                 .as_ref()
@@ -466,7 +547,6 @@ impl TerrainContext {
             self.sections.len(),
             self.scheduler.active.len(),
             h.model,
-            h.multipart,
             h.tint,
             h.offset,
             h.fluid
@@ -481,6 +561,8 @@ struct Job {
     compiled: Option<CompiledSection>,
 }
 
+#[cfg(test)]
+mod oracle;
 #[cfg(test)]
 mod perf;
 #[cfg(test)]

@@ -41,7 +41,8 @@ final class SectionSourcesCpuSmoke {
         var sources = new SectionSources(
                 new BlockStateModelSet(Map.of(Blocks.STONE.defaultBlockState(), model,
                                               Blocks.DIRT.defaultBlockState(), opaque),
-                                       model));
+                                       model),
+                new net.minecraft.client.renderer.block.FluidStateModelSet(Map.of(), null));
         var air = section(Blocks.AIR.defaultBlockState());
         var solid = section(Blocks.STONE.defaultBlockState());
         var unknown = section(Blocks.DIRT.defaultBlockState());
@@ -129,7 +130,7 @@ final class SectionSourcesCpuSmoke {
             throw new AssertionError("Opaque material callback");
         }
     }
-    private static LevelChunkSection section(net.minecraft.world.level.block.state.BlockState state)
+    static LevelChunkSection section(net.minecraft.world.level.block.state.BlockState state)
             throws Exception {
         var section = FluidRouterCpuSmoke.blank(LevelChunkSection.class);
         var states =
@@ -141,7 +142,7 @@ final class SectionSourcesCpuSmoke {
         field.set(section, states);
         return section;
     }
-    private static void write(SourcePages pages, Path file) throws Exception {
+    static void write(SourcePages pages, Path file) throws Exception {
         var table = pages.table();
         try (var out = Files.newOutputStream(file)) {
             for (long i = 0; i < pages.pageCount(); ++i) {

@@ -1,21 +1,26 @@
 //! Version adaptation and prototype defaults live here, not in the Java field router.
-use crate::wire::Reader;
+use crate::{
+    fluid::{Fluid, FluidMaterial},
+    shape::{Face, FaceId},
+    wire::Reader,
+};
 use prime_scene::Triangle;
 use std::collections::HashMap;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub(crate) struct State {
     pub flags: u32,
     pub model: u32,
     pub name: String,
+    pub faces: [FaceId; 6],
+    pub support: u32,
+    pub fluid: Fluid,
 }
 impl State {
     pub fn air(&self) -> bool {
-        self.flags & 1 != 0
-            || self.flags & 16 != 0
-                && self.name != "minecraft:water"
-                && self.name != "minecraft:lava"
+        self.flags & 1 != 0 || self.flags & 16 != 0 && self.fluid.kind == 0
     }
+
     pub fn full(&self) -> bool {
         self.flags & 4 != 0
     }
@@ -24,14 +29,12 @@ impl State {
             || self.name == "minecraft:lava"
             || self.name.ends_with("glass")
     }
-    pub fn occlusion(&self) -> Occlusion<'_> {
-        if self.full() {
-            Occlusion::Full
-        } else if self.same_block_culls() {
-            Occlusion::SameBlock(&self.name)
-        } else {
-            Occlusion::Open
-        }
+    pub fn same_boundary(&self, other: &Self) -> bool {
+        self.faces == other.faces
+            && self.fluid == other.fluid
+            && self.flags & 228 == other.flags & 228
+            && self.support == other.support
+            && (!(self.same_block_culls() || other.same_block_culls()) || self.name == other.name)
     }
     fn tint(&self) -> [f32; 4] {
         // P003: external tint/biome callbacks are deferred in this prototype.
@@ -52,13 +55,7 @@ impl State {
         ]
     }
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Occlusion<'a> {
-    Open,
-    Full,
-    SameBlock(&'a str),
-}
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct Quad {
     pub positions: [[f32; 3]; 4],
     pub uvs: [[f32; 2]; 4],
@@ -66,6 +63,7 @@ pub(crate) struct Quad {
     pub tint: bool,
     pub layer: usize,
 }
+#[derive(PartialEq)]
 pub(crate) enum Model {
     Unknown,
     Mesh(Vec<Quad>),
@@ -77,6 +75,9 @@ pub(crate) enum Model {
 pub(crate) struct Catalog {
     pub states: HashMap<u32, State>,
     pub models: HashMap<u32, Model>,
+    pub faces: HashMap<FaceId, Face>,
+    pub fluids: HashMap<u32, FluidMaterial>,
+    pub fluid_math: crate::fluid::FluidMath,
     face_masks: HashMap<u32, u32>,
 }
 
@@ -84,7 +85,7 @@ pub(crate) fn state(r: &mut Reader<'_>) -> Result<(u32, State), String> {
     let id = r.u32()?;
     let flags = r.u32()?;
     let model = r.u32()?;
-    if flags & !31 != 0 {
+    if flags & !255 != 0 {
         return Err("invalid raw state flags".into());
     }
     Ok((
@@ -93,6 +94,16 @@ pub(crate) fn state(r: &mut Reader<'_>) -> Result<(u32, State), String> {
             flags,
             model,
             name: r.string()?,
+            faces: [
+                FaceId(r.u32()?),
+                FaceId(r.u32()?),
+                FaceId(r.u32()?),
+                FaceId(r.u32()?),
+                FaceId(r.u32()?),
+                FaceId(r.u32()?),
+            ],
+            support: r.u32()?,
+            fluid: Fluid::read(r)?,
         },
     ))
 }
@@ -174,6 +185,9 @@ impl Random {
         self.0 = self.0.wrapping_mul(0x5deece66d).wrapping_add(11) & ((1u64 << 48) - 1);
         (self.0 >> (48 - bits)) as u32
     }
+    pub fn long(&mut self) -> i64 {
+        ((i64::from(self.next(32) as i32)) << 32).wrapping_add(i64::from(self.next(32) as i32))
+    }
     pub fn bound(&mut self, bound: u32) -> u32 {
         if bound.is_power_of_two() {
             return ((u64::from(bound) * u64::from(self.next(31))) >> 31) as u32;
@@ -198,7 +212,6 @@ pub(crate) fn position_seed(x: i32, y: i32, z: i32) -> i64 {
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Hacks {
     pub model: u64,
-    pub multipart: u64,
     pub tint: u64,
     pub offset: u64,
     pub fluid: u64,
@@ -206,13 +219,49 @@ pub(crate) struct Hacks {
 impl std::ops::AddAssign for Hacks {
     fn add_assign(&mut self, other: Self) {
         self.model += other.model;
-        self.multipart += other.multipart;
         self.tint += other.tint;
         self.offset += other.offset;
         self.fluid += other.fluid;
     }
 }
 impl Catalog {
+    pub fn covers(&self, occluder: FaceId, source: FaceId) -> bool {
+        if occluder.0 == 0 {
+            return false;
+        }
+        if occluder.0 == 1 {
+            return true;
+        }
+        if source.0 == 0 {
+            return false;
+        }
+        if occluder == source {
+            return true;
+        }
+        let occluder = &self.faces[&occluder];
+        if source.0 == 1 {
+            occluder.covers_height(1.)
+        } else {
+            occluder.covers(&self.faces[&source])
+        }
+    }
+    pub fn fluid_occluded(&self, state: &State, direction: usize, height: f32) -> bool {
+        if direction == 1 && height < 1. {
+            return false;
+        }
+        let id = state.faces[direction ^ 1];
+        let height = if direction < 2 { 1. } else { height };
+        match id.0 {
+            0 => false,
+            1 => true,
+            _ => self.faces[&id].covers_height(height),
+        }
+    }
+    #[cfg(test)]
+    pub fn hidden(&self, state: &State, neighbor: &State, face: usize) -> bool {
+        (state.same_block_culls() && state.name == neighbor.name)
+            || self.covers(neighbor.faces[face ^ 1], state.faces[face])
+    }
     // Derived only when resource definitions change. Conservative unions retain weighted choices;
     // cycles/depth limits keep every face eligible and continue through the existing fallback.
     pub fn prepare(&mut self) {
@@ -235,8 +284,8 @@ impl Catalog {
                     .iter()
                     .fold(0, |m, (_, id)| m | mask(*id, models, cache, depth + 1)),
                 Some(Model::Multipart(children)) => children
-                    .first()
-                    .map_or(0, |id| mask(*id, models, cache, depth + 1)),
+                    .iter()
+                    .fold(0, |m, id| m | mask(*id, models, cache, depth + 1)),
                 _ => 63,
             };
             cache.insert((id, depth), value);
@@ -250,10 +299,8 @@ impl Catalog {
             .collect();
     }
     pub fn face_mask(&self, state: &State) -> u32 {
-        if state.air() {
+        if state.air() || state.flags & 16 != 0 {
             0
-        } else if state.name == "minecraft:water" || state.name == "minecraft:lava" {
-            63
         } else {
             self.face_masks.get(&state.model).copied().unwrap_or(63)
         }
@@ -273,19 +320,7 @@ impl Catalog {
             offset[2] += (((s >> 8 & 15) as f64 / 15.0 - 0.5) * 0.5) as f32;
             hacks.offset += 1;
         }
-        if state.name == "minecraft:water" || state.name == "minecraft:lava" {
-            hacks.fluid += 1;
-            cube(
-                offset,
-                visible,
-                if state.name.ends_with("water") {
-                    [0.05, 0.25, 0.8, 0.5]
-                } else {
-                    [1.0, 0.2, 0.015, 1.0]
-                },
-                2,
-                layers,
-            );
+        if state.flags & 16 != 0 {
             return;
         }
         let mut random = Random::new(position_seed(position[0], position[1], position[2]));
@@ -361,9 +396,9 @@ impl Catalog {
                 }
             }
             Some(Model::Multipart(children)) => {
-                // P002: predicates require a later callback; choose one stable representative.
-                hacks.multipart += 1;
-                if let Some(&child) = children.first() {
+                let seed = random.long();
+                for &child in children {
+                    *random = Random::new(seed);
                     self.emit_model(
                         child,
                         state,
@@ -376,6 +411,7 @@ impl Catalog {
                     );
                 }
             }
+
             _ => {
                 hacks.model += 1;
                 cube(offset, visible, [1.0, 0.0, 1.0, 1.0], 0, layers);
@@ -383,7 +419,7 @@ impl Catalog {
         }
     }
 }
-fn emit_quad(
+pub(crate) fn emit_quad(
     q: &Quad,
     offset: [f32; 3],
     color: [f32; 4],
@@ -400,7 +436,7 @@ fn emit_quad(
         });
     }
 }
-fn cube(
+pub(crate) fn cube(
     offset: [f32; 3],
     visible: u32,
     color: [f32; 4],

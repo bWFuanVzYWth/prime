@@ -25,6 +25,7 @@ final class ExclusiveTerrainCpuSmoke {
         BlockEntityCandidatesCpuSmoke.run();
         SectionSourcesCpuSmoke.run();
         TerrainRouterCpuSmoke.run();
+        SectionCompilerOracle.run();
         ParticleRouterCpuSmoke.run();
         var camera = new CameraRenderState();
         camera.pos = Vec3.ZERO;

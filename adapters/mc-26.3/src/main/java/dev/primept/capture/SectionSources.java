@@ -1,6 +1,8 @@
 package dev.primept.capture;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import net.minecraft.client.renderer.block.FluidStateModelSet;
 import java.util.BitSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -26,7 +28,7 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.Palette;
 import net.minecraft.world.level.chunk.PalettedContainer;
 
-/** Field serialization only. Model selection, defaults, visibility and geometry belong to prime_minecraft. */
+/** Source dictionaries and necessary state-bound selection. Positional work belongs to Rust. */
 final class SectionSources {
     static final int GAME_VERSION = 263;
     private static final Field DATA = field(PalettedContainer.class, "data");
@@ -36,7 +38,9 @@ final class SectionSources {
     private static final Field SINGLE = field(SingleVariant.class, "model"),
                                WEIGHTED = field(WeightedVariants.class, "list");
     private static final Field SHARED = field(MultiPartModel.class, "shared"),
-                               SELECTORS = field(SHARED.getType(), "selectors");
+                               SELECTED = field(MultiPartModel.class, "models"),
+                               BLOCK_STATE = field(MultiPartModel.class, "blockState");
+    private static final Method SELECT = method(SHARED.getType(), "selectModels", BlockState.class);
     private static final Field OFFSET =
             field(BlockBehaviour.BlockStateBase.class, "offsetFunction");
     private static final Field SOLID = field(BlockBehaviour.BlockStateBase.class, "solidRender");
@@ -46,14 +50,16 @@ final class SectionSources {
             field(QuadCollection.class, "west"),    field(QuadCollection.class, "east"),
             field(QuadCollection.class, "unculled")};
     private final Map<BlockState, BlockStateModel> models;
+    private final SectionResources resources;
     private final BitSet states = new BitSet();
     private final IdentityHashMap<Object, Integer> definitions = new IdentityHashMap<>();
     private int nextModel;
     private boolean globalPublished;
 
     @SuppressWarnings("unchecked")
-    SectionSources(BlockStateModelSet modelSet) {
+    SectionSources(BlockStateModelSet modelSet, FluidStateModelSet fluidModels) {
         models = (Map<BlockState, BlockStateModel>)get(MODELS, modelSet);
+        resources = new SectionResources(fluidModels);
     }
     @SuppressWarnings("unchecked")
     void section(SourcePages out, int x, int y, int z, LevelChunkSection section) {
@@ -99,11 +105,14 @@ final class SectionSources {
             return;
         states.set(id);
         int model = model(out, models.get(state));
+        var source = resources.prepare(out, state);
         int flags = (state.isAir() ? 1 : 0) | (get(OFFSET, state) != null ? 2 : 0) |
                     ((boolean)get(SOLID, state) ? 4 : 0) |
-                    (state.getRenderShape() != RenderShape.MODEL ? 16 : 0);
+                    (state.getRenderShape() != RenderShape.MODEL ? 16 : 0) |
+                    SectionResources.flags(state);
         out.i(1).i(id).i(flags).i(model).string(
                 BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+        source.write(out);
     }
     @SuppressWarnings("unchecked")
     private int model(SourcePages out, Object value) {
@@ -127,12 +136,21 @@ final class SectionSources {
             for (int i = 0; i < children.length; ++i)
                 out.i(entries.get(i).weight()).i(children[i]);
         } else if (value.getClass() == MultiPartModel.class) {
-            var selectors = (List<MultiPartModel.Selector<BlockStateModel>>)get(SELECTORS,
-                                                                                get(SHARED, value));
-            int[] children = new int[selectors.size()];
+            var selected = (List<BlockStateModel>)get(SELECTED, value);
+            if (selected == null) {
+                // Explicit resource preparation: evaluate each state-bound predicate once, in host
+                // order, and retain its actual result in the host cache too. No positional replay.
+                try {
+                    selected = (List<BlockStateModel>)SELECT.invoke(get(SHARED, value),
+                                                                    get(BLOCK_STATE, value));
+                    SELECTED.set(value, selected);
+                } catch (ReflectiveOperationException failure) {
+                    throw new IllegalStateException("Multipart source selection failed", failure);
+                }
+            }
+            int[] children = new int[selected.size()];
             for (int i = 0; i < children.length; ++i)
-                children[i] = model(out, selectors.get(i).model());
-            // Conditions are deliberately not executed; Rust owns the prototype's default choice.
+                children[i] = model(out, selected.get(i));
             out.i(2).i(id).i(3).i(children.length);
             for (int child : children)
                 out.i(child);
@@ -158,6 +176,15 @@ final class SectionSources {
             out.i(2).i(id).i(0);
         }
         return id;
+    }
+    private static Method method(Class<?> type, String name, Class<?>... arguments) {
+        try {
+            var m = type.getDeclaredMethod(name, arguments);
+            m.setAccessible(true);
+            return m;
+        } catch (ReflectiveOperationException failure) {
+            throw new ExceptionInInitializerError(failure);
+        }
     }
     private static Field field(Class<?> type, String name) {
         try {

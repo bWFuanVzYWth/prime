@@ -30,7 +30,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本�
 
 ABI v5 新增下面的 MC 原始源批次接口，保留场景协议、参数粒子与诊断查询。当前生产地形走 `prime_mc_plan` / `prime_mc_sections`；op8/10/11/12/13 保留给封闭网格输入和 CPU 对照夹具，不与新生产者混用。op2 无生产消费者，未知操作及历史 ABI 直接拒绝。
 
-## MC 源批次（source version 1）
+## MC 源批次（source version 2）
 
 该入口只由 `prime_minecraft` 解释，不能将 Minecraft 字段枚举、坐标规则或 palette 布局扩散到 `prime_scene` / GPU。当前识别 MC version 262、263；其他版本明确拒绝。临时语义替代见独立的 [原型 hack 清单](../PROTOTYPE_HACKS.md)。
 
@@ -38,9 +38,9 @@ ABI v5 新增下面的 MC 原始源批次接口，保留场景协议、参数粒
 
 输入 `prime_source_page` 是 16 字节 `{const uint8_t* data; uint64_t length;}`，描述表和每页均只借用到调用返回。页串接成一个逻辑流，字段允许跨页；每页最多 256 MiB，Java 复用 1 MiB native 页，禁止为合批再次拼接成巨型数组。必须保留的数据在返回前成为 Rust 所有；编译 worker 返回前全部汇合。响应错误使引擎失败，不重放源回调补画。
 
-两个输入流都有 32 字节头：`magic:u32=0x53434d50, source_version:u32=1, minecraft_version:u32, kind:u32, epoch:u64, batch:u64`。epoch 和 batch 非零；epoch 必须匹配场景，batch 在 epoch 内严格增加。请求期间不可再次 plan，响应必须恰好匹配该请求的身份和全部 section。
+两个输入流都有 32 字节头：`magic:u32=0x53434d50, source_version:u32=2, minecraft_version:u32, kind:u32, epoch:u64, batch:u64`。epoch 和 batch 非零；epoch 必须匹配场景，batch 在 epoch 内严格增加。请求期间不可再次 plan，响应必须恰好匹配该请求的身份和全部 section。
 
-kind=1 的头后为相机 `x/z:f64`、半径 `i32`、世界 `min_section_y/max_section_y:i32`（含端点）、宿主实际来源范围 `min_x/max_x/min_z/max_z:i32`，随后为事件流。每条非零事件为 `kind:u32, x/y/z:i32`；1 加载列、2 卸载列、3 段脏、4 全量资源失效、5 清空旧来源列清单（随后用1重建）。单个 `u32=0` 终止。Java 转发原始通知；Rust 合并、过滤并维护窗口、活跃段和六面邻接依赖。完整清单仅在 owner 建立/实际源范围变化时重发。
+kind=1 的头后为相机 `x/z:f64`、半径 `i32`、世界 `min_section_y/max_section_y:i32`（含端点）、宿主实际来源范围 `min_x/max_x/min_z/max_z:i32`，随后为事件流。每条非零事件为 `kind:u32, x/y/z:i32`；1 加载列、2 卸载列、3 段脏、4 全量资源失效、5 清空旧来源列清单（随后用1重建）。单个 `u32=0` 终止。Java 转发原始通知；Rust 合并、过滤并维护窗口、活跃段和完整一格邻域依赖。完整清单仅在 owner 建立/实际源范围变化时重发。
 
 输出请求流为 `batch:u64, request_count:u64, column_edit_count:u64, active_count:u64`，后接 request_count 条 `{x/y/z:i32, active:i32}`（16 字节），再接 column_edit_count 条 `{x/z:i32, active:i32}`（12 字节）。active 为0或1；请求中的0表示仅供邻接依赖，不能发布为渲染段；列编辑只用于 Java 镜像 Rust 选择结果，以支持现有方块实体提取。输出借用指针在下一次 plan、accept 或销毁时失效，Java 必须在提交响应之前读完，不得保留。
 
@@ -48,15 +48,19 @@ kind=2 的头后是以下记录流，单个 `u32=0` 终止。所有字符串为 
 
 | 记录标签 | 字段 |
 | --- | --- |
-| 1 state | `state_id:u32, flags:u32, model_id:u32, block_name:string`；flags 位0=air、1=存在 offset 函数、2=缓存 solidRender、4=非 MODEL render shape，位3保留 |
+| 1 state | `state_id:u32, flags:u32, model_id:u32, block_name:string, face_id:u32×6, support_bits:u32, fluid_name:string, flow_level:u32, falling:u32, fluid_material:u32`；flags 位0=air、1=存在 offset 函数、2=缓存 solidRender、4=非 MODEL、5=legacySolid、6=HalfTransparentBlock/LeavesBlock、7=IceBlock；位3保留 |
 | 2 model | `id:u32, type:u32`；id非零，type0未知、1直接 quad、2权重选择、3multipart 子项、4别名 |
 | 3 section | `x/y/z:i32, available:u32`；0无源，1后跟压缩 palette 数据，不能以无源代替空段 |
+| 4 face profile | `id:u32, u_count:u32, v_count:u32, word_count:u32`，随后 U/V 坐标 f64 列表及占据 u64 words；id≥2，0/1为内置空/全面 |
+| 5 fluid material | `id:u32, raw_layer:u32, flags:u32, sprites:f32×12`；flags位0=存在 tint source、1=存在 overlay；sprite依次 still/flowing/overlay，每个为 u0/v0/u1/v1，缺 overlay 时写 flowing 区间 |
 
-model type1 后为 `quad_count:u32` 和每个92字节 quad：`face:u32, tint_index:i32, raw_layer:u32`，四个 `{position:f32×3, packed_uv:u64}`；MC 的 U 在高32位、V 在低32位。face0..5为下/上/北/南/西/东，6无剔除面。raw_layer 是版本层的实际字段值，Rust 适配器解释后生成公共材质语义。type2 为 `count:u32` 和 `{weight:u32, child_id:u32}`；type3 为 `count:u32` 和 child_id 列表；type4 为单个 child_id。定义身份限定于 epoch/资源失效代次，已观察定义不逐帧重发。
+model type1 后为 `quad_count:u32` 和每个92字节 quad：`face:u32, tint_index:i32, raw_layer:u32`，四个 `{position:f32×3, packed_uv:u64}`；MC 的 U 在高32位、V 在低32位。face0..5为下/上/北/南/西/东，6无剔除面。raw_layer 是版本层的实际字段值，Rust 适配器解释后生成公共材质语义。type2 为 `count:u32` 和 `{weight:u32, child_id:u32}`；type3 为 `count:u32` 和**实际选中**的 child_id 列表；type4 为单个 child_id。定义身份限定于 epoch/资源失效代次，已观察定义不逐帧重发。
+
+state 面顺序为下/上/北/南/西/东。face profile 的 U/V 轴在 X 法向时为 Z/Y、Y 法向时为 X/Z、Z 法向时为 X/Y；格索引 `u*(v_count-1)+v`，低位先行，word 尾部省略的位为零。转录初始化后缓存的离散面数据，由 Rust 判定覆盖，不在 Java 做 shape join。两版 support_bits 是宿主 faceSturdy 数组按索引展开的位（direction ordinal×3 + SupportType ordinal，FULL=0）；缺失动态支撑缓存时仅置bit31。flow_level 是实际 LEVEL 属性，缺属性写0；falling为0/1，流体 registry name 的源/流动态解释留在 Rust。无流体 material=0，其余引用定义过的非零资源。资源 ID 在失效前不可原地改变内容；source version 不匹配立即拒绝，不读历史布局。
 
 section 压缩数据为 `bits:u32, palette_count:u32, word_count:u32`、palette_count 个 registry state ID、word_count 个 u64。局部 palette 的存储值索引该列表；palette_count=0 表示全局 registry ID。零位存储恰好一个 palette 项且零 word；其余每个 word 存放 `floor(64/bits)` 个状态，不跨 word 拼接，顺序 `y*256+z*16+x`，恰好4096项。Java 只复制源列表/word，Rust 解包、比较与编译。
 
-完整验证响应后，Rust 更新活跃源缓存，只有实际源变化、资源失效或邻接/成员变化才进入编译。普通变化影响自身，仅边界遮挡结果变化才传播至对应活跃邻段；每个非空段分4个Y slab，由私有同步池完成。归并和精确内容比较也同步并行，最终向场景提交绑定当前 owner/epoch/revision/完成水位的版本无关 `CompiledSection`，发布前验证证明仍有效。源 batch 是唯一完成水位，静态仍等待64段完整后发布整格BLAS。资源重载强制重新解释相同 palette；不变压缩输入不重编译，重新编译但最终图层相同则保留 Arc 和内容版本，只推进源完成水位。
+完整验证响应后，Rust 更新活跃源缓存，只有实际源变化、资源失效或邻接/成员变化才进入编译。普通变化影响自身，边界依赖语义变化才传播至对应活跃面/棱/角邻段；每个非空段分4个Y slab，由私有同步池完成。归并和精确内容比较也同步并行，最终向场景提交绑定当前 owner/epoch/revision/完成水位的版本无关 `CompiledSection`，发布前验证证明仍有效。源 batch 是唯一完成水位，静态仍等待64段完整后发布整格BLAS。资源重载强制重新解释相同 palette；不变压缩输入不重编译，重新编译但最终图层相同则保留 Arc 和内容版本，只推进源完成水位。
 
 ## 公共顶点与材质语义
 

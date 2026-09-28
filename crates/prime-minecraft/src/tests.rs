@@ -52,6 +52,16 @@ pub(super) fn string(v: &mut Vec<u8>, s: &str) {
         v.push(0);
     }
 }
+pub(super) fn state_source(v: &mut Vec<u8>, flags: u32) {
+    for _ in 0..6 {
+        u32_to(v, u32::from(flags & 4 != 0));
+    }
+    u32_to(v, 0);
+    string(v, "minecraft:empty");
+    for _ in 0..3 {
+        u32_to(v, 0);
+    }
+}
 fn response(batch: u64, requests: &[Section], choose: impl Fn(Section) -> Option<bool>) -> Vec<u8> {
     let mut v = header(2, batch);
     for (id, flags, name) in [(0, 1, "minecraft:air"), (1, 4, "minecraft:stone")] {
@@ -59,6 +69,7 @@ fn response(batch: u64, requests: &[Section], choose: impl Fn(Section) -> Option
             u32_to(&mut v, n);
         }
         string(&mut v, name);
+        state_source(&mut v, flags);
     }
     for &s in requests {
         for n in [3, s.0 as u32, s.1 as u32, s.2 as u32] {
@@ -535,7 +546,7 @@ fn column_deltas_match_complete_window_membership_across_height_and_inventory_ch
         let mut cache = active.clone();
         for &s in &active {
             cache.extend(
-                s.neighbors()
+                s.halo()
                     .into_iter()
                     .filter(|n| (ys[0]..=ys[1]).contains(&n.1) && loaded.contains(&(n.0, n.2))),
             );
@@ -602,7 +613,7 @@ fn interior_mutations_do_not_invalidate_neighbors_but_changed_boundary_faces_do(
     new.storage[edge / 64] |= 1 << (edge % 64);
     assert_eq!(
         changed_boundaries(Some(&old), Some(&new), &ctx.catalog),
-        1 << 5
+        1 << 14
     );
     requests(&mut ctx, &frame(3, 0., 1, [0, 0], &[(3, a)]));
     ctx.accept(&[&update(3, a, &new)], &mut source).unwrap();
@@ -626,6 +637,9 @@ fn boundary_dependencies_follow_face_occlusion_and_not_state_identity() {
                 flags,
                 model: 0,
                 name: name.into(),
+                faces: [crate::shape::FaceId(u32::from(flags & 4 != 0)); 6],
+                fluid: Default::default(),
+                support: 0,
             },
         );
     }
@@ -645,11 +659,14 @@ fn boundary_dependencies_follow_face_occlusion_and_not_state_identity() {
     );
     assert_eq!(
         changed_boundaries(Some(&uniform(3)), Some(&uniform(5)), &catalog),
-        63
+        ((1 << 27) - 1) ^ (1 << 13)
     );
     assert_eq!(changed_boundaries(Some(&uniform(0)), None, &catalog), 0);
-    assert_eq!(changed_boundaries(Some(&uniform(1)), None, &catalog), 63);
-    for (axis, faces) in [[4, 5], [0, 1], [2, 3]].into_iter().enumerate() {
+    assert_eq!(
+        changed_boundaries(Some(&uniform(1)), None, &catalog),
+        ((1 << 27) - 1) ^ (1 << 13)
+    );
+    for (axis, faces) in [[12, 14], [4, 22], [10, 16]].into_iter().enumerate() {
         for (side, face) in [0, 15].into_iter().zip(faces) {
             let mut position = [8; 3];
             position[axis] = side;
@@ -666,5 +683,78 @@ fn boundary_dependencies_follow_face_occlusion_and_not_state_identity() {
                 1 << face
             );
         }
+    }
+}
+
+#[test]
+fn source_definitions_are_immutable_until_explicit_resource_invalidation() {
+    let mut ctx = TerrainContext::default();
+    let mut source = scene();
+    let key = Section(0, 0, 0);
+    let req = requests(&mut ctx, &frame(1, 0., 0, [0, 0], &[(1, key)]));
+    ctx.accept(&[&response(1, &req, |_| Some(true))], &mut source)
+        .unwrap();
+    let revision = source.revision();
+    let req = requests(&mut ctx, &frame(2, 0., 0, [0, 0], &[(3, key)]));
+    let mut wrong = header(2, 2);
+    for v in [1, 1, 0, 0] {
+        u32_to(&mut wrong, v);
+    }
+    string(&mut wrong, "minecraft:stone");
+    state_source(&mut wrong, 0);
+    for v in [3, 0, 0, 0, 1, 0, 1, 0, 1, 0] {
+        u32_to(&mut wrong, v);
+    }
+    assert!(
+        ctx.accept(&[&wrong], &mut source)
+            .unwrap_err()
+            .contains("without catalog invalidation")
+    );
+    assert_eq!(source.revision(), revision);
+    assert_eq!(ctx.catalog.states[&1].faces, [crate::shape::FaceId(1); 6]);
+    assert!(ctx.pending.is_some());
+    ctx.accept(&[&response(2, &req, |_| Some(true))], &mut source)
+        .unwrap();
+    assert_eq!(ctx.stats.compiled, 0);
+}
+
+#[test]
+fn corner_dependency_mask_includes_diagonals_for_same_fluid_height_changes() {
+    let mut catalog = Catalog::default();
+    for (id, amount) in [(1, 8), (2, 1)] {
+        catalog.states.insert(
+            id,
+            model::State {
+                fluid: fluid::Fluid {
+                    kind: 1,
+                    amount,
+                    falling: false,
+                    material: 1,
+                },
+                ..Default::default()
+            },
+        );
+    }
+    let old = SectionData {
+        palette: vec![1],
+        storage: vec![],
+        bits: 0,
+        per_word: 0,
+    };
+    for (x, y, z) in [(0, 0, 0), (15, 0, 15), (0, 15, 15), (15, 15, 0)] {
+        let index = y * 256 + z * 16 + x;
+        let mut new = SectionData {
+            palette: vec![1, 2],
+            storage: vec![0; 64],
+            bits: 1,
+            per_word: 64,
+        };
+        new.storage[index / 64] |= 1 << (index % 64);
+        let mask = changed_boundaries(Some(&old), Some(&new), &catalog);
+        assert_eq!(mask.count_ones(), 7);
+        let d = |c| if c == 0 { -1 } else { 1 };
+        let diagonal = ((d(y) + 1) * 9 + (d(z) + 1) * 3 + d(x) + 1) as usize;
+        assert_ne!(mask & (1 << diagonal), 0);
+        assert_eq!(mask & (1 << 13), 0);
     }
 }

@@ -4,9 +4,17 @@ use crate::tests::{frame, header, requests, scene, string};
 use std::io::Write;
 
 fn definitions(out: &mut Vec<u8>) {
+    for v in [5, 1, 2, 0] {
+        u32_to(out, v);
+    }
+    for _ in 0..3 {
+        for v in [0f32, 0., 1., 1.] {
+            u32_to(out, v.to_bits());
+        }
+    }
     for (id, flags, model, name) in [
         (0, 1, 0, "minecraft:air"),
-        (1, 4, 1, "minecraft:stone"),
+        (1, 36, 1, "minecraft:stone"),
         (2, 0, 1, "minecraft:glass"),
         (3, 16, 0, "minecraft:water"),
         (4, 2, 2, "minecraft:fern"),
@@ -15,6 +23,18 @@ fn definitions(out: &mut Vec<u8>) {
             u32_to(out, v);
         }
         string(out, name);
+        if id == 3 {
+            for _ in 0..6 {
+                u32_to(out, 0);
+            }
+            u32_to(out, 0);
+            string(out, "minecraft:water");
+            for v in [0, 0, 1] {
+                u32_to(out, v);
+            }
+        } else {
+            crate::tests::state_source(out, flags);
+        }
     }
     let faces = [
         [[0., 0., 0.], [1., 0., 0.], [1., 0., 1.], [0., 0., 1.]],

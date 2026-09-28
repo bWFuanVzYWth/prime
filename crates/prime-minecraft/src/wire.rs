@@ -1,6 +1,6 @@
 //! Borrowed page stream. The engine owns pointers; this crate only sees safe slices.
 pub const MAGIC: u32 = 0x5343_4d50;
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 pub(crate) struct Reader<'a> {
     pages: &'a [&'a [u8]],

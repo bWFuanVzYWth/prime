@@ -17,6 +17,16 @@ impl Section {
             self.2 as f64 * 16.0,
         ]
     }
+    pub fn halo(self) -> [Self; 27] {
+        std::array::from_fn(|i| {
+            Self(
+                self.0 + i as i32 % 3 - 1,
+                self.1 + i as i32 / 9 - 1,
+                self.2 + (i as i32 / 3) % 3 - 1,
+            )
+        })
+    }
+    #[cfg(test)]
     pub fn neighbors(self) -> [Self; 6] {
         [
             Self(self.0, self.1 - 1, self.2),
@@ -201,7 +211,16 @@ impl Scheduler {
             // at column granularity, then touch section identities only in changed columns.
             let mut cache_columns = columns_next.clone();
             for &(x, z) in &columns_next {
-                for n in [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)] {
+                for n in [
+                    (x - 1, z - 1),
+                    (x, z - 1),
+                    (x + 1, z - 1),
+                    (x - 1, z),
+                    (x + 1, z),
+                    (x - 1, z + 1),
+                    (x, z + 1),
+                    (x + 1, z + 1),
+                ] {
                     if self.loaded.contains(&n) && frame.source.contains(n.0, n.1) {
                         cache_columns.insert(n);
                     }

@@ -163,7 +163,8 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             events.clear();
             chunks.clear();
             blockEntities.clear();
-            sources = new SectionSources(minecraft.getModelManager().getBlockStateModelSet());
+            sources = new SectionSources(minecraft.getModelManager().getBlockStateModelSet(),
+                                         minecraft.getModelManager().getFluidStateModelSet());
             inventory = true;
         }
         var access = (LoadedTerrainSnapshot)world.getChunkSource();
@@ -286,7 +287,8 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             return;
         ++current.invalidations;
         current.sources = new SectionSources(
-                Minecraft.getInstance().getModelManager().getBlockStateModelSet());
+                Minecraft.getInstance().getModelManager().getBlockStateModelSet(),
+                Minecraft.getInstance().getModelManager().getFluidStateModelSet());
         current.event(4, 0, 0, 0);
     }
     public static void blockEntitiesChanged(LevelChunk chunk) {

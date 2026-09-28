@@ -8,12 +8,19 @@ static MISSING: State = State {
     flags: 0,
     model: 0,
     name: String::new(),
+    faces: [crate::shape::FaceId(0); 6],
+    support: 0,
+    fluid: crate::fluid::Fluid {
+        kind: 0,
+        amount: 0,
+        falling: false,
+        material: 0,
+    },
 };
 #[derive(Clone, Copy)]
 struct Cell<'a> {
     state: &'a State,
     faces: u32,
-    full: bool,
     matching: bool,
 }
 impl<'a> Cell<'a> {
@@ -22,7 +29,6 @@ impl<'a> Cell<'a> {
         Self {
             state,
             faces: catalog.face_mask(state),
-            full: state.full(),
             matching: state.same_block_culls(),
         }
     }
@@ -48,6 +54,13 @@ impl<'a> View<'a> {
             data,
             palette,
             catalog,
+        }
+    }
+    fn has_fluid(&self) -> bool {
+        match &self.palette {
+            Palette::Single(c) => c.state.fluid.kind != 0,
+            Palette::Local(cells) => cells.iter().any(|c| c.state.fluid.kind != 0),
+            Palette::Global => true,
         }
     }
     fn cell(&self, index: usize) -> Cell<'a> {
@@ -94,50 +107,49 @@ pub(super) fn compile_slab(
     const ROW: usize = 18;
     const PLANE: usize = ROW * ROW;
     let center = View::new(&sections[&job.key], catalog);
-    let neighbors = job
-        .key
-        .neighbors()
-        .map(|key| sections.get(&key).map(|d| View::new(d, catalog)));
+    let has_fluid = center.has_fluid();
+    let mut views = job.key.halo().map(|key| {
+        if key == job.key
+            || !has_fluid
+                && key.0.abs_diff(job.key.0) + key.1.abs_diff(job.key.1) + key.2.abs_diff(job.key.2)
+                    > 1
+        {
+            return None;
+        }
+
+        if key.1 < job.key.1 && job.first_y != 0 || key.1 > job.key.1 && job.first_y != 12 {
+            None
+        } else {
+            sections.get(&key).map(|d| View::new(d, catalog))
+        }
+    });
+    views[13] = Some(center);
     let missing = Cell {
         state: &MISSING,
         faces: 63,
-        full: false,
         matching: false,
     };
     let mut cells = [missing; 6 * PLANE];
-    // Inner rows and the two Y halo planes are contiguous source spans.
+    // Full one-cell neighborhood, including diagonals: fluid slopes/flow/backfaces consume it.
+    // Only halo rows expand; central 16-cell spans still unpack once, word by word.
     for py in 0..6 {
-        let y = job.first_y as isize + py as isize - 1;
-        let (view, sy) = if y < 0 {
-            (neighbors[0].as_ref(), 15)
-        } else if y >= 16 {
-            (neighbors[1].as_ref(), 0)
-        } else {
-            (Some(&center), y as usize)
-        };
-        if let Some(view) = view {
-            for z in 0..16 {
-                let at = py * PLANE + (z + 1) * ROW + 1;
-                view.row(sy * 256 + z * 16, &mut cells[at..at + 16]);
+        let y = job.first_y as i32 + py as i32 - 1;
+        let dy = y.div_euclid(16);
+        let sy = y.rem_euclid(16) as usize;
+        for pz in 0..18 {
+            let z = pz as i32 - 1;
+            let dz = z.div_euclid(16);
+            let sz = z.rem_euclid(16) as usize;
+            let row = py * PLANE + pz * ROW;
+            let vi = ((dy + 1) * 9 + (dz + 1) * 3 + 1) as usize;
+            if let Some(view) = &views[vi] {
+                view.row(sy * 256 + sz * 16, &mut cells[row + 1..row + 17]);
             }
-        }
-    }
-    // X/Z halos need only the four slab rows; unused edges/corners are never queried.
-    for y in 0..4 {
-        let sy = (job.first_y + y) * 256;
-        let plane = (y + 1) * PLANE;
-        for n in 0..16 {
-            if let Some(view) = &neighbors[2] {
-                cells[plane + n + 1] = view.cell(sy + 240 + n);
+            if let Some(view) = &views[vi - 1] {
+                cells[row] = view.cell(sy * 256 + sz * 16 + 15);
             }
-            if let Some(view) = &neighbors[3] {
-                cells[plane + 17 * ROW + n + 1] = view.cell(sy + n);
-            }
-            if let Some(view) = &neighbors[4] {
-                cells[plane + (n + 1) * ROW] = view.cell(sy + n * 16 + 15);
-            }
-            if let Some(view) = &neighbors[5] {
-                cells[plane + (n + 1) * ROW + 17] = view.cell(sy + n * 16);
+            if let Some(view) = &views[vi + 1] {
+                cells[row + 17] = view.cell(sy * 256 + sz * 16);
             }
         }
     }
@@ -146,6 +158,20 @@ pub(super) fn compile_slab(
             for x in 0..16 {
                 let index = (y + 1) * PLANE + (z + 1) * ROW + x + 1;
                 let cell = cells[index];
+                if cell.state.fluid.kind != 0 {
+                    crate::fluid::emit(
+                        catalog,
+                        cell.state,
+                        [x as f32, (job.first_y + y) as f32, z as f32],
+                        |dx, dy, dz| {
+                            cells
+                                [(index as i32 + dy * PLANE as i32 + dz * ROW as i32 + dx) as usize]
+                                .state
+                        },
+                        &mut job.layers,
+                        &mut job.hacks,
+                    );
+                }
                 if cell.faces == 0 {
                     continue;
                 }
@@ -162,10 +188,8 @@ pub(super) fn compile_slab(
                 .enumerate()
                 {
                     let other = cells[neighbor];
-                    if !(other.full
-                        || (cell.matching
-                            && (std::ptr::eq(cell.state, other.state)
-                                || cell.state.name == other.state.name)))
+                    if !(catalog.covers(other.state.faces[face ^ 1], cell.state.faces[face])
+                        || cell.matching && cell.state.name == other.state.name)
                     {
                         visible |= 1 << face;
                     }
