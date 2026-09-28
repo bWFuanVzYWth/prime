@@ -92,7 +92,7 @@ final class SectionTintCases {
             models.put(Blocks.OAK_SLAB.defaultBlockState().setValue(
                                BlockStateProperties.WATERLOGGED, true),
                        SectionCompilerOracle.box(material, 0, 0, 0, 1, .5f, 1));
-            for (int phase : new int[] {0, 1})
+            for (int phase : new int[] {0, 1, 3})
                 cases.add(new SectionCompilerOracle.Case("tint_biomes_" + radius + "_" + phase,
                                                          Map.copyOf(blocks), Map.copyOf(models),
                                                          radius, phase));
@@ -129,6 +129,9 @@ final class SectionTintCases {
         cases.add(new SectionCompilerOracle.Case("tint_dense_biome_changed",
                                                  SectionWorkloads.snapshot(blocks),
                                                  Map.copyOf(models), 7, 1, side));
+        cases.add(new SectionCompilerOracle.Case("tint_dense_biome_columns",
+                                                 SectionWorkloads.snapshot(blocks),
+                                                 Map.copyOf(models), 7, 3, side));
         for (int x = 0; x < side; ++x)
             for (int y = 0; y < 2; ++y)
                 for (int z = 0; z < side; ++z)
@@ -149,17 +152,20 @@ final class SectionTintCases {
                           new net.minecraft.client.OptionInstance.IntRange(0, 7),
                           Math.max(radius, 0), v -> {}));
         var world = FluidRouterCpuSmoke.blank(World.class);
-        world.phase = phase;
+        world.phase = phase & 1;
+        world.columnsOnly = phase >= 2;
         var biomes = List.of(
                 biome(.8f, .4f, 0x3f76e4, BiomeSpecialEffects.GrassColorModifier.NONE),
                 biome(.8f, .9f, 0x617b64, BiomeSpecialEffects.GrassColorModifier.SWAMP),
                 biome(.2f, .3f, 0x3938c9, BiomeSpecialEffects.GrassColorModifier.DARK_FOREST));
-        world.biomes = new BiomeManager(
-                (x, y, z)
-                        -> biomes.get(Math.floorMod(Math.floorDiv(x + world.phase * 4, 4) + y +
-                                                            Math.floorDiv(z, 4),
-                                                    3)),
-                BiomeManager.obfuscateSeed(123456789L));
+        world.biomes = new BiomeManager((x, y, z) -> {
+            int cx = Math.floorDiv(x, 4), cz = Math.floorDiv(z, 4);
+            int shift =
+                    !world.columnsOnly || (Math.floorMod(cx, 3) == 0 && Math.floorMod(cz, 3) == 0)
+                            ? world.phase
+                            : 0;
+            return biomes.get(Math.floorMod(cx + shift + y + cz, 3));
+        }, BiomeManager.obfuscateSeed(123456789L));
         world.caches = new java.util.IdentityHashMap<>();
         for (var resolver :
              List.of(net.minecraft.client.renderer.BiomeColors.GRASS_COLOR_RESOLVER,
@@ -186,6 +192,7 @@ final class SectionTintCases {
     static final class World extends ClientLevel {
         BiomeManager biomes;
         int phase;
+        boolean columnsOnly;
         Map<ColorResolver, BlockTintCache> caches;
         private World() {
             super(null, null, null, null, 0, 0, null, false, 0, 0);
@@ -200,6 +207,13 @@ final class SectionTintCases {
         }
         void clearColors() {
             caches.values().forEach(BlockTintCache::invalidateAll);
+        }
+        void clearColumns(int side) {
+            for (int x = 0; x <= side; x += 3)
+                for (int z = 0; z <= side; z += 3) {
+                    int cx = x, cz = z;
+                    caches.values().forEach(c -> c.invalidateForChunk(cx, cz));
+                }
         }
     }
 }

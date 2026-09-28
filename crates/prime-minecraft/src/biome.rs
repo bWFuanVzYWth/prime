@@ -66,13 +66,95 @@ impl Sample {
 pub(crate) struct Cache {
     radius: Option<i32>,
     sections: HashMap<Section, HashMap<u16, u32>>,
+    sources: HashMap<Section, Box<SourcePage>>,
+}
+
+struct SourcePage {
+    // Allocate only sampled resolver/Y planes, rather than all 4 * 4096 colors.
+    planes: [Option<Box<SourcePlane>>; 64],
+}
+impl Default for SourcePage {
+    fn default() -> Self {
+        Self {
+            planes: std::array::from_fn(|_| None),
+        }
+    }
+}
+struct SourcePlane {
+    colors: [u32; 256],
+    valid: [u64; 4],
+}
+impl Default for SourcePlane {
+    fn default() -> Self {
+        Self {
+            colors: [0; 256],
+            valid: [0; 4],
+        }
+    }
+}
+type SourceKey = (Resolver, i32, i32, i32);
+struct SourceIndices {
+    indices: [usize; 256],
+    missing: [u64; 4],
+}
+fn plane_index(resolver: Resolver, y: i32) -> usize {
+    (resolver as usize - 1) * 16 + (y & 15) as usize
+}
+
+/// Both supported MC BiomeManagers choose one of the eight quart corners at
+/// (block - 2) >> 2 and +1. A changed column affects samples in [-2, 17], then
+/// the exact box filter expands that horizontal dependency by its blend radius.
+fn dependency_masks(columns: &HashSet<(i32, i32)>, margin: i32) -> HashMap<(i32, i32), [u64; 4]> {
+    let mut masks = HashMap::<_, [u64; 4]>::new();
+    for &(x, z) in columns {
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let x0 = (-dx * 16 - margin).max(0);
+                let x1 = (-dx * 16 + 15 + margin).min(15);
+                let z0 = (-dz * 16 - margin).max(0);
+                let z1 = (-dz * 16 + 15 + margin).min(15);
+                let mask = masks.entry((x + dx, z + dz)).or_default();
+                let row = ((1u64 << (x1 - x0 + 1)) - 1) << x0;
+                for local_z in z0..=z1 {
+                    mask[local_z as usize / 4] |= row << ((local_z & 3) * 16);
+                }
+            }
+        }
+    }
+    masks
 }
 impl Cache {
     pub fn invalidate(&mut self, all: bool, columns: &HashSet<(i32, i32)>) {
         if all {
             self.sections.clear();
+            self.sources.clear();
         } else if !columns.is_empty() {
-            self.sections.retain(|s, _| !columns.contains(&(s.0, s.2)));
+            let mixed = dependency_masks(columns, self.radius.unwrap_or(0) + 2);
+            self.sections.retain(|s, colors| {
+                if let Some(mask) = mixed.get(&(s.0, s.2)) {
+                    colors.retain(|&local, _| {
+                        let xz = (local & 255) as usize;
+                        mask[xz / 64] & (1 << (xz & 63)) == 0
+                    });
+                }
+                !colors.is_empty()
+            });
+            let raw = dependency_masks(columns, 2);
+            self.sources.retain(|s, page| {
+                if let Some(mask) = raw.get(&(s.0, s.2)) {
+                    for plane in &mut page.planes {
+                        if let Some(p) = plane {
+                            for (valid, &remove) in p.valid.iter_mut().zip(mask) {
+                                *valid &= !remove;
+                            }
+                            if p.valid == [0; 4] {
+                                *plane = None;
+                            }
+                        }
+                    }
+                }
+                page.planes.iter().any(Option::is_some)
+            });
         }
     }
     pub fn forget(&mut self, section: Section) {
@@ -81,6 +163,16 @@ impl Cache {
         // Retire that dependency too, including a query below the world's section range.
         self.sections
             .remove(&Section(section.0, section.1 - 1, section.2));
+        // Raw samples include the horizontal filter halo and the upper-plant query
+        // below the consumer. Retiring this superset bounds storage to live consumers;
+        // shared neighboring pages may be recomputed, but never survive all owners.
+        for y in section.1 - 1..=section.1 {
+            for z in section.2 - 1..=section.2 + 1 {
+                for x in section.0 - 1..=section.0 + 1 {
+                    self.sources.remove(&Section(x, y, z));
+                }
+            }
+        }
     }
     pub fn prepare(
         &mut self,
@@ -133,8 +225,11 @@ impl Cache {
         }
         // Index a whole source row fragment at once, rather than hashing every sample.
         // The value is separately allocated so growing the map does not move 256 indices.
-        let mut unique: HashMap<(Resolver, i32, i32, i32), Box<[usize; 256]>> = HashMap::new();
+        let mut unique: HashMap<SourceKey, Box<SourceIndices>> = HashMap::new();
         let mut samples = Vec::new();
+        let mut values = Vec::new();
+        let mut missing_slots = Vec::new();
+        let mut cached_samples = 0;
         let mut output = Vec::with_capacity(tiles.len());
         for ((resolver, y, _, _), mut tile) in tiles {
             tile.min = tile.min.map(|p| p - radius);
@@ -162,20 +257,49 @@ impl Cache {
                     let end = ((x | 15) - tile.min[0] + 1).min(tile.width as i32);
                     let mut fragment = pending & ((1u32 << end) - 1);
                     pending &= !fragment;
-                    let indices = unique
-                        .entry((resolver, y, x >> 4, z >> 4))
-                        .or_insert_with(|| Box::new([usize::MAX; 256]));
+                    let indices =
+                        unique
+                            .entry((resolver, y, x >> 4, z >> 4))
+                            .or_insert_with(|| {
+                                Box::new(SourceIndices {
+                                    indices: [usize::MAX; 256],
+                                    missing: [0; 4],
+                                })
+                            });
+                    let cached = self
+                        .sources
+                        .get(&Section(x >> 4, y >> 4, z >> 4))
+                        .and_then(|page| page.planes[plane_index(resolver, y)].as_ref());
                     while fragment != 0 {
                         let column = fragment.trailing_zeros() as usize;
                         fragment &= fragment - 1;
                         let x = tile.min[0] + column as i32;
-                        let index = &mut indices[((z & 15) * 16 + (x & 15)) as usize];
+                        let local = ((z & 15) * 16 + (x & 15)) as usize;
+                        let index = &mut indices.indices[local];
                         if *index == usize::MAX {
-                            *index = samples.len();
-                            samples.push(Sample {
-                                position: [x, y, z],
-                                resolver,
-                            });
+                            *index = samples.len() + cached_samples;
+                            if let Some(plane) =
+                                cached.filter(|p| p.valid[local / 64] & (1 << (local & 63)) != 0)
+                            {
+                                // A cold batch reads the validated response directly. Allocate a
+                                // merged array only when a real cross-batch sample hit requires it.
+                                if cached_samples == 0 {
+                                    values.resize(samples.len(), 0);
+                                    missing_slots.extend(0..samples.len());
+                                }
+                                values.push(plane.colors[local]);
+                                cached_samples += 1;
+                            } else {
+                                indices.missing[local / 64] |= 1 << (local & 63);
+                                if cached_samples != 0 {
+                                    missing_slots.push(*index);
+                                    values.push(0);
+                                }
+                                samples.push(Sample {
+                                    position: [x, y, z],
+                                    resolver,
+                                });
+                            }
                         }
                         tile.samples[row * tile.width + column] = *index;
                     }
@@ -189,9 +313,38 @@ impl Cache {
             tiles: output,
             radius,
             hits,
+            cached_samples,
+            values,
+            missing_slots,
+            unique,
         }
     }
     pub fn finish(&mut self, mut plan: Plan, samples: &[u32]) -> Vec<u32> {
+        let values = if plan.cached_samples == 0 {
+            samples
+        } else {
+            for (&slot, &value) in plan.missing_slots.iter().zip(samples) {
+                plan.values[slot] = value;
+            }
+            &plan.values
+        };
+        // Publish only fully validated host responses, one map lookup per source plane.
+        for ((resolver, y, x, z), indices) in plan.unique {
+            if indices.missing == [0; 4] {
+                continue;
+            }
+            let page = self.sources.entry(Section(x, y >> 4, z)).or_default();
+            let plane = page.planes[plane_index(resolver, y)].get_or_insert_with(Box::default);
+            for (word, &mask) in indices.missing.iter().enumerate() {
+                plane.valid[word] |= mask;
+                let mut pending = mask;
+                while pending != 0 {
+                    let local = word * 64 + pending.trailing_zeros() as usize;
+                    pending &= pending - 1;
+                    plane.colors[local] = values[indices.indices[local]];
+                }
+            }
+        }
         let mut prefix = Vec::<[u32; 3]>::new();
         for tile in plan.tiles {
             let stride = tile.width + 1;
@@ -214,7 +367,7 @@ impl Cache {
                     let color = if index == usize::MAX {
                         0
                     } else {
-                        samples[index]
+                        values[index]
                     };
                     for (c, shift) in [16, 8, 0].into_iter().enumerate() {
                         row[c] += (color >> shift) & 255;
@@ -230,7 +383,7 @@ impl Cache {
                 let z = (query.position[2] - plan.radius - tile.min[1]) as usize;
                 let color = if plan.radius == 0 {
                     // With blending disabled MC returns the resolver's entire ARGB unchanged.
-                    samples[tile.samples[z * tile.width + x]]
+                    values[tile.samples[z * tile.width + x]]
                 } else {
                     let mut color = 0xff00_0000;
                     for (c, shift) in [16, 8, 0].into_iter().enumerate() {
@@ -266,6 +419,10 @@ pub(crate) struct Plan {
     tiles: Vec<Tile>,
     radius: i32,
     pub hits: usize,
+    pub cached_samples: usize,
+    values: Vec<u32>,
+    missing_slots: Vec<usize>,
+    unique: HashMap<SourceKey, Box<SourceIndices>>,
 }
 
 #[cfg(test)]
@@ -276,6 +433,114 @@ mod tests {
         (x.wrapping_mul(741103597) ^ y.wrapping_mul(341873128) ^ z.wrapping_mul(132897987))
             .cast_unsigned()
             ^ q.resolver as u32
+    }
+    #[test]
+    fn raw_samples_survive_blend_changes_but_not_global_invalidation_or_retirement() {
+        let request = Request {
+            position: [-1, 0, -1],
+            state: 0,
+            slot: 0,
+        };
+        for resolver in [
+            Resolver::Grass,
+            Resolver::Foliage,
+            Resolver::DryFoliage,
+            Resolver::Water,
+        ] {
+            let recipes = [Recipe::Biome {
+                resolver,
+                below: true,
+            }];
+            let mut cache = Cache::default();
+            let plan = cache.prepare(std::iter::once(request), &recipes, 7);
+            // Merely planning or abandoning a response must not populate the cache.
+            assert_eq!(
+                cache.prepare(std::iter::once(request), &recipes, 7).samples,
+                plan.samples
+            );
+            let values: Vec<_> = plan.samples.iter().copied().map(color).collect();
+            cache.finish(plan, &values);
+            for radius in (0..7).rev() {
+                let plan = cache.prepare(std::iter::once(request), &recipes, radius);
+                assert_eq!(plan.hits, 0);
+                assert!(plan.samples.is_empty());
+                assert_eq!(plan.cached_samples, (2 * radius + 1).pow(2) as usize);
+                let mut cold = Cache::default();
+                let reference = cold.prepare(std::iter::once(request), &recipes, radius);
+                let values: Vec<_> = reference.samples.iter().copied().map(color).collect();
+                assert_eq!(cache.finish(plan, &[]), cold.finish(reference, &values));
+            }
+            // An actual callback result at the same position must never reuse a biome color.
+            for value in [0x8070903f, 0x12345678] {
+                let plan = cache.prepare(std::iter::once(request), &[Recipe::Color(value)], 0);
+                assert_eq!(cache.finish(plan, &[]), [value]);
+            }
+            cache.forget(Section(-1, 0, -1));
+            assert!(cache.sources.is_empty());
+            let plan = cache.prepare(std::iter::once(request), &recipes, 7);
+            assert_eq!(plan.samples.len(), 225);
+            let values: Vec<_> = plan.samples.iter().copied().map(color).collect();
+            cache.finish(plan, &values);
+            cache.invalidate(true, &HashSet::new());
+            let plan = cache.prepare(std::iter::once(request), &recipes, 7);
+            assert_eq!(plan.samples.len(), 225);
+        }
+    }
+
+    #[test]
+    fn column_changes_preserve_unaffected_samples_and_match_a_cold_rebuild() {
+        let mut requests = Vec::new();
+        let mut recipes = Vec::new();
+        for resolver in [
+            Resolver::Grass,
+            Resolver::Foliage,
+            Resolver::DryFoliage,
+            Resolver::Water,
+        ] {
+            for y in [-17, 17] {
+                for z in (-26..=41).step_by(3) {
+                    for x in (-26..=41).step_by(3) {
+                        requests.push(Request {
+                            position: [x, y, z],
+                            state: 0,
+                            slot: 0,
+                        });
+                        recipes.push(Recipe::Biome {
+                            resolver,
+                            below: y < 0,
+                        });
+                    }
+                }
+            }
+        }
+        // Worst-case zoom dependence: every sample that could read the changed quart
+        // column changes. Check positive/negative columns, edges/corners and all radii.
+        for column in [(-1, -1), (0, 0), (1, 1)] {
+            let affected = |q: Sample| {
+                (column.0 * 16 - 2..=column.0 * 16 + 17).contains(&q.position[0])
+                    && (column.1 * 16 - 2..=column.1 * 16 + 17).contains(&q.position[2])
+            };
+            let updated = |q| color(q) ^ if affected(q) { 0x7fffffff } else { 0 };
+            for radius in 0..=7 {
+                let mut cache = Cache::default();
+                let plan = cache.prepare(requests.iter().copied(), &recipes, radius);
+                let expected_misses = plan.samples.iter().filter(|&&q| affected(q)).count();
+                let values: Vec<_> = plan.samples.iter().copied().map(color).collect();
+                cache.finish(plan, &values);
+                cache.invalidate(false, &HashSet::from([column]));
+                let plan = cache.prepare(requests.iter().copied(), &recipes, radius);
+                assert!(plan.hits > 0);
+                assert!(radius == 0 || plan.cached_samples > 0);
+                assert_eq!(plan.samples.len(), expected_misses);
+                assert!(plan.samples.iter().copied().all(affected));
+                let values: Vec<_> = plan.samples.iter().copied().map(updated).collect();
+                let actual = cache.finish(plan, &values);
+                let mut cold = Cache::default();
+                let reference = cold.prepare(requests.iter().copied(), &recipes, radius);
+                let values: Vec<_> = reference.samples.iter().copied().map(updated).collect();
+                assert_eq!(actual, cold.finish(reference, &values));
+            }
+        }
     }
     #[test]
     fn tiled_prefix_sums_match_scalar_integers_and_cache_dependencies() {

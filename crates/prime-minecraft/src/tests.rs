@@ -872,3 +872,89 @@ fn biome_stage_cannot_publish_incomplete_or_wrong_phase_results() {
     assert!(ctx.tint_requests.is_empty());
     assert_eq!(ctx.stats.response_batches, 3);
 }
+
+#[test]
+fn cached_raw_biomes_finish_the_source_response_without_a_host_sample_round() {
+    fn compile(warm: bool) -> Vec<Triangle> {
+        let mut ctx = TerrainContext::default();
+        let mut output = scene();
+        let key = Section(0, 0, 0);
+        let req = requests(&mut ctx, &frame(1, 0., 0, [0, 0], &[(1, key)]));
+        ctx.accept(
+            &[&crate::perf::packet(1, &req, "decorated", false)],
+            &mut output,
+        )
+        .unwrap();
+        let queries: Vec<_> = ctx
+            .awaiting_colors
+            .as_ref()
+            .unwrap()
+            .jobs
+            .iter()
+            .flat_map(|j| j.tints.requests.iter().copied())
+            .collect();
+        let recipes = vec![
+            biome::Recipe::Biome {
+                resolver: biome::Resolver::Grass,
+                below: false
+            };
+            queries.len()
+        ];
+        if warm {
+            let plan = ctx.biomes.prepare(queries.iter().copied(), &recipes, 7);
+            let colors = vec![0xff1270e4; plan.samples.len()];
+            ctx.biomes.finish(plan, &colors);
+        }
+        let mut response = header(3, 1);
+        u64_to(&mut response, queries.len() as u64);
+        u32_to(&mut response, 2);
+        for _ in queries {
+            u32_to(&mut response, 1);
+            u32_to(&mut response, 0);
+        }
+        ctx.accept(&[&response], &mut output).unwrap();
+        if warm {
+            assert!(ctx.tint_requests().is_empty());
+            assert_eq!(ctx.stats.biome_samples, 0);
+            assert!(ctx.stats.biome_cached_samples > 0);
+            assert_eq!(ctx.stats.response_batches, 2);
+        } else {
+            assert!(!ctx.tint_requests().is_empty());
+            let mut response = header(4, 1);
+            u64_to(&mut response, ctx.stats.biome_samples as u64);
+            for _ in 0..ctx.stats.biome_samples {
+                u32_to(&mut response, 0xff1270e4);
+            }
+            ctx.accept(&[&response], &mut output).unwrap();
+            assert_eq!(ctx.stats.response_batches, 3);
+        }
+        // A departed dependency column must recompile colored neighbors even when
+        // their palettes are unchanged; getBiome can now return the missing-column biome.
+        let req = requests(&mut ctx, &frame(2, 0., 0, [0, 0], &[(2, Section(1, 0, 0))]));
+        assert!(req.is_empty());
+        ctx.accept(
+            &[&crate::perf::packet(2, &req, "decorated", false)],
+            &mut output,
+        )
+        .unwrap();
+        assert_eq!(ctx.stats.compiled, 1);
+        assert!(!ctx.tint_requests().is_empty());
+        // Prior published colors remain visible until the replacement batch closes.
+        output
+            .translate([0.; 3])
+            .unwrap()
+            .meshes
+            .values()
+            .flat_map(|m| m.triangles.iter())
+            .collect()
+    }
+    let cold = compile(false);
+    let warm = compile(true);
+    assert!(!cold.is_empty());
+    assert_eq!(cold.len(), warm.len());
+    for (a, b) in cold.iter().zip(warm) {
+        assert_eq!(a.positions, b.positions);
+        assert_eq!(a.colors, b.colors);
+        assert_eq!(a.uvs, b.uvs);
+    }
+}

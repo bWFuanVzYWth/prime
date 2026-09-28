@@ -381,11 +381,12 @@ fn benchmark_edits_match_original_and_unchanged_inputs_do_no_compile() {
                 let edited = std::fs::read(root.join(format!("{name}.{suffix}.source"))).unwrap();
                 assert_eq!(requests(&mut context, &input).len(), edited_count);
                 context.accept(&[&edited], &mut output).unwrap();
-                finish_tints(
+                replay_cached_tints(
                     &mut context,
                     &mut output,
                     &root,
-                    &format!("{name}.{suffix}"),
+                    &format!("{name}_edited"),
+                    batch,
                 );
                 difference(&expected, &triangles(&output)).unwrap();
                 assert_eq!(
@@ -476,6 +477,107 @@ fn biome_only_invalidation_matches_vanilla_without_resending_sections() {
             ctx.accept(&[&source], &mut output).unwrap();
             assert_eq!(ctx.stats.compiled, 0);
             assert!(ctx.tint_requests().is_empty());
+        }
+    }
+}
+
+/// Select actual host results by request identity. Cold fixtures still use the
+/// strict ordered replay above; incremental caches legitimately request a subset.
+fn replay_cached_tints(
+    ctx: &mut TerrainContext,
+    output: &mut SourceScene,
+    root: &std::path::Path,
+    case: &str,
+    batch: u64,
+) {
+    for _ in 0..2 {
+        let request = ctx.tint_requests();
+        if request.is_empty() {
+            return;
+        }
+        let (suffix, key_size, value_size, prefix) = if request[28] == 0 {
+            ("tint", 20, 8, 44)
+        } else {
+            ("biome", 16, 4, 40)
+        };
+        let keys = std::fs::read(root.join(format!("{case}.{suffix}.requests"))).unwrap();
+        let values = std::fs::read(root.join(format!("{case}.{suffix}"))).unwrap();
+        let lookup: HashMap<_, _> = keys[32..]
+            .chunks_exact(key_size)
+            .zip(values[prefix..].chunks_exact(value_size))
+            .collect();
+        let mut response = values[..prefix].to_vec();
+        response[24..32].copy_from_slice(&batch.to_le_bytes());
+        response[32..40].copy_from_slice(&request[8..16]);
+        for key in request[32..].chunks_exact(key_size) {
+            response.extend_from_slice(
+                lookup
+                    .get(key)
+                    .expect("incremental query outside cold source union"),
+            );
+        }
+        ctx.accept(&[&response], output).unwrap();
+    }
+    assert!(ctx.tint_requests().is_empty());
+}
+
+#[test]
+#[ignore = "generate dual-version column biome fixtures first"]
+fn column_biome_updates_reuse_samples_and_match_actual_vanilla() {
+    for version in [262u32, 263] {
+        let root = suite_root(version);
+        for (base, changed) in [0, 2, 7]
+            .map(|radius| {
+                (
+                    format!("tint_biomes_{radius}_0"),
+                    format!("tint_biomes_{radius}_3"),
+                )
+            })
+            .into_iter()
+            .chain(std::iter::once((
+                "bench_tinted".into(),
+                "tint_dense_biome_columns".into(),
+            )))
+        {
+            let original = std::fs::read(root.join(format!("{base}.frame"))).unwrap();
+            let source = std::fs::read(root.join(format!("{base}.source"))).unwrap();
+            let mut ctx = TerrainContext::default();
+            let mut output = scene();
+            requests(&mut ctx, &original);
+            ctx.accept(&[&source], &mut output).unwrap();
+            finish_tints(&mut ctx, &mut output, &root, &base);
+            let before = triangles(&output);
+            let cold_samples = ctx.stats.biome_samples;
+            let expected = triangles(&reference(
+                &std::fs::read(root.join(format!("{changed}.expected"))).unwrap(),
+            ));
+            assert!(
+                difference(&before, &expected).is_err(),
+                "column fixture must change colors: {base}"
+            );
+            let window = schedule::FrameInput::read(&[&original]).unwrap();
+            let mut events = Vec::new();
+            for x in (0..=window.source.x1 + 1).step_by(3) {
+                for z in (0..=window.source.z1 + 1).step_by(3) {
+                    events.push((6, Section(x, 0, z)));
+                }
+            }
+            for (batch, case, expected) in [(2, &changed, &expected), (3, &base, &before)] {
+                let mut input = frame(batch, 0., 1, [-1, 1], &events);
+                input[32..76].copy_from_slice(&original[32..76]);
+                input[8..12].copy_from_slice(&version.to_le_bytes());
+                assert!(requests(&mut ctx, &input).is_empty());
+                let mut response = crate::tests::header(2, batch);
+                response[8..12].copy_from_slice(&version.to_le_bytes());
+                u32_to(&mut response, 0);
+                ctx.accept(&[&response], &mut output).unwrap();
+                replay_cached_tints(&mut ctx, &mut output, &root, case, batch);
+                assert!(ctx.stats.biome_samples < cold_samples);
+                if base == "bench_tinted" {
+                    assert!(ctx.stats.biome_cached_samples > 0 && ctx.stats.biome_hits > 0);
+                }
+                difference(expected, &triangles(&output)).unwrap();
+            }
         }
     }
 }

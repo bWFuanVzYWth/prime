@@ -108,6 +108,10 @@ final class SectionWorkload implements AutoCloseable {
                     pages.i(1).i(x).i(0).i(z);
         else if (mode.equals("biome"))
             pages.i(7).i(0).i(0).i(0);
+        else if (mode.equals("biome_columns"))
+            for (int x = 0; x <= region.side; x += 3)
+                for (int z = 0; z <= region.side; z += 3)
+                    pages.i(6).i(x).i(0).i(z);
         else if (!mode.equals("idle"))
             for (var k : keys)
                 if (k.x() >= 0 && k.y() >= 0 && k.z() >= 0)
@@ -249,11 +253,14 @@ final class SectionWorkload implements AutoCloseable {
             allocation.setThreadAllocatedMemoryEnabled(true);
         int threads = Integer.getInteger("primept.section.threads", 8);
         try (var reference = new Reference(threads)) {
-            for (String mode : fixture.name().equals("bench_tinted")
-                                       ? List.of("edit", "unchanged", "idle", "biome")
-                                       : List.of("edit", "unchanged", "idle")) {
+            for (String mode :
+                 fixture.name().equals("bench_tinted")
+                         ? List.of("edit", "unchanged", "idle", "biome", "biome_columns")
+                         : List.of("edit", "unchanged", "idle")) {
                 restore(false);
                 region.tintWorld.phase = fixture.biomePhase();
+                region.tintWorld.columnsOnly = mode.equals("biome_columns");
+                region.tintWorld.clearColors();
                 try (var bridge = new NativeBridge(
                              Path.of(System.getProperty("primept.smoke.nativeLibrary")));
                      var events = new SourcePages(); var response = new SourcePages()) {
@@ -262,7 +269,7 @@ final class SectionWorkload implements AutoCloseable {
                     var router = new SectionSources(models, fluids);
                     for (int sample = -1; sample < warmup + samples; ++sample) {
                         long batch = sample + 2L;
-                        if (mode.equals("biome"))
+                        if (mode.startsWith("biome"))
                             region.tintWorld.phase = (sample & 1);
                         if (mode.equals("edit") && sample >= 0)
                             restore((sample & 1) == 0);
@@ -273,12 +280,10 @@ final class SectionWorkload implements AutoCloseable {
                         boolean mcFirst = (sample & 1) == 0;
                         long[] mc = new long[2];
                         if (mcFirst) {
-                            if (mode.equals("biome"))
-                                region.tintWorld.clearColors();
+                            invalidateColors(mode);
                             reference.measure(selected, mc);
                         }
-                        if (mode.equals("biome"))
-                            region.tintWorld.clearColors();
+                        invalidateColors(mode);
                         long gc0 = gcCount(), gcMs0 = gcMillis(), alloc0 = allocated(allocation);
                         long t0 = System.nanoTime();
                         frame(events, batch, mode);
@@ -313,20 +318,19 @@ final class SectionWorkload implements AutoCloseable {
                         long bytes = alloc0 < 0 ? -1 : allocated(allocation) - alloc0,
                              gc = gcCount() - gc0, gcMs = gcMillis() - gcMs0;
                         if (!mcFirst) {
-                            if (mode.equals("biome"))
-                                region.tintWorld.clearColors();
+                            invalidateColors(mode);
                             reference.measure(selected, mc);
                         }
                         String diagnostics =
                                 bridge.cpuDiagnostics(); // formatting and I/O are outside timed work
                         long expectedRequests = sample < 0 ? keys.size()
-                                                : (mode.equals("idle") || mode.equals("biome"))
+                                                : (mode.equals("idle") || mode.startsWith("biome"))
                                                         ? 0
                                                         : edited.size();
                         if (count != expectedRequests)
                             throw new AssertionError("Unexpected workset " + diagnostics);
                         int compiled = sample < 0 ? keys.size()
-                                       : (mode.equals("edit") || mode.equals("biome"))
+                                       : (mode.equals("edit") || mode.startsWith("biome"))
                                                ? edited.size()
                                                : 0;
                         if (!diagnostics.contains("compiled=" + compiled + " "))
@@ -346,6 +350,12 @@ final class SectionWorkload implements AutoCloseable {
         }
         restore(false);
         Files.write(directory.resolve(fixture.name() + ".csv"), rows);
+    }
+    private void invalidateColors(String mode) {
+        if (mode.equals("biome_columns"))
+            region.tintWorld.clearColumns(region.side);
+        else if (mode.equals("biome"))
+            region.tintWorld.clearColors();
     }
     private void restore(boolean edit) {
         for (int x = 0; x < region.side; ++x)

@@ -226,6 +226,7 @@ struct Stats {
     tint_requests: usize,
     tint_bytes: usize,
     biome_samples: usize,
+    biome_cached_samples: usize,
     biome_hits: usize,
     biome_plan_ms: f64,
     biome_filter_ms: f64,
@@ -409,11 +410,14 @@ impl TerrainContext {
         // not scan every tinted section once for every arriving column.
         let mut tint_all = false;
         let mut tint_columns = HashSet::new();
+        let mut biome_columns = HashSet::new();
         for &(kind, key) in &input.events {
             if kind == 7 {
                 tint_all = true;
             }
-            if kind == 6 {
+            // Unloading a column also changes getBiome's missing-column fallback.
+            if kind == 6 || kind == 2 {
+                biome_columns.insert((key.0, key.2));
                 for x in key.0 - 1..=key.0 + 1 {
                     for z in key.2 - 1..=key.2 + 1 {
                         tint_columns.insert((x, z));
@@ -429,7 +433,7 @@ impl TerrainContext {
                     .filter(|s| tint_all || tint_columns.contains(&(s.0, s.2))),
             );
         }
-        self.biomes.invalidate(tint_all, &tint_columns);
+        self.biomes.invalidate(tint_all, &biome_columns);
         for &key in &demand.removed {
             self.biomes.forget(key);
         }
@@ -606,6 +610,7 @@ impl TerrainContext {
             self.stats.biome_plan_ms = prepare.elapsed().as_secs_f64() * 1000.;
             self.stats.biome_hits = plan.hits;
             self.stats.biome_samples = plan.samples.len();
+            self.stats.biome_cached_samples = plan.cached_samples;
             if !plan.samples.is_empty() {
                 self.tint_requests.clear();
                 u64_to(&mut self.tint_requests, pending.batch);
@@ -626,7 +631,9 @@ impl TerrainContext {
                 self.awaiting_colors.as_mut().unwrap().stage = ColorStage::Biomes(plan);
                 return Ok(());
             }
-            colors = plan.colors;
+            let filter = Instant::now();
+            colors = self.biomes.finish(plan, &[]);
+            self.stats.biome_filter_ms = filter.elapsed().as_secs_f64() * 1000.;
         } else {
             colors = Vec::with_capacity(count);
             for _ in 0..count {
@@ -743,7 +750,7 @@ impl TerrainContext {
         let s = &self.stats;
         let h = s.hacks;
         format!(
-            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} tint_requests={} tint_bytes={} tint_pack={:.3} tint_decode={:.3} biome_samples={} biome_hits={} biome_plan={:.3} biome_filter={:.3} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={})]",
+            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} tint_requests={} tint_bytes={} tint_pack={:.3} tint_decode={:.3} biome_samples={} biome_cached_samples={} biome_hits={} biome_plan={:.3} biome_filter={:.3} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={})]",
             self.epoch,
             self.pending
                 .as_ref()
@@ -771,6 +778,7 @@ impl TerrainContext {
             s.tint_pack_ms,
             s.tint_decode_ms,
             s.biome_samples,
+            s.biome_cached_samples,
             s.biome_hits,
             s.biome_plan_ms,
             s.biome_filter_ms,
