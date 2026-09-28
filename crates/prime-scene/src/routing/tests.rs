@@ -339,13 +339,15 @@ fn java_routing_matches_both_versions_actual_source_and_fluid_particle_oracles()
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../adapters");
     for version in ["26.2", "26.3"] {
         let dir = root.join(format!("mc-{version}/build/routing-fixtures"));
-        let files = std::fs::read_dir(&dir).expect("Generate Java cpuSmoke fixtures first");
+        // This directory also contains the section source ABI. Only these files carry
+        // the legacy pair-of-packet-streams format; require every declared oracle.
+        let names = ["terrain-false", "terrain-true", "particles"]
+            .into_iter()
+            .map(str::to_owned)
+            .chain((0..8).map(|i| format!("fluid-{i}")));
         let mut cases = 0;
-        for file in files {
-            let path = file.unwrap().path();
-            if path.extension().and_then(|s| s.to_str()) != Some("bin") {
-                continue;
-            }
+        for name in names {
+            let path = dir.join(format!("{name}.bin"));
             let bytes = std::fs::read(&path).unwrap();
             let mut input = bytes.as_slice();
             let number = |input: &mut &[u8]| {

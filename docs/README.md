@@ -13,6 +13,7 @@
 | [宿主 Vulkan 流水线](pipeline.md) | 设备协商、直接输出、命令提交、同步、手部与 HUD 合成 |
 | [Slang 数学基础与显示策略](shaders.md) | 模块边界、可替换的 primeDRT、颜色空间、Z-Sobol、求交误差与尺寸历史 |
 | [行尾与源码格式](guides/git-line-endings.md) | 仓库级换行、格式工具与规范化边界 |
+| [Section 对拍与基准契约](guides/section-tests.md) | 实际原版参照、数值等价、增量回归、计时边界与证据范围 |
 
 安装与使用见根 [README](../README.md)；构建、测试和测量方法见 [CONTRIBUTING](../CONTRIBUTING.md)；尚未实现的能力与技术债见 [HACK](../HACK.md)，后续工作见 [TODO](../TODO.md)。section 原型的临时默认值单独维护在 [PROTOTYPE_HACKS](../PROTOTYPE_HACKS.md)，不混入主清单。
 

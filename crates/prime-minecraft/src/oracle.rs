@@ -3,46 +3,113 @@
 use super::*;
 use crate::tests::{frame, requests, scene};
 
-fn triangles(scene: &SourceScene) -> Vec<Triangle> {
-    let snapshot = scene.translate([0.; 3]).unwrap();
+/// Keep the section origin in f64. Casting it to f32 hides local geometry errors far from spawn.
+#[derive(Clone, Debug, PartialEq)]
+struct ObservedTriangle {
+    positions: [[f64; 3]; 3],
+    uvs: [[f64; 2]; 3],
+    colors: [[f64; 4]; 3],
+    texture: u32,
+    flags: u32,
+}
+fn triangles(scene: &SourceScene) -> Vec<ObservedTriangle> {
+    triangles_at(scene, [0.; 3])
+}
+fn triangles_at(scene: &SourceScene, anchor: [f64; 3]) -> Vec<ObservedTriangle> {
+    let snapshot = scene.translate(anchor).unwrap();
     let mut result = Vec::new();
     for mesh in snapshot.meshes.values() {
-        for triangle in mesh.triangles.iter() {
-            let mut t = *triangle;
-            for p in &mut t.positions {
-                for (i, v) in p.iter_mut().enumerate() {
-                    *v += mesh.origin[i] as f32;
-                }
-            }
-            // Triangle order and cyclic starting corner may differ, but winding and duplicates matter.
+        for t in mesh.triangles.iter() {
+            let positions = t
+                .positions
+                .map(|p| std::array::from_fn(|i| f64::from(p[i]) + mesh.origin[i]));
+            // Preserve winding, corner attributes and multiplicity; only cyclic starting corner is irrelevant.
             let first = (0..3)
-                .min_by(|&a, &b| compare(&t.positions[a], &t.positions[b]))
+                .min_by(|&a, &b| compare(&positions[a], &positions[b]))
                 .unwrap();
-            t.positions = std::array::from_fn(|i| t.positions[(first + i) % 3]);
-            t.colors = std::array::from_fn(|i| t.colors[(first + i) % 3]);
-            t.uvs = std::array::from_fn(|i| t.uvs[(first + i) % 3]);
-            result.push(t);
+            result.push(ObservedTriangle {
+                positions: std::array::from_fn(|i| positions[(first + i) % 3]),
+                uvs: std::array::from_fn(|i| t.uvs[(first + i) % 3].map(f64::from)),
+                colors: std::array::from_fn(|i| t.colors[(first + i) % 3].map(f64::from)),
+                texture: t.texture_id,
+                flags: t.flags,
+            });
         }
     }
-    result.sort_by(|a, b| compare(&values(a), &values(b)));
+    // Fixed arrays: sorting a large real mesh must not allocate one Vec per comparison.
+    result.sort_unstable_by(|a, b| {
+        a.texture
+            .cmp(&b.texture)
+            .then(a.flags.cmp(&b.flags))
+            .then_with(|| compare(&values(a), &values(b)))
+    });
     result
 }
-fn values(t: &Triangle) -> Vec<f32> {
-    t.positions
-        .iter()
-        .flatten()
-        .chain(t.uvs.iter().flatten())
-        .chain(t.colors.iter().flatten())
-        .copied()
-        .chain([t.texture_id as f32, t.flags as f32])
-        .collect()
+fn values(t: &ObservedTriangle) -> [f64; 27] {
+    let mut result = [0.; 27];
+    for (out, value) in result.iter_mut().zip(
+        t.positions
+            .iter()
+            .flatten()
+            .chain(t.uvs.iter().flatten())
+            .chain(t.colors.iter().flatten()),
+    ) {
+        *out = *value;
+    }
+    result
 }
-fn compare(a: &[f32], b: &[f32]) -> std::cmp::Ordering {
+fn compare(a: &[f64], b: &[f64]) -> std::cmp::Ordering {
     a.iter()
         .zip(b)
         .map(|(a, b)| a.total_cmp(b))
         .find(|v| !v.is_eq())
         .unwrap_or(std::cmp::Ordering::Equal)
+}
+const ABS_TOLERANCE: f64 = 0.000005;
+fn difference(expected: &[ObservedTriangle], actual: &[ObservedTriangle]) -> Result<(), String> {
+    if expected.len() != actual.len() {
+        return Err(format!(
+            "triangle count original={} native={}",
+            expected.len(),
+            actual.len()
+        ));
+    }
+    for (i, (a, b)) in expected.iter().zip(actual).enumerate() {
+        if a.texture != b.texture || a.flags != b.flags {
+            return Err(format!(
+                "triangle {i}: material original=({}, {}) native=({}, {})",
+                a.texture, a.flags, b.texture, b.flags
+            ));
+        }
+        for (attribute, (a, b)) in values(a).iter().zip(values(b)).enumerate() {
+            if !a.is_finite() || !b.is_finite() || (a - b).abs() > ABS_TOLERANCE {
+                let (name, offset) = if attribute < 9 {
+                    ("position", attribute)
+                } else if attribute < 15 {
+                    ("uv", attribute - 9)
+                } else {
+                    ("color", attribute - 15)
+                };
+                return Err(format!(
+                    "triangle {i} {name}[{offset}]: original={a:.12} native={b:.12} abs_error={:.12}, tolerance={ABS_TOLERANCE}\noriginal={:?}\nnative={:?}",
+                    (a - b).abs(),
+                    expected[i],
+                    actual[i]
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+fn suite_root(version: u32) -> std::path::PathBuf {
+    let name = if version == 262 { "26.2" } else { "26.3" };
+    let base = std::env::var_os("PRIME_SECTION_SUITE_ROOT").map(std::path::PathBuf::from);
+    base.map(|p| p.join(format!("mc-{name}/section-oracle")))
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                "../../adapters/mc-{name}/build/routing-fixtures/section-oracle"
+            ))
+        })
 }
 fn reference(bytes: &[u8]) -> SourceScene {
     let mut input = bytes;
@@ -67,9 +134,19 @@ fn actual_section_compilers_match_native_geometry() {
     let mut failures = Vec::new();
     for version in [262, 263] {
         let name = if version == 262 { "26.2" } else { "26.3" };
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../adapters/mc-{name}/build/routing-fixtures/section-oracle"
-        ));
+        let root = suite_root(version);
+        let manifest = std::fs::read_to_string(root.join("suite.properties"))
+            .expect("generate the current section suite first");
+        for line in [
+            "format=1".to_owned(),
+            format!("sourceVersion={}", wire::VERSION),
+            format!("gameVersion={version}"),
+        ] {
+            assert!(
+                manifest.lines().any(|v| v == line),
+                "fixture manifest mismatch: {line}"
+            );
+        }
         let cases = std::fs::read_to_string(root.join("cases.txt"))
             .expect("run both Fabric cpuSmoke tasks first");
         for case in cases.lines() {
@@ -77,29 +154,23 @@ fn actual_section_compilers_match_native_geometry() {
             let expected = triangles(&reference(
                 &std::fs::read(root.join(format!("{case}.expected"))).unwrap(),
             ));
-            let events: Vec<_> = (-1..=1)
-                .flat_map(|x| (-1..=1).map(move |z| (1, Section(x, 0, z))))
-                .collect();
-            let mut input = frame(1, 0., 1, [-1, 1], &events);
-            input[8..12].copy_from_slice(&(version as u32).to_le_bytes());
+            if case.starts_with("bench_") {
+                let parallel = triangles(&reference(
+                    &std::fs::read(root.join(format!("{case}.parallel.expected")))
+                        .expect("parallel reference output missing"),
+                ));
+                difference(&expected, &parallel).unwrap_or_else(|e| {
+                    panic!("{name}/{case}: parallel MC reference differs from serial: {e}")
+                });
+            }
+            let input = std::fs::read(root.join(format!("{case}.frame"))).unwrap();
             let mut context = TerrainContext::default();
             let mut output = scene();
             assert_eq!(requests(&mut context, &input).len(), 27);
             context.accept(&[&source], &mut output).unwrap();
             let actual = triangles(&output);
-            let same = expected.len() == actual.len()
-                && expected.iter().zip(&actual).all(|(a, b)| {
-                    values(a)
-                        .iter()
-                        .zip(values(b))
-                        .all(|(a, b)| (*a - b).abs() < 0.000005)
-                });
-            if !same {
-                failures.push(format!(
-                    "{name}/{case}: original={} native={} triangles",
-                    expected.len(),
-                    actual.len()
-                ));
+            if let Err(error) = difference(&expected, &actual) {
+                failures.push(format!("{name}/{case}: {error}"));
             }
         }
     }
@@ -114,10 +185,7 @@ fn actual_section_compilers_match_native_geometry() {
 #[ignore = "generate both actual SectionCompiler fixtures with the two Fabric cpuSmoke tasks"]
 fn fluid_corner_edits_invalidate_diagonal_consumers_and_match_full_recompile() {
     for version in [262u32, 263] {
-        let name = if version == 262 { "26.2" } else { "26.3" };
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../adapters/mc-{name}/build/routing-fixtures/section-oracle"
-        ));
+        let root = suite_root(version);
         let events: Vec<_> = (-1..=1)
             .flat_map(|x| (-1..=1).map(move |z| (1, Section(x, 0, z))))
             .collect();
@@ -147,15 +215,7 @@ fn fluid_corner_edits_invalidate_diagonal_consumers_and_match_full_recompile() {
             source[24..32].copy_from_slice(&batch.to_le_bytes());
             context.accept(&[&source], &mut output).unwrap();
             let actual = triangles(&output);
-            assert_eq!(expected.len(), actual.len());
-            for (a, b) in expected.iter().zip(&actual) {
-                assert!(
-                    values(a)
-                        .iter()
-                        .zip(values(b))
-                        .all(|(a, b)| (*a - b).abs() < 0.000005)
-                );
-            }
+            difference(&expected, &actual).unwrap();
             assert_eq!(context.stats.changed, if batch == 2 { 1 } else { 0 });
             // Changed voxel (0,15,0) is a corner of its section: 7 dependents plus itself.
             assert_eq!(context.stats.compiled, if batch == 2 { 8 } else { 0 });
@@ -178,4 +238,100 @@ fn fluid_corner_edits_invalidate_diagonal_consumers_and_match_full_recompile() {
         );
         assert!(expected.triangle_count() > 0);
     }
+}
+
+#[test]
+fn oracle_rejects_material_winding_multiplicity_and_numerical_drift() {
+    let t = ObservedTriangle {
+        positions: [
+            [30_000_000.125, 0., 0.],
+            [30_000_000.875, 0., 0.],
+            [30_000_000.5, 1., 0.],
+        ],
+        uvs: [[0.; 2]; 3],
+        colors: [[1.; 4]; 3],
+        texture: (1 << 24) + 1,
+        flags: 1,
+    };
+    let expected = [t.clone()];
+    let mut actual = expected.clone();
+    actual[0].positions[0][0] += 0.000001;
+    difference(&expected, &actual).unwrap();
+    actual[0].positions[0][0] += 0.001;
+    assert!(
+        difference(&expected, &actual)
+            .unwrap_err()
+            .contains("position")
+    );
+    actual = expected.clone();
+    actual[0].texture -= 1;
+    assert!(difference(&expected, &actual).is_err());
+    actual = expected.clone();
+    actual[0].positions.swap(1, 2);
+    assert!(difference(&expected, &actual).is_err());
+    actual = expected.clone();
+    actual[0].uvs[0][0] = f64::NAN;
+    assert!(difference(&expected, &actual).is_err());
+    assert!(difference(&expected, &[]).is_err());
+}
+
+#[test]
+#[ignore = "generate the complete dual-version section suite first"]
+fn benchmark_edits_match_original_and_unchanged_inputs_do_no_compile() {
+    for version in [262u32, 263] {
+        let root = suite_root(version);
+        let cases = std::fs::read_to_string(root.join("cases.txt")).unwrap();
+        let names: Vec<_> = cases
+            .lines()
+            .filter(|c| c.starts_with("bench_") && !c.ends_with("_edited"))
+            .collect();
+        // cpuSmoke's smaller historical entry deliberately omits throughput cases.
+        if names.is_empty() {
+            assert!(
+                std::env::var_os("PRIME_SECTION_SUITE_ROOT").is_none(),
+                "full suite has no benchmarks"
+            );
+            continue;
+        }
+        for name in names {
+            let mut context = TerrainContext::default();
+            let mut output = scene();
+            let input = std::fs::read(root.join(format!("{name}.frame"))).unwrap();
+            assert_eq!(requests(&mut context, &input).len(), 27);
+            let source = std::fs::read(root.join(format!("{name}.source"))).unwrap();
+            context.accept(&[&source], &mut output).unwrap();
+            let expected = triangles(&reference(
+                &std::fs::read(root.join(format!("{name}_edited.expected"))).unwrap(),
+            ));
+            for batch in [2, 3] {
+                let suffix = if batch == 2 { "edit" } else { "unchanged" };
+                let input = std::fs::read(root.join(format!("{name}.{suffix}.frame"))).unwrap();
+                let edited = std::fs::read(root.join(format!("{name}.{suffix}.source"))).unwrap();
+                assert_eq!(requests(&mut context, &input).len(), 8);
+                context.accept(&[&edited], &mut output).unwrap();
+                difference(&expected, &triangles(&output)).unwrap();
+                assert_eq!(context.stats.changed, if batch == 2 { 8 } else { 0 });
+                assert_eq!(context.stats.compiled, if batch == 2 { 8 } else { 0 });
+            }
+        }
+    }
+}
+
+#[test]
+fn oracle_observes_local_precision_at_large_world_origins() {
+    let mut source = scene();
+    let t = Triangle {
+        positions: [[0.125, 0., 0.], [0.875, 0., 0.], [0.5, 1., 0.]],
+        uvs: [[0.; 2]; 3],
+        colors: [[1.; 4]; 3],
+        texture_id: (1 << 24) + 1,
+        flags: 0,
+    };
+    let compiled = source.prepare_compiled(7, [30_000_000., 0., 0.], [vec![t], vec![], vec![]]);
+    source.publish_compiled(1, 1, vec![compiled], &[]).unwrap();
+    let observed = triangles_at(&source, [30_000_000., 0., 0.]);
+    assert_eq!(observed.len(), 1);
+    assert_eq!(observed[0].positions[0][0], 30_000_000.125);
+    assert_eq!(observed[0].positions[1][0], 30_000_000.875);
+    assert_eq!(observed[0].texture, (1 << 24) + 1);
 }

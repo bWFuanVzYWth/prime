@@ -91,6 +91,7 @@ tasks.register('bundledNativeSmoke', JavaExec) {
 // A separate test mod exits its own JVM from Fabric preLaunch, before any window or GPU initialization.
 sourceSets {
     cpuSmoke {
+        java.srcDir rootProject.file('adapters/section-tests/src/main/java')
         compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
         runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
     }
@@ -101,7 +102,7 @@ tasks.register('cpuSmokeJar', Jar) {
     from sourceSets.cpuSmoke.output
 }
 tasks.register('cpuSmoke', JavaExec) {
-    dependsOn tasks.named('classes'), tasks.named('cpuSmokeJar'), common.tasks.named('testClasses'), rootProject.tasks.named('buildSourceCpuNative')
+    dependsOn tasks.named('classes'), tasks.named('cpuSmokeJar'), common.tasks.named('testClasses'), rootProject.tasks.named(providers.gradleProperty('primeptSectionSuite').isPresent() ? 'buildSectionBenchNative' : 'buildSourceCpuNative')
     classpath = sourceSets.main.runtimeClasspath + common.sourceSets.test.output
     mainClass = 'dev.primept.FabricCpuTestLauncher'
     jvmArgs '--enable-native-access=ALL-UNNAMED'
@@ -111,8 +112,13 @@ tasks.register('cpuSmoke', JavaExec) {
     systemProperty 'primept.smoke.foreignWrapper', providers.gradleProperty('primeptSmokeForeign').getOrElse('false')
     systemProperty 'primept.smoke.routingCost', providers.gradleProperty('primeptSmokeRoutingCost').getOrElse('')
     systemProperty 'primept.smoke.targetResize', providers.gradleProperty('primeptSmokeTargetResize').getOrElse('false')
-    systemProperty 'primept.smoke.routingDirectory', layout.buildDirectory.dir('routing-fixtures').get().asFile.absolutePath
-    systemProperty 'primept.smoke.nativeLibrary', rootProject.file("build/source-cpu-native/debug/${hostLibraryName}").absolutePath
+    systemProperty 'primept.section.suite', providers.gradleProperty('primeptSectionSuite').isPresent().toString()
+    systemProperty 'primept.section.bench', providers.gradleProperty('primeptSectionBench').getOrElse('false')
+    systemProperty 'primept.section.threads', providers.gradleProperty('primeptSectionThreads').getOrElse('8')
+    systemProperty 'primept.section.warmup', providers.gradleProperty('primeptSectionWarmup').getOrElse('8')
+    systemProperty 'primept.section.samples', providers.gradleProperty('primeptSectionSamples').getOrElse('25')
+    systemProperty 'primept.smoke.routingDirectory', providers.gradleProperty('primeptSectionOutput').map { rootProject.file("${it}/mc-${minecraftVersion}").absolutePath }.getOrElse(layout.buildDirectory.dir('routing-fixtures').get().asFile.absolutePath)
+    systemProperty 'primept.smoke.nativeLibrary', providers.gradleProperty('primeptSectionNativeLibrary').map { rootProject.file(it).absolutePath }.getOrElse(rootProject.file(providers.gradleProperty('primeptSectionSuite').isPresent() ? "build/section-bench-native/release/${hostLibraryName}" : "build/source-cpu-native/debug/${hostLibraryName}").absolutePath)
     systemProperty 'fabric.addMods', tasks.named('cpuSmokeJar').get().archiveFile.get().asFile.absolutePath
     systemProperty 'fabric.classPathGroups', sourceSets.main.output.files.collect { it.absolutePath }.join(File.pathSeparator)
     workingDir layout.buildDirectory.dir('cpu-smoke')

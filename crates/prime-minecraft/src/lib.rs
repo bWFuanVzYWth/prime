@@ -199,6 +199,7 @@ struct Stats {
     kernel_ms: f64,
     finalize_ms: f64,
     publish_ms: f64,
+    retire_ms: f64,
     published_layers: usize,
     retained_layers: usize,
     requested: usize,
@@ -461,27 +462,18 @@ impl TerrainContext {
                 .unwrap()
                 .chunks_mut(&mut jobs, 4, |_, jobs| {
                     for group in jobs.chunks_mut(4) {
-                        let layers = std::array::from_fn(|layer| {
-                            // Reuse the first populated allocation; reserve the remainder once, in output order.
-                            let mut output = Vec::new();
-                            let count: usize = group.iter().map(|j| j.layers[layer].len()).sum();
-                            for job in group.iter_mut() {
-                                let mut source = std::mem::take(&mut job.layers[layer]);
-                                if output.is_empty() && !source.is_empty() {
-                                    output = source;
-                                    output.reserve_exact(count - output.len());
-                                } else {
-                                    output.append(&mut source);
-                                }
-                            }
-                            output
-                        });
-                        let first = &mut group[0];
-                        first.compiled = Some(scene.prepare_compiled(
-                            first.key.key(),
-                            first.key.origin(),
-                            layers,
-                        ));
+                        let parts: [_; 4] = std::array::from_fn(|i| &group[i].layers);
+                        let compiled = scene.prepare_compiled_parts(
+                            group[0].key.key(),
+                            group[0].key.origin(),
+                            &parts,
+                        );
+                        // Dispose worker-owned fragments before the synchronous join. Publication
+                        // must not inherit all fragment deallocations on the caller thread.
+                        for job in group.iter_mut() {
+                            job.layers = Default::default();
+                        }
+                        group[0].compiled = Some(compiled);
                     }
                     Ok(())
                 })?;
@@ -506,7 +498,7 @@ impl TerrainContext {
         self.stats.finalize_ms = finalize_start.elapsed().as_secs_f64() * 1000.;
         self.stats.compile_ms = compile_start.elapsed().as_secs_f64() * 1000.0;
         let publish_start = Instant::now();
-        let publication = scene.publish_compiled(
+        let mut publication = scene.publish_compiled(
             epoch,
             batch,
             replacements,
@@ -515,6 +507,9 @@ impl TerrainContext {
         self.stats.published_layers = publication.replaced_layers;
         self.stats.retained_layers = publication.retained_layers;
         self.stats.publish_ms = publish_start.elapsed().as_secs_f64() * 1000.0;
+        let retire_start = Instant::now();
+        publication.release_retired(self.workers.as_ref())?;
+        self.stats.retire_ms = retire_start.elapsed().as_secs_f64() * 1000.;
         self.last_batch = input.batch;
         self.stats.response_batches = 1;
         Ok(())
@@ -523,7 +518,7 @@ impl TerrainContext {
         let s = &self.stats;
         let h = s.hacks;
         format!(
-            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={})]",
+            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={})]",
             self.epoch,
             self.pending
                 .as_ref()
@@ -534,6 +529,7 @@ impl TerrainContext {
             s.kernel_ms,
             s.finalize_ms,
             s.publish_ms,
+            s.retire_ms,
             s.published_layers,
             s.retained_layers,
             s.request_batches,

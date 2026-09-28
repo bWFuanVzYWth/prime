@@ -51,6 +51,37 @@ impl CompiledSection {
 pub struct Publication {
     pub replaced_layers: usize,
     pub retained_layers: usize,
+    retired: Vec<Option<Arc<[Triangle]>>>,
+}
+impl Publication {
+    /// Release this owner's references after publication, with a synchronous join. Other
+    /// scene/upload consumers keep their Arcs; this is not a GPU completion declaration.
+    pub fn release_retired(
+        &mut self,
+        workers: Option<&crate::workers::CpuWorkers>,
+    ) -> Result<(), String> {
+        // Small batches cost less to drop inline than to wake a pool. The crossover is
+        // measured by the section suite; this only chooses a CPU executor, never a lifetime.
+        const PARALLEL_RETIRE_BYTES: usize = 8 * 1024 * 1024;
+        let bytes: usize = self
+            .retired
+            .iter()
+            .flatten()
+            .map(|t| t.len() * size_of::<Triangle>())
+            .sum();
+        if let Some(workers) = workers
+            && bytes >= PARALLEL_RETIRE_BYTES
+        {
+            workers.chunks_mut(&mut self.retired, 1, |_, retired| {
+                for triangles in retired {
+                    *triangles = None;
+                }
+                Ok(())
+            })?;
+        }
+        self.retired.clear();
+        Ok(())
+    }
 }
 
 fn same_triangle(a: &Triangle, b: &Triangle) -> bool {
@@ -80,12 +111,23 @@ impl SourceScene {
         origin: [f64; 3],
         layers: [Vec<Triangle>; 3],
     ) -> CompiledSection {
-        let mut layer = 0;
-        let layers = layers.map(|triangles| {
-            let index = layer;
-            layer += 1;
+        self.prepare_compiled_parts(key, origin, &[&layers])
+    }
+
+    /// Preserve fragment order without a merged Vec or a second full geometry copy.
+    /// Parts are borrowed only during preparation; the returned proof owns its immutable output.
+    pub fn prepare_compiled_parts(
+        &self,
+        key: u64,
+        origin: [f64; 3],
+        parts: &[&[Vec<Triangle>; 3]],
+    ) -> CompiledSection {
+        let layers = std::array::from_fn(|layer| {
+            let index = layer as u32;
+            let count: usize = parts.iter().map(|p| p[layer].len()).sum();
+            let triangles = || parts.iter().flat_map(|p| p[layer].iter());
             let previous = self.meshes.get(&(key, index));
-            if triangles.is_empty() {
+            if count == 0 {
                 return if previous.is_some() {
                     Layer::Remove
                 } else {
@@ -96,28 +138,35 @@ impl SourceScene {
                 && old.origin.map(f64::to_bits) == origin.map(f64::to_bits)
                 && old.texture_id == 1
                 && old.flags == index
-                && old.triangles.len() == triangles.len()
+                && old.triangles.len() == count
                 && old
                     .triangles
                     .iter()
-                    .zip(&triangles)
+                    .zip(triangles())
                     .all(|(a, b)| same_triangle(a, b))
             {
-                return Layer::Retain(triangles.len());
+                return Layer::Retain(count);
             }
             let mut bounds = [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]];
-            for triangle in &triangles {
-                for p in triangle.positions {
-                    for (axis, value) in p.into_iter().enumerate() {
-                        bounds[0][axis] = bounds[0][axis].min(value);
-                        bounds[1][axis] = bounds[1][axis].max(value);
+            let mut input = triangles();
+            // Range + map is trusted-length: std initializes one Arc allocation directly.
+            // Bounds are reduced while copying, rather than scanning the merged output again.
+            let triangles: Arc<[Triangle]> = (0..count)
+                .map(|_| {
+                    let triangle = *input.next().unwrap();
+                    for p in triangle.positions {
+                        for (axis, value) in p.into_iter().enumerate() {
+                            bounds[0][axis] = bounds[0][axis].min(value);
+                            bounds[1][axis] = bounds[1][axis].max(value);
+                        }
                     }
-                }
-            }
+                    triangle
+                })
+                .collect();
             Layer::Replace(Mesh {
                 revision: MeshVersion::captured(SectionSequence(0)),
                 origin,
-                triangles: Arc::from(triangles),
+                triangles,
                 bounds,
                 texture_id: 1,
                 flags: index,
@@ -200,6 +249,7 @@ impl SourceScene {
             for layer in 0..3 {
                 if let Some(old) = self.meshes.remove(&(key, layer)) {
                     self.texture_lifetime.release(old.texture_id);
+                    result.retired.push(Some(old.triangles));
                     self.edits.meshes.insert((key, layer));
                     result.replaced_layers += 1;
                 }
@@ -221,6 +271,7 @@ impl SourceScene {
                 }
                 if let Some(old) = self.meshes.remove(&key) {
                     self.texture_lifetime.release(old.texture_id);
+                    result.retired.push(Some(old.triangles));
                 }
                 if let Layer::Replace(mut mesh) = plan {
                     mesh.revision = MeshVersion::captured(SectionSequence(sequence));

@@ -42,6 +42,12 @@ tasks.register('buildSourceCpuNative', Exec) {
     commandLine 'cargo', 'build', '--locked', '--no-default-features', '--package', 'prime_engine', '--target-dir', rootProject.file('build/source-cpu-native').absolutePath
 }
 
+// Benchmark only: optimized CPU engine, physically separate from smoke and game libraries.
+tasks.register('buildSectionBenchNative', Exec) {
+    workingDir rootDir
+    commandLine 'cargo', 'build', '--release', '--locked', '--no-default-features', '--package', 'prime_engine', '--target-dir', rootProject.file('build/section-bench-native').absolutePath
+}
+
 def adapters = [':mc-26.2', ':mc-26.3']
 tasks.register('test') { dependsOn subprojects.collect { "${it.path}:test" } }
 tasks.named('build') { dependsOn subprojects.collect { "${it.path}:build" } }

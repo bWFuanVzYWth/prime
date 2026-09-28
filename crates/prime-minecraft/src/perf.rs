@@ -128,12 +128,12 @@ pub(super) fn packet(batch: u64, sections: &[Section], mode: &str, mutation: boo
 fn source_cost_matrix() {
     let path = std::env::var("PRIME_SOURCE_BENCH_CSV").expect("set PRIME_SOURCE_BENCH_CSV");
     let mut file = std::fs::File::create(path).unwrap();
-    writeln!(file,"case,sample,warmup,threads,plan_ms,accept_ms,decode_ms,compile_ms,publish_ms,requested,changed,compiled,jobs,triangles,bytes,kernel_ms,finalize_ms,published_layers,retained_layers").unwrap();
+    writeln!(file,"case,sample,warmup,threads,plan_ms,accept_ms,decode_ms,compile_ms,publish_ms,requested,changed,compiled,jobs,triangles,bytes,kernel_ms,finalize_ms,published_layers,retained_layers,retire_ms").unwrap();
     let mut sample = |name: &str, n: usize, ctx: &TerrainContext, plan: f64, accept: f64| {
         let s = &ctx.stats;
         writeln!(
             file,
-            "{name},{n},{},8,{plan},{accept},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{name},{n},{},8,{plan},{accept},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             n < 3,
             s.decode_ms,
             s.compile_ms,
@@ -147,7 +147,8 @@ fn source_cost_matrix() {
             s.kernel_ms,
             s.finalize_ms,
             s.published_layers,
-            s.retained_layers
+            s.retained_layers,
+            s.retire_ms
         )
         .unwrap();
     };

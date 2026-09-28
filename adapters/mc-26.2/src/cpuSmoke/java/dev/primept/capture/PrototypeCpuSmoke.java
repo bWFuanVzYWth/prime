@@ -23,6 +23,10 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
     @Override
     public void onPreLaunch() {
         try {
+            if (Boolean.getBoolean("primept.section.suite")) {
+                SectionSuite.run();
+                System.exit(0);
+            }
             String routingCost = System.getProperty("primept.smoke.routingCost", "");
             if (!routingCost.isEmpty()) {
                 TerrainRoutingCostCpuSmoke.run(routingCost);

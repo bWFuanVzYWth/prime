@@ -297,6 +297,24 @@ cargo run --release --locked -p prime_tools --bin instance-perf -- --samples 60 
 
 它只创建 native CPU session、读取诊断、提交 reset 并销毁；不附着 Vulkan、不创建窗口。双版本 `cpuSmoke` 另验证真实警告格式、毫秒单位与光照通知钩子。GPU 时间戳与实际游戏慢帧仍由用户手动检查。
 
+## Section 对拍与 CPU 基准
+
+双版本场景定义、参照和测量代码在 `adapters/section-tests` 测试源集维护。长期比较与计时契约见 [Section 测试设施](docs/guides/section-tests.md)。推荐使用统一入口，输出目录必须为空：
+
+```powershell
+# 生成两版实际 SectionCompiler 参照，并回放 Rust 生产编译器
+.\scripts\test-sections.ps1
+
+# 同线程数、同工作集：原版编译与 Java → FFM → Rust 的完整 CPU 路径
+.\scripts\test-sections.ps1 -Bench -Threads 8 -Warmup 12 -Samples 40 -Rounds 3
+# 单线程用于区分算法成本与并行调度收益
+.\scripts\test-sections.ps1 -Bench -Threads 1 -Warmup 12 -Samples 40 -Rounds 3
+```
+
+需要 JDK 25、Rust release 工具链、Python 3（仅标准库生成摘要）和现有 Gradle 依赖；不需要 GPU/Slang，不启动游戏。默认结果写入 `artifacts/section-suite/<时间>/`，可用 `-Output` 指定新目录。`run.json` 标记整轮通过/失败，`summary.md/json` 提供分场景 p50/p95/max，CSV 保留冷启动、预热、所有正式样本与细阶段。默认使用三轮独立 JVM，汇总保留轮次和两个编辑方向；用 `-Rounds` 调整。统一入口在测量前及每轮测量后均执行对拍，并保存 native/输入哈希；避免与编译、游戏或其他基准同时运行。
+
+该入口覆盖受控模型与中性光照，不能证明完整原版资源包、真实存档或模组等价。原版参照包含其光栅专属工作，CPU 局部结果不代表游戏 FPS。维护时将新行为加入共用场景；确有版本差异的绑定留在版本测试目录，不复制两份用例。
+
 ## 文档与本地产物
 
 - `README.md`：玩家安装、使用和可见限制。

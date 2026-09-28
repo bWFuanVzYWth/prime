@@ -1,18 +1,11 @@
 package dev.primept.capture;
 
-import com.mojang.blaze3d.vertex.VertexSorting;
-import java.io.DataOutputStream;
-import java.lang.foreign.ValueLayout;
-import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import net.minecraft.client.color.block.BlockColors;
-import net.minecraft.client.renderer.SectionBufferBuilderPack;
-import net.minecraft.client.renderer.block.BlockStateModelSet;
 import net.minecraft.client.renderer.block.FluidModel;
 import net.minecraft.client.renderer.block.FluidStateModelSet;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
@@ -20,7 +13,6 @@ import net.minecraft.client.renderer.block.dispatch.SingleVariant;
 import net.minecraft.client.renderer.block.dispatch.WeightedVariants;
 import net.minecraft.client.renderer.block.dispatch.multipart.MultiPartModel;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
-import net.minecraft.client.renderer.chunk.RenderSectionRegion;
 import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.resources.model.SimpleModelWrapper;
@@ -30,10 +22,7 @@ import net.minecraft.client.resources.model.sprite.Material;
 import net.minecraft.client.model.geom.builders.UVPair;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.SectionPos;
 import net.minecraft.util.random.WeightedList;
-import net.minecraft.world.level.CardinalLighting;
-import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -198,91 +187,47 @@ final class SectionCompilerOracle {
             cases.add(new Case("water_stairs_" + stairShape.getSerializedName(),
                                Map.of(p, water, p.east(), a), Map.of(a, shapeModel(material, a))));
         }
+        if (Boolean.getBoolean("primept.section.suite"))
+            SectionWorkloads.add(cases, full, fence, post, arm);
         Path directory =
                 Path.of(System.getProperty("primept.smoke.routingDirectory"), "section-oracle");
         Files.createDirectories(directory);
+        // A failed generation must not leave the old completion manifest usable.
+        Files.deleteIfExists(directory.resolve("cases.txt"));
         for (Case fixture : cases) {
-            for (var pos : fixture.blocks.keySet())
-                if (pos.getX() < -16 || pos.getX() > 31 || pos.getY() < -16 || pos.getY() > 31 ||
-                    pos.getZ() < -16 || pos.getZ() > 31)
-                    throw new AssertionError("fixture outside closed source volume");
-            var models = new BlockStateModelSet(fixture.models, empty);
-            var region = FluidRouterCpuSmoke.blank(Region.class);
-            region.blocks = fixture.blocks;
-            var expected = new CaptureInbox(true);
-            var quads = new SourceQuads();
-            try (var builders = new SectionBufferBuilderPack(); var source = new SourcePages()) {
-                var router = new SectionSources(models, fluids);
-                source.header(SectionSources.GAME_VERSION, 2, 1, 1);
-                var compiler = new SectionCompiler(false, true, models, fluids, new BlockColors());
-                for (int sx = -1; sx <= 1; ++sx)
-                    for (int sz = -1; sz <= 1; ++sz)
-                        for (int sy = -1; sy <= 1; ++sy) {
-                            var section =
-                                    SectionSourcesCpuSmoke.section(Blocks.AIR.defaultBlockState());
-                            for (var entry : fixture.blocks.entrySet()) {
-                                var pos = entry.getKey();
-                                if ((pos.getX() >> 4) == sx && (pos.getY() >> 4) == sy &&
-                                    (pos.getZ() >> 4) == sz)
-                                    section.getStates().set(pos.getX() & 15, pos.getY() & 15,
-                                                            pos.getZ() & 15, entry.getValue());
-                            }
-                            // Native source is prepared before the oracle can warm the model's lazy caches.
-                            router.section(source, sx, sy, sz, section);
-                            var result =
-                                    compiler.compile(SectionPos.of(sx, sy, sz), region,
-                                                     VertexSorting.byDistance(0, 0, 0), builders);
-                            try {
-                                for (var entry : result.renderedLayers.entrySet()) {
-                                    var mesh = entry.getValue();
-                                    var format = mesh.drawState().format();
-                                    var bytes = mesh.vertexBuffer().order(ByteOrder.LITTLE_ENDIAN);
-                                    int stride = format.getVertexSize(),
-                                        position = format.getElement("Position").offset(),
-                                        color = format.getElement("Color").offset(),
-                                        uv = format.getElement("UV0").offset();
-                                    for (int v = 0; v < mesh.drawState().vertexCount(); ++v) {
-                                        int at = bytes.position() + v * stride;
-                                        int rgba = bytes.getInt(at + color);
-                                        int argb = (rgba & 0xff00ff00) | ((rgba & 255) << 16) |
-                                                   ((rgba >>> 16) & 255);
-                                        quads.vertex(entry.getKey().ordinal(),
-                                                     sx * 16 + bytes.getFloat(at + position),
-                                                     sy * 16 + bytes.getFloat(at + position + 4),
-                                                     sz * 16 + bytes.getFloat(at + position + 8),
-                                                     argb, bytes.getFloat(at + uv),
-                                                     bytes.getFloat(at + uv + 4));
-                                    }
-                                }
-                            } finally {
-                                result.release();
-                                builders.clearAll();
-                            }
-                        }
-                source.i(0);
-                SectionSourcesCpuSmoke.write(source, directory.resolve(fixture.name + ".source"));
-            }
-            expected.capture(expected.begin(SectionPos.of(0, 0, 0)), quads);
-            var packets =
-                    expected.seal().batches().stream().flatMap(b -> b.packets().stream()).toList();
-            try (var out = new DataOutputStream(
-                         Files.newOutputStream(directory.resolve(fixture.name + ".expected")))) {
-                out.writeInt(packets.size());
-                for (byte[] packet : packets) {
-                    out.writeInt(packet.length);
-                    out.write(packet);
-                }
+            try (var workload = new SectionWorkload(fixture, empty, fluids)) {
+                workload.write(directory);
+                if (Boolean.getBoolean("primept.section.bench") &&
+                    fixture.name.startsWith("bench_") && !fixture.name.endsWith("_edited"))
+                    workload.bench(directory);
             }
         }
+        Files.writeString(directory.resolve("suite.properties"),
+                          "format=1\nsourceVersion=" + SourcePages.VERSION +
+                                  "\ngameVersion=" + SectionSources.GAME_VERSION +
+                                  "\nlighting=neutral\nresources=controlled-baked\n");
+        Files.writeString(
+                directory.resolve("jvm.properties"),
+                "runtime=" + System.getProperty("java.runtime.version") +
+                        "\nvm=" + System.getProperty("java.vm.name") +
+                        "\nvmVersion=" + System.getProperty("java.vm.version") +
+                        "\narchitecture=" + System.getProperty("os.arch") +
+                        "\nprocessors=" + Runtime.getRuntime().availableProcessors() +
+                        "\nmaxHeapBytes=" + Runtime.getRuntime().maxMemory() + "\ngc=" +
+                        java.lang.management.ManagementFactory.getGarbageCollectorMXBeans()
+                                .stream()
+                                .map(b -> b.getName())
+                                .toList() +
+                        "\n");
         Files.write(directory.resolve("cases.txt"), cases.stream().map(c -> c.name).toList());
         System.out.println("PRIME_SECTION_COMPILER_ORACLE_OK: MC " + SectionSources.GAME_VERSION +
                            ", " + cases.size() +
                            " actual section compiler fixtures; neutral lighting, no GPU/window");
     }
-    private record Case(String name, Map<BlockPos, BlockState> blocks,
-                        Map<BlockState, BlockStateModel> models) {}
-    private static BlockStateModel
-    multipart(BlockState state, List<MultiPartModel.Selector<BlockStateModel>> selectors)
+    record Case(String name, Map<BlockPos, BlockState> blocks,
+                Map<BlockState, BlockStateModel> models) {}
+    static BlockStateModel multipart(BlockState state,
+                                     List<MultiPartModel.Selector<BlockStateModel>> selectors)
             throws Exception {
         var sharedType = MultiPartModel.class.getDeclaredField("shared").getType();
         var checked = new ArrayList<MultiPartModel.Selector<BlockStateModel>>();
@@ -300,8 +245,7 @@ final class SectionCompilerOracle {
         makeModel.setAccessible(true);
         return (BlockStateModel)makeModel.newInstance(makeShared.newInstance(checked), state);
     }
-    private static BlockStateModel shapeModel(Material.Baked material, BlockState state)
-            throws Exception {
+    static BlockStateModel shapeModel(Material.Baked material, BlockState state) throws Exception {
         var parts = new ArrayList<MultiPartModel.Selector<BlockStateModel>>();
         for (var a : state.getOcclusionShape().toAabbs())
             parts.add(new MultiPartModel.Selector<>(s
@@ -311,8 +255,8 @@ final class SectionCompilerOracle {
                                                         (float)a.maxZ)));
         return multipart(state, parts);
     }
-    private static BlockStateModel box(Material.Baked material, float x0, float y0, float z0,
-                                       float x1, float y1, float z1) {
+    static BlockStateModel box(Material.Baked material, float x0, float y0, float z0, float x1,
+                               float y1, float z1) {
         float[][][] faces = {{{x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}},
                              {{x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}},
                              {{x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}},
@@ -322,46 +266,13 @@ final class SectionCompilerOracle {
         var quads = new QuadCollection.Builder();
         for (var direction : Direction.values()) {
             var ps = faces[direction.ordinal()];
-            var q = new BakedQuad(
-                    new Vector3f(ps[0]), new Vector3f(ps[1]), new Vector3f(ps[2]),
-                    new Vector3f(ps[3]), UVPair.pack(.125f, .125f), UVPair.pack(.875f, .125f),
-                    UVPair.pack(.875f, .875f), UVPair.pack(.125f, .875f), direction,
-                    new BakedQuad.MaterialInfo(
-                            material.sprite(), ChunkSectionLayer.SOLID,
-                            net.minecraft.client.renderer.Sheets.cutoutBlockItemSheet(), -1, false,
-                            0));
+            var q = new BakedQuad(new Vector3f(ps[0]), new Vector3f(ps[1]), new Vector3f(ps[2]),
+                                  new Vector3f(ps[3]), UVPair.pack(.125f, .125f),
+                                  UVPair.pack(.875f, .125f), UVPair.pack(.875f, .875f),
+                                  UVPair.pack(.125f, .875f), direction,
+                                  SectionOracleMaterial.create(material.sprite()));
             quads.addCulledFace(direction, q);
         }
         return new SingleVariant(new SimpleModelWrapper(quads.build(), false, material));
-    }
-    private static final class Region extends RenderSectionRegion {
-        Map<BlockPos, BlockState> blocks;
-        Region() {
-            super(null, 0, 0, 0, null);
-        }
-        public BlockState getBlockState(BlockPos pos) {
-            return blocks.getOrDefault(pos, Blocks.AIR.defaultBlockState());
-        }
-        public net.minecraft.world.level.material.FluidState getFluidState(BlockPos pos) {
-            return getBlockState(pos).getFluidState();
-        }
-        public net.minecraft.world.level.block.entity.BlockEntity getBlockEntity(BlockPos pos) {
-            return null;
-        }
-        public int getBrightness(LightLayer layer, BlockPos pos) {
-            return 15;
-        }
-        public int getRawBrightness(BlockPos pos, int darken) {
-            return 15;
-        }
-        public CardinalLighting cardinalLighting() {
-            return new CardinalLighting(1, 1, 1, 1, 1, 1);
-        }
-        public int getHeight() {
-            return 384;
-        }
-        public int getMinY() {
-            return -64;
-        }
     }
 }
