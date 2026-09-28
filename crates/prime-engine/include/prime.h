@@ -9,7 +9,7 @@ extern "C" {
 // Zero status means success. On -1 call prime_last_error on the same thread.
 uint32_t prime_abi_version(void);
 uint64_t prime_create(uint32_t abi_version);
-// ABI v5. Production terrain uses prime_mc_plan/prime_mc_sections.
+// ABI v6. Production terrain uses prime_mc_plan/prime_mc_sections.
 // op12/op13 remain detached source/geometry fixtures; op6 supports parametric billboards.
 // op8: header[24], section/sequence:u64[2], origin:f64[3], layer_count/reserved:u32[2],
 // then each layer's layer/texture/flags/topology/count/stride/position/color/uv/reserved:u32[10]
@@ -51,9 +51,10 @@ typedef struct prime_source_page {
 // valid until the next plan/sections/destroy. No Java object or callback crosses here.
 int32_t prime_mc_plan(uint64_t handle, const prime_source_page *pages, uint64_t count,
                      prime_source_page *requests);
-// One complete response to that batch. Decode, compilation and worker join finish
-// before return. Resource definitions and raw section pages share this one call.
-int32_t prime_mc_sections(uint64_t handle, const prime_source_page *pages, uint64_t count);
+// Accept section data, color source results or biome samples. A nonempty output
+// requests the next explicit source stage; length zero proves publication is complete.
+// Each call joins its workers before return; no input pointers survive.
+int32_t prime_mc_sections(uint64_t handle, const prime_source_page *pages, uint64_t count, prime_source_page *output);
 int32_t prime_render(uint64_t handle, const uint8_t *frame, uint64_t length,
                      uint8_t *rgba, uint64_t capacity);
 // Production: borrow Minecraft's device and timeline, then record into its command buffer.

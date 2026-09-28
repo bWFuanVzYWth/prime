@@ -167,16 +167,32 @@ pub unsafe extern "C" fn prime_mc_plan(
 }
 
 /// # Safety
-/// Input pages remain readable through the synchronous decode/compile/join. No pointers escape.
+/// Input pages remain readable through synchronous decode/compile/join; no input pointers escape.
+/// `output` points to a writable SourcePage. A nonempty session-owned view requests
+/// color sources/biome samples; it expires at the next plan/accept/destroy. Zero length
+/// confirms final publication.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn prime_mc_sections(
     handle: u64,
     pages: *const SourcePage,
     count: u64,
+    output: *mut SourcePage,
 ) -> i32 {
     boundary(-1, || {
+        if output.is_null() {
+            return Err("null tint request result".into());
+        }
         let pages = unsafe { source_pages(pages, count)? };
-        session(handle, |engine| engine.accept_sections(&pages))?;
+        session(handle, |engine| {
+            let request = engine.accept_sections(&pages)?;
+            unsafe {
+                output.write(SourcePage {
+                    data: request.as_ptr(),
+                    length: request.len() as u64,
+                });
+            }
+            Ok(())
+        })?;
         Ok(0)
     })
 }

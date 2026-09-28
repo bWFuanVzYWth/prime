@@ -24,18 +24,18 @@ public final class RenderProfileCpuSmoke {
                                       15_000_000);
         var terrain = new ExclusiveTerrainCapture.Stats(700, 2, 3, 4, 1, 200, 8, 12, 100, 80, 90,
                                                         1_000_000, 2_000_000, 7_000_000, 123, 456,
-                                                        3_000_000, 654321);
+                                                        3_000_000, 654321, 99, 500_000);
         var text = RenderProfile.slowMessage(11, 77, 1920, 1080, false, frame, timing, terrain,
                                              new CaptureInbox.ProfileSnapshot(12345, 0, 0),
                                              ModelCapture.stats(), DynamicCapture.stats(),
                                              "serial=77 static_prepare=3.000 slot_wait=1.000", 0);
-        for (String required :
-             new String[] {"frame=11 serial=77", "currentWork=60.000ms", "extraction=10.000ms",
-                           "nativeSubmit=6.000ms", "resourceSubmit=2.000ms", "sourcePack=2.000ms",
-                           "sourceAccept=3.000ms", "sectionSourceBytes=654321",
-                           "extractionOther=3.000ms", "outsideInterval=25.000ms",
-                           "sourceBytes=123456", "lightEngineNotifications=123",
-                           "lightPacketNotifications=456", "native={serial=77"})
+        for (String required : new String[] {
+                     "frame=11 serial=77", "currentWork=60.000ms", "extraction=10.000ms",
+                     "nativeSubmit=6.000ms", "resourceSubmit=2.000ms", "sourcePack=2.000ms",
+                     "sourceAccept=3.000ms", "sectionSourceBytes=654321", "tintQueries=99",
+                     "tintCallback=0.500ms", "extractionOther=3.000ms", "outsideInterval=25.000ms",
+                     "sourceBytes=123456", "lightEngineNotifications=123",
+                     "lightPacketNotifications=456", "native={serial=77"})
             if (!text.contains(required))
                 throw new AssertionError("Missing diagnostic value: " + required + " in " + text);
         System.out.println(

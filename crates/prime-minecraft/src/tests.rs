@@ -379,6 +379,7 @@ fn synchronous_workers_preserve_geometry_order_and_values() {
         );
         ctx.accept(&[&crate::perf::packet(1, &req, mode, false)], &mut scene)
             .unwrap();
+        test_tints(&mut ctx, &mut scene);
         assert_eq!(ctx.stats.jobs, 16);
         scene
             .translate([0.; 3])
@@ -494,6 +495,8 @@ fn lowered_slabs_match_scalar_geometry_for_models_palettes_and_halos() {
                     layers: Default::default(),
                     hacks: Default::default(),
                     compiled: None,
+                    tints: Default::default(),
+                    color_start: 0,
                 };
                 let mut expected = make();
                 let mut actual = make();
@@ -634,6 +637,7 @@ fn boundary_dependencies_follow_face_occlusion_and_not_state_identity() {
         catalog.states.insert(
             id,
             model::State {
+                id,
                 flags,
                 model: 0,
                 name: name.into(),
@@ -757,4 +761,111 @@ fn corner_dependency_mask_includes_diagonals_for_same_fluid_height_changes() {
         assert_ne!(mask & (1 << diagonal), 0);
         assert_eq!(mask & (1 << 13), 0);
     }
+}
+
+/// Synthetic source workload has an explicit constant host callback, not a guessed vanilla color.
+pub(super) fn test_tints(ctx: &mut TerrainContext, scene: &mut SourceScene) {
+    if ctx.tint_requests.is_empty() {
+        return;
+    }
+    let response = tint_response(ctx, 0x8070903f);
+    ctx.accept(&[&response], scene).unwrap();
+}
+fn tint_response(ctx: &TerrainContext, color: u32) -> Vec<u8> {
+    let mut response = header(3, ctx.awaiting_colors.as_ref().unwrap().batch);
+    u64_to(&mut response, ctx.stats.tint_requests as u64);
+    u32_to(&mut response, 0); // blend radius
+    for _ in 0..ctx.stats.tint_requests {
+        u32_to(&mut response, 0);
+        u32_to(&mut response, color);
+    }
+    response
+}
+#[test]
+fn tint_batch_is_unique_atomic_and_validated_before_publication() {
+    let mut ctx = TerrainContext::default();
+    let mut scene = scene();
+    let rev = scene.revision();
+    let key = Section(0, 0, 0);
+    let req = requests(&mut ctx, &frame(1, 0., 0, [0, 0], &[(1, key)]));
+    ctx.accept(
+        &[&crate::perf::packet(1, &req, "decorated", false)],
+        &mut scene,
+    )
+    .unwrap();
+    assert_eq!(scene.revision(), rev); // No white placeholder can escape while colors are missing.
+    assert!(ctx.plan(&[&frame(2, 0., 0, [0, 0], &[])], 1).is_err());
+    let entries: HashSet<_> = ctx.tint_requests[32..].as_chunks::<20>().0.iter().collect();
+    assert_eq!(entries.len(), ctx.stats.tint_requests); // Several quads share exactly one callback.
+    let response = tint_response(&ctx, 0x8070903f);
+    let mut wrong = response.clone();
+    wrong[24] += 1;
+    assert!(ctx.accept(&[&wrong], &mut scene).is_err());
+    wrong = response.clone();
+    wrong[32] ^= 1;
+    assert!(ctx.accept(&[&wrong], &mut scene).is_err());
+    assert!(
+        ctx.accept(&[&response[..response.len() - 1]], &mut scene)
+            .is_err()
+    );
+    assert_eq!(scene.revision(), rev);
+    ctx.accept(&[&response], &mut scene).unwrap();
+    assert!(scene.revision() > rev);
+    assert!(ctx.tint_requests.is_empty());
+    assert!(ctx.accept(&[&response], &mut scene).is_err());
+    // Same palette dirty event does no work. A separate biome event re-evaluates only consumers.
+    for (batch, event, compiled) in [(2, 3, 0), (3, 6, 1), (4, 7, 1)] {
+        let req = requests(&mut ctx, &frame(batch, 0., 0, [0, 0], &[(event, key)]));
+        ctx.accept(
+            &[&crate::perf::packet(batch, &req, "decorated", false)],
+            &mut scene,
+        )
+        .unwrap();
+        assert_eq!(ctx.stats.compiled, compiled);
+        if compiled == 0 {
+            assert!(ctx.tint_requests.is_empty());
+        } else {
+            assert!(!ctx.tint_requests.is_empty());
+            test_tints(&mut ctx, &mut scene);
+        }
+    }
+}
+
+#[test]
+fn biome_stage_cannot_publish_incomplete_or_wrong_phase_results() {
+    let mut ctx = TerrainContext::default();
+    let mut scene = scene();
+    let rev = scene.revision();
+    let requests = requests(&mut ctx, &frame(1, 0., 0, [0, 0], &[(1, Section(0, 0, 0))]));
+    ctx.accept(
+        &[&crate::perf::packet(1, &requests, "decorated", false)],
+        &mut scene,
+    )
+    .unwrap();
+    let mut response = header(3, 1);
+    u64_to(&mut response, ctx.stats.tint_requests as u64);
+    u32_to(&mut response, 2);
+    for _ in 0..ctx.stats.tint_requests {
+        u32_to(&mut response, 1);
+        u32_to(&mut response, 0);
+    }
+    ctx.accept(&[&response], &mut scene).unwrap();
+    assert_eq!(ctx.tint_requests[28], 1);
+    assert!(ctx.stats.biome_samples > 0);
+    assert_eq!(scene.revision(), rev);
+    assert!(ctx.accept(&[&response], &mut scene).is_err());
+    response = header(4, 1);
+    u64_to(&mut response, ctx.stats.biome_samples as u64);
+    for _ in 0..ctx.stats.biome_samples {
+        u32_to(&mut response, 0xff1200ff);
+    }
+    assert!(
+        ctx.accept(&[&response[..response.len() - 1]], &mut scene)
+            .is_err()
+    );
+    assert_eq!(scene.revision(), rev);
+    ctx.accept(&[&response], &mut scene).unwrap();
+    assert!(scene.revision() > rev);
+    assert!(ctx.tint_requests.is_empty());
+    assert_eq!(ctx.stats.response_batches, 3);
 }

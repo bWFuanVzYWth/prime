@@ -11,7 +11,7 @@ use crate::{
 #[path = "protocol_capacity_tests.rs"]
 mod capacity_tests;
 
-pub const ABI_VERSION: u32 = 5;
+pub const ABI_VERSION: u32 = 6;
 pub const MAGIC: u32 = 0x5450_5250;
 pub const MAX_PACKET_BYTES: usize = 256 * 1024 * 1024;
 const MAX_TEXTURE_BYTES: usize = 512 * 1024 * 1024;

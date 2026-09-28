@@ -75,7 +75,14 @@ pub(super) fn compile_slab(
                     job.key.1 * 16 + y as i32,
                     job.key.2 * 16 + z as i32,
                 ];
-                catalog.emit(state, position, visible, &mut job.layers, &mut job.hacks);
+                catalog.emit(
+                    state,
+                    position,
+                    visible,
+                    &mut job.layers,
+                    &mut job.hacks,
+                    &mut job.tints,
+                );
             }
         }
     }

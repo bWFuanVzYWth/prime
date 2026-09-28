@@ -169,6 +169,7 @@ fn source_cost_matrix() {
             let data = packet(1, &req, mode, false);
             let start = Instant::now();
             ctx.accept(&[&data], &mut scene).unwrap();
+            crate::tests::test_tints(&mut ctx, &mut scene);
             let accept = start.elapsed().as_secs_f64() * 1000.;
             sample(mode, n, &ctx, plan, accept);
             let events: Vec<_> = req.iter().map(|&s| (3, s)).collect();
@@ -180,6 +181,7 @@ fn source_cost_matrix() {
                 let data = packet(batch, &req, mode, changed);
                 let start = Instant::now();
                 ctx.accept(&[&data], &mut scene).unwrap();
+                crate::tests::test_tints(&mut ctx, &mut scene);
                 let accept = start.elapsed().as_secs_f64() * 1000.;
                 sample(&format!("{mode}_{name}"), n, &ctx, plan, accept);
             }
@@ -196,6 +198,7 @@ fn source_cost_matrix() {
     let req = requests(&mut ctx, &frame(1, 0., 30, [-4, 19], &events));
     ctx.accept(&[&packet(1, &req, "empty", false)], &mut scene)
         .unwrap();
+    crate::tests::test_tints(&mut ctx, &mut scene);
     for n in 0..24 {
         let batch = n as u64 + 2;
         let input = frame(batch, if n % 2 == 0 { 16. } else { 0. }, 30, [-4, 19], &[]);
@@ -205,6 +208,7 @@ fn source_cost_matrix() {
         let data = packet(batch, &req, "empty", false);
         let start = Instant::now();
         ctx.accept(&[&data], &mut scene).unwrap();
+        crate::tests::test_tints(&mut ctx, &mut scene);
         let accept = start.elapsed().as_secs_f64() * 1000.;
         sample("window_89k", n, &ctx, plan, accept);
     }

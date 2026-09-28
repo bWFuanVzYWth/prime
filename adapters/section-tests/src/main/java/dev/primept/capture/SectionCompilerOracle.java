@@ -187,6 +187,7 @@ final class SectionCompilerOracle {
             cases.add(new Case("water_stairs_" + stairShape.getSerializedName(),
                                Map.of(p, water, p.east(), a), Map.of(a, shapeModel(material, a))));
         }
+        SectionTintCases.add(cases, material);
         if (Boolean.getBoolean("primept.section.suite"))
             SectionWorkloads.add(cases, full, fence, post, arm);
         Path directory =
@@ -225,7 +226,12 @@ final class SectionCompilerOracle {
                            " actual section compiler fixtures; neutral lighting, no GPU/window");
     }
     record Case(String name, Map<BlockPos, BlockState> blocks,
-                Map<BlockState, BlockStateModel> models) {}
+                Map<BlockState, BlockStateModel> models, int blendRadius, int biomePhase) {
+        Case(String name, Map<BlockPos, BlockState> blocks,
+             Map<BlockState, BlockStateModel> models) {
+            this(name, blocks, models, -1, 0);
+        }
+    }
     static BlockStateModel multipart(BlockState state,
                                      List<MultiPartModel.Selector<BlockStateModel>> selectors)
             throws Exception {
@@ -257,6 +263,10 @@ final class SectionCompilerOracle {
     }
     static BlockStateModel box(Material.Baked material, float x0, float y0, float z0, float x1,
                                float y1, float z1) {
+        return box(material, x0, y0, z0, x1, y1, z1, -1);
+    }
+    static BlockStateModel box(Material.Baked material, float x0, float y0, float z0, float x1,
+                               float y1, float z1, int tint) {
         float[][][] faces = {{{x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}},
                              {{x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}},
                              {{x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}},
@@ -270,7 +280,7 @@ final class SectionCompilerOracle {
                                   new Vector3f(ps[3]), UVPair.pack(.125f, .125f),
                                   UVPair.pack(.875f, .125f), UVPair.pack(.875f, .875f),
                                   UVPair.pack(.125f, .875f), direction,
-                                  SectionOracleMaterial.create(material.sprite()));
+                                  SectionOracleMaterial.create(material.sprite(), tint));
             quads.addCulledFace(direction, q);
         }
         return new SingleVariant(new SimpleModelWrapper(quads.build(), false, material));

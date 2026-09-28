@@ -30,7 +30,9 @@ def summarize(root):
         if len(thread_counts) != 1:
             raise ValueError("Cannot combine different reference thread counts")
         result = dict(version=version, case=case, mode=mode, samples=len(selected), rounds=len(rounds), mc_threads=thread_counts.pop())
-        for field in ("mc_ms", "frame_ms", "plan_ms", "pack_ms", "accept_ms", "route_ms", "source_bytes", "java_allocated_bytes"):
+        for field in ("mc_ms", "frame_ms", "plan_ms", "pack_ms", "accept_ms", "route_ms", "source_bytes", "java_allocated_bytes", "tint_queries", "tint_callback_ms"):
+            if field not in selected[0]:
+                continue
             values = [float(row[field]) for row in selected]
             result[field] = dict(p50=statistics.median(values), p95=percentile(values, .95), maximum=max(values))
         # Both transition directions are visible, even with an odd sample count.

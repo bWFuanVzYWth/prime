@@ -89,7 +89,7 @@ impl FrameInput {
             if kind == 0 {
                 break;
             }
-            if !matches!(kind, 1..=5) {
+            if !matches!(kind, 1..=7) {
                 return Err("unknown host event".into());
             }
             let section = Section(r.i32()?, r.i32()?, r.i32()?);
@@ -170,6 +170,7 @@ impl Scheduler {
                     inventory = true;
                     self.loaded.clear();
                 }
+                6 | 7 => {} // Tint dependencies are resolved against consumed source sets.
                 _ => unreachable!(),
             }
         }

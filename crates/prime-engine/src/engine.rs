@@ -44,7 +44,7 @@ impl Engine {
         }
         self.minecraft.plan(pages, self.source.epoch())
     }
-    pub(crate) fn accept_sections(&mut self, pages: &[&[u8]]) -> Result<(), String> {
+    pub(crate) fn accept_sections(&mut self, pages: &[&[u8]]) -> Result<&[u8], String> {
         if self.failed || self.frozen_frame.is_some() {
             return Err("renderer cannot accept live sections".into());
         }
@@ -56,7 +56,8 @@ impl Engine {
         if self.source.revision() != revision {
             self.last_frame = None;
         }
-        result
+        result?;
+        Ok(self.minecraft.tint_requests())
     }
 
     pub(crate) fn submit(&mut self, bytes: &[u8]) -> Result<(), String> {

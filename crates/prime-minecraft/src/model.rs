@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 #[derive(Clone, Default, PartialEq)]
 pub(crate) struct State {
+    pub id: u32,
     pub flags: u32,
     pub model: u32,
     pub name: String,
@@ -36,31 +37,13 @@ impl State {
             && self.support == other.support
             && (!(self.same_block_culls() || other.same_block_culls()) || self.name == other.name)
     }
-    fn tint(&self) -> [f32; 4] {
-        // P003: external tint/biome callbacks are deferred in this prototype.
-        let rgb = if self.name.contains("water") {
-            0x3f76e4
-        } else if self.name.contains("leaves") || self.name.contains("vine") {
-            0x77ab2f
-        } else if self.name.contains("redstone") {
-            0xb00000
-        } else {
-            0x91bd59
-        };
-        [
-            ((rgb >> 16) & 255) as f32 / 255.0,
-            ((rgb >> 8) & 255) as f32 / 255.0,
-            (rgb & 255) as f32 / 255.0,
-            1.0,
-        ]
-    }
 }
 #[derive(Clone, PartialEq)]
 pub(crate) struct Quad {
     pub positions: [[f32; 3]; 4],
     pub uvs: [[f32; 2]; 4],
     pub face: u32,
-    pub tint: bool,
+    pub tint: i32,
     pub layer: usize,
 }
 #[derive(PartialEq)]
@@ -91,6 +74,7 @@ pub(crate) fn state(r: &mut Reader<'_>) -> Result<(u32, State), String> {
     Ok((
         id,
         State {
+            id,
             flags,
             model,
             name: r.string()?,
@@ -128,7 +112,7 @@ pub(crate) fn model(r: &mut Reader<'_>) -> Result<(u32, Model), String> {
                     positions: [[0.0; 3]; 4],
                     uvs: [[0.0; 2]; 4],
                     face,
-                    tint: tint >= 0,
+                    tint,
                     layer: layer as usize,
                 };
                 for i in 0..4 {
@@ -305,6 +289,7 @@ impl Catalog {
             self.face_masks.get(&state.model).copied().unwrap_or(63)
         }
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn emit(
         &self,
         state: &State,
@@ -312,6 +297,7 @@ impl Catalog {
         visible: u32,
         layers: &mut [Vec<Triangle>; 3],
         hacks: &mut Hacks,
+        tints: &mut crate::tint::Deferred,
     ) {
         let mut offset = position.map(|p| p.rem_euclid(16) as f32);
         if state.flags & 2 != 0 {
@@ -326,12 +312,12 @@ impl Catalog {
         let mut random = Random::new(position_seed(position[0], position[1], position[2]));
         self.emit_model(
             state.model,
-            state,
             offset,
             visible,
             &mut random,
             layers,
             hacks,
+            tints,
             0,
         );
     }
@@ -339,12 +325,12 @@ impl Catalog {
     fn emit_model(
         &self,
         id: u32,
-        state: &State,
         offset: [f32; 3],
         visible: u32,
         random: &mut Random,
         layers: &mut [Vec<Triangle>; 3],
         hacks: &mut Hacks,
+        tints: &mut crate::tint::Deferred,
         depth: u32,
     ) {
         if depth > 64 {
@@ -356,24 +342,22 @@ impl Catalog {
             Some(Model::Mesh(quads)) => {
                 for q in quads {
                     if visible & (1 << q.face) != 0 {
-                        let color = if q.tint {
-                            hacks.tint += 1;
-                            state.tint()
-                        } else {
-                            [1.0; 4]
-                        };
-                        emit_quad(q, offset, color, 1, layers);
+                        let start = layers[q.layer].len();
+                        emit_quad(q, offset, [1.; 4], 1, layers);
+                        if q.tint >= 0 {
+                            tints.patch(q.tint, q.layer, start, layers[q.layer].len());
+                        }
                     }
                 }
             }
             Some(Model::Alias(child)) => self.emit_model(
                 *child,
-                state,
                 offset,
                 visible,
                 random,
                 layers,
                 hacks,
+                tints,
                 depth + 1,
             ),
             Some(Model::Weighted(items, total)) => {
@@ -382,12 +366,12 @@ impl Catalog {
                     if choice < weight {
                         self.emit_model(
                             child,
-                            state,
                             offset,
                             visible,
                             random,
                             layers,
                             hacks,
+                            tints,
                             depth + 1,
                         );
                         break;
@@ -401,12 +385,12 @@ impl Catalog {
                     *random = Random::new(seed);
                     self.emit_model(
                         child,
-                        state,
                         offset,
                         visible,
                         random,
                         layers,
                         hacks,
+                        tints,
                         depth + 1,
                     );
                 }
@@ -458,7 +442,7 @@ pub(crate) fn cube(
                     positions,
                     uvs: [[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
                     face: face as u32,
-                    tint: false,
+                    tint: -1,
                     layer,
                 },
                 offset,

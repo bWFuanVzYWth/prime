@@ -128,6 +128,48 @@ fn reference(bytes: &[u8]) -> SourceScene {
     expected
 }
 
+fn finish_tints(
+    context: &mut TerrainContext,
+    output: &mut SourceScene,
+    root: &std::path::Path,
+    case: &str,
+) {
+    replay_tints(context, output, root, case, None);
+}
+fn replay_tints(
+    context: &mut TerrainContext,
+    output: &mut SourceScene,
+    root: &std::path::Path,
+    case: &str,
+    batch: Option<u64>,
+) {
+    for _ in 0..2 {
+        if context.tint_requests().is_empty() {
+            return;
+        }
+        let suffix = if context.tint_requests()[28] == 0 {
+            "tint"
+        } else {
+            "biome"
+        };
+        let mut requests = std::fs::read(root.join(format!("{case}.{suffix}.requests")))
+            .expect("missing source requests");
+        let mut response = std::fs::read(root.join(format!("{case}.{suffix}")))
+            .expect("missing actual host results");
+        if let Some(batch) = batch {
+            requests[..8].copy_from_slice(&batch.to_le_bytes());
+            response[24..32].copy_from_slice(&batch.to_le_bytes());
+        }
+        assert_eq!(
+            context.tint_requests(),
+            requests,
+            "host/native request ordering: {case}/{suffix}"
+        );
+        context.accept(&[&response], output).unwrap();
+    }
+    assert!(context.tint_requests().is_empty());
+}
+
 #[test]
 #[ignore = "generate both actual SectionCompiler fixtures with the two Fabric cpuSmoke tasks"]
 fn actual_section_compilers_match_native_geometry() {
@@ -168,6 +210,7 @@ fn actual_section_compilers_match_native_geometry() {
             let mut output = scene();
             assert_eq!(requests(&mut context, &input).len(), 27);
             context.accept(&[&source], &mut output).unwrap();
+            finish_tints(&mut context, &mut output, &root, case);
             let actual = triangles(&output);
             if let Err(error) = difference(&expected, &actual) {
                 failures.push(format!("{name}/{case}: {error}"));
@@ -300,6 +343,7 @@ fn benchmark_edits_match_original_and_unchanged_inputs_do_no_compile() {
             assert_eq!(requests(&mut context, &input).len(), 27);
             let source = std::fs::read(root.join(format!("{name}.source"))).unwrap();
             context.accept(&[&source], &mut output).unwrap();
+            finish_tints(&mut context, &mut output, &root, name);
             let expected = triangles(&reference(
                 &std::fs::read(root.join(format!("{name}_edited.expected"))).unwrap(),
             ));
@@ -309,6 +353,12 @@ fn benchmark_edits_match_original_and_unchanged_inputs_do_no_compile() {
                 let edited = std::fs::read(root.join(format!("{name}.{suffix}.source"))).unwrap();
                 assert_eq!(requests(&mut context, &input).len(), 8);
                 context.accept(&[&edited], &mut output).unwrap();
+                finish_tints(
+                    &mut context,
+                    &mut output,
+                    &root,
+                    &format!("{name}.{suffix}"),
+                );
                 difference(&expected, &triangles(&output)).unwrap();
                 assert_eq!(context.stats.changed, if batch == 2 { 8 } else { 0 });
                 assert_eq!(context.stats.compiled, if batch == 2 { 8 } else { 0 });
@@ -334,4 +384,60 @@ fn oracle_observes_local_precision_at_large_world_origins() {
     assert_eq!(observed[0].positions[0][0], 30_000_000.125);
     assert_eq!(observed[0].positions[1][0], 30_000_000.875);
     assert_eq!(observed[0].texture, (1 << 24) + 1);
+}
+
+#[test]
+#[ignore = "generate the dual-version tint fixtures first"]
+fn biome_only_invalidation_matches_vanilla_without_resending_sections() {
+    for version in [262u32, 263] {
+        let root = suite_root(version);
+        for (base, changed) in [0, 2, 7]
+            .map(|radius| {
+                (
+                    format!("tint_biomes_{radius}_0"),
+                    format!("tint_biomes_{radius}_1"),
+                )
+            })
+            .into_iter()
+            .chain(std::iter::once((
+                "bench_tinted".into(),
+                "tint_dense_biome_changed".into(),
+            )))
+        {
+            let input = std::fs::read(root.join(format!("{base}.frame"))).unwrap();
+            let source = std::fs::read(root.join(format!("{base}.source"))).unwrap();
+            let mut ctx = TerrainContext::default();
+            let mut output = scene();
+            requests(&mut ctx, &input);
+            ctx.accept(&[&source], &mut output).unwrap();
+            finish_tints(&mut ctx, &mut output, &root, &base);
+            let before = triangles(&output);
+            let expected = triangles(&reference(
+                &std::fs::read(root.join(format!("{changed}.expected"))).unwrap(),
+            ));
+            assert!(
+                difference(&before, &expected).is_err(),
+                "biome fixture must change actual colors"
+            );
+            let mut input = frame(2, 0., 1, [-1, 1], &[(7, Section(0, 0, 0))]);
+            input[8..12].copy_from_slice(&version.to_le_bytes());
+            assert!(requests(&mut ctx, &input).is_empty());
+            let mut source = crate::tests::header(2, 2);
+            source[8..12].copy_from_slice(&version.to_le_bytes());
+            u32_to(&mut source, 0);
+            ctx.accept(&[&source], &mut output).unwrap();
+            assert_eq!(ctx.stats.changed, 0);
+            assert!(ctx.stats.compiled > 0 && ctx.stats.compiled < 27);
+            replay_tints(&mut ctx, &mut output, &root, &changed, Some(2));
+            difference(&expected, &triangles(&output)).unwrap();
+            // An unrelated biome arrival cannot rebuild these sections.
+            input = frame(3, 0., 1, [-1, 1], &[(6, Section(30, 0, 30))]);
+            input[8..12].copy_from_slice(&version.to_le_bytes());
+            assert!(requests(&mut ctx, &input).is_empty());
+            source[24..32].copy_from_slice(&3u64.to_le_bytes());
+            ctx.accept(&[&source], &mut output).unwrap();
+            assert_eq!(ctx.stats.compiled, 0);
+            assert!(ctx.tint_requests().is_empty());
+        }
+    }
 }

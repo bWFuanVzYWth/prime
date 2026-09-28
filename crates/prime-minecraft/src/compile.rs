@@ -5,6 +5,7 @@ use crate::model::State;
 use std::collections::HashMap;
 
 static MISSING: State = State {
+    id: 0,
     flags: 0,
     model: 0,
     name: String::new(),
@@ -158,7 +159,14 @@ pub(super) fn compile_slab(
             for x in 0..16 {
                 let index = (y + 1) * PLANE + (z + 1) * ROW + x + 1;
                 let cell = cells[index];
+                let position = [
+                    job.key.0 * 16 + x as i32,
+                    job.key.1 * 16 + (job.first_y + y) as i32,
+                    job.key.2 * 16 + z as i32,
+                ];
                 if cell.state.fluid.kind != 0 {
+                    job.tints.begin(cell.state.id, position);
+                    let starts = job.layers.each_ref().map(|l| l.len());
                     crate::fluid::emit(
                         catalog,
                         cell.state,
@@ -171,6 +179,16 @@ pub(super) fn compile_slab(
                         &mut job.layers,
                         &mut job.hacks,
                     );
+                    if cell.state.fluid.kind < 3
+                        && catalog
+                            .fluids
+                            .get(&cell.state.fluid.material)
+                            .is_some_and(|m| m.flags & 1 != 0)
+                    {
+                        for (layer, start) in starts.into_iter().enumerate() {
+                            job.tints.patch(-1, layer, start, job.layers[layer].len());
+                        }
+                    }
                 }
                 if cell.faces == 0 {
                     continue;
@@ -197,16 +215,14 @@ pub(super) fn compile_slab(
                 if cell.faces & visible == 0 {
                     continue;
                 }
+                job.tints.begin(cell.state.id, position);
                 catalog.emit(
                     cell.state,
-                    [
-                        job.key.0 * 16 + x as i32,
-                        job.key.1 * 16 + (job.first_y + y) as i32,
-                        job.key.2 * 16 + z as i32,
-                    ],
+                    position,
                     visible,
                     &mut job.layers,
                     &mut job.hacks,
+                    &mut job.tints,
                 );
             }
         }

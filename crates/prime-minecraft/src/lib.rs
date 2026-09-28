@@ -1,9 +1,11 @@
 //! Prototype MC 26.2/26.3 adaptation. Java forwards fields and events; this owner plans demand.
 #![forbid(unsafe_code)]
+mod biome;
 mod compile;
 mod fluid;
 mod model;
 mod shape;
+mod tint;
 use compile::compile_slab;
 #[cfg(test)]
 mod reference;
@@ -176,6 +178,17 @@ struct Pending {
     input: FrameInput,
     demand: Demand,
 }
+enum ColorStage {
+    Sources,
+    Biomes(biome::Plan),
+}
+struct AwaitingColors {
+    stage: ColorStage,
+    batch: u64,
+    jobs: Vec<Job>,
+    ordered: Vec<Section>,
+    removed: BTreeSet<Section>,
+}
 #[derive(Default)]
 pub struct TerrainContext {
     epoch: u64,
@@ -185,6 +198,10 @@ pub struct TerrainContext {
     catalog: Catalog,
     sections: HashMap<Section, SectionData>,
     pending: Option<Pending>,
+    awaiting_colors: Option<AwaitingColors>,
+    tinted: HashSet<Section>,
+    biomes: biome::Cache,
+    tint_requests: Vec<u8>,
     requests: Vec<u8>,
     workers: Option<CpuWorkers>,
     stats: Stats,
@@ -200,6 +217,14 @@ struct Stats {
     finalize_ms: f64,
     publish_ms: f64,
     retire_ms: f64,
+    tint_pack_ms: f64,
+    tint_decode_ms: f64,
+    tint_requests: usize,
+    tint_bytes: usize,
+    biome_samples: usize,
+    biome_hits: usize,
+    biome_plan_ms: f64,
+    biome_filter_ms: f64,
     published_layers: usize,
     retained_layers: usize,
     requested: usize,
@@ -213,8 +238,8 @@ struct Stats {
 impl TerrainContext {
     pub fn plan(&mut self, pages: &[&[u8]], source_epoch: u64) -> Result<&[u8], String> {
         let start = Instant::now();
-        if self.pending.is_some() {
-            return Err("previous section request still awaiting its single response".into());
+        if self.pending.is_some() || self.awaiting_colors.is_some() {
+            return Err("previous source batch still awaiting completion".into());
         }
         let input = FrameInput::read(pages)?;
         if input.epoch != source_epoch {
@@ -263,6 +288,10 @@ impl TerrainContext {
     }
 
     pub fn accept(&mut self, pages: &[&[u8]], scene: &mut SourceScene) -> Result<(), String> {
+        if self.awaiting_colors.is_some() {
+            return self.accept_colors(pages, scene);
+        }
+        self.tint_requests.clear();
         let start = Instant::now();
         let pending = self
             .pending
@@ -362,6 +391,7 @@ impl TerrainContext {
         let Pending { input, demand } = self.pending.take().unwrap();
         if demand.reset_catalog {
             self.catalog = Catalog::default();
+            self.biomes = biome::Cache::default();
         }
         self.catalog.states.extend(states);
         self.catalog.faces.extend(faces);
@@ -371,7 +401,36 @@ impl TerrainContext {
             self.catalog.prepare();
         }
         let mut compile = demand.compile;
+        // Merge invalidations before filtering consumers. A burst of chunk arrivals must
+        // not scan every tinted section once for every arriving column.
+        let mut tint_all = false;
+        let mut tint_columns = HashSet::new();
+        for &(kind, key) in &input.events {
+            if kind == 7 {
+                tint_all = true;
+            }
+            if kind == 6 {
+                for x in key.0 - 1..=key.0 + 1 {
+                    for z in key.2 - 1..=key.2 + 1 {
+                        tint_columns.insert((x, z));
+                    }
+                }
+            }
+        }
+        if tint_all || !tint_columns.is_empty() {
+            compile.extend(
+                self.tinted
+                    .iter()
+                    .copied()
+                    .filter(|s| tint_all || tint_columns.contains(&(s.0, s.2))),
+            );
+        }
+        self.biomes.invalidate(tint_all, &tint_columns);
+        for &key in &demand.removed {
+            self.biomes.forget(key);
+        }
         for key in demand.forget {
+            self.biomes.forget(key);
             if let Some(old) = self.sections.remove(&key) {
                 invalidate_neighbors(
                     key,
@@ -431,6 +490,8 @@ impl TerrainContext {
                         layers: Default::default(),
                         hacks: Hacks::default(),
                         compiled: None,
+                        tints: Default::default(),
+                        color_start: 0,
                     });
                 }
             }
@@ -455,13 +516,173 @@ impl TerrainContext {
         self.stats.kernel_ms = kernel_start.elapsed().as_secs_f64() * 1000.;
         self.stats.jobs = jobs.len();
         self.stats.compiled = ordered.len();
+        self.stats.compile_ms = compile_start.elapsed().as_secs_f64() * 1000.;
+        let tint_start = Instant::now();
+        let mut count = 0usize;
+        for job in &mut jobs {
+            job.color_start = count;
+            count = count
+                .checked_add(job.tints.requests.len())
+                .ok_or("tint count overflow")?;
+        }
+        self.stats.tint_requests = count;
+        self.stats.response_batches = 1;
+        if count != 0 {
+            self.stats.request_batches += 1;
+            u64_to(&mut self.tint_requests, batch);
+            u64_to(&mut self.tint_requests, count as u64);
+            u64_to(&mut self.tint_requests, epoch);
+            u32_to(&mut self.tint_requests, version);
+            u32_to(&mut self.tint_requests, 0);
+            for request in jobs.iter().flat_map(|j| &j.tints.requests) {
+                for v in request.position {
+                    u32_to(&mut self.tint_requests, v as u32);
+                }
+                u32_to(&mut self.tint_requests, request.state);
+                u32_to(&mut self.tint_requests, request.slot as u32);
+            }
+            self.stats.tint_bytes = self.tint_requests.len();
+            self.awaiting_colors = Some(AwaitingColors {
+                stage: ColorStage::Sources,
+                batch,
+                jobs,
+                ordered,
+                removed,
+            });
+            self.stats.tint_pack_ms = tint_start.elapsed().as_secs_f64() * 1000.;
+            return Ok(());
+        }
+        self.finalize(jobs, ordered, removed, batch, scene, None)
+    }
+    /// Session-owned read-only view; valid until the next mutable source call.
+    pub fn tint_requests(&self) -> &[u8] {
+        &self.tint_requests
+    }
+
+    fn accept_colors(&mut self, pages: &[&[u8]], scene: &mut SourceScene) -> Result<(), String> {
+        let start = Instant::now();
+        let pending = self.awaiting_colors.as_ref().unwrap();
+        let (kind, expected) = match &pending.stage {
+            ColorStage::Sources => (3, self.stats.tint_requests),
+            ColorStage::Biomes(plan) => (4, plan.samples.len()),
+        };
+        let mut r = Reader::new(pages)?;
+        if r.header(kind)? != (self.version, self.epoch, pending.batch)
+            || self.epoch != scene.epoch()
+        {
+            return Err("tint response identity mismatch".into());
+        }
+        let count = usize::try_from(r.u64()?).map_err(|_| "tint count overflow")?;
+        if count != expected {
+            return Err("tint response count mismatch".into());
+        }
+        let mut colors;
+        if kind == 3 {
+            let radius = r.i32()?;
+            if !(0..=7).contains(&radius) {
+                return Err("unsupported biome blend radius".into());
+            }
+            let mut recipes = Vec::with_capacity(count);
+            for _ in 0..count {
+                let kind = r.u32()?;
+                let value = r.u32()?;
+                recipes.push(biome::Recipe::read(kind, value)?);
+            }
+            r.finish()?;
+            self.stats.tint_decode_ms += start.elapsed().as_secs_f64() * 1000.;
+            let prepare = Instant::now();
+            let plan = self.biomes.prepare(
+                pending
+                    .jobs
+                    .iter()
+                    .flat_map(|j| j.tints.requests.iter().copied()),
+                &recipes,
+                radius,
+            );
+            self.stats.biome_plan_ms = prepare.elapsed().as_secs_f64() * 1000.;
+            self.stats.biome_hits = plan.hits;
+            self.stats.biome_samples = plan.samples.len();
+            if !plan.samples.is_empty() {
+                self.tint_requests.clear();
+                u64_to(&mut self.tint_requests, pending.batch);
+                u64_to(&mut self.tint_requests, plan.samples.len() as u64);
+                u64_to(&mut self.tint_requests, self.epoch);
+                u32_to(&mut self.tint_requests, self.version);
+                u32_to(&mut self.tint_requests, 1);
+                for sample in &plan.samples {
+                    for v in sample.position {
+                        u32_to(&mut self.tint_requests, v as u32);
+                    }
+                    u32_to(&mut self.tint_requests, sample.resolver as u32);
+                }
+                self.stats.tint_bytes +=
+                    self.tint_requests.len() + pages.iter().map(|p| p.len()).sum::<usize>();
+                self.stats.request_batches += 1;
+                self.stats.response_batches += 1;
+                self.awaiting_colors.as_mut().unwrap().stage = ColorStage::Biomes(plan);
+                return Ok(());
+            }
+            colors = plan.colors;
+        } else {
+            colors = Vec::with_capacity(count);
+            for _ in 0..count {
+                colors.push(r.u32()?);
+            }
+            r.finish()?;
+            self.stats.tint_decode_ms += start.elapsed().as_secs_f64() * 1000.;
+        }
+        let pending = self.awaiting_colors.take().unwrap();
+        if let ColorStage::Biomes(plan) = pending.stage {
+            let filter = Instant::now();
+            colors = self.biomes.finish(plan, &colors);
+            self.stats.biome_filter_ms = filter.elapsed().as_secs_f64() * 1000.;
+        }
+        self.stats.tint_bytes += pages.iter().map(|p| p.len()).sum::<usize>();
+        self.stats.response_batches += 1;
+        self.tint_requests.clear();
+        self.finalize(
+            pending.jobs,
+            pending.ordered,
+            pending.removed,
+            pending.batch,
+            scene,
+            Some(&colors),
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn finalize(
+        &mut self,
+        mut jobs: Vec<Job>,
+        ordered: Vec<Section>,
+        removed: BTreeSet<Section>,
+        batch: u64,
+        scene: &mut SourceScene,
+        colors: Option<&[u32]>,
+    ) -> Result<(), String> {
         let finalize_start = Instant::now();
+        for key in ordered.iter().chain(&removed) {
+            self.tinted.remove(key);
+        }
+        self.tinted.extend(
+            jobs.iter()
+                .filter(|j| !j.tints.requests.is_empty())
+                .map(|j| j.key),
+        );
         if !jobs.is_empty() {
             self.workers
                 .as_ref()
                 .unwrap()
                 .chunks_mut(&mut jobs, 4, |_, jobs| {
                     for group in jobs.chunks_mut(4) {
+                        if let Some(colors) = colors {
+                            for job in group.iter_mut() {
+                                job.tints.apply(
+                                    &colors[job.color_start
+                                        ..job.color_start + job.tints.requests.len()],
+                                    &mut job.layers,
+                                );
+                            }
+                        }
                         let parts: [_; 4] = std::array::from_fn(|i| &group[i].layers);
                         let compiled = scene.prepare_compiled_parts(
                             group[0].key.key(),
@@ -472,6 +693,7 @@ impl TerrainContext {
                         // must not inherit all fragment deallocations on the caller thread.
                         for job in group.iter_mut() {
                             job.layers = Default::default();
+                            job.tints = Default::default();
                         }
                         group[0].compiled = Some(compiled);
                     }
@@ -496,10 +718,10 @@ impl TerrainContext {
             replacements.push(compiled);
         }
         self.stats.finalize_ms = finalize_start.elapsed().as_secs_f64() * 1000.;
-        self.stats.compile_ms = compile_start.elapsed().as_secs_f64() * 1000.0;
+        self.stats.compile_ms += self.stats.finalize_ms;
         let publish_start = Instant::now();
         let mut publication = scene.publish_compiled(
-            epoch,
+            self.epoch,
             batch,
             replacements,
             &removed.iter().map(|s| s.key()).collect::<Vec<_>>(),
@@ -510,19 +732,20 @@ impl TerrainContext {
         let retire_start = Instant::now();
         publication.release_retired(self.workers.as_ref())?;
         self.stats.retire_ms = retire_start.elapsed().as_secs_f64() * 1000.;
-        self.last_batch = input.batch;
-        self.stats.response_batches = 1;
+        self.last_batch = batch;
         Ok(())
     }
     pub fn diagnostics(&self) -> String {
         let s = &self.stats;
         let h = s.hacks;
         format!(
-            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={})]",
+            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} tint_requests={} tint_bytes={} tint_pack={:.3} tint_decode={:.3} biome_samples={} biome_hits={} biome_plan={:.3} biome_filter={:.3} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={})]",
             self.epoch,
             self.pending
                 .as_ref()
-                .map_or(self.last_batch, |p| p.input.batch),
+                .map(|p| p.input.batch)
+                .or_else(|| self.awaiting_colors.as_ref().map(|p| p.batch))
+                .unwrap_or(self.last_batch),
             s.plan_ms,
             s.decode_ms,
             s.compile_ms,
@@ -539,6 +762,14 @@ impl TerrainContext {
             s.compiled,
             s.jobs,
             s.bytes,
+            s.tint_requests,
+            s.tint_bytes,
+            s.tint_pack_ms,
+            s.tint_decode_ms,
+            s.biome_samples,
+            s.biome_hits,
+            s.biome_plan_ms,
+            s.biome_filter_ms,
             s.triangles,
             self.sections.len(),
             self.scheduler.active.len(),
@@ -555,6 +786,8 @@ struct Job {
     layers: [Vec<Triangle>; 3],
     hacks: Hacks,
     compiled: Option<CompiledSection>,
+    tints: tint::Deferred,
+    color_start: usize,
 }
 
 #[cfg(test)]

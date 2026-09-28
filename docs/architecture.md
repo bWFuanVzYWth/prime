@@ -5,7 +5,7 @@
 ```text
 Minecraft 26.2 / 26.3 + Fabric Mixins
   实际列事件 / section palette 与 bit storage / 烘焙模型字段
-          │ Java 薄路由：每帧一次请求表、一次分页响应
+          │ Java 薄路由：每帧一次 section 请求/响应；按需颜色源/群系样本批次
 prime_engine → prime_minecraft（版本规则、半径、活跃集、同步并行编译）
           │ 自足 CompiledSection + 移除身份
 prime_scene → SourceScene / TranslatedScene / SceneInput
@@ -17,9 +17,9 @@ prime_vulkan → Slang SPIR-V → MC 主图像 → hand / HUD → 宿主呈现
 
 ## 边界
 
-长期边界保留第三方模型、模型选择、姿态与变换设置的能力，接管后截断相应的下游 Java 几何计算。当前 section 原型把 Minecraft 语义适配后移至 `prime_minecraft`，Java 仅绑定字段、转发事件和封装请求到的源数据。Rust 拥有半径、来源依赖、活跃集、编译调度、私有同步池与资源管理。state-bound multipart 选择在一次源准备内求值并保留真实结果；其他尚未接入的外部颜色/模型等仍用显式默认值，不宣称与原版等价；这些临时取舍独立登记在 [PROTOTYPE_HACKS](../PROTOTYPE_HACKS.md)。实体/方块实体/粒子暂保留已有路由。
+长期边界保留第三方模型、模型选择、姿态与变换设置的能力，接管后截断相应的下游 Java 几何计算。当前 section 原型把 Minecraft 语义适配后移至 `prime_minecraft`，Java 仅绑定字段、转发事件和封装请求到的源数据。Rust 拥有半径、来源依赖、活跃集、编译调度、私有同步池与资源管理。state-bound multipart 选择在一次源准备内求值并保留真实结果；实际 block/fluid tint 通过 Rust 选择的批次取得源声明/回调结果，标准群系去重和整数混合由 Rust 完成；其他尚未接入的模型等仍用显式默认值，不宣称与原版等价；这些临时取舍独立登记在 [PROTOTYPE_HACKS](../PROTOTYPE_HACKS.md)。实体/方块实体/粒子暂保留已有路由。
 
-路由包含输入接管与对应下游计算截断，不能复制数据后两边再算一次。原始源准备阶段由 Rust 一次性列出本帧需求；Java 在宿主线程复制真实字段，一次返回全部数据。闭合后的编译与渲染不访问 MC 对象、不请求补充回调；未来外部求值必须有新的显式批次契约。跨调用数据由 native 拥有，Java 对象和临时指针不能成为延迟查询接口。
+路由包含输入接管与对应下游计算截断，不能复制数据后两边再算一次。原始源准备阶段由 Rust 一次性列出本帧需求；Java 在宿主线程复制真实字段，一次返回全部数据。原生展开收集实际 tint slot 需求，宿主以显式颜色源/群系样本批次闭合输入后才发布；内核不访问 MC 对象或执行回调。后续外部求值必须有显式批次及依赖契约。跨调用数据由 native 拥有，Java 对象和临时指针不能成为延迟查询接口。
 
 直接网格来源仍可提交源顶点，但不能用它为已接管的标准模型下游修改兜底。完整源描述一经接收就省去对应 Java 计算，不保证自定义 downstream renderer/consumer 的实现或副作用。
 
@@ -39,7 +39,7 @@ prime_vulkan → Slang SPIR-V → MC 主图像 → hand / HUD → 宿主呈现
 
 Rust `InstanceContext` 先借用旧状态验证整批及最终引用关系，再显式修改持久场景；只访问变化记录和受影响原型的引用计数，不复制全实例表。解码记录与引用计划使用上下文持有的连续工作区，容量跨提交复用；在工作区内排序、检查重复及更新/删除冲突，不依赖线序。相同原型的姿态更新不产生无效的引用减增，失败也清除未发布值并保留可复用容量。常驻映射依然有查找和写入成本，这不是 O(1) 的全量更新。每条记录的 revision 等于该批 sequence，整体严格有序，因而无需永久保存死亡实体 ID。常驻容量有界，持续出生/删除不会仅因历史身份增长而耗尽容量。`prime_scene::translation` 计算静态合批、动态分桶和实例放置，`prime_vulkan` 的几何执行器与 `context::objects` 执行资源分配、上传和 AS 命令；两者通过显式借用协作，不引入后台任务或共享可变缓存。
 
-资源重载与世界切换推进 epoch。地形采用严格单调 batch 和一个待响应请求；旧 epoch、重复 batch、不完整或额外 section 响应均拒绝。同步源编译汇合后原子发布该批网格与可用性，再推进完成水位。空段算已就绪，无源或卸载撤销就绪；CPU 来源完成与 GPU timeline 是两个独立证明。旧显式网格/路由协议保留对照用途，不与同一 epoch 的原型生产者混用。
+资源重载与世界切换推进 epoch。地形采用严格单调 batch 和一个待响应源阶段（section、颜色源或群系样本）；旧 epoch、重复 batch、不完整或额外 section 响应均拒绝。同步源编译汇合后原子发布该批网格与可用性，再推进完成水位。空段算已就绪，无源或卸载撤销就绪；CPU 来源完成与 GPU timeline 是两个独立证明。旧显式网格/路由协议保留对照用途，不与同一 epoch 的原型生产者混用。
 
 ## 静态增量发布
 
@@ -75,7 +75,7 @@ Java 观察纹理的真实上传与关闭，关闭发送 op9 owner 退休。nati
 
 CPU 源处理保持同步：Java 按宿主生命周期取得必要的源观察，Rust 从封闭批次确定工作集、执行纯数据并行计算，返回前汇合后发布。所有者显式持有工作区，没有 8 段、3 ms 或 16 MiB 的跨帧配额；封批后重入的新事件属于下一批。原版 dispatcher/世界网格上传停止，手部与 HUD 保持宿主流程。
 
-`ExclusiveTerrainCapture` 只保存原始宿主通知，发送相机/选项与真实来源范围，然后按 Rust 请求复制 palette、bit storage 和首次使用的烘焙资源字段。Rust 合并脏事件，维护活跃与邻接工作集，解包、选择默认模型、计算表面并编译。Java 不执行 `collectParts`、模型随机选择、tint/遮挡查询或 section compiler；`TerrainRouter` / `FluidRouter` 仅留在 CPU 对照测试源集中。原型减少了兼容语义，不能将其性能等同于完整兼容实现。
+`ExclusiveTerrainCapture` 只保存原始宿主通知，发送相机/选项与真实来源范围，然后按 Rust 请求复制 palette、bit storage 和首次使用的烘焙资源字段。Rust 合并脏事件，维护活跃与邻接工作集，解包、选择默认模型、计算表面并编译。Java 不执行 `collectParts`、模型随机选择、遮挡查询或 section compiler；只有 Rust 所选的颜色请求允许实际 tint 回调。`TerrainRouter` / `FluidRouter` 仅留在 CPU 对照测试源集中。原型减少了兼容语义，不能将其性能等同于完整兼容实现。
 
 恢复原版时，在新 ViewArea 和遮挡图建立后，从实际 `ClientChunkCache` 一次性补入已加载列与空 section，再继续正常增量通知。旧遮挡图会清除这些状态，PT 期间又可能消费源更新日志，因此不能仅依赖切换之后的新事件恢复已有地形；此快照不增加稳态逐帧扫描。
 
@@ -134,6 +134,6 @@ Java 使用宿主 transient command buffer，将 native 录制结果交还 `enco
 
 路径追踪使用硬件 Ray Query、Lambert 材质、线性 Rec.2020 工作空间、固定方向太阳/梯度天空、可调路径预算（默认四个路径顶点）和 primeDRT 显示映射；Z-Sobol、起点误差与颜色契约见 [Slang 基础库](shaders.md)。纹理使用图集 UV、动画首帧与基础 mip 最近点采样；源 RGBA 与 tint 先按 Minecraft 编码域语义组合，shader 再进行所需的线性化。
 
-地形范围由 Rust 在宿主实际可用来源内选择，动态源仍依赖宿主准备过程。地形原型使用真实烘焙 quad；multipart、opaque 自定义模型、tint、偏移和流体按 [独立清单](../PROTOTYPE_HACKS.md) 暂用默认值。动态仍接收常规模型、方块实体、物品、自定义几何的支持布局及 quad 粒子；moving/falling block、leash、文字、glint、outline 等特殊路径不作普通表面支持承诺。
+地形范围由 Rust 在宿主实际可用来源内选择，动态源仍依赖宿主准备过程。地形原型使用真实烘焙 quad；标准 multipart、流体形状和实际 tint 已接入；opaque 自定义模型、特殊偏移和其他未覆盖规则按 [独立清单](../PROTOTYPE_HACKS.md) 暂用默认值。动态仍接收常规模型、方块实体、物品、自定义几何的支持布局及 quad 粒子；moving/falling block、leash、文字、glint、outline 等特殊路径不作普通表面支持承诺。
 
 cutout 当前使用固定 0.1 阈值；alpha 材质按源 alpha 随机覆盖，接受后仍是 Lambert 表面，没有水/玻璃折射或介质吸收。主射线和阴影使用同样覆盖语义，同射线的量化交点哈希使流体重合正反面共享判定；这也会关联几何重合而语义不同的透明面，是当前近似边界。实时模式逐帧推进样本序号且没有历史累积；离线冻结场景后纯累积，退出冻结时重建捕获 epoch。尚无动态重投影、降噪。完整动态纹理、PBR 和 HDR 仍待实现。未完成事项见 [HACK.md](../HACK.md)。

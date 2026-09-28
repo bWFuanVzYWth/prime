@@ -68,8 +68,9 @@ public final class NativeBridge implements AutoCloseable {
             planSections =
                     bind(lookup, "prime_mc_plan",
                          FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
-            acceptSections = bind(lookup, "prime_mc_sections",
-                                  FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_LONG));
+            acceptSections =
+                    bind(lookup, "prime_mc_sections",
+                         FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
             destroy = bind(lookup, "prime_destroy", FunctionDescriptor.of(JAVA_INT, JAVA_LONG));
             lastError = bind(lookup, "prime_last_error",
                              FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG));
@@ -146,13 +147,15 @@ public final class NativeBridge implements AutoCloseable {
             throw rethrow(failure);
         }
     }
-    public void sections(SourcePages response) {
+    /** Empty on publication; otherwise a borrowed color source/sample batch, answered through this same entry. */
+    public MemorySegment sections(SourcePages response) {
         checkOwner();
         try {
-            int status =
-                    (int)acceptSections.invokeExact(handle, response.table(), response.pageCount());
+            int status = (int)acceptSections.invokeExact(handle, response.table(),
+                                                         response.pageCount(), sourceRequest);
             if (status != 0)
                 throw new IllegalStateException("prime_mc_sections: " + error());
+            return sourceRequest.get(ADDRESS, 0).reinterpret(sourceRequest.get(JAVA_LONG, 8));
         } catch (Throwable failure) {
             throw rethrow(failure);
         }

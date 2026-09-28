@@ -44,9 +44,9 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
                         long selected, long emptyPublished, long emptyRetained, long routed,
                         long deferred, long waiting, long planNanos, long packNanos,
                         long totalNanos, long lightEngineEvents, long lightPacketEvents,
-                        long acceptNanos, long sourceBytes) {
+                        long acceptNanos, long sourceBytes, long tintQueries, long tintNanos) {
         private static final Stats EMPTY =
-                new Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                new Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
     public enum LightNotification { ENGINE, PACKET }
     public static void lightNotification(Object level, LightNotification kind) {
@@ -227,14 +227,28 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         }
         response.i(0);
         long packEnd = System.nanoTime();
-        bridge.sections(response);
+        long sourceBytes = response.bytes();
+        var tints = bridge.sections(response);
+        long tintQueries = 0, tintNanos = 0;
+        for (int round = 0; tints.byteSize() != 0; ++round) {
+            if (round >= 2)
+                throw new IllegalStateException("Unexpected color continuation");
+            tintQueries += tints.get(I64, 8);
+            long tintStart = System.nanoTime();
+            SectionTints.respond(tints, response, world, minecraft.getBlockColors(),
+                                 minecraft.getModelManager().getFluidStateModelSet(), world);
+            tintNanos += System.nanoTime() - tintStart;
+            sourceBytes += response.bytes();
+            tints = bridge.sections(response);
+        }
         long completed = System.nanoTime();
         lastFrame = serial;
         routedSections += available;
         stats = new Stats(dirtyEvents, entered, loadedColumns, unloadedColumns, invalidations,
                           count, 0, 0, available, count - available, 0, packStart - planStart,
                           packEnd - packStart, completed - started, lightEngineEvents,
-                          lightPacketEvents, completed - packEnd, frame.bytes() + response.bytes());
+                          lightPacketEvents, completed - packEnd - tintNanos,
+                          frame.bytes() + sourceBytes, tintQueries, tintNanos);
         dirtyEvents = loadedColumns = unloadedColumns = invalidations = lightEngineEvents =
                 lightPacketEvents = 0;
     }
@@ -249,6 +263,10 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             return;
         ++current.dirtyEvents;
         current.event(3, x, y, z);
+    }
+    public static void tintChanged(int x, int z, boolean all) {
+        if (current != null && current.world != null && current.failure == null)
+            current.event(all ? 7 : 6, x, 0, z);
     }
     public static void chunkLoaded(int x, int z) {
         if (current == null || current.world == null)

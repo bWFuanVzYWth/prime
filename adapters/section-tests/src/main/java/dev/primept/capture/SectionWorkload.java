@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import net.minecraft.client.color.block.BlockColors;
 import net.minecraft.client.renderer.SectionBufferBuilderPack;
@@ -37,16 +38,27 @@ final class SectionWorkload implements AutoCloseable {
     private final BlockStateModelSet models;
     private final FluidStateModelSet fluids;
     private final SectionCompiler compiler;
+    private final BlockColors colors = SectionTintCases.colors();
     private final SectionBufferBuilderPack builders = new SectionBufferBuilderPack();
     private final List<SectionPos> keys = new ArrayList<>();
 
     SectionWorkload(SectionCompilerOracle.Case fixture, BlockStateModel empty,
                     FluidStateModelSet fluids) throws Exception {
         this.fixture = fixture;
+        if (fixture.blendRadius() >= 0) {
+            var water =
+                    fluids.get(net.minecraft.world.level.material.Fluids.WATER.defaultFluidState());
+            fluids = new FluidStateModelSet(
+                    Map.of(), new net.minecraft.client.renderer.block.FluidModel(
+                                      water.layer(), water.stillMaterial(), water.flowingMaterial(),
+                                      water.overlayMaterial(),
+                                      net.minecraft.client.color.block.BlockTintSources.water()));
+        }
         this.fluids = fluids;
         models = new BlockStateModelSet(fixture.models(), empty);
         region = FluidRouterCpuSmoke.blank(Region.class);
         region.sections = new LevelChunkSection[27];
+        region.tintWorld = SectionTintCases.world(fixture.blendRadius(), fixture.biomePhase());
         for (int x = -1; x <= 1; ++x)
             for (int z = -1; z <= 1; ++z)
                 for (int y = -1; y <= 1; ++y) {
@@ -72,7 +84,7 @@ final class SectionWorkload implements AutoCloseable {
             region.sections[index(p.getX() >> 4, p.getY() >> 4, p.getZ() >> 4)].getStates().set(
                     p.getX() & 15, p.getY() & 15, p.getZ() & 15, e.getValue());
         }
-        compiler = new SectionCompiler(false, true, models, fluids, new BlockColors());
+        compiler = new SectionCompiler(false, true, models, fluids, colors);
     }
     private static int index(int x, int y, int z) {
         return ((x + 1) * 3 + z + 1) * 3 + y + 1;
@@ -93,6 +105,8 @@ final class SectionWorkload implements AutoCloseable {
             for (int x = -1; x <= 1; ++x)
                 for (int z = -1; z <= 1; ++z)
                     pages.i(1).i(x).i(0).i(z);
+        else if (mode.equals("biome"))
+            pages.i(7).i(0).i(0).i(0);
         else if (!mode.equals("idle"))
             for (var k : keys)
                 if (k.x() >= 0 && k.y() >= 0 && k.z() >= 0)
@@ -102,7 +116,12 @@ final class SectionWorkload implements AutoCloseable {
 
     void write(Path directory) throws Exception {
         var expected = new CaptureInbox(true);
-        try (var source = new SourcePages(); var frame = new SourcePages()) {
+        try (var source = new SourcePages(); var frame = new SourcePages();
+             var bridge =
+                     new NativeBridge(Path.of(System.getProperty("primept.smoke.nativeLibrary")));
+             var tintResponse = new SourcePages()) {
+            bridge.submit(Packets.reset(1));
+            bridge.submit(Packets.texture(1, 1, 1, new byte[] {-1, -1, -1, -1}));
             var router = new SectionSources(models, fluids);
             source.header(SectionSources.GAME_VERSION, 2, 1, 1);
             // Source first: the oracle is not allowed to warm source model-selection caches.
@@ -113,6 +132,7 @@ final class SectionWorkload implements AutoCloseable {
             SectionSourcesCpuSmoke.write(source, directory.resolve(fixture.name() + ".source"));
             frame(frame, 1, "full");
             SectionSourcesCpuSmoke.write(frame, directory.resolve(fixture.name() + ".frame"));
+            routeFixture(bridge, frame, source, tintResponse, directory, fixture.name());
             compile(keys, expected, builders);
             if (fixture.name().startsWith("bench_") && !fixture.name().endsWith("_edited")) {
                 restore(true);
@@ -129,6 +149,8 @@ final class SectionWorkload implements AutoCloseable {
                     source.i(0);
                     SectionSourcesCpuSmoke.write(
                             source, directory.resolve(fixture.name() + suffix + ".source"));
+                    routeFixture(bridge, frame, source, tintResponse, directory,
+                                 fixture.name() + suffix);
                 }
                 restore(false);
             }
@@ -141,6 +163,22 @@ final class SectionWorkload implements AutoCloseable {
             writeExpected(parallel, directory.resolve(fixture.name() + ".parallel.expected"));
         }
         writeExpected(expected, directory.resolve(fixture.name() + ".expected"));
+    }
+    private void routeFixture(NativeBridge bridge, SourcePages frame, SourcePages source,
+                              SourcePages tintResponse, Path directory, String name)
+            throws Exception {
+        bridge.requestSections(frame);
+        var request = bridge.sections(source);
+        for (int round = 0; request.byteSize() != 0; ++round) {
+            if (round >= 2)
+                throw new AssertionError("Extra callback round");
+            String suffix = request.get(I, 28) == 0 ? ".tint" : ".biome";
+            Files.write(directory.resolve(name + suffix + ".requests"),
+                        request.toArray(ValueLayout.JAVA_BYTE));
+            SectionTints.respond(request, tintResponse, region, colors, fluids, region.tintWorld);
+            SectionSourcesCpuSmoke.write(tintResponse, directory.resolve(name + suffix));
+            request = bridge.sections(tintResponse);
+        }
     }
     private static void writeExpected(CaptureInbox expected, Path output) throws Exception {
         var packets =
@@ -200,15 +238,18 @@ final class SectionWorkload implements AutoCloseable {
             throw new IllegalArgumentException("Need warmup>=1, samples>=3");
         var rows = new ArrayList<String>();
         rows.add(
-                "case,mode,sample,warmup,order,mc_threads,mc_ms,frame_ms,plan_ms,pack_ms,accept_ms,route_ms,request_count,source_bytes,mc_vertices,java_allocated_bytes,gc_count,gc_ms,native_diagnostics");
+                "case,mode,sample,warmup,order,mc_threads,mc_ms,frame_ms,plan_ms,pack_ms,accept_ms,route_ms,request_count,source_bytes,mc_vertices,java_allocated_bytes,gc_count,gc_ms,tint_queries,tint_callback_ms,native_diagnostics");
         var edited = keys.stream().filter(k -> k.x() >= 0 && k.y() >= 0 && k.z() >= 0).toList();
         var allocation = (com.sun.management.ThreadMXBean)ManagementFactory.getThreadMXBean();
         if (allocation.isThreadAllocatedMemorySupported())
             allocation.setThreadAllocatedMemoryEnabled(true);
         int threads = Integer.getInteger("primept.section.threads", 8);
         try (var reference = new Reference(threads)) {
-            for (String mode : List.of("edit", "unchanged", "idle")) {
+            for (String mode : fixture.name().equals("bench_tinted")
+                                       ? List.of("edit", "unchanged", "idle", "biome")
+                                       : List.of("edit", "unchanged", "idle")) {
                 restore(false);
+                region.tintWorld.phase = fixture.biomePhase();
                 try (var bridge = new NativeBridge(
                              Path.of(System.getProperty("primept.smoke.nativeLibrary")));
                      var events = new SourcePages(); var response = new SourcePages()) {
@@ -217,6 +258,8 @@ final class SectionWorkload implements AutoCloseable {
                     var router = new SectionSources(models, fluids);
                     for (int sample = -1; sample < warmup + samples; ++sample) {
                         long batch = sample + 2L;
+                        if (mode.equals("biome"))
+                            region.tintWorld.phase = (sample & 1);
                         if (mode.equals("edit") && sample >= 0)
                             restore((sample & 1) == 0);
                         var selected = sample < 0            ? keys
@@ -225,8 +268,13 @@ final class SectionWorkload implements AutoCloseable {
                         // Alternate order to avoid always timing one compiler after the other's cache warming.
                         boolean mcFirst = (sample & 1) == 0;
                         long[] mc = new long[2];
-                        if (mcFirst)
+                        if (mcFirst) {
+                            if (mode.equals("biome"))
+                                region.tintWorld.clearColors();
                             reference.measure(selected, mc);
+                        }
+                        if (mode.equals("biome"))
+                            region.tintWorld.clearColors();
                         long gc0 = gcCount(), gcMs0 = gcMillis(), alloc0 = allocated(allocation);
                         long t0 = System.nanoTime();
                         frame(events, batch, mode);
@@ -243,28 +291,48 @@ final class SectionWorkload implements AutoCloseable {
                         }
                         response.i(0);
                         long t3 = System.nanoTime();
-                        bridge.sections(response);
+                        long sourceBytes = response.bytes();
+                        var tints = bridge.sections(response);
+                        long tintCount = 0, tintNanos = 0;
+                        for (int round = 0; tints.byteSize() != 0; ++round) {
+                            if (round >= 2)
+                                throw new AssertionError("Unexpected tint continuation");
+                            tintCount += tints.get(L, 8);
+                            long tintStart = System.nanoTime();
+                            SectionTints.respond(tints, response, region, colors, fluids,
+                                                 region.tintWorld);
+                            tintNanos += System.nanoTime() - tintStart;
+                            sourceBytes += response.bytes();
+                            tints = bridge.sections(response);
+                        }
                         long t4 = System.nanoTime();
                         long bytes = alloc0 < 0 ? -1 : allocated(allocation) - alloc0,
                              gc = gcCount() - gc0, gcMs = gcMillis() - gcMs0;
-                        if (!mcFirst)
+                        if (!mcFirst) {
+                            if (mode.equals("biome"))
+                                region.tintWorld.clearColors();
                             reference.measure(selected, mc);
+                        }
                         String diagnostics =
                                 bridge.cpuDiagnostics(); // formatting and I/O are outside timed work
-                        long expectedRequests = sample < 0 ? 27 : mode.equals("idle") ? 0 : 8;
+                        long expectedRequests = sample < 0                                      ? 27
+                                                : (mode.equals("idle") || mode.equals("biome")) ? 0
+                                                                                                : 8;
                         if (count != expectedRequests)
                             throw new AssertionError("Unexpected workset " + diagnostics);
-                        int compiled = sample < 0 ? 27 : mode.equals("edit") ? 8 : 0;
+                        int compiled = sample < 0                                      ? 27
+                                       : (mode.equals("edit") || mode.equals("biome")) ? 8
+                                                                                       : 0;
                         if (!diagnostics.contains("compiled=" + compiled + " "))
                             throw new AssertionError(diagnostics);
                         rows.add(String.format(
                                 Locale.ROOT,
-                                "%s,%s,%d,%s,%s,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%d,%d,%d,\"%s\"",
+                                "%s,%s,%d,%s,%s,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%d,%d,%d,%d,%.6f,\"%s\"",
                                 fixture.name(), sample < 0 ? "cold_" + mode : mode, sample,
                                 sample < warmup, mcFirst ? "mc_first" : "native_first", threads,
                                 mc[0] / 1e6, (t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6,
-                                (t4 - t3) / 1e6, (t4 - t0) / 1e6, count, response.bytes(), mc[1],
-                                bytes, gc, gcMs, diagnostics));
+                                (t4 - t3) / 1e6, (t4 - t0) / 1e6, count, sourceBytes, mc[1], bytes,
+                                gc, gcMs, tintCount, tintNanos / 1e6, diagnostics));
                     }
                 }
             }
@@ -354,6 +422,11 @@ final class SectionWorkload implements AutoCloseable {
     /** Uses the same packed palettes as routing. HashMap-per-block lookups would bias the reference benchmark. */
     private static final class Region extends RenderSectionRegion {
         LevelChunkSection[] sections;
+        SectionTintCases.World tintWorld;
+        @Override
+        public int getBlockTint(BlockPos pos, net.minecraft.world.level.ColorResolver resolver) {
+            return tintWorld.getBlockTint(pos, resolver);
+        }
         Region() {
             super(null, 0, 0, 0, null);
         }

@@ -47,7 +47,7 @@ impl Fluid {
 #[derive(PartialEq)]
 pub(crate) struct FluidMaterial {
     layer: usize,
-    flags: u32,
+    pub flags: u32,
     sprites: [[f32; 4]; 3],
 }
 impl FluidMaterial {
@@ -224,12 +224,7 @@ pub(crate) fn emit<'a>(
             0
         }
     });
-    let color = if material.flags & 1 != 0 {
-        hacks.tint += 1;
-        [63. / 255., 118. / 255., 228. / 255., 1.]
-    } else {
-        [1.; 4]
-    };
+    let color = [1.; 4];
     let sprites = material.sprites;
     let mut flow = [0f64; 2];
     // Direction.Plane.HORIZONTAL: NORTH, EAST, SOUTH, WEST. Arithmetic order is source semantics.
@@ -303,7 +298,7 @@ pub(crate) fn emit<'a>(
             positions,
             uvs,
             face: 6,
-            tint: false,
+            tint: -1,
             layer: material.layer,
         };
         emit_quad(&q, offset, color, 1, layers);
