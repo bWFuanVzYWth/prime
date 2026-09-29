@@ -10,7 +10,7 @@ const DISPLAY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/display.spv"));
 const INTERSECTION: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/intersection.spv"));
 
 // Test-only submission/readback. Production shader libraries declare no bindings.
-fn run(
+pub(super) fn run(
     context: &Arc<Context>,
     code: &[u8],
     input: &[u32],
@@ -34,7 +34,7 @@ fn run(
         descriptor_layout: vk::DescriptorSetLayout::null(),
         pool: vk::DescriptorPool::null(),
         descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
-        pipeline: vk::Pipeline::null(),
+        pipelines: [vk::Pipeline::null(); 3],
         resolve: vk::Pipeline::null(),
     };
     unsafe {
@@ -160,7 +160,7 @@ fn run(
             None,
         );
         context.device.destroy_shader_module(module, None);
-        pipeline.pipeline = built.unwrap()[0];
+        pipeline.pipelines[0] = built.unwrap()[0];
     }
     let push: Vec<_> = [mode_count[0], mode_count[1], 0, 0]
         .into_iter()
@@ -171,7 +171,7 @@ fn run(
             context.device.cmd_bind_pipeline(
                 command,
                 vk::PipelineBindPoint::COMPUTE,
-                pipeline.pipeline,
+                pipeline.pipelines[0],
             );
             context.device.cmd_bind_descriptor_sets(
                 command,
@@ -531,7 +531,34 @@ fn gpu_ray_error_bounds_cover_reconstruction_and_both_spawn_sides() {
         [2, expected.len() as u32],
         None,
     );
-    for ((point, reference_normal), words) in expected.into_iter().zip(result.as_chunks::<16>().0) {
+    let translation_input = input
+        .as_chunks::<40>()
+        .0
+        .iter()
+        .step_by(2)
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>();
+    let translation_result = run(
+        &context,
+        FOUNDATIONS,
+        &translation_input,
+        expected.len() / 2 * 16,
+        [3, (expected.len() / 2) as u32],
+        None,
+    );
+    let cases = expected
+        .iter()
+        .copied()
+        .zip(result.as_chunks::<16>().0)
+        .chain(
+            expected
+                .iter()
+                .step_by(2)
+                .copied()
+                .zip(translation_result.as_chunks::<16>().0),
+        );
+    for ((point, reference_normal), words) in cases {
         let values = words.map(f32::from_bits).map(f64::from);
         assert!(values.iter().all(|v| v.is_finite()));
         let p: [f64; 3] = values[..3].try_into().unwrap();
@@ -620,6 +647,7 @@ fn gpu_spawn_avoids_self_hits_without_skipping_nearby_occluders() {
                 &context,
                 (&scene).into(),
                 Arc::new(prime_scene::workers::CpuWorkers::new(1).unwrap()),
+                false,
             )
             .unwrap();
             geometry

@@ -415,13 +415,21 @@ impl Objects {
 }
 
 pub(crate) fn index_buffer(context: &Arc<Context>, capacity: u32) -> Result<Buffer, String> {
+    index_buffer_with_stride(context, capacity, 8)
+}
+
+pub(crate) fn index_buffer_with_stride(
+    context: &Arc<Context>,
+    capacity: u32,
+    stride: u32,
+) -> Result<Buffer, String> {
     validate_material_count(capacity)?;
     let mut bytes = Vec::with_capacity(capacity as usize * 12);
     for primitive in 0..capacity {
         for corner in 0..3 {
             // The validated <= 4 GiB pointed range has at most 2^25 records,
             // so its 16-byte-stride vertex indices remain below 2^28.
-            uint(&mut bytes, primitive * 8 + corner);
+            uint(&mut bytes, primitive * stride + corner);
         }
     }
     Buffer::upload_device(

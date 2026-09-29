@@ -158,6 +158,11 @@ fn pack_records<T: Send>(
                     }
                 }
                 TriangleView::QuadFragments { .. } => unreachable!("fragments normalized above"),
+                TriangleView::Surfaces(_) => {
+                    return Err(
+                        "Custom surface records require the surface compiler renderer".into(),
+                    );
+                }
             }
             remaining = tail;
             triangle_index += count;
@@ -171,7 +176,16 @@ fn triangle_record(
     input: &Input<'_>,
     textures: &BTreeMap<u32, u32>,
 ) -> Result<[u8; 128], String> {
-    if input.flags.is_some_and(|flags| flags != triangle.flags) {
+    encode_triangle(triangle, input.offset, input.flags, textures)
+}
+
+pub(crate) fn encode_triangle(
+    triangle: &Triangle,
+    offset: Option<[f32; 3]>,
+    flags: Option<u32>,
+    textures: &BTreeMap<u32, u32>,
+) -> Result<[u8; 128], String> {
+    if flags.is_some_and(|flags| flags != triangle.flags) {
         return Err("Mesh material flags must be uniform".into());
     }
     let mut record = [0; 128];
@@ -181,7 +195,7 @@ fn triangle_record(
         cursor += 4;
     };
     for mut position in triangle.positions {
-        if let Some(offset) = input.offset {
+        if let Some(offset) = offset {
             for i in 0..3 {
                 position[i] += offset[i];
             }

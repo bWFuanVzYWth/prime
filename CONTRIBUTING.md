@@ -114,7 +114,7 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```powershell
 $env:PRIME_VK_VALIDATION = '1'
 $env:VK_LAYER_VALIDATE_SYNC = '1'
-cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip packing_cost_matrix --skip terrain_upload_cost_matrix --nocapture --test-threads=1
+cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip packing::perf --skip terrain_upload_cost_matrix --skip surface_steady_cost_matrix --nocapture --test-threads=1
 ```
 
 这些测试覆盖 cutout、累积、尺寸变化、增量场景和宿主资源退休；小尺寸/奇数尺寸用于边界检查，不是性能数据。改变宿主集成或捕获时，还需在对应 MC 适配器实际运行，检查主图像与 HUD、资源重载、世界退出等相关生命周期。更新公共接口时验证受影响的两个适配器；编译通过不证明 Mixin 注入或实际 GPU 功能正常。
@@ -166,6 +166,33 @@ Java CSV 的 `terrain_plan_ns` 是请求规划 FFM 总时间，`terrain_pack_ns`
 
 ## 性能测量
 
+### 自定义表面编译原型
+
+接口与支持范围见[表面编译原型](docs/surface-compiler.md)。默认仍为 `legacy`；显式选择在 renderer 创建时生效，Java/FFM 源 ABI 不因这个实验切换。以下游戏启动只由用户手动执行：
+
+```powershell
+$env:PRIME_SURFACE_COMPILER = 'rectangles'
+.\gradlew.bat buildNative :mc-26.3:runClient -PprimeptEnabled=true -PprimeptValidation=true -PprimeptProfile=true
+# 26.2 使用 :mc-26.2:runClient；对照时改为 legacy 并重新启动 renderer/客户端。
+```
+
+先检查平面材质重复、atlas 接缝、群系 tint 边界、cutout/透明、跨格更新和重定位，再关闭 validation 测量。现有 Minecraft 源尚未声明发光/介质；实验后端有灯采样能力并不代表游戏岩浆、火把已发光。未完成的覆盖层与光学界面按原型支持范围判断。
+
+无窗口原生1080p同输入矩形/记录对照：
+
+```powershell
+New-Item -ItemType Directory -Force artifacts/surface-bench | Out-Null
+$env:PRIME_PROFILE = '1'
+$env:PRIME_VK_VALIDATION = '0'
+$env:VK_LAYER_VALIDATE_SYNC = '0'
+$env:PRIME_SURFACE_CSV = "$PWD/artifacts/surface-bench/steady.csv"
+cargo test --release -p prime_vulkan --lib --locked surface_steady_cost_matrix -- --ignored --nocapture --test-threads=1
+```
+
+默认每种形状/coverage做3轮交错顺序、1024帧预热、120帧采样，两种编译路径固定相机和射线预算。可设 `PRIME_SURFACE_PATTERN=layers` 只测八层遮挡，`PRIME_SURFACE_ROUNDS` / `PRIME_SURFACE_SAMPLES` / `PRIME_SURFACE_WARMUP` 控制轮数/样本/预热。CSV保留原始CPU录制、GPU准备/完整渲染时间和实际三角形数，预热行也保留；极短夹具应避免把GPU从闲置升频的过渡当成稳态p95。每样本等待GPU完成用于归因，不代表游戏呈现吞吐；场景是受控夹具，不是真实存档。结束后删除这些会话环境变量或使用独立PowerShell，避免改变后续比较配置。
+
+### 通用测量约定
+
 正式性能测试使用原生 **1920×1080**，记录实际主 target 尺寸；降分辨率、动态分辨率或重建后的输出不能标为原生 1080p。固定场景、相机、种子、渲染参数、帧率上限和 VSync，记录构建、GPU/驱动、预热与采样范围。关闭 validation、capture audit 和逐调用 trace；可选聚合日志、CSV 和细粒度 profiling 是否启用也属于测量条件。测量期间避免另一游戏或 GPU 测试争用设备。
 
 当前 section 原型的 CPU 成本夹具：
@@ -204,6 +231,8 @@ cargo test --release -p prime_vulkan --lib --locked terrain_upload_cost_matrix -
 仅测 CPU 四边形上传记录打包，可设置 `PRIME_PACK_CSV` 为输出 CSV 绝对路径，运行 `cargo test --release --locked -p prime_vulkan packing::perf::quad_packing_cost -- --exact --ignored --nocapture`。固定8线程，覆盖52万和314万三角形，保留每批5次预热、40次正式样本及输出 hash；计时包含平移、校验、纹理查询和写入预分配的128字节记录，排除分配、GPU传输与AS构建，不创建 Vulkan 设备。`source_burst_cost` 的 `resident_geometry_bytes` 统计翻译快照持有的几何容量，不等于进程或分配器的物理占用。
 
 `terrain_upload_cost_matrix` 在原生1920×1080的无窗口宿主录制路径上，每次替换所有指定单元，固定网格、两种交替角点位置和默认射线预算。CPU 源整理/发布/翻译、录制和 GPU 时间分列；每个样本等待本次提交真正完成，`completed_ms` 包含等待，可据总时长计算吞吐量。每格64段，quads 是每段四边形数；不含 Minecraft、Java/FFM、源编译内核或图像读回。`upload_ns` 对直接打包的静态范围包含 CPU 记录初始化时间，对其他上传仍包含字节复制，不能将该计数解释为纯 memcpy 时间。用多轮不可变可执行文件交替对照 p95、最大值与吞吐量；两种夹具都不能替代真实存档的逐帧验收。
+
+自定义编译还需分别设 `PRIME_UPLOAD_PATTERN=small|grid|checker`：默认small为不可合并的0.4格网格/斜面，grid为单位面并交替改色，checker为相邻颜色不同的单位面反例。分别用 `PRIME_SURFACE_COMPILER=legacy|rectangles` 重启测试进程，以相同源输入比较；CSV的 `triangles` 是源三角形数，`resident_triangles` 是最终 GPU 几何数。按源工作量和真实完成耗时计算吞吐，不能把减少后的输出三角形数当成吞吐下降。
 
 群系样本规划及 raw 回退另有固定输入夹具；先构建，再按顺序执行：
 

@@ -121,6 +121,8 @@ pub enum MeshGeometry {
     Triangles(Arc<[Triangle]>),
     Quads(Arc<[CompiledQuad]>),
     QuadFragments(Arc<QuadFragments>),
+    /// Self-contained custom-compiler output, including sampling fields and light identity.
+    Surfaces(Arc<crate::surface::SurfaceMesh>),
 }
 impl Default for MeshGeometry {
     fn default() -> Self {
@@ -153,6 +155,7 @@ impl MeshGeometry {
             Self::Triangles(values) => values.len(),
             Self::Quads(values) => values.len() * 2,
             Self::QuadFragments(values) => values.len() * 2,
+            Self::Surfaces(values) => values.triangles.len(),
         }
     }
     pub fn is_empty(&self) -> bool {
@@ -167,6 +170,7 @@ impl MeshGeometry {
                 .iter()
                 .map(|b| b.values.capacity() * std::mem::size_of::<CompiledQuad>())
                 .sum(),
+            Self::Surfaces(values) => values.byte_len(),
         }
     }
     pub fn triangle(&self, index: usize) -> Triangle {
@@ -174,6 +178,7 @@ impl MeshGeometry {
             Self::Triangles(values) => values[index],
             Self::Quads(values) => values[index / 2].triangle(index % 2),
             Self::QuadFragments(values) => values.quad(index / 2).triangle(index % 2),
+            Self::Surfaces(values) => values.triangles[index].geometry,
         }
     }
     pub fn iter(&self) -> impl ExactSizeIterator<Item = Triangle> + DoubleEndedIterator + Clone {
@@ -184,6 +189,7 @@ impl MeshGeometry {
             (Self::Triangles(a), Self::Triangles(b)) => Arc::ptr_eq(a, b),
             (Self::Quads(a), Self::Quads(b)) => Arc::ptr_eq(a, b),
             (Self::QuadFragments(a), Self::QuadFragments(b)) => Arc::ptr_eq(a, b),
+            (Self::Surfaces(a), Self::Surfaces(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -191,6 +197,7 @@ impl MeshGeometry {
         assert!(range.start <= range.end && range.end <= self.len());
         match self {
             Self::Triangles(values) => TriangleView::Triangles(&values[range]),
+            Self::Surfaces(values) => TriangleView::Surfaces(&values.triangles[range]),
             Self::Quads(values) => TriangleView::Quads {
                 values: &values[range.start / 2..range.end.div_ceil(2)],
                 first: range.start % 2,
@@ -209,6 +216,7 @@ impl MeshGeometry {
 #[derive(Clone, Copy)]
 pub enum TriangleView<'a> {
     Triangles(&'a [Triangle]),
+    Surfaces(&'a [crate::surface::SurfaceTriangle]),
     Quads {
         values: &'a [CompiledQuad],
         first: usize,
@@ -229,6 +237,7 @@ impl<'a> TriangleView<'a> {
     pub fn len(self) -> usize {
         match self {
             Self::Triangles(values) => values.len(),
+            Self::Surfaces(values) => values.len(),
             Self::Quads { count, .. } => count,
             Self::QuadFragments { count, .. } => count,
         }
@@ -239,6 +248,7 @@ impl<'a> TriangleView<'a> {
     pub fn triangle(self, index: usize) -> Triangle {
         match self {
             Self::Triangles(values) => values[index],
+            Self::Surfaces(values) => values[index].geometry,
             Self::Quads { values, first, .. } => {
                 values[(first + index) / 2].triangle((first + index) % 2)
             }

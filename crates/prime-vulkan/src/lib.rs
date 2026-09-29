@@ -12,6 +12,9 @@ mod material_arena;
 mod packing;
 mod plan;
 mod resources;
+mod surface;
+#[cfg(test)]
+mod surface_tests;
 mod target;
 mod textures;
 pub use benchmark::HostBenchmark;
@@ -51,14 +54,16 @@ struct Pipeline {
     descriptor_layout: vk::DescriptorSetLayout,
     pool: vk::DescriptorPool,
     descriptors: [vk::DescriptorSet; FRAME_SLOTS],
-    pipeline: vk::Pipeline,
+    pipelines: [vk::Pipeline; 3],
     resolve: vk::Pipeline,
 }
 impl Drop for Pipeline {
     fn drop(&mut self) {
         if self.context.can_destroy() {
             unsafe {
-                self.context.device.destroy_pipeline(self.pipeline, None);
+                for pipeline in self.pipelines {
+                    self.context.device.destroy_pipeline(pipeline, None);
+                }
                 self.context.device.destroy_pipeline(self.resolve, None);
                 self.context.device.destroy_descriptor_pool(self.pool, None);
                 self.context
@@ -80,7 +85,7 @@ impl Pipeline {
                 descriptor_layout: vk::DescriptorSetLayout::null(),
                 pool: vk::DescriptorPool::null(),
                 descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
-                pipeline: vk::Pipeline::null(),
+                pipelines: [vk::Pipeline::null(); 3],
                 resolve: vk::Pipeline::null(),
             };
             let binding_ids: &[u32] = match mode {
@@ -160,17 +165,34 @@ impl Pipeline {
                 .map_err(|e| error("Allocate path-tracing descriptors", e))?
                 .try_into()
                 .map_err(|_| "Invalid descriptor count")?;
-            let create = |bytes: &[u8]| -> Result<vk::Pipeline, String> {
+            let create = |bytes: &[u8], features: [u32; 2]| -> Result<vk::Pipeline, String> {
                 let spirv = ash::util::read_spv(&mut Cursor::new(bytes))
                     .map_err(|e| format!("Read compiled Slang SPIR-V: {e}"))?;
                 let shader = context
                     .device
                     .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
                     .map_err(|e| error("Create Slang shader module", e))?;
+                let entries = [
+                    vk::SpecializationMapEntry {
+                        constant_id: 0,
+                        offset: 0,
+                        size: 4,
+                    },
+                    vk::SpecializationMapEntry {
+                        constant_id: 1,
+                        offset: 4,
+                        size: 4,
+                    },
+                ];
+                let data = features.map(u32::to_le_bytes);
+                let specialization = vk::SpecializationInfo::default()
+                    .map_entries(&entries)
+                    .data(data.as_flattened());
                 let stage = vk::PipelineShaderStageCreateInfo::default()
                     .stage(vk::ShaderStageFlags::COMPUTE)
                     .module(shader)
-                    .name(c"main");
+                    .name(c"main")
+                    .specialization_info(&specialization);
                 let created = context.device.create_compute_pipelines(
                     vk::PipelineCache::null(),
                     &[vk::ComputePipelineCreateInfo::default()
@@ -189,15 +211,18 @@ impl Pipeline {
                     }
                 })
             };
-            result.pipeline = create(match mode {
+            let shader: &[u8] = match mode {
                 RenderMode::Offline => include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv")),
                 RenderMode::Realtime => include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv")),
-            })?;
+            };
+            for (i, features) in [[0, 0], [1, 0], [1, 1]].into_iter().enumerate() {
+                result.pipelines[i] = create(shader, features)?;
+            }
             if mode == RenderMode::Realtime {
-                result.resolve = create(include_bytes!(concat!(
-                    env!("OUT_DIR"),
-                    "/realtime_display.spv"
-                )))?;
+                result.resolve = create(
+                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_display.spv")),
+                    [0, 0],
+                )?;
             }
             Ok(result)
         }
@@ -242,6 +267,7 @@ pub struct Renderer {
     // Only the selected backend's pipeline and sized output exist; scene geometry is shared.
     pipeline: Option<Pipeline>,
     geometry: Option<Geometry>,
+    surface_compiler: bool,
     output: Option<Output>,
     camera: Option<Camera>,
     samples: u32,

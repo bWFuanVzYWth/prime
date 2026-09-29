@@ -35,7 +35,10 @@ import "math/ray_offset.slang";
                                 asfloat(inputs[base + 6]));
         float3x4 w2o = float3x4(asfloat(inputs[base + 7]), asfloat(inputs[base + 8]),
                                 asfloat(inputs[base + 9]));
-        SurfacePoint hit = reconstructSurface(v0, v1, v2, bary, o2w, w2o);
+        SurfacePoint hit =
+                config.x == 3 ? reconstructStaticSurface(v0, v1, v2, bary,
+                                                         float3(o2w[0][3], o2w[1][3], o2w[2][3]))
+                              : reconstructSurface(v0, v1, v2, bary, o2w, w2o);
         outputs[4 * i] = asuint(float4(hit.position, hit.offset));
         outputs[4 * i + 1] = asuint(float4(hit.normal, 0));
         outputs[4 * i + 2] = asuint(float4(spawnRay(hit, hit.normal), 0));

@@ -34,7 +34,7 @@ Java `ExclusiveTerrainCapture` 转录宿主事件并响应请求，`SectionSourc
 
 ## 矩形分解的接入范围
 
-矩形分解复用体素引擎的 API、算法、测试和文档，来源见 [SOURCE.md](../crates/rectangle-decomposition/SOURCE.md)。它是可独立调用的 workspace 成员，目前没有运行期消费者，也未对 MC quad 开启合并。
+矩形分解复用体素引擎的 API、算法、测试和文档，来源见 [SOURCE.md](../crates/rectangle-decomposition/SOURCE.md)。它是可独立调用的 workspace 成员，由 `prime_scene::surface` 实验路径消费；规则面资格、完整材质标签和 UV 重复由调用者证明，库仍只处理二维标签。启用条件和限制见 [自定义表面编译](surface-compiler.md)。
 
 后续调用点应在 `prime_scene` 的受约束几何编译阶段：证明共面、方向、网格对齐、材质、UV 映射、tint/alpha 等完整语义可合并后，才转换到算法要求的 64×64 带标签 sparse quad。任意模型面、斜面、不同 UV 或 tint 不能仅按 block ID 合并。较大的 scratch 在 worker 生命周期复用，不能每个任务在渲染线程分配。
 

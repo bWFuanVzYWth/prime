@@ -8,6 +8,7 @@ use ash::vk;
 use std::sync::Arc;
 
 const RECORD_BYTES: u64 = 128;
+#[cfg(test)]
 const PAGE_RECORDS: u32 = (64 * 1024 * 1024) / RECORD_BYTES as u32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,13 +36,18 @@ struct NewPage {
 }
 
 impl NewPage {
+    #[cfg(test)]
     fn plan(count: u32) -> Result<Self, String> {
+        Self::with_stride(count, RECORD_BYTES)
+    }
+
+    fn with_stride(count: u32, record_bytes: u64) -> Result<Self, String> {
         if count == 0 {
             return Err("Cannot allocate an empty material range".into());
         }
-        let capacity = count.max(PAGE_RECORDS);
+        let capacity = count.max((64 * 1024 * 1024 / record_bytes) as u32);
         let bytes = u64::from(capacity)
-            .checked_mul(RECORD_BYTES)
+            .checked_mul(record_bytes)
             .ok_or("Material page byte size overflow")?;
         Ok(Self { capacity, bytes })
     }
@@ -96,20 +102,27 @@ impl Layout {
 pub(crate) struct MaterialArena {
     layout: Layout,
     buffers: Vec<Buffer>,
+    record_bytes: u64,
 }
 
 impl MaterialArena {
     pub fn new() -> Self {
+        Self::with_stride(RECORD_BYTES)
+    }
+
+    pub fn with_stride(record_bytes: u64) -> Self {
+        assert!(record_bytes >= 16 && record_bytes.is_multiple_of(16));
         Self {
             layout: Layout::default(),
             buffers: Vec::new(),
+            record_bytes,
         }
     }
 
     /// Allocation/free operations belong to the recording owner. Before writing
     /// a reused range, the caller orders earlier shader/AS readers on its queue.
     pub fn allocate(&mut self, context: &Arc<Context>, count: u32) -> Result<Allocation, String> {
-        let plan = NewPage::plan(count)?;
+        let plan = NewPage::with_stride(count, self.record_bytes)?;
         if let Some(allocation) = self.layout.allocate_existing(count) {
             return Ok(allocation);
         }
@@ -158,7 +171,7 @@ impl MaterialArena {
     }
 
     pub fn address(&self, allocation: Allocation) -> u64 {
-        self.buffer(allocation).address() + u64::from(allocation.first) * RECORD_BYTES
+        self.buffer(allocation).address() + u64::from(allocation.first) * self.record_bytes
     }
 
     pub fn page_count(&self) -> usize {

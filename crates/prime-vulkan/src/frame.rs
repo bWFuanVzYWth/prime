@@ -138,6 +138,11 @@ impl Renderer {
             context,
             pipeline,
             geometry: None,
+            surface_compiler: match std::env::var("PRIME_SURFACE_COMPILER").as_deref() {
+                Ok("rectangles") => true,
+                Ok("legacy") | Err(std::env::VarError::NotPresent) => false,
+                _ => return Err("PRIME_SURFACE_COMPILER must be legacy or rectangles".into()),
+            },
             workers: Arc::new(prime_scene::workers::CpuWorkers::configured()?),
             output: None,
             camera: None,
@@ -179,6 +184,17 @@ impl Renderer {
 
     pub fn device_name(&self) -> &str {
         &self.context.name
+    }
+
+    /// Select the experimental compiler before the first scene publication. A live renderer
+    /// keeps one compilation policy for its lifetime. Individual geometry ranges may change
+    /// their direct record format as part of a versioned scene publication.
+    pub fn set_surface_compiler(&mut self, enabled: bool) -> Result<(), String> {
+        if self.geometry.is_some() {
+            return Err("Surface compiler must be selected before publishing geometry".into());
+        }
+        self.surface_compiler = enabled;
+        Ok(())
     }
 
     /// Changes only the display transform. Scene-linear history remains valid.
@@ -385,8 +401,12 @@ impl Renderer {
                     // End the previous CPU owner before constructing another cache domain.
                     // Borrowed GPU resources still retire by their recorded completion serials.
                     self.geometry.take();
-                    self.geometry =
-                        Some(Geometry::new(&self.context, scene, self.workers.clone())?);
+                    self.geometry = Some(Geometry::new(
+                        &self.context,
+                        scene,
+                        self.workers.clone(),
+                        self.surface_compiler,
+                    )?);
                 }
                 self.samples = 0;
             }
@@ -600,7 +620,7 @@ impl Renderer {
             self.context.device.cmd_bind_pipeline(
                 command,
                 vk::PipelineBindPoint::COMPUTE,
-                pipeline.pipeline,
+                pipeline.pipelines[self.geometry.as_ref().map_or(0, Geometry::shader_variant)],
             );
             self.context.device.cmd_bind_descriptor_sets(
                 command,

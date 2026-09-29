@@ -36,6 +36,8 @@ Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样�
 
 生产 `R=ceil(log2(max(width,height)))`，`S=8`（原生 1080p 的 Morton 索引共 30 位，使用单字快路径）。相机 jitter 使用 domain 0；每个反弹从 `1+4*bounce` 起依次分配表面 coverage、阴影 coverage、BSDF 二维样本、roulette。分支不会推进共享 RNG。超过 256 个样本时切换全局 scramble，开始新的完整样本集；不声称它是无限延长的同一个 Sobol net。完整样本集/对齐像素邻域的均匀性不等于早期任意前缀的质量保证。
 
+[表面编译原型](surface-compiler.md)的显式灯使用独立的 `512+4*bounce` domain，依次用于世界/局部树选择、三角形二维采样、采样点 coverage 和有限阴影 coverage。静态灯 NEE 与发光命中使用同版本 proposal 的 MIS；既有太阳/天空路径保持原 domain。
+
 实现复用 domain hash，以固定双字移位代替通用 64 位移位分支，将 Sobol Y 变换移到反向位序，抵消紧邻的 Sobol/Owen bit reverse。没有额外采样纹理或跨帧随机状态。上述是运算路径变化，不代表已经测得整帧提速。
 
 ## 求交与安全起点
@@ -43,6 +45,8 @@ Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样�
 使用 Vulkan 硬件 Ray Query，最近交点与阴影查询共享实际材质和随机 coverage 语义。透明 coverage 仍不是折射/介质；不增加全场景软件三角形求交器。
 
 安全起点移植 NVIDIA `SelfIntersectionAvoidance.hlsl`：局部边与 barycentric 重建将基顶点最后相加，显式仿射变换将平移最后相加，逆转置法线及 object/world 两侧误差投影得到偏移。由出射方向选择表面正/反侧，`TMin=0`，取消固定世界单位 epsilon，减少小间隙漏遮挡。输入必须为有限、非退化三角形及互逆非奇异仿射变换。
+
+实验表面路径的静态单元由生产者证明只有平移，`reconstructStaticSurface` 特化对应的单位矩阵运算，保留相同误差常量和两侧投影；通用动态实例仍使用实际仿射矩阵。有限灯阴影从接收面安全起点到灯面朝向接收方的安全起点，不引入固定距离 epsilon。
 
 交点硬件误差常量采用参考中的 NVIDIA RTX 上界；其他厂商必须另外验证，不能由移植直接保证。算法来源与适用条件见 [NVIDIA 说明](https://developer.nvidia.com/blog/solving-self-intersection-artifacts-in-directx-raytracing/)，许可与修改范围见 [第三方声明](../THIRD_PARTY_NOTICES.md)。
 

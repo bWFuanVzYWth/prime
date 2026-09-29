@@ -8,6 +8,7 @@ description = "Version-neutral source protocol, scene values and CPU scene trans
 
 [dependencies]
 rayon.workspace = true
+rectangle_decomposition = { path = "../rectangle-decomposition" }
 
 [lints]
 workspace = true

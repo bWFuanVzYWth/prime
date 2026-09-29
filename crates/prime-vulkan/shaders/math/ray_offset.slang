@@ -50,6 +50,33 @@ public SurfacePoint reconstructSurface(float3 v0, float3 v1, float3 v2, float2 b
     result.offset = mad(scale, dot(localError, abs(localNormal)), dot(worldError, abs(normal)));
     return result;
 }
+
+// Static cells have a producer-proven translation-only instance transform. Keep the same
+// reconstruction order and RTX error constants, specializing the two identity matrix products
+// instead of fetching and multiplying general affine transforms at every static hit.
+public SurfacePoint reconstructStaticSurface(float3 v0, float3 v1, float3 v2, float2 bary,
+                                             float3 translation) {
+    precise float3 edge1 = v1 - v0;
+    precise float3 edge2 = v2 - v0;
+    precise float3 local = v0 + mad(bary.x, edge1, bary.y * edge2);
+    precise float3 world = translation + local;
+    float3 localNormal = cross(edge1, edge2);
+    float scale = rsqrt(dot(localNormal, localNormal));
+    float3 normal = localNormal * scale;
+    const float c0 = 5.9604644775390625e-8;
+    const float c1 = 1.78813976958736020606e-7;
+    const float c2 = 1.19209317972490680404e-7;
+    float3 extent3 = abs(edge1) + abs(edge2) + abs(edge1 - edge2);
+    float extent = max(max(extent3.x, extent3.y), extent3.z);
+    float3 localError = mad(c0, abs(v0), c1 * extent);
+    float3 worldError = mad(c1, abs(local), c2 * abs(translation));
+    localError = mad(c2, abs(world) + abs(translation), localError);
+    SurfacePoint result;
+    result.position = world;
+    result.normal = normal;
+    result.offset = mad(scale, dot(localError, abs(localNormal)), dot(worldError, abs(normal)));
+    return result;
+}
 // Direction chooses the outgoing side, supporting both reflection and transmission.
 public float3 spawnRay(SurfacePoint surface, float3 direction) {
     float3 normal = dot(surface.normal, direction) >= 0.0 ? surface.normal : -surface.normal;

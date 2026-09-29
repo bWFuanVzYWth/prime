@@ -11,6 +11,14 @@ public struct TraceResult {
     public float depth;
     public float3 normal;
 };
+float powerHeuristic(float a, float b) {
+    if (a >= b) {
+        float ratio = b / a;
+        return 1.0 / (1.0 + ratio * ratio);
+    }
+    float ratio = a / b;
+    return ratio * ratio / (1.0 + ratio * ratio);
+}
 float3 sky(float3 direction) {
     return linear709ToWorking(lerp(float3(0.22, 0.27, 0.35), float3(0.36, 0.61, 1.0),
                                    saturate(direction.y * 0.5 + 0.5)));
@@ -37,6 +45,8 @@ public TraceResult traceSample(TraceScene resources, Frame frame, uint2 pixel, u
                                  frame.right.xyz * (screen.x * frame.forward.w * frame.position.w) -
                                  frame.up.xyz * (screen.y * frame.position.w));
     float3 throughput = float3(1);
+    float3 previous = origin;
+    float previousPdf = 0;
     float3 sunDirection = normalize(float3(-0.45, 0.83, 0.33));
     for (uint bounce = 0; bounce < asuint(frame.displayExtra.z); ++bounce) {
         uint domain = 1 + 4 * bounce;
@@ -53,6 +63,29 @@ public TraceResult traceSample(TraceScene resources, Frame frame, uint2 pixel, u
             result.normal = surface.normal;
         }
         float3 albedo = sourceToWorking(saturate(hit.sourceColor.rgb));
+        if (lightFeatures != 0) {
+            float lightPdf = bounce == 0 ? 0 : emissiveHitPdf(resources, hit, previous);
+            float emissionWeight = lightPdf == 0 ? 1.0 : powerHeuristic(previousPdf, lightPdf);
+            result.radiance += throughput * linear709ToWorking(hit.emission) * emissionWeight;
+        }
+        if (lightFeatures != 0 && hasLocalLights(resources)) {
+            uint lightDomain = 512 + 4 * bounce;
+            LightSample light = sampleLocalLight(resources, sampler.sample1D(lightDomain),
+                                                 sampler.sample2D(lightDomain + 1),
+                                                 sampler.bits1D(lightDomain + 2));
+            float pdf;
+            float lightCosine;
+            float3 radiance = evaluateLocalLight(resources, surface, light,
+                                                 sampler.bits1D(lightDomain + 3), pdf, lightCosine);
+            if (pdf > 0) {
+                float bsdfPdf = lightCosine / 3.14159265359;
+                float weight = bounce + 1 == asuint(frame.displayExtra.z)
+                                       ? 1.0
+                                       : powerHeuristic(pdf, bsdfPdf);
+                result.radiance += throughput * albedo * linear709ToWorking(radiance) *
+                                   (weight * bsdfPdf / pdf);
+            }
+        }
         float cosine = saturate(dot(surface.normal, sunDirection));
         if (cosine > 0 && !traceOcclusion(resources, spawnRay(surface, sunDirection), sunDirection,
                                           sampler.bits1D(domain + 1)))
@@ -60,6 +93,8 @@ public TraceResult traceSample(TraceScene resources, Frame frame, uint2 pixel, u
                                (frame.right.w * cosine / 3.14159265359);
         throughput *= albedo;
         direction = cosineHemisphere(surface.normal, sampler.sample2D(domain + 2));
+        previous = surface.position;
+        previousPdf = max(0.0, dot(surface.normal, direction)) / 3.14159265359;
         origin = spawnRay(surface, direction);
         if (bounce >= 2) {
             float survival = clamp(workingLuminance(throughput), 0.05, 0.95);

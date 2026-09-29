@@ -11,6 +11,7 @@ mod routing;
 pub mod scene;
 pub mod settings;
 pub mod spatial;
+pub mod surface;
 mod texture_lifetime;
 pub mod translation;
 pub mod workers;

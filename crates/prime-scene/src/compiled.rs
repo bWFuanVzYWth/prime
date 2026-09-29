@@ -161,6 +161,7 @@ impl SourceScene {
                 && old.triangles.len() == count * 2
             {
                 let equal = match &old.triangles {
+                    MeshGeometry::Surfaces(_) => false,
                     MeshGeometry::Quads(quads) => quads.iter().zip(input()).all(|(a, b)| {
                         a.texture_id == b.texture_id
                             && a.flags == b.flags
@@ -251,6 +252,7 @@ impl SourceScene {
             });
             if !same_partition
                 && let Some(old) = compatible
+                && !matches!(old.triangles, MeshGeometry::Surfaces(_))
                 && old.triangles.len() == count * 2
                 && old
                     .triangles
@@ -317,6 +319,7 @@ impl SourceScene {
                 && old.origin.map(f64::to_bits) == origin.map(f64::to_bits)
                 && old.texture_id == 1
                 && old.flags == index
+                && !matches!(old.triangles, MeshGeometry::Surfaces(_))
                 && old.triangles.len() == count
                 && old
                     .triangles

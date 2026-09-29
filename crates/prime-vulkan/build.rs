@@ -26,7 +26,7 @@ fn main() {
         "realtime_display.spv",
     );
     if env::var_os("CARGO_FEATURE_SHADER_TESTS").is_some() {
-        for name in ["foundations", "intersection", "display"] {
+        for name in ["foundations", "intersection", "display", "lights"] {
             compile(
                 &compiler,
                 &format!("tests/shaders/{name}.slang"),

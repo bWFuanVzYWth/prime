@@ -21,11 +21,13 @@ fn terrain_upload_cost_matrix() {
     let cells = number("PRIME_UPLOAD_CELLS", 16);
     let samples = number("PRIME_UPLOAD_SAMPLES", 33);
     let warmup = number("PRIME_UPLOAD_WARMUP", 3);
+    let pattern = std::env::var("PRIME_UPLOAD_PATTERN").unwrap_or_else(|_| "small".into());
+    assert!(["small", "grid", "checker"].contains(&pattern.as_str()));
     assert!((1..=4096).contains(&count) && (1..=64).contains(&cells) && samples > warmup);
     let mut output =
         std::fs::File::create(std::env::var("PRIME_UPLOAD_CSV").expect("set PRIME_UPLOAD_CSV"))
             .unwrap();
-    writeln!(output,"sample,warmup,cells,quads_per_section,triangles,prepare_ms,publish_ms,translate_ms,record_ms,enqueue_ms,wait_ms,completed_ms,gpu_ms,gpu_prepare_ms,gpu_render_ms,cpu_ms").unwrap();
+    writeln!(output,"sample,warmup,cells,quads_per_section,triangles,prepare_ms,publish_ms,translate_ms,record_ms,enqueue_ms,wait_ms,completed_ms,gpu_ms,gpu_prepare_ms,gpu_render_ms,cpu_ms,resident_triangles").unwrap();
     let header = |op| {
         let mut bytes: Vec<_> = [MAGIC, ABI_VERSION, op, 0]
             .into_iter()
@@ -54,20 +56,32 @@ fn terrain_upload_cost_matrix() {
         vertical_fov_radians: 1.,
     };
     println!(
-        "terrain upload benchmark: device={}, native 1920x1080, 8 CPU workers, fixed grid and shader budget, completion drained each sample; no MC/FFM or readback",
+        "terrain upload benchmark: device={}, pattern={pattern}, native 1920x1080, 8 CPU workers, fixed grid and shader budget, completion drained each sample; no MC/FFM or readback",
         host.device_name()
     );
     let mut layers = [Vec::with_capacity(count), Vec::new(), Vec::new()];
     for i in 0..count {
-        let x = (i % 32) as f32 * 0.5;
-        let z = (i / 32 % 32) as f32 * 0.5;
-        let y = (i / 1024) as f32 * 2.;
+        let (x, y, z, size) = if pattern == "small" {
+            (
+                (i % 32) as f32 * 0.5,
+                (i / 1024) as f32 * 2.,
+                (i / 32 % 32) as f32 * 0.5,
+                0.4,
+            )
+        } else {
+            (
+                (i % 16) as f32,
+                (i / 256) as f32 * 4.,
+                (i / 16 % 16) as f32,
+                1.,
+            )
+        };
         layers[0].push(CompiledQuad {
             positions: [
                 [x, y, z],
-                [x, y, z + 0.4],
-                [x + 0.4, y, z + 0.4],
-                [x + 0.4, y, z],
+                [x, y, z + size],
+                [x + size, y, z + size],
+                [x + size, y, z],
             ],
             uvs: [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
             color: [0.25, 0.5, 0.75, 1.],
@@ -79,7 +93,14 @@ fn terrain_upload_cost_matrix() {
         // Producer fixture edits are excluded; all output preparation, retirement and GPU work
         // are included. Two exact inputs alternate in both executables.
         for (i, quad) in layers[0].iter_mut().enumerate() {
-            quad.positions[3][1] = (i / 1024) as f32 * 2. + (sample % 2) as f32 * 0.125;
+            if pattern == "small" {
+                quad.positions[3][1] = (i / 1024) as f32 * 2. + (sample % 2) as f32 * 0.125;
+            } else {
+                quad.color[0] = 0.25 + (sample % 2) as f32 * 0.125;
+                if pattern == "checker" && (i % 16 + i / 16 % 16) % 2 == 0 {
+                    quad.color[0] += 0.25;
+                }
+            }
         }
         let started = Instant::now();
         let mut sections: Vec<Option<_>> = (0..cells * 64).map(|_| None).collect();
@@ -127,9 +148,9 @@ fn terrain_upload_cost_matrix() {
         assert_eq!(triangles, cells * 64 * count * 2);
         let record_ms = frame.record_ns as f64 / 1e6;
         let cpu_ms = prepare_ms + publish_ms + translate_ms + record_ms;
-        writeln!(output,"{sample},{},{cells},{count},{triangles},{prepare_ms},{publish_ms},{translate_ms},{record_ms},{},{},{completed_ms},{},{},{},{cpu_ms}",
+        writeln!(output,"{sample},{},{cells},{count},{triangles},{prepare_ms},{publish_ms},{translate_ms},{record_ms},{},{},{completed_ms},{},{},{},{cpu_ms},{}",
             sample < warmup, frame.wall_ns as f64 / 1e6, frame.slot_wait_ns as f64 / 1e6,
-            gpu.gpu_ns as f64 / 1e6, gpu.preparation_ns.unwrap() as f64 / 1e6, gpu.render_ns.unwrap() as f64 / 1e6).unwrap();
+            gpu.gpu_ns as f64 / 1e6, gpu.preparation_ns.unwrap() as f64 / 1e6, gpu.render_ns.unwrap() as f64 / 1e6, host.triangle_count()).unwrap();
         output.flush().unwrap();
     }
 }
