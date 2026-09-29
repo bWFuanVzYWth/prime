@@ -13,7 +13,7 @@
 | `atmosphere/` | 四波长物理场、预计算 solver、天空/太阳/空气透视生产和消费；见[大气契约](atmosphere.md) |
 | `transport.slang` | 共同的漫反射积分、采样域与首次命中 guides，显式接收资源与帧 |
 | `path_trace.slang` | 离线累积及显示入口 |
-| `realtime.slang` / `realtime_display.slang` | 实时噪声/深度/法线写入与 GPU 显示/诊断入口 |
+| `realtime.slang` | 单次实时积分及所选视图显示，直接写输出图像 |
 
 库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口显式传入 `TraceScene` 与显示参数；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`，消费接收 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建跟踪整个 shader 目录，修改被导入模块也必须重新编译。
 
@@ -37,7 +37,7 @@ Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样�
 
 生产 `R=ceil(log2(max(width,height)))`，`S=8`（原生 1080p 的 Morton 索引共 30 位，使用单字快路径）。相机 jitter 使用 domain 0；每个反弹从 `1+4*bounce` 起依次分配表面 coverage、阴影 coverage、BSDF 二维样本、roulette。分支不会推进共享 RNG。超过 256 个样本时切换全局 scramble，开始新的完整样本集；不声称它是无限延长的同一个 Sobol net。完整样本集/对齐像素邻域的均匀性不等于早期任意前缀的质量保证。
 
-[表面编译原型](surface-compiler.md)的显式灯使用独立的 `512+4*bounce` domain，依次用于世界/局部树选择、三角形二维采样、采样点 coverage 和有限阴影 coverage。静态灯 NEE 与发光命中使用同版本 proposal 的 MIS；太阳圆盘方向使用独立的 `1024+bounce` domain，与太阳 coverage、BSDF 和显式灯互不重叠。
+[表面编译原型](surface-compiler.md)的显式灯使用独立的 `512+4*bounce` domain，依次用于世界/局部树选择、quad面积加权半面及三角形二维采样、采样点 coverage 和有限阴影 coverage。静态灯 NEE 与发光命中使用同版本 proposal 的 MIS；太阳圆盘方向使用独立的 `1024+bounce` domain，与太阳 coverage、BSDF 和显式灯互不重叠。
 
 实现复用 domain hash，以固定双字移位代替通用 64 位移位分支，将 Sobol Y 变换移到反向位序，抵消紧邻的 Sobol/Owen bit reverse。没有额外采样纹理或跨帧随机状态。上述是运算路径变化，不代表已经测得整帧提速。
 
@@ -53,7 +53,7 @@ Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样�
 
 ## 尺寸与历史
 
-Java 使用实际 render target 尺寸，零尺寸/未初始化相机暂停发布并重置样本序列；恢复及尺寸变化从新样本集开始。Rust 同步更新所选模式的 guides 或累积存储、相机宽高比、输出绑定与 Z-Sobol R。离线冻结姿态保持不变。旧输出按最后使用的 timeline 完成值回收，不等待当前帧、不回读像素。相同尺寸重建 image view 仍刷新宿主描述符。
+Java 使用实际 render target 尺寸，零尺寸/未初始化相机暂停发布并重置样本序列；恢复及尺寸变化从新样本集开始。Rust 同步更新离线累积存储（实时无需中间图）、相机宽高比、输出绑定与 Z-Sobol R。离线冻结姿态保持不变。旧输出按最后使用的 timeline 完成值回收，不等待当前帧、不回读像素。相同尺寸重建 image view 仍刷新宿主描述符。
 
 协议尺寸边界为每轴 `1..65536`，像素总数与字节计算为宽整数；实际还须满足设备 image dimension、compute dispatch 和累积 storage-buffer range。协议接受不代表设备可分配。原固定 4096 边长限制不再使用。历史到 `2^24` 样本前重启，避免 f32 样本权重失去单位精度及整数加一溢出。
 

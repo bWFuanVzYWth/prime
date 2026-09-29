@@ -1,9 +1,5 @@
 //! GPU arena ranges and shader record packing. Spatial planning lives in prime_scene.
-#[cfg(test)]
-use crate::float;
 use crate::{float4, uint};
-#[cfg(test)]
-use prime_scene::scene::Triangle;
 pub(crate) use prime_scene::translation::{ObjectKey, Placement, Planner, ScenePlan};
 use std::collections::BTreeMap;
 
@@ -17,7 +13,7 @@ pub(crate) fn translation([x, y, z]: [f32; 3]) -> [f32; 12] {
 
 // SPIR-V permits 32-bit byte offsets within one physical buffer. Keep each pointed
 // primitive range within 4 GiB; total scene size spans any number of arena pages.
-pub(crate) const MAX_MATERIAL_RECORDS: u32 = 1 << 25;
+pub(crate) const MAX_MATERIAL_RECORDS: u32 = crate::packing::MAX_RECORDS;
 pub(crate) fn validate_material_count(count: u32) -> Result<(), String> {
     if count == 0 || count > MAX_MATERIAL_RECORDS {
         return Err(format!(
@@ -114,25 +110,6 @@ impl Slots {
     }
 }
 
-/// Slang Triangle ABI: position float4 x3, encoded tint float4 x3, UV x3,
-/// resolved texture index and source flags. The buffer is owned CPU scratch.
-#[cfg(test)]
-pub(crate) fn pack_triangle(bytes: &mut Vec<u8>, triangle: &Triangle, texture: u32) {
-    for [x, y, z] in triangle.positions {
-        float4(bytes, [x, y, z, 0.0]);
-    }
-    for color in triangle.colors {
-        float4(bytes, color);
-    }
-    for uv in triangle.uvs {
-        for value in uv {
-            float(bytes, value);
-        }
-    }
-    uint(bytes, texture);
-    uint(bytes, triangle.flags);
-}
-
 pub(crate) fn pack_material(
     bytes: &mut Vec<u8>,
     address: u64,
@@ -181,8 +158,11 @@ mod tests {
         assert!(validate_material_count(MAX_MATERIAL_RECORDS).is_ok());
         assert!(validate_material_count(MAX_MATERIAL_RECORDS + 1).is_err());
         assert!(validate_material_count(u32::MAX).is_err());
-        let last_record_byte = (u64::from(MAX_MATERIAL_RECORDS) - 1) * 128 + 127;
-        assert_eq!(last_record_byte, u64::from(u32::MAX));
+        for format in 0..crate::packing::FORMATS {
+            let size = crate::packing::stride(format) as u64;
+            assert!(u64::from(MAX_MATERIAL_RECORDS) * size <= (1_u64 << 32));
+        }
+        assert!(u64::from(MAX_MATERIAL_RECORDS + 1) * 240 > (1_u64 << 32));
         assert_eq!(arena_capacity(17, 23).unwrap(), 23);
         assert!(arena_capacity(24, 23).is_err());
     }

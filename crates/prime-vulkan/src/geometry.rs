@@ -2,9 +2,9 @@
 use super::dynamic::TopLevel;
 use super::resources::{Acceleration, Buffer, Context};
 use super::textures::Textures;
-use crate::context::objects::Objects;
 use crate::cpu_profile::{FrameCpu, Stage};
 use crate::material_arena::{Allocation, MaterialArena};
+use crate::objects::Objects;
 use crate::plan::{OBJECT_BIT, validate_material_count};
 use ash::vk;
 use prime_scene::instances::InstanceInput;
@@ -14,7 +14,7 @@ use prime_scene::{
     scene::{InstanceScene, Scene},
     spatial::Cell,
     surface::SurfaceCompiler,
-    translation::{TerrainGeometry, TerrainLimits, TerrainMember, TerrainPlanner},
+    translation::{TerrainLimits, TerrainMember, TerrainPlanner},
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -25,16 +25,7 @@ struct StaticAllocation {
 }
 
 fn record_bytes(format: usize) -> u64 {
-    [128, crate::surface::RECORD_BYTES][format]
-}
-
-fn geometry_format(geometry: &TerrainGeometry) -> usize {
-    usize::from(
-        geometry
-            .members
-            .first()
-            .is_some_and(|m| matches!(m.triangles, MeshGeometry::Surfaces(_))),
-    )
+    crate::packing::stride(format) as u64
 }
 
 struct Cluster {
@@ -81,8 +72,8 @@ impl Geometry {
         let mut geometry = Self {
             workers: workers.clone(),
             indices: [
-                crate::context::objects::index_buffer_with_stride(context, 16, 8)?,
-                crate::context::objects::index_buffer_with_stride(context, 16, 12)?,
+                crate::objects::index_buffer_with_stride(context, 16, 11)?,
+                crate::objects::index_buffer_with_stride(context, 16, 15)?,
             ],
             builds: crate::arena::Arena::new(context, false),
             uploads,
@@ -103,10 +94,9 @@ impl Geometry {
             instances: Vec::new(),
             top_dirty: true,
             static_count: 0,
-            materials: [
-                MaterialArena::new(),
-                MaterialArena::with_stride(crate::surface::RECORD_BYTES),
-            ],
+            materials: std::array::from_fn(|format| {
+                MaterialArena::with_stride(record_bytes(format))
+            }),
             // update() publishes every entry before TLAS use. An initial zero
             // upload would be overwritten in the same host command buffer.
             static_bases: Buffer::new(
@@ -175,7 +165,7 @@ impl Geometry {
                         let Some(mesh) = compiler.compile_terrain(scene.revision, geometry)? else {
                             continue;
                         };
-                        let count = mesh.triangles.len();
+                        let count = mesh.quads.len() * 2;
                         geometry.triangle_count =
                             u32::try_from(count).map_err(|_| "Surface triangle count overflow")?;
                         geometry.members = vec![TerrainMember {
@@ -193,10 +183,8 @@ impl Geometry {
             for (_, old) in std::mem::take(&mut self.clusters) {
                 old.acceleration.retire(&mut self.builds);
             }
-            self.materials = [
-                MaterialArena::new(),
-                MaterialArena::with_stride(crate::surface::RECORD_BYTES),
-            ];
+            self.materials =
+                std::array::from_fn(|format| MaterialArena::with_stride(record_bytes(format)));
             self.epoch = scene.epoch;
         }
         for key in &plan.removed {
@@ -215,32 +203,44 @@ impl Geometry {
                     self.materials[allocation.format].free(allocation.records);
                 }
             }
-            let allocations = update
+            let plans = update
                 .geometries
                 .iter()
                 .map(|geometry| {
-                    validate_material_count(geometry.triangle_count)?;
-                    let format = geometry_format(geometry);
+                    crate::packing::Plan::new(
+                        geometry.members.iter().map(|member| crate::packing::Input {
+                            triangles: member.triangles.view(member.range.clone()),
+                            offset: Some(member.offset),
+                            flags: Some(geometry.flags),
+                        }),
+                        true,
+                    )
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let allocations = plans
+                .iter()
+                .flat_map(|p| &p.groups)
+                .map(|group| {
+                    validate_material_count(group.count)?;
                     Ok(StaticAllocation {
-                        records: self.materials[format]
-                            .allocate(context, geometry.triangle_count)?,
-                        format,
+                        records: self.materials[group.format].allocate(context, group.count)?,
+                        format: group.format,
                     })
                 })
                 .collect::<Result<Vec<_>, String>>()?;
-            allocated_changes.push((update, allocations));
+            allocated_changes.push((update, plans, allocations));
         }
         self.rebuilt_clusters = allocated_changes.len() as u32;
         for (format, indices) in self.indices.iter_mut().enumerate() {
             let largest = allocated_changes
                 .iter()
-                .flat_map(|(_, a)| a)
+                .flat_map(|(_, _, a)| a)
                 .filter(|a| a.format == format)
                 .map(|a| a.records.count)
                 .max()
                 .unwrap_or(0);
-            if u64::from(largest) * 12 > indices.size {
-                *indices = crate::context::objects::index_buffer_with_stride(
+            if u64::from(largest) * 24 > indices.size {
+                *indices = crate::objects::index_buffer_with_stride(
                     context,
                     largest,
                     (record_bytes(format) / 16) as u32,
@@ -252,7 +252,7 @@ impl Geometry {
         for batch in allocated_changes.chunks(32) {
             let mut uploads = Vec::new();
             let mut prepared = Vec::new();
-            for (update, allocations) in batch {
+            for (update, plans, allocations) in batch {
                 let bytes: u64 = allocations
                     .iter()
                     .map(|a| u64::from(a.records.count) * record_bytes(a.format))
@@ -260,41 +260,28 @@ impl Geometry {
                 let mut upload = self.uploads.allocate(context, bytes, 16)?;
                 upload.write_with(|output| {
                     let mut remaining = output;
-                    for (geometry, a) in update.geometries.iter().zip(allocations) {
-                        let sources: Vec<_> = geometry
-                            .members
-                            .iter()
-                            .map(|member| crate::packing::Input {
-                                triangles: member.triangles.view(member.range.clone()),
-                                offset: Some(member.offset),
-                                flags: Some(geometry.flags),
-                            })
-                            .collect();
+                    for ((plan, group), a) in plans
+                        .iter()
+                        .flat_map(|p| p.groups.iter().map(move |g| (p, g)))
+                        .zip(allocations)
+                    {
                         let size = a.records.count as usize * record_bytes(a.format) as usize;
                         let (destination, tail) = remaining.split_at_mut(size);
-                        if a.format == 1 {
-                            crate::surface::pack(
-                                &self.workers,
-                                destination,
-                                &sources,
-                                &self.textures.indices,
-                            )?;
-                        } else {
-                            crate::packing::pack_uninit_ranges(
-                                &self.workers,
-                                destination,
-                                &sources,
-                                &self.textures.indices,
-                            )?;
-                        }
+                        plan.pack(&self.workers, group, destination, &self.textures.indices)?;
                         remaining = tail;
                     }
                     Ok(())
                 })?;
-                let mut geometries = Vec::with_capacity(update.geometries.len());
-                let mut counts = Vec::with_capacity(update.geometries.len());
-                for (geometry, &allocation) in update.geometries.iter().zip(allocations) {
-                    let count = geometry.triangle_count;
+                let mut geometries = Vec::with_capacity(allocations.len());
+                let mut counts = Vec::with_capacity(allocations.len());
+                for ((geometry, _), &allocation) in update
+                    .geometries
+                    .iter()
+                    .zip(plans)
+                    .flat_map(|(g, p)| p.groups.iter().map(move |group| (g, group)))
+                    .zip(allocations)
+                {
+                    let count = allocation.records.count;
                     let triangles = vk::AccelerationStructureGeometryTrianglesDataKHR::default()
                         .vertex_format(vk::Format::R32G32B32_SFLOAT)
                         .vertex_data(vk::DeviceOrHostAddressConstKHR {
@@ -317,7 +304,7 @@ impl Geometry {
                             })
                             .geometry(vk::AccelerationStructureGeometryDataKHR { triangles }),
                     );
-                    counts.push(count);
+                    counts.push(count * 2);
                 }
                 prepared.push((
                     update.key,
@@ -361,34 +348,46 @@ impl Geometry {
                 self.uploads.retire(upload);
             }
             for (key, allocations, build) in prepared {
-                let update = batch.iter().find(|(u, _)| u.key == key).unwrap().0;
-                let light_pages = update
-                    .geometries
-                    .iter()
-                    .map(|g| {
-                        if let Some(member) = g.members.first()
-                            && let MeshGeometry::Surfaces(mesh) = &member.triangles
-                        {
-                            crate::surface::upload_lights(context, mesh, &self.textures.indices)
+                let (update, plans, _) = batch.iter().find(|(u, _, _)| u.key == key).unwrap();
+                // A source mesh owns one light tree even when its shading records use
+                // multiple format ranges. Attach it once; hit PDFs use the shared world power.
+                let mut light_pages = Vec::with_capacity(allocations.len());
+                for (g, plan) in update.geometries.iter().zip(plans) {
+                    for (index, _) in plan.groups.iter().enumerate() {
+                        let light = if index == 0 {
+                            if let Some(member) = g.members.first()
+                                && let MeshGeometry::Surfaces(mesh) = &member.triangles
+                            {
+                                crate::surface::upload_lights(
+                                    context,
+                                    mesh,
+                                    &self.textures.indices,
+                                )?
+                            } else {
+                                None
+                            }
                         } else {
-                            Ok(None)
-                        }
-                    })
-                    .collect::<Result<Vec<_>, String>>()?;
+                            None
+                        };
+                        light_pages.push(light);
+                    }
+                }
                 self.clusters.insert(
                     key,
                     Cluster {
                         allocations: allocations.clone(),
                         acceleration: build.finish(&mut self.builds),
-                        triangle_count: allocations
+                        triangle_count: update
+                            .geometries
                             .iter()
-                            .map(|a| u64::from(a.records.count))
+                            .map(|g| u64::from(g.triangle_count))
                             .sum(),
                         light_pages,
                     },
                 );
             }
         }
+        drop(allocated_changes);
         if !plan.placements_changed {
             self.revision = scene.publication();
             self.anchor = scene.anchor;
@@ -444,6 +443,11 @@ impl Geometry {
                         slot: page as u32,
                     });
                 }
+            }
+            if static_bases.len() / crate::surface::PAGE_BYTES >= OBJECT_BIT as usize {
+                return Err(
+                    "Static geometry format ranges exceed the instance address space".into(),
+                );
             }
             self.instances.push(vk::AccelerationStructureInstanceKHR {
                 transform: vk::TransformMatrixKHR {
@@ -517,7 +521,7 @@ impl Geometry {
         slot: usize,
         cpu: &mut FrameCpu,
     ) -> Result<(bool, bool), String> {
-        let (changed, mut bindings) = self.objects.prepare(
+        let changes = self.objects.prepare(
             context,
             scene,
             objects.into(),
@@ -526,7 +530,8 @@ impl Geometry {
             &mut self.builds,
             cpu,
         )?;
-        if self.top_dirty || changed {
+        let mut bindings = changes.bindings;
+        if self.top_dirty || changes.tlas {
             let started = cpu.start();
             bindings |= self.top.rebuild(
                 context,
@@ -545,7 +550,7 @@ impl Geometry {
             .static_count
             .checked_add(self.objects.triangle_count)
             .ok_or("Triangle count overflow")?;
-        Ok((changed, bindings))
+        Ok((changes.scene, bindings))
     }
 
     pub fn cpu_load(
@@ -810,7 +815,10 @@ mod tests {
         let first = geometry.clusters[&cell([0, 0, 0])].allocations[0];
         // Reserve the unused part of one page without producing fictitious geometry or uploading 64 MiB.
         let filler = geometry.materials[0]
-            .allocate(&context, 524288 - 2)
+            .allocate(
+                &context,
+                (64 * 1024 * 1024 / crate::packing::stride(0)) as u32 - 1,
+            )
             .unwrap();
         assert_eq!(first.records.page, filler.page);
         scene
@@ -1126,7 +1134,10 @@ mod tests {
         let context = renderer.context.clone();
         // Force geometry ranges in the same BLAS onto distinct physical material pages.
         renderer.geometry.as_mut().unwrap().materials[0]
-            .allocate(&context, 524288 - 2)
+            .allocate(
+                &context,
+                (64 * 1024 * 1024 / crate::packing::stride(0)) as u32 - 1,
+            )
             .unwrap();
         let mut separate = Renderer::new().unwrap();
         for seed in [0, 19, 500] {

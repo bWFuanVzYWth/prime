@@ -8,33 +8,23 @@ import java.util.ArrayList;
 import java.util.Arrays;
 
 /**
- * Render-thread-owned resource, residency and packet contexts. Observing a frame does not publish
- * it: dirty entries survive skipped native submissions and are acknowledged only after op7 succeeds.
+ * Render-thread-owned prototype and instance changes with separate wire storage. Observing a frame
+ * does not publish it: dirty entries survive skipped submissions and are acknowledged after op7 succeeds.
  * Handles are confined to this resource epoch. No Minecraft types or GPU objects cross this layer.
  */
 public final class InstanceCapture implements AutoCloseable {
     private static final int MAX_BYTES = 256 << 20;
     private final Thread owner = Thread.currentThread();
     private final long epoch;
-    private final ResourceContext resources = new ResourceContext();
-    private final WorldContext world = new WorldContext();
+    private long nextPrototypeId = 1, nextInstanceId = 1;
+    private final ArrayList<Prototype> dirtyPrototypes = new ArrayList<>();
+    private final ArrayList<Instance> dirtyInstances = new ArrayList<>();
+    private ArrayList<Instance> previousInstances = new ArrayList<>();
+    private ArrayList<Instance> visibleInstances = new ArrayList<>();
     private final FrameContext frame = new FrameContext();
     private long frameNumber, sequence;
     private boolean observing, sealed, closed;
     private Stats stats = new Stats(0, 0, 0, 0, 0, 0, 0, 0, 0);
-
-    /** Geometry ownership and queued definition/retirement changes, independent of visibility. */
-    private static final class ResourceContext {
-        long nextId = 1;
-        final ArrayList<Prototype> dirty = new ArrayList<>();
-    }
-
-    /** Stable handles and the two visible sets needed to derive explicit removals. */
-    private static final class WorldContext {
-        long nextId = 1;
-        ArrayList<Instance> previous = new ArrayList<>(), current = new ArrayList<>();
-        final ArrayList<Instance> dirty = new ArrayList<>();
-    }
 
     /** Owns only reusable wire storage, with a synchronous borrow through acknowledge(). */
     private static final class FrameContext implements AutoCloseable {
@@ -140,11 +130,11 @@ public final class InstanceCapture implements AutoCloseable {
             throw new IllegalArgumentException("Invalid prototype source length");
         byte[] copy = new byte[size];
         source.duplicate().get(copy);
-        long id = resources.nextId;
-        resources.nextId = Math.incrementExact(id);
+        long id = nextPrototypeId;
+        nextPrototypeId = Math.incrementExact(id);
         Prototype result =
                 new Prototype(this, id, topology, count, stride, position, color, uv, copy);
-        resources.dirty.add(result);
+        dirtyPrototypes.add(result);
         return result;
     }
 
@@ -159,8 +149,8 @@ public final class InstanceCapture implements AutoCloseable {
 
     public Instance instance() {
         checkMutable();
-        long id = world.nextId;
-        world.nextId = Math.incrementExact(id);
+        long id = nextInstanceId;
+        nextInstanceId = Math.incrementExact(id);
         return new Instance(this, id);
     }
 
@@ -169,7 +159,7 @@ public final class InstanceCapture implements AutoCloseable {
         if (observing)
             throw new IllegalStateException("Previous instance observation is still open");
         frameNumber = Math.incrementExact(frameNumber);
-        world.current.clear();
+        visibleInstances.clear();
         observing = true;
     }
 
@@ -203,7 +193,7 @@ public final class InstanceCapture implements AutoCloseable {
         }
         instance.active = true;
         instance.seen = frameNumber;
-        world.current.add(instance);
+        visibleInstances.add(instance);
         if (changed) {
             instance.x = x;
             instance.y = y;
@@ -221,16 +211,16 @@ public final class InstanceCapture implements AutoCloseable {
         checkMutable();
         if (!observing)
             throw new IllegalStateException("Instance observation is not open");
-        for (Instance instance : world.previous) {
+        for (Instance instance : previousInstances) {
             if (instance.seen != frameNumber) {
                 instance.active = false;
                 unreference(instance.prototype);
                 queue(instance);
             }
         }
-        ArrayList<Instance> spare = world.previous;
-        world.previous = world.current;
-        world.current = spare;
+        ArrayList<Instance> spare = previousInstances;
+        previousInstances = visibleInstances;
+        visibleInstances = spare;
         observing = false;
     }
 
@@ -240,7 +230,7 @@ public final class InstanceCapture implements AutoCloseable {
         if (observing)
             throw new IllegalStateException("Finish observation before publishing instances");
         int definitions = 0, retirements = 0, updates = 0, removals = 0, size = 48, sourceBytes = 0;
-        for (Prototype prototype : resources.dirty) {
+        for (Prototype prototype : dirtyPrototypes) {
             if (prototype.needed() && !prototype.published) {
                 ++definitions;
                 size = Math.addExact(size, Math.addExact(56, prototype.vertices.length));
@@ -250,7 +240,7 @@ public final class InstanceCapture implements AutoCloseable {
                 size = Math.addExact(size, 16);
             }
         }
-        for (Instance instance : world.dirty) {
+        for (Instance instance : dirtyInstances) {
             if (instance.active) {
                 ++updates;
                 size = Math.addExact(size, 128);
@@ -259,7 +249,7 @@ public final class InstanceCapture implements AutoCloseable {
                 size = Math.addExact(size, 16);
             }
         }
-        stats = new Stats(world.previous.size(), definitions, retirements, updates, removals,
+        stats = new Stats(previousInstances.size(), definitions, retirements, updates, removals,
                           size == 48 ? 0 : size, frame.bytes == null ? 0 : frame.bytes.capacity(),
                           frame.growths, sourceBytes);
         if (size == 48) {
@@ -280,7 +270,7 @@ public final class InstanceCapture implements AutoCloseable {
                 .putInt(retirements)
                 .putInt(updates)
                 .putInt(removals);
-        for (Prototype prototype : resources.dirty) {
+        for (Prototype prototype : dirtyPrototypes) {
             if (prototype.needed() && !prototype.published) {
                 bytes.putLong(prototype.id)
                         .putLong(revision)
@@ -297,10 +287,10 @@ public final class InstanceCapture implements AutoCloseable {
                         .put(prototype.vertices);
             }
         }
-        for (Prototype prototype : resources.dirty)
+        for (Prototype prototype : dirtyPrototypes)
             if (!prototype.needed() && prototype.published)
                 bytes.putLong(prototype.id).putLong(revision);
-        for (Instance instance : world.dirty) {
+        for (Instance instance : dirtyInstances) {
             if (!instance.active)
                 continue;
             bytes.putLong(instance.id)
@@ -321,7 +311,7 @@ public final class InstanceCapture implements AutoCloseable {
             for (float value : instance.uv)
                 bytes.putFloat(value);
         }
-        for (Instance instance : world.dirty)
+        for (Instance instance : dirtyInstances)
             if (!instance.active && instance.published)
                 bytes.putLong(instance.id).putLong(revision);
         if (bytes.position() != size)
@@ -347,18 +337,18 @@ public final class InstanceCapture implements AutoCloseable {
     }
 
     private void completeChanges() {
-        for (Instance instance : world.dirty) {
+        for (Instance instance : dirtyInstances) {
             instance.published = instance.active;
             instance.queued = false;
         }
-        world.dirty.clear();
-        for (Prototype prototype : resources.dirty) {
+        dirtyInstances.clear();
+        for (Prototype prototype : dirtyPrototypes) {
             prototype.published = prototype.needed();
             prototype.retired = !prototype.needed();
             prototype.vertices = null;
             prototype.queued = false;
         }
-        resources.dirty.clear();
+        dirtyPrototypes.clear();
     }
 
     private void unreference(Prototype prototype) {
@@ -369,13 +359,13 @@ public final class InstanceCapture implements AutoCloseable {
     private void queue(Prototype prototype) {
         if (!prototype.queued) {
             prototype.queued = true;
-            resources.dirty.add(prototype);
+            dirtyPrototypes.add(prototype);
         }
     }
     private void queue(Instance instance) {
         if (!instance.queued) {
             instance.queued = true;
-            world.dirty.add(instance);
+            dirtyInstances.add(instance);
         }
     }
     private void requirePrototype(Prototype prototype) {
@@ -400,10 +390,10 @@ public final class InstanceCapture implements AutoCloseable {
             return;
         checkOwner();
         frame.close();
-        resources.dirty.clear();
-        world.dirty.clear();
-        world.current.clear();
-        world.previous.clear();
+        dirtyPrototypes.clear();
+        dirtyInstances.clear();
+        visibleInstances.clear();
+        previousInstances.clear();
         closed = true;
     }
 }

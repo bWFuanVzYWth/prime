@@ -36,7 +36,7 @@ op3/op11 撤销该段可用性并删除其源层，整个格退出 GPU 场景；
 | 持久模型实例 | 实际仿射变换后包围盒中心所在单元 | 单元保存实例放置，实例仍引用共享的局部原型 BLAS。实例出生、移动、消失不烘焙或重建原型；空单元移除。 |
 | 原始动态回退 | 实际三角形的世界重心所在单元 | 按材质分类与容量分段；保持桶内源顺序，逐字段比较，只上传和重建变化段，消失的段移除。 |
 
-材质分类保持 opaque/cutout/alpha 语义。局部容量上限由执行器提供；静态的 opaque/cutout/alpha 范围在同一个 BLAS 内按各自标记构建，opaque 保留硬件快路径；局部材质寻址超限只增加内部 geometry，raw 则仍按独立 BLAS 拆段，不扩大网格或截断几何。静态 TLAS custom index 指向本 BLAS 的首个 geometry 材质地址，shader 加硬件 geometry index 后取得对应地址，再以局部 primitive index 取三角形；不增加逐三角形搜索或额外指针层。超过设备单 BLAS 的 geometry/primitive 上限明确失败，不静默拆成多个 BLAS。单个共享原型目前仍须满足执行器的局部几何上限，超限明确失败；这与全场景总量上限不同。
+材质分类保持 opaque/cutout/alpha 语义。局部容量上限由执行器提供；静态的 opaque/cutout/alpha 范围在同一个 BLAS 内按各自标记构建，opaque 保留硬件快路径；局部材质寻址超限只增加内部 geometry，raw 则仍按独立 BLAS 拆段，不扩大网格或截断几何。静态 TLAS custom index 指向本 BLAS 的首个 geometry 材质地址，shader 加硬件 geometry index 后取得对应地址，再以局部 `primitiveIndex >> 1` 取quad、最低位选原三角半面；不增加逐三角形搜索或额外指针层。超过设备单 BLAS 的 geometry/primitive 上限明确失败，不静默拆成多个 BLAS。单个共享原型目前仍须满足执行器的局部几何上限，超限明确失败；这与全场景总量上限不同。
 
 归属点只决定所有者，不代表几何被限制在该立方体内。跨格的大面或长模型完整保留、只出现一次，不裁剪、不复制；真实 AS 包围盒由实际几何决定。未来光源树也必须保留真实光源范围，不能把单元边界当成裁剪边界。
 

@@ -2,7 +2,7 @@
 
 玩家安装和使用见 [README](README.md)。模块、数据流和接口契约见 [架构索引](docs/README.md)，协作约定见 [AGENTS.md](AGENTS.md)。以下命令从项目根目录执行，示例使用 Windows PowerShell。
 
-源码格式与行尾遵循[统一规范](docs/guides/git-line-endings.md)，使用 `.\scripts\format.ps1` 应用、`.\scripts\format.ps1 -Check` 检查。当前 CPU 优化属于 [TODO](TODO.md) 中的非阻塞待办。
+源码格式与行尾遵循[统一规范](docs/guides/git-line-endings.md)，使用 `.\scripts\format.ps1` 应用、`.\scripts\format.ps1 -Check` 检查。性能优先级为稳态帧数 > 显存节省 > 加载效率；当前 CPU 优化属于 [TODO](TODO.md) 中的非阻塞待办。
 
 首次克隆后运行 `.\scripts\install-hooks.ps1`，为本仓库启用 pre-commit 格式检查。钩子只检查暂存快照，不自动格式化或暂存文件；已有其他 hooksPath 时停止，避免覆盖现有钩子。
 
@@ -130,7 +130,7 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```powershell
 $env:PRIME_VK_VALIDATION = '1'
 $env:VK_LAYER_VALIDATE_SYNC = '1'
-cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip atmosphere_cost_matrix --skip packing::perf --skip terrain_upload_cost_matrix --skip surface_steady_cost_matrix --nocapture --test-threads=1
+cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip cost_matrix --skip packing::perf --nocapture --test-threads=1
 ```
 
 这些测试覆盖 cutout、累积、尺寸变化、增量场景和宿主资源退休；小尺寸/奇数尺寸用于边界检查，不是性能数据。改变宿主集成或捕获时，还需在对应 MC 适配器实际运行，检查主图像与 HUD、资源重载、世界退出等相关生命周期。更新公共接口时验证受影响的两个适配器；编译通过不证明 Mixin 注入或实际 GPU 功能正常。
@@ -181,6 +181,18 @@ Java CSV 的 `terrain_plan_ns` 是请求规划 FFM 总时间，`terrain_pack_ns`
 封闭源批次没有人为的跨帧工作配额。完整首载或大范围修改可能形成真实长帧，应记录其成本；工作池线程数、几何批次、在途 GPU 页与当前活跃内容不是同一数量。空闲池页保留历史峰值，renderer 销毁时再释放。
 
 ## 性能测量
+
+### 实时输出
+
+无窗口夹具使用实际宿主录制路径，在原生1920×1080、4次反弹、固定种子下覆盖天空、平面、密集 cutout、斜面与多层透明表面。每场景预热256帧、记录512帧，CSV保留全部预热和离群值；每次记录后等待完成以明确GPU区间，不模拟游戏呈现或CPU/GPU重叠。
+
+```powershell
+$env:PRIME_PROFILE = '1'
+$env:PRIME_VK_VALIDATION = '0'
+$env:VK_LAYER_VALIDATE_SYNC = '0'
+$env:PRIME_OUTPUT_CSV = "$PWD/artifacts/realtime-output.csv"
+cargo test --release -p prime_vulkan --lib --locked realtime_output_cost_matrix -- --ignored --nocapture --test-threads=1
+```
 
 ### 自定义表面编译原型
 

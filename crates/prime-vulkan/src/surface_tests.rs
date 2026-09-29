@@ -5,7 +5,7 @@ use prime_scene::{
     spatial::Cell,
 };
 
-fn scene(edge: usize, pattern: &str, flags: u32) -> Scene {
+pub(crate) fn scene(edge: usize, pattern: &str, flags: u32) -> Scene {
     let mut scene = Scene {
         revision: 1,
         ..Default::default()
@@ -90,7 +90,7 @@ fn scene(edge: usize, pattern: &str, flags: u32) -> Scene {
     scene
 }
 
-fn camera(edge: usize) -> Camera {
+pub(crate) fn camera(edge: usize) -> Camera {
     let size = (edge * 64) as f32;
     Camera {
         position: [size * 0.5, size * 0.5, size],
@@ -98,6 +98,88 @@ fn camera(edge: usize) -> Camera {
         right: [1., 0., 0.],
         up: [0., 1., 0.],
         vertical_fov_radians: 0.9,
+    }
+}
+
+#[test]
+#[ignore = "windowless quad addressing and corner interpolation versus independently padded triangles"]
+fn gpu_quad_halves_match_independent_triangles_with_nonplanar_varying_attributes() {
+    use prime_scene::{Triangle, geometry::Quad};
+    let q = Quad {
+        positions: [
+            [-1., -1., -2.],
+            [1., -1., -2.],
+            [1., 1., -1.75],
+            [-1., 1., -2.],
+        ],
+        colors: [
+            [0.93, 0.11, 0.27, 0.8],
+            [0.13, 0.87, 0.41, 0.5],
+            [0.29, 0.37, 0.91, 0.9],
+            [0.73, 0.61, 0.17, 0.6],
+        ],
+        uvs: [[0., 0.], [1., 0.125], [0.875, 1.], [0.25, 0.875]],
+        texture_id: 1,
+        flags: 0,
+    };
+    let camera = crate::frame::tests::camera();
+    let mut pairs = Renderer::new().unwrap();
+    let mut singles = Renderer::new().unwrap();
+    let empty_image = pairs
+        .render(&Scene::default(), &camera, 192, 128, 0)
+        .unwrap();
+    for flags in 0..3 {
+        let mut q = q;
+        q.flags = flags;
+        let valid = [q.triangle(0), q.triangle(1)];
+        let empty = Triangle {
+            positions: [[20.; 3]; 3],
+            colors: [[0.; 4]; 3],
+            uvs: [[0.; 2]; 3],
+            texture_id: 1,
+            flags,
+        };
+        let make = |triangles: Vec<Triangle>| {
+            let mut scene = Scene {
+                revision: u64::from(flags) + 1,
+                ..Default::default()
+            };
+            scene
+                .ready_terrain
+                .insert(Cell::containing([0.; 3]).unwrap());
+            scene.textures.insert(
+                1,
+                Texture {
+                    width: 2,
+                    height: 2,
+                    pixels: vec![
+                        255, 128, 32, 255, 16, 255, 128, 0, 32, 64, 255, 255, 255, 255, 64, 255,
+                    ]
+                    .into(),
+                },
+            );
+            scene.meshes.insert(
+                (0, flags),
+                SceneMesh {
+                    revision: scene.revision,
+                    flags,
+                    origin: [0.; 3],
+                    triangles: triangles.into(),
+                },
+            );
+            scene
+        };
+        let paired = make(valid.to_vec());
+        // Zero-area separators prevent the reference's triangles from being paired by the
+        // exact shared-corner check. Every valid reference hit uses half zero of its own quad.
+        let independent = make(vec![valid[0], empty, valid[1], empty]);
+        let a = pairs.render(&paired, &camera, 192, 128, 0).unwrap();
+        let b = singles.render(&independent, &camera, 192, 128, 0).unwrap();
+        assert_ne!(a, empty_image, "quad oracle must contain visible geometry");
+        assert_eq!(
+            a, b,
+            "full quad and independent degenerate quads: flags={flags}"
+        );
     }
 }
 
@@ -274,7 +356,11 @@ fn gpu_surface_light_trees_match_reverse_pdf_and_follow_scene_replacement() {
     for i in 0..3 {
         let q = SurfaceQuad {
             geometry: CompiledQuad {
-                positions: [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]],
+                positions: match i {
+                    1 => [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [1., 1., 0.]],
+                    2 => [[0., 0., 0.], [2., 0., 0.], [2., 1., 0.], [0., 3., 0.]],
+                    _ => [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]],
+                },
                 uvs: [[0.; 2]; 4],
                 color: [1.; 4],
                 texture_id: 0,
@@ -310,7 +396,7 @@ fn gpu_surface_light_trees_match_reverse_pdf_and_follow_scene_replacement() {
         .flat_map(|i| {
             [
                 ((i as f32 + 0.5) / samples as f32).to_bits(),
-                0.25_f32.to_bits(),
+                (((i.reverse_bits() >> 19) as f32 + 0.5) / samples as f32).to_bits(),
                 0.75_f32.to_bits(),
                 0,
             ]
@@ -333,6 +419,7 @@ fn gpu_surface_light_trees_match_reverse_pdf_and_follow_scene_replacement() {
             renderer.geometry.as_ref(),
         );
         let mut counts = [0; 3];
+        let mut first_halves = [0; 3];
         for row in out.as_chunks::<16>().0 {
             if stage == 2 {
                 assert_eq!(row[0], 0);
@@ -343,6 +430,15 @@ fn gpu_surface_light_trees_match_reverse_pdf_and_follow_scene_replacement() {
             let x = f(4);
             let source = (x / 64.).floor() as usize;
             counts[source] += 1;
+            let local_x = x - source as f32 * 64.;
+            first_halves[source] +=
+                usize::from(f(5) < local_x * if source == 2 { 0.5 } else { 1. });
+            if source == 1 {
+                assert!(
+                    f(5) <= local_x + 1e-6,
+                    "zero-area half must never be sampled"
+                );
+            }
             assert!(source < 3 && (stage == 0 || source != 1));
             assert_eq!(row[3], 1);
             assert_eq!(
@@ -353,9 +449,9 @@ fn gpu_surface_light_trees_match_reverse_pdf_and_follow_scene_replacement() {
                     source as u32
                 }
             );
-            assert!(row[2] < 2);
+            assert_eq!(row[2], 0);
             assert_eq!([f(8), f(9), f(10)], [(1 << source) as f32; 3]);
-            let expected_area_pdf = (1 << source) as f32 / if stage == 0 { 7. } else { 5. };
+            let expected_area_pdf = (1 << source) as f32 / if stage == 0 { 18. } else { 17. };
             assert!((f(7) - expected_area_pdf).abs() < 1e-6);
             assert!(
                 (f(11) - expected_area_pdf * 4.).abs() < 1e-5,
@@ -363,7 +459,8 @@ fn gpu_surface_light_trees_match_reverse_pdf_and_follow_scene_replacement() {
                 f(7),
                 f(11)
             );
-            assert_eq!([f(12), f(13), f(14)], [0., 0., 1.]);
+            assert_eq!([f(12), f(13)], [0., 0.]);
+            assert!((f(14) - 1.).abs() <= 2. * f32::EPSILON);
             assert!(f(15) > 0.);
         }
         if stage < 2 {
@@ -371,8 +468,15 @@ fn gpu_surface_light_trees_match_reverse_pdf_and_follow_scene_replacement() {
                 let expected = if stage == 1 && i == 1 {
                     0.
                 } else {
-                    samples as f64 * (1 << i) as f64 / if stage == 0 { 7. } else { 5. }
+                    samples as f64 * [1., 1., 16.][i] / if stage == 0 { 18. } else { 17. }
                 };
+                if count > 0 {
+                    let observed = first_halves[i] as f64 / count as f64;
+                    assert!(
+                        (observed - [0.5, 1.0, 0.25][i]).abs() < 0.02,
+                        "quad half sampling source={i}: {observed}"
+                    );
+                }
                 assert!(
                     (count as f64 - expected).abs() <= 2.,
                     "counts={counts:?} stage={stage}"

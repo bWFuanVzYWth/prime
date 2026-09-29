@@ -7,6 +7,7 @@ use crate::resources::{Buffer, Context};
 use ash::vk;
 use std::sync::Arc;
 
+#[cfg(test)]
 const RECORD_BYTES: u64 = 128;
 #[cfg(test)]
 const PAGE_RECORDS: u32 = (64 * 1024 * 1024) / RECORD_BYTES as u32;
@@ -106,10 +107,6 @@ pub(crate) struct MaterialArena {
 }
 
 impl MaterialArena {
-    pub fn new() -> Self {
-        Self::with_stride(RECORD_BYTES)
-    }
-
     pub fn with_stride(record_bytes: u64) -> Self {
         assert!(record_bytes >= 16 && record_bytes.is_multiple_of(16));
         Self {

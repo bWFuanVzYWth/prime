@@ -157,15 +157,15 @@ fn label(q: &SurfaceQuad, mapping: RepeatUv) -> [u32; 18] {
     ]
 }
 
-pub(super) fn append(out: &mut Vec<SurfaceTriangle>, q: &SurfaceQuad, repeat: Option<RepeatUv>) {
-    out.extend(q.geometry.triangles().map(|geometry| SurfaceTriangle {
-        geometry,
+pub(super) fn append(out: &mut Vec<SurfaceFace>, q: &SurfaceQuad, repeat: Option<RepeatUv>) {
+    out.push(SurfaceFace {
+        geometry: q.geometry.into(),
         repeat,
         emission: q.emission,
         media: media(q.rule),
         emitter: None,
         emitter_area_weight: 0.0,
-    }));
+    });
 }
 
 // Include the actual two source triangles in the proof. Merely sorting four vertices would
@@ -208,7 +208,7 @@ impl SurfaceCompiler {
     pub(super) fn compile_rectangles(
         &mut self,
         quads: &[SurfaceQuad],
-    ) -> Result<(Vec<SurfaceTriangle>, Vec<usize>, CompileStats), String> {
+    ) -> Result<(Vec<SurfaceFace>, Vec<usize>, CompileStats), String> {
         let mut stats = CompileStats {
             source_quads: quads.len(),
             ..Default::default()

@@ -2,7 +2,7 @@ use super::*;
 use prime_scene::scene::{SceneMesh, Texture, Triangle};
 use prime_scene::settings::DiagnosticView;
 
-fn camera() -> Camera {
+pub(crate) fn camera() -> Camera {
     Camera {
         position: [0.0, 0.0, 2.0],
         forward: [0.0, 0.0, -1.0],
@@ -11,7 +11,7 @@ fn camera() -> Camera {
         vertical_fov_radians: 1.0,
     }
 }
-fn plane() -> Scene {
+pub(crate) fn plane() -> Scene {
     let mut scene = Scene {
         ready_terrain: [[0.0; 3], [128.0, 0.0, 0.0]]
             .map(|origin| prime_scene::spatial::Cell::containing(origin).unwrap())
@@ -52,96 +52,23 @@ fn plane() -> Scene {
     );
     scene
 }
-// Readback exists solely in this fixture; production guide display is another GPU dispatch.
-fn guide(renderer: &Renderer, image: &Image, components: usize) -> Vec<f32> {
-    let output = renderer.output.as_ref().unwrap();
-    let context = &renderer.context;
-    let bytes = output.width as usize * output.height as usize * components * 4;
-    let readback = Buffer::new_readback(context, bytes as u64).unwrap();
-    context
-        .submit_named("test_read_guide", |command| unsafe {
-            context.device.cmd_pipeline_barrier(
-                command,
-                vk::PipelineStageFlags::ALL_COMMANDS,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::DependencyFlags::empty(),
-                &[vk::MemoryBarrier::default()
-                    .src_access_mask(vk::AccessFlags::MEMORY_WRITE)
-                    .dst_access_mask(vk::AccessFlags::TRANSFER_READ)],
-                &[],
-                &[],
-            );
-            context.device.cmd_copy_image_to_buffer(
-                command,
-                image.image,
-                vk::ImageLayout::GENERAL,
-                readback.buffer,
-                &[vk::BufferImageCopy::default()
-                    .image_subresource(
-                        vk::ImageSubresourceLayers::default()
-                            .aspect_mask(vk::ImageAspectFlags::COLOR)
-                            .layer_count(1),
-                    )
-                    .image_extent(vk::Extent3D {
-                        width: output.width,
-                        height: output.height,
-                        depth: 1,
-                    })],
-            );
-            context.device.cmd_pipeline_barrier(
-                command,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::HOST,
-                vk::DependencyFlags::empty(),
-                &[vk::MemoryBarrier::default()
-                    .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                    .dst_access_mask(vk::AccessFlags::HOST_READ)],
-                &[],
-                &[],
-            );
-        })
-        .unwrap();
-    readback
-        .read(bytes)
-        .unwrap()
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|bytes| f32::from_le_bytes(*bytes))
-        .collect()
-}
-fn guides(renderer: &Renderer) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    let OutputStorage::Realtime {
-        noisy,
-        depth,
-        normal,
-    } = &renderer.output.as_ref().unwrap().storage
-    else {
-        panic!("Realtime allocated accumulation")
-    };
-    (
-        guide(renderer, noisy, 4),
-        guide(renderer, depth, 1),
-        guide(renderer, normal, 4),
-    )
-}
 #[test]
-#[ignore = "requires Vulkan with synchronization validation; guide textures and diagnostic display"]
-fn gpu_realtime_guides_match_primary_visibility_and_have_no_history() {
+#[ignore = "requires Vulkan with synchronization validation; realtime primary sample and diagnostic display"]
+fn gpu_realtime_views_match_primary_visibility_and_have_no_history() {
     let mut renderer = Renderer::with_mode(RenderMode::Realtime).unwrap();
     let mut scene = plane();
     let camera = camera();
     let first = renderer.render(&scene, &camera, 31, 17, 0).unwrap();
-    let (noise, depth, normal) = guides(&renderer);
-    assert!(noise.iter().all(|v| v.is_finite() && *v >= 0.0));
-    for (z, n) in depth.iter().zip(normal.as_chunks::<4>().0.iter()) {
-        assert!((*z - 2.0).abs() < 2e-5, "linear view Z: {z}");
-        assert_eq!(*n, [0.0, 0.0, 1.0, 1.0]);
-    }
-    renderer.render(&scene, &camera, 31, 17, 23).unwrap();
-    let (next, _, _) = guides(&renderer);
+    assert!(renderer.output.as_ref().unwrap().accumulation.is_none());
+    let mut offline = Renderer::new().unwrap();
+    assert_eq!(
+        first,
+        offline.render(&scene, &camera, 31, 17, 0).unwrap(),
+        "Realtime display must match the same single offline sample"
+    );
     assert_ne!(
-        next, noise,
+        renderer.render(&scene, &camera, 31, 17, 23).unwrap(),
+        first,
         "Static realtime frame must advance the noise sequence"
     );
     assert_eq!(renderer.samples, 1);
@@ -169,11 +96,6 @@ fn gpu_realtime_guides_match_primary_visibility_and_have_no_history() {
                 .iter()
                 .all(|rgba| *rgba == expected)
         );
-        assert_eq!(
-            guides(&renderer).0,
-            noise,
-            "Diagnostic preview must not change raw radiance"
-        );
     }
     renderer
         .configure(RenderSettings {
@@ -183,23 +105,56 @@ fn gpu_realtime_guides_match_primary_visibility_and_have_no_history() {
         .unwrap();
     let image = renderer.render(&scene, &camera, 31, 17, 0).unwrap();
     assert_ne!(image, first, "Raw view must bypass primeDRT");
-    assert_eq!(guides(&renderer).0, noise);
+    renderer.configure(RenderSettings::default()).unwrap();
+    assert_eq!(
+        renderer.render(&scene, &camera, 31, 17, 0).unwrap(),
+        first,
+        "Diagnostic switching must preserve the radiance sequence"
+    );
     scene.textures.get_mut(&7).unwrap().pixels = vec![255, 255, 255, 0].into();
     scene.revision += 1;
-    renderer.render(&scene, &camera, 31, 17, 0).unwrap();
-    let (sky, depth, normal) = guides(&renderer);
-    assert!(
-        sky.as_chunks::<4>()
-            .0
-            .iter()
-            .all(|p| p[0] > 0.0 && p[3] == 1.0)
-    );
-    assert!(depth.iter().all(|z| *z == f32::MAX));
-    assert!(normal.iter().all(|n| *n == 0.0));
-    renderer.render(&scene, &camera, 17, 31, 1).unwrap();
-    let (_, depth, _) = guides(&renderer);
-    assert_eq!(depth.len(), 17 * 31);
+    for view in [DiagnosticView::LinearDepth, DiagnosticView::Normal] {
+        renderer
+            .configure(RenderSettings {
+                view,
+                ..Default::default()
+            })
+            .unwrap();
+        let sky = renderer.render(&scene, &camera, 31, 17, 0).unwrap();
+        assert!(
+            sky.as_chunks::<4>()
+                .0
+                .iter()
+                .all(|rgba| *rgba == [0, 0, 0, 255]),
+            "Alpha-rejected sky has no surface guide"
+        );
+    }
+    let resized = renderer.render(&scene, &camera, 17, 31, 1).unwrap();
+    assert_eq!(resized.len(), 17 * 31 * 4);
 }
+#[test]
+#[ignore = "requires Vulkan; dense, sloped and layered coverage through both output pipelines"]
+fn gpu_realtime_matches_offline_single_sample_on_surface_paths() {
+    let mut realtime = Renderer::with_mode(RenderMode::Realtime).unwrap();
+    let mut offline = Renderer::with_mode(RenderMode::Offline).unwrap();
+    for flags in 0..3 {
+        for (index, pattern) in ["checker", "sloped", "layers"].into_iter().enumerate() {
+            let mut scene = crate::surface_tests::scene(1, pattern, flags);
+            scene.revision = u64::from(flags) * 3 + index as u64 + 1;
+            for mesh in scene.meshes.values_mut() {
+                mesh.revision = scene.revision;
+            }
+            let camera = crate::surface_tests::camera(1);
+            let actual = realtime.render(&scene, &camera, 97, 61, 0).unwrap();
+            let expected = offline.render(&scene, &camera, 97, 61, 0).unwrap();
+            assert!(
+                actual == expected,
+                "fused output differs: {pattern}, flags={flags}"
+            );
+        }
+    }
+}
+
 #[test]
 #[ignore = "requires Vulkan; exclusive modes, shared geometry and pure batched accumulation"]
 fn gpu_mode_switch_preserves_scene_and_offline_batching_matches_sequential_samples() {
@@ -218,20 +173,13 @@ fn gpu_mode_switch_preserves_scene_and_offline_batching_matches_sequential_sampl
         renderer.output.is_none(),
         "Old mode resources survive switch"
     );
-    assert_eq!(
-        renderer.pipeline.as_ref().unwrap().resolve,
-        vk::Pipeline::null()
-    );
     let mut four = vec![];
     for frame in 0..4 {
         four = renderer.render(&scene, &camera, 31, 17, frame).unwrap();
     }
     assert_eq!(renderer.samples, 4);
     assert_eq!(renderer.geometry.as_ref().unwrap().top.handle(), top);
-    assert!(matches!(
-        renderer.output.as_ref().unwrap().storage,
-        OutputStorage::Offline(_)
-    ));
+    assert!(renderer.output.as_ref().unwrap().accumulation.is_some());
     renderer
         .configure(RenderSettings {
             exposure: 0.25,
@@ -245,10 +193,6 @@ fn gpu_mode_switch_preserves_scene_and_offline_batching_matches_sequential_sampl
     renderer.configure(RenderSettings::default()).unwrap();
     renderer.set_scene_frozen(false);
     assert!(renderer.output.is_none());
-    assert_ne!(
-        renderer.pipeline.as_ref().unwrap().resolve,
-        vk::Pipeline::null()
-    );
     renderer.render(&scene, &camera, 31, 17, 0).unwrap();
     assert_eq!(renderer.geometry.as_ref().unwrap().top.handle(), top);
     renderer

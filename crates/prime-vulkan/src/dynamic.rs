@@ -148,6 +148,11 @@ impl TopLevel {
     }
 
     #[cfg(test)]
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    #[cfg(test)]
     pub fn assert_current_input(
         &self,
         terrain: &[vk::AccelerationStructureInstanceKHR],

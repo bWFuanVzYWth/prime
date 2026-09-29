@@ -21,21 +21,27 @@ fn quad(x: f32, y: f32) -> SurfaceQuad {
     )
 }
 
-fn point_uv(t: &SurfaceTriangle, point: [f32; 2]) -> Option<[f32; 2]> {
-    let p = t.geometry.positions;
-    let a = [p[1][0] - p[0][0], p[1][1] - p[0][1]];
-    let b = [p[2][0] - p[0][0], p[2][1] - p[0][1]];
-    let q = [point[0] - p[0][0], point[1] - p[0][1]];
-    let det = a[0] * b[1] - a[1] * b[0];
-    let u = (q[0] * b[1] - q[1] * b[0]) / det;
-    let v = (a[0] * q[1] - a[1] * q[0]) / det;
-    if u < 0.0 || v < 0.0 || u + v > 1.0 {
-        return None;
-    }
-    let uv = std::array::from_fn(|i| {
-        t.geometry.uvs[0][i] * (1.0 - u - v) + t.geometry.uvs[1][i] * u + t.geometry.uvs[2][i] * v
-    });
-    Some(t.repeat.map_or(uv, |m| m.evaluate(uv)))
+fn point_uv(t: &SurfaceFace, point: [f32; 2]) -> Option<[f32; 2]> {
+    (0..2).find_map(|half| {
+        let triangle = t.geometry.triangle(half);
+        let p = triangle.positions;
+        let a = [p[1][0] - p[0][0], p[1][1] - p[0][1]];
+        let b = [p[2][0] - p[0][0], p[2][1] - p[0][1]];
+        let q = [point[0] - p[0][0], point[1] - p[0][1]];
+        let det = a[0] * b[1] - a[1] * b[0];
+        if det == 0.0 {
+            return None;
+        }
+        let u = (q[0] * b[1] - q[1] * b[0]) / det;
+        let v = (a[0] * q[1] - a[1] * q[0]) / det;
+        if u < 0.0 || v < 0.0 || u + v > 1.0 {
+            return None;
+        }
+        let uv = std::array::from_fn(|i| {
+            triangle.uvs[0][i] * (1.0 - u - v) + triangle.uvs[1][i] * u + triangle.uvs[2][i] * v
+        });
+        Some(t.repeat.map_or(uv, |m| m.evaluate(uv)))
+    })
 }
 
 #[test]
@@ -45,7 +51,7 @@ fn full_plane_becomes_two_hardware_triangles_with_repeated_atlas_sampling() {
         .collect();
     let output = SurfaceCompiler::new().compile(37, &input).unwrap();
     assert_eq!(output.revision, 37);
-    assert_eq!(output.triangles.len(), 2);
+    assert_eq!(output.quads.len(), 1);
     assert_eq!(output.stats.grid_quads, 4096);
     assert_eq!(output.stats.rectangles, 1);
     assert!(output.lights.nodes.is_empty());
@@ -54,14 +60,14 @@ fn full_plane_becomes_two_hardware_triangles_with_repeated_atlas_sampling() {
             for [u, v] in [[0.125, 0.25], [0.25, 0.875], [0.875, 0.625]] {
                 let point = [x as f32 + u, y as f32 + v];
                 let uv = output
-                    .triangles
+                    .quads
                     .iter()
                     .find_map(|t| point_uv(t, point))
                     .unwrap();
                 // Independent original unit-face map; no output mapping reused as oracle.
                 let expected = [0.25 + u * 0.25, 0.5 + v * 0.125];
                 assert_eq!(uv, expected);
-                assert_eq!(output.triangles[0].geometry.texture_id, 0x1234_0001);
+                assert_eq!(output.quads[0].geometry.texture_id, 0x1234_0001);
             }
         }
     }
@@ -86,7 +92,7 @@ fn sparse_holes_and_labels_preserve_exact_coverage_and_each_material() {
     for y in 0..16 {
         for x in 0..16 {
             let hits: Vec<_> = out
-                .triangles
+                .quads
                 .iter()
                 .filter(|t| point_uv(t, [x as f32 + 0.375, y as f32 + 0.625]).is_some())
                 .collect();
@@ -97,7 +103,7 @@ fn sparse_holes_and_labels_preserve_exact_coverage_and_each_material() {
                 assert!(!hits.is_empty());
                 for t in hits {
                     assert_eq!(t.geometry.texture_id, q.geometry.texture_id);
-                    assert_eq!(t.geometry.colors, [q.geometry.color; 3]);
+                    assert_eq!(t.geometry.colors, [q.geometry.color; 4]);
                 }
             } else {
                 assert!(hits.is_empty());
@@ -132,18 +138,18 @@ fn all_axes_windings_uv_orientations_and_negative_tiles_are_supported() {
                     .collect();
                 let out = SurfaceCompiler::new().compile(0, &input).unwrap();
                 assert_eq!(
-                    out.triangles.len(),
-                    2,
+                    out.quads.len(),
+                    1,
                     "axis={axis} reverse={reverse} rotation={rotation}"
                 );
-                let p = out.triangles[0].geometry.positions;
+                let p = out.quads[0].geometry.positions;
                 let a = (axis + 1) % 3;
                 let b = (axis + 2) % 3;
                 let normal = (p[1][a] - p[0][a]) * (p[2][b] - p[0][b])
                     - (p[1][b] - p[0][b]) * (p[2][a] - p[0][a]);
                 assert_eq!(normal < 0.0, reverse);
                 assert!(
-                    out.triangles.iter().all(|t| t
+                    out.quads.iter().all(|t| t
                         .geometry
                         .positions
                         .iter()
@@ -159,7 +165,7 @@ fn unknown_layers_non_affine_uv_thin_shells_and_motion_domains_are_not_guessed()
     let mut input = vec![quad(0.0, 0.0), quad(1.0, 0.0)];
     input[1].provenance.domain = 2;
     let mut compiler = SurfaceCompiler::new();
-    assert_eq!(compiler.compile(0, &input).unwrap().triangles.len(), 4);
+    assert_eq!(compiler.compile(0, &input).unwrap().quads.len(), 2);
     input[1] = input[0].clone();
     input[1].geometry.color[0] = 0.125; // coincident but potentially meaningful coverage layer
     assert_eq!(
@@ -171,12 +177,12 @@ fn unknown_layers_non_affine_uv_thin_shells_and_motion_domains_are_not_guessed()
         .positions
         .iter_mut()
         .for_each(|p| p[2] += 0.000_001);
-    assert_eq!(compiler.compile(0, &input).unwrap().triangles.len(), 4);
+    assert_eq!(compiler.compile(0, &input).unwrap().quads.len(), 2);
     input = vec![quad(0.0, 0.0), quad(1.0, 0.0)];
     input[1].geometry.uvs[2][0] += 0.125; // two individually affine triangles, not one affine quad
     let out = compiler.compile(0, &input).unwrap();
     assert_eq!(out.stats.passthrough_quads, 1);
-    assert_eq!(out.triangles.len(), 4);
+    assert_eq!(out.quads.len(), 2);
     // An f64-only equality would silently round 1 - 2^-100 to 1 and invent a new UV map.
     for q in &mut input {
         q.geometry.uvs = [
@@ -199,9 +205,9 @@ fn only_explicit_relationships_remove_interfaces_or_duplicate_triangles() {
         compiler
             .compile(0, &[a.clone(), b.clone()])
             .unwrap()
-            .triangles
+            .quads
             .len(),
-        4
+        2
     );
     a.rule = SurfaceRule::Duplicate(9);
     b.rule = SurfaceRule::Duplicate(9);
@@ -218,20 +224,20 @@ fn only_explicit_relationships_remove_interfaces_or_duplicate_triangles() {
         a.geometry.uvs[1],
     ];
     let out = compiler.compile(1, &[a.clone(), b]).unwrap();
-    assert_eq!(out.triangles.len(), 2);
+    assert_eq!(out.quads.len(), 1);
     assert_eq!(out.stats.removed_duplicates, 1);
     a.rule = SurfaceRule::Interface {
         negative: 4,
         positive: 4,
     };
     let out = compiler.compile(2, &[a.clone()]).unwrap();
-    assert!(out.triangles.is_empty());
+    assert!(out.quads.is_empty());
     a.rule = SurfaceRule::Interface {
         negative: 4,
         positive: 5,
     };
     let out = compiler.compile(3, &[a.clone()]).unwrap();
-    assert_eq!(out.triangles[0].media, [4, 5]);
+    assert_eq!(out.quads[0].media, [4, 5]);
     a.emission.radiance = [1.0; 3];
     assert!(compiler.compile(4, &[a]).is_err());
 }
@@ -246,26 +252,26 @@ fn lights_are_built_from_final_geometry_and_forward_reverse_pdfs_agree() {
         };
     }
     let out = SurfaceCompiler::new().compile(10, &input).unwrap();
-    assert_eq!(out.triangles.len(), 2);
-    assert_eq!(out.lights.emitters.len(), 2);
-    assert_eq!(out.lights.nodes.len(), 3);
+    assert_eq!(out.quads.len(), 1);
+    assert_eq!(out.lights.emitters.len(), 1);
+    assert_eq!(out.lights.nodes.len(), 1);
     for (i, emitter) in out.lights.emitters.iter().enumerate() {
-        assert_eq!(emitter.primitive, i as u32);
-        assert_eq!(out.triangles[i].emitter, Some(i as u32));
-        assert_eq!(emitter.area, 4.0);
-        assert_eq!(emitter.power, 16.0);
+        assert_eq!(emitter.quad, i as u32);
+        assert_eq!(out.quads[i].emitter, Some(i as u32));
+        assert_eq!(emitter.area, 8.0);
+        assert_eq!(emitter.power, 32.0);
         assert_eq!(emitter.radiance, [2.0; 3]);
         assert_eq!(out.lights.area_pdf(i as u32), 0.125);
     }
-    let mut counts = [0; 2];
+    let mut counts = [0; 1];
     for i in 0..10_000 {
         let (id, pdf) = out.lights.select((i as f32 + 0.5) / 10_000.0).unwrap();
         counts[id as usize] += 1;
         assert_eq!(pdf, out.lights.selection_pdf(id));
         let point = out.lights.emitters[id as usize].sample_position([0.25, 0.75]);
-        assert!(point_uv(&out.triangles[id as usize], [point[0], point[1]]).is_some());
+        assert!(point_uv(&out.quads[id as usize], [point[0], point[1]]).is_some());
     }
-    assert_eq!(counts, [5000, 5000]);
+    assert_eq!(counts, [10000]);
     assert!(out.lights.select(1.0).is_none());
     assert_eq!(out.lights.area_pdf(99), 0.0);
 }
@@ -297,6 +303,48 @@ fn invalid_emission_fails_and_empty_or_degenerate_emitters_have_no_mass() {
 }
 
 #[test]
+fn quad_lights_sample_unequal_halves_by_area_and_never_sample_the_degenerate_half() {
+    let mut source = quad(0., 0.);
+    source.geometry.positions = [[0., 0., 0.], [2., 0., 0.], [2., 1., 0.], [0., 3., 0.]];
+    source.emission.radiance = [2.; 3];
+    let mut compiler = SurfaceCompiler::new();
+    let out = compiler.compile(1, &[source.clone()]).unwrap();
+    let e = &out.lights.emitters[0];
+    assert_eq!((e.area, e.first_fraction), (4., 0.25));
+    assert_eq!(out.lights.area_pdf(0), 0.25);
+    assert_eq!(
+        out.quads[0].emitter_area_weight / out.lights.nodes[0].power,
+        0.25
+    );
+    let mut first = 0;
+    for i in 0..10000 {
+        let p = e.sample_position([(i as f32 + 0.5) / 10000., 0.37]);
+        assert!(point_uv(&out.quads[0], [p[0], p[1]]).is_some());
+        first += usize::from(p[1] < p[0] * 0.5);
+    }
+    assert_eq!(first, 2500);
+    for zero_first in [false, true] {
+        source.geometry.positions = if zero_first {
+            [[0., 0., 0.], [0., 0., 0.], [2., 0., 0.], [0., 1., 0.]]
+        } else {
+            [[0., 0., 0.], [2., 0., 0.], [0., 1., 0.], [0., 1., 0.]]
+        };
+        let out = compiler.compile(2, &[source.clone()]).unwrap();
+        assert_eq!(out.lights.emitters.len(), 1);
+        let e = &out.lights.emitters[0];
+        assert_eq!(
+            (e.area, e.first_fraction),
+            (1., if zero_first { 0. } else { 1. })
+        );
+        for sample in [[0., 0.], [0.25, 0.75], [1., 1.]] {
+            let p = e.sample_position(sample);
+            assert!(p.iter().all(|x| x.is_finite()));
+            assert!(p[0] >= 0. && p[1] >= 0. && p[0] / 2. + p[1] <= 1.000001);
+        }
+    }
+}
+
+#[test]
 fn terrain_bridge_preserves_unchanged_pages_and_rebuilds_rich_light_identity() {
     use crate::{
         geometry::MeshGeometry,
@@ -317,10 +365,10 @@ fn terrain_bridge_preserves_unchanged_pages_and_rebuilds_rich_light_identity() {
         }],
     };
     let merged = compiler.compile_terrain(2, &geometry).unwrap().unwrap();
-    assert_eq!(merged.triangles.len(), 2);
+    assert_eq!(merged.quads.len(), 1);
     assert!(
         merged
-            .triangles
+            .quads
             .iter()
             .flat_map(|t| t.geometry.positions)
             .all(|p| p[0] >= 16.)
@@ -335,8 +383,8 @@ fn terrain_bridge_preserves_unchanged_pages_and_rebuilds_rich_light_identity() {
     geometry.members[0].range = 1..2;
     geometry.triangle_count = 1;
     let moved = compiler.compile_terrain(5, &geometry).unwrap().unwrap();
-    assert_eq!(moved.triangles[0].emitter, Some(0));
-    assert_eq!(moved.lights.emitters[0].primitive, 0);
+    assert_eq!(moved.quads[0].emitter, Some(0));
+    assert_eq!(moved.lights.emitters[0].quad, 0);
     assert_eq!(moved.lights.emitters[0].area, 0.5);
     assert!(
         moved.lights.emitters[0]

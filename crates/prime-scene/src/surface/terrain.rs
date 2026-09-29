@@ -1,7 +1,10 @@
 //! Bridge from the current closed terrain inputs. Rich producers can already publish
 //! MeshGeometry::Surfaces; closed inputs explicitly have no optical or emission declarations.
 use super::*;
-use crate::{geometry::TriangleView, translation::TerrainGeometry};
+use crate::{
+    geometry::{Quad, TriangleView},
+    translation::TerrainGeometry,
+};
 
 impl SurfaceCompiler {
     pub fn compile_terrain(
@@ -17,7 +20,7 @@ impl SurfaceCompiler {
         for member in &geometry.members {
             for part in member.triangles.view(member.range.clone()).contiguous() {
                 match part {
-                    TriangleView::Surfaces(_) => rich = true,
+                    TriangleView::Surfaces { .. } => rich = true,
                     TriangleView::Quads {
                         values,
                         first,
@@ -49,7 +52,7 @@ impl SurfaceCompiler {
         let mut other = Vec::new();
         let mut source = 0;
         for member in &geometry.members {
-            let offset = |mut t: Triangle| {
+            let offset = |mut t: crate::Triangle| {
                 for p in &mut t.positions {
                     for (a, x) in p.iter_mut().enumerate() {
                         *x += member.offset[a];
@@ -57,8 +60,8 @@ impl SurfaceCompiler {
                 }
                 t
             };
-            let closed_triangle = |t| SurfaceTriangle {
-                geometry: offset(t),
+            let closed_triangle = |t| SurfaceFace {
+                geometry: Quad::from_triangle(offset(t)),
                 repeat: None,
                 emission: Emission::default(),
                 media: [0; 2],
@@ -68,16 +71,48 @@ impl SurfaceCompiler {
             for part in member.triangles.view(member.range.clone()).contiguous() {
                 match part {
                     TriangleView::Triangles(triangles) => {
-                        for &t in triangles {
-                            other.push(closed_triangle(t));
+                        let mut i = 0;
+                        while i < triangles.len() {
+                            let mut face = closed_triangle(triangles[i]);
+                            if let Some(paired) = triangles
+                                .get(i + 1)
+                                .and_then(|b| Quad::from_pair(&triangles[i], b))
+                            {
+                                face.geometry = paired;
+                                for p in &mut face.geometry.positions {
+                                    for (a, x) in p.iter_mut().enumerate() {
+                                        *x += member.offset[a];
+                                    }
+                                }
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
+                            other.push(face);
                         }
                     }
-                    TriangleView::Surfaces(triangles) => {
-                        for t in triangles {
-                            let mut t = t.clone();
-                            t.geometry = offset(t.geometry);
-                            t.emitter = None; // assigned from this final batch's numbering
-                            other.push(t);
+                    TriangleView::Surfaces {
+                        values,
+                        first,
+                        count,
+                    } => {
+                        let end = first + count;
+                        let mut i = first;
+                        while i < end {
+                            let mut face = values[i / 2].clone();
+                            if i % 2 != 0 || i + 1 == end {
+                                face.geometry = Quad::from_triangle(face.geometry.triangle(i % 2));
+                                i += 1;
+                            } else {
+                                i += 2;
+                            }
+                            for p in &mut face.geometry.positions {
+                                for (a, x) in p.iter_mut().enumerate() {
+                                    *x += member.offset[a];
+                                }
+                            }
+                            face.emitter = None;
+                            other.push(face);
                         }
                     }
                     TriangleView::Quads {
@@ -111,23 +146,20 @@ impl SurfaceCompiler {
                 }
             }
         }
-        let (mut triangles, retained, stats) = self.compile_rectangles(&quads)?;
+        let (mut faces, retained, stats) = self.compile_rectangles(&quads)?;
         // Closed bridge rules only merge; equal counts prove the original shared input
         // can remain the final product. Rich inputs keep their explicit semantic fields.
-        if !rich
-            && triangles.len() + retained.len() * 2 + other.len()
-                == geometry.triangle_count as usize
-        {
+        if !rich && faces.len() + retained.len() == quads.len() {
             return Ok(None);
         }
         for index in retained {
-            rectangles::append(&mut triangles, &quads[index], None);
+            rectangles::append(&mut faces, &quads[index], None);
         }
-        triangles.extend(other);
-        let lights = LightTree::build(&mut triangles)?;
+        faces.extend(other);
+        let lights = LightTree::build(&mut faces)?;
         Ok(Some(SurfaceMesh {
             revision,
-            triangles,
+            quads: faces,
             lights,
             stats,
         }))

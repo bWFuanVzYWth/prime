@@ -1,4 +1,4 @@
-use super::SurfaceTriangle;
+use super::SurfaceFace;
 
 const LEAF: u32 = 1 << 31;
 
@@ -113,9 +113,9 @@ impl LightNode {
 /// Direct sampling record. A selected light never fetches a surface key, template or corners.
 #[derive(Clone, Debug)]
 pub struct Emitter {
-    pub primitive: u32,
-    pub positions: [[f32; 3]; 3],
-    pub normal: [f32; 3],
+    pub quad: u32,
+    pub positions: [[f32; 3]; 4],
+    pub first_fraction: f32,
     pub radiance: [f32; 3],
     pub area: f32,
     pub power: f32,
@@ -123,9 +123,18 @@ pub struct Emitter {
 }
 impl Emitter {
     pub fn sample_position(&self, sample: [f32; 2]) -> [f32; 3] {
-        let s = sample[0].sqrt();
+        let (half, u) = if self.first_fraction == 1.0 || sample[0] < self.first_fraction {
+            (0, sample[0] / self.first_fraction)
+        } else {
+            (
+                1,
+                (sample[0] - self.first_fraction) / (1.0 - self.first_fraction),
+            )
+        };
+        let corners = [[0, 1, 2], [2, 3, 0]][half];
+        let s = u.sqrt();
         let b = [1.0 - s, s * (1.0 - sample[1]), s * sample[1]];
-        std::array::from_fn(|i| (0..3).map(|c| b[c] * self.positions[c][i]).sum())
+        std::array::from_fn(|i| (0..3).map(|c| b[c] * self.positions[corners[c]][i]).sum())
     }
 }
 
@@ -135,9 +144,9 @@ pub struct LightTree {
     pub emitters: Vec<Emitter>,
 }
 impl LightTree {
-    pub(super) fn build(triangles: &mut [SurfaceTriangle]) -> Result<Self, String> {
+    pub(super) fn build(quads: &mut [SurfaceFace]) -> Result<Self, String> {
         let mut tree = Self::default();
-        for (primitive, t) in triangles.iter_mut().enumerate() {
+        for (quad, t) in quads.iter_mut().enumerate() {
             t.emitter = None;
             t.emitter_area_weight = 0.0;
             if t.emission
@@ -150,17 +159,16 @@ impl LightTree {
             if t.emission.radiance == [0.0; 3] {
                 continue;
             }
-            let p = t.geometry.positions.map(|p| p.map(f64::from));
-            let e1: [f64; 3] = std::array::from_fn(|i| p[1][i] - p[0][i]);
-            let e2: [f64; 3] = std::array::from_fn(|i| p[2][i] - p[0][i]);
-            let cross: [f64; 3] = std::array::from_fn(|i| {
-                e1[(i + 1) % 3] * e2[(i + 2) % 3] - e1[(i + 2) % 3] * e2[(i + 1) % 3]
-            });
-            let length = cross.iter().map(|x| x * x).sum::<f64>().sqrt();
-            if length == 0.0 {
-                continue; // a degenerate triangle has zero emitting area and no sampling mass
+            let areas = t.geometry.areas();
+            let total = areas[0] + areas[1];
+            if total == 0.0 {
+                continue; // zero area, including the repeated corner, has no sampling mass
             }
-            let area = (length * 0.5) as f32;
+            let area = total as f32;
+            let first_fraction = (areas[0] / total) as f32;
+            if areas[0] > 0.0 && areas[1] > 0.0 && !(first_fraction > 0.0 && first_fraction < 1.0) {
+                return Err("Emitter half-area probability is outside the f32 light ABI".into());
+            }
             let luminance = t
                 .emission
                 .radiance
@@ -183,9 +191,9 @@ impl LightTree {
                 return Err("Emitter area density is outside the f32 light ABI".into());
             }
             tree.emitters.push(Emitter {
-                primitive: u32::try_from(primitive).map_err(|_| "Too many surface primitives")?,
+                quad: u32::try_from(quad).map_err(|_| "Too many surface quads")?,
                 positions: t.geometry.positions,
-                normal: cross.map(|x| (x / length) as f32),
+                first_fraction,
                 radiance: t.emission.radiance,
                 area,
                 power,

@@ -484,6 +484,80 @@ mod tests {
     use prime_scene::scene::{SceneMesh, Texture, Triangle};
 
     #[test]
+    #[ignore = "native 1080p realtime output costs; run alone in release without validation"]
+    fn realtime_output_cost_matrix() {
+        use std::io::Write;
+        let path = std::env::var_os("PRIME_OUTPUT_CSV").expect("set PRIME_OUTPUT_CSV");
+        let mut csv = std::fs::File::create(path).unwrap();
+        writeln!(
+            csv,
+            "scene,sample,warmup,triangles,cpu_record_ns,cpu_wall_ns,gpu_ns,prepare_ns,render_ns"
+        )
+        .unwrap();
+        for (name, scene, camera) in [
+            (
+                "sky",
+                Scene {
+                    epoch: 1,
+                    ..Default::default()
+                },
+                crate::frame::tests::camera(),
+            ),
+            (
+                "plane",
+                crate::frame::tests::plane(),
+                crate::frame::tests::camera(),
+            ),
+            (
+                "checker_cutout",
+                crate::surface_tests::scene(4, "checker", 1),
+                crate::surface_tests::camera(4),
+            ),
+            (
+                "sloped_opaque",
+                crate::surface_tests::scene(4, "sloped", 0),
+                crate::surface_tests::camera(4),
+            ),
+            (
+                "layered_blend",
+                crate::surface_tests::scene(4, "layers", 2),
+                crate::surface_tests::camera(4),
+            ),
+        ] {
+            let mut host = HostBenchmark::new(1920, 1080).unwrap();
+            host.state
+                .as_mut()
+                .unwrap()
+                .renderer
+                .as_mut()
+                .unwrap()
+                .configure(RenderSettings::default())
+                .unwrap();
+            eprintln!(
+                "realtime output: {name} device={} native=1920x1080 bounces=4 seed=0x13572468 warmup=256 samples=512",
+                host.device_name()
+            );
+            for sample in 0..768 {
+                let frame = host.enqueue(&scene, &camera, sample).unwrap();
+                let complete = host.drain().unwrap();
+                let gpu = complete[0];
+                writeln!(
+                    csv,
+                    "{name},{sample},{},{},{},{},{},{},{}",
+                    sample < 256,
+                    host.triangle_count(),
+                    frame.record_ns,
+                    frame.wall_ns,
+                    gpu.gpu_ns,
+                    gpu.preparation_ns.unwrap_or(0),
+                    gpu.render_ns.unwrap_or(0)
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    #[test]
     #[ignore = "requires Vulkan; native 1080p atmosphere lifecycle/cost fixture, not a game benchmark"]
     fn host_atmosphere_updates_with_two_submissions_in_flight() {
         let mut host = HostBenchmark::new(1920, 1080).unwrap();
@@ -1050,7 +1124,7 @@ mod tests {
         }
     }
     #[test]
-    #[ignore = "requires Vulkan with synchronization validation; realtime guide retirement under in-flight resize"]
+    #[ignore = "requires Vulkan with synchronization validation; realtime output retirement under in-flight resize"]
     fn host_realtime_resize_and_offline_switch_retire_exclusive_resources() {
         let mut host = HostBenchmark::new(64, 48).unwrap();
         use crate::plan::{INHERIT, translation};

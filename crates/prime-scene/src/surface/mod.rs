@@ -7,8 +7,7 @@ mod lights;
 mod rectangles;
 mod terrain;
 
-use crate::Triangle;
-use crate::geometry::CompiledQuad;
+use crate::geometry::{CompiledQuad, Quad};
 pub use lights::{Emitter, LightNode, LightRoot, LightTree, build_light_forest};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -74,8 +73,8 @@ impl RepeatUv {
 }
 
 #[derive(Clone, Debug)]
-pub struct SurfaceTriangle {
-    pub geometry: Triangle,
+pub struct SurfaceFace {
+    pub geometry: Quad,
     pub repeat: Option<RepeatUv>,
     pub emission: Emission,
     /// Negative/positive relative to the actual triangle winding, never the viewing ray.
@@ -100,13 +99,13 @@ pub struct CompileStats {
 #[derive(Debug)]
 pub struct SurfaceMesh {
     pub revision: u64,
-    pub triangles: Vec<SurfaceTriangle>,
+    pub quads: Vec<SurfaceFace>,
     pub lights: LightTree,
     pub stats: CompileStats,
 }
 impl SurfaceMesh {
     pub fn byte_len(&self) -> usize {
-        self.triangles.capacity() * std::mem::size_of::<SurfaceTriangle>()
+        self.quads.capacity() * std::mem::size_of::<SurfaceFace>()
             + self.lights.nodes.capacity() * std::mem::size_of::<LightNode>()
             + self.lights.emitters.capacity() * std::mem::size_of::<Emitter>()
     }
@@ -129,14 +128,14 @@ impl SurfaceCompiler {
     }
 
     pub fn compile(&mut self, revision: u64, quads: &[SurfaceQuad]) -> Result<SurfaceMesh, String> {
-        let (mut triangles, retained, stats) = self.compile_rectangles(quads)?;
+        let (mut faces, retained, stats) = self.compile_rectangles(quads)?;
         for index in retained {
-            rectangles::append(&mut triangles, &quads[index], None);
+            rectangles::append(&mut faces, &quads[index], None);
         }
-        let lights = LightTree::build(&mut triangles)?;
+        let lights = LightTree::build(&mut faces)?;
         Ok(SurfaceMesh {
             revision,
-            triangles,
+            quads: faces,
             lights,
             stats,
         })

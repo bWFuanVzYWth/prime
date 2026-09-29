@@ -5,6 +5,7 @@
 ```text
 adapters/
   common/                 Java 25：设置、FFM、复用 native 源页与动态封包
+  minecraft-shared/       两版共用的宿主路由源码，分别对各版 MC/Fabric 编译
   mc-26.2/                26.2 宿主字段/事件路由、动态源与 Vulkan 句柄绑定
   mc-26.3/                26.3 宿主字段/事件路由、动态源与 Vulkan 句柄绑定
 crates/
@@ -24,7 +25,7 @@ crates/
 
 Java `ExclusiveTerrainCapture` 转录宿主事件并响应请求，`SectionSources` 转录 palette、bit storage 和已烘焙资源字段，不逐位置选择模型、求 tint、剔面或展开几何。它保留资源身份到协议 ID 的关联，实际模型字典与源缓存由 Rust 持有。原先的 `TerrainRouter` / `FluidRouter` 只保留在 CPU 测试源集中，作为旧协议的参考产物生成器，不进入生产 JAR。
 
-`adapters/common` 不依赖 Minecraft、Fabric 或 LWJGL；`SourcePages` 只负责 native 页编码。两版仍共享同一个引擎 DLL；MC 源协议显式带262/263版本身份，在 Rust 适配层校验。固定私有字段绑定由双版本无窗口夹具验证，未知来源与当前原型替代见独立的 [PROTOTYPE_HACKS](../PROTOTYPE_HACKS.md)。
+`adapters/common` 不依赖 Minecraft、Fabric 或 LWJGL；`SourcePages` 只负责 native 页编码。`minecraft-shared` 是两个适配器直接包含的源码目录，不另设运行时适配层；相同的宿主路由与 Mixin 只维护一份，遇到宿主 API 差异时将对应绑定放回版本目录，不加入版本判断或反射分派。两版仍共享同一个引擎 DLL；MC 源协议显式带262/263版本身份，在 Rust 适配层校验。固定私有字段绑定由双版本无窗口夹具验证，未知来源与当前原型替代见独立的 [PROTOTYPE_HACKS](../PROTOTYPE_HACKS.md)。
 
 ## 动态源与宿主
 

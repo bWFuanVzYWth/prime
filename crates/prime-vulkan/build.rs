@@ -51,11 +51,6 @@ fn main() {
             );
         }
     }
-    compile(
-        &compiler,
-        "shaders/realtime_display.slang",
-        "realtime_display.spv",
-    );
     if env::var_os("CARGO_FEATURE_SHADER_TESTS").is_some() {
         for name in ["foundations", "intersection", "display", "lights"] {
             compile(

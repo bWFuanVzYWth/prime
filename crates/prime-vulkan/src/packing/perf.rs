@@ -44,17 +44,19 @@ fn quad_packing_cost() {
                 flags: Some(2),
             })
             .collect();
-        let mut output = vec![MaybeUninit::new(0); geometry.len() * 128];
+        let packing = Plan::new(sources, true).unwrap();
+        let mut output = vec![MaybeUninit::uninit(); packing.bytes()];
         let mut samples = Vec::new();
         for sample in 0..45 {
             let start = Instant::now();
-            pack_uninit_ranges(
-                &workers,
-                black_box(&mut output),
-                black_box(&sources),
-                &textures,
-            )
-            .unwrap();
+            packing
+                .pack(
+                    &workers,
+                    &packing.groups[0],
+                    black_box(&mut output),
+                    &textures,
+                )
+                .unwrap();
             samples.push((sample, start.elapsed().as_nanos()));
             black_box(&output);
         }

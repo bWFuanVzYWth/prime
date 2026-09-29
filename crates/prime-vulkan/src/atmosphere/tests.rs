@@ -386,8 +386,8 @@ fn gpu_aerial_integral_filtering_and_cache_dependencies() {
 
 #[test]
 #[ignore = "requires Vulkan ray-query device"]
-fn gpu_aerial_blocker_changes_invalidate_radiance_only() {
-    use prime_scene::scene::{DynamicScene, Scene, Triangle};
+fn gpu_aerial_geometry_and_material_changes_invalidate_radiance_only() {
+    use prime_scene::scene::{DynamicScene, Instance, InstanceScene, Prototype, Scene, Triangle};
     let mut renderer = crate::Renderer::new().unwrap();
     let camera = camera();
     let mut scene = Scene {
@@ -422,7 +422,7 @@ fn gpu_aerial_blocker_changes_invalidate_radiance_only() {
             colors: [[1.; 4]; 3],
             uvs: [[0.; 2]; 3],
             texture_id: 0,
-            flags: 0,
+            flags: 1,
         })
         .to_vec()
         .into(),
@@ -444,6 +444,7 @@ fn gpu_aerial_blocker_changes_invalidate_radiance_only() {
             "roof did not block aerial: {lit:?} / {blocked:?}"
         );
     }
+    let roof = scene.dynamic.triangles.as_slice().into();
     scene.dynamic.revision += 1;
     scene.dynamic.triangles = Default::default();
     renderer.render(&scene, &camera, 32, 24, 2).unwrap();
@@ -456,6 +457,81 @@ fn gpu_aerial_blocker_changes_invalidate_radiance_only() {
     for lane in 0..3 {
         assert!((restored[lane] - lit[lane]).abs() < 1e-6);
     }
+
+    // The same cutout roof changes coverage through instance alpha alone.
+    // Shading/shadow invalidation must not depend on an acceleration rebuild.
+    let mut source = InstanceScene {
+        epoch: 1,
+        resource_revision: 1,
+        instance_revision: 1,
+        ..Default::default()
+    };
+    source.prototypes.insert(
+        1,
+        Prototype {
+            revision: 1,
+            triangles: roof,
+            bounds: [[-100., 20., -100.], [100., 20., 100.]],
+        },
+    );
+    source.instances.insert(
+        1,
+        Instance {
+            revision: 1,
+            prototype_id: 1,
+            origin: [0.; 3],
+            transform: crate::plan::translation([0.; 3]),
+            texture_id: crate::plan::INHERIT,
+            flags: crate::plan::INHERIT,
+            tint: [255; 4],
+            uv_transform: [1., 1., 0., 0.],
+        },
+    );
+    renderer
+        .render_with_instances(&scene, &source, &camera, 32, 24, 3)
+        .unwrap();
+    let generation = renderer.geometry.as_ref().unwrap().top.generation();
+    let updates = renderer.atmosphere.as_ref().unwrap().aerial_updates;
+    for (index, alpha) in [0, 255, 0].into_iter().enumerate() {
+        let instance = source.instances.get_mut(&1).unwrap();
+        instance.tint[3] = alpha;
+        instance.revision += 1;
+        source.instance_revision += 1;
+        renderer
+            .render_with_instances(&scene, &source, &camera, 32, 24, 4 + index as u32)
+            .unwrap();
+        let atmosphere = renderer.atmosphere.as_ref().unwrap();
+        let actual = execute(atmosphere, 3, 1, sample.as_flattened());
+        let expected = if alpha == 0 { &lit } else { &blocked };
+        for lane in 0..3 {
+            assert!(
+                (actual[lane] - expected[lane]).abs() < 1e-6,
+                "instance alpha={alpha} retained stale aerial shadows: {actual:?} / {expected:?}"
+            );
+        }
+        assert_eq!(atmosphere.aerial_updates, updates + index as u64 + 1);
+        assert_eq!(atmosphere.aerial_t_updates, count);
+        assert_eq!(
+            renderer.geometry.as_ref().unwrap().top.generation(),
+            generation
+        );
+        assert_eq!(renderer.instance_work().rebuilt_blas, 0);
+        assert_eq!(
+            renderer.samples, 1,
+            "material edits must reset accumulation"
+        );
+    }
+    renderer
+        .render_with_instances(&scene, &source, &camera, 32, 24, 7)
+        .unwrap();
+    assert_eq!(
+        renderer.atmosphere.as_ref().unwrap().aerial_updates,
+        updates + 3
+    );
+    assert_eq!(
+        renderer.samples, 2,
+        "unchanged input must retain accumulation"
+    );
 }
 
 #[test]

@@ -21,7 +21,7 @@ public struct Triangle {
     uint flags;
 };
 public struct InstanceMaterial {
-    Triangle *triangles;
+    uint *quads;
     uint texture;
     uint flags;
     uint tint;
@@ -44,11 +44,11 @@ public struct LightNode {
     uint child;
 };
 public struct TrianglePage {
-    Triangle *triangles;
-    uint format; // 0: ordinary 128B triangle; 1: extended 192B surface
+    uint *quads;
+    uint format; // 0: ordinary 176B quad; 1: extended 240B surface
     uint lightCount;
     LightNode *nodes;
-    SurfaceRecord *emitters;
+    uint *emitters;
     LightNode *worldNodes;
     float worldPower;
     uint reserved;
@@ -92,21 +92,50 @@ float4 sourceColor(TraceScene resources, SurfaceRecord record, float2 bary) {
             float4(packed & 255, (packed >> 8) & 255, (packed >> 16) & 255, packed >> 24) / 255.0;
     return texel * (tri.c0 * b.x + tri.c1 * b.y + tri.c2 * b.z);
 }
-SurfaceRecord loadSurface(TraceScene resources, uint instance, uint geometry, uint primitive) {
+SurfaceRecord loadQuad(uint *base, uint format, uint primitive) {
+    uint words = 44 + format * 16;
+    uint *record = base + (primitive >> 1) * words;
+    bool second = (primitive & 1) != 0;
+    uint a = second ? 2 : 0;
+    uint b = second ? 3 : 1;
+    uint c = second ? 0 : 2;
+    float4 *positions = (float4 *)record;
+    float4 *colors = (float4 *)(record + 16);
+    float2 *uvs = (float2 *)(record + 32);
+    Triangle t;
+    t.p0 = positions[a];
+    t.p1 = positions[b];
+    t.p2 = positions[c];
+    t.uv01 = float4(uvs[a], uvs[b]);
+    t.uv2 = uvs[c];
+    t.texture = record[40];
+    t.flags = record[41];
+    t.c0 = colors[a];
+    t.c1 = colors[b];
+    t.c2 = colors[c];
     SurfaceRecord result;
+    result.triangle = t;
     result.uvU = float4(0);
     result.uvV = float4(0);
     result.emission = float4(0);
     result.identity = uint4(0);
+    if (surfaceFeatures != 0 && format != 0) {
+        float4 *extra = (float4 *)(record + 44);
+        result.uvU = extra[0];
+        result.uvV = extra[1];
+        result.emission = extra[2];
+        result.identity = asuint(extra[3]);
+    }
+    return result;
+}
+SurfaceRecord loadSurface(TraceScene resources, uint instance, uint geometry, uint primitive) {
     if ((instance & 0x00800000) == 0) {
         TrianglePage page = resources.staticTrianglePages[instance + geometry];
-        if (surfaceFeatures != 0 && (page.format & 1) != 0)
-            return ((SurfaceRecord *)page.triangles)[primitive];
-        result.triangle = page.triangles[primitive];
-        return result;
+        return loadQuad(page.quads, page.format, primitive);
     }
     InstanceMaterial material = resources.instanceMaterials[instance & 0x007fffff];
-    Triangle tri = material.triangles[primitive];
+    SurfaceRecord result = loadQuad(material.quads, 0, primitive);
+    Triangle tri = result.triangle;
     if (material.texture != 0xffffffff)
         tri.texture = material.texture;
     if (material.flags != 0xffffffff)
@@ -277,8 +306,12 @@ public LightSample sampleLocalLight(TraceScene resources, float selector, float2
     result.page = selectLight(world.worldNodes, selector);
     TrianglePage page = resources.staticTrianglePages[result.page];
     result.emitter = selectLight(page.nodes, selector);
-    SurfaceRecord emitter = page.emitters[result.emitter];
-    float root = sqrt(sample.x);
+    uint *light = page.emitters + result.emitter * 60;
+    float firstFraction = asfloat(light[3]);
+    bool first = firstFraction == 1.0 || sample.x < firstFraction;
+    float u = first ? sample.x / firstFraction : (sample.x - firstFraction) / (1.0 - firstFraction);
+    SurfaceRecord emitter = loadQuad(light, 1, first ? 0 : 1);
+    float root = sqrt(u);
     float2 bary = float2(root * (1.0 - sample.y), root * sample.y);
     float3 t = page.origin.xyz;
     float3x4 toWorld = float3x4(1, 0, 0, t.x, 0, 1, 0, t.y, 0, 0, 1, t.z);

@@ -3,6 +3,87 @@ use crate::Triangle;
 use std::ops::Range;
 use std::sync::Arc;
 
+/// Four source corners, retaining the exact 012 / 230 triangle interpolation. An independent
+/// triangle repeats corner 2 as corner 3; its second hardware primitive has zero area.
+#[derive(Clone, Copy, Debug)]
+pub struct Quad {
+    pub positions: [[f32; 3]; 4],
+    pub colors: [[f32; 4]; 4],
+    pub uvs: [[f32; 2]; 4],
+    pub texture_id: u32,
+    pub flags: u32,
+}
+impl Quad {
+    pub fn from_triangle(t: Triangle) -> Self {
+        Self {
+            positions: [0, 1, 2, 2].map(|i| t.positions[i]),
+            colors: [0, 1, 2, 2].map(|i| t.colors[i]),
+            uvs: [0, 1, 2, 2].map(|i| t.uvs[i]),
+            texture_id: t.texture_id,
+            flags: t.flags,
+        }
+    }
+    /// Pair only exact shared corners in the established order. No geometric tolerance,
+    /// cyclic reorder, material inference, or change to either triangle is involved.
+    pub fn from_pair(a: &Triangle, b: &Triangle) -> Option<Self> {
+        if a.texture_id != b.texture_id || a.flags != b.flags {
+            return None;
+        }
+        for (i, j) in [(0, 2), (2, 0)] {
+            if a.positions[i].map(f32::to_bits) != b.positions[j].map(f32::to_bits)
+                || a.colors[i].map(f32::to_bits) != b.colors[j].map(f32::to_bits)
+                || a.uvs[i].map(f32::to_bits) != b.uvs[j].map(f32::to_bits)
+            {
+                return None;
+            }
+        }
+        Some(Self {
+            positions: [
+                a.positions[0],
+                a.positions[1],
+                a.positions[2],
+                b.positions[1],
+            ],
+            colors: [a.colors[0], a.colors[1], a.colors[2], b.colors[1]],
+            uvs: [a.uvs[0], a.uvs[1], a.uvs[2], b.uvs[1]],
+            texture_id: a.texture_id,
+            flags: a.flags,
+        })
+    }
+    pub fn triangle(&self, half: usize) -> Triangle {
+        let corners = [[0, 1, 2], [2, 3, 0]][half];
+        Triangle {
+            positions: corners.map(|i| self.positions[i]),
+            colors: corners.map(|i| self.colors[i]),
+            uvs: corners.map(|i| self.uvs[i]),
+            texture_id: self.texture_id,
+            flags: self.flags,
+        }
+    }
+    pub fn areas(&self) -> [f64; 2] {
+        [0, 1].map(|half| {
+            let p = self.triangle(half).positions.map(|p| p.map(f64::from));
+            let a: [f64; 3] = std::array::from_fn(|i| p[1][i] - p[0][i]);
+            let b: [f64; 3] = std::array::from_fn(|i| p[2][i] - p[0][i]);
+            let cross: [f64; 3] = std::array::from_fn(|i| {
+                a[(i + 1) % 3] * b[(i + 2) % 3] - a[(i + 2) % 3] * b[(i + 1) % 3]
+            });
+            cross.iter().map(|x| x * x).sum::<f64>().sqrt() * 0.5
+        })
+    }
+}
+impl From<CompiledQuad> for Quad {
+    fn from(q: CompiledQuad) -> Self {
+        Self {
+            positions: q.positions,
+            colors: [q.color; 4],
+            uvs: q.uvs,
+            texture_id: q.texture_id,
+            flags: q.flags,
+        }
+    }
+}
+
 /// Uniform source color, with the exact established 0-1-2 / 2-3-0 triangulation.
 #[derive(Clone, Copy, Debug)]
 pub struct CompiledQuad {
@@ -155,7 +236,7 @@ impl MeshGeometry {
             Self::Triangles(values) => values.len(),
             Self::Quads(values) => values.len() * 2,
             Self::QuadFragments(values) => values.len() * 2,
-            Self::Surfaces(values) => values.triangles.len(),
+            Self::Surfaces(values) => values.quads.len() * 2,
         }
     }
     pub fn is_empty(&self) -> bool {
@@ -178,7 +259,7 @@ impl MeshGeometry {
             Self::Triangles(values) => values[index],
             Self::Quads(values) => values[index / 2].triangle(index % 2),
             Self::QuadFragments(values) => values.quad(index / 2).triangle(index % 2),
-            Self::Surfaces(values) => values.triangles[index].geometry,
+            Self::Surfaces(values) => values.quads[index / 2].geometry.triangle(index % 2),
         }
     }
     pub fn iter(&self) -> impl ExactSizeIterator<Item = Triangle> + DoubleEndedIterator + Clone {
@@ -197,7 +278,11 @@ impl MeshGeometry {
         assert!(range.start <= range.end && range.end <= self.len());
         match self {
             Self::Triangles(values) => TriangleView::Triangles(&values[range]),
-            Self::Surfaces(values) => TriangleView::Surfaces(&values.triangles[range]),
+            Self::Surfaces(values) => TriangleView::Surfaces {
+                values: &values.quads[range.start / 2..range.end.div_ceil(2)],
+                first: range.start % 2,
+                count: range.len(),
+            },
             Self::Quads(values) => TriangleView::Quads {
                 values: &values[range.start / 2..range.end.div_ceil(2)],
                 first: range.start % 2,
@@ -216,7 +301,11 @@ impl MeshGeometry {
 #[derive(Clone, Copy)]
 pub enum TriangleView<'a> {
     Triangles(&'a [Triangle]),
-    Surfaces(&'a [crate::surface::SurfaceTriangle]),
+    Surfaces {
+        values: &'a [crate::surface::SurfaceFace],
+        first: usize,
+        count: usize,
+    },
     Quads {
         values: &'a [CompiledQuad],
         first: usize,
@@ -237,7 +326,7 @@ impl<'a> TriangleView<'a> {
     pub fn len(self) -> usize {
         match self {
             Self::Triangles(values) => values.len(),
-            Self::Surfaces(values) => values.len(),
+            Self::Surfaces { count, .. } => count,
             Self::Quads { count, .. } => count,
             Self::QuadFragments { count, .. } => count,
         }
@@ -248,7 +337,9 @@ impl<'a> TriangleView<'a> {
     pub fn triangle(self, index: usize) -> Triangle {
         match self {
             Self::Triangles(values) => values[index],
-            Self::Surfaces(values) => values[index].geometry,
+            Self::Surfaces { values, first, .. } => values[(first + index) / 2]
+                .geometry
+                .triangle((first + index) % 2),
             Self::Quads { values, first, .. } => {
                 values[(first + index) / 2].triangle((first + index) % 2)
             }

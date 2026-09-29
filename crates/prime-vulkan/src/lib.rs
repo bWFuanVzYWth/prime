@@ -5,10 +5,10 @@ mod atmosphere;
 #[cfg(feature = "atmosphere-bake")]
 pub use atmosphere::bake_default_atmosphere;
 mod benchmark;
-mod context;
 mod cpu_profile;
 mod display;
 mod dynamic;
+mod objects;
 pub use display::{PrimeDrtParameters, PrimeDrtSettings};
 mod geometry;
 mod material_arena;
@@ -59,7 +59,6 @@ struct Pipeline {
     pool: vk::DescriptorPool,
     descriptors: [vk::DescriptorSet; FRAME_SLOTS],
     pipelines: [vk::Pipeline; 3],
-    resolve: vk::Pipeline,
 }
 impl Drop for Pipeline {
     fn drop(&mut self) {
@@ -68,7 +67,6 @@ impl Drop for Pipeline {
                 for pipeline in self.pipelines {
                     self.context.device.destroy_pipeline(pipeline, None);
                 }
-                self.context.device.destroy_pipeline(self.resolve, None);
                 self.context.device.destroy_descriptor_pool(self.pool, None);
                 self.context
                     .device
@@ -94,11 +92,10 @@ impl Pipeline {
                 pool: vk::DescriptorPool::null(),
                 descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
                 pipelines: [vk::Pipeline::null(); 3],
-                resolve: vk::Pipeline::null(),
             };
             let binding_ids: &[u32] = match mode {
                 RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8],
-                RenderMode::Realtime => &[0, 2, 3, 4, 7, 8, 9, 10, 11],
+                RenderMode::Realtime => &[0, 2, 3, 4, 7, 8],
             };
             let bindings: Vec<_> = binding_ids
                 .iter()
@@ -110,7 +107,7 @@ impl Pipeline {
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
                         .descriptor_type(if binding == 0 {
                             vk::DescriptorType::ACCELERATION_STRUCTURE_KHR
-                        } else if binding == 4 || binding >= 9 {
+                        } else if binding == 4 {
                             vk::DescriptorType::STORAGE_IMAGE
                         } else {
                             vk::DescriptorType::STORAGE_BUFFER
@@ -151,8 +148,7 @@ impl Pipeline {
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_IMAGE,
-                    descriptor_count: (if mode == RenderMode::Offline { 1 } else { 4 })
-                        * FRAME_SLOTS as u32,
+                    descriptor_count: FRAME_SLOTS as u32,
                 },
             ];
             result.pool = context
@@ -227,12 +223,6 @@ impl Pipeline {
             for (i, features) in [[0, 0], [1, 0], [1, 1]].into_iter().enumerate() {
                 result.pipelines[i] = create(shader, features)?;
             }
-            if mode == RenderMode::Realtime {
-                result.resolve = create(
-                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_display.spv")),
-                    [0, 0],
-                )?;
-            }
             Ok(result)
         }
     }
@@ -292,7 +282,7 @@ pub struct Renderer {
     gpu_intervals: [GpuIntervals; FRAME_SLOTS],
     host_query: vk::QueryPool,
     last_gpu: GpuIntervals,
-    descriptor_keys: [[u64; 10]; FRAME_SLOTS],
+    descriptor_keys: [[u64; 7]; FRAME_SLOTS],
     cpu_profile: cpu_profile::CpuProfile,
 }
 #[cfg(test)]

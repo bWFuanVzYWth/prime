@@ -22,6 +22,9 @@ processResources {
 
 // Shared classes are compiled once. Each installable adapter JAR includes the common output.
 def common = project(':common')
+// Host APIs shared by these supported versions compile against each version's
+// own Minecraft/Fabric classpath; version-specific bindings stay in the adapter.
+sourceSets.main.java.srcDir(rootProject.file('adapters/minecraft-shared/src/main/java'))
 // Fabric's development resource pack sees the adapter's output roots, not a
 // plain Java dependency's resources. Use the same assets in dev and both JARs.
 sourceSets.main.resources.srcDirs(common.sourceSets.main.resources.srcDirs)

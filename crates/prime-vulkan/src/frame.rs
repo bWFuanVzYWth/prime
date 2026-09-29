@@ -16,16 +16,7 @@ pub(super) struct Output {
     // These exist only for explicit offline image diagnostics.
     image: Option<Image>,
     readback: Option<Buffer>,
-    storage: OutputStorage,
-}
-
-enum OutputStorage {
-    Offline(Buffer),
-    Realtime {
-        noisy: Image,
-        depth: Image,
-        normal: Image,
-    },
+    accumulation: Option<Buffer>,
 }
 
 impl Output {
@@ -52,28 +43,15 @@ impl Output {
             } else {
                 None
             },
-            storage: match mode {
-                RenderMode::Offline => OutputStorage::Offline(Buffer::new(
+            accumulation: if mode == RenderMode::Offline {
+                Some(Buffer::new(
                     context,
                     bytes * 16,
                     vk::BufferUsageFlags::STORAGE_BUFFER,
                     false,
-                )?),
-                RenderMode::Realtime => OutputStorage::Realtime {
-                    noisy: Image::with_format(
-                        context,
-                        width,
-                        height,
-                        vk::Format::R32G32B32A32_SFLOAT,
-                    )?,
-                    depth: Image::with_format(context, width, height, vk::Format::R32_SFLOAT)?,
-                    normal: Image::with_format(
-                        context,
-                        width,
-                        height,
-                        vk::Format::R32G32B32A32_SFLOAT,
-                    )?,
-                },
+                )?)
+            } else {
+                None
             },
         })
     }
@@ -158,7 +136,7 @@ impl Renderer {
             gpu_intervals: [GpuIntervals::default(); FRAME_SLOTS],
             host_query: vk::QueryPool::null(),
             last_gpu: GpuIntervals::default(),
-            descriptor_keys: [[0; 10]; FRAME_SLOTS],
+            descriptor_keys: [[0; 7]; FRAME_SLOTS],
             cpu_profile,
         };
         if result.context.is_borrowed() && result.context.timestamp_bits > 0 {
@@ -211,7 +189,7 @@ impl Renderer {
             drop(self.pipeline.take());
             self.context.completed_serial()?; // Drain the retired images/buffers using completed host work.
             self.pipeline = Some(Pipeline::new(&self.context, settings.mode)?);
-            self.descriptor_keys = [[0; 10]; FRAME_SLOTS];
+            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
             self.samples = 0;
             self.failed = false;
         } else if !settings.transport_matches(self.settings) {
@@ -398,7 +376,7 @@ impl Renderer {
             if self.geometry.as_ref().is_none_or(|g| g.needs_update(scene)) {
                 cpu.static_updates += 1;
                 self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
-                self.descriptor_keys = [[0; 10]; FRAME_SLOTS];
+                self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
                 if let Some(geometry) = &mut self.geometry
                     && geometry.same_owner(scene)
                 {
@@ -424,7 +402,7 @@ impl Renderer {
             }
             if bindings_changed {
                 // A freed raw handle can reappear in an older descriptor slot's key.
-                self.descriptor_keys = [[0; 10]; FRAME_SLOTS];
+                self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
             }
         }
         let started = cpu.start();
@@ -433,7 +411,7 @@ impl Renderer {
             .as_ref()
             .is_none_or(|o| o.width != width || o.height != height)
         {
-            self.descriptor_keys = [[0; 10]; FRAME_SLOTS];
+            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
             self.output = Some(Output::new(
                 &self.context,
                 width,
@@ -476,14 +454,7 @@ impl Renderer {
     fn descriptors(&mut self, slot: usize, view: vk::ImageView) {
         let geometry = self.geometry.as_ref().unwrap();
         let output = self.output.as_ref().unwrap();
-        let (accumulation, guide_views) = match &output.storage {
-            OutputStorage::Offline(buffer) => (Some(buffer), [vk::ImageView::null(); 3]),
-            OutputStorage::Realtime {
-                noisy,
-                depth,
-                normal,
-            } => (None, [noisy.view, depth.view, normal.view]),
-        };
+        let accumulation = output.accumulation.as_ref();
         let key = [
             geometry.top.handle().as_raw(),
             geometry.textures.metadata.buffer.as_raw(),
@@ -492,9 +463,6 @@ impl Renderer {
             geometry.objects.metadata.buffer.as_raw(),
             geometry.static_bases.buffer.as_raw(),
             accumulation.map_or(0, |b| b.buffer.as_raw()),
-            guide_views[0].as_raw(),
-            guide_views[1].as_raw(),
-            guide_views[2].as_raw(),
         ];
         let descriptor = self.pipeline.as_ref().unwrap().descriptors[slot];
         let image_info = |view| {
@@ -531,7 +499,7 @@ impl Renderer {
                 .buffer(b.buffer)
                 .range(b.size)]
         });
-        let mut writes = Vec::with_capacity(10);
+        let mut writes = Vec::with_capacity(7);
         writes.push(
             vk::WriteDescriptorSet::default()
                 .dst_set(descriptor)
@@ -555,7 +523,6 @@ impl Renderer {
                 .buffer(b.buffer)
                 .range(b.size)]
         });
-        let guides = guide_views.map(image_info);
         if let Some(info) = &accumulation_info {
             writes.push(
                 vk::WriteDescriptorSet::default()
@@ -564,16 +531,6 @@ impl Renderer {
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(info),
             );
-        } else {
-            for (binding, info) in [9, 10, 11].into_iter().zip(&guides) {
-                writes.push(
-                    vk::WriteDescriptorSet::default()
-                        .dst_set(descriptor)
-                        .dst_binding(binding)
-                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                        .image_info(info),
-                );
-            }
         }
         unsafe {
             self.context.device.update_descriptor_sets(&writes, &[]);
@@ -661,31 +618,6 @@ impl Renderer {
                 output.height.div_ceil(8),
                 1,
             );
-            if pipeline.resolve != vk::Pipeline::null() {
-                let barrier = [vk::MemoryBarrier::default()
-                    .src_access_mask(vk::AccessFlags::SHADER_WRITE)
-                    .dst_access_mask(vk::AccessFlags::SHADER_READ)];
-                self.context.device.cmd_pipeline_barrier(
-                    command,
-                    vk::PipelineStageFlags::COMPUTE_SHADER,
-                    vk::PipelineStageFlags::COMPUTE_SHADER,
-                    vk::DependencyFlags::empty(),
-                    &barrier,
-                    &[],
-                    &[],
-                );
-                self.context.device.cmd_bind_pipeline(
-                    command,
-                    vk::PipelineBindPoint::COMPUTE,
-                    pipeline.resolve,
-                );
-                self.context.device.cmd_dispatch(
-                    command,
-                    output.width.div_ceil(8),
-                    output.height.div_ceil(8),
-                    1,
-                );
-            }
         }
     }
 
@@ -1033,4 +965,4 @@ impl Drop for Renderer {
 
 #[cfg(test)]
 #[path = "mode_tests.rs"]
-mod tests;
+pub(crate) mod tests;
