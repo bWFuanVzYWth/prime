@@ -22,9 +22,12 @@ processResources {
 
 // Shared classes are compiled once. Each installable adapter JAR includes the common output.
 def common = project(':common')
+// Fabric's development resource pack sees the adapter's output roots, not a
+// plain Java dependency's resources. Use the same assets in dev and both JARs.
+sourceSets.main.resources.srcDirs(common.sourceSets.main.resources.srcDirs)
 tasks.named('jar') {
     dependsOn common.tasks.named('classes')
-    from common.sourceSets.main.output
+    from common.sourceSets.main.output.classesDirs
 }
 tasks.named('sourcesJar') { from common.sourceSets.main.allSource }
 
@@ -68,7 +71,7 @@ tasks.register('nativeJar', Jar) {
             throw new GradleException("Native build did not produce ${hostLibraryName}")
     }
     from sourceSets.main.output
-    from common.sourceSets.main.output
+    from common.sourceSets.main.output.classesDirs
     from(rootProject.file('target/release')) {
         include 'prime_engine.dll'
         into 'natives/windows-x86_64'

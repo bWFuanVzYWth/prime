@@ -57,8 +57,7 @@
     "FabricMeshFeatureMixin",
     "FabricBufferCacheMixin",
     "MinecraftMixin",
-    "VideoSettingsScreenMixin",
-    "OptionsSubScreenAccessor"
+    "OptionsScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1

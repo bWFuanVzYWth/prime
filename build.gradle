@@ -70,6 +70,15 @@ tasks.register('verifyNativeJars') {
                 byte[] nativeBytes = zip.getInputStream(nativeEntry).withCloseable { it.readAllBytes() }
                 byte[] bridgeBytes = zip.getInputStream(bridgeEntry).withCloseable { it.readAllBytes() }
                 if (nativeBytes.length == 0) throw new GradleException("Empty native engine in ${archive}")
+                ['en_us', 'zh_cn'].each { locale ->
+                    String asset = "assets/primept/lang/${locale}.json"
+                    def entry = zip.getEntry(asset)
+                    if (entry == null || Collections.list(zip.entries()).count { it.name == asset } != 1)
+                        throw new GradleException("Missing or duplicated ${asset} in ${archive}")
+                    byte[] actual = zip.getInputStream(entry).withCloseable { it.readAllBytes() }
+                    if (!Arrays.equals(rootProject.file("adapters/common/src/main/resources/${asset}").bytes, actual))
+                        throw new GradleException("Mismatched ${asset} in ${archive}")
+                }
                 def notices = ['LICENSE', 'LICENSE-EXCEPTIONS', 'META-INF/THIRD_PARTY_NOTICES.md',
                         'META-INF/licenses/nvidia-self-intersection-BSD-3-Clause.txt',
                         'META-INF/licenses/pbrt-Apache-2.0.txt',

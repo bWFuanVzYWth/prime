@@ -10,12 +10,15 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.SectionUpdateTracker;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.SkyRenderer;
 import net.minecraft.client.renderer.extract.LevelExtractor;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer.CrumblingOverlay;
 import net.minecraft.client.renderer.state.level.LevelRenderState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
+import net.minecraft.util.Mth;
+import net.minecraft.world.attribute.EnvironmentAttributes;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -52,6 +55,23 @@ public abstract class ExclusiveLevelExtractorMixin implements ExclusiveLevelExtr
             return;
         }
         ExclusiveTerrainCapture.prepareWindow(camera.position());
+    }
+    @Redirect(
+            method = "extract",
+            at = @At(
+                    value = "INVOKE",
+                    target =
+                            "Lnet/minecraft/client/renderer/LevelRenderer;skyRenderer()Lnet/minecraft/client/renderer/SkyRenderer;"))
+    private SkyRenderer
+    primept$skySource(LevelRenderer renderer, DeltaTracker delta, Camera camera, float partial) {
+        if (!ExclusiveTerrainCapture.vanillaSuspended())
+            return renderer.skyRenderer();
+        // The raster sky owner is created lazily in addSkyPass, which Prime never runs.
+        // Route its actual source once here, even on a cold Prime start; skip unused sky extraction.
+        levelRenderState.skyRenderState.sunAngle =
+                camera.attributeProbe().getValue(EnvironmentAttributes.SUN_ANGLE, partial) *
+                Mth.DEG_TO_RAD;
+        return null;
     }
     @Inject(method = "extract", at = @At("TAIL"))
     private void primept$consumeChunkEvents(CallbackInfo callback) {

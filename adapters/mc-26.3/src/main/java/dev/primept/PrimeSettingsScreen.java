@@ -82,10 +82,8 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                 OptionInstance.cachedConstantTooltip(
                         Component.translatable("primept.settings.view.tooltip")),
                 (caption, value)
-                        -> Options.genericValueLabel(
-                                caption,
-                                Component.translatable("primept.settings.view." +
-                                                       value.name().toLowerCase(Locale.ROOT))),
+                        -> Component.translatable("primept.settings.view." +
+                                                  value.name().toLowerCase(Locale.ROOT)),
                 new OptionInstance.Enum<>(List.of(View.values()),
                                           Codec.STRING.xmap(View::valueOf, View::name)),
                 PrimeClient.diagnosticView(), PrimeClient::setDiagnosticView);

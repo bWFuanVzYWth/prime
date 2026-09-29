@@ -6,20 +6,31 @@ import dev.primept.PrimeSettingsScreen;
 import dev.primept.render.OfflineMode;
 import dev.primept.settings.RenderSettings;
 import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.util.HashMap;
 import java.util.List;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GlyphSource;
+import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.layouts.LayoutElement;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.events.ContainerEventHandler;
 import net.minecraft.client.gui.font.glyphs.EffectGlyph;
 import net.minecraft.client.gui.font.glyphs.EmptyGlyph;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.options.OptionsScreen;
+import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.network.chat.FontDescription;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FormattedText;
+import net.minecraft.locale.Language;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.RandomSource;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.extract.LevelExtractor;
@@ -32,7 +43,7 @@ public final class SettingsCpuSmoke {
     public static int pressedAlt;
     static void run() throws Exception {
         for (String name : List.of("net.minecraft.client.Minecraft",
-                                   "net.minecraft.client.gui.screens.options.VideoSettingsScreen",
+                                   "net.minecraft.client.gui.screens.options.OptionsScreen",
                                    "net.minecraft.client.gui.screens.options.OptionsSubScreen",
                                    "net.minecraft.client.renderer.LevelRenderer"))
             Class.forName(name, false, SettingsCpuSmoke.class.getClassLoader());
@@ -73,7 +84,7 @@ public final class SettingsCpuSmoke {
             offline.reset();
             inputAndSettings(unsafe, offline);
             System.out.println(
-                    "PRIME_SETTINGS_CPU_SMOKE_OK: real version key routing, modifiers, frozen extraction/hand cancellation, repeated reset/scroll/resize");
+                    "PRIME_SETTINGS_CPU_SMOKE_OK: Fabric-owned en/zh resources, root options entry/callback/resize, localized label widths, real version key routing, modifiers, frozen extraction/hand cancellation, repeated reset/scroll/resize");
         } finally {
             offline.reset();
             if (previous == null)
@@ -122,12 +133,160 @@ public final class SettingsCpuSmoke {
             minecraft.level = null;
             check(!PrimeClient.offlineShortcut(f2, true), "No scene to freeze on the title screen");
             settingsRebuild();
+            localizedSettings(unsafe, minecraft);
         } finally {
             inputProbe = false;
             pressedAlt = 0;
             instance.set(null, previous);
             offline.reset();
             PrimeClient.restoreSettings();
+        }
+    }
+
+    private static void localizedSettings(Unsafe unsafe, Minecraft minecraft) throws Exception {
+        var mod = FabricLoader.getInstance().getModContainer("primept").orElseThrow();
+        Language previous = Language.getInstance();
+        boolean previousIde = net.minecraft.SharedConstants.IS_RUNNING_IN_IDE;
+        var router = (ScreenRouter)unsafe.allocateInstance(ScreenRouter.class);
+        field(Minecraft.class, "gui").set(minecraft, router);
+        field(Options.class, "fov")
+                .set(minecraft.options,
+                     new net.minecraft.client.OptionInstance<>(
+                             "options.fov", net.minecraft.client.OptionInstance.noTooltip(),
+                             (caption, value)
+                                     -> Options.genericValueLabel(
+                                             caption, Component.literal(Integer.toString(value))),
+                             new net.minecraft.client.OptionInstance.IntRange(30, 110), 70,
+                             value -> {}));
+        var rebuild = Screen.class.getDeclaredMethod("rebuildWidgets");
+        rebuild.setAccessible(true);
+        try {
+            net.minecraft.SharedConstants.IS_RUNNING_IN_IDE = true;
+            for (String locale : List.of("en_us", "zh_cn")) {
+                var translations = new HashMap<String, String>();
+                // Read from the actual Fabric mod, not the general Java classpath:
+                // the former failed in development even though the latter found the files.
+                var path =
+                        mod.findPath("assets/primept/lang/" + locale + ".json")
+                                .orElseThrow(
+                                        () -> new AssertionError("Missing mod language " + locale));
+                try (var input = Files.newInputStream(path)) {
+                    Language.loadFromJson(input, translations::put);
+                }
+                Language.inject(new Language() {
+                    @Override
+                    public String getOrDefault(String key, String fallback) {
+                        return translations.getOrDefault(key, previous.getOrDefault(key, fallback));
+                    }
+                    @Override
+                    public boolean has(String key) {
+                        return translations.containsKey(key) || previous.has(key);
+                    }
+                    @Override
+                    public boolean isDefaultRightToLeft() {
+                        return false;
+                    }
+                    @Override
+                    public FormattedCharSequence getVisualOrder(FormattedText text) {
+                        return previous.getVisualOrder(text);
+                    }
+                });
+                for (boolean inWorld : List.of(false, true)) {
+                    var root = new OptionsScreen(null, minecraft.options, inWorld);
+                    root.width = 480;
+                    root.height = 270;
+                    rebuild.invoke(root);
+                    for (int[] size : new int[][] {{480, 270}, {320, 240}, {641, 361}}) {
+                        root.resize(size[0], size[1]);
+                        var buttons = root.children()
+                                              .stream()
+                                              .filter(Button.class ::isInstance)
+                                              .map(Button.class ::cast)
+                                              .toList();
+                        var entries =
+                                buttons.stream()
+                                        .filter(button
+                                                -> button.getMessage().getString().equals(
+                                                        translations.get("primept.settings.title")))
+                                        .toList();
+                        check(entries.size() == 1, "Exactly one translated Prime root entry");
+                        var entry = entries.getFirst();
+                        check(entry.getX() >= 0 && entry.getRight() <= root.width &&
+                                      entry.getY() >= 0 && entry.getBottom() <= root.height,
+                              "Root entry must remain on screen at each GUI scale");
+                        for (var other : buttons)
+                            if (other != entry)
+                                check(entry.getRight() <= other.getX() ||
+                                              other.getRight() <= entry.getX() ||
+                                              entry.getBottom() <= other.getY() ||
+                                              other.getBottom() <= entry.getY(),
+                                      "Root entry overlaps " + other.getMessage().getString());
+                        entry.onPress(null);
+                        check(router.selected instanceof PrimeSettingsScreen &&
+                                      field(OptionsSubScreen.class, "lastScreen")
+                                                      .get(router.selected) == root,
+                              "Root button opens Prime and retains the return destination");
+                    }
+                }
+                for (int bound = 0; bound < 3; bound++) {
+                    var settings = RenderSettings.defaults();
+                    for (var control : RenderSettings.Control.values()) {
+                        check(translations.containsKey("primept.settings." + control.key) &&
+                                      translations.containsKey("primept.settings." + control.key +
+                                                               ".tooltip"),
+                              "Missing control translation " + locale + ": " + control);
+                        settings = settings.with(control, bound == 0   ? control.minimum
+                                                          : bound == 1 ? control.maximum
+                                                                       : control.initial);
+                    }
+                    PrimeClient.updateSettings(settings);
+                    var screen = new PrimeSettingsScreen(null);
+                    screen.width = 480;
+                    screen.height = 270;
+                    rebuild.invoke(screen);
+                    check(screen.getTitle().getString().equals(
+                                  translations.get("primept.settings.title")),
+                          "Settings title must resolve in " + locale);
+                    var list = (OptionsList)screen.children()
+                                       .stream()
+                                       .filter(OptionsList.class ::isInstance)
+                                       .findFirst()
+                                       .orElseThrow();
+                    for (Object row : list.children())
+                        if (row instanceof ContainerEventHandler container)
+                            for (var child : container.children())
+                                if (child instanceof AbstractWidget widget) {
+                                    String label = widget.getMessage().getString();
+                                    check(!label.contains("primept.settings."),
+                                          "Unresolved label " + label);
+                                    if (widget instanceof net.minecraft.client.gui.components
+                                                                  .AbstractButton ||
+                                        widget instanceof net.minecraft.client.gui.components
+                                                                  .AbstractSliderButton)
+                                        check(minecraft.font.width(widget.getMessage()) <=
+                                                      widget.getWidth() - 16,
+                                              "Label exceeds its control: " + locale + " " + label +
+                                                      " (" +
+                                                      minecraft.font.width(widget.getMessage()) +
+                                                      " > " + (widget.getWidth() - 16) + ")");
+                                }
+                }
+            }
+        } finally {
+            Language.inject(previous);
+            net.minecraft.SharedConstants.IS_RUNNING_IN_IDE = previousIde;
+            PrimeClient.restoreSettings();
+        }
+    }
+
+    private static final class ScreenRouter extends Gui {
+        Screen selected;
+        private ScreenRouter() {
+            super(null, null, null);
+        }
+        @Override
+        public void setScreen(Screen screen) {
+            selected = screen;
         }
     }
 
@@ -169,10 +328,11 @@ public final class SettingsCpuSmoke {
 
     private static Font fixtureFont() {
         var glyph = new EmptyGlyph(6).bake(null);
+        var wideGlyph = new EmptyGlyph(9).bake(null);
         var source = new GlyphSource() {
             @Override
             public net.minecraft.client.gui.font.glyphs.BakedGlyph getGlyph(int codepoint) {
-                return glyph;
+                return codepoint >= 0x2e80 ? wideGlyph : glyph;
             }
             @Override
             public net.minecraft.client.gui.font.glyphs.BakedGlyph getRandomGlyph(

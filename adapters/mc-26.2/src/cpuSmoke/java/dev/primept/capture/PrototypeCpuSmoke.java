@@ -44,6 +44,7 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
             }
             TargetResizeCpuSmoke.run();
             SettingsCpuSmoke.run();
+            AstronomyCpuSmoke.run();
             GeometryCacheCpuSmoke.run();
             CanonicalTextureCpuSmoke.run();
             FabricMeshCpuSmoke.run();

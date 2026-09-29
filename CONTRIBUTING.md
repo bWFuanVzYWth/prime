@@ -80,7 +80,7 @@
 4. 检查对应 `adapters/mc-*/run/logs/latest.log`，记录异常、Vulkan `VUID` / `SYNC-HAZARD`、缺失纹理或后端恢复失败。反馈版本、操作步骤、场景与日志，截图/日志副本放 `artifacts/`。
 5. 在两版分别拖动窗口、切换全屏、最小化/恢复；覆盖横/竖/奇数尺寸并回到 1920×1080。检查宽高比、边缘覆盖、历史残影和 HUD 方位；实时应保持新噪声输出；离线调整尺寸时重建累积，稳定后应继续收敛。观察高饱和材质、灰阶和亮部的 primeDRT 输出，以及细缝/斜面是否自遮挡或漏光。HDR 呈现和自动曝光仍未接入。
 
-6. 在“视频设置 → Prime 渲染设置”检查四组控件、默认恢复与关闭后持久化；重新启动确认配置生效。退出客户端后将 `config/primept.properties` 的 `version` 改成不匹配的值，再启动应整份回退默认，日志说明原因。
+6. 在“Esc → 选项 → Prime 渲染设置”检查四组控件、默认恢复与关闭后持久化；标题画面选项也应显示同一入口。覆盖简体中文/英语、不同 GUI 缩放，确认没有翻译键、截断或重复按钮；重新启动确认配置生效。退出客户端后将 `config/primept.properties` 的 `version` 改成不匹配的值，再启动应整份回退默认，日志说明原因。
 7. 世界加载完成后用 Ctrl+Alt+F2 进入离线，确认视角/实体/粒子固定、噪点持续减少；按 Esc 打开菜单仍保持离线。曝光、primeDRT 和每帧采样数可以修改，路径/光照固定。调整尺寸后重新累积；再次按快捷键应重新捕获当前世界，地图/动态纹理不能过期。覆盖冻结时 F3+T 重载、切原版、退出/重进世界。
 8. 实时诊断依次查看原始噪声色、线性深度、世界法线；检查物体边缘、alpha 表面和天空（深度/法线预览为黑）。修改深度范围只改变预览；回到最终输出后 primeDRT 正常。深度/法线尚不代表完整 DLSS RR 接入。
 
@@ -102,7 +102,7 @@ cargo test -p prime_vulkan --features shader-tests --release --lib atmosphere::t
 
 GPU 正确性检查设置下面介绍的 validation/sync 环境变量。局部成本测试单独运行：关闭 validation，设置 `PRIME_PROFILE=1`，执行 `cargo test -p prime_vulkan --features shader-tests --release --lib atmosphere_cost_matrix -- --ignored --nocapture --test-threads=1`。该测试比较原生 1920×1080 查询域的旧/新 SkyView 消费，并计量各类 LUT 更新，不代替游戏帧率基准。
 
-游戏手动覆盖 `/time set day/noon/night`、连续日出/日落圆盘、夜间、南北纬与四季黄经、极地昼夜、洞穴与顶棚增删、跑图/升降、旋转/FOV/窗口缩放、离线冻结后时间推进。诊断中的 `atmosphere_*_updates` 是累计重算次数：冻结后稳定不增长，太阳变化不应刷新 Camera-T 或 Aerial-T。场景几何变化刷新 Aerial-S；验证实体或地形阴影不会残留。
+游戏手动覆盖直接以 Prime 启动（不先运行原版）、原版→Prime→原版切换、`/time set day/noon/night`、连续日出/日落圆盘、夜间、南北纬与四季黄经、极地昼夜、洞穴与顶棚增删、跑图/升降、旋转/FOV/窗口缩放、离线冻结后时间推进。固定相机改变时间时，太阳圆盘、直射光与天空应同步变化。诊断中的 `atmosphere_*_updates` 是累计重算次数：冻结后稳定不增长，太阳变化不应刷新 Camera-T 或 Aerial-T。场景几何变化刷新 Aerial-S；验证实体或地形阴影不会残留。
 
 ### 常规检查
 
