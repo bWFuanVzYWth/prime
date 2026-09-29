@@ -168,17 +168,16 @@ Java CSV 的 `terrain_plan_ns` 是请求规划 FFM 总时间，`terrain_pack_ns`
 
 ### 自定义表面编译原型
 
-接口与支持范围见[表面编译原型](docs/surface-compiler.md)。默认仍为 `legacy`；显式选择在 renderer 创建时生效，Java/FFM 源 ABI 不因这个实验切换。以下游戏启动只由用户手动执行：
+接口与支持范围见[表面编译原型](docs/surface-compiler.md)。表面编译器是唯一静态几何编译入口，无需环境开关，Java/FFM 源 ABI 不变。以下游戏启动只由用户手动执行：
 
 ```powershell
-$env:PRIME_SURFACE_COMPILER = 'rectangles'
 .\gradlew.bat buildNative :mc-26.3:runClient -PprimeptEnabled=true -PprimeptValidation=true -PprimeptProfile=true
-# 26.2 使用 :mc-26.2:runClient；对照时改为 legacy 并重新启动 renderer/客户端。
+# 26.2 使用 :mc-26.2:runClient。
 ```
 
-先检查平面材质重复、atlas 接缝、群系 tint 边界、cutout/透明、跨格更新和重定位，再关闭 validation 测量。现有 Minecraft 源尚未声明发光/介质；实验后端有灯采样能力并不代表游戏岩浆、火把已发光。未完成的覆盖层与光学界面按原型支持范围判断。
+先检查平面材质重复、atlas 接缝、群系 tint 边界、cutout/透明、跨格更新和重定位，再关闭 validation 测量。现有 Minecraft 源尚未声明发光/介质；后端有灯采样能力并不代表游戏岩浆、火把已发光。未完成的覆盖层与光学界面按原型支持范围判断。
 
-无窗口原生1080p同输入矩形/记录对照：
+无窗口原生1080p表面编译稳态测量：
 
 ```powershell
 New-Item -ItemType Directory -Force artifacts/surface-bench | Out-Null
@@ -189,7 +188,7 @@ $env:PRIME_SURFACE_CSV = "$PWD/artifacts/surface-bench/steady.csv"
 cargo test --release -p prime_vulkan --lib --locked surface_steady_cost_matrix -- --ignored --nocapture --test-threads=1
 ```
 
-默认每种形状/coverage做3轮交错顺序、1024帧预热、120帧采样，两种编译路径固定相机和射线预算。可设 `PRIME_SURFACE_PATTERN=layers` 只测八层遮挡，`PRIME_SURFACE_ROUNDS` / `PRIME_SURFACE_SAMPLES` / `PRIME_SURFACE_WARMUP` 控制轮数/样本/预热。CSV保留原始CPU录制、GPU准备/完整渲染时间和实际三角形数，预热行也保留；极短夹具应避免把GPU从闲置升频的过渡当成稳态p95。每样本等待GPU完成用于归因，不代表游戏呈现吞吐；场景是受控夹具，不是真实存档。结束后删除这些会话环境变量或使用独立PowerShell，避免改变后续比较配置。
+默认每种形状/coverage做3轮、1024帧预热、120帧采样，固定相机和射线预算。可设 `PRIME_SURFACE_PATTERN=layers` 只测八层遮挡，`PRIME_SURFACE_ROUNDS` / `PRIME_SURFACE_SAMPLES` / `PRIME_SURFACE_WARMUP` 控制轮数/样本/预热。CSV保留原始CPU录制、GPU准备/完整渲染时间和实际三角形数，预热行也保留；跨版本比较使用固定历史构建、相同输入与配置，不在当前 renderer 内切换编译器。极短夹具应避免把GPU从闲置升频的过渡当成稳态p95。每样本等待GPU完成用于归因，不代表游戏呈现吞吐；场景是受控夹具，不是真实存档。结束后删除这些会话环境变量或使用独立PowerShell，避免改变后续比较配置。
 
 ### 通用测量约定
 
@@ -232,7 +231,7 @@ cargo test --release -p prime_vulkan --lib --locked terrain_upload_cost_matrix -
 
 `terrain_upload_cost_matrix` 在原生1920×1080的无窗口宿主录制路径上，每次替换所有指定单元，固定网格、两种交替角点位置和默认射线预算。CPU 源整理/发布/翻译、录制和 GPU 时间分列；每个样本等待本次提交真正完成，`completed_ms` 包含等待，可据总时长计算吞吐量。每格64段，quads 是每段四边形数；不含 Minecraft、Java/FFM、源编译内核或图像读回。`upload_ns` 对直接打包的静态范围包含 CPU 记录初始化时间，对其他上传仍包含字节复制，不能将该计数解释为纯 memcpy 时间。用多轮不可变可执行文件交替对照 p95、最大值与吞吐量；两种夹具都不能替代真实存档的逐帧验收。
 
-自定义编译还需分别设 `PRIME_UPLOAD_PATTERN=small|grid|checker`：默认small为不可合并的0.4格网格/斜面，grid为单位面并交替改色，checker为相邻颜色不同的单位面反例。分别用 `PRIME_SURFACE_COMPILER=legacy|rectangles` 重启测试进程，以相同源输入比较；CSV的 `triangles` 是源三角形数，`resident_triangles` 是最终 GPU 几何数。按源工作量和真实完成耗时计算吞吐，不能把减少后的输出三角形数当成吞吐下降。
+表面编译需分别设 `PRIME_UPLOAD_PATTERN=small|grid|checker`：默认small为不可合并的0.4格网格/斜面，grid为单位面并交替改色，checker为相邻颜色不同的单位面反例。跨版本比较使用相同源输入和配置的独立构建；CSV的 `triangles` 是源三角形数，`resident_triangles` 是最终 GPU 几何数。按源工作量和真实完成耗时计算吞吐，不能把减少后的输出三角形数当成吞吐下降。
 
 群系样本规划及 raw 回退另有固定输入夹具；先构建，再按顺序执行：
 

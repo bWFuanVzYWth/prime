@@ -1,4 +1,4 @@
-//! Experimental direct resident surface ABI. Rich CPU facts are lowered once at publication;
+//! Direct resident surface ABI. Rich CPU facts are lowered once at publication;
 //! each hit uses base + hardware primitive * 192, without a surface-key or corner dictionary.
 use crate::resources::{Buffer, Context};
 use ash::vk;

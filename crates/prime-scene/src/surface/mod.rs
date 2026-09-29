@@ -1,4 +1,4 @@
-//! Closed, version-neutral inputs to the experimental ray tracing scene compiler.
+//! Closed, version-neutral inputs to the ray tracing scene compiler.
 //!
 //! Source interpretation and the final GPU ABI are separate from this representation. In
 //! particular atlas coordinates are not stretched when adjacent unit faces become a rectangle.

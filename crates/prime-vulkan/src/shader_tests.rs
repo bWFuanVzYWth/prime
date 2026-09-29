@@ -647,7 +647,6 @@ fn gpu_spawn_avoids_self_hits_without_skipping_nearby_occluders() {
                 &context,
                 (&scene).into(),
                 Arc::new(prime_scene::workers::CpuWorkers::new(1).unwrap()),
-                false,
             )
             .unwrap();
             geometry

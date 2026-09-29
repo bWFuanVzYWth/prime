@@ -45,7 +45,7 @@ public struct LightNode {
 };
 public struct TrianglePage {
     Triangle *triangles;
-    uint format; // bit 0: 192B surface; bit 1: known translation reconstruction
+    uint format; // 0: ordinary 128B triangle; 1: extended 192B surface
     uint lightCount;
     LightNode *nodes;
     SurfaceRecord *emitters;
@@ -169,9 +169,8 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
         Triangle tri = record.triangle;
         float2 bary = query.CommittedTriangleBarycentrics();
         uint instance = query.CommittedInstanceID();
-        if (surfaceFeatures != 0 && (instance & 0x00800000) == 0 &&
-            (resources.staticTrianglePages[instance + query.CommittedGeometryIndex()].format & 2) !=
-                    0)
+        // Every static page has a producer-proven translation, for both record strides.
+        if ((instance & 0x00800000) == 0)
             hit.surface = reconstructStaticSurface(
                     tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary,
                     resources.staticTrianglePages[instance + query.CommittedGeometryIndex()]

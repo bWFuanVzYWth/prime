@@ -104,10 +104,8 @@ fn camera(edge: usize) -> Camera {
 #[test]
 #[ignore = "windowless GPU behavioral comparison; run with synchronization validation"]
 fn gpu_surface_rectangles_preserve_texture_coverage_and_replacements() {
-    let mut legacy = Renderer::new().unwrap();
-    legacy.set_surface_compiler(false).unwrap();
+    let mut reference = Renderer::new().unwrap();
     let mut compiled = Renderer::new().unwrap();
-    compiled.set_surface_compiler(true).unwrap();
     for flags in 0..3 {
         for (step, pattern) in ["uniform", "tiled", "checker", "sloped", "rotated"]
             .into_iter()
@@ -118,8 +116,14 @@ fn gpu_surface_rectangles_preserve_texture_coverage_and_replacements() {
             for mesh in input.meshes.values_mut() {
                 mesh.revision = input.revision;
             }
-            let a = legacy.render(&input, &camera(1), 512, 320, 0).unwrap();
             let b = compiled.render(&input, &camera(1), 512, 320, 0).unwrap();
+            // Supply the exact source triangulation as generic triangles. The same renderer
+            // accepts this independent geometry reference without an alternate compiler mode.
+            for mesh in input.meshes.values_mut() {
+                mesh.triangles = mesh.triangles.iter().collect::<Vec<_>>().into();
+            }
+            let a = reference.render(&input, &camera(1), 512, 320, 0).unwrap();
+            assert_eq!(reference.geometry.as_ref().unwrap().triangle_count, 8192);
             let changed = a
                 .as_chunks::<4>()
                 .0
@@ -135,7 +139,7 @@ fn gpu_surface_rectangles_preserve_texture_coverage_and_replacements() {
             println!(
                 "surface pixels flags={flags} pattern={pattern}: changed={changed}/163840 mean_abs={:.6} triangles={}->{}",
                 abs as f64 / a.len() as f64,
-                legacy.geometry.as_ref().unwrap().triangle_count,
+                reference.geometry.as_ref().unwrap().triangle_count,
                 compiled.geometry.as_ref().unwrap().triangle_count
             );
             // Retriangulation changes floating-point barycentrics at texture/coverage edges.
@@ -151,11 +155,10 @@ fn gpu_surface_rectangles_preserve_texture_coverage_and_replacements() {
             assert_eq!(compiled.geometry.as_ref().unwrap().triangle_count, expected);
         }
     }
-    assert!(compiled.set_surface_compiler(false).is_err());
 }
 
 #[test]
-#[ignore = "native 1080p steady GPU comparison; run alone in release without validation"]
+#[ignore = "native 1080p steady GPU measurement; run alone in release without validation"]
 fn surface_steady_cost_matrix() {
     use std::io::Write;
     let samples = std::env::var("PRIME_SURFACE_SAMPLES").map_or(120, |v| v.parse::<u32>().unwrap());
@@ -165,7 +168,11 @@ fn surface_steady_cost_matrix() {
     let mut csv =
         std::fs::File::create(std::env::var("PRIME_SURFACE_CSV").expect("set PRIME_SURFACE_CSV"))
             .unwrap();
-    writeln!(csv, "round,pattern,flags,compiler,sample,warmup,triangles,record_ns,wall_ns,gpu_ns,prepare_ns,render_ns").unwrap();
+    writeln!(
+        csv,
+        "round,pattern,flags,sample,warmup,triangles,record_ns,wall_ns,gpu_ns,prepare_ns,render_ns"
+    )
+    .unwrap();
     for round in 0..rounds {
         for pattern in ["uniform", "tiled", "checker", "sloped", "layers"] {
             if pattern_filter.as_ref().is_some_and(|p| p != pattern) {
@@ -173,39 +180,32 @@ fn surface_steady_cost_matrix() {
             }
             for flags in [0, 1, 2] {
                 let input = scene(4, pattern, flags);
-                for enabled in if round % 2 == 0 {
-                    [false, true]
-                } else {
-                    [true, false]
-                } {
-                    let mut host = HostBenchmark::new(1920, 1080).unwrap();
-                    host.set_surface_compiler(enabled).unwrap();
-                    println!(
-                        "surface steady: round={round} pattern={pattern} flags={flags} compiler={enabled} device={} native=1920x1080 warmup={warmup} samples={samples}",
-                        host.device_name()
-                    );
-                    for sample in 0..samples + warmup {
-                        let frame = host.enqueue(&input, &camera(4), sample).unwrap();
-                        // Completion per sample gives unambiguous CPU/GPU attribution. It does
-                        // not simulate a game's presentation or CPU/GPU overlap.
-                        let completed = host.drain().unwrap();
-                        assert_eq!(completed.len(), 1);
-                        let gpu = completed[0];
-                        writeln!(
-                            csv,
-                            "{round},{pattern},{flags},{enabled},{sample},{},{},{},{},{},{},{}",
-                            sample < warmup,
-                            host.triangle_count(),
-                            frame.record_ns,
-                            frame.wall_ns,
-                            gpu.gpu_ns,
-                            gpu.preparation_ns.unwrap_or(0),
-                            gpu.render_ns.unwrap_or(0)
-                        )
-                        .unwrap();
-                    }
-                    csv.flush().unwrap();
+                let mut host = HostBenchmark::new(1920, 1080).unwrap();
+                println!(
+                    "surface steady: round={round} pattern={pattern} flags={flags} device={} native=1920x1080 warmup={warmup} samples={samples}",
+                    host.device_name()
+                );
+                for sample in 0..samples + warmup {
+                    let frame = host.enqueue(&input, &camera(4), sample).unwrap();
+                    // Completion per sample gives unambiguous CPU/GPU attribution. It does
+                    // not simulate a game's presentation or CPU/GPU overlap.
+                    let completed = host.drain().unwrap();
+                    assert_eq!(completed.len(), 1);
+                    let gpu = completed[0];
+                    writeln!(
+                        csv,
+                        "{round},{pattern},{flags},{sample},{},{},{},{},{},{},{}",
+                        sample < warmup,
+                        host.triangle_count(),
+                        frame.record_ns,
+                        frame.wall_ns,
+                        gpu.gpu_ns,
+                        gpu.preparation_ns.unwrap_or(0),
+                        gpu.render_ns.unwrap_or(0)
+                    )
+                    .unwrap();
                 }
+                csv.flush().unwrap();
             }
         }
     }
@@ -215,9 +215,7 @@ fn surface_steady_cost_matrix() {
 #[ignore = "windowless mixed record strides, replacement and in-flight resource ownership"]
 fn gpu_surface_mixed_records_follow_material_ranges_and_format_replacement() {
     let mut compiled = Renderer::new().unwrap();
-    compiled.set_surface_compiler(true).unwrap();
     let mut host = HostBenchmark::new(128, 128).unwrap();
-    host.set_surface_compiler(true).unwrap();
     for revision in 1..=8 {
         let mut input = scene(1, "uniform", 0);
         // This test isolates record stride/ownership from repeated-atlas boundary rounding,
@@ -250,7 +248,6 @@ fn gpu_surface_mixed_records_follow_material_ranges_and_format_replacement() {
         }
         let b = compiled.render(&input, &camera(1), 256, 256, 11).unwrap();
         let mut fresh = Renderer::new().unwrap();
-        fresh.set_surface_compiler(true).unwrap();
         assert_eq!(
             fresh.render(&input, &camera(1), 256, 256, 11).unwrap(),
             b,
@@ -269,7 +266,6 @@ fn gpu_surface_mixed_records_follow_material_ranges_and_format_replacement() {
 fn gpu_surface_light_trees_match_reverse_pdf_and_follow_scene_replacement() {
     use prime_scene::surface::{Emission, Provenance, SurfaceCompiler, SurfaceQuad};
     let mut renderer = Renderer::new().unwrap();
-    renderer.set_surface_compiler(true).unwrap();
     let mut scene = Scene {
         revision: 1,
         ..Default::default()
@@ -454,7 +450,6 @@ fn gpu_surface_lights_illuminate_receivers_and_retire_with_inflight_frames() {
         vertical_fov_radians: 0.9,
     };
     let mut renderer = Renderer::new().unwrap();
-    renderer.set_surface_compiler(true).unwrap();
     renderer
         .configure(RenderSettings {
             mode: RenderMode::Offline,
@@ -494,7 +489,6 @@ fn gpu_surface_lights_illuminate_receivers_and_retire_with_inflight_frames() {
     drop(renderer);
 
     let mut host = HostBenchmark::new(128, 128).unwrap();
-    host.set_surface_compiler(true).unwrap();
     for revision in 1..=24 {
         let mut scene = lit_scene(
             revision,

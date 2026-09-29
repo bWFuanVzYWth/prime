@@ -46,7 +46,7 @@ Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样�
 
 安全起点移植 NVIDIA `SelfIntersectionAvoidance.hlsl`：局部边与 barycentric 重建将基顶点最后相加，显式仿射变换将平移最后相加，逆转置法线及 object/world 两侧误差投影得到偏移。由出射方向选择表面正/反侧，`TMin=0`，取消固定世界单位 epsilon，减少小间隙漏遮挡。输入必须为有限、非退化三角形及互逆非奇异仿射变换。
 
-实验表面路径的静态单元由生产者证明只有平移，`reconstructStaticSurface` 特化对应的单位矩阵运算，保留相同误差常量和两侧投影；通用动态实例仍使用实际仿射矩阵。有限灯阴影从接收面安全起点到灯面朝向接收方的安全起点，不引入固定距离 epsilon。
+所有静态单元由生产者证明只有平移，普通记录与扩展表面记录均使用 `reconstructStaticSurface` 特化对应的单位矩阵运算，保留相同误差常量和两侧投影；通用动态实例仍使用实际仿射矩阵。有限灯阴影从接收面安全起点到灯面朝向接收方的安全起点，不引入固定距离 epsilon。
 
 交点硬件误差常量采用参考中的 NVIDIA RTX 上界；其他厂商必须另外验证，不能由移植直接保证。算法来源与适用条件见 [NVIDIA 说明](https://developer.nvidia.com/blog/solving-self-intersection-artifacts-in-directx-raytracing/)，许可与修改范围见 [第三方声明](../THIRD_PARTY_NOTICES.md)。
 

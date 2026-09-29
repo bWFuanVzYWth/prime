@@ -158,16 +158,6 @@ impl HostBenchmark {
         &self.state.as_ref().unwrap().owner.name
     }
 
-    pub fn set_surface_compiler(&mut self, enabled: bool) -> Result<(), String> {
-        self.state
-            .as_mut()
-            .unwrap()
-            .renderer
-            .as_mut()
-            .unwrap()
-            .set_surface_compiler(enabled)
-    }
-
     pub fn triangle_count(&self) -> u64 {
         self.state
             .as_ref()

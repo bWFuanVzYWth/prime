@@ -160,7 +160,7 @@ fn pack_records<T: Send>(
                 TriangleView::QuadFragments { .. } => unreachable!("fragments normalized above"),
                 TriangleView::Surfaces(_) => {
                     return Err(
-                        "Custom surface records require the surface compiler renderer".into(),
+                        "Extended surface records require the 192-byte surface packer".into(),
                     );
                 }
             }

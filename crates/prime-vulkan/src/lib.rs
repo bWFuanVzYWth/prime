@@ -267,7 +267,6 @@ pub struct Renderer {
     // Only the selected backend's pipeline and sized output exist; scene geometry is shared.
     pipeline: Option<Pipeline>,
     geometry: Option<Geometry>,
-    surface_compiler: bool,
     output: Option<Output>,
     camera: Option<Camera>,
     samples: u32,

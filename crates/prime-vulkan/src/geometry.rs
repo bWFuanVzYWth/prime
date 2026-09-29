@@ -5,7 +5,7 @@ use super::textures::Textures;
 use crate::context::objects::Objects;
 use crate::cpu_profile::{FrameCpu, Stage};
 use crate::material_arena::{Allocation, MaterialArena};
-use crate::plan::{MAX_MATERIAL_RECORDS, OBJECT_BIT, validate_material_count};
+use crate::plan::{OBJECT_BIT, validate_material_count};
 use ash::vk;
 use prime_scene::instances::InstanceInput;
 use prime_scene::{
@@ -57,7 +57,7 @@ pub(super) struct Geometry {
     pub top: TopLevel,
     clusters: BTreeMap<Cell, Cluster>,
     static_planner: TerrainPlanner,
-    surface_compiler: Option<Vec<SurfaceCompiler>>,
+    surface_compilers: Vec<SurfaceCompiler>,
     pub objects: Objects,
     instances: Vec<vk::AccelerationStructureInstanceKHR>,
     top_dirty: bool,
@@ -75,7 +75,6 @@ impl Geometry {
         context: &Arc<Context>,
         scene: SceneInput<'_>,
         workers: Arc<prime_scene::workers::CpuWorkers>,
-        surface_compiler: bool,
     ) -> Result<Self, String> {
         let mut uploads = crate::arena::Arena::new(context, true);
         let textures = Textures::new(context, scene.texture_input(), &mut uploads)?;
@@ -94,18 +93,12 @@ impl Geometry {
             top: TopLevel::default(),
             clusters: BTreeMap::new(),
             static_planner: TerrainPlanner::new(TerrainLimits {
-                triangles_per_geometry: if surface_compiler {
-                    crate::surface::MAX_RECORDS
-                } else {
-                    MAX_MATERIAL_RECORDS
-                },
+                triangles_per_geometry: crate::surface::MAX_RECORDS,
                 geometry_records: OBJECT_BIT - 1,
             })?,
-            surface_compiler: surface_compiler.then(|| {
-                (0..workers.threads())
-                    .map(|_| SurfaceCompiler::new())
-                    .collect()
-            }),
+            surface_compilers: (0..workers.threads())
+                .map(|_| SurfaceCompiler::new())
+                .collect(),
             objects: Objects::new(context, workers)?,
             instances: Vec::new(),
             top_dirty: true,
@@ -173,28 +166,28 @@ impl Geometry {
                 .update(context, scene.texture_input(), &mut self.uploads)?;
         }
         let mut plan = self.static_planner.plan_input(scene)?;
-        if let Some(compilers) = &mut self.surface_compiler {
-            self.workers
-                .batches_mut(compilers, &mut plan.geometry, |compiler, updates| {
-                    for update in updates {
-                        for geometry in &mut update.geometries {
-                            let Some(mesh) = compiler.compile_terrain(scene.revision, geometry)?
-                            else {
-                                continue;
-                            };
-                            let count = mesh.triangles.len();
-                            geometry.triangle_count = u32::try_from(count)
-                                .map_err(|_| "Surface triangle count overflow")?;
-                            geometry.members = vec![TerrainMember {
-                                triangles: MeshGeometry::Surfaces(Arc::new(mesh)),
-                                range: 0..count,
-                                offset: [0.0; 3],
-                            }];
-                        }
+        self.workers.batches_mut(
+            &mut self.surface_compilers,
+            &mut plan.geometry,
+            |compiler, updates| {
+                for update in updates {
+                    for geometry in &mut update.geometries {
+                        let Some(mesh) = compiler.compile_terrain(scene.revision, geometry)? else {
+                            continue;
+                        };
+                        let count = mesh.triangles.len();
+                        geometry.triangle_count =
+                            u32::try_from(count).map_err(|_| "Surface triangle count overflow")?;
+                        geometry.members = vec![TerrainMember {
+                            triangles: MeshGeometry::Surfaces(Arc::new(mesh)),
+                            range: 0..count,
+                            offset: [0.0; 3],
+                        }];
                     }
-                    Ok(())
-                })?;
-        }
+                }
+                Ok(())
+            },
+        )?;
         self.top_dirty |= plan.placements_changed;
         if self.epoch != scene.epoch {
             for (_, old) in std::mem::take(&mut self.clusters) {
@@ -228,11 +221,6 @@ impl Geometry {
                 .map(|geometry| {
                     validate_material_count(geometry.triangle_count)?;
                     let format = geometry_format(geometry);
-                    if format != 0 && self.surface_compiler.is_none() {
-                        return Err(
-                            "Custom surface records require the surface compiler renderer".into(),
-                        );
-                    }
                     Ok(StaticAllocation {
                         records: self.materials[format]
                             .allocate(context, geometry.triangle_count)?,
@@ -423,10 +411,7 @@ impl Geometry {
                 let page = static_bases.len() / crate::surface::PAGE_BYTES;
                 let address = self.materials[allocation.format].address(allocation.records);
                 static_bases.extend_from_slice(&address.to_le_bytes());
-                static_bases.extend_from_slice(
-                    &(allocation.format as u32 | (u32::from(self.surface_compiler.is_some()) << 1))
-                        .to_le_bytes(),
-                );
+                static_bases.extend_from_slice(&(allocation.format as u32).to_le_bytes());
                 static_bases.extend_from_slice(&[0; 4]);
                 let light = &cluster.light_pages[i];
                 static_bases.extend_from_slice(
