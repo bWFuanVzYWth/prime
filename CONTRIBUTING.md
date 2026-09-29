@@ -11,12 +11,14 @@
 | 工具 | 用途 |
 | --- | --- |
 | JDK 25 | Java 编译、Fabric 开发客户端及 FFM |
-| Rust 工具链 | 满足根 `Cargo.toml` 声明的最低版本；构建 native 引擎 |
+| Rust 工具链 | 使用根 `rust-toolchain.toml` 固定的 nightly，包含 rustfmt/clippy；构建 native 引擎与 `std::simd` 内核 |
 | Slang 的 `slangc` | 将 shader 编译为 SPIR-V；构建 Vulkan crate 时需要 |
 | Vulkan 驱动与兼容光追显卡 | 运行 GPU 测试和实际游戏 |
 | Vulkan validation layer / SPIR-V Tools | GPU 同步检查与 SPIR-V 验证 |
 
 使用仓库的 Gradle Wrapper，不必另装 Gradle。Windows 的 Rust 工具链还需要对应的 MSVC 链接及 C 编译工具，后者用于构建 native 分配器。仅运行 Java 编译与测试不需要 Rust 或 Vulkan SDK；纯 CPU Rust 测试可排除 Vulkan crate。
+
+`std::simd` 仍是 nightly 的 `portable_simd` 接口，仓库固定 `nightly-2026-09-11`；通过 rustup 运行 cargo 会选择该工具链，不使用 `RUSTC_BOOTSTRAP`。CPU 内核按512-bit逻辑向量编写，由编译目标降为较窄向量或标量，ABI仍使用普通数组。`.cargo/config.toml` 为 x86-64 默认启用 `target-feature=+avx2`，发行包要求 AVX2；不要求 AVX-512、不启用 `target-cpu=native`，也不包含运行时指令集分派。需要验证较窄目标时可用 `RUSTFLAGS='-C target-cpu=x86-64 -C target-feature=-avx2,-avx'` 覆盖，并使用独立 target 目录保存产物。参考 [Rust portable SIMD](https://doc.rust-lang.org/nightly/std/simd/index.html)。
 
 `prime_vulkan` 按以下顺序寻找 Slang：`SLANGC` 指向的可执行文件、`VULKAN_SDK` 下的 `Bin/slangc.exe`（Linux 为 `bin/slangc`）、`PATH` 中的 `slangc`。这些路径属于本机配置，不写入项目文件。当前运行支持范围见 README，不因存在 Linux 构建分支就视为已完成 Linux 验证。
 
@@ -158,7 +160,7 @@ Java CSV 的 `terrain_plan_ns` 是请求规划 FFM 总时间，`terrain_pack_ns`
 
 原版 tint 由 Java 批量转录源字段，Rust 直接求色；`tint_callbacks` 只统计未知源的实际回调。`biome_samples` 是需要重新计算颜色的位置数，`biome_host_cells` / `biome_pages` 是实际读取的 quart 群系单元/页数，不能互相当成同一单位。`biome_source` 包含 native zoom、源请求组织和求色，`biome_filter` 为混合；历史 Java `tint_callback_ms` 字段包含整个颜色源准备，不能直接归因为回调。协议配套版本为 source v4，重建双适配器与 DLL 后再验收。
 
-`compile` 包含排序、作业建立、`kernel`（slab 解包/剔面/展开，含首次池创建）和 `finalize`（归并、精确内容比较、边界计算及不可变输出准备）；各值都是调用方墙钟时间，不是 worker CPU 时间之和。`published_layers` 是实际替换或删除的图层数，`retained_layers` 是重新编译后内容相同而保留的非空图层数。`publish` 是 owner 上的场景变更和旧引用释放，不包含 GPU 构建；并行化不会消除新输出复制和旧几何回收成本。
+`compile` 包含排序、作业建立、`kernel`（slab 解包/剔面/展开，含首次池创建）和 `finalize`（精确内容比较、分片边界计算及不可变输出准备）；各值都是调用方墙钟时间，不是 worker CPU 时间之和。分片直接移交其 Vec 所有权，精确相同的分片复用旧存储与包围盒，不再归并成整段连续副本。`published_layers` 是实际替换或删除的图层数，`retained_layers` 是重新编译后内容相同而保留的非空图层数。`publish` 是 owner 上的场景变更和旧引用释放，不包含 GPU 构建；新分片分配及旧几何最后引用的回收仍有成本。
 
 封闭源批次没有人为的跨帧工作配额。完整首载或大范围修改可能形成真实长帧，应记录其成本；工作池线程数、几何批次、在途 GPU 页与当前活跃内容不是同一数量。空闲池页保留历史峰值，renderer 销毁时再释放。
 
@@ -197,7 +199,9 @@ $env:PRIME_UPLOAD_WARMUP = '3'
 cargo test --release -p prime_vulkan --lib --locked terrain_upload_cost_matrix -- --ignored --nocapture
 ```
 
-`source_burst_cost` 固定8线程、每列4段，side 支持4/8/16/32（共64/256/1024/4096段），mode 支持 terrain/decorated。每次场景分别保留首载、编辑的两个方向和相同输入的原始样本及输入 hash。计时包括生产源规划、编译/颜色回填、发布、旧翻译快照最后引用的释放及整格计划；颜色响应为显式常量夹具，不包括实际宿主求色、Java/FFM、生成输入和 GPU。各阶段相加排除了阶段间的夹具构造；场景最终销毁不计入更新时间。此夹具、下述上传夹具及 `prime_tools` 入口与 native 引擎共用 MiMalloc 策略，计数包装仍统计真实分配请求；比较时记录锁定版本和分配器，另测进程峰值/保留内存，不能只记录逻辑几何字节。
+`source_burst_cost` 固定8线程、每列4段，side 支持4/8/16/32（共64/256/1024/4096段），mode 支持 terrain/decorated。每次场景分别保留首载、编辑的两个方向和相同输入的原始样本及输入 hash。计时包括生产源规划、编译/颜色回填、发布、旧翻译快照最后引用的释放及整格计划；颜色响应为显式常量夹具，其响应封包与回填包含在 `accept_ms` 内，不包括实际宿主求色、Java/FFM 和 GPU。各阶段相加排除了阶段间的 section 源包构造；场景最终销毁不计入更新时间。此夹具、下述上传夹具及 `prime_tools` 入口与 native 引擎共用 MiMalloc 策略，计数包装仍统计真实分配请求；比较时记录锁定版本和分配器，另测进程峰值/保留内存，不能只记录逻辑几何字节。
+
+仅测 CPU 四边形上传记录打包，可设置 `PRIME_PACK_CSV` 为输出 CSV 绝对路径，运行 `cargo test --release --locked -p prime_vulkan packing::perf::quad_packing_cost -- --exact --ignored --nocapture`。固定8线程，覆盖52万和314万三角形，保留每批5次预热、40次正式样本及输出 hash；计时包含平移、校验、纹理查询和写入预分配的128字节记录，排除分配、GPU传输与AS构建，不创建 Vulkan 设备。`source_burst_cost` 的 `resident_geometry_bytes` 统计翻译快照持有的几何容量，不等于进程或分配器的物理占用。
 
 `terrain_upload_cost_matrix` 在原生1920×1080的无窗口宿主录制路径上，每次替换所有指定单元，固定网格、两种交替角点位置和默认射线预算。CPU 源整理/发布/翻译、录制和 GPU 时间分列；每个样本等待本次提交真正完成，`completed_ms` 包含等待，可据总时长计算吞吐量。每格64段，quads 是每段四边形数；不含 Minecraft、Java/FFM、源编译内核或图像读回。`upload_ns` 对直接打包的静态范围包含 CPU 记录初始化时间，对其他上传仍包含字节复制，不能将该计数解释为纯 memcpy 时间。用多轮不可变可执行文件交替对照 p95、最大值与吞吐量；两种夹具都不能替代真实存档的逐帧验收。
 

@@ -1,4 +1,5 @@
 //! Prototype MC 26.2/26.3 adaptation. Java forwards fields and events; this owner plans demand.
+#![feature(portable_simd)]
 #![forbid(unsafe_code)]
 mod biome;
 mod biome_source;
@@ -45,33 +46,67 @@ impl SectionData {
         if bits != 0 && words != 4096usize.div_ceil(per_word) {
             return Err("invalid section storage length".into());
         }
-        let mut palette = Vec::with_capacity(count);
-        for _ in 0..count {
-            palette.push(r.u32()?);
-        }
-        let mut storage = Vec::with_capacity(words);
-        for _ in 0..words {
-            storage.push(r.u64()?);
-        }
+        let palette = r.u32s(count)?;
+        let storage = r.u64s(words)?;
         let result = Self {
             palette,
             storage,
             bits,
             per_word,
         };
-        if count != 0 && bits != 0 {
-            let mask = (1u64 << bits) - 1;
-            for (i, &word) in result.storage.iter().enumerate() {
-                let mut packed = word;
-                for _ in 0..per_word.min(4096 - i * per_word) {
-                    if packed & mask >= count as u64 {
-                        return Err("section palette index out of range".into());
-                    }
-                    packed >>= bits;
-                }
-            }
+        if !result.valid_indices() {
+            return Err("section palette index out of range".into());
         }
         Ok(result)
+    }
+    fn valid_indices(&self) -> bool {
+        use std::simd::{Simd, cmp::SimdPartialEq};
+        type Words = Simd<u64, 8>;
+        let count = self.palette.len() as u64;
+        if self.bits == 0 || count == 0 || count >= 1_u64 << self.bits {
+            return true;
+        }
+        // Put a sentinel in each packed field before subtraction: a borrow can clear that
+        // field's sentinel but cannot escape into the next field. Combine with the source
+        // high bit to compare the whole index, without unpacking all 4096 scalar indices.
+        let ones = (0..self.per_word).fold(0, |bits, lane| bits | 1 << (lane * self.bits as usize));
+        let high_bit = 1 << (self.bits - 1);
+        let high = ones * high_bit;
+        let threshold = ones * (count & (high_bit - 1));
+        let invalid = |word: Words| {
+            let top = word & Words::splat(high);
+            let lower_ge = (((word & !Words::splat(high)) | Words::splat(high))
+                - Words::splat(threshold))
+                & Words::splat(high);
+            if count < high_bit {
+                top | lower_ge
+            } else {
+                top & lower_ge
+            }
+        };
+        let full = 4096 / self.per_word;
+        let (vectors, tail) = self.storage[..full].as_chunks::<8>();
+        for words in vectors {
+            if invalid(Words::from_array(*words))
+                .simd_ne(Words::splat(0))
+                .any()
+            {
+                return false;
+            }
+        }
+        for &word in tail {
+            if invalid(Words::splat(word))[0] != 0 {
+                return false;
+            }
+        }
+        if full < self.storage.len() {
+            let used = 4096 % self.per_word;
+            let active = high & ((1_u64 << (used * self.bits as usize)) - 1);
+            if invalid(Words::splat(self.storage[full]))[0] & active != 0 {
+                return false;
+            }
+        }
+        true
     }
     fn index(&self, i: usize) -> u32 {
         if self.bits == 0 {
@@ -96,6 +131,27 @@ impl SectionData {
                 .iter()
                 .all(|id| catalog.states.get(id).is_some_and(model::State::air))
     }
+}
+
+/// Packed masks for the section surface. Only the layouts actually seen are initialized;
+/// palette IDs and section contents do not participate in this immutable layout cache.
+fn boundary_word_masks(bits: u32) -> &'static [u64] {
+    static MASKS: [std::sync::OnceLock<Box<[u64]>>; 33] =
+        [const { std::sync::OnceLock::new() }; 33];
+    MASKS[bits as usize].get_or_init(|| {
+        let per_word = 64 / bits as usize;
+        let field = (1_u64 << bits) - 1;
+        let mut masks = vec![0; 4096_usize.div_ceil(per_word)];
+        for index in 0..4096 {
+            if [index & 15, index >> 8, (index >> 4) & 15]
+                .iter()
+                .any(|&v| v == 0 || v == 15)
+            {
+                masks[index / per_word] |= field << ((index % per_word) * bits as usize);
+            }
+        }
+        masks.into_boxed_slice()
+    })
 }
 
 /// Mask of the exact neighboring section regions whose one-cell dependencies changed.
@@ -124,43 +180,63 @@ fn changed_boundaries(
         return if differs(0) { ALL } else { 0 };
     }
     let mut changed = 0;
+    let mut visit = |index: usize| {
+        let [x, y, z] = [index & 15, index >> 8, (index >> 4) & 15];
+        let side = |v| {
+            if v == 0 {
+                -1
+            } else if v == 15 {
+                1
+            } else {
+                0
+            }
+        };
+        let [dx, dy, dz] = [x, y, z].map(side);
+        if [dx, dy, dz] == [0; 3] || !differs(index) {
+            return;
+        }
+        for ox in [0, dx] {
+            for oy in [0, dy] {
+                for oz in [0, dz] {
+                    changed |= 1 << ((oy + 1) * 9 + (oz + 1) * 3 + ox + 1);
+                }
+            }
+        }
+    };
+    // Identical palette/layout proves identical words have identical source semantics. Visit
+    // only changed packed fields, ignoring unused high bits and final-word padding. A local
+    // edit usually needs no boundary state lookup at all; layout changes use the full surface.
+    if let (Some(a), Some(b)) = (before, after)
+        && a.bits == b.bits
+        && a.palette == b.palette
+    {
+        let mask = (1_u64 << a.bits) - 1;
+        for (word, ((&a_word, &b_word), &surface)) in a
+            .storage
+            .iter()
+            .zip(&b.storage)
+            .zip(boundary_word_masks(a.bits))
+            .enumerate()
+        {
+            let mut delta = (a_word ^ b_word) & surface;
+            while delta != 0 {
+                let lane = delta.trailing_zeros() as usize / a.bits as usize;
+                let index = word * a.per_word + lane;
+                visit(index);
+                delta &= !(mask << (lane * a.bits as usize));
+            }
+        }
+        return changed & ALL;
+    }
     for y in 0..16 {
         for z in 0..16 {
-            for x in 0..16 {
-                if x != 0 && x != 15 && y != 0 && y != 15 && z != 0 && z != 15 {
-                    continue;
+            if y == 0 || y == 15 || z == 0 || z == 15 {
+                for x in 0..16 {
+                    visit(y * 256 + z * 16 + x);
                 }
-                if !differs(y * 256 + z * 16 + x) {
-                    continue;
-                }
-                let dx = if x == 0 {
-                    -1
-                } else if x == 15 {
-                    1
-                } else {
-                    0
-                };
-                let dy = if y == 0 {
-                    -1
-                } else if y == 15 {
-                    1
-                } else {
-                    0
-                };
-                let dz = if z == 0 {
-                    -1
-                } else if z == 15 {
-                    1
-                } else {
-                    0
-                };
-                for ox in [0, dx] {
-                    for oy in [0, dy] {
-                        for oz in [0, dz] {
-                            changed |= 1 << ((oy + 1) * 9 + (oz + 1) * 3 + ox + 1);
-                        }
-                    }
-                }
+            } else {
+                visit(y * 256 + z * 16);
+                visit(y * 256 + z * 16 + 15);
             }
         }
     }
@@ -168,11 +244,21 @@ fn changed_boundaries(
 }
 fn invalidate_neighbors(
     key: Section,
-    changed: u32,
+    changed: impl FnOnce() -> u32,
     active: &HashSet<Section>,
     compile: &mut HashSet<Section>,
 ) {
-    for (i, n) in key.halo().into_iter().enumerate() {
+    let neighbors = key.halo();
+    // The closed batch compiles every queued consumer after all source updates. No boundary
+    // query can add work when every active neighbor is already queued (notably first load).
+    if !neighbors
+        .iter()
+        .any(|n| *n != key && active.contains(n) && !compile.contains(n))
+    {
+        return;
+    }
+    let changed = changed();
+    for (i, n) in neighbors.into_iter().enumerate() {
         if changed & (1 << i) != 0 && active.contains(&n) {
             compile.insert(n);
         }
@@ -452,7 +538,7 @@ impl TerrainContext {
             if let Some(old) = self.sections.remove(&key) {
                 invalidate_neighbors(
                     key,
-                    changed_boundaries(Some(&old), None, &self.catalog),
+                    || changed_boundaries(Some(&old), None, &self.catalog),
                     &self.scheduler.active,
                     &mut compile,
                 );
@@ -467,7 +553,7 @@ impl TerrainContext {
                     }
                     invalidate_neighbors(
                         key,
-                        changed_boundaries(Some(&old), None, &self.catalog),
+                        || changed_boundaries(Some(&old), None, &self.catalog),
                         &self.scheduler.active,
                         &mut compile,
                     );
@@ -483,7 +569,7 @@ impl TerrainContext {
                 }
                 invalidate_neighbors(
                     key,
-                    changed_boundaries(self.sections.get(&key), Some(&data), &self.catalog),
+                    || changed_boundaries(self.sections.get(&key), Some(&data), &self.catalog),
                     &self.scheduler.active,
                     &mut compile,
                 );
@@ -762,16 +848,16 @@ impl TerrainContext {
                                 );
                             }
                         }
-                        let parts: [_; 4] = std::array::from_fn(|i| &group[i].layers);
-                        let compiled = scene.prepare_compiled_quads(
+                        let parts: [_; 4] =
+                            std::array::from_fn(|i| std::mem::take(&mut group[i].layers));
+                        let compiled = scene.prepare_compiled_quad_fragments(
                             group[0].key.key(),
                             group[0].key.origin(),
-                            &parts,
+                            parts,
                         );
-                        // Dispose worker-owned fragments before the synchronous join. Publication
-                        // must not inherit all fragment deallocations on the caller thread.
+                        // Tint scratch is no longer needed. Geometry ownership moved into the
+                        // proof; redundant fragment buffers were disposed on these workers.
                         for job in group.iter_mut() {
-                            job.layers = Default::default();
                             job.tints = Default::default();
                         }
                         group[0].compiled = Some(compiled);

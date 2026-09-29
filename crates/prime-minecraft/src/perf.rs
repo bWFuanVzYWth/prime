@@ -315,7 +315,7 @@ fn source_burst_cost() {
     let mut file =
         std::fs::File::create(std::env::var("PRIME_BURST_CSV").expect("set PRIME_BURST_CSV"))
             .unwrap();
-    writeln!(file,"case,sample,warmup,threads,sections,input_hash,total_ms,plan_ms,accept_ms,translate_ms,group_ms,decode_ms,kernel_ms,finalize_ms,publish_ms,retire_ms,compiled,published_layers,retained_layers,resident_triangles,rebuilt_triangles,rebuilt_cells,biome_plan_ms,tint_requests").unwrap();
+    writeln!(file,"case,sample,warmup,threads,sections,input_hash,total_ms,plan_ms,accept_ms,translate_ms,group_ms,decode_ms,kernel_ms,finalize_ms,publish_ms,retire_ms,compiled,published_layers,retained_layers,resident_triangles,rebuilt_triangles,rebuilt_cells,biome_plan_ms,tint_requests,resident_geometry_bytes").unwrap();
     let low = -(side / 8) * 4; // Whole 4x4 columns, including the smallest single-cell fixture.
     let loaded: Vec<_> = (low..low + side)
         .flat_map(|x| (low..low + side).map(move |z| (1, Section(x, 0, z))))
@@ -380,13 +380,19 @@ fn source_burst_cost() {
             let group_ms = start.elapsed().as_secs_f64() * 1000.;
             let total_ms = plan_ms + accept_ms + translate_ms + group_ms;
             let resident = translated.input().triangle_count();
+            let resident_bytes: usize = translated
+                .input()
+                .meshes
+                .values()
+                .map(|mesh| mesh.triangles.byte_len())
+                .sum();
             if phase == "unchanged" {
                 assert_eq!(rebuilt, 0);
             } else {
                 assert!(rebuilt > 0);
             }
             let s = &ctx.stats;
-            writeln!(file,"{mode}_{phase},{sample},{},8,{},{input_hash},{total_ms},{plan_ms},{accept_ms},{translate_ms},{group_ms},{},{},{},{},{},{},{},{},{resident},{rebuilt},{cells},{},{}",
+            writeln!(file,"{mode}_{phase},{sample},{},8,{},{input_hash},{total_ms},{plan_ms},{accept_ms},{translate_ms},{group_ms},{},{},{},{},{},{},{},{},{resident},{rebuilt},{cells},{},{},{resident_bytes}",
                 sample < warmup, side * side * 4, s.decode_ms, s.kernel_ms, s.finalize_ms,
                 s.publish_ms, s.retire_ms, s.compiled, s.published_layers, s.retained_layers,
                 s.biome_plan_ms, s.tint_requests).unwrap();

@@ -3,7 +3,10 @@
 //! shapes, matching blocks and geometry expansion still use the exact resolved source states.
 use super::{Catalog, Job, Section, SectionData};
 use crate::model::State;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    simd::{Select, Simd, cmp::SimdPartialEq, num::SimdUint},
+};
 
 static MISSING: State = State {
     id: 0,
@@ -74,6 +77,53 @@ impl<'a> Slab<'a> {
         self.emission[index] = cell.emission;
         self.occlusion[index] = cell.occlusion;
     }
+    /// Sixteen independent cells use a 512-bit logical vector. Loads need no SIMD alignment;
+    /// the compiler lowers it to the selected target's vector width, including baseline SSE2.
+    fn visibility_row(&self, index: usize) -> [u32; 16] {
+        type Lanes = Simd<u32, 16>;
+        let emission = Simd::<u8, 16>::from_slice(&self.emission[index..]).cast::<u32>();
+        if emission.simd_eq(Lanes::splat(0)).all() {
+            return [0; 16];
+        }
+        let load = |at| Simd::<u16, 16>::from_slice(&self.occlusion[at..]).cast::<u32>();
+        let occlusion = (load(index - PLANE) & Lanes::splat(0x041))
+            | (load(index + PLANE) & Lanes::splat(0x082))
+            | (load(index - ROW) & Lanes::splat(0x104))
+            | (load(index + ROW) & Lanes::splat(0x208))
+            | (load(index - 1) & Lanes::splat(0x410))
+            | (load(index + 1) & Lanes::splat(0x820));
+        // Keep fluid and the unculled bucket. Only six direction bits can be occluded.
+        let visible = emission & !(occlusion & Lanes::splat(63));
+        let matching = (load(index) & Lanes::splat(u32::from(MATCHING))).simd_ne(Lanes::splat(0));
+        let exact = visible & matching.select(Lanes::splat(63), occlusion >> 6) & Lanes::splat(63);
+        (visible | (exact << 8)).to_array()
+    }
+    fn exact_visible(&self, index: usize, masks: u32, catalog: &Catalog) -> u32 {
+        let mut visible = masks & 127;
+        let mut exact = masks >> 8;
+        while exact != 0 {
+            let face = exact.trailing_zeros() as usize;
+            let bit = 1 << face;
+            exact &= !bit;
+            let other = self.states[(index as isize
+                + [
+                    -(PLANE as isize),
+                    PLANE as isize,
+                    -(ROW as isize),
+                    ROW as isize,
+                    -1,
+                    1,
+                ][face]) as usize];
+            let state = self.states[index];
+            if catalog.covers(other.faces[face ^ 1], state.faces[face])
+                || self.occlusion[index] & MATCHING != 0 && state.name == other.name
+            {
+                visible &= !bit;
+            }
+        }
+        visible
+    }
+    #[cfg(test)]
     fn visible(&self, index: usize, catalog: &Catalog) -> u32 {
         let neighbors = [
             index - PLANE,
@@ -228,10 +278,10 @@ pub(super) fn compile_slab(
     }
     for y in 0..4 {
         for z in 0..16 {
-            for x in 0..16 {
+            let row = cells.visibility_row((y + 1) * PLANE + (z + 1) * ROW + 1);
+            for (x, masks) in row.into_iter().enumerate() {
                 let index = (y + 1) * PLANE + (z + 1) * ROW + x + 1;
-                let emission = cells.emission[index];
-                if emission == 0 {
+                if masks == 0 {
                     continue;
                 }
                 let position = [
@@ -239,7 +289,7 @@ pub(super) fn compile_slab(
                     job.key.1 * 16 + (job.first_y + y) as i32,
                     job.key.2 * 16 + z as i32,
                 ];
-                if emission & FLUID != 0 {
+                if masks & u32::from(FLUID) != 0 {
                     let state = cells.states[index];
                     job.tints.begin(state.id, position);
                     let starts = job.layers.each_ref().map(|l| l.len());
@@ -265,10 +315,10 @@ pub(super) fn compile_slab(
                         }
                     }
                 }
-                if emission & 127 == 0 {
+                if masks & 127 == 0 {
                     continue;
                 }
-                let visible = cells.visible(index, catalog);
+                let visible = cells.exact_visible(index, masks, catalog);
                 if visible == 0 {
                     continue;
                 }
@@ -386,6 +436,8 @@ mod tests {
                         expected,
                         "source={source} neighbor={neighbor} at={at}"
                     );
+                    let masks = slab.visibility_row(index - 1)[1];
+                    assert_eq!(slab.exact_visible(index, masks, &catalog), expected);
                 }
                 // Next pair starts with an open/missing halo, then fills each direction in turn.
                 for &at in &neighbors {
@@ -393,5 +445,32 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn vector_rows_preserve_every_lane_fluid_and_unculled_bits() {
+        let catalog = Catalog::default();
+        let mut slab = Slab::new();
+        let mut random = 173_u64;
+        for index in 0..CELLS {
+            random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+            slab.emission[index] = (random >> 32) as u8;
+            slab.occlusion[index] = (random >> 40) as u16 & 0x1fff;
+        }
+        for y in 1..5 {
+            for z in 1..17 {
+                let start = y * PLANE + z * ROW + 1;
+                for (x, masks) in slab.visibility_row(start).into_iter().enumerate() {
+                    let at = start + x;
+                    assert_eq!(
+                        slab.exact_visible(at, masks, &catalog),
+                        slab.visible(at, &catalog)
+                    );
+                    assert_eq!(masks & 0xc0, u32::from(slab.emission[at] & 0xc0));
+                }
+            }
+        }
+        slab.emission.fill(0);
+        assert_eq!(slab.visibility_row(PLANE + ROW + 1), [0; 16]);
     }
 }

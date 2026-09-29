@@ -177,6 +177,88 @@ fn compact_quads_preserve_corner_bits_winding_bounds_and_retention() {
 }
 
 #[test]
+fn owned_fragments_move_buffers_share_equal_blocks_and_retain_across_partitions() {
+    let mut scene = scene();
+    let a = CompiledQuad {
+        positions: [[-0., 0., 0.], [2., -3., 0.], [1., 4., 5.], [-2., 1., 0.5]],
+        uvs: [[-0., 0.125], [0.25, 0.5], [0.875, 1.], [1.25, -0.5]],
+        color: [0.1, -0., 0.75, 0.25],
+        texture_id: 1,
+        flags: 0,
+    };
+    let mut b = a;
+    b.positions[3][1] = -7.;
+    let buffer = vec![a; 3];
+    let address = buffer.as_ptr();
+    let first = scene.prepare_compiled_quad_fragments(
+        7,
+        [0.; 3],
+        [
+            [buffer, vec![], vec![]],
+            [vec![], vec![], vec![]],
+            [vec![b], vec![], vec![]],
+        ],
+    );
+    scene.publish_compiled(1, 1, vec![first], &[]).unwrap();
+    let old = scene.meshes[&(7, 0)].triangles.clone();
+    let MeshGeometry::QuadFragments(old_parts) = &old else {
+        panic!("expected fragments")
+    };
+    assert_eq!(old_parts.blocks[0].values.as_ptr(), address);
+    assert_eq!(scene.meshes[&(7, 0)].bounds, [[-2., -7., 0.], [2., 4., 5.]]);
+    let mut edit = b;
+    edit.color[0] = 0.5;
+    let next = scene.prepare_compiled_quad_fragments(
+        7,
+        [0.; 3],
+        [
+            [vec![a; 3], vec![], vec![]],
+            [vec![], vec![], vec![]],
+            [vec![edit], vec![], vec![]],
+        ],
+    );
+    let mut retired = scene.publish_compiled(1, 2, vec![next], &[]).unwrap();
+    retired.release_retired(None).unwrap();
+    let current = scene.meshes[&(7, 0)].triangles.clone();
+    let MeshGeometry::QuadFragments(parts) = &current else {
+        panic!("expected fragments")
+    };
+    assert!(Arc::ptr_eq(&old_parts.blocks[0], &parts.blocks[0]));
+    assert!(!Arc::ptr_eq(&old_parts.blocks[2], &parts.blocks[2]));
+    assert!(old_parts.blocks[2].values[0].same_bits(&b));
+    assert!(parts.blocks[2].values[0].same_bits(&edit));
+    let equal = scene.prepare_compiled_quad_fragments(
+        7,
+        [0.; 3],
+        [
+            [vec![a], vec![], vec![]],
+            [vec![a, a, edit], vec![], vec![]],
+        ],
+    );
+    let result = scene.publish_compiled(1, 3, vec![equal], &[]).unwrap();
+    assert_eq!((result.replaced_layers, result.retained_layers), (0, 1));
+    assert!(current.ptr_eq(&scene.meshes[&(7, 0)].triangles));
+    let borrowed =
+        scene.prepare_compiled_quads(7, [0.; 3], &[&[vec![a, a, a, edit], vec![], vec![]]]);
+    let result = scene.publish_compiled(1, 4, vec![borrowed], &[]).unwrap();
+    assert_eq!((result.replaced_layers, result.retained_layers), (0, 1));
+
+    let mut translated = crate::incremental::TranslatedScene::default();
+    translated.update(&mut scene, [0.; 3]).unwrap();
+    let weak = Arc::downgrade(&parts.blocks[2]);
+    drop(current);
+    let mut retired = scene.publish_compiled(1, 5, vec![], &[7]).unwrap();
+    retired.release_retired(None).unwrap();
+    assert_eq!(weak.strong_count(), 1);
+    assert!(same_triangle(
+        &translated.input().meshes[&(7, 0)].triangles.triangle(7),
+        &edit.triangle(1)
+    ));
+    translated.update(&mut scene, [0.; 3]).unwrap();
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
 fn compact_retirement_keeps_translated_readers_alive_until_their_last_use() {
     let mut scene = scene();
     let quad = CompiledQuad {
@@ -222,25 +304,34 @@ fn compact_retention_compares_all_fields_exactly() {
         texture_id: 1,
         flags: 0,
     };
-    for field in 0..6 {
-        let mut scene = scene();
-        let first = scene.prepare_compiled_quads(7, [0.; 3], &[&[vec![quad], vec![], vec![]]]);
-        scene.publish_compiled(1, 1, vec![first], &[]).unwrap();
-        let old = scene.meshes[&(7, 0)].triangles.clone();
-        let mut edit = quad;
-        match field {
-            0 => edit.positions[3][2] = -0.,
-            1 => edit.uvs[3][0] = -0.,
-            2 => edit.color[1] = -0.,
-            3 => edit.color[3] = 0.5,
-            4 => edit.texture_id = 0,
-            5 => edit.flags = 1,
-            _ => unreachable!(),
+    for owned in [false, true] {
+        let prepare = |scene: &SourceScene, quad| {
+            if owned {
+                scene.prepare_compiled_quad_fragments(7, [0.; 3], [[vec![quad], vec![], vec![]]])
+            } else {
+                scene.prepare_compiled_quads(7, [0.; 3], &[&[vec![quad], vec![], vec![]]])
+            }
+        };
+        for field in 0..6 {
+            let mut scene = scene();
+            let first = prepare(&scene, quad);
+            scene.publish_compiled(1, 1, vec![first], &[]).unwrap();
+            let old = scene.meshes[&(7, 0)].triangles.clone();
+            let mut edit = quad;
+            match field {
+                0 => edit.positions[3][2] = -0.,
+                1 => edit.uvs[3][0] = -0.,
+                2 => edit.color[1] = -0.,
+                3 => edit.color[3] = 0.5,
+                4 => edit.texture_id = 0,
+                5 => edit.flags = 1,
+                _ => unreachable!(),
+            }
+            let next = prepare(&scene, edit);
+            let result = scene.publish_compiled(1, 2, vec![next], &[]).unwrap();
+            assert_eq!(result.replaced_layers, 1, "field {field}");
+            assert!(!old.ptr_eq(&scene.meshes[&(7, 0)].triangles));
         }
-        let next = scene.prepare_compiled_quads(7, [0.; 3], &[&[vec![edit], vec![], vec![]]]);
-        let result = scene.publish_compiled(1, 2, vec![next], &[]).unwrap();
-        assert_eq!(result.replaced_layers, 1, "field {field}");
-        assert!(!old.ptr_eq(&scene.meshes[&(7, 0)].triangles));
     }
 }
 

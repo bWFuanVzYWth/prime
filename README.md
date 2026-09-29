@@ -15,6 +15,7 @@ Prime PT 以 Mod 的形式安装到 `mods` 文件夹。它不是 Shader Pack，�
 | 项目 | 要求 |
 | --- | --- |
 | Java | 25；请检查启动器为当前实例选用的 Java 版本 |
+| CPU | 支持 AVX2 的 x86-64 处理器 |
 | 游戏图形后端 | Vulkan；OpenGL 模式不能启用 Prime PT |
 | 显卡与驱动 | 支持 Vulkan 1.2 及所需的硬件光线查询（Ray Query）功能 |
 | 已实机验证的显卡 | NVIDIA GeForce RTX 4090；其他显卡尚未完成实机兼容性验证 |

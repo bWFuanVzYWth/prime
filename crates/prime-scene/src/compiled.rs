@@ -1,6 +1,6 @@
 //! Closed geometry produced by native source adapters. No host callbacks or MC layouts.
 pub use crate::geometry::CompiledQuad;
-use crate::geometry::MeshGeometry;
+use crate::geometry::{MeshGeometry, QuadFragments};
 use crate::{
     SourceScene, Triangle,
     incremental::ContextId,
@@ -170,6 +170,9 @@ impl SourceScene {
                                 == b.uvs.map(|p| p.map(f32::to_bits))
                             && a.color.map(f32::to_bits) == b.color.map(f32::to_bits)
                     }),
+                    MeshGeometry::QuadFragments(parts) => {
+                        parts.iter().zip(input()).all(|(a, b)| a.same_bits(b))
+                    }
                     MeshGeometry::Triangles(triangles) => triangles
                         .iter()
                         .zip(input().flat_map(CompiledQuad::triangles))
@@ -198,6 +201,89 @@ impl SourceScene {
                 origin,
                 triangles: MeshGeometry::Quads(quads),
                 bounds,
+                texture_id: 1,
+                flags: layer as u32,
+            })
+        });
+        CompiledSection {
+            base: self.compiled_base(),
+            key,
+            origin,
+            layers,
+        }
+    }
+
+    /// Transfer producer buffers without flattening or copying their vertices. Equal fragments
+    /// share the old allocation and bounds; a whole equal layer retains its source identity.
+    pub fn prepare_compiled_quad_fragments(
+        &self,
+        key: u64,
+        origin: [f64; 3],
+        parts: impl IntoIterator<Item = [Vec<CompiledQuad>; 3]>,
+    ) -> CompiledSection {
+        let mut parts: Vec<_> = parts.into_iter().collect();
+        let layers = std::array::from_fn(|layer| {
+            let count: usize = parts.iter().map(|p| p[layer].len()).sum();
+            let previous = self.meshes.get(&(key, layer as u32));
+            if count == 0 {
+                return if previous.is_some() {
+                    Layer::Remove
+                } else {
+                    Layer::Retain(0)
+                };
+            }
+            let compatible = previous.filter(|old| {
+                old.origin.map(f64::to_bits) == origin.map(f64::to_bits)
+                    && old.texture_id == 1
+                    && old.flags == layer as u32
+            });
+            let old_parts = compatible.and_then(|old| match &old.triangles {
+                MeshGeometry::QuadFragments(parts) => Some(&**parts),
+                _ => None,
+            });
+            let same_partition = old_parts.is_some_and(|old| {
+                old.blocks.len() == parts.len()
+                    && old
+                        .blocks
+                        .iter()
+                        .zip(&parts)
+                        .all(|(a, b)| a.values.len() == b[layer].len())
+            });
+            if !same_partition
+                && let Some(old) = compatible
+                && old.triangles.len() == count * 2
+                && old
+                    .triangles
+                    .iter()
+                    .zip(
+                        parts
+                            .iter()
+                            .flat_map(|p| &p[layer])
+                            .flat_map(CompiledQuad::triangles),
+                    )
+                    .all(|(a, b)| same_triangle(&a, &b))
+            {
+                return Layer::Retain(count * 2);
+            }
+            let fragments = QuadFragments::reuse(
+                parts.iter_mut().map(|p| std::mem::take(&mut p[layer])),
+                old_parts,
+            );
+            if let Some(old) = old_parts
+                && old.blocks.len() == fragments.blocks.len()
+                && old
+                    .blocks
+                    .iter()
+                    .zip(&fragments.blocks)
+                    .all(|(a, b)| Arc::ptr_eq(a, b))
+            {
+                return Layer::Retain(count * 2);
+            }
+            Layer::Replace(Mesh {
+                revision: MeshVersion::captured(SectionSequence(0)),
+                origin,
+                bounds: fragments.bounds(),
+                triangles: MeshGeometry::QuadFragments(Arc::new(fragments)),
                 texture_id: 1,
                 flags: layer as u32,
             })

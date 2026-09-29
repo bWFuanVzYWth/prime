@@ -4,7 +4,10 @@ use crate::{
     schedule::Section,
     wire::Reader,
 };
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    simd::{Simd, num::SimdUint},
+};
 
 pub(crate) struct Definitions {
     seed: u64,
@@ -36,10 +39,7 @@ impl Definitions {
             if count > 65536 {
                 return Err("oversized biome color table".into());
             }
-            map.reserve(count);
-            for _ in 0..count {
-                map.push(r.u32()?);
-            }
+            *map = r.u32s(count)?;
         }
         Ok(Self {
             seed,
@@ -299,28 +299,42 @@ impl Default for ZoomPage {
     }
 }
 struct ZoomCube {
-    jitter: [[f64; 3]; 8],
+    jitter: [[f64; 8]; 3],
     winners: [u8; 64],
 }
 impl ZoomCube {
     fn new(seed: u64, base: [i32; 3]) -> Self {
-        let jitter = std::array::from_fn(|corner| {
-            let delta = [(corner >> 2) & 1, (corner >> 1) & 1, corner & 1];
-            let quart: [_; 3] = std::array::from_fn(|i| base[i] + delta[i] as i32);
-            let mut state = seed;
-            for _ in 0..2 {
-                for coordinate in quart {
-                    state = next(state, coordinate as i64 as u64);
-                }
-            }
-            let x = fiddle(state);
-            state = next(state, seed);
-            let y = fiddle(state);
-            state = next(state, seed);
-            [x, y, fiddle(state)]
+        type Corners = Simd<u64, 8>;
+        let next = |state: Corners, salt| {
+            state
+                * (state * Corners::splat(6364136223846793005)
+                    + Corners::splat(1442695040888963407))
+                + salt
+        };
+        let fiddle = |state: Corners| {
+            // The masked value is at most 1023; narrow before conversion to avoid emulated u64→f64.
+            let value = ((state >> 24) & Corners::splat(1023))
+                .cast::<u32>()
+                .cast::<f64>();
+            ((value / Simd::splat(1024.)) - Simd::splat(0.5)) * Simd::splat(0.9)
+        };
+        let quart: [_; 3] = std::array::from_fn(|axis| {
+            Corners::from_array(std::array::from_fn(|corner| {
+                (base[axis] + ((corner >> (2 - axis)) & 1) as i32) as i64 as u64
+            }))
         });
+        let mut state = Corners::splat(seed);
+        for _ in 0..2 {
+            for coordinate in quart {
+                state = next(state, coordinate);
+            }
+        }
+        let x = fiddle(state).to_array();
+        state = next(state, Corners::splat(seed));
+        let y = fiddle(state).to_array();
+        state = next(state, Corners::splat(seed));
         Self {
-            jitter,
+            jitter: [x, y, fiddle(state).to_array()],
             winners: [8; 64],
         }
     }
@@ -330,13 +344,19 @@ impl ZoomCube {
             return self.winners[local];
         }
         let f = fraction.map(|v| f64::from(v) / 4.);
+        type Corners = Simd<f64, 8>;
+        let distance = |axis, delta| {
+            (Corners::splat(f[axis]) - Corners::from_array(delta))
+                + Corners::from_array(self.jitter[axis])
+        };
+        let x = distance(0, [0., 0., 0., 0., 1., 1., 1., 1.]);
+        let y = distance(1, [0., 0., 1., 1., 0., 0., 1., 1.]);
+        let z = distance(2, [0., 1., 0., 1., 0., 1., 0., 1.]);
+        // Preserve vanilla's (z² + y²) + x² order, without FMA. Lowest lane wins ties.
+        let distance = z * z + y * y + x * x;
         let mut best = f64::INFINITY;
         let mut winner = 0;
-        for (corner, jitter) in self.jitter.iter().enumerate() {
-            let x = (f[0] - ((corner >> 2) & 1) as f64) + jitter[0];
-            let y = (f[1] - ((corner >> 1) & 1) as f64) + jitter[1];
-            let z = (f[2] - (corner & 1) as f64) + jitter[2];
-            let distance = z * z + y * y + x * x;
+        for (corner, distance) in distance.to_array().into_iter().enumerate() {
             if distance < best {
                 best = distance;
                 winner = corner as u8;
@@ -386,6 +406,7 @@ impl ZoomCache {
         positions
     }
 }
+#[cfg(test)]
 fn next(state: u64, salt: u64) -> u64 {
     state
         .wrapping_mul(
@@ -395,6 +416,7 @@ fn next(state: u64, salt: u64) -> u64 {
         )
         .wrapping_add(salt)
 }
+#[cfg(test)]
 fn fiddle(state: u64) -> f64 {
     ((((state >> 24) & 1023) as f64 / 1024.) - 0.5) * 0.9
 }
@@ -510,6 +532,60 @@ pub(crate) fn check_math_fixture(bytes: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn vector_zoom_matches_ordered_scalar_distances_and_ties() {
+        for seed in [0, 1, 42, u64::MAX, 0x1357_2468_ffff_0000] {
+            for base in [[0, 0, 0], [-1, -2, -3], [-1_000_000, 300, 2_000_000]] {
+                let mut cube = ZoomCube::new(seed, base);
+                for (corner, _) in cube.jitter[0].iter().enumerate() {
+                    let quart: [_; 3] = std::array::from_fn(|axis| {
+                        base[axis] + ((corner >> (2 - axis)) & 1) as i32
+                    });
+                    let mut state = seed;
+                    for _ in 0..2 {
+                        for coordinate in quart {
+                            state = next(state, coordinate as i64 as u64);
+                        }
+                    }
+                    for jitter in &cube.jitter {
+                        assert_eq!(jitter[corner].to_bits(), fiddle(state).to_bits());
+                        state = next(state, seed);
+                    }
+                }
+                for y in 0..4 {
+                    for z in 0..4 {
+                        for x in 0..4 {
+                            let f = [x, y, z].map(|v| f64::from(v) / 4.);
+                            let mut best = f64::INFINITY;
+                            let mut expected = 0;
+                            for corner in 0..8 {
+                                let x =
+                                    (f[0] - ((corner >> 2) & 1) as f64) + cube.jitter[0][corner];
+                                let y =
+                                    (f[1] - ((corner >> 1) & 1) as f64) + cube.jitter[1][corner];
+                                let z = (f[2] - (corner & 1) as f64) + cube.jitter[2][corner];
+                                let distance = z * z + y * y + x * x;
+                                if distance < best {
+                                    best = distance;
+                                    expected = corner as u8;
+                                }
+                            }
+                            assert_eq!(cube.resolve([x, y, z]), expected);
+                            assert_eq!(cube.resolve([x, y, z]), expected);
+                        }
+                    }
+                }
+            }
+        }
+        let mut tie = ZoomCube {
+            jitter: [[0.; 8]; 3],
+            winners: [8; 64],
+        };
+        assert_eq!(tie.resolve([2, 2, 2]), 0);
+        assert_eq!(tie.resolve([2, 2, 3]), 1);
+        assert_eq!(tie.resolve([3, 2, 2]), 4);
+    }
+
     #[test]
     fn source_pages_reuse_quarts_across_resolvers_and_invalidate_only_changed_columns() {
         let mut cache = Cache {

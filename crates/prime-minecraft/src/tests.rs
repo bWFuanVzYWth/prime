@@ -2,6 +2,72 @@ use super::*;
 use prime_scene::Triangle;
 use prime_scene::protocol::{ABI_VERSION, MAGIC as SCENE_MAGIC};
 
+#[test]
+fn packed_palette_validation_matches_scalar_for_all_widths_and_padding() {
+    for bits in 1..=32 {
+        let maximum = (1_u64 << bits).min(4096) as usize;
+        let half = 1_usize << (bits - 1);
+        let mut counts = vec![
+            1,
+            2,
+            3,
+            5,
+            half.saturating_sub(1),
+            half,
+            half + 1,
+            maximum.saturating_sub(1),
+            maximum,
+        ];
+        counts.retain(|&n| n != 0 && n <= maximum);
+        counts.sort_unstable();
+        counts.dedup();
+        for count in counts {
+            let per_word = 64 / bits as usize;
+            let mut data = SectionData {
+                palette: vec![0; count],
+                storage: vec![u64::MAX; 4096_usize.div_ceil(per_word)],
+                bits,
+                per_word,
+            };
+            let mask = (1_u64 << bits) - 1;
+            let mut random = 173_u64;
+            for index in 0..4096 {
+                random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let shift = index % per_word * bits as usize;
+                let word = &mut data.storage[index / per_word];
+                *word = (*word & !(mask << shift)) | ((random % count as u64) << shift);
+            }
+            // Unused high bits, and unused fields of a partial final word, stay all-ones.
+            assert!(data.valid_indices(), "bits={bits}, count={count}");
+            assert!((0..4096).all(|i| data.index(i) < count as u32));
+            if count as u64 > mask {
+                continue;
+            }
+            for index in [
+                0,
+                per_word - 1,
+                per_word,
+                8 * per_word - 1,
+                8 * per_word,
+                4095,
+            ] {
+                let shift = index % per_word * bits as usize;
+                let word = index / per_word;
+                let saved = data.storage[word];
+                for invalid in [count as u64, mask] {
+                    data.storage[word] = (saved & !(mask << shift)) | (invalid << shift);
+                    assert!(
+                        !data.valid_indices(),
+                        "bits={bits}, count={count}, index={index}, value={invalid}"
+                    );
+                    assert!(data.index(index) >= count as u32);
+                }
+                data.storage[word] = saved;
+            }
+        }
+    }
+}
+
 pub(super) fn header(kind: u32, batch: u64) -> Vec<u8> {
     let mut v = Vec::new();
     for n in [wire::MAGIC, wire::VERSION, 262, kind] {
@@ -689,6 +755,145 @@ fn boundary_dependencies_follow_face_occlusion_and_not_state_identity() {
                 changed_boundaries(Some(&uniform(1)), Some(&edited), &catalog),
                 1 << face
             );
+        }
+    }
+}
+
+#[test]
+fn boundary_queries_are_skipped_only_when_every_active_consumer_is_already_queued() {
+    let key = Section(0, 0, 0);
+    let neighbors = key.halo();
+    let active: HashSet<_> = neighbors.into_iter().collect();
+    let mut compile = active.clone();
+    invalidate_neighbors(
+        key,
+        || panic!("all consumers already queued"),
+        &active,
+        &mut compile,
+    );
+    let corner = Section(1, 1, 1);
+    let bit = 1 << neighbors.iter().position(|n| *n == corner).unwrap();
+    compile.remove(&corner);
+    let evaluated = std::cell::Cell::new(false);
+    invalidate_neighbors(
+        key,
+        || {
+            evaluated.set(true);
+            bit
+        },
+        &active,
+        &mut compile,
+    );
+    assert!(evaluated.get());
+    assert_eq!(compile, active);
+    compile.remove(&corner);
+    invalidate_neighbors(key, || 0, &active, &mut compile);
+    assert!(!compile.contains(&corner));
+    let isolated = HashSet::from([key]);
+    invalidate_neighbors(
+        key,
+        || panic!("no active neighbors"),
+        &isolated,
+        &mut HashSet::new(),
+    );
+}
+
+#[test]
+fn packed_boundary_differences_match_scalar_regions_for_every_layout() {
+    let mut catalog = Catalog::default();
+    catalog.states.insert(0, model::State::default());
+    catalog.states.insert(
+        1,
+        model::State {
+            id: 1,
+            flags: 4,
+            faces: [crate::shape::FaceId(1); 6],
+            ..Default::default()
+        },
+    );
+    let pack = |bits: u32, local: bool, cells: &[u32; 4096]| {
+        let per_word = 64 / bits as usize;
+        let mut storage = vec![0; 4096_usize.div_ceil(per_word)];
+        for (i, &value) in cells.iter().enumerate() {
+            storage[i / per_word] |= (value as u64) << ((i % per_word) * bits as usize);
+        }
+        SectionData {
+            palette: if local { vec![0, 1] } else { vec![] },
+            storage,
+            bits,
+            per_word,
+        }
+    };
+    let reference = |a: &SectionData, b: &SectionData| {
+        let mut result = 0;
+        for i in 0..4096 {
+            if catalog.states[&a.state(i)].same_boundary(&catalog.states[&b.state(i)]) {
+                continue;
+            }
+            let xyz = [i & 15, i >> 8, (i >> 4) & 15];
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    for dx in -1..=1 {
+                        if [dx, dy, dz] == [0; 3] {
+                            continue;
+                        }
+                        if [dx, dy, dz].into_iter().zip(xyz).all(|(d, v)| match d {
+                            -1 => v == 0,
+                            0 => true,
+                            1 => v == 15,
+                            _ => unreachable!(),
+                        }) {
+                            result |= 1 << ((dy + 1) * 9 + (dz + 1) * 3 + dx + 1);
+                        }
+                    }
+                }
+            }
+        }
+        result
+    };
+    for bits in 1..=32 {
+        for local in [false, true] {
+            let before = pack(bits, local, &[0; 4096]);
+            for index in [0, 15, 16, 255, 256, 2048, 2184, 3840, 4095, 4096] {
+                let mut cells = [0; 4096];
+                if index == 4096 {
+                    cells.fill(1);
+                } else {
+                    cells[index] = 1;
+                }
+                let after = pack(bits, local, &cells);
+                assert_eq!(
+                    changed_boundaries(Some(&before), Some(&after), &catalog),
+                    reference(&before, &after),
+                    "bits={bits} local={local} index={index}"
+                );
+            }
+            let mut padding = pack(bits, local, &[0; 4096]);
+            for (word, value) in padding.storage.iter_mut().enumerate() {
+                let used = (4096 - word * padding.per_word).min(padding.per_word) * bits as usize;
+                if used < 64 {
+                    *value |= u64::MAX << used;
+                }
+            }
+            assert_eq!(
+                changed_boundaries(Some(&before), Some(&padding), &catalog),
+                0
+            );
+            let cells = std::array::from_fn(|i| u32::from(i % 7 == 0));
+            let differently_packed = pack(if bits == 1 { 2 } else { 1 }, local, &cells);
+            assert_eq!(
+                changed_boundaries(Some(&before), Some(&differently_packed), &catalog),
+                reference(&before, &differently_packed)
+            );
+            if local {
+                let old = pack(bits, true, &cells);
+                let mut reordered = pack(bits, true, &cells.map(|v| 1 - v));
+                reordered.palette.reverse();
+                assert_eq!(
+                    changed_boundaries(Some(&old), Some(&reordered), &catalog),
+                    0
+                );
+            }
         }
     }
 }

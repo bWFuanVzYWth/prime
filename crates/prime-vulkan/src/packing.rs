@@ -1,10 +1,12 @@
 //! Synchronous disjoint record packing; workers borrow output bytes, never Vulkan handles.
-#[cfg(test)]
 use prime_scene::Triangle;
-use prime_scene::geometry::TriangleView;
+use prime_scene::geometry::{CompiledQuad, TriangleView};
 use prime_scene::workers::CpuWorkers;
 use std::collections::BTreeMap;
 use std::mem::MaybeUninit;
+
+#[cfg(test)]
+mod perf;
 
 pub(crate) struct Input<'a> {
     pub triangles: TriangleView<'a>,
@@ -65,6 +67,27 @@ fn pack_records<T: Send>(
     textures: &BTreeMap<u32, u32>,
     write: impl Fn(&mut T, [u8; 128]) + Sync,
 ) -> Result<(), String> {
+    // Flatten only span metadata. Fragmented source geometry stays shared and each worker's
+    // inner loop reads a contiguous slice, without a fragment search for every triangle.
+    let contiguous;
+    let sources = if sources
+        .iter()
+        .any(|s| matches!(s.triangles, TriangleView::QuadFragments { .. }))
+    {
+        contiguous = sources
+            .iter()
+            .flat_map(|source| {
+                source.triangles.contiguous().map(move |triangles| Input {
+                    triangles,
+                    offset: source.offset,
+                    flags: source.flags,
+                })
+            })
+            .collect::<Vec<_>>();
+        &contiguous
+    } else {
+        sources
+    };
     let mut count = 0usize;
     let one;
     let many;
@@ -85,7 +108,9 @@ fn pack_records<T: Send>(
     assert_eq!(output.len(), count);
     workers.chunks_mut(output, 4096, |first_triangle, records| {
         let mut source_index = ends.partition_point(|&end| end <= first_triangle);
-        for (triangle_index, destination) in (first_triangle..).zip(records) {
+        let mut triangle_index = first_triangle;
+        let mut remaining = records;
+        while !remaining.is_empty() {
             while ends[source_index] <= triangle_index {
                 source_index += 1;
             }
@@ -95,58 +120,157 @@ fn pack_records<T: Send>(
             } else {
                 ends[source_index - 1]
             };
-            let triangle = input.triangles.triangle(triangle_index - first);
-            if input.flags.is_some_and(|flags| flags != triangle.flags) {
-                return Err("Mesh material flags must be uniform".into());
-            }
-            let mut record = [0; 128];
-            let mut cursor = 0;
-            let mut scalar = |value: f32| {
-                record[cursor..cursor + 4].copy_from_slice(&value.to_le_bytes());
-                cursor += 4;
-            };
-            for mut position in triangle.positions {
-                if let Some(offset) = input.offset {
-                    for i in 0..3 {
-                        position[i] += offset[i];
+            let count = remaining.len().min(ends[source_index] - triangle_index);
+            let (destinations, tail) = remaining.split_at_mut(count);
+            let local = triangle_index - first;
+            match input.triangles {
+                TriangleView::Triangles(values) => {
+                    for (destination, triangle) in destinations.iter_mut().zip(&values[local..]) {
+                        write(destination, triangle_record(triangle, input, textures)?);
                     }
                 }
-                if position.iter().any(|v| !v.is_finite()) {
-                    return Err("Non-finite vertex".into());
+                TriangleView::Quads { values, first, .. } => {
+                    let mut quad = (first + local) / 2;
+                    let mut destinations = destinations;
+                    // Capacity/source/worker splits can start or end halfway through a quad.
+                    // Only the consumed half is validated in those cases.
+                    if (first + local) % 2 != 0 {
+                        let (head, tail) = destinations.split_first_mut().unwrap();
+                        write(
+                            head,
+                            triangle_record(&values[quad].triangle(1), input, textures)?,
+                        );
+                        destinations = tail;
+                        quad += 1;
+                    }
+                    let (pairs, tail) = destinations.as_chunks_mut::<2>();
+                    for pair in pairs {
+                        let records = quad_records(&values[quad], input, textures)?;
+                        write(&mut pair[0], records[0]);
+                        write(&mut pair[1], records[1]);
+                        quad += 1;
+                    }
+                    if let Some(last) = tail.first_mut() {
+                        write(
+                            last,
+                            triangle_record(&values[quad].triangle(0), input, textures)?,
+                        );
+                    }
                 }
-                for value in position {
-                    scalar(value);
-                }
-                scalar(0.0);
+                TriangleView::QuadFragments { .. } => unreachable!("fragments normalized above"),
             }
-            for color in triangle.colors {
-                if color
-                    .iter()
-                    .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
-                {
-                    return Err("Invalid vertex tint".into());
-                }
-                for value in color {
-                    scalar(value);
-                }
-            }
-            for uv in triangle.uvs {
-                if uv.iter().any(|v| !v.is_finite()) {
-                    return Err("Invalid texture coordinate".into());
-                }
-                for value in uv {
-                    scalar(value);
-                }
-            }
-            let texture = textures
-                .get(&triangle.texture_id)
-                .ok_or("Texture has not been captured")?;
-            record[120..124].copy_from_slice(&texture.to_le_bytes());
-            record[124..128].copy_from_slice(&triangle.flags.to_le_bytes());
-            write(destination, record);
+            remaining = tail;
+            triangle_index += count;
         }
         Ok(())
     })
+}
+
+fn triangle_record(
+    triangle: &Triangle,
+    input: &Input<'_>,
+    textures: &BTreeMap<u32, u32>,
+) -> Result<[u8; 128], String> {
+    if input.flags.is_some_and(|flags| flags != triangle.flags) {
+        return Err("Mesh material flags must be uniform".into());
+    }
+    let mut record = [0; 128];
+    let mut cursor = 0;
+    let mut scalar = |value: f32| {
+        record[cursor..cursor + 4].copy_from_slice(&value.to_le_bytes());
+        cursor += 4;
+    };
+    for mut position in triangle.positions {
+        if let Some(offset) = input.offset {
+            for i in 0..3 {
+                position[i] += offset[i];
+            }
+        }
+        if position.iter().any(|v| !v.is_finite()) {
+            return Err("Non-finite vertex".into());
+        }
+        for value in position {
+            scalar(value);
+        }
+        scalar(0.0);
+    }
+    for color in triangle.colors {
+        if color
+            .iter()
+            .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
+        {
+            return Err("Invalid vertex tint".into());
+        }
+        for value in color {
+            scalar(value);
+        }
+    }
+    for uv in triangle.uvs {
+        if uv.iter().any(|v| !v.is_finite()) {
+            return Err("Invalid texture coordinate".into());
+        }
+        for value in uv {
+            scalar(value);
+        }
+    }
+    let texture = textures
+        .get(&triangle.texture_id)
+        .ok_or("Texture has not been captured")?;
+    record[120..124].copy_from_slice(&texture.to_le_bytes());
+    record[124..128].copy_from_slice(&triangle.flags.to_le_bytes());
+    Ok(record)
+}
+
+/// A pair consumes four distinct corners and one uniform color/material. Transform and
+/// validate those once, then write the exact established two 128-byte triangle records.
+fn quad_records(
+    quad: &CompiledQuad,
+    input: &Input<'_>,
+    textures: &BTreeMap<u32, u32>,
+) -> Result<[[u8; 128]; 2], String> {
+    if input.flags.is_some_and(|flags| flags != quad.flags) {
+        return Err("Mesh material flags must be uniform".into());
+    }
+    if quad
+        .color
+        .iter()
+        .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
+    {
+        return Err("Invalid vertex tint".into());
+    }
+    let color = quad.color.map(f32::to_le_bytes);
+    let texture = textures
+        .get(&quad.texture_id)
+        .ok_or("Texture has not been captured")?;
+    let mut positions = [[0; 16]; 4];
+    let mut uvs = [[0; 8]; 4];
+    for i in 0..4 {
+        let mut position = quad.positions[i];
+        if let Some(offset) = input.offset {
+            for axis in 0..3 {
+                position[axis] += offset[axis];
+            }
+        }
+        if position.iter().any(|v| !v.is_finite()) {
+            return Err("Non-finite vertex".into());
+        }
+        if quad.uvs[i].iter().any(|v| !v.is_finite()) {
+            return Err("Invalid texture coordinate".into());
+        }
+        positions[i][..12].copy_from_slice(position.map(f32::to_le_bytes).as_flattened());
+        uvs[i].copy_from_slice(quad.uvs[i].map(f32::to_le_bytes).as_flattened());
+    }
+    let mut records = [[0; 128]; 2];
+    for (record, corners) in records.iter_mut().zip([[0, 1, 2], [2, 3, 0]]) {
+        for (i, corner) in corners.into_iter().enumerate() {
+            record[i * 16..i * 16 + 16].copy_from_slice(&positions[corner]);
+            record[48 + i * 16..64 + i * 16].copy_from_slice(color.as_flattened());
+            record[96 + i * 8..104 + i * 8].copy_from_slice(&uvs[corner]);
+        }
+        record[120..124].copy_from_slice(&texture.to_le_bytes());
+        record[124..128].copy_from_slice(&quad.flags.to_le_bytes());
+    }
+    Ok(records)
 }
 
 #[cfg(test)]
@@ -170,7 +294,16 @@ mod tests {
                 flags: 2,
             })
             .collect();
-        let compact = MeshGeometry::Quads(quads.clone().into());
+        let compact = MeshGeometry::QuadFragments(std::sync::Arc::new(
+            prime_scene::geometry::QuadFragments::new([
+                vec![],
+                quads[..1].to_vec(),
+                quads[1..2_003].to_vec(),
+                vec![],
+                quads[2_003..].to_vec(),
+                vec![],
+            ]),
+        ));
         let raw = Triangle {
             positions: [[0.; 3], [1., 0., 0.], [0., 1., 0.]],
             colors: [
@@ -319,6 +452,59 @@ mod tests {
                 "many small sources share one disjoint batch"
             );
             assert!(pack_ranges(&workers, &mut output, &sources, &BTreeMap::new()).is_err());
+        }
+    }
+    #[test]
+    fn partial_quad_validates_only_consumed_corners_and_reports_late_fragment_errors() {
+        use prime_scene::geometry::{MeshGeometry, QuadFragments};
+        use std::sync::Arc;
+        let good = CompiledQuad {
+            positions: [[0.; 3]; 4],
+            uvs: [[0.; 2]; 4],
+            color: [1.; 4],
+            texture_id: 7,
+            flags: 2,
+        };
+        let textures = BTreeMap::from([(7, 3)]);
+        let workers = CpuWorkers::new(4).unwrap();
+        for fault in 0..5 {
+            let mut bad = good;
+            match fault {
+                0 => bad.positions[3][1] = f32::NAN,
+                1 => bad.uvs[3][0] = f32::INFINITY,
+                2 => bad.color[3] = 1.01,
+                3 => bad.flags = 1,
+                _ => bad.texture_id = 100,
+            }
+            let geometry = MeshGeometry::QuadFragments(Arc::new(QuadFragments::new([
+                vec![],
+                vec![good; 4_103],
+                vec![],
+                vec![bad],
+                vec![],
+            ])));
+            let input = |range| Input {
+                triangles: geometry.view(range),
+                offset: None,
+                flags: Some(2),
+            };
+            let mut output = vec![0; geometry.len() * 128];
+            assert!(
+                pack_ranges(
+                    &workers,
+                    &mut output,
+                    &[input(0..geometry.len())],
+                    &textures
+                )
+                .is_err()
+            );
+            let mut half = [0; 128];
+            assert_eq!(
+                pack_ranges(&workers, &mut half, &[input(8_206..8_207)], &textures).is_ok(),
+                fault < 2
+            );
+            assert!(pack_ranges(&workers, &mut half, &[input(8_207..8_208)], &textures).is_err());
+            pack_ranges(&workers, &mut [], &[input(8_208..8_208)], &textures).unwrap();
         }
     }
     #[test]
