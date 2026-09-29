@@ -90,6 +90,22 @@
 
 纯文档修改核对事实、命令和链接即可。代码修改按受影响的契约选择以下入口，记录实际执行结果及未覆盖范围。
 
+### 大气资产与无窗口验证
+
+普通构建使用仓库内 Safetensors 资产，不在启动时求解多散射。物理输入迁移工具校验旧资源 SHA-256 并保留原始 f32 位模式；离线 GPU 工具仅在调整资产时启用：
+
+```powershell
+python scripts/import-atmosphere.py C:\WorkSpace\prime
+cargo run -p prime_tools --features atmosphere-bake --bin bake-atmosphere --release -- crates/prime-vulkan/assets/atmosphere/default.safetensors
+cargo test -p prime_vulkan --features shader-tests --release --lib atmosphere::tests -- --ignored --skip atmosphere_cost_matrix --nocapture --test-threads=1
+```
+
+GPU 正确性检查设置下面介绍的 validation/sync 环境变量。局部成本测试单独运行：关闭 validation，设置 `PRIME_PROFILE=1`，执行 `cargo test -p prime_vulkan --features shader-tests --release --lib atmosphere_cost_matrix -- --ignored --nocapture --test-threads=1`。该测试比较原生 1920×1080 查询域的旧/新 SkyView 消费，并计量各类 LUT 更新，不代替游戏帧率基准。
+
+游戏手动覆盖 `/time set day/noon/night`、连续日出/日落圆盘、夜间、南北纬与四季黄经、极地昼夜、洞穴与顶棚增删、跑图/升降、旋转/FOV/窗口缩放、离线冻结后时间推进。诊断中的 `atmosphere_*_updates` 是累计重算次数：冻结后稳定不增长，太阳变化不应刷新 Camera-T 或 Aerial-T。场景几何变化刷新 Aerial-S；验证实体或地形阴影不会残留。
+
+### 常规检查
+
 ```powershell
 # 无 GPU / Slang 依赖的协议、引擎边界与算法测试
 cargo test -p prime_minecraft -p prime_scene -p prime_engine --no-default-features --locked
@@ -114,7 +130,7 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```powershell
 $env:PRIME_VK_VALIDATION = '1'
 $env:VK_LAYER_VALIDATE_SYNC = '1'
-cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip packing::perf --skip terrain_upload_cost_matrix --skip surface_steady_cost_matrix --nocapture --test-threads=1
+cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip atmosphere_cost_matrix --skip packing::perf --skip terrain_upload_cost_matrix --skip surface_steady_cost_matrix --nocapture --test-threads=1
 ```
 
 这些测试覆盖 cutout、累积、尺寸变化、增量场景和宿主资源退休；小尺寸/奇数尺寸用于边界检查，不是性能数据。改变宿主集成或捕获时，还需在对应 MC 适配器实际运行，检查主图像与 HUD、资源重载、世界退出等相关生命周期。更新公共接口时验证受影响的两个适配器；编译通过不证明 Mixin 注入或实际 GPU 功能正常。
@@ -142,7 +158,7 @@ cargo test -p prime_scene --lib --locked java_routing_matches_both_versions_actu
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeForeign=true --no-parallel
 ```
 
-手动重点检查地形可以加载和显示、跨区块移动后持续补入与卸载、放置/破坏、资源重载、原版↔PT和离线切换；实体、HUD与粒子应继续可见。再检查红石强度0–15、草/叶/水的群系边界、混合设置0/2/7、`/fillbiome` 改色和资源重载；纯群系变化应 `requested=0`、`changed=0`，只重编译颜色消费者，稳态 `tint_requests/biome_samples=0`。重点对比水/岩浆的流动液面、跨段接缝、水淹半砖/围栏、连接部件和局部遮挡；未知模型仍可显示紫色方块，特殊可见性和未知回调依赖可能不同，按 [PROTOTYPE_HACKS](PROTOTYPE_HACKS.md) 验收。启动前重建 `buildNative`；ABI v6 不能混用旧 DLL。原生1080p画面与实际性能由用户检查。
+手动重点检查地形可以加载和显示、跨区块移动后持续补入与卸载、放置/破坏、资源重载、原版↔PT和离线切换；实体、HUD与粒子应继续可见。再检查红石强度0–15、草/叶/水的群系边界、混合设置0/2/7、`/fillbiome` 改色和资源重载；纯群系变化应 `requested=0`、`changed=0`，只重编译颜色消费者，稳态 `tint_requests/biome_samples=0`。重点对比水/岩浆的流动液面、跨段接缝、水淹半砖/围栏、连接部件和局部遮挡；未知模型仍可显示紫色方块，特殊可见性和未知回调依赖可能不同，按 [PROTOTYPE_HACKS](PROTOTYPE_HACKS.md) 验收。启动前重建 `buildNative`；ABI v7 不能混用旧 DLL。原生1080p画面与实际性能由用户检查。
 
 独立图像诊断入口：
 

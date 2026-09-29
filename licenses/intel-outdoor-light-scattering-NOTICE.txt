@@ -1,0 +1,16 @@
+Outdoor Light Scattering Sample
+Copyright 2017 Intel Corporation
+
+Source: https://github.com/GameTechDev/OutdoorLightScattering
+Reference commit: 3b31b3b8c1aaad8580dc7249b3b79f6c0993d7a8
+
+Licensed under the Apache License, Version 2.0. See intel-outdoor-light-scattering-Apache-2.0.txt.
+
+Prime's epipolar sun-shadow profile is adapted from the reference's
+per-epipolar-slice shadow-map line and one-dimensional min/max hierarchy.
+Prime replaces the raster cascaded shadow maps, screen-space interpolation,
+and one-dimensional texture hierarchy with a conservative profile over
+Prime's world-space ray-traced directional-shadow clipmaps. Uncovered,
+overflowed, or otherwise unknown profile intervals remain shadowed.
+
+Prime PT uses demand-filled leaf columns with the same conservative profile.

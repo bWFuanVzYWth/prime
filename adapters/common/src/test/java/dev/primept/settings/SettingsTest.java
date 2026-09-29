@@ -33,8 +33,8 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=1", "version=0"),
-                     valid.replace("version=1", "version=2"), valid.replace("version=1", ""),
+                     valid.replace("version=2", "version=0"),
+                     valid.replace("version=2", "version=3"), valid.replace("version=2", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
                      valid.replace("renderer.path_tracing=false", "renderer.path_tracing=maybe"),
@@ -55,8 +55,8 @@ final class SettingsTest {
                      () -> original.with(RenderSettings.Control.BOUNCES, 0));
         var bytes = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
         changed.write(bytes, true, RenderSettings.View.NORMAL);
-        assertEquals(48, bytes.position());
-        assertEquals(1, bytes.getInt(0));
+        assertEquals(56, bytes.position());
+        assertEquals(2, bytes.getInt(0));
         assertEquals(1, bytes.getInt(4));
         assertEquals(4, bytes.getInt(8));
         assertEquals(1, bytes.getInt(12));
@@ -68,6 +68,8 @@ final class SettingsTest {
         assertEquals(1f, bytes.getFloat(36));
         assertEquals(128f, bytes.getFloat(40));
         assertEquals(0x13572468, bytes.getInt(44));
+        assertEquals(30, bytes.getInt(48));
+        assertEquals(0, bytes.getInt(52));
     }
     @Test
     void shortcutRequiresBothModifiersAndEscapeKeepsSnapshot() {
@@ -96,6 +98,7 @@ final class SettingsTest {
                 Packets.frame(123, 1024.25, -30.5, 7.25, new float[] {0, 0, -1},
                               new float[] {1, 0, 0}, new float[] {0, 1, 0}, 1.1f, 1920, 1080, 73);
         var packet = ByteBuffer.wrap(frame.clone()).order(ByteOrder.LITTLE_ENDIAN);
+        packet.putFloat(100, 1.3f);
         Packets.resizeFrozenFrame(packet, 701, 999, 0);
         assertArrayEquals(java.util.Arrays.copyOf(frame, 88),
                           java.util.Arrays.copyOf(packet.array(), 88));
@@ -103,6 +106,6 @@ final class SettingsTest {
         assertEquals(999, packet.getInt(92));
         assertEquals(0, packet.getInt(96));
         assertEquals(frame.length, packet.position());
-        assertEquals(0, packet.getInt(100));
+        assertEquals(1.3f, packet.getFloat(100));
     }
 }

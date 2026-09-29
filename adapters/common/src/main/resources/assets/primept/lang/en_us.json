@@ -14,7 +14,7 @@
   "primept.settings.render.offline_samples": "Offline Samples per Frame",
   "primept.settings.render.offline_samples.tooltip": "Independent samples added per pixel each frame. Realtime always uses 1; changing this preserves accumulation.",
   "primept.settings.lighting.sun_ev_quarters": "Sun Intensity",
-  "primept.settings.lighting.sun_ev_quarters.tooltip": "Exposure stops relative to the default sun; fixed while frozen. Sun direction is currently fixed.",
+  "primept.settings.lighting.sun_ev_quarters.tooltip": "Stops relative to the default sun. Direction follows game time, latitude and season; fixed while frozen.",
   "primept.settings.lighting.sky_ev_quarters": "Sky Intensity",
   "primept.settings.lighting.sky_ev_quarters.tooltip": "Exposure stops relative to the default sky; fixed while frozen.",
   "primept.settings.display.exposure_ev_quarters": "Exposure",
@@ -30,5 +30,9 @@
   "primept.settings.view.linear_depth": "Linear Depth",
   "primept.settings.view.normal": "World Normals",
   "primept.settings.diagnostics.depth_range": "Depth View Range (blocks)",
-  "primept.settings.diagnostics.depth_range.tooltip": "Changes only the depth preview scale. Sky is black; the actual depth texture remains unchanged."
+  "primept.settings.diagnostics.depth_range.tooltip": "Changes only the depth preview scale. Sky is black; the actual depth texture remains unchanged.",
+  "primept.settings.astronomy.latitude_degrees": "Observer latitude",
+  "primept.settings.astronomy.latitude_degrees.tooltip": "Positive north, negative south. Default 30° N. Game time drives solar hour angle; fixed while frozen.",
+  "primept.settings.astronomy.solar_longitude_degrees": "Season · solar longitude",
+  "primept.settings.astronomy.solar_longitude_degrees.tooltip": "0° March equinox, 90° June solstice, 180° September equinox, 270° December solstice. Independent of game day count; fixed while frozen."
 }

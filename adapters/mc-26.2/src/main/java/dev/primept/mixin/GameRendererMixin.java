@@ -35,7 +35,8 @@ public abstract class GameRendererMixin {
     primept$render(CallbackInfo callback) {
         var renderer = (GameRenderer)(Object)this;
         PrimeClient.render(renderer.gameRenderState().levelRenderState.cameraRenderState,
-                           renderer.mainRenderTarget());
+                           renderer.mainRenderTarget(),
+                           renderer.gameRenderState().levelRenderState.skyRenderState.sunAngle);
     }
 
     @Inject(method = "renderItemInHand", at = @At("HEAD"), cancellable = true)

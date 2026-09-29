@@ -138,6 +138,9 @@ impl Renderer {
             context,
             pipeline,
             geometry: None,
+            atmosphere: None,
+            atmosphere_scene_revision: 0,
+            environment: Default::default(),
             workers: Arc::new(prime_scene::workers::CpuWorkers::configured()?),
             output: None,
             camera: None,
@@ -231,16 +234,34 @@ impl Renderer {
     pub fn set_scene_frozen(&mut self, frozen: bool) {
         self.scene_frozen = frozen;
     }
+
+    pub fn set_environment(
+        &mut self,
+        environment: prime_scene::environment::Environment,
+    ) -> Result<(), String> {
+        let environment = environment.validate()?;
+        if self.environment != environment {
+            self.samples = 0;
+            self.environment = environment;
+        }
+        Ok(())
+    }
     /// Last attempted host recording; fixed-size counters are retained, formatting is on demand.
     pub fn cpu_diagnostics(&self) -> String {
         format!(
-            "{} gpu_supported={} gpu_completed_serial={} gpu_preparation_ms={:.3} gpu_render_ms={:.3} gpu_total_ms={:.3} gpu_sample=delayed_completed_interval",
+            "{} gpu_supported={} gpu_completed_serial={} gpu_preparation_ms={:.3} gpu_render_ms={:.3} gpu_total_ms={:.3} gpu_sample=delayed_completed_interval atmosphere_sky_updates={} atmosphere_camera_t_updates={} atmosphere_aerial_s_updates={} atmosphere_aerial_t_updates={}",
             self.cpu_profile.last_report(),
             self.host_query != vk::QueryPool::null(),
             self.last_gpu.serial,
             self.last_gpu.preparation_ns as f64 / 1e6,
             self.last_gpu.render_ns as f64 / 1e6,
-            self.last_gpu.total_ns as f64 / 1e6
+            self.last_gpu.total_ns as f64 / 1e6,
+            self.atmosphere.as_ref().map_or(0, |a| a.sky_updates),
+            self.atmosphere
+                .as_ref()
+                .map_or(0, |a| a.transmittance_updates),
+            self.atmosphere.as_ref().map_or(0, |a| a.aerial_updates),
+            self.atmosphere.as_ref().map_or(0, |a| a.aerial_t_updates)
         )
     }
 
@@ -376,6 +397,7 @@ impl Renderer {
             let started = cpu.start();
             if self.geometry.as_ref().is_none_or(|g| g.needs_update(scene)) {
                 cpu.static_updates += 1;
+                self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
                 self.descriptor_keys = [[0; 10]; FRAME_SLOTS];
                 if let Some(geometry) = &mut self.geometry
                     && geometry.same_owner(scene)
@@ -397,6 +419,7 @@ impl Renderer {
                 .unwrap()
                 .prepare_dynamic(&self.context, &scene, instances, slot, cpu)?;
             if dynamic_changed {
+                self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
                 self.samples = 0;
             }
             if bindings_changed {
@@ -435,6 +458,18 @@ impl Renderer {
             sample_index
         };
         cpu.finish(Stage::Output, started);
+        if self.atmosphere.is_none() {
+            self.atmosphere = Some(crate::atmosphere::Atmosphere::new(&self.context)?);
+        }
+        self.atmosphere.as_mut().unwrap().prepare(
+            self.environment,
+            camera,
+            width as f32 / height as f32,
+            slot,
+            self.geometry
+                .as_ref()
+                .map(|g| (g, self.atmosphere_scene_revision)),
+        )?;
         Ok(())
     }
 
@@ -607,7 +642,10 @@ impl Renderer {
                 vk::PipelineBindPoint::COMPUTE,
                 pipeline.layout,
                 0,
-                &[pipeline.descriptors[slot]],
+                &[
+                    pipeline.descriptors[slot],
+                    self.atmosphere.as_ref().unwrap().descriptor(slot),
+                ],
                 &[],
             );
             self.context.device.cmd_push_constants(

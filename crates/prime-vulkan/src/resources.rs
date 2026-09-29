@@ -589,6 +589,16 @@ impl Context {
         self._instance.instance.handle().as_raw()
     }
 
+    pub fn supports_linear_sampling(&self, format: vk::Format) -> bool {
+        unsafe {
+            self._instance
+                .instance
+                .get_physical_device_format_properties(self.physical, format)
+        }
+        .optimal_tiling_features
+        .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR)
+    }
+
     /// Begin recording into the host's transient command buffer, whose completion
     /// is identified by a future value on the host submission timeline.
     pub fn begin_host_record(

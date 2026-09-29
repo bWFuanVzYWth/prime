@@ -11,7 +11,7 @@ use crate::{
 #[path = "protocol_capacity_tests.rs"]
 mod capacity_tests;
 
-pub const ABI_VERSION: u32 = 6;
+pub const ABI_VERSION: u32 = 7;
 pub const MAGIC: u32 = 0x5450_5250;
 pub const MAX_PACKET_BYTES: usize = 256 * 1024 * 1024;
 const MAX_TEXTURE_BYTES: usize = 512 * 1024 * 1024;
@@ -1035,6 +1035,7 @@ pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub sample_index: u32,
+    pub solar_hour_angle: f32,
 }
 impl Frame {
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
@@ -1065,7 +1066,7 @@ impl Frame {
         let width = input.u32()?;
         let height = input.u32()?;
         let sample_index = input.u32()?;
-        input.zero()?;
+        let solar_hour_angle = input.f32()?;
         input.finish()?;
         crate::extent::RenderExtent::new(width, height)?;
         Ok(Self {
@@ -1081,6 +1082,7 @@ impl Frame {
             width,
             height,
             sample_index,
+            solar_hour_angle,
         })
     }
     pub fn anchor(&self) -> [f64; 3] {

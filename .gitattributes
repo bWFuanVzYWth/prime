@@ -18,6 +18,7 @@
 *.woff -text
 *.woff2 -text
 *.bin -text
+*.safetensors -text
 *.spv -text
 *.dll -text
 *.so -text

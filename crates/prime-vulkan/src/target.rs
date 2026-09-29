@@ -21,6 +21,14 @@ impl Image {
         height: u32,
         format: vk::Format,
     ) -> Result<Self, String> {
+        Self::with_extent(context, [width, height, 1], format)
+    }
+
+    pub fn with_extent(
+        context: &Arc<Context>,
+        extent: [u32; 3],
+        format: vk::Format,
+    ) -> Result<Self, String> {
         let mut result = Self {
             context: context.clone(),
             image: vk::Image::null(),
@@ -32,12 +40,16 @@ impl Image {
                 .device
                 .create_image(
                     &vk::ImageCreateInfo::default()
-                        .image_type(vk::ImageType::TYPE_2D)
+                        .image_type(if extent[2] == 1 {
+                            vk::ImageType::TYPE_2D
+                        } else {
+                            vk::ImageType::TYPE_3D
+                        })
                         .format(format)
                         .extent(vk::Extent3D {
-                            width,
-                            height,
-                            depth: 1,
+                            width: extent[0],
+                            height: extent[1],
+                            depth: extent[2],
                         })
                         .mip_levels(1)
                         .array_layers(1)
@@ -46,6 +58,7 @@ impl Image {
                         .usage(
                             vk::ImageUsageFlags::STORAGE
                                 | vk::ImageUsageFlags::SAMPLED
+                                | vk::ImageUsageFlags::TRANSFER_DST
                                 | vk::ImageUsageFlags::TRANSFER_SRC,
                         )
                         .sharing_mode(vk::SharingMode::EXCLUSIVE),
@@ -79,7 +92,11 @@ impl Image {
                 .create_image_view(
                     &vk::ImageViewCreateInfo::default()
                         .image(result.image)
-                        .view_type(vk::ImageViewType::TYPE_2D)
+                        .view_type(if extent[2] == 1 {
+                            vk::ImageViewType::TYPE_2D
+                        } else {
+                            vk::ImageViewType::TYPE_3D
+                        })
                         .format(format)
                         .subresource_range(color_range()),
                     None,

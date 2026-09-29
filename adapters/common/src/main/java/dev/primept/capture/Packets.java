@@ -6,7 +6,7 @@ import java.util.List;
 
 /** Wire encoding only. Geometry/material interpretation belongs to Rust. */
 public final class Packets {
-    public static final int ABI_VERSION = 6;
+    public static final int ABI_VERSION = 7;
     public static final int MAGIC = 0x54505250;
     private Packets() {}
 
@@ -117,6 +117,12 @@ public final class Packets {
     public static void writeFrame(ByteBuffer bytes, long epoch, double x, double y, double z,
                                   float[] forward, float[] right, float[] up, float fovY, int width,
                                   int height, int sample) {
+        writeFrame(bytes, epoch, x, y, z, forward, right, up, fovY, width, height, sample, 0);
+    }
+
+    public static void writeFrame(ByteBuffer bytes, long epoch, double x, double y, double z,
+                                  float[] forward, float[] right, float[] up, float fovY, int width,
+                                  int height, int sample, float solarHourAngle) {
         if (bytes.capacity() != 104)
             throw new IllegalArgumentException("Frame packet requires 104 bytes");
         bytes.clear().order(ByteOrder.LITTLE_ENDIAN);
@@ -134,7 +140,7 @@ public final class Packets {
             for (float component : basis)
                 bytes.putFloat(component);
         }
-        bytes.putFloat(fovY).putInt(width).putInt(height).putInt(sample).putInt(0);
+        bytes.putFloat(fovY).putInt(width).putInt(height).putInt(sample).putFloat(solarHourAngle);
     }
 
     /** Reuses the last rendered camera packet; frozen frames transmit only the frame ABI, no scene data. */

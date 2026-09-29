@@ -8,10 +8,12 @@ description = "Vulkan resource ownership and Slang path-tracing execution for Pr
 
 [features]
 shader-tests = []
+atmosphere-bake = []
 
 [dependencies]
 ash = { workspace = true }
 prime_scene = { workspace = true }
+safetensors = "0.8.0"
 
 [dev-dependencies]
 mimalloc.workspace = true

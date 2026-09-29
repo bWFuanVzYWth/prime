@@ -483,6 +483,122 @@ mod tests {
     use super::*;
     use prime_scene::scene::{SceneMesh, Texture, Triangle};
 
+    #[test]
+    #[ignore = "requires Vulkan; native 1080p atmosphere lifecycle/cost fixture, not a game benchmark"]
+    fn host_atmosphere_updates_with_two_submissions_in_flight() {
+        let mut host = HostBenchmark::new(1920, 1080).unwrap();
+        let mut scene = Scene {
+            epoch: 1,
+            revision: 1,
+            ..Default::default()
+        };
+        let roof = |height| {
+            vec![
+                Triangle {
+                    positions: [
+                        [-100., height, -100.],
+                        [100., height, -100.],
+                        [100., height, 100.],
+                    ],
+                    colors: [[0.5, 0.5, 0.5, 1.]; 3],
+                    uvs: [[0.; 2]; 3],
+                    texture_id: 0,
+                    flags: 0,
+                },
+                Triangle {
+                    positions: [
+                        [-100., height, -100.],
+                        [100., height, 100.],
+                        [-100., height, 100.],
+                    ],
+                    colors: [[0.5, 0.5, 0.5, 1.]; 3],
+                    uvs: [[0.; 2]; 3],
+                    texture_id: 0,
+                    flags: 0,
+                },
+            ]
+        };
+        scene.dynamic.revision = 1;
+        scene.dynamic.triangles = roof(20.).into();
+        let mut camera = Camera {
+            position: [0.; 3],
+            forward: [0., 0., -1.],
+            right: [1., 0., 0.],
+            up: [0., 1., 0.],
+            vertical_fov_radians: 1.0,
+        };
+        let mut env = prime_scene::environment::Environment::default();
+        let mut serial = 0;
+        let mut completed = vec![];
+        const SAMPLES: usize = 256;
+        for kind in ["warmup", "static", "sun", "view", "geometry"] {
+            for i in 0..SAMPLES {
+                match kind {
+                    "sun" => {
+                        let angle = 0.2 + i as f32 * 0.0001;
+                        env.sun_direction =
+                            [-angle.sin(), angle.cos() * 0.8660254, angle.cos() * 0.5];
+                    }
+                    "view" => camera.vertical_fov_radians += 0.0001,
+                    "geometry" => {
+                        scene.dynamic.revision += 1;
+                        scene.dynamic.triangles = roof(20. + (i % 20 + 1) as f32 * 0.1).into();
+                    }
+                    _ => {}
+                }
+                host.state
+                    .as_mut()
+                    .unwrap()
+                    .renderer
+                    .as_mut()
+                    .unwrap()
+                    .set_environment(env)
+                    .unwrap();
+                host.enqueue(&scene, &camera, serial).unwrap();
+                serial += 1;
+            }
+            let samples = host.drain().unwrap();
+            // Settle each workload before comparing; retain every warmup/outlier in the raw log.
+            let measured = &samples[SAMPLES / 2..];
+            let mut total: Vec<_> = measured.iter().map(|s| s.gpu_ns as f64 / 1e6).collect();
+            total.sort_by(f64::total_cmp);
+            let mut prep: Vec<_> = measured
+                .iter()
+                .filter_map(|s| s.preparation_ns.map(|n| n as f64 / 1e6))
+                .collect();
+            prep.sort_by(f64::total_cmp);
+            let raw: Vec<_> = samples
+                .iter()
+                .map(|s| (s.serial, s.gpu_ns, s.preparation_ns, s.render_ns))
+                .collect();
+            eprintln!(
+                "atmosphere host 1920x1080 two_triangles {kind}: total GPU p50={:.4} p95={:.4} ms; preparation p50={:?} p95={:?} ms; measured=last {}; samples={raw:?}",
+                total[total.len() / 2],
+                total[(total.len() * 95).div_ceil(100) - 1],
+                prep.get(prep.len() / 2),
+                prep.get((prep.len() * 95).div_ceil(100).saturating_sub(1)),
+                measured.len()
+            );
+            completed.extend(samples);
+        }
+        assert_eq!(completed.len(), 5 * SAMPLES);
+        let a = host
+            .state
+            .as_ref()
+            .unwrap()
+            .renderer
+            .as_ref()
+            .unwrap()
+            .atmosphere
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            (a.sky_updates, a.transmittance_updates, a.aerial_t_updates),
+            (SAMPLES as u64 + 1, 1, SAMPLES as u64 + 1)
+        );
+        assert_eq!(a.aerial_updates, 3 * SAMPLES as u64 + 1);
+    }
+
     fn packet(op: u32) -> Vec<u8> {
         let mut bytes = Vec::new();
         for value in [

@@ -20,6 +20,37 @@ fn main() {
         .unwrap_or_else(|| PathBuf::from("slangc"));
     compile(&compiler, "shaders/path_trace.slang", "path_trace.spv");
     compile(&compiler, "shaders/realtime.slang", "realtime.spv");
+    for name in [
+        "prepare",
+        "sky_update",
+        "transmittance_update",
+        "aerial_update",
+        "aerial_transmittance_update",
+        "shadow_demand",
+        "shadow_resolve",
+    ] {
+        compile(
+            &compiler,
+            &format!("shaders/atmosphere/{name}.slang"),
+            &format!("atmosphere_{name}.spv"),
+        );
+    }
+    if env::var_os("CARGO_FEATURE_ATMOSPHERE_BAKE").is_some() {
+        for name in [
+            "transmittance",
+            "directions",
+            "incident",
+            "moments",
+            "multi_scattering",
+            "ground",
+        ] {
+            compile(
+                &compiler,
+                &format!("shaders/atmosphere/bake/{name}.slang"),
+                &format!("atmosphere_bake_{name}.spv"),
+            );
+        }
+    }
     compile(
         &compiler,
         "shaders/realtime_display.slang",
@@ -33,6 +64,11 @@ fn main() {
                 &format!("{name}.spv"),
             );
         }
+        compile(
+            &compiler,
+            "tests/shaders/atmosphere.slang",
+            "atmosphere_test.spv",
+        );
     }
 }
 

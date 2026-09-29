@@ -10,11 +10,12 @@
 | `display/prime_drt.slang` | 当前可替换的显示策略；显式显示变换与艺术调整，只依赖颜色数学库 |
 | `ray_query.slang` | 硬件 Ray Query、实际材质/覆盖率、交点；只依赖起点数学库 |
 | `frame.slang` | 入口共享的显式帧参数类型，无全局绑定 |
+| `atmosphere/` | 四波长物理场、预计算 solver、天空/太阳/空气透视生产和消费；见[大气契约](atmosphere.md) |
 | `transport.slang` | 共同的漫反射积分、采样域与首次命中 guides，显式接收资源与帧 |
 | `path_trace.slang` | 离线累积及显示入口 |
 | `realtime.slang` / `realtime_display.slang` | 实时噪声/深度/法线写入与 GPU 显示/诊断入口 |
 
-库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口显式传入 `TraceScene` 与显示参数；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。最长生产依赖链为入口 → transport → ray_query → ray_offset，不按单函数拆文件。构建跟踪整个 shader 目录，修改被导入模块也必须重新编译。
+库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口显式传入 `TraceScene` 与显示参数；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`，消费接收 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建跟踪整个 shader 目录，修改被导入模块也必须重新编译。
 
 `primeDRT` 不属于基础库，也不承诺稳定算法或参数接口。它同时负责显式显示变换与艺术调整，之后可以修改或被其他显示策略替代；`math/` 不依赖它。当前入口直接选择 primeDRT，不为尚不存在的替代方案引入注册表或额外抽象。策略专用 Rust 参数命名为 `PrimeDrtSettings`，与通用颜色变换分开；测试入口也与数学基础测试分离。
 
@@ -36,7 +37,7 @@ Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样�
 
 生产 `R=ceil(log2(max(width,height)))`，`S=8`（原生 1080p 的 Morton 索引共 30 位，使用单字快路径）。相机 jitter 使用 domain 0；每个反弹从 `1+4*bounce` 起依次分配表面 coverage、阴影 coverage、BSDF 二维样本、roulette。分支不会推进共享 RNG。超过 256 个样本时切换全局 scramble，开始新的完整样本集；不声称它是无限延长的同一个 Sobol net。完整样本集/对齐像素邻域的均匀性不等于早期任意前缀的质量保证。
 
-[表面编译原型](surface-compiler.md)的显式灯使用独立的 `512+4*bounce` domain，依次用于世界/局部树选择、三角形二维采样、采样点 coverage 和有限阴影 coverage。静态灯 NEE 与发光命中使用同版本 proposal 的 MIS；既有太阳/天空路径保持原 domain。
+[表面编译原型](surface-compiler.md)的显式灯使用独立的 `512+4*bounce` domain，依次用于世界/局部树选择、三角形二维采样、采样点 coverage 和有限阴影 coverage。静态灯 NEE 与发光命中使用同版本 proposal 的 MIS；太阳圆盘方向使用独立的 `1024+bounce` domain，与太阳 coverage、BSDF 和显式灯互不重叠。
 
 实现复用 domain hash，以固定双字移位代替通用 64 位移位分支，将 Sobol Y 变换移到反向位序，抵消紧邻的 Sobol/Owen bit reverse。没有额外采样纹理或跨帧随机状态。上述是运算路径变化，不代表已经测得整帧提速。
 

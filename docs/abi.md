@@ -1,15 +1,15 @@
-# FFM ABI v6
+# FFM ABI v7
 
 Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本号用于边界校验，不承诺不同发布之间的二进制兼容；不可仅凭版本号相同混用新旧 JAR 和引擎。双 Minecraft 适配器共享该构建的同一核心，不意味着共享不同发布的内部协议。
 
-导出原型以 [`prime.h`](../crates/prime-engine/include/prime.h) 为准。库名为 `prime_engine`，C 导出 `prime_*` 不变；26.2/26.3 适配器使用同一引擎。全部整数 little-endian，浮点 IEEE754，结构通过字节读取而非 C 对齐结构读取。长度为字节数，所有保留字段必须为零。`prime_create(6)` 返回非零 handle；status=0 成功，-1 失败。`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），输出容量允许时写入终止 NUL。
+导出原型以 [`prime.h`](../crates/prime-engine/include/prime.h) 为准。库名为 `prime_engine`，C 导出 `prime_*` 不变；26.2/26.3 适配器使用同一引擎。全部整数 little-endian，浮点 IEEE754，结构通过字节读取而非 C 对齐结构读取。长度为字节数，所有保留字段必须为零。`prime_create(7)` 返回非零 handle；status=0 成功，-1 失败。`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），输出容量允许时写入终止 NUL。
 
 ## 公共头（24 字节）
 
 | Offset | 类型 | 语义 |
 | --- | --- | --- |
 | 0 | u32 | magic `0x54505250`，字节 `PRPT` |
-| 4 | u32 | ABI version=6 |
+| 4 | u32 | ABI version=7 |
 | 8 | u32 | operation |
 | 12 | u32 | reserved=0 |
 | 16 | u64 | epoch；0 无效 |
@@ -28,7 +28,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本�
 - **12 route section**：本次局部模型放置与流体源描述，native 编译后原子替换全部层。
 - **13 routed resources**：局部模型定义与源 owner 退休，先完整验证再修改字典。
 
-ABI v6 提供下面的 MC 原始源批次接口，保留场景协议、参数粒子与诊断查询。当前生产地形走 `prime_mc_plan` / `prime_mc_sections`；op8/10/11/12/13 保留给封闭网格输入和 CPU 对照夹具，不与新生产者混用。op2 无生产消费者，未知操作及历史 ABI 直接拒绝。
+ABI v7 提供下面的 MC 原始源批次接口，保留场景协议、参数粒子与诊断查询。当前生产地形走 `prime_mc_plan` / `prime_mc_sections`；op8/10/11/12/13 保留给封闭网格输入和 CPU 对照夹具，不与新生产者混用。op2 无生产消费者，未知操作及历史 ABI 直接拒绝。
 
 ## MC 源批次（source version 4）
 
@@ -196,7 +196,7 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 | 84 | f32 | 垂直 FOV，弧度 |
 | 88 / 92 | u32 | width / height |
 | 96 | u32 | sample index，0 请求重置累积 |
-| 100 | u32 | reserved |
+| 100 | f32 | 实际太阳时角（弧度），必须有限；Rust MC 适配层生成大气太阳方向 |
 
 原生在相机、场景、尺寸变化或 sample index=0 时重置累积；其余样本计数由 renderer 自己维护。
 
@@ -237,18 +237,19 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 
 非空静态层、raw 和原型/实例在提交前必须上传引用的纹理；缺失引用明确报错。所有调用必须在创建 handle 的 OS 线程进行。`prime_destroy` 退休身份，重复释放会报错。调用方必须保证原生指针指向有效读写区域；长度校验不能验证任意地址。
 
-## 设置包（独立 schema v1）
+## 设置包（独立 schema v2）
 
-`prime_configure(handle, data, length)` 借用恰好 48 字节，返回前解析，不保留指针。它没有场景命令头；设置版本独立于场景 ABI。宿主模式改变时必须先提交 encoder，再从外层帧边界调用；native 等待旧 GPU 使用完成，释放旧模式资源后创建新资源。普通显示控制变化不需要切换等待。
+`prime_configure(handle, data, length)` 借用恰好 56 字节，返回前解析，不保留指针。它没有场景命令头；设置版本独立于场景 ABI。宿主模式改变时必须先提交 encoder，再从外层帧边界调用；native 等待旧 GPU 使用完成，释放旧模式资源后创建新资源。普通显示控制变化不需要切换等待。
 
 | Offset | 类型 | 字段 |
 | --- | --- | --- |
-| 0 / 4 | u32 | settings version=1 / mode（0 实时、1 离线） |
+| 0 / 4 | u32 | settings version=2 / mode（0 实时、1 离线） |
 | 8 / 12 | u32 | 最大路径顶点数 / 离线每帧样本数，均为 1–64 |
 | 16 / 20 / 24 | f32 | 曝光乘数 `[1/4096,4096]` / hue `[0,1]` / saturation `[0,0.5]` |
 | 28 | u32 | view：0 最终输出、1 噪声色、2 线性深度、3 世界法线 |
 | 32 / 36 | f32 | 太阳 / 天空乘数，均为 `[1/256,256]` |
 | 40 | f32 | 深度预览范围 `[1,4096]`，不影响实际深度 |
 | 44 | u32 | 采样 seed，Java 当前固定 `0x13572468` |
+| 48 / 52 | i32 / u32 | 观测纬度 -90…90° / 太阳黄经 0…359°，均为整数度 |
 
 非法版本、长度、枚举或数值拒绝整个包。冻结要求当前场景对应最近一次成功录制帧，冻结期间拒绝全部 `prime_submit`；输入帧仍须合法，native 只采用其中宽高/序号，其余使用冻结相机。场景有效期、资源上传与可变显示参数见 [渲染模式契约](renderers.md)。

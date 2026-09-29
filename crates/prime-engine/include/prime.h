@@ -9,7 +9,7 @@ extern "C" {
 // Zero status means success. On -1 call prime_last_error on the same thread.
 uint32_t prime_abi_version(void);
 uint64_t prime_create(uint32_t abi_version);
-// ABI v6. Production terrain uses prime_mc_plan/prime_mc_sections.
+// ABI v7. Production terrain uses prime_mc_plan/prime_mc_sections.
 // op12/op13 remain detached source/geometry fixtures; op6 supports parametric billboards.
 // op8: header[24], section/sequence:u64[2], origin:f64[3], layer_count/reserved:u32[2],
 // then each layer's layer/texture/flags/topology/count/stride/position/color/uv/reserved:u32[10]
@@ -61,8 +61,9 @@ int32_t prime_render(uint64_t handle, const uint8_t *frame, uint64_t length,
 // host[48] LE: instance/physical/device/queue/timeline u64, family u32, reserved u32=0.
 // Caller enables AS/rayQuery/BDA and timeline features; host objects remain caller-owned.
 int32_t prime_attach_vulkan(uint64_t handle, const uint8_t *host, uint64_t length);
-// Settings[48] LE: version=1/mode/bounces/offline_samples u32[4],
+// Settings[56] LE: version=2/mode/bounces/offline_samples u32[4],
 // exposure/hue/saturation f32[3], diagnostic_view u32, sun/sky/depth_range f32[3], seed u32.
+// latitude_degrees i32 (-90..90), solar_longitude_degrees u32 (0..359).
 // mode=0 realtime, 1 frozen offline; view=0 output, 1 noisy, 2 depth, 3 normal.
 // Mode changes occur outside recording: submit the host encoder first, then call.
 // Native waits for completion and destroys old mode resources before creating new ones.

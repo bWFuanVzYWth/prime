@@ -4,6 +4,7 @@ import "frame.slang";
 import "transport.slang";
 import "ray_query.slang";
 import "display/prime_drt.slang";
+#include "atmosphere/consumer_bindings.slang"
 
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure scene;
 [[vk::binding(2, 0)]] StructuredBuffer<uint4> textures;
@@ -22,7 +23,9 @@ import "display/prime_drt.slang";
     uint count = frame.dimensions.z;
     float3 mean = count == 0 ? float3(0) : accumulation[pixel].rgb;
     for (uint i = 0; i < frame.dimensions.w; ++i) {
-        float3 sample = traceSample(resources, frame, id.xy, frame.target.y + i).radiance;
+        float3 sample =
+                traceSample(resources, atmosphereEnvironment(), frame, id.xy, frame.target.y + i)
+                        .radiance;
         mean += (sample - mean) / float(++count);
     }
     accumulation[pixel] = float4(mean, 1);

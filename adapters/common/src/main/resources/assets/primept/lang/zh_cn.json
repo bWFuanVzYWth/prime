@@ -14,7 +14,7 @@
   "primept.settings.render.offline_samples": "离线每帧采样数",
   "primept.settings.render.offline_samples.tooltip": "每像素每帧追加的独立样本数。实时固定为 1；修改此项保留已有累积。",
   "primept.settings.lighting.sun_ev_quarters": "太阳强度",
-  "primept.settings.lighting.sun_ev_quarters.tooltip": "相对于默认太阳的曝光档数，冻结期间固定。当前太阳方向固定。",
+  "primept.settings.lighting.sun_ev_quarters.tooltip": "相对于默认太阳的曝光档数。太阳方位随游戏时间、观测纬度和季节变化，冻结期间固定。",
   "primept.settings.lighting.sky_ev_quarters": "天空强度",
   "primept.settings.lighting.sky_ev_quarters.tooltip": "相对于默认天空的曝光档数，冻结期间固定。",
   "primept.settings.display.exposure_ev_quarters": "曝光",
@@ -30,5 +30,9 @@
   "primept.settings.view.linear_depth": "线性深度",
   "primept.settings.view.normal": "世界法线",
   "primept.settings.diagnostics.depth_range": "深度显示范围（方块）",
-  "primept.settings.diagnostics.depth_range.tooltip": "仅改变深度诊断的灰度比例。天空显示黑色，不改变实际深度纹理。"
+  "primept.settings.diagnostics.depth_range.tooltip": "仅改变深度诊断的灰度比例。天空显示黑色，不改变实际深度纹理。",
+  "primept.settings.astronomy.latitude_degrees": "观测纬度",
+  "primept.settings.astronomy.latitude_degrees.tooltip": "北纬为正、南纬为负。默认北纬 30°；游戏时间驱动太阳时角，冻结期间固定。",
+  "primept.settings.astronomy.solar_longitude_degrees": "季节 · 太阳黄经",
+  "primept.settings.astronomy.solar_longitude_degrees.tooltip": "0° 春分、90° 夏至、180° 秋分、270° 冬至（北半球）。与游戏天数独立，冻结期间固定。"
 }

@@ -215,6 +215,26 @@ public bool traceOcclusion(TraceScene resources, float3 origin, float3 direction
     return traceOcclusionRange(resources, origin, direction, coverageSeed, 100000.0);
 }
 
+// Atmosphere clipmap: closest blocker without surface reconstruction. Alpha uses the
+// current scene's coverage contract, with a fixed seed for a stable cached column.
+public float traceBlockerDistance(TraceScene resources, float3 origin, float3 direction,
+                                  float limit) {
+    RayDesc ray = {origin, 0.0, direction, limit};
+    RayQuery<RAY_FLAG_NONE> query;
+    query.TraceRayInline(resources.acceleration, RAY_FLAG_NONE, 0xff, ray);
+    while (query.Proceed()) {
+        if (query.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) {
+            SurfaceRecord tri =
+                    loadSurface(resources, query.CandidateInstanceID(),
+                                query.CandidateGeometryIndex(), query.CandidatePrimitiveIndex());
+            if (acceptsCoverage(resources, tri, query.CandidateTriangleBarycentrics(),
+                                origin + direction * query.CandidateTriangleRayT(), 0))
+                query.CommitNonOpaqueTriangleHit();
+        }
+    }
+    return query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? query.CommittedRayT() : limit;
+}
+
 public bool hasLocalLights(TraceScene resources) {
     return resources.staticTrianglePages[0].lightCount != 0;
 }

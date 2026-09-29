@@ -10,12 +10,18 @@ description = "CPU capture-protocol benchmarks, native-1080p GPU fixtures and im
 [features]
 default = ["vulkan"]
 vulkan = ["dep:prime_vulkan", "dep:png"]
+atmosphere-bake = ["vulkan", "prime_vulkan/atmosphere-bake"]
 
 [dependencies]
 mimalloc.workspace = true
 prime_scene.workspace = true
 prime_vulkan = { workspace = true, optional = true }
 png = { workspace = true, optional = true }
+
+[[bin]]
+name = "bake-atmosphere"
+path = "src/bake_atmosphere.rs"
+required-features = ["atmosphere-bake"]
 
 [[bin]]
 name = "prime-pt-smoke"

@@ -4,6 +4,7 @@
 mod biome;
 mod biome_source;
 mod compile;
+pub mod environment;
 mod fluid;
 mod model;
 mod shape;

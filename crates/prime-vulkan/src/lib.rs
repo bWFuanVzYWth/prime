@@ -1,6 +1,9 @@
 //! Hardware ray-query renderer. Production records into the host Vulkan
 //! submission and target; synchronous readback is restricted to offline diagnostics.
 mod arena;
+mod atmosphere;
+#[cfg(feature = "atmosphere-bake")]
+pub use atmosphere::bake_default_atmosphere;
 mod benchmark;
 mod context;
 mod cpu_profile;
@@ -52,6 +55,7 @@ struct Pipeline {
     context: Arc<Context>,
     layout: vk::PipelineLayout,
     descriptor_layout: vk::DescriptorSetLayout,
+    environment_layout: vk::DescriptorSetLayout,
     pool: vk::DescriptorPool,
     descriptors: [vk::DescriptorSet; FRAME_SLOTS],
     pipelines: [vk::Pipeline; 3],
@@ -72,6 +76,9 @@ impl Drop for Pipeline {
                 self.context
                     .device
                     .destroy_descriptor_set_layout(self.descriptor_layout, None);
+                self.context
+                    .device
+                    .destroy_descriptor_set_layout(self.environment_layout, None);
             }
         }
     }
@@ -83,6 +90,7 @@ impl Pipeline {
                 context: context.clone(),
                 layout: vk::PipelineLayout::null(),
                 descriptor_layout: vk::DescriptorSetLayout::null(),
+                environment_layout: vk::DescriptorSetLayout::null(),
                 pool: vk::DescriptorPool::null(),
                 descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
                 pipelines: [vk::Pipeline::null(); 3],
@@ -116,7 +124,8 @@ impl Pipeline {
                     None,
                 )
                 .map_err(|e| error("Create path-tracing descriptor layout", e))?;
-            let layouts = [result.descriptor_layout];
+            result.environment_layout = atmosphere::consumer_layout(context)?;
+            let layouts = [result.descriptor_layout, result.environment_layout];
             let push = [vk::PushConstantRange::default()
                 .stage_flags(vk::ShaderStageFlags::COMPUTE)
                 .offset(0)
@@ -267,6 +276,9 @@ pub struct Renderer {
     // Only the selected backend's pipeline and sized output exist; scene geometry is shared.
     pipeline: Option<Pipeline>,
     geometry: Option<Geometry>,
+    atmosphere: Option<atmosphere::Atmosphere>,
+    atmosphere_scene_revision: u64,
+    environment: prime_scene::environment::Environment,
     output: Option<Output>,
     camera: Option<Camera>,
     samples: u32,
@@ -316,6 +328,14 @@ mod tests {
     fn gpu_dynamic_snapshot_alpha_coverage_and_incremental_textures() {
         use prime_scene::scene::DynamicScene;
         let mut renderer = Renderer::new().unwrap();
+        // Coverage is a primary-hit contract. A black surface now receives aerial
+        // radiance, so test the actual hit guide instead of assuming black output.
+        renderer
+            .configure(RenderSettings {
+                view: prime_scene::settings::DiagnosticView::LinearDepth,
+                ..Default::default()
+            })
+            .unwrap();
         let camera = Camera {
             position: [0.0, 0.0, 2.0],
             forward: [0.0, 0.0, -1.0],
@@ -371,7 +391,7 @@ mod tests {
                 triangles: quad(1.0).into(),
             },
         );
-        let sky = renderer.render(&scene, &camera, 64, 48, 0).unwrap();
+        let miss = renderer.render(&scene, &camera, 64, 48, 0).unwrap();
         let static_buffer = renderer.geometry.as_ref().unwrap().static_bases.buffer;
         let static_revision = renderer.geometry.as_ref().unwrap().revision;
         scene.dynamic = DynamicScene {
@@ -379,7 +399,7 @@ mod tests {
             origin: [0.0; 3],
             triangles: quad(0.0).into(),
         };
-        assert_eq!(renderer.render(&scene, &camera, 64, 48, 0).unwrap(), sky);
+        assert_eq!(renderer.render(&scene, &camera, 64, 48, 0).unwrap(), miss);
         let dynamic_buffer = renderer
             .geometry
             .as_ref()
@@ -393,13 +413,10 @@ mod tests {
         scene.dynamic.revision += 1;
         scene.dynamic.triangles = quad(1.0).into();
         let opaque = renderer.render(&scene, &camera, 64, 48, 0).unwrap();
-        assert!(
-            opaque
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .all(|pixel| *pixel == [0, 0, 0, 255])
-        );
+        assert!(opaque.as_chunks::<4>().0.iter().all(|pixel| pixel[0] > 0
+            && pixel[0] == pixel[1]
+            && pixel[1] == pixel[2]
+            && pixel[3] == 255));
         scene.dynamic.revision += 1;
         scene.dynamic.triangles = quad(0.5).into();
         let half = renderer.render(&scene, &camera, 64, 48, 0).unwrap();
@@ -407,7 +424,7 @@ mod tests {
             .as_chunks::<4>()
             .0
             .iter()
-            .filter(|pixel| **pixel == [0, 0, 0, 255])
+            .filter(|pixel| pixel[0] > 0)
             .count();
         assert!(
             (1300..1800).contains(&covered),
@@ -493,12 +510,12 @@ mod tests {
         scene.revision += 1;
         assert_eq!(
             renderer.render(&scene, &camera, 64, 48, 0).unwrap(),
-            sky,
+            miss,
             "texture delta must affect the existing dynamic material without a geometry update"
         );
         scene.dynamic.revision += 1;
         scene.dynamic.triangles = Arc::default();
-        assert_eq!(renderer.render(&scene, &camera, 64, 48, 0).unwrap(), sky);
+        assert_eq!(renderer.render(&scene, &camera, 64, 48, 0).unwrap(), miss);
     }
 
     #[test]

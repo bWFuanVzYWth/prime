@@ -32,6 +32,7 @@ pub(super) fn run(
         context: context.clone(),
         layout: vk::PipelineLayout::null(),
         descriptor_layout: vk::DescriptorSetLayout::null(),
+        environment_layout: vk::DescriptorSetLayout::null(),
         pool: vk::DescriptorPool::null(),
         descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
         pipelines: [vk::Pipeline::null(); 3],

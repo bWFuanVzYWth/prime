@@ -39,7 +39,8 @@ public final class PrimeClient implements ClientModInitializer {
         default boolean readyForCapture() {
             return false;
         }
-        default void render(CameraRenderState camera, RenderTarget destination) {}
+        default void render(CameraRenderState camera, RenderTarget destination,
+                            float solarHourAngle) {}
     }
     private final Map<String, Supplier<? extends WorldRenderer>> backends = new LinkedHashMap<>();
     private RendererSlot<String, WorldRenderer> slot;
@@ -167,9 +168,10 @@ public final class PrimeClient implements ClientModInitializer {
         });
     }
 
-    public static void render(CameraRenderState camera, RenderTarget destination) {
+    public static void render(CameraRenderState camera, RenderTarget destination,
+                              float solarHourAngle) {
         if (INSTANCE.slot != null && INSTANCE.slot.active() != null)
-            INSTANCE.slot.active().render(camera, destination);
+            INSTANCE.slot.active().render(camera, destination, solarHourAngle);
     }
 
     public static boolean captureResourcesEnabled() {
@@ -331,7 +333,8 @@ public final class PrimeClient implements ClientModInitializer {
         return owner.renderer.sourceBridge();
     }
 
-    private void renderFrame(CameraRenderState camera, RenderTarget destination) {
+    private void renderFrame(CameraRenderState camera, RenderTarget destination,
+                             float solarHourAngle) {
         if (failed || resourceReload != null)
             return;
         try {
@@ -397,7 +400,7 @@ public final class PrimeClient implements ClientModInitializer {
             var up = inverse.transformDirection(new Vector3f(0, 1, 0)).normalize();
             Packets.writeFrame(renderer.frameBuffer(), epoch, camera.pos.x, camera.pos.y,
                                camera.pos.z, components(forward), components(right), components(up),
-                               fov, width, height, frames.next(width, height));
+                               fov, width, height, frames.next(width, height), solarHourAngle);
             phaseStart = System.nanoTime();
             renderer.record(destination);
             timing.nativeRender = System.nanoTime() - phaseStart;
@@ -461,8 +464,9 @@ public final class PrimeClient implements ClientModInitializer {
                     CAPTURE.failure() == null && DynamicCapture.healthy();
         }
         @Override
-        public void render(CameraRenderState camera, RenderTarget destination) {
-            renderFrame(camera, destination);
+        public void render(CameraRenderState camera, RenderTarget destination,
+                           float solarHourAngle) {
+            renderFrame(camera, destination, solarHourAngle);
         }
         @Override
         public void start() throws Exception {

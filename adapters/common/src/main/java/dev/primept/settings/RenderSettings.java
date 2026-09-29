@@ -5,11 +5,13 @@ import java.util.Arrays;
 
 /** Immutable client settings. Version adapters own widgets; native consumes the validated wire. */
 public final class RenderSettings {
-    public static final int VERSION = 1;
-    public static final int WIRE_BYTES = 48;
+    public static final int VERSION = 2;
+    public static final int WIRE_BYTES = 56;
     public enum Control {
         BOUNCES("render.bounces", 1, 64, 4),
         OFFLINE_SAMPLES("render.offline_samples", 1, 64, 1),
+        LATITUDE("astronomy.latitude_degrees", -90, 90, 30),
+        SOLAR_LONGITUDE("astronomy.solar_longitude_degrees", 0, 359, 0),
         SUN_EV("lighting.sun_ev_quarters", -32, 32, 0),
         SKY_EV("lighting.sky_ev_quarters", -32, 32, 0),
         EXPOSURE_EV("display.exposure_ev_quarters", -48, 48, 0),
@@ -71,7 +73,9 @@ public final class RenderSettings {
                 .putFloat(multiplier(Control.SUN_EV))
                 .putFloat(multiplier(Control.SKY_EV))
                 .putFloat(value(Control.DEPTH_RANGE))
-                .putInt(0x13572468);
+                .putInt(0x13572468)
+                .putInt(value(Control.LATITUDE))
+                .putInt(value(Control.SOLAR_LONGITUDE));
     }
     private float multiplier(Control control) {
         return (float)Math.pow(2.0, value(control) / 4.0);

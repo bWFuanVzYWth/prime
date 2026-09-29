@@ -34,3 +34,21 @@ third-party libraries or assets.
 
 Both adapter JARs include the project LICENSE and LICENSE-EXCEPTIONS at the root,
 and these notices and third-party license texts under `META-INF`.
+
+
+`crates/prime-vulkan/shaders/atmosphere`, the physical assets and frozen reference
+fixtures adapt legacy Prime's atmosphere (copyright 2026 linlin), incorporating
+Sky Tracer `b66b16342afe38e788a5ece5371d3b3a67c5909a`, GPL-3.0-only.
+See [Sky Tracer notice](licenses/atmosphere-SKY-TRACER-NOTICE.md) and [LICENSE](LICENSE).
+The physical algorithm and default calibration are retained; the container,
+resource ownership, prepared consumers and cache scheduling are changed.
+
+`crates/prime-scene/src/environment.rs` adapts legacy Prime's `AstronomyState`
+and `AstronomySettings` (copyright 2026 linlin), under the project's
+[LICENSE](LICENSE) and [LICENSE-EXCEPTIONS](LICENSE-EXCEPTIONS).
+
+The epipolar shadow profile derives from Intel's Outdoor Light Scattering
+Sample, copyright 2017 Intel Corporation, Apache-2.0, reference commit
+`3b31b3b8c1aaad8580dc7249b3b79f6c0993d7a8`.
+See [notice](licenses/intel-outdoor-light-scattering-NOTICE.txt) and
+[license](licenses/intel-outdoor-light-scattering-Apache-2.0.txt).

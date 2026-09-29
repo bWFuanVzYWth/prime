@@ -72,7 +72,10 @@ tasks.register('verifyNativeJars') {
                 if (nativeBytes.length == 0) throw new GradleException("Empty native engine in ${archive}")
                 def notices = ['LICENSE', 'LICENSE-EXCEPTIONS', 'META-INF/THIRD_PARTY_NOTICES.md',
                         'META-INF/licenses/nvidia-self-intersection-BSD-3-Clause.txt',
-                        'META-INF/licenses/pbrt-Apache-2.0.txt']
+                        'META-INF/licenses/pbrt-Apache-2.0.txt',
+                        'META-INF/licenses/atmosphere-SKY-TRACER-NOTICE.md',
+                        'META-INF/licenses/intel-outdoor-light-scattering-NOTICE.txt',
+                        'META-INF/licenses/intel-outdoor-light-scattering-Apache-2.0.txt']
                 notices.each { name ->
                     def entry = zip.getEntry(name)
                     if (entry == null) throw new GradleException("Missing ${name} in ${archive}")

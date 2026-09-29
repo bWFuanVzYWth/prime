@@ -15,6 +15,7 @@ pub(crate) struct Engine {
     cpu_profile: PrepareProfile,
     pub(crate) failed: bool,
     pub(crate) settings: RenderSettings,
+    astronomy: prime_scene::environment::SolarOrbit,
     last_frame: Option<(Frame, RenderSettings)>,
     frozen_frame: Option<(Frame, RenderSettings)>,
     #[cfg(feature = "vulkan")]
@@ -96,9 +97,17 @@ impl Engine {
                 active.sun = transport.sun;
                 active.sky = transport.sky;
                 active.seed = transport.seed;
+                active.astronomy = transport.astronomy;
             }
             poison_on_failure(&mut self.failed, || renderer.configure(active))?;
             renderer.set_scene_frozen(frozen.is_some());
+        }
+        let effective_astronomy = frozen.map_or(settings.astronomy, |(_, fixed)| fixed.astronomy);
+        let previous_astronomy = self
+            .frozen_frame
+            .map_or(self.settings.astronomy, |(_, fixed)| fixed.astronomy);
+        if effective_astronomy != previous_astronomy {
+            self.astronomy = effective_astronomy.prepare();
         }
         self.settings = settings;
         self.frozen_frame = frozen;
@@ -147,6 +156,13 @@ impl Engine {
                     renderer.configure(self.settings)?;
                     self.renderer = Some(renderer);
                 }
+                self.renderer.as_mut().unwrap().set_environment(
+                    prime_minecraft::environment::environment(
+                        frame.world_position[1],
+                        frame.solar_hour_angle,
+                        self.astronomy,
+                    ),
+                )?;
                 let result = self.renderer.as_mut().unwrap().render_with_instances(
                     &self.translated,
                     self.source.instance_input(),
@@ -186,6 +202,11 @@ impl Engine {
                 .renderer
                 .as_mut()
                 .ok_or("Attach a Vulkan host before recording")?;
+            renderer.set_environment(prime_minecraft::environment::environment(
+                frame.world_position[1],
+                frame.solar_hour_angle,
+                self.astronomy,
+            ))?;
             unsafe {
                 renderer.record_host_with_instances(
                     &self.translated,
@@ -292,6 +313,7 @@ mod tests {
         let mut frame = Frame {
             epoch: 1,
             world_position: [0.0; 3],
+            solar_hour_angle: 0.0,
             camera: Camera {
                 position: [0.0; 3],
                 forward: [0.0, 0.0, -1.0],
@@ -368,6 +390,7 @@ mod tests {
         let frame = Frame {
             epoch: 1,
             world_position: [0.0; 3],
+            solar_hour_angle: 0.0,
             camera: Camera {
                 position: [0.0; 3],
                 forward: [0.0, 0.0, -1.0],
@@ -414,6 +437,7 @@ mod tests {
         let frame = Frame {
             epoch: 1,
             world_position: [512.25, -20.5, 8192.75],
+            solar_hour_angle: 0.0,
             camera: Camera {
                 position: [0.0; 3],
                 forward: [0.0, 0.0, -1.0],
@@ -426,11 +450,13 @@ mod tests {
             sample_index: 9,
         };
         engine.last_frame = Some((frame, engine.settings));
+        let frozen_sun = engine.astronomy.direction(0.);
         engine.configure(offline).unwrap();
         assert!(engine.submit(&dynamic(1, true)).is_err());
         assert!(engine.submit(&header(1)).is_err());
         let mut moved = frame;
         moved.world_position = [-9999.0; 3];
+        moved.solar_hour_angle = 1.3;
         moved.camera.vertical_fov_radians = 0.5;
         moved.epoch = 20;
         moved.width = 701;
@@ -438,6 +464,7 @@ mod tests {
         moved.sample_index = 7;
         let effective = engine.effective_frame(&moved);
         assert_eq!(effective.world_position, frame.world_position);
+        assert_eq!(effective.solar_hour_angle, frame.solar_hour_angle);
         assert_eq!(effective.camera, frame.camera);
         assert_eq!(effective.epoch, 1);
         assert_eq!(
@@ -449,13 +476,27 @@ mod tests {
                 exposure: 2.0,
                 bounces: 20,
                 sky: 3.0,
+                astronomy: prime_scene::environment::Astronomy {
+                    latitude_degrees: 80,
+                    solar_longitude_degrees: 90,
+                },
                 ..offline
             })
             .unwrap();
         assert_eq!(engine.settings.exposure, 2.0);
+        assert_eq!(engine.astronomy.direction(0.), frozen_sun);
         assert_eq!(engine.frozen_frame.unwrap().1, RenderSettings::default());
-        engine.configure(RenderSettings::default()).unwrap();
+        engine
+            .configure(RenderSettings {
+                astronomy: prime_scene::environment::Astronomy {
+                    latitude_degrees: 80,
+                    solar_longitude_degrees: 90,
+                },
+                ..Default::default()
+            })
+            .unwrap();
         assert!(engine.frozen_frame.is_none());
+        assert_ne!(engine.astronomy.direction(0.), frozen_sun);
         assert_eq!(
             engine.effective_frame(&moved).world_position,
             moved.world_position

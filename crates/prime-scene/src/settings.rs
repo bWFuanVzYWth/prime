@@ -19,6 +19,7 @@ pub enum DiagnosticView {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderSettings {
+    pub astronomy: crate::environment::Astronomy,
     pub mode: RenderMode,
     pub bounces: u32,
     pub offline_samples: u32,
@@ -34,6 +35,7 @@ pub struct RenderSettings {
 impl Default for RenderSettings {
     fn default() -> Self {
         Self {
+            astronomy: Default::default(),
             mode: RenderMode::Realtime,
             bounces: 4,
             offline_samples: 1,
@@ -49,17 +51,21 @@ impl Default for RenderSettings {
     }
 }
 impl RenderSettings {
-    pub const VERSION: u32 = 1;
-    pub const BYTES: usize = 48;
+    pub const VERSION: u32 = 2;
+    pub const BYTES: usize = 56;
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != Self::BYTES {
-            return Err("Settings require exactly 48 bytes".into());
+            return Err("Settings require exactly 56 bytes".into());
         }
         let word = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
         if word(0) != Self::VERSION {
             return Err("Unsupported settings version".into());
         }
         let result = Self {
+            astronomy: crate::environment::Astronomy {
+                latitude_degrees: word(48) as i32,
+                solar_longitude_degrees: word(52),
+            },
             mode: match word(4) {
                 0 => RenderMode::Realtime,
                 1 => RenderMode::Offline,
@@ -86,6 +92,7 @@ impl RenderSettings {
         Ok(result)
     }
     pub fn validate(self) -> Result<(), String> {
+        self.astronomy.validate()?;
         if !(1..=64).contains(&self.bounces)
             || !(1..=64).contains(&self.offline_samples)
             || !(1.0 / 4096.0..=4096.0).contains(&self.exposure)
@@ -101,6 +108,7 @@ impl RenderSettings {
     }
     pub fn transport_matches(self, other: Self) -> bool {
         self.bounces == other.bounces
+            && self.astronomy == other.astronomy
             && self.sun == other.sun
             && self.sky == other.sky
             && self.seed == other.seed
@@ -112,7 +120,7 @@ mod tests {
     use super::*;
     fn golden() -> Vec<u8> {
         [
-            1_u32,
+            2_u32,
             1,
             4,
             1,
@@ -124,6 +132,8 @@ mod tests {
             1_f32.to_bits(),
             128_f32.to_bits(),
             0x13572468,
+            30,
+            0,
         ]
         .into_iter()
         .flat_map(u32::to_le_bytes)
@@ -145,7 +155,11 @@ mod tests {
         );
         for (offset, value) in [
             (0, 0_u32),
-            (0, 2),
+            (0, 1),
+            (0, 3),
+            (48, 91),
+            (48, (-91i32) as u32),
+            (52, 360),
             (4, 2),
             (8, 0),
             (8, 65),

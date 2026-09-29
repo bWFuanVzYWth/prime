@@ -106,13 +106,31 @@ public final class NativeSmoke {
             ImageIO.write(image, "png", Path.of(args[1]).toFile());
             byte[] baseline = new byte[width * height * 4];
             rgba.get(0, baseline);
+            byte[] nightFrame = frame.clone();
+            ByteBuffer.wrap(nightFrame)
+                    .order(ByteOrder.LITTLE_ENDIAN)
+                    .putFloat(100, (float)Math.PI);
+            if (Arrays.equals(baseline, pixels(bridge, nightFrame, rgba)))
+                throw new AssertionError("Solar hour angle did not reach native lighting");
+            bridge.configure(RenderSettings.defaults()
+                                     .with(RenderSettings.Control.LATITUDE, -47)
+                                     .with(RenderSettings.Control.SOLAR_LONGITUDE, 90),
+                             false, RenderSettings.View.OUTPUT);
+            if (Arrays.equals(baseline, pixels(bridge, frame, rgba)))
+                throw new AssertionError("Observer and season did not reach native lighting");
+            bridge.configure(RenderSettings.defaults(), false, RenderSettings.View.OUTPUT);
+            if (!Arrays.equals(baseline, pixels(bridge, frame, rgba)))
+                throw new AssertionError("Restored astronomy did not reproduce the noon image");
             bridge.configure(RenderSettings.defaults(), true, RenderSettings.View.OUTPUT);
             byte[] moved = Packets.frame(999, 80000, 90000, 70000, new float[] {1, 0, 0},
                                          new float[] {0, 0, 1}, new float[] {0, 1, 0}, .5f, width,
                                          height, 0);
+            ByteBuffer.wrap(moved).order(ByteOrder.LITTLE_ENDIAN).putFloat(100, (float)Math.PI);
             bridge.configure(RenderSettings.defaults()
                                      .with(RenderSettings.Control.BOUNCES, 1)
-                                     .with(RenderSettings.Control.SUN_EV, 4),
+                                     .with(RenderSettings.Control.SUN_EV, 4)
+                                     .with(RenderSettings.Control.LATITUDE, -47)
+                                     .with(RenderSettings.Control.SOLAR_LONGITUDE, 90),
                              true, RenderSettings.View.OUTPUT);
             bridge.renderDiagnostic(moved, rgba);
             byte[] frozen = new byte[baseline.length];
@@ -228,7 +246,7 @@ public final class NativeSmoke {
             if (!rejected)
                 throw new AssertionError("Malformed packet must fail at the native boundary");
             System.out.println(
-                    "FFM Vulkan smoke passed: 63/64-section visibility gate, withdrawal/reload, complete-section, raw and persistent-instance packets -> Rust -> Slang -> RGBA; multi-layer op8/unchanged/material change/late rejection/removal, texture owner/reference retirement, bulk section removal and completion watermark, dynamic visibility, affine/texture instance, unchanged-frame zero-submit, atomic removal, alpha-zero visibility/shadows, owner-thread and malformed-input checks; " +
+                    "FFM Vulkan smoke passed: solar time/observer/season and frozen astronomy; 63/64-section visibility gate, withdrawal/reload, complete-section, raw and persistent-instance packets -> Rust -> Slang -> RGBA; multi-layer op8/unchanged/material change/late rejection/removal, texture owner/reference retirement, bulk section removal and completion watermark, dynamic visibility, affine/texture instance, unchanged-frame zero-submit, atomic removal, alpha-zero visibility/shadows, owner-thread and malformed-input checks; " +
                     args[1]);
         }
     }

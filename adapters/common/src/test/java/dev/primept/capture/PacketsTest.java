@@ -106,7 +106,8 @@ class PacketsTest {
     void reusedNativeFrameOverwritesEveryFieldAndRestoresWireOrder() {
         var wire = ByteBuffer.allocateDirect(104);
         float[] forward = {0, 0, -1}, right = {1, 0, 0}, up = {0, 1, 0};
-        Packets.writeFrame(wire, 1, 10, 20, 30, forward, right, up, 1, 1920, 1080, 7);
+        Packets.writeFrame(wire, 1, 10, 20, 30, forward, right, up, 1, 1920, 1080, 7, 1.3f);
+        assertEquals(1.3f, wire.getFloat(100));
         wire.order(ByteOrder.BIG_ENDIAN).putLong(0, -1).position(17).limit(23);
         Packets.writeFrame(wire, 2, -10, -20, -30, forward, right, up, 1.2f, 1920, 1080, 0);
         assertEquals(104, wire.position());

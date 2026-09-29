@@ -81,7 +81,9 @@ tasks.register('nativeJar', Jar) {
 
 tasks.register('bundledNativeSmoke', JavaExec) {
     dependsOn common.tasks.named('testClasses'), tasks.named('nativeJar')
-    classpath = files(tasks.named('nativeJar')) + common.sourceSets.test.runtimeClasspath
+    // NativeSmoke uses only the JDK and packaged bridge. Do not resolve another
+    // project's test dependencies from this adapter's task execution thread.
+    classpath = files(tasks.named('nativeJar')) + common.sourceSets.test.output
     mainClass = 'dev.primept.NativeSmoke'
     jvmArgs '--enable-native-access=ALL-UNNAMED'
     args 'bundled', layout.buildDirectory.file('bundled-ffm-smoke.png').get().asFile.absolutePath

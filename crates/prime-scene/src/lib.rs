@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod compiled;
+pub mod environment;
 pub mod extent;
 pub mod geometry;
 pub mod incremental;

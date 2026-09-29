@@ -287,7 +287,7 @@ pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const u8, lengt
 pub unsafe extern "C" fn prime_configure(handle: u64, data: *const u8, length: u64) -> i32 {
     boundary(-1, || {
         if data.is_null() || length != prime_scene::settings::RenderSettings::BYTES as u64 {
-            return Err("Settings require a non-null 48-byte packet".into());
+            return Err("Settings require a non-null 56-byte packet".into());
         }
         let settings = prime_scene::settings::RenderSettings::parse(unsafe {
             std::slice::from_raw_parts(data, length as usize)
@@ -507,7 +507,7 @@ mod abi_tests {
     fn configuration_validates_version_borrow_and_thread_before_mutation() {
         let handle = prime_create(ABI_VERSION);
         let bytes: Vec<_> = [
-            1_u32,
+            2_u32,
             0,
             4,
             1,
@@ -519,22 +519,24 @@ mod abi_tests {
             1_f32.to_bits(),
             128_f32.to_bits(),
             0x13572468,
+            30,
+            0,
         ]
         .into_iter()
         .flat_map(u32::to_le_bytes)
         .collect();
-        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 48) }, 0);
-        assert_eq!(unsafe { prime_configure(handle, std::ptr::null(), 48) }, -1);
+        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 56) }, 0);
+        assert_eq!(unsafe { prime_configure(handle, std::ptr::null(), 56) }, -1);
         assert_eq!(
             unsafe { prime_configure(handle, bytes.as_ptr(), u64::MAX) },
             -1
         );
         let mut invalid = bytes.clone();
-        invalid[0] = 2;
-        assert_eq!(unsafe { prime_configure(handle, invalid.as_ptr(), 48) }, -1);
+        invalid[0] = 3;
+        assert_eq!(unsafe { prime_configure(handle, invalid.as_ptr(), 56) }, -1);
         let foreign = bytes.clone();
         assert_eq!(
-            std::thread::spawn(move || unsafe { prime_configure(handle, foreign.as_ptr(), 48) })
+            std::thread::spawn(move || unsafe { prime_configure(handle, foreign.as_ptr(), 56) })
                 .join()
                 .unwrap(),
             -1
@@ -542,7 +544,7 @@ mod abi_tests {
         invalid = bytes.clone();
         invalid[4] = 1;
         assert_eq!(
-            unsafe { prime_configure(handle, invalid.as_ptr(), 48) },
+            unsafe { prime_configure(handle, invalid.as_ptr(), 56) },
             -1,
             "No rendered frame can be frozen"
         );
@@ -555,7 +557,7 @@ mod abi_tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 48) }, 0);
+        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 56) }, 0);
         assert_eq!(prime_destroy(handle), 0);
     }
 }

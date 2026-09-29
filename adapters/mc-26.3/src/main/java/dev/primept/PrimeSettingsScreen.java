@@ -33,6 +33,7 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                         -> Options.genericValueLabel(caption, Component.literal(switch (control) {
                     case SUN_EV, SKY_EV, EXPOSURE_EV ->
                         String.format(Locale.ROOT, "%+.2f EV", value / 4.0);
+                    case LATITUDE, SOLAR_LONGITUDE -> value + "°";
                     case HUE, SATURATION -> value + "%";
                     default -> Integer.toString(value);
                 })),
@@ -71,6 +72,7 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
         list.addSmall(controls.get(Control.BOUNCES), controls.get(Control.OFFLINE_SAMPLES));
         list.addHeader(Component.translatable("primept.settings.lighting"));
         list.addSmall(controls.get(Control.SUN_EV), controls.get(Control.SKY_EV));
+        list.addSmall(controls.get(Control.LATITUDE), controls.get(Control.SOLAR_LONGITUDE));
         list.addHeader(Component.translatable("primept.settings.display"));
         list.addBig(controls.get(Control.EXPOSURE_EV));
         list.addSmall(controls.get(Control.HUE), controls.get(Control.SATURATION));
@@ -109,7 +111,8 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
         list.findOption(offline).active = PrimeClient.controlsAvailable() &&
                                           PrimeClient.settings().pathTracing() &&
                                           Minecraft.getInstance().level != null;
-        for (var control : List.of(Control.BOUNCES, Control.SUN_EV, Control.SKY_EV))
+        for (var control : List.of(Control.BOUNCES, Control.SUN_EV, Control.SKY_EV,
+                                   Control.LATITUDE, Control.SOLAR_LONGITUDE))
             list.findOption(controls.get(control)).active = !frozen;
         list.findOption(view).active = !frozen;
         list.findOption(controls.get(Control.DEPTH_RANGE)).active = !frozen;

@@ -3,6 +3,7 @@ module realtime;
 import "frame.slang";
 import "transport.slang";
 import "ray_query.slang";
+#include "atmosphere/consumer_bindings.slang"
 
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure scene;
 [[vk::binding(2, 0)]] StructuredBuffer<uint4> textures;
@@ -18,7 +19,8 @@ import "ray_query.slang";
     if (any(id.xy >= frame.dimensions.xy))
         return;
     TraceScene resources = {scene, textures, texels, instanceMaterials, staticTrianglePages};
-    TraceResult sample = traceSample(resources, frame, id.xy, frame.target.y);
+    TraceResult sample =
+            traceSample(resources, atmosphereEnvironment(), frame, id.xy, frame.target.y);
     // Canonical top-left orientation, linear Rec.2020 without exposure or primeDRT.
     noisy[id.xy] = float4(sample.radiance, 1);
     depth[id.xy] = sample.depth; // Positive view-Z in blocks; FLT_MAX means sky/miss.
