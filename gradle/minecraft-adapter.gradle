@@ -11,12 +11,13 @@ dependencies {
     implementation project(':common')
 }
 
+def adapterArtifactVersion = project.version
 processResources {
-    inputs.property 'version', project.version
+    inputs.property 'version', adapterArtifactVersion
     inputs.property 'minecraftVersion', minecraftVersion
     inputs.property 'fabricApiVersion', fabricApiVersion
     filesMatching('fabric.mod.json') {
-        expand(version: project.version, minecraftVersion: minecraftVersion, fabricApiVersion: fabricApiVersion)
+        expand(version: adapterArtifactVersion, minecraftVersion: minecraftVersion, fabricApiVersion: fabricApiVersion)
     }
 }
 
