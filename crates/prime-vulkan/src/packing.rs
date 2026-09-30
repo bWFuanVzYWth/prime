@@ -7,11 +7,11 @@ use prime_scene::{
 };
 use std::{collections::BTreeMap, mem::MaybeUninit, ops::Range};
 
-pub(crate) const FORMATS: usize = 2;
-pub(crate) const MAX_RECORDS: u32 = ((1_u64 << 32) / 240) as u32;
+pub(crate) const FORMATS: usize = 4;
+pub(crate) const MAX_RECORDS: u32 = ((1_u64 << 32) / 432) as u32;
 // Four full f32 corners; format 1 adds repeat/emission/medium fields.
 pub(crate) const fn stride(format: usize) -> usize {
-    176 + format * 64
+    [176, 240, 272, 432][format]
 }
 
 pub(crate) struct Input<'a> {
@@ -27,12 +27,14 @@ struct Source<'a> {
 }
 fn closed(geometry: Quad) -> SurfaceFace {
     SurfaceFace {
+        optics: None,
         geometry,
         repeat: None,
         emission: Emission::default(),
         media: [0; 2],
         emitter: None,
         emitter_area_weight: 0.0,
+        detail: None,
     }
 }
 impl Source<'_> {
@@ -76,9 +78,9 @@ impl Source<'_> {
         };
         let at = index * 2;
         if at < first {
-            face.geometry = Quad::from_triangle(face.geometry.triangle(1));
+            face.keep_half(1);
         } else if at + 1 >= first + count {
-            face.geometry = Quad::from_triangle(face.geometry.triangle(0));
+            face.keep_half(0);
         }
         face
     }
@@ -162,12 +164,12 @@ impl<'a> Plan<'a> {
                 let next = format(&source.face(at));
                 if next != previous {
                     runs.push((previous, id, start..at));
-                    all_format |= previous;
+                    all_format = all_format.max(previous);
                     start = at;
                     previous = next;
                 }
             }
-            all_format |= previous;
+            all_format = all_format.max(previous);
             runs.push((previous, id, start..count));
         }
         let mut groups = Vec::new();
@@ -262,6 +264,12 @@ impl<'a> Plan<'a> {
     }
 }
 pub(crate) fn format(face: &SurfaceFace) -> usize {
+    if face.detail.is_some() {
+        return 3;
+    }
+    if face.optics.is_some() {
+        return 2;
+    }
     usize::from(
         face.repeat.is_some() || face.emission != Emission::default() || face.media != [0; 2],
     )
@@ -272,18 +280,15 @@ pub(crate) fn encode(
     offset: Option<[f32; 3]>,
     flags: Option<u32>,
     textures: &BTreeMap<u32, u32>,
-) -> Result<[u8; 240], String> {
+) -> Result<[u8; 432], String> {
     let q = &face.geometry;
-    if flags.is_some_and(|f| f != q.flags) {
+    if flags.is_some_and(|f| f != face.flags()) {
         return Err("Mesh material flags must be uniform".into());
     }
-    if face.media != [0; 2] {
-        return Err(
-            "Optical medium transport is not yet supported by the surface prototype renderer"
-                .into(),
-        );
+    if face.media != [0; 2] && face.optics.is_none() {
+        return Err("Optical medium identity requires explicit endpoint properties".into());
     }
-    let mut bytes = [0; 240];
+    let mut bytes = [0; 432];
     let mut f = |at: usize, value: f32| {
         bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
     };
@@ -323,16 +328,22 @@ pub(crate) fn encode(
     bytes[164..168].copy_from_slice(&q.flags.to_le_bytes());
     if format != 0 {
         let at = 176;
-        let mut properties = u32::from(face.emission.two_sided) * 2;
+        let mut properties =
+            (u32::from(face.emission.two_sided) * 2) | (u32::from(face.emission.textured) * 16);
+        if let Some(o) = face.optics {
+            properties |= 32 | (u32::from(o.thin) * 64) | (u32::from(o.transmit) * 128);
+        }
         if let Some(map) = face.repeat {
-            if [map.origin, map.du, map.dv]
-                .as_flattened()
-                .iter()
-                .any(|x| !x.is_finite())
+            if map.axes == 0
+                || map.axes > 3
+                || [map.origin, map.du, map.dv]
+                    .as_flattened()
+                    .iter()
+                    .any(|x| !x.is_finite())
             {
                 return Err("Invalid repeated texture mapping".into());
             }
-            properties |= 1;
+            properties |= 1 | (map.axes << 2);
             for i in 0..2 {
                 bytes[at + i * 16..at + i * 16 + 16].copy_from_slice(
                     [map.du[i], map.dv[i], map.origin[i], 0.0]
@@ -361,6 +372,84 @@ pub(crate) fn encode(
             .map(u32::to_le_bytes)
             .as_flattened(),
         );
+    }
+    if let Some(detail) = &face.detail {
+        let layer = &detail.layer;
+        if format != 3 || layer.flags > 2 {
+            return Err("Invalid compound surface format".into());
+        }
+        let mut floats = |at: usize, values: &[f32]| -> Result<(), String> {
+            if values.iter().any(|v| !v.is_finite()) {
+                return Err("Nonfinite surface layer".into());
+            }
+            for (i, value) in values.iter().enumerate() {
+                bytes[at + 4 * i..at + 4 * i + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            Ok(())
+        };
+        if layer
+            .colors
+            .as_flattened()
+            .iter()
+            .any(|v| !(0. ..=1.).contains(v))
+        {
+            return Err("Invalid layer tint".into());
+        }
+        floats(240, layer.colors.as_flattened())?;
+        floats(304, layer.uvs.as_flattened())?;
+        if let Some(map) = layer.repeat {
+            if map.axes == 0 || map.axes > 3 {
+                return Err("Invalid layer repeat axes".into());
+            }
+            floats(
+                352,
+                &[
+                    map.du[0],
+                    map.dv[0],
+                    map.origin[0],
+                    0.,
+                    map.du[1],
+                    map.dv[1],
+                    map.origin[1],
+                    0.,
+                ],
+            )?;
+        }
+        floats(384, &layer.emission.radiance)?;
+        let tex = textures
+            .get(&layer.texture_id)
+            .ok_or("Layer texture has not been captured")?;
+        bytes[168..172].copy_from_slice(&(detail.mode as u32).to_le_bytes());
+        bytes[336..340].copy_from_slice(&tex.to_le_bytes());
+        bytes[340..344].copy_from_slice(&layer.flags.to_le_bytes());
+        let props = layer.repeat.map_or(0, |m| 1 | m.axes << 2)
+            | ((u32::from(layer.emission.two_sided) * 2)
+                | (u32::from(layer.emission.textured) * 16));
+        bytes[344..348].copy_from_slice(&props.to_le_bytes());
+    }
+    if let Some(o) = face.optics {
+        if format < 2 {
+            return Err("Optical record format mismatch".into());
+        }
+        let at = if format == 2 { 240 } else { 400 };
+        for (side, medium) in [o.negative, o.positive].into_iter().enumerate() {
+            if !medium.ior.is_finite()
+                || medium.ior < 1.
+                || medium.extinction.iter().any(|v| !v.is_finite() || *v < 0.)
+            {
+                return Err("Invalid optical endpoint".into());
+            }
+            bytes[at + side * 16..at + side * 16 + 16].copy_from_slice(
+                [
+                    medium.ior,
+                    medium.extinction[0],
+                    medium.extinction[1],
+                    medium.extinction[2],
+                ]
+                .map(f32::to_le_bytes)
+                .as_flattened(),
+            );
+        }
     }
     Ok(bytes)
 }

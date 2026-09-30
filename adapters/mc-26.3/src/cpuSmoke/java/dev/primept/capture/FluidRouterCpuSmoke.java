@@ -78,7 +78,7 @@ final class FluidRouterCpuSmoke {
             TerrainRouterCpuSmoke.check(
                     FluidRouter.write(data, models, region, pos, water, water.getFluidState()),
                     "Fluid source emitted");
-            var source = new CaptureInbox(true);
+            var source = new LegacyTerrainInbox(true);
             var token = source.begin(SectionPos.of(0, 0, 0));
             source.route(token, new RouteBuffer()
                                         .header(12, 1)
@@ -104,7 +104,7 @@ final class FluidRouterCpuSmoke {
                     });
             new FluidRenderer(models).tesselate(region, pos,
                                                 layer -> sink, water, water.getFluidState());
-            var expected = new CaptureInbox(true);
+            var expected = new LegacyTerrainInbox(true);
             expected.capture(expected.begin(SectionPos.of(0, 0, 0)), quads);
             TerrainRouterCpuSmoke.check(expected.failure() == null, "Oracle complete primitives");
             TerrainRouterCpuSmoke.write("fluid-" + scenario, source.seal(), expected.seal());

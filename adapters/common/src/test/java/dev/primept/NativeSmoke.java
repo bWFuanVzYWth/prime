@@ -4,7 +4,6 @@ import dev.primept.capture.Packets;
 import dev.primept.settings.RenderSettings;
 import dev.primept.capture.DynamicFrame;
 import dev.primept.capture.InstanceCapture;
-import dev.primept.capture.RouteBuffer;
 import java.util.Arrays;
 import java.util.List;
 import java.awt.image.BufferedImage;
@@ -30,34 +29,9 @@ public final class NativeSmoke {
                 vertices.putFloat(0.5f).putFloat(0.5f).putInt(0);
             }
             vertices.flip();
-            var route = new RouteBuffer().header(13, 1).i(1).i(0).l(77).i(1).i(0).i(0).i(6).i(-1);
-            for (int i = 0; i < 4; ++i) {
-                int offset = i * 28;
-                route.f(vertices.getFloat(offset))
-                        .f(vertices.getFloat(offset + 4))
-                        .f(vertices.getFloat(offset + 8))
-                        .rgba(0xffbe5a37)
-                        .f(.5f)
-                        .f(.5f);
-            }
-            bridge.submit(route.seal());
-            bridge.submit(route.header(12, 1)
-                                  .l(1)
-                                  .l(1)
-                                  .d(0)
-                                  .d(0)
-                                  .d(0)
-                                  .i(1)
-                                  .i(0)
-                                  .l(77)
-                                  .f(0)
-                                  .f(0)
-                                  .f(0)
-                                  .i(64)
-                                  .i(0)
-                                  .seal());
-            // Source definitions can retire before GPU recording; compiled geometry owns its data.
-            bridge.submit(route.header(13, 1).i(0).i(1).l(77).seal());
+            bridge.submit(Packets.sectionReplace(
+                    1, 1, 1, 0, 0, 0,
+                    List.of(new Packets.SectionLayer(0, 1, 0, 4, 4, 28, 0, 12, 16, vertices))));
             byte[] frame = Packets.frame(
                     1, 0, 2, 4, new float[] {0, -.4472136f, -.8944272f}, new float[] {1, 0, 0},
                     new float[] {0, .8944272f, -.4472136f}, 1.05f, width, height, 0);

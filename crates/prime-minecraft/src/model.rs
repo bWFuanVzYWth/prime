@@ -5,7 +5,7 @@ use crate::{
     wire::Reader,
 };
 use prime_scene::compiled::CompiledQuad;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Default, PartialEq)]
 pub(crate) struct State {
@@ -16,15 +16,13 @@ pub(crate) struct State {
     pub faces: [FaceId; 6],
     pub support: u32,
     pub fluid: Fluid,
+    pub emission: u32,
 }
 impl State {
     pub fn air(&self) -> bool {
         self.flags & 1 != 0 || self.flags & 16 != 0 && self.fluid.kind == 0
     }
 
-    pub fn full(&self) -> bool {
-        self.flags & 4 != 0
-    }
     pub fn same_block_culls(&self) -> bool {
         self.name == "minecraft:water"
             || self.name == "minecraft:lava"
@@ -33,8 +31,10 @@ impl State {
     pub fn same_boundary(&self, other: &Self) -> bool {
         self.faces == other.faces
             && self.fluid == other.fluid
-            && self.flags & 228 == other.flags & 228
+            && self.flags & 2020 == other.flags & 2020
             && self.support == other.support
+            && self.model == other.model
+            && self.emission == other.emission
             && (!(self.same_block_culls() || other.same_block_culls()) || self.name == other.name)
     }
 }
@@ -45,6 +45,8 @@ pub(crate) struct Quad {
     pub face: u32,
     pub tint: i32,
     pub layer: usize,
+    pub sprite: u32,
+    pub emission: u32,
 }
 #[derive(PartialEq)]
 pub(crate) enum Model {
@@ -60,15 +62,23 @@ pub(crate) struct Catalog {
     pub models: HashMap<u32, Model>,
     pub faces: HashMap<FaceId, Face>,
     pub fluids: HashMap<u32, FluidMaterial>,
+    pub sprites: HashMap<u32, crate::sprite::Sprite>,
     pub fluid_math: crate::fluid::FluidMath,
     face_masks: HashMap<u32, u32>,
+    combined: HashMap<u32, Vec<Quad>>,
+    prepared: HashMap<u32, Vec<crate::surfaces::Recipe>>,
+    volume_prepared: HashSet<u32>,
+    pub volumes: HashMap<u32, crate::volume::Volume>,
+    pub glass_references: HashMap<u32, [f32; 4]>,
+    pub optical_materials: HashMap<(u32, u32), (u32, prime_scene::surface::Medium, bool)>,
+    medium_ids: HashMap<(String, [u32; 4]), u32>,
 }
 
 pub(crate) fn state(r: &mut Reader<'_>) -> Result<(u32, State), String> {
     let id = r.u32()?;
     let flags = r.u32()?;
     let model = r.u32()?;
-    if flags & !255 != 0 {
+    if flags & !2047 != 0 {
         return Err("invalid raw state flags".into());
     }
     Ok((
@@ -88,6 +98,13 @@ pub(crate) fn state(r: &mut Reader<'_>) -> Result<(u32, State), String> {
             ],
             support: r.u32()?,
             fluid: Fluid::read(r)?,
+            emission: {
+                let value = r.u32()?;
+                if value > 15 {
+                    return Err("invalid source emission".into());
+                }
+                value
+            },
         },
     ))
 }
@@ -99,13 +116,15 @@ pub(crate) fn model(r: &mut Reader<'_>) -> Result<(u32, Model), String> {
     let model = match r.u32()? {
         0 => Model::Unknown,
         1 => {
-            let count = r.count(92)?;
+            let count = r.count(100)?;
             let mut quads = Vec::with_capacity(count);
             for _ in 0..count {
                 let face = r.u32()?;
                 let tint = r.i32()?;
                 let layer = r.u32()?;
-                if face > 6 || layer > 2 || tint < -1 {
+                let sprite = r.u32()?;
+                let emission = r.u32()?;
+                if face > 6 || layer > 2 || tint < -1 || emission > 15 {
                     return Err("invalid raw quad attributes".into());
                 }
                 let mut q = Quad {
@@ -114,6 +133,8 @@ pub(crate) fn model(r: &mut Reader<'_>) -> Result<(u32, Model), String> {
                     face,
                     tint,
                     layer: layer as usize,
+                    sprite,
+                    emission,
                 };
                 for i in 0..4 {
                     q.positions[i] = [r.f32()?, r.f32()?, r.f32()?];
@@ -199,6 +220,8 @@ pub(crate) struct Hacks {
     pub tint: u64,
     pub offset: u64,
     pub fluid: u64,
+    pub optics: u64,
+    pub sprite: u64,
 }
 impl std::ops::AddAssign for Hacks {
     fn add_assign(&mut self, other: Self) {
@@ -206,9 +229,15 @@ impl std::ops::AddAssign for Hacks {
         self.tint += other.tint;
         self.offset += other.offset;
         self.fluid += other.fluid;
+        self.optics += other.optics;
+        self.sprite += other.sprite;
     }
 }
 impl Catalog {
+    #[cfg(test)]
+    pub fn prepared_for_test(&self, id: u32) -> usize {
+        self.prepared[&id].as_ptr() as usize
+    }
     pub fn covers(&self, occluder: FaceId, source: FaceId) -> bool {
         if occluder.0 == 0 {
             return false;
@@ -249,6 +278,133 @@ impl Catalog {
     // Derived only when resource definitions change. Conservative unions retain weighted choices;
     // cycles/depth limits keep every face eligible and continue through the existing fallback.
     pub fn prepare(&mut self) {
+        for (&id, model) in &self.models {
+            if let Model::Mesh(quads) = model {
+                self.prepared
+                    .entry(id)
+                    .or_insert_with(|| crate::surfaces::prepare(quads));
+            }
+        }
+        fn deterministic(
+            id: u32,
+            models: &HashMap<u32, Model>,
+            depth: u32,
+            out: &mut Vec<Quad>,
+        ) -> Option<()> {
+            if depth > 64 {
+                return None;
+            }
+            match models.get(&id)? {
+                Model::Mesh(q) => out.extend_from_slice(q),
+                Model::Alias(id) => deterministic(*id, models, depth + 1, out)?,
+                Model::Multipart(children) => {
+                    for id in children {
+                        deterministic(*id, models, depth + 1, out)?;
+                    }
+                }
+                _ => return None,
+            }
+            Some(())
+        }
+        // Only a fully deterministic root can be flattened. Weighted children retain the exact
+        // original random call order; no host model/selector is called a second time.
+        for state in self.states.values() {
+            if matches!(
+                self.models.get(&state.model),
+                Some(Model::Multipart(_) | Model::Alias(_))
+            ) && !self.combined.contains_key(&state.model)
+            {
+                let mut quads = Vec::new();
+                if deterministic(state.model, &self.models, 0, &mut quads).is_some() {
+                    self.prepared
+                        .insert(state.model, crate::surfaces::prepare(&quads));
+                    self.combined.insert(state.model, quads);
+                }
+            }
+        }
+        fn collect(
+            id: u32,
+            models: &HashMap<u32, Model>,
+            prepared: &HashMap<u32, Vec<crate::surfaces::Recipe>>,
+            depth: u32,
+            out: &mut Vec<Quad>,
+        ) -> Option<()> {
+            if depth > 64 {
+                return None;
+            }
+            match models.get(&id)? {
+                Model::Mesh(quads) => {
+                    for r in &prepared[&id] {
+                        out.push(quads[r.source].clone());
+                        if let Some(pair) = r.pair
+                            && !pair.reverse
+                        {
+                            out.push(quads[pair.other].clone());
+                        }
+                    }
+                }
+                Model::Alias(child) => collect(*child, models, prepared, depth + 1, out)?,
+                Model::Multipart(children) => {
+                    for child in children {
+                        collect(*child, models, prepared, depth + 1, out)?;
+                    }
+                }
+                _ => return None,
+            }
+            Some(())
+        }
+        // Only transmissive/contained-fluid sources need volume proofs. Immutable definitions
+        // share the grid; placements and the GPU never build or traverse a model object graph.
+        for state in self
+            .states
+            .values()
+            .filter(|s| s.flags & 768 != 0 || s.fluid.kind != 0 && s.flags & 16 == 0)
+        {
+            let mut quads = Vec::new();
+            if collect(state.model, &self.models, &self.prepared, 0, &mut quads).is_none() {
+                continue;
+            }
+            if self.volume_prepared.insert(state.model)
+                && let Some(volume) = crate::volume::Volume::prepare(&quads)
+            {
+                self.volumes.insert(state.model, volume);
+            }
+            if state.flags & 768 == 0 || quads.is_empty() || quads.iter().any(|q| q.tint >= 0) {
+                continue;
+            }
+            let closed = self.volumes.contains_key(&state.model);
+            let planar = (0..3).any(|a| {
+                quads
+                    .iter()
+                    .flat_map(|q| q.positions)
+                    .all(|p| p[a] == quads[0].positions[0][a])
+            });
+            if !closed && !planar {
+                continue;
+            }
+            let family = state.name.strip_suffix("_pane").unwrap_or(&state.name);
+            for q in &quads {
+                let texture = crate::sprite::texture(q.sprite);
+                let Some(&reference) = self.glass_references.get(&texture) else {
+                    continue;
+                };
+                let medium = crate::optics::glass(reference);
+                let key = (
+                    family.to_string(),
+                    [
+                        medium.ior,
+                        medium.extinction[0],
+                        medium.extinction[1],
+                        medium.extinction[2],
+                    ]
+                    .map(f32::to_bits),
+                );
+                let next = self.medium_ids.len() as u32 + 2;
+                let id = *self.medium_ids.entry(key).or_insert(next);
+                self.optical_materials
+                    .insert((state.id, texture), (id, medium, !closed));
+            }
+        }
         fn mask(
             id: u32,
             models: &HashMap<u32, Model>,
@@ -262,7 +418,9 @@ impl Catalog {
                 return value;
             }
             let value = match models.get(&id) {
-                Some(Model::Mesh(quads)) => quads.iter().fold(0, |m, q| m | (1 << q.face)),
+                Some(Model::Mesh(quads)) => quads
+                    .iter()
+                    .fold(0, |m, q| m | (1 << q.face) | (1 << (8 + q.layer))),
                 Some(Model::Alias(child)) => mask(*child, models, cache, depth + 1),
                 Some(Model::Weighted(children, _)) => children
                     .iter()
@@ -286,8 +444,25 @@ impl Catalog {
         if state.air() || state.flags & 16 != 0 {
             0
         } else {
-            self.face_masks.get(&state.model).copied().unwrap_or(63)
+            self.face_masks.get(&state.model).copied().unwrap_or(63) & 127
         }
+    }
+    pub fn contact_candidate(&self, state: &State) -> bool {
+        state.fluid.kind != 0
+            || state.flags & 768 != 0
+            || self
+                .face_masks
+                .get(&state.model)
+                .is_some_and(|v| v & 0x600 != 0)
+            || matches!(
+                state.name.as_str(),
+                "minecraft:fire" | "minecraft:soul_fire"
+            )
+    }
+    pub fn has_contacts(&self) -> bool {
+        !self.fluids.is_empty()
+            || self.states.values().any(|s| s.flags & 768 != 0)
+            || self.face_masks.values().any(|v| v & 0x600 != 0)
     }
     #[allow(clippy::too_many_arguments)]
     pub fn emit(
@@ -298,6 +473,7 @@ impl Catalog {
         layers: &mut [Vec<CompiledQuad>; 3],
         hacks: &mut Hacks,
         tints: &mut crate::tint::Deferred,
+        surfaces: &mut [Vec<prime_scene::surface::SurfaceFace>; 3],
     ) {
         let mut offset = position.map(|p| p.rem_euclid(16) as f32);
         if state.flags & 2 != 0 {
@@ -309,8 +485,22 @@ impl Catalog {
         if state.flags & 16 != 0 {
             return;
         }
+        if let Some(quads) = self.combined.get(&state.model) {
+            emit_prepared(
+                state,
+                quads,
+                &self.prepared[&state.model],
+                offset,
+                visible,
+                layers,
+                tints,
+                surfaces,
+            );
+            return;
+        }
         let mut random = Random::new(position_seed(position[0], position[1], position[2]));
         self.emit_model(
+            state,
             state.model,
             offset,
             visible,
@@ -318,12 +508,14 @@ impl Catalog {
             layers,
             hacks,
             tints,
+            surfaces,
             0,
         );
     }
     #[allow(clippy::too_many_arguments)]
     fn emit_model(
         &self,
+        state: &State,
         id: u32,
         offset: [f32; 3],
         visible: u32,
@@ -331,6 +523,7 @@ impl Catalog {
         layers: &mut [Vec<CompiledQuad>; 3],
         hacks: &mut Hacks,
         tints: &mut crate::tint::Deferred,
+        surfaces: &mut [Vec<prime_scene::surface::SurfaceFace>; 3],
         depth: u32,
     ) {
         if depth > 64 {
@@ -340,17 +533,19 @@ impl Catalog {
         }
         match self.models.get(&id) {
             Some(Model::Mesh(quads)) => {
-                for q in quads {
-                    if visible & (1 << q.face) != 0 {
-                        let start = layers[q.layer].len();
-                        emit_quad(q, offset, [1.; 4], 1, layers);
-                        if q.tint >= 0 {
-                            tints.patch(q.tint, q.layer, start, layers[q.layer].len());
-                        }
-                    }
-                }
+                emit_prepared(
+                    state,
+                    quads,
+                    &self.prepared[&id],
+                    offset,
+                    visible,
+                    layers,
+                    tints,
+                    surfaces,
+                );
             }
             Some(Model::Alias(child)) => self.emit_model(
+                state,
                 *child,
                 offset,
                 visible,
@@ -358,6 +553,7 @@ impl Catalog {
                 layers,
                 hacks,
                 tints,
+                surfaces,
                 depth + 1,
             ),
             Some(Model::Weighted(items, total)) => {
@@ -365,6 +561,7 @@ impl Catalog {
                 for &(weight, child) in items {
                     if choice < weight {
                         self.emit_model(
+                            state,
                             child,
                             offset,
                             visible,
@@ -372,6 +569,7 @@ impl Catalog {
                             layers,
                             hacks,
                             tints,
+                            surfaces,
                             depth + 1,
                         );
                         break;
@@ -384,6 +582,7 @@ impl Catalog {
                 for &child in children {
                     *random = Random::new(seed);
                     self.emit_model(
+                        state,
                         child,
                         offset,
                         visible,
@@ -391,6 +590,7 @@ impl Catalog {
                         layers,
                         hacks,
                         tints,
+                        surfaces,
                         depth + 1,
                     );
                 }
@@ -401,6 +601,78 @@ impl Catalog {
                 cube(offset, visible, [1.0, 0.0, 1.0, 1.0], 0, layers);
             }
         }
+    }
+}
+#[allow(clippy::too_many_arguments)]
+fn emit_prepared(
+    state: &State,
+    quads: &[Quad],
+    recipes: &[crate::surfaces::Recipe],
+    offset: [f32; 3],
+    visible: u32,
+    layers: &mut [Vec<CompiledQuad>; 3],
+    tints: &mut crate::tint::Deferred,
+    surfaces: &mut [Vec<prime_scene::surface::SurfaceFace>; 3],
+) {
+    for recipe in recipes {
+        let a = &quads[recipe.source];
+        let active = |q: &Quad| visible & (1 << q.face) != 0;
+        if let Some(pair) = recipe.pair {
+            let b = &quads[pair.other];
+            if active(a)
+                && active(b)
+                && let Some((face, slots)) = crate::surfaces::resolve(state, a, b, pair, offset)
+            {
+                let layer = face.flags() as usize;
+                let start = surfaces[layer].len();
+                surfaces[layer].push(face);
+                for (side, slot) in slots.into_iter().enumerate() {
+                    if slot >= 0 {
+                        tints.patch(slot, 3 + side * 3 + layer, start, start + 1);
+                    }
+                }
+                continue;
+            }
+            if active(a) {
+                emit_source(state, a, offset, layers, tints, surfaces, recipe.two_sided);
+            }
+            if active(b) {
+                emit_source(state, b, offset, layers, tints, surfaces, false);
+            }
+            continue;
+        }
+        if active(a) {
+            emit_source(state, a, offset, layers, tints, surfaces, recipe.two_sided);
+        }
+    }
+}
+#[allow(clippy::too_many_arguments)]
+fn emit_source(
+    state: &State,
+    q: &Quad,
+    offset: [f32; 3],
+    layers: &mut [Vec<CompiledQuad>; 3],
+    tints: &mut crate::tint::Deferred,
+    surfaces: &mut [Vec<prime_scene::surface::SurfaceFace>; 3],
+    two_sided: bool,
+) {
+    let layer = crate::surfaces::flags(state, q);
+    let emission = crate::surfaces::emission(state, q, two_sided);
+    if emission != prime_scene::surface::Emission::default() {
+        let mut face =
+            prime_scene::surface::SurfaceFace::from_quad(crate::surfaces::closed(state, q, offset));
+        face.emission = emission;
+        let start = surfaces[layer].len();
+        surfaces[layer].push(face);
+        if q.tint >= 0 {
+            tints.patch(q.tint, 3 + layer, start, start + 1);
+        }
+        return;
+    }
+    let start = layers[layer].len();
+    layers[layer].push(crate::surfaces::closed(state, q, offset));
+    if q.tint >= 0 {
+        tints.patch(q.tint, layer, start, start + 1);
     }
 }
 pub(crate) fn emit_quad(
@@ -439,6 +711,8 @@ pub(crate) fn cube(
         if visible & (1 << face) != 0 {
             emit_quad(
                 &Quad {
+                    sprite: 0,
+                    emission: 0,
                     positions,
                     uvs: [[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
                     face: face as u32,

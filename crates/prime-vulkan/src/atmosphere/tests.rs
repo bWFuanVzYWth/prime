@@ -535,6 +535,117 @@ fn gpu_aerial_geometry_and_material_changes_invalidate_radiance_only() {
 }
 
 #[test]
+#[ignore = "requires Vulkan ray-query device"]
+fn gpu_aerial_profile_reuse_matches_full_recompute() {
+    use prime_scene::scene::{Scene, Triangle};
+    let mut renderer = crate::Renderer::new().unwrap();
+    let mut reference = Atmosphere::new(&renderer.context).unwrap();
+    let mut camera = camera();
+    let mut environment = Environment::default();
+    let mut scene = Scene {
+        epoch: 1,
+        revision: 1,
+        ..Default::default()
+    };
+    // Creation, movement, RGB-only edits, coverage changes and removal. The last
+    // cases change each non-shadow dependency while retaining the same scene.
+    for case in 0..12 {
+        if case < 7 {
+            let x = if case >= 2 { 4. } else { -8. };
+            let alpha = if case == 4 { 0. } else { 1. };
+            let red = if case == 3 { 0.25 } else { 1. };
+            scene.dynamic.revision += 1;
+            scene.dynamic.triangles = if case == 0 || case == 6 {
+                Default::default()
+            } else {
+                [
+                    [[x, 10., -24.], [x + 12., 10., -24.], [x + 12., 10., 8.]],
+                    [[x, 10., -24.], [x + 12., 10., 8.], [x, 10., 8.]],
+                ]
+                .map(|positions| Triangle {
+                    positions,
+                    colors: [[red, 1., 1., alpha]; 3],
+                    uvs: [[0.; 2]; 3],
+                    texture_id: 0,
+                    flags: 1,
+                })
+                .to_vec()
+                .into()
+            };
+        }
+        match case {
+            7 => camera.position[0] += 2.,
+            8 => camera.vertical_fov_radians += 0.2,
+            9 => environment.sun_direction = [0., 0.8, 0.6],
+            10 => environment.world_y += 40.,
+            _ => {}
+        }
+        renderer.set_environment(environment).unwrap();
+        renderer.render(&scene, &camera, 32, 24, case).unwrap();
+        // An independent LUT with all caches invalidated is the reference,
+        // including a fresh ray query for every demanded shadow column.
+        reference.aerial_key = None;
+        reference.shadow_key = None;
+        reference
+            .prepare(
+                environment,
+                &camera,
+                4. / 3.,
+                0,
+                Some((
+                    renderer.geometry.as_ref().unwrap(),
+                    renderer.atmosphere_scene_revision,
+                )),
+            )
+            .unwrap();
+        let actual = renderer
+            .atmosphere
+            .as_ref()
+            .unwrap()
+            ._aerial_radiance
+            .read(&renderer.context)
+            .unwrap();
+        let expected = reference._aerial_radiance.read(&renderer.context).unwrap();
+        assert_eq!(
+            actual.iter().zip(&expected).position(|(a, b)| a != b),
+            None,
+            "cached/full aerial differ in case {case}"
+        );
+    }
+    // Prove the unchanged-profile path really skips all slice writes. A changed
+    // publication with the same blockers must preserve this diagnostic sentinel.
+    let atmosphere = renderer.atmosphere.as_mut().unwrap();
+    atmosphere
+        ._aerial_radiance
+        .upload(
+            &renderer.context,
+            &vec![0; atmosphere._aerial_radiance.size()],
+        )
+        .unwrap();
+    atmosphere
+        .prepare(
+            environment,
+            &camera,
+            4. / 3.,
+            0,
+            Some((
+                renderer.geometry.as_ref().unwrap(),
+                renderer.atmosphere_scene_revision + 1,
+            )),
+        )
+        .unwrap();
+    assert!(
+        atmosphere
+            ._aerial_radiance
+            .read(&renderer.context)
+            .unwrap()
+            .iter()
+            .all(|v| *v == 0),
+        "unchanged blocker profiles rewrote the aerial LUT"
+    );
+}
+
+#[test]
 #[ignore = "requires Vulkan device; run with PRIME_PROFILE=1 and validation disabled"]
 fn atmosphere_cost_matrix() {
     let context = Context::new().unwrap();

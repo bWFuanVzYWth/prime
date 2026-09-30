@@ -18,5 +18,6 @@ pub mod translation;
 pub mod workers;
 
 pub use scene::{
-    Camera, Instance, InstanceScene, Prototype, Scene, SceneMesh, SourceScene, Texture, Triangle,
+    Camera, Instance, InstanceScene, Prototype, Scene, SceneMesh, SourceScene, Texture,
+    TextureLevel, TextureSampling, Triangle,
 };

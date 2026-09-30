@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 /// Four source corners, retaining the exact 012 / 230 triangle interpolation. An independent
 /// triangle repeats corner 2 as corner 3; its second hardware primitive has zero area.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quad {
     pub positions: [[f32; 3]; 4],
     pub colors: [[f32; 4]; 4],

@@ -26,16 +26,18 @@ final class SectionResources {
     private final IdentityHashMap<VoxelShape, int[]> faces = new IdentityHashMap<>();
     private final IdentityHashMap<FluidModel, Integer> fluids = new IdentityHashMap<>();
     private final FluidStateModelSet fluidModels;
+    private final SourceSprites sprites;
     private int nextFace = 2;
-    SectionResources(FluidStateModelSet fluidModels) {
+    SectionResources(FluidStateModelSet fluidModels, SourceSprites sprites) {
+        this.sprites = sprites;
         this.fluidModels = fluidModels;
     }
     record StateSource(int[] faces, int support, String fluid, int level, boolean falling,
-                       int material) {
+                       int material, int emission) {
         void write(SourcePages out) {
             for (int face : faces)
                 out.i(face);
-            out.i(support).string(fluid).i(level).i(falling ? 1 : 0).i(material);
+            out.i(support).string(fluid).i(level).i(falling ? 1 : 0).i(material).i(emission);
         }
     }
     StateSource prepare(SourcePages out, BlockState state) {
@@ -58,7 +60,7 @@ final class SectionResources {
                 ids, support, BuiltInRegistries.FLUID.getKey(fluid.getType()).toString(),
                 fluid.hasProperty(FlowingFluid.LEVEL) ? fluid.getValue(FlowingFluid.LEVEL) : 0,
                 fluid.hasProperty(FlowingFluid.FALLING) && fluid.getValue(FlowingFluid.FALLING),
-                material);
+                material, state.getLightEmission());
     }
     static int flags(BlockState state) {
         return (state.isSolid() ? 32 : 0) |
@@ -66,7 +68,17 @@ final class SectionResources {
                                                                               LeavesBlock)
                          ? 64
                          : 0) |
-                (state.getBlock() instanceof net.minecraft.world.level.block.IceBlock ? 128 : 0);
+                (state.getBlock() instanceof net.minecraft.world.level.block.IceBlock ? 128 : 0) |
+                ((state.getBlock() == net.minecraft.world.level.block.Blocks.GLASS ||
+                  state.getBlock() instanceof net.minecraft.world.level.block.StainedGlassBlock ||
+                  state.getBlock() instanceof net.minecraft.world.level.block.TintedGlassBlock)
+                         ? 256
+                         : 0) |
+                ((state.getBlock() == net.minecraft.world.level.block.Blocks.GLASS_PANE ||
+                  state.getBlock() instanceof net.minecraft.world.level.block.StainedGlassPaneBlock)
+                         ? 512
+                         : 0) |
+                (state.getBlock() instanceof LeavesBlock ? 1024 : 0);
     }
     private int fluid(SourcePages out, FluidModel model) {
         Integer known = fluids.get(model);
@@ -74,6 +86,10 @@ final class SectionResources {
             return known;
         int id = fluids.size() + 1;
         fluids.put(model, id);
+        sprites.prepare(out, model.stillMaterial().sprite());
+        sprites.prepare(out, model.flowingMaterial().sprite());
+        if (model.overlayMaterial() != null)
+            sprites.prepare(out, model.overlayMaterial().sprite());
         out.i(5).i(id)
                 .i(model.layer().ordinal())
                 .i((model.tintSource() != null ? 1 : 0) |
@@ -83,7 +99,7 @@ final class SectionResources {
                      model.overlayMaterial() != null ? model.overlayMaterial()
                                                      : model.flowingMaterial()}) {
             var s = material.sprite();
-            out.f(s.getU0()).f(s.getV0()).f(s.getU1()).f(s.getV1());
+            out.i(sprites.prepare(out, s)).f(s.getU0()).f(s.getV0()).f(s.getU1()).f(s.getV1());
         }
         return id;
     }

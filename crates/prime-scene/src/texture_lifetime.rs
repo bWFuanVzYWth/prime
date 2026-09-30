@@ -1,6 +1,74 @@
 //! Source ownership and scene references are independent retirement prerequisites.
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Charge immutable pixel allocations once, including every animation frame and source mip.
+/// Descriptor-only changes keep the same backings and need no resident-texture scan.
+#[derive(Default)]
+pub(crate) struct TextureMemory {
+    references: BTreeMap<usize, usize>,
+    bytes: usize,
+}
+impl TextureMemory {
+    pub fn capacity<'a>(
+        &self,
+        replacements: impl Iterator<Item = (Option<&'a crate::Texture>, &'a crate::Texture)>,
+    ) -> Result<usize, String> {
+        let mut changes = BTreeMap::<usize, (usize, i64)>::new();
+        for (old, new) in replacements {
+            if old.is_some_and(|old| old.same_backings(new)) {
+                continue;
+            }
+            for (texture, sign) in old.into_iter().map(|t| (t, -1)).chain([(new, 1)]) {
+                for pixels in texture.backings() {
+                    changes
+                        .entry(pixels.as_ptr() as usize)
+                        .or_insert((pixels.len(), 0))
+                        .1 += sign;
+                }
+            }
+        }
+        let mut bytes = self.bytes as i64;
+        for (key, (size, delta)) in changes {
+            let old = self.references.get(&key).copied().unwrap_or(0) as i64;
+            let new = old + delta;
+            debug_assert!(new >= 0);
+            bytes += (i64::from(new > 0) - i64::from(old > 0)) * size as i64;
+        }
+        if bytes > crate::protocol::MAX_TEXTURE_BYTES as i64 {
+            return Err("texture capacity exceeded".into());
+        }
+        Ok(bytes as usize)
+    }
+    pub fn replace(&mut self, old: Option<&crate::Texture>, new: Option<&crate::Texture>) {
+        if old.zip(new).is_some_and(|(a, b)| a.same_backings(b)) {
+            return;
+        }
+        if let Some(texture) = old {
+            for pixels in texture.backings() {
+                let key = pixels.as_ptr() as usize;
+                let count = self
+                    .references
+                    .get_mut(&key)
+                    .expect("owned texture backing");
+                *count -= 1;
+                if *count == 0 {
+                    self.references.remove(&key);
+                    self.bytes -= pixels.len();
+                }
+            }
+        }
+        if let Some(texture) = new {
+            for pixels in texture.backings() {
+                let count = self.references.entry(pixels.as_ptr() as usize).or_default();
+                if *count == 0 {
+                    self.bytes += pixels.len();
+                }
+                *count += 1;
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct TextureLifetime {
     references: BTreeMap<u32, u64>,
@@ -59,7 +127,7 @@ impl crate::SourceScene {
         while let Some(id) = self.texture_lifetime.candidates.pop_first() {
             self.texture_lifetime.collected(id);
             if let Some(old) = self.textures.remove(&id) {
-                self.texture_bytes -= old.pixels.len();
+                self.texture_memory.replace(Some(&old), None);
                 self.edits.textures.insert(id);
                 self.revision = revision;
             }

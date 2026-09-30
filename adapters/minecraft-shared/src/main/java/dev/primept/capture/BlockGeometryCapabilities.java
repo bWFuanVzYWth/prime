@@ -5,7 +5,7 @@ import net.fabricmc.fabric.impl.client.indigo.renderer.IndigoRenderer;
 import net.minecraft.client.renderer.block.BlockModelRenderState;
 import net.minecraft.client.renderer.block.model.BlockStateModelWrapper;
 
-/** This first optimization implements the tested Fabric wrapper/state contract, not arbitrary method rewrites. */
+/** The geometry cache requires the known Fabric wrapper/state contract. */
 public final class BlockGeometryCapabilities {
     private BlockGeometryCapabilities() {}
     private static final class Methods {

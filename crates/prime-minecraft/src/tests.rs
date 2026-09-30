@@ -90,6 +90,7 @@ pub(super) fn frame(
     for n in [radius, ys[0], ys[1], -64, 64, -64, 64] {
         u32_to(&mut v, n as u32);
     }
+    u64_to(&mut v, batch);
     for &(kind, s) in events {
         for n in [kind, s.0 as u32, s.1 as u32, s.2 as u32] {
             u32_to(&mut v, n);
@@ -125,7 +126,7 @@ pub(super) fn state_source(v: &mut Vec<u8>, flags: u32) {
     }
     u32_to(v, 0);
     string(v, "minecraft:empty");
-    for _ in 0..3 {
+    for _ in 0..4 {
         u32_to(v, 0);
     }
 }
@@ -165,9 +166,10 @@ pub(super) fn scene() -> SourceScene {
     let mut scene = SourceScene::default();
     scene.submit(&h(1)).unwrap();
     let mut tex = h(4);
-    for n in [1, 1, 1, 0, u32::MAX] {
+    for n in [1, 16, 16, 0] {
         u32_to(&mut tex, n);
     }
+    tex.extend([255; 16 * 16 * 4]);
     scene.submit(&tex).unwrap();
     scene
 }
@@ -372,7 +374,7 @@ fn actual_mc_field_packets_produce_renderable_cells_and_exact_quad_values() {
         );
         assert_eq!(triangle.uvs, [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]);
         assert_eq!(triangle.colors, [[1.; 4]; 3]);
-        assert_eq!(triangle.texture_id, 1);
+        assert_eq!(triangle.texture_id, crate::sprite::texture(1));
         assert_eq!(triangle.flags, 1);
     }
 }
@@ -560,6 +562,7 @@ fn lowered_slabs_match_scalar_geometry_for_models_palettes_and_halos() {
                     key,
                     first_y,
                     layers: Default::default(),
+                    surfaces: Default::default(),
                     hacks: Default::default(),
                     compiled: None,
                     tints: Default::default(),
@@ -706,6 +709,7 @@ fn boundary_dependencies_follow_face_occlusion_and_not_state_identity() {
         catalog.states.insert(
             id,
             model::State {
+                emission: 0,
                 id,
                 flags,
                 model: 0,
@@ -734,7 +738,10 @@ fn boundary_dependencies_follow_face_occlusion_and_not_state_identity() {
         changed_boundaries(Some(&uniform(3)), Some(&uniform(5)), &catalog),
         ((1 << 27) - 1) ^ (1 << 13)
     );
-    assert_eq!(changed_boundaries(Some(&uniform(0)), None, &catalog), 0);
+    assert_eq!(
+        changed_boundaries(Some(&uniform(0)), None, &catalog),
+        ((1 << 27) - 1) ^ (1 << 13)
+    );
     assert_eq!(
         changed_boundaries(Some(&uniform(1)), None, &catalog),
         ((1 << 27) - 1) ^ (1 << 13)
@@ -1142,9 +1149,9 @@ fn cached_raw_biomes_finish_the_source_response_without_a_host_sample_round() {
             ctx.biomes.finish(plan, &colors);
         }
         let mut response = header(3, 1);
-        u64_to(&mut response, queries.len() as u64);
+        u64_to(&mut response, ctx.stats.tint_requests as u64);
         u32_to(&mut response, 2);
-        for _ in queries {
+        for _ in 0..ctx.stats.tint_requests {
             u32_to(&mut response, 1);
             u32_to(&mut response, 0);
         }
@@ -1189,5 +1196,37 @@ fn cached_raw_biomes_finish_the_source_response_without_a_host_sample_round() {
         assert_eq!(a.positions, b.positions);
         assert_eq!(a.colors, b.colors);
         assert_eq!(a.uvs, b.uvs);
+    }
+}
+
+#[test]
+#[ignore = "requires both actual host sprite animation fixtures from cpuSmoke"]
+fn actual_sprite_frames_and_animation_state_match_rust_clock() {
+    for name in ["26.2", "26.3"] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../adapters/mc-{name}/build/routing-fixtures/sprite-animation.bin"
+        ));
+        let data = std::fs::read(path).unwrap();
+        let pages = [&data[..]];
+        let mut r = crate::wire::Reader::new(&pages).unwrap();
+        assert_eq!(r.u32().unwrap(), 6);
+        let (id, sprite) = crate::sprite::Sprite::read(&mut r).unwrap();
+        assert_eq!(id, 1);
+        assert_eq!(sprite.frames, [(1, 3), (0, 7)]);
+        assert!(sprite.interpolate);
+        for _ in 0..r.u32().unwrap() {
+            let tick = r.u32().unwrap();
+            let frame = r.u32().unwrap();
+            let sub = r.u32().unwrap();
+            let duration = r.u32().unwrap();
+            let t = sprite
+                .image(u64::from(tick), &SourceScene::default())
+                .unwrap();
+            assert_eq!(t.region, Some([frame * 4, 0, 4, 4]));
+            let blend = t.sampling.as_ref().map_or(0., |s| s.blend);
+            let host = ((sub as f32 / duration as f32) * 1000.) as u32 as f32 / 1000.;
+            assert_eq!(blend, host);
+        }
+        r.finish().unwrap();
     }
 }

@@ -4,11 +4,17 @@
 mod biome;
 mod biome_source;
 mod compile;
+mod contact;
 pub mod environment;
 mod fluid;
 mod model;
+mod optics;
 mod shape;
+mod sprite;
+mod surfaces;
 mod tint;
+mod volume;
+#[cfg(test)]
 use compile::compile_slab;
 #[cfg(test)]
 mod reference;
@@ -173,7 +179,8 @@ fn changed_boundaries(
         ) {
             (Some(a), Some(b)) => !a.same_boundary(b),
             (None, None) => false,
-            (Some(s), None) | (None, Some(s)) => !s.same_boundary(&model::State::default()),
+            // Known air supplies a contact proof; an unavailable halo supplies none.
+            (Some(_), None) | (None, Some(_)) => true,
         }
     };
     const ALL: u32 = ((1 << 27) - 1) ^ (1 << 13);
@@ -280,6 +287,7 @@ struct AwaitingColors {
     jobs: Vec<Job>,
     ordered: Vec<Section>,
     removed: BTreeSet<Section>,
+    aliases: Vec<usize>,
 }
 #[derive(Default)]
 pub struct TerrainContext {
@@ -288,7 +296,11 @@ pub struct TerrainContext {
     last_batch: u64,
     scheduler: Scheduler,
     catalog: Catalog,
+    animation_tick: Option<u64>,
+    animated: Vec<u32>,
+    textures: Vec<(u32, prime_scene::Texture)>,
     sections: HashMap<Section, SectionData>,
+    renderable: HashSet<[i32; 3]>,
     pending: Option<Pending>,
     awaiting_colors: Option<AwaitingColors>,
     tinted: HashSet<Section>,
@@ -408,6 +420,7 @@ impl TerrainContext {
         let mut models = HashMap::new();
         let mut faces = HashMap::new();
         let mut fluids = HashMap::new();
+        let mut sprites = HashMap::new();
         loop {
             match r.u32()? {
                 0 => break,
@@ -447,12 +460,41 @@ impl TerrainContext {
                         return Err("duplicate fluid material".into());
                     }
                 }
+                6 => {
+                    let (id, sprite) = sprite::Sprite::read(&mut r)?;
+                    if sprites.insert(id, sprite).is_some() {
+                        return Err("duplicate sprite definition".into());
+                    }
+                }
                 _ => return Err("unknown section response record".into()),
             }
         }
         r.finish()?;
         if received.len() != requested.len() {
             return Err("incomplete section response".into());
+        }
+        for model in models.values_mut() {
+            if let model::Model::Mesh(quads) = model {
+                for quad in quads {
+                    if quad.sprite != 0 {
+                        let sprite = sprites
+                            .get(&quad.sprite)
+                            .or_else(|| {
+                                (!pending.demand.reset_catalog)
+                                    .then(|| self.catalog.sprites.get(&quad.sprite))
+                                    .flatten()
+                            })
+                            .ok_or("undefined source sprite")?;
+                        if let Some(uvs) = sprite.local(quad.uvs) {
+                            quad.uvs = uvs;
+                        } else {
+                            // Preserve unknown cross-sprite sampling, not a silently clamped edge.
+                            quad.sprite = 0;
+                            self.stats.hacks.sprite += 1;
+                        }
+                    }
+                }
+            }
         }
         // A resource ID denotes immutable content until the explicit catalog invalidation.
         // Reject in-place changes before committing any source data or consuming Pending.
@@ -464,6 +506,7 @@ impl TerrainContext {
             && (!unchanged(&self.catalog.states, &states)
                 || !unchanged(&self.catalog.models, &models)
                 || !unchanged(&self.catalog.fluids, &fluids)
+                || !unchanged(&self.catalog.sprites, &sprites)
                 || faces
                     .iter()
                     .any(|(id, value)| self.catalog.faces.get(id).is_some_and(|old| old != value)))
@@ -486,16 +529,57 @@ impl TerrainContext {
                 return Err("undefined fluid material".into());
             }
         }
+        for fluid in fluids.values() {
+            if fluid.identities.iter().any(|id| {
+                *id != 0
+                    && !sprites.contains_key(id)
+                    && (pending.demand.reset_catalog || !self.catalog.sprites.contains_key(id))
+            }) {
+                return Err("undefined fluid sprite".into());
+            }
+        }
+        // No fallible resource interpretation after taking Pending or mutating the catalog.
+        let mut references = Vec::new();
+        let mut textures = Vec::new();
+        for (&id, sprite) in &sprites {
+            textures.push((
+                sprite::texture(id),
+                sprite.image(pending.input.tick, scene)?,
+            ));
+            references.push((sprite::texture(id), sprite.reference(scene)?));
+        }
+        if !pending.demand.reset_catalog && self.animation_tick != Some(pending.input.tick) {
+            for &id in &self.animated {
+                if !sprites.contains_key(&id) {
+                    textures.push((
+                        sprite::texture(id),
+                        self.catalog.sprites[&id].image(pending.input.tick, scene)?,
+                    ));
+                }
+            }
+        }
+        scene.validate_textures(&textures)?;
+        self.textures = textures;
         let Pending { input, demand } = self.pending.take().unwrap();
         if demand.reset_catalog {
             self.catalog = Catalog::default();
             self.biomes = biome::Cache::default();
             self.biome_sources = biome_source::Cache::default();
+            self.animated.clear();
         }
+        self.animation_tick = Some(input.tick);
+        let prepare = !models.is_empty() || !states.is_empty();
         self.catalog.states.extend(states);
         self.catalog.faces.extend(faces);
         self.catalog.fluids.extend(fluids);
-        if !models.is_empty() {
+        self.catalog.glass_references.extend(references);
+        for (&id, sprite) in &sprites {
+            if !sprite.frames.is_empty() && !self.catalog.sprites.contains_key(&id) {
+                self.animated.push(id);
+            }
+        }
+        self.catalog.sprites.extend(sprites);
+        if prepare {
             self.catalog.models.extend(models);
             self.catalog.prepare();
         }
@@ -577,6 +661,35 @@ impl TerrainContext {
             }
             self.sections.insert(key, data);
         }
+        if !compile.is_empty() || !removed.is_empty() {
+            let mut counts = HashMap::<[i32; 3], u32>::new();
+            for s in &self.scheduler.active {
+                if self.sections.contains_key(s) {
+                    *counts
+                        .entry([s.0.div_euclid(4), s.1.div_euclid(4), s.2.div_euclid(4)])
+                        .or_default() += 1;
+                }
+            }
+            let next: HashSet<_> = counts
+                .into_iter()
+                .filter_map(|(cell, n)| (n == 64).then_some(cell))
+                .collect();
+            let changed: HashSet<_> = self
+                .renderable
+                .symmetric_difference(&next)
+                .copied()
+                .collect();
+            if !changed.is_empty() && self.catalog.has_contacts() {
+                for s in &self.scheduler.active {
+                    if s.halo().iter().any(|n| {
+                        changed.contains(&[n.0.div_euclid(4), n.1.div_euclid(4), n.2.div_euclid(4)])
+                    }) {
+                        compile.insert(*s);
+                    }
+                }
+            }
+            self.renderable = next;
+        }
         compile.retain(|s| self.scheduler.active.contains(s) && self.sections.contains_key(s));
         removed.retain(|s| !compile.contains(s));
         self.stats.decode_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -593,6 +706,7 @@ impl TerrainContext {
                         key,
                         first_y,
                         layers: Default::default(),
+                        surfaces: Default::default(),
                         hacks: Hacks::default(),
                         compiled: None,
                         tints: Default::default(),
@@ -613,7 +727,7 @@ impl TerrainContext {
                 .unwrap()
                 .chunks_mut(&mut jobs, 1, |_, output| {
                     for job in output {
-                        compile_slab(job, catalog, sections);
+                        compile::compile_contacts(job, catalog, sections, &self.renderable);
                     }
                     Ok(())
                 })?;
@@ -630,12 +744,24 @@ impl TerrainContext {
                 .checked_add(job.tints.requests.len())
                 .ok_or("tint count overflow")?;
         }
-        self.stats.tint_requests = count;
+        let mut unique = Vec::new();
+        let mut indices = HashMap::new();
+        let aliases: Vec<_> = jobs
+            .iter()
+            .flat_map(|j| &j.tints.requests)
+            .map(|&request| {
+                *indices.entry(request).or_insert_with(|| {
+                    unique.push(request);
+                    unique.len() - 1
+                })
+            })
+            .collect();
+        self.stats.tint_requests = unique.len();
         self.stats.response_batches = 1;
         if count != 0 {
             self.stats.request_batches += 1;
             u64_to(&mut self.tint_requests, batch);
-            u64_to(&mut self.tint_requests, count as u64);
+            u64_to(&mut self.tint_requests, unique.len() as u64);
             u64_to(&mut self.tint_requests, epoch);
             u32_to(&mut self.tint_requests, version);
             u32_to(
@@ -646,7 +772,7 @@ impl TerrainContext {
                     0
                 },
             );
-            for request in jobs.iter().flat_map(|j| &j.tints.requests) {
+            for request in &unique {
                 for v in request.position {
                     u32_to(&mut self.tint_requests, v as u32);
                 }
@@ -656,6 +782,7 @@ impl TerrainContext {
             self.stats.tint_bytes = self.tint_requests.len();
             self.awaiting_colors = Some(AwaitingColors {
                 stage: ColorStage::Sources,
+                aliases,
                 batch,
                 jobs,
                 ordered,
@@ -724,6 +851,7 @@ impl TerrainContext {
             self.stats.tint_callbacks = callbacks;
             self.stats.tint_decode_ms += start.elapsed().as_secs_f64() * 1000.;
             let prepare = Instant::now();
+            let recipes: Vec<_> = waiting.aliases.iter().map(|&i| recipes[i]).collect();
             let plan = self.biomes.prepare(
                 waiting
                     .jobs
@@ -846,16 +974,24 @@ impl TerrainContext {
                                     &colors[job.color_start
                                         ..job.color_start + job.tints.requests.len()],
                                     &mut job.layers,
+                                    &mut job.surfaces,
                                 );
                             }
                         }
                         let parts: [_; 4] =
                             std::array::from_fn(|i| std::mem::take(&mut group[i].layers));
-                        let compiled = scene.prepare_compiled_quad_fragments(
+                        let mut compiled = scene.prepare_compiled_quad_fragments(
                             group[0].key.key(),
                             group[0].key.origin(),
                             parts,
                         );
+                        let surfaces = std::array::from_fn(|i| {
+                            group
+                                .iter_mut()
+                                .flat_map(|job| std::mem::take(&mut job.surfaces[i]))
+                                .collect()
+                        });
+                        scene.prepare_surface_layers(&mut compiled, surfaces);
                         // Tint scratch is no longer needed. Geometry ownership moved into the
                         // proof; redundant fragment buffers were disposed on these workers.
                         for job in group.iter_mut() {
@@ -886,11 +1022,12 @@ impl TerrainContext {
         self.stats.finalize_ms = finalize_start.elapsed().as_secs_f64() * 1000.;
         self.stats.compile_ms += self.stats.finalize_ms;
         let publish_start = Instant::now();
-        let mut publication = scene.publish_compiled(
+        let mut publication = scene.publish_compiled_with_textures(
             self.epoch,
             batch,
             replacements,
             &removed.iter().map(|s| s.key()).collect::<Vec<_>>(),
+            std::mem::take(&mut self.textures),
         )?;
         self.stats.published_layers = publication.replaced_layers;
         self.stats.retained_layers = publication.retained_layers;
@@ -905,7 +1042,7 @@ impl TerrainContext {
         let s = &self.stats;
         let h = s.hacks;
         format!(
-            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} tint_requests={} tint_callbacks={} tint_bytes={} tint_pack={:.3} tint_decode={:.3} biome_samples={} biome_cached_samples={} biome_hits={} biome_plan={:.3} biome_filter={:.3} biome_source={:.3} biome_host_cells={} biome_pages={} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={})]",
+            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} tint_requests={} tint_callbacks={} tint_bytes={} tint_pack={:.3} tint_decode={:.3} biome_samples={} biome_cached_samples={} biome_hits={} biome_plan={:.3} biome_filter={:.3} biome_source={:.3} biome_host_cells={} biome_pages={} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={},optics={},sprite={})]",
             self.epoch,
             self.pending
                 .as_ref()
@@ -947,7 +1084,9 @@ impl TerrainContext {
             h.model,
             h.tint,
             h.offset,
-            h.fluid
+            h.fluid,
+            h.optics,
+            h.sprite
         )
     }
 }
@@ -955,6 +1094,7 @@ struct Job {
     key: Section,
     first_y: usize,
     layers: [Vec<CompiledQuad>; 3],
+    surfaces: [Vec<prime_scene::surface::SurfaceFace>; 3],
     hacks: Hacks,
     compiled: Option<CompiledSection>,
     tints: tint::Deferred,

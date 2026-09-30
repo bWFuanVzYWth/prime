@@ -49,6 +49,7 @@ pub(crate) struct FluidMaterial {
     layer: usize,
     pub flags: u32,
     sprites: [[f32; 4]; 3],
+    pub identities: [u32; 3],
 }
 impl FluidMaterial {
     pub fn read(r: &mut Reader<'_>) -> Result<(u32, Self), String> {
@@ -59,7 +60,9 @@ impl FluidMaterial {
             return Err("invalid fluid material".into());
         }
         let mut sprites = [[0.; 4]; 3];
-        for sprite in &mut sprites {
+        let mut identities = [0; 3];
+        for (index, sprite) in sprites.iter_mut().enumerate() {
+            identities[index] = r.u32()?;
             for v in sprite {
                 *v = r.f32()?;
             }
@@ -70,6 +73,7 @@ impl FluidMaterial {
                 layer: layer as usize,
                 flags,
                 sprites,
+                identities,
             },
         ))
     }
@@ -165,10 +169,11 @@ pub(crate) fn emit<'a>(
     get: impl Fn(i32, i32, i32) -> &'a State,
     layers: &mut [Vec<CompiledQuad>; 3],
     hacks: &mut Hacks,
-) {
+    contacts: bool,
+) -> Option<[f32; 4]> {
     let kind = state.fluid.kind;
     if kind == 0 {
-        return;
+        return None;
     }
     let Some(material) = catalog
         .fluids
@@ -177,7 +182,7 @@ pub(crate) fn emit<'a>(
     else {
         hacks.fluid += 1;
         cube(offset, 63, [1., 0., 1., 1.], 2, layers);
-        return;
+        return None;
     };
     let positions = [
         (0, -1, 0),
@@ -189,11 +194,14 @@ pub(crate) fn emit<'a>(
     ];
     let neighbors = positions.map(|(x, y, z)| get(x, y, z));
     let mut enabled = std::array::from_fn::<_, 6, _>(|i| {
-        neighbors[i].fluid.kind != kind && (i == 1 || !catalog.fluid_occluded(state, i ^ 1, 1.))
+        neighbors[i].fluid.kind != kind
+            && (contacts || i == 1 || !catalog.fluid_occluded(state, i ^ 1, 1.))
     });
-    enabled[0] &= !catalog.fluid_occluded(neighbors[0], 0, 0.8888889);
+    if !contacts {
+        enabled[0] &= !catalog.fluid_occluded(neighbors[0], 0, 0.8888889);
+    }
     if !enabled.iter().any(|b| *b) {
-        return;
+        return Some([1.; 4]);
     }
     let samples = std::array::from_fn::<_, 9, _>(|i| {
         let x = i as i32 % 3 - 1;
@@ -210,12 +218,6 @@ pub(crate) fn emit<'a>(
         } else {
             0.
         }
-    });
-    let backward = (-1..=1).any(|x| {
-        (-1..=1).any(|z| {
-            let s = get(x, 1, z);
-            s.fluid.kind != kind && !s.full()
-        })
     });
     let overlay = neighbors.iter().enumerate().fold(0, |mask, (i, s)| {
         mask | if material.flags & 2 != 0 && s.flags & 64 != 0 {
@@ -287,29 +289,34 @@ pub(crate) fn emit<'a>(
         corner(samples[4], samples[1], samples[5], samples[2]),
     ];
     let minimum = heights.iter().copied().fold(1.0, f32::min);
-    enabled[1] &= !catalog.fluid_occluded(neighbors[1], 1, minimum);
+    if !contacts {
+        enabled[1] &= !catalog.fluid_occluded(neighbors[1], 1, minimum);
+    }
     let bottom = if enabled[0] { 0.001 } else { 0.0 };
     let uv = |sprite: usize, u: f32, v: f32| {
+        if material.identities[sprite] != 0 {
+            return [u, v];
+        }
         let s = sprites[sprite];
         [s[0] + (s[2] - s[0]) * u, s[1] + (s[3] - s[1]) * v]
     };
-    let mut face = |positions: [[f32; 3]; 4], uvs: [[f32; 2]; 4], back: bool| {
+    let mut face = |positions: [[f32; 3]; 4], uvs: [[f32; 2]; 4], sprite: usize| {
         let q = Quad {
+            sprite: 0,
+            emission: 0,
             positions,
             uvs,
             face: 6,
             tint: -1,
             layer: material.layer,
         };
-        emit_quad(&q, offset, color, 1, layers);
-        if back {
-            let q = Quad {
-                positions: [positions[0], positions[3], positions[2], positions[1]],
-                uvs: [uvs[0], uvs[3], uvs[2], uvs[1]],
-                ..q
-            };
-            emit_quad(&q, offset, color, 1, layers);
-        }
+        emit_quad(
+            &q,
+            offset,
+            color,
+            crate::sprite::texture(material.identities[sprite]),
+            layers,
+        );
     };
     if enabled[1] {
         for height in &mut heights {
@@ -342,7 +349,7 @@ pub(crate) fn emit<'a>(
                 [1.0, heights[3], 0.0],
             ],
             uvs,
-            backward,
+            usize::from(flow != [0.; 2]),
         );
     }
     if enabled[0] {
@@ -359,7 +366,7 @@ pub(crate) fn emit<'a>(
                 uv(0, 1.0, 1.0),
                 uv(0, 0.0, 1.0),
             ],
-            false,
+            0,
         );
     }
     for (direction, a, b, x0, z0, x1, z1) in [
@@ -370,7 +377,7 @@ pub(crate) fn emit<'a>(
     ] {
         let (ha, hb) = (heights[a], heights[b]);
         if !enabled[direction]
-            || catalog.fluid_occluded(neighbors[direction], direction, ha.max(hb))
+            || !contacts && catalog.fluid_occluded(neighbors[direction], direction, ha.max(hb))
         {
             continue;
         }
@@ -389,7 +396,8 @@ pub(crate) fn emit<'a>(
                 uv(sprite, 0.5, 0.5),
                 uv(sprite, 0.0, 0.5),
             ],
-            !is_overlay,
+            sprite,
         );
     }
+    Some(heights)
 }

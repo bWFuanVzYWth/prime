@@ -14,6 +14,7 @@ import java.nio.ByteOrder;
 public final class DynamicFrame implements AutoCloseable {
     private static final int HEADER_BYTES = 64;
     private static final int SPAN_BYTES = 32;
+    private static final int VERTEX_BYTES = 24;
     private static final int MAX_BYTES = 256 << 20;
     private final Thread owner = Thread.currentThread();
     private Arena arena;
@@ -103,14 +104,14 @@ public final class DynamicFrame implements AutoCloseable {
 
     public void beginSpan(int textureId, int flags, int topology) {
         checkWriting();
-        openSpan(textureId, flags, topology, SourceQuads.STRIDE, 0, 12, 16);
+        openSpan(textureId, flags, topology, VERTEX_BYTES, 0, 12, 16);
     }
 
     /** Writes source encoded color; lighting and quad-to-triangle expansion belong elsewhere. */
     public void vertex(float x, float y, float z, int argb, float u, float v) {
         if (spanStart < 0)
             throw new IllegalStateException("No dynamic span is open");
-        ensure(SourceQuads.STRIDE);
+        ensure(VERTEX_BYTES);
         bytes.putFloat(x)
                 .putFloat(y)
                 .putFloat(z)

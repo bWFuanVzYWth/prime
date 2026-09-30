@@ -156,7 +156,15 @@ impl LightTree {
             {
                 return Err("Invalid linear emission radiance".into());
             }
-            if t.emission.radiance == [0.0; 3] {
+            let secondary = t
+                .detail
+                .as_ref()
+                .map(|d| d.layer.emission)
+                .unwrap_or_default();
+            if secondary.radiance.iter().any(|x| !x.is_finite() || *x < 0.) {
+                return Err("Invalid layer emission".into());
+            }
+            if t.emission.radiance == [0.0; 3] && secondary.radiance == [0.0; 3] {
                 continue;
             }
             let areas = t.geometry.areas();
@@ -169,15 +177,18 @@ impl LightTree {
             if areas[0] > 0.0 && areas[1] > 0.0 && !(first_fraction > 0.0 && first_fraction < 1.0) {
                 return Err("Emitter half-area probability is outside the f32 light ABI".into());
             }
-            let luminance = t
-                .emission
-                .radiance
-                .iter()
-                .zip([0.2126, 0.7152, 0.0722])
-                .map(|(&x, w)| f64::from(x) * w)
-                .sum::<f64>();
-            let power =
-                (f64::from(area) * luminance * if t.emission.two_sided { 2.0 } else { 1.0 }) as f32;
+            let luminance = |emission: super::Emission| {
+                emission
+                    .radiance
+                    .iter()
+                    .zip([0.2126, 0.7152, 0.0722])
+                    .map(|(&x, w)| f64::from(x) * w)
+                    .sum::<f64>()
+                    * if emission.two_sided { 2. } else { 1. }
+            };
+            // Proposal weight is an upper bound for layered coverage. The actual sampled
+            // radiance always comes from the same selected layer as a traced hit.
+            let power = (f64::from(area) * (luminance(t.emission) + luminance(secondary))) as f32;
             if !area.is_finite() || area <= 0.0 || !power.is_finite() || power <= 0.0 {
                 return Err("Emitting triangle area/power is outside the f32 light ABI".into());
             }

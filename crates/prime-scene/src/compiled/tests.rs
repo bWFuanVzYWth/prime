@@ -6,16 +6,19 @@ fn scene() -> SourceScene {
         epoch: 1,
         ..Default::default()
     };
-    scene.textures.insert(
-        1,
-        Texture {
-            width: 1,
-            height: 1,
-            pixels: Arc::from([255; 4]),
-        },
-    );
-    scene.texture_bytes = 4;
-    scene.texture_lifetime.owned(1);
+    scene
+        .set_texture(
+            1,
+            Texture {
+                region: None,
+                sampling: None,
+                width: 1,
+                height: 1,
+                pixels: Arc::from([255; 4]),
+            },
+        )
+        .unwrap();
+
     scene
 }
 fn triangle() -> Triangle {
@@ -494,4 +497,39 @@ fn triangle_storage(value: &MeshGeometry) -> &Arc<[Triangle]> {
         panic!("expected triangle source")
     };
     values
+}
+
+#[test]
+fn resource_and_compiled_geometry_publication_fail_together() {
+    let mut scene = scene();
+    let image = scene.texture(1).unwrap().clone();
+    let revision = scene.revision();
+    let section = plan(&scene, vec![triangle()]);
+    assert!(
+        scene
+            .publish_compiled_with_textures(2, 1, vec![section], &[], vec![(2, image.clone())])
+            .is_err()
+    );
+    assert!(scene.texture(2).is_none());
+    assert!(scene.meshes.is_empty());
+    assert_eq!(scene.revision(), revision);
+    let section = plan(&scene, vec![triangle()]);
+    let bad = Texture {
+        width: 2,
+        ..image.clone()
+    };
+    assert!(
+        scene
+            .publish_compiled_with_textures(1, 1, vec![section], &[], vec![(2, bad)])
+            .is_err()
+    );
+    assert!(scene.meshes.is_empty());
+    assert_eq!(scene.revision(), revision);
+    let section = plan(&scene, vec![triangle()]);
+    scene
+        .publish_compiled_with_textures(1, 1, vec![section], &[], vec![(2, image)])
+        .unwrap();
+    assert!(scene.texture(2).is_some());
+    assert_eq!(scene.meshes.len(), 1);
+    assert_eq!(scene.section_completed, SectionSequence(1));
 }

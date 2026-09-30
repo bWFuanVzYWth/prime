@@ -17,12 +17,14 @@ import "ray_query.slang";
         return;
     TraceScene resources = {acceleration, textures, texels, instanceMaterials, staticTrianglePages};
     float3 sample = asfloat(inputs[i]).xyz;
-    LightSample light = sampleLocalLight(resources, sample.x, sample.yz, 17);
+    LightSample light = sampleLocalLight(resources, sample.x, sample.yz, 17,
+                                         float3(0, 0, config.x == 1 ? -1000 : 1000));
     outputs[i * 4] = uint4(light.valid, 0, 0, 0);
     if (!light.valid)
         return;
-    float3 origin = light.surface.position + light.surface.normal * 2.0;
-    SurfaceHit hit = traceClosest(resources, origin, -light.surface.normal, 17);
+    float3 origin = light.surface.position + light.surface.normal * (config.x == 1 ? -2.0 : 2.0);
+    SurfaceHit hit = traceClosest(resources, origin,
+                                  light.surface.normal * (config.x == 1 ? 1.0 : -1.0), 17);
     float reverse = hit.found ? emissiveHitPdf(resources, hit, origin) : -1.0;
     outputs[i * 4] = uint4(light.valid, light.page, light.emitter, light.twoSided);
     outputs[i * 4 + 1] = asuint(float4(light.surface.position, light.areaPdf));

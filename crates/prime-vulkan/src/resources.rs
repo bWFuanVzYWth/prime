@@ -1413,6 +1413,10 @@ impl Drop for Acceleration {
     }
 }
 impl Acceleration {
+    #[cfg(test)]
+    pub fn storage_bytes(&self) -> u64 {
+        self.storage.as_ref().map_or(0, |s| s.size)
+    }
     pub fn retire(mut self, arena: &mut Arena) {
         if let Some(storage) = self.storage.take() {
             arena.retire(storage);

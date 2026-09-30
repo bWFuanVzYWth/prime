@@ -30,7 +30,7 @@ final class TerrainRouterCpuSmoke {
     static void run() throws Exception {
         var region = FluidRouterCpuSmoke.blank(Region.class);
         for (boolean keyed : new boolean[] {false, true}) {
-            var inbox = new CaptureInbox(true);
+            var inbox = new LegacyTerrainInbox(true);
             var model = new Model(keyed);
             var colors = new BlockColors();
             int[] tintCalls = {0};
@@ -55,7 +55,7 @@ final class TerrainRouterCpuSmoke {
                     expected.vertex(SourceQuads.CUTOUT, x + (i == 1 || i == 2 ? 1 : 0),
                                     i >= 2 ? 1 : 0, .25f, 0xff5b7e3b, i == 1 || i == 2 ? 1 : 0,
                                     i >= 2 ? 1 : 0);
-            var reference = new CaptureInbox(true);
+            var reference = new LegacyTerrainInbox(true);
             reference.capture(reference.begin(SectionPos.of(0, 0, 0)), expected);
             try (var router = new TerrainRouter(inbox, models, null, colors)) {
                 router.route(SectionPos.of(0, 0, 0), region);
@@ -90,7 +90,7 @@ final class TerrainRouterCpuSmoke {
     private static void hiddenPlacements() throws Exception {
         var region = FluidRouterCpuSmoke.blank(SolidRegion.class);
         for (boolean keyed : new boolean[] {false, true}) {
-            var inbox = new CaptureInbox(true);
+            var inbox = new LegacyTerrainInbox(true);
             var model = new Model(keyed);
             model.face = Direction.DOWN;
             var models =
@@ -124,8 +124,8 @@ final class TerrainRouterCpuSmoke {
             return Blocks.STONE.defaultBlockState();
         }
     }
-    static void write(String name, CaptureInbox.Sealed actual, CaptureInbox.Sealed expected)
-            throws Exception {
+    static void write(String name, LegacyTerrainInbox.Sealed actual,
+                      LegacyTerrainInbox.Sealed expected) throws Exception {
         Path root = Path.of(System.getProperty("primept.smoke.routingDirectory"));
         Files.createDirectories(root);
         try (var out = new DataOutputStream(Files.newOutputStream(root.resolve(name + ".bin")))) {
@@ -139,7 +139,7 @@ final class TerrainRouterCpuSmoke {
             }
         }
     }
-    private static ByteBuffer wire(CaptureInbox.Batch batch) {
+    private static ByteBuffer wire(LegacyTerrainInbox.Batch batch) {
         return ByteBuffer.wrap(batch.packets().getFirst()).order(ByteOrder.LITTLE_ENDIAN);
     }
     static final class Model implements BlockStateModel {

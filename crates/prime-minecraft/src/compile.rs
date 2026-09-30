@@ -9,6 +9,7 @@ use std::{
 };
 
 static MISSING: State = State {
+    emission: 0,
     id: 0,
     flags: 0,
     model: 0,
@@ -33,6 +34,7 @@ struct Cell<'a> {
     state: &'a State,
     emission: u8,
     occlusion: u16,
+    contact: u8,
 }
 impl<'a> Cell<'a> {
     fn lower(id: u32, catalog: &'a Catalog) -> Self {
@@ -56,6 +58,13 @@ impl<'a> Cell<'a> {
             emission: catalog.face_mask(state) as u8
                 | if state.fluid.kind != 0 { FLUID } else { 0 },
             occlusion,
+            contact: u8::from(catalog.contact_candidate(state))
+                | (u8::from(!state.air() && (state.model != 0 || state.fluid.kind != 0)) << 1)
+                | (u8::from(state.flags & 768 != 0 || state.fluid.kind != 0) << 2)
+                | (u8::from(matches!(
+                    state.name.as_str(),
+                    "minecraft:fire" | "minecraft:soul_fire"
+                )) << 3),
         }
     }
 }
@@ -63,6 +72,7 @@ struct Slab<'a> {
     states: [&'a State; CELLS],
     emission: [u8; CELLS],
     occlusion: [u16; CELLS],
+    contact: [u8; CELLS],
 }
 impl<'a> Slab<'a> {
     fn new() -> Self {
@@ -70,12 +80,35 @@ impl<'a> Slab<'a> {
             states: [&MISSING; CELLS],
             emission: [63; CELLS],
             occlusion: [0; CELLS],
+            contact: [0; CELLS],
         }
     }
     fn set(&mut self, index: usize, cell: Cell<'a>) {
         self.states[index] = cell.state;
         self.emission[index] = cell.emission;
         self.occlusion[index] = cell.occlusion;
+        self.contact[index] = cell.contact;
+    }
+    fn needs_contact(&self, index: usize) -> bool {
+        let own = self.contact[index];
+        if own & 4 != 0 {
+            return true;
+        }
+        [
+            index - PLANE,
+            index + PLANE,
+            index - ROW,
+            index + ROW,
+            index - 1,
+            index + 1,
+        ]
+        .into_iter()
+        .any(|i| {
+            // Ordinary opaque faces only need a neighbor's medium or fire coating.
+            // A cutout touching opaque resolves/removes its own side independently.
+            (own & 1 != 0 && self.contact[i] & 2 != 0)
+                || (own & 2 != 0 && self.contact[i] & 12 != 0)
+        })
     }
     /// Sixteen independent cells use a 512-bit logical vector. Loads need no SIMD alignment;
     /// the compiler lowers it to the selected target's vector width, including baseline SSE2.
@@ -229,11 +262,38 @@ impl<'a> View<'a> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn compile_slab(
     job: &mut Job,
     catalog: &Catalog,
     sections: &HashMap<Section, SectionData>,
 ) {
+    compile(job, catalog, sections, None);
+}
+pub(super) fn compile_contacts(
+    job: &mut Job,
+    catalog: &Catalog,
+    sections: &HashMap<Section, SectionData>,
+    cells: &std::collections::HashSet<[i32; 3]>,
+) {
+    compile(job, catalog, sections, Some(cells));
+}
+fn compile(
+    job: &mut Job,
+    catalog: &Catalog,
+    sections: &HashMap<Section, SectionData>,
+    published: Option<&std::collections::HashSet<[i32; 3]>>,
+) {
+    let contact =
+        published
+            .filter(|_| catalog.has_contacts())
+            .map(|cells| crate::contact::Context {
+                catalog,
+                sections,
+                cells,
+                origin: [job.key.0 * 16, job.key.1 * 16, job.key.2 * 16],
+            });
+    let mut contact_cache = crate::contact::Cache::new();
     let center = View::new(&sections[&job.key], catalog);
     let has_fluid = center.has_fluid();
     let mut views = job.key.halo().map(|key| {
@@ -289,6 +349,17 @@ pub(super) fn compile_slab(
                     job.key.1 * 16 + (job.first_y + y) as i32,
                     job.key.2 * 16 + z as i32,
                 ];
+                if let Some(contact) = &contact
+                    && cells.needs_contact(index)
+                {
+                    contact.emit(
+                        &mut contact_cache,
+                        job,
+                        position,
+                        cells.exact_visible(index, masks, catalog),
+                    );
+                    continue;
+                }
                 if masks & u32::from(FLUID) != 0 {
                     let state = cells.states[index];
                     job.tints.begin(state.id, position);
@@ -303,6 +374,7 @@ pub(super) fn compile_slab(
                         },
                         &mut job.layers,
                         &mut job.hacks,
+                        false,
                     );
                     if state.fluid.kind < 3
                         && catalog
@@ -331,6 +403,7 @@ pub(super) fn compile_slab(
                     &mut job.layers,
                     &mut job.hacks,
                     &mut job.tints,
+                    &mut job.surfaces,
                 );
             }
         }
@@ -371,6 +444,8 @@ mod tests {
                     faces
                         .into_iter()
                         .map(|face| Quad {
+                            sprite: 0,
+                            emission: 0,
                             positions: [[0.; 3]; 4],
                             uvs: [[0.; 2]; 4],
                             face,

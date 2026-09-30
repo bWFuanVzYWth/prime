@@ -23,6 +23,8 @@ pub(crate) fn plane() -> Scene {
     scene.textures.insert(
         7,
         Texture {
+            region: None,
+            sampling: None,
             width: 1,
             height: 1,
             pixels: vec![255; 4].into(),

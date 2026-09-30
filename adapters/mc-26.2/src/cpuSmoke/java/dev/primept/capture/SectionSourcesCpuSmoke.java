@@ -29,8 +29,8 @@ final class SectionSourcesCpuSmoke {
     private static final ValueLayout.OfLong L =
             ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
     static void run() throws Exception {
-        var material =
-                new BakedQuad.MaterialInfo(null, ChunkSectionLayer.CUTOUT, null, -1, true, 0);
+        var material = new BakedQuad.MaterialInfo(SourceSpriteFixture.create(0, 0, 16),
+                                                  ChunkSectionLayer.CUTOUT, null, -1, true, 0);
         var quad = new BakedQuad(
                 new Vector3f(0, 0, 0), new Vector3f(1, 0, 0), new Vector3f(1, 1, 0),
                 new Vector3f(0, 1, 0), UVPair.pack(.1f, .2f), UVPair.pack(.3f, .4f),
@@ -49,11 +49,12 @@ final class SectionSourcesCpuSmoke {
         Path fixture = Path.of(System.getProperty("primept.smoke.routingDirectory"),
                                "mc-section-source.bin");
         Files.createDirectories(fixture.getParent());
+        SourceSpriteFixture.verifyAnimation(fixture.getParent());
         try (var events = new SourcePages(); var output = new SourcePages();
              var bridge =
                      new NativeBridge(Path.of(System.getProperty("primept.smoke.nativeLibrary")))) {
             bridge.submit(Packets.reset(1));
-            bridge.submit(Packets.texture(1, 1, 1, new byte[] {-1, -1, -1, -1}));
+            bridge.submit(Packets.texture(1, 16, 16, SourceSpriteFixture.atlas()));
             for (long batch = 1; batch <= 5; ++batch) {
                 events.header(SectionSources.GAME_VERSION, 1, 1, batch)
                         .d(16)
@@ -64,7 +65,8 @@ final class SectionSourcesCpuSmoke {
                         .i(0)
                         .i(3)
                         .i(0)
-                        .i(3);
+                        .i(3)
+                        .l(batch);
                 if (batch == 1)
                     for (int x = 0; x < 4; ++x)
                         for (int z = 0; z < 4; ++z)

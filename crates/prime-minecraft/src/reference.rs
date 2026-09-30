@@ -39,6 +39,7 @@ pub(super) fn compile_slab(
                         },
                         &mut job.layers,
                         &mut job.hacks,
+                        false,
                     );
                 }
                 if state.air() {
@@ -82,6 +83,7 @@ pub(super) fn compile_slab(
                     &mut job.layers,
                     &mut job.hacks,
                     &mut job.tints,
+                    &mut job.surfaces,
                 );
             }
         }

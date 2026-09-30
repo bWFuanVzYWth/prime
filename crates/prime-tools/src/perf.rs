@@ -149,6 +149,8 @@ mod benchmark {
         scene.textures.insert(
             1,
             Texture {
+                region: None,
+                sampling: None,
                 width: 16,
                 height: 16,
                 pixels: opaque.into(),
@@ -157,6 +159,8 @@ mod benchmark {
         scene.textures.insert(
             2,
             Texture {
+                region: None,
+                sampling: None,
                 width: 16,
                 height: 16,
                 pixels: cutout.into(),

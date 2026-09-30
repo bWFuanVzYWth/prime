@@ -50,6 +50,7 @@ final class SectionSources {
             field(QuadCollection.class, "west"),    field(QuadCollection.class, "east"),
             field(QuadCollection.class, "unculled")};
     private final Map<BlockState, BlockStateModel> models;
+    private final SourceSprites sprites = new SourceSprites();
     private final SectionResources resources;
     private final BitSet states = new BitSet();
     private final IdentityHashMap<Object, Integer> definitions = new IdentityHashMap<>();
@@ -59,7 +60,7 @@ final class SectionSources {
     @SuppressWarnings("unchecked")
     SectionSources(BlockStateModelSet modelSet, FluidStateModelSet fluidModels) {
         models = (Map<BlockState, BlockStateModel>)get(MODELS, modelSet);
-        resources = new SectionResources(fluidModels);
+        resources = new SectionResources(fluidModels, sprites);
     }
     @SuppressWarnings("unchecked")
     void section(SourcePages out, int x, int y, int z, LevelChunkSection section) {
@@ -162,11 +163,18 @@ final class SectionSources {
                 groups.add(quads);
                 size = Math.addExact(size, quads.size());
             }
+            for (var group : groups)
+                for (var quad : group)
+                    sprites.prepare(out, quad.materialInfo().sprite());
             out.i(2).i(id).i(1).i(size);
             for (int face = 0; face < 7; ++face)
                 for (BakedQuad quad : groups.get(face)) {
                     var material = quad.materialInfo();
-                    out.i(face).i(material.tintIndex()).i(material.layer().ordinal());
+                    out.i(face)
+                            .i(material.tintIndex())
+                            .i(material.layer().ordinal())
+                            .i(sprites.prepare(out, material.sprite()))
+                            .i(material.lightEmission());
                     for (int i = 0; i < 4; ++i) {
                         var p = quad.position(i);
                         out.f(p.x()).f(p.y()).f(p.z()).l(quad.packedUV(i));

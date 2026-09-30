@@ -7,7 +7,7 @@ import net.minecraft.core.SectionPos;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
-class CaptureInboxTest {
+class LegacyTerrainInboxTest {
     private static final SectionPos SECTION = SectionPos.of(-7, 3, 9);
     private static SourceQuads empty() {
         return new SourceQuads();
@@ -21,7 +21,7 @@ class CaptureInboxTest {
         return source;
     }
 
-    static CaptureInbox.Batch take(CaptureInbox inbox) {
+    static LegacyTerrainInbox.Batch take(LegacyTerrainInbox inbox) {
         var batches = inbox.seal().batches();
         assertTrue(batches.size() <= 1, "Fixture expected a single sealed batch");
         return batches.isEmpty() ? null : batches.getFirst();
@@ -29,12 +29,12 @@ class CaptureInboxTest {
 
     @Test
     void residentSectionsCanExceedTheOldCountLimitWhenTheQueueIsDrained() {
-        var inbox = new CaptureInbox(true);
+        var inbox = new LegacyTerrainInbox(true);
         int count = 32769;
         for (int x = 0; x < count; ++x) {
             var section = SectionPos.of(x, 0, 0);
             inbox.capture(inbox.begin(section), quad());
-            var publication = CaptureInboxTest.take(inbox);
+            var publication = LegacyTerrainInboxTest.take(inbox);
             assertNotNull(publication, "Every admitted source must publish its actual geometry");
             assertEquals(section.asLong(), publication.section());
             assertFalse(publication.removal());
@@ -50,7 +50,7 @@ class CaptureInboxTest {
 
     @Test
     void inactiveUnloadsDoNotCreatePacketsOrAdvanceNativeWatermarks() {
-        var inbox = new CaptureInbox(true);
+        var inbox = new LegacyTerrainInbox(true);
         inbox.capture(inbox.begin(SECTION), quad());
         long first = inbox.seal().completedSequence();
         for (int x = 0; x < 10000; ++x)
@@ -72,7 +72,7 @@ class CaptureInboxTest {
 
     @Test
     void longChunkHistoryRetainsTheGenerationThatInvalidatesOldWorkers() {
-        var inbox = new CaptureInbox(true);
+        var inbox = new LegacyTerrainInbox(true);
         var first = SectionPos.of(0, 0, 0);
         var last = SectionPos.of(32768, 0, 0);
         var oldFirst = inbox.begin(first);
@@ -80,47 +80,47 @@ class CaptureInboxTest {
         long epoch = inbox.epoch();
         for (int x = 0; x <= 32768; ++x) {
             inbox.dropChunk(x, 0);
-            assertNull(CaptureInboxTest.take(inbox));
+            assertNull(LegacyTerrainInboxTest.take(inbox));
         }
         assertNull(inbox.failure());
         assertEquals(epoch, inbox.epoch(),
                      "History growth must not reset or disable the resource epoch");
         inbox.capture(oldFirst, quad());
         inbox.capture(oldLast, quad());
-        assertNull(CaptureInboxTest.take(inbox),
+        assertNull(LegacyTerrainInboxTest.take(inbox),
                    "Both early and recent old-generation workers remain invalid");
         var fresh = inbox.begin(first);
         assertNotNull(fresh);
         inbox.capture(fresh, quad());
-        assertEquals(fresh.revision(), CaptureInboxTest.take(inbox).revision());
-        assertNull(CaptureInboxTest.take(inbox));
+        assertEquals(fresh.revision(), LegacyTerrainInboxTest.take(inbox).revision());
+        assertNull(LegacyTerrainInboxTest.take(inbox));
         assertNull(inbox.failure());
     }
 
     @Test
     void worldResetAndAtlasReloadRejectInFlightOldGeometry() {
-        var inbox = new CaptureInbox(true);
+        var inbox = new LegacyTerrainInbox(true);
         var beforeReset = inbox.begin(SECTION);
         inbox.reset();
         inbox.capture(beforeReset, empty());
-        assertNull(CaptureInboxTest.take(inbox));
+        assertNull(LegacyTerrainInboxTest.take(inbox));
         var beforeReload = inbox.begin(SECTION);
         inbox.captureAtlas(new SpriteLoader.Preparations(1, 1, 0, null, Map.of(),
                                                          CompletableFuture.completedFuture(null)));
         inbox.capture(beforeReload, empty());
-        assertNull(CaptureInboxTest.take(inbox));
+        assertNull(LegacyTerrainInboxTest.take(inbox));
         assertNotNull(inbox.atlas());
         assertNull(inbox.failure());
     }
 
     @Test
     void unloadRejectsLateWorkerAndRemovesTheWholeSection() {
-        var inbox = new CaptureInbox(true);
+        var inbox = new LegacyTerrainInbox(true);
         inbox.capture(inbox.begin(SECTION), empty());
         var pendingWorker = inbox.begin(SECTION);
         inbox.dropChunk(-7, 9);
         inbox.capture(pendingWorker, empty());
-        var removal = CaptureInboxTest.take(inbox);
+        var removal = LegacyTerrainInboxTest.take(inbox);
         assertNotNull(removal);
         assertTrue(removal.removal());
         assertEquals(1, removal.packets().size());
@@ -128,13 +128,13 @@ class CaptureInboxTest {
                              .order(java.nio.ByteOrder.LITTLE_ENDIAN);
         assertEquals(11, packet.getInt(8),
                      "Unload must revoke availability, not publish a complete empty section");
-        assertNull(CaptureInboxTest.take(inbox));
+        assertNull(LegacyTerrainInboxTest.take(inbox));
         assertTrue(inbox.sections().isEmpty());
     }
 
     @Test
     void chunkIndexDeduplicatesPublicationsAndRetiresOnlyTheTargetColumn() {
-        var inbox = new CaptureInbox(true);
+        var inbox = new LegacyTerrainInbox(true);
         var sameColumn = SectionPos.of(SECTION.x(), SECTION.y() + 1, SECTION.z());
         var otherColumn = SectionPos.of(SECTION.x() + 1, SECTION.y(), SECTION.z());
         inbox.capture(inbox.begin(SECTION), empty());
@@ -154,7 +154,7 @@ class CaptureInboxTest {
         assertEquals(2, batches.size(), "One live replacement plus one bulk withdrawal");
         var removed = java.nio.ByteBuffer
                               .wrap(batches.stream()
-                                            .filter(CaptureInbox.Batch::removal)
+                                            .filter(LegacyTerrainInbox.Batch::removal)
                                             .findFirst()
                                             .orElseThrow()
                                             .packets()
@@ -168,14 +168,14 @@ class CaptureInboxTest {
         assertEquals(survivingWorker.revision(), survivor.revision());
 
         inbox.capture(inbox.begin(SECTION), empty());
-        assertEquals(SECTION.asLong(), CaptureInboxTest.take(inbox).section());
+        assertEquals(SECTION.asLong(), LegacyTerrainInboxTest.take(inbox).section());
         inbox.dropChunk(SECTION.x(), SECTION.z());
-        var removal = CaptureInboxTest.take(inbox);
+        var removal = LegacyTerrainInboxTest.take(inbox);
         assertTrue(removal.removal());
         assertEquals(SECTION.asLong(), java.nio.ByteBuffer.wrap(removal.packets().getFirst())
                                                .order(java.nio.ByteOrder.LITTLE_ENDIAN)
                                                .getLong(32));
-        assertNull(CaptureInboxTest.take(inbox));
+        assertNull(LegacyTerrainInboxTest.take(inbox));
         assertEquals(java.util.Set.of(otherColumn.asLong()),
                      new java.util.HashSet<>(inbox.sections()));
         assertNull(inbox.failure());
@@ -183,24 +183,24 @@ class CaptureInboxTest {
 
     @Test
     void mostRecentCompilationWinsRegardlessOfCompletionOrder() {
-        var inbox = new CaptureInbox(true);
+        var inbox = new LegacyTerrainInbox(true);
         var old = inbox.begin(SECTION);
         var fresh = inbox.begin(SECTION);
         inbox.capture(fresh, empty());
         inbox.capture(old, empty());
-        assertEquals(fresh.revision(), CaptureInboxTest.take(inbox).revision());
-        assertNull(CaptureInboxTest.take(inbox));
+        assertEquals(fresh.revision(), LegacyTerrainInboxTest.take(inbox).revision());
+        assertNull(LegacyTerrainInboxTest.take(inbox));
 
         inbox.capture(inbox.begin(SECTION), empty());
         var newest = inbox.begin(SECTION);
         inbox.capture(newest, empty());
-        assertEquals(newest.revision(), CaptureInboxTest.take(inbox).revision());
-        assertNull(CaptureInboxTest.take(inbox));
+        assertEquals(newest.revision(), LegacyTerrainInboxTest.take(inbox).revision());
+        assertNull(LegacyTerrainInboxTest.take(inbox));
     }
 
     @Test
     void sealedBatchExceedsOldQuotaAndBulkUnloadRetiresCompletedHistory() {
-        var inbox = new CaptureInbox(true);
+        var inbox = new LegacyTerrainInbox(true);
         for (int x = 0; x < 5000; x++)
             inbox.capture(inbox.begin(SectionPos.of(x, 0, 0)), empty());
         var first = inbox.seal();
@@ -227,7 +227,7 @@ class CaptureInboxTest {
 
     @Test
     void longStreamingHistoryIsBoundedByLiveSourcesAndUnfinishedTokens() throws Exception {
-        var inbox = new CaptureInbox(true);
+        var inbox = new LegacyTerrainInbox(true);
         for (int batch = 0; batch < 65; batch++) {
             for (int item = 0; item < 4097; item++) {
                 int x = batch * 4097 + item;
@@ -240,7 +240,7 @@ class CaptureInboxTest {
             assertTrue(inbox.sections().isEmpty());
             for (String name : new String[] {"revisions", "chunkSections", "chunkRevisions",
                                              "producers", "inFlight", "pending"}) {
-                var field = CaptureInbox.class.getDeclaredField(name);
+                var field = LegacyTerrainInbox.class.getDeclaredField(name);
                 field.setAccessible(true);
                 assertTrue(((Map<?,?>)field.get(inbox)).isEmpty(),name+" must release completed history");
             }
@@ -250,7 +250,7 @@ class CaptureInboxTest {
 
     @Test
     void titleResourceReloadUpdatesPixelsWhileWorldCaptureIsDisabled() {
-        var inbox = new CaptureInbox(true);
+        var inbox = new LegacyTerrainInbox(true);
         inbox.captureAtlas(new SpriteLoader.Preparations(1, 1, 0, null, Map.of(),
                                                          CompletableFuture.completedFuture(null)));
         var first = inbox.atlas();
@@ -271,15 +271,15 @@ class CaptureInboxTest {
         inbox.enable();
         assertSame(reloaded, inbox.atlas(), "The next world uses the actual latest source upload");
         inbox.capture(oldWorld, empty());
-        assertNull(CaptureInboxTest.take(inbox));
+        assertNull(LegacyTerrainInboxTest.take(inbox));
         inbox.capture(inbox.begin(SECTION), empty());
-        assertNotNull(CaptureInboxTest.take(inbox));
+        assertNotNull(LegacyTerrainInboxTest.take(inbox));
         assertNull(inbox.failure());
     }
 
     @Test
     void selectingVanillaReleasesSourcesAndRequiresANewActualUpload() {
-        var inbox = new CaptureInbox(true);
+        var inbox = new LegacyTerrainInbox(true);
         var upload = new SpriteLoader.Preparations(2, 1, 0, null, Map.of(),
                                                    CompletableFuture.completedFuture(null));
         inbox.captureAtlas(upload);
@@ -293,7 +293,7 @@ class CaptureInboxTest {
         inbox.enable();
         assertNull(inbox.atlas(), "Enabling capture cannot reconstruct a released source asset");
         inbox.capture(old, empty());
-        assertNull(CaptureInboxTest.take(inbox));
+        assertNull(LegacyTerrainInboxTest.take(inbox));
         inbox.captureAtlas(upload);
         assertEquals(8, inbox.atlas().rgba().length);
         assertNull(inbox.failure());

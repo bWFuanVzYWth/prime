@@ -14,7 +14,7 @@ mod capacity_tests;
 pub const ABI_VERSION: u32 = 7;
 pub const MAGIC: u32 = 0x5450_5250;
 pub const MAX_PACKET_BYTES: usize = 256 * 1024 * 1024;
-const MAX_TEXTURE_BYTES: usize = 512 * 1024 * 1024;
+pub(crate) const MAX_TEXTURE_BYTES: usize = 512 * 1024 * 1024;
 
 pub(crate) fn validate_triangle_capacity(total: usize) -> Result<(), String> {
     // Scene counts are independent of per-packet counts and GPU page addresses.
@@ -105,6 +105,7 @@ impl SourceScene {
     pub fn submit(&mut self, bytes: &[u8]) -> Result<(), String> {
         let mut input = Reader::new(bytes)?;
         let (op, epoch) = input.header()?;
+        #[cfg(test)]
         if op == 12 || op == 13 {
             if epoch == 0 || epoch != self.epoch {
                 return Err("stale or uninitialized resource epoch".into());
@@ -226,21 +227,19 @@ impl SourceScene {
                 let len = width as usize * height as usize * 4;
                 let pixels = input.take(len)?;
                 input.finish()?;
-                let current = self.texture_bytes;
-                let old = self.textures.get(&id).map_or(0, |t| t.pixels.len());
-                if current - old + len > MAX_TEXTURE_BYTES {
-                    return Err("texture capacity exceeded".into());
-                }
+                let texture = Texture {
+                    region: None,
+                    sampling: None,
+                    width,
+                    height,
+                    pixels: pixels.into(),
+                };
+                self.texture_memory
+                    .capacity(std::iter::once((self.textures.get(&id), &texture)))?;
+                self.texture_memory
+                    .replace(self.textures.get(&id), Some(&texture));
                 self.texture_lifetime.owned(id);
-                self.texture_bytes = current - old + len;
-                self.textures.insert(
-                    id,
-                    Texture {
-                        width,
-                        height,
-                        pixels: pixels.into(),
-                    },
-                );
+                self.textures.insert(id, texture);
                 self.edits.textures.insert(id);
             }
             9 => {

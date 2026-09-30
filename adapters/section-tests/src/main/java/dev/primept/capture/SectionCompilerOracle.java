@@ -53,19 +53,7 @@ final class SectionCompilerOracle {
         }
     }
     private static void fixtures() throws Exception {
-        var sprite = FluidRouterCpuSmoke.blank(TextureAtlasSprite.class);
-        for (String name : List.of("u0", "v0", "u1", "v1")) {
-            var field = TextureAtlasSprite.class.getDeclaredField(name);
-            field.setAccessible(true);
-            field.setFloat(sprite, name.endsWith("0") ? .125f : .875f);
-        }
-        var contents = TextureAtlasSprite.class.getDeclaredField("contents");
-        contents.setAccessible(true);
-        contents.set(sprite, FluidRouterCpuSmoke.blank(
-                                     net.minecraft.client.renderer.texture.SpriteContents.class));
-        var atlas = TextureAtlasSprite.class.getDeclaredField("atlasLocation");
-        atlas.setAccessible(true);
-        atlas.set(sprite, net.minecraft.client.renderer.texture.TextureAtlas.LOCATION_BLOCKS);
+        var sprite = SourceSpriteFixture.create(2, 2, 12);
         var material = new Material.Baked(sprite, true);
         var full = box(material, 0, 0, 0, 1, 1, 1);
         var slab = box(material, 0, 0, 0, 1, .5f, 1);

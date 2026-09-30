@@ -25,6 +25,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     scene.textures.insert(
         1,
         Texture {
+            region: None,
+            sampling: None,
             width: 2,
             height: 2,
             pixels: vec![

@@ -162,7 +162,7 @@ mod tests {
             let size = crate::packing::stride(format) as u64;
             assert!(u64::from(MAX_MATERIAL_RECORDS) * size <= (1_u64 << 32));
         }
-        assert!(u64::from(MAX_MATERIAL_RECORDS + 1) * 240 > (1_u64 << 32));
+        assert!(u64::from(MAX_MATERIAL_RECORDS + 1) * 432 > (1_u64 << 32));
         assert_eq!(arena_capacity(17, 23).unwrap(), 23);
         assert!(arena_capacity(24, 23).is_err());
     }

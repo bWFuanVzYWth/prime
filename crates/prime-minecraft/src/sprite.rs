@@ -1,0 +1,430 @@
+//! Resource-local sprite identity. Atlas UV interpretation and animation stay in Rust.
+use crate::wire::Reader;
+use prime_scene::{SourceScene, Texture, TextureLevel, TextureSampling};
+use std::sync::Arc;
+
+#[derive(PartialEq)]
+pub(crate) struct Image {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Arc<[u8]>,
+}
+#[derive(PartialEq)]
+pub(crate) struct Sprite {
+    pub name: String,
+    pub bounds: [f32; 4],
+    pub extent: [u32; 2],
+    pub images: Vec<Image>,
+    pub frames: Vec<(u32, u32)>,
+    pub interpolate: bool,
+}
+pub(crate) fn texture(id: u32) -> u32 {
+    if id == 0 { 1 } else { 0x4000_0000 + id }
+}
+impl Sprite {
+    pub fn reference(&self, scene: &SourceScene) -> Result<[f32; 4], String> {
+        let base = &self.images[0];
+        let [w, h] = self.extent;
+        let (pixels, stride, x, y) = if base.pixels.is_empty() {
+            let atlas = scene.texture(1).ok_or("sprite atlas missing")?;
+            (
+                &atlas.pixels,
+                atlas.width,
+                (self.bounds[0] * atlas.width as f32).round() as u32,
+                (self.bounds[1] * atlas.height as f32).round() as u32,
+            )
+        } else {
+            let first = self.frames.first().map_or(0, |&(f, _)| f);
+            let row = base.width / w;
+            (
+                &base.pixels,
+                base.width,
+                (first % row) * w,
+                (first / row) * h,
+            )
+        };
+        // Stable source reference, matching the previous translator's UV-bounds midpoint.
+        // Border paint must not turn a clear glass body into a colored absorbing medium.
+        let at = (((y + h / 2) * stride + x + w / 2) * 4) as usize;
+        let pixel = pixels
+            .get(at..at + 4)
+            .ok_or("sprite exceeds source atlas")?;
+        Ok(std::array::from_fn(|i| f32::from(pixel[i]) / 255.))
+    }
+
+    pub fn read(r: &mut Reader<'_>) -> Result<(u32, Self), String> {
+        let id = r.u32()?;
+        let name = r.string()?;
+        let bounds = [r.f32()?, r.f32()?, r.f32()?, r.f32()?];
+        let extent = [r.u32()?, r.u32()?];
+        if id == 0
+            || id >= 0x4000_0000
+            || extent.iter().any(|&v| v == 0 || v > 16384)
+            || bounds[0] < 0.
+            || bounds[1] < 0.
+            || bounds[2] > 1.
+            || bounds[3] > 1.
+            || bounds[2] <= bounds[0]
+            || bounds[3] <= bounds[1]
+        {
+            return Err("invalid source sprite".into());
+        }
+        let count = r.count(12)?;
+        if count == 0 || count > 15 {
+            return Err("invalid source mip count".into());
+        }
+        let mut images: Vec<Image> = Vec::with_capacity(count);
+        for mip in 0..count {
+            let width = r.u32()?;
+            let height = r.u32()?;
+            let count = r.count(4)?;
+            if width == 0
+                || height == 0
+                || width > 16384
+                || height > 16384
+                || count != 0 && count as u64 != u64::from(width) * u64::from(height)
+                || count == 0 && mip != 0
+            {
+                return Err("invalid source mip image".into());
+            }
+            let pixels: Arc<[u8]> = r
+                .u32s(count)?
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect();
+            if mip > 0
+                && (width != (images[0].width >> mip).max(1)
+                    || height != (images[0].height >> mip).max(1)
+                    || extent.iter().any(|&v| v >> mip == 0))
+            {
+                return Err("invalid source mip progression".into());
+            }
+            images.push(Image {
+                width,
+                height,
+                pixels,
+            });
+        }
+        let interpolate = r.u32()?;
+        let count = r.count(8)?;
+        let mut frames = Vec::with_capacity(count);
+        let base = &images[0];
+        if !base.width.is_multiple_of(extent[0])
+            || !base.height.is_multiple_of(extent[1])
+            || interpolate > 1
+            || count != 0 && base.pixels.is_empty()
+        {
+            return Err("invalid source animation image".into());
+        }
+        let capacity = (base.width / extent[0]) * (base.height / extent[1]);
+        let mut total = 0_u32;
+        for _ in 0..count {
+            let frame = r.u32()?;
+            let duration = r.u32()?;
+            total = total
+                .checked_add(duration)
+                .ok_or("animation duration overflow")?;
+            if frame >= capacity || duration == 0 {
+                return Err("invalid source animation frame".into());
+            }
+            frames.push((frame, duration));
+        }
+        Ok((
+            id,
+            Self {
+                name,
+                bounds,
+                extent,
+                images,
+                frames,
+                interpolate: interpolate != 0,
+            },
+        ))
+    }
+    /// Normalize only a few representable endpoint steps, never an arbitrary UV margin.
+    /// Intentional cross-sprite UVs retain their original atlas interpretation at the caller.
+    pub fn local(&self, uvs: [[f32; 2]; 4]) -> Option<[[f32; 2]; 4]> {
+        let mut result = uvs;
+        for uv in &mut result {
+            for (a, value) in uv.iter_mut().enumerate() {
+                let lo = self.bounds[a];
+                let hi = self.bounds[a + 2];
+                if *value < lo {
+                    if *value < lo.next_down().next_down().next_down().next_down() {
+                        return None;
+                    }
+                    *value = lo;
+                } else if *value > hi {
+                    if *value > hi.next_up().next_up().next_up().next_up() {
+                        return None;
+                    }
+                    *value = hi;
+                }
+                *value = (*value - lo) / (hi - lo);
+            }
+        }
+        Some(result)
+    }
+    pub fn image(&self, tick: u64, scene: &SourceScene) -> Result<Texture, String> {
+        let base = &self.images[0];
+        let [w, h] = self.extent;
+        let (frame, next, blend) = if self.frames.is_empty() {
+            (0, 0, 0.)
+        } else {
+            let total: u64 = self.frames.iter().map(|&(_, d)| u64::from(d)).sum();
+            let mut at = tick % total;
+            let (i, &(frame, duration)) = self
+                .frames
+                .iter()
+                .enumerate()
+                .find(|(_, (_, d))| {
+                    if at < u64::from(*d) {
+                        true
+                    } else {
+                        at -= u64::from(*d);
+                        false
+                    }
+                })
+                .unwrap();
+            (
+                frame,
+                self.frames[(i + 1) % self.frames.len()].0,
+                if self.interpolate {
+                    ((at as f32 / duration as f32) * 1000.) as u32 as f32 / 1000.
+                } else {
+                    0.
+                },
+            )
+        };
+        let row = base.width / w;
+        let mut texture = if base.pixels.is_empty() {
+            let atlas = scene
+                .texture(1)
+                .ok_or("sprite atlas has not been captured")?;
+            let x = (self.bounds[0] * atlas.width as f32).round() as u32;
+            let y = (self.bounds[1] * atlas.height as f32).round() as u32;
+            if (self.bounds[2] * atlas.width as f32).round() as u32 != x + w
+                || (self.bounds[3] * atlas.height as f32).round() as u32 != y + h
+            {
+                return Err("sprite bounds disagree with captured atlas extent".into());
+            }
+            Texture {
+                region: Some([x, y, w, h]),
+                sampling: None,
+                ..atlas.clone()
+            }
+        } else {
+            Texture {
+                width: base.width,
+                height: base.height,
+                pixels: base.pixels.clone(),
+                region: Some([(frame % row) * w, (frame / row) * h, w, h]),
+                sampling: None,
+            }
+        };
+        if self.images.len() > 1 || blend > 0. {
+            let region = texture.region.unwrap();
+            let next = if base.pixels.is_empty() {
+                [region[0], region[1]]
+            } else {
+                [(next % row) * w, (next / row) * h]
+            };
+            let levels = self
+                .images
+                .iter()
+                .enumerate()
+                .skip(1)
+                .map(|(m, image)| {
+                    let extent = self.extent.map(|v| (v >> m).max(1));
+                    let [w, h] = extent;
+                    TextureLevel {
+                        width: image.width,
+                        height: image.height,
+                        pixels: image.pixels.clone(),
+                        region: [(frame % row) * w, (frame / row) * h, w, h],
+                        // Only mip-0 borrows the atlas. Higher static mips are sprite-local.
+                        next: if base.pixels.is_empty() {
+                            [0; 2]
+                        } else {
+                            next.map(|v| v >> m)
+                        },
+                    }
+                })
+                .collect();
+            texture.sampling = Some(Arc::new(TextureSampling {
+                levels,
+                next,
+                blend,
+            }));
+        }
+        texture.validate()?;
+        Ok(texture)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn local_uvs_only_repair_endpoint_ulps_and_keep_crops_and_orientation() {
+        let sprite = Sprite {
+            name: "test:uv".into(),
+            bounds: [0.25, 0.5, 0.375, 0.625],
+            extent: [16, 16],
+            images: vec![],
+            frames: vec![],
+            interpolate: false,
+        };
+        let uvs = [
+            [0.375_f32.next_up(), 0.5_f32.next_down()],
+            [0.25, 0.625],
+            [0.3125, 0.5625],
+            [0.25, 0.5],
+        ];
+        assert_eq!(
+            sprite.local(uvs).unwrap(),
+            [[1., 0.], [0., 1.], [0.5, 0.5], [0., 0.]]
+        );
+        let mut outside = uvs;
+        outside[0][0] = 0.376;
+        assert!(sprite.local(outside).is_none());
+    }
+    #[test]
+    fn animation_uses_source_frames_durations_mips_and_immutable_backings() {
+        let pixels: Arc<[u8]> = (0..64).flat_map(|i| [i, 0, 0, 255]).collect();
+        let sprite = Sprite {
+            name: "test:animated".into(),
+            bounds: [0., 0., 1., 1.],
+            extent: [4, 4],
+            images: vec![
+                Image {
+                    width: 8,
+                    height: 8,
+                    pixels: pixels.clone(),
+                },
+                Image {
+                    width: 4,
+                    height: 4,
+                    pixels: vec![7; 64].into(),
+                },
+            ],
+            frames: vec![(3, 2), (0, 3)],
+            interpolate: true,
+        };
+        let scene = SourceScene::default();
+        for (tick, region, next, blend) in [
+            (0, [4, 4, 4, 4], [0, 0], 0.),
+            (1, [4, 4, 4, 4], [0, 0], 0.5),
+            (2, [0, 0, 4, 4], [4, 4], 0.),
+            (4, [0, 0, 4, 4], [4, 4], 0.666),
+            (5, [4, 4, 4, 4], [0, 0], 0.),
+        ] {
+            let t = sprite.image(tick, &scene).unwrap();
+            assert_eq!(t.region, Some(region));
+            assert!(Arc::ptr_eq(&t.pixels, &pixels));
+            let s = t.sampling.as_ref().unwrap();
+            assert_eq!(s.blend, blend);
+            assert_eq!(s.next, next);
+            assert_eq!(s.levels[0].region, [region[0] / 2, region[1] / 2, 2, 2]);
+            assert_eq!(s.levels[0].next, next.map(|v| v / 2));
+        }
+        let reference = sprite.reference(&scene).unwrap();
+        assert_eq!(reference[0], 54. / 255.);
+    }
+    #[test]
+    fn static_atlas_window_uses_sprite_local_mip_coordinates() {
+        let mut scene = SourceScene::default();
+        scene
+            .set_texture(
+                1,
+                Texture {
+                    width: 16,
+                    height: 8,
+                    pixels: vec![255; 16 * 8 * 4].into(),
+                    region: None,
+                    sampling: None,
+                },
+            )
+            .unwrap();
+        let sprite = Sprite {
+            name: "test:offset_static".into(),
+            bounds: [0.5, 0.5, 0.75, 1.],
+            extent: [4, 4],
+            images: vec![
+                Image {
+                    width: 4,
+                    height: 4,
+                    pixels: Arc::from([]),
+                },
+                Image {
+                    width: 2,
+                    height: 2,
+                    pixels: vec![63; 16].into(),
+                },
+                Image {
+                    width: 1,
+                    height: 1,
+                    pixels: vec![127; 4].into(),
+                },
+            ],
+            frames: vec![],
+            interpolate: false,
+        };
+        let image = sprite.image(123, &scene).unwrap();
+        assert_eq!(image.region, Some([8, 4, 4, 4]));
+        assert!(Arc::ptr_eq(
+            &image.pixels,
+            &scene.texture(1).unwrap().pixels
+        ));
+        let sampling = image.sampling.unwrap();
+        assert_eq!(sampling.next, [8, 4]);
+        assert_eq!(sampling.blend, 0.);
+        for (i, mip) in sampling.levels.iter().enumerate() {
+            let extent = 2 >> i;
+            assert_eq!(mip.region, [0, 0, extent, extent]);
+            assert_eq!(mip.next, [0, 0]);
+            assert!(Arc::ptr_eq(&mip.pixels, &sprite.images[i + 1].pixels));
+        }
+    }
+    #[test]
+    fn clear_glass_reference_does_not_average_opaque_border_paint_into_the_medium() {
+        let mut scene = SourceScene::default();
+        let mut pixels = vec![255; 64];
+        pixels[40..44].copy_from_slice(&[255, 255, 255, 0]);
+        scene
+            .set_texture(
+                1,
+                Texture {
+                    width: 4,
+                    height: 4,
+                    pixels: pixels.into(),
+                    region: None,
+                    sampling: None,
+                },
+            )
+            .unwrap();
+        let mut sprite = Sprite {
+            name: "test:glass".into(),
+            bounds: [0., 0., 1., 1.],
+            extent: [4, 4],
+            images: vec![Image {
+                width: 4,
+                height: 4,
+                pixels: Arc::from([]),
+            }],
+            frames: vec![],
+            interpolate: false,
+        };
+        assert_eq!(sprite.reference(&scene).unwrap(), [1., 1., 1., 0.]);
+        assert_eq!(
+            crate::optics::glass(sprite.reference(&scene).unwrap()).extinction,
+            [0.; 3]
+        );
+        assert!(Arc::ptr_eq(
+            &sprite.image(0, &scene).unwrap().pixels,
+            &scene.texture(1).unwrap().pixels
+        ));
+        sprite.extent = [3, 4];
+        assert!(sprite.image(0, &scene).is_err());
+    }
+}

@@ -6,17 +6,38 @@ use crate::plan::Slots;
 use ash::vk;
 use prime_scene::Texture;
 use prime_scene::incremental::{TextureCursor, TextureInput};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 pub(super) struct Textures {
     source: BTreeMap<u32, Texture>,
     cursor: Option<TextureCursor>,
+    pub sprites: usize,
     pub indices: BTreeMap<u32, u32>,
-    allocations: BTreeMap<u32, (u32, u32)>,
+    allocations: BTreeMap<usize, Backing>,
     pixels: Slots,
+    mip_slots: BTreeMap<u32, (u32, u32)>,
     slots: Slots,
     pub metadata: Buffer,
     pub texels: Buffer,
+}
+struct Backing {
+    offset: u32,
+    count: u32,
+    references: usize,
+}
+fn images(texture: &Texture) -> impl Iterator<Item = &Arc<[u8]>> {
+    std::iter::once(&texture.pixels).chain(
+        texture
+            .sampling
+            .iter()
+            .flat_map(|s| s.levels.iter().map(|m| &m.pixels)),
+    )
+}
+fn keys(texture: &Texture) -> BTreeSet<usize> {
+    images(texture).map(|p| p.as_ptr() as usize).collect()
 }
 
 impl Textures {
@@ -26,7 +47,7 @@ impl Textures {
         uploads: &mut crate::arena::Arena,
     ) -> Result<Self, String> {
         let mut metadata = Vec::new();
-        for value in [0, 1, 1, 0] {
+        for value in [0, 1, 1, 0, 0, 0, 0, 0] {
             uint(&mut metadata, value);
         }
         let mut pixels = Slots::default();
@@ -36,9 +57,11 @@ impl Textures {
         let mut result = Self {
             source: BTreeMap::new(),
             cursor: None,
+            sprites: 0,
             indices: BTreeMap::from([(0, 0)]),
-            allocations: BTreeMap::from([(0, (0, 1))]),
+            allocations: BTreeMap::new(),
             pixels,
+            mip_slots: BTreeMap::new(),
             slots,
             metadata: Buffer::upload_device(context, &metadata, storage_usage())?,
             texels: Buffer::upload_device(context, &[255; 4], storage_usage())?,
@@ -48,10 +71,23 @@ impl Textures {
     }
 
     fn remove(&mut self, id: u32) {
-        if self.source.remove(&id).is_some() {
+        if let Some(old) = self.source.remove(&id) {
+            self.sprites -= usize::from(old.region.is_some());
             self.slots.release(self.indices.remove(&id).unwrap(), 1);
-            let (offset, capacity) = self.allocations.remove(&id).unwrap();
-            self.pixels.release(offset, capacity);
+            if let Some((start, count)) = self.mip_slots.remove(&id) {
+                self.slots.release(start, count);
+            }
+            for key in keys(&old) {
+                self.release(key);
+            }
+        }
+    }
+    fn release(&mut self, key: usize) {
+        let backing = self.allocations.get_mut(&key).unwrap();
+        backing.references -= 1;
+        if backing.references == 0 {
+            let backing = self.allocations.remove(&key).unwrap();
+            self.pixels.release(backing.offset, backing.count);
         }
     }
 
@@ -100,20 +136,10 @@ impl Textures {
             if *id == 0 {
                 return Err("Texture zero is reserved for explicit untextured white".into());
             }
-            if self.source.get(id).is_some_and(|old| {
-                old.width == texture.width
-                    && old.height == texture.height
-                    && Arc::ptr_eq(&old.pixels, &texture.pixels)
-            }) {
+            if self.source.get(id).is_some_and(|old| old.same(texture)) {
                 continue;
             }
-            let count = texture
-                .width
-                .checked_mul(texture.height)
-                .ok_or("Texture extent overflow")?;
-            if count == 0 || u64::from(count) * 4 != texture.pixels.len() as u64 {
-                return Err(format!("Texture {id} has invalid RGBA8 dimensions"));
-            }
+            texture.validate()?;
             let index = if let Some(&index) = self.indices.get(id) {
                 index
             } else {
@@ -121,55 +147,123 @@ impl Textures {
                 self.indices.insert(*id, index);
                 index
             };
-            let offset = match self.allocations.get(id) {
-                Some(&(offset, capacity)) if count <= capacity => offset,
-                _ => {
-                    if let Some((offset, capacity)) = self.allocations.remove(id) {
-                        self.pixels.release(offset, capacity);
-                    }
-                    let offset = self.pixels.allocate(count)?;
-                    self.allocations.insert(*id, (offset, count));
-                    offset
-                }
-            };
-            pixel_copies.push(
-                vk::BufferCopy::default()
-                    .src_offset(pixels.len() as u64)
-                    .dst_offset(u64::from(offset) * 4)
-                    .size(texture.pixels.len() as u64),
-            );
-            pixels.extend_from_slice(&texture.pixels);
-            metadata_copies.push(
-                vk::BufferCopy::default()
-                    .src_offset(metadata.len() as u64)
-                    .dst_offset(u64::from(index) * 16)
-                    .size(16),
-            );
-            for value in [offset, texture.width, texture.height, 0] {
-                uint(&mut metadata, value);
+            let previous = self.source.get(id).map_or_else(BTreeSet::new, keys);
+            let current = keys(texture);
+            for &key in previous.difference(&current) {
+                self.release(key);
             }
+            for &key in current.difference(&previous) {
+                if let Some(backing) = self.allocations.get_mut(&key) {
+                    backing.references += 1;
+                } else {
+                    let image = images(texture)
+                        .find(|p| p.as_ptr() as usize == key)
+                        .unwrap();
+                    let count = (image.len() / 4) as u32;
+                    let offset = self.pixels.allocate(count)?;
+                    self.allocations.insert(
+                        key,
+                        Backing {
+                            offset,
+                            count,
+                            references: 1,
+                        },
+                    );
+                    pixel_copies.push(
+                        vk::BufferCopy::default()
+                            .src_offset(pixels.len() as u64)
+                            .dst_offset(u64::from(offset) * 4)
+                            .size(image.len() as u64),
+                    );
+                    pixels.extend_from_slice(image);
+                }
+            }
+            let count = texture
+                .sampling
+                .as_ref()
+                .map_or(0, |s| s.levels.len() as u32);
+            if self.mip_slots.get(id).is_some_and(|&(_, n)| n != count) {
+                let (start, n) = self.mip_slots.remove(id).unwrap();
+                self.slots.release(start, n);
+            }
+            let first = if count == 0 {
+                0
+            } else if let Some(&(start, _)) = self.mip_slots.get(id) {
+                start
+            } else {
+                let start = self.slots.allocate(count)?;
+                self.mip_slots.insert(*id, (start, count));
+                start
+            };
+            let region = texture
+                .region
+                .unwrap_or([0, 0, texture.width, texture.height]);
+            let next = texture
+                .sampling
+                .as_ref()
+                .map_or([region[0], region[1]], |s| s.next);
+            let blend = texture.sampling.as_ref().map_or(0., |s| s.blend).to_bits();
+            let views = std::iter::once((index, &texture.pixels, texture.width, region, next))
+                .chain(texture.sampling.iter().flat_map(|s| {
+                    s.levels
+                        .iter()
+                        .enumerate()
+                        .map(|(i, m)| (first + i as u32, &m.pixels, m.width, m.region, m.next))
+                }));
+            for (slot, image, stride, [x, y, w, h], next) in views {
+                let base = self.allocations[&(image.as_ptr() as usize)].offset;
+                metadata_copies.push(
+                    vk::BufferCopy::default()
+                        .src_offset(metadata.len() as u64)
+                        .dst_offset(u64::from(slot) * 32)
+                        .size(32),
+                );
+                let flags = if texture.region.is_some() { 1 << 31 } else { 0 };
+                for value in [
+                    base + y * stride + x,
+                    w,
+                    h,
+                    stride | flags,
+                    base + next[1] * stride + next[0],
+                    first,
+                    count,
+                    blend,
+                ] {
+                    uint(&mut metadata, value);
+                }
+            }
+            self.sprites -=
+                usize::from(self.source.get(id).is_some_and(|old| old.region.is_some()));
+            self.sprites += usize::from(texture.region.is_some());
             self.source.insert(*id, texture.clone());
         }
-        if !pixels.is_empty() {
+        if !metadata.is_empty() {
             grow(context, &mut self.texels, u64::from(self.pixels.end) * 4)?;
-            grow(context, &mut self.metadata, u64::from(self.slots.end) * 16)?;
-            let pixel_upload = uploads.allocate(context, pixels.len() as u64, 4)?;
-            pixel_upload.write(&pixels)?;
+            grow(context, &mut self.metadata, u64::from(self.slots.end) * 32)?;
+            let pixel_upload = if pixels.is_empty() {
+                None
+            } else {
+                let upload = uploads.allocate(context, pixels.len() as u64, 4)?;
+                upload.write(&pixels)?;
+                Some(upload)
+            };
             let metadata_upload = uploads.allocate(context, metadata.len() as u64, 4)?;
             metadata_upload.write(&metadata)?;
             for copy in &mut pixel_copies {
-                copy.src_offset += pixel_upload.offset;
+                copy.src_offset += pixel_upload.as_ref().unwrap().offset;
             }
             for copy in &mut metadata_copies {
                 copy.src_offset += metadata_upload.offset;
             }
             let result = context.submit_named("texture_delta", |command| unsafe {
-                context.device.cmd_copy_buffer(
-                    command,
-                    pixel_upload.buffer.buffer,
-                    self.texels.buffer,
-                    &pixel_copies,
-                );
+                if let Some(upload) = &pixel_upload {
+                    context.device.cmd_copy_buffer(
+                        command,
+                        upload.buffer.buffer,
+                        self.texels.buffer,
+                        &pixel_copies,
+                    );
+                }
                 context.device.cmd_copy_buffer(
                     command,
                     metadata_upload.buffer.buffer,
@@ -178,7 +272,9 @@ impl Textures {
                 );
                 transfer_barrier(context, command);
             });
-            uploads.retire(pixel_upload);
+            if let Some(upload) = pixel_upload {
+                uploads.retire(upload);
+            }
             uploads.retire(metadata_upload);
             result?;
         }

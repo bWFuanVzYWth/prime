@@ -1,6 +1,5 @@
 package dev.primept;
 
-import dev.primept.capture.CaptureInbox;
 import dev.primept.capture.DynamicCapture;
 import dev.primept.capture.ModelCapture;
 import dev.primept.capture.ExclusiveTerrainCapture;
@@ -26,7 +25,6 @@ public final class RenderProfileCpuSmoke {
                                                         1_000_000, 2_000_000, 7_000_000, 123, 456,
                                                         3_000_000, 654321, 99, 500_000);
         var text = RenderProfile.slowMessage(11, 77, 1920, 1080, false, frame, timing, terrain,
-                                             new CaptureInbox.ProfileSnapshot(12345, 0, 0),
                                              ModelCapture.stats(), DynamicCapture.stats(),
                                              "serial=77 static_prepare=3.000 slot_wait=1.000", 0);
         for (String required : new String[] {

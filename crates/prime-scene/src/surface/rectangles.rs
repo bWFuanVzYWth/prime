@@ -20,6 +20,77 @@ struct Cell {
     mapping: RepeatUv,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct StripPlane {
+    domain: u64,
+    axis: usize,
+    at: u32,
+    reverse: bool,
+    direction: usize,
+    interval: [u32; 2],
+    tile: i32,
+}
+#[derive(Clone, Copy)]
+struct Strip {
+    cell: Cell,
+    start: f32,
+    end: f32,
+}
+
+/// One complete direction, arbitrary exact width in the other: slabs, trapdoors, posts.
+/// The complete direction is per surface, not a fixed world axis. No voxel upsampling.
+fn strip(g: &CompiledQuad, domain: u64, source: usize) -> Option<(StripPlane, Strip)> {
+    let axis = (0..3).find(|&a| g.positions.iter().all(|p| p[a] == g.positions[0][a]))?;
+    let axes = [(axis + 1) % 3, (axis + 2) % 3];
+    let lo = axes.map(|a| {
+        g.positions
+            .iter()
+            .map(|p| p[a])
+            .fold(f32::INFINITY, f32::min)
+    });
+    let hi = axes.map(|a| {
+        g.positions
+            .iter()
+            .map(|p| p[a])
+            .fold(f32::NEG_INFINITY, f32::max)
+    });
+    let direction = (0..2).find(|&i| f64::from(hi[i]) - f64::from(lo[i]) == 1.0)?;
+    if (0..2).any(|i| hi[i] <= lo[i]) || lo[direction].abs() >= 16_777_216.0 {
+        return None;
+    }
+    let mut canonical = *g;
+    for p in &mut canonical.positions {
+        for i in 0..2 {
+            p[axes[i]] = if p[axes[i]] == lo[i] {
+                0.
+            } else if p[axes[i]] == hi[i] {
+                1.
+            } else {
+                return None;
+            };
+        }
+    }
+    let (plane, mut cell) = grid(&canonical, domain, source)?;
+    cell.mapping.axes = 1 << direction;
+    let bits = |x: f32| if x == 0. { 0 } else { x.to_bits() };
+    Some((
+        StripPlane {
+            domain,
+            axis,
+            at: plane.at,
+            reverse: plane.reverse,
+            direction,
+            interval: [bits(lo[direction ^ 1]), bits(hi[direction ^ 1])],
+            tile: (lo[direction].floor() as i32).div_euclid(64),
+        },
+        Strip {
+            cell,
+            start: lo[direction],
+            end: hi[direction],
+        },
+    ))
+}
+
 fn media(rule: SurfaceRule) -> [u32; 2] {
     match rule {
         SurfaceRule::Interface { negative, positive } => [negative, positive],
@@ -99,6 +170,7 @@ fn grid(g: &CompiledQuad, domain: u64, source: usize) -> Option<(Plane, Cell)> {
         origin: uv[0],
         du: std::array::from_fn(|i| uv[1][i] - uv[0][i]),
         dv: std::array::from_fn(|i| uv[3][i] - uv[0][i]),
+        axes: 3,
     };
     for i in 0..2 {
         // Keep the residual: f32 UVs with widely separated exponents can lose information
@@ -128,6 +200,12 @@ fn grid(g: &CompiledQuad, domain: u64, source: usize) -> Option<(Plane, Cell)> {
     ))
 }
 
+pub(super) fn mapping(g: &CompiledQuad) -> Option<RepeatUv> {
+    grid(g, 0, 0)
+        .map(|(_, c)| c.mapping)
+        .or_else(|| strip(g, 0, 0).map(|(_, c)| c.cell.mapping))
+}
+
 fn label(q: &SurfaceQuad, mapping: RepeatUv) -> [u32; 18] {
     let [r, g, b, a] = q.geometry.color.map(f32::to_bits);
     let [u, v] = mapping.origin.map(f32::to_bits);
@@ -151,7 +229,7 @@ fn label(q: &SurfaceQuad, mapping: RepeatUv) -> [u32; 18] {
         er,
         eg,
         eb,
-        u32::from(q.emission.two_sided),
+        (u32::from(q.emission.two_sided) | (u32::from(q.emission.textured) * 2)),
         negative,
         positive,
     ]
@@ -159,12 +237,14 @@ fn label(q: &SurfaceQuad, mapping: RepeatUv) -> [u32; 18] {
 
 pub(super) fn append(out: &mut Vec<SurfaceFace>, q: &SurfaceQuad, repeat: Option<RepeatUv>) {
     out.push(SurfaceFace {
+        optics: None,
         geometry: q.geometry.into(),
         repeat,
         emission: q.emission,
         media: media(q.rule),
         emitter: None,
         emitter_area_weight: 0.0,
+        detail: None,
     });
 }
 
@@ -195,14 +275,14 @@ fn duplicate_key(q: &SurfaceQuad) -> ([[[u32; 5]; 3]; 2], [u32; 10]) {
             er,
             eg,
             eb,
-            u32::from(q.emission.two_sided),
+            (u32::from(q.emission.two_sided) | (u32::from(q.emission.textured) * 2)),
         ],
     )
 }
 
 impl SurfaceCompiler {
     pub(super) fn grid_candidate(quad: &CompiledQuad) -> bool {
-        grid(quad, 0, 0).is_some()
+        grid(quad, 0, 0).is_some() || strip(quad, 0, 0).is_some()
     }
 
     pub(super) fn compile_rectangles(
@@ -216,6 +296,7 @@ impl SurfaceCompiler {
         let mut output = Vec::new();
         let mut retained = Vec::new();
         let mut planes: BTreeMap<Plane, Vec<Cell>> = BTreeMap::new();
+        let mut strips: BTreeMap<StripPlane, Vec<Strip>> = BTreeMap::new();
         let mut duplicates = std::collections::BTreeSet::new();
         // Source order is meaningful for explicit duplicate owners: choose the lowest stable
         // provenance, independently of the producer's capture/worker ordering.
@@ -241,9 +322,67 @@ impl SurfaceCompiler {
             }
             if let Some((plane, cell)) = grid(&q.geometry, q.provenance.domain, index) {
                 planes.entry(plane).or_default().push(cell);
+            } else if let Some((plane, cell)) = strip(&q.geometry, q.provenance.domain, index) {
+                strips.entry(plane).or_default().push(cell);
             } else {
                 retained.push(index);
                 stats.passthrough_quads += 1;
+            }
+        }
+        for (plane, mut cells) in strips {
+            cells.sort_unstable_by(|a, b| {
+                a.start.total_cmp(&b.start).then_with(|| {
+                    quads[a.cell.source]
+                        .provenance
+                        .cmp(&quads[b.cell.source].provenance)
+                })
+            });
+            // Every interval has length one. Adjacent overlap checks therefore find ALL
+            // ambiguous occupants, regardless of material; none may be merged away.
+            let blocked: Vec<_> = (0..cells.len())
+                .map(|i| {
+                    i > 0 && cells[i - 1].end > cells[i].start
+                        || i + 1 < cells.len() && cells[i].end > cells[i + 1].start
+                })
+                .collect();
+            let mut first = 0;
+            while first < cells.len() {
+                let source = cells[first];
+                let q = &quads[source.cell.source];
+                let mut end = first + 1;
+                if !blocked[first] {
+                    while end < cells.len()
+                        && !blocked[end]
+                        && cells[end - 1].end == cells[end].start
+                        && label(q, source.cell.mapping)
+                            == label(&quads[cells[end].cell.source], cells[end].cell.mapping)
+                    {
+                        end += 1;
+                    }
+                }
+                stats.grid_quads += end - first;
+                stats.rectangles += 1;
+                if end == first + 1 {
+                    retained.push(source.cell.source);
+                } else {
+                    let mut q = q.clone();
+                    let a = (plane.axis + 1 + plane.direction) % 3;
+                    for (corner, xy) in [[0., 0.], [1., 0.], [1., 1.], [0., 1.]]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let i = source.cell.corners[corner];
+                        q.geometry.positions[i][a] = if xy[plane.direction] == 0. {
+                            source.start
+                        } else {
+                            cells[end - 1].end
+                        };
+                        q.geometry.uvs[i] = xy;
+                        q.geometry.uvs[i][plane.direction] *= (end - first) as f32;
+                    }
+                    append(&mut output, &q, Some(source.cell.mapping));
+                }
+                first = end;
             }
         }
         let mut leaves = Vec::new();

@@ -54,6 +54,8 @@
 
 根 `runClient` 是 26.2 的别名，另有 `runClient26_2` 和 `runClient26_3`。常用属性如下：
 
+未指定 `nativeLibrary` 时，适配器 `runClient` 依赖 `buildNative` 完成；并行 Gradle 也不会一边替换 DLL 一边启动游戏。指定库路径时由调用者保证产物已经构建完成，适合保存不可变二进制做对比。
+
 | Gradle 属性 | 用途 |
 | --- | --- |
 | `-PprimeptEnabled=true` | 启用 PT，默认关闭 |
@@ -64,11 +66,13 @@
 | `-PprimeptProfileLeaves=true` | 配合 profile 开启逐 Cube 细计时，默认关闭；只用于成本归因 |
 | `-PprimeptProfileCsv=绝对路径` | 保存逐帧 CPU 节奏、阶段及源计数，保留离群值 |
 | `-PprimeptCaptureAudit=true` | 记录源 quad、实际 tint 与被排除的原版明暗；用于正确性检查 |
-| `-PprimeptGeometryCache=true` | 试行 Fabric wrapper 的 geometry-key 缓存；用 false 做同构建对照，保持其他配置一致 |
+| `-PprimeptGeometryCache=false` | 关闭默认启用的 Fabric wrapper geometry-key 缓存，用于同构建对照；无 key 或不兼容 wrapper 仍走实际源路径 |
 | `-PprimeptWorld=存档目录名` | 使用 quick play 进入该版本 run 目录下的测试世界 |
 | `-PprimeptUuid=玩家UUID` | 在测试副本中读取指定已有玩家的位置和状态 |
 
 外部启动器对应的 JVM 参数见 README；不要将 Gradle 的 `-P` 属性直接交给 Java。
+
+逐帧 CSV 同时记录实时与离线帧，末列 `offline` 标识模式；冻结后的源捕获计数为零。`profile=true` 每 120 帧记录对应模式的 native CPU/GPU 阶段摘要，GPU 时间来自延迟完成的采样。比较时分开稳态窗口与进入/退出离线的过渡，不把冻结省去的游戏模拟、源准备和资源更新误计为路径着色器差异。
 
 客户端命令 `/primept renderer vanilla` 与 `/primept renderer path_trace` 只请求切换，实际资源移交在下一外层帧边界执行。验证时覆盖 Prime→原版→Prime、世界退出/重进、标题界面资源重载及退休失败；等待资源加载完成再采样，不把切换暂停计入稳态。首个 Prime 后端使用宿主事件驱动的源路由，加载完成的判据包括待路由地形事件清空，不能仅等待首帧输出。新增后端通过惰性工厂注册，并遵守公共 `RendererSlot` 的完成/失败契约。
 
@@ -174,7 +178,7 @@ Prime 自有 CPU 工作池全部在 Rust。`PRIME_CPU_THREADS` 控制源编译�
 
 Java CSV 的 `terrain_plan_ns` 是请求规划 FFM 总时间，`terrain_pack_ns` 是按表读取/封装源和应用列镜像的时间，`terrain_accept_ns` 是响应提交、Rust 解码/编译/发布的同步总时间；它们包含于 `terrain_total_ns`，总时间还包括初次 epoch/atlas 准备和事件封装。`terrain_source_bytes` 是本帧请求输入与响应输入之和，包含资源定义，不含返回请求表。`terrain_selected` 是请求段数，`terrain_routed` 是有源响应数，`terrain_deferred` 是本批无源数；pending/waiting 当前为0，不是64段全部就绪证明。loaded/unloaded 是原始列事件数，entered 是 Rust 新激活且镜像成功的列数。`mc_source[...]` 另给 native plan/decode/compile/publish、请求批次数、变化/编译/活跃/驻留段数与 hack 使用计数。
 
-原版 tint 由 Java 批量转录源字段，Rust 直接求色；`tint_callbacks` 只统计未知源的实际回调。`biome_samples` 是需要重新计算颜色的位置数，`biome_host_cells` / `biome_pages` 是实际读取的 quart 群系单元/页数，不能互相当成同一单位。`biome_source` 包含 native zoom、源请求组织和求色，`biome_filter` 为混合；历史 Java `tint_callback_ms` 字段包含整个颜色源准备，不能直接归因为回调。协议配套版本为 source v4，重建双适配器与 DLL 后再验收。
+原版 tint 由 Java 批量转录源字段，Rust 直接求色；`tint_callbacks` 只统计未知源的实际回调。`biome_samples` 是需要重新计算颜色的位置数，`biome_host_cells` / `biome_pages` 是实际读取的 quart 群系单元/页数，不能互相当成同一单位。`biome_source` 包含 native zoom、源请求组织和求色，`biome_filter` 为混合；历史 Java `tint_callback_ms` 字段包含整个颜色源准备，不能直接归因为回调。协议配套版本为 source v5，重建双适配器与 DLL 后再验收。
 
 `compile` 包含排序、作业建立、`kernel`（slab 解包/剔面/展开，含首次池创建）和 `finalize`（精确内容比较、分片边界计算及不可变输出准备）；各值都是调用方墙钟时间，不是 worker CPU 时间之和。分片直接移交其 Vec 所有权，精确相同的分片复用旧存储与包围盒，不再归并成整段连续副本。`published_layers` 是实际替换或删除的图层数，`retained_layers` 是重新编译后内容相同而保留的非空图层数。`publish` 是 owner 上的场景变更和旧引用释放，不包含 GPU 构建；新分片分配及旧几何最后引用的回收仍有成本。
 
@@ -196,14 +200,14 @@ cargo test --release -p prime_vulkan --lib --locked realtime_output_cost_matrix 
 
 ### 自定义表面编译原型
 
-接口与支持范围见[表面编译原型](docs/surface-compiler.md)。表面编译器是唯一静态几何编译入口，无需环境开关，Java/FFM 源 ABI 不变。以下游戏启动只由用户手动执行：
+接口与支持范围见[表面编译](docs/surface-compiler.md)。表面编译器是唯一静态几何编译入口，无需环境开关；分页 source 协议为 v5，双适配器与 DLL 必须配套重建，外层 FFM 版本保持 7。以下游戏启动只由用户手动执行：
 
 ```powershell
 .\gradlew.bat buildNative :mc-26.3:runClient -PprimeptEnabled=true -PprimeptValidation=true -PprimeptProfile=true
 # 26.2 使用 :mc-26.2:runClient。
 ```
 
-先检查平面材质重复、atlas 接缝、群系 tint 边界、cutout/透明、跨格更新和重定位，再关闭 validation 测量。现有 Minecraft 源尚未声明发光/介质；后端有灯采样能力并不代表游戏岩浆、火把已发光。未完成的覆盖层与光学界面按原型支持范围判断。
+先检查半砖/活版门薄边/竖向栅栏的连续面与孔洞、纹理裁切/旋转/周期、草侧/红石/向日葵正反面、贴墙火焰、玻璃/水/含水部件、浅水斜坡、岩浆和火把发光。覆盖两侧与内部观察、首帧以外的动画、资源重载、负坐标及 16/64 块边界增删，确认编辑结果等价重新加载。检查 `hacks.sprite` / `hacks.optics` 的未支持来源，再关闭 validation 测量。动态光学、复杂开放玻璃、LabPBR 与折射焦散不在当前支持范围内。
 
 无窗口原生1080p表面编译稳态测量：
 
@@ -217,6 +221,15 @@ cargo test --release -p prime_vulkan --lib --locked surface_steady_cost_matrix -
 ```
 
 默认每种形状/coverage做3轮、1024帧预热、120帧采样，固定相机和射线预算。可设 `PRIME_SURFACE_PATTERN=layers` 只测八层遮挡，`PRIME_SURFACE_ROUNDS` / `PRIME_SURFACE_SAMPLES` / `PRIME_SURFACE_WARMUP` 控制轮数/样本/预热。CSV保留原始CPU录制、GPU准备/完整渲染时间和实际三角形数，预热行也保留；跨版本比较使用固定历史构建、相同输入与配置，不在当前 renderer 内切换编译器。极短夹具应避免把GPU从闲置升频的过渡当成稳态p95。每样本等待GPU完成用于归因，不代表游戏呈现吞吐；场景是受控夹具，不是真实存档。结束后删除这些会话环境变量或使用独立PowerShell，避免改变后续比较配置。
+
+部分矩形的同构建对照使用相同源 quad，分别输入不合并的封闭三角形和规范合并表面；夹具断言实际 primitive 数，避免对照组再次被合并：
+
+```powershell
+$env:PRIME_STRIP_CSV = "$PWD/artifacts/partial-strips.csv"
+cargo test --release -p prime_vulkan --lib --locked partial_strip_cost_matrix -- --ignored --nocapture --test-threads=1
+```
+
+沿用上面的 profile/validation 配置。原生 1920×1080、4 次反弹、固定种子，三轮半砖/活版门/竖向栅栏，各 65536 源 quad；交替顺序，稳态 256 次预热/256 次正式样本，更新 4 次预热/24 次正式样本。`compile_ns` 是夹具源到 Scene 准备，`visible_ns` 包括准备、录制和实际 GPU 完成；不包括 MC 捕获/FFM，也不等于呈现延迟。记录有效记录字节、材质预留、活跃 BLAS、构建/上传池和索引；不把子分配与池容量重复相加，也不当成驱动总显存。
 
 ### 通用测量约定
 
@@ -255,7 +268,7 @@ cargo test --release -p prime_vulkan --lib --locked terrain_upload_cost_matrix -
 
 `source_burst_cost` 固定8线程、每列4段，side 支持4/8/16/32（共64/256/1024/4096段），mode 支持 terrain/decorated。每次场景分别保留首载、编辑的两个方向和相同输入的原始样本及输入 hash。计时包括生产源规划、编译/颜色回填、发布、旧翻译快照最后引用的释放及整格计划；颜色响应为显式常量夹具，其响应封包与回填包含在 `accept_ms` 内，不包括实际宿主求色、Java/FFM 和 GPU。各阶段相加排除了阶段间的 section 源包构造；场景最终销毁不计入更新时间。此夹具、下述上传夹具及 `prime_tools` 入口与 native 引擎共用 MiMalloc 策略，计数包装仍统计真实分配请求；比较时记录锁定版本和分配器，另测进程峰值/保留内存，不能只记录逻辑几何字节。
 
-仅测 CPU 四边形上传记录打包，可设置 `PRIME_PACK_CSV` 为输出 CSV 绝对路径，运行 `cargo test --release --locked -p prime_vulkan packing::perf::quad_packing_cost -- --exact --ignored --nocapture`。固定8线程，覆盖52万和314万三角形，保留每批5次预热、40次正式样本及输出 hash；计时包含平移、校验、纹理查询和写入预分配的128字节记录，排除分配、GPU传输与AS构建，不创建 Vulkan 设备。`source_burst_cost` 的 `resident_geometry_bytes` 统计翻译快照持有的几何容量，不等于进程或分配器的物理占用。
+仅测 CPU 四边形上传记录打包，可设置 `PRIME_PACK_CSV` 为输出 CSV 绝对路径，运行 `cargo test --release --locked -p prime_vulkan packing::perf::quad_packing_cost -- --exact --ignored --nocapture`。固定8线程，覆盖52万和314万三角形，保留每批5次预热、40次正式样本及输出 hash；计时包含平移、校验、纹理查询和写入预分配的176字节quad记录，排除分配、GPU传输与AS构建，不创建 Vulkan 设备。`source_burst_cost` 的 `resident_geometry_bytes` 统计翻译快照持有的几何容量，不等于进程或分配器的物理占用。
 
 `terrain_upload_cost_matrix` 在原生1920×1080的无窗口宿主录制路径上，每次替换所有指定单元，固定网格、两种交替角点位置和默认射线预算。CPU 源整理/发布/翻译、录制和 GPU 时间分列；每个样本等待本次提交真正完成，`completed_ms` 包含等待，可据总时长计算吞吐量。每格64段，quads 是每段四边形数；不含 Minecraft、Java/FFM、源编译内核或图像读回。`upload_ns` 对直接打包的静态范围包含 CPU 记录初始化时间，对其他上传仍包含字节复制，不能将该计数解释为纯 memcpy 时间。用多轮不可变可执行文件交替对照 p95、最大值与吞吐量；两种夹具都不能替代真实存档的逐帧验收。
 

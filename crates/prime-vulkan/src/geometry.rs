@@ -33,11 +33,12 @@ struct Cluster {
     acceleration: Acceleration,
     triangle_count: u64,
     light_pages: Vec<Option<crate::surface::LightPage>>,
+    optical: bool,
 }
 
 pub(super) struct Geometry {
     workers: Arc<prime_scene::workers::CpuWorkers>,
-    indices: [Buffer; 2],
+    indices: [Buffer; crate::packing::FORMATS],
     builds: crate::arena::Arena,
     uploads: crate::arena::Arena,
     pub revision: ScenePublication,
@@ -53,10 +54,12 @@ pub(super) struct Geometry {
     instances: Vec<vk::AccelerationStructureInstanceKHR>,
     top_dirty: bool,
     static_count: u64,
-    materials: [MaterialArena; 2],
+    materials: [MaterialArena; crate::packing::FORMATS],
     pub static_bases: Buffer,
     world_lights: Option<Buffer>,
     has_surfaces: bool,
+    has_compounds: bool,
+    has_optics: bool,
     pub textures: Textures,
     pub rebuilt_clusters: u32,
 }
@@ -74,6 +77,8 @@ impl Geometry {
             indices: [
                 crate::objects::index_buffer_with_stride(context, 16, 11)?,
                 crate::objects::index_buffer_with_stride(context, 16, 15)?,
+                crate::objects::index_buffer_with_stride(context, 16, 17)?,
+                crate::objects::index_buffer_with_stride(context, 16, 27)?,
             ],
             builds: crate::arena::Arena::new(context, false),
             uploads,
@@ -107,6 +112,8 @@ impl Geometry {
             )?,
             world_lights: None,
             has_surfaces: false,
+            has_compounds: false,
+            has_optics: false,
             textures,
             rebuilt_clusters: 0,
         };
@@ -133,16 +140,40 @@ impl Geometry {
         self.revision != scene.publication() || self.anchor != scene.anchor
     }
 
+    #[cfg(test)]
+    pub fn surface_memory(&self) -> [u64; 6] {
+        [
+            self.clusters
+                .values()
+                .flat_map(|c| &c.allocations)
+                .map(|a| u64::from(a.records.count) * record_bytes(a.format))
+                .sum(),
+            self.materials
+                .iter()
+                .map(MaterialArena::reserved_bytes)
+                .sum(),
+            self.clusters
+                .values()
+                .map(|c| c.acceleration.storage_bytes())
+                .sum(),
+            self.builds.reserved_bytes(),
+            self.uploads.reserved_bytes(),
+            self.indices.iter().map(|b| b.size).sum(),
+        ]
+    }
+
     pub fn same_owner(&self, scene: SceneInput<'_>) -> bool {
         self.revision.same_owner(scene.publication())
     }
     pub fn shader_variant(&self) -> usize {
-        if !self.has_surfaces {
-            0
+        if self.has_optics {
+            4 + usize::from(self.world_lights.is_some())
         } else if self.world_lights.is_some() {
+            3
+        } else if self.has_compounds || self.textures.sprites != 0 {
             2
         } else {
-            1
+            usize::from(self.has_surfaces)
         }
     }
     pub fn update(&mut self, context: &Arc<Context>, scene: SceneInput<'_>) -> Result<(), String> {
@@ -375,6 +406,7 @@ impl Geometry {
                 self.clusters.insert(
                     key,
                     Cluster {
+                        optical: update.geometries.iter().flat_map(|g| &g.members).any(|m| matches!(&m.triangles, MeshGeometry::Surfaces(mesh) if mesh.quads.iter().any(|q|q.optics.is_some()))),
                         allocations: allocations.clone(),
                         acceleration: build.finish(&mut self.builds),
                         triangle_count: update
@@ -400,13 +432,17 @@ impl Geometry {
             Vec::with_capacity(self.clusters.len().max(1) * crate::surface::PAGE_BYTES);
         let mut light_roots = Vec::new();
         self.has_surfaces = false;
+        self.has_compounds = false;
+        self.has_optics = false;
         for placement in self.static_planner.placements() {
             let cluster = &self.clusters[&placement.key];
+            self.has_optics |= cluster.optical;
             // The instance ID points to the first geometry address; hardware geometry index
             // selects the range without a second pointer lookup or per-primitive search.
             let index = static_bases.len() / crate::surface::PAGE_BYTES;
             for (i, &allocation) in cluster.allocations.iter().enumerate() {
                 self.has_surfaces |= allocation.format != 0;
+                self.has_compounds |= allocation.format >= 2;
                 let page = static_bases.len() / crate::surface::PAGE_BYTES;
                 let address = self.materials[allocation.format].address(allocation.records);
                 static_bases.extend_from_slice(&address.to_le_bytes());
@@ -425,7 +461,8 @@ impl Geometry {
                         .map_or(0, |l| l.emitters.address())
                         .to_le_bytes(),
                 );
-                static_bases.extend_from_slice(&[0; 16]); // world root pointer/power patched below
+                static_bases.extend_from_slice(&[0; 12]); // world root pointer/power patched below
+                crate::uint(&mut static_bases, light.as_ref().map_or(1, |l| l.format));
                 let origin = [
                     placement.transform[3],
                     placement.transform[7],
@@ -813,12 +850,11 @@ mod tests {
         let context = renderer.context.clone();
         let geometry = renderer.geometry.as_mut().unwrap();
         let first = geometry.clusters[&cell([0, 0, 0])].allocations[0];
-        // Reserve the unused part of one page without producing fictitious geometry or uploading 64 MiB.
+        // Fill the actual first page without producing fictitious geometry or uploading padding.
+        let capacity = (geometry.materials[0].buffer(first.records).size
+            / crate::packing::stride(0) as u64) as u32;
         let filler = geometry.materials[0]
-            .allocate(
-                &context,
-                (64 * 1024 * 1024 / crate::packing::stride(0)) as u32 - 1,
-            )
+            .allocate(&context, capacity - first.records.count)
             .unwrap();
         assert_eq!(first.records.page, filler.page);
         scene
@@ -1063,6 +1099,8 @@ mod tests {
         scene.textures.insert(
             7,
             prime_scene::Texture {
+                region: None,
+                sampling: None,
                 width: 2,
                 height: 1,
                 pixels: vec![255, 255, 255, 0, 255, 255, 255, 255].into(),
@@ -1133,12 +1171,10 @@ mod tests {
             .unwrap();
         let context = renderer.context.clone();
         // Force geometry ranges in the same BLAS onto distinct physical material pages.
-        renderer.geometry.as_mut().unwrap().materials[0]
-            .allocate(
-                &context,
-                (64 * 1024 * 1024 / crate::packing::stride(0)) as u32 - 1,
-            )
-            .unwrap();
+        let arena = &mut renderer.geometry.as_mut().unwrap().materials[0];
+        let reserved = arena.allocate(&context, 1).unwrap();
+        let capacity = (arena.buffer(reserved).size / crate::packing::stride(0) as u64) as u32;
+        arena.allocate(&context, capacity - 2).unwrap();
         let mut separate = Renderer::new().unwrap();
         for seed in [0, 19, 500] {
             let merged = renderer.render(&scene, &camera, 96, 64, seed).unwrap();

@@ -74,6 +74,142 @@ fn full_plane_becomes_two_hardware_triangles_with_repeated_atlas_sampling() {
 }
 
 #[test]
+fn complete_direction_merges_slab_trapdoor_and_stacked_post_sides() {
+    for width in [0.5, 3. / 16., 2. / 16.] {
+        for direction in 0..2 {
+            for axis in 0..3 {
+                for reverse in [false, true] {
+                    let mut input = Vec::new();
+                    for n in 0..32 {
+                        let mut q = quad(0., 0.);
+                        for p in &mut q.geometry.positions {
+                            p[direction] += -32. + n as f32;
+                            p[direction ^ 1] = p[direction ^ 1] * width + 0.375;
+                        }
+                        // Crop the narrow direction rather than rescaling its texture.
+                        for uv in &mut q.geometry.uvs {
+                            uv[direction ^ 1] *= width;
+                        }
+                        if reverse {
+                            q.geometry.positions.reverse();
+                            q.geometry.uvs.reverse();
+                        }
+                        q.geometry.positions = q.geometry.positions.map(|p| {
+                            let mut out = [0.; 3];
+                            out[axis] = 0.125;
+                            out[(axis + 1) % 3] = p[0];
+                            out[(axis + 2) % 3] = p[1];
+                            out
+                        });
+                        input.push(q);
+                    }
+                    let result = SurfaceCompiler::new().compile(1, &input).unwrap();
+                    assert_eq!(
+                        result.quads.len(),
+                        1,
+                        "width={width}, direction={direction}, axis={axis}"
+                    );
+                    let mut out = result.quads[0].clone();
+                    out.geometry.positions = out
+                        .geometry
+                        .positions
+                        .map(|p| [p[(axis + 1) % 3], p[(axis + 2) % 3], 0.]);
+                    for n in 0..32 {
+                        for f in [0.125, 0.625, 0.875] {
+                            let mut point = [0.; 2];
+                            point[direction] = -32. + n as f32 + f;
+                            point[direction ^ 1] = 0.375 + width * 0.75;
+                            let uv = point_uv(&out, point).unwrap();
+                            let mut t = [0.; 2];
+                            t[direction] = f;
+                            t[direction ^ 1] = 0.75;
+                            let mut expected = [0.25 + 0.25 * t[0], 0.5 + 0.125 * t[1]];
+                            expected[direction ^ 1] *= width;
+                            assert_eq!(uv, expected);
+                        }
+                    }
+                    let repeat = out.repeat.unwrap();
+                    assert_eq!(repeat.axes, 1 << direction);
+                    // The narrow edge endpoint remains t=1, not frac(1)=0.
+                    let mut edge = [0.25; 2];
+                    edge[direction ^ 1] = 1.;
+                    assert_ne!(repeat.evaluate(edge), repeat.evaluate([0.25, 0.25]));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn contact_clipping_preserves_constant_tint_exactly_at_fractional_boundaries() {
+    let mut q = quad(0., 0.).geometry;
+    q.color = [1.; 4];
+    let source = SurfaceFace::from_quad(q);
+    for x in 1..37 {
+        for y in 1..41 {
+            let mut patch = source.clone();
+            for p in &mut patch.geometry.positions {
+                p[0] *= x as f32 / 37.;
+                p[1] *= y as f32 / 41.;
+            }
+            let pairs = intersect_surfaces(&patch, &source).unwrap();
+            assert!(!pairs.is_empty());
+            for (face, layer) in pairs {
+                assert_eq!(face.geometry.colors, [[1.; 4]; 4]);
+                assert_eq!(layer.colors, [[1.; 4]; 4], "{x}, {y}");
+            }
+        }
+    }
+}
+
+#[test]
+fn contact_clipping_keeps_gradient_tints_in_the_source_range() {
+    let mut source = SurfaceFace::from_quad(quad(0., 0.).geometry);
+    for mask in 1..15u32 {
+        source.geometry.colors = std::array::from_fn(|i| [((mask >> i) & 1) as f32; 4]);
+        for x in 1..37 {
+            for y in 1..41 {
+                let mut patch = source.clone();
+                for p in &mut patch.geometry.positions {
+                    p[0] *= x as f32 / 37.;
+                    p[1] *= y as f32 / 41.;
+                }
+                for (face, layer) in intersect_surfaces(&patch, &source).unwrap() {
+                    for color in face.geometry.colors.iter().chain(&layer.colors) {
+                        assert!(
+                            color.iter().all(|v| (0. ..=1.).contains(v)),
+                            "mask={mask} x={x} y={y}: {color:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn partial_strips_preserve_gaps_overlaps_material_changes_and_non_affine_uv() {
+    let slab = |x| {
+        let mut q = quad(x, 0.);
+        for p in &mut q.geometry.positions {
+            p[1] *= 0.5;
+        }
+        q
+    };
+    let mut input = vec![slab(0.), slab(1.), slab(3.), slab(4.)];
+    let mut compiler = SurfaceCompiler::new();
+    assert_eq!(compiler.compile(1, &input).unwrap().quads.len(), 2);
+    input[1].geometry.color[0] = 0.;
+    assert_eq!(compiler.compile(1, &input).unwrap().quads.len(), 3);
+    input[3].geometry.uvs[2][0] += 0.125;
+    assert_eq!(compiler.compile(1, &input).unwrap().quads.len(), 4);
+    input = vec![slab(0.), slab(0.), slab(1.)];
+    assert_eq!(compiler.compile(1, &input).unwrap().quads.len(), 3);
+    input = vec![slab(0.), slab(0.5), slab(1.)];
+    assert_eq!(compiler.compile(1, &input).unwrap().quads.len(), 3);
+}
+
+#[test]
 fn sparse_holes_and_labels_preserve_exact_coverage_and_each_material() {
     let input: Vec<_> = (0..16)
         .flat_map(|y| {
@@ -247,6 +383,7 @@ fn lights_are_built_from_final_geometry_and_forward_reverse_pdfs_agree() {
     let mut input: Vec<_> = (0..8).map(|x| quad(x as f32, 0.0)).collect();
     for q in &mut input {
         q.emission = Emission {
+            textured: false,
             radiance: [2.0; 3],
             two_sided: true,
         };
@@ -392,4 +529,112 @@ fn terrain_bridge_preserves_unchanged_pages_and_rebuilds_rich_light_identity() {
             .iter()
             .all(|p| p[0] >= 16.)
     );
+}
+
+#[test]
+fn contact_clipping_preserves_triangle_interpolation_and_secondary_uvs() {
+    for warped_uv in [false, true] {
+        let mut face = SurfaceFace::from_quad(quad(0., 0.).geometry);
+        if warped_uv {
+            face.geometry.uvs[2] = [0.73, 0.94];
+        }
+        let layer = SurfaceLayer {
+            uvs: face.geometry.uvs.map(|uv| [1. - uv[1], uv[0] * 2.]),
+            colors: face.geometry.colors,
+            texture_id: 9,
+            flags: 1,
+            repeat: None,
+            emission: Default::default(),
+        };
+        face.detail = Some(Arc::new(SurfaceDetail {
+            mode: LayerMode::Bilateral,
+            layer,
+        }));
+        let clipped = clip_rectangle(
+            &face,
+            Rectangle {
+                bounds: [0.125, 0.375, 0.875, 0.75],
+                ..Rectangle::from_face(&face).unwrap()
+            },
+        );
+        assert!(!clipped.is_empty());
+        if !warped_uv {
+            assert_eq!(clipped.len(), 1);
+        }
+        for x in 0..37 {
+            for y in 0..31 {
+                let point = [(x as f32 + 0.37) / 37., (y as f32 + 0.31) / 31.];
+                let actual = clipped.iter().find_map(|f| point_uv(f, point));
+                let inside =
+                    point[0] > 0.125 && point[0] < 0.875 && point[1] > 0.375 && point[1] < 0.75;
+                assert_eq!(actual.is_some(), inside);
+                if let Some(uv) = actual {
+                    let expected = point_uv(&face, point).unwrap();
+                    for i in 0..2 {
+                        assert!((uv[i] - expected[i]).abs() < 2e-6);
+                    }
+                    let secondary = clipped
+                        .iter()
+                        .find_map(|f| {
+                            let mut q = f.clone();
+                            q.geometry.uvs = q.detail.as_ref().unwrap().layer.uvs;
+                            point_uv(&q, point)
+                        })
+                        .unwrap();
+                    assert!((secondary[0] - (1. - expected[1])).abs() < 2e-6);
+                    assert!((secondary[1] - 2. * expected[0]).abs() < 2e-6);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn trapezoid_contacts_with_distinct_diagonals_preserve_both_fields_and_union_area() {
+    let mut a = SurfaceFace::from_quad(quad(0., 0.).geometry);
+    a.geometry.uvs[2] = [0.83, 0.91];
+    let mut b = a.clone();
+    b.geometry.positions = [
+        [0.25, 0., 0.],
+        [1.25, 0., 0.],
+        [1.25, 0.6, 0.],
+        [0.25, 0.9, 0.],
+    ];
+    b.geometry.positions.rotate_left(1);
+    b.geometry.uvs = [[0., 1.], [0.91, 0.8], [1., 0.], [0., 0.]];
+    let outside = subtract_surface(&a, &b).unwrap();
+    let inside = intersect_surfaces(&a, &b).unwrap();
+    let area: f64 = outside
+        .iter()
+        .map(|f| f.geometry.areas().iter().sum::<f64>())
+        .sum::<f64>()
+        + inside
+            .iter()
+            .map(|(f, _)| f.geometry.areas().iter().sum::<f64>())
+            .sum::<f64>();
+    assert!((area - 1.).abs() < 1e-6);
+    for x in 0..41 {
+        for y in 0..37 {
+            let point = [(x as f32 + 0.31) / 41., (y as f32 + 0.27) / 37.];
+            let expected = point_uv(&b, point);
+            let part = inside.iter().find(|(f, _)| point_uv(f, point).is_some());
+            assert_eq!(expected.is_some(), part.is_some());
+            if let Some((face, layer)) = part {
+                let uv = point_uv(face, point).unwrap();
+                let original = point_uv(&a, point).unwrap();
+                for i in 0..2 {
+                    assert!((uv[i] - original[i]).abs() < 2e-6);
+                }
+                let mut secondary = face.clone();
+                secondary.geometry.uvs = layer.uvs;
+                let uv = point_uv(&secondary, point).unwrap();
+                for (value, expected) in uv.into_iter().zip(expected.unwrap()) {
+                    assert!((value - expected).abs() < 2e-6);
+                }
+                assert!(outside.iter().all(|f| point_uv(f, point).is_none()));
+            } else {
+                assert!(outside.iter().any(|f| point_uv(f, point).is_some()));
+            }
+        }
+    }
 }

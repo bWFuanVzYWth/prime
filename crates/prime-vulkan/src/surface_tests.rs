@@ -26,6 +26,8 @@ pub(crate) fn scene(edge: usize, pattern: &str, flags: u32) -> Scene {
     scene.textures.insert(
         1,
         Texture {
+            region: None,
+            sampling: None,
             width: 32,
             height: 32,
             pixels: pixels.into(),
@@ -102,6 +104,220 @@ pub(crate) fn camera(edge: usize) -> Camera {
 }
 
 #[test]
+#[ignore = "windowless bilateral/overlay shading, coverage and single physical geometry"]
+fn gpu_compound_sheet_matches_independent_material_oracle_from_both_sides() {
+    use prime_scene::surface::{
+        Emission, LayerMode, SurfaceDetail, SurfaceFace, SurfaceLayer, SurfaceMesh,
+    };
+    let base = CompiledQuad {
+        positions: [
+            [-1., -1., -2.],
+            [1., -1., -2.],
+            [1., 1., -2.],
+            [-1., 1., -2.],
+        ],
+        uvs: [[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
+        color: [1.; 4],
+        texture_id: 1,
+        flags: 0,
+    };
+    let mut actual = Renderer::new().unwrap();
+    let mut expected = Renderer::new().unwrap();
+    let mut revision = 1;
+    for mode in [
+        LayerMode::Bilateral,
+        LayerMode::OverlayFront,
+        LayerMode::OverlayBoth,
+    ] {
+        for back in [false, true] {
+            let mut q = SurfaceFace::from_quad(base);
+            q.detail = Some(Arc::new(SurfaceDetail {
+                mode,
+                layer: SurfaceLayer {
+                    colors: [[1.; 4]; 4],
+                    uvs: base.uvs,
+                    texture_id: 2,
+                    flags: 1,
+                    repeat: None,
+                    emission: Emission::default(),
+                },
+            }));
+            let mut scene = Scene {
+                revision,
+                ..Default::default()
+            };
+            revision += 1;
+            scene
+                .ready_terrain
+                .insert(Cell::containing([0.; 3]).unwrap());
+            for (id, pixels) in [
+                (1, vec![255, 0, 0, 255, 0, 255, 0, 255]),
+                (2, vec![0, 0, 255, 255, 255, 255, 255, 0]),
+            ] {
+                scene.textures.insert(
+                    id,
+                    Texture {
+                        region: None,
+                        sampling: None,
+                        width: 2,
+                        height: 1,
+                        pixels: pixels.into(),
+                    },
+                );
+            }
+            scene.meshes.insert(
+                (1, 0),
+                SceneMesh {
+                    revision: scene.revision,
+                    flags: q.flags(),
+                    origin: [0.; 3],
+                    triangles: MeshGeometry::Surfaces(Arc::new(
+                        SurfaceMesh::from_resolved(scene.revision, vec![q]).unwrap(),
+                    )),
+                },
+            );
+            let mut camera = crate::frame::tests::camera();
+            if back {
+                camera.position = [0., 0., -4.];
+                camera.forward = [0., 0., 1.];
+                camera.right = [-1., 0., 0.];
+            }
+            let image = actual.render(&scene, &camera, 96, 64, 19).unwrap();
+            let pixels = match mode {
+                LayerMode::Bilateral if back => vec![0, 0, 255, 255, 255, 255, 255, 0],
+                LayerMode::OverlayBoth => vec![0, 0, 255, 255, 0, 255, 0, 255],
+                LayerMode::OverlayFront if !back => vec![0, 0, 255, 255, 0, 255, 0, 255],
+                _ => vec![255, 0, 0, 255, 0, 255, 0, 255],
+            };
+            let flags = u32::from(mode == LayerMode::Bilateral && back);
+            scene.textures.insert(
+                1,
+                Texture {
+                    region: None,
+                    sampling: None,
+                    width: 2,
+                    height: 1,
+                    pixels: pixels.into(),
+                },
+            );
+            let mut reference = base;
+            reference.flags = flags;
+            scene.meshes.insert(
+                (1, 0),
+                SceneMesh {
+                    revision: scene.revision,
+                    flags,
+                    origin: [0.; 3],
+                    triangles: MeshGeometry::Quads(vec![reference].into()),
+                },
+            );
+            let reference_image = expected.render(&scene, &camera, 96, 64, 19).unwrap();
+            assert_eq!(image, reference_image, "mode={mode:?}, back={back}");
+        }
+    }
+}
+
+#[test]
+#[ignore = "windowless actual optical boundaries, order-independent absorption and initial medium"]
+fn gpu_optical_boundaries_match_beer_lambert_and_fresnel_from_both_sides_and_inside() {
+    use prime_scene::surface::{Medium, Optics, SurfaceFace, SurfaceMesh};
+    let mut renderer = Renderer::new().unwrap();
+    let camera = Camera {
+        position: [2., 2., 0.],
+        forward: [0., 0., 1.],
+        right: [-1., 0., 0.],
+        up: [0., 1., 0.],
+        vertical_fov_radians: 1.,
+    };
+    for (index, ior) in [1_f32, 1.333, 1.5].into_iter().enumerate() {
+        let medium = Medium {
+            ior,
+            extinction: [0.2, 0.5, 0.9],
+        };
+        let faces = [1., 3.].map(|z| {
+            let mut positions = [[1., 1., z], [3., 1., z], [3., 3., z], [1., 3., z]];
+            if z == 1. {
+                positions.reverse();
+            }
+            let mut face = SurfaceFace::from_quad(CompiledQuad {
+                positions,
+                uvs: [[0.5; 2]; 4],
+                color: [1.; 4],
+                texture_id: 0,
+                flags: 0,
+            });
+            face.media = [7, 0];
+            face.optics = Some(Optics {
+                negative: medium,
+                positive: Medium::default(),
+                transmit: true,
+                thin: false,
+            });
+            face
+        });
+        let mesh = SurfaceMesh::from_resolved(1, faces.into()).unwrap();
+        let mut scene = Scene {
+            epoch: 1,
+            revision: index as u64 + 1,
+            ..Default::default()
+        };
+        scene
+            .ready_terrain
+            .insert(Cell::containing([0.; 3]).unwrap());
+        scene.meshes.insert(
+            (1, 0),
+            SceneMesh {
+                revision: index as u64 + 1,
+                flags: 2,
+                origin: [0.; 3],
+                triangles: MeshGeometry::Surfaces(Arc::new(mesh)),
+            },
+        );
+        renderer.render(&scene, &camera, 8, 8, 19).unwrap();
+        let mut inputs = Vec::new();
+        for (z, dir, inside) in [
+            (0., 1., false),
+            (4., -1., false),
+            (2., 1., true),
+            (2., -1., true),
+        ] {
+            inputs.extend([2., 2., z, 6., 0., 0., dir, if inside { ior } else { 1. }]);
+            inputs.extend(if inside { [0.2, 0.5, 0.9, 0.] } else { [0.; 4] });
+        }
+        let input: Vec<_> = inputs.into_iter().map(f32::to_bits).collect();
+        let output = crate::shader_tests::run(
+            &renderer.context,
+            include_bytes!(concat!(env!("OUT_DIR"), "/optics.spv")),
+            &input,
+            48,
+            [0, 4],
+            renderer.geometry.as_ref(),
+        );
+        let f = ((ior - 1.) / (ior + 1.)).powi(2);
+        for i in 0..4 {
+            assert_eq!(f32::from_bits(output[i * 12 + 3]), 1.);
+            let (distance, boundaries) = if i < 2 { (2., 2) } else { (1., 1) };
+            for (c, sigma) in [0.2_f32, 0.5, 0.9].into_iter().enumerate() {
+                let expected = (1. - f).powi(boundaries) * (-sigma * distance).exp();
+                let actual = f32::from_bits(output[i * 12 + c]);
+                assert!(
+                    (actual - expected).abs() < 2e-6,
+                    "ior={ior} ray={i} channel={c}: {actual} != {expected}"
+                );
+            }
+            assert_eq!(
+                f32::from_bits(output[i * 12 + 4]),
+                if i < 2 { 1. } else { ior }
+            );
+            assert_eq!(
+                f32::from_bits(output[i * 12 + 5]),
+                if i < 2 { ior } else { 1. }
+            );
+        }
+    }
+}
+
+#[test]
 #[ignore = "windowless quad addressing and corner interpolation versus independently padded triangles"]
 fn gpu_quad_halves_match_independent_triangles_with_nonplanar_varying_attributes() {
     use prime_scene::{Triangle, geometry::Quad};
@@ -150,6 +366,8 @@ fn gpu_quad_halves_match_independent_triangles_with_nonplanar_varying_attributes
             scene.textures.insert(
                 1,
                 Texture {
+                    region: None,
+                    sampling: None,
                     width: 2,
                     height: 2,
                     pixels: vec![
@@ -305,6 +523,8 @@ fn gpu_surface_mixed_records_follow_material_ranges_and_format_replacement() {
         input.textures.insert(
             1,
             Texture {
+                region: None,
+                sampling: None,
                 width: 1,
                 height: 1,
                 pixels: Arc::from([99, 133, 177, 255]),
@@ -371,6 +591,7 @@ fn gpu_surface_light_trees_match_reverse_pdf_and_follow_scene_replacement() {
                 source: i,
             },
             emission: Emission {
+                textured: false,
                 radiance: [(1 << i) as f32; 3],
                 two_sided: true,
             },
@@ -501,6 +722,7 @@ fn lit_scene(revision: u64, emission: f32) -> Scene {
             source: if radiance == 0. { 0 } else { 1 },
         },
         emission: Emission {
+            textured: false,
             radiance: [radiance; 3],
             two_sided: false,
         },
@@ -609,4 +831,270 @@ fn gpu_surface_lights_illuminate_receivers_and_retire_with_inflight_frames() {
         assert_eq!(frame.serial, revision);
     }
     host.drain().unwrap();
+}
+
+#[test]
+#[ignore = "windowless production sprite sampling, shared backing and metadata-only animation"]
+fn sprite_frames_mips_and_endpoints_share_pixels_without_rebuilding_geometry() {
+    use prime_scene::{TextureLevel, TextureSampling};
+    let mut renderer = Renderer::new().unwrap();
+    let camera = crate::frame::tests::camera();
+    let pixels: Arc<[u8]> = (0..4)
+        .flat_map(|y| (0..10).flat_map(move |x| [x * 20, y * 40, 50, if x < 5 { 64 } else { 255 }]))
+        .collect::<Vec<_>>()
+        .into();
+    let mip: Arc<[u8]> = (0..2)
+        .flat_map(|_| {
+            (0..4).flat_map(|x| {
+                if x < 2 {
+                    [80, 100, 120, 32]
+                } else {
+                    [160, 180, 200, 224]
+                }
+            })
+        })
+        .collect::<Vec<_>>()
+        .into();
+    let mut scene = crate::frame::tests::plane();
+    let shared = Texture {
+        width: 10,
+        height: 4,
+        pixels: pixels.clone(),
+        region: None,
+        sampling: None,
+    };
+    scene.textures.insert(1, shared.clone());
+    let sprite = Texture {
+        region: Some([1, 0, 4, 4]),
+        sampling: Some(Arc::new(TextureSampling {
+            next: [5, 0],
+            blend: 0.25,
+            levels: vec![TextureLevel {
+                width: 4,
+                height: 2,
+                pixels: mip,
+                region: [0, 0, 2, 2],
+                next: [2, 0],
+            }],
+        })),
+        ..shared
+    };
+    scene.textures.insert(2, sprite.clone());
+    scene.textures.insert(3, sprite);
+    renderer.render(&scene, &camera, 8, 8, 1).unwrap();
+    let retained = renderer
+        .geometry
+        .as_ref()
+        .unwrap()
+        .textures
+        .retained_slots();
+    assert_eq!(
+        retained.1,
+        2 + 40 + 8,
+        "atlas and multiple sprite views share each backing once"
+    );
+    let samples = [
+        [0., 0., 0., 0.],
+        [1., 1., 0., 0.],
+        [0.4, 0.6, 0.5, 0.],
+        [0.4, 0.6, 2_f32.sqrt() / 4., 0.],
+    ];
+    let input: Vec<_> = samples.into_iter().flatten().map(f32::to_bits).collect();
+    for frame in 0..2 {
+        if frame == 1 {
+            let t = scene.textures.get_mut(&2).unwrap();
+            t.region = Some([5, 0, 4, 4]);
+            let s = Arc::make_mut(t.sampling.as_mut().unwrap());
+            s.next = [1, 0];
+            s.blend = 0.5;
+            s.levels[0].region = [2, 0, 2, 2];
+            s.levels[0].next = [0, 0];
+            scene.revision += 1;
+            renderer.render(&scene, &camera, 8, 8, 2).unwrap();
+            let g = renderer.geometry.as_ref().unwrap();
+            assert_eq!(g.rebuilt_clusters, 0);
+            assert_eq!(
+                g.textures.retained_slots(),
+                retained,
+                "animation only changes descriptors"
+            );
+        }
+        let g = renderer.geometry.as_ref().unwrap();
+        let output = crate::shader_tests::run(
+            &renderer.context,
+            include_bytes!(concat!(env!("OUT_DIR"), "/texture.spv")),
+            &input,
+            16,
+            [g.textures.index(2).unwrap(), 4],
+            Some(g),
+        );
+        let base = if frame == 0 {
+            [
+                [40., 0., 50., 112.],
+                [100., 120., 50., 112.],
+                [60., 80., 50., 112.],
+            ]
+        } else {
+            [
+                [60., 0., 50., 160.],
+                [120., 120., 50., 160.],
+                [80., 80., 50., 160.],
+            ]
+        };
+        let lower = if frame == 0 {
+            [100., 120., 140., 80.]
+        } else {
+            [120., 140., 160., 128.]
+        };
+        for (i, expected) in [
+            base[0],
+            base[1],
+            lower,
+            std::array::from_fn(|a| (base[2][a] + lower[a]) * 0.5),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for (c, value) in expected.into_iter().enumerate() {
+                let actual = f32::from_bits(output[i * 4 + c]);
+                assert!(
+                    (actual - value / 255.).abs() < 2e-6,
+                    "frame={frame} sample={i} c={c}: {actual} != {}",
+                    value / 255.
+                );
+            }
+        }
+    }
+    scene.textures.remove(&3);
+    scene.revision += 1;
+    renderer.render(&scene, &camera, 8, 8, 3).unwrap();
+    assert_eq!(
+        renderer
+            .geometry
+            .as_ref()
+            .unwrap()
+            .textures
+            .retained_slots()
+            .1,
+        retained.1
+    );
+}
+
+#[test]
+#[ignore = "windowless compound/textured emission support and bidirectional PDF"]
+fn compound_emitters_sample_the_visible_layer_without_leaking_hidden_emission() {
+    use prime_scene::surface::{
+        Emission, LayerMode, SurfaceDetail, SurfaceFace, SurfaceLayer, SurfaceMesh,
+    };
+    let mut renderer = Renderer::new().unwrap();
+    let geometry = prime_scene::geometry::Quad {
+        positions: [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]],
+        colors: [[1.; 4]; 4],
+        uvs: [[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
+        texture_id: 0,
+        flags: 0,
+    };
+    let samples = 1024;
+    let input: Vec<_> = (0..samples)
+        .flat_map(|i| {
+            [
+                0.5_f32.to_bits(),
+                ((i as f32 + 0.5) / samples as f32).to_bits(),
+                (((i * 31 % samples) as f32 + 0.5) / samples as f32).to_bits(),
+                0,
+            ]
+        })
+        .collect();
+    for mode in [
+        LayerMode::Bilateral,
+        LayerMode::OverlayFront,
+        LayerMode::OverlayBoth,
+    ] {
+        let face = SurfaceFace {
+            geometry,
+            repeat: None,
+            emission: Emission {
+                radiance: [2., 0., 0.],
+                two_sided: true,
+                textured: false,
+            },
+            media: [0; 2],
+            emitter: None,
+            emitter_area_weight: 0.,
+            optics: None,
+            detail: Some(Arc::new(SurfaceDetail {
+                mode,
+                layer: SurfaceLayer {
+                    colors: [[1.; 4]; 4],
+                    uvs: geometry.uvs,
+                    texture_id: 1,
+                    flags: if mode == LayerMode::Bilateral { 0 } else { 1 },
+                    repeat: None,
+                    emission: Emission {
+                        radiance: [3.; 3],
+                        two_sided: true,
+                        textured: true,
+                    },
+                },
+            })),
+        };
+        let mut scene = Scene {
+            revision: mode as u64,
+            ..Default::default()
+        };
+        scene
+            .ready_terrain
+            .insert(Cell::containing([0.; 3]).unwrap());
+        scene.meshes.insert(
+            (0, 0),
+            SceneMesh {
+                revision: scene.revision,
+                flags: 0,
+                origin: [0.; 3],
+                triangles: MeshGeometry::Surfaces(Arc::new(
+                    SurfaceMesh::from_resolved(scene.revision, vec![face]).unwrap(),
+                )),
+            },
+        );
+        scene.textures.insert(
+            1,
+            Texture {
+                width: 2,
+                height: 1,
+                pixels: Arc::from([0, 255, 0, 0, 0, 255, 0, 255]),
+                region: None,
+                sampling: None,
+            },
+        );
+        renderer.render(&scene, &camera(1), 8, 8, 0).unwrap();
+        for back in [0, 1] {
+            let out = crate::shader_tests::run(
+                &renderer.context,
+                include_bytes!(concat!(env!("OUT_DIR"), "/lights.spv")),
+                &input,
+                samples * 16,
+                [back, samples as u32],
+                renderer.geometry.as_ref(),
+            );
+            for row in out.as_chunks::<16>().0 {
+                assert_eq!(row[0], 1);
+                let f = |i| f32::from_bits(row[i]);
+                let top = if mode == LayerMode::Bilateral {
+                    back == 1
+                } else {
+                    (mode == LayerMode::OverlayBoth || back == 0) && f(4) >= 0.5
+                };
+                assert_eq!(
+                    [f(8), f(9), f(10)],
+                    if top { [0., 3., 0.] } else { [2., 0., 0.] }
+                );
+                assert!((f(7) - 1.).abs() < 1e-6);
+                assert!(
+                    (f(11) - 4.).abs() < 2e-5,
+                    "forward/reverse mismatch {mode:?} {back}: {}",
+                    f(11)
+                );
+            }
+        }
+    }
 }

@@ -9,7 +9,7 @@ import java.util.ArrayList;
 
 /** Reusable native transport pages. No geometry, Minecraft interpretation or scheduling. */
 public final class SourcePages implements AutoCloseable {
-    public static final int MAGIC = 0x53434d50, VERSION = 4;
+    public static final int MAGIC = 0x53434d50, VERSION = 5;
     private static final int PAGE_BYTES = 1 << 20;
     private static final ValueLayout.OfInt I32 =
             ValueLayout.JAVA_INT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
@@ -80,6 +80,11 @@ public final class SourcePages implements AutoCloseable {
     }
     public SourcePages ints(int[] values, int count) {
         return copy(MemorySegment.ofArray(values).asSlice(0, (long)count * 4));
+    }
+    public SourcePages pixels(java.nio.ByteBuffer rgba) {
+        if ((rgba.remaining() & 3) != 0)
+            throw new IllegalArgumentException("RGBA source length");
+        return copy(MemorySegment.ofBuffer(rgba));
     }
     private SourcePages copy(MemorySegment source) {
         long at = 0;

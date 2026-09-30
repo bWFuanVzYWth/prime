@@ -135,7 +135,7 @@ Java 使用宿主 transient command buffer，将 native 录制结果交还 `enco
 
 ## 生命周期与线程
 
-- `prime_minecraft::TerrainContext` 显式持有来源清单、活跃集、压缩 section、资源字典、待响应身份与同步工作池；无后台任务或逃逸借用。Java `SourcePages` 只持有可复用运输页，调用返回后可覆写。`CaptureInbox` 继续维护动态/纹理 epoch 与旧协议夹具，不再决定生产地形工作集。
+- `prime_minecraft::TerrainContext` 显式持有来源清单、活跃集、压缩 section、资源字典、待响应身份与同步工作池；无后台任务或逃逸借用。Java `SourcePages` 只持有可复用运输页，调用返回后可覆写。`CaptureInbox` 只维护资源 epoch、atlas 发布与失败状态；旧地形路由仅保留于测试源集。
 - 标准模型资源缓存以 Cube 弱身份关联已观察几何，在帧边界显式处理 ReferenceQueue，避免临时 Cube 永久积累；该操作只释放 CPU 源所有权。存活实例引用仍保留原型，GPU 资源另依 timeline 退休，不能以 GC 通知充当 GPU 完成证明。
 - FFM confined arena 可重复使用：帧与错误缓冲固定分配，输入 staging 按需增长。Rust 在调用返回前完成输入消费，跨调用数据持有独立存储，不保存 Java 地址；同步 worker 可借用本次包，GPU 执行异步不延长输入字节借用期。生产 FFM 不传输输出像素。
 - native handle 存在创建 OS 线程的 TLS 表中。全局原子计数器仅分配不可复用身份；跨线程、已释放或伪造 handle 明确失败。没有全局共享可变场景。
@@ -146,8 +146,8 @@ Java 使用宿主 transient command buffer，将 native 录制结果交还 `enco
 
 ## 当前渲染范围
 
-路径追踪使用硬件 Ray Query、Lambert 材质、线性 Rec.2020 工作空间、旧 Prime 的物理大气、有限太阳圆盘与空气透视（见[缓存契约](atmosphere.md)）、可调路径预算（默认四个路径顶点）和 primeDRT 显示映射；Z-Sobol、起点误差与颜色契约见 [Slang 基础库](shaders.md)。纹理使用图集 UV、动画首帧与基础 mip 最近点采样；源 RGBA 与 tint 先按 Minecraft 编码域语义组合，shader 再进行所需的线性化。
+路径追踪使用硬件 Ray Query、Lambert 材质、线性 Rec.2020 工作空间、旧 Prime 的物理大气、有限太阳圆盘与空气透视（见[缓存契约](atmosphere.md)）、可调路径预算（默认四个路径顶点）和 primeDRT 显示映射；Z-Sobol、起点误差与颜色契约见 [Slang 基础库](shaders.md)。地形使用 sprite-local UV、实际动画帧与源 mip，GPU 消费时钟描述；未知 UV 保留 atlas 回退。源 RGBA 与 tint 按 Minecraft 编码域语义组合，shader 再线性化。过滤近似、动画相位与发光采样边界见[表面编译](surface-compiler.md)。
 
 地形范围由 Rust 在宿主实际可用来源内选择，动态源仍依赖宿主准备过程。地形原型使用真实烘焙 quad；标准 multipart、流体形状和实际 tint 已接入；opaque 自定义模型、特殊偏移和其他未覆盖规则按 [独立清单](../PROTOTYPE_HACKS.md) 暂用默认值。动态仍接收常规模型、方块实体、物品、自定义几何的支持布局及 quad 粒子；moving/falling block、leash、文字、glint、outline 等特殊路径不作普通表面支持承诺。
 
-cutout 当前使用固定 0.1 阈值；alpha 材质按源 alpha 随机覆盖，接受后仍是 Lambert 表面，没有水/玻璃折射或介质吸收。主射线和阴影使用同样覆盖语义，同射线的量化交点哈希使流体重合正反面共享判定；这也会关联几何重合而语义不同的透明面，是当前近似边界。实时模式逐帧推进样本序号且没有历史累积；离线冻结场景后纯累积，退出冻结时重建捕获 epoch。尚无动态重投影、降噪。完整动态纹理、PBR 和 HDR 仍待实现。未完成事项见 [HACK.md](../HACK.md)。
+cutout 使用固定 0.1 阈值；未解释的 alpha 材质仍按源 alpha 随机覆盖，接受后使用 Lambert。标准水与具有拓扑证明的静态玻璃使用 Fresnel 反射/折射和 Beer 吸收；光学边界、正反侧与覆盖层由规范表面直接表示，命中、阴影和灯采样共享选择规则。复杂开放玻璃、动态介质与折射焦散尚未覆盖。实时模式逐帧推进样本序号且没有历史累积；离线冻结场景后纯累积，退出冻结时重建捕获 epoch。动态重投影、降噪、完整动态纹理、PBR 和 HDR 仍待实现。未完成事项见 [HACK.md](../HACK.md)。

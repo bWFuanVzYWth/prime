@@ -112,6 +112,8 @@ public final class DynamicTextures {
         long newTotal = retainedBytes - (previous == null ? 0 : previous.rgba.length) + rgba.length;
         if (newTotal > 512L << 20)
             throw new IllegalStateException("Dynamic source textures exceed 512 MiB");
+        if (!blockAtlas && previous == null && nextId >= 0x40000000)
+            throw new IllegalStateException("Dynamic texture identity space exhausted");
         int id = blockAtlas ? 1 : previous == null ? nextId++ : previous.id;
         SOURCES.put(texture, new Texture(id, width, height, rgba));
         retainedBytes = newTotal;

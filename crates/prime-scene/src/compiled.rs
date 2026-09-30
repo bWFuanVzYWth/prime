@@ -42,10 +42,15 @@ pub struct CompiledSection {
     key: u64,
     origin: [f64; 3],
     layers: [Layer; 3],
+    surfaces: [Layer; 3],
 }
 impl CompiledSection {
     pub fn triangle_count(&self) -> usize {
-        self.layers.iter().map(Layer::triangle_count).sum()
+        self.layers
+            .iter()
+            .chain(&self.surfaces)
+            .map(Layer::triangle_count)
+            .sum()
     }
 }
 
@@ -95,6 +100,62 @@ fn same_triangle(a: &Triangle, b: &Triangle) -> bool {
 }
 
 impl SourceScene {
+    fn empty_surfaces(&self, key: u64) -> [Layer; 3] {
+        std::array::from_fn(|i| {
+            if self.meshes.contains_key(&(key, 3 + i as u32)) {
+                Layer::Remove
+            } else {
+                Layer::Retain(0)
+            }
+        })
+    }
+
+    /// Attach already resolved uncommon sheets to the same immutable publication proof.
+    /// Ordinary fragments keep their compact allocation and are never expanded to this IR.
+    pub fn prepare_surface_layers(
+        &self,
+        compiled: &mut CompiledSection,
+        mut surfaces: [Vec<crate::surface::SurfaceFace>; 3],
+    ) {
+        compiled.surfaces = std::array::from_fn(|i| {
+            let faces = std::mem::take(&mut surfaces[i]);
+            let old = self.meshes.get(&(compiled.key, 3 + i as u32));
+            if faces.is_empty() {
+                return if old.is_some() {
+                    Layer::Remove
+                } else {
+                    Layer::Retain(0)
+                };
+            }
+            if let Some(old) = old
+                && old.origin == compiled.origin
+                && let MeshGeometry::Surfaces(mesh) = &old.triangles
+                && mesh.quads == faces
+            {
+                return Layer::Retain(faces.len() * 2);
+            }
+            let mut bounds = [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]];
+            for p in faces.iter().flat_map(|q| q.geometry.positions) {
+                for a in 0..3 {
+                    bounds[0][a] = bounds[0][a].min(p[a]);
+                    bounds[1][a] = bounds[1][a].max(p[a]);
+                }
+            }
+            Layer::Replace(Mesh {
+                revision: MeshVersion::captured(SectionSequence(0)),
+                origin: compiled.origin,
+                bounds,
+                triangles: MeshGeometry::Surfaces(Arc::new(crate::surface::SurfaceMesh {
+                    revision: 0,
+                    quads: faces,
+                    lights: Default::default(),
+                    stats: Default::default(),
+                })),
+                texture_id: 1,
+                flags: i as u32,
+            })
+        });
+    }
     fn compiled_base(&self) -> Base {
         Base {
             owner: self.id,
@@ -211,6 +272,7 @@ impl SourceScene {
             key,
             origin,
             layers,
+            surfaces: self.empty_surfaces(key),
         }
     }
 
@@ -295,6 +357,7 @@ impl SourceScene {
             key,
             origin,
             layers,
+            surfaces: self.empty_surfaces(key),
         }
     }
 
@@ -362,7 +425,29 @@ impl SourceScene {
             key,
             origin,
             layers,
+            surfaces: self.empty_surfaces(key),
         }
+    }
+
+    /// A source resource generation becomes visible together with its matching surfaces.
+    /// Texture validation reserves enough revision space; geometry publication cannot change
+    /// texture capacity, so installing the validated batch afterward is infallible.
+    pub fn publish_compiled_with_textures(
+        &mut self,
+        epoch: u64,
+        sequence: u64,
+        sections: Vec<CompiledSection>,
+        removed: &[u64],
+        textures: Vec<(u32, crate::Texture)>,
+    ) -> Result<Publication, String> {
+        self.validate_textures(&textures)?;
+        self.revision
+            .checked_add(2)
+            .ok_or("scene revision exhausted")?;
+        let publication = self.publish_compiled(epoch, sequence, sections, removed)?;
+        self.set_textures(textures)
+            .expect("validated texture batch under exclusive scene ownership");
+        Ok(publication)
     }
 
     /// Publish after all preparers join. All fallible checks precede mutation. Equal
@@ -392,7 +477,7 @@ impl SourceScene {
                 return Err("duplicate compiled section identity".into());
             }
             for ((_, layer), mesh) in self.meshes.range((key, 0)..=(key, u32::MAX)) {
-                if *layer > 2 || mesh.revision.observed_at().0 >= sequence {
+                if *layer > 5 || mesh.revision.observed_at().0 >= sequence {
                     return Err("compiled sections cannot mix terrain producers or precede resident geometry".into());
                 }
                 count -= mesh.triangles.len();
@@ -415,7 +500,7 @@ impl SourceScene {
             .iter()
             .any(|key| self.sections.origin(*key).is_some())
             || sections.iter().any(|s| {
-                s.layers.iter().any(Layer::changed)
+                s.layers.iter().chain(&s.surfaces).any(Layer::changed)
                     || self.sections.origin(s.key) != Some(&s.origin)
             });
         let revision = if changed {
@@ -431,7 +516,7 @@ impl SourceScene {
                 self.edits.availability(origin);
             }
             self.sections.remove(key);
-            for layer in 0..3 {
+            for layer in 0..6 {
                 if let Some(old) = self.meshes.remove(&(key, layer)) {
                     self.texture_lifetime.release(old.texture_id);
                     result.retired.push(Some(old.triangles));
@@ -448,7 +533,12 @@ impl SourceScene {
                 self.edits.availability(section.origin);
                 self.sections.publish(section.key, section.origin);
             }
-            for (layer, plan) in section.layers.into_iter().enumerate() {
+            for (layer, plan) in section
+                .layers
+                .into_iter()
+                .chain(section.surfaces)
+                .enumerate()
+            {
                 let key = (section.key, layer as u32);
                 if let Layer::Retain(count) = plan {
                     result.retained_layers += usize::from(count != 0);

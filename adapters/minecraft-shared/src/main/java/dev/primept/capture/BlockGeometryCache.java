@@ -18,7 +18,7 @@ import org.joml.Matrix4fc;
 public final class BlockGeometryCache {
     private static final boolean ENABLED =
             Boolean.getBoolean("primept.enabled") &&
-            Boolean.parseBoolean(System.getProperty("primept.geometryCache", "false"));
+            Boolean.parseBoolean(System.getProperty("primept.geometryCache", "true"));
     private static final ResourceContext RESOURCES = new ResourceContext();
     private BlockGeometryCache() {}
     public record Stats(long hits, long misses, long nullKeys, long emits, long emittedBytes,

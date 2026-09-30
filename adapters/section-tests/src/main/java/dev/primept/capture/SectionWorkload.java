@@ -101,7 +101,8 @@ final class SectionWorkload implements AutoCloseable {
                 .i(-1)
                 .i(region.side - 1)
                 .i(-1)
-                .i(region.side - 1);
+                .i(region.side - 1)
+                .l(batch);
         if (batch == 1)
             for (int x = -1; x < region.side; ++x)
                 for (int z = -1; z < region.side; ++z)
@@ -125,13 +126,13 @@ final class SectionWorkload implements AutoCloseable {
         Files.writeString(directory.resolve(fixture.name() + ".workload.properties"),
                           "requested=" + keys.size() +
                                   "\nedited=" + (region.side * region.side * 2) + "\n");
-        var expected = new CaptureInbox(true);
+        var expected = new LegacyTerrainInbox(true);
         try (var source = new SourcePages(); var frame = new SourcePages();
              var bridge =
                      new NativeBridge(Path.of(System.getProperty("primept.smoke.nativeLibrary")));
              var tintResponse = new SourcePages()) {
             bridge.submit(Packets.reset(1));
-            bridge.submit(Packets.texture(1, 1, 1, new byte[] {-1, -1, -1, -1}));
+            bridge.submit(Packets.texture(1, 16, 16, SourceSpriteFixture.atlas()));
             var router = new SectionSources(models, fluids);
             source.header(SectionSources.GAME_VERSION, 2, 1, 1);
             // Source first: the oracle is not allowed to warm source model-selection caches.
@@ -166,7 +167,7 @@ final class SectionWorkload implements AutoCloseable {
             }
         }
         if (fixture.name().startsWith("bench_")) {
-            var parallel = new CaptureInbox(true);
+            var parallel = new LegacyTerrainInbox(true);
             try (var reference = new Reference(Integer.getInteger("primept.section.threads", 8))) {
                 reference.compileBatch(keys, parallel);
             }
@@ -198,7 +199,7 @@ final class SectionWorkload implements AutoCloseable {
         if (nativeCount(bridge.cpuDiagnostics(), "tint_callbacks") != 0)
             throw new AssertionError("Known vanilla tint source invoked a color callback");
     }
-    private static void writeExpected(CaptureInbox expected, Path output) throws Exception {
+    private static void writeExpected(LegacyTerrainInbox expected, Path output) throws Exception {
         var packets =
                 expected.seal().batches().stream().flatMap(b -> b.packets().stream()).toList();
         try (var out = new DataOutputStream(Files.newOutputStream(output))) {
@@ -210,7 +211,7 @@ final class SectionWorkload implements AutoCloseable {
         }
     }
 
-    private long compile(List<SectionPos> selected, CaptureInbox expected,
+    private long compile(List<SectionPos> selected, LegacyTerrainInbox expected,
                          SectionBufferBuilderPack builders) {
         long vertices = 0;
         for (var k : selected) {
@@ -275,7 +276,7 @@ final class SectionWorkload implements AutoCloseable {
                              Path.of(System.getProperty("primept.smoke.nativeLibrary")));
                      var events = new SourcePages(); var response = new SourcePages()) {
                     bridge.submit(Packets.reset(1));
-                    bridge.submit(Packets.texture(1, 1, 1, new byte[] {-1, -1, -1, -1}));
+                    bridge.submit(Packets.texture(1, 16, 16, SourceSpriteFixture.atlas()));
                     var router = new SectionSources(models, fluids);
                     for (int sample = -1; sample < warmup + samples; ++sample) {
                         long batch = sample + 2L;
@@ -407,7 +408,7 @@ final class SectionWorkload implements AutoCloseable {
             result[1] = compileBatch(selected, null);
             result[0] = System.nanoTime() - start;
         }
-        long compileBatch(List<SectionPos> selected, CaptureInbox expected) throws Exception {
+        long compileBatch(List<SectionPos> selected, LegacyTerrainInbox expected) throws Exception {
             if (workers == null || selected.isEmpty())
                 return compile(selected, expected, packs[0]);
             // Each task owns one builder for this closed batch; join before editing input again.

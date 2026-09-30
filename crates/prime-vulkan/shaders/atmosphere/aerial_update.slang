@@ -24,6 +24,41 @@ static const uint PRIME_ATMOSPHERE_AERIAL_SEGMENT_SAMPLES = 2;
 public static const uint PRIME_PHASE_GROUP_SIZE_X = PRIME_ATMOSPHERE_AERIAL_EPIPOLAR_SAMPLES;
 
 [[vk::binding(2, 2)]] [[vk::image_format("rgba16f")]] writeonly RWTexture3D<float4> aerialRadiance;
+[[vk::binding(5, 2)]] RWStructuredBuffer<uint> previousProfiles;
+groupshared uint profileChanged;
+
+// With an identical camera, sun and medium, interval boundaries are identical.
+// Only the five counts and their live blocker depths can change the integral.
+// Compare them exactly so animation outside a slice does not repeat its spectral work.
+bool updateShadowProfile(uint slice, uint lane) {
+    bool reuse = frames[0].shadowV.w > 0.5;
+    if (lane == 0)
+        profileChanged = reuse ? 0 : 1;
+    GroupMemoryBarrierWithGroupSync();
+    uint start = slice * (SUN_SHADOW_PROFILE_TOTAL_CAPACITY + SUN_SHADOW_CASCADE_COUNT);
+    bool changed = false;
+    if (lane < SUN_SHADOW_CASCADE_COUNT) {
+        uint count = asuint(sunShadowProfileCounts[lane]);
+        if (reuse)
+            changed = previousProfiles[start + lane] != count;
+        previousProfiles[start + lane] = count;
+    }
+    for (int cascade = 0; cascade < SUN_SHADOW_CASCADE_COUNT; cascade++) {
+        int base = sunShadowProfileBase(cascade);
+        for (int i = int(lane); i < sunShadowProfileCounts[cascade];
+             i += PRIME_PHASE_GROUP_SIZE_X) {
+            uint index = start + SUN_SHADOW_CASCADE_COUNT + base + i;
+            uint depth = asuint(sunShadowProfileEntries[base + i].y);
+            if (reuse)
+                changed = changed || previousProfiles[index] != depth;
+            previousProfiles[index] = depth;
+        }
+    }
+    if (changed)
+        InterlockedOr(profileChanged, 1u);
+    GroupMemoryBarrierWithGroupSync();
+    return profileChanged != 0;
+}
 
 struct AerialPhase {
     float cosine;
@@ -128,6 +163,9 @@ float3 aerialDirection(int2 coordinate, int2 dimensions) {
         sunShadowBuildProfileCascade(shadowSource(), radial);
     }
     GroupMemoryBarrierWithGroupSync();
+
+    if (!updateShadowProfile(uint(slice), uint(radial)))
+        return;
 
     float3 direction = aerialDirection(coordinate, dimensions.xy);
     float phaseCosine = dot(direction, frames[0].sun.xyz);

@@ -28,7 +28,7 @@ public final class TerrainRouter implements AutoCloseable {
     private static final int SOURCE_KEYS = 4096;
     private static final Direction[] FACES = {Direction.DOWN,  Direction.UP,   Direction.NORTH,
                                               Direction.SOUTH, Direction.WEST, Direction.EAST};
-    private final CaptureInbox inbox;
+    private final LegacyTerrainInbox inbox;
     private final long epoch;
     private final BlockStateModelSet models;
     private final FluidStateModelSet fluids;
@@ -41,8 +41,8 @@ public final class TerrainRouter implements AutoCloseable {
     private int quadCount, faces;
 
     private record Geometry(long id, int[] tintIndices, int[] tintFaces, int faces) {}
-    public TerrainRouter(CaptureInbox inbox, BlockStateModelSet models, FluidStateModelSet fluids,
-                         BlockColors colors) {
+    public TerrainRouter(LegacyTerrainInbox inbox, BlockStateModelSet models,
+                         FluidStateModelSet fluids, BlockColors colors) {
         this.inbox = inbox;
         this.epoch = inbox.epoch();
         this.models = models;

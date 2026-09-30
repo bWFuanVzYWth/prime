@@ -61,12 +61,14 @@ impl SurfaceCompiler {
                 t
             };
             let closed_triangle = |t| SurfaceFace {
+                optics: None,
                 geometry: Quad::from_triangle(offset(t)),
                 repeat: None,
                 emission: Emission::default(),
                 media: [0; 2],
                 emitter: None,
                 emitter_area_weight: 0.0,
+                detail: None,
             };
             for part in member.triangles.view(member.range.clone()).contiguous() {
                 match part {
@@ -101,7 +103,7 @@ impl SurfaceCompiler {
                         while i < end {
                             let mut face = values[i / 2].clone();
                             if i % 2 != 0 || i + 1 == end {
-                                face.geometry = Quad::from_triangle(face.geometry.triangle(i % 2));
+                                face.keep_half(i % 2);
                                 i += 1;
                             } else {
                                 i += 2;
@@ -155,7 +157,7 @@ impl SurfaceCompiler {
         for index in retained {
             rectangles::append(&mut faces, &quads[index], None);
         }
-        faces.extend(other);
+        faces.extend(self.merge_resolved(other)?);
         let lights = LightTree::build(&mut faces)?;
         Ok(Some(SurfaceMesh {
             revision,

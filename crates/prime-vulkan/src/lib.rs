@@ -58,7 +58,7 @@ struct Pipeline {
     environment_layout: vk::DescriptorSetLayout,
     pool: vk::DescriptorPool,
     descriptors: [vk::DescriptorSet; FRAME_SLOTS],
-    pipelines: [vk::Pipeline; 3],
+    pipelines: [vk::Pipeline; 6],
 }
 impl Drop for Pipeline {
     fn drop(&mut self) {
@@ -91,7 +91,7 @@ impl Pipeline {
                 environment_layout: vk::DescriptorSetLayout::null(),
                 pool: vk::DescriptorPool::null(),
                 descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
-                pipelines: [vk::Pipeline::null(); 3],
+                pipelines: [vk::Pipeline::null(); 6],
             };
             let binding_ids: &[u32] = match mode {
                 RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8],
@@ -170,7 +170,7 @@ impl Pipeline {
                 .map_err(|e| error("Allocate path-tracing descriptors", e))?
                 .try_into()
                 .map_err(|_| "Invalid descriptor count")?;
-            let create = |bytes: &[u8], features: [u32; 2]| -> Result<vk::Pipeline, String> {
+            let create = |bytes: &[u8], features: [u32; 3]| -> Result<vk::Pipeline, String> {
                 let spirv = ash::util::read_spv(&mut Cursor::new(bytes))
                     .map_err(|e| format!("Read compiled Slang SPIR-V: {e}"))?;
                 let shader = context
@@ -186,6 +186,11 @@ impl Pipeline {
                     vk::SpecializationMapEntry {
                         constant_id: 1,
                         offset: 4,
+                        size: 4,
+                    },
+                    vk::SpecializationMapEntry {
+                        constant_id: 2,
+                        offset: 8,
                         size: 4,
                     },
                 ];
@@ -220,7 +225,17 @@ impl Pipeline {
                 RenderMode::Offline => include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv")),
                 RenderMode::Realtime => include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv")),
             };
-            for (i, features) in [[0, 0], [1, 0], [1, 1]].into_iter().enumerate() {
+            for (i, features) in [
+                [0, 0, 0],
+                [1, 0, 0],
+                [2, 0, 0],
+                [2, 1, 0],
+                [2, 0, 1],
+                [2, 1, 1],
+            ]
+            .into_iter()
+            .enumerate()
+            {
                 result.pipelines[i] = create(shader, features)?;
             }
             Ok(result)
@@ -367,6 +382,8 @@ mod tests {
         scene.textures.insert(
             7,
             Texture {
+                region: None,
+                sampling: None,
                 width: 1,
                 height: 1,
                 pixels: vec![255; 4].into(),
@@ -478,6 +495,8 @@ mod tests {
         scene.textures.insert(
             3,
             Texture {
+                region: None,
+                sampling: None,
                 width: 2,
                 height: 2,
                 pixels: vec![128; 16].into(),
@@ -527,6 +546,8 @@ mod tests {
         scene.textures.insert(
             7,
             Texture {
+                region: None,
+                sampling: None,
                 width: 2,
                 height: 1,
                 pixels: vec![255, 0, 0, 255, 0, 0, 0, 0].into(),
@@ -662,6 +683,8 @@ mod tests {
         scene.textures.insert(
             7,
             Texture {
+                region: None,
+                sampling: None,
                 width: 2,
                 height: 1,
                 pixels: vec![255, 0, 0, 255, 0, 0, 0, 0].into(),

@@ -44,7 +44,7 @@ struct Input {
     float3 u, v;
     sunShadowBasis(normalize(f.sun.xyz), u, v);
     f.shadowU = float4(u, input.padding.z);
-    f.shadowV = float4(v, 0);
+    f.shadowV = float4(v, input.padding.w);
     for (uint i = 0; i < 3; i++) {
         AtmSkyChart c = atmSkyChart(h, elevation, i);
         f.charts[i].bounds = float4(c.bounds, c.weights.x / max(c.bounds.y - c.bounds.x, 1e-10), 0);

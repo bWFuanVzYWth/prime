@@ -348,7 +348,7 @@ public final class PrimeClient implements ClientModInitializer {
                 long started = System.nanoTime();
                 renderer.record(destination);
                 timing.nativeRender = System.nanoTime() - started;
-                profile.finish(timing, CAPTURE, destination.width, destination.height, renderer);
+                profile.finish(timing, destination.width, destination.height, renderer);
                 return;
             }
             RuntimeException terrainFailure = ExclusiveTerrainCapture.failure();
@@ -411,7 +411,7 @@ public final class PrimeClient implements ClientModInitializer {
                 reportedFrame = true;
                 renderer.enableWorldReplacementAfterCompletion();
             }
-            profile.finish(timing, CAPTURE, width, height, renderer);
+            profile.finish(timing, width, height, renderer);
         } catch (Exception | LinkageError exception) {
             failRenderer(exception);
         }

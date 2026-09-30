@@ -3,6 +3,7 @@
 use super::*;
 use crate::tests::{frame, requests, scene};
 use prime_scene::Triangle;
+use std::sync::Arc;
 
 /// Keep the section origin in f64. Casting it to f32 hides local geometry errors far from spawn.
 #[derive(Clone, Debug, PartialEq)]
@@ -20,7 +21,35 @@ fn triangles_at(scene: &SourceScene, anchor: [f64; 3]) -> Vec<ObservedTriangle> 
     let snapshot = scene.translate(anchor).unwrap();
     let mut result = Vec::new();
     for mesh in snapshot.meshes.values() {
-        for t in mesh.triangles.iter() {
+        let mut observed: Vec<_> = mesh.triangles.iter().collect();
+        if let prime_scene::geometry::MeshGeometry::Surfaces(surface) = &mesh.triangles {
+            for face in &surface.quads {
+                if let Some(detail) = &face.detail {
+                    let mut q = face.geometry;
+                    q.colors = detail.layer.colors;
+                    q.uvs = detail.layer.uvs;
+                    q.texture_id = detail.layer.texture_id;
+                    q.flags = detail.layer.flags;
+                    observed.extend([q.triangle(0), q.triangle(1)]);
+                }
+            }
+        }
+        for mut t in observed {
+            // The observer converts a proven shared-atlas view back to the host's UV domain;
+            // it does not infer sprite identity from UV bounds or alter corner interpolation.
+            if let Some(texture) = snapshot.textures.get(&t.texture_id)
+                && let Some(atlas) = snapshot.textures.get(&1)
+                && let Some([x, y, w, h]) = texture.region
+                && Arc::ptr_eq(&texture.pixels, &atlas.pixels)
+            {
+                t.texture_id = 1;
+                t.uvs = t.uvs.map(|uv| {
+                    [
+                        (x as f32 + uv[0] * w as f32) / atlas.width as f32,
+                        (y as f32 + uv[1] * h as f32) / atlas.height as f32,
+                    ]
+                });
+            }
             let positions = t
                 .positions
                 .map(|p| std::array::from_fn(|i| f64::from(p[i]) + mesh.origin[i]));
@@ -96,6 +125,220 @@ fn difference(expected: &[ObservedTriangle], actual: &[ObservedTriangle]) -> Res
                     (a - b).abs(),
                     expected[i],
                     actual[i]
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+/// Geometry intentionally changes for these source fixtures. Compare sampled surface fields
+/// against the host triangles, independently of subdivision, raster backfaces and source order.
+/// This does not validate optical transport; the contact/volume and GPU oracles do that separately.
+fn translated_difference(
+    case: &str,
+    expected: &[ObservedTriangle],
+    actual: &[ObservedTriangle],
+) -> Result<(), String> {
+    if case == "tint_redstone_power" {
+        let mut expected = expected.to_vec();
+        for t in &mut expected {
+            t.flags = 1;
+        }
+        return difference(&expected, actual);
+    }
+    if !(case.starts_with("water")
+        || case == "lava"
+        || case.starts_with("tint_biomes")
+        || case.starts_with("bench_liquids"))
+    {
+        return difference(expected, actual);
+    }
+    fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+        std::array::from_fn(|i| a[i] - b[i])
+    }
+    fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+        a.into_iter().zip(b).map(|(a, b)| a * b).sum()
+    }
+    fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    }
+    fn bary(t: &ObservedTriangle, p: [f64; 3]) -> Option<[f64; 3]> {
+        let a = sub(t.positions[1], t.positions[0]);
+        let b = sub(t.positions[2], t.positions[0]);
+        let d = sub(p, t.positions[0]);
+        let n = cross(a, b);
+        let nn = dot(n, n);
+        if nn < 1e-24 || dot(n, d).abs() > ABS_TOLERANCE * nn.sqrt() {
+            return None;
+        }
+        let u = dot(cross(d, b), n) / nn;
+        let v = dot(cross(a, d), n) / nn;
+        (u >= -1e-5 && v >= -1e-5 && u + v <= 1. + 1e-5).then_some([1. - u - v, u, v])
+    }
+    fn canonical(ts: &[ObservedTriangle], lava: bool) -> Vec<ObservedTriangle> {
+        ts.iter()
+            .cloned()
+            .map(|mut t| {
+                if t.flags == 2 || lava {
+                    for p in &mut t.positions {
+                        if ((p[1] - p[1].floor()) - 0.001).abs() < ABS_TOLERANCE {
+                            p[1] = p[1].round();
+                        }
+                    }
+                    // Only the named vanilla fluid inset: no arbitrary near-plane welding.
+                    for axis in 0..3 {
+                        let plane = t.positions[0][axis];
+                        if t.positions.iter().all(|p| p[axis] == plane) {
+                            let fraction = plane - plane.floor();
+                            if (fraction - 0.001).abs() < ABS_TOLERANCE
+                                || axis != 1 && (fraction - 0.999).abs() < ABS_TOLERANCE
+                            {
+                                for p in &mut t.positions {
+                                    p[axis] = plane.round();
+                                }
+                            }
+                        }
+                    }
+                }
+                t
+            })
+            .collect()
+    }
+    fn inside_solid(point: [f64; 3], triangles: &[ObservedTriangle]) -> bool {
+        [1., -1.].into_iter().all(|sign| {
+            let direction = [1., 0.1732050807568877, 0.291547594742265].map(|v| v * sign);
+            let mut winding = 0;
+            for t in triangles.iter().filter(|t| t.flags == 0) {
+                let n = cross(
+                    sub(t.positions[1], t.positions[0]),
+                    sub(t.positions[2], t.positions[0]),
+                );
+                let den = dot(n, direction);
+                if den.abs() < 1e-20 {
+                    continue;
+                }
+                let distance = dot(n, sub(t.positions[0], point)) / den;
+                if distance > ABS_TOLERANCE
+                    && bary(
+                        t,
+                        std::array::from_fn(|a| point[a] + direction[a] * distance),
+                    )
+                    .is_some()
+                {
+                    winding += if den > 0. { 1 } else { -1 };
+                }
+            }
+            winding > 0
+        })
+    }
+    fn field_index(
+        triangles: &[ObservedTriangle],
+    ) -> std::collections::HashMap<[i32; 3], Vec<&ObservedTriangle>> {
+        let mut cells = std::collections::HashMap::<_, Vec<_>>::new();
+        for t in triangles {
+            // Conservative broad phase only; barycentric/attribute tolerances stay unchanged.
+            let lo = std::array::from_fn::<_, 3, _>(|a| {
+                (t.positions
+                    .iter()
+                    .map(|p| p[a])
+                    .fold(f64::INFINITY, f64::min)
+                    - 0.0001)
+                    .floor() as i32
+            });
+            let hi = std::array::from_fn::<_, 3, _>(|a| {
+                (t.positions
+                    .iter()
+                    .map(|p| p[a])
+                    .fold(f64::NEG_INFINITY, f64::max)
+                    + 0.0001)
+                    .floor() as i32
+            });
+            for x in lo[0]..=hi[0] {
+                for y in lo[1]..=hi[1] {
+                    for z in lo[2]..=hi[2] {
+                        cells.entry([x, y, z]).or_default().push(t);
+                    }
+                }
+            }
+        }
+        cells
+    }
+    let lava = case == "lava" || case == "water_different_fluid";
+    let expected = canonical(expected, lava);
+    let actual = canonical(actual, lava);
+    for (label, source, target, allow_hidden) in [
+        ("native", &actual, &expected, false),
+        ("host", &expected, &actual, true),
+    ] {
+        let cells = field_index(target);
+        for (index, t) in source.iter().enumerate() {
+            let n = cross(
+                sub(t.positions[1], t.positions[0]),
+                sub(t.positions[2], t.positions[0]),
+            );
+            if dot(n, n) < 1e-24 {
+                continue;
+            }
+            for weights in [
+                [0.2, 0.3, 0.5],
+                [0.8, 0.1, 0.1],
+                [0.1, 0.8, 0.1],
+                [0.1, 0.1, 0.8],
+                [0.37, 0.26, 0.37],
+            ] {
+                let p: [f64; 3] =
+                    std::array::from_fn(|a| (0..3).map(|i| t.positions[i][a] * weights[i]).sum());
+                let nearby = cells
+                    .get(&p.map(|v| v.floor() as i32))
+                    .map_or(&[][..], Vec::as_slice);
+                let material = |other: &ObservedTriangle, w: [f64; 3]| {
+                    other.texture == t.texture
+                        && other.flags == t.flags
+                        && (0..2).all(|a| {
+                            ((0..3)
+                                .map(|i| t.uvs[i][a] * weights[i] - other.uvs[i][a] * w[i])
+                                .sum::<f64>())
+                            .abs()
+                                < 2e-5
+                        })
+                        && (0..4).all(|a| {
+                            ((0..3)
+                                .map(|i| t.colors[i][a] * weights[i] - other.colors[i][a] * w[i])
+                                .sum::<f64>())
+                            .abs()
+                                < 2e-5
+                        })
+                };
+                if nearby
+                    .iter()
+                    .any(|other| bary(other, p).is_some_and(|w| material(other, w)))
+                {
+                    continue;
+                }
+                // Fluid inside a closed opaque source, or covered by its coincident boundary,
+                // has no remaining surface. This occupancy oracle uses only the host triangles.
+                if allow_hidden
+                    && (t.flags == 2
+                        && nearby
+                            .iter()
+                            .any(|other| other.flags == 0 && bary(other, p).is_some())
+                        || inside_solid(p, &expected))
+                {
+                    continue;
+                }
+                return Err(format!(
+                    "nearby={:?}\n{label} triangle {index} at {p:?} has no matching field (flags={}, uv={:?}, color={:?})",
+                    nearby
+                        .iter()
+                        .filter_map(|o| bary(o, p).map(|b| (o, b)))
+                        .collect::<Vec<_>>(),
+                    t.flags,
+                    t.uvs,
+                    t.colors
                 ));
             }
         }
@@ -277,7 +520,7 @@ fn actual_section_compilers_match_native_geometry() {
             context.accept(&[&source], &mut output).unwrap();
             finish_tints(&mut context, &mut output, &root, case);
             let actual = triangles(&output);
-            if let Err(error) = difference(&expected, &actual) {
+            if let Err(error) = translated_difference(case, &expected, &actual) {
                 failures.push(format!("{name}/{case}: {error}"));
             }
         }
@@ -323,7 +566,7 @@ fn fluid_corner_edits_invalidate_diagonal_consumers_and_match_full_recompile() {
             source[24..32].copy_from_slice(&batch.to_le_bytes());
             context.accept(&[&source], &mut output).unwrap();
             let actual = triangles(&output);
-            difference(&expected, &actual).unwrap();
+            translated_difference("water_cross_section_changed", &expected, &actual).unwrap();
             assert_eq!(context.stats.changed, if batch == 2 { 1 } else { 0 });
             // Changed voxel (0,15,0) is a corner of its section: 7 dependents plus itself.
             assert_eq!(context.stats.compiled, if batch == 2 { 8 } else { 0 });
@@ -426,7 +669,8 @@ fn benchmark_edits_match_original_and_unchanged_inputs_do_no_compile() {
                     &format!("{name}_edited"),
                     batch,
                 );
-                difference(&expected, &triangles(&output)).unwrap();
+                translated_difference(&format!("{name}_edited"), &expected, &triangles(&output))
+                    .unwrap();
                 assert_eq!(
                     context.stats.changed,
                     if batch == 2 { edited_count } else { 0 }
@@ -505,7 +749,7 @@ fn biome_only_invalidation_matches_vanilla_without_resending_sections() {
             assert_eq!(ctx.stats.changed, 0);
             assert!(ctx.stats.compiled > 0 && ctx.stats.compiled < workload_size(&root, &base).0);
             replay_tints(&mut ctx, &mut output, &root, &changed, Some(2));
-            difference(&expected, &triangles(&output)).unwrap();
+            translated_difference(&changed, &expected, &triangles(&output)).unwrap();
             // An unrelated biome arrival cannot rebuild these sections.
             input = frame(3, 0., 1, [-1, 1], &[(6, Section(30, 0, 30))]);
             input[32..76].copy_from_slice(&window);
@@ -648,8 +892,38 @@ fn column_biome_updates_reuse_samples_and_match_actual_vanilla() {
                 if base == "bench_tinted" {
                     assert!(ctx.stats.biome_cached_samples > 0 && ctx.stats.biome_hits > 0);
                 }
-                difference(expected, &triangles(&output)).unwrap();
+                translated_difference(case, expected, &triangles(&output)).unwrap();
             }
         }
     }
+}
+
+#[test]
+fn surface_field_oracle_accepts_subdivision_but_rejects_holes_uv_color_and_excess() {
+    let a = ObservedTriangle {
+        positions: [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+        uvs: [[0., 0.], [1., 0.], [0., 1.]],
+        colors: [[1.; 4]; 3],
+        texture: 1,
+        flags: 2,
+    };
+    let mut left = a.clone();
+    left.positions[1] = [0.5, 0., 0.];
+    left.uvs[1] = [0.5, 0.];
+    let mut right = a.clone();
+    right.positions[0] = [0.5, 0., 0.];
+    right.uvs[0] = [0.5, 0.];
+    let expected = [a];
+    let correct = [left, right];
+    translated_difference("water", &expected, &correct).unwrap();
+    assert!(translated_difference("water", &expected, &correct[..1]).is_err());
+    let mut wrong = correct.clone();
+    wrong[0].uvs[0][0] += 0.01;
+    assert!(translated_difference("water", &expected, &wrong).is_err());
+    wrong = correct.clone();
+    wrong[1].colors[2][1] = 0.8;
+    assert!(translated_difference("water", &expected, &wrong).is_err());
+    wrong = correct.clone();
+    wrong[1].positions[1][0] = 1.1;
+    assert!(translated_difference("water", &expected, &wrong).is_err());
 }

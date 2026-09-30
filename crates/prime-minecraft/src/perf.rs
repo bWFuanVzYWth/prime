@@ -84,6 +84,7 @@ fn definitions(out: &mut Vec<u8>) {
         u32_to(out, v);
     }
     for _ in 0..3 {
+        u32_to(out, 0);
         for v in [0f32, 0., 1., 1.] {
             u32_to(out, v.to_bits());
         }
@@ -105,7 +106,7 @@ fn definitions(out: &mut Vec<u8>) {
             }
             u32_to(out, 0);
             string(out, "minecraft:water");
-            for v in [0, 0, 1] {
+            for v in [0, 0, 1, 0] {
                 u32_to(out, v);
             }
         } else {
@@ -129,6 +130,8 @@ fn definitions(out: &mut Vec<u8>) {
                 if model == 2 { 6 } else { face as u32 },
                 if model == 2 { 0 } else { u32::MAX },
                 if model == 2 { 1 } else { 0 },
+                0,
+                0,
             ] {
                 u32_to(out, v);
             }

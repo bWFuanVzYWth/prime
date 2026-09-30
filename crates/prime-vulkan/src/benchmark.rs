@@ -558,6 +558,157 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "native 1080p partial-strip memory, steady and update costs; run alone in release"]
+    fn partial_strip_cost_matrix() {
+        use prime_scene::{
+            geometry::{CompiledQuad, MeshGeometry},
+            spatial::Cell,
+            surface::{Provenance, SurfaceCompiler, SurfaceQuad},
+        };
+        use std::io::Write;
+        let mut csv = std::fs::File::create(std::env::var("PRIME_STRIP_CSV").unwrap()).unwrap();
+        writeln!(csv, "round,shape,merged,phase,sample,warmup,source_quads,primitives,compile_ns,cpu_wall_ns,visible_ns,gpu_ns,prepare_ns,render_ns,record_bytes,material_reserved,blas_bytes,build_reserved,upload_reserved,index_bytes").unwrap();
+        for round in 0..3 {
+            for (name, height, vertical) in [
+                ("slab", 0.5, false),
+                ("trapdoor", 3. / 16., false),
+                ("fence", 2. / 16., true),
+            ] {
+                let input: Vec<_> = (0..64)
+                    .flat_map(|y| {
+                        (0..64).map(move |x| {
+                            let x = x as f32;
+                            let y = y as f32;
+                            let mut positions = [
+                                [x, y, 0.],
+                                [x + 1., y, 0.],
+                                [x + 1., y + height, 0.],
+                                [x, y + height, 0.],
+                            ];
+                            if vertical {
+                                for p in &mut positions {
+                                    p.swap(0, 1);
+                                }
+                            }
+                            SurfaceQuad::from_closed(
+                                CompiledQuad {
+                                    positions,
+                                    uvs: [[0., 0.], [1., 0.], [1., height], [0., height]],
+                                    color: [1.; 4],
+                                    texture_id: 1,
+                                    flags: 0,
+                                },
+                                Provenance {
+                                    domain: 0,
+                                    source: (y as u64) * 64 + x as u64,
+                                },
+                            )
+                        })
+                    })
+                    .collect();
+                for merged in if round % 2 == 0 {
+                    [false, true]
+                } else {
+                    [true, false]
+                } {
+                    let mut compiler = SurfaceCompiler::new();
+                    let make = |revision, compiler: &mut SurfaceCompiler| {
+                        let mut scene = Scene {
+                            epoch: 1,
+                            revision,
+                            ..Default::default()
+                        };
+                        scene.textures.insert(
+                            1,
+                            Texture {
+                                width: 8,
+                                height: 8,
+                                pixels: (0..64)
+                                    .flat_map(|i| [(i % 8 * 31) as u8, (i / 8 * 31) as u8, 90, 255])
+                                    .collect(),
+                                region: None,
+                                sampling: None,
+                            },
+                        );
+                        for i in 0..16 {
+                            let triangles = if merged {
+                                MeshGeometry::Surfaces(Arc::new(
+                                    compiler.compile(revision, &input).unwrap(),
+                                ))
+                            } else {
+                                // Plain independent source triangles bypass rectangle compilation,
+                                // then exact GPU packing restores their original 176 B quad pairs.
+                                input
+                                    .iter()
+                                    .flat_map(|q| q.geometry.triangles())
+                                    .collect::<Vec<_>>()
+                                    .into()
+                            };
+                            let origin = [(i % 4) as f64 * 64., (i / 4) as f64 * 64., 0.];
+                            scene
+                                .ready_terrain
+                                .insert(Cell::containing(origin).unwrap());
+                            scene.meshes.insert(
+                                (i, 0),
+                                SceneMesh {
+                                    revision,
+                                    flags: 0,
+                                    origin,
+                                    triangles,
+                                },
+                            );
+                        }
+                        scene
+                    };
+                    let camera = Camera {
+                        position: [128., 128., 240.],
+                        forward: [0., 0., -1.],
+                        right: [1., 0., 0.],
+                        up: [0., 1., 0.],
+                        vertical_fov_radians: 1.0,
+                    };
+                    let mut host = HostBenchmark::new(1920, 1080).unwrap();
+                    let mut scene = make(1, &mut compiler);
+                    eprintln!(
+                        "strip cost round={round} shape={name} merged={merged} native=1920x1080 device={}",
+                        host.device_name()
+                    );
+                    for (phase, count, warmup) in [("steady", 512, 256), ("update", 28, 4)] {
+                        for sample in 0..count {
+                            let start = Instant::now();
+                            let compile_ns = if phase == "update" {
+                                scene = make(scene.revision + 1, &mut compiler);
+                                start.elapsed().as_nanos() as u64
+                            } else {
+                                0
+                            };
+                            let frame = host.enqueue(&scene, &camera, sample).unwrap();
+                            let done = host.drain().unwrap()[0];
+                            assert_eq!(host.triangle_count(), if merged { 2048 } else { 131072 });
+                            let visible_ns = start.elapsed().as_nanos();
+                            let memory = host
+                                .state
+                                .as_ref()
+                                .unwrap()
+                                .renderer
+                                .as_ref()
+                                .unwrap()
+                                .geometry
+                                .as_ref()
+                                .unwrap()
+                                .surface_memory();
+                            writeln!(csv, "{round},{name},{merged},{phase},{sample},{},65536,{},{compile_ns},{},{visible_ns},{},{},{},{},{},{},{},{},{}",
+                                sample < warmup, host.triangle_count(), frame.wall_ns, done.gpu_ns, done.preparation_ns.unwrap_or(0), done.render_ns.unwrap_or(0),
+                                memory[0], memory[1], memory[2], memory[3], memory[4], memory[5]).unwrap();
+                        }
+                    }
+                    csv.flush().unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
     #[ignore = "requires Vulkan; native 1080p atmosphere lifecycle/cost fixture, not a game benchmark"]
     fn host_atmosphere_updates_with_two_submissions_in_flight() {
         let mut host = HostBenchmark::new(1920, 1080).unwrap();
@@ -1054,6 +1205,8 @@ mod tests {
         scene.textures.insert(
             7,
             Texture {
+                region: None,
+                sampling: None,
                 width: 1,
                 height: 1,
                 pixels: vec![255, 0, 0, 255].into(),

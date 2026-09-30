@@ -229,6 +229,8 @@ fn gpu_affine_material_instances_match_baked_source_and_ten_thousand_share_one_b
     scene.textures.insert(
         7,
         Texture {
+            region: None,
+            sampling: None,
             width: 2,
             height: 2,
             pixels: vec![
@@ -240,6 +242,8 @@ fn gpu_affine_material_instances_match_baked_source_and_ten_thousand_share_one_b
     scene.textures.insert(
         9,
         Texture {
+            region: None,
+            sampling: None,
             width: 2,
             height: 2,
             pixels: vec![

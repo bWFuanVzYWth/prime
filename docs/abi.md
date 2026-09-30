@@ -25,12 +25,10 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本�
 - **9 retire textures**：源 owner 释放纹理，实际回收还须等待场景引用消失。
 - **10 section completion**：生产者完成水位，允许回收已不可能被迟到工作引用的历史。
 - **11 remove sections**：同一包批量撤销多个 section，完整验证后发布。
-- **12 route section**：本次局部模型放置与流体源描述，native 编译后原子替换全部层。
-- **13 routed resources**：局部模型定义与源 owner 退休，先完整验证再修改字典。
 
-ABI v7 提供下面的 MC 原始源批次接口，保留场景协议、参数粒子与诊断查询。当前生产地形走 `prime_mc_plan` / `prime_mc_sections`；op8/10/11/12/13 保留给封闭网格输入和 CPU 对照夹具，不与新生产者混用。op2 无生产消费者，未知操作及历史 ABI 直接拒绝。
+ABI v7 提供下面的 MC 原始源批次接口，保留场景协议、参数粒子与诊断查询。当前生产地形走 `prime_mc_plan` / `prime_mc_sections`；op8/10/11 保留给封闭网格输入和诊断夹具；op12/13 仅在 Rust cfg(test) 与 Java testFixtures 中存在，生产库拒绝，不与新生产者混用。op2 无生产消费者，未知操作及历史 ABI 直接拒绝。
 
-## MC 源批次（source version 4）
+## MC 源批次（source version 5）
 
 该入口只由 `prime_minecraft` 解释，不能将 Minecraft 字段枚举、坐标规则或 palette 布局扩散到 `prime_scene` / GPU。当前识别 MC version 262、263；其他版本明确拒绝。临时语义替代见独立的 [原型 hack 清单](../PROTOTYPE_HACKS.md)。
 
@@ -38,9 +36,9 @@ ABI v7 提供下面的 MC 原始源批次接口，保留场景协议、参数粒
 
 输入 `prime_source_page` 是 16 字节 `{const uint8_t* data; uint64_t length;}`，描述表和每页均只借用到调用返回。页串接成一个逻辑流，字段允许跨页；每页最多 256 MiB，Java 复用 1 MiB native 页，禁止为合批再次拼接成巨型数组。必须保留的数据在返回前成为 Rust 所有；编译 worker 返回前全部汇合。响应错误使引擎失败，不重放源回调补画。
 
-四个输入流都有 32 字节头：`magic:u32=0x53434d50, source_version:u32=4, minecraft_version:u32, kind:u32, epoch:u64, batch:u64`。epoch 和 batch 非零；epoch 必须匹配场景，batch 在 epoch 内严格增加。请求期间不可再次 plan，响应必须恰好匹配该请求的身份和全部 section。
+四个输入流都有 32 字节头：`magic:u32=0x53434d50, source_version:u32=5, minecraft_version:u32, kind:u32, epoch:u64, batch:u64`。epoch 和 batch 非零；epoch 必须匹配场景，batch 在 epoch 内严格增加。请求期间不可再次 plan，响应必须恰好匹配该请求的身份和全部 section。
 
-kind=1 的头后为相机 `x/z:f64`、半径 `i32`、世界 `min_section_y/max_section_y:i32`（含端点）、宿主实际来源范围 `min_x/max_x/min_z/max_z:i32`，随后为事件流。每条非零事件为 `kind:u32, x/y/z:i32`；1 加载列、2 卸载列、3 段脏、4 全量资源失效、5 清空旧来源列清单（随后用1重建）、6 宿主颜色列失效（x/z及其相邻八列）、7 全部宿主颜色缓存失效。6/7只重编译实际消费过 tint 的活跃段，不重新请求其 palette；普通 dirty 与颜色失效不可互相代替。单个 `u32=0` 终止。Java 转发原始通知；Rust 合并、过滤并维护窗口、活跃段和完整一格邻域依赖。完整清单仅在 owner 建立/实际源范围变化时重发。
+kind=1 的头后为相机 `x/z:f64`、半径 `i32`、世界 `min_section_y/max_section_y:i32`（含端点）、宿主实际来源范围 `min_x/max_x/min_z/max_z:i32`、实际 `game_time:u64`，随后为事件流。每条非零事件为 `kind:u32, x/y/z:i32`；1 加载列、2 卸载列、3 段脏、4 全量资源失效、5 清空旧来源列清单（随后用1重建）、6 宿主颜色列失效（x/z及其相邻八列）、7 全部宿主颜色缓存失效。6/7只重编译实际消费过 tint 的活跃段，不重新请求其 palette；普通 dirty 与颜色失效不可互相代替。单个 `u32=0` 终止。Java 转发原始通知；Rust 合并、过滤并维护窗口、活跃段和完整一格邻域依赖。完整清单仅在 owner 建立/实际源范围变化时重发。
 
 输出请求流为 `batch:u64, request_count:u64, column_edit_count:u64, active_count:u64`，后接 request_count 条 `{x/y/z:i32, active:i32}`（16 字节），再接 column_edit_count 条 `{x/z:i32, active:i32}`（12 字节）。active 为0或1；请求中的0表示仅供邻接依赖，不能发布为渲染段；列编辑只用于 Java 镜像 Rust 选择结果，以支持现有方块实体提取。输出借用指针在下一次 plan、accept 或销毁时失效，Java 必须在提交响应之前读完，不得保留。
 
@@ -48,13 +46,18 @@ kind=2 的头后是以下记录流，单个 `u32=0` 终止。所有字符串为 
 
 | 记录标签 | 字段 |
 | --- | --- |
-| 1 state | `state_id:u32, flags:u32, model_id:u32, block_name:string, face_id:u32×6, support_bits:u32, fluid_name:string, flow_level:u32, falling:u32, fluid_material:u32`；flags 位0=air、1=存在 offset 函数、2=缓存 solidRender、4=非 MODEL、5=legacySolid、6=HalfTransparentBlock/LeavesBlock、7=IceBlock；位3保留 |
+| 1 state | `state_id:u32, flags:u32, model_id:u32, block_name:string, face_id:u32×6, support_bits:u32, fluid_name:string, flow_level:u32, falling:u32, fluid_material:u32, light_emission:u32`；flags 位0=air、1=存在 offset 函数、2=缓存 solidRender、4=非 MODEL、5=legacySolid、6=HalfTransparentBlock/LeavesBlock、7=IceBlock、8=实际玻璃块类型、9=实际玻璃板类型、10=LeavesBlock；位3保留 |
 | 2 model | `id:u32, type:u32`；id非零，type0未知、1直接 quad、2权重选择、3multipart 子项、4别名 |
 | 3 section | `x/y/z:i32, available:u32`；0无源，1后跟压缩 palette 数据，不能以无源代替空段 |
 | 4 face profile | `id:u32, u_count:u32, v_count:u32, word_count:u32`，随后 U/V 坐标 f64 列表及占据 u64 words；id≥2，0/1为内置空/全面 |
-| 5 fluid material | `id:u32, raw_layer:u32, flags:u32, sprites:f32×12`；flags位0=存在 tint source、1=存在 overlay；sprite依次 still/flowing/overlay，每个为 u0/v0/u1/v1，缺 overlay 时写 flowing 区间 |
+| 5 fluid material | `id:u32, raw_layer:u32, flags:u32`，后接 still/flowing/overlay 三条 `{sprite_id:u32, bounds:f32×4}`；flags位0=存在 tint source、1=存在 overlay；缺 overlay 时写 flowing 来源 |
+| 6 sprite | `id:u32, name:string, bounds:f32×4, frame_width/height:u32, mip_count:u32`；每级为 `width/height:u32, pixel_count:u32, RGBA8[pixel_count]`；最后 `interpolate:u32, frame_count:u32` 和 `{frame_index:u32, duration:u32}` 列表 |
 
-model type1 后为 `quad_count:u32` 和每个92字节 quad：`face:u32, tint_index:i32, raw_layer:u32`，四个 `{position:f32×3, packed_uv:u64}`；MC 的 U 在高32位、V 在低32位。face0..5为下/上/北/南/西/东，6无剔除面。raw_layer 是版本层的实际字段值，Rust 适配器解释后生成公共材质语义。type2 为 `count:u32` 和 `{weight:u32, child_id:u32}`；type3 为 `count:u32` 和**实际选中**的 child_id 列表；type4 为单个 child_id。定义身份限定于 epoch/资源失效代次，已观察定义不逐帧重发。
+model type1 后为 `quad_count:u32` 和每个100字节 quad：`face:u32, tint_index:i32, raw_layer:u32, sprite_id:u32, light_emission:u32`，四个 `{position:f32×3, packed_uv:u64}`；MC 的 U 在高32位、V 在低32位。face0..5为下/上/北/南/西/东，6无剔除面。raw_layer 是版本层的实际字段值，Rust 适配器解释后生成公共材质语义。type2 为 `count:u32` 和 `{weight:u32, child_id:u32}`；type3 为 `count:u32` 和**实际选中**的 child_id 列表；type4 为单个 child_id。定义身份限定于 epoch/资源失效代次，已观察定义不逐帧重发。
+
+sprite id 为 1..0x3fffffff，映射到 generic texture id `0x40000000+id`；动态纹理限制在该保留区间以下。quad sprite=0 是封闭 atlas 来源。静态 mip0 的 pixel_count=0 表示共享已捕获的 atlas，其他 mip 必须有完整图像；动画必须有完整 mip0 帧图。mip_count 为1..15，帧尺寸/图像≤16384，逐级尺寸及所有帧索引/正时长完整验证。资源字典不传 Rust 配方、关系、平面、合并标签或 GPU 布局。读取与 UV 解释、采样边界见[表面编译](surface-compiler.md)。
+
+state/quad 的 light_emission 为实际0..15字段。不传没有消费者的完整碰撞形状布尔值；占据从源模型闭合关系证明，不能从碰撞或 sturdy 推断渲染实体。实际源类型标志只由 Java 绑定，光学分类与系数属于 Rust MC 适配。
 
 state 面顺序为下/上/北/南/西/东。face profile 的 U/V 轴在 X 法向时为 Z/Y、Y 法向时为 X/Z、Z 法向时为 X/Y；格索引 `u*(v_count-1)+v`，低位先行，word 尾部省略的位为零。转录初始化后缓存的离散面数据，由 Rust 判定覆盖，不在 Java 做 shape join。两版 support_bits 是宿主 faceSturdy 数组按索引展开的位（direction ordinal×3 + SupportType ordinal，FULL=0）；缺失动态支撑缓存时仅置bit31。flow_level 是实际 LEVEL 属性，缺属性写0；falling为0/1，流体 registry name 的源/流动态解释留在 Rust。无流体 material=0，其余引用定义过的非零资源。资源 ID 在失效前不可原地改变内容；source version 不匹配立即拒绝，不读历史布局。
 
@@ -98,30 +101,9 @@ op=8 固定头共 **72 字节**：公共头后为 `section:u64`（24）、`seque
 
 完整包、最终容量及引用验证成功后才原子发布。源序列始终推进；三角形、源 RGBA/UV、纹理/材质与原点逐字段相同的层保留原 Arc 和内容 revision，在可用性不变时不使渲染 scene 失效。首次完成的空段也会推进 scene revision，因为它可能使 64 段单元完整。忽略的布局 padding 与层顺序不参与内容身份。移除的层被清除，只有新增或变化层发布新内容。这个序列屏障也约束 op3/op11，不能混用旧序列复活遗漏层。op8 保留为显式网格输入与诊断对照；生产地形由 MC 适配 crate 发布封闭网格，同一 renderer/epoch 只能有一个地形生产者。CPU 持有逐段快照；64 段就绪门槛和后续整格替换见 [空间合批](spatial-batching.md)。
 
-## 封闭路由夹具：源资源和 section
+## 历史路由夹具
 
-op13 公共头后为 `definition_count:u32, retirement_count:u32`。每个定义是 `id:u64, quad_count:u32, tint_count:u32`，再跟 quad_count 条记录，每条 **108 字节**：`material:u32, cull_face:u32, tint_slot:u32`，随后四个 `position:f32×3, RGBA8, UV:f32×2`。face=0/1/2/3/4/5 依次为下/上/北/南/西/东，6 表示不按邻面剔除；tint_slot=UINT32_MAX 表示无 tint，其余小于 tint_count。局部坐标有限且每轴绝对值不超过 4096。
-
-定义后紧接 retirement_count 个非零 u64 身份。定义不能重复或覆盖仍存活定义；退休必须对应已有定义且不重复、不与本包新增冲突。资源身份限定在 epoch 内，不能作为 Java 地址解释。整个包验证后才应用。Java 按封批合并多条定义；定义先于所有使用它的 section、退休晚于最后使用。新定义不是 GPU 对象，退休不直接释放已编译的逐段网格或 GPU 数据。
-
-op12 固定头为 **72 字节**：公共头后 `section:u64, sequence:u64, origin:f64×3, placement_count:u32, fluid_count:u32`。section/sequence/origin 的含义与 op8 相同。随后是全部放置，再跟全部流体描述；两计数为零时发布已完成的空段。
-
-放置为 `geometry_id:u64, offset:f32×3, visible_faces:u32, tint_count:u32`，再跟 tint_count 个 RGBA8。可见位只用 bit0..6，bit6 必须置位，tint_count 必须与定义匹配。offset 有限且每轴绝对值不超过 4096。Rust 筛选面并执行 `offset + localPosition`、`floor(sourceRGBA*tintRGBA/255)` 和四边形三角化，纹理引用固定为当前 block atlas（id=1），material 只接受 0/1/2。
-
-流体描述依次为：
-
-| 字段 | 编码与语义 |
-| --- | --- |
-| material / tint / offset | u32 / RGBA8 / f32×3 |
-| visible / overlay / backward_up | 三个 u32；前两项为 bit0..5，最后只能为 0/1 |
-| heights | 九个 f32，z=-1..1 外层、x=-1..1 内层，中心索引4；[-1,1]，中心须大于0。-1 为非流体实心，0 为非实心，1 表示上方同类流体，其余为实际高度 |
-| flow | f64×2，水平 x/z |
-| sprites | still、flow、overlay 各 f32×4，顺序 u0/v0/u1/v1 |
-| coverage | 12 个面区域：自身六面，随后邻居对应反面；顺序同 face 0..5 |
-
-每个 coverage 用 u32 标签：0 空、1 完整、2 为矩形列表。标签2后为 `count:u32`，再跟 count 个 `minA/minB/maxA/maxB:f64×4`；Y 面投影到 XZ，Z 面到 XY，X 面到 ZY。源层负责提取实际形状；Rust 做遮挡覆盖测试、加权角高度、偏移、双面和 UV 构造。流向 UV 使用数学三角函数，对照 MC 近似查表时允许 UV 绝对差 5e-5；几何 float 对照容差2e-6用于运算次序，不用于吞掉源更新。
-
-op12 的失败不发布层、可用性或源序列。相同最终内容保留原 Arc/内容 revision，但源序列仍推进。资源校验、三角总量、纹理引用和全部源数据通过之后才同步编译/发布；工作池返回前汇合。编译结果不再依赖源定义的寿命。
+旧局部模型/流体 op12/13 已退出生产 ABI，只在 `prime_scene::routing::legacy` 的 cfg(test) 参照和 Java testFixtures 保留。发行 JAR 不包含旧地形队列、RouteBuffer 或 SourceQuads；生产 CaptureInbox 仅管理资源世代、atlas 与失败状态。不得重新以这些夹具恢复另一套生产解释器。
 
 ## 批量撤销与生产者完成证明
 
@@ -231,9 +213,9 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 
 全场景三角形总量不再受 800 万或带符号 32 位上限约束。64 位宿主累计地形、op6 回退与 op7 原型的唯一几何数量及派生字节，同一原型不按实例数重复计费；超过宿主可寻址字节范围明确失败。`count:u32` 仍描述单个 span，单包仍限 256 MiB；大量独立 section/prototype 分批发布，与一个含数十亿顶点的连续包是不同契约。
 
-当前仍明确拒绝：超过 512 MiB 的纹理总量、各超过 262144 的常驻原型或实例、超出每轴 1..65536 或设备 image/dispatch/累积 storage range 的输出，以及不有限/越域位置、未知 flags、未知拓扑和尾随字节。op6 是完整动态快照，op7 是一批原子增量，op8/op12 是完整 section 替换，op13 是资源批次；它们尚未提供跨包事务，不能用重复替换包伪装无界分页。GPU 的局部 AS/实例索引、设备内存分配数量与实际内存也构成独立边界。以上不表示已经支持任意视距、任意单资源或任意驻留总量。协议验证失败不修改场景 revision 或已有数据；部分分配使用 `try_reserve`，尚不能保证所有 Rust 系统内存耗尽均可恢复。
+当前仍明确拒绝：超过 512 MiB 的唯一像素存储总量（含完整动画帧图与 mip，共享 Arc 不重复计费）、各超过 262144 的常驻原型或实例、超出每轴 1..65536 或设备 image/dispatch/累积 storage range 的输出，以及不有限/越域位置、未知 flags、未知拓扑和尾随字节。op6 是完整动态快照，op7 是一批原子增量，op8 是完整 section 替换；它们尚未提供跨包事务，不能用重复替换包伪装无界分页。GPU 的局部 AS/实例索引、设备内存分配数量与实际内存也构成独立边界。以上不表示已经支持任意视距、任意单资源或任意驻留总量。协议验证失败不修改场景 revision 或已有数据；部分分配使用 `try_reserve`，尚不能保证所有 Rust 系统内存耗尽均可恢复。
 
-当前 Slang 局部指针下标以32位字节偏移计算，单个被寻址的材质范围最多 `2^25` 条128字节记录；[表面编译原型](surface-compiler.md)的192字节记录上限为 `floor(2^32/192)`。各局部范围的设备基址为64位，总量可以跨页。静态范围在编译前统一按192B记录上限划分，允许编译后选择任一记录格式，超限时增加同一 BLAS 内的 geometry；raw 回退按128B上限拆成多个 BLAS。单个共享原型超限仍明确失败，不能让乘法回绕，也不能以此单资源限制代替全场景数量契约。实例展开后的三角形统计使用 u64，GPU 帧参数只传“是否有几何”，避免大计数收窄后误判为空场景。
+当前 Slang 局部指针下标以32位字节偏移计算。静态范围按最宽432 B记录的保守上限 `floor(2^32/432)` 划分，局部范围保持完整 quad 的两个 primitive 槽；实际选择176/240/272/432 B格式，详见[表面记录](surface-compiler.md)。动态/原型使用176 B quad，并保守使用相同局部范围上限。各范围设备基址为64位，总量可跨页；单个共享原型超限仍明确失败。实例展开统计使用u64，帧参数只传“是否有几何”，不能收窄后误判为空。
 
 非空静态层、raw 和原型/实例在提交前必须上传引用的纹理；缺失引用明确报错。所有调用必须在创建 handle 的 OS 线程进行。`prime_destroy` 退休身份，重复释放会报错。调用方必须保证原生指针指向有效读写区域；长度校验不能验证任意地址。
 

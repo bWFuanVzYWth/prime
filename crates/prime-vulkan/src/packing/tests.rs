@@ -164,6 +164,7 @@ fn real_field_requirements_split_plain_and_extended_ranges_without_promotion() {
     colored.geometry.colors[2][0] = 0.37;
     let mut rich = plain.clone();
     rich.repeat = Some(RepeatUv {
+        axes: 3,
         origin: [0.25, 0.5],
         du: [0.5, 0.],
         dv: [0., 0.125],
@@ -202,7 +203,7 @@ fn real_field_requirements_split_plain_and_extended_ranges_without_promotion() {
             assert_eq!([f(extra), f(extra + 4), f(extra + 8)], [0.5, 0., 0.25]);
             assert_eq!(
                 u32::from_le_bytes(packed[extra + 60..extra + 64].try_into().unwrap()),
-                1
+                13
             );
         }
         offset += stride(format);

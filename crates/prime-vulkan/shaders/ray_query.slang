@@ -1,11 +1,14 @@
 #language slang 2026
 module "ray_query.slang";
 import "math/ray_offset.slang";
+import "math/color.slang";
 
 // Vulkan pipeline specialization removes unused record/light paths before GPU execution.
 // Test entry points use the complete semantics by default.
-[[vk::constant_id(0)]] public const uint surfaceFeatures = 1;
+// 0: ordinary; 1: repeats/emission; 2: compound records and sprite sampling.
+[[vk::constant_id(0)]] public const uint surfaceFeatures = 2;
 [[vk::constant_id(1)]] public const uint lightFeatures = 1;
+[[vk::constant_id(2)]] public const uint opticalFeatures = 1;
 
 // GPU records are shared with Rust. Only entry points assign descriptor bindings.
 public struct Triangle {
@@ -36,6 +39,11 @@ public struct SurfaceRecord {
     float4 uvV;
     float4 emission;
     uint4 identity; // negative medium, positive medium, emitter, repeat/sided flags
+    uint *compound;
+    uint mode;
+    uint half;
+    float4 negative;
+    float4 positive;
 };
 public struct LightNode {
     float3 lower;
@@ -51,7 +59,7 @@ public struct TrianglePage {
     uint *emitters;
     LightNode *worldNodes;
     float worldPower;
-    uint reserved;
+    uint emitterFormat;
     float4 origin;
 };
 
@@ -68,6 +76,10 @@ public struct SurfaceHit {
     public float4 sourceColor;
     public float3 emission;
     public float emitterAreaWeight;
+    public float4 incident;
+    public float4 transmitted;
+    public bool optical;
+    public bool thin;
 };
 uint hash(uint x) {
     x ^= x >> 16;
@@ -76,24 +88,83 @@ uint hash(uint x) {
     x *= 0x846ca68b;
     return x ^ (x >> 16);
 }
-float4 sourceColor(TraceScene resources, SurfaceRecord record, float2 bary) {
+float4 texel(StructuredBuffer<uint> texels, uint address) {
+    uint packed = texels[address];
+    return float4(packed & 255, (packed >> 8) & 255, (packed >> 16) & 255, packed >> 24) / 255.0;
+}
+float4 sampleLevel(StructuredBuffer<uint4> textures, StructuredBuffer<uint> texels, uint index,
+                   float2 uv, bool sprite) {
+    uint4 image = textures[index * 2];
+    float2 local = sprite ? saturate(uv) : frac(uv);
+    uint2 pixel = min(uint2(local * float2(image.yz)), image.yz - 1);
+    // Whole textures are packed rows; only sprite views need the backing-image stride.
+    uint stride = sprite ? image.w & 0x7fffffff : image.y;
+    uint at = pixel.y * stride + pixel.x;
+    float4 color = texel(texels, image.x + at);
+    if (sprite) {
+        uint4 extra = textures[index * 2 + 1];
+        float blend = asfloat(extra.w);
+        if (blend > 0.0) {
+            float4 next = texel(texels, extra.x + at);
+            // MC 26.x interpolates all RGBA channels into an RGBA8_UNORM atlas.
+            color = floor(lerp(color, next, blend) * 255.0 + 0.5) / 255.0;
+        }
+    }
+    return color;
+}
+public float4 sampleTexture(StructuredBuffer<uint4> textures, StructuredBuffer<uint> texels,
+                            uint texture, float2 uv, float lod) {
+    uint4 image = textures[texture * 2];
+    bool sprite = surfaceFeatures >= 2 && (image.w & 0x80000000) != 0;
+    uint4 extra = sprite ? textures[texture * 2 + 1] : uint4(0);
+    lod = clamp(lod, 0.0, float(extra.z));
+    uint level = uint(lod);
+    uint index = level == 0 ? texture : extra.y + level - 1;
+    float4 color = sampleLevel(textures, texels, index, uv, sprite);
+    float blend = frac(lod);
+    if (blend > 0.0)
+        color = lerp(color, sampleLevel(textures, texels, extra.y + level, uv, sprite), blend);
+    return color;
+}
+float4 sourceColor(TraceScene resources, SurfaceRecord record, float2 bary, float footprint) {
     Triangle tri = record.triangle;
     float3 b = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
     float2 uv = tri.uv01.xy * b.x + tri.uv01.zw * b.y + tri.uv2 * b.z;
+    float2 du = tri.uv01.zw - tri.uv01.xy, dv = tri.uv2 - tri.uv01.xy;
     if ((record.identity.w & 1) != 0) {
-        float2 tile = frac(uv);
+        float2 tile = float2((record.identity.w & 4) != 0 ? frac(uv.x) : uv.x,
+                             (record.identity.w & 8) != 0 ? frac(uv.y) : uv.y);
         uv = float2(dot(record.uvU.xy, tile) + record.uvU.z,
                     dot(record.uvV.xy, tile) + record.uvV.z);
+        du = float2(dot(record.uvU.xy, du), dot(record.uvV.xy, du));
+        dv = float2(dot(record.uvU.xy, dv), dot(record.uvV.xy, dv));
     }
-    uint4 texture = resources.textures[tri.texture];
-    uint2 pixel = min(uint2(frac(uv) * float2(texture.yz)), texture.yz - 1);
-    uint packed = resources.texels[texture.x + pixel.y * texture.y + pixel.x];
-    float4 texel =
-            float4(packed & 255, (packed >> 8) & 255, (packed >> 16) & 255, packed >> 24) / 255.0;
-    return texel * (tri.c0 * b.x + tri.c1 * b.y + tri.c2 * b.z);
+    uint4 image = resources.textures[tri.texture * 2];
+    bool sprite = surfaceFeatures >= 2 && (image.w & 0x80000000) != 0;
+    float lod = 0.0;
+    uint4 extra = uint4(0);
+    if (sprite && footprint > 0.0) {
+        extra = resources.textures[tri.texture * 2 + 1];
+        if (extra.z > 0) {
+            float3 e = tri.p1.xyz - tri.p0.xyz, f = tri.p2.xyz - tri.p0.xyz;
+            float ee = dot(e, e), ef = dot(e, f), ff = dot(f, f);
+            float inv = 1.0 / max(ee * ff - ef * ef, 1e-20);
+            float3 gu = (e * (du.x * ff - dv.x * ef) + f * (dv.x * ee - du.x * ef)) * inv * image.y;
+            float3 gv = (e * (du.y * ff - dv.y * ef) + f * (dv.y * ee - du.y * ef)) * inv * image.z;
+            lod = clamp(log2(max(footprint * sqrt(max(dot(gu, gu), dot(gv, gv))), 1.0)), 0.0,
+                        float(extra.z));
+        }
+    }
+    return sampleTexture(resources.textures, resources.texels, tri.texture, uv, lod) *
+           (tri.c0 * b.x + tri.c1 * b.y + tri.c2 * b.z);
+}
+float4 sourceColor(TraceScene resources, SurfaceRecord record, float2 bary) {
+    // Coverage and emitter evaluation share the source base-level support domain.
+    return sourceColor(resources, record, bary, 0.0);
 }
 SurfaceRecord loadQuad(uint *base, uint format, uint primitive) {
-    uint words = 44 + format * 16;
+    uint words = surfaceFeatures < 2 ? 44 + format * 16
+                                     : (format == 3 ? 108 : (format == 2 ? 68 : 44 + format * 16));
     uint *record = base + (primitive >> 1) * words;
     bool second = (primitive & 1) != 0;
     uint a = second ? 2 : 0;
@@ -119,12 +190,21 @@ SurfaceRecord loadQuad(uint *base, uint format, uint primitive) {
     result.uvV = float4(0);
     result.emission = float4(0);
     result.identity = uint4(0);
+    result.compound = record + 60;
+    result.mode = surfaceFeatures >= 2 && format == 3 ? record[42] : 0;
+    result.negative = result.positive = float4(1, 0, 0, 0);
+    result.half = primitive & 1;
     if (surfaceFeatures != 0 && format != 0) {
         float4 *extra = (float4 *)(record + 44);
         result.uvU = extra[0];
         result.uvV = extra[1];
         result.emission = extra[2];
         result.identity = asuint(extra[3]);
+        if (opticalFeatures != 0 && (result.identity.w & 32) != 0) {
+            float4 *medium = (float4 *)(record + (format == 2 ? 60 : 100));
+            result.negative = medium[0];
+            result.positive = medium[1];
+        }
     }
     return result;
 }
@@ -155,6 +235,8 @@ SurfaceRecord loadSurface(TraceScene resources, uint instance, uint geometry, ui
 }
 bool acceptsCoverage(TraceScene resources, SurfaceRecord record, float2 bary, float3 point,
                      uint raySeed) {
+    if ((record.identity.w & 128) != 0)
+        return true;
     Triangle tri = record.triangle;
     if (tri.flags == 0)
         return true;
@@ -170,8 +252,42 @@ bool acceptsCoverage(TraceScene resources, SurfaceRecord record, float2 bary, fl
     return float(event >> 8) * (1.0 / 16777216.0) < alpha;
 }
 
+SurfaceRecord secondary(SurfaceRecord base) {
+    uint *data = base.compound;
+    uint a = base.half != 0 ? 2 : 0, b = base.half != 0 ? 3 : 1, c = base.half != 0 ? 0 : 2;
+    float4 *colors = (float4 *)data;
+    float2 *uvs = (float2 *)(data + 16);
+    base.triangle.c0 = colors[a];
+    base.triangle.c1 = colors[b];
+    base.triangle.c2 = colors[c];
+    base.triangle.uv01 = float4(uvs[a], uvs[b]);
+    base.triangle.uv2 = uvs[c];
+    base.triangle.texture = data[24];
+    base.triangle.flags = data[25];
+    base.identity.w = data[26] | (base.identity.w & 224);
+    base.uvU = ((float4 *)data)[7];
+    base.uvV = ((float4 *)data)[8];
+    base.emission.rgb = ((float4 *)data)[9].rgb;
+    return base;
+}
+SurfaceRecord selectMaterial(TraceScene resources, SurfaceRecord record, bool front, float2 bary,
+                             float3 point, uint seed) {
+    if (record.mode == 1) {
+        if (!front) {
+            record = secondary(record);
+            record.identity.w |= 2;
+        }
+    } else if (record.mode == 3 || (record.mode == 2 && front)) {
+        SurfaceRecord top = secondary(record);
+        top.identity.w &= ~128u; // The coating is an actual material, with its own coverage.
+        if (acceptsCoverage(resources, top, bary, point, seed))
+            record = top;
+    }
+    return record;
+}
+
 public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direction,
-                               uint coverageSeed) {
+                               uint coverageSeed, float coneWidth, float coneSpread) {
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = direction;
@@ -184,6 +300,10 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
             SurfaceRecord candidate =
                     loadSurface(resources, query.CandidateInstanceID(),
                                 query.CandidateGeometryIndex(), query.CandidatePrimitiveIndex());
+            candidate = selectMaterial(resources, candidate, query.CandidateTriangleFrontFace(),
+                                       query.CandidateTriangleBarycentrics(),
+                                       origin + direction * query.CandidateTriangleRayT(),
+                                       coverageSeed);
             if (acceptsCoverage(resources, candidate, query.CandidateTriangleBarycentrics(),
                                 origin + direction * query.CandidateTriangleRayT(), coverageSeed))
                 query.CommitNonOpaqueTriangleHit();
@@ -197,6 +317,8 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
                             query.CommittedPrimitiveIndex());
         Triangle tri = record.triangle;
         float2 bary = query.CommittedTriangleBarycentrics();
+        record = selectMaterial(resources, record, query.CommittedTriangleFrontFace(), bary,
+                                origin + direction * query.CommittedRayT(), coverageSeed);
         uint instance = query.CommittedInstanceID();
         // Every static page has a producer-proven translation, for both record strides.
         if ((instance & 0x00800000) == 0)
@@ -208,13 +330,33 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
             hit.surface = reconstructSurface(tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary,
                                              query.CommittedObjectToWorld3x4(),
                                              query.CommittedWorldToObject3x4());
-        hit.sourceColor = sourceColor(resources, record, bary);
+        // Surface-local derivatives must include an instance's actual scale/shear.
+        if ((instance & 0x00800000) != 0 && coneSpread > 0.0) {
+            float3x4 transform = query.CommittedObjectToWorld3x4();
+            record.triangle.p0.xyz = mul(transform, float4(tri.p0.xyz, 1));
+            record.triangle.p1.xyz = mul(transform, float4(tri.p1.xyz, 1));
+            record.triangle.p2.xyz = mul(transform, float4(tri.p2.xyz, 1));
+        }
+        float footprint = (coneWidth + coneSpread * query.CommittedRayT()) /
+                          max(abs(dot(hit.surface.normal, direction)), 0.05);
+        hit.sourceColor = sourceColor(resources, record, bary, footprint);
         hit.emission = ((record.identity.w & 2) != 0 || dot(hit.surface.normal, direction) < 0)
                                ? record.emission.rgb
                                : float3(0);
+        if ((record.identity.w & 16) != 0)
+            hit.emission *= decodeSrgb(saturate(hit.sourceColor.rgb));
         hit.emitterAreaWeight = record.emission.w;
+        bool front = query.CommittedTriangleFrontFace();
+        hit.incident = front ? record.positive : record.negative;
+        hit.transmitted = front ? record.negative : record.positive;
+        hit.optical = opticalFeatures != 0 && (record.identity.w & 128) != 0;
+        hit.thin = opticalFeatures != 0 && (record.identity.w & 64) != 0;
     }
     return hit;
+}
+public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direction,
+                               uint coverageSeed) {
+    return traceClosest(resources, origin, direction, coverageSeed, 0.0, 0.0);
 }
 bool traceOcclusionRange(TraceScene resources, float3 origin, float3 direction, uint coverageSeed,
                          float limit) {
@@ -231,6 +373,9 @@ bool traceOcclusionRange(TraceScene resources, float3 origin, float3 direction, 
             SurfaceRecord tri =
                     loadSurface(resources, query.CandidateInstanceID(),
                                 query.CandidateGeometryIndex(), query.CandidatePrimitiveIndex());
+            tri = selectMaterial(resources, tri, query.CandidateTriangleFrontFace(),
+                                 query.CandidateTriangleBarycentrics(),
+                                 origin + direction * query.CandidateTriangleRayT(), coverageSeed);
             if (acceptsCoverage(resources, tri, query.CandidateTriangleBarycentrics(),
                                 origin + direction * query.CandidateTriangleRayT(), coverageSeed))
                 query.CommitNonOpaqueTriangleHit();
@@ -242,6 +387,70 @@ bool traceOcclusionRange(TraceScene resources, float3 origin, float3 direction, 
 public bool traceOcclusion(TraceScene resources, float3 origin, float3 direction,
                            uint coverageSeed) {
     return traceOcclusionRange(resources, origin, direction, coverageSeed, 100000.0);
+}
+
+public float dielectricFresnel(float cosine, float etaI, float etaT) {
+    if (etaI == etaT)
+        return 0.0;
+    float sinT2 = (etaI * etaI) / (etaT * etaT) * max(0.0, 1.0 - cosine * cosine);
+    if (sinT2 >= 1.0)
+        return 1.0;
+    float cosT = sqrt(1.0 - sinT2);
+    float a = (etaI * cosine - etaT * cosT) / (etaI * cosine + etaT * cosT);
+    float b = (etaT * cosine - etaI * cosT) / (etaT * cosine + etaI * cosT);
+    return 0.5 * (a * a + b * b);
+}
+// Boundary moments integrate absorption independent of BVH candidate traversal order.
+// This is the straight visibility segment for NEE; refracted paths use the BSDF below.
+public float3 traceTransmittance(TraceScene resources, float3 origin, float3 direction, uint seed,
+                                 float limit, float4 startingMedium) {
+    if (opticalFeatures == 0)
+        return traceOcclusionRange(resources, origin, direction, seed, limit) ? float3(0)
+                                                                              : float3(1);
+    RayDesc ray = {origin, 0.0, direction, limit};
+    RayQuery<RAY_FLAG_NONE> query;
+    query.TraceRayInline(resources.acceleration, RAY_FLAG_NONE, 0xff, ray);
+    float3 moment = float3(0), terminal = startingMedium.yzw;
+    float last = -1, fresnel = 1;
+    while (query.Proceed()) {
+        if (query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE)
+            continue;
+        SurfaceRecord record =
+                loadSurface(resources, query.CandidateInstanceID(), query.CandidateGeometryIndex(),
+                            query.CandidatePrimitiveIndex());
+        float distance = query.CandidateTriangleRayT();
+        bool front = query.CandidateTriangleFrontFace();
+        float2 bary = query.CandidateTriangleBarycentrics();
+        record =
+                selectMaterial(resources, record, front, bary, origin + direction * distance, seed);
+        if ((record.identity.w & 128) == 0) {
+            if (acceptsCoverage(resources, record, bary, origin + direction * distance, seed))
+                query.CommitNonOpaqueTriangleHit();
+            continue;
+        }
+        float4 from = front ? record.positive : record.negative,
+               to = front ? record.negative : record.positive;
+        Triangle t = record.triangle;
+        float3 n = normalize(cross(t.p1.xyz - t.p0.xyz, t.p2.xyz - t.p0.xyz));
+        float cosine = abs(dot(n, direction));
+        if ((record.identity.w & 64) != 0) {
+            float4 glass =
+                    record.negative.x > record.positive.x ? record.negative : record.positive;
+            float f = dielectricFresnel(cosine, startingMedium.x, glass.x);
+            fresnel *= (1.0 - f) / (1.0 + f);
+            moment += glass.yzw * (0.0625 / max(cosine, 0.001));
+        } else {
+            fresnel *= 1.0 - dielectricFresnel(cosine, from.x, to.x);
+            moment += distance * (from.yzw - to.yzw);
+            if (distance > last) {
+                last = distance;
+                terminal = to.yzw;
+            }
+        }
+    }
+    return query.CommittedStatus() == COMMITTED_TRIANGLE_HIT
+                   ? float3(0)
+                   : fresnel * exp(-max(float3(0), moment + terminal * limit));
 }
 
 // Atmosphere clipmap: closest blocker without surface reconstruction. Alpha uses the
@@ -256,7 +465,11 @@ public float traceBlockerDistance(TraceScene resources, float3 origin, float3 di
             SurfaceRecord tri =
                     loadSurface(resources, query.CandidateInstanceID(),
                                 query.CandidateGeometryIndex(), query.CandidatePrimitiveIndex());
-            if (acceptsCoverage(resources, tri, query.CandidateTriangleBarycentrics(),
+            tri = selectMaterial(resources, tri, query.CandidateTriangleFrontFace(),
+                                 query.CandidateTriangleBarycentrics(),
+                                 origin + direction * query.CandidateTriangleRayT(), 0);
+            if ((tri.identity.w & 128) == 0 &&
+                acceptsCoverage(resources, tri, query.CandidateTriangleBarycentrics(),
                                 origin + direction * query.CandidateTriangleRayT(), 0))
                 query.CommitNonOpaqueTriangleHit();
         }
@@ -297,7 +510,7 @@ public struct LightSample {
 };
 
 public LightSample sampleLocalLight(TraceScene resources, float selector, float2 sample,
-                                    uint coverageSeed) {
+                                    uint coverageSeed, float3 receiver) {
     LightSample result;
     result.valid = false;
     TrianglePage world = resources.staticTrianglePages[0];
@@ -306,11 +519,12 @@ public LightSample sampleLocalLight(TraceScene resources, float selector, float2
     result.page = selectLight(world.worldNodes, selector);
     TrianglePage page = resources.staticTrianglePages[result.page];
     result.emitter = selectLight(page.nodes, selector);
-    uint *light = page.emitters + result.emitter * 60;
+    uint words = page.emitterFormat == 3 ? 108 : (page.emitterFormat == 2 ? 68 : 60);
+    uint *light = page.emitters + result.emitter * words;
     float firstFraction = asfloat(light[3]);
     bool first = firstFraction == 1.0 || sample.x < firstFraction;
     float u = first ? sample.x / firstFraction : (sample.x - firstFraction) / (1.0 - firstFraction);
-    SurfaceRecord emitter = loadQuad(light, 1, first ? 0 : 1);
+    SurfaceRecord emitter = loadQuad(light, page.emitterFormat, first ? 0 : 1);
     float root = sqrt(u);
     float2 bary = float2(root * (1.0 - sample.y), root * sample.y);
     float3 t = page.origin.xyz;
@@ -318,8 +532,13 @@ public LightSample sampleLocalLight(TraceScene resources, float selector, float2
     float3x4 toLocal = float3x4(1, 0, 0, -t.x, 0, 1, 0, -t.y, 0, 0, 1, -t.z);
     Triangle tri = emitter.triangle;
     result.surface = reconstructSurface(tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary, toWorld, toLocal);
+    bool front = dot(result.surface.normal, receiver - result.surface.position) >= 0;
+    emitter =
+            selectMaterial(resources, emitter, front, bary, result.surface.position, coverageSeed);
     result.valid = acceptsCoverage(resources, emitter, bary, result.surface.position, coverageSeed);
-    result.radiance = emitter.emission.rgb;
+    result.radiance = front || (emitter.identity.w & 2) != 0 ? emitter.emission.rgb : float3(0);
+    if ((emitter.identity.w & 16) != 0)
+        result.radiance *= decodeSrgb(saturate(sourceColor(resources, emitter, bary).rgb));
     result.areaPdf = emitter.emission.w / world.worldPower;
     result.twoSided = (emitter.identity.w & 2) != 0;
     return result;
@@ -337,7 +556,8 @@ public float emissiveHitPdf(TraceScene resources, SurfaceHit hit, float3 previou
 }
 
 public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, LightSample light,
-                                 uint coverageSeed, out float pdf, out float cosine) {
+                                 uint coverageSeed, float4 medium, out float pdf,
+                                 out float cosine) {
     pdf = 0;
     cosine = 0;
     if (!light.valid)
@@ -360,7 +580,6 @@ public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, Li
     float limit = length(segment);
     if (limit == 0)
         return float3(0);
-    return !traceOcclusionRange(resources, begin, segment / limit, coverageSeed, limit)
-                   ? light.radiance
-                   : float3(0);
+    return traceTransmittance(resources, begin, segment / limit, coverageSeed, limit, medium) *
+           light.radiance;
 }

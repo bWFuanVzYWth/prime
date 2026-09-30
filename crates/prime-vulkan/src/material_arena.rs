@@ -7,6 +7,8 @@ use crate::resources::{Buffer, Context};
 use ash::vk;
 use std::sync::Arc;
 
+const INITIAL_PAGE_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_PAGE_BYTES: u64 = 64 * 1024 * 1024;
 #[cfg(test)]
 const RECORD_BYTES: u64 = 128;
 #[cfg(test)]
@@ -39,14 +41,14 @@ struct NewPage {
 impl NewPage {
     #[cfg(test)]
     fn plan(count: u32) -> Result<Self, String> {
-        Self::with_stride(count, RECORD_BYTES)
+        Self::with_stride(count, RECORD_BYTES, MAX_PAGE_BYTES)
     }
 
-    fn with_stride(count: u32, record_bytes: u64) -> Result<Self, String> {
+    fn with_stride(count: u32, record_bytes: u64, page_bytes: u64) -> Result<Self, String> {
         if count == 0 {
             return Err("Cannot allocate an empty material range".into());
         }
-        let capacity = count.max((64 * 1024 * 1024 / record_bytes) as u32);
+        let capacity = count.max((page_bytes / record_bytes) as u32);
         let bytes = u64::from(capacity)
             .checked_mul(record_bytes)
             .ok_or("Material page byte size overflow")?;
@@ -107,6 +109,10 @@ pub(crate) struct MaterialArena {
 }
 
 impl MaterialArena {
+    #[cfg(test)]
+    pub fn reserved_bytes(&self) -> u64 {
+        self.buffers.iter().map(|b| b.size).sum()
+    }
     pub fn with_stride(record_bytes: u64) -> Self {
         assert!(record_bytes >= 16 && record_bytes.is_multiple_of(16));
         Self {
@@ -119,10 +125,18 @@ impl MaterialArena {
     /// Allocation/free operations belong to the recording owner. Before writing
     /// a reused range, the caller orders earlier shader/AS readers on its queue.
     pub fn allocate(&mut self, context: &Arc<Context>, count: u32) -> Result<Allocation, String> {
-        let plan = NewPage::with_stride(count, self.record_bytes)?;
+        if count == 0 {
+            return Err("Cannot allocate an empty material range".into());
+        }
         if let Some(allocation) = self.layout.allocate_existing(count) {
             return Ok(allocation);
         }
+        // Small format groups must not each reserve 64 MiB. Grow subsequent pages
+        // without moving existing device addresses or adding a shader indirection.
+        let page_bytes = self.buffers.last().map_or(INITIAL_PAGE_BYTES, |b| {
+            b.size.saturating_mul(2).min(MAX_PAGE_BYTES)
+        });
+        let plan = NewPage::with_stride(count, self.record_bytes, page_bytes)?;
         self.layout
             .pages
             .try_reserve(1)
@@ -179,6 +193,21 @@ impl MaterialArena {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_format_pages_grow_without_padding_each_format_to_sixty_four_mib() {
+        for stride in [176, 240, 272, 432] {
+            let mut page_bytes = INITIAL_PAGE_BYTES;
+            for expected in [4, 8, 16, 32, 64, 64] {
+                let page = NewPage::with_stride(1, stride, page_bytes).unwrap();
+                assert!(page.bytes <= expected * 1024 * 1024);
+                assert!(page.bytes > expected * 1024 * 1024 - stride * 32);
+                page_bytes = page.bytes.saturating_mul(2).min(MAX_PAGE_BYTES);
+            }
+            let large = NewPage::with_stride(1_000_000, stride, INITIAL_PAGE_BYTES).unwrap();
+            assert_eq!(large.capacity, 1_000_000);
+        }
+    }
 
     fn allocate(layout: &mut Layout, count: u32) -> Allocation {
         let plan = NewPage::plan(count).unwrap();

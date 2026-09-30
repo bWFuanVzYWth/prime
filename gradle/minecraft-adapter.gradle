@@ -25,6 +25,10 @@ def common = project(':common')
 // Host APIs shared by these supported versions compile against each version's
 // own Minecraft/Fabric classpath; version-specific bindings stay in the adapter.
 sourceSets.main.java.srcDir(rootProject.file('adapters/minecraft-shared/src/main/java'))
+sourceSets.test.java.srcDir(rootProject.file('adapters/minecraft-shared/src/testFixtures/java'))
+sourceSets.test.compileClasspath += common.sourceSets.test.output
+sourceSets.test.runtimeClasspath += common.sourceSets.test.output
+tasks.named('compileTestJava') { dependsOn common.tasks.named('testClasses') }
 // Fabric's development resource pack sees the adapter's output roots, not a
 // plain Java dependency's resources. Use the same assets in dev and both JARs.
 sourceSets.main.resources.srcDirs(common.sourceSets.main.resources.srcDirs)
@@ -53,7 +57,8 @@ loom {
                 vmArgs "-Dprimept.renderer=${providers.gradleProperty('primeptRenderer').get()}"
             vmArgs "-Dprimept.profile.leaves=${providers.gradleProperty('primeptProfileLeaves').getOrElse('false')}"
             vmArgs "-Dprimept.profile=${providers.gradleProperty('primeptProfile').getOrElse('false')}"
-            vmArgs "-Dprimept.geometryCache=${providers.gradleProperty('primeptGeometryCache').getOrElse('false')}"
+            if (providers.gradleProperty('primeptGeometryCache').isPresent())
+                vmArgs "-Dprimept.geometryCache=${providers.gradleProperty('primeptGeometryCache').get()}"
             vmArgs "-Dprimept.capture.audit=${providers.gradleProperty('primeptCaptureAudit').getOrElse('false')}"
             if (providers.gradleProperty('primeptProfileCsv').isPresent()) vmArgs "-Dprimept.profile.csv=${providers.gradleProperty('primeptProfileCsv').get()}"
             programArgs '--graphicsBackend', 'VULKAN', '--width', '1920', '--height', '1080'
@@ -64,6 +69,13 @@ loom {
             if (providers.gradleProperty('primeptUuid').isPresent()) programArgs '--uuid', providers.gradleProperty('primeptUuid').get()
         }
     }
+}
+
+// Do not let a parallel run lock/load yesterday's DLL while buildNative replaces it.
+// An explicitly supplied library is an immutable caller-owned build.
+tasks.named('runClient') {
+    if (!providers.gradleProperty('nativeLibrary').isPresent())
+        dependsOn rootProject.tasks.named('buildNative')
 }
 
 tasks.register('nativeJar', Jar) {
@@ -99,11 +111,14 @@ tasks.register('bundledNativeSmoke', JavaExec) {
 // A separate test mod exits its own JVM from Fabric preLaunch, before any window or GPU initialization.
 sourceSets {
     cpuSmoke {
+        java.srcDir rootProject.file('adapters/minecraft-shared/src/testFixtures/java')
         java.srcDir rootProject.file('adapters/section-tests/src/main/java')
         compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        compileClasspath += common.sourceSets.test.output
         runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
     }
 }
+tasks.named('compileCpuSmokeJava') { dependsOn common.tasks.named('testClasses') }
 tasks.register('cpuSmokeJar', Jar) {
     dependsOn tasks.named('cpuSmokeClasses')
     archiveClassifier = 'cpu-test'
@@ -116,7 +131,6 @@ tasks.register('cpuSmoke', JavaExec) {
     jvmArgs '--enable-native-access=ALL-UNNAMED'
     systemProperty 'fabric.development', 'true'
     systemProperty 'primept.enabled', 'true'
-    systemProperty 'primept.geometryCache', 'true'
     systemProperty 'primept.smoke.foreignWrapper', providers.gradleProperty('primeptSmokeForeign').getOrElse('false')
     systemProperty 'primept.smoke.routingCost', providers.gradleProperty('primeptSmokeRoutingCost').getOrElse('')
     systemProperty 'primept.smoke.targetResize', providers.gradleProperty('primeptSmokeTargetResize').getOrElse('false')

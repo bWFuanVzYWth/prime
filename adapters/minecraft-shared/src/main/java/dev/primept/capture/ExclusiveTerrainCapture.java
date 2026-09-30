@@ -186,7 +186,8 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
                 .i(bounds.minX())
                 .i(bounds.maxX())
                 .i(bounds.minZ())
-                .i(bounds.maxZ());
+                .i(bounds.maxZ())
+                .l(world.getGameTime());
         for (int i = 0; i < events.size(); ++i)
             frame.i(events.getInt(i));
         frame.i(0);

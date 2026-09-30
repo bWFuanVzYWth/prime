@@ -1,4 +1,5 @@
 base { archivesName = 'prime-common' }
+sourceSets.test.java.srcDir('src/testFixtures/java')
 
 // CPU-only real Java capture/FFM/native transaction. Use a fresh JVM per DLL comparison.
 tasks.register('instanceSubmitPerf', JavaExec) {

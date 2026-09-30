@@ -59,6 +59,7 @@ pub(crate) struct FrameInput {
     pub min_y: i32,
     pub max_y: i32,
     pub source: Window,
+    pub tick: u64,
     pub events: Vec<(u32, Section)>,
 }
 impl FrameInput {
@@ -79,6 +80,7 @@ impl FrameInput {
             z0: r.i32()?,
             z1: r.i32()?,
         };
+        let tick = r.u64()?;
         if !(0..=2_000_000).contains(&radius) || min_y < -524288 || max_y > 524287 || max_y < min_y
         {
             return Err("invalid source window".into());
@@ -108,6 +110,7 @@ impl FrameInput {
             min_y,
             max_y,
             source,
+            tick,
             events,
         })
     }

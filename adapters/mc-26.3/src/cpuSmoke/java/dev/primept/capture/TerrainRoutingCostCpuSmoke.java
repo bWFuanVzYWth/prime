@@ -41,7 +41,7 @@ final class TerrainRoutingCostCpuSmoke {
             var region = FluidRouterCpuSmoke.blank(Region.class);
             region.kind = kind;
             var model = new Model(kind.equals("unculled"));
-            var inbox = new CaptureInbox(true);
+            var inbox = new LegacyTerrainInbox(true);
             var models =
                     new BlockStateModelSet(Map.of(Blocks.STONE.defaultBlockState(), model), model);
             try (var router = new TerrainRouter(inbox, models, null, new BlockColors())) {

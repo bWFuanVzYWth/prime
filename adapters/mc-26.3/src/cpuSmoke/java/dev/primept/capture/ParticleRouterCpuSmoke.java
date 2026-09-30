@@ -93,12 +93,15 @@ final class ParticleRouterCpuSmoke {
                 .order(java.nio.ByteOrder.LITTLE_ENDIAN)
                 .putLong(16, 1)
                 .putLong(24, 1);
-        var a = new CaptureInbox.Sealed(
-                1, List.of(new CaptureInbox.Batch(1, 0, 0, false, List.of(actual), actual.length)),
-                0);
-        var b = new CaptureInbox.Sealed(
+        var a = new LegacyTerrainInbox.Sealed(
                 1,
-                List.of(new CaptureInbox.Batch(1, 0, 0, false, List.of(expected), expected.length)),
+                List.of(new LegacyTerrainInbox.Batch(1, 0, 0, false, List.of(actual),
+                                                     actual.length)),
+                0);
+        var b = new LegacyTerrainInbox.Sealed(
+                1,
+                List.of(new LegacyTerrainInbox.Batch(1, 0, 0, false, List.of(expected),
+                                                     expected.length)),
                 0);
         TerrainRouterCpuSmoke.write("particles", a, b);
         System.out.println(

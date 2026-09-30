@@ -37,6 +37,7 @@ pub(super) struct Atmosphere {
     _aerial_radiance: Texture,
     _aerial_transmittance: Texture,
     shadow_cells: Buffer,
+    _shadow_profiles: Buffer,
     shadow_epoch: u32,
     shadow_key: Option<([u32; 4], u64)>,
     aerial_key: Option<[u32; 23]>,
@@ -115,12 +116,19 @@ impl Atmosphere {
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
             false,
         )?;
+        // Exact blocker depths/counts per epipolar slice; no hash or temporal approximation.
+        let shadow_profiles = Buffer::new(
+            context,
+            256 * (512 + 4 * 256 + 5) * 4,
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            false,
+        )?;
         let compute = Compute::new(
             context,
             &[
                 &[c, c, i, i, i, b],
                 CONSUMER_TYPES,
-                &[w, w, w, w, b],
+                &[w, w, w, w, b, b],
                 &[vk::DescriptorType::ACCELERATION_STRUCTURE_KHR, b, b, b, b],
             ],
             crate::FRAME_SLOTS,
@@ -161,6 +169,7 @@ impl Atmosphere {
             compute.buffer(0, slot, 5, &medium);
             compute.buffer(1, slot, 0, &frames[slot]);
             compute.buffer(2, slot, 4, &shadow_cells);
+            compute.buffer(2, slot, 5, &shadow_profiles);
             for (binding, image) in [
                 &sky,
                 &transmittance,
@@ -185,6 +194,7 @@ impl Atmosphere {
             _aerial_radiance: aerial_radiance,
             _aerial_transmittance: aerial_transmittance,
             shadow_cells,
+            _shadow_profiles: shadow_profiles,
             shadow_epoch: 0,
             shadow_key: None,
             aerial_key: None,
@@ -247,6 +257,9 @@ impl Atmosphere {
         aerial_key[21] = (revision >> 32) as u32;
         aerial_key[22] = u32::from(scene.is_some());
         let aerial = self.aerial_key != Some(aerial_key);
+        let reuse_profiles = self
+            .aerial_key
+            .is_some_and(|key| key[..20] == aerial_key[..20] && key[22] == aerial_key[22]);
         let mut aerial_t_key = [0u32; 13];
         aerial_t_key[0] = radius.to_bits();
         aerial_t_key[1..].copy_from_slice(&words[8..20]);
@@ -274,6 +287,7 @@ impl Atmosphere {
         words[20] = self.shadow_epoch;
         words[21] = if scene.is_some() { 1f32.to_bits() } else { 0 };
         words[22] = plane.to_bits();
+        words[23] = if reuse_profiles { 1f32.to_bits() } else { 0 };
         if aerial && let Some((geometry, _)) = scene {
             self.compute.acceleration(3, slot, 0, geometry.top.handle());
             for (binding, buffer) in [

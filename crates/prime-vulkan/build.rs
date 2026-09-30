@@ -52,7 +52,14 @@ fn main() {
         }
     }
     if env::var_os("CARGO_FEATURE_SHADER_TESTS").is_some() {
-        for name in ["foundations", "intersection", "display", "lights"] {
+        for name in [
+            "foundations",
+            "intersection",
+            "display",
+            "lights",
+            "optics",
+            "texture",
+        ] {
             compile(
                 &compiler,
                 &format!("tests/shaders/{name}.slang"),

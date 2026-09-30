@@ -8,10 +8,10 @@
 | `math/z_sobol.slang` | Z-order + 二维 Sobol + FastOwen；无纹理、表、64 位整数算术或隐式随机状态 |
 | `math/ray_offset.slang` | 三角形交点重建、误差界与双侧安全起点；无资源依赖 |
 | `display/prime_drt.slang` | 当前可替换的显示策略；显式显示变换与艺术调整，只依赖颜色数学库 |
-| `ray_query.slang` | 硬件 Ray Query、实际材质/覆盖率、交点；只依赖起点数学库 |
+| `ray_query.slang` | 硬件 Ray Query、直接表面/纹理/光学端点、覆盖与灯采样；依赖起点和颜色数学库 |
 | `frame.slang` | 入口共享的显式帧参数类型，无全局绑定 |
 | `atmosphere/` | 四波长物理场、预计算 solver、天空/太阳/空气透视生产和消费；见[大气契约](atmosphere.md) |
-| `transport.slang` | 共同的漫反射积分、采样域与首次命中 guides，显式接收资源与帧 |
+| `transport.slang` | 共同的漫反射/光滑介质输运、采样域与首次命中 guides，显式接收资源与帧 |
 | `path_trace.slang` | 离线累积及显示入口 |
 | `realtime.slang` | 单次实时积分及所选视图显示，直接写输出图像 |
 
@@ -43,7 +43,7 @@ Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样�
 
 ## 求交与安全起点
 
-使用 Vulkan 硬件 Ray Query，最近交点与阴影查询共享实际材质和随机 coverage 语义。透明 coverage 仍不是折射/介质；不增加全场景软件三角形求交器。
+使用 Vulkan 硬件 Ray Query，最近交点与阴影查询共享实际材质和随机 coverage 语义。未知透明源的 coverage 与已证明的光学边界分别表示；后者使用 Fresnel、折射和 Beer 吸收，首命中确定已知初始介质，直线 NEE 使用端点透射。具体支持范围和近似见[表面编译](surface-compiler.md)，不增加软件三角形求交器。
 
 安全起点移植 NVIDIA `SelfIntersectionAvoidance.hlsl`：局部边与 barycentric 重建将基顶点最后相加，显式仿射变换将平移最后相加，逆转置法线及 object/world 两侧误差投影得到偏移。由出射方向选择表面正/反侧，`TMin=0`，取消固定世界单位 epsilon，减少小间隙漏遮挡。输入必须为有限、非退化三角形及互逆非奇异仿射变换。
 
