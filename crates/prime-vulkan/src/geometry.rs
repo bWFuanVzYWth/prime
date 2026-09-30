@@ -16,7 +16,7 @@ use prime_scene::{
     surface::SurfaceCompiler,
     translation::{TerrainLimits, TerrainMember, TerrainPlanner},
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, rc::Rc, sync::Arc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct StaticAllocation {
@@ -32,7 +32,7 @@ struct Cluster {
     allocations: Vec<StaticAllocation>,
     acceleration: Acceleration,
     triangle_count: u64,
-    light_pages: Vec<Option<crate::surface::LightPage>>,
+    light_pages: Vec<Option<Rc<crate::surface::LightPage>>>,
     optical: bool,
 }
 
@@ -56,7 +56,8 @@ pub(super) struct Geometry {
     static_count: u64,
     materials: [MaterialArena; crate::packing::FORMATS],
     pub static_bases: Buffer,
-    world_lights: Option<Buffer>,
+    light_grid: crate::light_grid::LightGrid,
+    next_light_key: u64,
     has_surfaces: bool,
     has_compounds: bool,
     has_optics: bool,
@@ -110,7 +111,8 @@ impl Geometry {
                 vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                 false,
             )?,
-            world_lights: None,
+            light_grid: crate::light_grid::LightGrid::new(context),
+            next_light_key: 1,
             has_surfaces: false,
             has_compounds: false,
             has_optics: false,
@@ -126,6 +128,7 @@ impl Geometry {
         let serial = context.retirement_serial();
         self.builds.begin(completed, serial);
         self.uploads.begin(completed, serial);
+        self.light_grid.begin_frame(completed, serial);
     }
     #[cfg(test)]
     pub fn assert_incremental_workspaces(&self) -> (usize, u64) {
@@ -167,8 +170,8 @@ impl Geometry {
     }
     pub fn shader_variant(&self) -> usize {
         if self.has_optics {
-            4 + usize::from(self.world_lights.is_some())
-        } else if self.world_lights.is_some() {
+            4 + usize::from(self.light_grid.has_lights())
+        } else if self.light_grid.has_lights() {
             3
         } else if self.has_compounds || self.textures.sprites != 0 {
             2
@@ -380,27 +383,31 @@ impl Geometry {
             }
             for (key, allocations, build) in prepared {
                 let (update, plans, _) = batch.iter().find(|(u, _, _)| u.key == key).unwrap();
-                // A source mesh owns one light tree even when its shading records use
-                // multiple format ranges. Attach it once; hit PDFs use the shared world power.
+                // Every material range keeps its source mesh's canonical emitter IDs.
+                // The shared owner uploads the emitter records once, independent of formats.
                 let mut light_pages = Vec::with_capacity(allocations.len());
                 for (g, plan) in update.geometries.iter().zip(plans) {
-                    for (index, _) in plan.groups.iter().enumerate() {
-                        let light = if index == 0 {
-                            if let Some(member) = g.members.first()
-                                && let MeshGeometry::Surfaces(mesh) = &member.triangles
-                            {
-                                crate::surface::upload_lights(
-                                    context,
-                                    mesh,
-                                    &self.textures.indices,
-                                )?
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-                        light_pages.push(light);
+                    let light = if let Some(member) = g.members.first()
+                        && let MeshGeometry::Surfaces(mesh) = &member.triangles
+                    {
+                        crate::surface::upload_lights(
+                            context,
+                            mesh,
+                            &self.textures.indices,
+                            self.next_light_key,
+                        )?
+                        .map(Rc::new)
+                    } else {
+                        None
+                    };
+                    if light.is_some() {
+                        self.next_light_key = self
+                            .next_light_key
+                            .checked_add(1)
+                            .ok_or("Light page identity overflow")?;
+                    }
+                    for _ in &plan.groups {
+                        light_pages.push(light.clone());
                     }
                 }
                 self.clusters.insert(
@@ -426,11 +433,23 @@ impl Geometry {
             self.static_planner.recycle(plan);
             return Ok(());
         }
+        let light_sources = self
+            .clusters
+            .iter()
+            .flat_map(|(cell, cluster)| {
+                cluster
+                    .light_pages
+                    .iter()
+                    .flatten()
+                    .map(move |light| (light.key, (cell.origin(), light.as_ref())))
+            })
+            .collect();
+        self.light_grid
+            .update(context, scene.anchor, &light_sources, &mut self.uploads)?;
         self.instances.clear();
         self.instances.reserve(self.clusters.len() + 1);
         let mut static_bases =
             Vec::with_capacity(self.clusters.len().max(1) * crate::surface::PAGE_BYTES);
-        let mut light_roots = Vec::new();
         self.has_surfaces = false;
         self.has_compounds = false;
         self.has_optics = false;
@@ -443,25 +462,25 @@ impl Geometry {
             for (i, &allocation) in cluster.allocations.iter().enumerate() {
                 self.has_surfaces |= allocation.format != 0;
                 self.has_compounds |= allocation.format >= 2;
-                let page = static_bases.len() / crate::surface::PAGE_BYTES;
                 let address = self.materials[allocation.format].address(allocation.records);
                 static_bases.extend_from_slice(&address.to_le_bytes());
                 static_bases.extend_from_slice(&(allocation.format as u32).to_le_bytes());
                 static_bases.extend_from_slice(&[0; 4]);
                 let light = &cluster.light_pages[i];
-                static_bases.extend_from_slice(
-                    &light
+                crate::uint(
+                    &mut static_bases,
+                    light
                         .as_ref()
-                        .map_or(0, |l| l.nodes.address())
-                        .to_le_bytes(),
+                        .map_or(0, |l| self.light_grid.first_emitter(l.key)),
                 );
+                crate::uint(&mut static_bases, 0);
                 static_bases.extend_from_slice(
                     &light
                         .as_ref()
                         .map_or(0, |l| l.emitters.address())
                         .to_le_bytes(),
                 );
-                static_bases.extend_from_slice(&[0; 12]); // world root pointer/power patched below
+                static_bases.extend_from_slice(&[0; 12]); // shared grid header patched below
                 crate::uint(&mut static_bases, light.as_ref().map_or(1, |l| l.format));
                 let origin = [
                     placement.transform[3],
@@ -469,17 +488,6 @@ impl Geometry {
                     placement.transform[11],
                 ];
                 crate::float4(&mut static_bases, [origin[0], origin[1], origin[2], 0.0]);
-                if let Some(light) = light {
-                    let bounds = light
-                        .root
-                        .bounds
-                        .map(|p| std::array::from_fn(|a| p[a] + origin[a]));
-                    light_roots.push(prime_scene::surface::LightRoot {
-                        bounds,
-                        power: light.root.power,
-                        slot: page as u32,
-                    });
-                }
             }
             if static_bases.len() / crate::surface::PAGE_BYTES >= OBJECT_BIT as usize {
                 return Err(
@@ -503,22 +511,9 @@ impl Geometry {
         if static_bases.is_empty() {
             static_bases.extend_from_slice(&[0; crate::surface::PAGE_BYTES]);
         }
-        let world = prime_scene::surface::build_light_forest(&light_roots)?;
-        self.world_lights = if world.is_empty() {
-            None
-        } else {
-            Some(Buffer::upload_device(
-                context,
-                &crate::surface::node_bytes(&world),
-                vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-            )?)
-        };
         // Entry zero owns the world light header even when its own geometry is not emissive.
-        static_bases[12..16].copy_from_slice(&(light_roots.len() as u32).to_le_bytes());
-        if let Some(lights) = &self.world_lights {
-            static_bases[32..40].copy_from_slice(&lights.address().to_le_bytes());
-            static_bases[40..44].copy_from_slice(&world[0].power.to_le_bytes());
-        }
+        static_bases[12..16].copy_from_slice(&self.light_grid.world_count().to_le_bytes());
+        static_bases[32..40].copy_from_slice(&self.light_grid.header_address().to_le_bytes());
         if static_bases.len() as u64 > self.static_bases.size {
             self.static_bases = Buffer::new(
                 context,
@@ -532,6 +527,7 @@ impl Geometry {
             .allocate(context, static_bases.len() as u64, 16)?;
         bases_upload.write(&static_bases)?;
         context.submit_named("static_cluster_bases", |command| unsafe {
+            transfer_write_barrier(context, command);
             context.device.cmd_copy_buffer(
                 command,
                 bases_upload.buffer.buffer,
@@ -617,6 +613,23 @@ impl Geometry {
             cpu.tlas_rebuilds,
             uploaded,
         ]
+    }
+}
+
+pub(super) unsafe fn transfer_write_barrier(context: &Context, command: vk::CommandBuffer) {
+    let barrier = [vk::MemoryBarrier::default()
+        .src_access_mask(vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE)
+        .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)];
+    unsafe {
+        context.device.cmd_pipeline_barrier(
+            command,
+            vk::PipelineStageFlags::ALL_COMMANDS,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::DependencyFlags::empty(),
+            &barrier,
+            &[],
+            &[],
+        );
     }
 }
 

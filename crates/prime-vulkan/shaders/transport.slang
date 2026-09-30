@@ -112,9 +112,7 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
         }
         if (lightFeatures != 0 && hasLocalLights(resources)) {
             uint lightDomain = 512 + 4 * bounce;
-            LightSample light = sampleLocalLight(resources, sampler.sample1D(lightDomain),
-                                                 sampler.sample2D(lightDomain + 1),
-                                                 sampler.bits1D(lightDomain + 2), surface.position);
+            LightSample light = sampleLocalLight(resources, sampler, bounce, surface.position);
             float pdf;
             float lightCosine;
             float3 radiance =

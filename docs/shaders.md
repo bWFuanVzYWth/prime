@@ -7,7 +7,8 @@
 | `math/color.slang` | sRGB 传递函数、线性 BT.709 ↔ Rec.2020（D65）、工作空间亮度；无资源依赖 |
 | `math/z_sobol.slang` | Z-order + 二维 Sobol + FastOwen；无纹理、表、64 位整数算术或隐式随机状态 |
 | `math/ray_offset.slang` | 三角形交点重建、误差界与双侧安全起点；无资源依赖 |
-| `light_sampling.slang` | 32B 光源节点与功率选择；生产和显式采样实验共用，无资源绑定 |
+| `grid_sampling.slang` | 生产固定单级局部 alias、全局退路及正反向混合 PDF，无资源绑定 |
+| `light_sampling.slang` | 显式采样实验保留的 32B 功率树节点与选择，无资源绑定 |
 | `display/prime_drt.slang` | 当前可替换的显示策略；显式显示变换与艺术调整，只依赖颜色数学库 |
 | `ray_query.slang` | 硬件 Ray Query、直接表面/纹理/光学端点、覆盖与灯采样；依赖起点和颜色数学库 |
 | `frame.slang` | 入口共享的显式帧参数类型，无全局绑定 |
@@ -38,7 +39,9 @@ Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样�
 
 生产 `R=ceil(log2(max(width,height)))`，`S=8`（原生 1080p 的 Morton 索引共 30 位，使用单字快路径）。相机 jitter 使用 domain 0；每个反弹从 `1+4*bounce` 起依次分配表面 coverage、阴影 coverage、BSDF 二维样本、roulette。分支不会推进共享 RNG。超过 256 个样本时切换全局 scramble，开始新的完整样本集；不声称它是无限延长的同一个 Sobol net。完整样本集/对齐像素邻域的均匀性不等于早期任意前缀的质量保证。
 
-[表面编译原型](surface-compiler.md)的显式灯使用独立的 `512+4*bounce` domain，依次用于世界/局部树选择、quad面积加权半面及三角形二维采样、采样点 coverage 和有限阴影 coverage。静态灯 NEE 与发光命中使用同版本 proposal 的 MIS；太阳圆盘方向使用独立的 `1024+bounce` domain，与太阳 coverage、BSDF 和显式灯互不重叠。
+[表面编译](surface-compiler.md)的显式灯使用 `sample2D(512+4*bounce)` 分配局部/全局路由及局部 alias 样本，`sample2D(768+bounce)` 分配全局页及页内灯样本。两个二维域各复用一次 index permutation，不串接同一 24-bit 标量的条件残差。前一域加 1 仍用于 quad 面积加权半面及三角形二维采样，加 2/3 分别用于采样点 coverage 和有限阴影 coverage。64 次反弹内这些域互不重叠；`sample1D(d)` 与 `sample2D(d).x` 是同一值，不能视为额外随机维度。静态灯 NEE 与发光命中使用同版本、同一前一着色点的完整混合 PDF 做 MIS；太阳圆盘方向使用独立的 `1024+bounce` domain。
+
+alias 的 PDF 对应单表实际 f32 运算及 24-bit 输入格点，上传后仍有 f32 存储舍入。CPU 将每列阈值下限设为该列首个实际残差的下一个 f32 值，并至少为最小正规数，防止极小功率区间不可达或 GPU 将次正规阈值冲零；之后按修正后的表计算 PDF。修正只改变提议概率，不改发光，生产继续渲染并按累计修正表数的倍增输出 `Warning PT-010`，包含表项数及最大单表概率转移量。不同采样域避免已知的单标量残差支持损失，但单表边际校验不证明有限多维序列的完全独立或任意有限前缀已收敛。实际支持、PDF 接线、正常 Z-Sobol 的逐灯统计和完整图像分别验证。
 
 实现复用 domain hash，以固定双字移位代替通用 64 位移位分支，将 Sobol Y 变换移到反向位序，抵消紧邻的 Sobol/Owen bit reverse。没有额外采样纹理或跨帧随机状态。上述是运算路径变化，不代表已经测得整帧提速。
 

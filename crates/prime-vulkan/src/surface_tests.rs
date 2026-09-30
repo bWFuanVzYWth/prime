@@ -564,8 +564,8 @@ fn gpu_surface_mixed_records_follow_material_ranges_and_format_replacement() {
 
 #[cfg(feature = "shader-tests")]
 #[test]
-#[ignore = "windowless production GPU light-tree selection/PDF and publication test"]
-fn gpu_surface_light_trees_match_reverse_pdf_and_follow_scene_replacement() {
+#[ignore = "windowless production global fallback/PDF and publication test"]
+fn gpu_surface_light_grid_global_fallback_matches_reverse_pdf_and_scene_replacement() {
     use prime_scene::surface::{Emission, Provenance, SurfaceCompiler, SurfaceQuad};
     let mut renderer = Renderer::new().unwrap();
     let mut scene = Scene {
@@ -662,20 +662,17 @@ fn gpu_surface_light_trees_match_reverse_pdf_and_follow_scene_replacement() {
             }
             assert!(source < 3 && (stage == 0 || source != 1));
             assert_eq!(row[3], 1);
-            assert_eq!(
-                row[1],
-                if stage == 1 && source == 2 {
-                    1
-                } else {
-                    source as u32
-                }
-            );
+            // Page IDs survive removal of an earlier geometry page.
+            assert_eq!(row[1], source as u32);
             assert_eq!(row[2], 0);
             assert_eq!([f(8), f(9), f(10)], [(1 << source) as f32; 3]);
             let expected_area_pdf = (1 << source) as f32 / if stage == 0 { 18. } else { 17. };
             assert!((f(7) - expected_area_pdf).abs() < 1e-6);
+            let distance_squared = f(4) * f(4) + f(5) * f(5) + (f(6) - 1000.).powi(2);
+            let expected_solid_pdf =
+                expected_area_pdf * distance_squared * distance_squared.sqrt() / 1000.;
             assert!(
-                (f(11) - expected_area_pdf * 4.).abs() < 1e-5,
+                (f(11) / expected_solid_pdf - 1.).abs() < 2e-6,
                 "forward={} reverse={}",
                 f(7),
                 f(11)
@@ -1089,8 +1086,11 @@ fn compound_emitters_sample_the_visible_layer_without_leaking_hidden_emission() 
                     if top { [0., 3., 0.] } else { [2., 0., 0.] }
                 );
                 assert!((f(7) - 1.).abs() < 1e-6);
+                let receiver_z = if back == 1 { -1000. } else { 1000. };
+                let distance_squared = f(4) * f(4) + f(5) * f(5) + (f(6) - receiver_z).powi(2);
+                let expected_solid_pdf = distance_squared * distance_squared.sqrt() / 1000.;
                 assert!(
-                    (f(11) - 4.).abs() < 2e-5,
+                    (f(11) / expected_solid_pdf - 1.).abs() < 2e-6,
                     "forward/reverse mismatch {mode:?} {back}: {}",
                     f(11)
                 );

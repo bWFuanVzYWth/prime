@@ -5,7 +5,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [整体架构与所有权](architecture.md) | 源数据到场景和 GPU 的数据流、增量更新、线程与资源生命周期 |
-| [自定义表面编译](surface-compiler.md) | 源关系与局部接触、部分矩形合并、直接 GPU 记录、介质、sprite 与光源树 |
+| [自定义表面编译](surface-compiler.md) | 源关系与局部接触、部分矩形合并、直接 GPU 记录、介质、sprite 与局部灯网格 |
 | [大气资产与缓存](atmosphere.md) | 固定物理场、天空/太阳/空气透视、GPU 遮挡列与更新依赖 |
 | [工程结构与路由边界](structure.md) | Rust crate、Java 版本适配、公共层依赖、Rust 版本适配、分页路由与矩形分解边界 |
 | [源路由边界与批量数据流](capture-boundaries.md) | 外观描述与下游计算的分界、接管后的 Java 截断、兼容范围、缓存与接入状态 |

@@ -2,7 +2,8 @@
 module "ray_query.slang";
 import "math/ray_offset.slang";
 import "math/color.slang";
-import "light_sampling.slang";
+import "grid_sampling.slang";
+import "math/z_sobol.slang";
 
 // Vulkan pipeline specialization removes unused record/light paths before GPU execution.
 // Test entry points use the complete semantics by default.
@@ -50,10 +51,11 @@ public struct TrianglePage {
     uint *quads;
     uint format; // 0: ordinary 176B quad; 1: extended 240B surface
     uint lightCount;
-    LightNode *nodes;
+    uint firstEmitter;
+    uint reserved0;
     uint *emitters;
-    LightNode *worldNodes;
-    float worldPower;
+    public LightGrid *lightGrid;
+    uint reserved1;
     uint emitterFormat;
     float4 origin;
 };
@@ -70,7 +72,7 @@ public struct SurfaceHit {
     public SurfacePoint surface;
     public float4 sourceColor;
     public float3 emission;
-    public float emitterAreaWeight;
+    public uint light;
     public float4 incident;
     public float4 transmitted;
     public bool optical;
@@ -184,7 +186,7 @@ SurfaceRecord loadQuad(uint *base, uint format, uint primitive) {
     result.uvU = float4(0);
     result.uvV = float4(0);
     result.emission = float4(0);
-    result.identity = uint4(0);
+    result.identity = uint4(0, 0, 0xffffffffu, 0);
     result.compound = record + 60;
     result.mode = surfaceFeatures >= 2 && format == 3 ? record[42] : 0;
     result.negative = result.positive = float4(1, 0, 0, 0);
@@ -340,7 +342,12 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
                                : float3(0);
         if ((record.identity.w & 16) != 0)
             hit.emission *= decodeSrgb(saturate(hit.sourceColor.rgb));
-        hit.emitterAreaWeight = record.emission.w;
+        hit.light =
+                (instance & 0x00800000) == 0 && record.identity.z != 0xffffffffu
+                        ? resources.staticTrianglePages[instance + query.CommittedGeometryIndex()]
+                                          .firstEmitter +
+                                  record.identity.z
+                        : 0xffffffffu;
         bool front = query.CommittedTriangleFrontFace();
         hit.incident = front ? record.positive : record.negative;
         hit.transmitted = front ? record.negative : record.positive;
@@ -483,25 +490,30 @@ public struct LightSample {
     public float areaPdf;
     public uint page;
     public uint emitter;
+    public uint light;
     public bool twoSided;
 };
 
-public LightSample sampleLocalLight(TraceScene resources, float selector, float2 sample,
+public LightSample sampleLocalLight(TraceScene resources, float4 selectors, float2 sample,
                                     uint coverageSeed, float3 receiver) {
     LightSample result;
     result.valid = false;
     TrianglePage world = resources.staticTrianglePages[0];
     if (world.lightCount == 0)
         return result;
-    result.page = selectPowerLight(world.worldNodes, selector);
-    TrianglePage page = resources.staticTrianglePages[result.page];
-    result.emitter = selectPowerLight(page.nodes, selector);
-    uint words = page.emitterFormat == 3 ? 108 : (page.emitterFormat == 2 ? 68 : 60);
+    LightGrid grid = *world.lightGrid;
+    float selectionPdf;
+    result.light = selectGridLight(grid, receiver, selectors, selectionPdf);
+    GridEmitter reference = grid.emitters[result.light];
+    result.page = reference.page;
+    result.emitter = reference.emitter;
+    GridPage page = grid.pages[result.page];
+    uint words = page.format == 3 ? 108 : (page.format == 2 ? 68 : 60);
     uint *light = page.emitters + result.emitter * words;
     float firstFraction = asfloat(light[3]);
     bool first = firstFraction == 1.0 || sample.x < firstFraction;
     float u = first ? sample.x / firstFraction : (sample.x - firstFraction) / (1.0 - firstFraction);
-    SurfaceRecord emitter = loadQuad(light, page.emitterFormat, first ? 0 : 1);
+    SurfaceRecord emitter = loadQuad(light, page.format, first ? 0 : 1);
     float root = sqrt(u);
     float2 bary = float2(root * (1.0 - sample.y), root * sample.y);
     float3 t = page.origin.xyz;
@@ -516,19 +528,29 @@ public LightSample sampleLocalLight(TraceScene resources, float selector, float2
     result.radiance = front || (emitter.identity.w & 2) != 0 ? emitter.emission.rgb : float3(0);
     if ((emitter.identity.w & 16) != 0)
         result.radiance *= decodeSrgb(saturate(sourceColor(resources, emitter, bary).rgb));
-    result.areaPdf = emitter.emission.w / world.worldPower;
+    result.areaPdf = selectionPdf * reference.inverseArea;
     result.twoSided = (emitter.identity.w & 2) != 0;
     return result;
 }
 
+public LightSample sampleLocalLight(TraceScene resources, ZSobol sampler, uint bounce,
+                                    float3 receiver) {
+    uint domain = 512 + 4 * bounce;
+    // Two 2D domains share each index permutation without cascading one 24-bit residual.
+    float4 selectors = float4(sampler.sample2D(domain), sampler.sample2D(768 + bounce));
+    return sampleLocalLight(resources, selectors, sampler.sample2D(domain + 1),
+                            sampler.bits1D(domain + 2), receiver);
+}
+
 public float emissiveHitPdf(TraceScene resources, SurfaceHit hit, float3 previous) {
-    if (hit.emitterAreaWeight == 0)
+    if (hit.light == 0xffffffffu)
         return 0;
     float3 delta = hit.surface.position - previous;
     float distanceSquared = dot(delta, delta);
-    float cosine = abs(dot(hit.surface.normal, normalize(delta)));
-    return cosine > 0 ? (hit.emitterAreaWeight / resources.staticTrianglePages[0].worldPower) *
-                                distanceSquared / cosine
+    float cosine = distanceSquared > 0 ? abs(dot(hit.surface.normal, normalize(delta))) : 0;
+    LightGrid grid = *resources.staticTrianglePages[0].lightGrid;
+    return cosine > 0 ? gridLightPdf(grid, previous, hit.light) *
+                                grid.emitters[hit.light].inverseArea * distanceSquared / cosine
                       : 0;
 }
 

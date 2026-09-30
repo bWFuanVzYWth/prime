@@ -8,6 +8,10 @@ mod benchmark;
 mod cpu_profile;
 mod display;
 mod dynamic;
+mod light_grid;
+mod light_grid_cpu;
+#[cfg(all(test, feature = "shader-tests"))]
+mod light_grid_tests;
 #[cfg(feature = "light-sampling-bench")]
 pub mod light_sampling;
 mod objects;
