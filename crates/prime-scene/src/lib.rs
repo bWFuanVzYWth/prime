@@ -19,5 +19,5 @@ pub mod workers;
 
 pub use scene::{
     Camera, Instance, InstanceScene, Prototype, Scene, SceneMesh, SourceScene, Texture,
-    TextureLevel, TextureSampling, Triangle,
+    TextureLevel, TextureMaterial, TextureSampling, Triangle,
 };

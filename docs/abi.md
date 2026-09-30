@@ -54,10 +54,28 @@ kind=2 的头后是以下记录流，单个 `u32=0` 终止。所有字符串为 
 | 4 face profile | `id:u32, u_count:u32, v_count:u32, word_count:u32`，随后 U/V 坐标 f64 列表及占据 u64 words；id≥2，0/1为内置空/全面 |
 | 5 fluid material | `id:u32, raw_layer:u32, flags:u32`，后接 still/flowing/overlay 三条 `{sprite_id:u32, bounds:f32×4}`；flags位0=存在 tint source、1=存在 overlay；缺 overlay 时写 flowing 来源 |
 | 6 sprite | `id:u32, name:string, bounds:f32×4, frame_width/height:u32, mip_count:u32`；每级为 `width/height:u32, pixel_count:u32, RGBA8[pixel_count]`；最后 `interpolate:u32, frame_count:u32` 和 `{frame_index:u32, duration:u32}` 列表 |
+| 9 LabPBR source | `sprite_id:u32`，随后 normal/specular 两个图像字段：`present:u32`（0缺图、1有图）；有图紧接 `width/height:u32, pixel_count:u32, RGBA8[pixel_count]` |
 
 model type1 后为 `quad_count:u32` 和每个100字节 quad：`face:u32, tint_index:i32, raw_layer:u32, sprite_id:u32, light_emission:u32`，四个 `{position:f32×3, packed_uv:u64}`；MC 的 U 在高32位、V 在低32位。face0..5为下/上/北/南/西/东，6无剔除面。raw_layer 是版本层的实际字段值，Rust 适配器解释后生成公共材质语义。type2 为 `count:u32` 和 `{weight:u32, child_id:u32}`；type3 为 `count:u32` 和**实际选中**的 child_id 列表；type4 为单个 child_id。定义身份限定于 epoch/资源失效代次，已观察定义不逐帧重发。
 
 sprite id 为 1..0x3fffffff，映射到 generic texture id `0x40000000+id`；动态纹理限制在该保留区间以下。quad sprite=0 是封闭 atlas 来源。静态 mip0 的 pixel_count=0 表示共享已捕获的 atlas，其他 mip 必须有完整图像；动画必须有完整 mip0 帧图。mip_count 为1..15，帧尺寸/图像≤16384，逐级尺寸及所有帧索引/正时长完整验证。资源字典不传 Rust 配方、关系、平面、合并标签或 GPU 布局。读取与 UV 解释、采样边界见[表面编译](surface-compiler.md)。
+
+LabPBR record 必须跟在同批已定义的 sprite 后，单个 sprite 不可重复定义材料。只有有效的 `format=lab-pbr/1.3` 声明与实际辅助图才生成该记录；传输的是原始 RGBA8，源 G/B 清洗、sheet 布局、mip、动画和 height 解码归 Rust。缺图不补伪像素，源尺寸、像素数量和所有权在发布前验证。该 source record 与场景 op9 的纹理退休不同；公共 ABI v7 和 source version 5 不改变新旧发布不可混用的要求。具体通道见[材质契约](materials.md)。
+
+### GPU 纹理描述符（内部契约）
+
+每个视图为64B，由四个 `uint4` 构成；shader 以 `descriptor_index*4` 寻址。它由 Rust 的规范 Texture 生成，不是 Java wire record。
+
+| Offset | 内容 |
+| --- | --- |
+| 0 | 基础像素偏移、视图宽、高、行步长；行步长 bit31 为 sprite 局部采样标记 |
+| 16 | 下一帧像素偏移、首个 lower-mip descriptor、lower-mip 数量、动画 blend 的 f32 bits |
+| 32 | normal descriptor、specular descriptor、材料 flags、coverage/atlas-lookup descriptor；0 表示缺失引用 |
+| 48 | sprite 的归一化 atlas bounds `[loU,loV,hiU,hiV]` 的 f32 bits；无 bounds 时为0 |
+
+材料 flags 的 bit0/1 表示 normal/specular，bit2 表示 authored emission，bit3 表示 atlas material lookup。lookup 的原始 CPU texel 是 source texture identity，上传时变为稳定 GPU sprite descriptor index；值0表示该处无辅助材质，采样不得将它当颜色。普通 presence coverage 使用 R 的位0/1/2。atlas 命中先解析 sprite descriptor 和 bounds，再按 local UV 消费该 sprite 的独立辅助视图。辅助图动画已由 CPU 按分类通道规则混合，其描述符 blend 固定0；基色保留源 RGBA 插值。
+
+共享 pixel backing 只上传与计费一次，描述符身份在当前纹理生命周期内稳定。所有材质平面及其完整 mip/动画 backing 进入既有512 MiB唯一像素预算；旧资源仍依最后消费者和 GPU 完成证明回收。光学邻接的 IOR 源引用复用已有 quad UV 记录的空闲字段，传输 GPU descriptor identity；不增加 quad 步长或新的 binding。
 
 state/quad 的 light_emission 为实际0..15字段。不传没有消费者的完整碰撞形状布尔值；占据从源模型闭合关系证明，不能从碰撞或 sturdy 推断渲染实体。实际源类型标志只由 Java 绑定，光学分类与系数属于 Rust MC 适配。
 

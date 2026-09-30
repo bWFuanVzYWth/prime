@@ -126,6 +126,9 @@ impl Context<'_> {
                     textured: true,
                 };
             }
+            if b.fluid {
+                authored_emission(self.catalog, &mut b.face);
+            }
             if b.fluid
                 && self
                     .state([p[0], p[1] - 1, p[2]])
@@ -366,10 +369,12 @@ impl Context<'_> {
                             .get_or_insert(prime_scene::surface::Optics {
                                 negative: Default::default(),
                                 positive: Default::default(),
+                                ior_textures: [None; 2],
                                 transmit: false,
                                 thin: false,
                             });
                         o.positive = other_optics.negative;
+                        o.ior_textures[1] = other_optics.ior_textures[0];
                         piece.face.media[1] = top.face.media[0];
                     }
                     if matches!(action, Resolution::Combine) {
@@ -396,6 +401,35 @@ impl Context<'_> {
                 );
             }
         }
+    }
+}
+
+fn authored_emission(catalog: &Catalog, face: &mut SurfaceFace) {
+    let apply = |texture: u32, flags: u32, emission: &mut prime_scene::surface::Emission| {
+        if let Some(sprite) = texture
+            .checked_sub(0x4000_0000)
+            .and_then(|id| catalog.sprites.get(&id))
+            && let Some(maximum) = sprite.emission_maximum()
+        {
+            if maximum == 0.0 {
+                *emission = Default::default();
+                return;
+            }
+            // The proposal bounds all animation frames. Shading consumes the actual filtered
+            // alpha at the sampled point; authored zero also replaces ordinal block light.
+            emission.radiance = [1.5 * maximum; 3];
+            emission.textured = true;
+            emission.two_sided |= flags == 1;
+        }
+    };
+    apply(
+        face.geometry.texture_id,
+        face.geometry.flags,
+        &mut face.emission,
+    );
+    if let Some(detail) = &mut face.detail {
+        let layer = &mut Arc::make_mut(detail).layer;
+        apply(layer.texture_id, layer.flags, &mut layer.emission);
     }
 }
 /// Partition against the two actual fluid triangles, not their bounding height. Their
@@ -433,10 +467,12 @@ fn water_contact(face: SurfaceFace, origin: [f32; 3], heights: [f32; 4]) -> Vec<
                 let optics = part.optics.get_or_insert(Optics {
                     negative: Default::default(),
                     positive: Default::default(),
+                    ior_textures: [None; 2],
                     transmit: false,
                     thin: false,
                 });
                 optics.positive = crate::optics::water();
+                optics.ior_textures[1] = None;
                 part.media[1] = 1;
                 part
             })
@@ -477,10 +513,12 @@ fn water_contact(face: SurfaceFace, origin: [f32; 3], heights: [f32; 4]) -> Vec<
                 let optics = part.optics.get_or_insert(Optics {
                     negative: Default::default(),
                     positive: Default::default(),
+                    ior_textures: [None; 2],
                     transmit: false,
                     thin: false,
                 });
                 optics.positive = crate::optics::water();
+                optics.ior_textures[1] = None;
                 part.media[1] = 1;
                 result.push(part);
             }
@@ -693,6 +731,62 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn optical_contacts_retain_the_adjacent_animated_ior_source_through_clipping() {
+        for axis in 0..3 {
+            let (mut catalog, sections, [a, b]) = sources(axis, 15, [2, 2]);
+            for id in [1, 2] {
+                let Model::Mesh(quads) = catalog.models.get_mut(&id).unwrap() else {
+                    unreachable!()
+                };
+                quads[0].sprite = id;
+                let texture = crate::sprite::texture(id);
+                catalog.optical_materials.insert(
+                    (id, texture),
+                    (
+                        crate::optics::DYNAMIC_IOR_MEDIUM | (id + 1),
+                        prime_scene::surface::Medium {
+                            ior: 1.5,
+                            extinction: [id as f32 * 0.1; 3],
+                        },
+                        false,
+                    ),
+                );
+            }
+            let cells = HashSet::from([a.map(|v| v.div_euclid(64)), b.map(|v| v.div_euclid(64))]);
+            let compiled = compile(&catalog, &sections, &cells, a);
+            let boundary = compiled.surfaces[2]
+                .iter()
+                .find(|face| face.detail.is_some())
+                .unwrap();
+            let optics = boundary.optics.unwrap();
+            assert_eq!(
+                optics.ior_textures,
+                [
+                    Some(crate::sprite::texture(1)),
+                    Some(crate::sprite::texture(2))
+                ]
+            );
+            assert_eq!(
+                boundary.media,
+                [
+                    crate::optics::DYNAMIC_IOR_MEDIUM | 2,
+                    crate::optics::DYNAMIC_IOR_MEDIUM | 3
+                ]
+            );
+            assert_eq!(optics.positive.extinction, [0.2; 3]);
+            let mut clipped = boundary.clone();
+            clipped.keep_half(1);
+            assert_eq!(clipped.optics, Some(optics));
+            assert!(compiled.surfaces[2].iter().all(
+                |face| face.optics.unwrap().ior_textures[0] == Some(crate::sprite::texture(1))
+            ));
+            assert!(compiled.surfaces[2].iter().any(
+                |face| face.detail.is_none() && face.optics.unwrap().ior_textures[1].is_none()
+            ));
+        }
+    }
     #[test]
     fn opaque_partial_contact_clips_only_covered_area_and_unknown_halo_preserves_source() {
         let (catalog, mut sections, [a, b]) = sources(2, 15, [2, 0]);
@@ -743,6 +837,7 @@ mod tests {
                 extinction: [0.1; 3],
             },
             positive: Default::default(),
+            ior_textures: [None; 2],
             transmit: true,
             thin: false,
         });

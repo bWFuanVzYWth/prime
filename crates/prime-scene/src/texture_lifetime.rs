@@ -77,6 +77,22 @@ pub(crate) struct TextureLifetime {
 }
 
 impl TextureLifetime {
+    pub fn acquire_ior_textures(&mut self, geometry: &crate::geometry::MeshGeometry) {
+        if let crate::geometry::MeshGeometry::Surfaces(mesh) = geometry {
+            for texture in mesh.ior_textures() {
+                self.acquire(texture);
+            }
+        }
+    }
+
+    pub fn release_ior_textures(&mut self, geometry: &crate::geometry::MeshGeometry) {
+        if let crate::geometry::MeshGeometry::Surfaces(mesh) = geometry {
+            for texture in mesh.ior_textures() {
+                self.release(texture);
+            }
+        }
+    }
+
     pub fn acquire(&mut self, id: u32) {
         if id == 0 || id == u32::MAX {
             return;

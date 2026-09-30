@@ -6,6 +6,7 @@
 | --- | --- |
 | [整体架构与所有权](architecture.md) | 源数据到场景和 GPU 的数据流、增量更新、线程与资源生命周期 |
 | [自定义表面编译](surface-compiler.md) | 源关系与局部接触、部分矩形合并、直接 GPU 记录、介质、sprite 与局部灯网格 |
+| [LabPBR 与 LitePBR](materials.md) | 源声明、规范通道、数值清洗、法线分布过滤、动画、低阶闭包边界与发光 |
 | [大气资产与缓存](atmosphere.md) | 固定物理场、天空/太阳/空气透视、GPU 遮挡列与更新依赖 |
 | [工程结构与路由边界](structure.md) | Rust crate、Java 版本适配、公共层依赖、Rust 版本适配、分页路由与矩形分解边界 |
 | [源路由边界与批量数据流](capture-boundaries.md) | 外观描述与下游计算的分界、接管后的 Java 截断、兼容范围、缓存与接入状态 |
@@ -13,7 +14,7 @@
 | [设置与渲染模式](renderers.md) | 当前配置版本、冻结快照、互斥资源、实时噪声与深度/法线诊断 |
 | [FFM ABI](abi.md) | 字节协议、输入验证、指针借用、宿主 Vulkan 录制接口 |
 | [宿主 Vulkan 流水线](pipeline.md) | 设备协商、直接输出、命令提交、同步、手部与 HUD 合成 |
-| [Slang 数学基础与显示策略](shaders.md) | 模块边界、可替换的 primeDRT、颜色空间、Z-Sobol、求交误差与尺寸历史 |
+| [Slang 数学基础与显示策略](shaders.md) | 模块边界、LitePBR 接入、可替换的 primeDRT、颜色空间、Z-Sobol、求交误差与尺寸历史 |
 | [行尾与源码格式](guides/git-line-endings.md) | 仓库级换行、格式工具与规范化边界 |
 | [Section 对拍与基准契约](guides/section-tests.md) | 实际原版参照、数值等价、增量回归、计时边界与证据范围 |
 | [光源采样测试](guides/light-sampling.md) | 无窗口选灯成本、线性噪声、独立参考与理论/经验收敛边界 |

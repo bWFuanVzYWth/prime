@@ -7,17 +7,25 @@
 | `math/color.slang` | sRGB 传递函数、线性 BT.709 ↔ Rec.2020（D65）、工作空间亮度；无资源依赖 |
 | `math/z_sobol.slang` | Z-order + 二维 Sobol + FastOwen；无纹理、表、64 位整数算术或隐式随机状态 |
 | `math/ray_offset.slang` | 三角形交点重建、误差界与双侧安全起点；无资源依赖 |
+| `math/transport.slang` | 面积 PDF、MIS、稳定乘除、Beer、eta 补偿及 roulette；无资源依赖 |
+| `bsdf/common/` | 材质值类型、事件 flags、默认初始化、坐标框架、标量数学与内部介质栈；无闭包或纹理资源 |
+| `bsdf/lite/` | LitePBR opaque、solid/thin dielectric、foliage 的状态、支持域、evaluate/sample/PDF 与事件数学 |
+| `model/material/` | 已规范化 LabPBR 通道、默认值、Fresnel 身份和颜色/IOR 转换 |
+| `service/bsdf/`、`service/material/normal_mapping.slang` | BSDF 消费契约、数值清洗和法线有效反射修正 |
+| `pbr.slang` | LitePBR 材质 API 与生产 opaque/dielectric 源适配；不含 Minecraft 名称预设 |
 | `grid_sampling.slang` | 生产固定单级局部 alias、全局退路及正反向混合 PDF，无资源绑定 |
 | `light_sampling.slang` | 显式采样实验保留的 32B 功率树节点与选择，无资源绑定 |
 | `display/prime_drt.slang` | 当前可替换的显示策略；显式显示变换与艺术调整，只依赖颜色数学库 |
 | `ray_query.slang` | 硬件 Ray Query、直接表面/纹理/光学端点、覆盖与灯采样；依赖起点和颜色数学库 |
 | `frame.slang` | 入口共享的显式帧参数类型，无全局绑定 |
 | `atmosphere/` | 四波长物理场、预计算 solver、天空/太阳/空气透视生产和消费；见[大气契约](atmosphere.md) |
-| `transport.slang` | 共同的漫反射/光滑介质输运、采样域与首次命中 guides，显式接收资源与帧 |
+| `transport.slang` | 共同的 LitePBR 输运、采样域与首次命中 guides，显式接收资源与帧 |
 | `path_trace.slang` | 离线累积及显示入口 |
 | `realtime.slang` | 单次实时积分及所选视图显示，直接写输出图像 |
 
 库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口显式传入 `TraceScene` 与显示参数；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`，消费接收 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建跟踪整个 shader 目录，修改被导入模块也必须重新编译。
+
+实时与离线入口共同使用 LitePBR。方向能量使用无纹理的 GGX/Schlick 解析拟合，scalar closure 调整已有反射瓣；不声明或采样 transmission-GGX 能量表，也不占用其 GPU binding。生产按现有表面分类选择 opaque 和已证明水/玻璃的 dielectric；foliage API 不代表已按 MC 类型或旧 preset 自动分类。高粗糙度角分布、opaque dielectric 非互易层叠、通道、数值与过滤边界见[材质契约](materials.md)。
 
 `primeDRT` 不属于基础库，也不承诺稳定算法或参数接口。它同时负责显式显示变换与艺术调整，之后可以修改或被其他显示策略替代；`math/` 不依赖它。当前入口直接选择 primeDRT，不为尚不存在的替代方案引入注册表或额外抽象。策略专用 Rust 参数命名为 `PrimeDrtSettings`，与通用颜色变换分开；测试入口也与数学基础测试分离。
 
@@ -68,5 +76,7 @@ Java 使用实际 render target 尺寸，零尺寸/未初始化相机暂停发�
 ## 验证范围
 
 `shader-tests` feature 构建专用入口，GPU 直接执行生产数学模块。独立 u64/top-down/标量 Sobol oracle、f64 颜色与几何参考、冻结的旧 DRT shader 分别检查整数一致性、数值误差与移植等价。实际 AS 查询覆盖仿射、镜像、非均匀缩放、平移、掠射及邻近遮挡；图像测试检查 resize、历史、显示参数与宿主在途资源。
+
+PBR 检查分别覆盖 LitePBR sample/evaluate/PDF、delta/TIR/薄壁与数值清洗，以及实际纹理描述符、规范通道、法线分布、动画、atlas lookup 和发光消费。底层闭包数学、资源翻译和生产输运是不同验证层；单个数值域或无窗口夹具不能外推完整游戏材质和帧率。
 
 测试入口的读回只用于无窗口行为验证，不进入游戏流水线。它们不替代两版 Minecraft 的窗口/全屏/HUD 验收。操作入口见 [CONTRIBUTING](../CONTRIBUTING.md)。

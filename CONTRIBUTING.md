@@ -87,6 +87,7 @@
 6. 在“Esc → 选项 → Prime 渲染设置”检查四组控件、默认恢复与关闭后持久化；标题画面选项也应显示同一入口。覆盖简体中文/英语、不同 GUI 缩放，确认没有翻译键、截断或重复按钮；重新启动确认配置生效。退出客户端后将 `config/primept.properties` 的 `version` 改成不匹配的值，再启动应整份回退默认，日志说明原因。
 7. 世界加载完成后用 Ctrl+Alt+F2 进入离线，确认视角/实体/粒子固定、噪点持续减少；按 Esc 打开菜单仍保持离线。曝光、primeDRT 和每帧采样数可以修改，路径/光照固定。调整尺寸后重新累积；再次按快捷键应重新捕获当前世界，地图/动态纹理不能过期。覆盖冻结时 F3+T 重载、切原版、退出/重进世界。
 8. 实时诊断依次查看原始噪声色、线性深度、世界法线；检查物体边缘、alpha 表面和天空（深度/法线预览为黑）。修改深度范围只改变预览；回到最终输出后 primeDRT 正常。深度/法线尚不代表完整 DLSS RR 接入。
+9. 使用声明 `format=lab-pbr/1.3` 的资源包，检查 `_n` 法线与远处粗糙度、`_s` 的介质/金属分类、玻璃 IOR、发光零值和 255 哨兵；覆盖地形与 atlas UV 的物品、纹理动画、资源重载、实时/离线切换。分类通道 G/B 应保持基础层身份，动画分类采用当前帧；缺图遵循全局缺省和已有宿主源规则。高度解码与自动 foliage 材质选择的支持边界见 [材质契约](docs/materials.md)。
 
 上述启动命令开启 validation 用于正确性检查，不用于性能结论。需要性能采样时，将 `-PprimeptValidation=false`，保持细叶计时和 capture audit 关闭，另加 `-PprimeptProfileCsv=绝对路径` 保存逐帧数据；固定场景、相机、画质、射线预算与分辨率。原型稳态应只交换请求/响应头，`requested/compiled/tint_requests` 为0；覆盖边缘可能仍不完整，pending=0 不能证明全部64段单元齐备。再分别记录稳态及更新阶段；CPU 优化目前非阻塞，不以即时 FPS 达标作为本轮检查的前提。
 
@@ -149,6 +150,9 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked light_grid -- 
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_optical_visibility -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_solar_sampled_radiance -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_cross_bilateral_uvs -- --ignored --nocapture --test-threads=1
+# 历史 LitePBR 六类拓扑、数值清洗与采样/评价契约；LabPBR 实际上传、atlas 查询与动画
+cargo test -p prime_vulkan --features shader-tests --lib --locked pbr_tests:: -- --ignored --nocapture --test-threads=1
+cargo test -p prime_vulkan --features shader-tests --lib --locked pbr_texture_tests:: -- --ignored --nocapture --test-threads=1
 ```
 
 光学测试组合水/厚薄玻璃与前、中、后方的 opaque/cutout/stochastic blocker，并反转 mesh/primitive 顺序；无遮挡时对照解析 Beer/Fresnel，遮挡使用独立 coverage 参照。太阳测试使用实际圆盘采样，覆盖昼、夜和地平线部分可见，验证同一采样方向的辐亮度与支持域。它们是行为检查，不是稳态性能基线。
@@ -241,7 +245,7 @@ cargo test --release -p prime_vulkan --lib --locked realtime_output_cost_matrix 
 # 26.2 使用 :mc-26.2:runClient。
 ```
 
-先检查半砖/活版门薄边/竖向栅栏的连续面与孔洞、纹理裁切/旋转/周期、草侧/红石/向日葵正反面、贴墙火焰、玻璃/水/含水部件、浅水斜坡、岩浆和火把发光。十字草与花从四个方向观察两张相交面的正反纹理及 cutout 孔洞，使用左右非对称的纹理检查各侧源 UV，并对比原版；不要用对称纹理判断正反映射。覆盖两侧与内部观察、首帧以外的动画、资源重载、负坐标及 16/64 块边界增删，确认编辑结果等价重新加载。检查 `hacks.sprite` / `hacks.optics` 的未支持来源，再关闭 validation 测量。动态光学、复杂开放玻璃、LabPBR 与折射焦散不在当前支持范围内。
+先检查半砖/活版门薄边/竖向栅栏的连续面与孔洞、纹理裁切/旋转/周期、草侧/红石/向日葵正反面、贴墙火焰、玻璃/水/含水部件、浅水斜坡、岩浆和火把发光。十字草与花从四个方向观察两张相交面的正反纹理及 cutout 孔洞，使用左右非对称的纹理检查各侧源 UV，并对比原版；不要用对称纹理判断正反映射。覆盖两侧与内部观察、首帧以外的动画、资源重载、负坐标及 16/64 块边界增删，确认编辑结果等价重新加载。检查 `hacks.sprite` / `hacks.optics` 的未支持来源，再关闭 validation 测量。声明 LabPBR 的资源包另按[材质契约](docs/materials.md)检查法线、金属、玻璃 IOR、cutout SSS、发光和动画。动态光学几何、复杂开放玻璃与折射焦散不在当前支持范围内。
 
 另覆盖均一水/玻璃/岩浆段与混合段的接缝、完整64段单元边缘的加载/卸载，以及白天到夜间和太阳圆盘跨地平线时的透明阴影。持续移动/增删动态对象后缩小负载，检查材质、光源概率与资源回收；重载图集、地图和皮肤时确认像素更新正常。两版分别验收，原生1080p帧时与更新尾延迟按固定输入另行记录。
 

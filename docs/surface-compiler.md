@@ -51,11 +51,11 @@ Single、Local 与 Global palette 的状态行都包含同一份接触、光学�
 
 ## 光学模型
 
-标准水为 IOR 1.333、线性 Rec.2020 消光 `(0.2916, 0.04444, 0.010182)`；玻璃为 IOR 1.5，沿用旧项目白底透明色校准和 0.4 参考不透明度。玻璃颜色取源 sprite 首帧中心 texel，避免边框油漆污染透明主体。当前对应旧默认 seamless-glass；自定义裁切 UV 的局部参考色、粗糙玻璃、LabPBR 法线/光学贴图不在已实现范围内。
+标准水为 IOR 1.333、线性 Rec.2020 消光 `(0.2916, 0.04444, 0.010182)`；玻璃消光沿用旧项目白底透明色校准和 0.4 参考不透明度。参考色取源 sprite 首帧中心 texel，避免边框油漆污染透明主体；自定义裁切 UV 的局部消光参考尚未独立建立。缺 LabPBR 时玻璃 IOR 为1.5，有规范 G 时按清洗后的 dielectric F0 转为 IOR。均匀源在 CPU 建立介质身份；空间/动画变化的 G 保留源身份，当前表面负侧按命中 UV、邻接正侧按固定 sprite midpoint，分别读取当前帧 mip0 G。消光仍为 homogeneous 参考。引用使用已有光学记录与稳定 texture descriptor，不扩张几何步长。通道及支持边界见[材质契约](materials.md)。
 
 玻璃必须来自实际玻璃类型标志、无未知 tint，并具有确定性的闭合轴对齐体积或共面薄片证明；复杂开放/随机模型保留源 coverage，计入 `hacks.optics`。同介质身份包括颜色族与光学参数；仅在两侧都是实体透射、无涂层/发光/tint 时消去相同介质边界，不因名字或平均颜色相同猜测。
 
-路径使用 Fresnel 反射/折射、Beer 吸收与 eta² 辐亮度权重。首条射线从首个已知边界或介质中的 opaque 接触面确定入射介质；没有足够边界证明的复杂场景不保证初始介质正确。薄片用 1/16 m 有效厚度及双界面 Fresnel。NEE 的直线连接积累端点/路径长度、Fresnel 与薄片吸收，不解算折射焦散连接。
+实时与离线路径共同使用 LitePBR opaque 与 solid/thin dielectric 的 sample/evaluate/PDF、Fresnel/TIR、单散射 GGX、方向能量标量闭合、Beer 吸收与 eta² 辐亮度权重；LabPBR 法线和粗糙度进入同一生产消费。首条射线从首个已知边界或介质中的 opaque 接触面确定入射介质；没有足够边界证明的复杂场景不保证初始介质正确。薄片用 1/16 m 有效厚度及双界面 Fresnel。NEE 的直线连接积累端点/路径长度、Fresnel 与薄片吸收，不解算折射焦散连接。foliage 底层接口已保留，MC 树叶未按旧 PBR preset 自动选择该拓扑。
 
 未知 translucent 材料仍使用原 stochastic coverage；这与有证明的介质输运分别表示。大气阴影列存 opaque 深度，忽略透射边界，不存彩色透射；空气透视不在已知水/玻璃内重复叠加空气段。动态实例未接入光学介质，不能由静态夹具推断它已经支持。
 
@@ -63,15 +63,19 @@ Single、Local 与 Global palette 的状态行都包含同一份接触、光学�
 
 Java 转录真实 sprite 身份、atlas bounds、帧尺寸、原始帧序列/时长/插值开关和各级 mip 像素。Rust 将已证明在 sprite 范围内的 atlas UV 转为 local UV，只修正端点外四个 ULP 内的误差；明显越界保留原 atlas UV 并计入 `hacks.sprite`，该兼容回退不承诺跨 sprite 动画和 mip。
 
-静态 mip0 直接共享已捕获的 atlas Arc，动画使用自持完整帧图，各级 mip 保留原始像素。CPU/GPU 按实际共享像素分配计费；动画所有帧都计入 512 MiB 源纹理预算，不按可见窗口低估，也不将 atlas 每个视图重复计费。32 B 纹理描述符直接保存偏移、尺寸、行步长、下一帧和 mip 区间；动画时钟改变描述符，不重传像素、不重建 BLAS。资源仍以 epoch 为寿命，尚无活跃 sprite 的细粒度驱逐。
+静态基色 mip0 直接共享已捕获的 atlas Arc，动画使用自持完整帧图，各级基色 mip 保留原始像素。CPU/GPU 按实际共享像素分配计费；全部动画帧、mip 和规范辅助图都计入 512 MiB 源纹理预算，不按可见窗口低估，也不将 atlas 每个视图重复计费。64 B 纹理描述符保存偏移、尺寸、行步长、下一帧、mip 区间、独立材料视图和 atlas bounds；基色动画只改描述符，LabPBR 辅助动画按源规则在 CPU 混合后局部发布，不重建 BLAS。静态 atlas lookup 使 atlas UV 消费共享对应 sprite 的材料视图，不随动画重建整张材质 atlas。资源仍以 epoch 为寿命，尚无活跃 sprite 的细粒度驱逐。
 
 26.2/26.3 的宿主 shader 对编码域 RGBA 四个通道插值并写入 UNORM8；Rust 按源 tick/时长生成相同的千分位进度，GPU 插值后按 UNORM8 舍入。着色按主像素射线锥估计 mip，层内最近点、层间线性；coverage 与灯支持域固定 mip0，因此不会随查询类型改变几何覆盖。射线锥不包含粗糙反弹的扩散，此过滤是明确的近似，不声称与光栅导数逐像素相同。动画按源帧传入的 game time 推进，离线冻结不更新。
 
+有效 `format=lab-pbr/1.3` 包的 `_n/_s` 原图由 Java 读取，在 Rust 生成规范 mip 和辅助动画。连续通道层内/层间线性过滤；normal 分布保持 GGX 平均长度，specular 的分类 G/B 在生产固定当前帧 mip0 点样。非金属 authored SSS 由 LitePBR opaque 消费：optical thin 或 cutout SSS 使用有色双半球薄层，其余使用白色 diffuse transmission，介质身份不变。thick 分支是低阶近似，不执行体积 random walk；foliage 不套用旧树叶预设。AO/porosity 只保留，不直接乘着色；height 保留逐帧 min 解码，旧 voxel displacement 几何管线不移植。旧材质预设不参与默认值或分类。
+
 游戏发光使用实际 block/quad emission 的较大值，按旧校准 `1.5 * (level/15)^2` 变为线性 BT.709 RGB，再乘采样点的解码纹理×tint。岩浆进入相同路径。光源从最终面提取，每个物理 patch 只计一次；复合面 proposal 覆盖两侧/层的功率上界，实际采样按选侧/coverage 计算发光，涂层挡住的底层不泄漏。
+
+存在 authored LabPBR emission 时，上述宿主 ordinal emission 由 specular A 替换：0..254 解码 A/254，255 sentinel 为0；全 source sheet 所有帧 A 均为255时保留宿主来源。0明确关闭发光。CPU 使用全帧最大强度建立静态 proposal，shader 命中/NEE 使用当前实际采样强度；动画不改变 alias 支持域。满强度继续使用1.5校准，AO/porosity不额外降低发光。
 
 生产默认使用单级局部网格 alias：世界对齐 cell 边长 16，局部球半径 24，非空格以 3/4 概率选择局部灯、1/4 概率选择全局功率灯。全局先选灯页再选页内灯，两个步骤使用独立样本；不上传或遍历旧功率树。局部成员取灯中心到 cell 中心的距离，权重为 `power / max(distance², 1 + 16²/4 + extent)`；矩形的 `extent=(|u|²+|v|²)/3`，一般 quad 的中心和 extent 按原两半采样面积权重计算质心及面积二阶中心矩，包含退化半面。该权重是提议近似，不改变真实发光、面积或可见性。无朝向裁剪、候选重采样或查询捷径。
 
-每个局部灯页采用其实际需要的最大记录格式（240/272/432 B），普通灯不为第二层付费。按原 `012/230` 两半真实面积选择再重映射样本，零面积半面无采样质量。稳定灯身份查询独立的总面积倒数；前向面积 PDF 和发光命中反向 PDF 共同使用 `q = 1/4*qGlobal + 3/4*qLocal`，再除以该总面积。反向局部格来自上一未偏移着色点，不是命中灯或相机的位置。空格只用全局 PDF；覆盖失败产生零贡献，不重采。NEE/BSDF 使用 MIS，specular 路径不与漫反射 PDF 竞争。
+每个局部灯页采用其实际需要的最大记录格式（240/272/432 B），普通灯不为第二层付费。按原 `012/230` 两半真实面积选择再重映射样本，零面积半面无采样质量。稳定灯身份查询独立的总面积倒数；前向面积 PDF 和发光命中反向 PDF 共同使用 `q = 1/4*qGlobal + 3/4*qLocal`，再除以该总面积。反向局部格来自上一未偏移着色点，不是命中灯或相机的位置。空格只用全局 PDF；覆盖失败产生零贡献，不重采。NEE/BSDF 使用 MIS，连续反射/透射使用其实际闭包 PDF；delta 事件不与连续 PDF 竞争。
 
 局部表每项 16 B，保存稳定灯身份、alias、阈值和所表示的离散概率；独立灯引用 16 B，页内 alias 8 B，世界页 alias 16 B，灯页描述 48 B，稀疏格目录槽 32 B，世界头 64 B。目录只含至少一个局部成员的格子，不依赖当前相机或测试接收点。每个灯散射到半径内的格子，因此扩大视距的主要成本是局部引用复制，不是格头。稳定身份区分紧凑的 TLAS/geometry 页号，页增删只重建其影响的局部格；世界页概率变化不重建其他格。anchor 使用整数格坐标加余量，平移 anchor 不重建局部 alias。
 

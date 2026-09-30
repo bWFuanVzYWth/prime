@@ -28,6 +28,7 @@ pub(crate) fn scene(edge: usize, pattern: &str, flags: u32) -> Scene {
         Texture {
             region: None,
             sampling: None,
+            material: None,
             width: 32,
             height: 32,
             pixels: pixels.into(),
@@ -159,6 +160,7 @@ fn gpu_compound_sheet_matches_independent_material_oracle_from_both_sides() {
                     Texture {
                         region: None,
                         sampling: None,
+                        material: None,
                         width: 2,
                         height: 1,
                         pixels: pixels.into(),
@@ -195,6 +197,7 @@ fn gpu_compound_sheet_matches_independent_material_oracle_from_both_sides() {
                 Texture {
                     region: None,
                     sampling: None,
+                    material: None,
                     width: 2,
                     height: 1,
                     pixels: pixels.into(),
@@ -308,6 +311,7 @@ fn gpu_cross_bilateral_uvs_match_original_source_triangles_from_four_sides() {
             Texture {
                 region: None,
                 sampling: None,
+                material: None,
                 width: 16,
                 height: 16,
                 pixels: pixels.into(),
@@ -583,6 +587,7 @@ fn gpu_optical_boundaries_match_beer_lambert_and_fresnel_from_both_sides_and_ins
             face.optics = Some(Optics {
                 negative: medium,
                 positive: Medium::default(),
+                ior_textures: [None; 2],
                 transmit: true,
                 thin: false,
             });
@@ -812,6 +817,7 @@ fn gpu_optical_visibility_preserves_coverage_and_absorption_with_blocker_reorder
             face.optics = Some(Optics {
                 negative: medium,
                 positive: Medium::default(),
+                ior_textures: [None; 2],
                 transmit: true,
                 thin,
             });
@@ -905,6 +911,7 @@ fn gpu_quad_halves_match_independent_triangles_with_nonplanar_varying_attributes
                 Texture {
                     region: None,
                     sampling: None,
+                    material: None,
                     width: 2,
                     height: 2,
                     pixels: vec![
@@ -1062,6 +1069,7 @@ fn gpu_surface_mixed_records_follow_material_ranges_and_format_replacement() {
             Texture {
                 region: None,
                 sampling: None,
+                material: None,
                 width: 1,
                 height: 1,
                 pixels: Arc::from([99, 133, 177, 255]),
@@ -1397,6 +1405,7 @@ fn sprite_frames_mips_and_endpoints_share_pixels_without_rebuilding_geometry() {
         pixels: pixels.clone(),
         region: None,
         sampling: None,
+        material: None,
     };
     scene.textures.insert(1, shared.clone());
     let sprite = Texture {
@@ -1600,6 +1609,7 @@ fn compound_emitters_sample_the_visible_layer_without_leaking_hidden_emission() 
                 pixels: Arc::from([0, 255, 0, 0, 0, 255, 0, 255]),
                 region: None,
                 sampling: None,
+                material: None,
             },
         );
         renderer.render(&scene, &camera(1), 8, 8, 0).unwrap();

@@ -13,6 +13,7 @@ import net.minecraft.resources.Identifier;
 /** Real transformed sprite bindings from both host versions, without a graphics device. */
 final class ModelSpriteCpuSmoke {
     static void run() throws Exception {
+        LabPbrSourcesCpuSmoke.run();
         var contents = new SpriteContents(Identifier.withDefaultNamespace("prime_sprite_binding"),
                                           new FrameSize(16, 16), new NativeImage(16, 16, true));
         try {

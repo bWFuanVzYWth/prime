@@ -7,6 +7,7 @@ mod compile;
 mod contact;
 pub mod environment;
 mod fluid;
+mod labpbr;
 mod model;
 mod optics;
 mod shape;
@@ -499,6 +500,16 @@ impl TerrainContext {
                         return Err("duplicate sprite definition".into());
                     }
                 }
+                9 => {
+                    let id = r.u32()?;
+                    let sprite = sprites
+                        .get_mut(&id)
+                        .ok_or("LabPBR references undefined batch sprite")?;
+                    if sprite.material.is_some() {
+                        return Err("duplicate LabPBR definition".into());
+                    }
+                    sprite.material = Some(labpbr::Material::read(&mut r, sprite)?);
+                }
                 _ => return Err("unknown section response record".into()),
             }
         }
@@ -590,6 +601,9 @@ impl TerrainContext {
                     ));
                 }
             }
+        }
+        if let Some(atlas) = labpbr::atlas(scene, &sprites) {
+            textures.push((1, atlas));
         }
         scene.validate_textures(&textures)?;
         self.textures = textures;

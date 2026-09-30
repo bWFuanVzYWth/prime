@@ -204,6 +204,7 @@ impl SourceScene {
                 for mesh_key in keys {
                     let mesh = self.meshes.remove(&mesh_key).unwrap();
                     self.texture_lifetime.release(mesh.texture_id);
+                    self.texture_lifetime.release_ior_textures(&mesh.triangles);
                     self.triangle_count -= mesh.triangles.len();
                     changed |= !mesh.triangles.is_empty();
                     self.edits.meshes.insert(mesh_key);
@@ -230,6 +231,7 @@ impl SourceScene {
                 let texture = Texture {
                     region: None,
                     sampling: None,
+                    material: None,
                     width,
                     height,
                     pixels: pixels.into(),
@@ -508,6 +510,7 @@ impl SourceScene {
                 let mesh = self.meshes.remove(&(key, layer)).unwrap();
                 self.triangle_count -= mesh.triangles.len();
                 self.texture_lifetime.release(mesh.texture_id);
+                self.texture_lifetime.release_ior_textures(&mesh.triangles);
                 self.edits.meshes.insert((key, layer));
             }
             self.removed.insert(key, sequence);
@@ -524,6 +527,7 @@ impl SourceScene {
                 if !plan.present[*layer as usize] {
                     if let Some(old) = self.meshes.remove(&(plan.key, *layer)) {
                         self.texture_lifetime.release(old.texture_id);
+                        self.texture_lifetime.release_ior_textures(&old.triangles);
                     }
                     self.edits.meshes.insert((plan.key, *layer));
                 }
@@ -532,6 +536,7 @@ impl SourceScene {
                 self.texture_lifetime.acquire(mesh.texture_id);
                 if let Some(old) = self.meshes.insert((plan.key, layer), mesh) {
                     self.texture_lifetime.release(old.texture_id);
+                    self.texture_lifetime.release_ior_textures(&old.triangles);
                 }
                 self.edits.meshes.insert((plan.key, layer));
             }

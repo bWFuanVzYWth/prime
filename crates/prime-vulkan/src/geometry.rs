@@ -1114,6 +1114,7 @@ mod tests {
             prime_scene::Texture {
                 region: None,
                 sampling: None,
+                material: None,
                 width: 2,
                 height: 1,
                 pixels: vec![255, 255, 255, 0, 255, 255, 255, 255].into(),

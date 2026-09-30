@@ -12,8 +12,10 @@
 | P008 | Java 对两版明确的私有资源字段作缓存反射读取。除 state-bound multipart 首次资源准备允许实际 selector 求值外，仅转录字段，不做邻域剔面或逐位置模型求值；两版均有真实类型和 FFM 夹具。未识别资源结构走 P001，不声称任意 Mixin 修改均兼容。 | 固化版本绑定方式与源布局测试，按后续版本需要替换绑定。 |
 | P009 | 每段4个slab及同步颜色回填/发布仍有输出分配和精确比较成本。普通quad片段保留独立所有权，复杂接触需裁切/分层；旧快照最后引用释放归实际消费者，没有跨帧配额。 | 按原生1080p实际更新数据优化分配、复制和退休，不能牺牲语义。 |
 | P010 | 源定义随 renderer/world/resource epoch 保留；global palette 首次出现时一次转录全局 state 字典，普通 local palette 按需转录。未做活跃资源细粒度退休。 | 增加明确的 native 资源需求/退休契约，并测量首次成本。 |
-| P011 | 标准水与可证明闭合/共面薄片的玻璃已接入光学边界。未知 tint、复杂开放/随机玻璃模型仍按源 coverage，计入 optics；当前是旧默认 seamless-glass、sprite首帧中心参考色，无粗糙玻璃/LabPBR。直线NEE不解算折射焦散，大气遮挡列仍为opaque深度。 | 按真实源契约扩展光学模型与初始介质证明，保留稳态性能证据。 |
+| P011 | 标准水与可证明闭合/共面薄片的玻璃已接入 LitePBR 与 LabPBR 法线/粗糙度/IOR。未知 tint、复杂开放/随机玻璃模型仍按源 coverage，计入 optics；消光仍为 sprite 首帧中心颜色的 homogeneous 参考，自定义裁切 UV 的局部消光未独立建立。空间/动画 G 的当前负侧和邻接正侧按各自固定采样语义更新 IOR。直线NEE不解算折射焦散，大气遮挡列仍为opaque深度。 | 按真实源契约扩展光学模型与初始介质证明，保留稳态性能证据。 |
 | P012 | Sprite动画/mip已接入；明显跨sprite的UV保留原atlas采样并计入sprite，不保证该回退的动画/mip。射线锥仅估计主像素足迹，不含粗糙散射扩散。源资源仍按epoch整体保留。 | 为特殊UV、过滤和资源驱逐提供明确且有收益的契约。 |
+
+LabPBR 的源声明、canonical G/B、法线分布过滤、辅助动画和发光已接入，不再作为材质缺失替代；具体边界见[材质契约](docs/materials.md)。AO/porosity 保留但不直接乘着色，height 已解码逐帧 minimum，未移植旧 voxel displacement 几何；非金属 authored SSS 保留 LitePBR 有色 thin 双半球/白色 thick diffuse transmission 近似，不执行体积 random walk；foliage 底层 API 尚无 MC 生产拓扑自动选择。旧 PBR presets 不移植。
 
 
 标准 block/fluid tint 已保留实际 slot、ARGB、红石强度和群系混合结果，不再使用名称代表色。已识别原版源使用实际状态/常量、资源色表、seed 和 quart 群系字段，由 Rust 直接计算；未知源保留实际回调。对内置求色/群系选择算法的 Mixin 修改，以及自定义颜色回调的任意外部依赖失效尚未声明，第三方兼容不作保证。

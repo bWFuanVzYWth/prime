@@ -40,6 +40,7 @@ impl SurfaceCompiler {
             key.extend(face.media);
             if let Some(o) = face.optics {
                 key.extend([u32::from(o.thin), u32::from(o.transmit)]);
+                key.extend(o.ior_textures.map(|texture| texture.unwrap_or(0)));
                 for m in [o.negative, o.positive] {
                     key.push(m.ior.to_bits());
                     key.extend(m.extinction.map(f32::to_bits));

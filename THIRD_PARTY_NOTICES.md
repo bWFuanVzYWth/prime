@@ -52,3 +52,33 @@ Sample, copyright 2017 Intel Corporation, Apache-2.0, reference commit
 `3b31b3b8c1aaad8580dc7249b3b79f6c0993d7a8`.
 See [notice](licenses/intel-outdoor-light-scattering-NOTICE.txt) and
 [license](licenses/intel-outdoor-light-scattering-Apache-2.0.txt).
+
+`crates/prime-vulkan/shaders/bsdf/common/common.slang` and `material.slang`
+adapt the common value types, event flags, scalar/frame/Fresnel/roughness and
+volume utilities carried by legacy Prime. Its BSDF mathematical basis identifies
+[RoboCute](https://github.com/RoboCute/RoboCute), base source revision
+`5985e989254b4685e3885d876b33f4874d233dcd`, copyright RoboCute contributors,
+Apache-2.0. The incorporated scope is these shared foundations and default
+initialization, as used by LitePBR. See the [RoboCute notice](licenses/robocute-NOTICE.txt)
+and unmodified [Apache-2.0 license](licenses/robocute-Apache-2.0.txt).
+
+`crates/prime-vulkan/shaders/bsdf/lite/bsdf.slang` ports the formal LitePBR
+implementation from legacy Prime revision
+`ca364b25c4b4c7de5c8eae82115b401bf1932b3e`, copyright (c) 2026 linlin, under this
+project's [LICENSE](LICENSE) and [LICENSE-EXCEPTIONS](LICENSE-EXCEPTIONS), with
+the shared foundations attributed above. Module imports and resource boundaries
+are adapted; the low-order BSDF is shared by realtime and offline rendering.
+The thin-wall Snell TIR endpoint explicitly returns full reflection and zero
+transmission. Refractive sampling removes a redundant incident-side sign factor
+from its initial reflection-candidate guard so exit reflection and TIR are not
+discarded. Half-vector orientation, subsequent support checks, relative eta and
+medium state are preserved. It uses scalar directional-energy fits without
+transmission-GGX energy assets.
+
+`crates/prime-minecraft/src/labpbr.rs`, Java's `LabPbrSources`, the canonical
+material modules, numerical services and `pbr.slang` adapt legacy Prime's
+LabPBR source translation and material consumers, copyright (c) 2026 linlin,
+under this project's [LICENSE](LICENSE) and [LICENSE-EXCEPTIONS](LICENSE-EXCEPTIONS).
+The port moves resource decoding, filtering and animation into Rust, changes
+texture metadata and resource ownership, and preserves the source numerical
+contracts. Legacy PBR presets are outside the incorporated scope.

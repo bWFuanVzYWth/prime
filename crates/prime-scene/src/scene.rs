@@ -27,6 +27,23 @@ pub struct Texture {
     pub region: Option<[u32; 4]>,
     /// Sprite-only filtering/animation. Ordinary captured textures keep the direct base view.
     pub sampling: Option<Arc<TextureSampling>>,
+    /// Canonical material planes. Source encodings are translated before publication.
+    pub material: Option<Arc<TextureMaterial>>,
+}
+#[derive(Clone, Debug, Default)]
+pub struct TextureMaterial {
+    /// RG tangent direction, B source AO, A GGX distribution perceptual roughness.
+    pub normal: Option<Texture>,
+    /// Complement roughness, canonical Fresnel identity, tagged SSS/porosity, emission.
+    pub specular: Option<Texture>,
+    /// Per-texel presence bits, or identities when `atlas_lookup` is set.
+    pub coverage: Option<Texture>,
+    /// Any source alpha below 255 authorizes replacing ordinal host emission.
+    pub authored_emission: bool,
+    /// Coverage texels store source texture identities, translated to GPU descriptor indices.
+    pub atlas_lookup: bool,
+    /// Normalized backing-atlas bounds used when resolving a material sprite from atlas UVs.
+    pub bounds: Option<[f32; 4]>,
 }
 #[derive(Clone, Debug)]
 pub struct TextureLevel {
@@ -45,16 +62,25 @@ pub struct TextureSampling {
     pub blend: f32,
 }
 impl Texture {
-    pub(crate) fn backings(&self) -> impl Iterator<Item = &Arc<[u8]>> {
+    fn color_backings(&self) -> impl Iterator<Item = &Arc<[u8]>> {
         std::iter::once(&self.pixels).chain(
             self.sampling
                 .iter()
                 .flat_map(|s| s.levels.iter().map(|m| &m.pixels)),
         )
     }
+    pub fn backings(&self) -> impl Iterator<Item = &Arc<[u8]>> {
+        self.color_backings()
+            .chain(self.material.iter().flat_map(|m| {
+                m.normal
+                    .iter()
+                    .chain(&m.specular)
+                    .chain(&m.coverage)
+                    .flat_map(Self::color_backings)
+            }))
+    }
     pub(crate) fn same_backings(&self, other: &Self) -> bool {
-        self.sampling.as_ref().map_or(0, |s| s.levels.len())
-            == other.sampling.as_ref().map_or(0, |s| s.levels.len())
+        self.backings().count() == other.backings().count()
             && self
                 .backings()
                 .zip(other.backings())
@@ -65,6 +91,25 @@ impl Texture {
             && self.height == other.height
             && self.region == other.region
             && Arc::ptr_eq(&self.pixels, &other.pixels)
+            && match (&self.material, &other.material) {
+                (None, None) => true,
+                (Some(a), Some(b)) => {
+                    Arc::ptr_eq(a, b) || {
+                        let same = |a: &Option<Texture>, b: &Option<Texture>| match (a, b) {
+                            (None, None) => true,
+                            (Some(a), Some(b)) => a.same(b),
+                            _ => false,
+                        };
+                        a.authored_emission == b.authored_emission
+                            && a.atlas_lookup == b.atlas_lookup
+                            && a.bounds == b.bounds
+                            && same(&a.normal, &b.normal)
+                            && same(&a.specular, &b.specular)
+                            && same(&a.coverage, &b.coverage)
+                    }
+                }
+                _ => false,
+            }
             && match (&self.sampling, &other.sampling) {
                 (None, None) => true,
                 (Some(a), Some(b)) => {
@@ -124,6 +169,35 @@ impl Texture {
                 {
                     return Err("invalid sprite mip".into());
                 }
+            }
+        }
+        if let Some(material) = &self.material {
+            if material.authored_emission && material.specular.is_none()
+                || material.atlas_lookup && material.coverage.is_none()
+                || material.bounds.is_some_and(|b| {
+                    b.iter().any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
+                        || b[0] >= b[2]
+                        || b[1] >= b[3]
+                })
+            {
+                return Err("invalid canonical material controls".into());
+            }
+            for plane in material
+                .normal
+                .iter()
+                .chain(&material.specular)
+                .chain(&material.coverage)
+            {
+                if plane.material.is_some()
+                    || plane
+                        .region
+                        .map(|r| [r[2], r[3]])
+                        .unwrap_or([plane.width, plane.height])
+                        != [r[2], r[3]]
+                {
+                    return Err("invalid material plane extent or nesting".into());
+                }
+                plane.validate()?;
             }
         }
         Ok(())

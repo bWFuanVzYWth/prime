@@ -151,6 +151,7 @@ mod benchmark {
             Texture {
                 region: None,
                 sampling: None,
+                material: None,
                 width: 16,
                 height: 16,
                 pixels: opaque.into(),
@@ -161,6 +162,7 @@ mod benchmark {
             Texture {
                 region: None,
                 sampling: None,
+                material: None,
                 width: 16,
                 height: 16,
                 pixels: cutout.into(),

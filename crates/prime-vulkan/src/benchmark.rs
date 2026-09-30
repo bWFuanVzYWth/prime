@@ -628,6 +628,7 @@ mod tests {
                                     .collect(),
                                 region: None,
                                 sampling: None,
+                                material: None,
                             },
                         );
                         for i in 0..16 {
@@ -1207,6 +1208,7 @@ mod tests {
             Texture {
                 region: None,
                 sampling: None,
+                material: None,
                 width: 1,
                 height: 1,
                 pixels: vec![255, 0, 0, 255].into(),

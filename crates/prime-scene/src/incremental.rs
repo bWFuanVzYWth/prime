@@ -81,11 +81,13 @@ impl<'a> TextureInput<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct TextureUpdates<'a> {
     source: &'a BTreeMap<u32, crate::scene::Texture>,
     keys: TextureKeys<'a>,
 }
 
+#[derive(Clone)]
 enum TextureKeys<'a> {
     None,
     All(std::collections::btree_map::Iter<'a, u32, crate::scene::Texture>),

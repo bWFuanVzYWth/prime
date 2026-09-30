@@ -11,6 +11,8 @@ public final class CaptureInbox {
     private boolean resourceActive = Boolean.getBoolean("primept.enabled");
     private RuntimeException failure;
     private Atlas atlas;
+    private java.util.List<net.minecraft.client.renderer.texture.TextureAtlasSprite> sprites =
+            java.util.List.of();
     public record Atlas(long version, int width, int height, byte[] rgba) {}
     public synchronized void captureAtlas(SpriteLoader.Preparations preparations) {
         if (!resourceActive)
@@ -41,6 +43,7 @@ public final class CaptureInbox {
             // UVs from earlier compiles refer to the old packing; invalidate that entire capture epoch.
             reset();
             atlas = new Atlas(++atlasVersion, width, height, rgba);
+            sprites = java.util.List.copyOf(preparations.regions().values());
             PrimeClient.LOGGER.info("Captured block atlas {}x{}, {} bytes, resource epoch {}",
                                     width, height, size, epoch);
         } catch (RuntimeException exception) {
@@ -50,6 +53,10 @@ public final class CaptureInbox {
 
     public synchronized Atlas atlas() {
         return atlas;
+    }
+    public synchronized java.util.List<net.minecraft.client.renderer.texture.TextureAtlasSprite>
+    sprites() {
+        return sprites;
     }
     public synchronized long epoch() {
         return epoch;
@@ -75,6 +82,7 @@ public final class CaptureInbox {
         disable();
         resourceActive = false;
         atlas = null;
+        sprites = java.util.List.of();
         failure = null;
     }
     private void fail(RuntimeException exception) {

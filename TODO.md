@@ -9,7 +9,7 @@
 | 能力 | 旧项目已有实现 | 本项目现状 | 后续取舍 |
 | --- | --- | --- | --- |
 | 实时重建 | `render/runtime/RealtimeRenderer`、`vulkan/reconstruction`；DLSS RR 与 NRD + FSR；独立 native bridge | 原始噪声输出，已有主深度/法线；无 motion、完整 guide 或历史契约 | 首要补齐 guide/历史，再接窄 native 后端；不迁回 Java 渲染调度 |
-| 材质与闭包 | `terrain/MaterialRecipeResolver`、`shaders/bsdf/compact`；LabPBR 与 OpenPBR 紧凑闭包 | Lambert、静态水/玻璃 Fresnel/Beer、纹理发光 | 迁移源事实、数学与独立 oracle；不沿用旧图元位打包和容量上限 |
+| 材质与闭包 | 历史正式 LitePBR 模型、LabPBR 资源翻译与数值契约；旧名称预设 | LitePBR 底层 API 移植，实时/离线生产 opaque/dielectric、规范 LabPBR 图、动画与发光已接入 | 旧 PBR presets 不移植；补源拓扑与科学/整帧验收，不沿用旧图元位打包和容量上限 |
 | 天空与显示 | `RealtimeRenderer` 的星图合成、`post` 的曝光/HDR；物理大气 | 大气与太阳已接入，SDR primeDRT；无星图、天气/维度天空、自动曝光/HDR | 保留当前 primeDRT，分开补环境语义、星图和显示能力；显示策略替换另行决定 |
 | 场景与寿命 | cluster 编译、timeline 退休、BLAS 压缩与上传池 | Rust 增量源/实例、直接 quad、上传/AS 池 | 复用完成证明和行为参照；整空页归还、静态压缩按实际常驻量与更新延迟评估 |
 | 源兼容 | 旧版实际模型/资源捕获与支持范围 | 双版本 Rust section 原型仍有洋红代理、offset/特殊剔面等边界 | 按真实源合同补齐；不重播有状态回调或恢复已接管的 Java 下游展开 |
@@ -24,7 +24,9 @@
 
 ### 随后推进：材质、环境与显示
 
-- [ ] 以 Rust 源适配/Scene 材质语义建立 LabPBR 资源可用性、默认值和材质分类，再逐类接入 opaque、solid/thin dielectric、foliage 紧凑闭包。旧 `MaterialRecipeResolver`、OpenPBR 数学与测试可作参照；旧颜色位复用、u16 MaterialId、24-bit emitter 和动态纹理数限制不构成新 ABI。验证 sample/evaluate/PDF、能量与颜色域、法线/粗糙度、介质切换及纹理过滤，并量测固定场景下的寄存器、显存和完整 GPU 时间。
+- [x] 移植正式 LitePBR opaque、solid/thin dielectric、foliage 底层 API、LabPBR 解码和数值清洗，并将 opaque/dielectric 接入实时与离线生产输运。Java raw-map I/O、Rust canonical G/B、法线分布 mip、辅助动画、稳定 atlas lookup、发光最大值 proposal 与实际 shader 强度遵循[材质契约](docs/materials.md)；旧 PBR presets 不移植。
+- [ ] 为 foliage 生产消费建立真实源拓扑与薄表面语义，按明确来源选择闭包；不能仅凭 Minecraft 树叶类型或 LabPBR 字节猜测厚薄关系。LitePBR thick SSS 当前为白色 diffuse transmission 近似且不改变介质身份；更准确的厚介质散射须另行定义。AO/porosity 的物理用途与 height 几何消费另行决定，不默认恢复旧 voxel displacement 管线。
+- [ ] 扩展材质科学验收与真实资源包覆盖：sample/evaluate/PDF、能量、颜色域、粗糙/掠射/薄壁、空间及动画 IOR、法线过滤与发光支持域分别对照独立参考。区分 LitePBR 自身估计的一致性与单散射/方向能量标量闭合近似，高粗糙度角分布和非互易 opaque dielectric 不作为完整 OpenPBR 等价性验收。两版游戏覆盖资源重载、模式切换、atlas 物品和冻结；固定原生1920×1080场景/种子/射线预算测量寄存器、显存和完整 CPU/GPU 时间，不从底层属性检查外推整帧收益。
 - [ ] 补齐维度/天气环境的真实源字段与失效，再迁移旧星图的资产、夜空方向和实际前景 coverage 合成。资源格式/设备能力与许可同时验证；月亮、云和通用体积仍是独立新增能力。
 - [ ] 在保留现有 SDR primeDRT 的前提下接入自动曝光和 HDR 呈现。明确统计输入、冻结/切换时的曝光历史、屏幕峰值/SDR 白、scRGB 标定及手部/HUD 的线性合成；借鉴旧 `docs/HDR输出.md` 的接口合同，显示变换外观迁移需独立参考和用户验收。
 
@@ -52,12 +54,12 @@ Java 绑定实际源字段，Rust 负责语义编译、调度和资源，GPU 直
 - [x] 在最终分组前解析局部接触：闭合轴对齐占据、非平面水面分区、含水部件裁切、已知流体偏移、贴墙覆盖和介质端点；Single/Local/Global palette 使用相同接触与发光语义。以可发布集合和世界坐标确定唯一 owner；按源可用性和活动成员增量维护完整单元，只在跨越64段阈值时传播对应邻域失效。未知重叠和无法证明的模型保留来源语义。
 - [x] 六类行为分别验证：实际宿主源、独立区域/插值 oracle、跨轴/负坐标/16与64块边界、关系和覆盖、介质、纹理/发光；原版最终 quad 对拍仅约束未改变的源语义，不强制光追修复保留冗余面数。
 - [x] 直接 GPU 正反/覆盖层、Fresnel/Beer/初始介质、静态纹理发光与两层灯树；最近命中、阴影、空气透视遮挡和灯采样使用一致的侧/层支持域。固定 quad pair、176/240/272/432 B 记录按实际字段分组，不引入模板解释链。
-- [x] 实际 sprite 身份、f32 局部 UV、帧序列/时长、RGBA 插值和源 mip；纹理帧共享存储，动画只变采样描述，不重建 BLAS。源纹理与几何验证后原子发布，共享像素按唯一存储计费。
-- [x] 收缩 Java/ABI：生产 CaptureInbox 只保留资源发布，旧地形队列及 op12/13 移到测试夹具。source v5 仅增加真实 sprite、时间、发光和实际玻璃/树叶类型字段，owner、关系、裁切和合并标签由 Rust 派生。
+- [x] 实际 sprite 身份、f32 局部 UV、帧序列/时长、RGBA 插值和源 mip；纹理帧共享存储，基色动画只变采样描述，LabPBR 辅助动画在 CPU 混合并局部发布，不重建 BLAS。源纹理与几何验证后原子发布，共享像素按唯一存储计费。
+- [x] 收缩 Java/ABI：生产 CaptureInbox 只保留资源发布，旧地形队列及 op12/13 移到测试夹具。source v5 传递真实 sprite、时间、发光、实际玻璃/树叶类型和原始 LabPBR 图字段，owner、关系、裁切、合并与材质分类由 Rust 派生。
 - [x] 合并轴对齐且至少一个方向长度为1的连续部分矩形，沿它自身的完整方向延伸；覆盖半砖、活版门薄边、竖向栅栏。保留孔洞、每侧/层 UV 裁切和周期、材质及介质；完整1×1面继续最优矩形分解，渐变/非仿射反例保留。
 - [x] 材质页从4 MiB按需倍增至64 MiB，复杂格式不各自固定预留64 MiB；成本夹具分别记录有效记录、池容量、活跃BLAS、构建/上传预留与索引。六种固定shader特化移除场景不用的功能，没有运行时编译器切换。
 - [ ] 用户手动验收原生1080p真实场景：草侧/红石/向日葵、浅水/含水玻璃/火焰、动画覆盖、资源包、跨簇编辑、重载及在途替换；分别记录稳态GPU/CPU、显存峰值、源到可见p95和吞吐。无窗口数据与功能近似不能外推完整游戏收益或旧效果完全等价。
-- [ ] 补足已声明的支持边界：复杂开放/随机玻璃和未知UV/光学来源、动态介质/发光、LabPBR、折射焦散及更准确的间接光纹理footprint。先确定实际需求和成本，不引入任意层数或通用CSG框架。
+- [ ] 补足已声明的支持边界：复杂开放/随机玻璃和未知UV/光学来源、动态介质/发光、foliage 源拓扑、折射焦散及更准确的间接光纹理footprint。LabPBR 解码/采样已接入，新增物理用途须先确定真实需求和成本，不引入任意层数或通用CSG框架。
 - [ ] 继续控制实际显存高水位：在途退休与纹理/灯分项、真实裁切退化占比、整空页归还、AS与scratch分池、静态BLAS压缩。现有页仍保留历史容量；不以三角形数或累计allocated_bytes代替驱动常驻量。
 - [ ] 持续审查收益与复杂度：规范源已前移，但最终合并/分组仍有成本；只在完整数据流收益充分时增加缓存、硬件纹理分页或GPU展开，不围绕局部指标叠加状态。每轮保留原始样本、较慢场景与明确取舍。
 

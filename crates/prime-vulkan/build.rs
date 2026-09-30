@@ -66,6 +66,8 @@ fn main() {
             "lights",
             "optics",
             "texture",
+            "pbr",
+            "pbr_texture",
         ] {
             compile(
                 &compiler,

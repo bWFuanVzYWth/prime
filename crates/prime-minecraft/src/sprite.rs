@@ -17,6 +17,7 @@ pub(crate) struct Sprite {
     pub images: Vec<Image>,
     pub frames: Vec<(u32, u32)>,
     pub interpolate: bool,
+    pub material: Option<crate::labpbr::Material>,
 }
 pub(crate) fn texture(id: u32) -> u32 {
     if id == 0 { 1 } else { 0x4000_0000 + id }
@@ -138,6 +139,7 @@ impl Sprite {
                 images,
                 frames,
                 interpolate: interpolate != 0,
+                material: None,
             },
         ))
     }
@@ -211,6 +213,7 @@ impl Sprite {
             Texture {
                 region: Some([x, y, w, h]),
                 sampling: None,
+                material: None,
                 ..atlas.clone()
             }
         } else {
@@ -220,6 +223,7 @@ impl Sprite {
                 pixels: base.pixels.clone(),
                 region: Some([(frame % row) * w, (frame / row) * h, w, h]),
                 sampling: None,
+                material: None,
             }
         };
         if self.images.len() > 1 || blend > 0. {
@@ -258,7 +262,27 @@ impl Sprite {
             }));
         }
         texture.validate()?;
+        texture.material = self
+            .material
+            .as_ref()
+            .map(|m| m.image(self, frame, next, blend));
+        texture.validate()?;
         Ok(texture)
+    }
+    pub fn emission_maximum(&self) -> Option<f32> {
+        self.material
+            .as_ref()
+            .and_then(crate::labpbr::Material::emission_maximum)
+    }
+    pub fn fresnel_code(&self, frame: u32, uv: [f32; 2]) -> Option<u8> {
+        self.material
+            .as_ref()
+            .and_then(|m| m.fresnel_code(frame, uv))
+    }
+    pub fn fresnel_code_constant(&self) -> Option<u8> {
+        self.material
+            .as_ref()
+            .and_then(crate::labpbr::Material::fresnel_code_constant)
     }
 }
 
@@ -274,6 +298,7 @@ mod tests {
             images: vec![],
             frames: vec![],
             interpolate: false,
+            material: None,
         };
         let uvs = [
             [0.375_f32.next_up(), 0.5_f32.next_down()],
@@ -310,6 +335,7 @@ mod tests {
             ],
             frames: vec![(3, 2), (0, 3)],
             interpolate: true,
+            material: None,
         };
         let scene = SourceScene::default();
         for (tick, region, next, blend) in [
@@ -343,6 +369,7 @@ mod tests {
                     pixels: vec![255; 16 * 8 * 4].into(),
                     region: None,
                     sampling: None,
+                    material: None,
                 },
             )
             .unwrap();
@@ -369,6 +396,7 @@ mod tests {
             ],
             frames: vec![],
             interpolate: false,
+            material: None,
         };
         let image = sprite.image(123, &scene).unwrap();
         assert_eq!(image.region, Some([8, 4, 4, 4]));
@@ -400,6 +428,7 @@ mod tests {
                     pixels: pixels.into(),
                     region: None,
                     sampling: None,
+                    material: None,
                 },
             )
             .unwrap();
@@ -414,6 +443,7 @@ mod tests {
             }],
             frames: vec![],
             interpolate: false,
+            material: None,
         };
         assert_eq!(sprite.reference(&scene).unwrap(), [1., 1., 1., 0.]);
         assert_eq!(

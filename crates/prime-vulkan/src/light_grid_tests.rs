@@ -61,6 +61,7 @@ fn fixture(
                 face.optics = Some(Optics {
                     negative: Default::default(),
                     positive: Default::default(),
+                    ior_textures: [None; 2],
                     transmit: false,
                     thin: false,
                 });

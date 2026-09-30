@@ -27,6 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Texture {
             region: None,
             sampling: None,
+            material: None,
             width: 2,
             height: 2,
             pixels: vec![

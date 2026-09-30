@@ -1,5 +1,5 @@
 //! Resource-local proofs. No placement, tint callback or world-space epsilon participates.
-use crate::model::{Quad, State};
+use crate::model::{Catalog, Quad, State};
 use prime_scene::{
     compiled::CompiledQuad,
     surface::{Emission, LayerMode, SurfaceDetail, SurfaceFace, SurfaceLayer},
@@ -212,7 +212,21 @@ pub(crate) fn closed(state: &State, q: &Quad, offset: [f32; 3]) -> CompiledQuad 
         flags: flags(state, q) as u32,
     }
 }
-pub(crate) fn emission(state: &State, q: &Quad, two_sided: bool) -> Emission {
+pub(crate) fn emission(catalog: &Catalog, state: &State, q: &Quad, two_sided: bool) -> Emission {
+    if let Some(maximum) = catalog
+        .sprites
+        .get(&q.sprite)
+        .and_then(crate::sprite::Sprite::emission_maximum)
+    {
+        if maximum == 0.0 {
+            return Emission::default();
+        }
+        return Emission {
+            radiance: [1.5 * maximum; 3],
+            two_sided: two_sided || flags(state, q) == 1,
+            textured: true,
+        };
+    }
     let level = state.emission.max(q.emission);
     if level == 0 {
         return Emission::default();
@@ -227,6 +241,7 @@ pub(crate) fn emission(state: &State, q: &Quad, two_sided: bool) -> Emission {
 
 /// Returns the two tint slots in actual retained geometry order, with their independent bindings.
 pub(crate) fn resolve(
+    catalog: &Catalog,
     state: &State,
     a: &Quad,
     b: &Quad,
@@ -235,7 +250,7 @@ pub(crate) fn resolve(
 ) -> Option<(SurfaceFace, [i32; 2])> {
     if pair.inner || same(a, b, pair.corners) {
         let mut face = SurfaceFace::from_quad(closed(state, a, offset));
-        face.emission = emission(state, a, pair.reverse);
+        face.emission = emission(catalog, state, a, pair.reverse);
         return Some((face, [a.tint, -1]));
     }
     let (base, top, corners, mode) = if pair.reverse {
@@ -249,7 +264,7 @@ pub(crate) fn resolve(
         return None;
     };
     let mut face = SurfaceFace::from_quad(closed(state, base, offset));
-    face.emission = emission(state, base, false);
+    face.emission = emission(catalog, state, base, false);
     face.detail = Some(Arc::new(SurfaceDetail {
         mode,
         layer: SurfaceLayer {
@@ -258,7 +273,7 @@ pub(crate) fn resolve(
             texture_id: crate::sprite::texture(top.sprite),
             flags: flags(state, top) as u32,
             repeat: None,
-            emission: emission(state, top, false),
+            emission: emission(catalog, state, top, false),
         },
     }));
     Some((face, [base.tint, top.tint]))

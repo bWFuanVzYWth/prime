@@ -15,6 +15,45 @@ fn quad() -> CompiledQuad {
         flags: 1,
     }
 }
+
+#[test]
+fn optical_reference_uses_existing_padding_and_keeps_repeat_coordinates() {
+    use prime_scene::surface::{Medium, Optics, SurfaceFace};
+    let mut face = SurfaceFace::from_quad(quad());
+    face.repeat = Some(RepeatUv {
+        origin: [0.25, 0.5],
+        du: [0.125, 0.],
+        dv: [0., 0.25],
+        axes: 3,
+    });
+    face.optics = Some(Optics {
+        negative: Medium::default(),
+        positive: Medium::default(),
+        ior_textures: [Some(7), Some(90)],
+        transmit: false,
+        thin: false,
+    });
+    let textures = BTreeMap::from([(7, 3), (90, 11)]);
+    let packed = encode(&face, 2, None, None, &textures).unwrap();
+    assert_eq!(u32::from_le_bytes(packed[188..192].try_into().unwrap()), 11);
+    for (at, expected) in [
+        (176, 0.125f32),
+        (180, 0.),
+        (184, 0.25),
+        (192, 0.),
+        (196, 0.25),
+        (200, 0.5),
+    ] {
+        assert_eq!(
+            f32::from_le_bytes(packed[at..at + 4].try_into().unwrap()),
+            expected
+        );
+    }
+    assert!(encode(&face, 2, None, None, &BTreeMap::from([(7, 3)])).is_err());
+    face.optics.as_mut().unwrap().ior_textures = [None; 2];
+    let packed = encode(&face, 2, None, None, &textures).unwrap();
+    assert_eq!(packed[188..192], [0; 4]);
+}
 fn input(triangles: TriangleView<'_>) -> Input<'_> {
     Input {
         triangles,

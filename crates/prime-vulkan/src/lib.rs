@@ -19,6 +19,10 @@ pub use display::{PrimeDrtParameters, PrimeDrtSettings};
 mod geometry;
 mod material_arena;
 mod packing;
+#[cfg(all(test, feature = "shader-tests"))]
+mod pbr_tests;
+#[cfg(all(test, feature = "shader-tests"))]
+mod pbr_texture_tests;
 mod plan;
 mod resources;
 mod surface;
@@ -390,6 +394,7 @@ mod tests {
             Texture {
                 region: None,
                 sampling: None,
+                material: None,
                 width: 1,
                 height: 1,
                 pixels: vec![255; 4].into(),
@@ -503,6 +508,7 @@ mod tests {
             Texture {
                 region: None,
                 sampling: None,
+                material: None,
                 width: 2,
                 height: 2,
                 pixels: vec![128; 16].into(),
@@ -554,6 +560,7 @@ mod tests {
             Texture {
                 region: None,
                 sampling: None,
+                material: None,
                 width: 2,
                 height: 1,
                 pixels: vec![255, 0, 0, 255, 0, 0, 0, 0].into(),
@@ -691,6 +698,7 @@ mod tests {
             Texture {
                 region: None,
                 sampling: None,
+                material: None,
                 width: 2,
                 height: 1,
                 pixels: vec![255, 0, 0, 255, 0, 0, 0, 0].into(),

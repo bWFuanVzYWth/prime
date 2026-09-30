@@ -13,6 +13,19 @@ final class SourceSprites {
                                FRAMES = field(ANIMATION.getType(), "frames"),
                                INTERPOLATE = field(ANIMATION.getType(), "interpolateFrames");
     private final IdentityHashMap<TextureAtlasSprite, Integer> ids = new IdentityHashMap<>();
+    private final LabPbrSources materials = new LabPbrSources();
+    private boolean atlasPrepared;
+
+    void prepareAtlas(SourcePages out) {
+        if (atlasPrepared)
+            return;
+        atlasPrepared = true;
+        var sprites = dev.primept.PrimeClient.CAPTURE.sprites();
+        if (!materials.hasMaps(sprites))
+            return;
+        for (var sprite : sprites)
+            prepare(out, sprite);
+    }
 
     int prepare(SourcePages out, TextureAtlasSprite sprite) {
         Integer known = ids.get(sprite);
@@ -52,6 +65,7 @@ final class SourceSprites {
                 out.i((int)get(field(frame.getClass(), "index"), frame))
                         .i((int)get(field(frame.getClass(), "time"), frame));
         }
+        materials.prepare(out, id, contents.name());
         return id;
     }
     private static Field field(Class<?> type, String name) {

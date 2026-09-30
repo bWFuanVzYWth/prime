@@ -10,6 +10,7 @@ fn a_late_invalid_sprite_batch_does_not_publish_earlier_textures() {
         pixels: backing,
         region: None,
         sampling: None,
+        material: None,
     };
     scene.set_texture(1, image.clone()).unwrap();
     let revision = scene.revision();
@@ -61,6 +62,7 @@ fn budgets_count_shared_backings_and_all_animation_frames_and_mips() {
             next: [2, 0],
             blend: 0.5,
         })),
+        material: None,
     };
     scene
         .set_textures(vec![(2, t.clone()), (3, t.clone())])
@@ -74,4 +76,100 @@ fn budgets_count_shared_backings_and_all_animation_frames_and_mips() {
     assert_eq!(scene.validate_textures(&[]).unwrap(), 576);
     scene.set_texture(3, t).unwrap();
     assert_eq!(scene.validate_textures(&[]).unwrap(), 320);
+}
+
+#[test]
+fn canonical_material_backings_share_ownership_and_descriptor_updates_keep_the_budget() {
+    use prime_scene::TextureMaterial;
+    let mut scene = SourceScene::default();
+    let mut color = Texture {
+        width: 2,
+        height: 2,
+        pixels: vec![255; 16].into(),
+        region: None,
+        sampling: None,
+        material: None,
+    };
+    let plane = Texture {
+        pixels: vec![128; 16].into(),
+        ..color.clone()
+    };
+    color.material = Some(Arc::new(TextureMaterial {
+        normal: Some(plane.clone()),
+        specular: Some(plane.clone()),
+        authored_emission: true,
+        ..Default::default()
+    }));
+    scene
+        .set_textures(vec![(1, color.clone()), (2, color.clone())])
+        .unwrap();
+    assert_eq!(scene.validate_textures(&[]).unwrap(), 32);
+    let mut material = color.material.as_ref().unwrap().as_ref().clone();
+    material.bounds = Some([0., 0., 0.5, 0.5]);
+    color.material = Some(Arc::new(material));
+    scene.set_texture(2, color.clone()).unwrap();
+    assert_eq!(scene.validate_textures(&[]).unwrap(), 32);
+    let mut material = color.material.as_ref().unwrap().as_ref().clone();
+    material.normal.as_mut().unwrap().pixels = vec![64; 16].into();
+    color.material = Some(Arc::new(material));
+    scene.set_texture(2, color).unwrap();
+    assert_eq!(scene.validate_textures(&[]).unwrap(), 48);
+}
+
+#[test]
+fn malformed_material_extents_controls_and_nesting_cannot_publish() {
+    use prime_scene::TextureMaterial;
+    let base = Texture {
+        width: 2,
+        height: 2,
+        pixels: vec![255; 16].into(),
+        region: None,
+        sampling: None,
+        material: None,
+    };
+    let mut scene = SourceScene::default();
+    scene.set_texture(1, base.clone()).unwrap();
+    let revision = scene.revision();
+    for material in [
+        TextureMaterial {
+            normal: Some(Texture {
+                width: 1,
+                height: 1,
+                pixels: vec![128; 4].into(),
+                ..base.clone()
+            }),
+            ..Default::default()
+        },
+        TextureMaterial {
+            normal: Some(Texture {
+                material: Some(Arc::new(TextureMaterial::default())),
+                ..base.clone()
+            }),
+            ..Default::default()
+        },
+        TextureMaterial {
+            authored_emission: true,
+            ..Default::default()
+        },
+        TextureMaterial {
+            atlas_lookup: true,
+            ..Default::default()
+        },
+        TextureMaterial {
+            bounds: Some([0., 0., f32::NAN, 1.]),
+            ..Default::default()
+        },
+    ] {
+        let texture = Texture {
+            material: Some(Arc::new(material)),
+            ..base.clone()
+        };
+        assert!(
+            scene
+                .set_textures(vec![(2, base.clone()), (3, texture)])
+                .is_err()
+        );
+        assert!(scene.texture(2).is_none());
+        assert_eq!(scene.revision(), revision);
+    }
 }

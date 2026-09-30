@@ -2,8 +2,12 @@
 module "ray_query.slang";
 import "math/ray_offset.slang";
 import "math/color.slang";
+import "math/transport.slang";
 import "grid_sampling.slang";
 import "math/z_sobol.slang";
+import "model/material/labpbr.slang";
+import "model/material/medium.slang";
+import "service/material/normal_mapping.slang";
 
 // Vulkan pipeline specialization removes unused record/light paths before GPU execution.
 // Test entry points use the complete semantics by default.
@@ -14,15 +18,15 @@ import "math/z_sobol.slang";
 
 // GPU records are shared with Rust. Only entry points assign descriptor bindings.
 public struct Triangle {
-    float4 p0;
-    float4 p1;
-    float4 p2;
-    float4 c0;
-    float4 c1;
-    float4 c2;
-    float4 uv01;
-    float2 uv2;
-    uint texture;
+    public float4 p0;
+    public float4 p1;
+    public float4 p2;
+    public float4 c0;
+    public float4 c1;
+    public float4 c2;
+    public float4 uv01;
+    public float2 uv2;
+    public uint texture;
     uint flags;
 };
 public struct InstanceMaterial {
@@ -36,16 +40,17 @@ public struct InstanceMaterial {
     float4 uv;
 };
 public struct SurfaceRecord {
-    Triangle triangle;
+    public Triangle triangle;
     float4 uvU;
     float4 uvV;
-    float4 emission;
-    uint4 identity; // negative medium, positive medium, emitter, repeat/sided flags
+    public float4 emission;
+    public uint4 identity; // negative medium, positive medium, emitter, repeat/sided flags
     uint *compound;
     uint mode;
     uint half;
-    float4 negative;
-    float4 positive;
+    public float4 negative;
+    public float4 positive;
+    public uint positiveIorTexture;
 };
 public struct TrianglePage {
     uint *quads;
@@ -77,6 +82,11 @@ public struct SurfaceHit {
     public float4 transmitted;
     public bool optical;
     public bool thin;
+    public bool materialThin;
+    public float3 shadingNormal;
+    public float4 normalSample;
+    public float4 specularSample;
+    public uint materialFlags;
 };
 uint hash(uint x) {
     x ^= x >> 16;
@@ -91,7 +101,7 @@ float4 texel(StructuredBuffer<uint> texels, uint address) {
 }
 float4 sampleLevel(StructuredBuffer<uint4> textures, StructuredBuffer<uint> texels, uint index,
                    float2 uv, bool sprite) {
-    uint4 image = textures[index * 2];
+    uint4 image = textures[index * 4];
     float2 local = sprite ? saturate(uv) : frac(uv);
     uint2 pixel = min(uint2(local * float2(image.yz)), image.yz - 1);
     // Whole textures are packed rows; only sprite views need the backing-image stride.
@@ -99,7 +109,7 @@ float4 sampleLevel(StructuredBuffer<uint4> textures, StructuredBuffer<uint> texe
     uint at = pixel.y * stride + pixel.x;
     float4 color = texel(texels, image.x + at);
     if (sprite) {
-        uint4 extra = textures[index * 2 + 1];
+        uint4 extra = textures[index * 4 + 1];
         float blend = asfloat(extra.w);
         if (blend > 0.0) {
             float4 next = texel(texels, extra.x + at);
@@ -111,9 +121,9 @@ float4 sampleLevel(StructuredBuffer<uint4> textures, StructuredBuffer<uint> texe
 }
 public float4 sampleTexture(StructuredBuffer<uint4> textures, StructuredBuffer<uint> texels,
                             uint texture, float2 uv, float lod) {
-    uint4 image = textures[texture * 2];
+    uint4 image = textures[texture * 4];
     bool sprite = surfaceFeatures >= 2 && (image.w & 0x80000000) != 0;
-    uint4 extra = sprite ? textures[texture * 2 + 1] : uint4(0);
+    uint4 extra = sprite ? textures[texture * 4 + 1] : uint4(0);
     lod = clamp(lod, 0.0, float(extra.z));
     uint level = uint(lod);
     uint index = level == 0 ? texture : extra.y + level - 1;
@@ -123,7 +133,15 @@ public float4 sampleTexture(StructuredBuffer<uint4> textures, StructuredBuffer<u
         color = lerp(color, sampleLevel(textures, texels, extra.y + level, uv, sprite), blend);
     return color;
 }
-float4 sourceColor(TraceScene resources, SurfaceRecord record, float2 bary, float footprint) {
+public struct SourceSample {
+    public float4 color;
+    public float2 uv;
+    public float2 du;
+    public float2 dv;
+    public float lod;
+};
+SourceSample sourceSample(TraceScene resources, SurfaceRecord record, float2 bary,
+                          float footprint) {
     Triangle tri = record.triangle;
     float3 b = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
     float2 uv = tri.uv01.xy * b.x + tri.uv01.zw * b.y + tri.uv2 * b.z;
@@ -136,28 +154,108 @@ float4 sourceColor(TraceScene resources, SurfaceRecord record, float2 bary, floa
         du = float2(dot(record.uvU.xy, du), dot(record.uvV.xy, du));
         dv = float2(dot(record.uvU.xy, dv), dot(record.uvV.xy, dv));
     }
-    uint4 image = resources.textures[tri.texture * 2];
-    bool sprite = surfaceFeatures >= 2 && (image.w & 0x80000000) != 0;
+    uint4 image = resources.textures[tri.texture * 4];
     float lod = 0.0;
-    uint4 extra = uint4(0);
-    if (sprite && footprint > 0.0) {
-        extra = resources.textures[tri.texture * 2 + 1];
-        if (extra.z > 0) {
-            float3 e = tri.p1.xyz - tri.p0.xyz, f = tri.p2.xyz - tri.p0.xyz;
-            float ee = dot(e, e), ef = dot(e, f), ff = dot(f, f);
-            float inv = 1.0 / max(ee * ff - ef * ef, 1e-20);
-            float3 gu = (e * (du.x * ff - dv.x * ef) + f * (dv.x * ee - du.x * ef)) * inv * image.y;
-            float3 gv = (e * (du.y * ff - dv.y * ef) + f * (dv.y * ee - du.y * ef)) * inv * image.z;
-            lod = clamp(log2(max(footprint * sqrt(max(dot(gu, gu), dot(gv, gv))), 1.0)), 0.0,
-                        float(extra.z));
-        }
+    if (footprint > 0.0) {
+        float3 e = tri.p1.xyz - tri.p0.xyz, f = tri.p2.xyz - tri.p0.xyz;
+        float ee = dot(e, e), ef = dot(e, f), ff = dot(f, f);
+        float inv = 1.0 / max(ee * ff - ef * ef, 1e-20);
+        float3 gu = (e * (du.x * ff - dv.x * ef) + f * (dv.x * ee - du.x * ef)) * inv * image.y;
+        float3 gv = (e * (du.y * ff - dv.y * ef) + f * (dv.y * ee - du.y * ef)) * inv * image.z;
+        lod = max(log2(max(footprint * sqrt(max(dot(gu, gu), dot(gv, gv))), 1.0)), 0.0);
     }
-    return sampleTexture(resources.textures, resources.texels, tri.texture, uv, lod) *
-           (tri.c0 * b.x + tri.c1 * b.y + tri.c2 * b.z);
+    SourceSample result = {
+            sampleTexture(resources.textures, resources.texels, tri.texture, uv, lod) *
+                    (tri.c0 * b.x + tri.c1 * b.y + tri.c2 * b.z),
+            uv, du, dv, lod};
+    return result;
+}
+float4 sourceColor(TraceScene resources, SurfaceRecord record, float2 bary, float footprint) {
+    return sourceSample(resources, record, bary, footprint).color;
 }
 float4 sourceColor(TraceScene resources, SurfaceRecord record, float2 bary) {
     // Coverage and emitter evaluation share the source base-level support domain.
     return sourceColor(resources, record, bary, 0.0);
+}
+public struct MaterialSample {
+    public uint4 maps;
+    public float2 uv;
+};
+public MaterialSample materialSource(TraceScene resources, uint texture, float2 uv) {
+    uint4 maps = resources.textures[texture * 4 + 2];
+    if ((maps.z & 8) != 0) {
+        // Raw atlas coordinates use the base texture's repeat domain. Only the
+        // resolved sprite coordinates clamp at their local frame endpoints.
+        uv = frac(uv);
+        uint4 lookup = resources.textures[maps.w * 4];
+        uint2 pixel = min(uint2(uv * float2(lookup.yz)), lookup.yz - 1);
+        uint sprite = resources.texels[lookup.x + pixel.y * lookup.y + pixel.x];
+        if (sprite == 0) {
+            MaterialSample empty = {uint4(0), uv};
+            return empty;
+        }
+        float4 bounds = asfloat(resources.textures[sprite * 4 + 3]);
+        uv = (uv - bounds.xy) / (bounds.zw - bounds.xy);
+        maps = resources.textures[sprite * 4 + 2];
+    }
+    MaterialSample result = {maps, uv};
+    return result;
+}
+// Continuous channels use their own mip chain. Fresnel and subsurface categories always
+// retain the point-filtered base-level source identity, as in the original access service.
+float4 linearMaterialLevel(TraceScene resources, uint texture, float2 uv) {
+    uint4 image = resources.textures[texture * 4];
+    float2 position = uv * float2(image.yz) - 0.5;
+    float2 lo = floor(position);
+    float2 f = frac(position);
+    float4 a = sampleTexture(resources.textures, resources.texels, texture,
+                             (lo + float2(0.5, 0.5)) / float2(image.yz), 0.0);
+    float4 b = sampleTexture(resources.textures, resources.texels, texture,
+                             (lo + float2(1.5, 0.5)) / float2(image.yz), 0.0);
+    float4 c = sampleTexture(resources.textures, resources.texels, texture,
+                             (lo + float2(0.5, 1.5)) / float2(image.yz), 0.0);
+    float4 d = sampleTexture(resources.textures, resources.texels, texture,
+                             (lo + float2(1.5, 1.5)) / float2(image.yz), 0.0);
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+}
+public float4 linearMaterial(TraceScene resources, uint texture, float2 uv, float lod) {
+    uint4 extra = resources.textures[texture * 4 + 1];
+    lod = clamp(lod, 0.0, float(extra.z));
+    uint level = uint(lod);
+    uint index = level == 0 ? texture : extra.y + level - 1;
+    float4 value = linearMaterialLevel(resources, index, uv);
+    return frac(lod) == 0.0
+                   ? value
+                   : lerp(value, linearMaterialLevel(resources, extra.y + level, uv), frac(lod));
+}
+float3 mappedNormal(SurfaceRecord record, SourceSample source, float3 geometric, float4 sample) {
+    float determinant = source.du.x * source.dv.y - source.du.y * source.dv.x;
+    if (abs(determinant) <= 1e-20)
+        return geometric;
+    float3 e = record.triangle.p1.xyz - record.triangle.p0.xyz;
+    float3 f = record.triangle.p2.xyz - record.triangle.p0.xyz;
+    float3 tangent = (e * source.dv.y - f * source.du.y) / determinant;
+    tangent -= geometric * dot(geometric, tangent);
+    if (dot(tangent, tangent) <= 1e-20)
+        return geometric;
+    tangent = normalize(tangent);
+    float3 bitangent = cross(geometric, tangent) * (determinant < 0.0 ? -1.0 : 1.0);
+    float3 normal = primeAdaptLabPbrNormalAtlas(sample).tangentNormal;
+    return normalize(tangent * normal.x + bitangent * normal.y + geometric * normal.z);
+}
+public float3 sourceEmission(TraceScene resources, SurfaceRecord record, SourceSample source,
+                             bool front) {
+    if (!front && (record.identity.w & 2) == 0)
+        return float3(0);
+    MaterialSample material = materialSource(resources, record.triangle.texture, source.uv);
+    if ((material.maps.z & 4) != 0) {
+        uint specular = material.maps.y;
+        float value = primeDecodeLabPbrEmission(
+                linearMaterial(resources, specular, material.uv, source.lod).a);
+        return decodeSrgb(saturate(source.color.rgb)) * (1.5 * value);
+    }
+    return record.emission.rgb *
+           ((record.identity.w & 16) != 0 ? decodeSrgb(saturate(source.color.rgb)) : float3(1));
 }
 SurfaceRecord loadQuad(uint *base, uint format, uint primitive) {
     uint words = surfaceFeatures < 2 ? 44 + format * 16
@@ -190,6 +288,7 @@ SurfaceRecord loadQuad(uint *base, uint format, uint primitive) {
     result.compound = record + 60;
     result.mode = surfaceFeatures >= 2 && format == 3 ? record[42] : 0;
     result.negative = result.positive = float4(1, 0, 0, 0);
+    result.positiveIorTexture = 0;
     result.half = primitive & 1;
     if (surfaceFeatures != 0 && format != 0) {
         float4 *extra = (float4 *)(record + 44);
@@ -198,6 +297,7 @@ SurfaceRecord loadQuad(uint *base, uint format, uint primitive) {
         result.emission = extra[2];
         result.identity = asuint(extra[3]);
         if (opticalFeatures != 0 && (result.identity.w & 32) != 0) {
+            result.positiveIorTexture = asuint(extra[0].w);
             float4 *medium = (float4 *)(record + (format == 2 ? 60 : 100));
             result.negative = medium[0];
             result.positive = medium[1];
@@ -267,6 +367,34 @@ SurfaceRecord secondary(SurfaceRecord base) {
     base.emission.rgb = ((float4 *)data)[9].rgb;
     return base;
 }
+public SurfaceRecord boundaryIors(TraceScene resources, SurfaceRecord record, float2 bary,
+                                  float footprint) {
+    if (opticalFeatures == 0)
+        return record;
+    // Reference coordinates stay fixed while their G category follows the current frame.
+    // Coatings cannot replace either physical medium's source field.
+    if (record.positiveIorTexture != 0) {
+        MaterialSample reference =
+                materialSource(resources, record.positiveIorTexture, float2(0.5));
+        if ((reference.maps.z & 2) != 0) {
+            float g = sampleTexture(resources.textures, resources.texels, reference.maps.y,
+                                    reference.uv, 0.0)
+                              .g;
+            record.positive.x = primePbrFresnelCodeIor(uint(round(g * 255.0)));
+        }
+    }
+    if ((record.identity.x & PRIME_PBR_DYNAMIC_MEDIUM_IOR) != 0) {
+        SourceSample source = sourceSample(resources, record, bary, footprint);
+        MaterialSample material = materialSource(resources, record.triangle.texture, source.uv);
+        if ((material.maps.z & 2) != 0) {
+            float g = sampleTexture(resources.textures, resources.texels, material.maps.y,
+                                    material.uv, 0.0)
+                              .g;
+            record.negative.x = primePbrFresnelCodeIor(uint(round(g * 255.0)));
+        }
+    }
+    return record;
+}
 SurfaceRecord selectMaterial(TraceScene resources, SurfaceRecord record, bool front, float2 bary,
                              float3 point, uint seed) {
     if (record.mode == 1) {
@@ -312,6 +440,7 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
         SurfaceRecord record =
                 loadSurface(resources, query.CommittedInstanceID(), query.CommittedGeometryIndex(),
                             query.CommittedPrimitiveIndex());
+        SurfaceRecord boundary = record;
         Triangle tri = record.triangle;
         float2 bary = query.CommittedTriangleBarycentrics();
         record = selectMaterial(resources, record, query.CommittedTriangleFrontFace(), bary,
@@ -328,20 +457,46 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
                                              query.CommittedObjectToWorld3x4(),
                                              query.CommittedWorldToObject3x4());
         // Surface-local derivatives must include an instance's actual scale/shear.
-        if ((instance & 0x00800000) != 0 && coneSpread > 0.0) {
+        if ((instance & 0x00800000) != 0) {
             float3x4 transform = query.CommittedObjectToWorld3x4();
             record.triangle.p0.xyz = mul(transform, float4(tri.p0.xyz, 1));
             record.triangle.p1.xyz = mul(transform, float4(tri.p1.xyz, 1));
             record.triangle.p2.xyz = mul(transform, float4(tri.p2.xyz, 1));
+            boundary.triangle.p0.xyz = record.triangle.p0.xyz;
+            boundary.triangle.p1.xyz = record.triangle.p1.xyz;
+            boundary.triangle.p2.xyz = record.triangle.p2.xyz;
         }
         float footprint = (coneWidth + coneSpread * query.CommittedRayT()) /
                           max(abs(dot(hit.surface.normal, direction)), 0.05);
-        hit.sourceColor = sourceColor(resources, record, bary, footprint);
-        hit.emission = ((record.identity.w & 2) != 0 || dot(hit.surface.normal, direction) < 0)
-                               ? record.emission.rgb
-                               : float3(0);
-        if ((record.identity.w & 16) != 0)
-            hit.emission *= decodeSrgb(saturate(hit.sourceColor.rgb));
+        boundary = boundaryIors(resources, boundary, bary, footprint);
+        record.negative = boundary.negative;
+        record.positive = boundary.positive;
+        SourceSample sampled = sourceSample(resources, record, bary, footprint);
+        hit.sourceColor = sampled.color;
+        MaterialSample material = materialSource(resources, record.triangle.texture, sampled.uv);
+        hit.materialFlags = material.maps.z;
+        uint4 maps = material.maps;
+        hit.normalSample = (hit.materialFlags & 1) != 0
+                                   ? linearMaterial(resources, maps.x, material.uv, sampled.lod)
+                                   : float4(0.5, 0.5, 1, 0);
+        hit.specularSample = (hit.materialFlags & 2) != 0
+                                     ? sampleTexture(resources.textures, resources.texels, maps.y,
+                                                     material.uv, 0.0)
+                                     : float4(0);
+        if ((hit.materialFlags & 2) != 0) {
+            float4 continuous = linearMaterial(resources, maps.y, material.uv, sampled.lod);
+            hit.specularSample.r = continuous.r;
+            hit.specularSample.a = continuous.a;
+        }
+        hit.shadingNormal =
+                (hit.materialFlags & 1) != 0
+                        ? mappedNormal(record, sampled, hit.surface.normal, hit.normalSample)
+                        : hit.surface.normal;
+        if ((hit.materialFlags & 1) != 0)
+            hit.shadingNormal = primeEnsureValidNormalMappedReflection(
+                    hit.surface.normal, -direction, hit.shadingNormal);
+        hit.emission =
+                sourceEmission(resources, record, sampled, dot(hit.surface.normal, direction) < 0);
         hit.light =
                 (instance & 0x00800000) == 0 && record.identity.z != 0xffffffffu
                         ? resources.staticTrianglePages[instance + query.CommittedGeometryIndex()]
@@ -353,6 +508,8 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
         hit.transmitted = front ? record.negative : record.positive;
         hit.optical = opticalFeatures != 0 && (record.identity.w & 128) != 0;
         hit.thin = opticalFeatures != 0 && (record.identity.w & 64) != 0;
+        hit.materialThin = primePbrSourceThinWalled(hit.thin, record.triangle.flags,
+                                                    uint(round(hit.specularSample.b * 255.0)));
     }
     return hit;
 }
@@ -426,6 +583,7 @@ public float3 traceTransmittance(TraceScene resources, float3 origin, float3 dir
         float distance = query.CandidateTriangleRayT();
         bool front = query.CandidateTriangleFrontFace();
         float2 bary = query.CandidateTriangleBarycentrics();
+        record = boundaryIors(resources, record, bary, 0.0);
         record =
                 selectMaterial(resources, record, front, bary, origin + direction * distance, seed);
         if ((record.identity.w & 128) == 0) {
@@ -528,9 +686,8 @@ public LightSample sampleLocalLight(TraceScene resources, float4 selectors, floa
     emitter =
             selectMaterial(resources, emitter, front, bary, result.surface.position, coverageSeed);
     result.valid = acceptsCoverage(resources, emitter, bary, result.surface.position, coverageSeed);
-    result.radiance = front || (emitter.identity.w & 2) != 0 ? emitter.emission.rgb : float3(0);
-    if ((emitter.identity.w & 16) != 0)
-        result.radiance *= decodeSrgb(saturate(sourceColor(resources, emitter, bary).rgb));
+    result.radiance =
+            sourceEmission(resources, emitter, sourceSample(resources, emitter, bary, 0.0), front);
     result.areaPdf = selectionPdf * reference.inverseArea;
     result.twoSided = (emitter.identity.w & 2) != 0;
     return result;
@@ -552,13 +709,12 @@ public float emissiveHitPdf(TraceScene resources, SurfaceHit hit, float3 previou
     float distanceSquared = dot(delta, delta);
     float cosine = distanceSquared > 0 ? abs(dot(hit.surface.normal, normalize(delta))) : 0;
     LightGrid grid = *resources.staticTrianglePages[0].lightGrid;
-    return cosine > 0 ? gridLightPdf(grid, previous, hit.light) *
-                                grid.emitters[hit.light].inverseArea * distanceSquared / cosine
-                      : 0;
+    float areaPdf = gridLightPdf(grid, previous, hit.light) * grid.emitters[hit.light].inverseArea;
+    return primeAreaSolidAnglePdfValue(areaPdf, distanceSquared, cosine);
 }
 
 public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, LightSample light,
-                                 uint coverageSeed, float4 medium, out float pdf,
+                                 uint coverageSeed, float4 medium, bool transmission, out float pdf,
                                  out float cosine) {
     pdf = 0;
     cosine = 0;
@@ -569,13 +725,14 @@ public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, Li
     if (distanceSquared == 0)
         return float3(0);
     float3 direction = delta * rsqrt(distanceSquared);
-    cosine = max(0.0, dot(receiver.normal, direction));
+    cosine = transmission ? abs(dot(receiver.normal, direction))
+                          : max(0.0, dot(receiver.normal, direction));
     float lightCosine = dot(light.surface.normal, -direction);
     if (light.twoSided)
         lightCosine = abs(lightCosine);
     if (cosine == 0 || lightCosine <= 0)
         return float3(0);
-    pdf = light.areaPdf * distanceSquared / lightCosine;
+    pdf = primeAreaSolidAnglePdfValue(light.areaPdf, distanceSquared, lightCosine);
     float3 begin = spawnRay(receiver, direction);
     float3 end = spawnRay(light.surface, -direction);
     float3 segment = end - begin;
@@ -584,4 +741,9 @@ public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, Li
         return float3(0);
     return traceTransmittance(resources, begin, segment / limit, coverageSeed, limit, medium) *
            light.radiance;
+}
+public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, LightSample light,
+                                 uint coverageSeed, float4 medium, out float pdf,
+                                 out float cosine) {
+    return evaluateLocalLight(resources, receiver, light, coverageSeed, medium, false, pdf, cosine);
 }

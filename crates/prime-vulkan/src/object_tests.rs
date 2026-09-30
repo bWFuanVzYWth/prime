@@ -231,6 +231,7 @@ fn gpu_affine_material_instances_match_baked_source_and_ten_thousand_share_one_b
         Texture {
             region: None,
             sampling: None,
+            material: None,
             width: 2,
             height: 2,
             pixels: vec![
@@ -244,6 +245,7 @@ fn gpu_affine_material_instances_match_baked_source_and_ten_thousand_share_one_b
         Texture {
             region: None,
             sampling: None,
+            material: None,
             width: 2,
             height: 2,
             pixels: vec![

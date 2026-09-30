@@ -444,7 +444,14 @@ impl SourceScene {
         self.revision
             .checked_add(2)
             .ok_or("scene revision exhausted")?;
-        let publication = self.publish_compiled(epoch, sequence, sections, removed)?;
+        let available = textures.iter().map(|(id, _)| *id).collect();
+        let publication = self.publish_compiled_with_ior_textures(
+            epoch,
+            sequence,
+            sections,
+            removed,
+            Some(&available),
+        )?;
         self.set_textures(textures)
             .expect("validated texture batch under exclusive scene ownership");
         Ok(publication)
@@ -458,6 +465,17 @@ impl SourceScene {
         sequence: u64,
         sections: Vec<CompiledSection>,
         removed: &[u64],
+    ) -> Result<Publication, String> {
+        self.publish_compiled_with_ior_textures(epoch, sequence, sections, removed, None)
+    }
+
+    fn publish_compiled_with_ior_textures(
+        &mut self,
+        epoch: u64,
+        sequence: u64,
+        sections: Vec<CompiledSection>,
+        removed: &[u64],
+        available: Option<&std::collections::BTreeSet<u32>>,
     ) -> Result<Publication, String> {
         if epoch != self.epoch || sequence <= self.section_completed.0 {
             return Err("stale compiled section batch".into());
@@ -484,6 +502,23 @@ impl SourceScene {
             }
         }
         for section in &sections {
+            for layer in &section.surfaces {
+                if let Layer::Replace(mesh) = layer
+                    && let MeshGeometry::Surfaces(surface) = &mesh.triangles
+                {
+                    for texture in surface.ior_textures() {
+                        if texture == 0
+                            || texture == u32::MAX
+                            || (!self.textures.contains_key(&texture)
+                                && available.is_none_or(|textures| !textures.contains(&texture)))
+                        {
+                            return Err(
+                                "optical IOR reference texture has not been captured".into()
+                            );
+                        }
+                    }
+                }
+            }
             count = count
                 .checked_add(section.triangle_count())
                 .ok_or("compiled geometry size overflow")?;
@@ -519,6 +554,7 @@ impl SourceScene {
             for layer in 0..6 {
                 if let Some(old) = self.meshes.remove(&(key, layer)) {
                     self.texture_lifetime.release(old.texture_id);
+                    self.texture_lifetime.release_ior_textures(&old.triangles);
                     result.retired.push(Some(old.triangles));
                     self.edits.meshes.insert((key, layer));
                     result.replaced_layers += 1;
@@ -546,11 +582,13 @@ impl SourceScene {
                 }
                 if let Some(old) = self.meshes.remove(&key) {
                     self.texture_lifetime.release(old.texture_id);
+                    self.texture_lifetime.release_ior_textures(&old.triangles);
                     result.retired.push(Some(old.triangles));
                 }
                 if let Layer::Replace(mut mesh) = plan {
                     mesh.revision = MeshVersion::captured(SectionSequence(sequence));
                     self.texture_lifetime.acquire(mesh.texture_id);
+                    self.texture_lifetime.acquire_ior_textures(&mesh.triangles);
                     self.meshes.insert(key, mesh);
                 }
                 result.replaced_layers += 1;

@@ -21,6 +21,44 @@ fn quad(x: f32, y: f32) -> SurfaceQuad {
     )
 }
 
+#[test]
+fn optical_reference_identity_prevents_merge_and_survives_exact_clipping() {
+    let mut a = SurfaceFace::from_quad(quad(0., 0.).geometry);
+    a.optics = Some(Optics {
+        negative: Medium::default(),
+        positive: Medium::default(),
+        ior_textures: [Some(7), Some(20)],
+        transmit: true,
+        thin: false,
+    });
+    let mut b = a.clone();
+    b.optics.as_mut().unwrap().ior_textures[1] = Some(90);
+    let merged = SurfaceCompiler::new()
+        .merge_resolved(vec![a.clone(), b])
+        .unwrap();
+    assert_eq!(
+        merged.len(),
+        2,
+        "distinct IOR resource owners are distinct material labels"
+    );
+    let owners: std::collections::BTreeSet<_> = merged
+        .iter()
+        .map(|face| face.optics.unwrap().ior_textures)
+        .collect();
+    assert_eq!(owners.len(), 2);
+    let clipped = clip_rectangle(
+        &a,
+        Rectangle {
+            axis: 2,
+            plane: 0.,
+            axes: [0, 1],
+            bounds: [0.125, 0.25, 0.875, 0.75],
+        },
+    );
+    assert!(!clipped.is_empty());
+    assert!(clipped.iter().all(|face| face.optics == a.optics));
+}
+
 fn point_uv(t: &SurfaceFace, point: [f32; 2]) -> Option<[f32; 2]> {
     (0..2).find_map(|half| {
         let triangle = t.geometry.triangle(half);

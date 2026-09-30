@@ -120,6 +120,9 @@ impl Default for Medium {
 pub struct Optics {
     pub negative: Medium,
     pub positive: Medium,
+    /// Current-frame LabPBR G owners. The positive side uses the source midpoint;
+    /// retaining this identity lets animation update IOR without recompiling geometry.
+    pub ior_textures: [Option<u32>; 2],
     /// False is an opaque coating with known incident media (e.g. submerged terrain).
     pub transmit: bool,
     pub thin: bool,
@@ -203,6 +206,14 @@ pub struct SurfaceMesh {
     pub stats: CompileStats,
 }
 impl SurfaceMesh {
+    pub(crate) fn ior_textures(&self) -> impl Iterator<Item = u32> + '_ {
+        self.quads.iter().flat_map(|face| {
+            face.optics
+                .into_iter()
+                .flat_map(|optics| optics.ior_textures.into_iter().flatten())
+        })
+    }
+
     pub fn from_resolved(revision: u64, mut quads: Vec<SurfaceFace>) -> Result<Self, String> {
         let lights = LightTree::build(&mut quads)?;
         Ok(Self {

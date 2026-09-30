@@ -25,6 +25,7 @@ pub(crate) fn plane() -> Scene {
         Texture {
             region: None,
             sampling: None,
+            material: None,
             width: 1,
             height: 1,
             pixels: vec![255; 4].into(),

@@ -1,0 +1,30 @@
+The shared BSDF foundations in
+`crates/prime-vulkan/shaders/bsdf/common/common.slang` and
+`crates/prime-vulkan/shaders/bsdf/common/material.slang` are adapted from legacy
+Prime's compact boundary utilities. Legacy Prime identifies the mathematical
+basis of those utilities with the BSDF implementation distributed by RoboCute:
+
+https://github.com/RoboCute/RoboCute
+
+BSDF base source revision recorded by legacy Prime:
+5985e989254b4685e3885d876b33f4874d233dcd
+
+Copyright RoboCute contributors. Licensed under the Apache License, Version
+2.0. The unmodified license is included in robocute-Apache-2.0.txt.
+
+This port retains the common value types, event flags, scalar/vector helpers,
+frame construction, Fresnel/IOR and roughness relations, volume derivation,
+bounded stack operations and default material initialization. Module names,
+visibility and imports are adapted to Prime PT's explicit LitePBR interface.
+
+The incorporated implementation is Prime's low-order LitePBR, carried by
+legacy Prime revision ca364b25c4b4c7de5c8eae82115b401bf1932b3e. This notice does
+not describe a complete compact OpenPBR closure library, an author hotfix
+source overlay, or transmission-GGX energy data. The LitePBR shader and Prime
+integration retain their separate project copyright and license.
+
+The LitePBR adaptation explicitly returns R=1 and T=0 at the thin-wall Snell TIR
+endpoint and removes a redundant incident-side sign factor from the initial
+refractive reflection-candidate guard, retaining exit reflection and TIR.
+Half-vector orientation, subsequent support checks, relative eta and medium
+state are preserved; the other source math is retained.

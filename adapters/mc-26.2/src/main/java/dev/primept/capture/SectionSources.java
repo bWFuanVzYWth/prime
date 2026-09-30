@@ -64,6 +64,7 @@ final class SectionSources {
     }
     @SuppressWarnings("unchecked")
     void section(SourcePages out, int x, int y, int z, LevelChunkSection section) {
+        sprites.prepareAtlas(out);
         if (section == null) {
             out.i(3).i(x).i(y).i(z).i(0);
             return;

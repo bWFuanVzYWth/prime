@@ -437,6 +437,17 @@ pub(crate) fn encode(
         if format < 2 {
             return Err("Optical record format mismatch".into());
         }
+        for texture in o.ior_textures.into_iter().flatten() {
+            if texture == 0 || texture == u32::MAX || !textures.contains_key(&texture) {
+                return Err("Optical IOR texture has not been captured".into());
+            }
+        }
+        if let Some(texture) = o.ior_textures[1] {
+            let index = textures[&texture];
+            // Repeat mappings consume only xyz; preserve this unused lane for the current
+            // positive-side material reference, without changing record size or bindings.
+            bytes[188..192].copy_from_slice(&index.to_le_bytes());
+        }
         let at = if format == 2 { 240 } else { 400 };
         for (side, medium) in [o.negative, o.positive].into_iter().enumerate() {
             if !medium.ior.is_finite()

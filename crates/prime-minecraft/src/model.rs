@@ -71,7 +71,7 @@ pub(crate) struct Catalog {
     pub volumes: HashMap<u32, crate::volume::Volume>,
     pub glass_references: HashMap<u32, [f32; 4]>,
     pub optical_materials: HashMap<(u32, u32), (u32, prime_scene::surface::Medium, bool)>,
-    medium_ids: HashMap<(String, [u32; 4]), u32>,
+    medium_ids: HashMap<(String, [u32; 4], Option<u32>), u32>,
 }
 
 pub(crate) fn state(r: &mut Reader<'_>) -> Result<(u32, State), String> {
@@ -388,7 +388,18 @@ impl Catalog {
                 let Some(&reference) = self.glass_references.get(&texture) else {
                     continue;
                 };
-                let medium = crate::optics::glass(reference);
+                let sprite = self.sprites.get(&q.sprite);
+                let reference_code = sprite.and_then(|sprite| {
+                    let frame = sprite.frames.first().map_or(0, |&(frame, _)| frame);
+                    sprite.fresnel_code(frame, [0.5; 2])
+                });
+                let constant_code = sprite.and_then(crate::sprite::Sprite::fresnel_code_constant);
+                let varying_ior = reference_code.is_some() && constant_code.is_none();
+                // This midpoint initializes the medium. Uniform resources prove one IOR;
+                // varying current G is sampled per hit and adjacent G follows the current
+                // GPU page at fixed reference coordinates.
+                let mut medium = crate::optics::glass(reference);
+                medium.ior = crate::optics::fresnel_code_ior(reference_code.unwrap_or(0));
                 let key = (
                     family.to_string(),
                     [
@@ -398,9 +409,15 @@ impl Catalog {
                         medium.extinction[2],
                     ]
                     .map(f32::to_bits),
+                    varying_ior.then_some(texture),
                 );
                 let next = self.medium_ids.len() as u32 + 2;
                 let id = *self.medium_ids.entry(key).or_insert(next);
+                let id = if varying_ior {
+                    id | crate::optics::DYNAMIC_IOR_MEDIUM
+                } else {
+                    id
+                };
                 self.optical_materials
                     .insert((state.id, texture), (id, medium, !closed));
             }
@@ -487,6 +504,7 @@ impl Catalog {
         }
         if let Some(quads) = self.combined.get(&state.model) {
             emit_prepared(
+                self,
                 state,
                 quads,
                 &self.prepared[&state.model],
@@ -534,6 +552,7 @@ impl Catalog {
         match self.models.get(&id) {
             Some(Model::Mesh(quads)) => {
                 emit_prepared(
+                    self,
                     state,
                     quads,
                     &self.prepared[&id],
@@ -605,6 +624,7 @@ impl Catalog {
 }
 #[allow(clippy::too_many_arguments)]
 fn emit_prepared(
+    catalog: &Catalog,
     state: &State,
     quads: &[Quad],
     recipes: &[crate::surfaces::Recipe],
@@ -621,7 +641,8 @@ fn emit_prepared(
             let b = &quads[pair.other];
             if active(a)
                 && active(b)
-                && let Some((face, slots)) = crate::surfaces::resolve(state, a, b, pair, offset)
+                && let Some((face, slots)) =
+                    crate::surfaces::resolve(catalog, state, a, b, pair, offset)
             {
                 let layer = face.flags() as usize;
                 let start = surfaces[layer].len();
@@ -634,20 +655,39 @@ fn emit_prepared(
                 continue;
             }
             if active(a) {
-                emit_source(state, a, offset, layers, tints, surfaces, recipe.two_sided);
+                emit_source(
+                    catalog,
+                    state,
+                    a,
+                    offset,
+                    layers,
+                    tints,
+                    surfaces,
+                    recipe.two_sided,
+                );
             }
             if active(b) {
-                emit_source(state, b, offset, layers, tints, surfaces, false);
+                emit_source(catalog, state, b, offset, layers, tints, surfaces, false);
             }
             continue;
         }
         if active(a) {
-            emit_source(state, a, offset, layers, tints, surfaces, recipe.two_sided);
+            emit_source(
+                catalog,
+                state,
+                a,
+                offset,
+                layers,
+                tints,
+                surfaces,
+                recipe.two_sided,
+            );
         }
     }
 }
 #[allow(clippy::too_many_arguments)]
 fn emit_source(
+    catalog: &Catalog,
     state: &State,
     q: &Quad,
     offset: [f32; 3],
@@ -657,7 +697,7 @@ fn emit_source(
     two_sided: bool,
 ) {
     let layer = crate::surfaces::flags(state, q);
-    let emission = crate::surfaces::emission(state, q, two_sided);
+    let emission = crate::surfaces::emission(catalog, state, q, two_sided);
     if emission != prime_scene::surface::Emission::default() {
         let mut face =
             prime_scene::surface::SurfaceFace::from_quad(crate::surfaces::closed(state, q, offset));

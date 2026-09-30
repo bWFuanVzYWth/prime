@@ -1,5 +1,70 @@
 use super::*;
 use crate::model::{Catalog, Model};
+
+#[test]
+fn authored_labpbr_emission_enters_the_ordinary_model_light_path_and_replaces_host_levels() {
+    let state = State {
+        id: 1,
+        model: 1,
+        ..Default::default()
+    };
+    for (alpha, level, expected) in [(254, 0, 1.5), (127, 15, 0.75), (0, 15, 0.0), (255, 15, 1.5)] {
+        let mut q = face();
+        q.sprite = 1;
+        q.layer = 0;
+        q.emission = level;
+        let mut sprite = crate::sprite::Sprite {
+            name: "test:lamp".into(),
+            bounds: [0., 0., 1., 1.],
+            extent: [1, 1],
+            images: vec![crate::sprite::Image {
+                width: 1,
+                height: 1,
+                pixels: vec![255; 4].into(),
+            }],
+            frames: vec![],
+            interpolate: false,
+            material: None,
+        };
+        let bytes: Vec<_> = [0_u32, 1, 1, 1, 1, u32::from_le_bytes([0, 4, 0, alpha])]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        let pages = [bytes.as_slice()];
+        sprite.material = Some(
+            crate::labpbr::Material::read(&mut crate::wire::Reader::new(&pages).unwrap(), &sprite)
+                .unwrap(),
+        );
+        let mut catalog = Catalog::default();
+        catalog.sprites.insert(1, sprite);
+        catalog.models.insert(1, Model::Mesh(vec![q]));
+        catalog.states.insert(1, state.clone());
+        catalog.prepare();
+        let mut layers = Default::default();
+        let mut surfaces = Default::default();
+        catalog.emit(
+            &state,
+            [0; 3],
+            127,
+            &mut layers,
+            &mut Default::default(),
+            &mut Default::default(),
+            &mut surfaces,
+        );
+        if expected == 0.0 {
+            assert_eq!(layers[0].len(), 1);
+            assert!(surfaces[0].is_empty());
+        } else {
+            assert!(layers[0].is_empty());
+            assert_eq!(surfaces[0].len(), 1);
+            assert_eq!(surfaces[0][0].emission.radiance, [expected; 3]);
+            let mesh =
+                prime_scene::surface::SurfaceMesh::from_resolved(1, surfaces[0].clone()).unwrap();
+            assert_eq!(mesh.lights.emitters.len(), 1);
+            assert_eq!(mesh.lights.emitters[0].power, expected);
+        }
+    }
+}
 fn face() -> Quad {
     Quad {
         sprite: 0,

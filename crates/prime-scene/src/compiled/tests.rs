@@ -12,6 +12,7 @@ fn scene() -> SourceScene {
             Texture {
                 region: None,
                 sampling: None,
+                material: None,
                 width: 1,
                 height: 1,
                 pixels: Arc::from([255; 4]),
@@ -30,8 +31,187 @@ fn triangle() -> Triangle {
         flags: 0,
     }
 }
+
+#[test]
+fn optical_reference_publication_is_atomic_and_holds_texture_until_last_surface_release() {
+    use crate::surface::{Medium, Optics, SurfaceFace};
+    let mut scene = scene();
+    let source = triangle();
+    let mut face = SurfaceFace::from_quad(CompiledQuad {
+        positions: [
+            source.positions[0],
+            source.positions[1],
+            source.positions[2],
+            source.positions[2],
+        ],
+        uvs: [source.uvs[0], source.uvs[1], source.uvs[2], source.uvs[2]],
+        color: [1.; 4],
+        texture_id: 1,
+        flags: 0,
+    });
+    face.optics = Some(Optics {
+        negative: Medium::default(),
+        positive: Medium::default(),
+        ior_textures: [Some(20), Some(20)],
+        transmit: false,
+        thin: false,
+    });
+    let mut missing = plan(&scene, vec![]);
+    scene.prepare_surface_layers(&mut missing, [vec![face.clone()], vec![], vec![]]);
+    let revision = scene.revision();
+    assert!(scene.publish_compiled(1, 1, vec![missing], &[]).is_err());
+    assert_eq!(scene.revision(), revision);
+    assert!(scene.meshes.is_empty());
+    assert_eq!(scene.section_completed, SectionSequence(0));
+
+    let mut captured = plan(&scene, vec![]);
+    scene.prepare_surface_layers(&mut captured, [vec![face.clone()], vec![], vec![]]);
+    let image = scene.texture(1).unwrap().clone();
+    scene
+        .publish_compiled_with_textures(1, 1, vec![captured], &[], vec![(20, image)])
+        .unwrap();
+    scene.texture_lifetime.retire(20);
+    scene.collect_textures().unwrap();
+    assert!(scene.texture(20).is_some());
+
+    let mut retained = plan(&scene, vec![]);
+    scene.prepare_surface_layers(&mut retained, [vec![face], vec![], vec![]]);
+    scene.publish_compiled(1, 2, vec![retained], &[]).unwrap();
+    scene.collect_textures().unwrap();
+    assert!(
+        scene.texture(20).is_some(),
+        "unchanged publication retains the IOR owner"
+    );
+    scene.publish_compiled(1, 3, vec![], &[7]).unwrap();
+    scene.collect_textures().unwrap();
+    assert!(
+        scene.texture(20).is_none(),
+        "retired source is collected after its final surface reference"
+    );
+}
 fn plan(scene: &SourceScene, triangles: Vec<Triangle>) -> CompiledSection {
     scene.prepare_compiled(7, [0.; 3], [triangles, Vec::new(), Vec::new()])
+}
+
+fn optical_protocol_release(op: u32, replace_layer: bool) {
+    use crate::surface::{Medium, Optics, SurfaceFace};
+    fn header(op: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for value in [crate::protocol::MAGIC, crate::protocol::ABI_VERSION, op, 0] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend(1_u64.to_le_bytes());
+        bytes
+    }
+    fn removal(key: u64, sequence: u64) -> Vec<u8> {
+        let mut bytes = header(3);
+        bytes.extend(key.to_le_bytes());
+        bytes.extend(sequence.to_le_bytes());
+        bytes
+    }
+    let mut scene = scene();
+    let source = triangle();
+    let mut face = SurfaceFace::from_quad(CompiledQuad {
+        positions: [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]],
+        uvs: [[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
+        color: [1.; 4],
+        texture_id: 1,
+        flags: 0,
+    });
+    face.optics = Some(Optics {
+        negative: Medium::default(),
+        positive: Medium::default(),
+        ior_textures: [Some(20), Some(20)],
+        transmit: false,
+        thin: false,
+    });
+    let sections = [7, 8]
+        .map(|key| {
+            let mut section = scene.prepare_compiled(key, [0.; 3], [vec![], vec![], vec![]]);
+            scene.prepare_surface_layers(&mut section, [vec![face.clone()], vec![], vec![]]);
+            section
+        })
+        .into();
+    let image = scene.texture(1).unwrap().clone();
+    scene
+        .publish_compiled_with_textures(1, 1, sections, &[], vec![(20, image)])
+        .unwrap();
+    let mut retire = header(9);
+    for value in [1_u32, 0, 20] {
+        retire.extend(value.to_le_bytes());
+    }
+    scene.submit(&retire).unwrap();
+    scene.collect_textures().unwrap();
+    assert!(scene.texture(20).is_some());
+
+    let mut packet = header(op);
+    if op == 11 {
+        packet.extend(1_u32.to_le_bytes());
+        packet.extend(0_u32.to_le_bytes());
+    }
+    packet.extend(7_u64.to_le_bytes());
+    packet.extend(2_u64.to_le_bytes());
+    if op == 8 {
+        for value in [0_f64; 3] {
+            packet.extend(value.to_le_bytes());
+        }
+        packet.extend(u32::from(replace_layer).to_le_bytes());
+        packet.extend(0_u32.to_le_bytes());
+        if replace_layer {
+            // Replace the optical surface layer with an ordinary, untextured triangle.
+            for value in [3_u32, 0, 0, 3, 3, 24, 0, 12, 16, 0] {
+                packet.extend(value.to_le_bytes());
+            }
+            for (position, uv) in source.positions.into_iter().zip(source.uvs) {
+                for value in position {
+                    packet.extend(value.to_le_bytes());
+                }
+                packet.extend([255_u8; 4]);
+                for value in uv {
+                    packet.extend(value.to_le_bytes());
+                }
+            }
+        }
+    }
+    scene.submit(&packet).unwrap();
+    scene.collect_textures().unwrap();
+    assert!(
+        scene.texture(20).is_some(),
+        "the other section still consumes both optical references"
+    );
+    assert_eq!(scene.meshes.contains_key(&(7, 3)), replace_layer);
+    if replace_layer {
+        assert!(matches!(
+            scene.meshes[&(7, 3)].triangles,
+            MeshGeometry::Triangles(_)
+        ));
+    }
+    scene.submit(&removal(8, 3)).unwrap();
+    scene.collect_textures().unwrap();
+    assert!(
+        scene.texture(20).is_none(),
+        "protocol removal releases the final optical reference"
+    );
+}
+
+#[test]
+fn optical_reference_protocol_single_removal_releases_last_owner() {
+    optical_protocol_release(3, false);
+}
+
+#[test]
+fn optical_reference_protocol_batch_removal_releases_last_owner() {
+    optical_protocol_release(11, false);
+}
+
+#[test]
+fn optical_reference_protocol_omitted_layer_releases_last_owner() {
+    optical_protocol_release(8, false);
+}
+
+#[test]
+fn optical_reference_protocol_replaced_layer_releases_last_owner() {
+    optical_protocol_release(8, true);
 }
 
 #[test]
