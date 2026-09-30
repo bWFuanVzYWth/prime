@@ -134,6 +134,7 @@ tasks.register('cpuSmoke', JavaExec) {
     systemProperty 'primept.smoke.foreignWrapper', providers.gradleProperty('primeptSmokeForeign').getOrElse('false')
     systemProperty 'primept.smoke.routingCost', providers.gradleProperty('primeptSmokeRoutingCost').getOrElse('')
     systemProperty 'primept.smoke.targetResize', providers.gradleProperty('primeptSmokeTargetResize').getOrElse('false')
+    systemProperty 'primept.sampling.registry', providers.gradleProperty('primeptSamplingRegistry').map { rootProject.file(it).absolutePath }.getOrElse('')
     systemProperty 'primept.section.suite', providers.gradleProperty('primeptSectionSuite').isPresent().toString()
     systemProperty 'primept.section.bench', providers.gradleProperty('primeptSectionBench').getOrElse('false')
     systemProperty 'primept.section.threads', providers.gradleProperty('primeptSectionThreads').getOrElse('8')

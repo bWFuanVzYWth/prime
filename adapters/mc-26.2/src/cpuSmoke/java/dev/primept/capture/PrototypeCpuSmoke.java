@@ -23,6 +23,11 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
     @Override
     public void onPreLaunch() {
         try {
+            String samplingRegistry = System.getProperty("primept.sampling.registry", "");
+            if (!samplingRegistry.isEmpty()) {
+                SamplingRegistryDump.run(java.nio.file.Path.of(samplingRegistry));
+                System.exit(0);
+            }
             if (Boolean.getBoolean("primept.section.suite")) {
                 SectionSuite.run();
                 System.exit(0);
