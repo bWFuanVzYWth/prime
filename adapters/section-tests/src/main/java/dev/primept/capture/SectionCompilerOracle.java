@@ -192,6 +192,7 @@ final class SectionCompilerOracle {
             }
         }
         SectionTintOracle.write(directory);
+        CrossUvCpuSmoke.run(directory.resolve("cross-uv"));
         Files.writeString(directory.resolve("suite.properties"),
                           "format=1\nsourceVersion=" + SourcePages.VERSION +
                                   "\ngameVersion=" + SectionSources.GAME_VERSION +

@@ -148,9 +148,12 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked object_tests::
 cargo test -p prime_vulkan --features shader-tests --lib --locked light_grid -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_optical_visibility -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_solar_sampled_radiance -- --ignored --nocapture --test-threads=1
+cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_cross_bilateral_uvs -- --ignored --nocapture --test-threads=1
 ```
 
 光学测试组合水/厚薄玻璃与前、中、后方的 opaque/cutout/stochastic blocker，并反转 mesh/primitive 顺序；无遮挡时对照解析 Beer/Fresnel，遮挡使用独立 coverage 参照。太阳测试使用实际圆盘采样，覆盖昼、夜和地平线部分可见，验证同一采样方向的辐亮度与支持域。它们是行为检查，不是稳态性能基线。
+
+十字面 GPU 测试从四个方向对照独立源三角形，使用非对称颜色与 alpha 检查两侧 UV 和透孔。CPU 配对规则随普通 `prime_minecraft` 测试验证；实际双版本 `cross` / `tinted_cross` 字段由 `cpuSmoke` 生成，再通过下面的原生回放核对。支持与参照边界见 [Section 测试设施](docs/guides/section-tests.md)。
 
 实例相关 GPU 测试覆盖局部原型、仿射/颜色/UV、增删及在途资源退休。Java 的 `cpuSmoke` 在真实 Fabric/Mixin 类上验证源路由、标准模型、下游截断与 target 创建/缩放。测试启动器在 preLaunch 退出，不调用游戏 main、不创建窗口或设备。地形原型通过真实 MC palette/模型字段、FFM 和独立 CPU native 库验证64段完整性、重复 dirty 合并、相同输入不重编译、空段清除与未知模型默认值；opaque 模型回调会主动抛错以证明未被调用。该入口需要 Rust，构建库放在 `build/source-cpu-native`，不会覆盖游戏使用的 release DLL。人工窗口不能代替实际视距或游戏验证。
 
@@ -168,6 +171,8 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_solar_samp
 ```powershell
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke --no-parallel
 cargo test -p prime_minecraft --locked -- --include-ignored --skip source_cost_matrix --skip source_burst_cost --skip biome_stream_cost
+# 只回放实际 cross / tinted_cross 的双版本正反 UV
+cargo test -p prime_minecraft --locked actual_cross_models -- --ignored --nocapture
 # 旧封闭几何路径的独立对照
 cargo test -p prime_scene --lib --locked java_routing_matches_both_versions_actual_source_and_fluid_particle_oracles -- --ignored --nocapture
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeForeign=true --no-parallel
@@ -236,7 +241,7 @@ cargo test --release -p prime_vulkan --lib --locked realtime_output_cost_matrix 
 # 26.2 使用 :mc-26.2:runClient。
 ```
 
-先检查半砖/活版门薄边/竖向栅栏的连续面与孔洞、纹理裁切/旋转/周期、草侧/红石/向日葵正反面、贴墙火焰、玻璃/水/含水部件、浅水斜坡、岩浆和火把发光。覆盖两侧与内部观察、首帧以外的动画、资源重载、负坐标及 16/64 块边界增删，确认编辑结果等价重新加载。检查 `hacks.sprite` / `hacks.optics` 的未支持来源，再关闭 validation 测量。动态光学、复杂开放玻璃、LabPBR 与折射焦散不在当前支持范围内。
+先检查半砖/活版门薄边/竖向栅栏的连续面与孔洞、纹理裁切/旋转/周期、草侧/红石/向日葵正反面、贴墙火焰、玻璃/水/含水部件、浅水斜坡、岩浆和火把发光。十字草与花从四个方向观察两张相交面的正反纹理及 cutout 孔洞，使用左右非对称的纹理检查各侧源 UV，并对比原版；不要用对称纹理判断正反映射。覆盖两侧与内部观察、首帧以外的动画、资源重载、负坐标及 16/64 块边界增删，确认编辑结果等价重新加载。检查 `hacks.sprite` / `hacks.optics` 的未支持来源，再关闭 validation 测量。动态光学、复杂开放玻璃、LabPBR 与折射焦散不在当前支持范围内。
 
 另覆盖均一水/玻璃/岩浆段与混合段的接缝、完整64段单元边缘的加载/卸载，以及白天到夜间和太阳圆盘跨地平线时的透明阴影。持续移动/增删动态对象后缩小负载，检查材质、光源概率与资源回收；重载图集、地图和皮肤时确认像素更新正常。两版分别验收，原生1080p帧时与更新尾延迟按固定输入另行记录。
 

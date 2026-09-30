@@ -5,6 +5,9 @@ use crate::tests::{frame, requests, scene};
 use prime_scene::Triangle;
 use std::sync::Arc;
 
+#[path = "oracle/cross_uv.rs"]
+mod cross_uv;
+
 /// Keep the section origin in f64. Casting it to f32 hides local geometry errors far from spawn.
 #[derive(Clone, Debug, PartialEq)]
 struct ObservedTriangle {

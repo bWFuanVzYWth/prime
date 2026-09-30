@@ -22,6 +22,21 @@ final class SourceSpriteFixture extends TextureAtlasSprite {
                                    new FrameSize(size, size), pixels),
                 x, y);
     }
+    static TextureAtlasSprite load(net.minecraft.resources.Identifier texture) throws Exception {
+        try (var input = SourceSpriteFixture.class.getResourceAsStream(
+                     "/assets/" + texture.getNamespace() + "/textures/" + texture.getPath() +
+                     ".png")) {
+            if (input == null)
+                throw new AssertionError("Missing vanilla texture: " + texture);
+            var image = NativeImage.read(input);
+            if (image.getWidth() != 16 || image.getHeight() != 16) {
+                image.close();
+                throw new AssertionError("Fixture requires a 16x16 vanilla texture: " + texture);
+            }
+            return new SourceSpriteFixture(
+                    new SpriteContents(texture, new FrameSize(16, 16), image), 0, 0);
+        }
+    }
     static void verifyAnimation(java.nio.file.Path directory) throws Exception {
         var image = new NativeImage(8, 4, true);
         for (int y = 0; y < 4; ++y)

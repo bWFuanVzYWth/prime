@@ -16,6 +16,77 @@ fn reverse(mut q: Quad) -> Quad {
     q.uvs = [0, 3, 2, 1].map(|i| q.uvs[i]);
     q
 }
+fn reverse_diagonal(mut q: Quad) -> Quad {
+    q.positions.reverse();
+    q.uvs.reverse();
+    q
+}
+fn cross_sheet(other: bool) -> Quad {
+    let mut q = face();
+    q.positions = if other {
+        [[1., 1., 0.], [1., 0., 0.], [0., 0., 1.], [0., 1., 1.]]
+    } else {
+        [[0., 1., 0.], [0., 0., 0.], [1., 0., 1.], [1., 1., 1.]]
+    };
+    q.uvs = [[0., 0.], [0., 1.], [1., 1.], [1., 0.]];
+    q
+}
+fn uv_at(positions: [[f32; 3]; 4], uvs: [[f32; 2]; 4], p: [f64; 3]) -> [f64; 2] {
+    let positions = positions.map(|p| p.map(f64::from));
+    let dot = |a: [f64; 3], b: [f64; 3]| a.into_iter().zip(b).map(|(a, b)| a * b).sum::<f64>();
+    for [a, b, c] in [[0, 1, 2], [2, 3, 0]] {
+        let u = std::array::from_fn(|i| positions[b][i] - positions[a][i]);
+        let v = std::array::from_fn(|i| positions[c][i] - positions[a][i]);
+        let p = std::array::from_fn(|i| p[i] - positions[a][i]);
+        let (uu, uv, vv, pu, pv) = (dot(u, u), dot(u, v), dot(v, v), dot(p, u), dot(p, v));
+        let determinant = uu * vv - uv * uv;
+        let x = (pu * vv - pv * uv) / determinant;
+        let y = (pv * uu - pu * uv) / determinant;
+        if x >= -1e-12 && y >= -1e-12 && x + y <= 1. + 1e-12 {
+            return std::array::from_fn(|i| {
+                f64::from(uvs[a][i]) * (1. - x - y)
+                    + f64::from(uvs[b][i]) * x
+                    + f64::from(uvs[c][i]) * y
+            });
+        }
+    }
+    panic!("query point is outside source triangles");
+}
+fn normal(positions: [[f32; 3]; 4]) -> [f32; 3] {
+    let a: [f32; 3] = std::array::from_fn(|i| positions[1][i] - positions[0][i]);
+    let b: [f32; 3] = std::array::from_fn(|i| positions[2][i] - positions[0][i]);
+    std::array::from_fn(|i| a[(i + 1) % 3] * b[(i + 2) % 3] - a[(i + 2) % 3] * b[(i + 1) % 3])
+}
+fn assert_side_uvs(face: &SurfaceFace, source: &Quad) {
+    let positions = source.positions.map(|p| [p[0] + 3., p[1] + 4., p[2] + 5.]);
+    let front = normal(positions)
+        .into_iter()
+        .zip(normal(face.geometry.positions))
+        .map(|(a, b)| a * b)
+        .sum::<f32>()
+        > 0.;
+    let actual_uvs = if front {
+        face.geometry.uvs
+    } else {
+        face.detail.as_ref().unwrap().layer.uvs
+    };
+    // Query both source halves and both possible diagonals, including their shared edges.
+    for s in [0.125, 0.25, 0.5, 0.75, 0.875] {
+        for t in [0.125, 0.25, 0.5, 0.75, 0.875] {
+            let point = std::array::from_fn(|i| {
+                f64::from(positions[0][i])
+                    + s * (f64::from(positions[1][i]) - f64::from(positions[0][i]))
+                    + t * (f64::from(positions[3][i]) - f64::from(positions[0][i]))
+            });
+            let expected = uv_at(positions, source.uvs, point);
+            let actual = uv_at(face.geometry.positions, actual_uvs, point);
+            assert!(
+                (0..2).all(|i| (expected[i] - actual[i]).abs() < 1e-12),
+                "side={front} point={point:?} source={expected:?} resolved={actual:?}"
+            );
+        }
+    }
+}
 fn emit(
     c: &Catalog,
     name: &str,
@@ -119,6 +190,137 @@ fn independent_cull_conditions_and_side_uvs_survive_definition_preparation() {
     assert_eq!(d.mode, LayerMode::Bilateral);
     assert_eq!(d.layer.uvs[0], [0.25, 0.]);
     assert_eq!(rich[0].geometry.uvs[0], [0., 0.]);
+}
+#[test]
+fn affine_cross_sides_keep_source_uvs_across_diagonals_rotations_and_order() {
+    for first_rotation in 0..4 {
+        for second_rotation in 0..4 {
+            for swap in [false, true] {
+                let mut quads = Vec::new();
+                for other in [false, true] {
+                    let mut a = cross_sheet(other);
+                    let mut b = reverse_diagonal(a.clone());
+                    // Vanilla cross faces use the same numbered UV corners on opposite windings:
+                    // their physical U maps differ, so they must remain independent side fields.
+                    b.uvs = a.uvs;
+                    a.positions.rotate_left(first_rotation);
+                    a.uvs.rotate_left(first_rotation);
+                    b.positions.rotate_left(second_rotation);
+                    b.uvs.rotate_left(second_rotation);
+                    quads.extend(if swap { [b, a] } else { [a, b] });
+                }
+                let c = catalog(quads.clone());
+                let (plain, rich, _) = emit(&c, "test:cross", 127);
+                assert!(plain.is_empty());
+                assert_eq!(rich.len(), 2);
+                for (face, sources) in rich.iter().zip(quads.as_chunks::<2>().0) {
+                    assert_eq!(face.detail.as_ref().unwrap().mode, LayerMode::Bilateral);
+                    for source in sources {
+                        assert_side_uvs(face, source);
+                    }
+                    assert_ne!(face.geometry.uvs, face.detail.as_ref().unwrap().layer.uvs);
+                }
+            }
+        }
+    }
+}
+#[test]
+fn affine_odd_diagonal_pairs_keep_independent_activation_and_tints() {
+    let mut a = cross_sheet(false);
+    a.face = 2;
+    a.tint = 0;
+    let mut b = reverse_diagonal(a.clone());
+    b.uvs = a.uvs;
+    b.face = 3;
+    b.tint = 1;
+    let c = catalog(vec![a.clone(), b.clone()]);
+    for source in [&a, &b] {
+        let (plain, rich, tints) = emit(&c, "test:cross", 1 << source.face);
+        assert_eq!(plain.len(), 1);
+        assert!(rich.is_empty());
+        assert_eq!(plain[0].uvs, source.uvs);
+        assert_eq!(tints.requests.len(), 1);
+        assert_eq!(tints.requests[0].slot, source.tint);
+    }
+    let (plain, rich, tints) = emit(&c, "test:cross", 127);
+    assert!(plain.is_empty());
+    assert_eq!(rich.len(), 1);
+    assert_eq!(tints.requests.len(), 2);
+    assert_side_uvs(&rich[0], &a);
+    assert_side_uvs(&rich[0], &b);
+}
+#[test]
+fn equivalent_affine_odd_diagonals_collapse_without_a_second_layer() {
+    let a = cross_sheet(false);
+    let c = catalog(vec![a.clone(), reverse_diagonal(a.clone())]);
+    let (plain, rich, _) = emit(&c, "test:sheet", 127);
+    assert_eq!(plain.len(), 1);
+    assert!(rich.is_empty());
+    assert_eq!(plain[0].uvs, a.uvs);
+}
+#[test]
+fn odd_diagonal_proofs_reject_nonaffine_geometry_uvs_and_degenerate_sheets() {
+    let a = face();
+    let mut cases = Vec::new();
+    let mut warped = a.clone();
+    warped.positions[2][2] = 0.125;
+    cases.push(("nonplanar", warped));
+    let mut trapezoid = a.clone();
+    trapezoid.positions[2][0] = 0.75;
+    cases.push(("trapezoid", trapezoid));
+    let mut concave = a.clone();
+    concave.positions[2] = [0.25, 0.25, 0.];
+    cases.push(("concave", concave));
+    let mut collinear = a.clone();
+    collinear.positions = [[0., 0., 0.], [1., 1., 1.], [3., 3., 3.], [2., 2., 2.]];
+    cases.push(("collinear parallelogram", collinear));
+    let mut repeated = a.clone();
+    repeated.positions = [[0., 0., 0.], [1., 0., 0.], [2., 0., 0.], [1., 0., 0.]];
+    cases.push(("repeated corner", repeated));
+    let mut nonaffine = a.clone();
+    nonaffine.uvs[2][0] = 0.75;
+    cases.push(("nonaffine UV", nonaffine));
+    let tiny = 2.0_f32.powi(-100);
+    let mut rounded_geometry = a.clone();
+    rounded_geometry.positions = [[1., 0., 0.], [0., 0., 0.], [-tiny, 1., 0.], [1., 1., 0.]];
+    cases.push(("f64-rounded geometry sum", rounded_geometry));
+    let mut rounded_uv = a.clone();
+    rounded_uv.uvs = [[1., 0.], [1., 0.], [tiny, 1.], [0., 1.]];
+    cases.push(("f64-rounded UV sum", rounded_uv));
+    for (label, source) in cases {
+        let c = catalog(vec![source.clone(), reverse_diagonal(source)]);
+        let (plain, rich, _) = emit(&c, "test:sheet", 127);
+        assert_eq!(plain.len(), 2, "{label}");
+        assert!(rich.is_empty(), "{label}");
+    }
+    // Both sides must prove their own affine UVs, even when the other source is regular.
+    for bad_side in [0, 1] {
+        let mut pair = [a.clone(), reverse_diagonal(a.clone())];
+        pair[bad_side].uvs[2][0] = 0.75;
+        let (plain, rich, _) = emit(&catalog(pair.into()), "test:sheet", 127);
+        assert_eq!(plain.len(), 2, "nonaffine side {bad_side}");
+        assert!(rich.is_empty());
+    }
+}
+#[test]
+fn nondegenerate_projection_preserves_tiny_areas_without_inventing_collinear_area() {
+    let tiny = 2.0_f32.powi(-100);
+    let positions = [
+        [1., 3., 0.],
+        [tiny, 3. * tiny, 0.],
+        [-1., -3., 0.],
+        [-tiny, -3. * tiny, 0.],
+    ];
+    assert!(affine(positions));
+    assert!(!nondegenerate(positions));
+    let thin = [
+        [0., 0., 0.],
+        [1., 1., 0.],
+        [2., 2. + 2.0_f32.powi(-22), 0.],
+        [1., 1. + 2.0_f32.powi(-22), 0.],
+    ];
+    assert!(affine(thin));
+    assert!(nondegenerate(thin));
 }
 #[test]
 fn state_bound_overlay_keeps_each_tint_and_does_not_pollute_shared_model() {

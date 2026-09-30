@@ -22,10 +22,56 @@ pub(crate) struct Recipe {
     pub two_sided: bool,
 }
 
+fn exact_sum(a: f64, b: f64) -> (f64, f64) {
+    let sum = a + b;
+    let b_virtual = sum - a;
+    (sum, (a - (sum - b_virtual)) + (b - b_virtual))
+}
+fn affine<const N: usize>(values: [[f32; N]; 4]) -> bool {
+    (0..N).all(|i| {
+        exact_sum(f64::from(values[0][i]), f64::from(values[2][i]))
+            == exact_sum(f64::from(values[1][i]), f64::from(values[3][i]))
+    })
+}
+fn nondegenerate(positions: [[f32; 3]; 4]) -> bool {
+    let p = positions.map(|p| p.map(f64::from));
+    (0..3).any(|axis| {
+        let (x, y) = ((axis + 1) % 3, (axis + 2) % 3);
+        // Each product of two source f32 values is exact in f64. An expansion keeps every
+        // residual of the projected (p1-p0) x (p3-p0), including nearly collinear input.
+        let terms = [
+            p[1][x] * p[3][y],
+            -p[1][x] * p[0][y],
+            -p[0][x] * p[3][y],
+            -p[1][y] * p[3][x],
+            p[1][y] * p[0][x],
+            p[0][y] * p[3][x],
+        ];
+        let mut expansion = [0.; 6];
+        let mut count = 0;
+        for mut sum in terms {
+            let mut next = 0;
+            for i in 0..count {
+                let (high, low) = exact_sum(sum, expansion[i]);
+                sum = high;
+                if low != 0. {
+                    expansion[next] = low;
+                    next += 1;
+                }
+            }
+            if sum != 0. {
+                expansion[next] = sum;
+                next += 1;
+            }
+            count = next;
+        }
+        count != 0
+    })
+}
 fn mapping(a: &Quad, b: &Quad) -> Option<([usize; 4], bool)> {
     for reverse in [false, true] {
         // Even offsets preserve the source diagonal and both exact triangle interpolants.
-        for shift in [0, 2] {
+        for shift in [0, 2, 1, 3] {
             let corners = std::array::from_fn(|i| {
                 if reverse {
                     (shift + 4 - i) % 4
@@ -33,7 +79,15 @@ fn mapping(a: &Quad, b: &Quad) -> Option<([usize; 4], bool)> {
                     (shift + i) % 4
                 }
             });
-            if (0..4).all(|i| a.positions[i] == b.positions[corners[i]]) {
+            if (0..4).all(|i| a.positions[i] == b.positions[corners[i]])
+                && (shift % 2 == 0
+                    // A different diagonal is equivalent only on a nondegenerate exact
+                    // parallelogram with an affine UV map on each source side.
+                    || affine(a.positions)
+                        && nondegenerate(a.positions)
+                        && affine(a.uvs)
+                        && affine(b.uvs))
+            {
                 return Some((corners, reverse));
             }
         }

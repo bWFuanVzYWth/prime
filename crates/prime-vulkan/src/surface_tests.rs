@@ -219,6 +219,338 @@ fn gpu_compound_sheet_matches_independent_material_oracle_from_both_sides() {
 
 #[cfg(feature = "shader-tests")]
 #[test]
+#[ignore = "windowless crossed-sheet source UV/coverage oracle from four sides with independent AS triangles"]
+fn gpu_cross_bilateral_uvs_match_original_source_triangles_from_four_sides() {
+    use prime_scene::surface::{
+        Emission, LayerMode, SurfaceDetail, SurfaceFace, SurfaceLayer, SurfaceMesh,
+    };
+
+    fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+        std::array::from_fn(|i| a[i] - b[i])
+    }
+    fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+        a.into_iter().zip(b).map(|(a, b)| a * b).sum()
+    }
+    fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    }
+    fn facing(source: &CompiledQuad, direction: [f32; 3]) -> bool {
+        let p = source.positions.map(|p| p.map(f64::from));
+        dot(
+            cross(sub(p[1], p[0]), sub(p[2], p[0])),
+            direction.map(f64::from),
+        ) < 0.
+    }
+    fn oracle(
+        sources: &[CompiledQuad; 4],
+        origin: [f32; 3],
+        direction: [f32; 3],
+        pixels: &[u8],
+    ) -> ([f32; 3], [f32; 4]) {
+        // Intersect the original source triangles with f64 Moller-Trumbore. Neither the
+        // bilateral corner remap nor the shader's record/half addressing participates.
+        let origin = origin.map(f64::from);
+        let ray = direction.map(f64::from);
+        let mut nearest = f64::INFINITY;
+        let mut color = None;
+        for source in sources.iter().filter(|source| facing(source, direction)) {
+            for triangle in source.triangles() {
+                let p = triangle.positions.map(|p| p.map(f64::from));
+                let e = sub(p[1], p[0]);
+                let f = sub(p[2], p[0]);
+                let h = cross(ray, f);
+                let inverse = 1. / dot(e, h);
+                let offset = sub(origin, p[0]);
+                let u = dot(offset, h) * inverse;
+                let q = cross(offset, e);
+                let v = dot(ray, q) * inverse;
+                let distance = dot(f, q) * inverse;
+                if u < 0. || v < 0. || u + v > 1. || distance <= 0. || distance >= nearest {
+                    continue;
+                }
+                let uv: [f64; 2] = std::array::from_fn(|a| {
+                    f64::from(triangle.uvs[0][a]) * (1. - u - v)
+                        + f64::from(triangle.uvs[1][a]) * u
+                        + f64::from(triangle.uvs[2][a]) * v
+                });
+                let [x, y] = uv.map(|v| ((v - v.floor()) * 16.).floor() as usize);
+                let texel: [f32; 4] = pixels[(y * 16 + x) * 4..][..4]
+                    .try_into()
+                    .map(|pixel: [u8; 4]| pixel.map(|v| f32::from(v) / 255.))
+                    .unwrap();
+                if source.flags == 1 && texel[3] < 0.1 {
+                    continue;
+                }
+                nearest = distance;
+                color = Some(texel);
+            }
+        }
+        (
+            if color.is_some() { [0.; 3] } else { [1.; 3] },
+            color.unwrap_or([0.; 4]),
+        )
+    }
+    fn scene(pixels: &[u8], meshes: impl IntoIterator<Item = MeshGeometry>, flags: u32) -> Scene {
+        let mut scene = Scene {
+            epoch: 1,
+            revision: 1,
+            ..Default::default()
+        };
+        scene
+            .ready_terrain
+            .insert(Cell::containing([0.; 3]).unwrap());
+        scene.textures.insert(
+            1,
+            Texture {
+                region: None,
+                sampling: None,
+                width: 16,
+                height: 16,
+                pixels: pixels.into(),
+            },
+        );
+        for (id, triangles) in meshes.into_iter().enumerate() {
+            scene.meshes.insert(
+                (id as u64, flags),
+                SceneMesh {
+                    revision: 1,
+                    flags,
+                    origin: [0.; 3],
+                    triangles,
+                },
+            );
+        }
+        scene
+    }
+    fn geometry(context: &Arc<Context>, scene: &Scene) -> Geometry {
+        let mut geometry = Geometry::new(
+            context,
+            scene.into(),
+            Arc::new(prime_scene::workers::CpuWorkers::new(1).unwrap()),
+        )
+        .unwrap();
+        geometry
+            .prepare_dynamic(
+                context,
+                scene,
+                &InstanceScene::default(),
+                0,
+                &mut cpu_profile::FrameCpu::default(),
+            )
+            .unwrap();
+        geometry
+    }
+    fn query(
+        context: &Arc<Context>,
+        geometry: &Geometry,
+        input: &[u32],
+    ) -> Vec<([f32; 3], [f32; 4])> {
+        crate::shader_tests::run(
+            context,
+            include_bytes!(concat!(env!("OUT_DIR"), "/optics.spv")),
+            input,
+            input.len(),
+            [0, (input.len() / 12) as u32],
+            Some(geometry),
+        )
+        .as_chunks::<12>()
+        .0
+        .iter()
+        .map(|row| {
+            (
+                [row[0], row[1], row[2]].map(f32::from_bits),
+                [row[8], row[9], row[10], row[11]].map(f32::from_bits),
+            )
+        })
+        .collect()
+    }
+
+    let pixels: Vec<u8> = (0..16)
+        .flat_map(|y| {
+            (0..16).flat_map(move |x| {
+                [
+                    17 + x * 13,
+                    23 + y * 11,
+                    ((x * 7 + y * 3) % 16) * 13,
+                    if (x + 2 * y) % 5 < 2 { 0 } else { 255 },
+                ]
+            })
+        })
+        .collect();
+    let context = Context::new().unwrap();
+    // Actual vanilla cross.json -> FaceBakery output: the opposite sides reverse all four
+    // position corners (a different diagonal) while retaining their own original UV order.
+    let low = 0.05000004;
+    let high = 0.9499999;
+    for flags in [0, 1] {
+        let sources = [
+            [
+                [high, 1., low],
+                [high, 0., low],
+                [low, 0., high],
+                [low, 1., high],
+            ],
+            [
+                [low, 1., high],
+                [low, 0., high],
+                [high, 0., low],
+                [high, 1., low],
+            ],
+            [
+                [low, 1., low],
+                [low, 0., low],
+                [high, 0., high],
+                [high, 1., high],
+            ],
+            [
+                [high, 1., high],
+                [high, 0., high],
+                [low, 0., low],
+                [low, 1., low],
+            ],
+        ]
+        .map(|positions| CompiledQuad {
+            positions,
+            uvs: [[0., 0.], [0., 1.], [1., 1.], [1., 0.]],
+            color: [1.; 4],
+            texture_id: 1,
+            flags,
+        });
+        let actual: Vec<_> = [false, true]
+            .into_iter()
+            .map(|reverse| {
+                let faces = [0, 2].map(|pair| {
+                    let base = sources[pair + usize::from(reverse)];
+                    let back = sources[pair + usize::from(!reverse)];
+                    let mut face = SurfaceFace::from_quad(base);
+                    face.detail = Some(Arc::new(SurfaceDetail {
+                        mode: LayerMode::Bilateral,
+                        layer: SurfaceLayer {
+                            colors: [back.color; 4],
+                            // Match source positions; no assumed U reflection or barycentric flip.
+                            uvs: base.positions.map(|p| {
+                                back.uvs[back.positions.iter().position(|&b| b == p).unwrap()]
+                            }),
+                            texture_id: back.texture_id,
+                            flags: back.flags,
+                            repeat: None,
+                            emission: Emission::default(),
+                        },
+                    }));
+                    face
+                });
+                let mut faces = faces.to_vec();
+                if reverse {
+                    faces.reverse();
+                }
+                let geometry = geometry(
+                    &context,
+                    &scene(
+                        &pixels,
+                        [MeshGeometry::Surfaces(Arc::new(
+                            SurfaceMesh::from_resolved(1, faces).unwrap(),
+                        ))],
+                        flags,
+                    ),
+                );
+                assert_eq!(geometry.shader_variant(), 2);
+                assert_eq!(geometry.surface_memory()[0], 2 * 432);
+                geometry
+            })
+            .collect();
+        for direction in [[1., 0., 0.], [-1., 0., 0.], [0., 0., 1.], [0., 0., -1.]] {
+            // Only actual front-facing source sheets enter the reference AS. Each original
+            // 012/230 triangle is a separate mesh, excluding both pair folding and coincident
+            // front/back competition from this oracle.
+            let reference = geometry(
+                &context,
+                &scene(
+                    &pixels,
+                    sources
+                        .iter()
+                        .filter(|source| facing(source, direction))
+                        .flat_map(|source| source.triangles().map(|triangle| [triangle].into())),
+                    flags,
+                ),
+            );
+            assert_eq!(reference.surface_memory()[0], 4 * 176);
+            let mut input = Vec::new();
+            let mut expected = Vec::new();
+            for y in 0..16 {
+                for x in 0..16 {
+                    // Offset sample centers away from diagonals, cross intersections and texel
+                    // boundaries, retaining both source triangle halves and every texture row.
+                    let horizontal = low + (high - low) * (x as f32 + 0.375) / 16.;
+                    let vertical = (y as f32 + 0.6875) / 16.;
+                    let origin = if direction[0] != 0. {
+                        [
+                            if direction[0] > 0. { -1. } else { 2. },
+                            vertical,
+                            horizontal,
+                        ]
+                    } else {
+                        [
+                            horizontal,
+                            vertical,
+                            if direction[2] > 0. { -1. } else { 2. },
+                        ]
+                    };
+                    input.extend([origin[0], origin[1], origin[2], 4.].map(f32::to_bits));
+                    input.extend([direction[0], direction[1], direction[2], 1.].map(f32::to_bits));
+                    input.extend([0.; 4].map(f32::to_bits));
+                    expected.push(oracle(&sources, origin, direction, &pixels));
+                }
+            }
+            if flags == 1 {
+                assert!(
+                    expected
+                        .iter()
+                        .any(|(visibility, _)| *visibility == [0.; 3])
+                );
+                assert!(
+                    expected
+                        .iter()
+                        .any(|(visibility, _)| *visibility == [1.; 3])
+                );
+            }
+            let source = query(&context, &reference, &input);
+            for (reverse, geometry) in actual.iter().enumerate() {
+                let output = query(&context, geometry, &input);
+                for (
+                    i,
+                    ((actual_visibility, actual_color), (expected_visibility, expected_color)),
+                ) in output.iter().zip(&expected).enumerate()
+                {
+                    assert_eq!(
+                        actual_visibility, expected_visibility,
+                        "flags={flags} direction={direction:?} reverse={reverse} ray={i}"
+                    );
+                    assert_eq!(
+                        source[i].0, *expected_visibility,
+                        "source reference visibility ray={i}"
+                    );
+                    for channel in 0..4 {
+                        assert!(
+                            (source[i].1[channel] - expected_color[channel]).abs() < 2e-6,
+                            "source reference color ray={i} channel={channel}"
+                        );
+                        assert!(
+                            (actual_color[channel] - expected_color[channel]).abs() < 2e-6,
+                            "flags={flags} direction={direction:?} reverse={reverse} ray={i} color={actual_color:?} expected={expected_color:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "shader-tests")]
+#[test]
 #[ignore = "windowless actual optical boundaries, order-independent absorption and initial medium"]
 fn gpu_optical_boundaries_match_beer_lambert_and_fresnel_from_both_sides_and_inside() {
     use prime_scene::surface::{Medium, Optics, SurfaceFace, SurfaceMesh};
