@@ -9,6 +9,7 @@ description = "Vulkan resource ownership and Slang path-tracing execution for Pr
 [features]
 shader-tests = []
 atmosphere-bake = []
+light-sampling-bench = []
 
 [dependencies]
 ash = { workspace = true }

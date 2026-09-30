@@ -8,6 +8,8 @@ mod benchmark;
 mod cpu_profile;
 mod display;
 mod dynamic;
+#[cfg(feature = "light-sampling-bench")]
+pub mod light_sampling;
 mod objects;
 pub use display::{PrimeDrtParameters, PrimeDrtSettings};
 mod geometry;

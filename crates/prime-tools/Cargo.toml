@@ -11,12 +11,18 @@ description = "CPU capture-protocol benchmarks, native-1080p GPU fixtures and im
 default = ["vulkan"]
 vulkan = ["dep:prime_vulkan", "dep:png"]
 atmosphere-bake = ["vulkan", "prime_vulkan/atmosphere-bake"]
+light-sampling-bench = ["vulkan", "prime_vulkan/light-sampling-bench"]
 
 [dependencies]
 mimalloc.workspace = true
 prime_scene.workspace = true
 prime_vulkan = { workspace = true, optional = true }
 png = { workspace = true, optional = true }
+
+[[bin]]
+name = "light-sampling"
+path = "src/light_sampling.rs"
+required-features = ["light-sampling-bench"]
 
 [[bin]]
 name = "bake-atmosphere"

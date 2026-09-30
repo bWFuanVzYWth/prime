@@ -2,6 +2,7 @@
 module "ray_query.slang";
 import "math/ray_offset.slang";
 import "math/color.slang";
+import "light_sampling.slang";
 
 // Vulkan pipeline specialization removes unused record/light paths before GPU execution.
 // Test entry points use the complete semantics by default.
@@ -44,12 +45,6 @@ public struct SurfaceRecord {
     uint half;
     float4 negative;
     float4 positive;
-};
-public struct LightNode {
-    float3 lower;
-    float power;
-    float3 upper;
-    uint child;
 };
 public struct TrianglePage {
     uint *quads;
@@ -481,24 +476,6 @@ public bool hasLocalLights(TraceScene resources) {
     return resources.staticTrianglePages[0].lightCount != 0;
 }
 
-// Power-weighted baseline. Residual uniform mass is passed from the world leaf to its local
-// tree. Bounds are resident, but a position-dependent proposal is not implied by this version.
-uint selectLight(LightNode *nodes, inout float sample) {
-    LightNode node = nodes[0];
-    float weight = sample * node.power;
-    while ((node.child & 0x80000000u) == 0) {
-        LightNode left = nodes[node.child];
-        if (weight < left.power)
-            node = left;
-        else {
-            weight -= left.power;
-            node = nodes[node.child + 1];
-        }
-    }
-    sample = min(weight / node.power, asfloat(0x3f7fffffu));
-    return node.child & 0x7fffffffu;
-}
-
 public struct LightSample {
     public bool valid;
     public SurfacePoint surface;
@@ -516,9 +493,9 @@ public LightSample sampleLocalLight(TraceScene resources, float selector, float2
     TrianglePage world = resources.staticTrianglePages[0];
     if (world.lightCount == 0)
         return result;
-    result.page = selectLight(world.worldNodes, selector);
+    result.page = selectPowerLight(world.worldNodes, selector);
     TrianglePage page = resources.staticTrianglePages[result.page];
-    result.emitter = selectLight(page.nodes, selector);
+    result.emitter = selectPowerLight(page.nodes, selector);
     uint words = page.emitterFormat == 3 ? 108 : (page.emitterFormat == 2 ? 68 : 60);
     uint *light = page.emitters + result.emitter * words;
     float firstFraction = asfloat(light[3]);

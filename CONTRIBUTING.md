@@ -186,6 +186,24 @@ Java CSV 的 `terrain_plan_ns` 是请求规划 FFM 总时间，`terrain_pack_ns`
 
 ## 性能测量
 
+### 光源采样质量与成本
+
+显式 `light-sampling-bench` feature 构建独立的无窗口采样实验。默认比较功率树、同分布分层 alias、接收点相关实验树；每种都测 IID 和生产 Z-Sobol。数学定义、夹具支持范围和计时边界见[测试契约](docs/guides/light-sampling.md)。该 pass 时间不等于游戏帧时。
+
+```powershell
+$env:PRIME_VK_VALIDATION = '1'
+$env:VK_LAYER_VALIDATE_SYNC = '1'
+cargo test -p prime_vulkan --features 'shader-tests,light-sampling-bench' --release --lib --locked light_sampling -- --include-ignored --nocapture --test-threads=1
+
+# 性能阶段关闭 validation，不与其他 GPU 作业同时运行；输出目录不可覆盖已有结果。
+$env:PRIME_VK_VALIDATION = '0'
+$env:VK_LAYER_VALIDATE_SYNC = '0'
+$env:PRIME_PROFILE = '0'
+cargo run -p prime_tools --bin light-sampling --features light-sampling-bench --release --locked -- --output artifacts/light-sampling-run --replicas 4 --spp 256
+```
+
+默认原生1920×1080，256帧预热、512帧计时，保留所有原始时间、逐种子误差与线性 PFM；`--help` 列出参数。较小尺寸只作正确性/快速检查。参考使用矩形解析积分，二阶矩数值积分另做收敛检查；理论 `σ²/N` 只对 IID 成立。保留构建源码 diff、GPU/驱动和 CPU/工具链信息，报告同样本误差与相同 GPU 时间误差，不能仅依据更快选灯就认定方案更好。
+
 ### 实时输出
 
 无窗口夹具使用实际宿主录制路径，在原生1920×1080、4次反弹、固定种子下覆盖天空、平面、密集 cutout、斜面与多层透明表面。每场景预热256帧、记录512帧，CSV保留全部预热和离群值；每次记录后等待完成以明确GPU区间，不模拟游戏呈现或CPU/GPU重叠。

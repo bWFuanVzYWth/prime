@@ -20,6 +20,13 @@ fn main() {
         .unwrap_or_else(|| PathBuf::from("slangc"));
     compile(&compiler, "shaders/path_trace.slang", "path_trace.spv");
     compile(&compiler, "shaders/realtime.slang", "realtime.spv");
+    if env::var_os("CARGO_FEATURE_LIGHT_SAMPLING_BENCH").is_some() {
+        compile(
+            &compiler,
+            "tests/shaders/sampling_experiment.slang",
+            "light_sampling.spv",
+        );
+    }
     for name in [
         "prepare",
         "sky_update",

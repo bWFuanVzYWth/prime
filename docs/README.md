@@ -16,6 +16,7 @@
 | [Slang 数学基础与显示策略](shaders.md) | 模块边界、可替换的 primeDRT、颜色空间、Z-Sobol、求交误差与尺寸历史 |
 | [行尾与源码格式](guides/git-line-endings.md) | 仓库级换行、格式工具与规范化边界 |
 | [Section 对拍与基准契约](guides/section-tests.md) | 实际原版参照、数值等价、增量回归、计时边界与证据范围 |
+| [光源采样测试](guides/light-sampling.md) | 无窗口选灯成本、线性噪声、独立参考与理论/经验收敛边界 |
 
 安装与使用见根 [README](../README.md)；构建、测试和测量方法见 [CONTRIBUTING](../CONTRIBUTING.md)；尚未实现的能力与技术债见 [HACK](../HACK.md)，后续工作见 [TODO](../TODO.md)。section 原型的临时默认值单独维护在 [PROTOTYPE_HACKS](../PROTOTYPE_HACKS.md)，不混入主清单。
 
