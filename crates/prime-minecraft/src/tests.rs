@@ -223,6 +223,167 @@ fn full_cell_waits_for_all_64_and_unchanged_frames_do_no_work() {
         assert_eq!(scene.revision(), revision);
     }
 }
+
+fn assert_cell_availability(context: &TerrainContext) {
+    let mut expected = HashMap::<[i32; 3], u8>::new();
+    for s in &context.scheduler.active {
+        if context.sections.contains_key(s) {
+            *expected
+                .entry([s.0.div_euclid(4), s.1.div_euclid(4), s.2.div_euclid(4)])
+                .or_default() += 1;
+        }
+    }
+    assert_eq!(context.available, expected);
+    assert_eq!(
+        context.renderable,
+        expected
+            .into_iter()
+            .filter_map(|(cell, count)| (count == 64).then_some(cell))
+            .collect()
+    );
+}
+
+#[test]
+fn availability_counts_follow_source_lifecycle_and_contact_ownership() {
+    let mut ctx = TerrainContext::default();
+    let mut output = scene();
+    let events: Vec<_> = (0..8)
+        .flat_map(|x| (0..4).map(move |z| (1, Section(x, 0, z))))
+        .collect();
+    let missing = Section(3, 3, 3);
+    let req = requests(&mut ctx, &frame(1, 48., 7, [0, 3], &events));
+    let mut initial = response(1, &req, |s| (s != missing).then_some(false));
+    // Presence of an optical source makes completed-cell ownership a contact dependency.
+    // The actual sections remain empty, so this checks scheduling without expensive geometry.
+    initial.truncate(initial.len() - 4);
+    for n in [1, 2, 256, 0] {
+        u32_to(&mut initial, n);
+    }
+    string(&mut initial, "test:optical");
+    state_source(&mut initial, 256);
+    u32_to(&mut initial, 0);
+    assert!(
+        ctx.accept(&[&initial[..initial.len() - 1]], &mut output)
+            .is_err()
+    );
+    assert!(ctx.available.is_empty());
+    assert!(ctx.renderable.is_empty());
+    ctx.accept(&[&initial], &mut output).unwrap();
+    assert_cell_availability(&ctx);
+    assert_eq!(ctx.available[&[0, 0, 0]], 63);
+    assert_eq!(ctx.renderable, HashSet::from([[1, 0, 0]]));
+    for (batch, present, count, compiled) in
+        [(2, true, 64, 80), (3, false, 63, 79), (4, true, 64, 80)]
+    {
+        let req = requests(&mut ctx, &frame(batch, 48., 7, [0, 3], &[(3, missing)]));
+        assert_eq!(req, [missing]);
+        ctx.accept(
+            &[&response(batch, &req, |_| present.then_some(false))],
+            &mut output,
+        )
+        .unwrap();
+        assert_cell_availability(&ctx);
+        assert_eq!(ctx.available[&[0, 0, 0]], count);
+        assert_eq!(ctx.stats.availability_updates, 1);
+        // The changed cell and the one-section band in its adjacent complete cell recompile.
+        assert_eq!(ctx.stats.compiled, compiled);
+    }
+    let req = requests(&mut ctx, &frame(5, 48., 7, [0, 3], &[(4, missing)]));
+    ctx.accept(&[&response(5, &req, |_| Some(false))], &mut output)
+        .unwrap();
+    assert_cell_availability(&ctx);
+    assert_eq!(ctx.stats.availability_updates, 0);
+    assert_eq!(ctx.renderable.len(), 2);
+    assert_eq!(ctx.stats.compiled, 128); // Catalog reset still recompiles every active source.
+}
+
+#[test]
+fn availability_counts_follow_cached_membership_vertical_ranges_and_unload() {
+    let mut ctx = TerrainContext::default();
+    let mut output = scene();
+    let events: Vec<_> = (-4..8)
+        .flat_map(|x| (0..4).map(move |z| (1, Section(x, 0, z))))
+        .collect();
+    for (batch, center, ys) in [
+        (1, 16., [0, 3]),
+        (2, 64., [0, 3]),
+        (3, 16., [0, 3]),
+        (4, 16., [-1, 4]),
+        (5, 16., [0, 3]),
+    ] {
+        let mut input = frame(batch, center, 3, ys, if batch == 1 { &events } else { &[] });
+        input[40..48].copy_from_slice(&16f64.to_bits().to_le_bytes());
+        let req = requests(&mut ctx, &input);
+        ctx.accept(&[&response(batch, &req, |_| Some(false))], &mut output)
+            .unwrap();
+        assert_cell_availability(&ctx);
+        if batch == 2 {
+            assert!(!ctx.renderable.contains(&[0, 0, 0]));
+            assert!(ctx.sections.contains_key(&Section(0, 0, 0))); // Retained as source halo.
+            assert!(ctx.renderable.contains(&[1, 0, 0]));
+        } else {
+            assert!(ctx.renderable.contains(&[0, 0, 0]));
+        }
+        if batch == 3 {
+            assert!(!req.contains(&Section(0, 0, 0))); // Re-enter using the cached source.
+        }
+        if batch == 5 {
+            assert!(!ctx.available.keys().any(|cell| cell[1] != 0));
+        }
+    }
+    let unload: Vec<_> = events.into_iter().map(|(_, s)| (2, s)).collect();
+    let req = requests(&mut ctx, &frame(6, 16., 3, [0, 3], &unload));
+    ctx.accept(&[&response(6, &req, |_| unreachable!())], &mut output)
+        .unwrap();
+    assert_cell_availability(&ctx);
+    assert!(ctx.available.is_empty());
+    assert!(ctx.sections.is_empty());
+    assert!(ctx.renderable.is_empty());
+}
+
+#[test]
+fn availability_counts_do_no_work_for_a_single_interior_edit_in_89k_sections() {
+    let mut ctx = TerrainContext::default();
+    let mut output = scene();
+    let events: Vec<_> = (-30..=30)
+        .flat_map(|x| (-30..=30).map(move |z| (1, Section(x, 0, z))))
+        .collect();
+    let req = requests(&mut ctx, &frame(1, 0., 30, [-4, 19], &events));
+    ctx.accept(&[&response(1, &req, |_| Some(false))], &mut output)
+        .unwrap();
+    assert_eq!(ctx.scheduler.active.len(), 89_304);
+    let availability = ctx.available.clone();
+    let renderable = ctx.renderable.clone();
+    let key = Section(0, 0, 0);
+    let req = requests(&mut ctx, &frame(2, 0., 30, [-4, 19], &[(3, key)]));
+    assert_eq!(req, [key]);
+    let mut edited = header(2, 2);
+    for n in [3, 0, 0, 0, 1, 4, 2, 256, 0, 1] {
+        u32_to(&mut edited, n);
+    }
+    let index = 8 * 256 + 8 * 16 + 8;
+    for word in 0..256 {
+        u64_to(
+            &mut edited,
+            if word == index / 16 {
+                1 << (index % 16 * 4)
+            } else {
+                0
+            },
+        );
+    }
+    u32_to(&mut edited, 0);
+    ctx.accept(&[&edited], &mut output).unwrap();
+    assert_eq!((ctx.stats.requested, ctx.stats.compiled), (1, 1));
+    assert_eq!(ctx.stats.availability_updates, 0);
+    assert_eq!(ctx.available, availability);
+    assert_eq!(ctx.renderable, renderable);
+    let req = requests(&mut ctx, &frame(3, 0., 30, [-4, 19], &[]));
+    assert!(req.is_empty());
+    ctx.accept(&[&response(3, &req, |_| unreachable!())], &mut output)
+        .unwrap();
+    assert_eq!(ctx.stats.availability_updates, 0);
+}
 #[test]
 fn halo_is_dependency_only_and_neighbor_change_invalidates_surface() {
     let mut ctx = TerrainContext::default();

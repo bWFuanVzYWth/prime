@@ -217,6 +217,7 @@ fn gpu_compound_sheet_matches_independent_material_oracle_from_both_sides() {
     }
 }
 
+#[cfg(feature = "shader-tests")]
 #[test]
 #[ignore = "windowless actual optical boundaries, order-independent absorption and initial medium"]
 fn gpu_optical_boundaries_match_beer_lambert_and_fresnel_from_both_sides_and_inside() {
@@ -313,6 +314,210 @@ fn gpu_optical_boundaries_match_beer_lambert_and_fresnel_from_both_sides_and_ins
                 f32::from_bits(output[i * 12 + 5]),
                 if i < 2 { ior } else { 1. }
             );
+        }
+    }
+}
+
+#[cfg(feature = "shader-tests")]
+#[test]
+#[ignore = "windowless optical visibility with opaque/cutout/alpha blockers and primitive reordering"]
+fn gpu_optical_visibility_preserves_coverage_and_absorption_with_blocker_reordering() {
+    use prime_scene::surface::{Medium, Optics, SurfaceFace, SurfaceMesh};
+
+    fn query(context: &Arc<Context>, scene: &Scene, input: &[u32]) -> Vec<[f32; 3]> {
+        let mut geometry = Geometry::new(
+            context,
+            scene.into(),
+            Arc::new(prime_scene::workers::CpuWorkers::new(1).unwrap()),
+        )
+        .unwrap();
+        geometry
+            .prepare_dynamic(
+                context,
+                scene,
+                &InstanceScene::default(),
+                0,
+                &mut cpu_profile::FrameCpu::default(),
+            )
+            .unwrap();
+        crate::shader_tests::run(
+            context,
+            include_bytes!(concat!(env!("OUT_DIR"), "/optics.spv")),
+            input,
+            input.len(),
+            [0, (input.len() / 12) as u32],
+            Some(&geometry),
+        )
+        .as_chunks::<12>()
+        .0
+        .iter()
+        .map(|row| [row[0], row[1], row[2]].map(f32::from_bits))
+        .collect()
+    }
+    fn rays(medium: Medium, thin: bool) -> Vec<u32> {
+        let mut input = Vec::new();
+        for i in 0..16 {
+            let x = 1.125 + i as f32 / 16.;
+            for (z, direction, inside) in [
+                (0., 1., false),
+                (5., -1., false),
+                (2., 1., true),
+                (2., -1., true),
+            ] {
+                input.extend(
+                    [
+                        x,
+                        1.75,
+                        z,
+                        6.,
+                        0.,
+                        0.,
+                        direction,
+                        if inside && !thin { medium.ior } else { 1. },
+                    ]
+                    .map(f32::to_bits),
+                );
+                input.extend(
+                    if inside && !thin {
+                        [
+                            medium.extinction[0],
+                            medium.extinction[1],
+                            medium.extinction[2],
+                            0.,
+                        ]
+                    } else {
+                        [0.; 4]
+                    }
+                    .map(f32::to_bits),
+                );
+            }
+        }
+        input
+    }
+    fn sheet(z: f32, flags: u32, alpha: f32) -> CompiledQuad {
+        CompiledQuad {
+            positions: [[1., 1., z], [3., 1., z], [3., 3., z], [1., 3., z]],
+            uvs: [[0.5; 2]; 4],
+            color: [1., 1., 1., alpha],
+            texture_id: 0,
+            flags,
+        }
+    }
+    fn scene(faces: &[SurfaceFace], blocker: Option<CompiledQuad>, reverse: bool) -> Scene {
+        let mut scene = Scene {
+            epoch: 1,
+            revision: 1,
+            ..Default::default()
+        };
+        scene
+            .ready_terrain
+            .insert(Cell::containing([0.; 3]).unwrap());
+        if !faces.is_empty() {
+            let mut faces = faces.to_vec();
+            if reverse {
+                faces.reverse();
+            }
+            scene.meshes.insert(
+                (if reverse { 2 } else { 1 }, 0),
+                SceneMesh {
+                    revision: 1,
+                    flags: 2,
+                    origin: [0.; 3],
+                    triangles: MeshGeometry::Surfaces(Arc::new(
+                        SurfaceMesh::from_resolved(1, faces).unwrap(),
+                    )),
+                },
+            );
+        }
+        if let Some(blocker) = blocker {
+            scene.meshes.insert(
+                (if reverse { 1 } else { 2 }, 0),
+                SceneMesh {
+                    revision: 1,
+                    flags: blocker.flags,
+                    origin: [0.; 3],
+                    triangles: MeshGeometry::Quads(vec![blocker].into()),
+                },
+            );
+        }
+        scene
+    }
+
+    let context = Context::new().unwrap();
+    let air_rays = rays(Medium::default(), false);
+    let mut blockers = Vec::new();
+    for z in [0.5, 2.25, 4.] {
+        for (flags, alpha) in [(0, 1.), (1, 0.), (1, 1.), (2, 0.), (2, 1.), (2, 0.5)] {
+            let blocker = sheet(z, flags, alpha);
+            let reference = query(&context, &scene(&[], Some(blocker), false), &air_rays);
+            assert!(reference.iter().all(|v| *v == [0.; 3] || *v == [1.; 3]));
+            if flags == 2 && alpha == 0.5 {
+                let covered = reference
+                    .iter()
+                    .step_by(4)
+                    .filter(|v| **v == [0.; 3])
+                    .count();
+                assert!(
+                    covered > 0 && covered < 16,
+                    "random coverage must exercise both decisions"
+                );
+            }
+            blockers.push((blocker, reference));
+        }
+    }
+    for (ior, thin) in [(1.333_f32, false), (1.5, false), (1.5, true)] {
+        let medium = Medium {
+            ior,
+            extinction: [0.2, 0.5, 0.9],
+        };
+        let faces = [1., 3.].map(|z| {
+            let mut quad = sheet(z, 0, 1.);
+            if z == 1. {
+                quad.positions.reverse();
+            }
+            let mut face = SurfaceFace::from_quad(quad);
+            face.media = [7, 0];
+            face.optics = Some(Optics {
+                negative: medium,
+                positive: Medium::default(),
+                transmit: true,
+                thin,
+            });
+            face
+        });
+        let input = rays(medium, thin);
+        let baseline = query(&context, &scene(&faces, None, false), &input);
+        let f = ((ior - 1.) / (ior + 1.)).powi(2);
+        for (i, value) in baseline.iter().enumerate() {
+            let boundaries = if i % 4 < 2 { 2 } else { 1 };
+            let distance = if thin {
+                boundaries as f32 * 0.0625
+            } else {
+                boundaries as f32
+            };
+            let transmission = if thin { (1. - f) / (1. + f) } else { 1. - f };
+            for channel in 0..3 {
+                let expected =
+                    transmission.powi(boundaries) * (-medium.extinction[channel] * distance).exp();
+                assert!(
+                    (value[channel] - expected).abs() < 2e-6,
+                    "ior={ior} thin={thin} ray={i} value={value:?} expected={expected}"
+                );
+            }
+        }
+        for (blocker, reference) in &blockers {
+            for reverse in [false, true] {
+                let actual = query(&context, &scene(&faces, Some(*blocker), reverse), &input);
+                for (i, value) in actual.iter().enumerate() {
+                    for channel in 0..3 {
+                        let expected = baseline[i][channel] * reference[i][channel];
+                        assert!(
+                            (value[channel] - expected).abs() < 2e-6,
+                            "ior={ior} thin={thin} reverse={reverse} blocker={blocker:?} ray={i} value={value:?} expected={expected}"
+                        );
+                    }
+                }
+            }
         }
     }
 }
@@ -830,6 +1035,7 @@ fn gpu_surface_lights_illuminate_receivers_and_retire_with_inflight_frames() {
     host.drain().unwrap();
 }
 
+#[cfg(feature = "shader-tests")]
 #[test]
 #[ignore = "windowless production sprite sampling, shared backing and metadata-only animation"]
 fn sprite_frames_mips_and_endpoints_share_pixels_without_rebuilding_geometry() {
@@ -977,6 +1183,7 @@ fn sprite_frames_mips_and_endpoints_share_pixels_without_rebuilding_geometry() {
     );
 }
 
+#[cfg(feature = "shader-tests")]
 #[test]
 #[ignore = "windowless compound/textured emission support and bidirectional PDF"]
 fn compound_emitters_sample_the_visible_layer_without_leaking_hidden_emission() {

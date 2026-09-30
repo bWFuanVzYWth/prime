@@ -235,6 +235,7 @@ impl<'a> View<'a> {
             output.states[offset..offset + 16].fill(cell.state);
             output.emission[offset..offset + 16].fill(cell.emission);
             output.occlusion[offset..offset + 16].fill(cell.occlusion);
+            output.contact[offset..offset + 16].fill(cell.contact);
             return;
         }
         let data = self.data;
@@ -547,5 +548,128 @@ mod tests {
         }
         slab.emission.fill(0);
         assert_eq!(slab.visibility_row(PLANE + ROW + 1), [0; 16]);
+    }
+
+    #[test]
+    fn single_local_and_global_palettes_preserve_optical_and_emissive_output() {
+        use prime_scene::surface::SurfaceFace;
+        for kind in [0, 1, 2] {
+            let mut catalog = Catalog::default();
+            let (flags, name) = match kind {
+                0 => (256, "test:glass"),
+                1 => (16, "minecraft:water"),
+                _ => (16, "minecraft:lava"),
+            };
+            catalog.states.insert(
+                1,
+                State {
+                    id: 1,
+                    flags,
+                    model: 1,
+                    name: name.into(),
+                    fluid: crate::fluid::Fluid {
+                        kind,
+                        amount: 8,
+                        material: 1,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            );
+            if kind == 0 {
+                catalog.models.insert(
+                    1,
+                    Model::Mesh(vec![Quad {
+                        sprite: 0,
+                        emission: 0,
+                        positions: [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]],
+                        uvs: [[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
+                        face: 6,
+                        tint: -1,
+                        layer: 2,
+                    }]),
+                );
+                catalog.glass_references.insert(1, [1.; 4]);
+            } else {
+                let mut bytes = Vec::new();
+                for n in [1, if kind == 1 { 2 } else { 0 }, 0] {
+                    u32_to(&mut bytes, n);
+                }
+                for _ in 0..3 {
+                    u32_to(&mut bytes, 0);
+                    for n in [0_f32, 0., 1., 1.] {
+                        u32_to(&mut bytes, n.to_bits());
+                    }
+                }
+                let pages = [bytes.as_slice()];
+                let (id, material) =
+                    crate::fluid::FluidMaterial::read(&mut Reader::new(&pages).unwrap()).unwrap();
+                catalog.fluids.insert(id, material);
+            }
+            catalog.prepare();
+            let source = [
+                SectionData {
+                    palette: vec![1],
+                    storage: vec![],
+                    bits: 0,
+                    per_word: 0,
+                },
+                SectionData {
+                    palette: vec![0, 1],
+                    storage: vec![0x1111_1111_1111_1111; 256],
+                    bits: 4,
+                    per_word: 16,
+                },
+                SectionData {
+                    palette: vec![],
+                    storage: vec![0x0000_0001_0000_0001; 2048],
+                    bits: 32,
+                    per_word: 2,
+                },
+            ];
+            let mut reference = None;
+            for data in source {
+                let sections = HashMap::from([(Section(0, 0, 0), data)]);
+                let published = std::collections::HashSet::from([[0; 3]]);
+                let mut faces = Vec::new();
+                for first_y in [0, 4, 8, 12] {
+                    let mut job = Job {
+                        key: Section(0, 0, 0),
+                        first_y,
+                        layers: Default::default(),
+                        surfaces: Default::default(),
+                        hacks: Default::default(),
+                        compiled: None,
+                        tints: Default::default(),
+                        color_start: 0,
+                    };
+                    compile_contacts(&mut job, &catalog, &sections, &published);
+                    faces.extend(job.layers.into_iter().flatten().map(SurfaceFace::from_quad));
+                    faces.extend(job.surfaces.into_iter().flatten());
+                }
+                assert!(!faces.is_empty(), "{name}");
+                if kind < 2 {
+                    assert!(
+                        faces
+                            .iter()
+                            .all(|face| face.optics.is_some_and(|o| o.transmit)),
+                        "{name}"
+                    );
+                    assert!(faces.iter().all(|face| face.media[0] != 0), "{name}");
+                } else {
+                    assert!(
+                        faces.iter().all(
+                            |face| face.emission.radiance == [1.5; 3] && face.emission.textured
+                        ),
+                        "{name}"
+                    );
+                }
+                if let Some(reference) = &reference {
+                    assert_eq!(&faces, reference, "{name}");
+                } else {
+                    reference = Some(faces);
+                }
+            }
+        }
     }
 }

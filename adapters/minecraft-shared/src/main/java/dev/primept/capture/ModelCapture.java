@@ -164,7 +164,8 @@ public final class ModelCapture {
             TextureAtlasSprite sprite = null;
             if (consumer.getClass() == SpriteCoordinateExpander.class) {
                 var wrapper = (SpriteConsumerAccessor)consumer;
-                if (!(wrapper.primept$mapping() instanceof TextureAtlasSprite actualSprite)) {
+                Object mapping = wrapper.primept$mapping();
+                if (!(mapping instanceof TextureAtlasSprite actualSprite)) {
                     ++fallbackLeaves;
                     throw new IllegalArgumentException("Unsupported routed model UV mapping");
                 }

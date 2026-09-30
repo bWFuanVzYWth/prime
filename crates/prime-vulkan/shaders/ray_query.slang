@@ -410,8 +410,11 @@ public float3 traceTransmittance(TraceScene resources, float3 origin, float3 dir
         return traceOcclusionRange(resources, origin, direction, seed, limit) ? float3(0)
                                                                               : float3(1);
     RayDesc ray = {origin, 0.0, direction, limit};
-    RayQuery<RAY_FLAG_NONE> query;
-    query.TraceRayInline(resources.acceleration, RAY_FLAG_NONE, 0xff, ray);
+    // Optical boundaries are not committed: an unobstructed segment still visits every
+    // boundary. Any accepted ordinary blocker makes all remaining moments irrelevant.
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
+    query.TraceRayInline(resources.acceleration, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff,
+                         ray);
     float3 moment = float3(0), terminal = startingMedium.yzw;
     float last = -1, fresnel = 1;
     while (query.Proceed()) {

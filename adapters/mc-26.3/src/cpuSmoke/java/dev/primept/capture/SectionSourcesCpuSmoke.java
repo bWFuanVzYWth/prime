@@ -55,7 +55,7 @@ final class SectionSourcesCpuSmoke {
              var bridge =
                      new NativeBridge(Path.of(System.getProperty("primept.smoke.nativeLibrary")))) {
             bridge.submit(Packets.reset(1));
-            bridge.submit(Packets.texture(1, 16, 16, SourceSpriteFixture.atlas()));
+            bridge.submitTexture(1, 1, 16, 16, SourceSpriteFixture.atlas());
             for (long batch = 1; batch <= 5; ++batch) {
                 events.header(SectionSources.GAME_VERSION, 1, 1, batch)
                         .d(16)

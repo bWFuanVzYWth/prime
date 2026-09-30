@@ -289,6 +289,79 @@ fn gpu_solar_disk_and_update_dependencies() {
 }
 
 #[test]
+#[ignore = "windowless sampled solar radiance, earth occlusion and partial solar limb"]
+fn gpu_solar_sampled_radiance_preserves_day_night_and_partial_limb() {
+    let context = Context::new().unwrap();
+    let mut atmosphere = Atmosphere::new(&context).unwrap();
+    let camera = camera();
+    let mut input = Vec::new();
+    for i in 0..4096 {
+        for value in [
+            (i as f32 + 0.5) / 4096.,
+            ((i * 1597) % 4096) as f32 / 4096.,
+            0.,
+            0.,
+        ] {
+            float(&mut input, value);
+        }
+    }
+    for (name, sun_direction) in [
+        ("day", [0., 1., 0.]),
+        ("limb", [0., 0., -1.]),
+        ("night", [0., -1., 0.]),
+    ] {
+        // Put the eye on the physical ground horizon so the horizontal disk is partially visible.
+        atmosphere
+            .prepare(
+                Environment {
+                    world_y: -364.,
+                    sun_direction,
+                },
+                &camera,
+                16. / 9.,
+                0,
+                None,
+            )
+            .unwrap();
+        let transmission = execute(&atmosphere, 2, 4096, &input);
+        let radiance = execute(&atmosphere, 6, 4096, &input);
+        let mut visible = 0;
+        for (t, l) in transmission
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .zip(radiance.as_chunks::<8>().0)
+        {
+            assert_eq!(
+                &t[..4],
+                &l[..4],
+                "{name}: the gate must use the same sampled direction/PDF"
+            );
+            let supported = l[4..7].iter().any(|&v| v > 0.);
+            assert_eq!(supported, t[4..7].iter().any(|&v| v > 0.));
+            visible += usize::from(supported);
+            for channel in 4..7 {
+                let expected = t[channel] * (12.5 * t[3]);
+                assert!(
+                    l[channel].is_finite()
+                        && (l[channel] - expected).abs() <= 1e-6_f32.max(expected * 3e-6),
+                    "{name}: solar radiance {l:?}, transmittance {t:?}"
+                );
+            }
+        }
+        match name {
+            "day" => assert_eq!(visible, 4096),
+            "night" => assert_eq!(visible, 0),
+            "limb" => assert!(
+                (1800..2300).contains(&visible),
+                "visible solar limb={visible}"
+            ),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires Vulkan ray-query device"]
 fn gpu_aerial_integral_filtering_and_cache_dependencies() {
     let context = Context::new().unwrap();

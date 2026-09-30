@@ -2,11 +2,71 @@ package dev.primept.capture;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.lang.foreign.Arena;
+import java.lang.foreign.ValueLayout;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PacketsTest {
+    @Test
+    void textureBudgetIncludesTheWholePacketAndRejectsDimensionsWithoutAllocation() {
+        int largestPixels = (Packets.MAX_PACKET_BYTES - Packets.TEXTURE_HEADER_BYTES) / 4;
+        assertEquals(Packets.MAX_PACKET_BYTES,
+                     Packets.TEXTURE_HEADER_BYTES + Packets.texturePixelBytes(largestPixels, 1));
+        assertThrows(IllegalArgumentException.class,
+                     () -> Packets.texturePixelBytes(largestPixels + 1, 1));
+        assertThrows(IllegalArgumentException.class, () -> Packets.texturePixelBytes(8192, 8192));
+        assertThrows(IllegalArgumentException.class,
+                     () -> Packets.texturePixelBytes(Integer.MAX_VALUE, Integer.MAX_VALUE));
+        assertThrows(IllegalArgumentException.class, () -> Packets.texturePixelBytes(0, 1));
+        assertThrows(IllegalArgumentException.class, () -> Packets.texturePixelBytes(1, -1));
+    }
+
+    @Test
+    void nativeTextureWriterReusesStorageAndOverwritesEveryWireField() {
+        try (var arena = Arena.ofConfined()) {
+            var memory = arena.allocate(64, 8);
+            var output = memory.asByteBuffer();
+            byte[] pixels = {1, 2, 3, 4, 5, 6, 7, 8};
+            Packets.writeTexture(output, 11, 19, 2, 1, pixels);
+            assertEquals(48, output.position());
+            assertEquals(Packets.MAGIC, output.getInt(0));
+            assertEquals(Packets.ABI_VERSION, output.getInt(4));
+            assertEquals(4, output.getInt(8));
+            assertEquals(0, output.getInt(12));
+            assertEquals(11, output.getLong(16));
+            assertEquals(19, output.getInt(24));
+            assertEquals(2, output.getInt(28));
+            assertEquals(1, output.getInt(32));
+            assertEquals(0, output.getInt(36));
+            assertArrayEquals(pixels, memory.asSlice(40, 8).toArray(ValueLayout.JAVA_BYTE));
+            pixels[0] = 99;
+            assertEquals(1, output.get(40), "The wire owns its one copied pixel snapshot");
+
+            output.order(ByteOrder.BIG_ENDIAN).putLong(0, -1).position(7).limit(13);
+            byte[] replacement = {9, 10, 11, 12};
+            Packets.writeTexture(output, 12, 27, 1, 1, replacement);
+            assertEquals(44, output.position());
+            assertEquals(ByteOrder.LITTLE_ENDIAN, output.order());
+            assertEquals(Packets.MAGIC, output.getInt(0));
+            assertEquals(12, output.getLong(16));
+            assertEquals(27, output.getInt(24));
+            assertEquals(1, output.getInt(28));
+            assertEquals(1, output.getInt(32));
+            assertEquals(0, output.getInt(36));
+            assertArrayEquals(replacement, memory.asSlice(40, 4).toArray(ValueLayout.JAVA_BYTE));
+
+            byte[] before = memory.toArray(ValueLayout.JAVA_BYTE);
+            assertThrows(IllegalArgumentException.class,
+                         () -> Packets.writeTexture(output, 13, 28, 2, 1, replacement));
+            assertArrayEquals(before, memory.toArray(ValueLayout.JAVA_BYTE));
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> Packets.writeTexture(ByteBuffer.allocate(43), 13, 28, 1, 1, replacement));
+        }
+    }
+
     @Test
     void completeSectionHasOneAtomicPacketAndOwnsEveryLayer() {
         var opaque = ByteBuffer.allocate(4 * 24).order(ByteOrder.LITTLE_ENDIAN);

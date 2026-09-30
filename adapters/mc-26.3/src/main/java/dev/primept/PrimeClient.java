@@ -325,8 +325,8 @@ public final class PrimeClient implements ClientModInitializer {
             owner.renderer.resetReadiness();
         }
         if (owner.sentAtlas != atlas.version()) {
-            owner.renderer.submit(
-                    Packets.texture(epoch, atlas.width(), atlas.height(), atlas.rgba()));
+            owner.renderer.sourceBridge().submitTexture(epoch, 1, atlas.width(), atlas.height(),
+                                                        atlas.rgba());
             owner.sentAtlas = atlas.version();
             owner.frames.reset();
         }
@@ -384,7 +384,7 @@ public final class PrimeClient implements ClientModInitializer {
                 renderer.resetReadiness();
             }
             if (sentAtlas != atlas.version()) {
-                submit(Packets.texture(epoch, atlas.width(), atlas.height(), atlas.rgba()), timing);
+                submitAtlas(epoch, atlas, timing);
                 sentAtlas = atlas.version();
                 frames.reset();
             }
@@ -501,6 +501,15 @@ public final class PrimeClient implements ClientModInitializer {
         timing.submit += System.nanoTime() - start;
         ++timing.packets;
         timing.bytes += packet.length;
+    }
+
+    private void submitAtlas(long epoch, CaptureInbox.Atlas atlas, RenderProfile.Frame timing) {
+        long start = System.nanoTime();
+        renderer.sourceBridge().submitTexture(epoch, 1, atlas.width(), atlas.height(),
+                                              atlas.rgba());
+        timing.submit += System.nanoTime() - start;
+        ++timing.packets;
+        timing.bytes += Packets.TEXTURE_HEADER_BYTES + atlas.rgba().length;
     }
 
     private static float[] components(Vector3f vector) {

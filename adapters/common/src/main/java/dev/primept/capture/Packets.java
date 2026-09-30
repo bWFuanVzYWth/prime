@@ -8,6 +8,8 @@ import java.util.List;
 public final class Packets {
     public static final int ABI_VERSION = 7;
     public static final int MAGIC = 0x54505250;
+    public static final int MAX_PACKET_BYTES = 256 << 20;
+    public static final int TEXTURE_HEADER_BYTES = 40;
     private Packets() {}
 
     public static ByteBuffer packet(int operation, long epoch, int payloadSize) {
@@ -86,15 +88,43 @@ public final class Packets {
     }
 
     public static byte[] texture(long epoch, int id, int width, int height, byte[] rgba) {
-        if (rgba.length != Math.multiplyExact(Math.multiplyExact(width, height), 4))
+        int pixels = texturePixelBytes(width, height);
+        if (rgba.length != pixels)
             throw new IllegalArgumentException("Unexpected texture byte count");
-        return packet(4, epoch, Math.addExact(16, rgba.length))
+        var output = ByteBuffer.allocate(TEXTURE_HEADER_BYTES + pixels);
+        writeTexture(output, epoch, id, width, height, rgba);
+        return output.array();
+    }
+
+    /** Validates the complete op4 budget before any source pixels or packet storage are allocated. */
+    public static int texturePixelBytes(int width, int height) {
+        if (width <= 0 || height <= 0)
+            throw new IllegalArgumentException("Invalid texture dimensions");
+        long pixels = (long)width * height;
+        if (pixels > (MAX_PACKET_BYTES - TEXTURE_HEADER_BYTES) / 4)
+            throw new IllegalArgumentException("Texture exceeds the 256 MiB packet capacity");
+        return (int)pixels * 4;
+    }
+
+    /** Writes directly into reusable owner storage; the caller retains source pixels and cursors. */
+    public static void writeTexture(ByteBuffer output, long epoch, int id, int width, int height,
+                                    byte[] rgba) {
+        int size = texturePixelBytes(width, height);
+        if (rgba.length != size)
+            throw new IllegalArgumentException("Unexpected texture byte count");
+        if (output.capacity() < TEXTURE_HEADER_BYTES + size)
+            throw new IllegalArgumentException("Texture packet storage is too small");
+        output.clear().order(ByteOrder.LITTLE_ENDIAN);
+        output.putInt(MAGIC)
+                .putInt(ABI_VERSION)
+                .putInt(4)
+                .putInt(0)
+                .putLong(epoch)
                 .putInt(id)
                 .putInt(width)
                 .putInt(height)
                 .putInt(0)
-                .put(rgba)
-                .array();
+                .put(rgba);
     }
 
     public static byte[] retireTextures(long epoch, int[] ids) {

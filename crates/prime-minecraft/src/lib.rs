@@ -300,6 +300,7 @@ pub struct TerrainContext {
     animated: Vec<u32>,
     textures: Vec<(u32, prime_scene::Texture)>,
     sections: HashMap<Section, SectionData>,
+    available: HashMap<[i32; 3], u8>,
     renderable: HashSet<[i32; 3]>,
     pending: Option<Pending>,
     awaiting_colors: Option<AwaitingColors>,
@@ -344,8 +345,40 @@ struct Stats {
     bytes: usize,
     triangles: usize,
     hacks: Hacks,
+    #[cfg(test)]
+    availability_updates: usize,
 }
 impl TerrainContext {
+    fn update_availability(
+        &mut self,
+        key: Section,
+        present: bool,
+        touched: &mut HashSet<[i32; 3]>,
+    ) {
+        let cell = [
+            key.0.div_euclid(4),
+            key.1.div_euclid(4),
+            key.2.div_euclid(4),
+        ];
+        if present {
+            *self.available.entry(cell).or_default() += 1;
+        } else {
+            let count = self
+                .available
+                .get_mut(&cell)
+                .expect("available active section");
+            *count -= 1;
+            if *count == 0 {
+                self.available.remove(&cell);
+            }
+        }
+        touched.insert(cell);
+        #[cfg(test)]
+        {
+            self.stats.availability_updates += 1;
+        }
+    }
+
     pub fn plan(&mut self, pages: &[&[u8]], source_epoch: u64) -> Result<&[u8], String> {
         let start = Instant::now();
         if self.pending.is_some() || self.awaiting_colors.is_some() {
@@ -583,6 +616,19 @@ impl TerrainContext {
             self.catalog.models.extend(models);
             self.catalog.prepare();
         }
+        // Membership changed during planning; only previously available sections contribute.
+        // Source responses below then apply their availability changes to this same batch.
+        let mut availability_cells = HashSet::new();
+        for &key in &demand.removed {
+            if self.sections.contains_key(&key) {
+                self.update_availability(key, false, &mut availability_cells);
+            }
+        }
+        for &key in &demand.compile {
+            if self.sections.contains_key(&key) {
+                self.update_availability(key, true, &mut availability_cells);
+            }
+        }
         let mut compile = demand.compile;
         // Merge invalidations before filtering consumers. A burst of chunk arrivals must
         // not scan every tinted section once for every arriving column.
@@ -635,6 +681,7 @@ impl TerrainContext {
                 if let Some(old) = self.sections.remove(&key) {
                     if self.scheduler.active.contains(&key) {
                         removed.insert(key);
+                        self.update_availability(key, false, &mut availability_cells);
                     }
                     invalidate_neighbors(
                         key,
@@ -645,7 +692,9 @@ impl TerrainContext {
                 }
                 continue;
             };
-            if self.sections.get(&key) == Some(&data) && !demand.reset_catalog {
+            let previous = self.sections.get(&key);
+            let newly_available = previous.is_none() && self.scheduler.active.contains(&key);
+            if previous == Some(&data) && !demand.reset_catalog {
                 // A host event may have changed a neighbor; preserve its independently planned compile.
             } else {
                 self.stats.changed += 1;
@@ -659,36 +708,31 @@ impl TerrainContext {
                     &mut compile,
                 );
             }
+            if newly_available {
+                self.update_availability(key, true, &mut availability_cells);
+            }
             self.sections.insert(key, data);
         }
-        if !compile.is_empty() || !removed.is_empty() {
-            let mut counts = HashMap::<[i32; 3], u32>::new();
-            for s in &self.scheduler.active {
-                if self.sections.contains_key(s) {
-                    *counts
-                        .entry([s.0.div_euclid(4), s.1.div_euclid(4), s.2.div_euclid(4)])
-                        .or_default() += 1;
-                }
-            }
-            let next: HashSet<_> = counts
-                .into_iter()
-                .filter_map(|(cell, n)| (n == 64).then_some(cell))
-                .collect();
-            let changed: HashSet<_> = self
-                .renderable
-                .symmetric_difference(&next)
-                .copied()
-                .collect();
-            if !changed.is_empty() && self.catalog.has_contacts() {
-                for s in &self.scheduler.active {
-                    if s.halo().iter().any(|n| {
-                        changed.contains(&[n.0.div_euclid(4), n.1.div_euclid(4), n.2.div_euclid(4)])
-                    }) {
-                        compile.insert(*s);
+        let contacts = !availability_cells.is_empty() && self.catalog.has_contacts();
+        for cell in availability_cells {
+            let changed = if self.available.get(&cell) == Some(&64) {
+                self.renderable.insert(cell)
+            } else {
+                self.renderable.remove(&cell)
+            };
+            if changed && contacts {
+                // A one-cell halo can observe this ownership change only within these sections.
+                for x in cell[0] * 4 - 1..=cell[0] * 4 + 4 {
+                    for y in cell[1] * 4 - 1..=cell[1] * 4 + 4 {
+                        for z in cell[2] * 4 - 1..=cell[2] * 4 + 4 {
+                            let key = Section(x, y, z);
+                            if self.scheduler.active.contains(&key) {
+                                compile.insert(key);
+                            }
+                        }
                     }
                 }
             }
-            self.renderable = next;
         }
         compile.retain(|s| self.scheduler.active.contains(s) && self.sections.contains_key(s));
         removed.retain(|s| !compile.contains(s));

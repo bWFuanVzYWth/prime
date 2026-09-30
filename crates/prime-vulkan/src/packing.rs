@@ -154,7 +154,12 @@ impl<'a> Plan<'a> {
             if count == 0 {
                 continue;
             }
-            if matches!(source.input.triangles, TriangleView::Quads { .. }) {
+            // Ordinary triangle and quad sources cannot carry surface properties.
+            // Pairing was already established above; only surface sources need classification.
+            if matches!(
+                source.input.triangles,
+                TriangleView::Triangles(_) | TriangleView::Quads { .. }
+            ) {
                 runs.push((0, id, 0..count));
                 continue;
             }
@@ -241,6 +246,7 @@ impl<'a> Plan<'a> {
             Ok(())
         })
     }
+    #[cfg(test)]
     pub fn pack_bytes(
         &self,
         workers: &CpuWorkers,

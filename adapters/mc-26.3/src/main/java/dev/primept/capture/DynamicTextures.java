@@ -97,9 +97,7 @@ public final class DynamicTextures {
     }
 
     private static int captureSize(GpuTexture texture, int width, int height) {
-        int bytes = Math.multiplyExact(Math.multiplyExact(width, height), 4);
-        if (width <= 0 || height <= 0 || bytes > (256 << 20) - 40)
-            throw new IllegalStateException("Dynamic source texture exceeds the packet capacity");
+        int bytes = Packets.texturePixelBytes(width, height);
         Texture previous = SOURCES.get(texture);
         if (retainedBytes - (previous == null ? 0 : previous.rgba.length) + bytes > 512L << 20)
             throw new IllegalStateException("Dynamic source textures exceed 512 MiB");
@@ -178,8 +176,7 @@ public final class DynamicTextures {
         for (Texture source : NEEDED) {
             if (source.sentEpoch == epoch)
                 continue;
-            bridge.submit(
-                    Packets.texture(epoch, source.id, source.width, source.height, source.rgba));
+            bridge.submitTexture(epoch, source.id, source.width, source.height, source.rgba);
             source.sentEpoch = epoch;
         }
         if (!RETIRED.isEmpty()) {

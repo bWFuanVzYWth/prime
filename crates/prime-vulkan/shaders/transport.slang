@@ -130,16 +130,20 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
         float3 sunDirection = atmSampleSun(environment, sampler.sample2D(1024 + bounce));
         float cosine = saturate(dot(surface.normal, sunDirection));
         if (cosine > 0) {
-            float3 visibility =
-                    traceTransmittance(resources, spawnRay(surface, sunDirection), sunDirection,
-                                       sampler.bits1D(domain + 1), 100000.0, medium);
-            if (any(visibility > 0.0)) {
-                float bsdfPdf = cosine / 3.14159265359;
-                float weight = bounce + 1 < asuint(frame.displayExtra.z)
-                                       ? powerHeuristic(atmSunPdf(), bsdfPdf)
-                                       : 1.0;
-                result.radiance += throughput * albedo * atmSunRadiance(environment, sunDirection) *
-                                   (weight * frame.right.w * bsdfPdf / atmSunPdf()) * visibility;
+            float3 sunRadiance = atmSunRadiance(environment, sunDirection);
+            if (any(sunRadiance > 0.0)) {
+                float3 visibility =
+                        traceTransmittance(resources, spawnRay(surface, sunDirection), sunDirection,
+                                           sampler.bits1D(domain + 1), 100000.0, medium);
+                if (any(visibility > 0.0)) {
+                    float bsdfPdf = cosine / 3.14159265359;
+                    float weight = bounce + 1 < asuint(frame.displayExtra.z)
+                                           ? powerHeuristic(atmSunPdf(), bsdfPdf)
+                                           : 1.0;
+                    result.radiance += throughput * albedo * sunRadiance *
+                                       (weight * frame.right.w * bsdfPdf / atmSunPdf()) *
+                                       visibility;
+                }
             }
         }
         throughput *= albedo;

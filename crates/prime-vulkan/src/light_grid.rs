@@ -165,36 +165,14 @@ impl LightGrid {
                 self.allocations.insert(*key, destination);
             }
         }
-        if !copies.is_empty() {
-            context.submit_named("light_grid_ranges", |command| unsafe {
-                // Stable IDs can reuse a device range while earlier frames still read it.
-                // Order those reads before transfer writes; never mutate mapped live input.
-                crate::geometry::transfer_write_barrier(context, command);
-                for copy in &copies {
-                    context.device.cmd_copy_buffer(
-                        command,
-                        copy.source.buffer.buffer,
-                        copy.destination,
-                        &[vk::BufferCopy::default()
-                            .src_offset(copy.source.offset)
-                            .dst_offset(copy.offset)
-                            .size(copy.source.size)],
-                    );
-                }
-                crate::geometry::transfer_barrier(context, command);
-            })?;
-            for copy in copies {
-                uploads.retire(copy.source);
-            }
-        }
-
-        let usage = vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS;
         if changes.world || self.world.is_none() {
-            self.world = Some(Buffer::upload_device(
+            stage_table(
                 context,
+                uploads,
                 &alias_bytes(&self.cpu.world),
-                usage,
-            )?);
+                &mut self.world,
+                &mut copies,
+            )?;
         }
         if !changes.cells.is_empty() || self.cells.is_none() {
             let bytes = cell_bytes(
@@ -202,7 +180,7 @@ impl LightGrid {
                     .iter()
                     .map(|(&key, lease)| (key, (lease.size / 16) as u32, lease.address())),
             )?;
-            self.cells = Some(Buffer::upload_device(context, &bytes, usage)?);
+            stage_table(context, uploads, &bytes, &mut self.cells, &mut copies)?;
         }
 
         let mut pages = Vec::with_capacity(self.cpu.pages.len() * 48);
@@ -226,7 +204,7 @@ impl LightGrid {
             crate::float(&mut pages, page.pdf);
             crate::uint(&mut pages, 0);
         }
-        self.pages = Some(Buffer::upload_device(context, &pages, usage)?);
+        stage_table(context, uploads, &pages, &mut self.pages, &mut copies)?;
         let header = header_bytes(
             [
                 self.pages.as_ref().unwrap().address(),
@@ -235,10 +213,30 @@ impl LightGrid {
                 self.cells.as_ref().unwrap().address(),
             ],
             anchor,
-            (self.cells.as_ref().unwrap().size / 32 - 1) as u32,
+            (cell_capacity(self.allocations.len())? - 1) as u32,
             u32::try_from(self.cpu.world.len()).map_err(|_| "Too many light pages")?,
         )?;
-        self.header = Some(Buffer::upload_device(context, &header, usage)?);
+        stage_table(context, uploads, &header, &mut self.header, &mut copies)?;
+        context.submit_named("light_grid_ranges", |command| unsafe {
+            // Reused table/range addresses may still have readers in earlier submissions.
+            // Serialize those reads before this batch's writes, then publish all tables together.
+            crate::geometry::transfer_write_barrier(context, command);
+            for copy in &copies {
+                context.device.cmd_copy_buffer(
+                    command,
+                    copy.source.buffer.buffer,
+                    copy.destination,
+                    &[vk::BufferCopy::default()
+                        .src_offset(copy.source.offset)
+                        .dst_offset(copy.offset)
+                        .size(copy.source.size)],
+                );
+            }
+            crate::geometry::transfer_barrier(context, command);
+        })?;
+        for copy in copies {
+            uploads.retire(copy.source);
+        }
         self.anchor = Some(anchor);
         Ok(())
     }
@@ -257,7 +255,9 @@ fn grow(context: &Arc<Context>, buffer: &mut Option<Buffer>, bytes: usize) -> Re
     *buffer = Some(Buffer::new(
         context,
         capacity,
-        vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS | vk::BufferUsageFlags::TRANSFER_DST,
+        vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+            | vk::BufferUsageFlags::TRANSFER_DST
+            | vk::BufferUsageFlags::TRANSFER_SRC,
         false,
     )?);
     Ok(true)
@@ -307,6 +307,24 @@ fn stage(
     })
 }
 
+fn stage_table(
+    context: &Arc<Context>,
+    uploads: &mut Arena,
+    bytes: &[u8],
+    destination: &mut Option<Buffer>,
+    copies: &mut Vec<Copy>,
+) -> Result<(), String> {
+    grow(context, destination, bytes.len())?;
+    copies.push(stage(
+        context,
+        uploads,
+        bytes,
+        destination.as_ref().unwrap().buffer,
+        0,
+    )?);
+    Ok(())
+}
+
 fn alias_bytes(aliases: &[Alias]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(aliases.len() * 16);
     for alias in aliases {
@@ -332,12 +350,7 @@ fn cell_hash(key: [i32; 3]) -> u32 {
 fn cell_bytes(
     cells: impl ExactSizeIterator<Item = ([i32; 3], u32, u64)>,
 ) -> Result<Vec<u8>, String> {
-    let capacity = cells
-        .len()
-        .checked_mul(2)
-        .and_then(usize::checked_next_power_of_two)
-        .filter(|&n| n <= u32::MAX as usize)
-        .ok_or("Light cell hash exceeds address capacity")?;
+    let capacity = cell_capacity(cells.len())?;
     let mut bytes = vec![
         0;
         capacity
@@ -357,6 +370,14 @@ fn cell_bytes(
         entry[16..24].copy_from_slice(&address.to_le_bytes());
     }
     Ok(bytes)
+}
+
+fn cell_capacity(count: usize) -> Result<usize, String> {
+    count
+        .checked_mul(2)
+        .and_then(usize::checked_next_power_of_two)
+        .filter(|&n| n <= u32::MAX as usize)
+        .ok_or("Light cell hash exceeds address capacity".into())
 }
 
 fn header_bytes(
@@ -465,5 +486,85 @@ mod tests {
         assert_eq!(full.len(), 1);
         assert_eq!(full[0], 0..12);
         assert!(copy_ranges(std::slice::from_ref(&(5..13)), 12, false).is_err());
+    }
+
+    #[test]
+    #[ignore = "windowless light-table capacity reuse, shrink mask and actual GPU upload"]
+    fn gpu_light_tables_reuse_capacity_and_publish_logical_hash_extent() {
+        let context = Context::new().unwrap();
+        let pages: Vec<_> = (0..16)
+            .map(|key| LightPage {
+                key: key + 1,
+                emitters: Buffer::new(
+                    &context,
+                    16,
+                    vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                    false,
+                )
+                .unwrap(),
+                lights: vec![crate::light_grid_cpu::Light {
+                    center: [8., 8., 8.],
+                    power: 1.,
+                    inv_area: 1.,
+                    extent: 1.,
+                }],
+                format: 1,
+            })
+            .collect();
+        let mut grid = LightGrid::new(&context);
+        let mut uploads = Arena::new(&context, true);
+        let addresses = |grid: &LightGrid| {
+            [&grid.world, &grid.cells, &grid.pages, &grid.header]
+                .map(|buffer| buffer.as_ref().unwrap().address())
+        };
+        let mut first_addresses = None;
+        let mut largest_mask = 0;
+        for (serial, count) in [16, 1, 8, 16].into_iter().enumerate() {
+            grid.begin_frame(u64::MAX, serial as u64 + 1);
+            uploads.begin(u64::MAX, serial as u64 + 1);
+            let sources = pages[..count]
+                .iter()
+                .enumerate()
+                .map(|(index, page)| (page.key, ([index as f64 * 64., 0., 0.], page)))
+                .collect();
+            let anchor = [serial as f64 * 13., 0., -2.];
+            grid.update(&context, anchor, &sources, &mut uploads)
+                .unwrap();
+            let current = addresses(&grid);
+            if let Some(first) = first_addresses {
+                assert_eq!(current, first, "bounded replacements reallocated tables");
+            } else {
+                first_addresses = Some(current);
+            }
+            let header = grid.header.as_ref().unwrap();
+            let readback =
+                Buffer::new(&context, 64, vk::BufferUsageFlags::TRANSFER_DST, true).unwrap();
+            context
+                .submit_named("read_light_header", |command| unsafe {
+                    context.device.cmd_copy_buffer(
+                        command,
+                        header.buffer,
+                        readback.buffer,
+                        &[vk::BufferCopy::default().size(64)],
+                    );
+                })
+                .unwrap();
+            let bytes = readback.read(64).unwrap();
+            let mask = u32::from_le_bytes(bytes[44..48].try_into().unwrap());
+            assert_eq!(
+                mask as usize + 1,
+                cell_capacity(grid.allocations.len()).unwrap()
+            );
+            assert_eq!(
+                u32::from_le_bytes(bytes[60..64].try_into().unwrap()),
+                grid.cpu.world.len() as u32
+            );
+            if serial == 0 {
+                largest_mask = mask;
+            } else if count == 1 {
+                assert!(mask < largest_mask);
+                assert!(grid.cells.as_ref().unwrap().size > u64::from(mask + 1) * 32);
+            }
+        }
     }
 }

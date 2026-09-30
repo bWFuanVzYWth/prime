@@ -27,6 +27,8 @@ Java `ExclusiveTerrainCapture` 转录宿主事件并响应请求，`SectionSourc
 
 `adapters/common` 不依赖 Minecraft、Fabric 或 LWJGL；`SourcePages` 只负责 native 页编码。`minecraft-shared` 是两个适配器直接包含的源码目录，不另设运行时适配层；相同的宿主路由与 Mixin 只维护一份，遇到宿主 API 差异时将对应绑定放回版本目录，不加入版本判断或反射分派。两版仍共享同一个引擎 DLL；MC 源协议显式带262/263版本身份，在 Rust 适配层校验。固定私有字段绑定由双版本无窗口夹具验证，未知来源与当前原型替代见独立的 [PROTOTYPE_HACKS](../PROTOTYPE_HACKS.md)。
 
+标准模型的 `ModelCapture` 也在 `minecraft-shared` 维护一份：保留实际模型遍历、姿态与源材质观察，局部原型和实例增量使用同一路由。两版 `SpriteConsumerAccessor` 分别绑定宿主 sprite 字段并提供相同的源 getter，宿主字段差异不进入共享模型逻辑。
+
 ## 动态源与宿主
 
 本轮原型接管地形。实体/方块实体、普通 item、Fabric Mesh 与粒子保留各自的源入口和实际姿态回调，使用 op7 / op6；它们不能从 section 状态页还原。纹理源、相机和宿主 Vulkan 特性/句柄继续由对应 Java 版本绑定。

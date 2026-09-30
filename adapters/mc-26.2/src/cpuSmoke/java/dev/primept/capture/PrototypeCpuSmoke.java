@@ -56,6 +56,7 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
             ItemCpuSmoke.run();
             ExclusiveTerrainCpuSmoke.run();
             dev.primept.RenderProfileCpuSmoke.run();
+            ModelSpriteCpuSmoke.run();
             run();
             System.out.println(
                     "PRIME_PT_CPU_SMOKE_OK: actual transformed Cube/Draw hooks, 10000 instances, unchanged frame=0B, mutation, skipped native submit, raw fallback");

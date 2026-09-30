@@ -53,6 +53,8 @@ tasks.register('test') { dependsOn subprojects.collect { "${it.path}:test" } }
 tasks.named('build') { dependsOn subprojects.collect { "${it.path}:build" } }
 tasks.named('clean') { dependsOn subprojects.collect { "${it.path}:clean" } }
 tasks.register('nativeJar') { dependsOn adapters.collect { "${it}:nativeJar" } }
+def nativeJarAdapters = adapters.collect { project(it) }
+def nativeJarVerificationRoot = rootProject.projectDir
 tasks.register('verifyNativeJars') {
     dependsOn tasks.named('nativeJar')
     doLast {
@@ -60,8 +62,7 @@ tasks.register('verifyNativeJars') {
                 ? 'natives/windows-x86_64/prime_engine.dll' : 'natives/linux-x86_64/libprime_engine.so'
         byte[] referenceNative = null
         byte[] referenceBridge = null
-        adapters.each { path ->
-            def adapter = project(path)
+        nativeJarAdapters.each { adapter ->
             def archive = adapter.tasks.named('nativeJar').get().archiveFile.get().asFile
             new java.util.zip.ZipFile(archive).withCloseable { zip ->
                 def nativeEntry = zip.getEntry(entryName)
@@ -76,7 +77,7 @@ tasks.register('verifyNativeJars') {
                     if (entry == null || Collections.list(zip.entries()).count { it.name == asset } != 1)
                         throw new GradleException("Missing or duplicated ${asset} in ${archive}")
                     byte[] actual = zip.getInputStream(entry).withCloseable { it.readAllBytes() }
-                    if (!Arrays.equals(rootProject.file("adapters/common/src/main/resources/${asset}").bytes, actual))
+                    if (!Arrays.equals(new File(nativeJarVerificationRoot, "adapters/common/src/main/resources/${asset}").bytes, actual))
                         throw new GradleException("Mismatched ${asset} in ${archive}")
                 }
                 def notices = ['LICENSE', 'LICENSE-EXCEPTIONS', 'META-INF/THIRD_PARTY_NOTICES.md',
@@ -90,7 +91,7 @@ tasks.register('verifyNativeJars') {
                     if (entry == null) throw new GradleException("Missing ${name} in ${archive}")
                     byte[] actual = zip.getInputStream(entry).withCloseable { it.readAllBytes() }
                     String source = name.startsWith('META-INF/') ? name.substring('META-INF/'.length()) : name
-                    if (!Arrays.equals(rootProject.file(source).bytes, actual)) throw new GradleException("Mismatched ${name} in ${archive}")
+                    if (!Arrays.equals(new File(nativeJarVerificationRoot, source).bytes, actual)) throw new GradleException("Mismatched ${name} in ${archive}")
                 }
                 if (referenceNative != null && !Arrays.equals(referenceNative, nativeBytes)) throw new GradleException('Adapters packaged different native engines')
                 if (referenceBridge != null && !Arrays.equals(referenceBridge, bridgeBytes)) throw new GradleException('Adapters packaged different common bridge classes')

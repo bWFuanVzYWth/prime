@@ -41,11 +41,13 @@ struct Params {
         AtmTransport result = atmIntegrateAt(atmosphereModel(), a.xyz, b.xyz, a.w, b.w, 96, true);
         output[id.x * 2] = result.light;
         output[id.x * 2 + 1] = result.transmittance;
-    } else if (params.mode == 2) {
+    } else if (params.mode == 2 || params.mode == 6) {
         float3 direction = atmSampleSun(environment, input[id.x].xy);
         output[id.x * 2] = float4(direction, atmSunPdf());
-        output[id.x * 2 + 1] = float4(atmDistantTransmittance(environment, direction),
-                                      atmSunContains(environment, direction) ? 1.0 : 0.0);
+        output[id.x * 2 + 1] =
+                float4(params.mode == 6 ? atmSunRadiance(environment, direction)
+                                        : atmDistantTransmittance(environment, direction),
+                       atmSunContains(environment, direction) ? 1.0 : 0.0);
     } else if (params.mode == 3) {
         float4 a = input[id.x];
         float3 s, t;

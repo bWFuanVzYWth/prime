@@ -31,7 +31,7 @@ pub(crate) struct Objects {
     indices: Buffer,
     pub metadata: Buffer,
     uploads: [Option<Buffer>; FRAME_SLOTS],
-    bytes: Vec<u8>,
+    material_bytes: Vec<u8>,
     pub instances: Vec<vk::AccelerationStructureInstanceKHR>,
     pub changed_instances: Vec<usize>,
     pub triangle_count: u64,
@@ -67,7 +67,7 @@ impl Objects {
                 false,
             )?,
             uploads: std::array::from_fn(|_| None),
-            bytes: Vec::new(),
+            material_bytes: Vec::new(),
             instances: Vec::new(),
             changed_instances: Vec::new(),
             triangle_count: 0,
@@ -170,14 +170,7 @@ impl Objects {
             .iter()
             .try_fold(0usize, |sum, p| sum.checked_add(p.bytes()))
             .ok_or("Object upload size overflow")?;
-        self.bytes.clear();
-        self.bytes.resize(packed_bytes, 0);
-        let mut destination = &mut self.bytes[..];
-        for packing in &plans {
-            let (head, tail) = destination.split_at_mut(packing.bytes());
-            packing.pack_bytes(&self.workers, head, &textures.indices)?;
-            destination = tail;
-        }
+        self.material_bytes.clear();
         let mut copies: BTreeMap<vk::Buffer, Vec<vk::BufferCopy>> = BTreeMap::new();
         let mut offset = 0;
         for (item, &(key, allocation, count, capacity, replace)) in
@@ -297,9 +290,9 @@ impl Objects {
                 } else {
                     textures.index(placement.texture_id)?
                 };
-                let offset = self.bytes.len() as u64;
+                let offset = packed_bytes as u64 + self.material_bytes.len() as u64;
                 pack_material(
-                    &mut self.bytes,
+                    &mut self.material_bytes,
                     self.materials.address(object.allocation),
                     texture,
                     placement,
@@ -346,17 +339,39 @@ impl Objects {
                 self.changed_instances.push(index);
             }
         }
-        upload_capacity += (self.bytes.len() - packed_bytes) as u64;
-        if self.bytes.is_empty() {
+        let upload_bytes = packed_bytes
+            .checked_add(self.material_bytes.len())
+            .ok_or("Object upload size overflow")?;
+        upload_capacity += self.material_bytes.len() as u64;
+        if upload_bytes == 0 {
             return Ok(bindings);
         }
         let staging = slot_buffer(
             context,
             &mut self.uploads[slot],
-            upload_capacity.max(self.bytes.len() as u64),
+            upload_capacity.max(upload_bytes as u64),
             vk::BufferUsageFlags::TRANSFER_SRC,
         )?;
-        staging.write(&self.bytes)?;
+        // SAFETY: Frame preparation has proved this slot's previous GPU submission complete.
+        // Packing workers write disjoint ranges and join before returning. A failed write is
+        // never recorded, so no GPU consumer can observe an incompletely initialized batch.
+        unsafe {
+            staging.write_with(0, upload_bytes, |output| {
+                let (mut geometry, materials) = output.split_at_mut(packed_bytes);
+                for packing in &plans {
+                    for group in &packing.groups {
+                        let size = group.count as usize * crate::packing::stride(group.format);
+                        let (destination, tail) = geometry.split_at_mut(size);
+                        packing.pack(&self.workers, group, destination, &textures.indices)?;
+                        geometry = tail;
+                    }
+                }
+                for (out, byte) in materials.iter_mut().zip(&self.material_bytes) {
+                    out.write(*byte);
+                }
+                Ok(())
+            })?;
+        }
         context.submit_named("object_updates", |command| unsafe {
             for (destination, regions) in &copies {
                 context

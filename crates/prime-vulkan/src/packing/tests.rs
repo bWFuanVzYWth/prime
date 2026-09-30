@@ -74,19 +74,21 @@ fn unstructured_pairs_and_independent_triangles_preserve_every_corner_bit() {
     let mut independent = q.triangle(0);
     independent.positions[0][2] = -3.;
     let source = [q.triangle(0), q.triangle(1), independent];
-    let plan = Plan::new([input((&source[..]).into())], false).unwrap();
-    assert_eq!(
-        (plan.groups[0].format, plan.groups[0].count, plan.bytes()),
-        (0, 2, 352)
-    );
-    let packed = bytes(&plan, 4);
-    exact(decode(&packed, 0), source[0]);
-    exact(decode(&packed, 1), source[1]);
-    exact(decode(&packed[176..], 0), independent);
-    let degenerate = decode(&packed[176..], 1);
-    assert_eq!(degenerate.positions[0], degenerate.positions[1]);
-    assert_eq!(degenerate.colors[0], degenerate.colors[1]);
-    assert_eq!(degenerate.uvs[0], degenerate.uvs[1]);
+    for split_formats in [false, true] {
+        let plan = Plan::new([input((&source[..]).into())], split_formats).unwrap();
+        assert_eq!(
+            (plan.groups[0].format, plan.groups[0].count, plan.bytes()),
+            (0, 2, 352)
+        );
+        let packed = bytes(&plan, 4);
+        exact(decode(&packed, 0), source[0]);
+        exact(decode(&packed, 1), source[1]);
+        exact(decode(&packed[176..], 0), independent);
+        let degenerate = decode(&packed[176..], 1);
+        assert_eq!(degenerate.positions[0], degenerate.positions[1]);
+        assert_eq!(degenerate.colors[0], degenerate.colors[1]);
+        assert_eq!(degenerate.uvs[0], degenerate.uvs[1]);
+    }
     let mut discontinuous = source[..2].to_vec();
     discontinuous[1].uvs[0][0] += 0.125;
     let split = Plan::new([input(discontinuous.as_slice().into())], false).unwrap();

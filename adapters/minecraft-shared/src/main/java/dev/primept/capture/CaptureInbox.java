@@ -17,10 +17,8 @@ public final class CaptureInbox {
             return;
         try {
             int width = preparations.width(), height = preparations.height();
-            long size = (long)width * height * 4;
-            if (size > 256L << 20)
-                throw new IllegalArgumentException("Block atlas exceeds 256 MiB capture budget");
-            byte[] rgba = new byte[Math.toIntExact(size)];
+            int size = Packets.texturePixelBytes(width, height);
+            byte[] rgba = new byte[size];
             for (var sprite : preparations.regions().values()) {
                 var contents = sprite.contents();
                 var source = ((SpriteContentsAccessor)contents).primept$originalImage();

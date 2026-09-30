@@ -9,5 +9,5 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 @Mixin(SpriteCoordinateExpander.class)
 public interface SpriteConsumerAccessor {
     @Accessor("delegate") VertexConsumer primept$delegate();
-    @Accessor("sprite") TextureAtlasSprite primept$sprite();
+    @Accessor("sprite") TextureAtlasSprite primept$mapping();
 }

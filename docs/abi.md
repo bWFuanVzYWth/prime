@@ -28,6 +28,8 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。ABI 版本�
 
 ABI v7 提供下面的 MC 原始源批次接口，保留场景协议、参数粒子与诊断查询。当前生产地形走 `prime_mc_plan` / `prime_mc_sections`；op8/10/11 保留给封闭网格输入和诊断夹具；op12/13 仅在 Rust cfg(test) 与 Java testFixtures 中存在，生产库拒绝，不与新生产者混用。op2 无生产消费者，未知操作及历史 ABI 直接拒绝。
 
+op4 的完整包预算是 `40 + width*height*4 ≤ 256 MiB`，尺寸与乘法先校验，不能只限制像素数组。Java 图集与动态纹理直接将40字节头和源 RGBA 写入 `NativeBridge` 复用的 confined native 存储，不再生成同尺寸的临时 heap 包。该存储只借用到同步 `prime_submit` 返回，扩容或下次提交可覆盖；Rust 在返回前拥有需要保留的像素。源捕获数组和 GPU 上传仍有各自的复制与寿命，这一改动不表示纹理链路零复制。
+
 ## MC 源批次（source version 5）
 
 该入口只由 `prime_minecraft` 解释，不能将 Minecraft 字段枚举、坐标规则或 palette 布局扩散到 `prime_scene` / GPU。当前识别 MC version 262、263；其他版本明确拒绝。临时语义替代见独立的 [原型 hack 清单](../PROTOTYPE_HACKS.md)。

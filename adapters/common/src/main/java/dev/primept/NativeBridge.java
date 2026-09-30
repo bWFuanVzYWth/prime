@@ -93,30 +93,43 @@ public final class NativeBridge implements AutoCloseable {
 
     public void submit(byte[] packet) {
         checkOwner();
-        try {
-            if (packetBuffer == null || packetBuffer.byteSize() < packet.length) {
-                long capacity = Math.max(
-                        packet.length, packetBuffer == null ? 65536L : packetBuffer.byteSize() * 2);
-                var replacement = Arena.ofConfined();
-                MemorySegment memory;
-                try {
-                    memory = replacement.allocate(capacity, 8);
-                } catch (Throwable failure) {
-                    replacement.close();
-                    throw failure;
-                }
-                if (packetArena != null)
-                    packetArena.close();
-                packetArena = replacement;
-                packetBuffer = memory;
+        var storage = packetStorage(packet.length);
+        storage.copyFrom(MemorySegment.ofArray(packet));
+        submit(storage);
+    }
+
+    /** One pixel copy into reusable native wire storage, borrowed only through submit's return. */
+    public void submitTexture(long epoch, int id, int width, int height, byte[] rgba) {
+        checkOwner();
+        int pixels = Packets.texturePixelBytes(width, height);
+        if (rgba.length != pixels)
+            throw new IllegalArgumentException("Unexpected texture byte count");
+        var storage = packetStorage(Packets.TEXTURE_HEADER_BYTES + pixels);
+        Packets.writeTexture(storage.asByteBuffer(), epoch, id, width, height, rgba);
+        submit(storage);
+    }
+
+    private MemorySegment packetStorage(int size) {
+        if (size > Packets.MAX_PACKET_BYTES)
+            throw new IllegalArgumentException("Packet exceeds 256 MiB");
+        if (packetBuffer == null || packetBuffer.byteSize() < size) {
+            long capacity = Math.min(
+                    Packets.MAX_PACKET_BYTES,
+                    Math.max(size, packetBuffer == null ? 65536L : packetBuffer.byteSize() * 2));
+            var replacement = Arena.ofConfined();
+            MemorySegment memory;
+            try {
+                memory = replacement.allocate(capacity, 8);
+            } catch (Throwable failure) {
+                replacement.close();
+                throw failure;
             }
-            packetBuffer.asSlice(0, packet.length).copyFrom(MemorySegment.ofArray(packet));
-            int status = (int)submit.invokeExact(handle, packetBuffer, (long)packet.length);
-            if (status != 0)
-                throw new IllegalStateException("prime_submit (" + status + "): " + error());
-        } catch (Throwable failure) {
-            throw rethrow(failure);
+            if (packetArena != null)
+                packetArena.close();
+            packetArena = replacement;
+            packetBuffer = memory;
         }
+        return packetBuffer.asSlice(0, size);
     }
 
     /** Borrows an owner-thread native packet only for this call; Rust retains no source pointer. */
