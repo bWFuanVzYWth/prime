@@ -10,7 +10,7 @@
   "primept.settings.offline": "离线累积",
   "primept.settings.offline.tooltip": "Ctrl+Alt+F2 切换。冻结当前已显示场景、相机和光照，持续累积；Esc 只打开菜单。重载资源或退出世界会结束冻结，返回实时后重新捕获世界。",
   "primept.settings.render.bounces": "最大路径顶点数",
-  "primept.settings.render.bounces.tooltip": "计入首次表面命中。冻结期间固定；纯漫反射传输，暂不包含折射或体积。",
+  "primept.settings.render.bounces.tooltip": "1–64 个顶点，默认 12，含首次命中。反射与透射都计入；末顶点估计直接光后停止续接。冻结期间固定。",
   "primept.settings.render.offline_samples": "离线每帧采样数",
   "primept.settings.render.offline_samples.tooltip": "每像素每帧追加的独立样本数。实时固定为 1；修改此项保留已有累积。",
   "primept.settings.lighting.sun_ev_quarters": "太阳强度",

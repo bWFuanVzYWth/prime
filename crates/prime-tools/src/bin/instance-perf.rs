@@ -299,6 +299,10 @@ mod benchmark {
             // Separate diagnostic execution: never included in benchmark samples.
             let (scene, source, camera) = fixture(20_000);
             let mut renderer = prime_vulkan::Renderer::new()?;
+            renderer.configure(prime_scene::settings::RenderSettings {
+                bounces: 4,
+                ..Default::default()
+            })?;
             let mut pixels = Vec::new();
             for sample in 0..32 {
                 pixels =

@@ -12,6 +12,31 @@ import org.junit.jupiter.api.io.TempDir;
 
 final class SettingsTest {
     @Test
+    void vertexBudgetDefaultsAndExplicitLegacyValues(@TempDir Path dir) {
+        assertEquals(12, RenderSettings.defaults().value(RenderSettings.Control.BOUNCES));
+        assertEquals(12, SettingsFile.load(dir.resolve("absent.properties"))
+                                 .settings()
+                                 .value(RenderSettings.Control.BOUNCES));
+        for (int budget = 1; budget <= 64; ++budget) {
+            var settings = RenderSettings.defaults().with(RenderSettings.Control.BOUNCES, budget);
+            assertEquals(settings, SettingsFile.decode(SettingsFile.encode(settings)).settings());
+            var wire = ByteBuffer.allocate(56).order(ByteOrder.LITTLE_ENDIAN);
+            settings.write(wire, false, RenderSettings.View.OUTPUT);
+            assertEquals(budget, wire.getInt(8));
+        }
+        var legacy = RenderSettings.defaults().with(RenderSettings.Control.BOUNCES, 4);
+        assertEquals(4, SettingsFile.decode(SettingsFile.encode(legacy))
+                                .settings()
+                                .value(RenderSettings.Control.BOUNCES));
+        var missing =
+                SettingsFile.decode(SettingsFile.encode(legacy).replace("render.bounces=4\n", ""));
+        assertEquals(RenderSettings.defaults(), missing.settings());
+        assertFalse(missing.resetReason().isEmpty());
+        assertThrows(IllegalArgumentException.class,
+                     () -> legacy.with(RenderSettings.Control.BOUNCES, 65));
+    }
+
+    @Test
     void completeFileRoundTripAndReplacement(@TempDir Path dir) throws Exception {
         var settings = RenderSettings.defaults().withPathTracing(false);
         for (var control : RenderSettings.Control.values())
@@ -58,7 +83,7 @@ final class SettingsTest {
         assertEquals(56, bytes.position());
         assertEquals(2, bytes.getInt(0));
         assertEquals(1, bytes.getInt(4));
-        assertEquals(4, bytes.getInt(8));
+        assertEquals(12, bytes.getInt(8));
         assertEquals(1, bytes.getInt(12));
         assertEquals(4.0f, bytes.getFloat(16));
         assertEquals(.75f, bytes.getFloat(20));

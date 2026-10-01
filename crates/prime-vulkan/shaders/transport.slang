@@ -43,6 +43,7 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
                                  frame.right.xyz * (screen.x * frame.forward.w * frame.position.w) -
                                  frame.up.xyz * (screen.y * frame.position.w));
     float3 throughput = float3(1);
+    float etaScale = 1.0;
     float3 previous = origin;
     float primaryDistance = 0;
     float previousPdf = 0;
@@ -134,9 +135,10 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
                                                      lightDirection, optical))
                     evaluated = primeInvalidBsdfEvaluation();
                 float bsdfPdf = evaluated.pdf;
-                float weightedInversePdf = bounce + 1 == asuint(frame.displayExtra.z)
-                                                   ? 1.0 / pdf
-                                                   : primePowerHeuristicOverPdfValue(pdf, bsdfPdf);
+                float weightedInversePdf =
+                        primePathHasContinuation(bounce, asuint(frame.displayExtra.z))
+                                ? primePowerHeuristicOverPdfValue(pdf, bsdfPdf)
+                                : 1.0 / pdf;
                 result.radiance +=
                         throughput * primeTripleProduct(linear709ToWorking(radiance),
                                                         evaluated.response, weightedInversePdf);
@@ -160,7 +162,7 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
                         evaluated = primeInvalidBsdfEvaluation();
                     float bsdfPdf = evaluated.pdf;
                     float weightedInversePdf =
-                            bounce + 1 < asuint(frame.displayExtra.z)
+                            primePathHasContinuation(bounce, asuint(frame.displayExtra.z))
                                     ? primePowerHeuristicOverPdfValue(atmSunPdf(), bsdfPdf)
                                     : 1.0 / atmSunPdf();
                     result.radiance +=
@@ -172,7 +174,7 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
         }
         // The final vertex has no continuation consumer. Keep its NEE and MIS above,
         // but do not construct a BSDF sample or roulette state that will be discarded.
-        if (bounce + 1 == asuint(frame.displayExtra.z))
+        if (!primePathHasContinuation(bounce, asuint(frame.displayExtra.z)))
             break;
         // The three-dimensional closure sample keeps its lobe selector independent of roulette.
         PrimePbrSample sampled = primeSamplePbrVertex(
@@ -184,18 +186,27 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
             !primeGeometricSampleSupport(hasNormal, surface.normal, view, scatter))
             break;
         throughput = primeProductOver(throughput, scatter.response, scatter.pdf);
-        if (!primeBsdfFinite(throughput))
+        if (!primeBsdfFinite(throughput) || all(throughput == float3(0)))
             break;
+        etaScale = primeEtaScaleAfterScatter(etaScale, scatter.relativeEta,
+                                             (scatter.eventFlags & PRIME_BSDF_EVENT_TRANSMISSION) !=
+                                                     0u);
         direction = scatter.direction;
         medium = sampled.medium;
         previous = surface.position;
         previousPdf = primeDirectLightingMisPdf(optical, scatter);
         origin = spawnRay(surface, direction);
-        if (bounce >= 2) {
-            float survival = clamp(workingLuminance(throughput), 0.05, 0.95);
-            if (sampler.sample1D(domain + 3) >= survival)
+        if (primeRussianRouletteApplies(bounce, PRIME_RUSSIAN_ROULETTE_START)) {
+            float survival = primeRussianRouletteSurvival(throughput, etaScale);
+            if (!(survival > 0.0))
                 break;
-            throughput /= survival;
+            if (survival < 1.0) {
+                if (!(sampler.sample1D(domain + 3) < survival))
+                    break;
+                throughput = primeRussianRouletteReweight(throughput, survival);
+                if (!primeBsdfFinite(throughput))
+                    break;
+            }
         }
     }
     if (primaryDistance > 0) {

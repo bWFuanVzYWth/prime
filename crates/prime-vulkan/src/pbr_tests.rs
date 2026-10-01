@@ -1,4 +1,4 @@
-//! Executes the production material translation, LitePBR closures and sanitizers on the GPU.
+//! Checks material translation, Full and retained Lite closures, and sanitizers.
 use super::{Context, shader_tests::run};
 
 const PBR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/pbr.spv"));
@@ -829,7 +829,7 @@ fn gpu_litepbr_normal_mapped_evaluation_rejects_the_wrong_physical_boundary_side
 }
 
 #[test]
-fn litepbr_spirv_production_has_no_energy_resource_binding() {
+fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
     fn bindings(code: &[u8]) -> Vec<u32> {
         use std::collections::{BTreeMap, BTreeSet};
         let words: Vec<_> = code
@@ -865,18 +865,26 @@ fn litepbr_spirv_production_has_no_energy_resource_binding() {
     }
     assert_eq!(
         bindings(include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv"))),
-        [0, 2, 3, 4, 5, 7, 8],
+        [0, 2, 3, 4, 5, 7, 8, 9],
         "offline production descriptor contract"
     );
     assert_eq!(
         bindings(include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv"))),
-        [0, 2, 3, 4, 7, 8],
+        [0, 2, 3, 4, 7, 8, 9],
         "realtime production descriptor contract"
     );
     assert_eq!(
         bindings(PBR),
         [0, 1],
-        "the behavior fixture also needs no energy table"
+        "the retained Lite behavior fixture needs no energy table"
+    );
+    assert_eq!(
+        bindings(include_bytes!(concat!(
+            env!("OUT_DIR"),
+            "/full_openpbr.spv"
+        ))),
+        [0, 1, 9],
+        "the Full constructor oracle binds the actual energy table"
     );
 }
 

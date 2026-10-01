@@ -142,6 +142,11 @@ impl HostBenchmark {
                 state.owner.queue_family,
                 state.timeline.as_raw(),
             )?);
+            // Preserve this benchmark's declared budget across product default changes.
+            state.renderer.as_mut().unwrap().configure(RenderSettings {
+                bounces: 4,
+                ..Default::default()
+            })?;
         }
         Ok(Self {
             state: Some(state),
@@ -542,7 +547,10 @@ mod tests {
                 .renderer
                 .as_mut()
                 .unwrap()
-                .configure(RenderSettings::default())
+                .configure(RenderSettings {
+                    bounces: 4,
+                    ..Default::default()
+                })
                 .unwrap();
             eprintln!(
                 "realtime output: {name} device={} native=1920x1080 bounces=4 seed=0x13572468 warmup=256 samples=512",

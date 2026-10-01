@@ -99,6 +99,8 @@
 
 纯文档修改核对事实、命令和链接即可。代码修改按受影响的契约选择以下入口，记录实际执行结果及未覆盖范围。
 
+RR、折射 eta 与反弹预算的数学合同可以无 GPU 运行 `./scripts/test-roulette-cpu.ps1`：使用当前 Slang 实际生成的 C++ 和 clang++ 执行生产数学/BSDF 核，覆盖概率重加权、介质进出、TIR、薄壁、异常值与终端预算。需要 Slang 和 clang++；输出默认保存在忽略的 `artifacts/roulette-cpu`。这个 CPU 验证不创建 Vulkan 设备，不代替 shader SPIR-V 校验或用户实际画面与性能验收。
+
 ### 大气资产与无窗口验证
 
 普通构建使用仓库内 Safetensors 资产，不在启动时求解多散射。物理输入迁移工具校验旧资源 SHA-256 并保留原始 f32 位模式；离线 GPU 工具仅在调整资产时启用：

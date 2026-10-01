@@ -8,7 +8,7 @@ public final class RenderSettings {
     public static final int VERSION = 2;
     public static final int WIRE_BYTES = 56;
     public enum Control {
-        BOUNCES("render.bounces", 1, 64, 4),
+        BOUNCES("render.bounces", 1, 64, 12),
         OFFLINE_SAMPLES("render.offline_samples", 1, 64, 1),
         LATITUDE("astronomy.latitude_degrees", -90, 90, 30),
         SOLAR_LONGITUDE("astronomy.solar_longitude_degrees", 0, 359, 0),

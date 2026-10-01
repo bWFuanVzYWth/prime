@@ -4,6 +4,13 @@
 
 module "math/transport.slang";
 
+public static const uint PRIME_RUSSIAN_ROULETTE_START = 1;
+
+// Budget counts illuminated surface vertices, including the primary hit.
+public bool primePathHasContinuation(uint vertex, uint budget) {
+    return vertex + 1u < budget;
+}
+
 public float primeProductOver(float first, float second, float denominator) {
     int firstExponent;
     int secondExponent;

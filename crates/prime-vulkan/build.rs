@@ -66,6 +66,7 @@ fn main() {
             "lights",
             "optics",
             "texture",
+            "roulette",
             "pbr",
             "full_openpbr",
             "pbr_texture",

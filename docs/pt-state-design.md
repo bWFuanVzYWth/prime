@@ -12,7 +12,7 @@
 flowchart TD
     CPU["CPU：源规范化、动画/mip、光学身份、灯分布"] --> PUB["同一资源代次的描述符、纹理与场景记录"]
     PUB --> QUERY["最近交点查询：遍历与 coverage"]
-    PATH["路径：ray、cone、medium、throughput、previous MIS、sampler"] --> QUERY
+    PATH["路径：ray、cone、medium、throughput、etaScale、previous MIS、sampler"] --> QUERY
     QUERY --> FOUND{"是否命中"}
     FOUND -->|否| SKY["天空/太阳 escape 与 MIS；结束路径"]
     PATH --> SKY
@@ -79,16 +79,18 @@ flowchart TD
 
 | 当前切面 | 此后仍有消费者的数据 | 当前在切面前结束的数据与消费 |
 | --- | --- | --- |
-| 最近交点遍历 | ray 与 coverage 身份；既有路径 throughput/radiance、medium、previous/PDF、cone；末尾空气透视所需主射线信息，以及 Realtime 首次命中 guides | 上一跳原始 hit、闭包与光源样本已无消费者；单样本 Offline 尚不读取历史均值 |
+| 最近交点遍历 | ray 与 coverage 身份；既有路径 throughput/radiance、单标量 etaScale、medium、previous/PDF、cone；末尾空气透视所需主射线信息，以及 Realtime 首次命中 guides | 上一跳原始 hit、闭包与光源样本已无消费者；单样本 Offline 尚不读取历史均值 |
 | hit 准备完成到局部阴影 | canonical vertex、SurfacePoint、view、物理端点/介质、路径/采样上下文；该灯查询后所需方向、radiance/PDF | 几何/材质记录、变换、UV/TBN/LOD、raw normal/specular、发光与发光命中 PDF 在交点作用域内消费 |
 | 局部评价到太阳阴影 | 同一 vertex、SurfacePoint、物理端点/介质和路径/采样上下文；太阳查询后需要的方向/radiance | 局部灯样本、visibility、response、PDF/MIS 和该次评价闭包结束；贡献已累加 |
 | 太阳评价到下一跳 | vertex、几何与介质仍被 continuation 消费 | 太阳评价的方向、visibility、response、PDF/MIS 和闭包结束；末预算顶点没有 continuation 消费者 |
-| 下一跳到下一次最近交点 | 新 ray/medium/throughput、previous position/PDF、cone、累计 radiance 和随机身份 | 当前 vertex 与 BSDF 采样临时状态结束 |
-| 路径结束到输出 | radiance、同一主射线 jitter UV、primaryDistance；Realtime 另消费真实 depth/normal guides | ray/query/vertex/BSDF/medium/MIS 结束；随后消费空气透视、Offline 历史和显示参数 |
+| 下一跳到下一次最近交点 | 新 ray/medium/throughput、单标量 etaScale、previous position/PDF、cone、累计 radiance 和随机身份 | 当前 vertex、BSDF 采样与该轮 RR 概率/样本临时状态结束 |
+| 路径结束到输出 | radiance、同一主射线 jitter UV、primaryDistance；Realtime 另消费真实 depth/normal guides | ray/query/vertex/BSDF/medium/etaScale/MIS 结束；随后消费空气透视、Offline 历史和显示参数 |
 
 不可变 Full 能量图像/采样器在入口绑定，首次帧上传一次，之后作为显式资源值传入消费者。它不增加 pass、queue 或稳态上传。
 
 当前各 BSDF 评价在对应阴影查询后构造短时正交框架（ONB）与 Full 支持子域状态，立即消费响应、总 PDF 和 MIS，再累加贡献。下一跳也就地准备状态。这会重复少量准备运算，换取较少的跨查询状态重叠。缓存 ONB 的两个切向量会增加六个浮点分量；缓存方向相关 closure 或多份 pending contribution 还会增加其他状态。重算、缓存和重载都允许改进，应比较省下的运算与实际保存、占用率及带宽成本，不能仅因准备重复就预计算全部状态，也不能永久禁止缓存。
+
+最大反弹预算默认 12、可调 1–64，实际表示含首次表面命中的照明/散射顶点上限 N，最多 N−1 次续接；它不是保证执行 N 次反射。末顶点保留发光与 NEE，并因没有续接竞争技术使用 NEE 权重 1，然后跳过 BSDF 采样与 RR。第二次有效散射开始采用旧项目验证的 RR：`p = clamp(maxRGB(throughput) × etaScale, 0, 1)`，存活后按 `throughput/p` 重加权。etaScale 初始为 1，只有透射事件乘 `relativeEta²`；反射/TIR 不改变它，薄壁的 relativeEta 为 1。它是跨反弹必需的一个 PT 标量，不保存闭包或历史 eta 的额外副本。零吞吐/零概率终止，单位概率跳过无消费者的 RR 随机数与除法，域身份不改变。有限 beta 和重加权结果的实际数值检查仍位于消费边界。
 
 ## CPU、交点、视角与方向的边界
 

@@ -37,7 +37,7 @@ impl Default for RenderSettings {
         Self {
             astronomy: Default::default(),
             mode: RenderMode::Realtime,
-            bounces: 4,
+            bounces: 12,
             offline_samples: 1,
             exposure: 1.0,
             hue: 0.75,
@@ -122,7 +122,7 @@ mod tests {
         [
             2_u32,
             1,
-            4,
+            12,
             1,
             4_f32.to_bits(),
             0.75_f32.to_bits(),
@@ -174,6 +174,21 @@ mod tests {
         let mut longer = bytes;
         longer.push(0);
         assert!(RenderSettings::parse(&longer).is_err());
+    }
+    #[test]
+    fn vertex_budget_defaults_and_all_explicit_wire_values() {
+        assert_eq!(RenderSettings::default().bounces, 12);
+        for budget in 1..=64_u32 {
+            let mut bytes = golden();
+            bytes[8..12].copy_from_slice(&budget.to_le_bytes());
+            assert_eq!(RenderSettings::parse(&bytes).unwrap().bounces, budget);
+        }
+        let old = RenderSettings {
+            bounces: 4,
+            ..Default::default()
+        };
+        assert!(old.validate().is_ok());
+        assert!(!old.transport_matches(RenderSettings::default()));
     }
     #[test]
     fn rejects_nonfinite_or_out_of_range_floats() {
