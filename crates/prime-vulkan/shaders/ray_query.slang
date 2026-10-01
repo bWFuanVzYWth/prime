@@ -243,19 +243,28 @@ float3 mappedNormal(SurfaceRecord record, SourceSample source, float3 geometric,
     float3 normal = primeAdaptLabPbrNormalAtlas(sample).tangentNormal;
     return normalize(tangent * normal.x + bitangent * normal.y + geometric * normal.z);
 }
-public float3 sourceEmission(TraceScene resources, SurfaceRecord record, SourceSample source,
-                             bool front) {
+float3 sourceEmissionResolved(SurfaceRecord record, SourceSample source, bool front,
+                              uint materialFlags, float emissionSample) {
     if (!front && (record.identity.w & 2) == 0)
         return float3(0);
-    MaterialSample material = materialSource(resources, record.triangle.texture, source.uv);
-    if ((material.maps.z & 4) != 0) {
-        uint specular = material.maps.y;
-        float value = primeDecodeLabPbrEmission(
-                linearMaterial(resources, specular, material.uv, source.lod).a);
+    if ((materialFlags & 4) != 0) {
+        float value = primeDecodeLabPbrEmission(emissionSample);
         return decodeSrgb(saturate(source.color.rgb)) * (1.5 * value);
     }
     return record.emission.rgb *
            ((record.identity.w & 16) != 0 ? decodeSrgb(saturate(source.color.rgb)) : float3(1));
+}
+public float3 sourceEmission(TraceScene resources, SurfaceRecord record, SourceSample source,
+                             bool front) {
+    // Generic emitter callers do not have the surface's filtered material sample.
+    if (!front && (record.identity.w & 2) == 0)
+        return float3(0);
+    MaterialSample material = materialSource(resources, record.triangle.texture, source.uv);
+    float emissionSample =
+            (material.maps.z & 4) != 0
+                    ? linearMaterial(resources, material.maps.y, material.uv, source.lod).a
+                    : 0.0;
+    return sourceEmissionResolved(record, source, front, material.maps.z, emissionSample);
 }
 SurfaceRecord loadQuad(uint *base, uint format, uint primitive) {
     uint words = surfaceFeatures < 2 ? 44 + format * 16
@@ -434,31 +443,34 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
                 query.CommitNonOpaqueTriangleHit();
         }
     }
-    SurfaceHit hit;
+    // Miss members have no consumers; define them so Slang cannot carry a prior vertex's
+    // uninitialized return members through the bounce loop and closest query.
+    SurfaceHit hit = {};
     hit.found = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
     if (hit.found) {
-        SurfaceRecord record =
-                loadSurface(resources, query.CommittedInstanceID(), query.CommittedGeometryIndex(),
-                            query.CommittedPrimitiveIndex());
+        uint instance = query.CommittedInstanceID();
+        uint geometry = query.CommittedGeometryIndex();
+        uint primitive = query.CommittedPrimitiveIndex();
+        float2 bary = query.CommittedTriangleBarycentrics();
+        float distance = query.CommittedRayT();
+        bool front = query.CommittedTriangleFrontFace();
+        SurfaceRecord record = loadSurface(resources, instance, geometry, primitive);
+        // Medium endpoints belong to the physical boundary, before a coating is selected.
         SurfaceRecord boundary = record;
         Triangle tri = record.triangle;
-        float2 bary = query.CommittedTriangleBarycentrics();
-        record = selectMaterial(resources, record, query.CommittedTriangleFrontFace(), bary,
-                                origin + direction * query.CommittedRayT(), coverageSeed);
-        uint instance = query.CommittedInstanceID();
+        record = selectMaterial(resources, record, front, bary, origin + direction * distance,
+                                coverageSeed);
         // Every static page has a producer-proven translation, for both record strides.
         if ((instance & 0x00800000) == 0)
             hit.surface = reconstructStaticSurface(
                     tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary,
-                    resources.staticTrianglePages[instance + query.CommittedGeometryIndex()]
-                            .origin.xyz);
-        else
-            hit.surface = reconstructSurface(tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary,
-                                             query.CommittedObjectToWorld3x4(),
-                                             query.CommittedWorldToObject3x4());
-        // Surface-local derivatives must include an instance's actual scale/shear.
-        if ((instance & 0x00800000) != 0) {
+                    resources.staticTrianglePages[instance + geometry].origin.xyz);
+        else {
+            // Consume dynamic transforms here; later texture/medium work needs no query getter.
             float3x4 transform = query.CommittedObjectToWorld3x4();
+            hit.surface = reconstructSurface(tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary, transform,
+                                             query.CommittedWorldToObject3x4());
+            // Surface-local derivatives must include an instance's actual scale/shear.
             record.triangle.p0.xyz = mul(transform, float4(tri.p0.xyz, 1));
             record.triangle.p1.xyz = mul(transform, float4(tri.p1.xyz, 1));
             record.triangle.p2.xyz = mul(transform, float4(tri.p2.xyz, 1));
@@ -466,7 +478,7 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
             boundary.triangle.p1.xyz = record.triangle.p1.xyz;
             boundary.triangle.p2.xyz = record.triangle.p2.xyz;
         }
-        float footprint = (coneWidth + coneSpread * query.CommittedRayT()) /
+        float footprint = (coneWidth + coneSpread * distance) /
                           max(abs(dot(hit.surface.normal, direction)), 0.05);
         boundary = boundaryIors(resources, boundary, bary, footprint);
         record.negative = boundary.negative;
@@ -495,15 +507,15 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
         if ((hit.materialFlags & 1) != 0)
             hit.shadingNormal = primeEnsureValidNormalMappedReflection(
                     hit.surface.normal, -direction, hit.shadingNormal);
+        // Resident metadata guarantees authored emission has a specular map. Reuse the same
+        // selected shading record, animation frame, UV, LOD and filtered A already read above.
         hit.emission =
-                sourceEmission(resources, record, sampled, dot(hit.surface.normal, direction) < 0);
-        hit.light =
-                (instance & 0x00800000) == 0 && record.identity.z != 0xffffffffu
-                        ? resources.staticTrianglePages[instance + query.CommittedGeometryIndex()]
-                                          .firstEmitter +
-                                  record.identity.z
-                        : 0xffffffffu;
-        bool front = query.CommittedTriangleFrontFace();
+                sourceEmissionResolved(record, sampled, dot(hit.surface.normal, direction) < 0,
+                                       hit.materialFlags, hit.specularSample.a);
+        hit.light = (instance & 0x00800000) == 0 && record.identity.z != 0xffffffffu
+                            ? resources.staticTrianglePages[instance + geometry].firstEmitter +
+                                      record.identity.z
+                            : 0xffffffffu;
         hit.incident = front ? record.positive : record.negative;
         hit.transmitted = front ? record.negative : record.positive;
         hit.optical = opticalFeatures != 0 && (record.identity.w & 128) != 0;
