@@ -66,7 +66,7 @@ Minecraft、Fabric API 和 Prime PT 的版本必须匹配。当前验证组合�
 
 已接入 LabPBR 1.3 的法线、粗糙度、介电反射率、标准/自定义金属和发光贴图，支持辅助图动画与法线分布过滤。资源包必须在 `assets/minecraft/optifine/texture.properties` 声明 `format=lab-pbr/1.3`，并提供对应方块图集 sprite 的 `_n.png` / `_s.png`；缺少声明或贴图时使用默认材质。地形与使用同一图集 UV 的物品共享材质。
 
-实时与离线都使用轻量 LitePBR 材质模型；水和受支持的玻璃已接入粗糙反射/透射；cutout 贴图中 authored SSS 可产生薄表面漫反射透射。AO、porosity 和 height 源数据已保留，当前不直接作 AO 乘色或几何位移；树叶专用 foliage 拓扑尚未自动选择。旧 Prime 的 PBR 预设不导入。完整支持边界见[材质说明](docs/materials.md)，实际资源包画面仍需按对应游戏版本检查。
+实时与离线共同使用 OpenPBR 已接入的材质能力与多次散射补偿；水和受支持的玻璃已接入粗糙反射/透射，cutout 贴图中 authored SSS 可产生薄表面漫反射透射。厚壁 authored SSS 仍使用历史 LitePBR 近似。AO、porosity 和 height 源数据已保留，当前不直接作 AO 乘色或几何位移；树叶专用 foliage 拓扑尚未自动选择。旧 Prime 的 PBR 预设不导入。完整支持边界见[材质说明](docs/materials.md)，实际资源包画面仍需按对应游戏版本检查。
 
 ## 关闭 Prime PT
 
