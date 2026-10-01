@@ -106,11 +106,11 @@ public struct PrimeLiteFoliageEnergy {
     public float3 specular;
 };
 
-float primeLiteWeight(float3 value) {
+public float primeLiteWeight(float3 value) {
     return max(0.0, primeOpenPbrSpectrumToWeight(value));
 }
 
-PrimeLiteMixState primeLiteMixState(float firstWeight, float secondWeight) {
+public PrimeLiteMixState primeLiteMixState(float firstWeight, float secondWeight) {
     PrimeLiteMixState result;
     float sum = firstWeight + secondWeight;
     result.firstSampleWeight = sum > 0.0 ? firstWeight / sum : 0.0;
@@ -225,8 +225,9 @@ float2 primeLiteReflectiveDirectionalAlbedoBasis(PrimeOpenPbrMicrofacet microfac
     return clamp(r.xy / r.zw, float2(0.0), float2(1.0));
 }
 
-float primeLiteDielectricDirectionalClosure(PrimeOpenPbrMicrofacet microfacet, float cosineTheta,
-                                            float energyIor, out float specularScale) {
+public float primeLiteDielectricDirectionalClosure(PrimeOpenPbrMicrofacet microfacet,
+                                                   float cosineTheta, float energyIor,
+                                                   out float specularScale) {
     float f0 = primeOpenPbrIorToF0(energyIor);
     float2 basis = primeLiteReflectiveDirectionalAlbedoBasis(microfacet, cosineTheta);
     float singleScatterUnity = clamp(basis.x + basis.y, 1.0e-5, 1.0);
@@ -235,18 +236,24 @@ float primeLiteDielectricDirectionalClosure(PrimeOpenPbrMicrofacet microfacet, f
     return clamp(singleScatter * specularScale, 0.0, 1.0);
 }
 
-float3 primeLiteConductorFresnel(PrimeOpenPbrConductorFresnel fresnel, float cosineTheta) {
+public float3 primeLiteConductorFresnelCore(float3 f0, float3 f82, float3 f90, float weight,
+                                            float cosineTheta) {
     // Generalized Schlick retains the authored F82 anchor without a conductor-IOR solve.
     const float anchorCosine = 1.0 / 7.0;
     float anchorTail = primeOpenPbrPow6(1.0 - anchorCosine);
-    float3 baseAtAnchor = lerp(fresnel.f0, fresnel.f90, primeOpenPbrPow5(1.0 - anchorCosine));
-    float3 correction = baseAtAnchor * (float3(1.0) - fresnel.f82) / (anchorCosine * anchorTail);
+    float3 baseAtAnchor = lerp(f0, f90, primeOpenPbrPow5(1.0 - anchorCosine));
+    float3 correction = baseAtAnchor * (float3(1.0) - f82) / (anchorCosine * anchorTail);
     float cosine = clamp(abs(cosineTheta), 0.0, 1.0);
     float oneMinusCosine = 1.0 - cosine;
-    return clamp((lerp(fresnel.f0, fresnel.f90, primeOpenPbrPow5(oneMinusCosine)) -
+    return clamp((lerp(f0, f90, primeOpenPbrPow5(oneMinusCosine)) -
                   correction * cosine * primeOpenPbrPow6(oneMinusCosine)) *
-                         fresnel.weight,
+                         weight,
                  float3(0.0), float3(1.0));
+}
+
+float3 primeLiteConductorFresnel(PrimeOpenPbrConductorFresnel fresnel, float cosineTheta) {
+    return primeLiteConductorFresnelCore(fresnel.f0, fresnel.f82, fresnel.f90, fresnel.weight,
+                                         cosineTheta);
 }
 
 public PrimeOpenPbrRefractResult primeLiteDielectricRefract(float ior, float3 incident,
@@ -269,23 +276,27 @@ public PrimeOpenPbrRefractResult primeLiteDielectricRefract(float ior, float3 in
     return result;
 }
 
-PrimeOpenPbrVecPair primeLiteFresnelRt(PrimeOpenPbrSpecularFresnel fresnel, float cosineTheta) {
-    float reflection = primeLiteDielectricFresnel(fresnel.ior, cosineTheta);
+public PrimeOpenPbrVecPair primeLiteFresnelRtCore(float ior, float3 color, float cosineTheta) {
+    float reflection = primeLiteDielectricFresnel(ior, cosineTheta);
     PrimeOpenPbrVecPair result;
-    result.first = float3(reflection) * (cosineTheta >= 0.0 ? fresnel.color : float3(1.0));
+    result.first = float3(reflection) * (cosineTheta >= 0.0 ? color : float3(1.0));
     result.second = float3(1.0 - reflection);
     return result;
 }
 
-struct PrimeLiteReflectiveBase {
-    float factor;
-    float microCosine;
-    uint flags;
+PrimeOpenPbrVecPair primeLiteFresnelRt(PrimeOpenPbrSpecularFresnel fresnel, float cosineTheta) {
+    return primeLiteFresnelRtCore(fresnel.ior, fresnel.color, cosineTheta);
+}
+
+public struct PrimeLiteReflectiveBase {
+    public float factor;
+    public float microCosine;
+    public uint flags;
 };
 
-PrimeLiteReflectiveBase primeLiteReflectiveEvalBase(float3 wi, float3 wo,
-                                                    PrimeOpenPbrMicrofacet microfacet,
-                                                    uint samplingFlags) {
+public PrimeLiteReflectiveBase primeLiteReflectiveEvalBase(float3 wi, float3 wo,
+                                                           PrimeOpenPbrMicrofacet microfacet,
+                                                           uint samplingFlags) {
     PrimeLiteReflectiveBase result;
     result.factor = 0.0;
     result.microCosine = 0.0;
@@ -310,9 +321,9 @@ PrimeLiteReflectiveBase primeLiteReflectiveEvalBase(float3 wi, float3 wo,
     return result;
 }
 
-PrimeOpenPbrSample primeLiteReflectiveSampleBase(float3 wi, float3 randomValue,
-                                                 PrimeOpenPbrMicrofacet microfacet,
-                                                 uint samplingFlags, out float microCosine) {
+public PrimeOpenPbrSample primeLiteReflectiveSampleBase(float3 wi, float2 randomValue,
+                                                        PrimeOpenPbrMicrofacet microfacet,
+                                                        uint samplingFlags, out float microCosine) {
     PrimeOpenPbrSample result = primeOpenPbrZeroSample();
     microCosine = 0.0;
     if (wi.z < 0.0) {
@@ -325,8 +336,8 @@ PrimeOpenPbrSample primeLiteReflectiveSampleBase(float3 wi, float3 randomValue,
     if (!smooth && !primeOpenPbrIsSpecular(samplingFlags)) {
         return result;
     }
-    float3 halfVector = smooth ? float3(0.0, 0.0, 1.0)
-                               : primeLiteMicrofacetSample(microfacet, wi, randomValue.xy);
+    float3 halfVector =
+            smooth ? float3(0.0, 0.0, 1.0) : primeLiteMicrofacetSample(microfacet, wi, randomValue);
     microCosine = dot(wi, halfVector);
     float3 wo = reflect(-wi, halfVector);
     if (microCosine <= 0.0 || wo.z <= 0.0) {
@@ -354,7 +365,7 @@ PrimeOpenPbrSample primeLiteReflectiveSampleBase(float3 wi, float3 randomValue,
     return result;
 }
 
-float primeLiteReflectivePdf(float3 wi, float3 wo, PrimeOpenPbrMicrofacet microfacet) {
+public float primeLiteReflectivePdf(float3 wi, float3 wo, PrimeOpenPbrMicrofacet microfacet) {
     if (primeLiteMicrofacetEffectivelySmooth(microfacet) || wi.z < 0.0 || wo.z <= 0.0) {
         return 0.0;
     }
@@ -370,194 +381,281 @@ float primeLiteReflectivePdf(float3 wi, float3 wo, PrimeOpenPbrMicrofacet microf
                    : 0.0;
 }
 
-PrimeOpenPbrThroughput primeLiteLambertEval(float3 wi, float3 wo, PrimeLiteOpaqueState state,
-                                            uint samplingFlags) {
+public PrimeOpenPbrThroughput primeLiteLambertEvalCore(float3 wi, float3 wo, float3 color,
+                                                       uint samplingFlags) {
     if (wi.z < 0.0 || wo.z < 0.0 || (samplingFlags & PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION) == 0u) {
         return primeOpenPbrZeroThroughput();
     }
     PrimeOpenPbrThroughput result;
-    result.value = state.baseColor * (PRIME_OPENPBR_INV_PI * wo.z);
+    result.value = color * (PRIME_OPENPBR_INV_PI * wo.z);
     result.flags = PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION;
     return result;
+}
+
+PrimeOpenPbrThroughput primeLiteLambertEval(float3 wi, float3 wo, PrimeLiteOpaqueState state,
+                                            uint samplingFlags) {
+    return primeLiteLambertEvalCore(wi, wo, state.baseColor, samplingFlags);
 }
 
 float primeLiteLambertPdf(float3 wi, float3 wo) {
     return wi.z >= 0.0 && wo.z > 0.0 ? PRIME_OPENPBR_INV_PI * wo.z : 0.0;
 }
 
+public PrimeOpenPbrSample primeLiteLambertSampleCore(float3 wi, float2 randomValue, float3 color,
+                                                     uint samplingFlags) {
+    PrimeOpenPbrSample result = primeOpenPbrZeroSample();
+    if (wi.z < 0.0 || (samplingFlags & PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION) == 0u) {
+        return result;
+    }
+    result.wo = primeOpenPbrCosineSampleHemisphere(randomValue);
+    result.pdf = PRIME_OPENPBR_INV_PI * result.wo.z;
+    result.throughput.value = color * result.pdf;
+    result.throughput.flags = PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION;
+    return result;
+}
+
 PrimeOpenPbrSampleResult primeLiteLambertSample(float3 wi, float3 randomValue,
                                                 PrimeLiteOpaqueState state, uint samplingFlags,
                                                 PrimeOpenPbrVolumeStack stack) {
     PrimeOpenPbrSampleResult result = primeLiteZeroSampleResult(state.rayT, stack);
-    if (wi.z < 0.0 || (samplingFlags & PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION) == 0u) {
-        return result;
-    }
-    result.bsdfSample.wo = primeOpenPbrCosineSampleHemisphere(randomValue.xy);
-    result.bsdfSample.pdf = PRIME_OPENPBR_INV_PI * result.bsdfSample.wo.z;
-    result.bsdfSample.throughput.value = state.baseColor * result.bsdfSample.pdf;
-    result.bsdfSample.throughput.flags = PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION;
+    result.bsdfSample =
+            primeLiteLambertSampleCore(wi, randomValue.xy, state.baseColor, samplingFlags);
     return result;
 }
 
-float primeLiteSubsurfaceReflectionProbability(PrimeLiteOpaqueState state, uint samplingFlags) {
-    float probability = state.thinWalled != 0u ? 0.5 * (1.0 - state.subsurfaceAnisotropy) : 0.0;
+public float primeLiteSubsurfaceReflectionProbabilityCore(uint thinWalled, float anisotropy,
+                                                          uint samplingFlags) {
+    float probability = thinWalled != 0u ? 0.5 * (1.0 - anisotropy) : 0.0;
     return (samplingFlags & PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION) != 0u ? probability : 0.0;
 }
 
-float primeLiteSubsurfaceTransmissionProbability(PrimeLiteOpaqueState state, uint samplingFlags) {
-    float probability = state.thinWalled != 0u ? 0.5 * (1.0 + state.subsurfaceAnisotropy) : 1.0;
+float primeLiteSubsurfaceReflectionProbability(PrimeLiteOpaqueState state, uint samplingFlags) {
+    return primeLiteSubsurfaceReflectionProbabilityCore(state.thinWalled,
+                                                        state.subsurfaceAnisotropy, samplingFlags);
+}
+
+public float primeLiteSubsurfaceTransmissionProbabilityCore(uint thinWalled, float anisotropy,
+                                                            uint samplingFlags) {
+    float probability = thinWalled != 0u ? 0.5 * (1.0 + anisotropy) : 1.0;
     return (samplingFlags & PRIME_OPENPBR_FLAG_DIFFUSE_TRANSMISSION) != 0u ? probability : 0.0;
 }
 
-PrimeOpenPbrThroughput primeLiteSubsurfaceEval(float3 wi, float3 wo, PrimeLiteOpaqueState state,
-                                               uint samplingFlags) {
+float primeLiteSubsurfaceTransmissionProbability(PrimeLiteOpaqueState state, uint samplingFlags) {
+    return primeLiteSubsurfaceTransmissionProbabilityCore(
+            state.thinWalled, state.subsurfaceAnisotropy, samplingFlags);
+}
+
+public PrimeOpenPbrThroughput primeLiteSubsurfaceEvalCore(float3 wi, float3 wo, uint thinWalled,
+                                                          float3 color, float anisotropy,
+                                                          uint samplingFlags) {
     bool reflected = wi.z * wo.z > 0.0;
-    float probability = reflected
-                                ? primeLiteSubsurfaceReflectionProbability(state, samplingFlags)
-                                : primeLiteSubsurfaceTransmissionProbability(state, samplingFlags);
+    float probability = reflected ? primeLiteSubsurfaceReflectionProbabilityCore(
+                                            thinWalled, anisotropy, samplingFlags)
+                                  : primeLiteSubsurfaceTransmissionProbabilityCore(
+                                            thinWalled, anisotropy, samplingFlags);
     if (probability == 0.0) {
         return primeOpenPbrZeroThroughput();
     }
     PrimeOpenPbrThroughput result;
-    float3 color = state.thinWalled != 0u ? state.subsurfaceColor : float3(1.0);
-    result.value = color * (probability * PRIME_OPENPBR_INV_PI * abs(wo.z));
+    float3 effectiveColor = thinWalled != 0u ? color : float3(1.0);
+    result.value = effectiveColor * (probability * PRIME_OPENPBR_INV_PI * abs(wo.z));
     result.flags = reflected ? PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION
                              : PRIME_OPENPBR_FLAG_DIFFUSE_TRANSMISSION;
     return result;
 }
 
-float primeLiteSubsurfacePdf(float3 wi, float3 wo, PrimeLiteOpaqueState state, uint samplingFlags) {
-    float probability = wi.z * wo.z > 0.0
-                                ? primeLiteSubsurfaceReflectionProbability(state, samplingFlags)
-                                : primeLiteSubsurfaceTransmissionProbability(state, samplingFlags);
+PrimeOpenPbrThroughput primeLiteSubsurfaceEval(float3 wi, float3 wo, PrimeLiteOpaqueState state,
+                                               uint samplingFlags) {
+    return primeLiteSubsurfaceEvalCore(wi, wo, state.thinWalled, state.subsurfaceColor,
+                                       state.subsurfaceAnisotropy, samplingFlags);
+}
+
+public float primeLiteSubsurfacePdfCore(float3 wi, float3 wo, uint thinWalled, float anisotropy,
+                                        uint samplingFlags) {
+    float probability = wi.z * wo.z > 0.0 ? primeLiteSubsurfaceReflectionProbabilityCore(
+                                                    thinWalled, anisotropy, samplingFlags)
+                                          : primeLiteSubsurfaceTransmissionProbabilityCore(
+                                                    thinWalled, anisotropy, samplingFlags);
     return probability * PRIME_OPENPBR_INV_PI * abs(wo.z);
 }
 
-PrimeOpenPbrSampleResult primeLiteSubsurfaceSample(float3 wi, float3 randomValue,
-                                                   PrimeLiteOpaqueState state, uint samplingFlags,
-                                                   PrimeOpenPbrVolumeStack stack) {
-    PrimeOpenPbrSampleResult result = primeLiteZeroSampleResult(state.rayT, stack);
-    float reflection = primeLiteSubsurfaceReflectionProbability(state, samplingFlags);
-    float transmission = primeLiteSubsurfaceTransmissionProbability(state, samplingFlags);
+float primeLiteSubsurfacePdf(float3 wi, float3 wo, PrimeLiteOpaqueState state, uint samplingFlags) {
+    return primeLiteSubsurfacePdfCore(wi, wo, state.thinWalled, state.subsurfaceAnisotropy,
+                                      samplingFlags);
+}
+
+public PrimeOpenPbrSample primeLiteSubsurfaceSampleCore(float3 wi, float3 randomValue,
+                                                        uint thinWalled, float3 color,
+                                                        float anisotropy, uint samplingFlags) {
+    PrimeOpenPbrSample result = primeOpenPbrZeroSample();
+    float reflection =
+            primeLiteSubsurfaceReflectionProbabilityCore(thinWalled, anisotropy, samplingFlags);
+    float transmission =
+            primeLiteSubsurfaceTransmissionProbabilityCore(thinWalled, anisotropy, samplingFlags);
     float sum = reflection + transmission;
     if (sum == 0.0) {
         return result;
     }
     reflection /= sum;
     transmission /= sum;
-    result.bsdfSample.wo = primeOpenPbrCosineSampleHemisphere(randomValue.xy);
+    result.wo = primeOpenPbrCosineSampleHemisphere(randomValue.xy);
     if (wi.z < 0.0) {
-        result.bsdfSample.wo.z = -result.bsdfSample.wo.z;
+        result.wo.z = -result.wo.z;
     }
     bool transmitted = randomValue.z < transmission;
     if (transmitted) {
-        result.bsdfSample.wo.z = -result.bsdfSample.wo.z;
+        result.wo.z = -result.wo.z;
     }
     float eventProbability = transmitted ? transmission : reflection;
-    result.bsdfSample.pdf = eventProbability * PRIME_OPENPBR_INV_PI * abs(result.bsdfSample.wo.z);
-    float3 color = state.thinWalled != 0u ? state.subsurfaceColor : float3(1.0);
-    result.bsdfSample.throughput.value = color * result.bsdfSample.pdf;
-    result.bsdfSample.throughput.flags = transmitted ? PRIME_OPENPBR_FLAG_DIFFUSE_TRANSMISSION
-                                                     : PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION;
+    result.pdf = eventProbability * PRIME_OPENPBR_INV_PI * abs(result.wo.z);
+    float3 effectiveColor = thinWalled != 0u ? color : float3(1.0);
+    result.throughput.value = effectiveColor * result.pdf;
+    result.throughput.flags = transmitted ? PRIME_OPENPBR_FLAG_DIFFUSE_TRANSMISSION
+                                          : PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION;
     return result;
 }
 
+PrimeOpenPbrSampleResult primeLiteSubsurfaceSample(float3 wi, float3 randomValue,
+                                                   PrimeLiteOpaqueState state, uint samplingFlags,
+                                                   PrimeOpenPbrVolumeStack stack) {
+    PrimeOpenPbrSampleResult result = primeLiteZeroSampleResult(state.rayT, stack);
+    result.bsdfSample =
+            primeLiteSubsurfaceSampleCore(wi, randomValue, state.thinWalled, state.subsurfaceColor,
+                                          state.subsurfaceAnisotropy, samplingFlags);
+    return result;
+}
+
+public float3 primeLiteSubsurfaceEnergyCore(uint thinWalled, float3 color) {
+    return thinWalled != 0u ? color : float3(1.0);
+}
+
 float3 primeLiteSubsurfaceEnergy(PrimeLiteOpaqueState state) {
-    return state.thinWalled != 0u ? state.subsurfaceColor : float3(1.0);
+    return primeLiteSubsurfaceEnergyCore(state.thinWalled, state.subsurfaceColor);
+}
+
+public PrimeOpenPbrThroughput primeLiteBaseEvalCore(float3 wi, float3 wo, uint kind,
+                                                    float3 baseColor, float subsurfaceWeight,
+                                                    uint thinWalled, float3 subsurfaceColor,
+                                                    float anisotropy, uint samplingFlags) {
+    if (kind == PRIME_LITE_OPAQUE_DIELECTRIC) {
+        return primeLiteLambertEvalCore(wi, wo, baseColor, samplingFlags);
+    }
+    PrimeOpenPbrThroughput subsurface = primeLiteSubsurfaceEvalCore(
+            wi, wo, thinWalled, subsurfaceColor, anisotropy, samplingFlags);
+    if (kind == PRIME_LITE_OPAQUE_SUBSURFACE) {
+        return subsurface;
+    }
+    PrimeOpenPbrThroughput diffuse = primeLiteLambertEvalCore(wi, wo, baseColor, samplingFlags);
+    return primeOpenPbrThroughputAdd(primeOpenPbrThroughputScale(diffuse, 1.0 - subsurfaceWeight),
+                                     primeOpenPbrThroughputScale(subsurface, subsurfaceWeight));
 }
 
 PrimeOpenPbrThroughput primeLiteBaseEval(float3 wi, float3 wo, PrimeLiteOpaqueState state,
                                          uint samplingFlags) {
-    if (state.kind == PRIME_LITE_OPAQUE_DIELECTRIC) {
-        return primeLiteLambertEval(wi, wo, state, samplingFlags);
-    }
-    PrimeOpenPbrThroughput subsurface = primeLiteSubsurfaceEval(wi, wo, state, samplingFlags);
-    if (state.kind == PRIME_LITE_OPAQUE_SUBSURFACE) {
-        return subsurface;
-    }
-    PrimeOpenPbrThroughput diffuse = primeLiteLambertEval(wi, wo, state, samplingFlags);
-    return primeOpenPbrThroughputAdd(
-            primeOpenPbrThroughputScale(diffuse, 1.0 - state.subsurfaceWeight),
-            primeOpenPbrThroughputScale(subsurface, state.subsurfaceWeight));
+    return primeLiteBaseEvalCore(wi, wo, state.kind, state.baseColor, state.subsurfaceWeight,
+                                 state.thinWalled, state.subsurfaceColor,
+                                 state.subsurfaceAnisotropy, samplingFlags);
 }
 
-float primeLiteBasePdf(float3 wi, float3 wo, PrimeLiteOpaqueState state, uint samplingFlags) {
-    if (state.kind == PRIME_LITE_OPAQUE_DIELECTRIC) {
+public float primeLiteBasePdfCore(float3 wi, float3 wo, uint kind, uint thinWalled,
+                                  float anisotropy, PrimeLiteMixState diffuseMix,
+                                  uint samplingFlags) {
+    if (kind == PRIME_LITE_OPAQUE_DIELECTRIC) {
         return (samplingFlags & PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION) != 0u
                        ? primeLiteLambertPdf(wi, wo)
                        : 0.0;
     }
-    if (state.kind == PRIME_LITE_OPAQUE_SUBSURFACE) {
-        return primeLiteSubsurfacePdf(wi, wo, state, samplingFlags);
+    if (kind == PRIME_LITE_OPAQUE_SUBSURFACE) {
+        return primeLiteSubsurfacePdfCore(wi, wo, thinWalled, anisotropy, samplingFlags);
     }
     float diffuse = (samplingFlags & PRIME_OPENPBR_FLAG_DIFFUSE_REFLECTION) != 0u
                             ? primeLiteLambertPdf(wi, wo)
                             : 0.0;
-    float subsurface = primeLiteSubsurfacePdf(wi, wo, state, samplingFlags);
-    return state.diffuseMix.firstSampleWeight * diffuse +
-           state.diffuseMix.secondSampleWeight * subsurface;
+    float subsurface = primeLiteSubsurfacePdfCore(wi, wo, thinWalled, anisotropy, samplingFlags);
+    return diffuseMix.firstSampleWeight * diffuse + diffuseMix.secondSampleWeight * subsurface;
+}
+
+float primeLiteBasePdf(float3 wi, float3 wo, PrimeLiteOpaqueState state, uint samplingFlags) {
+    return primeLiteBasePdfCore(wi, wo, state.kind, state.thinWalled, state.subsurfaceAnisotropy,
+                                state.diffuseMix, samplingFlags);
+}
+
+public float3 primeLiteBaseEnergyCore(uint kind, float3 baseColor, float subsurfaceWeight,
+                                      uint thinWalled, float3 subsurfaceColor) {
+    if (kind == PRIME_LITE_OPAQUE_DIELECTRIC) {
+        return baseColor;
+    }
+    if (kind == PRIME_LITE_OPAQUE_SUBSURFACE) {
+        return primeLiteSubsurfaceEnergyCore(thinWalled, subsurfaceColor);
+    }
+    return (1.0 - subsurfaceWeight) * baseColor +
+           subsurfaceWeight * primeLiteSubsurfaceEnergyCore(thinWalled, subsurfaceColor);
 }
 
 float3 primeLiteBaseEnergy(PrimeLiteOpaqueState state) {
-    if (state.kind == PRIME_LITE_OPAQUE_DIELECTRIC) {
-        return state.baseColor;
+    return primeLiteBaseEnergyCore(state.kind, state.baseColor, state.subsurfaceWeight,
+                                   state.thinWalled, state.subsurfaceColor);
+}
+
+public PrimeOpenPbrSample primeLiteBaseSampleCore(float3 wi, float3 randomValue, uint kind,
+                                                  float3 baseColor, float subsurfaceWeight,
+                                                  uint thinWalled, float3 subsurfaceColor,
+                                                  float anisotropy, PrimeLiteMixState diffuseMix,
+                                                  uint samplingFlags) {
+    if (kind == PRIME_LITE_OPAQUE_DIELECTRIC) {
+        return primeLiteLambertSampleCore(wi, randomValue.xy, baseColor, samplingFlags);
     }
-    if (state.kind == PRIME_LITE_OPAQUE_SUBSURFACE) {
-        return primeLiteSubsurfaceEnergy(state);
+    if (kind == PRIME_LITE_OPAQUE_SUBSURFACE) {
+        return primeLiteSubsurfaceSampleCore(wi, randomValue, thinWalled, subsurfaceColor,
+                                             anisotropy, samplingFlags);
     }
-    return (1.0 - state.subsurfaceWeight) * state.baseColor +
-           state.subsurfaceWeight * primeLiteSubsurfaceEnergy(state);
+    PrimeOpenPbrSample result;
+    if (randomValue.z < diffuseMix.secondSampleWeight && diffuseMix.secondSampleWeight > 0.0) {
+        float remapped = randomValue.z / diffuseMix.secondSampleWeight;
+        result = primeLiteSubsurfaceSampleCore(wi, float3(randomValue.xy, remapped), thinWalled,
+                                               subsurfaceColor, anisotropy, samplingFlags);
+        result.throughput = primeOpenPbrThroughputScale(result.throughput, subsurfaceWeight);
+        result.pdf *= diffuseMix.secondSampleWeight;
+        return result;
+    }
+    result = primeLiteLambertSampleCore(wi, randomValue.xy, baseColor, samplingFlags);
+    result.throughput = primeOpenPbrThroughputScale(result.throughput, 1.0 - subsurfaceWeight);
+    result.pdf *= diffuseMix.firstSampleWeight;
+    return result;
 }
 
 PrimeOpenPbrSampleResult primeLiteBaseSample(float3 wi, float3 randomValue,
                                              PrimeLiteOpaqueState state, uint samplingFlags,
                                              PrimeOpenPbrVolumeStack stack) {
-    if (state.kind == PRIME_LITE_OPAQUE_DIELECTRIC) {
-        return primeLiteLambertSample(wi, randomValue, state, samplingFlags, stack);
+    PrimeOpenPbrSampleResult result = primeLiteZeroSampleResult(state.rayT, stack);
+    result.bsdfSample = primeLiteBaseSampleCore(
+            wi, randomValue, state.kind, state.baseColor, state.subsurfaceWeight, state.thinWalled,
+            state.subsurfaceColor, state.subsurfaceAnisotropy, state.diffuseMix, samplingFlags);
+    return result;
+}
+
+public PrimeOpenPbrThroughput primeLiteDielectricEvalCore(float3 wi, float3 wo,
+                                                          PrimeOpenPbrMicrofacet microfacet,
+                                                          float energyIor, float3 color,
+                                                          float specularScale, uint samplingFlags) {
+    PrimeLiteReflectiveBase base = primeLiteReflectiveEvalBase(wi, wo, microfacet, samplingFlags);
+    if (base.flags == PRIME_OPENPBR_FLAG_NONE) {
+        return primeOpenPbrZeroThroughput();
     }
-    if (state.kind == PRIME_LITE_OPAQUE_SUBSURFACE) {
-        return primeLiteSubsurfaceSample(wi, randomValue, state, samplingFlags, stack);
+    PrimeOpenPbrThroughput result;
+    result.value = color * (primeLiteDielectricFresnel(energyIor, base.microCosine) * base.factor);
+    result.flags = base.flags;
+    if (primeOpenPbrIsNonDelta(result.flags)) {
+        result.value *= specularScale;
     }
-    PrimeOpenPbrSampleResult result;
-    if (randomValue.z < state.diffuseMix.secondSampleWeight &&
-        state.diffuseMix.secondSampleWeight > 0.0) {
-        float remapped = randomValue.z / state.diffuseMix.secondSampleWeight;
-        result = primeLiteSubsurfaceSample(wi, float3(randomValue.xy, remapped), state,
-                                           samplingFlags, stack);
-        result.bsdfSample.throughput =
-                primeOpenPbrThroughputScale(result.bsdfSample.throughput, state.subsurfaceWeight);
-        result.bsdfSample.pdf *= state.diffuseMix.secondSampleWeight;
-        return result;
-    }
-    float remapped = state.diffuseMix.firstSampleWeight > 0.0
-                             ? (randomValue.z - state.diffuseMix.secondSampleWeight) /
-                                       state.diffuseMix.firstSampleWeight
-                             : 0.0;
-    result = primeLiteLambertSample(wi, float3(randomValue.xy, remapped), state, samplingFlags,
-                                    stack);
-    result.bsdfSample.throughput =
-            primeOpenPbrThroughputScale(result.bsdfSample.throughput, 1.0 - state.subsurfaceWeight);
-    result.bsdfSample.pdf *= state.diffuseMix.firstSampleWeight;
     return result;
 }
 
 PrimeOpenPbrThroughput primeLiteDielectricEval(float3 wi, float3 wo, PrimeLiteOpaqueState state,
                                                uint samplingFlags) {
-    PrimeLiteReflectiveBase base =
-            primeLiteReflectiveEvalBase(wi, wo, state.microfacet, samplingFlags);
-    if (base.flags == PRIME_OPENPBR_FLAG_NONE) {
-        return primeOpenPbrZeroThroughput();
-    }
-    PrimeOpenPbrThroughput result;
-    result.value =
-            state.dielectricFresnel.color *
-            (primeLiteDielectricFresnel(state.dielectricFresnel.energyIor, base.microCosine) *
-             base.factor);
-    result.flags = base.flags;
-    if (primeOpenPbrIsNonDelta(result.flags)) {
-        result.value *= state.layer.specularScale;
-    }
-    return result;
+    return primeLiteDielectricEvalCore(wi, wo, state.microfacet, state.dielectricFresnel.energyIor,
+                                       state.dielectricFresnel.color, state.layer.specularScale,
+                                       samplingFlags);
 }
 
 PrimeOpenPbrThroughput primeLiteConductorEval(float3 wi, float3 wo, PrimeLiteOpaqueState state,
@@ -579,7 +677,7 @@ PrimeOpenPbrSampleResult primeLiteSpecularSample(float3 wi, float3 randomValue,
                                                  PrimeOpenPbrVolumeStack stack) {
     PrimeOpenPbrSampleResult result = primeLiteZeroSampleResult(state.rayT, stack);
     float microCosine;
-    result.bsdfSample = primeLiteReflectiveSampleBase(wi, randomValue, state.microfacet,
+    result.bsdfSample = primeLiteReflectiveSampleBase(wi, randomValue.xy, state.microfacet,
                                                       PRIME_OPENPBR_FLAG_ALL, microCosine);
     if (result.bsdfSample.throughput.flags == PRIME_OPENPBR_FLAG_NONE) {
         return result;
@@ -610,7 +708,7 @@ float primeLiteOpaquePdf(float3 wi, float3 wo, PrimeLiteOpaqueState state) {
     }
     float basePdf = primeLiteBasePdf(wi, wo, state, PRIME_OPENPBR_FLAG_ALL);
     float specularPdf = primeLiteReflectivePdf(wi, wo, state.microfacet);
-    return state.layer.baseSampleWeight * basePdf + state.layer.specularSampleWeight * specularPdf;
+    return primeLiteLayerPdf(state.layer, basePdf, specularPdf);
 }
 
 public bool primeLiteOpaqueSupports(PrimeOpenPbrMaterial material) {
@@ -791,10 +889,11 @@ float3 primeLiteTransmissionFrame(float3 direction, PrimeLiteTransmissionState s
     return state.entering != 0u ? direction : float3(-direction.x, direction.y, -direction.z);
 }
 
-PrimeOpenPbrVecPair primeLiteThinWallRt(float cosineTheta, PrimeLiteTransmissionState state) {
-    PrimeOpenPbrVecPair fresnel = primeLiteFresnelRt(state.specularFresnel, cosineTheta);
+public PrimeOpenPbrVecPair primeLiteThinWallRtCore(float cosineTheta, float ior, float3 color,
+                                                   float3 tint, float3 extinction) {
+    PrimeOpenPbrVecPair fresnel = primeLiteFresnelRtCore(ior, color, cosineTheta);
     float transmittedCosineSquared =
-            1.0 - (1.0 - cosineTheta * cosineTheta) / primeOpenPbrSquare(state.specularFresnel.ior);
+            1.0 - (1.0 - cosineTheta * cosineTheta) / primeOpenPbrSquare(ior);
     if (transmittedCosineSquared <= 0.0) {
         // The explicit interface endpoints also permit a lower-IOR slab. Its first
         // interface is totally internally reflecting; positive-cosine Schlick alone
@@ -804,8 +903,7 @@ PrimeOpenPbrVecPair primeLiteThinWallRt(float cosineTheta, PrimeLiteTransmission
         return fresnel;
     }
     float transmittedCosine = sqrt(transmittedCosineSquared);
-    float3 absorption =
-            state.transmissionTint * exp(-state.transmissionVolume.extinction / transmittedCosine);
+    float3 absorption = tint * exp(-extinction / transmittedCosine);
     float3 roundTrip = fresnel.first * absorption;
     float3 series = float3(1.0) /
                     max(float3(PRIME_OPENPBR_DENOM_TOLERANCE), float3(1.0) - roundTrip * roundTrip);
@@ -816,6 +914,12 @@ PrimeOpenPbrVecPair primeLiteThinWallRt(float cosineTheta, PrimeLiteTransmission
     return result;
 }
 
+PrimeOpenPbrVecPair primeLiteThinWallRt(float cosineTheta, PrimeLiteTransmissionState state) {
+    return primeLiteThinWallRtCore(cosineTheta, state.specularFresnel.ior,
+                                   state.specularFresnel.color, state.transmissionTint,
+                                   state.transmissionVolume.extinction);
+}
+
 public float primeLiteTransmissionDirectionalReflectance(PrimeLiteTransmissionState state,
                                                          float3 localView) {
     if (state.geometryThinWalled != 0u) {
@@ -824,18 +928,16 @@ public float primeLiteTransmissionDirectionalReflectance(PrimeLiteTransmissionSt
     return primeLiteDielectricFresnel(state.specularFresnel.ior, localView.z);
 }
 
-PrimeOpenPbrThroughput primeLiteRefractiveEval(float3 wi, float3 wo,
-                                               PrimeLiteTransmissionState state,
-                                               uint samplingFlags) {
+public PrimeOpenPbrThroughput primeLiteRefractiveEvalCore(float3 wi, float3 wo,
+                                                          PrimeOpenPbrMicrofacet microfacet,
+                                                          float ior, float3 color, float3 tint,
+                                                          uint samplingFlags) {
     PrimeOpenPbrThroughput result = primeOpenPbrZeroThroughput();
-    PrimeOpenPbrMicrofacet microfacet = state.specularMicrofacet;
-    if (primeLiteMicrofacetEffectivelySmooth(microfacet) || state.specularFresnel.ior == 1.0) {
+    if (primeLiteMicrofacetEffectivelySmooth(microfacet) || ior == 1.0) {
         return result;
     }
     bool reflected = wi.z * wo.z > 0.0;
-    float etaPath =
-            reflected ? 1.0
-                      : (wi.z > 0.0 ? state.specularFresnel.ior : 1.0 / state.specularFresnel.ior);
+    float etaPath = reflected ? 1.0 : (wi.z > 0.0 ? ior : 1.0 / ior);
     float3 sum = wi + etaPath * wo;
     float lengthSquared = dot(sum, sum);
     if (wi.z == 0.0 || wo.z == 0.0 || lengthSquared == 0.0) {
@@ -850,7 +952,7 @@ PrimeOpenPbrThroughput primeLiteRefractiveEval(float3 wi, float3 wo,
     if (microIncident * wi.z <= 0.0 || microOutgoing * wo.z <= 0.0) {
         return result;
     }
-    PrimeOpenPbrVecPair rt = primeLiteFresnelRt(state.specularFresnel, microIncident);
+    PrimeOpenPbrVecPair rt = primeLiteFresnelRtCore(ior, color, microIncident);
     float distribution = primeLiteMicrofacetD(microfacet, halfVector);
     float geometry = primeLiteMicrofacetG2(microfacet, wi, wo);
     if (reflected && (samplingFlags & PRIME_OPENPBR_FLAG_SPECULAR_REFLECTION) != 0u) {
@@ -858,7 +960,7 @@ PrimeOpenPbrThroughput primeLiteRefractiveEval(float3 wi, float3 wo,
         result.flags = PRIME_OPENPBR_FLAG_SPECULAR_REFLECTION;
     } else if (!reflected && (samplingFlags & PRIME_OPENPBR_FLAG_SPECULAR_TRANSMISSION) != 0u) {
         float denominator = primeOpenPbrSquare(microOutgoing + microIncident / etaPath);
-        result.value = rt.second * state.transmissionTint * distribution * geometry *
+        result.value = rt.second * tint * distribution * geometry *
                        abs(microIncident * microOutgoing / (wi.z * denominator)) /
                        primeOpenPbrSquare(etaPath);
         result.flags = PRIME_OPENPBR_FLAG_SPECULAR_TRANSMISSION;
@@ -866,17 +968,22 @@ PrimeOpenPbrThroughput primeLiteRefractiveEval(float3 wi, float3 wo,
     return result;
 }
 
-float primeLiteRefractivePdf(float3 wi, float3 wo, PrimeLiteTransmissionState state,
-                             uint samplingFlags) {
-    PrimeOpenPbrMicrofacet microfacet = state.specularMicrofacet;
-    if (primeLiteMicrofacetEffectivelySmooth(microfacet) || state.specularFresnel.ior == 1.0 ||
+PrimeOpenPbrThroughput primeLiteRefractiveEval(float3 wi, float3 wo,
+                                               PrimeLiteTransmissionState state,
+                                               uint samplingFlags) {
+    return primeLiteRefractiveEvalCore(wi, wo, state.specularMicrofacet, state.specularFresnel.ior,
+                                       state.specularFresnel.color, state.transmissionTint,
+                                       samplingFlags);
+}
+
+public float primeLiteRefractivePdfCore(float3 wi, float3 wo, PrimeOpenPbrMicrofacet microfacet,
+                                        float ior, float3 color, uint samplingFlags) {
+    if (primeLiteMicrofacetEffectivelySmooth(microfacet) || ior == 1.0 ||
         !primeOpenPbrIsSpecular(samplingFlags)) {
         return 0.0;
     }
     bool reflected = wi.z * wo.z > 0.0;
-    float etaPath =
-            reflected ? 1.0
-                      : (wi.z > 0.0 ? state.specularFresnel.ior : 1.0 / state.specularFresnel.ior);
+    float etaPath = reflected ? 1.0 : (wi.z > 0.0 ? ior : 1.0 / ior);
     float3 sum = wi + etaPath * wo;
     float lengthSquared = dot(sum, sum);
     if (wi.z == 0.0 || wo.z == 0.0 || lengthSquared == 0.0) {
@@ -891,7 +998,7 @@ float primeLiteRefractivePdf(float3 wi, float3 wo, PrimeLiteTransmissionState st
     if (microIncident * wi.z <= 0.0 || microOutgoing * wo.z <= 0.0) {
         return 0.0;
     }
-    PrimeOpenPbrVecPair rt = primeLiteFresnelRt(state.specularFresnel, microIncident);
+    PrimeOpenPbrVecPair rt = primeLiteFresnelRtCore(ior, color, microIncident);
     float reflectionWeight =
             primeOpenPbrIsReflective(samplingFlags) ? primeLiteWeight(rt.first) : 0.0;
     float transmissionWeight =
@@ -909,11 +1016,17 @@ float primeLiteRefractivePdf(float3 wi, float3 wo, PrimeLiteTransmissionState st
     return halfPdf * abs(microOutgoing) / denominator * transmissionWeight / sumWeight;
 }
 
-PrimeOpenPbrSample primeLiteRefractiveSample(float3 wi, float3 randomValue,
-                                             PrimeLiteTransmissionState state, uint samplingFlags) {
-    PrimeOpenPbrMicrofacet microfacet = state.specularMicrofacet;
-    bool smooth =
-            primeLiteMicrofacetEffectivelySmooth(microfacet) || state.specularFresnel.ior == 1.0;
+float primeLiteRefractivePdf(float3 wi, float3 wo, PrimeLiteTransmissionState state,
+                             uint samplingFlags) {
+    return primeLiteRefractivePdfCore(wi, wo, state.specularMicrofacet, state.specularFresnel.ior,
+                                      state.specularFresnel.color, samplingFlags);
+}
+
+public PrimeOpenPbrSample primeLiteRefractiveSampleCore(float3 wi, float3 randomValue,
+                                                        PrimeOpenPbrMicrofacet microfacet,
+                                                        float ior, float3 color, float3 tint,
+                                                        uint samplingFlags) {
+    bool smooth = primeLiteMicrofacetEffectivelySmooth(microfacet) || ior == 1.0;
     if (smooth && !primeOpenPbrIsDelta(samplingFlags)) {
         return primeOpenPbrZeroSample();
     }
@@ -925,13 +1038,12 @@ PrimeOpenPbrSample primeLiteRefractiveSample(float3 wi, float3 randomValue,
             smooth ? float3(0.0, 0.0, 1.0)
                    : primeLiteMicrofacetSample(microfacet, sampleDirection, randomValue.xy);
     float microIncident = dot(halfVector, wi);
-    PrimeOpenPbrVecPair rt = primeLiteFresnelRt(state.specularFresnel, microIncident);
+    PrimeOpenPbrVecPair rt = primeLiteFresnelRtCore(ior, color, microIncident);
     float reflectionWeight =
             primeOpenPbrIsReflective(samplingFlags) ? primeLiteWeight(rt.first) : 0.0;
     float transmissionWeight =
             primeOpenPbrIsTransmissive(samplingFlags) ? primeLiteWeight(rt.second) : 0.0;
-    PrimeOpenPbrRefractResult refracted =
-            primeLiteDielectricRefract(state.specularFresnel.ior, -wi, halfVector);
+    PrimeOpenPbrRefractResult refracted = primeLiteDielectricRefract(ior, -wi, halfVector);
     if (refracted.valid == 0u) {
         transmissionWeight = 0.0;
         rt.first = float3(1.0);
@@ -948,8 +1060,7 @@ PrimeOpenPbrSample primeLiteRefractiveSample(float3 wi, float3 randomValue,
         }
         result.wo = wo;
         result.eta = refracted.relativeIor;
-        result.throughput.value =
-                rt.second * state.transmissionTint / primeOpenPbrSquare(result.eta);
+        result.throughput.value = rt.second * tint / primeOpenPbrSquare(result.eta);
         result.throughput.flags = PRIME_OPENPBR_FLAG_DELTA_TRANSMISSION;
         result.pdf = transmissionWeight / weightSum;
         if (!smooth) {
@@ -957,7 +1068,7 @@ PrimeOpenPbrSample primeLiteRefractiveSample(float3 wi, float3 randomValue,
             float denominator = primeOpenPbrSquare(microOutgoing + microIncident / result.eta);
             float halfPdf = primeLiteMicrofacetPdf(microfacet, sampleDirection, halfVector);
             result.pdf *= halfPdf * abs(microOutgoing) / denominator;
-            result.throughput.value = rt.second * state.transmissionTint *
+            result.throughput.value = rt.second * tint *
                                       primeLiteMicrofacetD(microfacet, halfVector) *
                                       primeLiteMicrofacetG2(microfacet, wi, wo) *
                                       abs(microIncident * microOutgoing / (wi.z * denominator)) /
@@ -999,8 +1110,17 @@ PrimeOpenPbrSample primeLiteRefractiveSample(float3 wi, float3 randomValue,
     return result;
 }
 
-PrimeOpenPbrThroughput primeLiteThinWallEval(float3 wi, float3 inputWo,
+PrimeOpenPbrSample primeLiteRefractiveSample(float3 wi, float3 randomValue,
                                              PrimeLiteTransmissionState state, uint samplingFlags) {
+    return primeLiteRefractiveSampleCore(wi, randomValue, state.specularMicrofacet,
+                                         state.specularFresnel.ior, state.specularFresnel.color,
+                                         state.transmissionTint, samplingFlags);
+}
+
+public PrimeOpenPbrThroughput primeLiteThinWallEvalCore(float3 wi, float3 inputWo,
+                                                        PrimeOpenPbrMicrofacet microfacet,
+                                                        float ior, float3 color, float3 tint,
+                                                        float3 extinction, uint samplingFlags) {
     float3 wo = inputWo;
     bool transmitted = wo.z < 0.0;
     if (transmitted) {
@@ -1011,12 +1131,13 @@ PrimeOpenPbrThroughput primeLiteThinWallEval(float3 wi, float3 inputWo,
     } else if (!primeOpenPbrIsReflective(samplingFlags)) {
         return primeOpenPbrZeroThroughput();
     }
-    PrimeLiteReflectiveBase base = primeLiteReflectiveEvalBase(
-            wi, wo, state.transmissionMicrofacet, PRIME_OPENPBR_FLAG_SPECULAR_REFLECTION);
+    PrimeLiteReflectiveBase base =
+            primeLiteReflectiveEvalBase(wi, wo, microfacet, PRIME_OPENPBR_FLAG_SPECULAR_REFLECTION);
     if (base.flags == PRIME_OPENPBR_FLAG_NONE) {
         return primeOpenPbrZeroThroughput();
     }
-    PrimeOpenPbrVecPair rt = primeLiteThinWallRt(base.microCosine, state);
+    PrimeOpenPbrVecPair rt =
+            primeLiteThinWallRtCore(base.microCosine, ior, color, tint, extinction);
     PrimeOpenPbrThroughput result;
     result.value = base.factor * (transmitted ? rt.second : rt.first);
     result.flags = transmitted ? PRIME_OPENPBR_FLAG_SPECULAR_TRANSMISSION
@@ -1024,8 +1145,17 @@ PrimeOpenPbrThroughput primeLiteThinWallEval(float3 wi, float3 inputWo,
     return result;
 }
 
-float primeLiteThinWallPdf(float3 wi, float3 inputWo, PrimeLiteTransmissionState state,
-                           uint samplingFlags) {
+PrimeOpenPbrThroughput primeLiteThinWallEval(float3 wi, float3 inputWo,
+                                             PrimeLiteTransmissionState state, uint samplingFlags) {
+    return primeLiteThinWallEvalCore(wi, inputWo, state.transmissionMicrofacet,
+                                     state.specularFresnel.ior, state.specularFresnel.color,
+                                     state.transmissionTint, state.transmissionVolume.extinction,
+                                     samplingFlags);
+}
+
+public float primeLiteThinWallPdfCore(float3 wi, float3 inputWo, PrimeOpenPbrMicrofacet microfacet,
+                                      float ior, float3 color, float3 tint, float3 extinction,
+                                      uint samplingFlags) {
     float3 wo = inputWo;
     bool transmitted = wo.z < 0.0;
     if (transmitted) {
@@ -1037,7 +1167,8 @@ float primeLiteThinWallPdf(float3 wi, float3 inputWo, PrimeLiteTransmissionState
         return 0.0;
     }
     float3 halfVector = sum * rsqrt(lengthSquared);
-    PrimeOpenPbrVecPair rt = primeLiteThinWallRt(dot(wi, halfVector), state);
+    PrimeOpenPbrVecPair rt =
+            primeLiteThinWallRtCore(dot(wi, halfVector), ior, color, tint, extinction);
     float reflectionWeight =
             primeOpenPbrIsReflective(samplingFlags) ? primeLiteWeight(rt.first) : 0.0;
     float transmissionWeight =
@@ -1046,19 +1177,29 @@ float primeLiteThinWallPdf(float3 wi, float3 inputWo, PrimeLiteTransmissionState
     if (weightSum == 0.0) {
         return 0.0;
     }
-    float directionPdf = primeLiteReflectivePdf(wi, wo, state.transmissionMicrofacet);
+    float directionPdf = primeLiteReflectivePdf(wi, wo, microfacet);
     return directionPdf * (transmitted ? transmissionWeight : reflectionWeight) / weightSum;
 }
 
-PrimeOpenPbrSample primeLiteThinWallSample(float3 wi, float3 randomValue,
-                                           PrimeLiteTransmissionState state, uint samplingFlags) {
+float primeLiteThinWallPdf(float3 wi, float3 inputWo, PrimeLiteTransmissionState state,
+                           uint samplingFlags) {
+    return primeLiteThinWallPdfCore(wi, inputWo, state.transmissionMicrofacet,
+                                    state.specularFresnel.ior, state.specularFresnel.color,
+                                    state.transmissionTint, state.transmissionVolume.extinction,
+                                    samplingFlags);
+}
+
+public PrimeOpenPbrSample primeLiteThinWallSampleCore(float3 wi, float3 randomValue,
+                                                      PrimeOpenPbrMicrofacet microfacet, float ior,
+                                                      float3 color, float3 tint, float3 extinction,
+                                                      uint samplingFlags) {
     float microCosine;
-    PrimeOpenPbrSample result = primeLiteReflectiveSampleBase(
-            wi, randomValue, state.transmissionMicrofacet, samplingFlags, microCosine);
+    PrimeOpenPbrSample result = primeLiteReflectiveSampleBase(wi, randomValue.xy, microfacet,
+                                                              samplingFlags, microCosine);
     if (result.throughput.flags == PRIME_OPENPBR_FLAG_NONE) {
         return result;
     }
-    PrimeOpenPbrVecPair rt = primeLiteThinWallRt(microCosine, state);
+    PrimeOpenPbrVecPair rt = primeLiteThinWallRtCore(microCosine, ior, color, tint, extinction);
     float reflectionWeight =
             primeOpenPbrIsReflective(samplingFlags) ? primeLiteWeight(rt.first) : 0.0;
     float transmissionWeight =
@@ -1077,6 +1218,14 @@ PrimeOpenPbrSample primeLiteThinWallSample(float3 wi, float3 randomValue,
                                           : PRIME_OPENPBR_FLAG_SPECULAR_TRANSMISSION;
     }
     return result;
+}
+
+PrimeOpenPbrSample primeLiteThinWallSample(float3 wi, float3 randomValue,
+                                           PrimeLiteTransmissionState state, uint samplingFlags) {
+    return primeLiteThinWallSampleCore(wi, randomValue, state.transmissionMicrofacet,
+                                       state.specularFresnel.ior, state.specularFresnel.color,
+                                       state.transmissionTint, state.transmissionVolume.extinction,
+                                       samplingFlags);
 }
 
 public PrimeLiteTransmissionEvaluation
@@ -1249,4 +1398,8 @@ public PrimeLiteFoliageEnergy primeLiteFoliageEnergy<Energy>(Energy ignored, flo
                      state.transmissionWeight * state.transmissionTint;
     result.specular = (1.0 - state.transmissionWeight) * base.specular;
     return result;
+}
+
+public float primeLiteLayerPdf(PrimeLiteLayerState layer, float basePdf, float specularPdf) {
+    return layer.baseSampleWeight * basePdf + layer.specularSampleWeight * specularPdf;
 }

@@ -105,6 +105,7 @@ impl Gpu {
             pool: vk::DescriptorPool::null(),
             descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
             pipelines: [vk::Pipeline::null(); 6],
+            single_sample_pipelines: None,
         };
         unsafe {
             let ranges = [vk::PushConstantRange::default()

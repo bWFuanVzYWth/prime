@@ -14,20 +14,29 @@ import "display/prime_drt.slang";
 [[vk::binding(7, 0)]] StructuredBuffer<InstanceMaterial> instanceMaterials;
 [[vk::binding(8, 0)]] StructuredBuffer<TrianglePage> staticTrianglePages;
 [[vk::push_constant]] ConstantBuffer<Frame> frame;
+// ID 3 remains available to the material mask specialization.
+[[vk::constant_id(4)]] const uint singleOfflineSample = 0;
 
 [shader("compute")][numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (any(id.xy >= frame.dimensions.xy))
         return;
-    uint pixel = id.y * frame.dimensions.x + id.x;
     TraceScene resources = {scene, textures, texels, instanceMaterials, staticTrianglePages};
-    uint count = frame.dimensions.z;
-    float3 mean = count == 0 ? float3(0) : accumulation[pixel].rgb;
-    for (uint i = 0; i < frame.dimensions.w; ++i) {
+    // The host selects this profile only for dimensions.w == 1. Both profiles
+    // share one trace body; the single-sample profile removes the outer loop.
+    uint samples = singleOfflineSample != 0 ? 1 : frame.dimensions.w;
+    float3 mean = float3(0);
+    for (uint i = 0; i < samples; ++i) {
         float3 sample =
                 traceSample(resources, atmosphereEnvironment(), frame, id.xy, frame.target.y + i)
                         .radiance;
-        mean += (sample - mean) / float(++count);
+        uint baseCount = frame.dimensions.z;
+        if (i == 0)
+            mean = baseCount == 0 ? float3(0) : accumulation[id.y * frame.dimensions.x + id.x].rgb;
+        mean += (sample - mean) / float(baseCount + i + 1);
+        if (singleOfflineSample != 0)
+            break;
     }
+    uint pixel = id.y * frame.dimensions.x + id.x;
     accumulation[pixel] = float4(mean, 1);
     PrimeDRTParameters display = {frame.display.x, frame.display.y, frame.display.z,
                                   frame.display.w, frame.displayExtra.x};

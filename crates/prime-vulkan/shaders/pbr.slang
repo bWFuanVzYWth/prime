@@ -11,6 +11,7 @@ import "model/material/fresnel_code.slang";
 import "bsdf/common/common.slang";
 import "bsdf/common/material.slang";
 import "bsdf/lite/bsdf.slang";
+import "bsdf/lite/pt.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/conversion.slang";
 import "service/bsdf/support/sanitization.slang";
@@ -33,6 +34,73 @@ public struct PrimePbrSample {
     // Transport ABI: x = IOR; yzw = linear Rec.2020 extinction in inverse metres.
     public float4 medium;
 };
+
+public static const uint PRIME_PBR_VERTEX_THIN_WALLED = 1u << 16u;
+public static const uint PRIME_PBR_VERTEX_DIELECTRIC = 1u << 17u;
+public static const uint PRIME_PBR_VERTEX_HAS_NORMAL = 1u << 18u;
+public static const uint PRIME_PBR_VERTEX_CONDUCTOR = 1u << 19u;
+
+public struct PrimePbrVertex {
+    public float3 baseColor;
+    public float3 normal;
+    public float roughness;
+    public uint control;
+};
+
+public bool primePbrVertexHasNormal(PrimePbrVertex vertex) {
+    return (vertex.control & PRIME_PBR_VERTEX_HAS_NORMAL) != 0u;
+}
+
+public bool primePbrVertexIsDielectric(PrimePbrVertex vertex) {
+    return (vertex.control & PRIME_PBR_VERTEX_DIELECTRIC) != 0u;
+}
+
+public bool primePbrVertexIsThinWalled(PrimePbrVertex vertex) {
+    return (vertex.control & PRIME_PBR_VERTEX_THIN_WALLED) != 0u;
+}
+
+public bool primePbrVertexIsConductor(PrimePbrVertex vertex) {
+    return (vertex.control & PRIME_PBR_VERTEX_CONDUCTOR) != 0u;
+}
+
+// R/A are continuous filtered inputs; G/B retain their canonical point-selected identity.
+// No frame, closure, source AO, emission alpha or tangent normal remains in this vertex.
+public PrimePbrVertex primePbrVertex(float3 baseColor, float3 normal, float normalVariance,
+                                     float3 opticalSample, bool hasNormal, bool hasSpecular,
+                                     bool thinWalled, bool dielectric, float3 viewDirection) {
+    PrimePbrVertex vertex;
+    vertex.baseColor = baseColor;
+    vertex.normal = dot(normal, viewDirection) < 0.0 ? -normal : normal;
+    vertex.roughness = dielectric ? 0.0 : PRIME_DEFAULT_REFERENCE_LINEAR_ROUGHNESS;
+    vertex.control = (hasNormal ? PRIME_PBR_VERTEX_HAS_NORMAL : 0u) |
+                     (thinWalled ? PRIME_PBR_VERTEX_THIN_WALLED : 0u) |
+                     (dielectric ? PRIME_PBR_VERTEX_DIELECTRIC : 0u);
+    if (hasSpecular) {
+        uint roughnessByte = uint(round(opticalSample.r * 255.0));
+        vertex.roughness = clamp(1.0 - float(roughnessByte) / 255.0, 0.0, 1.0);
+        if (!dielectric) {
+            uint fresnelCode = uint(round(opticalSample.g * 255.0));
+            vertex.control |= fresnelCode;
+            if (primeIsSupportedConductorCode(fresnelCode)) {
+                vertex.control |= PRIME_PBR_VERTEX_CONDUCTOR;
+            } else {
+                uint scattering = uint(round(opticalSample.b * 255.0));
+                uint subsurface = scattering > 64u ? scattering - 64u : 0u;
+                vertex.control |= subsurface << PRIME_OPTICAL_SUBSURFACE_SHIFT;
+            }
+        }
+    }
+    if (hasNormal)
+        vertex.roughness = primeCombineLabPbrNormalRoughness(vertex.roughness,
+                                                             clamp(normalVariance, 0.0, 1.0));
+    return vertex;
+}
+
+public PrimePbrVertex primePbrVertex(PrimePbrSource source, float3 viewDirection, bool dielectric) {
+    return primePbrVertex(source.baseColor, source.normal, source.normalSample.a,
+                          source.specularSample.rgb, source.hasNormal, source.hasSpecular,
+                          source.thinWalled, dielectric, viewDirection);
+}
 
 public PrimeOpenPbrMaterial primePbrMaterial(PrimePbrSource source) {
     PrimeCanonicalOptics optics;
@@ -143,27 +211,33 @@ PrimeOpenPbrSample primePbrFoliageSample(float3 wi, float3 randomValue, PrimeLit
     return sampled;
 }
 
-PrimePbrSample primePbrSample(PrimeOpenPbrSample sampled, PrimeOpenPbrMaterial material,
-                              float3 viewDirection, float4 incidentMedium, float4 transmittedMedium,
-                              bool dielectric) {
+PrimePbrSample primePbrSampleFrame(PrimeOpenPbrSample sampled, PrimeOpenPbrOnb onb, bool thinWalled,
+                                   float3 viewDirection, float4 incidentMedium,
+                                   float4 transmittedMedium, bool dielectric) {
     PrimePbrSample result;
     result.bsdfSample = primeInvalidBsdfSample();
     result.medium = incidentMedium;
     if (!primeOpenPbrHasSample(sampled))
         return result;
-    result.bsdfSample.direction = primeOpenPbrOnbToWorld(material.geometry.onb, sampled.wo);
+    result.bsdfSample.direction = primeOpenPbrOnbToWorld(onb, sampled.wo);
     if ((sampled.throughput.flags & PRIME_OPENPBR_FLAG_DELTA_REFLECTION) != 0u)
-        result.bsdfSample.direction =
-                normalize(reflect(-viewDirection, material.geometry.onb.normal));
+        result.bsdfSample.direction = normalize(reflect(-viewDirection, onb.normal));
     result.bsdfSample.response = sampled.throughput.value;
     result.bsdfSample.pdf = sampled.pdf;
     result.bsdfSample.relativeEta = sampled.eta;
     result.bsdfSample.eventFlags = primeOpenPbrToBsdfEventFlags(sampled.throughput.flags);
     result.bsdfSample = primeSanitizeBsdfSample(result.bsdfSample);
-    if (dielectric && material.geometry.thinWalled == 0u &&
+    if (dielectric && !thinWalled &&
         (result.bsdfSample.eventFlags & PRIME_BSDF_EVENT_TRANSMISSION) != 0u)
         result.medium = transmittedMedium;
     return result;
+}
+
+PrimePbrSample primePbrSample(PrimeOpenPbrSample sampled, PrimeOpenPbrMaterial material,
+                              float3 viewDirection, float4 incidentMedium, float4 transmittedMedium,
+                              bool dielectric) {
+    return primePbrSampleFrame(sampled, material.geometry.onb, material.geometry.thinWalled != 0u,
+                               viewDirection, incidentMedium, transmittedMedium, dielectric);
 }
 
 public BsdfEvaluation primeEvaluatePbrMaterial(PrimeOpenPbrMaterial material, float3 viewDirection,
@@ -296,4 +370,127 @@ public PrimePbrSample primeSamplePbr(PrimePbrSource source, float3 viewDirection
     }
     return primePbrSample(sampled, material, viewDirection, incidentMedium, transmittedMedium,
                           dielectric);
+}
+
+PrimeOpenPbrOnb primePbrVertexFrame(PrimePbrVertex vertex, float3 viewDirection,
+                                    float4 incidentMedium, float4 transmittedMedium) {
+    PrimeOpenPbrOnb onb = primeOpenPbrOnbFromNormal(vertex.normal);
+    if (primePbrVertexIsDielectric(vertex)) {
+        bool exiting =
+                !primePbrVertexIsThinWalled(vertex) && incidentMedium.x > transmittedMedium.x;
+        bool facesView = dot(onb.normal, viewDirection) >= 0.0;
+        if (facesView == exiting) {
+            onb.normal = -onb.normal;
+            onb.bitangent = -onb.bitangent;
+        }
+    }
+    return onb;
+}
+
+float primePbrVertexInterfaceIor(PrimePbrVertex vertex, float4 incidentMedium,
+                                 float4 transmittedMedium) {
+    bool exiting = !primePbrVertexIsThinWalled(vertex) && incidentMedium.x > transmittedMedium.x;
+    float materialIor = exiting ? incidentMedium.x : transmittedMedium.x;
+    float inverseOutsideIor = 1.0 / (exiting ? transmittedMedium.x : incidentMedium.x);
+    return materialIor * inverseOutsideIor;
+}
+
+PrimeLitePtOpaqueState primePbrVertexOpaqueState(PrimePbrVertex vertex, float3 wi,
+                                                 float4 incidentMedium) {
+    uint fresnelCode = vertex.control & PRIME_OPTICAL_FRESNEL_MASK;
+    uint subsurface = vertex.control >> PRIME_OPTICAL_SUBSURFACE_SHIFT & 0xffu;
+    float materialIor = primeOpenPbrF0ToIor(primeDecodeDielectricF0(fresnelCode));
+    return primeLitePtOpaqueStateInit(vertex.baseColor, vertex.roughness, materialIor,
+                                      1.0 / incidentMedium.x, float(subsurface) / 190.0,
+                                      primePbrVertexIsThinWalled(vertex), wi);
+}
+
+public BsdfEvaluation primeEvaluatePbrVertex(PrimePbrVertex vertex, float3 viewDirection,
+                                             float3 scatterDirection, float4 incidentMedium,
+                                             float4 transmittedMedium) {
+    PrimeOpenPbrOnb onb =
+            primePbrVertexFrame(vertex, viewDirection, incidentMedium, transmittedMedium);
+    float3 wi = primeOpenPbrOnbToLocal(onb, viewDirection);
+    float3 wo = primeOpenPbrOnbToLocal(onb, scatterDirection);
+    if (primePbrVertexIsDielectric(vertex)) {
+        PrimeOpenPbrMicrofacet microfacet;
+        microfacet.alpha = float2(vertex.roughness * vertex.roughness);
+        float ior = primePbrVertexInterfaceIor(vertex, incidentMedium, transmittedMedium);
+        if (primePbrVertexIsThinWalled(vertex)) {
+            float3 extinction = transmittedMedium.yzw * 0.0625;
+            return primePbrEvaluation(
+                    primeLiteThinWallEvalCore(wi, wo, microfacet, ior, float3(1.0), float3(1.0),
+                                              extinction, PRIME_OPENPBR_FLAG_ALL),
+                    primeLiteThinWallPdfCore(wi, wo, microfacet, ior, float3(1.0), float3(1.0),
+                                             extinction, PRIME_OPENPBR_FLAG_ALL));
+        }
+        return primePbrEvaluation(primeLiteRefractiveEvalCore(wi, wo, microfacet, ior, float3(1.0),
+                                                              float3(1.0), PRIME_OPENPBR_FLAG_ALL),
+                                  primeLiteRefractivePdfCore(wi, wo, microfacet, ior, float3(1.0),
+                                                             PRIME_OPENPBR_FLAG_ALL));
+    }
+    if (primePbrVertexIsConductor(vertex)) {
+        PrimeConductorFresnel fresnel = primeConductorFresnel(
+                vertex.baseColor, vertex.control & PRIME_OPTICAL_FRESNEL_MASK);
+        PrimeOpenPbrMicrofacet microfacet;
+        microfacet.alpha = float2(vertex.roughness * vertex.roughness);
+        PrimeLiteReflectiveBase reflection =
+                primeLiteReflectiveEvalBase(wi, wo, microfacet, PRIME_OPENPBR_FLAG_ALL);
+        PrimeOpenPbrThroughput throughput = primeOpenPbrZeroThroughput();
+        if (reflection.flags != PRIME_OPENPBR_FLAG_NONE) {
+            throughput.value =
+                    primeLiteConductorFresnelCore(fresnel.f0, fresnel.f82Tint, float3(1.0), 1.0,
+                                                  reflection.microCosine) *
+                    reflection.factor;
+            throughput.flags = reflection.flags;
+        }
+        return primePbrEvaluation(throughput, primeLiteReflectivePdf(wi, wo, microfacet));
+    }
+    PrimeLitePtOpaqueState state = primePbrVertexOpaqueState(vertex, wi, incidentMedium);
+    PrimeLiteOpaqueEvaluation evaluated = primeLitePtOpaqueEvaluate(wi, wo, state);
+    return primePbrEvaluation(evaluated.throughput, evaluated.pdf);
+}
+
+public PrimePbrSample primeSamplePbrVertex(PrimePbrVertex vertex, float3 viewDirection,
+                                           float3 randomValue, float4 incidentMedium,
+                                           float4 transmittedMedium) {
+    PrimeOpenPbrOnb onb =
+            primePbrVertexFrame(vertex, viewDirection, incidentMedium, transmittedMedium);
+    float3 wi = primeOpenPbrOnbToLocal(onb, viewDirection);
+    PrimeOpenPbrSample sampled;
+    bool dielectric = primePbrVertexIsDielectric(vertex);
+    if (dielectric) {
+        PrimeOpenPbrMicrofacet microfacet;
+        microfacet.alpha = float2(vertex.roughness * vertex.roughness);
+        float ior = primePbrVertexInterfaceIor(vertex, incidentMedium, transmittedMedium);
+        sampled = primePbrVertexIsThinWalled(vertex)
+                          ? primeLiteThinWallSampleCore(
+                                    wi, randomValue, microfacet, ior, float3(1.0), float3(1.0),
+                                    transmittedMedium.yzw * 0.0625, PRIME_OPENPBR_FLAG_ALL)
+                          : primeLiteRefractiveSampleCore(wi, randomValue, microfacet, ior,
+                                                          float3(1.0), float3(1.0),
+                                                          PRIME_OPENPBR_FLAG_ALL);
+    } else if (primePbrVertexIsConductor(vertex)) {
+        PrimeConductorFresnel fresnel = primeConductorFresnel(
+                vertex.baseColor, vertex.control & PRIME_OPTICAL_FRESNEL_MASK);
+        PrimeOpenPbrMicrofacet microfacet;
+        microfacet.alpha = float2(vertex.roughness * vertex.roughness);
+        float microCosine;
+        sampled = primeLiteReflectiveSampleBase(wi, randomValue.xy, microfacet,
+                                                PRIME_OPENPBR_FLAG_ALL, microCosine);
+        if (sampled.throughput.flags != PRIME_OPENPBR_FLAG_NONE)
+            sampled.throughput.value *= primeLiteConductorFresnelCore(
+                    fresnel.f0, fresnel.f82Tint, float3(1.0), 1.0, microCosine);
+    } else {
+        PrimeLitePtOpaqueState state = primePbrVertexOpaqueState(vertex, wi, incidentMedium);
+        sampled = primeLitePtOpaqueSample(wi, randomValue, state);
+        if (primeOpenPbrHasSample(sampled) && !primeOpenPbrIsDelta(sampled.throughput.flags)) {
+            // Preserve the full closure response and marginal proposal density used by MIS.
+            PrimeLiteOpaqueEvaluation evaluated = primeLitePtOpaqueEvaluate(wi, sampled.wo, state);
+            sampled.throughput.value = evaluated.throughput.value;
+            sampled.pdf = evaluated.pdf;
+        }
+    }
+    return primePbrSampleFrame(sampled, onb, primePbrVertexIsThinWalled(vertex), viewDirection,
+                               incidentMedium, transmittedMedium, dielectric);
 }

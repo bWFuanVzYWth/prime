@@ -551,6 +551,7 @@ impl Renderer {
         let pipeline = self.pipeline.as_ref().unwrap();
         let camera = self.camera.unwrap();
         let output = self.output.as_ref().unwrap();
+        let samples_this_dispatch = self.samples_per_frame();
         let mut push = [0u8; 128];
         let values = [
             camera.position[0],
@@ -577,7 +578,7 @@ impl Renderer {
             output.width,
             output.height,
             self.samples,
-            self.samples_per_frame(),
+            samples_this_dispatch,
             u32::from(bottom_up),
             self.frame_seed,
             output.log2_resolution,
@@ -601,7 +602,10 @@ impl Renderer {
             self.context.device.cmd_bind_pipeline(
                 command,
                 vk::PipelineBindPoint::COMPUTE,
-                pipeline.pipelines[self.geometry.as_ref().map_or(0, Geometry::shader_variant)],
+                pipeline.for_dispatch(
+                    self.geometry.as_ref().map_or(0, Geometry::shader_variant),
+                    samples_this_dispatch,
+                ),
             );
             self.context.device.cmd_bind_descriptor_sets(
                 command,

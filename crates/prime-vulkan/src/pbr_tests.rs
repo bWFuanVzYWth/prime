@@ -5,6 +5,89 @@ const PBR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/pbr.spv"));
 const INPUT_WORDS: usize = 32;
 const OUTPUT_WORDS: usize = 64;
 
+#[test]
+#[ignore = "requires Vulkan; compares compact PT vertex against the retained source facade"]
+fn gpu_compact_pbr_vertex_preserves_source_closure() {
+    let views = [
+        [0.0, 0.0, 1.0, 0.0],
+        [0.6, 0.0, 0.8, 0.0],
+        [0.99995, 0.0, 0.01, 0.0],
+        [0.0, 0.8, -0.6, 0.0],
+    ];
+    let iors = [
+        [1.0, 1.5],
+        [1.5, 1.0],
+        [1.0, 1.0],
+        [1.5, 1.33],
+        [1.33, 1.5],
+        [1.5, 0.9],
+    ];
+    let colors = [[0.4, 0.6, 0.2], [0.0; 3], [1.0; 3], [1.25, 0.1, 0.7]];
+    let proposal_z = [0.0, 0.03, 0.25, 0.499999, 0.5, 0.75, 0.97, 0.999999];
+    let mut cases = Vec::new();
+    for g in 0..=255u8 {
+        for b in [0, 64, 65, 96, 190, 254] {
+            for r in [0, 64, 128, 254, 255] {
+                for a in [0, 128, 255] {
+                    for flags in 0..4 {
+                        for thin in [false, true] {
+                            for dielectric in [false, true] {
+                                let index = cases.len();
+                                let control =
+                                    flags | u32::from(thin) << 2 | u32::from(dielectric) << 3;
+                                let mut case = source_case([r, g, b, 255], control, dielectric);
+                                // Include reserved canonical G codes as well as all supported classes.
+                                case[0] = rgba([128, 128, 191, a]);
+                                case[1] = rgba([r, g, b, 255]);
+                                let color = colors[(index >> 2) % 4];
+                                case[4..8]
+                                    .copy_from_slice(&bits([color[0], color[1], color[2], 0.0]));
+                                case[8..12].copy_from_slice(&bits(views[(index >> 4) % 4]));
+                                case[12..16].copy_from_slice(&bits([
+                                    ((index * 17) % 1009) as f32 / 1009.0,
+                                    ((index * 53 + 1) % 1013) as f32 / 1013.0,
+                                    proposal_z[(index >> 5) % 8],
+                                    0.0,
+                                ]));
+                                let ior = iors[(index >> 7) % 6];
+                                case[16..20].copy_from_slice(&bits([ior[0], 0.01, 0.03, 0.02]));
+                                case[20..24].copy_from_slice(&bits([ior[1], 0.1, 0.2, 0.3]));
+                                case[24..28].copy_from_slice(&bits(views[(index >> 9) % 4]));
+                                let sign = if index >> 3 & 1 == 0 { 1.0 } else { -1.0 };
+                                case[28..32].copy_from_slice(&bits(if index >> 6 & 1 == 0 {
+                                    [0.0, 0.0, sign, 0.0]
+                                } else {
+                                    [0.6 * sign, 0.0, 0.8 * sign, 0.0]
+                                }));
+                                cases.push(case);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(cases.len(), 368_640);
+    for (index, result) in execute(13, &cases).iter().enumerate() {
+        for word in 0..24 {
+            if (8..16).contains(&word) {
+                assert_eq!(
+                    result[word],
+                    result[word + 24],
+                    "compact event/medium case {index} word {word}"
+                );
+            } else {
+                close(
+                    f32::from_bits(result[word + 24]),
+                    f32::from_bits(result[word]),
+                    2.0e-5,
+                    "compact sample/evaluation/PDF",
+                );
+            }
+        }
+    }
+}
+
 fn bits(values: [f32; 4]) -> [u32; 4] {
     values.map(f32::to_bits)
 }

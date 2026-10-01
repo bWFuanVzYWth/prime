@@ -10,5 +10,7 @@ public static const float ATM_THICKNESS_KM = ATM_TOP_RADIUS_KM - ATM_BOTTOM_RADI
 // World positions and travelled distances enter the physical atmosphere in kilometres.
 public static const float ATM_WORLD_UNIT_SCALE_KM = 0.001;
 public static const float ATM_AERIAL_MAX_DISTANCE_KM = 2.048;
+// Production Aerial-S allocation and update dispatch in atmosphere/mod.rs use 256 slices.
+public static const int ATM_AERIAL_RADIANCE_SLICES = 256;
 public static const float ATM_SPACE_SUN_INTENSITY = 12.5;
 public static const float ATM_SUN_ANGULAR_RADIUS_RADIANS = 0.00471;

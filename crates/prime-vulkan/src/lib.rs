@@ -69,12 +69,17 @@ struct Pipeline {
     pool: vk::DescriptorPool,
     descriptors: [vk::DescriptorSet; FRAME_SLOTS],
     pipelines: [vk::Pipeline; 6],
+    single_sample_pipelines: Option<[vk::Pipeline; 6]>,
 }
 impl Drop for Pipeline {
     fn drop(&mut self) {
         if self.context.can_destroy() {
             unsafe {
-                for pipeline in self.pipelines {
+                for pipeline in self
+                    .pipelines
+                    .into_iter()
+                    .chain(self.single_sample_pipelines.into_iter().flatten())
+                {
                     self.context.device.destroy_pipeline(pipeline, None);
                 }
                 self.context.device.destroy_descriptor_pool(self.pool, None);
@@ -102,6 +107,8 @@ impl Pipeline {
                 pool: vk::DescriptorPool::null(),
                 descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
                 pipelines: [vk::Pipeline::null(); 6],
+                single_sample_pipelines: (mode == RenderMode::Offline)
+                    .then_some([vk::Pipeline::null(); 6]),
             };
             let binding_ids: &[u32] = match mode {
                 RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8],
@@ -180,7 +187,10 @@ impl Pipeline {
                 .map_err(|e| error("Allocate path-tracing descriptors", e))?
                 .try_into()
                 .map_err(|_| "Invalid descriptor count")?;
-            let create = |bytes: &[u8], features: [u32; 3]| -> Result<vk::Pipeline, String> {
+            let create = |bytes: &[u8],
+                          features: [u32; 3],
+                          single_sample: u32|
+             -> Result<vk::Pipeline, String> {
                 let spirv = ash::util::read_spv(&mut Cursor::new(bytes))
                     .map_err(|e| format!("Read compiled Slang SPIR-V: {e}"))?;
                 let shader = context
@@ -203,10 +213,16 @@ impl Pipeline {
                         offset: 8,
                         size: 4,
                     },
+                    vk::SpecializationMapEntry {
+                        constant_id: 4,
+                        offset: 12,
+                        size: 4,
+                    },
                 ];
-                let data = features.map(u32::to_le_bytes);
+                let data =
+                    [features[0], features[1], features[2], single_sample].map(u32::to_le_bytes);
                 let specialization = vk::SpecializationInfo::default()
-                    .map_entries(&entries)
+                    .map_entries(&entries[..if mode == RenderMode::Offline { 4 } else { 3 }])
                     .data(data.as_flattened());
                 let stage = vk::PipelineShaderStageCreateInfo::default()
                     .stage(vk::ShaderStageFlags::COMPUTE)
@@ -246,9 +262,19 @@ impl Pipeline {
             .into_iter()
             .enumerate()
             {
-                result.pipelines[i] = create(shader, features)?;
+                result.pipelines[i] = create(shader, features, 0)?;
+                if let Some(single) = &mut result.single_sample_pipelines {
+                    single[i] = create(shader, features, 1)?;
+                }
             }
             Ok(result)
+        }
+    }
+
+    fn for_dispatch(&self, scene_variant: usize, samples_this_dispatch: u32) -> vk::Pipeline {
+        match (&self.single_sample_pipelines, samples_this_dispatch) {
+            (Some(single), 1) => single[scene_variant],
+            _ => self.pipelines[scene_variant],
         }
     }
 }

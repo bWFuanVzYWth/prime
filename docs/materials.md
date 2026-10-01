@@ -37,6 +37,8 @@ Rust 为每个辅助图生成与基色帧尺寸对应的规范 mip。法线 foot
 
 `bsdf/common/common.slang` 与 `material.slang` 提供材质值类型、事件 flags、坐标框架、标量数学、介质栈与默认初始化；历史 `PrimeOpenPbr*` 类型名作为内部 API 保留，不表示实现完整 OpenPBR。三个 LitePBR 家族的支持谓词拒绝 coat、fuzz、thin-film 等未支持组合；生产源适配只建立已有证明的拓扑。
 
+生产源适配使用 `PrimePbrVertex`：working RGB、已修正世界法线、有效粗糙度和控制字。输入只消费 normal A 与 specular RGB；emission A 在交点发光阶段消费，AO 和 porosity 不进入闭包。粗糙度仍先按当前 UV/LOD 过滤、量化，再与 normal 分布组合；控制字保留 Fresnel/SSS 身份、法线贴图存在性、材质薄壁与 dielectric 选择。缺 specular 图的缺省已进入有效粗糙度与类别，不再保存该存在性。后续 opaque/transmission 窄状态使用通用库相同的数学核，避免构建通用未使用字段；完整响应、总 PDF、事件、eta、介质切换及数值检查与通用入口遵守同一契约。
+
 LitePBR 是低阶散射模型，不符合完整 OpenPBR。opaque dielectric 使用 single-scatter anisotropic GGX，将缺失方向能量以标量闭合压回现有 GGX 瓣，并以当前入射方向剩余能量混合基底；conductor 使用 single-scatter GGX 与 generalized Schlick/F82。方向能量来自无纹理的 GGX/Schlick 解析拟合。该闭合不恢复多次散射的低频角分布；opaque dielectric 的层叠以当前入射方向为条件，不声明反射互易性。
 
 solid dielectric 使用 Walter GGX 反射/折射、相关 Smith masking-shadowing、Snell/TIR 与 Beer-Lambert 吸收；thin-wall 保留两界面 Fresnel/吸收解析级数和轻量 single-scatter GGX。漫反射使用余弦半球，GGX 使用可见法线采样；分量选择概率与所选分量的响应/PDF 成对。没有 transmission directional-energy LUT、表驱动多次散射补偿或对应 GPU binding。高粗糙度反射/透射的角分布和能量仍需按此近似边界评估。

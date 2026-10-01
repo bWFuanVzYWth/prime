@@ -32,8 +32,8 @@ float powerHeuristic(float a, float b) {
 public TraceResult traceSample(TraceScene resources, AtmEnvironment environment, Frame frame,
                                uint2 pixel, uint sequence) {
     TraceResult result = {float3(0), 3.402823466e38f, float3(0)};
-    ZSobol sampler = makeZSobol(pixel, sequence & 0xffu, frame.target.z, 8,
-                                frame.target.w ^ (sequence >> 8));
+    ZSobol sampler =
+            makeZSobolS8(pixel, sequence & 0xffu, frame.target.z, frame.target.w ^ (sequence >> 8));
     float2 screen =
             ((float2(pixel) + sampler.sample2D(0)) / float2(frame.dimensions.xy)) * 2.0 - 1.0;
     float3 origin = frame.position.xyz;
@@ -50,74 +50,86 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
             surfaceFeatures >= 2 ? 2.0 * frame.position.w / float(frame.dimensions.y) : 0.0;
     for (uint bounce = 0; bounce < asuint(frame.displayExtra.z); ++bounce) {
         uint domain = 1 + 4 * bounce;
-        SurfaceHit hit = traceClosest(resources, origin, direction, sampler.bits1D(domain),
-                                      coneWidth, coneSpread);
-        if (!hit.found) {
-            float3 escaped = atmSky(environment, direction) * frame.up.w;
-            if (atmSunContains(environment, direction)) {
-                float weight = previousPdf == 0 ? 1.0 : powerHeuristic(previousPdf, atmSunPdf());
-                escaped += weight * atmSunRadiance(environment, direction) * frame.right.w;
-            }
-            result.radiance += throughput * escaped;
-            break;
-        }
-        SurfacePoint surface = hit.surface;
-        coneWidth += coneSpread * length(surface.position - origin);
-        if (opticalFeatures != 0) {
-            if (bounce == 0)
-                medium = hit.thin ? float4(1, 0, 0, 0) : hit.incident;
-            throughput *= exp(-medium.yzw * length(surface.position - origin));
-        }
-        if (dot(surface.normal, direction) > 0)
-            surface.normal = -surface.normal;
-        if (bounce == 0) {
-            primaryDistance = medium.x == 1.0 ? length(surface.position - frame.position.xyz) : 0.0;
-            result.depth = dot(surface.position - frame.position.xyz, frame.forward.xyz);
-            result.normal =
-                    dot(hit.shadingNormal, direction) > 0 ? -hit.shadingNormal : hit.shadingNormal;
-        }
-        float3 albedo = sourceToWorking(saturate(hit.sourceColor.rgb));
-        float3 normal =
-                dot(hit.shadingNormal, direction) > 0 ? -hit.shadingNormal : hit.shadingNormal;
-        PrimePbrSource material = {albedo,
-                                   normal,
-                                   hit.normalSample,
-                                   hit.specularSample,
-                                   (hit.materialFlags & 1) != 0,
-                                   (hit.materialFlags & 2) != 0,
-                                   hit.materialThin};
-        float3 view = -direction;
-        float4 incident = hit.optical && !hit.thin ? hit.incident : medium;
-        float4 transmitted =
-                hit.thin ? (hit.incident.x > hit.transmitted.x ? hit.incident : hit.transmitted)
-                         : hit.transmitted;
+        SurfacePoint surface;
+        PrimePbrVertex material;
+        float4 incident;
+        float4 transmitted;
+        bool optical;
+        bool thin;
+        // Raw hit samples and emitter metadata end here. Only canonical shading inputs
+        // and the physical boundary endpoints are needed by the shadow consumers.
         {
-            float lightPdf = previousPdf == 0 || lightFeatures == 0
-                                     ? 0
-                                     : emissiveHitPdf(resources, hit, previous);
-            float emissionWeight = lightPdf == 0 ? 1.0 : powerHeuristic(previousPdf, lightPdf);
-            result.radiance += primeTripleProduct(throughput, linear709ToWorking(hit.emission),
-                                                  emissionWeight);
+            SurfaceHit hit = traceClosest(resources, origin, direction, sampler.bits1D(domain),
+                                          coneWidth, coneSpread);
+            if (!hit.found) {
+                float3 escaped = atmSky(environment, direction) * frame.up.w;
+                if (atmSunContains(environment, direction)) {
+                    float weight =
+                            previousPdf == 0 ? 1.0 : powerHeuristic(previousPdf, atmSunPdf());
+                    escaped += weight * atmSunRadiance(environment, direction) * frame.right.w;
+                }
+                result.radiance += throughput * escaped;
+                break;
+            }
+            surface = hit.surface;
+            coneWidth += coneSpread * length(surface.position - origin);
+            if (opticalFeatures != 0) {
+                if (bounce == 0)
+                    medium = hit.thin ? float4(1, 0, 0, 0) : hit.incident;
+                throughput *= exp(-medium.yzw * length(surface.position - origin));
+            }
+            if (dot(surface.normal, direction) > 0)
+                surface.normal = -surface.normal;
+            if (bounce == 0) {
+                primaryDistance =
+                        medium.x == 1.0 ? length(surface.position - frame.position.xyz) : 0.0;
+                result.depth = dot(surface.position - frame.position.xyz, frame.forward.xyz);
+                result.normal = dot(hit.shadingNormal, direction) > 0 ? -hit.shadingNormal
+                                                                      : hit.shadingNormal;
+            }
+            float3 albedo = sourceToWorking(saturate(hit.sourceColor.rgb));
+            float3 normal =
+                    dot(hit.shadingNormal, direction) > 0 ? -hit.shadingNormal : hit.shadingNormal;
+            optical = hit.optical;
+            thin = hit.thin;
+            material = primePbrVertex(albedo, normal, hit.normalSample.a, hit.specularSample.rgb,
+                                      (hit.materialFlags & 1) != 0, (hit.materialFlags & 2) != 0,
+                                      hit.materialThin, optical, -direction);
+            incident = optical && !thin ? hit.incident : medium;
+            transmitted =
+                    hit.thin ? (hit.incident.x > hit.transmitted.x ? hit.incident : hit.transmitted)
+                             : hit.transmitted;
+            {
+                float lightPdf = previousPdf == 0 || lightFeatures == 0
+                                         ? 0
+                                         : emissiveHitPdf(resources, hit, previous);
+                float emissionWeight = lightPdf == 0 ? 1.0 : powerHeuristic(previousPdf, lightPdf);
+                result.radiance += primeTripleProduct(throughput, linear709ToWorking(hit.emission),
+                                                      emissionWeight);
+            }
         }
+        float3 view = -direction;
+        float3 normal = material.normal;
+        bool hasNormal = primePbrVertexHasNormal(material);
         if (lightFeatures != 0 && hasLocalLights(resources)) {
             uint lightDomain = 512 + 4 * bounce;
             LightSample light = sampleLocalLight(resources, sampler, bounce, surface.position);
             float3 lightDirection = light.valid
                                             ? normalize(light.surface.position - surface.position)
                                             : surface.normal;
-            float4 lightMedium = hit.optical && !hit.thin && dot(surface.normal, lightDirection) < 0
+            float4 lightMedium = optical && !thin && dot(surface.normal, lightDirection) < 0
                                          ? transmitted
                                          : medium;
             float pdf;
             float lightCosine;
             float3 radiance =
                     evaluateLocalLight(resources, surface, light, sampler.bits1D(lightDomain + 3),
-                                       lightMedium, hit.optical, pdf, lightCosine);
+                                       lightMedium, optical, pdf, lightCosine);
             if (pdf > 0) {
-                BsdfEvaluation evaluated = primeEvaluatePbr(material, view, lightDirection,
-                                                            incident, transmitted, hit.optical);
-                if (!primeGeometricEvaluationSupport((hit.materialFlags & 1) != 0, surface.normal,
-                                                     normal, view, lightDirection, hit.optical))
+                BsdfEvaluation evaluated = primeEvaluatePbrVertex(material, view, lightDirection,
+                                                                  incident, transmitted);
+                if (!primeGeometricEvaluationSupport(hasNormal, surface.normal, normal, view,
+                                                     lightDirection, optical))
                     evaluated = primeInvalidBsdfEvaluation();
                 float bsdfPdf = evaluated.pdf;
                 float weightedInversePdf = bounce + 1 == asuint(frame.displayExtra.z)
@@ -130,21 +142,19 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
         }
         float3 sunDirection = atmSampleSun(environment, sampler.sample2D(1024 + bounce));
         float cosine = saturate(dot(surface.normal, sunDirection));
-        if (cosine > 0 || hit.optical) {
+        if (cosine > 0 || optical) {
             float3 sunRadiance = atmSunRadiance(environment, sunDirection);
             if (any(sunRadiance > 0.0)) {
                 float3 visibility = traceTransmittance(
                         resources, spawnRay(surface, sunDirection), sunDirection,
                         sampler.bits1D(domain + 1), 100000.0,
-                        hit.optical && !hit.thin && dot(surface.normal, sunDirection) < 0
-                                ? transmitted
-                                : medium);
+                        optical && !thin && dot(surface.normal, sunDirection) < 0 ? transmitted
+                                                                                  : medium);
                 if (any(visibility > 0.0)) {
-                    BsdfEvaluation evaluated = primeEvaluatePbr(material, view, sunDirection,
-                                                                incident, transmitted, hit.optical);
-                    if (!primeGeometricEvaluationSupport((hit.materialFlags & 1) != 0,
-                                                         surface.normal, normal, view, sunDirection,
-                                                         hit.optical))
+                    BsdfEvaluation evaluated = primeEvaluatePbrVertex(material, view, sunDirection,
+                                                                      incident, transmitted);
+                    if (!primeGeometricEvaluationSupport(hasNormal, surface.normal, normal, view,
+                                                         sunDirection, optical))
                         evaluated = primeInvalidBsdfEvaluation();
                     float bsdfPdf = evaluated.pdf;
                     float weightedInversePdf =
@@ -158,14 +168,18 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
                 }
             }
         }
+        // The final vertex has no continuation consumer. Keep its NEE and MIS above,
+        // but do not construct a BSDF sample or roulette state that will be discarded.
+        if (bounce + 1 == asuint(frame.displayExtra.z))
+            break;
         // The three-dimensional closure sample keeps its lobe selector independent of roulette.
-        PrimePbrSample sampled = primeSamplePbr(
+        PrimePbrSample sampled = primeSamplePbrVertex(
                 material, view,
                 float3(sampler.sample2D(domain + 2), sampler.sample1D(1280 + bounce)), incident,
-                transmitted, hit.optical);
+                transmitted);
         BsdfSample scatter = sampled.bsdfSample;
-        if (scatter.eventFlags == 0 || !primeGeometricSampleSupport((hit.materialFlags & 1) != 0,
-                                                                    surface.normal, view, scatter))
+        if (scatter.eventFlags == 0 ||
+            !primeGeometricSampleSupport(hasNormal, surface.normal, view, scatter))
             break;
         throughput = primeProductOver(throughput, scatter.response, scatter.pdf);
         if (!primeBsdfFinite(throughput))
@@ -173,7 +187,7 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
         direction = scatter.direction;
         medium = sampled.medium;
         previous = surface.position;
-        previousPdf = primeDirectLightingMisPdf(hit.optical, scatter);
+        previousPdf = primeDirectLightingMisPdf(optical, scatter);
         origin = spawnRay(surface, direction);
         if (bounce >= 2) {
             float survival = clamp(workingLuminance(throughput), 0.05, 0.95);

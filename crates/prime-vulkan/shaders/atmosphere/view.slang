@@ -97,8 +97,8 @@ public AtmEpipolarRange atmPreparedRange(AtmFrame f) {
     return {f.range.x, f.range.y, f.range.zw, f.rangeExtra.x, f.rangeExtra.y > 0.5};
 }
 public float3 atmAerialDirection(AtmFrame f, int2 coordinate) {
-    AtmEpipolarSegment segment =
-            atmEpipolarSliceSegment(f.epipole.xy, atmPreparedRange(f), coordinate.y, 256);
+    AtmEpipolarSegment segment = atmEpipolarSliceSegment(f.epipole.xy, atmPreparedRange(f),
+                                                         coordinate.y, ATM_AERIAL_RADIANCE_SLICES);
     float2 ndc = segment.valid
                          ? lerp(segment.entry, segment.exit, (float(coordinate.x) + 0.5) / 128.0)
                          : float2(2);
@@ -113,7 +113,7 @@ public void atmAerial(AtmEnvironment environment, float2 uv, float distanceMeter
                          0.0, 1.0);
     AtmFrame f = environment.frames[0];
     float3 s = atmSampleEpipolarWithRange(environment.aerialRadiance, uv, depth, f.epipole.xy,
-                                          atmPreparedRange(f))
+                                          atmPreparedRange(f), ATM_AERIAL_RADIANCE_SLICES)
                        .rgb;
     float3 t = environment.aerialTransmittance.SampleLevel(float3(uv, depth), 0).rgb;
     radiance = max(s, float3(0)) * weight;

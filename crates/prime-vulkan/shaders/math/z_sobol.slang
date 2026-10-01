@@ -116,3 +116,15 @@ public ZSobol makeZSobol(uint2 pixel, uint sample, uint log2Resolution, uint log
     result.seed = seed;
     return result;
 }
+
+// Production uses S=8 and sample<256. Keep the public variable-S constructor
+// above for its full boundary contract and independent sampling fixtures.
+public ZSobol makeZSobolS8(uint2 pixel, uint sample, uint log2Resolution, uint seed) {
+    uint m = spread(pixel.x) | (spread(pixel.y) << 1);
+    ZSobol result;
+    result.morton = uint2((m << 8) | sample, m >> 24);
+    result.bitCount = 2 * log2Resolution + 8;
+    result.odd = 0;
+    result.seed = seed;
+    return result;
+}

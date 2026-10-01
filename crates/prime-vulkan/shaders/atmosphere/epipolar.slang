@@ -214,44 +214,52 @@ public float atmEpipolarRadialCoordinate(float2 screenNdc, AtmEpipolarSegment se
 
 public float4 atmSampleEpipolarSlice(Sampler3D<float4> source, float2 screenNdc,
                                      float normalizedDepth, float2 epipoleNdc,
-                                     AtmEpipolarRange range, int slice) {
-    uint width;
-    uint height;
-    uint depth;
-    source.GetDimensions(width, height, depth);
-    int3 dimensions = int3(width, height, depth);
-    AtmEpipolarSegment segment = atmEpipolarSliceSegment(epipoleNdc, range, slice, dimensions.y);
+                                     AtmEpipolarRange range, int slice, int sliceCount) {
+    AtmEpipolarSegment segment = atmEpipolarSliceSegment(epipoleNdc, range, slice, sliceCount);
     float radial = atmEpipolarRadialCoordinate(screenNdc, segment);
     return source.SampleLevel(float3(clamp(radial, 0.0, 1.0),
-                                     (float(slice) + 0.5) / float(dimensions.y),
+                                     (float(slice) + 0.5) / float(sliceCount),
                                      clamp(normalizedDepth, 0.0, 1.0)),
                               0);
+}
+
+public float4 atmSampleEpipolarSlice(Sampler3D<float4> source, float2 screenNdc,
+                                     float normalizedDepth, float2 epipoleNdc,
+                                     AtmEpipolarRange range, int slice) {
+    uint width, height, depth;
+    source.GetDimensions(width, height, depth);
+    return atmSampleEpipolarSlice(source, screenNdc, normalizedDepth, epipoleNdc, range, slice,
+                                  int(height));
+}
+
+public float4 atmSampleEpipolarWithRange(Sampler3D<float4> source, float2 screenUv,
+                                         float normalizedDepth, float2 epipoleNdc,
+                                         AtmEpipolarRange range, int sliceCount) {
+    float2 screenNdc = primeCanonicalUvToClip(screenUv);
+    const float twoPi = 6.28318530717958647692;
+    float sliceCoordinate =
+            atmEpipolarRangeCoordinate(range, epipoleNdc, screenNdc) * float(sliceCount) - 0.5;
+    int lowerSliceUnwrapped = int(floor(sliceCoordinate));
+    float sliceFraction = frac(sliceCoordinate);
+    bool wraps = !range.parallel && range.span >= twoPi - ATM_EPIPOLAR_EPSILON;
+    int lowerSlice = wraps ? (lowerSliceUnwrapped % sliceCount + sliceCount) % sliceCount
+                           : clamp(lowerSliceUnwrapped, 0, sliceCount - 1);
+    int upperSlice = wraps ? (lowerSlice + 1) % sliceCount
+                           : clamp(lowerSliceUnwrapped + 1, 0, sliceCount - 1);
+    float4 lower = atmSampleEpipolarSlice(source, screenNdc, normalizedDepth, epipoleNdc, range,
+                                          lowerSlice, sliceCount);
+    float4 upper = atmSampleEpipolarSlice(source, screenNdc, normalizedDepth, epipoleNdc, range,
+                                          upperSlice, sliceCount);
+    return lerp(lower, upper, sliceFraction);
 }
 
 public float4 atmSampleEpipolarWithRange(Sampler3D<float4> source, float2 screenUv,
                                          float normalizedDepth, float2 epipoleNdc,
                                          AtmEpipolarRange range) {
-    uint width;
-    uint height;
-    uint depth;
+    uint width, height, depth;
     source.GetDimensions(width, height, depth);
-    int3 dimensions = int3(width, height, depth);
-    float2 screenNdc = primeCanonicalUvToClip(screenUv);
-    const float twoPi = 6.28318530717958647692;
-    float sliceCoordinate =
-            atmEpipolarRangeCoordinate(range, epipoleNdc, screenNdc) * float(dimensions.y) - 0.5;
-    int lowerSliceUnwrapped = int(floor(sliceCoordinate));
-    float sliceFraction = frac(sliceCoordinate);
-    bool wraps = !range.parallel && range.span >= twoPi - ATM_EPIPOLAR_EPSILON;
-    int lowerSlice = wraps ? (lowerSliceUnwrapped % dimensions.y + dimensions.y) % dimensions.y
-                           : clamp(lowerSliceUnwrapped, 0, dimensions.y - 1);
-    int upperSlice = wraps ? (lowerSlice + 1) % dimensions.y
-                           : clamp(lowerSliceUnwrapped + 1, 0, dimensions.y - 1);
-    float4 lower = atmSampleEpipolarSlice(source, screenNdc, normalizedDepth, epipoleNdc, range,
-                                          lowerSlice);
-    float4 upper = atmSampleEpipolarSlice(source, screenNdc, normalizedDepth, epipoleNdc, range,
-                                          upperSlice);
-    return lerp(lower, upper, sliceFraction);
+    return atmSampleEpipolarWithRange(source, screenUv, normalizedDepth, epipoleNdc, range,
+                                      int(height));
 }
 
 public float4 atmSampleEpipolar(Sampler3D<float4> source, float2 screenUv, float normalizedDepth,

@@ -422,6 +422,39 @@ PrimeLiteTestResult primeLiteTestRun(uint4 encoded[4]) {
     uint outputOffset = i * 16u;
     for (uint index = 0u; index < 16u; ++index)
         outputs[outputOffset + index] = uint4(0u);
+    if (config.x == 13u) {
+        PrimePbrSource source = loadSource(inputOffset);
+        source.normal = asfloat(inputs[inputOffset + 7]).xyz;
+        bool dielectric = (inputs[inputOffset].z & 8u) != 0u;
+        float3 view = asfloat(inputs[inputOffset + 2]).xyz;
+        float3 randomValue = asfloat(inputs[inputOffset + 3]).xyz;
+        float4 incident = asfloat(inputs[inputOffset + 4]);
+        float4 transmitted = asfloat(inputs[inputOffset + 5]);
+        float3 scatter = asfloat(inputs[inputOffset + 6]).xyz;
+        PrimePbrVertex vertex = primePbrVertex(source, view, dielectric);
+        PrimePbrSample original =
+                primeSamplePbr(source, view, randomValue, incident, transmitted, dielectric);
+        PrimePbrSample compact =
+                primeSamplePbrVertex(vertex, view, randomValue, incident, transmitted);
+        writeSample(outputOffset, original.bsdfSample);
+        outputs[outputOffset + 3] = asuint(original.medium);
+        BsdfEvaluation evaluated =
+                primeEvaluatePbr(source, view, scatter, incident, transmitted, dielectric);
+        outputs[outputOffset + 4] = asuint(float4(evaluated.response, evaluated.pdf));
+        evaluated = primeEvaluatePbr(source, view, original.bsdfSample.direction, incident,
+                                     transmitted, dielectric);
+        outputs[outputOffset + 5] = asuint(float4(evaluated.response, evaluated.pdf));
+        writeSample(outputOffset + 6, compact.bsdfSample);
+        outputs[outputOffset + 9] = asuint(compact.medium);
+        evaluated = primeEvaluatePbrVertex(vertex, view, scatter, incident, transmitted);
+        outputs[outputOffset + 10] = asuint(float4(evaluated.response, evaluated.pdf));
+        evaluated = primeEvaluatePbrVertex(vertex, view, compact.bsdfSample.direction, incident,
+                                           transmitted);
+        outputs[outputOffset + 11] = asuint(float4(evaluated.response, evaluated.pdf));
+        outputs[outputOffset + 12] = asuint(float4(vertex.baseColor, vertex.roughness));
+        outputs[outputOffset + 13] = uint4(asuint(vertex.normal), vertex.control);
+        return;
+    }
     if (config.x == 12u) {
         PrimePbrSource source = loadSource(inputOffset);
         PrimeOpenPbrMaterial material = primePbrMaterial(source);
