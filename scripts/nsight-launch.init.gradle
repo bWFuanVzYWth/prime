@@ -1,0 +1,166 @@
+import groovy.json.JsonOutput
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+
+// Export the real Loom JavaExec inputs, but never execute runClient.
+gradle.projectsEvaluated {
+    def root = gradle.rootProject
+    def versions = root.providers.gradleProperty('nsightVersions').get().split(',').toList()
+    if (!versions || versions.any { !['26.2', '26.3'].contains(it) })
+        throw new GradleException('nsightVersions must contain supported Minecraft versions')
+    def outputRoot = root.file(root.providers.gradleProperty('nsightOutput').get()).canonicalFile
+    def snapshot = root.providers.gradleProperty('nsightSnapshot').get().toBoolean()
+    def workspace = root.projectDir.canonicalFile.toPath()
+    def pathMappings = new LinkedHashMap<String, String>()
+    def copiedFiles = new LinkedHashMap<String, Map>()
+    def digest = { File file ->
+        def sha = MessageDigest.getInstance('SHA-256')
+        file.withInputStream { stream ->
+            def buffer = new byte[1024 * 1024]
+            for (int count; (count = stream.read(buffer)) != -1;) sha.update(buffer, 0, count)
+        }
+        sha.digest().encodeHex().toString()
+    }
+    def copyFile = { File source, File destination ->
+        if (!source.isFile()) throw new GradleException("Required launch file does not exist: ${source}")
+        destination.parentFile.mkdirs()
+        if (!destination.exists()) Files.copy(source.toPath(), destination.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+        pathMappings[source.canonicalPath] = destination.absolutePath
+        copiedFiles[destination.absolutePath] = [source: source.canonicalPath, destination: destination.absolutePath, sha256: digest(destination)]
+        destination
+    }
+    def copyWorkspacePath = { File source ->
+        source = source.canonicalFile
+        if (!source.toPath().startsWith(workspace)) return source
+        if (!source.exists()) throw new GradleException("Required workspace runtime path does not exist: ${source}")
+        def destination = new File(outputRoot, 'workspace/' + workspace.relativize(source.toPath()).toString())
+        pathMappings[source.canonicalPath] = destination.absolutePath
+        if (source.isDirectory()) {
+            destination.mkdirs()
+            Files.walk(source.toPath()).withCloseable { paths ->
+                paths.forEach { path ->
+                    def target = destination.toPath().resolve(source.toPath().relativize(path))
+                    if (Files.isDirectory(path)) Files.createDirectories(target)
+                    else copyFile(path.toFile(), target.toFile())
+                }
+            }
+        } else copyFile(source, destination)
+        destination
+    }
+    def remap = { String value ->
+        pathMappings.keySet().sort { a, b -> b.length() <=> a.length() }.each { original ->
+            def destination = pathMappings[original]
+            value = value.replace(original, destination)
+            value = value.replace(original.replace('\\', '/'), destination.replace('\\', '/'))
+        }
+        value
+    }
+    def quoteArgument = { String argument ->
+        if (argument.contains('\n') || argument.contains('\r') || argument.contains('\u0000'))
+            throw new GradleException('Java argument files cannot contain a newline or NUL in an argument')
+        '"' + argument.replace('\\', '\\\\').replace('"', '\\"') + '"'
+    }
+    versions.each { version ->
+        def adapter = root.project(":mc-${version}")
+        def game = adapter.tasks.named('runClient').get()
+        def runConfiguration = adapter.extensions.getByName('loom').runConfigs.getByName('client')
+        adapter.tasks.register('exportNsightLaunch') {
+            dependsOn game.taskDependencies.getDependencies(game)
+            // nativeLibrary is explicitly supplied by the stable preparation tool;
+            // therefore runClient itself no longer adds this prerequisite.
+            dependsOn root.tasks.named('buildNative')
+            doLast {
+                outputRoot.mkdirs()
+                def jvm = game.allJvmArgs.collect { it.toString() }
+                def classpath = game.classpath.files.collect { it.canonicalFile }
+                def sourceJvmArgumentFiles = []
+                jvm = jvm.findAll { argument ->
+                    if (!argument.startsWith('@')) return true
+                    def file = new File(argument.substring(1)).canonicalFile
+                    // Loom's provider emits only a classpath in a two-line argfile.
+                    // Validate that it is exactly the classpath exported below; never
+                    // silently discard other JVM options or rely on nested @files.
+                    def lines = file.readLines('UTF-8').findAll { !it.isEmpty() }
+                    def nestedClasspath = lines.size() == 2 && lines[0] == '-classpath' ?
+                        lines[1].split(java.util.regex.Pattern.quote(File.pathSeparator), -1).collect { new File(it).canonicalFile } : null
+                    if (nestedClasspath != classpath)
+                        throw new GradleException("Unexpected JVM argfile format; explicit expansion is required: ${file}")
+                    sourceJvmArgumentFiles.add([file: file.absolutePath, sha256: digest(file), expanded: 'runClient classpath'])
+                    false
+                }
+                def program = (game.args ?: []).collect { it.toString() } +
+                    game.argumentProviders.collectMany { it.asArguments().collect { argument -> argument.toString() } }
+                def mainClass = game.mainClass.get()
+                def nativeArgument = jvm.find { it.startsWith('-Dprimept.native.path=') }
+                if (nativeArgument == null) throw new GradleException('runClient has no Prime native path')
+                def nativeLibrary = new File(nativeArgument.substring('-Dprimept.native.path='.length())).canonicalFile
+                def nativePdb = new File(nativeLibrary.parentFile, nativeLibrary.name.replaceFirst(/\.[^.]+$/, '.pdb'))
+                def configFiles = jvm.findAll { it.startsWith('-Dfabric.dli.config=') || it.startsWith('-Dlog4j.configurationFile=') }
+                    .collect { new File(it.substring(it.indexOf('=') + 1)).canonicalFile }
+                def sharedAssets = []
+                def extraConfigs = []
+                configFiles.each { file ->
+                    if (!file.isFile()) throw new GradleException("Loom launch config does not exist: ${file}")
+                    def lines = file.readLines('UTF-8')
+                    lines.eachWithIndex { line, index ->
+                        if (line.trim() == '--assetsDir' && index + 1 < lines.size()) sharedAssets.add(lines[index + 1].trim())
+                    }
+                    lines.findAll { it.trim().startsWith('log4j.configurationFile=') }.each { line ->
+                        extraConfigs.add(new File(line.trim().substring('log4j.configurationFile='.length())).canonicalFile)
+                    }
+                }
+                configFiles = (configFiles + extraConfigs).unique()
+                if (snapshot) {
+                    nativeLibrary = copyFile(nativeLibrary, new File(outputRoot, 'native/' + nativeLibrary.name))
+                    if (nativePdb.isFile()) nativePdb = copyFile(nativePdb, new File(outputRoot, 'native/' + nativePdb.name))
+                    classpath = classpath.collect { copyWorkspacePath(it) }
+                    configFiles = configFiles.collect { copyWorkspacePath(it) }
+                    copyWorkspacePath(root.file('crates/prime-vulkan/shaders'))
+                    // Configs may refer to one another, so remap only after collecting all paths.
+                    configFiles.each { file ->
+                        file.setText(remap(file.getText('UTF-8')), 'UTF-8')
+                        copiedFiles[file.absolutePath].sha256 = digest(file)
+                    }
+                    jvm = jvm.collect { remap(it) }
+                    program = program.collect { remap(it) }
+                }
+                def arguments = jvm + ['-classpath', classpath.collect { it.absolutePath }.join(File.pathSeparator), mainClass] + program
+                def argumentFile = new File(outputRoot, "mc-${version}.args")
+                argumentFile.setText(arguments.collect { quoteArgument(it) }.join('\n') + '\n', 'UTF-8')
+                def environment = [
+                    PRIME_PROFILE: '0', PRIME_PROFILE_CPU: '0', PRIME_PROFILE_TRACE: '0', PRIME_VK_VALIDATION: '0',
+                    VK_LAYER_ENABLES: '', VK_INSTANCE_LAYERS: ''
+                ]
+                def data = [
+                    schemaVersion: 1,
+                    version: "mc-${version}",
+                    snapshot: snapshot,
+                    executable: game.javaLauncher.get().executablePath.asFile.absolutePath,
+                    // Loom applies its internal run directory only inside exec();
+                    // JavaExec.workingDir is still the adapter root before launch.
+                    workingDirectory: runConfiguration.runDirectory.get().asFile.absolutePath,
+                    commandLineArguments: '@"' + argumentFile.absolutePath + '"',
+                    nativeLibrary: nativeLibrary.absolutePath,
+                    nativeSha256: digest(nativeLibrary),
+                    nativePdb: nativePdb.isFile() ? nativePdb.absolutePath : null,
+                    classpath: classpath.collect { it.absolutePath },
+                    jvmArguments: jvm,
+                    sourceJvmArgumentFiles: sourceJvmArgumentFiles,
+                    mainClass: mainClass,
+                    programArguments: program,
+                    environment: environment.collect { key, value -> "${key}=${value};" }.join(''),
+                    environmentVariables: environment,
+                    inheritedEnvironment: 'All other environment variables are inherited from the Nsight launch process; no user secrets are exported.',
+                    configFiles: configFiles.collect { it.absolutePath },
+                    pathMappings: pathMappings,
+                    copiedFiles: copiedFiles.values().collect { it },
+                    externalClasspath: classpath.findAll { !it.toPath().startsWith(workspace) && !it.toPath().startsWith(outputRoot.toPath()) }.collect { it.absolutePath },
+                    sharedAssetsDirectory: sharedAssets.unique()
+                ]
+                new File(outputRoot, "mc-${version}.json").setText(JsonOutput.prettyPrint(JsonOutput.toJson(data)) + '\n', 'UTF-8')
+                logger.lifecycle("Exported ${argumentFile}; no game process was started")
+            }
+        }
+    }
+}

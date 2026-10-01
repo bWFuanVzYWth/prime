@@ -101,6 +101,7 @@ fn compile(compiler: &std::path::Path, source: &str, name: &str) {
             "-emit-spirv-directly",
             "-fvk-use-entrypoint-name",
             "-O3",
+            "-g3",
             "-o",
         ])
         .arg(&output)

@@ -22,6 +22,8 @@
 
 `prime_vulkan` 按以下顺序寻找 Slang：`SLANGC` 指向的可执行文件、`VULKAN_SDK` 下的 `Bin/slangc.exe`（Linux 为 `bin/slangc`）、`PATH` 中的 `slangc`。这些路径属于本机配置，不写入项目文件。当前运行支持范围见 README，不因存在 Linux 构建分支就视为已完成 Linux 验证。
 
+所有 shader 默认使用 `-O3 -g3` 编译，保留优化并生成最高级别调试信息，供 GPU 分析工具使用。
+
 ## 构建与发行包
 
 ```powershell
@@ -205,6 +207,8 @@ Java CSV 的 `terrain_plan_ns` 是请求规划 FFM 总时间，`terrain_pack_ns`
 封闭源批次没有人为的跨帧工作配额。完整首载或大范围修改可能形成真实长帧，应记录其成本；工作池线程数、几何批次、在途 GPU 页与当前活跃内容不是同一数量。空闲池页保留历史峰值，renderer 销毁时再释放。
 
 ## 性能测量
+
+使用 Nsight Graphics 启动 Minecraft + Prime、抓取 GPU 时间线或 Vulkan 帧、固定构建并进行版本对照，见[Nsight 抓帧手册](docs/guides/nsight.md)。无窗口启动准备入口为 `.\scripts\prepare-nsight.ps1`；启动参数和抓取证据生成到 Git 忽略的 `artifacts/nsight/`。
 
 ### 光源采样质量与成本
 
