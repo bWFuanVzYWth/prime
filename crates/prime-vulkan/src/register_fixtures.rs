@@ -28,9 +28,12 @@ pub(super) enum Case {
     CoverageNormal,
     Overlay,
     RouletteRoom,
+    GlassLights,
+    RoughGlassLights,
+    OpaqueGlassLights,
 }
 impl Case {
-    pub(super) const ALL: [Self; 17] = [
+    pub(super) const ALL: [Self; 20] = [
         Self::Empty,
         Self::Opaque,
         Self::MirrorMiss,
@@ -48,6 +51,9 @@ impl Case {
         Self::CoverageNormal,
         Self::Overlay,
         Self::RouletteRoom,
+        Self::GlassLights,
+        Self::RoughGlassLights,
+        Self::OpaqueGlassLights,
     ];
 }
 
@@ -118,10 +124,13 @@ pub(super) fn fixture(case: Case, revision: u64) -> (Scene, Camera) {
     let specular = match case {
         Case::MirrorMiss | Case::NormalRoughMirror => Some([255, 231, 0, 255]),
         Case::EmissiveMirror => Some([255, 231, 0, 128]),
-        Case::GlassLanding | Case::ThinGlass | Case::TirLanding => Some([255, 5, 0, 255]),
-        Case::RoughGlass | Case::EqualIorRoughGlass | Case::ThinEqualIorRoughGlass => {
-            Some([150, 5, 0, 255])
+        Case::GlassLanding | Case::GlassLights | Case::ThinGlass | Case::TirLanding => {
+            Some([255, 5, 0, 255])
         }
+        Case::RoughGlass
+        | Case::RoughGlassLights
+        | Case::EqualIorRoughGlass
+        | Case::ThinEqualIorRoughGlass => Some([150, 5, 0, 255]),
         Case::SmoothMixed => Some([255, 5, 0, 255]),
         Case::Subsurface | Case::ThinSubsurface => Some([120, 5, 254, 255]),
         Case::CoverageNormal => Some([160, 5, 0, 255]),
@@ -145,7 +154,7 @@ pub(super) fn fixture(case: Case, revision: u64) -> (Scene, Camera) {
     scene.textures.insert(3, texel([70, 210, 100, 140]));
     match case {
         Case::Empty => {}
-        Case::GlassLanding | Case::RoughGlass => {
+        Case::GlassLanding | Case::GlassLights | Case::RoughGlass | Case::RoughGlassLights => {
             faces.extend([
                 glass(0., false, false),
                 glass(-0.5, true, false),
@@ -247,6 +256,9 @@ pub(super) fn fixture(case: Case, revision: u64) -> (Scene, Camera) {
     if matches!(
         case,
         Case::Opaque
+            | Case::OpaqueGlassLights
+            | Case::GlassLights
+            | Case::RoughGlassLights
             | Case::SmoothMixed
             | Case::Subsurface
             | Case::ThinSubsurface
@@ -271,6 +283,15 @@ pub(super) fn fixture(case: Case, revision: u64) -> (Scene, Camera) {
             };
             faces.push(rear);
         }
+    }
+    if matches!(case, Case::OpaqueGlassLights) {
+        // Off-screen optical geometry keeps ordinary opaque hits on the full
+        // scene-wide (surface=2, light=1, optical=1) production specialization.
+        let mut boundary = glass(0., false, false);
+        for position in &mut boundary.geometry.positions {
+            position[0] += 100.;
+        }
+        faces.push(boundary);
     }
     let mut groups = BTreeMap::<u32, Vec<SurfaceFace>>::new();
     for face in faces {
