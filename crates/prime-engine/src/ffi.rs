@@ -551,7 +551,11 @@ mod abi_tests {
         session(handle, |engine| {
             assert_eq!(
                 engine.settings,
-                prime_scene::settings::RenderSettings::default()
+                prime_scene::settings::RenderSettings {
+                    // The accepted packet explicitly chooses four, independently of defaults.
+                    bounces: 4,
+                    ..Default::default()
+                }
             );
             assert!(!engine.failed);
             Ok(())
