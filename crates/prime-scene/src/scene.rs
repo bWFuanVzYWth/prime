@@ -79,12 +79,22 @@ impl Texture {
                     .flat_map(Self::color_backings)
             }))
     }
-    pub(crate) fn same_backings(&self, other: &Self) -> bool {
-        self.backings().count() == other.backings().count()
-            && self
-                .backings()
-                .zip(other.backings())
-                .all(|(a, b)| Arc::ptr_eq(a, b))
+    /// Same ordered immutable pixel allocations, independent of view/material metadata.
+    /// A false result may still contain the same unique allocations in a different order.
+    pub fn same_backings(&self, other: &Self) -> bool {
+        let mut a = self.backings();
+        let mut b = other.backings();
+        loop {
+            match (a.next(), b.next()) {
+                (Some(a), Some(b)) => {
+                    if !Arc::ptr_eq(a, b) {
+                        return false;
+                    }
+                }
+                (None, None) => return true,
+                _ => return false,
+            }
+        }
     }
     pub fn same(&self, other: &Self) -> bool {
         self.width == other.width
@@ -201,6 +211,113 @@ impl Texture {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod texture_tests {
+    use super::*;
+
+    fn plane() -> Texture {
+        Texture {
+            width: 4,
+            height: 4,
+            pixels: vec![255; 64].into(),
+            region: Some([0, 0, 2, 2]),
+            sampling: Some(Arc::new(TextureSampling {
+                levels: vec![TextureLevel {
+                    width: 2,
+                    height: 2,
+                    pixels: vec![255; 16].into(),
+                    region: [0, 0, 1, 1],
+                    next: [1, 1],
+                }],
+                next: [2, 2],
+                blend: 0.25,
+            })),
+            material: None,
+        }
+    }
+
+    fn texture() -> Texture {
+        let mut texture = plane();
+        texture.material = Some(Arc::new(TextureMaterial {
+            normal: Some(plane()),
+            specular: Some(plane()),
+            coverage: Some(plane()),
+            ..Default::default()
+        }));
+        texture
+    }
+
+    #[test]
+    fn backing_identity_ignores_changed_view_and_material_metadata() {
+        let old = texture();
+        let mut new = old.clone();
+        new.region = Some([2, 0, 2, 2]);
+        let sampling = Arc::make_mut(new.sampling.as_mut().unwrap());
+        sampling.next = [0, 2];
+        sampling.blend = 0.75;
+        sampling.levels[0].region = [1, 0, 1, 1];
+        sampling.levels[0].next = [0, 1];
+        let material = Arc::make_mut(new.material.as_mut().unwrap());
+        material.authored_emission = true;
+        material.atlas_lookup = true;
+        material.bounds = Some([0.25, 0.25, 0.75, 0.75]);
+        old.validate().unwrap();
+        new.validate().unwrap();
+        assert!(!old.same(&new));
+        assert!(old.same_backings(&new));
+    }
+
+    #[test]
+    fn backing_identity_checks_all_planes_mips_order_and_duplicates() {
+        let old = texture();
+        let mut new = old.clone();
+        // Equal bytes in a new allocation are a new pixel owner.
+        new.pixels = old.pixels.to_vec().into();
+        assert!(!old.same_backings(&new));
+        for plane_index in 0..4 {
+            let mut new = old.clone();
+            let plane = if plane_index == 0 {
+                &mut new
+            } else {
+                let material = Arc::make_mut(new.material.as_mut().unwrap());
+                match plane_index {
+                    1 => material.normal.as_mut().unwrap(),
+                    2 => material.specular.as_mut().unwrap(),
+                    _ => material.coverage.as_mut().unwrap(),
+                }
+            };
+            let sampling = Arc::make_mut(plane.sampling.as_mut().unwrap());
+            sampling.levels[0].pixels = sampling.levels[0].pixels.to_vec().into();
+            assert!(!old.same_backings(&new));
+        }
+        let mut reordered = old.clone();
+        let material = Arc::make_mut(reordered.material.as_mut().unwrap());
+        std::mem::swap(&mut material.normal, &mut material.specular);
+        assert!(!old.same_backings(&reordered));
+        let mut duplicate = old.clone();
+        let material = Arc::make_mut(duplicate.material.as_mut().unwrap());
+        material.coverage = material.normal.clone();
+        assert!(duplicate.same_backings(&duplicate.clone()));
+        let mut fewer = duplicate.clone();
+        Arc::make_mut(fewer.material.as_mut().unwrap()).coverage = None;
+        assert!(!duplicate.same_backings(&fewer));
+    }
+
+    #[test]
+    fn backing_identity_rejects_a_matching_prefix_in_either_direction() {
+        let long = plane();
+        let mut short = long.clone();
+        short.sampling = None;
+        long.validate().unwrap();
+        short.validate().unwrap();
+        assert_eq!(short.backings().count(), 1);
+        assert_eq!(long.backings().count(), 2);
+        assert!(short.same_backings(&short.clone()));
+        assert!(!short.same_backings(&long));
+        assert!(!long.same_backings(&short));
     }
 }
 

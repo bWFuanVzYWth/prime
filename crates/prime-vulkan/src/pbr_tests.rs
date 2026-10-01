@@ -1357,7 +1357,7 @@ fn gpu_full_openpbr_narrow_constructors_preserve_legacy_math() {
     let context = Context::new().unwrap();
     let values =
         super::shader_tests::run_full_openpbr(&context, CODE, &cases, count * 32, count as u32);
-    for (case, output) in values.chunks_exact(32).enumerate() {
+    for (case, output) in values.as_chunks::<32>().0.iter().enumerate() {
         for word in 0..16 {
             if (8..12).contains(&word) {
                 assert_eq!(

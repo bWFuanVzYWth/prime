@@ -29,7 +29,7 @@ Rust 为每个辅助图生成与基色帧尺寸对应的规范 mip。法线 foot
 
 生产连续通道采用层内线性、层间线性过滤。法线线性过滤使用方向与 GGX 平均长度，过滤新增的分布粗糙度与材质粗糙度沿用源 squared-alpha-space 近似组合。光学 R/A 连续过滤后量化；分类 G/B 始终从当前帧 **mip0 点采样**，不随射线足迹选择分类 mip。各级 CPU categorical mip 仍保留完整源翻译语义。射线锥当前只估计主像素足迹，未包含粗糙反弹扩散。
 
-静态基色视图共享 atlas backing；辅助图、所有动画帧和 mip 按实际 Arc backing 计入纹理预算。64B 描述符带独立 normal/specular 视图及归一化 atlas bounds。atlas UV 消费先读静态 lookup，取得稳定 sprite descriptor，再转为局部 UV；动画更新 sprite 辅助图，不重建整张材质 atlas 或 BLAS。lookup 不替代基色跨 sprite UV 的原有兼容边界。资源按源引用、CPU 最后消费者和 GPU 完成证明退休。
+静态基色视图共享 atlas backing；辅助图、所有动画帧和 mip 按实际 Arc backing 计入纹理预算。64B 描述符带独立 normal/specular 视图及归一化 atlas bounds。atlas UV 消费先读静态 lookup，取得稳定 sprite descriptor，再转为局部 UV；动画更新 sprite 辅助图，不重建整张材质 atlas 或 BLAS。lookup 不替代基色跨 sprite UV 的原有兼容边界。纹理元数据变化仍发布描述符；完整 backing 序列相同则不构造引用差分集合，保留现有像素所有权。序列不同或重新分配时仍按去重集合精确增减引用，不能按相同字节猜测同一 owner。资源按源引用、CPU 最后消费者和 GPU 完成证明退休。
 
 ## 闭包与数值契约
 

@@ -184,14 +184,28 @@ def main(argv=None):
                     write_json(args.out / "counter-request.json", {"windows": windows, "metrics": metrics})
                     command = [sys.executable, str(Path(__file__).resolve().parents[1] / "nsight-trace.py"),
                                "--counter-worker", str(args.nsight_host.resolve()), str(args.out)]
-                    process = subprocess.run(command, capture_output=True, timeout=300)
-                    (args.out / "counter-worker.stdout.txt").write_bytes(process.stdout)
-                    (args.out / "counter-worker.stderr.txt").write_bytes(process.stderr)
-                    if (args.out / "counters.json").exists():
-                        counters = json.loads((args.out / "counters.json").read_text(encoding="utf-8"))
+                    try:
+                        process = subprocess.run(command, capture_output=True, timeout=300)
+                    except (OSError, subprocess.SubprocessError) as error:
+                        for name in ("stdout", "stderr"):
+                            value = getattr(error, name, None) or b""
+                            if isinstance(value, str):
+                                value = value.encode("utf-8")
+                            (args.out / ("counter-worker." + name + ".txt")).write_bytes(value)
+                        counters = {"status": "unavailable", "reason": str(error),
+                                    "workerFailureType": type(error).__name__,
+                                    "workerExitCode": getattr(error, "returncode", None)}
                     else:
-                        counters = {"status": "unavailable", "reason": "NVPerf child failed without a result"}
-                    counters["workerExitCode"] = process.returncode
+                        (args.out / "counter-worker.stdout.txt").write_bytes(process.stdout)
+                        (args.out / "counter-worker.stderr.txt").write_bytes(process.stderr)
+                        if (args.out / "counters.json").exists():
+                            counters = json.loads((args.out / "counters.json").read_text(encoding="utf-8"))
+                        else:
+                            counters = {"status": "unavailable", "reason": "NVPerf child failed without a result"}
+                        counters["workerExitCode"] = process.returncode
+                        if process.returncode != 0 and counters["status"] == "decoded":
+                            counters["status"] = "partial"
+                            counters["workerFailureReason"] = "NVPerf child exited unsuccessfully after writing a result"
             elif args.nsight_host:
                 counters["reason"] = "counter image chunk 1 absent"
             write_json(args.out / "counters.json", counters)

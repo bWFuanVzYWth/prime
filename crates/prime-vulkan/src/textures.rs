@@ -155,55 +155,63 @@ impl Textures {
                 self.indices.insert(*id, index);
                 index
             };
-            let previous = self.source.get(id).map_or_else(BTreeSet::new, keys);
-            let current = keys(texture);
-            for &key in previous.difference(&current) {
-                self.release(key);
-            }
-            for &key in current.difference(&previous) {
-                if let Some(backing) = self.allocations.get_mut(&key) {
-                    backing.references += 1;
-                } else {
-                    let image = images(texture)
-                        .find(|p| p.as_ptr() as usize == key)
-                        .unwrap();
-                    let count = (image.len() / 4) as u32;
-                    let offset = self.pixels.allocate(count)?;
-                    self.allocations.insert(
-                        key,
-                        Backing {
-                            offset,
-                            count,
-                            references: 1,
-                        },
-                    );
-                    pixel_copies.push(
-                        vk::BufferCopy::default()
-                            .src_offset(pixels.len() as u64)
-                            .dst_offset(u64::from(offset) * 4)
-                            .size(image.len() as u64),
-                    );
-                    let lookup = texture
-                        .material
-                        .as_ref()
-                        .filter(|m| m.atlas_lookup)
-                        .and_then(|m| m.coverage.as_ref())
-                        .is_some_and(|p| Arc::ptr_eq(&p.pixels, image));
-                    if lookup {
-                        for pixel in image.as_chunks::<4>().0.iter() {
-                            let id = u32::from_le_bytes(*pixel);
-                            let descriptor = if id == 0 {
-                                0
-                            } else {
-                                *self
-                                    .indices
-                                    .get(&id)
-                                    .ok_or("atlas material sprite missing")?
-                            };
-                            pixels.extend_from_slice(&descriptor.to_le_bytes());
-                        }
+            // Animation/view-only changes still publish descriptors, but retain the same
+            // backing ownership. Avoid building two temporary sets for that common case.
+            if self
+                .source
+                .get(id)
+                .is_none_or(|old| !old.same_backings(texture))
+            {
+                let previous = self.source.get(id).map_or_else(BTreeSet::new, keys);
+                let current = keys(texture);
+                for &key in previous.difference(&current) {
+                    self.release(key);
+                }
+                for &key in current.difference(&previous) {
+                    if let Some(backing) = self.allocations.get_mut(&key) {
+                        backing.references += 1;
                     } else {
-                        pixels.extend_from_slice(image);
+                        let image = images(texture)
+                            .find(|p| p.as_ptr() as usize == key)
+                            .unwrap();
+                        let count = (image.len() / 4) as u32;
+                        let offset = self.pixels.allocate(count)?;
+                        self.allocations.insert(
+                            key,
+                            Backing {
+                                offset,
+                                count,
+                                references: 1,
+                            },
+                        );
+                        pixel_copies.push(
+                            vk::BufferCopy::default()
+                                .src_offset(pixels.len() as u64)
+                                .dst_offset(u64::from(offset) * 4)
+                                .size(image.len() as u64),
+                        );
+                        let lookup = texture
+                            .material
+                            .as_ref()
+                            .filter(|m| m.atlas_lookup)
+                            .and_then(|m| m.coverage.as_ref())
+                            .is_some_and(|p| Arc::ptr_eq(&p.pixels, image));
+                        if lookup {
+                            for pixel in image.as_chunks::<4>().0.iter() {
+                                let id = u32::from_le_bytes(*pixel);
+                                let descriptor = if id == 0 {
+                                    0
+                                } else {
+                                    *self
+                                        .indices
+                                        .get(&id)
+                                        .ok_or("atlas material sprite missing")?
+                                };
+                                pixels.extend_from_slice(&descriptor.to_le_bytes());
+                            }
+                        } else {
+                            pixels.extend_from_slice(image);
+                        }
                     }
                 }
             }

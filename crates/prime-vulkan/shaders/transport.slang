@@ -17,18 +17,6 @@ public struct TraceResult {
     public float depth;
     public float3 normal;
 };
-float powerHeuristic(float a, float b) {
-    if (a <= 0)
-        return 0;
-    if (b <= 0)
-        return 1;
-    if (a >= b) {
-        float ratio = b / a;
-        return 1.0 / (1.0 + ratio * ratio);
-    }
-    float ratio = a / b;
-    return ratio * ratio / (1.0 + ratio * ratio);
-}
 // Guides describe the very same jittered primary sample and alpha decision as noisy radiance.
 public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
                                PrimeFullTransmissionGgxEnergy energy, Frame frame, uint2 pixel,
@@ -67,8 +55,9 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
             if (!hit.found) {
                 float3 escaped = atmSky(environment, direction) * frame.up.w;
                 if (atmSunContains(environment, direction)) {
-                    float weight =
-                            previousPdf == 0 ? 1.0 : powerHeuristic(previousPdf, atmSunPdf());
+                    float weight = previousPdf == 0
+                                           ? 1.0
+                                           : primePowerHeuristicValue(previousPdf, atmSunPdf());
                     escaped += weight * atmSunRadiance(environment, direction) * frame.right.w;
                 }
                 result.radiance += throughput * escaped;
@@ -106,7 +95,8 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
                 float lightPdf = previousPdf == 0 || lightFeatures == 0
                                          ? 0
                                          : emissiveHitPdf(resources, hit, previous);
-                float emissionWeight = lightPdf == 0 ? 1.0 : powerHeuristic(previousPdf, lightPdf);
+                float emissionWeight =
+                        lightPdf == 0 ? 1.0 : primePowerHeuristicValue(previousPdf, lightPdf);
                 result.radiance += primeTripleProduct(throughput, linear709ToWorking(hit.emission),
                                                       emissionWeight);
             }
@@ -124,10 +114,9 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
                                          ? transmitted
                                          : medium;
             float pdf;
-            float lightCosine;
             float3 radiance =
                     evaluateLocalLight(resources, surface, light, sampler.bits1D(lightDomain + 3),
-                                       lightMedium, optical, pdf, lightCosine);
+                                       lightMedium, optical, pdf);
             if (pdf > 0) {
                 BsdfEvaluation evaluated = primeEvaluatePbrVertex(
                         energy, material, view, lightDirection, incident, transmitted);

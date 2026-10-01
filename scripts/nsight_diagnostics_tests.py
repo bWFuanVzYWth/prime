@@ -5,6 +5,8 @@ the CLI with caller-supplied files and are documented separately in artifacts.
 """
 
 import json
+import io
+from contextlib import redirect_stdout
 from pathlib import Path
 import struct
 import subprocess
@@ -12,6 +14,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 try:
     import lz4.block
@@ -23,7 +26,7 @@ from nsight_diagnostics import FormatError
 from nsight_diagnostics.analysis import aggregate, gpu_windows, metric_unit
 from nsight_diagnostics.format import PROFILE, descriptor_at, schema_class, sha256, unpack_chunks, varint
 from nsight_diagnostics.shaders import (decode_blob, elf_functions, normalize_elf, pc_samples,
-                                        range_index, run_tool, source_identity, validate_spirv)
+                                        range_index, run_tool, shader_objects, source_identity, validate_spirv)
 
 
 def container(chunks):
@@ -71,6 +74,42 @@ def fixture_call(name):
     pool.Add(descriptor)
     cls = message_factory.GetMessageClass(pool.FindMessageTypeByName("fixture.Call"))
     return cls(functionName=name)
+
+
+def rt_tool_fixture():
+    data = elf_fixture()
+    blob = Message(data=data, compression=1, obfuscation=1, uncompressedSize=len(data))
+    module = Message(rtCoreUserCubin=Message(cubin=Message(ref=Message(idx=0))))
+    session = Message(modules=[module], codeBlocks=[])
+    device = Message(ShaderProfilerReport=Message(
+        blobTable=Message(blobs=[blob]), pcCountersInfo=Message(pcSamplingSession=session)))
+    return Message(devices=[device], gpus=[Message(SamplingData=Message(PcSamplingPerSM=[]))])
+
+
+def fixture_pc_sm(fields):
+    # Reviewed PerSM wire fields, constructed independently; no vendor descriptor.
+    descriptor = descriptor_pb2.FileDescriptorProto(name="fixture-pc.proto", package="fixture", syntax="proto2")
+    item = descriptor.message_type.add(name="PcPerSM")
+    for name, number, kind in (("vsmid", 1, 13), ("version", 2, 4),
+                               ("timestampsStorage", 3, 12), ("pcSamplesStorage", 4, 12)):
+        item.field.add(name=name, number=number, type=kind, label=2)
+    pool = descriptor_pool.DescriptorPool()
+    pool.Add(descriptor)
+    cls = message_factory.GetMessageClass(pool.FindMessageTypeByName("fixture.PcPerSM"))
+    sm = cls(vsmid=0, pcSamplesStorage=struct.pack("<QQ", 100, 0),
+             timestampsStorage=struct.pack("<QQ", 10, 1), **fields)
+    return cls.FromString(sm.SerializePartialToString())
+
+
+def fixture_tool_result(executable, arguments, output, failed_argument=None, exit_code=1):
+    failed = failed_argument in arguments if failed_argument is not None else False
+    stdout = b"" if failed and exit_code == 0 else b"Function kernel: REG:86 STACK:0 SHARED:0 LOCAL:0\n"
+    stderr = b"fixture failure" if failed else b""
+    Path(str(output) + ".stdout.txt").write_bytes(stdout)
+    Path(str(output) + ".stderr.txt").write_bytes(stderr)
+    return {"executable": str(executable), "arguments": arguments, "exitCode": exit_code if failed else 0,
+            "stdoutBytes": len(stdout), "stderrBytes": len(stderr), "success": not failed,
+            "unavailableReason": "nonzero exit or empty stdout" if failed else None}
 
 
 class ContainerTest(unittest.TestCase):
@@ -197,6 +236,121 @@ class AggregateTest(unittest.TestCase):
 
 
 class ShaderTest(unittest.TestCase):
+    def test_requested_missing_tool_propagates_partial_and_preserves_objects(self):
+        for missing in ("nvdisasm", "cuobjdump"):
+            with self.subTest(tool=missing), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                out = root / "out"
+                out.mkdir()
+                for name in ("nvdisasm", "cuobjdump"):
+                    if name != missing:
+                        (root / (name + ".exe")).write_bytes(b"not executed")
+                with mock.patch("nsight_diagnostics.shaders.brief", return_value={}), \
+                        mock.patch("nsight_diagnostics.shaders.run_tool", side_effect=fixture_tool_result):
+                    result = shader_objects(rt_tool_fixture(), {"frames": [], "dispatches": []}, out, cuda_bin=root)
+                self.assertEqual(result["status"], "partial")
+                self.assertTrue(result["requestedToolFailures"])
+                self.assertEqual(result["unavailableObjects"], [])
+                self.assertEqual((out / result["objects"][0]["path"]).read_bytes(), elf_fixture())
+                self.assertTrue(any(missing in failure["executable"] for failure in result["requestedToolFailures"]))
+
+    def test_requested_tool_output_and_process_failures_propagate_partial(self):
+        for argument, exit_code in (("-gi", 1), ("-gi", 0), ("--version", 1), ("--version", 0),
+                                    ("--dump-resource-usage", 1), ("--dump-resource-usage", 0)):
+            with self.subTest(argument=argument, exit_code=exit_code), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                out = root / "out"
+                out.mkdir()
+                for name in ("nvdisasm", "cuobjdump"):
+                    (root / (name + ".exe")).write_bytes(b"not executed")
+                def run(executable, arguments, output):
+                    return fixture_tool_result(executable, arguments, output, argument, exit_code)
+                with mock.patch("nsight_diagnostics.shaders.brief", return_value={}), \
+                        mock.patch("nsight_diagnostics.shaders.run_tool", side_effect=run):
+                    result = shader_objects(rt_tool_fixture(), {"frames": [], "dispatches": []}, out, cuda_bin=root)
+                self.assertEqual(result["status"], "partial")
+                self.assertTrue(result["requestedToolFailures"])
+                self.assertEqual(result["unavailableObjects"], [])
+                self.assertEqual(len(result["objects"]), 1)
+                if argument == "--dump-resource-usage":
+                    self.assertNotIn("cudaResourceMetadata", result["functions"][0])
+
+    def test_tools_optional_and_successful_requests_stay_decoded(self):
+        for requested in (False, True):
+            with self.subTest(requested=requested), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                out = root / "out"
+                out.mkdir()
+                for name in ("nvdisasm", "cuobjdump"):
+                    (root / (name + ".exe")).write_bytes(b"not executed")
+                with mock.patch("nsight_diagnostics.shaders.brief", return_value={}), \
+                        mock.patch("nsight_diagnostics.shaders.run_tool", side_effect=fixture_tool_result) as tool:
+                    result = shader_objects(rt_tool_fixture(), {"frames": [], "dispatches": []}, out,
+                                            cuda_bin=root if requested else None)
+                self.assertEqual(result["status"], "decoded")
+                self.assertEqual(result["requestedToolFailures"], [])
+                if requested:
+                    self.assertEqual(tool.call_count, 4)
+                    self.assertEqual(result["functions"][0]["cudaResourceMetadata"]["REG"], 86)
+                else:
+                    tool.assert_not_called()
+
+    def test_cli_requested_tool_failure_exits_partial_optional_path_exits_zero(self):
+        from nsight_diagnostics.cli import main
+        for requested, failure, exit_code in ((False, None, 0), (True, "missing", 0),
+                                              (True, "-gi", 1), (True, "-gi", 0),
+                                              (False, "workerTimeout", 0), (False, "workerStart", 0),
+                                              (False, "workerExit", 1)):
+            with self.subTest(requested=requested, failure=failure, exit_code=exit_code), \
+                    tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                capture = root / "fixture.ngfx-gputrace"
+                capture.write_bytes(b"fixture")
+                out = root / "out"
+                trace = rt_tool_fixture()
+                trace.InfoTables = []
+                trace.IsInitialized = lambda: True
+                trace.ByteSize = lambda: 0
+                cls = mock.Mock()
+                cls.FromString.return_value = trace
+                cls.return_value.ByteSize.return_value = 0
+                def counter_worker(*args, **kwargs):
+                    if failure == "workerTimeout":
+                        raise subprocess.TimeoutExpired("fixture-worker", 300, output=b"partial output", stderr=b"timeout fixture")
+                    if failure == "workerStart":
+                        raise OSError("fixture worker could not start")
+                    (out / "counters.json").write_text('{"status":"decoded"}', encoding="utf-8")
+                    return Message(returncode=exit_code if failure == "workerExit" else 0, stdout=b"", stderr=b"")
+                arguments = [str(capture), "--out", str(out), "--nsight-host", str(root)]
+                if requested:
+                    arguments += ["--cuda-bin", str(root)]
+                    if failure != "missing":
+                        for name in ("nvdisasm", "cuobjdump"):
+                            (root / (name + ".exe")).write_bytes(b"not executed")
+                def run(executable, arguments, output):
+                    return fixture_tool_result(executable, arguments, output, failure, exit_code)
+                with mock.patch("nsight_diagnostics.cli.schema_class", return_value=(cls, {})), \
+                        mock.patch("nsight_diagnostics.cli.unpack_chunks", return_value=[
+                            ({"id": 0}, b"fixture"), ({"id": 1}, b"fixture")]), \
+                        mock.patch("nsight_diagnostics.cli.gpu_windows", return_value={"frames": [], "dispatches": []}), \
+                        mock.patch("nsight_diagnostics.cli.subprocess.run", side_effect=counter_worker), \
+                        mock.patch("nsight_diagnostics.shaders.run_tool", side_effect=run), \
+                        mock.patch("nsight_diagnostics.shaders.brief", return_value={}), \
+                        redirect_stdout(io.StringIO()):
+                    code = main(arguments)
+                partial = requested or failure is not None
+                self.assertEqual(code, 3 if partial else 0)
+                summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+                self.assertEqual(summary["status"], "partial" if partial else "decoded")
+                self.assertTrue(summary["provenance"]["inputUnchanged"])
+                if failure in ("workerTimeout", "workerStart"):
+                    counters = json.loads((out / "counters.json").read_text(encoding="utf-8"))
+                    self.assertEqual(counters["status"], "unavailable")
+                    self.assertEqual(summary["errors"], [])
+                if failure == "workerTimeout":
+                    self.assertEqual((out / "counter-worker.stdout.txt").read_bytes(), b"partial output")
+                    self.assertEqual((out / "counter-worker.stderr.txt").read_bytes(), b"timeout fixture")
+
     def test_empty_disassembler_stdout_is_not_success(self):
         with tempfile.TemporaryDirectory() as directory:
             result = run_tool(Path(sys.executable), ["-c", "pass"], Path(directory) / "empty-tool")
@@ -252,7 +406,7 @@ class ShaderTest(unittest.TestCase):
 
     def test_pc_window_end_exclusive_and_unmapped(self):
         functions = [{"gpuVA": 100, "bytes": 10}]
-        sampling = Message(PcSamplingPerSM=[Message(
+        sampling = Message(PcSamplingPerSM=[Message(version=1,
             pcSamplesStorage=b"".join(struct.pack("<QQ", pc, 0) for pc in (100, 109, 110, 105)),
             timestampsStorage=struct.pack("<QQQQ", 10, 3, 20, 4))])
         windows = {"frames": [{"id": "frame", "startNs": 10, "endNs": 20, "durationNs": 10}], "dispatches": []}
@@ -265,6 +419,29 @@ class ShaderTest(unittest.TestCase):
         sampling.PcSamplingPerSM[0].timestampsStorage = struct.pack("<QQ", 10, 99)
         with self.assertRaises(FormatError):
             pc_samples(sampling, functions, windows)
+
+    def test_pc_record_unknown_or_missing_version_is_unavailable_empty_data_is_valid(self):
+        functions = [{"gpuVA": 100, "bytes": 10}]
+        windows = {"frames": [{"id": "frame", "startNs": 10, "endNs": 20, "durationNs": 10}], "dispatches": []}
+        self.assertEqual(pc_samples(Message(PcSamplingPerSM=[fixture_pc_sm({"version": 1})]),
+                                    functions, windows)[0]["totalSamples"], 1)
+        for fields in ({"version": 2}, {}):
+            with self.subTest(fields=fields):
+                sm = fixture_pc_sm(fields)
+                with self.assertRaisesRegex(FormatError, "version"):
+                    pc_samples(Message(PcSamplingPerSM=[sm]), functions, windows)
+                sm.pcSamplesStorage, sm.timestampsStorage = b"", b""
+                row = pc_samples(Message(PcSamplingPerSM=[sm]), functions, windows)[0]
+                self.assertEqual(row["totalSamples"], 0)
+        trace = rt_tool_fixture()
+        trace.gpus[0].SamplingData.PcSamplingPerSM = [Message(version=2,
+            pcSamplesStorage=struct.pack("<QQ", 0x200000000, 0), timestampsStorage=struct.pack("<QQ", 10, 1))]
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch("nsight_diagnostics.shaders.brief", return_value={}):
+            result = shader_objects(trace, windows, Path(directory))
+        self.assertEqual(result["status"], "partial")
+        self.assertIn("version", result["pcAttributionUnavailableReason"])
+        self.assertEqual(len(result["objects"]), 1)
 
 
 if __name__ == "__main__":

@@ -218,7 +218,7 @@ python scripts/nsight-trace.py artifacts/captures/target.ngfx-gputrace --out art
 
 工具只推导参考长度范围内的 XOR 字节映射，记录参考/hash/coverage；更长 blob 明确 unavailable，绝不截断或用目标待验证 source 补尾。reference 自身及相同 encoded/plain 对标 `derivedFromReference/identityNotIndependentlyVerified`，不计作独立 source 确认。其他独立 blob 必须全长解码、结构有效并与独立冻结 SPV 全 SHA 相等才进入 `sourceMatches`。全 SHA 身份不证明 actual specialization、push constants、SPP、预算或场景；这些当前保持 unknown，不从 source 默认值推断。
 
-RT 用户程序来自 `rtCoreUserCubin`，普通 shader codeBlocks 可能只有宿主 VS/PS。PC 映射使用原始标准 ELF function GPU VA 与半开 timestamp 窗口，资源结论必须引用该窗口 `activeFunctions` 的非零样本；inactive 缓存 variant 单列。PC samples 不是 invocation 数、动态 instruction 数或精确耗时占比，unmapped 也不全归 traversal。
+RT 用户程序来自 `rtCoreUserCubin`，普通 shader codeBlocks 可能只有宿主 VS/PS。PC 映射使用原始标准 ELF function GPU VA 与半开 timestamp 窗口，资源结论必须引用该窗口 `activeFunctions` 的非零样本；inactive 缓存 variant 单列。PC samples 不是 invocation 数、动态 instruction 数或精确耗时占比，unmapped 也不全归 traversal。 当前只解码显式 PerSM version 1 的 16-byte PC/timestamp 记录；有记录却缺少版本或使用其它版本时，PC 归属标 unavailable，原始数据保留。descriptor hash 相同不证明任意记录版本兼容。
 
 `--cuda-bin` 可调用 CPU `cuobjdump`/`nvdisasm` 导出资源/SASS，保留可执行文件 hash、version、stdout/stderr。仅在已验证 ELF 布局下，另存 function symbol 的 section-relative 派生副本并证明 `.text` 字节不变；原件与 PC 映射仍用原 absolute VA。非零退出或 stdout 为空都不是反汇编成功，warnings 不丢弃。REG/CUDA STACK/LOCAL/SHARED 属于静态 program metadata，不能当 peak-live registers、整个 RT pipeline allocation 或 continuation stack bytes；私有 `.rt.info.liveState/callstack/callsite` 只列大小，不解码未知 ABI，也不以 CUDA STACK=0 宣称 RT 栈或 spill 为零。普通 shader 的 common/compute metadata 原样保留，shared memory 也不能一概归为 spill。
 

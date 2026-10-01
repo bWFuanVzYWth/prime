@@ -663,21 +663,19 @@ public struct LightSample {
     public float areaPdf;
     public uint page;
     public uint emitter;
-    public uint light;
     public bool twoSided;
 };
 
 public LightSample sampleLocalLight(TraceScene resources, float4 selectors, float2 sample,
                                     uint coverageSeed, float3 receiver) {
-    LightSample result;
-    result.valid = false;
+    LightSample result = {};
     TrianglePage world = resources.staticTrianglePages[0];
     if (world.lightCount == 0)
         return result;
     LightGrid grid = *world.lightGrid;
     float selectionPdf;
-    result.light = selectGridLight(grid, receiver, selectors, selectionPdf);
-    GridEmitter reference = grid.emitters[result.light];
+    uint selectedLight = selectGridLight(grid, receiver, selectors, selectionPdf);
+    GridEmitter reference = grid.emitters[selectedLight];
     result.page = reference.page;
     result.emitter = reference.emitter;
     GridPage page = grid.pages[result.page];
@@ -689,11 +687,10 @@ public LightSample sampleLocalLight(TraceScene resources, float4 selectors, floa
     SurfaceRecord emitter = loadQuad(light, page.format, first ? 0 : 1);
     float root = sqrt(u);
     float2 bary = float2(root * (1.0 - sample.y), root * sample.y);
-    float3 t = page.origin.xyz;
-    float3x4 toWorld = float3x4(1, 0, 0, t.x, 0, 1, 0, t.y, 0, 0, 1, t.z);
-    float3x4 toLocal = float3x4(1, 0, 0, -t.x, 0, 1, 0, -t.y, 0, 0, 1, -t.z);
     Triangle tri = emitter.triangle;
-    result.surface = reconstructSurface(tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary, toWorld, toLocal);
+    // Grid pages contain static emitters with the same proven translation as closest hits.
+    result.surface =
+            reconstructStaticSurface(tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary, page.origin.xyz);
     bool front = dot(result.surface.normal, receiver - result.surface.position) >= 0;
     emitter =
             selectMaterial(resources, emitter, front, bary, result.surface.position, coverageSeed);
@@ -726,10 +723,9 @@ public float emissiveHitPdf(TraceScene resources, SurfaceHit hit, float3 previou
 }
 
 public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, LightSample light,
-                                 uint coverageSeed, float4 medium, bool transmission, out float pdf,
-                                 out float cosine) {
+                                 uint coverageSeed, float4 medium, bool transmission,
+                                 out float pdf) {
     pdf = 0;
-    cosine = 0;
     if (!light.valid)
         return float3(0);
     float3 delta = light.surface.position - receiver.position;
@@ -737,8 +733,8 @@ public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, Li
     if (distanceSquared == 0)
         return float3(0);
     float3 direction = delta * rsqrt(distanceSquared);
-    cosine = transmission ? abs(dot(receiver.normal, direction))
-                          : max(0.0, dot(receiver.normal, direction));
+    float cosine = transmission ? abs(dot(receiver.normal, direction))
+                                : max(0.0, dot(receiver.normal, direction));
     float lightCosine = dot(light.surface.normal, -direction);
     if (light.twoSided)
         lightCosine = abs(lightCosine);
@@ -755,7 +751,6 @@ public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, Li
            light.radiance;
 }
 public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, LightSample light,
-                                 uint coverageSeed, float4 medium, out float pdf,
-                                 out float cosine) {
-    return evaluateLocalLight(resources, receiver, light, coverageSeed, medium, false, pdf, cosine);
+                                 uint coverageSeed, float4 medium, out float pdf) {
+    return evaluateLocalLight(resources, receiver, light, coverageSeed, medium, false, pdf);
 }

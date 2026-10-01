@@ -172,6 +172,8 @@ def pc_samples(sampling, functions, windows):
     result = {window["id"]: {"totalSamples": 0, "unmappedSamples": 0, "functions": Counter()} for window in scopes}
     for sm in sampling.PcSamplingPerSM:
         pcs, timestamps = sm.pcSamplesStorage, sm.timestampsStorage
+        if (pcs or timestamps) and (not sm.HasField("version") or sm.version != 1):
+            raise FormatError("PC record version unavailable/unsupported; only reviewed PerSM version 1 is decoded")
         if len(pcs) % 16 or len(timestamps) % 16:
             raise FormatError("PC sample/timestamp storage is not 16-byte records")
         previous, previous_time = 0, None
@@ -225,13 +227,26 @@ def shader_objects(trace, windows, out, mapping=None, expected_dir=None, cuda_bi
             validate_spirv(data)
             expected.setdefault(sha256(data), []).append({"path": str(path), "bytes": len(data)})
     objects, functions, failures, matches, tools = [], [], [], [], []
+    tool_failures = []
+
+    def requested_tool(executable, arguments, output, component):
+        if not executable.exists():
+            result = {"executable": str(executable), "arguments": arguments, "success": False,
+                      "unavailableReason": "requested executable absent"}
+        else:
+            try:
+                result = run_tool(executable, arguments, output)
+            except (OSError, subprocess.SubprocessError) as error:
+                result = {"executable": str(executable), "arguments": arguments, "success": False,
+                          "unavailableReason": str(error)}
+        if not result["success"]:
+            tool_failures.append({"component": component, **result})
+        return result
+
     if cuda_bin:
         for name in ("cuobjdump", "nvdisasm"):
             path = cuda_bin / (name + ".exe" if (cuda_bin / (name + ".exe")).exists() else name)
-            if path.exists():
-                tools.append(run_tool(path, ["--version"], out / (name + "-version")))
-            else:
-                tools.append({"executable": str(path), "success": False, "unavailableReason": "requested executable absent"})
+            tools.append(requested_tool(path, ["--version"], out / (name + "-version"), name + "/version"))
     for di, device in enumerate(trace.devices):
         if not device.HasField("ShaderProfilerReport"):
             continue
@@ -279,14 +294,16 @@ def shader_objects(trace, windows, out, mapping=None, expected_dir=None, cuda_bi
                         row["derivedElf"] = {"path": target.name, "sha256": sha256(derived), "textUnchanged": True}
                         if cuda_bin:
                             nvdisasm = cuda_bin / ("nvdisasm.exe" if (cuda_bin / "nvdisasm.exe").exists() else "nvdisasm")
-                            if nvdisasm.exists():
-                                row["disassembly"] = run_tool(nvdisasm, ["-gi", str(target)], out / (stem + ".sass"))
+                            row["disassembly"] = requested_tool(
+                                nvdisasm, ["-gi", str(target)], out / (stem + ".sass"), stem + "/disassembly")
                     (out / (stem + suffix)).write_bytes(data)
                     row["path"] = stem + suffix
                     if kind == "rtCoreUserCubin" and cuda_bin:
                         cuobjdump = cuda_bin / ("cuobjdump.exe" if (cuda_bin / "cuobjdump.exe").exists() else "cuobjdump")
-                        if cuobjdump.exists():
-                            row["resourceTool"] = run_tool(cuobjdump, ["--dump-resource-usage", str(out / row["path"])], out / (stem + ".resources"))
+                        row["resourceTool"] = requested_tool(
+                            cuobjdump, ["--dump-resource-usage", str(out / row["path"])],
+                            out / (stem + ".resources"), stem + "/resources")
+                        if row["resourceTool"]["success"]:
                             content = (out / (stem + ".resources.stdout.txt")).read_text(encoding="utf-8", errors="replace")
                             for function in functions:
                                 if function.get("module") != mi or function["device"] != di:
@@ -329,8 +346,9 @@ def shader_objects(trace, windows, out, mapping=None, expected_dir=None, cuda_bi
                     (out / obj["path"]).write_bytes(data)
                     if cuda_bin:
                         executable = cuda_bin / ("nvdisasm.exe" if (cuda_bin / "nvdisasm.exe").exists() else "nvdisasm")
-                        if executable.exists():
-                            obj["disassembly"] = run_tool(executable, ["-c", "-gi", str(out / obj["path"])], out / (stem + ".sass"))
+                        obj["disassembly"] = requested_tool(
+                            executable, ["-c", "-gi", str(out / obj["path"])], out / (stem + ".sass"),
+                            stem + "/disassembly")
                     objects.append(obj)
                 except (FormatError, OSError, subprocess.SubprocessError) as error:
                     failures.append({"device": di, "codeBlock": ci, "kind": "standardShaderDebugElf", "reason": str(error)})
@@ -343,11 +361,11 @@ def shader_objects(trace, windows, out, mapping=None, expected_dir=None, cuda_bi
     else:
         reason = "PC/device address namespace association is not reviewed for multiple GPUs/devices"
     mapping_confirmed = any(match["obfuscation"] == 2 for match in matches)
-    return {"status": "partial" if failures or reason or (mapping is not None and not mapping_confirmed) else "decoded",
+    return {"status": "partial" if failures or tool_failures or reason or (mapping is not None and not mapping_confirmed) else "decoded",
             "xorMappingIndependentTargetValidation": mapping_confirmed if mapping is not None else None,
             "objects": objects, "functions": functions,
             "sourceMatches": matches, "unavailableObjects": failures, "pcWindows": samples,
-            "pcAttributionUnavailableReason": reason, "toolVersions": tools,
+            "pcAttributionUnavailableReason": reason, "toolVersions": tools, "requestedToolFailures": tool_failures,
             "limitations": ["PC samples are not invocation counts, dynamic instructions, or exclusive time percentages.",
             "Unmapped PCs are separate; they cannot all be assigned to traversal.",
             "REG metadata is not peak live state or complete pipeline register allocation.",
