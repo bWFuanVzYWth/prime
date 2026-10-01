@@ -4,6 +4,8 @@
 
 源码格式与行尾遵循[统一规范](docs/guides/git-line-endings.md)，使用 `.\scripts\format.ps1` 应用、`.\scripts\format.ps1 -Check` 检查。性能优先级为稳态帧数 > 显存节省 > 加载效率；当前 CPU 优化属于 [TODO](TODO.md) 中的非阻塞待办。
 
+修改性能敏感的 PT 数据流、材质准备、查询、调度或输出状态前，阅读 [PT 依赖与性能设计](docs/pt-state-design.md)，在设计说明中先回答其中的[性能问题](docs/pt-state-design.md#修改前必须回答的性能问题)，列明假设与验证计划；提交说明补充相关答案和实际验证边界。当前设计不声明最优，也不锁定实现；临时方案、测量与复盘保存在 `artifacts/`，实现改变后同步维护稳定文档。
+
 首次克隆后运行 `.\scripts\install-hooks.ps1`，为本仓库启用 pre-commit 格式检查。钩子只检查暂存快照，不自动格式化或暂存文件；已有其他 hooksPath 时停止，避免覆盖现有钩子。
 
 ## 开发环境

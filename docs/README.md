@@ -15,6 +15,7 @@
 | [FFM ABI](abi.md) | 字节协议、输入验证、指针借用、宿主 Vulkan 录制接口 |
 | [宿主 Vulkan 流水线](pipeline.md) | 设备协商、直接输出、命令提交、同步、手部与 HUD 合成 |
 | [Slang 数学基础与显示策略](shaders.md) | 模块边界、LitePBR 接入、可替换的 primeDRT、颜色空间、Z-Sobol、求交误差与尺寸历史 |
+| [PT 依赖与性能设计](pt-state-design.md) | 数据依赖图、查询切面、CPU/GPU 边界、当前状态策略与修改前必须回答的性能问题；不声明最优，不锁定设计 |
 | [行尾与源码格式](guides/git-line-endings.md) | 仓库级换行、格式工具与规范化边界 |
 | [Nsight Graphics 抓帧](guides/nsight.md) | 当前/固定版本启动、GPU Trace 与 Graphics Capture、性能归因和证据保存 |
 | [Section 对拍与基准契约](guides/section-tests.md) | 实际原版参照、数值等价、增量回归、计时边界与证据范围 |
