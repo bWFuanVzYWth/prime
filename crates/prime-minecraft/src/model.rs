@@ -17,6 +17,7 @@ pub(crate) struct State {
     pub support: u32,
     pub fluid: Fluid,
     pub emission: u32,
+    pub placement: crate::placement::Placement,
 }
 impl State {
     pub fn air(&self) -> bool {
@@ -35,6 +36,7 @@ impl State {
             && self.support == other.support
             && self.model == other.model
             && self.emission == other.emission
+            && self.placement == other.placement
             && (!(self.same_block_culls() || other.same_block_culls()) || self.name == other.name)
     }
 }
@@ -72,6 +74,7 @@ pub(crate) struct Catalog {
     pub glass_references: HashMap<u32, [f32; 4]>,
     pub optical_materials: HashMap<(u32, u32), (u32, prime_scene::surface::Medium, bool)>,
     medium_ids: HashMap<(String, [u32; 4], Option<u32>), u32>,
+    contact_capable: bool,
 }
 
 pub(crate) fn state(r: &mut Reader<'_>) -> Result<(u32, State), String> {
@@ -105,6 +108,7 @@ pub(crate) fn state(r: &mut Reader<'_>) -> Result<(u32, State), String> {
                 }
                 value
             },
+            placement: crate::placement::Placement::read(r, flags & 2 != 0)?,
         },
     ))
 }
@@ -219,6 +223,8 @@ pub(crate) struct Hacks {
     pub model: u64,
     pub tint: u64,
     pub offset: u64,
+    pub offset_unknown: u64,
+    pub seed_unknown: u64,
     pub fluid: u64,
     pub optics: u64,
     pub sprite: u64,
@@ -228,6 +234,8 @@ impl std::ops::AddAssign for Hacks {
         self.model += other.model;
         self.tint += other.tint;
         self.offset += other.offset;
+        self.offset_unknown += other.offset_unknown;
+        self.seed_unknown += other.seed_unknown;
         self.fluid += other.fluid;
         self.optics += other.optics;
         self.sprite += other.sprite;
@@ -456,6 +464,7 @@ impl Catalog {
             .keys()
             .map(|&id| (id, mask(id, &self.models, &mut cache, 0)))
             .collect();
+        self.refresh_contact_capability();
     }
     pub fn face_mask(&self, state: &State) -> u32 {
         if state.air() || state.flags & 16 != 0 {
@@ -477,9 +486,12 @@ impl Catalog {
             )
     }
     pub fn has_contacts(&self) -> bool {
-        !self.fluids.is_empty()
+        self.contact_capable
+    }
+    pub fn refresh_contact_capability(&mut self) {
+        self.contact_capable = !self.fluids.is_empty()
             || self.states.values().any(|s| s.flags & 768 != 0)
-            || self.face_masks.values().any(|v| v & 0x600 != 0)
+            || self.face_masks.values().any(|v| v & 0x600 != 0);
     }
     #[allow(clippy::too_many_arguments)]
     pub fn emit(
@@ -494,11 +506,18 @@ impl Catalog {
     ) {
         let mut offset = position.map(|p| p.rem_euclid(16) as f32);
         if state.flags & 2 != 0 {
-            let s = position_seed(position[0], 0, position[2]);
-            offset[0] += (((s & 15) as f64 / 15.0 - 0.5) * 0.5) as f32;
-            offset[2] += (((s >> 8 & 15) as f64 / 15.0 - 0.5) * 0.5) as f32;
+            let displacement = state.placement.offset(position);
+            for axis in 0..3 {
+                if state.placement.offset == 3 {
+                    offset[axis] += displacement[axis] as f32;
+                } else {
+                    offset[axis] = (f64::from(offset[axis]) + displacement[axis]) as f32;
+                }
+            }
             hacks.offset += 1;
+            hacks.offset_unknown += u64::from(state.placement.offset == 3);
         }
+        hacks.seed_unknown += u64::from(state.placement.seed == 6);
         if state.flags & 16 != 0 {
             return;
         }
@@ -516,7 +535,7 @@ impl Catalog {
             );
             return;
         }
-        let mut random = Random::new(position_seed(position[0], position[1], position[2]));
+        let mut random = Random::new(state.placement.seed(position));
         self.emit_model(
             state,
             state.model,

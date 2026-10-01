@@ -31,6 +31,8 @@ import net.minecraft.world.level.chunk.PalettedContainer;
 /** Source dictionaries and necessary state-bound selection. Positional work belongs to Rust. */
 final class SectionSources {
     static final int GAME_VERSION = 263;
+    static final Class<?> BED_SEED_DECLARATION =
+            net.minecraft.world.level.block.AbstractBedBlock.class;
     private static final Field DATA = field(PalettedContainer.class, "data");
     private static final Field STORAGE = field(DATA.getType(), "storage"),
                                PALETTE = field(DATA.getType(), "palette");
@@ -41,8 +43,6 @@ final class SectionSources {
                                SELECTED = field(MultiPartModel.class, "models"),
                                BLOCK_STATE = field(MultiPartModel.class, "blockState");
     private static final Method SELECT = method(SHARED.getType(), "selectModels", BlockState.class);
-    private static final Field OFFSET =
-            field(BlockBehaviour.BlockStateBase.class, "offsetFunction");
     private static final Field SOLID = field(BlockBehaviour.BlockStateBase.class, "solidRender");
     private static final Field[] QUADS = {
             field(QuadCollection.class, "down"),    field(QuadCollection.class, "up"),
@@ -52,6 +52,8 @@ final class SectionSources {
     private final Map<BlockState, BlockStateModel> models;
     private final SourceSprites sprites = new SourceSprites();
     private final SectionResources resources;
+    private final SectionPlacementSources placements =
+            new SectionPlacementSources(BED_SEED_DECLARATION);
     private final BitSet states = new BitSet();
     private final IdentityHashMap<Object, Integer> definitions = new IdentityHashMap<>();
     private int nextModel;
@@ -108,13 +110,15 @@ final class SectionSources {
         states.set(id);
         int model = model(out, models.get(state));
         var source = resources.prepare(out, state);
-        int flags = (state.isAir() ? 1 : 0) | (get(OFFSET, state) != null ? 2 : 0) |
+        var placement = placements.prepare(state);
+        int flags = (state.isAir() ? 1 : 0) | (placement.hasOffset() ? 2 : 0) |
                     ((boolean)get(SOLID, state) ? 4 : 0) |
                     (state.getRenderShape() != RenderShape.MODEL ? 16 : 0) |
                     SectionResources.flags(state);
         out.i(1).i(id).i(flags).i(model).string(
                 BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
         source.write(out);
+        placement.write(out);
     }
     @SuppressWarnings("unchecked")
     private int model(SourcePages out, Object value) {

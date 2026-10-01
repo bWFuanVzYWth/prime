@@ -24,6 +24,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.random.WeightedList;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.joml.Vector3f;
@@ -91,6 +92,50 @@ final class SectionCompilerOracle {
         for (int x = -3; x <= 3; ++x)
             weightedBlocks.put(new BlockPos(x, 8, 3), stone);
         cases.add(new Case("weighted", weightedBlocks, Map.of(stone, weighted)));
+        for (var state : new BlockState[] {Blocks.SHORT_GRASS.defaultBlockState(),
+                                           Blocks.POPPY.defaultBlockState(),
+                                           Blocks.SMALL_DRIPLEAF.defaultBlockState(),
+                                           Blocks.POINTED_DRIPSTONE.defaultBlockState()}) {
+            String name =
+                    net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock())
+                            .getPath();
+            cases.add(new Case("placement_offset_" + name,
+                               Map.of(p, state, p.east(3), state, new BlockPos(-8, 7, -9), state),
+                               Map.of(state, full)));
+        }
+        for (var state : new BlockState[] {Blocks.TALL_GRASS.defaultBlockState(),
+                                           Blocks.OAK_DOOR.defaultBlockState()}) {
+            var upper = state.setValue(
+                    BlockStateProperties.DOUBLE_BLOCK_HALF,
+                    net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER);
+            String name =
+                    net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock())
+                            .getPath();
+            cases.add(new Case(
+                    "placement_seed_" + name,
+                    Map.of(p, state, p.above(), upper, p.east(3), state, p.east(3).above(), upper),
+                    Map.of(state, weighted, upper, weighted)));
+        }
+        BlockState bed = null;
+        for (var state : Block.BLOCK_STATE_REGISTRY) {
+            if (SectionSources.BED_SEED_DECLARATION.isInstance(state.getBlock())) {
+                bed = state;
+                break;
+            }
+        }
+        if (bed == null)
+            throw new AssertionError("Missing actual bed source state");
+        for (var direction :
+             new Direction[] {Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST}) {
+            var foot = bed.setValue(BlockStateProperties.BED_PART,
+                                    net.minecraft.world.level.block.state.properties.BedPart.FOOT)
+                               .setValue(BlockStateProperties.HORIZONTAL_FACING, direction);
+            var head = foot.setValue(BlockStateProperties.BED_PART,
+                                     net.minecraft.world.level.block.state.properties.BedPart.HEAD);
+            cases.add(new Case("placement_seed_bed_" + direction.getName(),
+                               Map.of(p, foot, p.relative(direction), head),
+                               Map.of(foot, weighted, head, weighted)));
+        }
         var multiWeighted = multipart(
                 fence, List.of(new MultiPartModel.Selector<BlockStateModel>(s -> true, weighted),
                                new MultiPartModel.Selector<BlockStateModel>(s -> true, weighted)));

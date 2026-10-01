@@ -22,6 +22,7 @@ static MISSING: State = State {
         falling: false,
         material: 0,
     },
+    placement: crate::placement::Placement::NONE,
 };
 const ROW: usize = 18;
 const PLANE: usize = ROW * ROW;

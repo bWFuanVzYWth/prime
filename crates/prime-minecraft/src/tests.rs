@@ -129,6 +129,14 @@ pub(super) fn state_source(v: &mut Vec<u8>, flags: u32) {
     for _ in 0..4 {
         u32_to(v, 0);
     }
+    for n in [
+        u32::from(flags & 2 != 0),
+        if flags & 2 != 0 { 0.25f32.to_bits() } else { 0 },
+        0,
+        0,
+    ] {
+        u32_to(v, n);
+    }
 }
 fn response(batch: u64, requests: &[Section], choose: impl Fn(Section) -> Option<bool>) -> Vec<u8> {
     let mut v = header(2, batch);
@@ -153,6 +161,129 @@ fn response(batch: u64, requests: &[Section], choose: impl Fn(Section) -> Option
     }
     u32_to(&mut v, 0);
     v
+}
+
+#[test]
+fn malformed_placement_response_does_not_publish_and_valid_retry_keeps_the_batch() {
+    let mut ctx = TerrainContext::default();
+    let mut output = scene();
+    let requests = requests(
+        &mut ctx,
+        &frame(1, 16., 3, [0, 3], &[(1, Section(0, 0, 0))]),
+    );
+    let mut invalid = header(2, 1);
+    for n in [1, 0, 1, 0] {
+        u32_to(&mut invalid, n);
+    }
+    string(&mut invalid, "minecraft:air");
+    state_source(&mut invalid, 1);
+    let at = invalid.len() - 16;
+    invalid[at..at + 4].copy_from_slice(&3u32.to_le_bytes());
+    u32_to(&mut invalid, 0);
+    assert!(ctx.accept(&[&invalid], &mut output).is_err());
+    assert!(ctx.catalog.states.is_empty());
+    assert!(ctx.sections.is_empty());
+    ctx.accept(&[&response(1, &requests, |_| Some(false))], &mut output)
+        .unwrap();
+    assert_eq!(ctx.last_batch, 1);
+}
+
+#[test]
+fn placement_changes_invalidate_boundary_proof_and_unknown_rules_are_observable() {
+    let first = model::State {
+        flags: 2,
+        placement: crate::placement::Placement {
+            offset: 1,
+            horizontal: 0.25,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut second = first.clone();
+    second.placement.seed = 1;
+    assert!(!first.same_boundary(&second));
+    second.placement = crate::placement::Placement {
+        offset: 3,
+        seed: 6,
+        ..Default::default()
+    };
+    let catalog = Catalog::default();
+    let mut hacks = Hacks::default();
+    catalog.emit(
+        &second,
+        [7, 8, 9],
+        127,
+        &mut Default::default(),
+        &mut hacks,
+        &mut Default::default(),
+        &mut Default::default(),
+    );
+    assert_eq!((hacks.offset_unknown, hacks.seed_unknown), (1, 1));
+}
+
+#[test]
+fn contact_capability_refreshes_for_state_model_fluid_and_catalog_reset() {
+    let mut catalog = Catalog::default();
+    catalog.prepare();
+    assert!(!catalog.has_contacts());
+    catalog.states.insert(
+        1,
+        model::State {
+            flags: 256,
+            ..Default::default()
+        },
+    );
+    catalog.prepare();
+    assert!(catalog.has_contacts());
+    catalog = Catalog::default();
+    assert!(!catalog.has_contacts());
+    catalog.models.insert(
+        1,
+        model::Model::Mesh(vec![model::Quad {
+            positions: [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]],
+            uvs: [[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
+            face: 6,
+            tint: -1,
+            layer: 2,
+            sprite: 0,
+            emission: 0,
+        }]),
+    );
+    catalog.prepare();
+    assert!(catalog.has_contacts());
+    let mut context = TerrainContext::default();
+    let mut output = scene();
+    let requested = requests(&mut context, &frame(1, 16., 3, [0, 3], &[]));
+    assert!(requested.is_empty());
+    let mut bytes = header(2, 1);
+    for n in [5, 1, 0, 0] {
+        u32_to(&mut bytes, n);
+    }
+    for _ in 0..3 {
+        for n in [0, 0, 0, 1f32.to_bits(), 1f32.to_bits()] {
+            u32_to(&mut bytes, n);
+        }
+    }
+    u32_to(&mut bytes, 0);
+    // Actual accept path with only a fluid resource: no state/model prepare is scheduled.
+    context.accept(&[&bytes], &mut output).unwrap();
+    assert!(context.catalog.has_contacts());
+    let requested = requests(
+        &mut context,
+        &frame(2, 16., 3, [0, 3], &[(4, Section(0, 0, 0))]),
+    );
+    context
+        .accept(&[&response(2, &requested, |_| None)], &mut output)
+        .unwrap();
+    assert!(!context.catalog.has_contacts());
+    assert!(requests(&mut context, &frame(3, 16., 3, [0, 3], &[])).is_empty());
+    bytes[24..32].copy_from_slice(&3u64.to_le_bytes());
+    context.accept(&[&bytes], &mut output).unwrap();
+    assert!(context.catalog.has_contacts());
+    let mut next_epoch = frame(1, 16., 3, [0, 3], &[]);
+    next_epoch[16..24].copy_from_slice(&2u64.to_le_bytes());
+    context.plan(&[&next_epoch], 2).unwrap();
+    assert!(!context.catalog.has_contacts());
 }
 pub(super) fn scene() -> SourceScene {
     fn h(op: u32) -> Vec<u8> {
@@ -878,6 +1009,7 @@ fn boundary_dependencies_follow_face_occlusion_and_not_state_identity() {
                 faces: [crate::shape::FaceId(u32::from(flags & 4 != 0)); 6],
                 fluid: Default::default(),
                 support: 0,
+                placement: crate::placement::Placement::NONE,
             },
         );
     }

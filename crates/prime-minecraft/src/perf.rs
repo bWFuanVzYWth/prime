@@ -109,6 +109,9 @@ fn definitions(out: &mut Vec<u8>) {
             for v in [0, 0, 1, 0] {
                 u32_to(out, v);
             }
+            for _ in 0..4 {
+                u32_to(out, 0);
+            }
         } else {
             crate::tests::state_source(out, flags);
         }

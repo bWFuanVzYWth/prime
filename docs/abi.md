@@ -30,7 +30,7 @@ ABI v7 提供下面的 MC 原始源批次接口，保留场景协议、参数粒
 
 op4 的完整包预算是 `40 + width*height*4 ≤ 256 MiB`，尺寸与乘法先校验，不能只限制像素数组。Java 图集与动态纹理直接将40字节头和源 RGBA 写入 `NativeBridge` 复用的 confined native 存储，不再生成同尺寸的临时 heap 包。该存储只借用到同步 `prime_submit` 返回，扩容或下次提交可覆盖；Rust 在返回前拥有需要保留的像素。源捕获数组和 GPU 上传仍有各自的复制与寿命，这一改动不表示纹理链路零复制。
 
-## MC 源批次（source version 5）
+## MC 源批次（source version 6）
 
 该入口只由 `prime_minecraft` 解释，不能将 Minecraft 字段枚举、坐标规则或 palette 布局扩散到 `prime_scene` / GPU。当前识别 MC version 262、263；其他版本明确拒绝。临时语义替代见独立的 [原型 hack 清单](../PROTOTYPE_HACKS.md)。
 
@@ -38,7 +38,7 @@ op4 的完整包预算是 `40 + width*height*4 ≤ 256 MiB`，尺寸与乘法先
 
 输入 `prime_source_page` 是 16 字节 `{const uint8_t* data; uint64_t length;}`，描述表和每页均只借用到调用返回。页串接成一个逻辑流，字段允许跨页；每页最多 256 MiB，Java 复用 1 MiB native 页，禁止为合批再次拼接成巨型数组。必须保留的数据在返回前成为 Rust 所有；编译 worker 返回前全部汇合。响应错误使引擎失败，不重放源回调补画。
 
-四个输入流都有 32 字节头：`magic:u32=0x53434d50, source_version:u32=5, minecraft_version:u32, kind:u32, epoch:u64, batch:u64`。epoch 和 batch 非零；epoch 必须匹配场景，batch 在 epoch 内严格增加。请求期间不可再次 plan，响应必须恰好匹配该请求的身份和全部 section。
+四个输入流都有 32 字节头：`magic:u32=0x53434d50, source_version:u32=6, minecraft_version:u32, kind:u32, epoch:u64, batch:u64`。epoch 和 batch 非零；epoch 必须匹配场景，batch 在 epoch 内严格增加。请求期间不可再次 plan，响应必须恰好匹配该请求的身份和全部 section。
 
 kind=1 的头后为相机 `x/z:f64`、半径 `i32`、世界 `min_section_y/max_section_y:i32`（含端点）、宿主实际来源范围 `min_x/max_x/min_z/max_z:i32`、实际 `game_time:u64`，随后为事件流。每条非零事件为 `kind:u32, x/y/z:i32`；1 加载列、2 卸载列、3 段脏、4 全量资源失效、5 清空旧来源列清单（随后用1重建）、6 宿主颜色列失效（x/z及其相邻八列）、7 全部宿主颜色缓存失效。6/7只重编译实际消费过 tint 的活跃段，不重新请求其 palette；普通 dirty 与颜色失效不可互相代替。单个 `u32=0` 终止。Java 转发原始通知；Rust 合并、过滤并维护窗口、活跃段和完整一格邻域依赖。完整清单仅在 owner 建立/实际源范围变化时重发。
 
@@ -48,7 +48,7 @@ kind=2 的头后是以下记录流，单个 `u32=0` 终止。所有字符串为 
 
 | 记录标签 | 字段 |
 | --- | --- |
-| 1 state | `state_id:u32, flags:u32, model_id:u32, block_name:string, face_id:u32×6, support_bits:u32, fluid_name:string, flow_level:u32, falling:u32, fluid_material:u32, light_emission:u32`；flags 位0=air、1=存在 offset 函数、2=缓存 solidRender、4=非 MODEL、5=legacySolid、6=HalfTransparentBlock/LeavesBlock、7=IceBlock、8=实际玻璃块类型、9=实际玻璃板类型、10=LeavesBlock；位3保留 |
+| 1 state | `state_id:u32, flags:u32, model_id:u32, block_name:string, face_id:u32×6, support_bits:u32, fluid_name:string, flow_level:u32, falling:u32, fluid_material:u32, light_emission:u32`，随后16字节 placement 声明（见下文）；flags 位0=air、1=存在 offset 函数、2=缓存 solidRender、4=非 MODEL、5=legacySolid、6=HalfTransparentBlock/LeavesBlock、7=IceBlock、8=实际玻璃块类型、9=实际玻璃板类型、10=LeavesBlock；位3保留 |
 | 2 model | `id:u32, type:u32`；id非零，type0未知、1直接 quad、2权重选择、3multipart 子项、4别名 |
 | 3 section | `x/y/z:i32, available:u32`；0无源，1后跟压缩 palette 数据，不能以无源代替空段 |
 | 4 face profile | `id:u32, u_count:u32, v_count:u32, word_count:u32`，随后 U/V 坐标 f64 列表及占据 u64 words；id≥2，0/1为内置空/全面 |
@@ -56,11 +56,15 @@ kind=2 的头后是以下记录流，单个 `u32=0` 终止。所有字符串为 
 | 6 sprite | `id:u32, name:string, bounds:f32×4, frame_width/height:u32, mip_count:u32`；每级为 `width/height:u32, pixel_count:u32, RGBA8[pixel_count]`；最后 `interpolate:u32, frame_count:u32` 和 `{frame_index:u32, duration:u32}` 列表 |
 | 9 LabPBR source | `sprite_id:u32`，随后 normal/specular 两个图像字段：`present:u32`（0缺图、1有图）；有图紧接 `width/height:u32, pixel_count:u32, RGBA8[pixel_count]` |
 
+state 的 placement 尾部为 `{offset_kind:u32, horizontal_limit:f32, vertical_scale:f32, seed_kind:u32}`。offset_kind 为0无偏移、1标准XZ、2标准XYZ、3未知；flags 位1必须与 kind 非零一致。参数须有限且非负；kind0/3参数均为0，kind1的 vertical_scale 为0。seed_kind 为0当前位置、1下方一格、2北方一格、3南方一格、4西方一格、5东方一格、6未知。种子邻格位移先按 i32 wrapping 求坐标，随后执行相应版本的 MC 位置哈希；x 的乘法先 i32 wrapping 再转 i64。偏移保持源 f32 除法后转 f64、水平 clamp 和 XYZ 竖向缩放的求值顺序。
+
+Java 仅在首次 state 定义的批量源准备阶段，绑定实际 offset 函数类、方法声明类、状态属性及已知常量返回值，不按位置调用 getOffset/getSeed。未知 lambda 或方法覆写不被执行以猜测规则，保持旧默认近似并单独诊断。对标准方法体或 lambda 的第三方 Mixin 原地修改不在该声明识别的兼容保证内。placement 参与邻接依赖比较，资源代次重置后重新准备。布局或参数不合法时整批不发布；source version 5 与6明确互拒，公共 FFM ABI仍为7，JVM与DLL须来自同一构建。
+
 model type1 后为 `quad_count:u32` 和每个100字节 quad：`face:u32, tint_index:i32, raw_layer:u32, sprite_id:u32, light_emission:u32`，四个 `{position:f32×3, packed_uv:u64}`；MC 的 U 在高32位、V 在低32位。face0..5为下/上/北/南/西/东，6无剔除面。raw_layer 是版本层的实际字段值，Rust 适配器解释后生成公共材质语义。type2 为 `count:u32` 和 `{weight:u32, child_id:u32}`；type3 为 `count:u32` 和**实际选中**的 child_id 列表；type4 为单个 child_id。定义身份限定于 epoch/资源失效代次，已观察定义不逐帧重发。
 
 sprite id 为 1..0x3fffffff，映射到 generic texture id `0x40000000+id`；动态纹理限制在该保留区间以下。quad sprite=0 是封闭 atlas 来源。静态 mip0 的 pixel_count=0 表示共享已捕获的 atlas，其他 mip 必须有完整图像；动画必须有完整 mip0 帧图。mip_count 为1..15，帧尺寸/图像≤16384，逐级尺寸及所有帧索引/正时长完整验证。资源字典不传 Rust 配方、关系、平面、合并标签或 GPU 布局。读取与 UV 解释、采样边界见[表面编译](surface-compiler.md)。
 
-LabPBR record 必须跟在同批已定义的 sprite 后，单个 sprite 不可重复定义材料。只有有效的 `format=lab-pbr/1.3` 声明与实际辅助图才生成该记录；传输的是原始 RGBA8，源 G/B 清洗、sheet 布局、mip、动画和 height 解码归 Rust。缺图不补伪像素，源尺寸、像素数量和所有权在发布前验证。该 source record 与场景 op9 的纹理退休不同；公共 ABI v7 和 source version 5 不改变新旧发布不可混用的要求。具体通道见[材质契约](materials.md)。
+LabPBR record 必须跟在同批已定义的 sprite 后，单个 sprite 不可重复定义材料。只有有效的 `format=lab-pbr/1.3` 声明与实际辅助图才生成该记录；传输的是原始 RGBA8，源 G/B 清洗、sheet 布局、mip、动画和 height 解码归 Rust。缺图不补伪像素，源尺寸、像素数量和所有权在发布前验证。该 source record 与场景 op9 的纹理退休不同；公共 ABI v7 和 source version 6 不改变新旧发布不可混用的要求。具体通道见[材质契约](materials.md)。
 
 ### GPU 纹理描述符（内部契约）
 

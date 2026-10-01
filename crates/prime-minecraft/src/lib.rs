@@ -10,6 +10,7 @@ mod fluid;
 mod labpbr;
 mod model;
 mod optics;
+mod placement;
 mod shape;
 mod sprite;
 mod surfaces;
@@ -616,6 +617,7 @@ impl TerrainContext {
         }
         self.animation_tick = Some(input.tick);
         let prepare = !models.is_empty() || !states.is_empty();
+        let added_fluids = !fluids.is_empty();
         self.catalog.states.extend(states);
         self.catalog.faces.extend(faces);
         self.catalog.fluids.extend(fluids);
@@ -629,6 +631,8 @@ impl TerrainContext {
         if prepare {
             self.catalog.models.extend(models);
             self.catalog.prepare();
+        } else if added_fluids {
+            self.catalog.refresh_contact_capability();
         }
         // Membership changed during planning; only previously available sections contribute.
         // Source responses below then apply their availability changes to this same batch.
@@ -1100,7 +1104,7 @@ impl TerrainContext {
         let s = &self.stats;
         let h = s.hacks;
         format!(
-            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} tint_requests={} tint_callbacks={} tint_bytes={} tint_pack={:.3} tint_decode={:.3} biome_samples={} biome_cached_samples={} biome_hits={} biome_plan={:.3} biome_filter={:.3} biome_source={:.3} biome_host_cells={} biome_pages={} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={},optics={},sprite={})]",
+            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} tint_requests={} tint_callbacks={} tint_bytes={} tint_pack={:.3} tint_decode={:.3} biome_samples={} biome_cached_samples={} biome_hits={} biome_plan={:.3} biome_filter={:.3} biome_source={:.3} biome_host_cells={} biome_pages={} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={},optics={},sprite={}) placement_unknown(offset={},seed={})]",
             self.epoch,
             self.pending
                 .as_ref()
@@ -1144,7 +1148,9 @@ impl TerrainContext {
             h.offset,
             h.fluid,
             h.optics,
-            h.sprite
+            h.sprite,
+            h.offset_unknown,
+            h.seed_unknown
         )
     }
 }
