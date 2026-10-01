@@ -98,6 +98,7 @@ impl Gpu {
         let readback = Buffer::new_readback(&context, bytes)?;
         // Reuse the existing RAII owner; this private entry uses only BDA push constants.
         let mut pipeline = Pipeline {
+            energy_lut: None,
             context: context.clone(),
             layout: vk::PipelineLayout::null(),
             descriptor_layout: vk::DescriptorSetLayout::null(),

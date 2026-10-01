@@ -2,6 +2,7 @@
 module realtime;
 import "frame.slang";
 import "transport.slang";
+import "bsdf/full/energy.slang";
 import "ray_query.slang";
 import "display/prime_drt.slang";
 import "math/color.slang";
@@ -13,14 +14,16 @@ import "math/color.slang";
 [[vk::binding(7, 0)]] StructuredBuffer<InstanceMaterial> instanceMaterials;
 [[vk::binding(8, 0)]] StructuredBuffer<TrianglePage> staticTrianglePages;
 [[vk::binding(4, 0)]] [[vk::image_format("rgba8")]] RWTexture2D<float4> outputImage;
+[[vk::binding(9, 0)]] Sampler3D<float4> transmissionEnergy;
 [[vk::push_constant]] ConstantBuffer<Frame> frame;
 
 [shader("compute")][numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (any(id.xy >= frame.dimensions.xy))
         return;
+    PrimeFullTransmissionGgxEnergy energy = {transmissionEnergy};
     TraceScene resources = {scene, textures, texels, instanceMaterials, staticTrianglePages};
     TraceResult sample =
-            traceSample(resources, atmosphereEnvironment(), frame, id.xy, frame.target.y);
+            traceSample(resources, atmosphereEnvironment(), energy, frame, id.xy, frame.target.y);
     // Consume this primary sample directly; no full-resolution intermediate images.
     PrimeDRTParameters display = {frame.display.x, frame.display.y, frame.display.z,
                                   frame.display.w, frame.displayExtra.x};

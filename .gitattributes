@@ -18,6 +18,7 @@
 *.woff -text
 *.woff2 -text
 *.bin -text
+*.bytes -text
 *.safetensors -text
 *.spv -text
 *.dll -text
@@ -25,6 +26,8 @@
 *.dylib -text
 *.exe -text
 *.pdf -text
+# Author-delivered reference overlays retain the exact independently locked bytes.
+crates/prime-vulkan/assets/openpbr/author-bsdf-hotfix-2026-07-24/*.hpp -text
 crates/prime-vulkan/assets/**/*.ktx2 filter=lfs diff=lfs merge=lfs -text
 crates/prime-vulkan/assets/**/*.bc6h.gz filter=lfs diff=lfs merge=lfs -text
 crates/prime-vulkan/assets/**/*.bytes filter=lfs diff=lfs merge=lfs -text

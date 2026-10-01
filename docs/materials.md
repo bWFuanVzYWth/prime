@@ -1,4 +1,4 @@
-# LabPBR 源适配与 LitePBR
+# LabPBR 源适配与 OpenPBR 支持子域
 
 Java 读取资源包的实际声明、RGBA8 图像和 Minecraft sprite 字段；`prime_minecraft` 负责源布局、分类码、过滤、动画及发光支持域；`prime_scene` 持有规范纹理和光学端点；Vulkan 与 shader 消费这些自持数据。生产消费不再查询 Minecraft 或资源文件。源格式与 GPU 描述符见 [ABI](abi.md)，几何与介质证明见[表面编译](surface-compiler.md)。
 
@@ -33,13 +33,17 @@ Rust 为每个辅助图生成与基色帧尺寸对应的规范 mip。法线 foot
 
 ## 闭包与数值契约
 
-`shaders/bsdf/lite/bsdf.slang` 保留旧 Prime 正式 LitePBR 的 opaque、solid/thin dielectric 和 foliage 状态、支持谓词、evaluate、sample、PDF、离散事件与体积端点。`pbr.slang` 提供自持的统一材质 API 与生产源适配入口。实时与离线使用同一 LitePBR 数学后端；离线增加采样并冻结场景，不改变材质模型。
+`shaders/bsdf/lite/bsdf.slang` 保留旧 Prime 正式 LitePBR 的 opaque、solid/thin dielectric 和 foliage 状态、支持谓词、evaluate、sample、PDF、离散事件与体积端点。`pbr.slang` 提供自持的统一材质 API 与生产源适配入口。实时与离线的生产 opaque/dielectric 使用 `bsdf/full/` 的高质量 OpenPBR 支持子域数学；离线增加采样并冻结场景，不改变材质模型。LitePBR 通用 API 保留为历史参考及旧支持域之外的 thick-SSS 扩展。
 
 `bsdf/common/common.slang` 与 `material.slang` 提供材质值类型、事件 flags、坐标框架、标量数学、介质栈与默认初始化；历史 `PrimeOpenPbr*` 类型名作为内部 API 保留，不表示实现完整 OpenPBR。三个 LitePBR 家族的支持谓词拒绝 coat、fuzz、thin-film 等未支持组合；生产源适配只建立已有证明的拓扑。
 
-生产源适配当前使用 `PrimePbrVertex`，输入只消费 normal A 与 specular RGB；emission A 在交点发光阶段消费，AO 和 porosity 不进入闭包。粗糙度仍先按当前 UV/LOD 过滤、量化，再与 normal 分布组合。后续 opaque/transmission 窄状态复用通用库相同的数学核；完整响应、总 PDF、事件、eta、介质切换及数值检查与通用入口遵守同一契约。当前值接口、消费切面与可修改的性能策略见 [PT 依赖与性能设计](pt-state-design.md)。
+生产源适配当前使用 `PrimePbrVertex`，输入只消费 normal A 与 specular RGB；emission A 在交点发光阶段消费，AO 和 porosity 不进入闭包。粗糙度仍先按当前 UV/LOD 过滤、量化，再与 normal 分布组合。后续 opaque/transmission 窄构造直接消费 `bsdf/full/` 的旧完整模型支持子域数学核；完整响应、总 PDF、事件、eta、介质切换及数值检查与通用入口遵守同一契约。当前值接口、消费切面与可修改的性能策略见 [PT 依赖与性能设计](pt-state-design.md)。
 
-LitePBR 是低阶散射模型，不符合完整 OpenPBR。opaque dielectric 使用 single-scatter anisotropic GGX，将缺失方向能量以标量闭合压回现有 GGX 瓣，并以当前入射方向剩余能量混合基底；conductor 使用 single-scatter GGX 与 generalized Schlick/F82。方向能量来自无纹理的 GGX/Schlick 解析拟合。该闭合不恢复多次散射的低频角分布；opaque dielectric 的层叠以当前入射方向为条件，不声明反射互易性。
+生产 Full 路径来自旧 Prime 的 `bsdf/compact`，使用精确介电 Fresnel、F82 conductor 与 GGX 方向能量、作者 transmission-GGX LUT 的反射/透射分支多次散射补偿、精确 thin-wall 几何级数及完整 marginal PDF。生产支持 opaque dielectric、conductor、薄壁 subsurface 的精确零/一/分数混合，以及 solid/thin dielectric；这是完整 OpenPBR 数学在实际源拓扑上的支持子域，不是任意 coat/fuzz/thin-film/diffraction/dispersion 参数 API。普通源不自动选择 foliage，也不移植预设。LabPBR 厚壁 authored SSS 超出旧 compact 支持域，继续单独使用现有 Lite 厚壁近似，事件与介质身份保持当前契约。
+
+不可变 transmission 能量表为 44×32×159 HALF4，1,790,976 bytes，使用归一化线性 clamp 过滤。入口在 set0/binding9 绑定图像/采样器并显式传入库；资源位于 device-local memory，首次实际帧录制上传，随后复用，按已有宿主完成/失败隔离契约退休。数学来源及独立作者 overlay 锁在 [robocute.lock.json](../crates/prime-vulkan/assets/openpbr/robocute.lock.json)；overlay 不与 thick-glass eta 修复混淆。
+
+保留的 LitePBR 是低阶散射模型，不符合完整 OpenPBR。opaque dielectric 使用 single-scatter anisotropic GGX，将缺失方向能量以标量闭合压回现有 GGX 瓣，并以当前入射方向剩余能量混合基底；conductor 使用 single-scatter GGX 与 generalized Schlick/F82。方向能量来自无纹理的 GGX/Schlick 解析拟合。该闭合不恢复多次散射的低频角分布；opaque dielectric 的层叠以当前入射方向为条件，不声明反射互易性。
 
 solid dielectric 使用 Walter GGX 反射/折射、相关 Smith masking-shadowing、Snell/TIR 与 Beer-Lambert 吸收；thin-wall 保留两界面 Fresnel/吸收解析级数和轻量 single-scatter GGX。漫反射使用余弦半球，GGX 使用可见法线采样；分量选择概率与所选分量的响应/PDF 成对。没有 transmission directional-energy LUT、表驱动多次散射补偿或对应 GPU binding。高粗糙度反射/透射的角分布和能量仍需按此近似边界评估。
 
@@ -47,7 +51,7 @@ LitePBR 数学保留两项支持修正：thin-wall 对外侧 IOR 大于内侧、
 
 生产根据已有表面分类使用 opaque 和已证明水/玻璃的 dielectric 闭包；普通 opaque 缺图参考粗糙度为0.9，已证明的 dielectric 缺 specular 图时为光滑边界，法线分布仍可提高粗糙度。非金属且规范 specular B>64 的 authored SSS 进入 LitePBR opaque 的 subsurface 分支。optical thin 或 cutout authored SSS 使用 thin-material 的有色余弦双半球 reflection/transmission，thin-material 与介质几何薄片标志分别表示；其余使用历史 thick 分支的白色 diffuse transmission，SSS 分量的采样概率为反射0、透射1，介质身份不变。该 thick 分支是低阶近似，不表示厚介质 random-walk 散射。已证明介质薄片保留 1/16 m 有效厚度，foliage 底层 API 不意味着 Minecraft 树叶已自动采用该拓扑或旧固定 15% 透射权重。旧 PBR presets、`MaterialRecipeResolver` 的名称配方和用户材质预设不移植。
 
-材质边界保留粗糙度端点、F0 清洗和法线有效反射修正；LitePBR 保留 delta/连续事件区别、Fresnel/TIR、薄壁与 eta² 辐亮度权重。BSDF evaluate 的 response/PDF 必须有限且非负；任一通道非法时整组 response/PDF 清零，分量 evaluate 也整组清零。sample 还要求非零事件、有限单位方向（长度平方误差≤0.001）、正 PDF 和正 relative eta；非法结果成为零贡献无事件样本，不能携带非法介质继续传播。denoise albedo 逐通道将非有限值置零、有限值限制到 `[0,1]`。normal-mapped NEE 的反射/透射分类与 continuation 使用相同支持语义。功率启发式、乘除及 eta/roulette 数值辅助保留；生产 MIS 先计算带权 inverse PDF，再使用稳定 triple product 组合贡献。生产 facade 的有效连续 sample 与 NEE 使用相同的完整 response 和总方向 PDF：多瓣 opaque/foliage 在同一 state 对采样方向重新完整 evaluate，保留原 flags/eta；底层历史 sample 仍保留所选 component response/joint PDF，delta 保持所选离散测度。生产路径仍沿用本项目按吞吐亮度、限制在0.05..0.95的 roulette 策略。未知或缺失输入与合法零值分别表示。代码来源与许可见[第三方声明](../THIRD_PARTY_NOTICES.md)。
+材质边界保留粗糙度端点、F0 清洗和法线有效反射修正；两种后端保留 delta/连续事件区别、Fresnel/TIR、薄壁与 eta² 辐亮度权重。BSDF evaluate 的 response/PDF 必须有限且非负；任一通道非法时整组 response/PDF 清零，分量 evaluate 也整组清零。sample 还要求非零事件、有限单位方向（长度平方误差≤0.001）、正 PDF 和正 relative eta；非法结果成为零贡献无事件样本，不能携带非法介质继续传播。denoise albedo 逐通道将非有限值置零、有限值限制到 `[0,1]`。normal-mapped NEE 的反射/透射分类与 continuation 使用相同支持语义。功率启发式、乘除及 eta/roulette 数值辅助保留；生产 MIS 先计算带权 inverse PDF，再使用稳定 triple product 组合贡献。生产 facade 的有效连续 sample 与 NEE 使用相同的完整 response 和总方向 PDF：多瓣 opaque/foliage 在同一 state 对采样方向重新完整 evaluate，保留原 flags/eta；底层历史 sample 仍保留所选 component response/joint PDF，delta 保持所选离散测度。生产路径仍沿用本项目按吞吐亮度、限制在0.05..0.95的 roulette 策略。未知或缺失输入与合法零值分别表示。代码来源与许可见[第三方声明](../THIRD_PARTY_NOTICES.md)。
 
 ## 发光与介质
 

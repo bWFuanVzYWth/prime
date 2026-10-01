@@ -86,7 +86,9 @@ flowchart TD
 | 下一跳到下一次最近交点 | 新 ray/medium/throughput、previous position/PDF、cone、累计 radiance 和随机身份 | 当前 vertex 与 BSDF 采样临时状态结束 |
 | 路径结束到输出 | radiance、同一主射线 jitter UV、primaryDistance；Realtime 另消费真实 depth/normal guides | ray/query/vertex/BSDF/medium/MIS 结束；随后消费空气透视、Offline 历史和显示参数 |
 
-当前各 BSDF 评价在对应阴影查询后构造短时正交框架（ONB）与 Lite 状态，立即消费响应、总 PDF 和 MIS，再累加贡献。下一跳也就地准备状态。这会重复少量准备运算，换取较少的跨查询状态重叠。缓存 ONB 的两个切向量会增加六个浮点分量；缓存方向相关 closure 或多份 pending contribution 还会增加其他状态。重算、缓存和重载都允许改进，应比较省下的运算与实际保存、占用率及带宽成本，不能仅因准备重复就预计算全部状态，也不能永久禁止缓存。
+不可变 Full 能量图像/采样器在入口绑定，首次帧上传一次，之后作为显式资源值传入消费者。它不增加 pass、queue 或稳态上传。
+
+当前各 BSDF 评价在对应阴影查询后构造短时正交框架（ONB）与 Full 支持子域状态，立即消费响应、总 PDF 和 MIS，再累加贡献。下一跳也就地准备状态。这会重复少量准备运算，换取较少的跨查询状态重叠。缓存 ONB 的两个切向量会增加六个浮点分量；缓存方向相关 closure 或多份 pending contribution 还会增加其他状态。重算、缓存和重载都允许改进，应比较省下的运算与实际保存、占用率及带宽成本，不能仅因准备重复就预计算全部状态，也不能永久禁止缓存。
 
 ## CPU、交点、视角与方向的边界
 
@@ -107,7 +109,7 @@ CPU 证明必须说明生产者、覆盖域、未知情况和失效路径。当�
 
 局部灯源颜色与 RGB visibility 在原线性 BT.709 域相乘，之后才执行非对角的工作空间转换；这个乘法不能任意移过矩阵。保持 alpha/coverage、光源实际 PMF、完整混合 PDF、MIS、薄壁/TIR、介质、随机域及 roulette 契约。末预算顶点仍消费 NEE 与对应 MIS，只省去没有下一跳消费者的采样和 roulette。源输入规范化不能证明 BSDF response/PDF、方向、eta、throughput 或最终 radiance 有限；实际结果清洗继续在其消费者边界执行。
 
-当前源码显式结束或删除生产路径不消费的字段、参数、默认构造和不可达拓扑，而不把支持边界藏在编译器 DCE 中。生产窄适配器与通用 LitePBR API 复用同一数学核；通用库的合法能力不因生产暂未接入而删除。AO、height、porosity 或 generic 默认字段的源码简化不自动证明 GPU 加速；packed 纹理仍可能执行同一次事务。
+当前源码显式结束或删除生产路径不消费的字段、参数、默认构造和不可达拓扑，而不把支持边界藏在编译器 DCE 中。生产窄构造与旧完整 OpenPBR 支持子域 API 复用同一数学核；厚壁 SSS 扩展单独保留 Lite 数学；通用库的合法能力不因生产暂未接入而删除。AO、height、porosity 或 generic 默认字段的源码简化不自动证明 GPU 加速；packed 纹理仍可能执行同一次事务。
 
 `traceClosest` 当前将返回 hit 显式初始化，miss 消费者只进入 escape 并结束路径。定义其余返回字段可避免未初始化成员形成上一跳到下一跳的无用 Phi 依赖。committed 标识和动态变换在几何重建阶段消费完，后续纹理和介质计算不再调用 query getter。
 
@@ -140,7 +142,7 @@ Offline 单样本当前使用 specialization ID4；场景能力使用 ID0/1/2，
 ## 维护入口
 
 - [共同输运](../crates/prime-vulkan/shaders/transport.slang)、[最近交点与阴影](../crates/prime-vulkan/shaders/ray_query.slang)：查询边界、几何/材质消费与贡献累加。
-- [PBR 生产适配](../crates/prime-vulkan/shaders/pbr.slang)、[窄 Lite 状态](../crates/prime-vulkan/shaders/bsdf/lite/pt.slang)、[共同 Lite 数学核](../crates/prime-vulkan/shaders/bsdf/lite/bsdf.slang)：值接口与数学复用。
+- [PBR 生产适配](../crates/prime-vulkan/shaders/pbr.slang)、[Full 窄构造](../crates/prime-vulkan/shaders/bsdf/full/pt.slang)、[完整数学支持子域](../crates/prime-vulkan/shaders/bsdf/full/opaque/lobes.slang)：值接口与数学复用。
 - [Offline 入口](../crates/prime-vulkan/shaders/path_trace.slang)、[Realtime 入口](../crates/prime-vulkan/shaders/realtime.slang)、[管线构造](../crates/prime-vulkan/src/lib.rs)、[帧录制](../crates/prime-vulkan/src/frame.rs)：profile、历史与输出消费。
 - [开发与验证流程](../CONTRIBUTING.md)、[Nsight 抓帧规范](guides/nsight.md)、[资源与提交契约](pipeline.md)：验证、可复现比较和完成证明。
 

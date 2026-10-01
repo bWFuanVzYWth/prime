@@ -67,6 +67,7 @@ fn main() {
             "optics",
             "texture",
             "pbr",
+            "full_openpbr",
             "pbr_texture",
         ] {
             compile(

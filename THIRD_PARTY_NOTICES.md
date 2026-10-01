@@ -82,3 +82,17 @@ under this project's [LICENSE](LICENSE) and [LICENSE-EXCEPTIONS](LICENSE-EXCEPTI
 The port moves resource decoding, filtering and animation into Rust, changes
 texture metadata and resource ownership, and preserves the source numerical
 contracts. Legacy PBR presets are outside the incorporated scope.
+
+`crates/prime-vulkan/shaders/bsdf/full/` adapts the exact supported-domain
+OpenPBR kernels from legacy Prime revision
+`b35438684203200b6ab8c0b19977bd06625faaea`, rooted in RoboCute reference
+`0d982c77b3fd26c2c5a3c0852be3bd05e5860bd8` and the separately locked author
+2026-07-24 dielectric-highlight overlay. The HALF4 transmission energy asset
+is included under RoboCute's Apache-2.0 permission in
+`crates/prime-vulkan/assets/openpbr/`; its hashes and reference-approved
+differences are recorded in the adjacent lock JSON and author notice.
+Prime's Slang ports and narrow source adapters remain under the project's
+LICENSE and LICENSE-EXCEPTIONS. Existing RoboCute license/notice above apply.
+The incorporated production scope excludes presets and arbitrary nonzero
+coat/fuzz/film/diffraction/dispersion parameters. No full arbitrary material
+API or GPU performance improvement is implied by this mathematical reference.

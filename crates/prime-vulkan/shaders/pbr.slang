@@ -2,6 +2,16 @@
 
 #language slang 2026
 module "pbr.slang";
+import "bsdf/full/math/spectrum.slang";
+import "bsdf/full/contract/sample.slang";
+import "bsdf/full/contract/flags.slang";
+import "bsdf/full/dielectric/state.slang";
+import "bsdf/full/dielectric/refract.slang";
+import "bsdf/full/dielectric/evaluate.slang";
+import "bsdf/full/dielectric/contract.slang";
+import "bsdf/full/opaque/evaluate.slang";
+import "bsdf/full/opaque/lobes.slang";
+import "bsdf/full/opaque/state.slang";
 
 import "model/material/labpbr.slang";
 import "model/material/defaults.slang";
@@ -12,6 +22,8 @@ import "bsdf/common/common.slang";
 import "bsdf/common/material.slang";
 import "bsdf/lite/bsdf.slang";
 import "bsdf/lite/pt.slang";
+import "bsdf/full/pt.slang";
+import "bsdf/full/math/microfacet_energy.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/conversion.slang";
 import "service/bsdf/support/sanitization.slang";
@@ -405,9 +417,9 @@ PrimeLitePtOpaqueState primePbrVertexOpaqueState(PrimePbrVertex vertex, float3 w
                                       primePbrVertexIsThinWalled(vertex), wi);
 }
 
-public BsdfEvaluation primeEvaluatePbrVertex(PrimePbrVertex vertex, float3 viewDirection,
-                                             float3 scatterDirection, float4 incidentMedium,
-                                             float4 transmittedMedium) {
+public BsdfEvaluation primeEvaluateLitePbrVertex(PrimePbrVertex vertex, float3 viewDirection,
+                                                 float3 scatterDirection, float4 incidentMedium,
+                                                 float4 transmittedMedium) {
     PrimeOpenPbrOnb onb =
             primePbrVertexFrame(vertex, viewDirection, incidentMedium, transmittedMedium);
     float3 wi = primeOpenPbrOnbToLocal(onb, viewDirection);
@@ -451,9 +463,9 @@ public BsdfEvaluation primeEvaluatePbrVertex(PrimePbrVertex vertex, float3 viewD
     return primePbrEvaluation(evaluated.throughput, evaluated.pdf);
 }
 
-public PrimePbrSample primeSamplePbrVertex(PrimePbrVertex vertex, float3 viewDirection,
-                                           float3 randomValue, float4 incidentMedium,
-                                           float4 transmittedMedium) {
+public PrimePbrSample primeSampleLitePbrVertex(PrimePbrVertex vertex, float3 viewDirection,
+                                               float3 randomValue, float4 incidentMedium,
+                                               float4 transmittedMedium) {
     PrimeOpenPbrOnb onb =
             primePbrVertexFrame(vertex, viewDirection, incidentMedium, transmittedMedium);
     float3 wi = primeOpenPbrOnbToLocal(onb, viewDirection);
@@ -491,6 +503,111 @@ public PrimePbrSample primeSamplePbrVertex(PrimePbrVertex vertex, float3 viewDir
             sampled.pdf = evaluated.pdf;
         }
     }
+    return primePbrSampleFrame(sampled, onb, primePbrVertexIsThinWalled(vertex), viewDirection,
+                               incidentMedium, transmittedMedium, dielectric);
+}
+
+// Thick authored SSS was not a supported legacy full-model compact topology.
+// Retain the current source approximation on that explicit extension instead
+// of dropping its diffuse-transmission event or claiming reference equivalence.
+bool primePbrVertexUsesLegacyThickSss(PrimePbrVertex vertex) {
+    return !primePbrVertexIsDielectric(vertex) && !primePbrVertexIsConductor(vertex) &&
+           !primePbrVertexIsThinWalled(vertex) &&
+           ((vertex.control >> PRIME_OPTICAL_SUBSURFACE_SHIFT) & 0xffu) != 0u;
+}
+
+PrimeFullCompactOpaqueState primePbrFullOpaqueState<Energy>(Energy energy, PrimePbrVertex vertex,
+                                                            float3 wi,
+                                                            float4 incidentMedium) where Energy
+    : IPrimeFullOpenPbrTransmissionGgxEnergy {
+    bool conductor = primePbrVertexIsConductor(vertex);
+    uint fresnelCode = vertex.control & PRIME_OPTICAL_FRESNEL_MASK;
+    float3 f0 = float3(0.0);
+    float3 f82 = float3(0.0);
+    float interfaceIor = 1.0;
+    float subsurfaceWeight = 0.0;
+    if (conductor) {
+        PrimeConductorFresnel fresnel = primeConductorFresnel(vertex.baseColor, fresnelCode);
+        f0 = fresnel.f0;
+        f82 = fresnel.f82Tint;
+    } else {
+        interfaceIor = primeOpenPbrF0ToIor(primeDecodeDielectricF0(fresnelCode)) *
+                       (1.0 / incidentMedium.x);
+        subsurfaceWeight =
+                float((vertex.control >> PRIME_OPTICAL_SUBSURFACE_SHIFT) & 0xffu) / 190.0;
+    }
+    return primeFullPtOpaqueState(energy, vertex.baseColor, vertex.roughness, interfaceIor,
+                                  subsurfaceWeight, conductor, f0, f82, wi);
+}
+
+BsdfEvaluation primePbrFullEvaluation(PrimeFullOpenPbrThroughput throughput, float pdf) {
+    BsdfEvaluation result = primeInvalidBsdfEvaluation();
+    if (throughput.flags != PRIME_FULL_OPENPBR_FLAG_NONE) {
+        result.response = throughput.value;
+        result.pdf = pdf;
+    }
+    return primeSanitizeBsdfEvaluation(result);
+}
+
+public BsdfEvaluation primeEvaluatePbrVertex<Energy>(Energy energy, PrimePbrVertex vertex,
+                                                     float3 viewDirection, float3 scatterDirection,
+                                                     float4 incidentMedium,
+                                                     float4 transmittedMedium) where Energy
+    : IPrimeFullOpenPbrTransmissionGgxEnergy {
+    if (primePbrVertexUsesLegacyThickSss(vertex))
+        return primeEvaluateLitePbrVertex(vertex, viewDirection, scatterDirection, incidentMedium,
+                                          transmittedMedium);
+    PrimeOpenPbrOnb onb =
+            primePbrVertexFrame(vertex, viewDirection, incidentMedium, transmittedMedium);
+    float3 wi = primeOpenPbrOnbToLocal(onb, viewDirection);
+    float3 wo = primeOpenPbrOnbToLocal(onb, scatterDirection);
+    if (primePbrVertexIsDielectric(vertex)) {
+        PrimeFullCompactTransmissionState state = primeFullPtTransmissionState(
+                energy, vertex.roughness,
+                primePbrVertexInterfaceIor(vertex, incidentMedium, transmittedMedium),
+                primePbrVertexIsThinWalled(vertex), transmittedMedium.yzw * 0.0625, wi);
+        PrimeFullCompactTransmissionEvaluation evaluated =
+                primeFullCompactTransmissionEvaluate(wi, wo, state, PRIME_FULL_OPENPBR_FLAG_ALL);
+        return primePbrFullEvaluation(evaluated.throughput, evaluated.pdf);
+    }
+    PrimeFullCompactOpaqueState state = primePbrFullOpaqueState(energy, vertex, wi, incidentMedium);
+    PrimeFullCompactOpaqueEvaluation evaluated = primeFullCompactOpaqueEvaluate(wi, wo, state);
+    return primePbrFullEvaluation(evaluated.throughput, evaluated.pdf);
+}
+
+public PrimePbrSample primeSamplePbrVertex<Energy>(Energy energy, PrimePbrVertex vertex,
+                                                   float3 viewDirection, float3 randomValue,
+                                                   float4 incidentMedium,
+                                                   float4 transmittedMedium) where Energy
+    : IPrimeFullOpenPbrTransmissionGgxEnergy {
+    if (primePbrVertexUsesLegacyThickSss(vertex))
+        return primeSampleLitePbrVertex(vertex, viewDirection, randomValue, incidentMedium,
+                                        transmittedMedium);
+    PrimeOpenPbrOnb onb =
+            primePbrVertexFrame(vertex, viewDirection, incidentMedium, transmittedMedium);
+    float3 wi = primeOpenPbrOnbToLocal(onb, viewDirection);
+    PrimeFullOpenPbrSample fullSample;
+    bool dielectric = primePbrVertexIsDielectric(vertex);
+    if (dielectric) {
+        PrimeFullCompactTransmissionState state = primeFullPtTransmissionState(
+                energy, vertex.roughness,
+                primePbrVertexInterfaceIor(vertex, incidentMedium, transmittedMedium),
+                primePbrVertexIsThinWalled(vertex), transmittedMedium.yzw * 0.0625, wi);
+        fullSample = primeFullCompactTransmissionSampleRaw(
+                wi, randomValue, primeFullCompactTransmissionClosureState(state),
+                PRIME_FULL_OPENPBR_FLAG_ALL);
+    } else {
+        PrimeFullCompactOpaqueState state =
+                primePbrFullOpaqueState(energy, vertex, wi, incidentMedium);
+        fullSample = primeFullPtOpaqueSample(wi, randomValue, state);
+    }
+    // Flag bit layouts are locked and verified by the CPU full-model oracle.
+    PrimeOpenPbrSample sampled;
+    sampled.wo = fullSample.wo;
+    sampled.throughput.value = fullSample.throughput.value;
+    sampled.throughput.flags = fullSample.throughput.flags;
+    sampled.pdf = fullSample.pdf;
+    sampled.eta = fullSample.eta;
     return primePbrSampleFrame(sampled, onb, primePbrVertexIsThinWalled(vertex), viewDirection,
                                incidentMedium, transmittedMedium, dielectric);
 }

@@ -6,6 +6,7 @@ import "math/z_sobol.slang";
 import "math/ray_offset.slang";
 import "math/transport.slang";
 import "pbr.slang";
+import "bsdf/full/energy.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/sanitization.slang";
 import "ray_query.slang";
@@ -29,8 +30,9 @@ float powerHeuristic(float a, float b) {
     return ratio * ratio / (1.0 + ratio * ratio);
 }
 // Guides describe the very same jittered primary sample and alpha decision as noisy radiance.
-public TraceResult traceSample(TraceScene resources, AtmEnvironment environment, Frame frame,
-                               uint2 pixel, uint sequence) {
+public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
+                               PrimeFullTransmissionGgxEnergy energy, Frame frame, uint2 pixel,
+                               uint sequence) {
     TraceResult result = {float3(0), 3.402823466e38f, float3(0)};
     ZSobol sampler =
             makeZSobolS8(pixel, sequence & 0xffu, frame.target.z, frame.target.w ^ (sequence >> 8));
@@ -126,8 +128,8 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
                     evaluateLocalLight(resources, surface, light, sampler.bits1D(lightDomain + 3),
                                        lightMedium, optical, pdf, lightCosine);
             if (pdf > 0) {
-                BsdfEvaluation evaluated = primeEvaluatePbrVertex(material, view, lightDirection,
-                                                                  incident, transmitted);
+                BsdfEvaluation evaluated = primeEvaluatePbrVertex(
+                        energy, material, view, lightDirection, incident, transmitted);
                 if (!primeGeometricEvaluationSupport(hasNormal, surface.normal, normal, view,
                                                      lightDirection, optical))
                     evaluated = primeInvalidBsdfEvaluation();
@@ -151,8 +153,8 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
                         optical && !thin && dot(surface.normal, sunDirection) < 0 ? transmitted
                                                                                   : medium);
                 if (any(visibility > 0.0)) {
-                    BsdfEvaluation evaluated = primeEvaluatePbrVertex(material, view, sunDirection,
-                                                                      incident, transmitted);
+                    BsdfEvaluation evaluated = primeEvaluatePbrVertex(
+                            energy, material, view, sunDirection, incident, transmitted);
                     if (!primeGeometricEvaluationSupport(hasNormal, surface.normal, normal, view,
                                                          sunDirection, optical))
                         evaluated = primeInvalidBsdfEvaluation();
@@ -174,7 +176,7 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
             break;
         // The three-dimensional closure sample keeps its lobe selector independent of roulette.
         PrimePbrSample sampled = primeSamplePbrVertex(
-                material, view,
+                energy, material, view,
                 float3(sampler.sample2D(domain + 2), sampler.sample1D(1280 + bounce)), incident,
                 transmitted);
         BsdfSample scatter = sampled.bsdfSample;

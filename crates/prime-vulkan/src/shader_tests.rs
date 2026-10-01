@@ -18,6 +18,36 @@ pub(super) fn run(
     mode_count: [u32; 2],
     geometry: Option<&Geometry>,
 ) -> Vec<u32> {
+    run_impl(
+        context,
+        code,
+        input,
+        output_words,
+        mode_count,
+        geometry,
+        false,
+    )
+}
+
+pub(super) fn run_full_openpbr(
+    context: &Arc<Context>,
+    code: &[u8],
+    input: &[u32],
+    output_words: usize,
+    count: u32,
+) -> Vec<u32> {
+    run_impl(context, code, input, output_words, [0, count], None, true)
+}
+
+fn run_impl(
+    context: &Arc<Context>,
+    code: &[u8],
+    input: &[u32],
+    output_words: usize,
+    mode_count: [u32; 2],
+    geometry: Option<&Geometry>,
+    full_energy: bool,
+) -> Vec<u32> {
     let bytes: Vec<_> = input.iter().flat_map(|v| v.to_le_bytes()).collect();
     let source = Buffer::upload(context, &bytes, vk::BufferUsageFlags::STORAGE_BUFFER).unwrap();
     let destination = Buffer::new(
@@ -29,6 +59,7 @@ pub(super) fn run(
     .unwrap();
     // Reuse the production RAII owner, with a private fixture layout and one set.
     let mut pipeline = Pipeline {
+        energy_lut: full_energy.then(|| openpbr::EnergyLut::new(context).unwrap()),
         context: context.clone(),
         layout: vk::PipelineLayout::null(),
         descriptor_layout: vk::DescriptorSetLayout::null(),
@@ -48,7 +79,7 @@ pub(super) fn run(
                 }
             })
             .collect();
-        let bindings: Vec<_> = types
+        let mut bindings: Vec<_> = types
             .iter()
             .enumerate()
             .map(|(i, &ty)| {
@@ -59,6 +90,15 @@ pub(super) fn run(
                     .stage_flags(vk::ShaderStageFlags::COMPUTE)
             })
             .collect();
+        if full_energy {
+            bindings.push(
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(9)
+                    .descriptor_count(1)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+            );
+        }
         pipeline.descriptor_layout = context
             .device
             .create_descriptor_set_layout(
@@ -89,6 +129,12 @@ pub(super) fn run(
                 descriptor_count: 1,
             });
         }
+        if full_energy {
+            sizes.push(vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                descriptor_count: 1,
+            });
+        }
         pipeline.pool = context
             .device
             .create_descriptor_pool(
@@ -107,6 +153,18 @@ pub(super) fn run(
             )
             .unwrap()[0];
         pipeline.descriptors[0] = set;
+        if let Some(energy) = pipeline.energy_lut.as_mut() {
+            energy.prepare().unwrap();
+            let image = [energy.descriptor()];
+            context.device.update_descriptor_sets(
+                &[vk::WriteDescriptorSet::default()
+                    .dst_set(set)
+                    .dst_binding(9)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(&image)],
+                &[],
+            );
+        }
         let mut buffers = vec![(0, &source), (1, &destination)];
         if let Some(g) = geometry {
             buffers.extend([

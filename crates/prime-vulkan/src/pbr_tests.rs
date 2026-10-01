@@ -1311,3 +1311,65 @@ fn gpu_litepbr_continuous_mixtures_match_evaluation_and_two_strategy_mis() {
         assert!(count > 40, "SSS/foliage transmission for topology {kind}");
     }
 }
+
+#[test]
+#[ignore = "requires Vulkan; actual HALF4 LUT plus retained full-model constructor oracle"]
+fn gpu_full_openpbr_narrow_constructors_preserve_legacy_math() {
+    const CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/full_openpbr.spv"));
+    let mut cases = Vec::new();
+    for kind in 0..4u32 {
+        for roughness in [0.0, 1e-8, 0.009999, 0.01, 0.010001, 0.2, 0.5, 1.0] {
+            for cosine in [1.0f32, 0.8, 0.02, 0.0001, -0.8, -0.02] {
+                for ior in [1.0f32, 1.0001, 1.33, 1.5, 2.5, 0.8, 1.0 / 1.5] {
+                    for subsurface in [0.0, 1.0 / 190.0, 0.25, 0.5, 0.75, 1.0] {
+                        if kind != 0 && subsurface != 0.0 {
+                            continue;
+                        }
+                        for random_z in [0.0f32, 1.0 / 16777216.0, 0.5, 0.99999994, 1.0] {
+                            let mut record = Vec::new();
+                            record.extend(bits([0.4, 0.6, 0.2, roughness]));
+                            record.extend(bits([(1.0 - cosine * cosine).sqrt(), 0.0, cosine, ior]));
+                            record.extend(bits([0.0, 0.6, 0.8, subsurface]));
+                            record.extend([
+                                0.3f32.to_bits(),
+                                0.7f32.to_bits(),
+                                random_z.to_bits(),
+                                kind,
+                            ]);
+                            record.extend(bits([0.4, 0.6, 0.8, 0.0]));
+                            record.extend(bits([0.8, 1.0, 0.9, 0.0]));
+                            cases.extend(record);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let count = cases.len() / 24;
+    let context = Context::new().unwrap();
+    let values =
+        super::shader_tests::run_full_openpbr(&context, CODE, &cases, count * 32, count as u32);
+    for (case, output) in values.chunks_exact(32).enumerate() {
+        for word in 0..16 {
+            if (8..12).contains(&word) {
+                assert_eq!(
+                    output[word],
+                    output[word + 16],
+                    "full flags case {case} word {word}"
+                );
+            } else {
+                let reference = f32::from_bits(output[word]);
+                let actual = f32::from_bits(output[word + 16]);
+                if reference.is_nan() && actual.is_nan() {
+                    continue;
+                }
+                assert!(
+                    reference == actual
+                        || (reference - actual).abs()
+                            <= 2e-6 + 2e-5 * reference.abs().max(actual.abs()),
+                    "full math case {case} word {word}: {reference} vs {actual}"
+                );
+            }
+        }
+    }
+}

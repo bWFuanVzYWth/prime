@@ -29,6 +29,40 @@ impl Image {
         extent: [u32; 3],
         format: vk::Format,
     ) -> Result<Self, String> {
+        Self::create(
+            context,
+            extent,
+            format,
+            vk::ImageUsageFlags::STORAGE
+                | vk::ImageUsageFlags::SAMPLED
+                | vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::TRANSFER_SRC,
+            true,
+        )
+    }
+
+    // Allocation only: borrowed-host construction cannot submit commands.
+    pub fn sampled_3d_uninitialized(
+        context: &Arc<Context>,
+        extent: [u32; 3],
+        format: vk::Format,
+    ) -> Result<Self, String> {
+        Self::create(
+            context,
+            extent,
+            format,
+            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
+            false,
+        )
+    }
+
+    fn create(
+        context: &Arc<Context>,
+        extent: [u32; 3],
+        format: vk::Format,
+        usage: vk::ImageUsageFlags,
+        initialize: bool,
+    ) -> Result<Self, String> {
         let mut result = Self {
             context: context.clone(),
             image: vk::Image::null(),
@@ -55,12 +89,7 @@ impl Image {
                         .array_layers(1)
                         .samples(vk::SampleCountFlags::TYPE_1)
                         .tiling(vk::ImageTiling::OPTIMAL)
-                        .usage(
-                            vk::ImageUsageFlags::STORAGE
-                                | vk::ImageUsageFlags::SAMPLED
-                                | vk::ImageUsageFlags::TRANSFER_DST
-                                | vk::ImageUsageFlags::TRANSFER_SRC,
-                        )
+                        .usage(usage)
                         .sharing_mode(vk::SharingMode::EXCLUSIVE),
                     None,
                 )
@@ -102,25 +131,27 @@ impl Image {
                     None,
                 )
                 .map_err(|e| error("Create diagnostic image view", e))?;
-            context.submit_named("initialize_diagnostic_target", |command| {
-                let barrier = [vk::ImageMemoryBarrier::default()
-                    .image(result.image)
-                    .old_layout(vk::ImageLayout::UNDEFINED)
-                    .new_layout(vk::ImageLayout::GENERAL)
-                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .dst_access_mask(vk::AccessFlags::SHADER_WRITE)
-                    .subresource_range(color_range())];
-                context.device.cmd_pipeline_barrier(
-                    command,
-                    vk::PipelineStageFlags::TOP_OF_PIPE,
-                    vk::PipelineStageFlags::COMPUTE_SHADER,
-                    vk::DependencyFlags::empty(),
-                    &[],
-                    &[],
-                    &barrier,
-                );
-            })?;
+            if initialize {
+                context.submit_named("initialize_diagnostic_target", |command| {
+                    let barrier = [vk::ImageMemoryBarrier::default()
+                        .image(result.image)
+                        .old_layout(vk::ImageLayout::UNDEFINED)
+                        .new_layout(vk::ImageLayout::GENERAL)
+                        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .dst_access_mask(vk::AccessFlags::SHADER_WRITE)
+                        .subresource_range(color_range())];
+                    context.device.cmd_pipeline_barrier(
+                        command,
+                        vk::PipelineStageFlags::TOP_OF_PIPE,
+                        vk::PipelineStageFlags::COMPUTE_SHADER,
+                        vk::DependencyFlags::empty(),
+                        &[],
+                        &[],
+                        &barrier,
+                    );
+                })?;
+            }
         }
         Ok(result)
     }

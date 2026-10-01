@@ -377,6 +377,13 @@ impl Renderer {
         {
             return Err("Camera contains invalid vectors or vertical FOV".into());
         }
+        self.pipeline
+            .as_mut()
+            .unwrap()
+            .energy_lut
+            .as_mut()
+            .unwrap()
+            .prepare()?;
         if let Some(geometry) = &mut self.geometry {
             geometry.begin_frame(&self.context, completed);
         }

@@ -9,23 +9,24 @@
 | `math/ray_offset.slang` | 三角形交点重建、误差界与双侧安全起点；无资源依赖 |
 | `math/transport.slang` | 面积 PDF、MIS、稳定乘除、Beer、eta 补偿及 roulette；无资源依赖 |
 | `bsdf/common/` | 材质值类型、事件 flags、默认初始化、坐标框架、标量数学与内部介质栈；无闭包或纹理资源 |
+| `bsdf/full/` | 旧完整 OpenPBR 数学的 opaque/solid/thin 支持子域、显式 energy 资源接口与生产窄构造 |
 | `bsdf/lite/` | LitePBR opaque、solid/thin dielectric、foliage 的状态、支持域、evaluate/sample/PDF 与事件数学 |
 | `model/material/` | 已规范化 LabPBR 通道、默认值、Fresnel 身份和颜色/IOR 转换 |
 | `service/bsdf/`、`service/material/normal_mapping.slang` | BSDF 消费契约、数值清洗和法线有效反射修正 |
-| `pbr.slang` | LitePBR 材质 API 与生产 opaque/dielectric 源适配；不含 Minecraft 名称预设 |
+| `pbr.slang` | 生产 Full opaque/dielectric 源适配、thick-SSS Lite 扩展与历史 Lite 材质参考 API；不含 Minecraft 名称预设 |
 | `grid_sampling.slang` | 生产固定单级局部 alias、全局退路及正反向混合 PDF，无资源绑定 |
 | `light_sampling.slang` | 显式采样实验保留的 32B 功率树节点与选择，无资源绑定 |
 | `display/prime_drt.slang` | 当前可替换的显示策略；显式显示变换与艺术调整，只依赖颜色数学库 |
 | `ray_query.slang` | 硬件 Ray Query、直接表面/纹理/光学端点、覆盖与灯采样；依赖起点和颜色数学库 |
 | `frame.slang` | 入口共享的显式帧参数类型，无全局绑定 |
 | `atmosphere/` | 四波长物理场、预计算 solver、天空/太阳/空气透视生产和消费；见[大气契约](atmosphere.md) |
-| `transport.slang` | 共同的 LitePBR 输运、采样域与首次命中 guides，显式接收资源与帧 |
+| `transport.slang` | 共同的 OpenPBR 支持子域输运、采样域与首次命中 guides，显式接收资源与帧 |
 | `path_trace.slang` | 离线累积及显示入口 |
 | `realtime.slang` | 单次实时积分及所选视图显示，直接写输出图像 |
 
-库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口显式传入 `TraceScene` 与显示参数；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`，消费接收 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建跟踪整个 shader 目录，修改被导入模块也必须重新编译。
+库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口显式传入 `TraceScene`、OpenPBR energy 资源值与显示参数；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`，消费接收 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建跟踪整个 shader 目录，修改被导入模块也必须重新编译。
 
-实时与离线入口共同使用 LitePBR。方向能量使用无纹理的 GGX/Schlick 解析拟合，scalar closure 调整已有反射瓣；不声明或采样 transmission-GGX 能量表，也不占用其 GPU binding。生产按现有表面分类选择 opaque 和已证明水/玻璃的 dielectric；foliage API 不代表已按 MC 类型或旧 preset 自动分类。高粗糙度角分布、opaque dielectric 非互易层叠、通道、数值与过滤边界见[材质契约](materials.md)。
+实时与离线入口共同使用旧完整 OpenPBR 的实际源支持子域；math/state/evaluate/sample 保持同一数学核，生产窄构造不建立完整 generic Material 默认图。能量表 binding 仅由两个入口声明，经 transport 显式传给 PBR 泛型 energy 参数，库不声明描述符。精确 Fresnel、multiple scattering、支持与过滤边界见[材质契约](materials.md)。厚壁 authored SSS 仍使用明确隔离的历史 Lite 近似；foliage API 不表示已按 MC 类型或旧 preset 自动分类。
 
 生产 PT 当前采用 canonical vertex 与短时 BSDF 状态，显式结束原始 hit 的消费并消除未消费的构造与假依赖。查询切面、数据依赖、CPU/GPU 边界和缓存/重算取舍统一维护在 [PT 依赖与性能设计](pt-state-design.md)；这些安排不声明最优，不锁定后续设计。
 

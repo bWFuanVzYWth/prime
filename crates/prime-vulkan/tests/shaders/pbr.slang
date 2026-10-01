@@ -435,7 +435,7 @@ PrimeLiteTestResult primeLiteTestRun(uint4 encoded[4]) {
         PrimePbrSample original =
                 primeSamplePbr(source, view, randomValue, incident, transmitted, dielectric);
         PrimePbrSample compact =
-                primeSamplePbrVertex(vertex, view, randomValue, incident, transmitted);
+                primeSampleLitePbrVertex(vertex, view, randomValue, incident, transmitted);
         writeSample(outputOffset, original.bsdfSample);
         outputs[outputOffset + 3] = asuint(original.medium);
         BsdfEvaluation evaluated =
@@ -446,10 +446,10 @@ PrimeLiteTestResult primeLiteTestRun(uint4 encoded[4]) {
         outputs[outputOffset + 5] = asuint(float4(evaluated.response, evaluated.pdf));
         writeSample(outputOffset + 6, compact.bsdfSample);
         outputs[outputOffset + 9] = asuint(compact.medium);
-        evaluated = primeEvaluatePbrVertex(vertex, view, scatter, incident, transmitted);
+        evaluated = primeEvaluateLitePbrVertex(vertex, view, scatter, incident, transmitted);
         outputs[outputOffset + 10] = asuint(float4(evaluated.response, evaluated.pdf));
-        evaluated = primeEvaluatePbrVertex(vertex, view, compact.bsdfSample.direction, incident,
-                                           transmitted);
+        evaluated = primeEvaluateLitePbrVertex(vertex, view, compact.bsdfSample.direction, incident,
+                                               transmitted);
         outputs[outputOffset + 11] = asuint(float4(evaluated.response, evaluated.pdf));
         outputs[outputOffset + 12] = asuint(float4(vertex.baseColor, vertex.roughness));
         outputs[outputOffset + 13] = uint4(asuint(vertex.normal), vertex.control);

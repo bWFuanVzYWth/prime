@@ -15,6 +15,7 @@ mod light_grid_tests;
 #[cfg(feature = "light-sampling-bench")]
 pub mod light_sampling;
 mod objects;
+mod openpbr;
 pub use display::{PrimeDrtParameters, PrimeDrtSettings};
 mod geometry;
 mod material_arena;
@@ -70,6 +71,7 @@ struct Pipeline {
     descriptors: [vk::DescriptorSet; FRAME_SLOTS],
     pipelines: [vk::Pipeline; 6],
     single_sample_pipelines: Option<[vk::Pipeline; 6]>,
+    energy_lut: Option<openpbr::EnergyLut>,
 }
 impl Drop for Pipeline {
     fn drop(&mut self) {
@@ -98,9 +100,11 @@ impl Drop for Pipeline {
 }
 impl Pipeline {
     fn new(context: &Arc<Context>, mode: RenderMode) -> Result<Self, String> {
+        let energy_lut = openpbr::EnergyLut::new(context)?;
         unsafe {
             let mut result = Self {
                 context: context.clone(),
+                energy_lut: Some(energy_lut),
                 layout: vk::PipelineLayout::null(),
                 descriptor_layout: vk::DescriptorSetLayout::null(),
                 environment_layout: vk::DescriptorSetLayout::null(),
@@ -111,8 +115,8 @@ impl Pipeline {
                     .then_some([vk::Pipeline::null(); 6]),
             };
             let binding_ids: &[u32] = match mode {
-                RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8],
-                RenderMode::Realtime => &[0, 2, 3, 4, 7, 8],
+                RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8, 9],
+                RenderMode::Realtime => &[0, 2, 3, 4, 7, 8, 9],
             };
             let bindings: Vec<_> = binding_ids
                 .iter()
@@ -124,6 +128,8 @@ impl Pipeline {
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
                         .descriptor_type(if binding == 0 {
                             vk::DescriptorType::ACCELERATION_STRUCTURE_KHR
+                        } else if binding == 9 {
+                            vk::DescriptorType::COMBINED_IMAGE_SAMPLER
                         } else if binding == 4 {
                             vk::DescriptorType::STORAGE_IMAGE
                         } else {
@@ -154,6 +160,10 @@ impl Pipeline {
                 )
                 .map_err(|e| error("Create path-tracing pipeline layout", e))?;
             let sizes = [
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    descriptor_count: FRAME_SLOTS as u32,
+                },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
                     descriptor_count: FRAME_SLOTS as u32,
@@ -187,6 +197,19 @@ impl Pipeline {
                 .map_err(|e| error("Allocate path-tracing descriptors", e))?
                 .try_into()
                 .map_err(|_| "Invalid descriptor count")?;
+            let energy_info = [result.energy_lut.as_ref().unwrap().descriptor()];
+            let energy_writes: Vec<_> = result
+                .descriptors
+                .iter()
+                .map(|&set| {
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(set)
+                        .dst_binding(9)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .image_info(&energy_info)
+                })
+                .collect();
+            context.device.update_descriptor_sets(&energy_writes, &[]);
             let create = |bytes: &[u8],
                           features: [u32; 3],
                           single_sample: u32|
