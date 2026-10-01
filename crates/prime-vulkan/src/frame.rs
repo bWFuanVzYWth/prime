@@ -20,6 +20,10 @@ pub(super) struct Output {
 }
 
 impl Output {
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub(super) fn linear_buffer(&self) -> &Buffer {
+        self.accumulation.as_ref().unwrap()
+    }
     fn new(
         context: &Arc<Context>,
         width: u32,

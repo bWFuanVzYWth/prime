@@ -804,3 +804,8 @@ mod tests {
         assert!(renderer.context.render_extent(65536, 65536).is_err());
     }
 }
+
+#[cfg(all(test, feature = "shader-tests"))]
+mod register_fixtures;
+#[cfg(all(test, feature = "shader-tests"))]
+mod register_tests;

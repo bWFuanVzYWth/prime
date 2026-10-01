@@ -158,6 +158,17 @@ impl HostBenchmark {
         &self.state.as_ref().unwrap().owner.name
     }
 
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub(super) fn configure(&mut self, settings: RenderSettings) -> Result<(), String> {
+        self.state
+            .as_mut()
+            .unwrap()
+            .renderer
+            .as_mut()
+            .unwrap()
+            .configure(settings)
+    }
+
     pub fn triangle_count(&self) -> u64 {
         self.state
             .as_ref()
