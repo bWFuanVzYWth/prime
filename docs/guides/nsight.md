@@ -149,6 +149,51 @@ shader 默认编译参数为 `-O3 -g3`。保留优化，检查采样对象的实
 | 抓取期间 FPS 与平时不同 | 核对采样、锁时钟、validation、VSync 和呈现设置，分别记录两种条件 |
 | 历史版本导出失败 | 核对该提交的 adapter、Loom 和构建入口；不将部分输出冒充可用参数 |
 
+## CPU 离线读取已有 GPU Trace
+
+[scripts/nsight-trace.py](../../scripts/nsight-trace.py) 只读已有 `.ngfx-gputrace`，不启动 Nsight、游戏、回放或 GPU。安装 Python 依赖后运行；输出目录必须新建或为空，工具不覆盖已有证据：
+
+```powershell
+python -m pip install -r scripts/nsight-requirements.txt
+python scripts/nsight-trace.py artifacts/captures/example.ngfx-gputrace --out artifacts/nsight-analysis/example --nsight-host '<Nsight安装目录>/host/windows-desktop-nomad-x64'
+python -B -m unittest discover -s scripts -p nsight_diagnostics_tests.py
+```
+
+`--nsight-host` 是显式输入，不搜索或固定某个用户的安装位置。工具从 `Plugins/WarpVizPlugin/WarpVizPlugin.dll` 的文件字节提取 protobuf descriptors，**不加载该插件**。也可用 `--schema-dir` 提供之前导出的五份 `.proto.pb`，无需安装 Nsight 即可解包 metadata 和 GPU 窗口；不提供两者时仍导出原始 chunks，schema 结果标记 unavailable。原厂 descriptors、capture、shader/debug 内容与 XOR 映射不随工具发布，不上传文件。
+
+当前支持已审查的 WRPV v10 chunk/LZ4 和 descriptor SHA profile；它是经过实际捕获验证的私有格式范围，不是 NVIDIA 的公开兼容承诺。工具检查头、块边界、总长、未知 flags、descriptor hash、protobuf required/unknown fields。未知容器版本明确失败；未知 descriptor profile 停止 metadata 解码，保留 chunks 和原因。扩展 profile 前须用真实结构夹具和新版本 capture 验证，不能靠相同字段名或默认分支猜兼容。
+
+退出码为 `0`（所请求基础分析完整）、`3`（partial，至少一项缺失/不支持或显式 `--metadata-only`）、`2`（输入损坏、容器不支持、完整性失败或 CLI 错误）。`3` 的可用结果仍保留；检查 `summary.json` 与组件的 status/reason，不把它当全部通过，也不把它等同原件损坏。未安装可选依赖时 Python 测试会明确 skip，不计作解析验证通过。
+
+输出根 `summary.json` 的 `outputSchemaVersion=1` 记录 provenance、原文件分析前后 SHA256/不变检查、producer/host 版本证据、组件状态、errors 和 limitations。新增字段可向后兼容；改变单位、统计口径或既有字段含义须升版本。主要组件如下：
+
+| 产物 | 契约 |
+| --- | --- |
+| `chunks.json` / `chunks/` | 每块压缩布局、私有 flag、大小、解压 SHA256 与原始解压字节 |
+| `schemas/manifest.json` | schema 来源文件/hash/offset、五份 descriptor hash 与受支持 profile |
+| `metadata.json` | 捕获 InfoTables 的原始键值、producer 和采集设置；可能包含私有路径 |
+| `gpu-windows.json` | 全部捕获 GPU frame 与 Dispatch/TraceRays 的 GPU Ptimer 前后区间，单位 ns；保留 queue/stream/call、pipeline 和原始参数 |
+| `counters.json` / `counter-samples.csv` | counter 名称、转换/求值状态、chip、每样本原值、有效覆盖及按窗口汇总；缺失/null 与实际零分开 |
+| `shaders.json` / `shaders/` | stored SPV/普通 shader/RT CUBIN、全长 source SHA 比较、标准 ELF 函数及地址、按窗口的活跃 PC samples、工具日志 |
+
+GPU call 窗口要求 `NextCallIndex=ci/ci+1` 的唯一 GPU timestamp；不使用 CPU API duration。重复、超出 Calls 范围或缺失的 timestamp 单列诊断；只有合法前后对参与计时。保存 `containedFrameIds` 区分捕获帧内和邻近调用。原始 Dispatch 参数始终标为未独立验证，不按 shader 预期尺寸纠正异常值。不同队列可能重叠，不能把调用墙钟直接相加当整帧工作量。
+
+提供 `--nsight-host` 时，Windows x64 子进程只加载 graphics **host** NVPerf，调用 host/evaluator 白名单读取已有 chunk 1 CounterDataImage；不创建 target/device 或 sampling session。chip 从 image 查询，ABI 使用受审查的 64-bit graphics 参数布局和结构大小协商，记录 DLL hash/file version、返回状态及清理结果。未知 ABI/缺失库/进程失败标 unavailable。多 GPU 或多 device 的 counter-image/地址命名空间关联尚未证明时，不向各设备窗口贴同一份指标。
+
+百分比等指标按每个 periodic sample 与窗口的 overlap ns 加权，覆盖不足不外推。`.sum` 按 `value × overlap / sampleDuration` 分摊，假设样本内均匀，因此计数可出现小数；这不表示捕获精确提供了边界内整数计数。输出每指标的 `validDurationNs`/有限样本数/min/max，拒绝重叠样本造成覆盖重复。单位只对已识别名称后缀推断，未知单位明确保留。`threadInstOver32WarpInst` 仅使用 warp/thread 两项同时有限的同一组样本，并记录 paired 覆盖；它不等于逐样本 lane 百分比的时间均值。缺失/NaN/失败状态保留 null，不能用于证明零 spill 或零流量。
+
+Shader blobs 有独立压缩/obfuscation 标志。未混淆数据直接验证；`OBFUSCATION_SIMPLE` 默认保留 encoded 数据并标 unavailable。需要恢复时，调用者显式提供**独立已识别**的参考 capture/blob 与原始 SPV：
+
+```powershell
+python scripts/nsight-trace.py artifacts/captures/target.ngfx-gputrace --out artifacts/nsight-analysis/target --schema-dir artifacts/schema-cache --xor-reference-trace artifacts/captures/independent-reference.ngfx-gputrace --xor-reference-device 0 --xor-reference-blob 0 --xor-reference-spv artifacts/reference/original.spv --expected-spv-dir artifacts/target-build/spirv --cuda-bin '<CUDA安装目录>/bin'
+```
+
+工具只推导参考长度范围内的 XOR 字节映射，记录参考/hash/coverage；更长 blob 明确 unavailable，绝不截断或用目标待验证 source 补尾。reference 自身及相同 encoded/plain 对标 `derivedFromReference/identityNotIndependentlyVerified`，不计作独立 source 确认。其他独立 blob 必须全长解码、结构有效并与独立冻结 SPV 全 SHA 相等才进入 `sourceMatches`。全 SHA 身份不证明 actual specialization、push constants、SPP、预算或场景；这些当前保持 unknown，不从 source 默认值推断。
+
+RT 用户程序来自 `rtCoreUserCubin`，普通 shader codeBlocks 可能只有宿主 VS/PS。PC 映射使用原始标准 ELF function GPU VA 与半开 timestamp 窗口，资源结论必须引用该窗口 `activeFunctions` 的非零样本；inactive 缓存 variant 单列。PC samples 不是 invocation 数、动态 instruction 数或精确耗时占比，unmapped 也不全归 traversal。
+
+`--cuda-bin` 可调用 CPU `cuobjdump`/`nvdisasm` 导出资源/SASS，保留可执行文件 hash、version、stdout/stderr。仅在已验证 ELF 布局下，另存 function symbol 的 section-relative 派生副本并证明 `.text` 字节不变；原件与 PC 映射仍用原 absolute VA。非零退出或 stdout 为空都不是反汇编成功，warnings 不丢弃。REG/CUDA STACK/LOCAL/SHARED 属于静态 program metadata，不能当 peak-live registers、整个 RT pipeline allocation 或 continuation stack bytes；私有 `.rt.info.liveState/callstack/callsite` 只列大小，不解码未知 ABI，也不以 CUDA STACK=0 宣称 RT 栈或 spill 为零。普通 shader 的 common/compute metadata 原样保留，shared memory 也不能一概归为 spill。
+
 ## 维护约定
 
 改变 Minecraft 适配器、Loom、Java 启动参数、native 路径、shader 默认参数或 Nsight 操作入口时，同步更新本手册与[准备脚本](../../scripts/prepare-nsight.ps1)。参数从实际运行配置导出，不长期维护手抄的完整 classpath。

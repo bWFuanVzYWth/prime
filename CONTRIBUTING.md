@@ -490,6 +490,18 @@ python -B -m unittest discover -s scripts -p 'test_*.py'
 
 该入口覆盖受控模型与中性光照，不能证明完整原版资源包、真实存档或模组等价。原版参照包含其光栅专属工作，CPU 局部结果不代表游戏 FPS。维护时将新行为加入共用场景；确有版本差异的绑定留在版本测试目录，不复制两份用例。
 
+## 已有 Nsight Trace 的 CPU 离线诊断
+
+维护入口为 [scripts/nsight-trace.py](scripts/nsight-trace.py)，格式、输出 schema、partial 退出码和统计边界见 [Nsight 手册](docs/guides/nsight.md#cpu-离线读取已有-gpu-trace)。此工具只读取已有文件，不启动 Nsight、回放、游戏或 GPU：
+
+```powershell
+python -m pip install -r scripts/nsight-requirements.txt
+python scripts/nsight-trace.py artifacts/captures/example.ngfx-gputrace --out artifacts/nsight-analysis/example --nsight-host '<Nsight安装目录>/host/windows-desktop-nomad-x64'
+python -B -m unittest discover -s scripts -p nsight_diagnostics_tests.py
+```
+
+输出目录新建或为空。修改工具须执行字节结构、损坏边界、单位/加权与地址归一化测试，并用已有真实 capture 做 CPU 回归；未知格式、缺失 counter、无法独立确认的模块和缺少运行设置都明确标记，不用零或源码默认值补齐。原件 SHA256 前后相等是完整性证据，编译/测试或成功解包不代表游戏正确性与性能结论。
+
 ## 文档与本地产物
 
 - `README.md`：玩家安装、使用和可见限制。
