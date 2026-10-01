@@ -120,6 +120,34 @@ API 在时间线上出现 barrier 不足以证明它是瓶颈；结合两端工�
 
 shader 默认编译参数为 `-O3 -g3`。保留优化，检查采样对象的实际 shader hash、源码关联和 compiler 版本；旧提交的参数可能不同，比较前统一并记录。没有源码关联时先检查实际加载的 DLL、调试信息、Collect Shader Pipelines 和源搜索路径，再使用反汇编分析。`-g3` 产物存在并不保证每个优化后指令都有唯一源码行。
 
+### Stall 标签与 PC 关联
+
+Top Stall 是所选行中出现最多的 stall 类型，先记录它属于哪个 pipeline、shader 或函数，以及选定 GPU 窗口、样本数和比例的分母。排名不等于整帧时间份额；UI 观察、可求值的硬件 counter 和有可信标签的 reason-PC 统计分别保存。看到 NoInst 可以将取指、代码组织或程序切换列为待检验方向，但不能仅凭标签认定 I-cache、某个源函数或 spill 是主因。[官方 Shader Profiler 指标](https://docs.nvidia.com/nsight-graphics/UserGuide/shader-profiler.html#shader-pipelines)。
+
+PC 样本的位置是 warp 当时无法前进的位置。等待可能来自较早的数据生产者，也可能出现在尚未解决的分支之后；热点落在 load 的消费者、同步或分支附近，不证明该条指令独占了采样所反映的成本。沿数据依赖与实际调用路径检查原因，再用受控改动对照。[官方样本位置解释](https://docs.nvidia.com/nsight-graphics/UserGuide/shader-profiler.html#interpreting-sample-locations)。
+
+离线文件没有可信的名称/计数对应或版本、架构明确的 packed 字段映射时，stall 分类保持 unknown。不能用 metric catalog index、其他工具的旧枚举或原始 word 的某个数值命名 NoInst，也不能把未收集 counter 的 NaN 填成零。仍可报告已映射 PC 和未映射样本；缺少丢样字段不证明没有丢样。
+
+### 代码尺寸与实际采样范围
+
+分析代码膨胀或函数共享时，分开记录以下三层：
+
+| 对象 | 能说明什么 | 不能替代什么 |
+| --- | --- | --- |
+| 原始 SPIR-V 与去调试派生物 | 源模块身份、语义指令、函数/循环及资源结构 | 原始 `-g3` 文件尺寸和嵌入源字符串不是机器代码量或动态工作量 |
+| 同一窗口活跃机器函数的 `.text` 字节 | 实际 program 的静态代码范围，可识别 RT resume、hit/miss 与重复函数体 | 不把 inactive 缓存变体加入活跃总量；多个函数字节之和不是 I-cache working set |
+| 同一窗口 distinct PC 与各地址样本权重 | 已采到的指令地址范围、热点集中或分散程度 | 地址数乘已核验指令宽度只是采样覆盖字节，不是 cache line、驻留量、miss 数或精确耗时 |
+
+没有采到某地址不证明它未执行；多个静态副本也不证明它们在同一路径都被执行或同时驻留。先按窗口确认活跃函数，再查看热点覆盖和对应动态指令、issue、occupancy 及可用取指指标。代码变小仍可能因调用、保存、特化或调度成本变慢，不能用静态字节变化直接预测帧率。
+
+### 先检查产物，再调整编译提示
+
+优化循环或重复数学前，检查真实执行 profile 的 SPIR-V 和机器码回边、循环体及调用图；语义派生物另外保存并验证，不覆盖冻结原件。特化比较明确所有 specialization 值，避免冻结工具将其他 feature 默认为另一组条件。不能只数 `OpLoopMerge` 或调试字符串判断执行次数、可达循环和状态寿命。
+
+Z-Sobol 等循环若机器码已有回跳、每个循环体只保留一次运算，问题可能是不同采样调用点或 RT continuation 的静态复制；追加 `DontUnroll` 不能据此消除复制。生产 S=8 或原生 1080p 的窄索引事实也不能替代通用 odd-S、宽尺寸的支持范围与实际特化证明。
+
+尝试函数共享或 `noinline` 时，先核对实际 `OpFunctionCall` 是否指向同一个函数，以及 helper 的输入/返回、资源访问和 query 边界；同时核算参数搬运、caller/callee 保存、常量传播丢失和重新保留的通用分支。Slang 提示及 SPIR-V function control 只证明该阶段的结构，驱动可能再次内联或复制。独立数学对拍验证语义后，继续核对捕获中的实际 SASS 调用/回边、代码范围和保存成本，最后比较固定输入与预算的 PT/整帧时间；更小的 IR 或更少的源码字段不是性能验收。
+
 ## 对照记录与证据
 
 每次抓取在 `artifacts/nsight/reports/<案例标签>/` 保存原始报告、启动配置、构建记录、日志、截图及导出表格。`docs/` 维护流程和长期契约，具体提交列表、单次设备结果和待验证推测留在 artifacts。

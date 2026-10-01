@@ -156,7 +156,7 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked light_grid -- 
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_optical_visibility -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_solar_sampled_radiance -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_cross_bilateral_uvs -- --ignored --nocapture --test-threads=1
-# 历史 LitePBR 六类拓扑、数值清洗与采样/评价契约；LabPBR 实际上传、atlas 查询与动画
+# Full 窄构造/LUT 与历史 LitePBR 拓扑、数值清洗及采样/评价；LabPBR 上传、atlas 查询与动画
 cargo test -p prime_vulkan --features shader-tests --lib --locked pbr_tests:: -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked pbr_texture_tests:: -- --ignored --nocapture --test-threads=1
 ```
@@ -512,4 +512,4 @@ python -B -m unittest discover -s scripts -p nsight_diagnostics_tests.py
 - `docs/guides/git-line-endings.md`：长期行尾与格式约定；具体开发操作仍由本文件索引。
 - `artifacts/`：本地调查、方案、性能/验收报告、截图、日志和 CSV；整个目录由 Git 忽略。
 
-报告可放在 `artifacts/reports/<日期或任务>/`，保留环境、输入、结论和限制；不要从需提交的文档链接某次本地产物。设计落地后只提炼有效契约到架构文档。需要长期回归的最小测试 fixture 放到对应测试目录，注明来源与语义，不把一次运行的完整输出转成 fixture。
+报告可放在 `artifacts/reports/<日期或任务>/`，保留环境、输入、结论和限制；不要从需提交的文档链接某次本地产物。设计落地后只提炼有效契约到架构文档。需要长期回归的最小测试 fixture 放到对应测试目录，注明来源与语义，不把一次运行的完整输出转成 fixture。实验保留、冻结依赖和可再生成产物清理遵循[性能证据规范](docs/guides/performance-evidence.md)。

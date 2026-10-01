@@ -150,8 +150,8 @@ Java 使用宿主 transient command buffer，将 native 录制结果交还 `enco
 
 ## 当前渲染范围
 
-路径追踪使用硬件 Ray Query、LitePBR opaque/dielectric 材质、线性 Rec.2020 工作空间、旧 Prime 的物理大气、有限太阳圆盘与空气透视（见[缓存契约](atmosphere.md)）、可调路径预算（默认四个路径顶点）和 primeDRT 显示映射；Z-Sobol、起点误差与颜色契约见 [Slang 基础库](shaders.md)。地形使用 sprite-local UV、实际动画帧与源 mip；规范 LabPBR 图在 Rust 生成分布感知 mip 和辅助动画，atlas UV 材料消费通过静态 lookup 解析稳定 sprite 描述符。基色未知 UV 保留 atlas 回退。源 RGBA 与 tint 按 Minecraft 编码域语义组合，shader 再线性化。过滤近似、动画相位与发光采样边界见[表面编译](surface-compiler.md)和[材质契约](materials.md)。
+路径追踪使用硬件内联 Ray Query、Full OpenPBR 支持子域的 opaque/dielectric 材质、线性 Rec.2020 工作空间、旧 Prime 的物理大气、有限太阳圆盘与空气透视（见[缓存契约](atmosphere.md)）、可调路径预算（默认 12 个照明/散射顶点，最多 11 次续接）和 primeDRT 显示映射。第二次有效散射开始使用 eta-aware 俄罗斯轮盘赌；预算、末顶点 NEE 与状态消费见 [PT 设计](pt-state-design.md)。Z-Sobol、起点误差与颜色契约见 [Slang 基础库](shaders.md)。地形使用 sprite-local UV、实际动画帧与源 mip；规范 LabPBR 图在 Rust 生成分布感知 mip 和辅助动画，atlas UV 材料消费通过静态 lookup 解析稳定 sprite 描述符。基色未知 UV 保留 atlas 回退。源 RGBA 与 tint 按 Minecraft 编码域语义组合，shader 再线性化。过滤近似、动画相位与发光采样边界见[表面编译](surface-compiler.md)和[材质契约](materials.md)。
 
 地形范围由 Rust 在宿主实际可用来源内选择，动态源仍依赖宿主准备过程。地形原型使用真实烘焙 quad；标准 multipart、流体形状和实际 tint 已接入；opaque 自定义模型、特殊偏移和其他未覆盖规则按 [独立清单](../PROTOTYPE_HACKS.md) 暂用默认值。动态仍接收常规模型、方块实体、物品、自定义几何的支持布局及 quad 粒子；moving/falling block、leash、文字、glint、outline 等特殊路径不作普通表面支持承诺。
 
-cutout 使用固定 0.1 阈值；未解释的 alpha 材质仍按源 alpha 随机覆盖，接受后使用实际 opaque 闭包。非金属 authored SSS 进入 LitePBR 的 thin 双半球或 thick 白色漫透射近似，介质身份不变；分支条件见[材质契约](materials.md)。标准水与具有拓扑证明的静态玻璃使用 LitePBR dielectric 的粗糙反射/透射和 Beer 吸收；光学边界、正反侧与覆盖层由规范表面直接表示，命中、阴影和灯采样共享选择规则。foliage 底层 API 已保留，旧 PBR presets 不移植。复杂开放玻璃、动态介质与折射焦散尚未覆盖。实时模式逐帧推进样本序号且没有历史累积；离线冻结场景后纯累积，退出冻结时重建捕获 epoch。动态重投影、降噪、完整动态纹理和 HDR 仍待实现。未完成事项见 [HACK.md](../HACK.md)。
+cutout 使用固定 0.1 阈值；未解释的 alpha 材质仍按源 alpha 随机覆盖，接受后使用实际 opaque 闭包。非金属 authored SSS 的薄材质使用 Full 有色双半球混合，厚壁扩展保留 LitePBR 白色漫透射近似，介质身份不变；分支条件见[材质契约](materials.md)。标准水与具有拓扑证明的静态玻璃使用 Full dielectric 的粗糙反射/透射和 Beer 吸收；光学边界、正反侧与覆盖层由规范表面直接表示，命中、阴影和灯采样共享选择规则。支持子域不包含任意 coat/fuzz/thin-film 等组合；foliage 底层 API 已保留，旧 PBR presets 不移植。复杂开放玻璃、动态介质与折射焦散尚未覆盖。实时模式逐帧推进样本序号且没有历史累积；离线冻结场景后纯累积，退出冻结时重建捕获 epoch。动态重投影、降噪、完整动态纹理和 HDR 仍待实现。未完成事项见 [HACK.md](../HACK.md)。

@@ -19,6 +19,7 @@
 | [行尾与源码格式](guides/git-line-endings.md) | 仓库级换行、格式工具与规范化边界 |
 | [Nsight Graphics 抓帧](guides/nsight.md) | 当前/固定版本启动、GPU Trace 与 Graphics Capture、性能归因和证据保存 |
 | [Section 对拍与基准契约](guides/section-tests.md) | 实际原版参照、数值等价、增量回归、计时边界与证据范围 |
+| [性能证据与实验清理](guides/performance-evidence.md) | 稳定结论提炼、实验保留、冻结依赖与可再生成产物清理 |
 | [光源采样测试](guides/light-sampling.md) | 无窗口选灯成本、线性噪声、独立参考与理论/经验收敛边界 |
 
 安装与使用见根 [README](../README.md)；构建、测试和测量方法见 [CONTRIBUTING](../CONTRIBUTING.md)；尚未实现的能力与技术债见 [HACK](../HACK.md)，后续工作见 [TODO](../TODO.md)。section 原型的临时默认值单独维护在 [PROTOTYPE_HACKS](../PROTOTYPE_HACKS.md)，不混入主清单。

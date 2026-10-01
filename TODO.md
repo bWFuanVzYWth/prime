@@ -9,7 +9,7 @@
 | 能力 | 旧项目已有实现 | 本项目现状 | 后续取舍 |
 | --- | --- | --- | --- |
 | 实时重建 | `render/runtime/RealtimeRenderer`、`vulkan/reconstruction`；DLSS RR 与 NRD + FSR；独立 native bridge | 原始噪声输出，已有主深度/法线；无 motion、完整 guide 或历史契约 | 首要补齐 guide/历史，再接窄 native 后端；不迁回 Java 渲染调度 |
-| 材质与闭包 | 历史正式 LitePBR 模型、LabPBR 资源翻译与数值契约；旧名称预设 | LitePBR 底层 API 移植，实时/离线生产 opaque/dielectric、规范 LabPBR 图、动画与发光已接入 | 旧 PBR presets 不移植；补源拓扑与科学/整帧验收，不沿用旧图元位打包和容量上限 |
+| 材质与闭包 | Full OpenPBR 实际支持子域、LitePBR 模型、LabPBR 资源翻译与数值契约；旧名称预设 | Full opaque/conductor、薄材质 SSS、solid/thin dielectric 已用于实时/离线；保留 Lite 厚 SSS 近似与参考 API，规范 LabPBR 图、动画与发光已接入 | 旧 PBR presets 不移植；补源拓扑与科学/整帧验收，不沿用旧图元位打包和容量上限 |
 | 天空与显示 | `RealtimeRenderer` 的星图合成、`post` 的曝光/HDR；物理大气 | 大气与太阳已接入，SDR primeDRT；无星图、天气/维度天空、自动曝光/HDR | 保留当前 primeDRT，分开补环境语义、星图和显示能力；显示策略替换另行决定 |
 | 场景与寿命 | cluster 编译、timeline 退休、BLAS 压缩与上传池 | Rust 增量源/实例、直接 quad、上传/AS 池 | 复用完成证明和行为参照；整空页归还、静态压缩按实际常驻量与更新延迟评估 |
 | 源兼容 | 旧版实际模型/资源捕获与支持范围 | 双版本 Rust section 原型仍有洋红代理、offset/特殊剔面等边界 | 按真实源合同补齐；不重播有状态回调或恢复已接管的 Java 下游展开 |
@@ -25,8 +25,9 @@
 ### 随后推进：材质、环境与显示
 
 - [x] 移植正式 LitePBR opaque、solid/thin dielectric、foliage 底层 API、LabPBR 解码和数值清洗，并将 opaque/dielectric 接入实时与离线生产输运。Java raw-map I/O、Rust canonical G/B、法线分布 mip、辅助动画、稳定 atlas lookup、发光最大值 proposal 与实际 shader 强度遵循[材质契约](docs/materials.md)；旧 PBR presets 不移植。
+- [x] 生产 opaque/conductor、薄材质 SSS 与 solid/thin dielectric 切换至旧 Full 支持子域，锁定独立作者 transmission-GGX 能量表与数学来源；Lite 通用库和厚 SSS 扩展继续保留。加入 eta-aware RR 与默认 12 顶点预算，末预算保留发光和 NEE，详情见 [PT 设计](docs/pt-state-design.md)。这不表示完整 OpenPBR 参数 API 或全部真实资源包已验收。
 - [ ] 为 foliage 生产消费建立真实源拓扑与薄表面语义，按明确来源选择闭包；不能仅凭 Minecraft 树叶类型或 LabPBR 字节猜测厚薄关系。LitePBR thick SSS 当前为白色 diffuse transmission 近似且不改变介质身份；更准确的厚介质散射须另行定义。AO/porosity 的物理用途与 height 几何消费另行决定，不默认恢复旧 voxel displacement 管线。
-- [ ] 扩展材质科学验收与真实资源包覆盖：sample/evaluate/PDF、能量、颜色域、粗糙/掠射/薄壁、空间及动画 IOR、法线过滤与发光支持域分别对照独立参考。区分 LitePBR 自身估计的一致性与单散射/方向能量标量闭合近似，高粗糙度角分布和非互易 opaque dielectric 不作为完整 OpenPBR 等价性验收。两版游戏覆盖资源重载、模式切换、atlas 物品和冻结；固定原生1920×1080场景/种子/射线预算测量寄存器、显存和完整 CPU/GPU 时间，不从底层属性检查外推整帧收益。
+- [ ] 扩展 Full 支持子域及保留 Lite 近似的科学验收与真实资源包覆盖：sample/evaluate/PDF、能量、颜色域、粗糙/掠射/薄壁、空间及动画 IOR、法线过滤与发光支持域分别对照独立参考。区分参考数学等价、估计器一致性和物理模型边界；Lite 的单散射/方向能量标量闭合、高粗糙度角分布和非互易 opaque dielectric 不作为 Full 等价性验收。两版游戏覆盖资源重载、模式切换、atlas 物品和冻结；固定原生1920×1080场景/种子/射线预算测量寄存器、显存和完整 CPU/GPU 时间，不从底层属性检查外推整帧收益。
 - [ ] 补齐维度/天气环境的真实源字段与失效，再迁移旧星图的资产、夜空方向和实际前景 coverage 合成。资源格式/设备能力与许可同时验证；月亮、云和通用体积仍是独立新增能力。
 - [ ] 在保留现有 SDR primeDRT 的前提下接入自动曝光和 HDR 呈现。明确统计输入、冻结/切换时的曝光历史、屏幕峰值/SDR 白、scRGB 标定及手部/HUD 的线性合成；借鉴旧 `docs/HDR输出.md` 的接口合同，显示变换外观迁移需独立参考和用户验收。
 
