@@ -51,7 +51,12 @@ impl Output {
                 Some(Buffer::new(
                     context,
                     bytes * 16,
-                    vk::BufferUsageFlags::STORAGE_BUFFER,
+                    vk::BufferUsageFlags::STORAGE_BUFFER
+                        | if cfg!(all(test, feature = "shader-tests")) {
+                            vk::BufferUsageFlags::TRANSFER_SRC
+                        } else {
+                            vk::BufferUsageFlags::empty()
+                        },
                     false,
                 )?)
             } else {
