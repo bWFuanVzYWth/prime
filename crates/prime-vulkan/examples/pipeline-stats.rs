@@ -1,6 +1,6 @@
 //! Compile actual Prime SPIR-V with driver executable statistics; no dispatch or game.
-//! Usage: pipeline-stats compute FILE [surface optical light]
-//!        pipeline-stats rt OUT_DIR [surface optical light]
+//! Usage: pipeline-stats compute FILE [surface light optical]
+//!        pipeline-stats rt OUT_DIR [surface light optical]
 //! Defaults to the six production feature tuples. CSV stdout, device metadata stderr.
 use ash::{Entry, vk};
 use std::{ffi::CStr, io::Cursor, path::Path};
@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         || !matches!(args.len(), 2 | 5)
     {
         return Err(
-            "usage: pipeline-stats compute FILE | rt OUT_DIR [surface optical light]".into(),
+            "usage: pipeline-stats compute FILE | rt OUT_DIR [surface light optical]".into(),
         );
     }
     let tuples: Vec<[u32; 3]> = if args.len() == 5 {
@@ -194,7 +194,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )?,
             );
         }
-        println!("input,surface,optical,light,executable,stages,subgroup,metric,value,description");
+        println!("input,surface,light,optical,executable,stages,subgroup,metric,value,description");
         for features in tuples {
             let entries = std::array::from_fn::<_, 3, _>(|i| vk::SpecializationMapEntry {
                 constant_id: i as u32,
