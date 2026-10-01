@@ -1,6 +1,6 @@
 //! Compile actual Prime SPIR-V with driver executable statistics; no dispatch or game.
-//! Usage: pipeline-stats compute FILE [surface light optical]
-//!        pipeline-stats rt OUT_DIR [surface light optical]
+//! Usage: pipeline-stats compute FILE [surface light optical [specular]]
+//!        pipeline-stats rt OUT_DIR [surface light optical [specular]]
 //! Defaults to the six production feature tuples. CSV stdout, device metadata stderr.
 use ash::{Entry, vk};
 use std::{ffi::CStr, io::Cursor, path::Path};
@@ -16,22 +16,27 @@ fn csv(value: &str) -> String {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if !matches!(args.first().map(String::as_str), Some("compute" | "rt"))
-        || !matches!(args.len(), 2 | 5)
+        || !matches!(args.len(), 2 | 5 | 6)
     {
         return Err(
             "usage: pipeline-stats compute FILE | rt OUT_DIR [surface light optical]".into(),
         );
     }
-    let tuples: Vec<[u32; 3]> = if args.len() == 5 {
-        vec![[args[2].parse()?, args[3].parse()?, args[4].parse()?]]
+    let tuples: Vec<[u32; 4]> = if args.len() >= 5 {
+        vec![[
+            args[2].parse()?,
+            args[3].parse()?,
+            args[4].parse()?,
+            if args.len() == 6 { args[5].parse()? } else { 1 },
+        ]]
     } else {
         vec![
-            [0, 0, 0],
-            [1, 0, 0],
-            [2, 0, 0],
-            [2, 1, 0],
-            [2, 0, 1],
-            [2, 1, 1],
+            [0, 0, 0, 1],
+            [1, 0, 0, 1],
+            [2, 0, 0, 1],
+            [2, 1, 0, 1],
+            [2, 0, 1, 1],
+            [2, 1, 1, 1],
         ]
     };
     unsafe {
@@ -194,9 +199,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )?,
             );
         }
-        println!("input,surface,light,optical,executable,stages,subgroup,metric,value,description");
+        println!(
+            "input,surface,light,optical,specular,executable,stages,subgroup,metric,value,description"
+        );
         for features in tuples {
-            let entries = std::array::from_fn::<_, 3, _>(|i| vk::SpecializationMapEntry {
+            let entries = std::array::from_fn::<_, 4, _>(|i| vk::SpecializationMapEntry {
                 constant_id: i as u32,
                 offset: i as u32 * 4,
                 size: 4,
@@ -294,11 +301,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         _ => return Err("Unknown statistic value format".into()),
                     };
                     println!(
-                        "{},{},{},{},{},{:?},{},{},{},{}",
+                        "{},{},{},{},{},{},{:?},{},{},{},{}",
                         csv(&args[1]),
                         features[0],
                         features[1],
                         features[2],
+                        features[3],
                         csv(&text(&executable.name)),
                         executable.stages,
                         executable.subgroup_size,
