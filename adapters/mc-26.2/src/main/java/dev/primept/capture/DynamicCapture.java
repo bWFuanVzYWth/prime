@@ -268,7 +268,7 @@ public final class DynamicCapture {
         ModelCapture.submit(bridge);
         boolean rawNonempty = frame.vertexCount() != 0;
         if (!sentRaw || rawNonempty || previousRawNonempty) {
-            bridge.submit(frame.seal());
+            bridge.submitDynamic(frame.seal());
             sentRaw = true;
             previousRawNonempty = rawNonempty;
         }

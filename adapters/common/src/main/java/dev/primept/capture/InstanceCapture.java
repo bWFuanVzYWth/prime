@@ -1,6 +1,8 @@
 package dev.primept.capture;
 
 import java.lang.foreign.Arena;
+import dev.primept.NativeBridge;
+import static dev.primept.abi.PrimeAbi.*;
 import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -8,8 +10,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 
 /**
- * Render-thread-owned prototype and instance changes with separate wire storage. Observing a frame
- * does not publish it: dirty entries survive skipped submissions and are acknowledged after op7 succeeds.
+ * Render-thread-owned prototype and instance changes with reusable typed batch storage. Observing a frame
+ * does not publish it: dirty entries survive skipped submissions and are acknowledged after the native batch succeeds.
  * Handles are confined to this resource epoch. No Minecraft types or GPU objects cross this layer.
  */
 public final class InstanceCapture implements AutoCloseable {
@@ -229,11 +231,14 @@ public final class InstanceCapture implements AutoCloseable {
         checkMutable();
         if (observing)
             throw new IllegalStateException("Finish observation before publishing instances");
-        int definitions = 0, retirements = 0, updates = 0, removals = 0, size = 48, sourceBytes = 0;
+        int definitions = 0, retirements = 0, updates = 0, removals = 0,
+            size = (int)PrimeInstanceBatch.SIZE, sourceBytes = 0;
         for (Prototype prototype : dirtyPrototypes) {
             if (prototype.needed() && !prototype.published) {
                 ++definitions;
-                size = Math.addExact(size, Math.addExact(56, prototype.vertices.length));
+                size = Math.addExact(
+                        size, Math.addExact((int)(PrimePrototypeSource.SIZE + PrimeMeshSpan.SIZE),
+                                            prototype.vertices.length));
                 sourceBytes = Math.addExact(sourceBytes, prototype.vertices.length);
             } else if (!prototype.needed() && prototype.published) {
                 ++retirements;
@@ -250,79 +255,108 @@ public final class InstanceCapture implements AutoCloseable {
             }
         }
         stats = new Stats(previousInstances.size(), definitions, retirements, updates, removals,
-                          size == 48 ? 0 : size, frame.bytes == null ? 0 : frame.bytes.capacity(),
-                          frame.growths, sourceBytes);
-        if (size == 48) {
+                          size == PrimeInstanceBatch.SIZE ? 0 : size,
+                          frame.bytes == null ? 0 : frame.bytes.capacity(), frame.growths,
+                          sourceBytes);
+        if (size == PrimeInstanceBatch.SIZE) {
             // Unpublished objects may disappear before any native submission; retire only Java state.
             completeChanges();
             return null;
         }
         long revision = Math.incrementExact(sequence);
         frame.begin(size);
-        ByteBuffer bytes = frame.bytes;
-        bytes.putInt(Packets.MAGIC)
-                .putInt(Packets.ABI_VERSION)
-                .putInt(7)
-                .putInt(0)
-                .putLong(epoch)
-                .putLong(revision)
-                .putInt(definitions)
-                .putInt(retirements)
-                .putInt(updates)
-                .putInt(removals);
+        var root = frame.memory.asSlice(0, PrimeInstanceBatch.SIZE);
+        long prototypeBase = PrimeInstanceBatch.SIZE;
+        long prototypeRemovalBase = prototypeBase + definitions * PrimePrototypeSource.SIZE;
+        long instanceBase = prototypeRemovalBase + retirements * PrimeRemoval.SIZE;
+        long instanceRemovalBase = instanceBase + updates * PrimeInstanceSource.SIZE;
+        long spanBase = instanceRemovalBase + removals * PrimeRemoval.SIZE;
+        long payloadAt = spanBase + definitions * PrimeMeshSpan.SIZE;
+        NativeBridge.header(PrimeInstanceBatch.header(root), PrimeInstanceBatch.SIZE);
+        PrimeInstanceBatch.epoch(root, epoch);
+        PrimeInstanceBatch.sequence(root, revision);
+        PrimeInstanceBatch.prototypes(
+                root, frame.memory.asSlice(prototypeBase, definitions * PrimePrototypeSource.SIZE));
+        PrimeInstanceBatch.prototype_count(root, definitions);
+        PrimeInstanceBatch.prototype_removals(
+                root, frame.memory.asSlice(prototypeRemovalBase, retirements * PrimeRemoval.SIZE));
+        PrimeInstanceBatch.prototype_removal_count(root, retirements);
+        PrimeInstanceBatch.instances(
+                root, frame.memory.asSlice(instanceBase, updates * PrimeInstanceSource.SIZE));
+        PrimeInstanceBatch.instance_count(root, updates);
+        PrimeInstanceBatch.instance_removals(
+                root, frame.memory.asSlice(instanceRemovalBase, removals * PrimeRemoval.SIZE));
+        PrimeInstanceBatch.instance_removal_count(root, removals);
+        int pi = 0, pr = 0, ii = 0, ir = 0;
         for (Prototype prototype : dirtyPrototypes) {
             if (prototype.needed() && !prototype.published) {
-                bytes.putLong(prototype.id)
-                        .putLong(revision)
-                        .putInt(1)
-                        .putInt(0)
-                        .putInt(0)
-                        .putInt(0)
-                        .putInt(prototype.topology)
-                        .putInt(prototype.count)
-                        .putInt(prototype.stride)
-                        .putInt(prototype.position)
-                        .putInt(prototype.color)
-                        .putInt(prototype.uv)
-                        .put(prototype.vertices);
+                var p = frame.memory.asSlice(prototypeBase + (long)pi * PrimePrototypeSource.SIZE,
+                                             PrimePrototypeSource.SIZE);
+                var span = frame.memory.asSlice(spanBase + (long)pi * PrimeMeshSpan.SIZE,
+                                                PrimeMeshSpan.SIZE);
+                ++pi;
+                var payload = frame.memory.asSlice(payloadAt, prototype.vertices.length);
+                payloadAt += prototype.vertices.length;
+                payload.copyFrom(MemorySegment.ofArray(prototype.vertices));
+                PrimePrototypeSource.id(p, prototype.id);
+                PrimePrototypeSource.revision(p, revision);
+                PrimePrototypeSource.spans(p, span);
+                PrimePrototypeSource.count(p, 1);
+                PrimeMeshSpan.texture_id(span, 0);
+                PrimeMeshSpan.flags(span, 0);
+                PrimeMeshSpan.topology(span, prototype.topology);
+                PrimeMeshSpan.vertex_count(span, prototype.count);
+                PrimeMeshSpan.stride(span, prototype.stride);
+                PrimeMeshSpan.position_offset(span, prototype.position);
+                PrimeMeshSpan.color_offset(span, prototype.color);
+                PrimeMeshSpan.uv_offset(span, prototype.uv);
+                PrimeByteSpan.data(PrimeMeshSpan.vertices(span), payload);
+                PrimeByteSpan.count(PrimeMeshSpan.vertices(span), prototype.vertices.length);
+            } else if (!prototype.needed() && prototype.published) {
+                var r = frame.memory.asSlice(prototypeRemovalBase + (long)pr++ * PrimeRemoval.SIZE,
+                                             PrimeRemoval.SIZE);
+                PrimeRemoval.id(r, prototype.id);
+                PrimeRemoval.revision(r, revision);
             }
         }
-        for (Prototype prototype : dirtyPrototypes)
-            if (!prototype.needed() && prototype.published)
-                bytes.putLong(prototype.id).putLong(revision);
         for (Instance instance : dirtyInstances) {
-            if (!instance.active)
-                continue;
-            bytes.putLong(instance.id)
-                    .putLong(revision)
-                    .putLong(instance.prototype.id)
-                    .putDouble(instance.x)
-                    .putDouble(instance.y)
-                    .putDouble(instance.z);
-            for (float value : instance.transform)
-                bytes.putFloat(value);
-            bytes.putInt(instance.texture)
-                    .putInt(instance.flags)
-                    .put((byte)(instance.argb >>> 16))
-                    .put((byte)(instance.argb >>> 8))
-                    .put((byte)instance.argb)
-                    .put((byte)(instance.argb >>> 24))
-                    .putInt(0);
-            for (float value : instance.uv)
-                bytes.putFloat(value);
+            if (instance.active) {
+                var i = frame.memory.asSlice(instanceBase + (long)ii++ * PrimeInstanceSource.SIZE,
+                                             PrimeInstanceSource.SIZE);
+                PrimeInstanceSource.id(i, instance.id);
+                PrimeInstanceSource.revision(i, revision);
+                PrimeInstanceSource.prototype_id(i, instance.prototype.id);
+                PrimeInstanceSource.origin(i, 0, instance.x);
+                PrimeInstanceSource.origin(i, 1, instance.y);
+                PrimeInstanceSource.origin(i, 2, instance.z);
+                for (int j = 0; j < 12; j++)
+                    PrimeInstanceSource.transform(i, j, instance.transform[j]);
+                PrimeInstanceSource.texture_id(i, instance.texture);
+                PrimeInstanceSource.flags(i, instance.flags);
+                int rgba = (instance.argb & 0xff00ff00) | ((instance.argb >>> 16) & 255) |
+                           ((instance.argb & 255) << 16);
+                PrimeInstanceSource.rgba(i, rgba);
+                PrimeInstanceSource.reserved(i, 0);
+                for (int j = 0; j < 4; j++)
+                    PrimeInstanceSource.uv_transform(i, j, instance.uv[j]);
+            } else if (instance.published) {
+                var r = frame.memory.asSlice(instanceRemovalBase + (long)ir++ * PrimeRemoval.SIZE,
+                                             PrimeRemoval.SIZE);
+                PrimeRemoval.id(r, instance.id);
+                PrimeRemoval.revision(r, revision);
+            }
         }
-        for (Instance instance : dirtyInstances)
-            if (!instance.active && instance.published)
-                bytes.putLong(instance.id).putLong(revision);
-        if (bytes.position() != size)
-            throw new IllegalStateException("Instance packet size mismatch");
+        if (payloadAt != size)
+            throw new IllegalStateException("Instance batch size mismatch");
+        ByteBuffer bytes = frame.bytes;
+        bytes.position(size);
         stats = new Stats(stats.activeInstances, definitions, retirements, updates, removals, size,
                           bytes.capacity(), frame.growths, sourceBytes);
         sealed = true;
-        return frame.memory.asSlice(0, size).asReadOnly();
+        return root.asReadOnly();
     }
 
-    /** Native op7 is atomic; acknowledge after that call succeeds, independently of GPU completion. */
+    /** The native typed batch is atomic; acknowledge after that call succeeds, independently of GPU completion. */
     public void acknowledge() {
         checkOwner();
         if (!sealed)

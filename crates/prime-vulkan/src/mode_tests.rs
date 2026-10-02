@@ -2,6 +2,187 @@ use super::*;
 use prime_scene::scene::{SceneMesh, Texture, Triangle};
 use prime_scene::settings::DiagnosticView;
 
+#[test]
+#[ignore = "requires Vulkan with synchronization validation; renderer resource ownership and real host submission"]
+fn gpu_resource_prepare_world_reset_and_quality_reuse() {
+    use prime_scene::{settings::ReconstructionQuality, workers::CpuWorkers};
+    let owner = Context::new().unwrap();
+    let timeline = unsafe {
+        let mut ty =
+            vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE);
+        owner
+            .device
+            .create_semaphore(&vk::SemaphoreCreateInfo::default().push_next(&mut ty), None)
+    }
+    .unwrap();
+    struct Timeline(Arc<Context>, vk::Semaphore);
+    impl Drop for Timeline {
+        fn drop(&mut self) {
+            if self.0.can_destroy() {
+                unsafe {
+                    self.0.device.destroy_semaphore(self.1, None);
+                }
+            }
+        }
+    }
+    let _timeline = Timeline(owner.clone(), timeline);
+    let workers = Arc::new(CpuWorkers::new(1).unwrap());
+    let settings = RenderSettings {
+        mode: RenderMode::Realtime,
+        ray_reconstruction: false,
+        reconstruction_quality: ReconstructionQuality::Quality,
+        view: DiagnosticView::LinearDepth,
+        ..Default::default()
+    };
+    let mut renderer = unsafe {
+        Renderer::borrowed_with_settings_and_workers(
+            owner.instance_handle(),
+            owner.physical.as_raw(),
+            owner.device.handle().as_raw(),
+            owner.queue.as_raw(),
+            owner.queue_family,
+            timeline.as_raw(),
+            u32::from(owner.opacity_micromap.is_some()),
+            settings,
+            workers.clone(),
+        )
+    }
+    .unwrap();
+    assert!(Arc::ptr_eq(&renderer.workers, &workers));
+    assert_eq!(renderer.settings, settings);
+    assert!(renderer.reconstruction.is_none());
+    assert!(renderer.atmosphere.is_none());
+    assert!(!renderer.energy_lut.is_ready());
+    let pipeline = renderer.pipeline.as_ref().unwrap().pipelines;
+    let lut = renderer.energy_lut.descriptor().image_view;
+    let mut scene = plane();
+    let texture = scene.textures.get_mut(&7).unwrap();
+    texture.width = 2;
+    texture.height = 2;
+    texture.region = Some([0, 0, 2, 2]);
+    texture.pixels = vec![
+        255, 255, 255, 255, 255, 255, 255, 0, 255, 255, 255, 0, 255, 255, 255, 255,
+    ]
+    .into();
+    let image = Image::new(&owner, 19, 13).unwrap();
+    let camera = camera();
+    let mut key = None;
+    for serial in 1..=2 {
+        if serial == 2 {
+            let allocated = renderer
+                .context
+                .live_allocations
+                .load(std::sync::atomic::Ordering::Relaxed);
+            assert!(renderer.geometry.is_some());
+            assert!(renderer.output.is_some());
+            renderer.reset_world().unwrap();
+            assert!(renderer.geometry.is_none());
+            assert!(renderer.output.is_none());
+            assert!(renderer.camera.is_none());
+            assert_eq!(renderer.samples, 0);
+            assert!(
+                renderer
+                    .context
+                    .live_allocations
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    < allocated,
+                "World GPU allocations must retire before another frame is recorded"
+            );
+            assert_eq!(renderer.pipeline.as_ref().unwrap().pipelines, pipeline);
+            assert_eq!(renderer.energy_lut.descriptor().image_view, lut);
+            // World epoch changes do not change this independently owned resource identity.
+            scene.epoch += 1;
+            scene.revision += 1;
+            renderer
+                .configure(RenderSettings {
+                    reconstruction_quality: ReconstructionQuality::Performance,
+                    ..settings
+                })
+                .unwrap();
+        }
+        let mut result = None;
+        owner
+            .submit_named("prepare_then_record_resource_test", |command| {
+                result = Some((|| -> Result<(), String> {
+                    unsafe {
+                        renderer.prepare_host_resources(
+                            (&scene).into(),
+                            command.as_raw(),
+                            serial,
+                        )?;
+                    }
+                    assert!(renderer.energy_lut.is_ready());
+                    assert!(renderer.atmosphere.is_some());
+                    if serial == 1 {
+                        assert!(renderer.geometry.is_none());
+                    }
+                    let resources = renderer.scene_resources.as_ref().unwrap().clone();
+                    let current = {
+                        let resources = resources.borrow();
+                        (
+                            resources.textures.metadata.buffer,
+                            resources.textures.texels.buffer,
+                            resources.pool.stats(),
+                        )
+                    };
+                    if let Some(previous) = key {
+                        assert_eq!(current, previous);
+                    } else {
+                        key = Some(current);
+                    }
+                    if owner.opacity_micromap.is_some() {
+                        assert!(current.2[0] > 0);
+                    }
+                    let uploaded = renderer.context.cpu_upload_bytes();
+                    unsafe {
+                        renderer.prepare_host_resources(
+                            (&scene).into(),
+                            command.as_raw(),
+                            serial,
+                        )?;
+                    }
+                    assert_eq!(
+                        renderer.context.cpu_upload_bytes(),
+                        uploaded,
+                        "Repeated explicit prepare reuploaded immutable resources"
+                    );
+                    unsafe {
+                        renderer.record_host(
+                            &scene,
+                            &camera,
+                            19,
+                            13,
+                            serial as u32,
+                            command.as_raw(),
+                            image.image.as_raw(),
+                            image.view.as_raw(),
+                            serial,
+                        )?;
+                    }
+                    assert_eq!(renderer.pipeline.as_ref().unwrap().pipelines, pipeline);
+                    assert_eq!(renderer.energy_lut.descriptor().image_view, lut);
+                    assert!(std::rc::Rc::ptr_eq(
+                        renderer.scene_resources.as_ref().unwrap(),
+                        &resources
+                    ));
+                    Ok(())
+                })());
+            })
+            .unwrap();
+        // The owner's fence completed this exact command before publishing its completion value.
+        unsafe {
+            owner.device.signal_semaphore(
+                &vk::SemaphoreSignalInfo::default()
+                    .semaphore(timeline)
+                    .value(serial),
+            )
+        }
+        .unwrap();
+        result.unwrap().unwrap();
+    }
+    renderer.shutdown().unwrap();
+}
+
 pub(crate) fn camera() -> Camera {
     Camera {
         position: [0.0, 0.0, 2.0],

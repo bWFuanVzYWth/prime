@@ -36,10 +36,10 @@ Minecraft、Fabric API 和 Prime PT 的版本必须匹配。当前验证组合�
 1. 在启动器中准备一个 Minecraft **26.2 或 26.3** 的独立游戏实例，为它安装 Fabric Loader **0.19.5**，并选择 **Java 25**。启动器支持安装 Fabric 时可使用其内置功能；使用 Minecraft 官方启动器时，可从 [Fabric 官方安装器](https://fabricmc.net/use/installer/) 开始。
 2. 从 [Fabric API 版本列表](https://modrinth.com/mod/fabric-api/versions) 获取上表中对应的精确版本，并准备匹配的 Prime PT **`-native.jar`**。本项目目前没有在此提供公开发行下载地址，请向提供者索取匹配的安装包，或按文末入口自行构建。
 3. 在启动器里打开这个实例的游戏文件夹，找到 `mods` 文件夹；没有时新建一个。将 Fabric API 和 Prime PT 两个 JAR 放进去，**不要解压**。同一实例只放一个对应版本的 Prime PT 包。
-4. 找到启动器为该实例提供的 **JVM 参数／Java 参数**，追加下面两项，保留已有参数：
+4. 找到启动器为该实例提供的 **JVM 参数／Java 参数**，追加下面一项，保留已有参数：
 
    ```text
-   --enable-native-access=ALL-UNNAMED -Dprimept.enabled=true
+   --enable-native-access=ALL-UNNAMED
    ```
 
 5. 找到该实例的 **游戏参数／Minecraft 参数**，追加：
@@ -52,7 +52,7 @@ Minecraft、Fabric API 和 Prime PT 的版本必须匹配。当前验证组合�
 
 6. 启动这个 Fabric 实例并进入世界。首次加载地形时可能出现短暂停顿；兼容设备默认启用 DLSS Ray Reconstruction，也可按下文启用离线累积。
 
-游戏内可在聊天栏输入 `/primept renderer vanilla` 切回原版，输入 `/primept renderer path_trace` 切回路径追踪。切回 Prime 时会重新加载资源，期间需要等待。也可以在下述设置页切换；仅把 JAR 放入 `mods`，但没有添加启用参数时，仍使用原版渲染，游戏内命令也不能补开启动时未启用的显卡功能。
+游戏内可在聊天栏输入 `/primept renderer vanilla` 切回原版，输入 `/primept renderer path_trace` 切回路径追踪。切回 Prime 时会重新加载资源，期间需要等待。也可以在下述设置页切换。Prime 默认启用，无需额外添加 `-Dprimept.enabled=true`；验证层、性能采样和捕获审计默认关闭，几何缓存默认开启。已有设置中的渲染器选择仍会保留。
 
 ## 设置与离线累积
 
@@ -76,7 +76,7 @@ Minecraft、Fabric API 和 Prime PT 的版本必须匹配。当前验证组合�
 
 ## 关闭 Prime PT
 
-在设置页关闭“路径追踪”并退出页面即可保存选择；也可用 `/primept renderer vanilla` 临时切回原版。要完全关闭 Prime 的启动能力，退出游戏，把 JVM 参数中的 `-Dprimept.enabled=true` 改为 `-Dprimept.enabled=false`，或直接删除这一项，再重新启动。也可以退出游戏后从 `mods` 中移走 Prime PT 的 JAR。
+在设置页关闭“路径追踪”并退出页面即可保存选择；也可用 `/primept renderer vanilla` 临时切回原版。要完全关闭 Prime 的启动能力，退出游戏，在 JVM 参数中添加 `-Dprimept.enabled=false`，再重新启动。也可以退出游戏后从 `mods` 中移走 Prime PT 的 JAR。
 
 关闭 Prime PT 后可以继续使用原版 Vulkan 渲染。若还要恢复之前的图形后端，删除游戏参数 `--graphicsBackend VULKAN`，再按启动器或游戏的图形设置选择。
 
@@ -100,7 +100,7 @@ Minecraft、Fabric API 和 Prime PT 的版本必须匹配。当前验证组合�
 
 | 日志内容 | 含义与下一步 |
 | --- | --- |
-| `enabled=false` | 没有启用；检查 JVM 参数 `-Dprimept.enabled=true` |
+| `enabled=false` | 启动能力被显式关闭；删除 JVM 参数 `-Dprimept.enabled=false` 并重启 |
 | `Prime PT world frame completed on GPU` | 已有一帧路径追踪世界在显卡上完成 |
 | `Prime renderer failed` 或 `integration unavailable` | 本次运行未能继续使用路径追踪；查看紧随其后的原因和异常，常见原因包括图形后端、显卡能力或安装包不匹配 |
 | `retirement is unresolved` 或 `replacement remains blocked` | 旧渲染资源未能安全释放，无法继续切换；请保留日志并重启游戏 |

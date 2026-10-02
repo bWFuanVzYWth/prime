@@ -5,10 +5,12 @@ use prime_scene::{
     protocol::Frame,
     scene::SourceScene,
     settings::{RenderMode, RenderSettings},
+    workers::CpuWorkers,
 };
+use std::sync::Arc;
 
-#[derive(Default)]
 pub(crate) struct Engine {
+    pub(crate) workers: Arc<CpuWorkers>,
     pub(crate) source: SourceScene,
     pub(crate) minecraft: prime_minecraft::TerrainContext,
     translated: TranslatedScene,
@@ -23,6 +25,38 @@ pub(crate) struct Engine {
 }
 
 impl Engine {
+    pub(crate) fn check_live_source(&self) -> Result<(), String> {
+        if self.failed || self.frozen_frame.is_some() {
+            Err("renderer cannot accept live sources".into())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn source_changed(&mut self) {
+        self.last_frame = None;
+    }
+
+    pub(crate) fn new() -> Result<Self, String> {
+        Ok(Self::with_workers(Arc::new(CpuWorkers::configured()?)))
+    }
+
+    fn with_workers(workers: Arc<CpuWorkers>) -> Self {
+        Self {
+            source: SourceScene::with_workers(workers.clone()),
+            minecraft: prime_minecraft::TerrainContext::with_workers(workers.clone()),
+            workers,
+            translated: Default::default(),
+            cpu_profile: Default::default(),
+            failed: false,
+            settings: Default::default(),
+            astronomy: Default::default(),
+            last_frame: None,
+            frozen_frame: None,
+            #[cfg(feature = "vulkan")]
+            renderer: None,
+        }
+    }
     pub(crate) fn cpu_diagnostics(&self) -> String {
         #[cfg(feature = "vulkan")]
         let renderer = self.renderer.as_ref().map_or_else(
@@ -32,50 +66,71 @@ impl Engine {
         #[cfg(not(feature = "vulkan"))]
         let renderer = "available=false built_without_vulkan=true";
         format!(
-            "cpu_units=ms cpu_excludes=Java,FFM,host_submit,GPU,log prepare[{}] {} renderer[{}]",
+            "cpu_units=ms cpu_excludes=Java,FFM,host_submit,GPU,log cpu_workers={} prepare[{}] {} renderer[{}]",
+            self.workers.threads(),
             self.cpu_profile.last_report(),
             self.minecraft.diagnostics(),
             renderer
         )
     }
 
-    pub(crate) fn plan_sections(&mut self, pages: &[&[u8]]) -> Result<&[u8], String> {
-        if self.failed || self.frozen_frame.is_some() {
-            return Err("renderer cannot request live sections".into());
-        }
-        self.minecraft.plan_with_budget(
-            pages,
-            self.source.epoch(),
-            self.settings.terrain_batches_per_frame,
-        )
-    }
-    pub(crate) fn accept_sections(&mut self, pages: &[&[u8]]) -> Result<&[u8], String> {
-        if self.failed || self.frozen_frame.is_some() {
-            return Err("renderer cannot accept live sections".into());
-        }
-        let revision = self.source.revision();
-        let result = self.minecraft.accept(pages, &mut self.source);
-        if result.is_err() {
-            self.failed = true;
-        }
-        if self.source.revision() != revision {
-            self.last_frame = None;
-        }
-        result?;
-        Ok(self.minecraft.tint_requests())
+    #[cfg(test)]
+    pub(crate) fn submit(&mut self, bytes: &[u8]) -> Result<(), String> {
+        self.update_source(|source| source.submit(bytes))
     }
 
-    pub(crate) fn submit(&mut self, bytes: &[u8]) -> Result<(), String> {
+    pub(crate) fn reset_world(&mut self, epoch: u64) -> Result<(), String> {
+        self.check_live_source()?;
+        self.source.reset_world(epoch)?;
+        self.minecraft.clear_world(epoch);
+        self.translated = Default::default();
+        self.cpu_profile = Default::default();
+        self.last_frame = None;
+        #[cfg(feature = "vulkan")]
+        if let Some(renderer) = &mut self.renderer {
+            poison_on_failure(&mut self.failed, || renderer.reset_world())?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn update_source(
+        &mut self,
+        operation: impl FnOnce(&mut SourceScene) -> Result<(), String>,
+    ) -> Result<(), String> {
         if self.failed {
             return Err("Renderer session is poisoned".into());
         }
         if self.frozen_frame.is_some() {
             return Err("Cannot mutate a frozen offline scene".into());
         }
-        self.source.submit(bytes)?;
+        operation(&mut self.source)?;
         // A scene mutation not yet rendered cannot be called the last displayed snapshot.
         self.last_frame = None;
         Ok(())
+    }
+
+    /// Record fixed/device and current resource-generation preparation on the real
+    /// host stream. No section selection, geometry build or PT dispatch occurs here.
+    /// # Safety
+    /// The host submits `command` in order and signals its attached timeline at `serial`.
+    #[cfg(feature = "vulkan")]
+    pub(crate) unsafe fn prepare_resources(
+        &mut self,
+        command: u64,
+        serial: u64,
+    ) -> Result<(), String> {
+        if self.failed || self.frozen_frame.is_some() {
+            return Err("renderer cannot prepare live resources".into());
+        }
+        let anchor = self.translated.input().anchor;
+        self.translated.update(&mut self.source, anchor)?;
+        let renderer = self
+            .renderer
+            .as_mut()
+            .ok_or("host renderer is not attached")?;
+        poison_on_failure(&mut self.failed, || unsafe {
+            renderer.prepare_host_resources(self.translated.input(), command, serial)
+        })
     }
 
     pub(crate) fn configure(&mut self, settings: RenderSettings) -> Result<(), String> {
@@ -156,8 +211,10 @@ impl Engine {
         {
             poison_on_failure(&mut self.failed, || {
                 if self.renderer.is_none() {
-                    let mut renderer = prime_vulkan::Renderer::with_mode(self.settings.mode)?;
-                    renderer.configure(self.settings)?;
+                    let renderer = prime_vulkan::Renderer::with_settings_and_workers(
+                        self.settings,
+                        self.workers.clone(),
+                    )?;
                     self.renderer = Some(renderer);
                 }
                 self.renderer.as_mut().unwrap().set_environment(
@@ -252,10 +309,37 @@ pub(crate) fn poison_on_failure<T>(
 }
 
 #[cfg(test)]
+impl Default for Engine {
+    fn default() -> Self {
+        Self::with_workers(Arc::new(CpuWorkers::new(1).expect("inline workers")))
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use prime_scene::{Camera, protocol::MAGIC};
     use std::sync::Arc;
+
+    #[test]
+    fn one_session_pool_is_shared_and_survives_world_and_resource_reset() {
+        let workers = Arc::new(CpuWorkers::new(2).unwrap());
+        let mut engine = Engine::with_workers(workers.clone());
+        assert!(Arc::ptr_eq(engine.source.cpu_workers().unwrap(), &workers));
+        assert!(Arc::ptr_eq(
+            engine.minecraft.cpu_workers().unwrap(),
+            &workers
+        ));
+        engine.reset_world(1).unwrap();
+        engine.source.publish_resource_textures(1, vec![]).unwrap();
+        engine.reset_world(2).unwrap();
+        assert!(Arc::ptr_eq(engine.source.cpu_workers().unwrap(), &workers));
+        assert!(Arc::ptr_eq(
+            engine.minecraft.cpu_workers().unwrap(),
+            &workers
+        ));
+        assert!(Arc::ptr_eq(&engine.workers, &workers));
+    }
 
     fn header(operation: u32) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -363,6 +447,18 @@ mod tests {
         assert_eq!(scene.dynamic.revision, 2);
         assert!(scene.dynamic.triangles.is_empty());
         assert_eq!(dynamic_vertices.len(), 2);
+        engine.reset_world(2).unwrap();
+        assert!(engine.translated.input().meshes.is_empty());
+        let remaining = match &static_vertices {
+            prime_scene::geometry::MeshGeometry::Triangles(v) => Arc::strong_count(v),
+            prime_scene::geometry::MeshGeometry::Quads(v) => Arc::strong_count(v),
+            prime_scene::geometry::MeshGeometry::QuadFragments(v) => Arc::strong_count(v),
+            prime_scene::geometry::MeshGeometry::Surfaces(v) => Arc::strong_count(v),
+        };
+        assert_eq!(
+            remaining, 1,
+            "Only this test retains the retired world geometry, without another prepare"
+        );
     }
 
     #[test]

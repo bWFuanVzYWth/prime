@@ -33,7 +33,7 @@ public final class PrimeClient implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("PrimePT");
     public static final CaptureInbox CAPTURE = new CaptureInbox();
     private static final PrimeClient INSTANCE = new PrimeClient();
-    private final boolean enabled = Boolean.getBoolean("primept.enabled");
+    private final boolean enabled = StartupOptions.enabled();
     // Factories are resource-free; only RendererSlot may start a selected owner.
     private interface WorldRenderer extends RendererSlot.Backend {
         default boolean readyForCapture() {
@@ -152,7 +152,7 @@ public final class PrimeClient implements ClientModInitializer {
                 renderers.then(literal(key).executes(context -> {
                     if (!key.equals("vanilla") && !INSTANCE.enabled) {
                         context.getSource().sendError(Component.literal(
-                                "Prime requires -Dprimept.enabled=true at startup to enable Vulkan ray tracing."));
+                                "Prime was disabled at startup. Remove -Dprimept.enabled=false and restart to enable Vulkan ray tracing."));
                         return 0;
                     }
                     INSTANCE.requested = key;
@@ -253,8 +253,12 @@ public final class PrimeClient implements ClientModInitializer {
                     throw new IllegalStateException(
                             "Resource reload produced no captured block atlas");
             }
-            if (renderer != null && resourceReload == null)
+            if (renderer != null && resourceReload == null) {
                 advancePrimeMode();
+                // Complete immutable resource preparation before host extraction or section demand.
+                if (!offline.active() && CAPTURE.atlas() != null)
+                    prepareNativeSources();
+            }
         } catch (Exception | LinkageError exception) {
             failRenderer(exception);
         }
@@ -317,19 +321,15 @@ public final class PrimeClient implements ClientModInitializer {
             return null;
         long epoch = CAPTURE.epoch();
         if (owner.sentEpoch != epoch) {
-            owner.renderer.submit(Packets.reset(epoch));
+            owner.renderer.reset(epoch);
             owner.sentEpoch = epoch;
             owner.sentAtlas = 0;
             owner.frames.reset();
             owner.reportedFrame = false;
             owner.renderer.resetReadiness();
         }
-        if (owner.sentAtlas != atlas.version()) {
-            owner.renderer.sourceBridge().submitTexture(epoch, 1, atlas.width(), atlas.height(),
-                                                        atlas.rgba());
-            owner.sentAtlas = atlas.version();
-            owner.frames.reset();
-        }
+        ExclusiveTerrainCapture.prepareResources(owner.renderer.sourceBridge());
+        owner.sentAtlas = atlas.version();
         return owner.renderer.sourceBridge();
     }
 
@@ -376,7 +376,7 @@ public final class PrimeClient implements ClientModInitializer {
             RenderProfile.Frame timing = profile.begin(worldRenderStart);
             long epoch = CAPTURE.epoch();
             if (sentEpoch != epoch) {
-                submit(Packets.reset(epoch), timing);
+                reset(epoch, timing);
                 sentEpoch = epoch;
                 sentAtlas = 0;
                 frames.reset();
@@ -384,7 +384,7 @@ public final class PrimeClient implements ClientModInitializer {
                 renderer.resetReadiness();
             }
             if (sentAtlas != atlas.version()) {
-                submitAtlas(epoch, atlas, timing);
+                ExclusiveTerrainCapture.prepareResources(renderer.sourceBridge());
                 sentAtlas = atlas.version();
                 frames.reset();
             }
@@ -489,27 +489,25 @@ public final class PrimeClient implements ClientModInitializer {
             DynamicCapture.close();
             CAPTURE.disable();
             ExclusiveTerrainCapture.release();
+            ExclusiveTerrainCapture.releaseResourceSources();
             renderer = null;
             resourceReload = null;
             offline.reset();
         }
     }
 
-    private void submit(byte[] packet, RenderProfile.Frame timing) {
-        long start = System.nanoTime();
-        renderer.submit(packet);
-        timing.submit += System.nanoTime() - start;
-        ++timing.packets;
-        timing.bytes += packet.length;
+    public static void prepareResourceGeneration() {
+        if (INSTANCE.renderer == null)
+            throw new IllegalStateException("Missing resource renderer");
+        INSTANCE.renderer.prepareResources();
+        INSTANCE.frames.reset();
     }
-
-    private void submitAtlas(long epoch, CaptureInbox.Atlas atlas, RenderProfile.Frame timing) {
+    private void reset(long epoch, RenderProfile.Frame timing) {
         long start = System.nanoTime();
-        renderer.sourceBridge().submitTexture(epoch, 1, atlas.width(), atlas.height(),
-                                              atlas.rgba());
+        renderer.reset(epoch);
         timing.submit += System.nanoTime() - start;
         ++timing.packets;
-        timing.bytes += Packets.TEXTURE_HEADER_BYTES + atlas.rgba().length;
+        timing.bytes += dev.primept.abi.PrimeAbi.PrimeReset.SIZE;
     }
 
     private static float[] components(Vector3f vector) {
@@ -517,10 +515,32 @@ public final class PrimeClient implements ClientModInitializer {
     }
 
     public static void resetWorld() {
-        INSTANCE.closeResources();
-        INSTANCE.offline.reset();
-        CAPTURE.reset();
-        INSTANCE.resetFrameState();
+        var owner = INSTANCE;
+        try {
+            boolean resumeSources = owner.offline.active();
+            // The host completes the old encoder and explicitly thaws native state before reset.
+            if (owner.renderer != null && !owner.failed)
+                owner.renderer.configure(owner.settings, false, owner.diagnosticView);
+            owner.offline.reset();
+            if (resumeSources && owner.renderer != null && !owner.failed) {
+                CAPTURE.enable();
+
+            } else {
+                CAPTURE.reset();
+            }
+            DynamicCapture.close();
+            ExclusiveTerrainCapture.release();
+            if (owner.renderer != null && !owner.failed)
+                ExclusiveTerrainCapture.acquire();
+            owner.resetFrameState();
+            if (owner.renderer != null && !owner.failed) {
+                owner.renderer.reset(CAPTURE.epoch());
+                owner.sentEpoch = CAPTURE.epoch();
+                owner.renderer.resetReadiness();
+            }
+        } catch (Exception | LinkageError exception) {
+            owner.failRenderer(exception);
+        }
     }
     private void resetFrameState() {
         profile.reset();

@@ -406,6 +406,7 @@ pub struct Scene {
     pub epoch: u64,
     /// Explicit catalog replacements revoke old terrain even when a consumer defers rebuilds.
     pub terrain_resource_generation: u64,
+    pub resources: crate::incremental::ResourceIdentity,
     pub anchor: [f64; 3],
     pub meshes: BTreeMap<MeshKey, SceneMesh>,
     /// Only cells with all 64 complete source sections may publish static geometry.
@@ -485,6 +486,7 @@ pub struct SourceScene {
     pub(crate) epoch: u64,
     pub(crate) revision: u64,
     pub(crate) terrain_resource_generation: u64,
+    pub(crate) resources: crate::incremental::ResourceIdentity,
     pub(crate) meshes: BTreeMap<(u64, u32), Mesh>,
     /// Complete source snapshots, including observed empty sections; absence is unknown.
     pub(crate) sections: TerrainAvailability,
@@ -504,6 +506,135 @@ pub struct SourceScene {
 }
 
 impl SourceScene {
+    pub fn with_workers(workers: Arc<crate::workers::CpuWorkers>) -> Self {
+        Self {
+            routing: crate::routing::SourceRoutes::with_workers(workers),
+            ..Self::default()
+        }
+    }
+
+    pub fn cpu_workers(&self) -> Option<&Arc<crate::workers::CpuWorkers>> {
+        self.routing.workers()
+    }
+
+    pub fn resource_generation(&self) -> u64 {
+        self.resources.generation()
+    }
+
+    pub fn is_resource_texture(&self, id: u32) -> bool {
+        self.texture_lifetime.resident.contains(&id)
+    }
+
+    /// A world reset drops scene consumers, but retains the prepared resource generation.
+    pub fn reset_world(&mut self, epoch: u64) -> Result<(), String> {
+        if epoch <= self.epoch {
+            return Err("reset epoch must increase".into());
+        }
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or("scene revision exhausted")?;
+        let workers = self.routing.workers().cloned();
+        let resources = self.resources;
+        let mut textures = std::mem::take(&mut self.textures);
+        textures.retain(|id, _| self.texture_lifetime.resident.contains(id));
+        let mut texture_memory = crate::texture_lifetime::TextureMemory::default();
+        let mut texture_lifetime = crate::texture_lifetime::TextureLifetime::default();
+        for (&id, texture) in &textures {
+            texture_memory.replace(None, Some(texture));
+            texture_lifetime.pin(id);
+        }
+        *self = Self {
+            epoch,
+            revision,
+            resources,
+            textures,
+            texture_memory,
+            texture_lifetime,
+            instances: InstanceContext::new(epoch),
+            routing: workers
+                .map_or_else(Default::default, crate::routing::SourceRoutes::with_workers),
+            ..Self::default()
+        };
+        Ok(())
+    }
+
+    /// A new resource generation is validated as a whole before old scene consumers are
+    /// revoked. Same-generation additions and animation views retain scene geometry.
+    pub fn publish_resource_textures(
+        &mut self,
+        generation: u64,
+        textures: Vec<(u32, Texture)>,
+    ) -> Result<(), String> {
+        if generation == 0 || generation < self.resource_generation() {
+            return Err("stale resource generation".into());
+        }
+        if generation == self.resource_generation() {
+            if textures.iter().any(|(id, _)| {
+                self.textures.contains_key(id) && !self.texture_lifetime.resident.contains(id)
+            }) {
+                return Err("resource identity conflicts with dynamic texture".into());
+            }
+            let ids: Vec<_> = textures.iter().map(|(id, _)| *id).collect();
+            self.set_textures(textures)?;
+            for id in ids {
+                self.texture_lifetime.pin(id);
+            }
+            return Ok(());
+        }
+
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or("scene revision exhausted")?;
+        let terrain_resource_generation = self
+            .terrain_resource_generation
+            .checked_add(1)
+            .ok_or("terrain resource generation exhausted")?;
+        let mut next = BTreeMap::new();
+        for (id, texture) in textures {
+            if id == 0 || id == u32::MAX || next.contains_key(&id) {
+                return Err("invalid/duplicate resource texture identity".into());
+            }
+            texture.validate()?;
+            next.insert(id, texture);
+        }
+        let resident: BTreeSet<_> = next.keys().copied().collect();
+        for (&id, texture) in &self.textures {
+            if !self.texture_lifetime.resident.contains(&id) {
+                if next.contains_key(&id) && id != 1 {
+                    return Err("resource identity conflicts with dynamic texture".into());
+                }
+                next.entry(id).or_insert_with(|| texture.clone());
+            }
+        }
+        let mut texture_memory = crate::texture_lifetime::TextureMemory::default();
+        texture_memory.capacity(next.values().map(|texture| (None, texture)))?;
+        for texture in next.values() {
+            texture_memory.replace(None, Some(texture));
+        }
+        let mut texture_lifetime = crate::texture_lifetime::TextureLifetime::default();
+        for id in resident {
+            texture_lifetime.pin(id);
+        }
+        texture_lifetime.inherit_retirements(&self.texture_lifetime);
+        let workers = self.routing.workers().cloned();
+        *self = Self {
+            epoch: self.epoch,
+            revision,
+            terrain_resource_generation,
+            resources: self.resources.with_generation(generation),
+            textures: next,
+            texture_memory,
+            texture_lifetime,
+            instances: InstanceContext::new(self.epoch),
+            routing: workers
+                .map_or_else(Default::default, crate::routing::SourceRoutes::with_workers),
+            ..Self::default()
+        };
+        Ok(())
+    }
+
     pub fn texture(&self, id: u32) -> Option<&Texture> {
         self.textures.get(&id)
     }
@@ -514,6 +645,10 @@ impl SourceScene {
     /// Validate the complete resource batch before advancing the scene or its delta journal.
     pub fn set_textures(&mut self, mut textures: Vec<(u32, Texture)>) -> Result<(), String> {
         self.validate_textures(&textures)?;
+        // Re-publication renews source ownership even when immutable content is unchanged.
+        for (id, _) in &textures {
+            self.texture_lifetime.owned(*id);
+        }
         textures.retain(|(id, t)| self.textures.get(id).is_none_or(|old| !old.same(t)));
         if textures.is_empty() {
             return Ok(());
@@ -522,7 +657,6 @@ impl SourceScene {
         for (id, texture) in textures {
             self.texture_memory
                 .replace(self.textures.get(&id), Some(&texture));
-            self.texture_lifetime.owned(id);
             self.textures.insert(id, texture);
             self.edits.textures.insert(id);
         }
@@ -597,6 +731,7 @@ impl SourceScene {
             revision: self.revision,
             epoch: self.epoch,
             terrain_resource_generation: self.terrain_resource_generation,
+            resources: self.resources,
             anchor,
             meshes,
             ready_terrain: self.sections.ready.clone(),
@@ -632,3 +767,7 @@ impl SourceScene {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "resource_tests.rs"]
+mod resource_tests;

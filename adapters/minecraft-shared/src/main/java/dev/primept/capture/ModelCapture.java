@@ -85,7 +85,7 @@ public final class ModelCapture {
         MemorySegment packet = instances.sealDelta();
         if (packet != null) {
             deltaBytes = Math.toIntExact(packet.byteSize());
-            bridge.submit(packet);
+            bridge.submitInstances(packet);
             instances.acknowledge();
         }
     }

@@ -25,6 +25,7 @@ const FORMATS: [vk::Format; 9] = [
 struct Images {
     input: [u32; 2],
     output: [u32; 2],
+    quality: ReconstructionQuality,
     images: [Image; 9],
     // Engine completion state only; never tagged as an SDK input or BiasCurrentColorHint.
     unresolved: Image,
@@ -135,7 +136,7 @@ impl Reconstruction {
         if self
             .images
             .as_ref()
-            .is_none_or(|images| images.output != output)
+            .is_none_or(|images| images.output != output || images.quality != quality)
         {
             // Reconfiguration can release SDK-private history, so first prove its last use complete.
             if self.last_serial > completed {
@@ -156,6 +157,7 @@ impl Reconstruction {
             self.images = Some(Images {
                 input,
                 output,
+                quality,
                 images,
                 unresolved: Image::with_format(
                     &self.context,

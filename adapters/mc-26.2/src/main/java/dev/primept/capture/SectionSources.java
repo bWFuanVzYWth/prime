@@ -7,6 +7,7 @@ import java.util.BitSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import dev.primept.abi.PrimeAbi.*;
 import net.minecraft.client.renderer.block.BlockStateModelSet;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.block.dispatch.SingleVariant;
@@ -63,11 +64,44 @@ final class SectionSources {
         models = (Map<BlockState, BlockStateModel>)get(MODELS, modelSet);
         resources = new SectionResources(fluidModels, sprites);
     }
-    @SuppressWarnings("unchecked")
-    void section(SourcePages out, int x, int y, int z, LevelChunkSection section) {
+    /** Immutable ready definitions only; unresolved multipart selection waits for actual demand. */
+    void prepareResources(McSourceBatch out) {
         sprites.prepareAtlas(out);
+        for (BlockState state : Block.BLOCK_STATE_REGISTRY)
+            if (ready(models.get(state), new IdentityHashMap<>()))
+                state(out, state);
+    }
+    @SuppressWarnings("unchecked")
+    private boolean ready(Object value, IdentityHashMap<Object, Boolean> visiting) {
+        if (value == null || definitions.containsKey(value))
+            return true;
+        if (visiting.put(value, true) != null)
+            return false;
+        if (value.getClass() == SingleVariant.class) {
+            boolean result = ready(get(SINGLE, value), visiting);
+            visiting.remove(value);
+            return result;
+        }
+        if (value.getClass() == WeightedVariants.class) {
+            for (var entry : ((WeightedList<BlockStateModel>)get(WEIGHTED, value)).unwrap())
+                if (!ready(entry.value(), visiting))
+                    return false;
+        } else if (value.getClass() == MultiPartModel.class) {
+            var selected = (List<BlockStateModel>)get(SELECTED, value);
+            if (selected == null)
+                return false;
+            for (var child : selected)
+                if (!ready(child, visiting))
+                    return false;
+        }
+        visiting.remove(value);
+        return true;
+    }
+    @SuppressWarnings("unchecked")
+    void section(McSourceBatch out, McSourceBatch sections, int x, int y, int z,
+                 LevelChunkSection section) {
         if (section == null) {
-            out.i(3).i(x).i(y).i(z).i(0);
+            sections.section(x, y, z, 0, new int[0], new long[0], false);
             return;
         }
         var container = section.getStates();
@@ -86,23 +120,16 @@ final class SectionSources {
                 for (int i = 0; i < palette.getSize(); ++i)
                     state(out, palette.valueFor(i));
             }
-            long[] words = storage.getRaw();
-            out.i(3).i(x)
-                    .i(y)
-                    .i(z)
-                    .i(1)
-                    .i(storage.getBits())
-                    .i(global ? 0 : palette.getSize())
-                    .i(words.length);
+            int[] ids = new int[global ? 0 : palette.getSize()];
             if (!global)
                 for (int i = 0; i < palette.getSize(); ++i)
-                    out.i(Block.getId(palette.valueFor(i)));
-            out.longs(words);
+                    ids[i] = Block.getId(palette.valueFor(i));
+            sections.section(x, y, z, storage.getBits(), ids, storage.getRaw(), true);
         } finally {
             container.release();
         }
     }
-    private void state(SourcePages out, BlockState state) {
+    private void state(McSourceBatch out, BlockState state) {
         int id = Block.getId(state);
         if (states.get(id))
             return;
@@ -114,13 +141,17 @@ final class SectionSources {
                     ((boolean)get(SOLID, state) ? 4 : 0) |
                     (state.getRenderShape() != RenderShape.MODEL ? 16 : 0) |
                     SectionResources.flags(state);
-        out.i(1).i(id).i(flags).i(model).string(
-                BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
-        source.write(out);
-        placement.write(out);
+        var name = out.text(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+        var value = out.states.add();
+        PrimeMcState.id(value, id);
+        PrimeMcState.flags(value, flags);
+        PrimeMcState.model(value, model);
+        name.write(PrimeMcState.name(value));
+        source.write(out, value);
+        placement.write(PrimeMcState.placement(value));
     }
     @SuppressWarnings("unchecked")
-    private int model(SourcePages out, Object value) {
+    private int model(McSourceBatch out, Object value) {
         if (value == null)
             return 0;
         Integer known = definitions.get(value);
@@ -129,17 +160,24 @@ final class SectionSources {
         int id = Math.incrementExact(nextModel);
         nextModel = id;
         definitions.put(value, id);
+        int kind = 0, alias = 0;
+        long childFirst = 0, childCount = 0, quadFirst = 0, quadCount = 0;
         if (value.getClass() == SingleVariant.class) {
-            int child = model(out, get(SINGLE, value));
-            out.i(2).i(id).i(4).i(child);
+            alias = model(out, get(SINGLE, value));
+            kind = 4;
         } else if (value.getClass() == WeightedVariants.class) {
             var entries = ((WeightedList<BlockStateModel>)get(WEIGHTED, value)).unwrap();
             int[] children = new int[entries.size()];
             for (int i = 0; i < children.length; ++i)
                 children[i] = model(out, entries.get(i).value());
-            out.i(2).i(id).i(2).i(children.length);
-            for (int i = 0; i < children.length; ++i)
-                out.i(entries.get(i).weight()).i(children[i]);
+            kind = 2;
+            childFirst = out.children.count();
+            childCount = children.length;
+            for (int i = 0; i < children.length; ++i) {
+                var child = out.children.add();
+                PrimeMcModelChild.weight(child, entries.get(i).weight());
+                PrimeMcModelChild.model(child, children[i]);
+            }
         } else if (value.getClass() == MultiPartModel.class) {
             var selected = (List<BlockStateModel>)get(SELECTED, value);
             if (selected == null) {
@@ -156,9 +194,14 @@ final class SectionSources {
             int[] children = new int[selected.size()];
             for (int i = 0; i < children.length; ++i)
                 children[i] = model(out, selected.get(i));
-            out.i(2).i(id).i(3).i(children.length);
-            for (int child : children)
-                out.i(child);
+            kind = 3;
+            childFirst = out.children.count();
+            childCount = children.length;
+            for (int child : children) {
+                var item = out.children.add();
+                PrimeMcModelChild.weight(item, 1);
+                PrimeMcModelChild.model(item, child);
+            }
         } else if (value instanceof SimpleModelWrapper simple) {
             var groups = new java.util.ArrayList<List<BakedQuad>>(7);
             int size = 0;
@@ -170,23 +213,33 @@ final class SectionSources {
             for (var group : groups)
                 for (var quad : group)
                     sprites.prepare(out, quad.materialInfo().sprite());
-            out.i(2).i(id).i(1).i(size);
+            kind = 1;
+            quadFirst = out.quads.count();
+            quadCount = size;
             for (int face = 0; face < 7; ++face)
                 for (BakedQuad quad : groups.get(face)) {
                     var material = quad.materialInfo();
-                    out.i(face)
-                            .i(material.tintIndex())
-                            .i(material.layer().ordinal())
-                            .i(sprites.prepare(out, material.sprite()))
-                            .i(material.lightEmission());
+                    var item = out.quads.add();
+                    PrimeMcQuad.face(item, face);
+                    PrimeMcQuad.tint(item, material.tintIndex());
+                    PrimeMcQuad.layer(item, material.layer().ordinal());
+                    PrimeMcQuad.sprite(item, sprites.prepare(out, material.sprite()));
+                    PrimeMcQuad.emission(item, material.lightEmission());
                     for (int i = 0; i < 4; ++i) {
                         var p = quad.position(i);
-                        out.f(p.x()).f(p.y()).f(p.z()).l(quad.packedUV(i));
+                        PrimeMcQuad.positions(item, i * 3, p.x());
+                        PrimeMcQuad.positions(item, i * 3 + 1, p.y());
+                        PrimeMcQuad.positions(item, i * 3 + 2, p.z());
+                        PrimeMcQuad.uv_pairs(item, i, quad.packedUV(i));
                     }
                 }
-        } else {
-            out.i(2).i(id).i(0);
         }
+        var record = out.models.add();
+        PrimeMcModel.id(record, id);
+        PrimeMcModel.kind(record, kind);
+        PrimeMcModel.alias(record, alias);
+        new McSourceBatch.Range(childFirst, childCount).write(PrimeMcModel.children(record));
+        new McSourceBatch.Range(quadFirst, quadCount).write(PrimeMcModel.quads(record));
         return id;
     }
     private static Method method(Class<?> type, String name, Class<?>... arguments) {

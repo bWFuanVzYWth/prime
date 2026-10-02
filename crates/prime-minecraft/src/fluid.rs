@@ -12,6 +12,34 @@ pub(crate) struct Fluid {
     pub material: u32,
 }
 impl Fluid {
+    pub fn from_fields(
+        name: &str,
+        level: u32,
+        falling: u32,
+        material: u32,
+    ) -> Result<Self, String> {
+        if level > 8 || falling > 1 {
+            return Err("invalid source fluid properties".into());
+        }
+        let kind = match name {
+            "minecraft:empty" => 0,
+            "minecraft:water" | "minecraft:flowing_water" => 1,
+            "minecraft:lava" | "minecraft:flowing_lava" => 2,
+            _ => 3,
+        };
+        Ok(Self {
+            kind,
+            amount: if kind == 0 {
+                0
+            } else if level == 0 {
+                8
+            } else {
+                level
+            },
+            falling: falling != 0,
+            material,
+        })
+    }
     pub fn read(r: &mut Reader<'_>) -> Result<Self, String> {
         let name = r.string()?;
         let level = r.u32()?;
@@ -52,6 +80,21 @@ pub(crate) struct FluidMaterial {
     pub identities: [u32; 3],
 }
 impl FluidMaterial {
+    pub fn from_typed(value: &prime_abi::PrimeMcFluid) -> Result<(u32, Self), String> {
+        if value.id == 0 || value.layer > 2 || value.flags & !3 != 0 {
+            return Err("invalid fluid material".into());
+        }
+        prime_abi::minecraft::finite(&value.bounds)?;
+        Ok((
+            value.id,
+            Self {
+                layer: value.layer as usize,
+                flags: value.flags,
+                identities: value.identities,
+                sprites: std::array::from_fn(|i| std::array::from_fn(|j| value.bounds[i * 4 + j])),
+            },
+        ))
+    }
     pub fn read(r: &mut Reader<'_>) -> Result<(u32, Self), String> {
         let id = r.u32()?;
         let layer = r.u32()?;
@@ -78,21 +121,33 @@ impl FluidMaterial {
         ))
     }
 }
-/// Host math tables have an explicit resource owner; workers only borrow them.
+/// These version-matched host tables are immutable and shared by resource catalogs.
+#[derive(Clone)]
 pub(crate) struct FluidMath {
+    tables: std::sync::Arc<FluidTables>,
+}
+struct FluidTables {
     sin: Box<[f32]>,
     asin: [f64; 257],
     cos: [f64; 257],
 }
 impl Default for FluidMath {
     fn default() -> Self {
-        let asin = std::array::from_fn(|i| (i as f64 / 256.).asin());
+        static TABLES: std::sync::OnceLock<std::sync::Arc<FluidTables>> =
+            std::sync::OnceLock::new();
         Self {
-            sin: (0..65536)
-                .map(|i| (i as f64 * std::f64::consts::PI * 2. / 65536.).sin() as f32)
-                .collect(),
-            cos: asin.map(f64::cos),
-            asin,
+            tables: TABLES
+                .get_or_init(|| {
+                    let asin = std::array::from_fn(|i| (i as f64 / 256.).asin());
+                    std::sync::Arc::new(FluidTables {
+                        sin: (0..65536)
+                            .map(|i| (i as f64 * std::f64::consts::PI * 2. / 65536.).sin() as f32)
+                            .collect(),
+                        cos: asin.map(f64::cos),
+                        asin,
+                    })
+                })
+                .clone(),
         }
     }
 }
@@ -100,8 +155,8 @@ impl FluidMath {
     fn sin_cos(&self, angle: f32) -> (f32, f32) {
         let index = f64::from(angle) * 10430.378350470453;
         (
-            self.sin[(index as i64 & 65535) as usize],
-            self.sin[((index + 16384.) as i64 & 65535) as usize],
+            self.tables.sin[(index as i64 & 65535) as usize],
+            self.tables.sin[((index + 16384.) as i64 & 65535) as usize],
         )
     }
     fn atan2(&self, mut y: f64, mut x: f64) -> f64 {
@@ -121,8 +176,8 @@ impl FluidMath {
         let bias = f64::from_bits(4805340802404319232);
         let yp = bias + y;
         let index = (yp.to_bits() as u32) as usize;
-        let sd = y * self.cos[index] - x * (yp - bias);
-        let mut theta = self.asin[index] + (6. + sd * sd) * sd * (1. / 6.);
+        let sd = y * self.tables.cos[index] - x * (yp - bias);
+        let mut theta = self.tables.asin[index] + (6. + sd * sd) * sd * (1. / 6.);
         if steep {
             theta = std::f64::consts::FRAC_PI_2 - theta;
         }

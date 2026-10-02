@@ -1,0 +1,10 @@
+[package]
+name = "prime_abi"
+license.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Generated C ABI values and checked synchronous pointer views"
+
+[lints]
+workspace = true

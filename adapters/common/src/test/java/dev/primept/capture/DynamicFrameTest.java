@@ -1,5 +1,8 @@
 package dev.primept.capture;
 
+import java.lang.foreign.MemorySegment;
+import static java.lang.foreign.ValueLayout.*;
+import static dev.primept.abi.PrimeAbi.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.atomic.AtomicReference;
@@ -16,28 +19,33 @@ class DynamicFrameTest {
         try (var frame = new DynamicFrame(64)) {
             frame.begin(7, 19, 30_000_000.25, -3, 77);
             frame.append(5, 2, 4, 4, 36, 4, 16, 20, source);
-            var wire = frame.seal().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
-            assertEquals(240, wire.remaining());
-            assertEquals(Packets.MAGIC, wire.getInt(0));
-            assertEquals(Packets.ABI_VERSION, wire.getInt(4));
-            assertEquals(6, wire.getInt(8));
-            assertEquals(7, wire.getLong(16));
-            assertEquals(19, wire.getLong(24));
-            assertEquals(30_000_000.25, wire.getDouble(32));
-            assertEquals(-3, wire.getDouble(40));
-            assertEquals(77, wire.getDouble(48));
-            assertEquals(1, wire.getInt(56));
-            assertEquals(0, wire.getInt(60));
-            assertArrayEquals(new int[] {5, 2, 4, 4, 36, 4, 16, 20},
-                              new int[] {wire.getInt(64), wire.getInt(68), wire.getInt(72),
-                                         wire.getInt(76), wire.getInt(80), wire.getInt(84),
-                                         wire.getInt(88), wire.getInt(92)});
+            var batch = frame.seal();
+            assertEquals(PrimeDynamicBatch.SIZE, batch.byteSize());
+            assertEquals(PrimeDynamicBatch.SIZE,
+                         PrimeHeader.struct_size(PrimeDynamicBatch.header(batch)));
+            assertEquals(PRIME_ABI_VERSION,
+                         PrimeHeader.abi_version(PrimeDynamicBatch.header(batch)));
+            assertEquals(7, PrimeDynamicBatch.epoch(batch));
+            assertEquals(19, PrimeDynamicBatch.sequence(batch));
+            assertEquals(30_000_000.25, PrimeDynamicBatch.origin(batch, 0));
+            assertEquals(-3, PrimeDynamicBatch.origin(batch, 1));
+            assertEquals(77, PrimeDynamicBatch.origin(batch, 2));
+            assertEquals(1, PrimeDynamicBatch.count(batch));
+            var span = span(batch, 0);
+            assertArrayEquals(
+                    new int[] {5, 2, 4, 4, 36, 4, 16, 20},
+                    new int[] {PrimeMeshSpan.texture_id(span), PrimeMeshSpan.flags(span),
+                               PrimeMeshSpan.topology(span), PrimeMeshSpan.vertex_count(span),
+                               PrimeMeshSpan.stride(span), PrimeMeshSpan.position_offset(span),
+                               PrimeMeshSpan.color_offset(span), PrimeMeshSpan.uv_offset(span)});
+            var wire = vertices(span).asByteBuffer();
+            assertEquals(144, wire.remaining());
             for (int i = 0; i < 144; i++)
-                assertEquals((byte)(i + 7), wire.get(96 + i));
+                assertEquals((byte)(i + 7), wire.get(i));
             assertEquals(7, source.position());
             assertEquals(ByteOrder.BIG_ENDIAN, source.order());
             source.put(7, (byte)0);
-            assertEquals((byte)7, wire.get(96),
+            assertEquals((byte)7, wire.get(0),
                          "Borrowed mesh was copied before its producer released it");
         }
     }
@@ -53,21 +61,21 @@ class DynamicFrameTest {
                 frame.endSpan();
             }
             var packet = frame.seal();
-            var wire = packet.asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
+            var descriptor = span(packet, 0);
+            var wire = vertices(descriptor).asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
             assertEquals(1, frame.spanCount());
             assertEquals(16_384, frame.vertexCount());
-            assertEquals(64 + 32 + 16_384 * 24, packet.byteSize());
-            assertEquals(16_384, wire.getInt(76));
+            assertEquals(64 + 48 + 16_384 * 24, frame.byteSize());
+            assertEquals(16_384, PrimeMeshSpan.vertex_count(descriptor));
             assertEquals(4095, wire.getFloat(wire.limit() - 24));
-            assertArrayEquals(
-                    new byte[] {0x40, 0x20, 0x10, (byte)0x80},
-                    new byte[] {wire.get(108), wire.get(109), wire.get(110), wire.get(111)});
+            assertArrayEquals(new byte[] {0x40, 0x20, 0x10, (byte)0x80},
+                              new byte[] {wire.get(12), wire.get(13), wire.get(14), wire.get(15)});
             long address = packet.address();
             int growths = frame.growthCount();
             frame.begin(1, 2, 0, 0, 0);
             var empty = frame.seal();
             assertEquals(64, empty.byteSize());
-            assertEquals(0, empty.asByteBuffer().order(ByteOrder.LITTLE_ENDIAN).getInt(56));
+            assertEquals(0, PrimeDynamicBatch.count(empty));
             assertEquals(address, empty.address());
             assertEquals(growths, frame.growthCount());
         }
@@ -82,14 +90,14 @@ class DynamicFrameTest {
             frame.endSpan();
             quad(frame, 1, 0);
             quad(frame, 1, 2);
-            var wire = frame.seal().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
-            assertEquals(2, wire.getInt(56));
-            assertEquals(8, wire.getInt(76));
-            int second = 64 + 32 + 8 * 24;
-            assertEquals(1, wire.getInt(second));
-            assertEquals(2, wire.getInt(second + 4));
-            assertEquals(4, wire.getInt(second + 12));
-            assertEquals(second + 32 + 4 * 24, wire.limit());
+            var batch = frame.seal();
+            assertEquals(2, PrimeDynamicBatch.count(batch));
+            assertEquals(8, PrimeMeshSpan.vertex_count(span(batch, 0)));
+            var second = span(batch, 1);
+            assertEquals(1, PrimeMeshSpan.texture_id(second));
+            assertEquals(2, PrimeMeshSpan.flags(second));
+            assertEquals(4, PrimeMeshSpan.vertex_count(second));
+            assertEquals(64 + 2 * 48 + 12 * 24, frame.byteSize());
         }
     }
 
@@ -118,13 +126,13 @@ class DynamicFrameTest {
                     frame.append(3, 1, 4, vertices, stride, 0, 12, 16, source);
                 }
                 var packet = frame.seal();
-                var wire = packet.asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
+                var wire = vertices(span(packet, 0)).asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
                 assertEquals(1, frame.spanCount());
                 assertEquals(objects * vertices, frame.vertexCount());
-                assertEquals(96L + (long)objects * vertices * stride, packet.byteSize());
+                assertEquals(64L + 48L + (long)objects * vertices * stride, frame.byteSize());
                 for (int object = 0; object < objects; object++)
                     assertEquals(object + iteration * objects,
-                                 wire.getInt(96 + object * vertices * stride + 32));
+                                 wire.getInt(object * vertices * stride + 32));
                 assertEquals(0, source.position());
                 if (iteration == 0) {
                     warmedAddress = packet.address();
@@ -175,6 +183,16 @@ class DynamicFrameTest {
         assertThrows(IllegalStateException.class, () -> frame.begin(1, 2, 0, 0, 0));
     }
 
+    private static MemorySegment span(MemorySegment batch, long index) {
+        assertTrue(index < PrimeDynamicBatch.count(batch));
+        return PrimeDynamicBatch.spans(batch)
+                .reinterpret(Math.multiplyExact(PrimeDynamicBatch.count(batch), PrimeMeshSpan.SIZE))
+                .asSlice(index * PrimeMeshSpan.SIZE, PrimeMeshSpan.SIZE);
+    }
+    private static MemorySegment vertices(MemorySegment span) {
+        var bytes = PrimeMeshSpan.vertices(span);
+        return PrimeByteSpan.data(bytes).reinterpret(PrimeByteSpan.count(bytes));
+    }
     private static void quad(DynamicFrame frame, int texture, int flags) {
         frame.beginSpan(texture, flags, 4);
         for (int corner = 0; corner < 4; corner++)

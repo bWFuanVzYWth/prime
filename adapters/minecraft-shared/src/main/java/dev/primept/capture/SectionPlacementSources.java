@@ -3,6 +3,8 @@ package dev.primept.capture;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.IdentityHashMap;
+import java.lang.foreign.MemorySegment;
+import dev.primept.abi.PrimeAbi.PrimeMcPlacement;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.DoublePlantBlock;
@@ -29,8 +31,11 @@ final class SectionPlacementSources {
         this.bedSeedDeclaration = bedSeedDeclaration;
     }
     record Placement(int offset, float horizontal, float vertical, int seed) {
-        void write(SourcePages out) {
-            out.i(offset).f(horizontal).f(vertical).i(seed);
+        void write(MemorySegment out) {
+            PrimeMcPlacement.offset(out, offset);
+            PrimeMcPlacement.horizontal(out, horizontal);
+            PrimeMcPlacement.vertical(out, vertical);
+            PrimeMcPlacement.seed(out, seed);
         }
         boolean hasOffset() {
             return offset != 0;

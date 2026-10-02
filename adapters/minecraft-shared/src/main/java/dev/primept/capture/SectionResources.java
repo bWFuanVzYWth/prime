@@ -3,6 +3,9 @@ package dev.primept.capture;
 import java.lang.reflect.Field;
 import java.util.BitSet;
 import java.util.IdentityHashMap;
+import java.lang.foreign.MemorySegment;
+import dev.primept.abi.PrimeAbi.*;
+import static java.lang.foreign.ValueLayout.JAVA_DOUBLE;
 import net.minecraft.client.renderer.block.FluidModel;
 import net.minecraft.client.renderer.block.FluidStateModelSet;
 import net.minecraft.core.Direction;
@@ -34,13 +37,18 @@ final class SectionResources {
     }
     record StateSource(int[] faces, int support, String fluid, int level, boolean falling,
                        int material, int emission) {
-        void write(SourcePages out) {
-            for (int face : faces)
-                out.i(face);
-            out.i(support).string(fluid).i(level).i(falling ? 1 : 0).i(material).i(emission);
+        void write(McSourceBatch out, MemorySegment value) {
+            for (int i = 0; i < 6; i++)
+                PrimeMcState.faces(value, i, faces[i]);
+            PrimeMcState.support(value, support);
+            out.text(fluid).write(PrimeMcState.fluid_name(value));
+            PrimeMcState.fluid_level(value, level);
+            PrimeMcState.fluid_falling(value, falling ? 1 : 0);
+            PrimeMcState.fluid_material(value, material);
+            PrimeMcState.emission(value, emission);
         }
     }
-    StateSource prepare(SourcePages out, BlockState state) {
+    StateSource prepare(McSourceBatch out, BlockState state) {
         var shapes = (VoxelShape[])get(FACES, state);
         int[] ids = new int[6];
         for (var face : Direction.values())
@@ -80,7 +88,7 @@ final class SectionResources {
                          : 0) |
                 (state.getBlock() instanceof LeavesBlock ? 1024 : 0);
     }
-    private int fluid(SourcePages out, FluidModel model) {
+    private int fluid(McSourceBatch out, FluidModel model) {
         Integer known = fluids.get(model);
         if (known != null)
             return known;
@@ -90,20 +98,26 @@ final class SectionResources {
         sprites.prepare(out, model.flowingMaterial().sprite());
         if (model.overlayMaterial() != null)
             sprites.prepare(out, model.overlayMaterial().sprite());
-        out.i(5).i(id)
-                .i(model.layer().ordinal())
-                .i((model.tintSource() != null ? 1 : 0) |
-                   (model.overlayMaterial() != null ? 2 : 0));
+        var value = out.fluids.add();
+        PrimeMcFluid.id(value, id);
+        PrimeMcFluid.layer(value, model.layer().ordinal());
+        PrimeMcFluid.flags(value, (model.tintSource() != null ? 1 : 0) |
+                                          (model.overlayMaterial() != null ? 2 : 0));
+        int index = 0;
         for (var material : new net.minecraft.client.resources.model.sprite.Material.Baked[] {
                      model.stillMaterial(), model.flowingMaterial(),
                      model.overlayMaterial() != null ? model.overlayMaterial()
                                                      : model.flowingMaterial()}) {
             var s = material.sprite();
-            out.i(sprites.prepare(out, s)).f(s.getU0()).f(s.getV0()).f(s.getU1()).f(s.getV1());
+            PrimeMcFluid.identities(value, index, sprites.prepare(out, s));
+            float[] bounds = {s.getU0(), s.getV0(), s.getU1(), s.getV1()};
+            for (int i = 0; i < 4; i++)
+                PrimeMcFluid.bounds(value, index * 4 + i, bounds[i]);
+            index++;
         }
         return id;
     }
-    private int face(SourcePages out, VoxelShape shape, Direction.Axis normal) {
+    private int face(McSourceBatch out, VoxelShape shape, Direction.Axis normal) {
         if (shape == Shapes.empty())
             return 0;
         if (shape == Shapes.block())
@@ -130,12 +144,18 @@ final class SectionResources {
                     bits.set(a * nv + b);
             }
         long[] words = bits.toLongArray();
-        out.i(4).i(id).i(us.size()).i(vs.size()).i(words.length);
+        long firstU = out.coordinates.count();
         for (double c : us)
-            out.d(c);
+            out.coordinates.add().set(JAVA_DOUBLE, 0, c);
+        long firstV = out.coordinates.count();
         for (double c : vs)
-            out.d(c);
-        out.longs(words);
+            out.coordinates.add().set(JAVA_DOUBLE, 0, c);
+        var wordRange = out.words.longs(words);
+        var value = out.faces.add();
+        PrimeMcFace.id(value, id);
+        new McSourceBatch.Range(firstU, us.size()).write(PrimeMcFace.u(value));
+        new McSourceBatch.Range(firstV, vs.size()).write(PrimeMcFace.v(value));
+        wordRange.write(PrimeMcFace.words(value));
         return id;
     }
     private static Field field(Class<?> type, String name) {

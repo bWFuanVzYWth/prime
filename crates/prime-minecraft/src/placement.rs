@@ -10,6 +10,28 @@ pub(crate) struct Placement {
 }
 
 impl Placement {
+    pub fn from_typed(
+        value: prime_abi::PrimeMcPlacement,
+        has_offset: bool,
+    ) -> Result<Self, String> {
+        prime_abi::minecraft::finite(&[value.horizontal, value.vertical])?;
+        if value.offset > 3
+            || value.seed > 6
+            || has_offset != (value.offset != 0)
+            || value.horizontal < 0.
+            || value.vertical < 0.
+            || (matches!(value.offset, 0 | 3) && (value.horizontal != 0. || value.vertical != 0.))
+            || (value.offset == 1 && value.vertical != 0.)
+        {
+            return Err("invalid source placement declaration".into());
+        }
+        Ok(Self {
+            offset: value.offset,
+            horizontal: value.horizontal,
+            vertical: value.vertical,
+            seed: value.seed,
+        })
+    }
     pub const NONE: Self = Self {
         offset: 0,
         horizontal: 0.0,

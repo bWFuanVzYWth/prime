@@ -74,7 +74,20 @@ impl Renderer {
     }
 
     pub fn with_mode(mode: RenderMode) -> Result<Self, String> {
-        Self::from_context(Context::new()?, mode)
+        Self::with_settings_and_workers(
+            RenderSettings {
+                mode,
+                ..Default::default()
+            },
+            Arc::new(prime_scene::workers::CpuWorkers::configured()?),
+        )
+    }
+
+    pub fn with_settings_and_workers(
+        settings: RenderSettings,
+        workers: Arc<prime_scene::workers::CpuWorkers>,
+    ) -> Result<Self, String> {
+        Self::from_context(Context::new()?, settings, workers)
     }
 
     /// # Safety
@@ -116,7 +129,11 @@ impl Renderer {
     ) -> Result<Self, String> {
         Self::from_context(
             unsafe { Context::borrowed(instance, physical, device, queue, family, timeline)? },
-            mode,
+            RenderSettings {
+                mode,
+                ..Default::default()
+            },
+            Arc::new(prime_scene::workers::CpuWorkers::configured()?),
         )
     }
 
@@ -134,6 +151,38 @@ impl Renderer {
         mode: RenderMode,
         capabilities: u32,
     ) -> Result<Self, String> {
+        unsafe {
+            Self::borrowed_with_settings_and_workers(
+                instance,
+                physical,
+                device,
+                queue,
+                family,
+                timeline,
+                capabilities,
+                RenderSettings {
+                    mode,
+                    ..Default::default()
+                },
+                Arc::new(prime_scene::workers::CpuWorkers::configured()?),
+            )
+        }
+    }
+
+    /// # Safety
+    /// Same borrowed-device and completion contract as borrowed_mode_with_capabilities.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn borrowed_with_settings_and_workers(
+        instance: u64,
+        physical: u64,
+        device: u64,
+        queue: u64,
+        family: u32,
+        timeline: u64,
+        capabilities: u32,
+        settings: RenderSettings,
+        workers: Arc<prime_scene::workers::CpuWorkers>,
+    ) -> Result<Self, String> {
         Self::from_context(
             unsafe {
                 Context::borrowed_with_capabilities(
@@ -146,36 +195,52 @@ impl Renderer {
                     capabilities,
                 )?
             },
-            mode,
+            settings,
+            workers,
         )
     }
 
-    fn from_context(context: Arc<Context>, mode: RenderMode) -> Result<Self, String> {
+    fn from_context(
+        context: Arc<Context>,
+        settings: RenderSettings,
+        workers: Arc<prime_scene::workers::CpuWorkers>,
+    ) -> Result<Self, String> {
+        settings.validate()?;
         let cpu_profile = CpuProfile::default();
         let mut reconstruction_error = None;
-        let reconstruction = (mode == RenderMode::Realtime)
+        let reconstruction = (settings.mode == RenderMode::Realtime && settings.ray_reconstruction)
             .then(|| reconstruction::Reconstruction::new(&context, &mut reconstruction_error))
             .flatten();
-        let pipeline = Some(Pipeline::new(&context, mode, reconstruction.is_some())?);
+        let energy_lut = openpbr::EnergyLut::new(&context)?;
+        let pipeline = Some(Pipeline::new(
+            &context,
+            settings.mode,
+            reconstruction.is_some(),
+            &energy_lut,
+        )?);
         let mut result = Self {
             context,
             pipeline,
+            energy_lut,
             reconstruction,
             reconstruction_error,
             geometry: None,
+            scene_resources: None,
             atmosphere: None,
             atmosphere_scene_revision: 0,
             environment: Default::default(),
-            workers: Arc::new(prime_scene::workers::CpuWorkers::configured()?),
+            workers,
             output: None,
             camera: None,
             samples: 0,
             frame_seed: 0,
-            display: PrimeDrtSettings::default().prepare(1.0)?,
-            settings: RenderSettings {
-                mode,
-                ..Default::default()
-            },
+            display: PrimeDrtSettings {
+                exposure_multiplier: settings.exposure,
+                hue_compensation: settings.hue,
+                saturation_compensation: settings.saturation,
+            }
+            .prepare(1.0)?,
+            settings,
             scene_frozen: false,
             failed: false,
             host_serials: [0; FRAME_SLOTS],
@@ -202,7 +267,65 @@ impl Renderer {
             result.context.name,
             result.context.is_borrowed()
         );
+        if !result.context.is_borrowed() {
+            result.prepare_fixed_resources()?;
+        }
         Ok(result)
+    }
+
+    fn prepare_fixed_resources(&mut self) -> Result<(), String> {
+        self.energy_lut.prepare()?;
+        if self.atmosphere.is_none() {
+            self.atmosphere = Some(atmosphere::Atmosphere::new(&self.context)?);
+        }
+        Ok(())
+    }
+
+    fn prepare_scene_resources(
+        &mut self,
+        scene: SceneInput<'_>,
+        completed: u64,
+    ) -> Result<(), String> {
+        self.prepare_fixed_resources()?;
+        if let Some(owner) = &self.scene_resources {
+            let mut resources = owner.borrow_mut();
+            let previous = resources.revision;
+            resources.begin(&self.context, completed);
+            resources.prepare(&self.context, scene)?;
+            if resources.revision != previous {
+                self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
+            }
+        } else {
+            self.scene_resources =
+                Some(scene_resources::SceneResources::new(&self.context, scene)?);
+            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
+        }
+        Ok(())
+    }
+
+    /// Prepare immutable assets and the published texture/OMM resource generation without
+    /// constructing terrain or a TLAS. This may precede a PT frame in the same submission.
+    /// # Safety
+    /// `command` is an active host command buffer on the attached queue. The caller submits
+    /// it in order and signals `serial`; host ownership and cancellation rules match record_host.
+    pub unsafe fn prepare_host_resources(
+        &mut self,
+        scene: SceneInput<'_>,
+        command: u64,
+        serial: u64,
+    ) -> Result<(), String> {
+        if self.failed || !self.context.is_borrowed() || command == 0 || serial == 0 {
+            return Err("Invalid host resource preparation state".into());
+        }
+        self.failed = true;
+        let command = vk::CommandBuffer::from_raw(command);
+        let completed = self.context.begin_host_record(command, serial)?;
+        let _scope = HostRecordScope(self.context.clone());
+        self.before_frame(command);
+        self.prepare_scene_resources(scene, completed)?;
+        self.before_frame(command);
+        self.failed = false;
+        Ok(())
     }
 
     pub fn device_name(&self) -> &str {
@@ -231,8 +354,7 @@ impl Renderer {
         .prepare(1.0)?;
         if settings.mode != self.settings.mode
             || settings.mode == RenderMode::Realtime
-                && (settings.ray_reconstruction != self.settings.ray_reconstruction
-                    || settings.reconstruction_quality != self.settings.reconstruction_quality)
+                && settings.ray_reconstruction != self.settings.ray_reconstruction
         {
             self.failed = true;
             self.context.wait_host_idle()?;
@@ -254,11 +376,15 @@ impl Renderer {
                 &self.context,
                 settings.mode,
                 self.reconstruction.is_some(),
+                &self.energy_lut,
             )?);
             self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
             self.samples = 0;
             self.failed = false;
-        } else if !settings.transport_matches(self.settings) {
+        } else if !settings.transport_matches(self.settings)
+            || settings.mode == RenderMode::Realtime
+                && settings.reconstruction_quality != self.settings.reconstruction_quality
+        {
             self.samples = 0;
             if let Some(rr) = &mut self.reconstruction {
                 rr.reset();
@@ -283,6 +409,43 @@ impl Renderer {
     /// The source stays immutable until thawed; queued geometry may finish publishing under its budget.
     pub fn set_scene_frozen(&mut self, frozen: bool) {
         self.scene_frozen = frozen;
+    }
+
+    /// Release the old world's geometry and frame storage without rebuilding device resources.
+    /// The host must submit and complete its previous work before this world boundary.
+    pub fn reset_world(&mut self) -> Result<(), String> {
+        if self.failed {
+            return Err("Cannot reset a failed renderer".into());
+        }
+        self.failed = true;
+        let completed = self.context.completed_serial()?;
+        if completed < self.context.retirement_serial() {
+            return Err("World reset requires completed host work".into());
+        }
+        drop(self.geometry.take());
+        drop(self.output.take());
+        if let Some(rr) = &mut self.reconstruction {
+            rr.reset();
+        }
+        if let Some(resources) = &self.scene_resources {
+            let mut resources = resources.borrow_mut();
+            resources.collect();
+            resources.begin(&self.context, completed);
+        }
+        // Resource drops enqueue native destruction. Drain it now, even if no later world is drawn.
+        self.context.completed_serial()?;
+        self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
+        self.host_serials = [0; FRAME_SLOTS];
+        self.query_serials = [0; FRAME_SLOTS];
+        self.gpu_intervals = [GpuIntervals::default(); FRAME_SLOTS];
+        self.last_gpu = GpuIntervals::default();
+        self.camera = None;
+        self.samples = 0;
+        self.frame_seed = 0;
+        self.scene_frozen = false;
+        self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
+        self.failed = false;
+        Ok(())
     }
 
     pub fn set_environment(
@@ -481,6 +644,7 @@ impl Renderer {
         {
             return Err("Camera contains invalid vectors or vertical FOV".into());
         }
+        self.prepare_scene_resources(scene, completed)?;
         if let Some(geometry) = &mut self.geometry {
             geometry.begin_frame(&self.context, completed);
         }
@@ -496,7 +660,7 @@ impl Renderer {
                 let published_changed = if let Some(geometry) = &mut self.geometry
                     && geometry.same_owner(scene)
                 {
-                    geometry.update_limited(
+                    geometry.update_prepared(
                         &self.context,
                         scene,
                         self.settings.terrain_batches_per_frame as usize,
@@ -508,12 +672,13 @@ impl Renderer {
                     }
                     // Borrowed GPU resources still retire by their recorded completion serials.
                     self.geometry.take();
-                    self.geometry = Some(Geometry::new_with_budget(
+                    self.geometry = Some(Geometry::new_with_resources(
                         &self.context,
                         scene,
                         self.workers.clone(),
                         self.settings.opacity_micromap,
                         self.settings.terrain_batches_per_frame as usize,
+                        self.scene_resources.as_ref().unwrap().clone(),
                     )?);
                     true
                 };
@@ -588,21 +753,17 @@ impl Renderer {
                     .wait_host_serial(*self.host_serials.iter().max().unwrap())?;
                 drop(self.reconstruction.take());
                 drop(self.pipeline.take());
-                self.pipeline = Some(Pipeline::new(&self.context, self.settings.mode, false)?);
+                self.pipeline = Some(Pipeline::new(
+                    &self.context,
+                    self.settings.mode,
+                    false,
+                    &self.energy_lut,
+                )?);
                 self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
                 eprintln!("[Prime PT] DLSS RR setup failed; using native raw output: {message}");
                 self.reconstruction_error = Some(message);
             }
         }
-        // RR setup may replace the pipeline. Initialize the LUT of the final
-        // pipeline before descriptors and the PT dispatch consume it.
-        self.pipeline
-            .as_mut()
-            .unwrap()
-            .energy_lut
-            .as_mut()
-            .unwrap()
-            .prepare()?;
         if self.settings.mode == RenderMode::Realtime {
             // RR setup/failure has now selected the actual render extent. Scratch is GPU-only,
             // reused on this queue and retired through Buffer's host serial proof on resize.
@@ -627,9 +788,6 @@ impl Renderer {
             )?;
         }
         cpu.finish(Stage::Output, started);
-        if self.atmosphere.is_none() {
-            self.atmosphere = Some(crate::atmosphere::Atmosphere::new(&self.context)?);
-        }
         self.atmosphere.as_mut().unwrap().prepare(
             self.environment,
             camera,
@@ -644,12 +802,13 @@ impl Renderer {
 
     fn descriptors(&mut self, slot: usize, view: vk::ImageView) {
         let geometry = self.geometry.as_ref().unwrap();
+        let textures = geometry.textures();
         let output = self.output.as_ref().unwrap();
         let accumulation = output.accumulation.as_ref();
         let key = [
             geometry.top.handle().as_raw(),
-            geometry.textures.metadata.buffer.as_raw(),
-            geometry.textures.texels.buffer.as_raw(),
+            textures.metadata.buffer.as_raw(),
+            textures.texels.buffer.as_raw(),
             view.as_raw(),
             geometry.objects.metadata.buffer.as_raw(),
             geometry.static_bases.buffer.as_raw(),
@@ -683,8 +842,8 @@ impl Renderer {
         let mut acceleration = vk::WriteDescriptorSetAccelerationStructureKHR::default()
             .acceleration_structures(&handles);
         let buffers = [
-            &geometry.textures.metadata,
-            &geometry.textures.texels,
+            &textures.metadata,
+            &textures.texels,
             &geometry.objects.metadata,
             &geometry.static_bases,
         ];
@@ -1068,7 +1227,12 @@ impl Renderer {
                 .and_then(|rr| rr.last_error().map(str::to_owned));
             drop(self.reconstruction.take());
             drop(self.pipeline.take());
-            self.pipeline = Some(Pipeline::new(&self.context, self.settings.mode, false)?);
+            self.pipeline = Some(Pipeline::new(
+                &self.context,
+                self.settings.mode,
+                false,
+                &self.energy_lut,
+            )?);
             self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
         }
         // A contained FFI panic must still release the recording scope.

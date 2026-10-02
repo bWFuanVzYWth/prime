@@ -22,7 +22,7 @@ impl SourceRoutes {
             return Ok(());
         }
         if self.workers.is_none() {
-            self.workers = Some(CpuWorkers::configured()?);
+            self.workers = Some(std::sync::Arc::new(CpuWorkers::configured()?));
         }
         let start = triangles.len();
         triangles.resize(start + raw.len() / 52 * 2, EMPTY_TRIANGLE);

@@ -1,6 +1,8 @@
 package dev.primept.capture;
 
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.Arena;
+import dev.primept.abi.PrimeAbi.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Path;
@@ -74,9 +76,10 @@ final class SectionTintOracle {
         var chosen = new BlockPos.MutableBlockPos();
         var pos = new BlockPos.MutableBlockPos();
         var random = new Random(0x6ab739de);
-        try (var out = new SourcePages()) {
+        try (var out = new SourcePages(); var typed = new McSourceBatch()) {
             out.header(SectionSources.GAME_VERSION, 90, 1, 1);
-            SectionBiomes.definitions(out, new BiomeManager((x, y, z) -> holder, 0));
+            SectionBiomes.definitions(typed, new BiomeManager((x, y, z) -> holder, 0));
+            SourceFixtureWire.definitions(typed, out);
             out.i(65536);
             for (long seed : new long[] {0, -1, Long.MIN_VALUE, 0x123456789abcdefL}) {
                 var manager = new BiomeManager((x, y, z) -> {
@@ -101,7 +104,9 @@ final class SectionTintOracle {
             }
             out.i(biomes.size());
             for (var biome : biomes) {
-                SectionBiomes.fields(out, biome);
+                typed.biomes.clear();
+                SectionBiomes.fields(typed, biome);
+                SourceFixtureWire.biome(typed.biomes.get(0), out);
                 out.i(8192);
                 for (int i = 0; i < 8192; ++i) {
                     int x = i < 4096 ? (i & 63) - 32 : random.nextInt(60000001) - 30000000;
@@ -155,22 +160,30 @@ final class SectionTintOracle {
         states.add(Blocks.STONE.defaultBlockState());
         slots.add(99);
         expected.add(-1);
-        var request = ByteBuffer.allocate(32 + states.size() * 20).order(ByteOrder.LITTLE_ENDIAN);
-        request.putLong(1)
-                .putLong(states.size())
-                .putLong(1)
-                .putInt(SectionSources.GAME_VERSION)
-                .putInt(2);
-        for (int i = 0; i < states.size(); ++i)
-            request.putInt(8)
-                    .putInt(8)
-                    .putInt(8)
-                    .putInt(Block.getId(states.get(i)))
-                    .putInt(slots.get(i));
-        try (var out = new SourcePages()) {
+        try (var arena = Arena.ofConfined(); var typed = new McSourceBatch();
+             var out = new SourcePages()) {
+            var request = arena.allocate(PrimeMcRequests.LAYOUT);
+            request.fill((byte)0);
+            McSourceBatch.identity(PrimeMcRequests.identity(request), PrimeMcRequests.SIZE,
+                                   SectionSources.GAME_VERSION, 1, 1, 1);
+            PrimeMcRequests.phase(request, 2);
+            PrimeMcRequests.color_count(request, states.size());
+            var requests =
+                    arena.allocate(Math.multiplyExact(states.size(), PrimeMcColorRequest.SIZE),
+                                   PrimeMcColorRequest.ALIGN);
+            requests.fill((byte)0);
+            PrimeMcRequests.colors(request, requests);
+            for (int i = 0; i < states.size(); i++) {
+                var item = requests.asSlice(i * PrimeMcColorRequest.SIZE, PrimeMcColorRequest.SIZE);
+                PrimeMcColorRequest.x(item, 8);
+                PrimeMcColorRequest.y(item, 8);
+                PrimeMcColorRequest.z(item, 8);
+                PrimeMcColorRequest.state(item, Block.getId(states.get(i)));
+                PrimeMcColorRequest.slot(item, slots.get(i));
+            }
             world.rejectColorCallbacks = true;
-            SectionTints.respond(MemorySegment.ofArray(request.array()), out, world, colors, null,
-                                 world);
+            var result = SectionTints.respond(request, typed, world, colors, null, world);
+            SourceFixtureWire.colors(typed, result, false, out, 0);
             if (calls[0] != 1)
                 throw new AssertionError("Custom tint callback must run exactly once, got " +
                                          calls[0]);

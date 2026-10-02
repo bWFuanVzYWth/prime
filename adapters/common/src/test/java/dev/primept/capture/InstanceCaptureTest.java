@@ -1,5 +1,8 @@
 package dev.primept.capture;
 
+import java.lang.foreign.MemorySegment;
+import static java.lang.foreign.ValueLayout.*;
+import static dev.primept.abi.PrimeAbi.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import org.junit.jupiter.api.Test;
@@ -23,30 +26,34 @@ class InstanceCaptureTest {
                             0x80402010, uv);
             context.endFrame();
             var packet = context.sealDelta();
-            var bytes = packet.asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
-            assertEquals(328, packet.byteSize());
-            assertEquals(Packets.MAGIC, bytes.getInt(0));
-            assertEquals(7, bytes.getInt(8));
-            assertEquals(7, bytes.getLong(16));
-            assertEquals(1, bytes.getLong(24));
-            assertEquals(1, bytes.getInt(32));
-            assertEquals(0, bytes.getInt(36));
-            assertEquals(1, bytes.getInt(40));
-            assertEquals(0, bytes.getInt(44));
-            assertEquals(prototype.id(), bytes.getLong(48));
-            assertEquals(0, bytes.getFloat(104), "Source was owned before the producer changed it");
-            int offset = 200;
-            assertEquals(instance.id(), bytes.getLong(offset));
-            assertEquals(prototype.id(), bytes.getLong(offset + 16));
-            assertEquals(29_999_999.25, bytes.getDouble(offset + 24));
+            assertEquals(PrimeInstanceBatch.SIZE, packet.byteSize());
+            assertEquals(PrimeInstanceBatch.SIZE,
+                         PrimeHeader.struct_size(PrimeInstanceBatch.header(packet)));
+            assertEquals(PRIME_ABI_VERSION,
+                         PrimeHeader.abi_version(PrimeInstanceBatch.header(packet)));
+            assertEquals(7, PrimeInstanceBatch.epoch(packet));
+            assertEquals(1, PrimeInstanceBatch.sequence(packet));
+            counts(packet, 1, 0, 1, 0);
+            var definition =
+                    PrimeInstanceBatch.prototypes(packet).reinterpret(PrimePrototypeSource.SIZE);
+            assertEquals(prototype.id(), PrimePrototypeSource.id(definition));
+            var span = PrimePrototypeSource.spans(definition).reinterpret(PrimeMeshSpan.SIZE);
+            var payload = PrimeMeshSpan.vertices(span);
+            assertEquals(96, PrimeByteSpan.count(payload));
+            assertEquals(0, PrimeByteSpan.data(payload).reinterpret(96).get(JAVA_FLOAT, 0),
+                         "Source was owned before the producer changed it");
+            var value = instance(packet);
+            assertEquals(instance.id(), PrimeInstanceSource.id(value));
+            assertEquals(prototype.id(), PrimeInstanceSource.prototype_id(value));
+            assertEquals(29_999_999.25, PrimeInstanceSource.origin(value, 0));
             for (int i = 0; i < 12; i++)
-                assertEquals(transform[i], bytes.getFloat(offset + 48 + 4 * i));
-            assertEquals(19, bytes.getInt(offset + 96));
-            assertEquals(2, bytes.getInt(offset + 100));
-            assertEquals(0x80102040, bytes.getInt(offset + 104));
-            assertEquals(0, bytes.getInt(offset + 108));
+                assertEquals(transform[i], PrimeInstanceSource.transform(value, i));
+            assertEquals(19, PrimeInstanceSource.texture_id(value));
+            assertEquals(2, PrimeInstanceSource.flags(value));
+            assertEquals(0x80102040, PrimeInstanceSource.rgba(value));
+            assertEquals(0, PrimeInstanceSource.reserved(value));
             for (int i = 0; i < 4; i++)
-                assertEquals(uv[i], bytes.getFloat(offset + 112 + 4 * i));
+                assertEquals(uv[i], PrimeInstanceSource.uv_transform(value, i));
             assertThrows(IllegalStateException.class, context::beginFrame);
             context.acknowledge();
         }
@@ -64,7 +71,8 @@ class InstanceCaptureTest {
             }
             context.endFrame();
             var initial = context.sealDelta();
-            assertEquals(48 + 56 + 96 + 10_000 * 128, initial.byteSize());
+            assertEquals(88 + 32 + 48 + 96 + 10_000 * 128, context.stats().bytes());
+            counts(initial, 1, 0, 10_000, 0);
             int capacity = context.stats().capacity(), growths = context.stats().growths();
             context.acknowledge();
 
@@ -80,11 +88,10 @@ class InstanceCaptureTest {
             for (int i = 0; i < instances.length; i++)
                 observe(context, instances[i], prototype, i == 5432 ? i + .5 : i);
             context.endFrame();
-            var change = context.sealDelta().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
-            assertEquals(176, change.remaining());
-            assertEquals(0, change.getInt(32));
-            assertEquals(1, change.getInt(40));
-            assertEquals(instances[5432].id(), change.getLong(48));
+            var change = context.sealDelta();
+            assertEquals(88 + 128, context.stats().bytes());
+            counts(change, 0, 0, 1, 0);
+            assertEquals(instances[5432].id(), PrimeInstanceSource.id(instance(change)));
             assertEquals(capacity, context.stats().capacity());
             assertEquals(growths, context.stats().growths());
             context.acknowledge();
@@ -103,19 +110,22 @@ class InstanceCaptureTest {
             context.acknowledge();
             context.beginFrame();
             context.endFrame();
-            var removal = context.sealDelta().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
-            assertEquals(64, removal.remaining());
-            assertEquals(1, removal.getInt(44));
-            assertEquals(instance.id(), removal.getLong(48));
-            assertEquals(2, removal.getLong(56));
+            var removal = context.sealDelta();
+            assertEquals(88 + 16, context.stats().bytes());
+            counts(removal, 0, 0, 0, 1);
+            var removed =
+                    PrimeInstanceBatch.instance_removals(removal).reinterpret(PrimeRemoval.SIZE);
+            assertEquals(instance.id(), PrimeRemoval.id(removed));
+            assertEquals(2, PrimeRemoval.revision(removed));
             context.acknowledge();
             context.beginFrame();
             observe(context, instance, prototype, 0);
             context.endFrame();
-            var returned = context.sealDelta().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
-            assertEquals(176, returned.remaining());
-            assertEquals(instance.id(), returned.getLong(48));
-            assertEquals(3, returned.getLong(56));
+            var returned = context.sealDelta();
+            assertEquals(88 + 128, context.stats().bytes());
+            counts(returned, 0, 0, 1, 0);
+            assertEquals(instance.id(), PrimeInstanceSource.id(instance(returned)));
+            assertEquals(3, PrimeInstanceSource.revision(instance(returned)));
             context.acknowledge();
         }
     }
@@ -139,21 +149,20 @@ class InstanceCaptureTest {
             observe(context, a, replacement, 0);
             observe(context, b, old, 1);
             context.endFrame();
-            var mixed = context.sealDelta().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
-            assertEquals(1, mixed.getInt(32));
-            assertEquals(0, mixed.getInt(36));
-            assertEquals(1, mixed.getInt(40));
+            var mixed = context.sealDelta();
+            counts(mixed, 1, 0, 1, 0);
             context.acknowledge();
 
             context.beginFrame();
             observe(context, a, replacement, 0);
             observe(context, b, replacement, 1);
             context.endFrame();
-            var retired = context.sealDelta().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
-            assertEquals(192, retired.remaining());
-            assertEquals(1, retired.getInt(36));
-            assertEquals(1, retired.getInt(40));
-            assertEquals(old.id(), retired.getLong(48));
+            var retired = context.sealDelta();
+            assertEquals(88 + 16 + 128, context.stats().bytes());
+            counts(retired, 0, 1, 1, 0);
+            var removed =
+                    PrimeInstanceBatch.prototype_removals(retired).reinterpret(PrimeRemoval.SIZE);
+            assertEquals(old.id(), PrimeRemoval.id(removed));
             context.acknowledge();
             assertThrows(IllegalArgumentException.class, () -> context.release(old));
         }
@@ -170,9 +179,9 @@ class InstanceCaptureTest {
             context.beginFrame();
             observe(context, instance, prototype, 2);
             context.endFrame();
-            var packet = context.sealDelta().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
-            assertEquals(2, packet.getDouble(200 + 24));
-            assertEquals(1, packet.getLong(24));
+            var packet = context.sealDelta();
+            assertEquals(2, PrimeInstanceSource.origin(instance(packet), 0));
+            assertEquals(1, PrimeInstanceBatch.sequence(packet));
             context.acknowledge();
             var transientPrototype = prototype(context);
             var transientInstance = context.instance();
@@ -207,6 +216,17 @@ class InstanceCaptureTest {
         }
     }
 
+    private static void counts(MemorySegment batch, long prototypes, long prototypeRemovals,
+                               long instances, long instanceRemovals) {
+        assertEquals(prototypes, PrimeInstanceBatch.prototype_count(batch));
+        assertEquals(prototypeRemovals, PrimeInstanceBatch.prototype_removal_count(batch));
+        assertEquals(instances, PrimeInstanceBatch.instance_count(batch));
+        assertEquals(instanceRemovals, PrimeInstanceBatch.instance_removal_count(batch));
+    }
+    private static MemorySegment instance(MemorySegment batch) {
+        assertEquals(1, PrimeInstanceBatch.instance_count(batch));
+        return PrimeInstanceBatch.instances(batch).reinterpret(PrimeInstanceSource.SIZE);
+    }
     private static void observe(InstanceCapture context, InstanceCapture.Instance instance,
                                 InstanceCapture.Prototype prototype, double x) {
         context.observe(instance, prototype, x, 0, 0, IDENTITY, 0, 0, -1, UV);

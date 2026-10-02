@@ -9,5 +9,7 @@ static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod cpu_profile;
 mod engine;
 mod ffi;
+mod minecraft_ffi;
 
 pub use ffi::*;
+pub use minecraft_ffi::*;

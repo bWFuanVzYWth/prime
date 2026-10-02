@@ -39,6 +39,9 @@ public final class HostVulkanRenderer implements AutoCloseable {
         var access = (VulkanCommandEncoderAccessor)(Object)encoder;
         bridge = new NativeBridge(NativeBridge.resolveLibrary());
         try {
+            var initialSettings = PrimeClient.settings();
+            var initialView = PrimeClient.diagnosticView();
+            bridge.configure(initialSettings, false, initialView);
             bridge.attachVulkan(
                     device.instance().vkInstance().address(),
                     device.vkDevice().getPhysicalDevice().address(), device.vkDevice().address(),
@@ -46,8 +49,12 @@ public final class HostVulkanRenderer implements AutoCloseable {
                     device.graphicsQueue().queueFamilyIndex(),
                     VulkanBootstrap.opacityMicromapEnabled(device),
                     VulkanBootstrap.streamlineEnabled(device));
+            appliedSettings = initialSettings;
+            appliedView = initialView;
+            prepareResources();
         } catch (RuntimeException | Error failure) {
             try {
+                submitAndAwait(encoder);
                 bridge.close();
             } catch (RuntimeException | Error cleanup) {
                 blockRetirement(bridge, cleanup);
@@ -65,7 +72,7 @@ public final class HostVulkanRenderer implements AutoCloseable {
 
     /** Every main color allocation needs this, including resize while vanilla is selected. */
     public static int mainColorUsage(int usage) {
-        if (!Boolean.getBoolean("primept.enabled"))
+        if (!StartupOptions.enabled())
             return usage;
         var backend = ((GpuDeviceAccessor)(Object)RenderSystem.getDevice()).primept$backend();
         return backend instanceof VulkanDevice device && VulkanBootstrap.isEnabled(device)
@@ -152,8 +159,25 @@ public final class HostVulkanRenderer implements AutoCloseable {
         return bridge;
     }
 
-    public void submit(byte[] packet) {
-        bridge.submit(packet);
+    /** Explicit initialization/reload boundary; ordinary scene updates never wait here. */
+    public void prepareResources() {
+        if (closed)
+            throw new IllegalStateException("Host renderer is closed");
+        var command = encoder.allocateAndBeginTransientCommandBuffer();
+        long serial = ((VulkanCommandEncoderAccessor)(Object)encoder).primept$currentSubmitIndex();
+        bridge.prepareResources(command.address(), serial);
+        int status = VK10.vkEndCommandBuffer(command);
+        if (status != VK10.VK_SUCCESS)
+            throw new IllegalStateException("Cannot finish resource preparation command buffer: " +
+                                            status);
+        encoder.execute(command);
+        submitAndAwait(encoder);
+    }
+
+    public void reset(long epoch) {
+        // World reset retires geometry immediately; prove its final host submission complete.
+        submitAndAwait(encoder);
+        bridge.reset(epoch);
     }
     /** Frame-boundary control updates; stable frames make no settings FFM call. */
     public void configure(RenderSettings settings, boolean nextOffline, RenderSettings.View view) {

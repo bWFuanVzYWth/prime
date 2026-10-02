@@ -289,10 +289,11 @@ impl Atmosphere {
         words[22] = plane.to_bits();
         words[23] = if reuse_profiles { 1f32.to_bits() } else { 0 };
         if aerial && let Some((geometry, _)) = scene {
+            let textures = geometry.textures();
             self.compute.acceleration(3, slot, 0, geometry.top.handle());
             for (binding, buffer) in [
-                &geometry.textures.metadata,
-                &geometry.textures.texels,
+                &textures.metadata,
+                &textures.texels,
                 &geometry.objects.metadata,
                 &geometry.static_bases,
             ]

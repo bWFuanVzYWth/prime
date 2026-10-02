@@ -1110,7 +1110,7 @@ mod tests {
                     .load(std::sync::atomic::Ordering::Relaxed),
             );
             assert_eq!(
-                geometry.textures.retained_slots(),
+                geometry.textures().retained_slots(),
                 (2, 5),
                 "retired texture slots reused across 40 distinct IDs"
             );

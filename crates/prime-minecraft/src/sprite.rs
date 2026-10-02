@@ -16,6 +16,8 @@ pub(crate) struct Sprite {
     pub extent: [u32; 2],
     pub images: Vec<Image>,
     pub frames: Vec<(u32, u32)>,
+    /// Prepared inclusive duration prefix; final endpoint is the validated cycle length.
+    pub frame_ends: Vec<u32>,
     /// All actual sequence-frame windows, shared across per-tick texture views.
     pub coverage_frames: Arc<[[u32; 2]]>,
     pub interpolate: bool,
@@ -24,7 +26,115 @@ pub(crate) struct Sprite {
 pub(crate) fn texture(id: u32) -> u32 {
     if id == 0 { 1 } else { 0x4000_0000 + id }
 }
+fn frame_ends(frames: &[(u32, u32)]) -> Vec<u32> {
+    let mut total = 0;
+    frames
+        .iter()
+        .map(|&(_, duration)| {
+            total += duration;
+            total
+        })
+        .collect()
+}
 impl Sprite {
+    pub fn from_typed(
+        value: &prime_abi::PrimeMcSprite,
+        source: &prime_abi::minecraft::Resources<'_>,
+    ) -> Result<(u32, Self), String> {
+        use prime_abi::minecraft::{finite, range, string};
+        let bounds = value.bounds;
+        let extent = value.extent;
+        finite(&bounds)?;
+        if value.id == 0
+            || value.id >= 0x4000_0000
+            || extent.iter().any(|&v| v == 0 || v > 16384)
+            || bounds[0] < 0.
+            || bounds[1] < 0.
+            || bounds[2] > 1.
+            || bounds[3] > 1.
+            || bounds[2] <= bounds[0]
+            || bounds[3] <= bounds[1]
+            || value.interpolate > 1
+        {
+            return Err("invalid source sprite".into());
+        }
+        let descriptors = range(source.images(), value.images)?;
+        if descriptors.is_empty() || descriptors.len() > 15 {
+            return Err("invalid source mip count".into());
+        }
+        let mut images: Vec<Image> = Vec::with_capacity(descriptors.len());
+        for (mip, desc) in descriptors.iter().enumerate() {
+            let image = Image::from_typed(desc, source.bytes(), mip == 0)?;
+            if mip > 0
+                && (image.width != (images[0].width >> mip).max(1)
+                    || image.height != (images[0].height >> mip).max(1)
+                    || extent.iter().any(|&v| v >> mip == 0))
+            {
+                return Err("invalid source mip progression".into());
+            }
+            images.push(image);
+        }
+        let base = &images[0];
+        let descriptors = range(source.frames(), value.frames)?;
+        if !base.width.is_multiple_of(extent[0])
+            || !base.height.is_multiple_of(extent[1])
+            || !descriptors.is_empty() && base.pixels.is_empty()
+        {
+            return Err("invalid source animation image".into());
+        }
+        let capacity = (base.width / extent[0]) * (base.height / extent[1]);
+        let mut total = 0_u32;
+        let mut frames = Vec::with_capacity(descriptors.len());
+        for f in descriptors {
+            total = total
+                .checked_add(f.duration)
+                .ok_or("animation duration overflow")?;
+            if f.frame >= capacity || f.duration == 0 {
+                return Err("invalid source animation frame".into());
+            }
+            frames.push((f.frame, f.duration));
+        }
+        let row = base.width / extent[0];
+        let mut coverage: Vec<_> = frames
+            .iter()
+            .map(|&(f, _)| [(f % row) * extent[0], (f / row) * extent[1]])
+            .collect();
+        coverage.sort_unstable();
+        coverage.dedup();
+        let mut sprite = Self {
+            name: string(source.bytes(), value.name)?,
+            bounds,
+            extent,
+            images,
+            frame_ends: frame_ends(&frames),
+            frames,
+            coverage_frames: coverage.into(),
+            interpolate: value.interpolate != 0,
+            material: None,
+        };
+        let image = |id: u32| -> Result<Option<Image>, String> {
+            if id == u32::MAX {
+                return Ok(None);
+            }
+            Image::from_typed(
+                source
+                    .images()
+                    .get(id as usize)
+                    .ok_or("undefined material image")?,
+                source.bytes(),
+                false,
+            )
+            .map(Some)
+        };
+        let normal = image(value.normal_image)?;
+        let specular = image(value.specular_image)?;
+        if normal.is_some() || specular.is_some() {
+            sprite.material = Some(crate::labpbr::Material::from_images(
+                &sprite, normal, specular,
+            ));
+        }
+        Ok((value.id, sprite))
+    }
     pub fn reference(&self, scene: &SourceScene) -> Result<[f32; 4], String> {
         let base = &self.images[0];
         let [w, h] = self.extent;
@@ -146,6 +256,7 @@ impl Sprite {
                 bounds,
                 extent,
                 images,
+                frame_ends: frame_ends(&frames),
                 frames,
                 coverage_frames: coverage_frames.into(),
                 interpolate: interpolate != 0,
@@ -177,37 +288,30 @@ impl Sprite {
         }
         Some(result)
     }
+    fn phase(&self, tick: u64) -> (u32, u32, f32) {
+        let Some(&total) = self.frame_ends.last() else {
+            return (0, 0, 0.0);
+        };
+        let at = (tick % u64::from(total)) as u32;
+        let i = self.frame_ends.partition_point(|&end| end <= at);
+        let start = if i == 0 { 0 } else { self.frame_ends[i - 1] };
+        let (frame, duration) = self.frames[i];
+        let blend = if self.interpolate {
+            (((at - start) as f32 / duration as f32) * 1000.) as u32 as f32 / 1000.
+        } else {
+            0.
+        };
+        (frame, self.frames[(i + 1) % self.frames.len()].0, blend)
+    }
+    /// Only compare ticks within this immutable catalog sprite. Resource replacement
+    /// constructs and validates new images independently, even at the same clock phase.
+    pub fn same_phase(&self, previous: u64, tick: u64) -> bool {
+        self.phase(previous) == self.phase(tick)
+    }
     pub fn image(&self, tick: u64, scene: &SourceScene) -> Result<Texture, String> {
         let base = &self.images[0];
         let [w, h] = self.extent;
-        let (frame, next, blend) = if self.frames.is_empty() {
-            (0, 0, 0.)
-        } else {
-            let total: u64 = self.frames.iter().map(|&(_, d)| u64::from(d)).sum();
-            let mut at = tick % total;
-            let (i, &(frame, duration)) = self
-                .frames
-                .iter()
-                .enumerate()
-                .find(|(_, (_, d))| {
-                    if at < u64::from(*d) {
-                        true
-                    } else {
-                        at -= u64::from(*d);
-                        false
-                    }
-                })
-                .unwrap();
-            (
-                frame,
-                self.frames[(i + 1) % self.frames.len()].0,
-                if self.interpolate {
-                    ((at as f32 / duration as f32) * 1000.) as u32 as f32 / 1000.
-                } else {
-                    0.
-                },
-            )
-        };
+        let (frame, next, blend) = self.phase(tick);
         let row = base.width / w;
         let mut texture = if base.pixels.is_empty() {
             let atlas = scene
@@ -297,9 +401,64 @@ impl Sprite {
     }
 }
 
+impl Image {
+    pub fn from_typed(
+        value: &prime_abi::PrimeMcImage,
+        bytes: &[u8],
+        allow_empty: bool,
+    ) -> Result<Self, String> {
+        let pixels = prime_abi::minecraft::range(bytes, value.pixels)?;
+        if value.width == 0
+            || value.height == 0
+            || value.width > 16384
+            || value.height > 16384
+            || !(allow_empty && pixels.is_empty())
+                && pixels.len() as u64 != u64::from(value.width) * u64::from(value.height) * 4
+        {
+            return Err("invalid source image".into());
+        }
+        Ok(Self {
+            width: value.width,
+            height: value.height,
+            pixels: pixels.into(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn prepared_phase_matches_duration_clock_and_preserves_thousandth_quantization() {
+        let frames = [(3, 2), (1, 12345), (3, 7)];
+        for interpolate in [false, true] {
+            let bytes = source_bytes(&frames, interpolate);
+            let pages = [bytes.as_slice()];
+            let (_, sprite) = Sprite::read(&mut Reader::new(&pages).unwrap()).unwrap();
+            assert_eq!(sprite.frame_ends, [2, 12347, 12354]);
+            for tick in (0..25000).chain([u64::MAX - 1, u64::MAX]) {
+                let mut at = tick % 12354;
+                let mut index = 0;
+                while at >= u64::from(frames[index].1) {
+                    at -= u64::from(frames[index].1);
+                    index += 1;
+                }
+                let blend = if interpolate {
+                    ((at as f32 / frames[index].1 as f32) * 1000.) as u32 as f32 / 1000.
+                } else {
+                    0.
+                };
+                assert_eq!(
+                    sprite.phase(tick),
+                    (frames[index].0, frames[(index + 1) % 3].0, blend)
+                );
+            }
+            assert!(sprite.same_phase(2, 3));
+            assert!(sprite.same_phase(2, 12356));
+            assert!(!sprite.same_phase(1, 2));
+        }
+    }
+
     fn source_bytes(frames: &[(u32, u32)], interpolate: bool) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend(1_u32.to_le_bytes());
@@ -380,6 +539,7 @@ mod tests {
             extent: [16, 16],
             images: vec![],
             frames: vec![],
+            frame_ends: vec![],
             coverage_frames: Arc::from([]),
             interpolate: false,
             material: None,
@@ -418,6 +578,7 @@ mod tests {
                 },
             ],
             frames: vec![(3, 2), (0, 3)],
+            frame_ends: vec![2, 5],
             coverage_frames: Arc::from([[0, 0], [4, 4]]),
             interpolate: true,
             material: None,
@@ -481,6 +642,7 @@ mod tests {
                 },
             ],
             frames: vec![],
+            frame_ends: vec![],
             coverage_frames: Arc::from([]),
             interpolate: false,
             material: None,
@@ -529,6 +691,7 @@ mod tests {
                 pixels: Arc::from([]),
             }],
             frames: vec![],
+            frame_ends: vec![],
             coverage_frames: Arc::from([]),
             interpolate: false,
             material: None,

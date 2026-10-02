@@ -47,13 +47,27 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 
 版本取自 `gradle.properties` 的 `mod_version`。两个 JAR 使用同一 `target/release/prime_engine.dll`，各自包含公共 Java 层。Minecraft/Fabric API 版本在各适配器的 `build.gradle` 中声明；升级时检查实际宿主和 Indigo 注入点。
 
+## ABI 生成与验证
+
+公共 C ABI 为 v8，Minecraft 源 schema 为 v7，配置文件 schema 仍为 v5。JAR 与 DLL 必须配套重建；旧字节入口不再导出。只修改 `crates/prime-engine/include/prime.h` / `prime_mc.h`，由头文件生成 `prime_abi/src/generated.rs` 和 Java `PrimeAbi`，不要手工维护三套布局。
+
+```powershell
+python scripts/generate-abi.py --probe clang
+python scripts/generate-abi.py --check --probe clang
+cargo test -p prime_scene --test typed --locked
+cargo test -p prime_engine --no-default-features --lib --locked
+./gradlew.bat :common:test
+```
+
+生成器使用仓库 rustfmt/clang-format 规范化产物；`--check` 不改文件。C11 编译探针核对所有 POD 的尺寸/对齐/字段偏移和函数签名，Rust 编译同时约束真实 export 类型，Java/native 行为测试验证实际具名字段与指针借用。原始顶点/像素保留 payload span，不得用 typed wrapper 封装旧 stream 或引入逐 section FFM。MC 总源数组没有 generic 单批256 MiB上限；保留 checked 地址范围和真实像素预算。运行/消费预编译产物不依赖 Python 或 C 编译器。
+
 ## 开发客户端
 
 本节命令供用户手动执行。自动化默认只做格式、编译和无窗口单元测试；没有用户新的明确请求，不运行 `runClient`、启动游戏验收或占用前台。
 
 ```powershell
-.\gradlew.bat buildNative :mc-26.2:runClient -PprimeptEnabled=true -PprimeptGeometryCache=true -PprimeptValidation=true -PprimeptProfile=true
-.\gradlew.bat buildNative :mc-26.3:runClient -PprimeptEnabled=true -PprimeptGeometryCache=true -PprimeptValidation=true -PprimeptProfile=true
+.\gradlew.bat :mc-26.2:runClient
+.\gradlew.bat :mc-26.3:runClient
 ```
 
 按版本单独运行。各适配器的 `run/` 保存日志、选项、截图和存档。使用独立测试存档或副本，不让较新版本直接升级旧版验证存档。启动默认请求 Vulkan 和 1920×1080；仍需从实际设备日志和主 target 尺寸确认后端与分辨率。
@@ -64,8 +78,8 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 
 | Gradle 属性 | 用途 |
 | --- | --- |
-| `-PprimeptEnabled=true` | 启用 PT，默认关闭 |
-| `-PprimeptRenderer=vanilla` | 启动时选择原版；配合 enabled=true 保留之后切换 Prime 所需设备能力，未指定时使用保存的设置（初始为 path_trace） |
+| `-PprimeptEnabled=false` | 显式关闭 Prime 启动能力；未指定时与发行包一致，默认启用 |
+| `-PprimeptRenderer=vanilla` | 启动时选择原版；默认保留之后切换 Prime 所需设备能力，未指定时使用保存的设置（初始为 path_trace） |
 | `-PnativeLibrary=绝对路径` | 指定引擎库，适合同一不可变 DLL 的双版本验证 |
 | `-PprimeptValidation=true` | 启用宿主 Vulkan validation |
 | `-PprimeptProfile=true` | 开启 Java 窗口汇总；粗计时和慢帧警告常驻 |
@@ -76,7 +90,7 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 | `-PprimeptWorld=存档目录名` | 使用 quick play 进入该版本 run 目录下的测试世界 |
 | `-PprimeptUuid=玩家UUID` | 在测试副本中读取指定已有玩家的位置和状态 |
 
-外部启动器对应的 JVM 参数见 README；不要将 Gradle 的 `-P` 属性直接交给 Java。
+默认使用 release 原生引擎，启用 Prime 与几何缓存，关闭 validation、profile、细叶计时及 capture audit。`-P` 属性只影响开发客户端启动，不会写入 JAR；发行包本身使用相同的运行时默认值。外部启动器对应的 JVM 参数见 README；不要将 Gradle 的 `-P` 属性直接交给 Java。
 
 逐帧 CSV 同时记录实时与离线帧，末列 `offline` 标识模式；冻结后的源捕获计数为零。`profile=true` 每 120 帧记录对应模式的 native CPU/GPU 阶段摘要，GPU 时间来自延迟完成的采样。比较时分开稳态窗口与进入/退出离线的过渡，不把冻结省去的游戏模拟、源准备和资源更新误计为路径着色器差异。
 
@@ -87,6 +101,7 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 1. 两版分别使用对应版本的测试存档或副本，确认实际 Vulkan 后端与原生 `1920×1080` 主图像，等待地形加载完成。较新版本保存过的世界不要交给旧版本验证。
 2. 观察地形、透明表面、实体/方块实体、框内物品、掉落物和粒子是否缺失或重复；检查旋转/移动、物品内容变化与持续增删，以及手部/HUD 是否正常。特殊文字、glint、outline 和折射仍按当前支持范围判断。
 3. 依次切换到 `vanilla` 和 `path_trace`，等待各自就绪；检查原版地形恢复、PT 重新加载，以及皮肤、地图等动态纹理。再检查世界退出/重进与资源重载后是否正常。
+   同资源代世界切换应复用纹理/OMM；停留标题界面时旧世界几何应已退休。覆盖离线退出世界及仅模型资源换代，确认实时源恢复、实体定义和动态纹理重新发布，不能只验正常 atlas 重载。
 4. 检查对应 `adapters/mc-*/run/logs/latest.log`，记录异常、Vulkan `VUID` / `SYNC-HAZARD`、缺失纹理或后端恢复失败。反馈版本、操作步骤、场景与日志，截图/日志副本放 `artifacts/`。
 5. 在两版分别拖动窗口、切换全屏、最小化/恢复；覆盖横/竖/奇数尺寸并回到 1920×1080。检查宽高比、边缘覆盖、历史残影和 HUD 方位；关闭 RR 的实时应保持新噪声输出，开启 RR 时检查重建稳定性；离线调整尺寸时重建累积，稳定后应继续收敛。观察高饱和材质、灰阶和亮部的 primeDRT 输出，以及细缝/斜面是否自遮挡或漏光。HDR 呈现和自动曝光仍未接入。
 
@@ -95,7 +110,7 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 8. 实时诊断依次查看原始噪声色、线性深度、世界法线；检查物体边缘、alpha 表面和天空（深度/法线预览为黑）。修改深度范围只改变预览；回到最终输出后 primeDRT 正常。开启 RR 时这些诊断显示实际内部输入；返回最终输出会重置重建历史。
 9. 使用声明 `format=lab-pbr/1.3` 的资源包，检查 `_n` 法线与远处粗糙度、`_s` 的介质/金属分类、玻璃 IOR、发光零值和 255 哨兵；覆盖地形与 atlas UV 的物品、纹理动画、资源重载、实时/离线切换。分类通道 G/B 应保持基础层身份，动画分类采用当前帧；缺图遵循全局缺省和已有宿主源规则。高度解码与自动 foliage 材质选择的支持边界见 [材质契约](docs/materials.md)。
 
-上述启动命令开启 validation 用于正确性检查，不用于性能结论。需要性能采样时，将 `-PprimeptValidation=false`，保持细叶计时和 capture audit 关闭，另加 `-PprimeptProfileCsv=绝对路径` 保存逐帧数据；固定场景、相机、画质、射线预算与分辨率。积压清空后的原型稳态应只交换请求/响应头，`requested/compiled/tint_requests` 为0；覆盖边缘可能仍不完整，pending=0 不能证明全部64段单元齐备。再分别记录稳态及更新阶段；CPU 优化目前非阻塞，不以即时 FPS 达标作为本轮检查的前提。
+正确性检查时显式追加 `-PprimeptValidation=true`，此时不作性能结论。需要性能采样时，保持 validation、细叶计时和 capture audit 关闭，追加 `-PprimeptProfile=true` 和 `-PprimeptProfileCsv=绝对路径` 保存逐帧数据；固定场景、相机、画质、射线预算与分辨率。积压清空后的原型稳态应只交换请求/响应头，`requested/compiled/tint_requests` 为0；覆盖边缘可能仍不完整，pending=0 不能证明全部64段单元齐备。再分别记录稳态及更新阶段；CPU 优化目前非阻塞，不以即时 FPS 达标作为本轮检查的前提。
 
 ## 按改动选择验证
 
@@ -208,9 +223,9 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked pbr_texture_te
 
 实例相关 GPU 测试覆盖局部原型、仿射/颜色/UV、增删及在途资源退休。Java 的 `cpuSmoke` 在真实 Fabric/Mixin 类上验证源路由、标准模型、下游截断与 target 创建/缩放。测试启动器在 preLaunch 退出，不调用游戏 main、不创建窗口或设备。地形原型通过真实 MC palette/模型字段、FFM 和独立 CPU native 库验证64段完整性、重复 dirty 合并、相同输入不重编译、空段清除与未知模型默认值；opaque 模型回调会主动抛错以证明未被调用。该入口需要 Rust，构建库放在 `build/source-cpu-native`，不会覆盖游戏使用的 release DLL。人工窗口不能代替实际视距或游戏验证。
 
-地形分帧改动需同时验证 CPU 编译和后段 planner 的每阶段 N 格上限，覆盖 1/8/128、无新源时继续清空积压、重复编辑读取最新源、公平轮转、卸载/epoch 取消、负坐标、重定位和失败不确认；最终几何需与无上限参考一致。资源目录同 epoch 整代换新和普通纹理身份撤销须立即撤旧，后续按预算恢复且不混用旧 UV/材质。后段 GPU 验证另覆盖真实几何内容变化重置离线累积、等价 OMM 重建保留累积、OMM 旧覆盖的实例禁用与在途资源寿命。设置使用独立 schema v5、72 字节（追加 `u32@68`），旧 v4 文件按严格版本规则整份回退默认；公共场景 ABI 仍为 v7，JAR 与 DLL 必须同次构建。
+地形分帧改动需同时验证 CPU 编译和后段 planner 的每阶段 N 格上限，覆盖 1/8/128、无新源时继续清空积压、重复编辑读取最新源、公平轮转、卸载/epoch 取消、负坐标、重定位和失败不确认；最终几何需与无上限参考一致。资源目录同 epoch 整代换新和普通纹理身份撤销须立即撤旧，后续按预算恢复且不混用旧 UV/材质。后段 GPU 验证另覆盖真实几何内容变化重置离线累积、等价 OMM 重建保留累积、OMM 旧覆盖的实例禁用与在途资源寿命。设置文件使用独立 schema v5，旧 v4 文件按严格版本规则整份回退默认；FFM 使用76字节 `PrimeSettings`，公共 ABI 为 v8，JAR 与 DLL 必须同次构建。
 
-纹理撤销用例验证当前机制的安全边界；地形纹理应在初始化/重载后全局常驻，现有运行时引用回收与该目标的偏差见 [TODO](TODO.md#待纠正的资源生命周期偏差)，不能把用例通过解释为该资源架构已符合目标。
+纹理撤销用例分别验证动态owner退休和全局资源常驻：普通区块卸载不能退休terrain sprite，world reset保留资源像素及canonical目录；真实资源重载原子替换整代，旧CPU/GPU读者持有必要引用直到各自消费结束。相位未变动画复用已发布纹理；变化相位仍需验证通道插值结果。全局资源准备不等于所有初始化工作均已移出帧内，须单独测加载和重载成本。
 
 ```powershell
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke --no-parallel
@@ -233,7 +248,7 @@ cargo test -p prime_scene --lib --locked java_routing_matches_both_versions_actu
 .\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptSmokeForeign=true --no-parallel
 ```
 
-手动重点检查地形可以加载和显示、跨区块移动后持续补入与卸载、放置/破坏、资源重载、原版↔PT和离线切换；实体、HUD与粒子应继续可见。再检查红石强度0–15、草/叶/水的群系边界、混合设置0/2/7、`/fillbiome` 改色和资源重载；纯群系变化应 `requested=0`、`changed=0`，只重编译颜色消费者，稳态 `tint_requests/biome_samples=0`。重点对比水/岩浆的流动液面、跨段接缝、水淹半砖/围栏、连接部件和局部遮挡；未知模型仍可显示紫色方块，特殊可见性和未知回调依赖可能不同，按 [PROTOTYPE_HACKS](PROTOTYPE_HACKS.md) 验收。启动前重建 `buildNative`；ABI v7 不能混用旧 DLL。原生1080p画面与实际性能由用户检查。
+手动重点检查地形可以加载和显示、跨区块移动后持续补入与卸载、放置/破坏、资源重载、原版↔PT和离线切换；实体、HUD与粒子应继续可见。再检查红石强度0–15、草/叶/水的群系边界、混合设置0/2/7、`/fillbiome` 改色和资源重载；纯群系变化应 `requested=0`、`changed=0`，只重编译颜色消费者，稳态 `tint_requests/biome_samples=0`。重点对比水/岩浆的流动液面、跨段接缝、水淹半砖/围栏、连接部件和局部遮挡；未知模型仍可显示紫色方块，特殊可见性和未知回调依赖可能不同，按 [PROTOTYPE_HACKS](PROTOTYPE_HACKS.md) 验收。启动前重建 `buildNative`；ABI v8 不能混用旧 DLL。原生1080p画面与实际性能由用户检查。
 
 在“每帧地形批次”分别选择 1、8、128，检查连续移动与编辑时最终补齐、跨格修改允许分帧生效、卸载不留旧格、持续编辑不饿死其他区域。带积压进入离线时，CPU 待编译停止，已发布源的后段可继续；实际几何变化重置累积，积压清空后持续累积。比较固定原生 1920×1080 下的 CPU/GPU 帧时与从编辑到可见的尾延迟，保留慢帧；源读取、纹理、动态对象及全局 TLAS 不计入格预算，不能只按每帧格数认定卡顿已解决。
 
@@ -247,11 +262,11 @@ cargo run -p prime_tools --bin prime-pt-smoke -- smoke artifacts/smoke.png 32
 
 ## 同步工作池
 
-Prime 自有 CPU 工作池全部在 Rust。`PRIME_CPU_THREADS` 控制源编译与后端打包私有同步池的线程数，默认取可用 CPU 数与 8 的较小值；设为 1 可验证串行路径，非法非正值拒绝。小批直接运行，多线程仅写各自独占输出，返回前全部 join。Java 不再有 `primeptCompilerThreads` 参数或 Prime section compiler，源回调留在宿主 owner。
+Prime 自有 CPU 工作池全部在 Rust。当前 section 编译、粒子源展开和 renderer 准备最多各持有一个独立池，后端静态几何与对象共用 renderer 池。`PRIME_CPU_THREADS` 设置的是每池线程数，默认取可用并行度与 8 的较小值；设为 1 时直接在调用线程执行，非法非正值拒绝。这些阶段顺序调用，小批直接执行，多线程仅写各自独占输出，返回前全部 join；不应把池数相加当成同时工作的线程数或后台构建能力。Java 不再有 `primeptCompilerThreads` 参数或 Prime section compiler，源回调留在宿主 owner。
 
 Java CSV 的 `terrain_plan_ns` 是请求规划 FFM 总时间，`terrain_pack_ns` 是按表读取/封装源和应用列镜像的时间，`terrain_accept_ns` 是响应提交、Rust 解码/编译/发布的同步总时间；它们包含于 `terrain_total_ns`，总时间还包括初次 epoch/atlas 准备和事件封装。`terrain_source_bytes` 是本帧请求输入与响应输入之和，包含资源定义，不含返回请求表。`terrain_selected` 是请求段数，`terrain_routed` 是有源响应数，`terrain_deferred` 是本批无源数；pending/waiting 当前为0，不是64段全部就绪证明。loaded/unloaded 是原始列事件数，entered 是 Rust 新激活且镜像成功的列数。`mc_source[...]` 另给 native plan/decode/compile/publish、请求批次数、变化/编译/活跃/驻留段数与 hack 使用计数。
 
-原版 tint 由 Java 批量转录源字段，Rust 直接求色；`tint_callbacks` 只统计未知源的实际回调。`biome_samples` 是需要重新计算颜色的位置数，`biome_host_cells` / `biome_pages` 是实际读取的 quart 群系单元/页数，不能互相当成同一单位。`biome_source` 包含 native zoom、源请求组织和求色，`biome_filter` 为混合；历史 Java `tint_callback_ms` 字段包含整个颜色源准备，不能直接归因为回调。协议配套版本为 source v6（公共 FFM ABI仍为7），重建双适配器与 DLL 后再验收。`cpuSmoke` 同时生成实际 `getOffset/getSeed` 的 `placement-oracle.bin`，原生回放精确比较位置种子与偏移位模式；支持与未知回调边界见 [Section 测试设施](docs/guides/section-tests.md)。
+原版 tint 由 Java 批量转录源字段，Rust 直接求色；`tint_callbacks` 只统计未知源的实际回调。`biome_samples` 是需要重新计算颜色的位置数，`biome_host_cells` / `biome_pages` 是实际读取的 quart 群系单元/页数，不能互相当成同一单位。`biome_source` 包含 native zoom、源请求组织和求色，`biome_filter` 为混合；历史 Java `tint_callback_ms` 字段包含整个颜色源准备，不能直接归因为回调。协议配套版本为 source v7（公共 FFM ABI为8），重建双适配器与 DLL 后再验收。`cpuSmoke` 同时生成实际 `getOffset/getSeed` 的 `placement-oracle.bin`，原生回放精确比较位置种子与偏移位模式；支持与未知回调边界见 [Section 测试设施](docs/guides/section-tests.md)。
 
 `compile` 包含排序、作业建立、`kernel`（slab 解包/剔面/展开，含首次池创建）和 `finalize`（精确内容比较、分片边界计算及不可变输出准备）；各值都是调用方墙钟时间，不是 worker CPU 时间之和。分片直接移交其 Vec 所有权，精确相同的分片复用旧存储与包围盒，不再归并成整段连续副本。`published_layers` 是实际替换或删除的图层数，`retained_layers` 是重新编译后内容相同而保留的非空图层数。`publish` 是 owner 上的场景变更和旧引用释放，不包含 GPU 构建；新分片分配及旧几何最后引用的回收仍有成本。
 
@@ -296,7 +311,7 @@ cargo test --release -p prime_vulkan --lib --locked realtime_output_cost_matrix 
 接口与支持范围见[表面编译](docs/surface-compiler.md)。表面编译器是唯一静态几何编译入口，无需环境开关；分页 source 协议为 v5，双适配器与 DLL 必须配套重建，外层 FFM 版本保持 7。以下游戏启动只由用户手动执行：
 
 ```powershell
-.\gradlew.bat buildNative :mc-26.3:runClient -PprimeptEnabled=true -PprimeptValidation=true -PprimeptProfile=true
+.\gradlew.bat :mc-26.3:runClient -PprimeptValidation=true -PprimeptProfile=true
 # 26.2 使用 :mc-26.2:runClient。
 ```
 

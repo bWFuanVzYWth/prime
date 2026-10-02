@@ -85,6 +85,35 @@ impl Material {
     pub fn read(r: &mut Reader<'_>, sprite: &Sprite) -> Result<Self, String> {
         let normal = source(r, sprite)?;
         let specular = source(r, sprite)?;
+        Ok(Self::prepare(sprite, normal, specular))
+    }
+    pub fn from_images(sprite: &Sprite, normal: Option<Image>, specular: Option<Image>) -> Self {
+        let source = |image: Image| {
+            let [w, h] = sprite.extent;
+            let base = &sprite.images[0];
+            let columns = (base.width / w).max(1);
+            let rows = (base.height / h).max(1);
+            let (extent, columns, frames) = if image.width == w && image.height == h {
+                ([image.width, image.height], 1, 1)
+            } else if image.width.is_multiple_of(columns) && image.height.is_multiple_of(rows) {
+                (
+                    [image.width / columns, image.height / rows],
+                    columns,
+                    columns * rows,
+                )
+            } else {
+                ([image.width, image.height], 1, 1)
+            };
+            Source {
+                image,
+                extent,
+                columns,
+                frames,
+            }
+        };
+        Self::prepare(sprite, normal.map(source), specular.map(source))
+    }
+    fn prepare(sprite: &Sprite, normal: Option<Source>, specular: Option<Source>) -> Self {
         let emission = specular.as_ref().and_then(|s| {
             let mut maximum = None::<u8>;
             for p in s.image.pixels.as_chunks::<4>().0.iter() {
@@ -132,13 +161,13 @@ impl Material {
                 minima,
             }
         });
-        Ok(Self {
+        Self {
             normal: normal.map(|s| s.compile(sprite, false)),
             specular: specular.map(|s| s.compile(sprite, true)),
             emission,
             fresnel,
             height,
-        })
+        }
     }
     pub fn emission_maximum(&self) -> Option<f32> {
         self.emission
@@ -564,6 +593,7 @@ mod tests {
                 },
             ],
             frames: vec![(0, 2), (1, 2)],
+            frame_ends: vec![2, 4],
             coverage_frames: Arc::from([[0, 0], [0, 2]]),
             interpolate: true,
             material: None,
@@ -655,6 +685,7 @@ mod tests {
     fn animation_clock_truncates_thousandths_before_filtering_auxiliary_channels() {
         let mut sprite = authored_sprite();
         sprite.frames = vec![(0, 3), (1, 3)];
+        sprite.frame_ends = vec![3, 6];
         let data = bytes(None, Some((1, 2, vec![1, 10, 66, 1, 254, 80, 255, 254])));
         let pages = [data.as_slice()];
         sprite.material = Some(Material::read(&mut Reader::new(&pages).unwrap(), &sprite).unwrap());

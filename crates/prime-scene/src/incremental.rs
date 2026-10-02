@@ -26,6 +26,22 @@ impl Default for ContextId {
     }
 }
 
+/// Resource ownership is independent of world publication and animation view revisions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ResourceIdentity {
+    owner: ContextId,
+    generation: u64,
+}
+
+impl ResourceIdentity {
+    pub fn generation(self) -> u64 {
+        self.generation
+    }
+    pub(crate) fn with_generation(self, generation: u64) -> Self {
+        Self { generation, ..self }
+    }
+}
+
 /// Texture publication identity cannot be substituted for a geometry cursor.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TextureCursor {
@@ -243,6 +259,14 @@ impl ScenePublication {
 }
 
 impl<'a> SceneInput<'a> {
+    pub fn resource_identity(self) -> ResourceIdentity {
+        self.scene.resources
+    }
+
+    pub fn resource_generation(self) -> u64 {
+        self.scene.resources.generation()
+    }
+
     pub fn publication(self) -> ScenePublication {
         ScenePublication {
             owner: self.terrain.map(|index| index.generation.owner),
@@ -438,6 +462,7 @@ impl TranslatedScene {
         self.scene.epoch = source.epoch;
         self.scene.revision = revision;
         self.scene.terrain_resource_generation = source.terrain_resource_generation;
+        self.scene.resources = source.resources;
         self.scene.anchor = anchor;
         if let Some(dynamic) = dynamic {
             self.scene.dynamic = dynamic;

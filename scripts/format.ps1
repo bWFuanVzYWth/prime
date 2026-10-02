@@ -21,6 +21,7 @@ try {
             }
         }
         Get-ChildItem -LiteralPath 'crates' -Recurse -File -Filter '*.slang'
+        Get-ChildItem -LiteralPath 'crates/prime-engine/include' -File -Filter '*.h'
         Get-ChildItem -LiteralPath 'native' -Recurse -File | Where-Object {
             $_.Extension -in '.cpp', '.h'
         }

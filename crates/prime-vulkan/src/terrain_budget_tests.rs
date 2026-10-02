@@ -152,7 +152,7 @@ fn gpu_terrain_budget_revoked_texture_withdraws_before_descriptor_slot_reuse() {
         initial[2][8] > initial[2][10],
         "initial texture A must be red"
     );
-    let old_slot = current.geometry.as_ref().unwrap().textures.indices[&7];
+    let old_slot = current.geometry.as_ref().unwrap().textures().indices[&7];
 
     current.configure(settings(1)).unwrap();
     // Every Cell is dirty, so the round-robin scheduler spends this frame's allowance
@@ -174,7 +174,8 @@ fn gpu_terrain_budget_revoked_texture_withdraws_before_descriptor_slot_reuse() {
     render(&mut current, &scene, 1);
     let geometry = current.geometry.as_ref().unwrap();
     assert_eq!(
-        geometry.textures.indices[&9], old_slot,
+        geometry.textures().indices[&9],
+        old_slot,
         "fixture must actually reuse A's descriptor slot"
     );
     assert_eq!(geometry.rebuilt_clusters, 1);

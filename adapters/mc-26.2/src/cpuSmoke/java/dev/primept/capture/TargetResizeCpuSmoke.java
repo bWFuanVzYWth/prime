@@ -55,7 +55,7 @@ final class TargetResizeCpuSmoke {
         try {
             device.set(null, recorder);
             thread.set(null, Thread.currentThread());
-            System.setProperty("primept.enabled", "true");
+            System.clearProperty("primept.enabled");
             requested.set(client, "path_trace");
             status.set(null, statusConstructor.newInstance(101L, 202L, true, true, true, ""));
             check(VulkanBootstrap.isEnabled(backend), "Synthetic negotiated device is recognized");
@@ -188,7 +188,7 @@ final class TargetResizeCpuSmoke {
             lifecycle(true);
             System.setProperty("primept.enabled", "false");
             lifecycle(false);
-            System.setProperty("primept.enabled", "true");
+            System.clearProperty("primept.enabled");
             status.set(null,
                        statusConstructor.newInstance(101L, 303L, true, true, true, "other device"));
             check(!VulkanBootstrap.opacityMicromapEnabled(backend),

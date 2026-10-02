@@ -89,7 +89,7 @@ public final class VulkanBootstrap {
     public static void negotiate(Collection<String> extensions, VulkanPhysicalDevice physical,
                                  Set<VulkanFeature> features) {
         long physicalHandle = physical.vkPhysicalDevice().address();
-        if (!Boolean.getBoolean("primept.enabled")) {
+        if (!StartupOptions.enabled()) {
             status = new Status(physicalHandle, 0, false, false, false, "Prime PT is disabled");
             return;
         }
@@ -181,7 +181,7 @@ public final class VulkanBootstrap {
     public static void deviceCreated(VkDevice device, Collection<String> extensions,
                                      Set<VulkanFeature> features) {
         Status previous = status;
-        if (!previous.requested || !Boolean.getBoolean("primept.enabled") ||
+        if (!previous.requested || !StartupOptions.enabled() ||
             previous.physical != device.getPhysicalDevice().address() ||
             !extensions.containsAll(EXTENSIONS) || !features.containsAll(FEATURES))
             return;

@@ -6,7 +6,7 @@
   "primept.settings.display": "显示 · primeDRT",
   "primept.settings.diagnostics": "诊断 · 实时视图",
   "primept.settings.enabled": "路径追踪",
-  "primept.settings.enabled.tooltip": "选择 Prime 或原版渲染器。启动时需启用 primept.enabled 并使用 Vulkan；切换在下一帧边界生效。",
+  "primept.settings.enabled.tooltip": "选择 Prime 或原版渲染器。需要 Vulkan，且启动时未显式关闭 Prime；切换在下一帧边界生效。",
   "primept.settings.offline": "离线累积",
   "primept.settings.offline.tooltip": "Ctrl+Alt+F2 切换。冻结当前已显示场景、相机和光照，持续累积；Esc 只打开菜单。重载资源或退出世界会结束冻结，返回实时后重新捕获世界。",
   "primept.settings.opacity_micromap": "镂空表面 OMM",

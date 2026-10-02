@@ -71,7 +71,6 @@ fn upload(context: &Arc<Context>, image: &Image, extent: [u32; 2], data: &[u8]) 
 
 fn pipeline(context: &Arc<Context>) -> Pipeline {
     let mut pipeline = Pipeline {
-        energy_lut: None,
         context: context.clone(),
         layout: vk::PipelineLayout::null(),
         descriptor_layout: vk::DescriptorSetLayout::null(),

@@ -72,11 +72,11 @@ pub(super) struct Geometry {
     has_surfaces: bool,
     has_compounds: bool,
     has_optics: bool,
-    pub textures: Textures,
+    resources: crate::scene_resources::SharedResources,
+    resource_revision: u64,
+    omm_revision: u64,
     pub rebuilt_clusters: u32,
     pub(crate) opacity_micromap: bool,
-    omm_templates: Option<crate::omm_cpu::Templates>,
-    omm_pool: crate::omm::Pool,
     omm_dirty: bool,
     pub(crate) omm_prepare_ns: [u64; 3],
     pub(crate) omm_work_counts: [u64; 2],
@@ -100,6 +100,7 @@ impl Geometry {
     ) -> Result<Self, String> {
         Self::new_with_budget(context, scene, workers, enabled, usize::MAX)
     }
+    #[cfg(test)]
     pub fn new_with_budget(
         context: &Arc<Context>,
         scene: SceneInput<'_>,
@@ -107,8 +108,17 @@ impl Geometry {
         enabled: bool,
         cell_budget: usize,
     ) -> Result<Self, String> {
-        let mut uploads = crate::arena::Arena::new(context, true);
-        let textures = Textures::new(context, scene.texture_input(), &mut uploads)?;
+        let resources = crate::scene_resources::SceneResources::new(context, scene)?;
+        Self::new_with_resources(context, scene, workers, enabled, cell_budget, resources)
+    }
+    pub fn new_with_resources(
+        context: &Arc<Context>,
+        scene: SceneInput<'_>,
+        workers: Arc<prime_scene::workers::CpuWorkers>,
+        enabled: bool,
+        cell_budget: usize,
+        resources: crate::scene_resources::SharedResources,
+    ) -> Result<Self, String> {
         let mut geometry = Self {
             workers: workers.clone(),
             indices: [
@@ -118,7 +128,7 @@ impl Geometry {
                 crate::objects::index_buffer_with_stride(context, 16, 27)?,
             ],
             builds: crate::arena::Arena::new(context, false),
-            uploads,
+            uploads: crate::arena::Arena::new(context, true),
             revision: scene.publication(),
             epoch: scene.epoch,
             anchor: scene.anchor,
@@ -152,17 +162,20 @@ impl Geometry {
             has_surfaces: false,
             has_compounds: false,
             has_optics: false,
-            textures,
+            resources,
+            resource_revision: 0,
+            omm_revision: 0,
             rebuilt_clusters: 0,
             opacity_micromap: enabled && context.opacity_micromap.is_some(),
-            omm_templates: None,
-            omm_pool: crate::omm::Pool::new(),
             omm_dirty: false,
             omm_prepare_ns: [0; 3],
             omm_work_counts: [0; 2],
         };
-        geometry.update_limited(context, scene, cell_budget)?;
+        geometry.update_prepared(context, scene, cell_budget)?;
         Ok(geometry)
+    }
+    pub fn textures(&self) -> std::cell::Ref<'_, Textures> {
+        std::cell::Ref::map(self.resources.borrow(), |resources| &resources.textures)
     }
     pub fn begin_frame(&mut self, context: &Context, completed: u64) {
         // Frozen frames do not execute an object plan; do not report the prior frame's rebuilds.
@@ -173,7 +186,7 @@ impl Geometry {
         let serial = context.retirement_serial();
         self.builds.begin(completed, serial);
         self.uploads.begin(completed, serial);
-        self.omm_pool.collect(&mut self.builds);
+        self.resources.borrow_mut().begin(context, completed);
         self.light_grid.begin_frame(completed, serial);
     }
     #[cfg(test)]
@@ -186,7 +199,10 @@ impl Geometry {
         )
     }
     pub fn needs_update(&self, scene: SceneInput<'_>) -> bool {
-        self.omm_dirty || self.source_changed(scene) || self.static_planner.has_pending()
+        self.omm_dirty
+            || self.source_changed(scene)
+            || self.static_planner.has_pending()
+            || self.resource_revision != self.resources.borrow().revision
     }
     pub fn source_changed(&self, scene: SceneInput<'_>) -> bool {
         self.revision != scene.publication() || self.anchor != scene.anchor
@@ -235,7 +251,7 @@ impl Geometry {
         })
     }
     pub(crate) fn omm_pool_stats(&self) -> [u64; 4] {
-        self.omm_pool.stats()
+        self.resources.borrow().pool.stats()
     }
     pub fn same_owner(&self, scene: SceneInput<'_>) -> bool {
         self.revision.same_owner(scene.publication())
@@ -245,7 +261,7 @@ impl Geometry {
             4 + usize::from(self.light_grid.has_lights())
         } else if self.light_grid.has_lights() {
             3
-        } else if self.has_compounds || self.textures.sprites != 0 {
+        } else if self.has_compounds || self.textures().sprites != 0 {
             2
         } else {
             usize::from(self.has_surfaces)
@@ -256,7 +272,17 @@ impl Geometry {
         self.update_limited(context, scene, usize::MAX).map(|_| ())
     }
     /// Returns whether published geometry content changed; equivalent OMM rebuilds do not.
+    #[cfg(test)]
     pub fn update_limited(
+        &mut self,
+        context: &Arc<Context>,
+        scene: SceneInput<'_>,
+        cell_budget: usize,
+    ) -> Result<bool, String> {
+        self.resources.borrow_mut().prepare(context, scene)?;
+        self.update_prepared(context, scene, cell_budget)
+    }
+    pub fn update_prepared(
         &mut self,
         context: &Arc<Context>,
         scene: SceneInput<'_>,
@@ -266,27 +292,26 @@ impl Geometry {
             return Err("Invalid scene anchor".into());
         }
         let mut instance_flags_changed = self.omm_dirty;
-        if self.epoch != scene.epoch {
-            self.textures = Textures::new(context, scene.texture_input(), &mut self.uploads)?;
-        } else {
-            self.textures
-                .update(context, scene.texture_input(), &mut self.uploads)?;
-        }
-        if !self.textures.coverage_changed.is_empty() {
+        let owner = self.resources.clone();
+        let mut resources = owner.borrow_mut();
+        self.omm_prepare_ns[0] = resources.prepare_ns[0];
+        self.omm_prepare_ns[2] = resources.prepare_ns[2];
+        self.omm_work_counts[0] = resources.preparations;
+        if !resources.coverage_changed.is_empty() {
             for (&key, cluster) in &mut self.clusters {
                 // A source may retire an identity while its replacement is still queued.
                 // Withdraw old records before a released descriptor can be consumed again.
                 if cluster
                     .texture_dependencies
                     .iter()
-                    .any(|id| !self.textures.source.contains_key(id))
+                    .any(|id| !resources.textures.source.contains_key(id))
                 {
                     self.static_planner.withdraw_cells([key]);
                 }
                 if cluster
                     .omm_textures
                     .iter()
-                    .any(|id| self.textures.coverage_changed.contains(id))
+                    .any(|id| resources.coverage_changed.contains(id))
                 {
                     self.static_planner.invalidate_cells([key]);
                     if !cluster.micromaps.is_empty() {
@@ -296,38 +321,7 @@ impl Geometry {
                 }
             }
         }
-        // OMM is a texture resource. Prepare the finite global library even while the
-        // setting is off; terrain membership and setting toggles only change bindings.
-        if let Some(limits) = &context.opacity_micromap
-            && (self.epoch != scene.epoch
-                || self.omm_templates.as_ref().is_none_or(|templates| {
-                    templates.dependencies_changed(&self.textures.coverage_changed)
-                        || self.textures.coverage_changed.iter().any(|id| {
-                            !templates.contains_texture(*id)
-                                && self
-                                    .textures
-                                    .source
-                                    .get(id)
-                                    .is_some_and(|t| t.region.is_some())
-                        })
-                }))
-        {
-            let start = std::time::Instant::now();
-            let templates = crate::omm_cpu::Templates::prepare(
-                &self.textures.source,
-                limits.max_two_state,
-                limits.max_four_state,
-            );
-            self.omm_prepare_ns[0] += start.elapsed().as_nanos() as u64;
-            self.omm_work_counts[0] += 1;
-            let start = std::time::Instant::now();
-            self.omm_pool.replace(
-                context,
-                &mut self.builds,
-                &mut self.uploads,
-                &templates.data,
-            )?;
-            self.omm_prepare_ns[2] += start.elapsed().as_nanos() as u64;
+        if self.omm_revision != resources.omm_revision {
             // Global IDs belong to this generation. Rebind all existing cutout BLAS,
             // including those whose source pixels did not change in this reload.
             for (&cell, cluster) in &mut self.clusters {
@@ -339,7 +333,6 @@ impl Geometry {
                     }
                 }
             }
-            self.omm_templates = Some(templates);
         }
         for compiler in &mut self.surface_compilers {
             compiler.set_cutout_squares(self.opacity_micromap);
@@ -467,7 +460,12 @@ impl Geometry {
                     {
                         let size = a.records.count as usize * record_bytes(a.format) as usize;
                         let (destination, tail) = remaining.split_at_mut(size);
-                        plan.pack(&self.workers, group, destination, &self.textures.indices)?;
+                        plan.pack(
+                            &self.workers,
+                            group,
+                            destination,
+                            &resources.textures.indices,
+                        )?;
                         remaining = tail;
                     }
                     Ok(())
@@ -486,7 +484,7 @@ impl Geometry {
                 {
                     let data = if self.opacity_micromap
                         && geometry.flags == 1
-                        && let Some(templates) = &self.omm_templates
+                        && let Some(templates) = &resources.templates
                     {
                         let start = std::time::Instant::now();
                         let data = templates.bind(plan, group);
@@ -499,7 +497,7 @@ impl Geometry {
                         omm_textures.extend(data.textures.iter().copied());
                         self.omm_work_counts[1] += data.indices.len() as u64;
                         let start = std::time::Instant::now();
-                        let prepared = self.omm_pool.bind(
+                        let prepared = resources.pool.bind(
                             context,
                             &mut self.builds,
                             &mut self.uploads,
@@ -627,7 +625,7 @@ impl Geometry {
                         crate::surface::upload_lights(
                             context,
                             mesh,
-                            &self.textures.indices,
+                            &resources.textures.indices,
                             self.next_light_key,
                         )?
                         .map(Rc::new)
@@ -670,12 +668,15 @@ impl Geometry {
                 );
             }
         }
-        self.omm_pool.collect(&mut self.builds);
+        resources.collect();
         drop(allocated_changes);
         if !plan.placements_changed {
             self.omm_dirty = false;
             self.revision = scene.publication();
             self.anchor = scene.anchor;
+            self.resource_revision = resources.revision;
+            self.omm_revision = resources.omm_revision;
+            resources.coverage_changed.clear();
             self.static_planner.recycle(plan);
             return Ok(false);
         }
@@ -796,6 +797,9 @@ impl Geometry {
         self.omm_dirty = false;
         self.revision = scene.publication();
         self.anchor = scene.anchor;
+        self.resource_revision = resources.revision;
+        self.omm_revision = resources.omm_revision;
+        resources.coverage_changed.clear();
         Ok(published_changed)
     }
 
@@ -807,11 +811,12 @@ impl Geometry {
         slot: usize,
         cpu: &mut FrameCpu,
     ) -> Result<(bool, bool), String> {
+        let resources = self.resources.borrow();
         let changes = self.objects.prepare(
             context,
             scene,
             objects.into(),
-            &self.textures,
+            &resources.textures,
             slot,
             &mut self.builds,
             cpu,

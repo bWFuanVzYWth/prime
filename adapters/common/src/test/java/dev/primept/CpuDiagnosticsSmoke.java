@@ -9,7 +9,7 @@ public final class CpuDiagnosticsSmoke {
             var initial = bridge.cpuDiagnostics();
             if (!initial.contains("available=false"))
                 throw new AssertionError(initial);
-            bridge.submit(Packets.reset(1));
+            bridge.reset(1);
             if (!bridge.cpuDiagnostics().equals(initial))
                 throw new AssertionError("Source submission cannot fabricate renderer timings");
             var wrongThread = new Thread(() -> {

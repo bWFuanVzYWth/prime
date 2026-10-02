@@ -133,8 +133,9 @@ impl Textures {
         context: &Arc<Context>,
         source: impl Into<TextureInput<'a>>,
         uploads: &mut crate::arena::Arena,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         self.coverage_changed.clear();
+        let old_count = self.source.len();
         let (cursor, updates) = source.into().updates(self.cursor);
         // Do not scan resident identities for a certified incremental input.
         if updates.is_snapshot() {
@@ -395,7 +396,9 @@ impl Textures {
             result?;
         }
         self.cursor = cursor;
-        Ok(())
+        Ok(!metadata.is_empty()
+            || self.source.len() != old_count
+            || !self.coverage_changed.is_empty())
     }
 }
 

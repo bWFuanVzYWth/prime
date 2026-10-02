@@ -1,5 +1,6 @@
 package dev.primept.capture;
 
+import dev.primept.StartupOptions;
 import dev.primept.PrimeClient;
 import dev.primept.mixin.SpriteContentsAccessor;
 import java.nio.ByteBuffer;
@@ -8,7 +9,9 @@ import net.minecraft.client.renderer.texture.SpriteLoader;
 /** Resource epoch and atlas ownership. Terrain scheduling lives solely in Rust. */
 public final class CaptureInbox {
     private long epoch = 1, atlasVersion;
-    private boolean resourceActive = Boolean.getBoolean("primept.enabled");
+    private long resourceGeneration, observedAtlas;
+    private Object observedModels, observedFluids;
+    private boolean resourceActive = StartupOptions.enabled();
     private RuntimeException failure;
     private Atlas atlas;
     private java.util.List<net.minecraft.client.renderer.texture.TextureAtlasSprite> sprites =
@@ -61,6 +64,19 @@ public final class CaptureInbox {
     public synchronized long epoch() {
         return epoch;
     }
+    /** Resource identity is independent of world/geometry resets. No model callback is executed. */
+    public synchronized long resourceGeneration(Object models, Object fluids) {
+        if (atlas == null)
+            throw new IllegalStateException("Missing prepared block atlas");
+        if (observedAtlas != atlas.version() || observedModels != models ||
+            observedFluids != fluids) {
+            resourceGeneration = Math.incrementExact(resourceGeneration);
+            observedAtlas = atlas.version();
+            observedModels = models;
+            observedFluids = fluids;
+        }
+        return resourceGeneration;
+    }
     public synchronized RuntimeException failure() {
         return failure;
     }
@@ -83,6 +99,9 @@ public final class CaptureInbox {
         resourceActive = false;
         atlas = null;
         sprites = java.util.List.of();
+        observedModels = null;
+        observedFluids = null;
+        observedAtlas = 0;
         failure = null;
     }
     private void fail(RuntimeException exception) {

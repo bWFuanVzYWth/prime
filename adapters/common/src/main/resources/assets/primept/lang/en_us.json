@@ -6,7 +6,7 @@
   "primept.settings.display": "Display · primeDRT",
   "primept.settings.diagnostics": "Diagnostics · Realtime Views",
   "primept.settings.enabled": "Path Tracing",
-  "primept.settings.enabled.tooltip": "Select Prime or vanilla. Requires primept.enabled and Vulkan at startup; switches at the next frame boundary.",
+  "primept.settings.enabled.tooltip": "Select Prime or vanilla. Requires Vulkan and Prime not explicitly disabled at startup; switches at the next frame boundary.",
   "primept.settings.offline": "Offline Rendering",
   "primept.settings.offline.tooltip": "Ctrl+Alt+F2 toggles. Freeze the displayed scene, camera and lighting; accumulate continuously. Esc opens the menu. Resource reload or world exit ends the snapshot; realtime resumes with a fresh capture.",
   "primept.settings.opacity_micromap": "Cutout OMM",

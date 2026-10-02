@@ -37,7 +37,8 @@ tasks.named('jar') {
     dependsOn common.tasks.named('classes')
     from common.sourceSets.main.output.classesDirs
 }
-tasks.named('sourcesJar') { from common.sourceSets.main.allSource }
+// Common resources already enter the adapter's own allSource through the resource roots above.
+tasks.named('sourcesJar') { from common.sourceSets.main.allJava }
 
 // Adapted shader source also lives in the embedded native binary.
 tasks.withType(Jar).configureEach {
@@ -53,7 +54,9 @@ loom {
             runDir = 'run'
             vmArgs '--enable-native-access=ALL-UNNAMED'
             vmArgs "-Dprimept.native.path=${providers.gradleProperty('nativeLibrary').getOrElse(rootProject.file("target/release/${hostLibraryName}").absolutePath)}"
-            vmArgs "-Dprimept.enabled=${providers.gradleProperty('primeptEnabled').getOrElse('false')}"
+            // Use the packaged runtime default unless explicitly overridden.
+            if (providers.gradleProperty('primeptEnabled').isPresent())
+                vmArgs "-Dprimept.enabled=${providers.gradleProperty('primeptEnabled').get()}"
             if (providers.gradleProperty('primeptRenderer').isPresent())
                 vmArgs "-Dprimept.renderer=${providers.gradleProperty('primeptRenderer').get()}"
             vmArgs "-Dprimept.profile.leaves=${providers.gradleProperty('primeptProfileLeaves').getOrElse('false')}"
@@ -137,7 +140,6 @@ tasks.register('cpuSmoke', JavaExec) {
     mainClass = 'dev.primept.FabricCpuTestLauncher'
     jvmArgs '--enable-native-access=ALL-UNNAMED'
     systemProperty 'fabric.development', 'true'
-    systemProperty 'primept.enabled', 'true'
     systemProperty 'primept.smoke.foreignWrapper', providers.gradleProperty('primeptSmokeForeign').getOrElse('false')
     systemProperty 'primept.smoke.routingCost', providers.gradleProperty('primeptSmokeRoutingCost').getOrElse('')
     systemProperty 'primept.smoke.targetResize', providers.gradleProperty('primeptSmokeTargetResize').getOrElse('false')

@@ -64,14 +64,15 @@ final class SourceSpriteFixture extends TextureAtlasSprite {
         frame.setAccessible(true);
         subFrame.setAccessible(true);
         var tick = stateType.getMethod("tick");
-        try (var out = new SourcePages()) {
+        try (var out = new SourcePages(); var batch = new McSourceBatch()) {
             var resources = new SourceSprites();
             var sprite = new SourceSpriteFixture(contents, 0, 0);
-            resources.prepare(out, sprite);
-            long bytes = out.bytes();
-            resources.prepare(out, sprite);
-            if (out.bytes() != bytes)
+            resources.prepare(batch, sprite);
+            long bytes = batch.bytes();
+            resources.prepare(batch, sprite);
+            if (batch.bytes() != bytes)
                 throw new AssertionError("sprite definition was retransmitted");
+            SourceFixtureWire.resources(batch, out);
             out.i(31);
             for (int i = 0; i < 31; ++i) {
                 int selected = frame.getInt(state), sub = subFrame.getInt(state);
@@ -90,27 +91,30 @@ final class SourceSpriteFixture extends TextureAtlasSprite {
         var used = create(0, 0, 8);
         var unused = create(8, 0, 8);
         var replacement = create(0, 8, 8);
-        try (var out = new SourcePages()) {
+        try (var out = new SourcePages(); var batch = new McSourceBatch()) {
             field.set(capture, java.util.List.of(used, unused));
             var sources = new SourceSprites();
-            sources.prepareAtlas(out);
+            sources.prepareAtlas(batch);
+            SourceFixtureWire.resources(batch, out);
             var data = read(out);
             staticDefinition(data, 1, used);
             staticDefinition(data, 2, unused);
             if (data.hasRemaining())
                 throw new AssertionError("complete atlas dictionary has unexpected records");
-            long preparedBytes = out.bytes();
-            if (preparedBytes == 0 || sources.prepare(out, used) != 1 ||
-                sources.prepare(out, unused) != 2 || out.bytes() != preparedBytes)
+            long preparedBytes = batch.bytes();
+            if (preparedBytes == 0 || sources.prepare(batch, used) != 1 ||
+                sources.prepare(batch, unused) != 2 || batch.bytes() != preparedBytes)
                 throw new AssertionError("section sprite use must reuse resource dictionary IDs");
             out.clear();
+            batch.clear();
             for (int section = 0; section < 1000; ++section)
-                sources.prepareAtlas(out);
-            if (out.bytes() != 0)
+                sources.prepareAtlas(batch);
+            if (batch.bytes() != 0)
                 throw new AssertionError("atlas dictionary was retransmitted per section");
             // A fresh source owner is created for the new capture/catalog epoch.
             field.set(capture, java.util.List.of(replacement, unused));
-            new SourceSprites().prepareAtlas(out);
+            new SourceSprites().prepareAtlas(batch);
+            SourceFixtureWire.resources(batch, out);
             data = read(out);
             staticDefinition(data, 1, replacement);
             staticDefinition(data, 2, unused);

@@ -1431,7 +1431,7 @@ fn sprite_frames_mips_and_endpoints_share_pixels_without_rebuilding_geometry() {
         .geometry
         .as_ref()
         .unwrap()
-        .textures
+        .textures()
         .retained_slots();
     assert_eq!(
         retained.1,
@@ -1459,7 +1459,7 @@ fn sprite_frames_mips_and_endpoints_share_pixels_without_rebuilding_geometry() {
             let g = renderer.geometry.as_ref().unwrap();
             assert_eq!(g.rebuilt_clusters, 0);
             assert_eq!(
-                g.textures.retained_slots(),
+                g.textures().retained_slots(),
                 retained,
                 "animation only changes descriptors"
             );
@@ -1470,7 +1470,7 @@ fn sprite_frames_mips_and_endpoints_share_pixels_without_rebuilding_geometry() {
             include_bytes!(concat!(env!("OUT_DIR"), "/texture.spv")),
             &input,
             16,
-            [g.textures.index(2).unwrap(), 4],
+            [g.textures().index(2).unwrap(), 4],
             Some(g),
         );
         let base = if frame == 0 {
@@ -1518,7 +1518,7 @@ fn sprite_frames_mips_and_endpoints_share_pixels_without_rebuilding_geometry() {
             .geometry
             .as_ref()
             .unwrap()
-            .textures
+            .textures()
             .retained_slots()
             .1,
         retained.1

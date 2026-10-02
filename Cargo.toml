@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/prime-abi",
     "crates/prime-minecraft",
     "crates/prime-scene",
     "crates/prime-vulkan",
@@ -16,6 +17,7 @@ edition = "2024"
 rust-version = "1.89"
 
 [workspace.dependencies]
+prime_abi = { path = "crates/prime-abi" }
 prime_minecraft = { path = "crates/prime-minecraft" }
 prime_scene = { path = "crates/prime-scene" }
 prime_vulkan = { path = "crates/prime-vulkan" }

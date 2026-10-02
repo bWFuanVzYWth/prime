@@ -1,5 +1,7 @@
 package dev.primept.capture;
 
+import static dev.primept.abi.PrimeAbi.*;
+
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -48,15 +50,19 @@ final class FabricMeshCpuSmoke {
         check(first != null && context.stats().prototypeUpserts() == 2 &&
                       context.stats().instanceUpserts() == 2,
               "Per-tint prototypes and stable source instances");
-        var wire = first.asByteBuffer().order(java.nio.ByteOrder.LITTLE_ENDIAN);
-        check(wire.get(48 + 56 + 12) == (byte)0x12 && wire.get(48 + 56 + 13) == (byte)0x34,
+        var source = TypedSceneFixtureWire.prototypeSpan(first, 0, 0);
+        var vertices = TypedSceneFixtureWire.vertices(source).asByteBuffer();
+        int colorOffset = PrimeMeshSpan.color_offset(source);
+        check(vertices.get(colorOffset) == (byte)0x12 &&
+                      vertices.get(colorOffset + 1) == (byte)0x34,
               "Prototype stores actual unlit source channels before tint");
-        int firstInstance = 48 + 2 * (56 + 96);
-        check(wire.getDouble(firstInstance + 24) == 10 && wire.getFloat(firstInstance + 48) == -2 &&
-                      wire.getFloat(firstInstance + 60) == 2,
+        var instance = TypedSceneFixtureWire.instance(first, 0);
+        check(PrimeInstanceSource.origin(instance, 0) == 10 &&
+                      PrimeInstanceSource.transform(instance, 0) == -2 &&
+                      PrimeInstanceSource.transform(instance, 3) == 2,
               "Stable world origin and full negative nonuniform affine preserved");
         int expectedTint = net.minecraft.util.ARGB.multiply(0xff8f7f6f, 0xff778899);
-        check(wire.get(firstInstance + 104) == (byte)(expectedTint >>> 16),
+        check((byte)PrimeInstanceSource.rgba(instance) == (byte)(expectedTint >>> 16),
               "Actual integer base/layer tint reaches native instance");
         context.acknowledge();
         frame(mesh, true, 0xff778899, 2);

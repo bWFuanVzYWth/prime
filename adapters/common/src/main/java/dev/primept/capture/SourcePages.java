@@ -7,7 +7,7 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 
-/** Reusable native transport pages. No geometry, Minecraft interpretation or scheduling. */
+/** Legacy CPU oracle file writer. Production source transport uses McSourceBatch. */
 public final class SourcePages implements AutoCloseable {
     public static final int MAGIC = 0x53434d50, VERSION = 6;
     private static final int PAGE_BYTES = 1 << 20;

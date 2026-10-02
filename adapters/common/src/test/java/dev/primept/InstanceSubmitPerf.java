@@ -1,7 +1,7 @@
 package dev.primept;
 
 import dev.primept.capture.InstanceCapture;
-import dev.primept.capture.Packets;
+import static dev.primept.abi.PrimeAbi.*;
 import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -72,7 +72,7 @@ public final class InstanceSubmitPerf {
                 MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(library)));
         Files.writeString(
                 Path.of(output + ".metadata.txt"),
-                "scope=InstanceCapture + NativeBridge.submit(MemorySegment) + SourceScene; no Minecraft/GPU/FPS\n"
+                "scope=InstanceCapture + NativeBridge.submitInstances(MemorySegment) + SourceScene; no Minecraft/GPU/FPS\n"
                         + "library=" + library + "\nsha256=" + sha +
                         "\njava=" + System.getProperty("java.runtime.version") +
                         "\nvm=" + System.getProperty("java.vm.name") + "\nobjects=" + objects +
@@ -80,7 +80,8 @@ public final class InstanceSubmitPerf {
                         "\nsamples_per_phase=" + samples +
                         "\ninitial=one cold publication per fresh epoch; not a steady-state distribution\n"
                         + "observe=beginFrame + observe all resident handles + endFrame\n"
-                        + "seal=sealDelta including continuous packet writes; no native call\n"
+                        +
+                        "seal=sealDelta including typed descriptor/payload writes; no native call\n"
                         +
                         "native_submit=one synchronous direct-segment FFM call; zero for unchanged frames\n"
                         +
@@ -92,7 +93,7 @@ public final class InstanceSubmitPerf {
 
     private static void run(NativeBridge bridge, int objects, long epoch, String phase, int changed,
                             int warmup, int samples, ArrayList<Sample> rows) {
-        bridge.submit(Packets.reset(epoch));
+        bridge.reset(epoch);
         try (var capture = new InstanceCapture(epoch)) {
             var prototypes = new InstanceCapture.Prototype[PROTOTYPES];
             for (int i = 0; i < prototypes.length; i++) {
@@ -133,7 +134,7 @@ public final class InstanceSubmitPerf {
         long nativeNs = 0, acknowledgeNs = 0;
         if (packet != null) {
             long submitBegin = System.nanoTime();
-            bridge.submit(packet);
+            bridge.submitInstances(packet);
             long submitted = System.nanoTime();
             capture.acknowledge();
             long acknowledged = System.nanoTime();
@@ -141,9 +142,13 @@ public final class InstanceSubmitPerf {
             acknowledgeNs = acknowledged - submitted;
         }
         InstanceCapture.Stats stats = capture.stats();
-        int expectedBytes = expectedUpdates == 0 ? 0 : 48 + expectedUpdates * 128;
+        int expectedBytes = expectedUpdates == 0
+                                    ? 0
+                                    : Math.toIntExact(PrimeInstanceBatch.SIZE +
+                                                      expectedUpdates * PrimeInstanceSource.SIZE);
         if (initial)
-            expectedBytes += PROTOTYPES * (56 + 4 * 24);
+            expectedBytes += Math.toIntExact(
+                    PROTOTYPES * (PrimePrototypeSource.SIZE + PrimeMeshSpan.SIZE + 4 * 24));
         if (stats.instanceUpserts() != expectedUpdates || stats.instanceRemoves() != 0 ||
             stats.prototypeUpserts() != (initial ? PROTOTYPES : 0) ||
             stats.prototypeRemoves() != 0 || stats.bytes() != expectedBytes ||

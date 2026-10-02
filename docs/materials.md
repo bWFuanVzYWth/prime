@@ -6,7 +6,7 @@ Java 读取资源包的实际声明、RGBA8 图像和 Minecraft sprite 字段；
 
 仅接受 `minecraft:optifine/texture.properties` 中的 `format=lab-pbr/1.3`，比较忽略大小写与首尾空白。辅助图位置为 `textures/<sprite path>_n.png` 和 `_s.png`，沿用 sprite namespace。缺少声明、格式不支持、缺图或非法图像均不伪装成已提供材质；非法资源记录诊断，该 sprite 不发布部分材料。当前读取通道位深不超过8 bit、可无损表示为 RGBA8 的 PNG，Java 不对像素做 PBR 数值清洗。
 
-辅助图可以是单帧图，也可以匹配基色 sheet 的列/行布局；尺寸不同的有效图由 Rust 按源布局映射到基色帧。无法匹配 sheet 布局的图沿用源实现的单帧解释。资源定义在失效代次内不可原地改变；重新加载重新准备。无有效 LabPBR 包时保留按需 sprite 准备；有辅助图的包一次准备 block atlas sprites，使地形和使用 atlas UV 的物品共享同一份材料来源。
+辅助图可以是单帧图，也可以匹配基色 sheet 的列/行布局；尺寸不同的有效图由 Rust 按源布局映射到基色帧。无法匹配 sheet 布局的图沿用源实现的单帧解释。资源定义在失效代次内不可原地改变；重新加载重新准备。当前每个 `SourceSprites` 实例一次准备完整 block atlas sprite 字典，无论是否存在有效 LabPBR 辅助图，使地形和使用 atlas UV 的物品共享同一份材料来源。独立资源owner在初始化/真实重载准备此字典，通过typed资源事务连同atlas原子登记；world/几何重置保留该资源代，renderer重建重新准备native/GPU所有者。
 
 | 源通道 | 规范通道与消费 |
 | --- | --- |

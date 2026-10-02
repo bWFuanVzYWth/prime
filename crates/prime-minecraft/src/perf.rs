@@ -240,7 +240,7 @@ fn source_cost_matrix() {
             .collect();
         for n in 0..15 {
             let mut ctx = TerrainContext {
-                workers: Some(CpuWorkers::new(8).unwrap()),
+                workers: Some(CpuWorkers::new(8).unwrap().into()),
                 ..Default::default()
             };
             let mut scene = scene();
@@ -270,7 +270,7 @@ fn source_cost_matrix() {
         }
     }
     let mut ctx = TerrainContext {
-        workers: Some(CpuWorkers::new(8).unwrap()),
+        workers: Some(CpuWorkers::new(8).unwrap().into()),
         ..Default::default()
     };
     let mut scene = scene();
@@ -328,7 +328,7 @@ fn source_burst_cost() {
         .collect();
     for sample in 0..samples {
         let mut ctx = TerrainContext {
-            workers: Some(CpuWorkers::new(8).unwrap()),
+            workers: Some(CpuWorkers::new(8).unwrap().into()),
             ..Default::default()
         };
         let mut source = scene();

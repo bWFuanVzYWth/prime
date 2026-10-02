@@ -12,12 +12,17 @@ pub(super) struct EnergyLut {
     context: Arc<Context>,
     image: Image,
     sampler: vk::Sampler,
-    // CPU ownership until the first actual frame recording. After the copy is
+    // CPU ownership until the first actual resource preparation command. After the copy is
     // recorded, staging retires using the existing Context host serial proof.
     pending: Option<Buffer>,
 }
 
 impl EnergyLut {
+    #[cfg(test)]
+    pub fn is_ready(&self) -> bool {
+        self.pending.is_none()
+    }
+
     pub fn new(context: &Arc<Context>) -> Result<Self, String> {
         let image = Image::sampled_3d_uninitialized(
             context,
@@ -127,7 +132,7 @@ impl EnergyLut {
 
 impl Drop for EnergyLut {
     fn drop(&mut self) {
-        // The owner is Pipeline; Renderer drains before pipeline replacement or
+        // Renderer owns this independently of its pipelines and drains before
         // destruction. An uncertain submission retains every native object.
         if self.context.can_destroy() {
             unsafe {

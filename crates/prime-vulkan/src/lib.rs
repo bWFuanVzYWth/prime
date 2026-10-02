@@ -47,6 +47,7 @@ mod reconstruction_history;
 mod resources;
 #[cfg(all(test, feature = "shader-tests"))]
 mod rr_display_tests;
+mod scene_resources;
 mod surface;
 #[cfg(test)]
 mod surface_tests;
@@ -102,7 +103,6 @@ struct Pipeline {
     primary_pipelines: Option<[vk::Pipeline; 4]>,
     realtime_post: Option<vk::Pipeline>,
     reconstruction_display: Option<vk::Pipeline>,
-    energy_lut: Option<openpbr::EnergyLut>,
 }
 impl Drop for Pipeline {
     fn drop(&mut self) {
@@ -133,12 +133,15 @@ impl Drop for Pipeline {
     }
 }
 impl Pipeline {
-    fn new(context: &Arc<Context>, mode: RenderMode, reconstruction: bool) -> Result<Self, String> {
-        let energy_lut = openpbr::EnergyLut::new(context)?;
+    fn new(
+        context: &Arc<Context>,
+        mode: RenderMode,
+        reconstruction: bool,
+        energy_lut: &openpbr::EnergyLut,
+    ) -> Result<Self, String> {
         unsafe {
             let mut result = Self {
                 context: context.clone(),
-                energy_lut: Some(energy_lut),
                 layout: vk::PipelineLayout::null(),
                 descriptor_layout: vk::DescriptorSetLayout::null(),
                 environment_layout: vk::DescriptorSetLayout::null(),
@@ -244,7 +247,7 @@ impl Pipeline {
                 .map_err(|e| error("Allocate path-tracing descriptors", e))?
                 .try_into()
                 .map_err(|_| "Invalid descriptor count")?;
-            let energy_info = [result.energy_lut.as_ref().unwrap().descriptor()];
+            let energy_info = [energy_lut.descriptor()];
             let energy_writes: Vec<_> = result
                 .descriptors
                 .iter()
@@ -425,9 +428,12 @@ pub struct Renderer {
     context: Arc<Context>,
     // Only the selected backend's pipeline and sized output exist; scene geometry is shared.
     pipeline: Option<Pipeline>,
+    // Immutable device data outlives mode and quality changes.
+    energy_lut: openpbr::EnergyLut,
     reconstruction: Option<reconstruction::Reconstruction>,
     reconstruction_error: Option<String>,
     geometry: Option<Geometry>,
+    scene_resources: Option<scene_resources::SharedResources>,
     atmosphere: Option<atmosphere::Atmosphere>,
     atmosphere_scene_revision: u64,
     environment: prime_scene::environment::Environment,
@@ -637,7 +643,7 @@ mod tests {
             .geometry
             .as_ref()
             .unwrap()
-            .textures
+            .textures()
             .index(7)
             .unwrap();
         scene.textures.insert(
@@ -658,7 +664,7 @@ mod tests {
                 .geometry
                 .as_ref()
                 .unwrap()
-                .textures
+                .textures()
                 .index(7)
                 .unwrap(),
             original_index

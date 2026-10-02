@@ -2,6 +2,8 @@ package dev.primept.capture;
 
 import com.mojang.blaze3d.vertex.VertexSorting;
 import dev.primept.NativeBridge;
+import dev.primept.abi.PrimeAbi.*;
+import java.lang.foreign.MemorySegment;
 import java.io.DataOutputStream;
 import java.lang.foreign.ValueLayout;
 import java.lang.management.ManagementFactory;
@@ -91,35 +93,40 @@ final class SectionWorkload implements AutoCloseable {
         return region.index(x, y, z);
     }
 
-    private void frame(SourcePages pages, long batch, String mode) {
-        pages.header(SectionSources.GAME_VERSION, 1, 1, batch)
-                .d(0)
-                .d(0)
-                .i(region.side - 1)
-                .i(-1)
-                .i(1)
-                .i(-1)
-                .i(region.side - 1)
-                .i(-1)
-                .i(region.side - 1)
-                .l(batch);
+    private MemorySegment frame(McSourceBatch pages, long batch, String mode) {
+        pages.clear();
         if (batch == 1)
             for (int x = -1; x < region.side; ++x)
                 for (int z = -1; z < region.side; ++z)
-                    pages.i(1).i(x).i(0).i(z);
+                    event(pages, 1, x, 0, z);
         else if (mode.equals("reload"))
-            pages.i(4).i(0).i(0).i(0);
+            event(pages, 4, 0, 0, 0);
         else if (mode.equals("biome"))
-            pages.i(7).i(0).i(0).i(0);
+            event(pages, 7, 0, 0, 0);
         else if (mode.equals("biome_columns"))
             for (int x = 0; x <= region.side; x += 3)
                 for (int z = 0; z <= region.side; z += 3)
-                    pages.i(6).i(x).i(0).i(z);
+                    event(pages, 6, x, 0, z);
         else if (!mode.equals("idle"))
             for (var k : keys)
                 if (k.x() >= 0 && k.y() >= 0 && k.z() >= 0)
-                    pages.i(3).i(k.x()).i(k.y()).i(k.z());
-        pages.i(0);
+                    event(pages, 3, k.x(), k.y(), k.z());
+        return pages.plan(SectionSources.GAME_VERSION, 1, 1, batch, 0, 0, region.side - 1, -1, 1,
+                          new int[] {-1, region.side - 1, -1, region.side - 1}, batch);
+    }
+    private static void event(McSourceBatch b, int kind, int x, int y, int z) {
+        var e = b.events.add();
+        PrimeMcEvent.kind(e, kind);
+        PrimeMcEvent.x(e, x);
+        PrimeMcEvent.y(e, y);
+        PrimeMcEvent.z(e, z);
+    }
+    private static void publish(NativeBridge bridge, McSourceBatch resources, long batch,
+                                boolean replace) {
+        if (replace || resources.hasResources())
+            bridge.resources(resources.resources(
+                    SectionSources.GAME_VERSION, 1, 1, batch, batch, replace, replace ? 16 : 0,
+                    replace ? 16 : 0, replace ? SourceSpriteFixture.atlas() : new byte[0]));
     }
 
     void write(Path directory) throws Exception {
@@ -127,40 +134,45 @@ final class SectionWorkload implements AutoCloseable {
                           "requested=" + keys.size() +
                                   "\nedited=" + (region.side * region.side * 2) + "\n");
         var expected = new LegacyTerrainInbox(true);
-        try (var source = new SourcePages(); var frame = new SourcePages();
+        try (var source = new McSourceBatch(); var frame = new McSourceBatch();
+             var resources = new McSourceBatch(); var wire = new SourcePages();
              var bridge =
                      new NativeBridge(Path.of(System.getProperty("primept.smoke.nativeLibrary")));
-             var tintResponse = new SourcePages()) {
-            bridge.submit(Packets.reset(1));
-            bridge.submit(Packets.texture(1, 16, 16, SourceSpriteFixture.atlas()));
+             var tintResponse = new McSourceBatch()) {
+            bridge.reset(1);
             var router = new SectionSources(models, fluids);
-            source.header(SectionSources.GAME_VERSION, 2, 1, 1);
             // Source first: the oracle is not allowed to warm source model-selection caches.
             for (var k : keys)
-                router.section(source, k.x(), k.y(), k.z(),
+                router.section(resources, source, k.x(), k.y(), k.z(),
                                region.sections[index(k.x(), k.y(), k.z())]);
-            source.i(0);
-            SectionSourcesCpuSmoke.write(source, directory.resolve(fixture.name() + ".source"));
-            frame(frame, 1, "full");
-            SectionSourcesCpuSmoke.write(frame, directory.resolve(fixture.name() + ".frame"));
-            routeFixture(bridge, frame, source, tintResponse, directory, fixture.name());
+            SourceFixtureWire.source(resources, source, wire, 1);
+            SectionSourcesCpuSmoke.write(wire, directory.resolve(fixture.name() + ".source"));
+            publish(bridge, resources, 1, true);
+            resources.clear();
+            var plan = frame(frame, 1, "full");
+            SourceFixtureWire.plan(plan, wire);
+            SectionSourcesCpuSmoke.write(wire, directory.resolve(fixture.name() + ".frame"));
+            routeFixture(bridge, plan, source, tintResponse, directory, fixture.name());
             compile(keys, expected, builders);
             if (fixture.name().startsWith("bench_") && !fixture.name().endsWith("_edited")) {
                 restore(true);
                 for (int batch = 2; batch <= 3; ++batch) {
                     String suffix = batch == 2 ? ".edit" : ".unchanged";
-                    frame(frame, batch, "edit");
+                    plan = frame(frame, batch, "edit");
+                    SourceFixtureWire.plan(plan, wire);
                     SectionSourcesCpuSmoke.write(
-                            frame, directory.resolve(fixture.name() + suffix + ".frame"));
-                    source.header(SectionSources.GAME_VERSION, 2, 1, batch);
+                            wire, directory.resolve(fixture.name() + suffix + ".frame"));
+                    source.clear();
+                    resources.clear();
                     for (var k : keys)
                         if (k.x() >= 0 && k.y() >= 0 && k.z() >= 0)
-                            router.section(source, k.x(), k.y(), k.z(),
+                            router.section(resources, source, k.x(), k.y(), k.z(),
                                            region.sections[index(k.x(), k.y(), k.z())]);
-                    source.i(0);
+                    SourceFixtureWire.source(resources, source, wire, batch);
                     SectionSourcesCpuSmoke.write(
-                            source, directory.resolve(fixture.name() + suffix + ".source"));
-                    routeFixture(bridge, frame, source, tintResponse, directory,
+                            wire, directory.resolve(fixture.name() + suffix + ".source"));
+                    publish(bridge, resources, batch, false);
+                    routeFixture(bridge, plan, source, tintResponse, directory,
                                  fixture.name() + suffix);
                 }
                 restore(false);
@@ -175,26 +187,33 @@ final class SectionWorkload implements AutoCloseable {
         }
         writeExpected(expected, directory.resolve(fixture.name() + ".expected"));
     }
-    private void routeFixture(NativeBridge bridge, SourcePages frame, SourcePages source,
-                              SourcePages tintResponse, Path directory, String name)
+    private void routeFixture(NativeBridge bridge, MemorySegment frame, McSourceBatch source,
+                              McSourceBatch tintResponse, Path directory, String name)
             throws Exception {
         bridge.requestSections(frame);
-        var request = bridge.sections(source);
-        for (int round = 0; request.byteSize() != 0; ++round) {
-            if (round >= 2)
-                throw new AssertionError("Extra callback round");
-            String suffix = request.get(I, 28) == 3 ? ".biome" : ".tint";
-            Files.write(directory.resolve(name + suffix + ".requests"),
-                        request.toArray(ValueLayout.JAVA_BYTE));
-            region.tintWorld.rejectColorCallbacks = true;
-            try {
-                SectionTints.respond(request, tintResponse, region, colors, fluids,
-                                     region.tintWorld);
-            } finally {
-                region.tintWorld.rejectColorCallbacks = false;
+        long batch = PrimeMcIdentity.batch(PrimeMcPlan.identity(frame));
+        var request = bridge.sections(source.sections(SectionSources.GAME_VERSION, 1, 1, batch));
+        try (var wire = new SourcePages()) {
+            for (int round = 0; PrimeMcRequests.phase(request) != 0; ++round) {
+                if (round >= 2)
+                    throw new AssertionError("Extra callback round");
+                boolean biome = PrimeMcRequests.phase(request) == 4;
+                String suffix = biome ? ".biome" : ".tint";
+                SourceFixtureWire.requests(request, wire);
+                SectionSourcesCpuSmoke.write(wire, directory.resolve(name + suffix + ".requests"));
+                region.tintWorld.rejectColorCallbacks = true;
+                MemorySegment response;
+                try {
+                    response = SectionTints.respond(request, tintResponse, region, colors, fluids,
+                                                    region.tintWorld);
+                } finally {
+                    region.tintWorld.rejectColorCallbacks = false;
+                }
+                SourceFixtureWire.colors(tintResponse, response, biome, wire,
+                                         PrimeMcRequests.biome_count(request));
+                SectionSourcesCpuSmoke.write(wire, directory.resolve(name + suffix));
+                request = biome ? bridge.biomes(response) : bridge.colors(response);
             }
-            SectionSourcesCpuSmoke.write(tintResponse, directory.resolve(name + suffix));
-            request = bridge.sections(tintResponse);
         }
         if (nativeCount(bridge.cpuDiagnostics(), "tint_callbacks") != 0)
             throw new AssertionError("Known vanilla tint source invoked a color callback");
@@ -274,10 +293,16 @@ final class SectionWorkload implements AutoCloseable {
                 region.tintWorld.clearColors();
                 try (var bridge = new NativeBridge(
                              Path.of(System.getProperty("primept.smoke.nativeLibrary")));
-                     var events = new SourcePages(); var response = new SourcePages()) {
-                    bridge.submit(Packets.reset(1));
-                    bridge.submit(Packets.texture(1, 16, 16, SourceSpriteFixture.atlas()));
+                     var events = new McSourceBatch(); var response = new McSourceBatch();
+                     var resources = new McSourceBatch()) {
+                    bridge.reset(1);
                     var router = new SectionSources(models, fluids);
+                    for (var k : keys)
+                        router.section(resources, response, k.x(), k.y(), k.z(),
+                                       region.sections[index(k.x(), k.y(), k.z())]);
+                    publish(bridge, resources, 1, true);
+                    resources.clear();
+                    response.clear();
                     for (int sample = -1; sample < warmup + samples; ++sample) {
                         long batch = sample + 2L;
                         if (mode.startsWith("biome"))
@@ -297,35 +322,43 @@ final class SectionWorkload implements AutoCloseable {
                         invalidateColors(mode);
                         long gc0 = gcCount(), gcMs0 = gcMillis(), alloc0 = allocated(allocation);
                         long t0 = System.nanoTime();
-                        frame(events, batch, mode);
+                        var plan = frame(events, batch, mode);
                         long t1 = System.nanoTime();
-                        var request = bridge.requestSections(events);
+                        var request = bridge.requestSections(plan);
                         long t2 = System.nanoTime();
-                        if (mode.equals("reload"))
-                            router = new SectionSources(models, fluids);
-                        long count = request.get(L, 8);
-                        response.header(SectionSources.GAME_VERSION, 2, 1, batch);
+                        long count = PrimeMcRequests.section_count(request);
+                        response.clear();
+                        resources.clear();
+                        var requests = PrimeMcRequests.sections(request).reinterpret(
+                                count * PrimeMcSectionRequest.SIZE);
                         for (long n = 0; n < count; ++n) {
-                            long at = 32 + n * 16;
-                            int x = request.get(I, at), y = request.get(I, at + 4),
-                                z = request.get(I, at + 8);
-                            router.section(response, x, y, z, region.sections[index(x, y, z)]);
+                            var item = requests.asSlice(n * PrimeMcSectionRequest.SIZE,
+                                                        PrimeMcSectionRequest.SIZE);
+                            int x = PrimeMcSectionRequest.x(item),
+                                y = PrimeMcSectionRequest.y(item),
+                                z = PrimeMcSectionRequest.z(item);
+                            router.section(resources, response, x, y, z,
+                                           region.sections[index(x, y, z)]);
                         }
-                        response.i(0);
+                        publish(bridge, resources, batch, false);
                         long t3 = System.nanoTime();
-                        long sourceBytes = response.bytes();
-                        var tints = bridge.sections(response);
+                        long sourceBytes = response.bytes() + resources.bytes();
+                        var tints = bridge.sections(
+                                response.sections(SectionSources.GAME_VERSION, 1, 1, batch));
                         long tintCount = 0, tintNanos = 0;
-                        for (int round = 0; tints.byteSize() != 0; ++round) {
+                        for (int round = 0; PrimeMcRequests.phase(tints) != 0; ++round) {
                             if (round >= 2)
                                 throw new AssertionError("Unexpected tint continuation");
-                            tintCount += tints.get(L, 8);
+                            boolean biome = PrimeMcRequests.phase(tints) == 4;
+                            tintCount += biome ? PrimeMcRequests.biome_count(tints)
+                                               : PrimeMcRequests.color_count(tints);
                             long tintStart = System.nanoTime();
-                            SectionTints.respond(tints, response, region, colors, fluids,
-                                                 region.tintWorld);
+                            var colorResponse = SectionTints.respond(
+                                    tints, response, region, colors, fluids, region.tintWorld);
                             tintNanos += System.nanoTime() - tintStart;
                             sourceBytes += response.bytes();
-                            tints = bridge.sections(response);
+                            tints = biome ? bridge.biomes(colorResponse)
+                                          : bridge.colors(colorResponse);
                         }
                         long t4 = System.nanoTime();
                         long bytes = alloc0 < 0 ? -1 : allocated(allocation) - alloc0,

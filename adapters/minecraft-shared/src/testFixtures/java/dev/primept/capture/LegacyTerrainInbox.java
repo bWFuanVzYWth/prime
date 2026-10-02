@@ -1,5 +1,6 @@
 package dev.primept.capture;
 
+import dev.primept.StartupOptions;
 import dev.primept.PrimeClient;
 import dev.primept.mixin.SpriteContentsAccessor;
 import java.nio.ByteBuffer;
@@ -33,7 +34,7 @@ public final class LegacyTerrainInbox {
     private final List<Long> routeRetirements = new ArrayList<>();
 
     public LegacyTerrainInbox() {
-        this(Boolean.getBoolean("primept.enabled"));
+        this(StartupOptions.enabled());
     }
     LegacyTerrainInbox(boolean active) {
         this.active = resourceActive = active;

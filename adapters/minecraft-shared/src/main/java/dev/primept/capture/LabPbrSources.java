@@ -37,26 +37,25 @@ final class LabPbrSources {
         }
         return false;
     }
-    void prepare(SourcePages out, int id, Identifier name) {
+    int[] prepare(McSourceBatch out, Identifier name) {
         var minecraft = Minecraft.getInstance();
         if (minecraft == null)
-            return;
+            return new int[] {-1, -1};
         var manager = minecraft.getResourceManager();
-        prepare(manager, out, id, name);
+        return prepare(manager, out, name);
     }
-    void prepare(ResourceManager manager, SourcePages out, int id, Identifier name) {
+    int[] prepare(ResourceManager manager, McSourceBatch out, Identifier name) {
         if (manager == null || !supported(manager))
-            return;
+            return new int[] {-1, -1};
         try (var normal = image(manager, name, "_n"); var specular = image(manager, name, "_s")) {
             if (normal == null && specular == null)
-                return;
-            out.i(9).i(id);
-            write(out, normal);
-            write(out, specular);
+                return new int[] {-1, -1};
+            return new int[] {write(out, normal), write(out, specular)};
         } catch (IOException | RuntimeException exception) {
             // Both planes are fully validated before appending the record. A malformed optional
             // plane must not publish a partially changed material under the same sprite identity.
             PrimeClient.LOGGER.warn("Unable to read LabPBR material {}", name, exception);
+            return new int[] {-1, -1};
         }
     }
     private static boolean declared(ResourceManager manager) {
@@ -81,13 +80,12 @@ final class LabPbrSources {
         return Identifier.fromNamespaceAndPath(name.getNamespace(),
                                                "textures/" + name.getPath() + suffix + ".png");
     }
-    private static void write(SourcePages out, NativeImage image) {
+    private static int write(McSourceBatch out, NativeImage image) {
         if (image == null) {
-            out.i(0);
-            return;
+            return -1;
         }
         var pixels = image.getPixelBytes();
-        out.i(1).i(image.getWidth()).i(image.getHeight()).i(pixels.remaining() / 4).pixels(pixels);
+        return Math.toIntExact(out.image(image.getWidth(), image.getHeight(), pixels));
     }
     private static NativeImage image(ResourceManager manager, Identifier name, String suffix)
             throws IOException {

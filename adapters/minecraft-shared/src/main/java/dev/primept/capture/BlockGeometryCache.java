@@ -1,5 +1,6 @@
 package dev.primept.capture;
 
+import dev.primept.StartupOptions;
 import java.util.LinkedHashMap;
 import dev.primept.PrimeClient;
 import net.fabricmc.fabric.api.client.renderer.v1.Renderer;
@@ -17,7 +18,7 @@ import org.joml.Matrix4fc;
 /** Resource-scoped FRAPI geometry, before wrapper transform and external tint. Render thread only. */
 public final class BlockGeometryCache {
     private static final boolean ENABLED =
-            Boolean.getBoolean("primept.enabled") &&
+            StartupOptions.enabled() &&
             Boolean.parseBoolean(System.getProperty("primept.geometryCache", "true"));
     private static final ResourceContext RESOURCES = new ResourceContext();
     private BlockGeometryCache() {}

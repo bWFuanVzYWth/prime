@@ -510,10 +510,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "prime_abi"
+version = "0.1.0"
+
+[[package]]
 name = "prime_engine"
 version = "0.1.0"
 dependencies = [
  "mimalloc",
+ "prime_abi",
  "prime_minecraft",
  "prime_scene",
  "prime_vulkan",
@@ -524,6 +529,7 @@ name = "prime_minecraft"
 version = "0.1.0"
 dependencies = [
  "mimalloc",
+ "prime_abi",
  "prime_scene",
 ]
 
@@ -531,6 +537,7 @@ dependencies = [
 name = "prime_scene"
 version = "0.1.0"
 dependencies = [
+ "prime_abi",
  "rayon",
  "rectangle_decomposition",
 ]

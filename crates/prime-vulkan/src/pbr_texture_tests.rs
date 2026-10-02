@@ -187,7 +187,7 @@ fn query_reference(
 ) -> [u32; 32] {
     let input = [
         [
-            geometry.textures.index(texture).unwrap(),
+            geometry.textures().index(texture).unwrap(),
             uv[0].to_bits(),
             uv[1].to_bits(),
             lod.to_bits(),
@@ -200,7 +200,7 @@ fn query_reference(
             identity,
         ],
         [
-            positive_texture.map_or(0, |id| geometry.textures.index(id).unwrap()),
+            positive_texture.map_or(0, |id| geometry.textures().index(id).unwrap()),
             0,
             0,
             0,
@@ -453,8 +453,8 @@ fn gpu_labpbr_material_frame_updates_keep_texture_identity_and_reuse_slots() {
     let context = Context::new().unwrap();
     let mut scene = fixture();
     let mut geometry = geometry(&context, &scene);
-    let identities = geometry.textures.indices.clone();
-    let initial_slots = geometry.textures.retained_slots();
+    let identities = geometry.textures().indices.clone();
+    let initial_slots = geometry.textures().retained_slots();
     let normal = scene.textures[&20]
         .material
         .as_ref()
@@ -479,11 +479,12 @@ fn gpu_labpbr_material_frame_updates_keep_texture_identity_and_reuse_slots() {
         scene.textures.insert(20, texture);
         geometry.update(&context, (&scene).into()).unwrap();
         assert_eq!(
-            geometry.textures.indices, identities,
+            geometry.textures().indices,
+            identities,
             "animated material identity is stable"
         );
         assert_eq!(
-            geometry.textures.retained_slots(),
+            geometry.textures().retained_slots(),
             initial_slots,
             "same-extent frame replacement reuses arenas"
         );

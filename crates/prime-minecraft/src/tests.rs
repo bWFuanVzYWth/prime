@@ -729,7 +729,7 @@ fn replacement_and_catalog_reset_refresh_sources_without_idle_polling() {
 fn synchronous_workers_preserve_geometry_order_and_values() {
     fn compile(threads: usize, mode: &str) -> Vec<Triangle> {
         let mut ctx = TerrainContext {
-            workers: Some(CpuWorkers::new(threads).unwrap()),
+            workers: Some(CpuWorkers::new(threads).unwrap().into()),
             ..Default::default()
         };
         let mut scene = scene();

@@ -97,8 +97,8 @@ fn run_impl(
     )
     .unwrap();
     // Reuse the production RAII owner, with a private fixture layout and one set.
+    let mut energy_lut = full_energy.then(|| openpbr::EnergyLut::new(context).unwrap());
     let mut pipeline = Pipeline {
-        energy_lut: full_energy.then(|| openpbr::EnergyLut::new(context).unwrap()),
         context: context.clone(),
         layout: vk::PipelineLayout::null(),
         descriptor_layout: vk::DescriptorSetLayout::null(),
@@ -195,7 +195,7 @@ fn run_impl(
             )
             .unwrap()[0];
         pipeline.descriptors[0] = set;
-        if let Some(energy) = pipeline.energy_lut.as_mut() {
+        if let Some(energy) = energy_lut.as_mut() {
             energy.prepare().unwrap();
             let image = [energy.descriptor()];
             context.device.update_descriptor_sets(
@@ -208,10 +208,11 @@ fn run_impl(
             );
         }
         let mut buffers = vec![(0, &source), (1, &destination)];
+        let textures = geometry.map(Geometry::textures);
         if let Some(g) = geometry {
             buffers.extend([
-                (3, &g.textures.metadata),
-                (4, &g.textures.texels),
+                (3, &textures.as_ref().unwrap().metadata),
+                (4, &textures.as_ref().unwrap().texels),
                 (5, &g.objects.metadata),
                 (6, &g.static_bases),
             ]);

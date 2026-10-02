@@ -199,6 +199,27 @@ impl InstanceContext {
         result
     }
 
+    pub fn submit_typed(
+        &mut self,
+        view: prime_abi::scene::InstancesView<'_>,
+        textures: &BTreeMap<u32, Texture>,
+        other_triangles: usize,
+    ) -> Result<(), String> {
+        let result = self.batch.decode_typed(view).and_then(|()| {
+            plan(
+                &self.state,
+                &self.batch,
+                textures,
+                other_triangles,
+                &mut self.scratch,
+            )
+        });
+        let result = result.map(|plan| self.apply(plan));
+        self.batch.clear();
+        self.scratch.clear();
+        result
+    }
+
     // The private plan is applied synchronously to exactly the state it validated.
     fn apply(&mut self, plan: Plan) {
         let state = &mut self.state;

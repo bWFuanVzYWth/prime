@@ -130,6 +130,56 @@ impl RenderSettings {
         result.validate()?;
         Ok(result)
     }
+    pub fn from_abi(s: &prime_abi::PrimeSettings) -> Result<Self, String> {
+        let result = Self {
+            astronomy: crate::environment::Astronomy {
+                latitude_degrees: s.latitude_degrees,
+                solar_longitude_degrees: s.solar_longitude_degrees,
+            },
+            mode: match s.mode {
+                0 => RenderMode::Realtime,
+                1 => RenderMode::Offline,
+                _ => return Err("Unknown renderer mode".into()),
+            },
+            bounces: s.bounces,
+            offline_samples: s.offline_samples,
+            terrain_batches_per_frame: s.terrain_batches_per_frame,
+            exposure: s.exposure,
+            hue: s.hue,
+            saturation: s.saturation,
+            view: match s.view {
+                0 => DiagnosticView::Output,
+                1 => DiagnosticView::NoisyColor,
+                2 => DiagnosticView::LinearDepth,
+                3 => DiagnosticView::Normal,
+                _ => return Err("Unknown diagnostic view".into()),
+            },
+            sun: s.sun,
+            sky: s.sky,
+            depth_range: s.depth_range,
+            seed: s.seed,
+            opacity_micromap: match s.opacity_micromap {
+                0 => false,
+                1 => true,
+                _ => return Err("Unknown opacity micromap setting".into()),
+            },
+            ray_reconstruction: match s.ray_reconstruction {
+                0 => false,
+                1 => true,
+                _ => return Err("Unknown ray reconstruction setting".into()),
+            },
+            reconstruction_quality: match s.reconstruction_quality {
+                0 => ReconstructionQuality::Native,
+                1 => ReconstructionQuality::Quality,
+                2 => ReconstructionQuality::Balanced,
+                3 => ReconstructionQuality::Performance,
+                4 => ReconstructionQuality::UltraPerformance,
+                _ => return Err("Unknown reconstruction quality".into()),
+            },
+        };
+        result.validate()?;
+        Ok(result)
+    }
     pub fn validate(self) -> Result<(), String> {
         self.astronomy.validate()?;
         if !(1..=64).contains(&self.bounces)

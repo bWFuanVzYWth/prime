@@ -4,6 +4,7 @@ import dev.primept.mixin.SpriteContentsAccessor;
 import java.lang.reflect.Field;
 import java.util.IdentityHashMap;
 import java.util.List;
+import dev.primept.abi.PrimeAbi.*;
 import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 
@@ -16,7 +17,7 @@ final class SourceSprites {
     private final LabPbrSources materials = new LabPbrSources();
     private boolean atlasPrepared;
 
-    void prepareAtlas(SourcePages out) {
+    void prepareAtlas(McSourceBatch out) {
         if (atlasPrepared)
             return;
         atlasPrepared = true;
@@ -27,7 +28,7 @@ final class SourceSprites {
             prepare(out, sprite);
     }
 
-    int prepare(SourcePages out, TextureAtlasSprite sprite) {
+    int prepare(McSourceBatch out, TextureAtlasSprite sprite) {
         Integer known = ids.get(sprite);
         if (known != null)
             return known;
@@ -36,36 +37,45 @@ final class SourceSprites {
         var contents = sprite.contents();
         Object animation = get(ANIMATION, contents);
         var images = ((SpriteContentsAccessor)contents).primept$mipImages();
-        out.i(6).i(id)
-                .string(contents.name().toString())
-                .f(sprite.getU0())
-                .f(sprite.getV0())
-                .f(sprite.getU1())
-                .f(sprite.getV1())
-                .i(contents.width())
-                .i(contents.height())
-                .i(images.length);
+        long firstImage = out.images.count();
         for (int mip = 0; mip < images.length; ++mip) {
             var image = images[mip];
-            out.i(image.getWidth()).i(image.getHeight());
             // The static base image already belongs to the shared atlas. No duplicate pixels.
             if (mip == 0 && animation == null)
-                out.i(0);
+                out.emptyImage(image.getWidth(), image.getHeight());
             else {
                 var pixels = image.getPixelBytes();
-                out.i(pixels.remaining() / 4).pixels(pixels);
+                out.image(image.getWidth(), image.getHeight(), pixels);
             }
         }
-        if (animation == null)
-            out.i(0).i(0);
-        else {
+        long firstFrame = out.frames.count();
+        if (animation != null) {
             var frames = (List<?>)get(FRAMES, animation);
-            out.i((boolean)get(INTERPOLATE, animation) ? 1 : 0).i(frames.size());
-            for (Object frame : frames)
-                out.i((int)get(field(frame.getClass(), "index"), frame))
-                        .i((int)get(field(frame.getClass(), "time"), frame));
+            for (Object frame : frames) {
+                var value = out.frames.add();
+                PrimeMcAnimationFrame.frame(value,
+                                            (int)get(field(frame.getClass(), "index"), frame));
+                PrimeMcAnimationFrame.duration(value,
+                                               (int)get(field(frame.getClass(), "time"), frame));
+            }
         }
-        materials.prepare(out, id, contents.name());
+        var material = materials.prepare(out, contents.name());
+        var name = out.text(contents.name().toString());
+        var value = out.sprites.add();
+        PrimeMcSprite.id(value, id);
+        PrimeMcSprite.interpolate(
+                value, animation != null && (boolean)get(INTERPOLATE, animation) ? 1 : 0);
+        float[] bounds = {sprite.getU0(), sprite.getV0(), sprite.getU1(), sprite.getV1()};
+        for (int i = 0; i < 4; i++)
+            PrimeMcSprite.bounds(value, i, bounds[i]);
+        PrimeMcSprite.extent(value, 0, contents.width());
+        PrimeMcSprite.extent(value, 1, contents.height());
+        name.write(PrimeMcSprite.name(value));
+        new McSourceBatch.Range(firstImage, images.length).write(PrimeMcSprite.images(value));
+        new McSourceBatch.Range(firstFrame, out.frames.count() - firstFrame)
+                .write(PrimeMcSprite.frames(value));
+        PrimeMcSprite.normal_image(value, material[0]);
+        PrimeMcSprite.specular_image(value, material[1]);
         return id;
     }
     private static Field field(Class<?> type, String name) {

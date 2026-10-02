@@ -62,11 +62,12 @@ final class CrossUvCpuSmoke {
                         collection, false, new Material.Baked(sprite, false)));
                 var router = new SectionSources(new BlockStateModelSet(Map.of(state, model), model),
                                                 new FluidStateModelSet(Map.of(), null));
-                try (var source = new SourcePages(); var frame = new SourcePages();
+                try (var source = new SourcePages(); var resources = new McSourceBatch();
+                     var sections = new McSourceBatch(); var frame = new SourcePages();
                      var tintResponse = new SourcePages()) {
-                    source.header(SectionSources.GAME_VERSION, 2, 1, 1);
-                    router.section(source, 0, 0, 0, SectionSourcesCpuSmoke.section(state));
-                    source.i(0);
+                    router.section(resources, sections, 0, 0, 0,
+                                   SectionSourcesCpuSmoke.section(state));
+                    SourceFixtureWire.source(resources, sections, source, 1);
                     SectionSourcesCpuSmoke.write(source, directory.resolve(parentName + ".source"));
                     // One closed section, one model placement at (0,0,0).
                     frame.header(SectionSources.GAME_VERSION, 1, 1, 1)

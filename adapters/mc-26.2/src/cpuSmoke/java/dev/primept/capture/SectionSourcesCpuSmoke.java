@@ -1,6 +1,7 @@
 package dev.primept.capture;
 
 import dev.primept.NativeBridge;
+import dev.primept.abi.PrimeAbi.*;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.ByteOrder;
@@ -52,51 +53,63 @@ final class SectionSourcesCpuSmoke {
                                "mc-section-source.bin");
         Files.createDirectories(fixture.getParent());
         SourceSpriteFixture.verifyAnimation(fixture.getParent());
-        try (var events = new SourcePages(); var output = new SourcePages();
+        try (var events = new McSourceBatch(); var output = new McSourceBatch();
+             var resources = new McSourceBatch(); var wire = new SourcePages();
              var bridge =
                      new NativeBridge(Path.of(System.getProperty("primept.smoke.nativeLibrary")))) {
-            bridge.submit(Packets.reset(1));
-            bridge.submitTexture(1, 1, 16, 16, SourceSpriteFixture.atlas());
+            bridge.reset(1);
+            sources.section(resources, output, 0, 0, 0, solid);
+            sources.section(resources, output, 0, 0, 0, unknown);
+            sources.section(resources, output, 0, 0, 0, air);
+            output.clear();
+            bridge.resources(resources.resources(SectionSources.GAME_VERSION, 1, 1, 1, 0, true, 16,
+                                                 16, SourceSpriteFixture.atlas()));
             for (long batch = 1; batch <= 5; ++batch) {
-                events.header(SectionSources.GAME_VERSION, 1, 1, batch)
-                        .d(16)
-                        .d(16)
-                        .i(3)
-                        .i(0)
-                        .i(3)
-                        .i(0)
-                        .i(3)
-                        .i(0)
-                        .i(3)
-                        .l(batch);
+                events.clear();
+                output.clear();
+                // Retain first resource definitions for the independent on-disk legacy oracle.
+                if (batch != 1)
+                    resources.clear();
                 if (batch == 1)
                     for (int x = 0; x < 4; ++x)
                         for (int z = 0; z < 4; ++z)
-                            events.i(1).i(x).i(0).i(z);
+                            event(events, 1, x, 0, z);
                 if (batch >= 3)
                     for (int n = 0; n < 1000; ++n)
-                        events.i(3).i(0).i(0).i(0);
-                events.i(0);
-                MemorySegment request = bridge.requestSections(events);
-                long count = request.get(L, 8);
+                        event(events, 3, 0, 0, 0);
+                MemorySegment request = bridge.requestSections(
+                        events.plan(SectionSources.GAME_VERSION, 1, 1, batch, 16, 16, 3, 0, 3,
+                                    new int[] {0, 3, 0, 3}, batch));
+                long count = PrimeMcRequests.section_count(request);
                 check(count == (batch == 1   ? 64
                                 : batch == 2 ? 0
                                              : 1),
                       "Rust request count after actual duplicate events: " + count);
-                output.header(SectionSources.GAME_VERSION, 2, 1, batch);
+                var requests = PrimeMcRequests.sections(request).reinterpret(
+                        count * PrimeMcSectionRequest.SIZE);
+                // First preparation may leave only world-dependent model selections missing.
+                long preparedStates = resources.states.count();
                 for (long n = 0; n < count; ++n) {
-                    long at = 32 + n * 16;
-                    int x = request.get(I, at), y = request.get(I, at + 4),
-                        z = request.get(I, at + 8);
-                    sources.section(output, x, y, z,
+                    var item = requests.asSlice(n * PrimeMcSectionRequest.SIZE,
+                                                PrimeMcSectionRequest.SIZE);
+                    int x = PrimeMcSectionRequest.x(item), y = PrimeMcSectionRequest.y(item),
+                        z = PrimeMcSectionRequest.z(item);
+                    sources.section(resources, output, x, y, z,
                                     batch == 5                                 ? unknown
                                     : batch != 4 && x == 0 && y == 0 && z == 0 ? solid
                                                                                : air);
                 }
-                output.i(0);
-                if (batch == 1)
-                    write(output, fixture);
-                bridge.sections(output);
+                if (batch == 1) {
+                    SourceFixtureWire.source(resources, output, wire, batch);
+                    write(wire, fixture);
+                    // This fixture's models are immutable and were all prepared before planning.
+                    check(resources.states.count() == preparedStates,
+                          "initial immutable resource preparation missed a state");
+                } else if (resources.hasResources()) {
+                    bridge.resources(resources.resources(SectionSources.GAME_VERSION, 1, 1, batch,
+                                                         batch, false, 0, 0, new byte[0]));
+                }
+                bridge.sections(output.sections(SectionSources.GAME_VERSION, 1, 1, batch));
                 String diagnostics = bridge.cpuDiagnostics();
                 check(diagnostics.contains("active=64"), diagnostics);
                 check(diagnostics.contains("triangles=" +
@@ -133,6 +146,13 @@ final class SectionSourcesCpuSmoke {
             ++calls;
             throw new AssertionError("Opaque material callback");
         }
+    }
+    private static void event(McSourceBatch b, int kind, int x, int y, int z) {
+        var e = b.events.add();
+        PrimeMcEvent.kind(e, kind);
+        PrimeMcEvent.x(e, x);
+        PrimeMcEvent.y(e, y);
+        PrimeMcEvent.z(e, z);
     }
     static LevelChunkSection section(net.minecraft.world.level.block.state.BlockState state)
             throws Exception {

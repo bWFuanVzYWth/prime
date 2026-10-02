@@ -1,5 +1,8 @@
 package dev.primept.capture;
 
+import static dev.primept.abi.PrimeAbi.*;
+import java.lang.foreign.MemorySegment;
+
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -35,7 +38,7 @@ public final class ItemCpuSmoke {
     private static final ItemFeatureRenderer RENDERER = new ItemFeatureRenderer() {};
     private static final Owner FIRST = new Owner(), SECOND = new Owner();
     private static int emitted;
-    private static byte[] baseline;
+    private static TypedSceneFixtureWire.Mesh baseline;
     public static void run() throws Exception {
         CAMERA.pos = Vec3.ZERO;
         Vector3f mutable = new Vector3f(0, 0, 0);
@@ -44,10 +47,12 @@ public final class ItemCpuSmoke {
         check(emitted == 8 && DynamicCapture.stats().vertices() == 8,
               "Nonexclusive original output retained");
         DynamicFrame raw = value(DynamicCapture.class, "frame", null);
-        baseline = raw.seal().toArray(java.lang.foreign.ValueLayout.JAVA_BYTE);
+        var rawBatch = raw.seal();
+        check(PrimeDynamicBatch.count(rawBatch) == 1, "Baseline has one source span");
+        baseline = TypedSceneFixtureWire.mesh(TypedSceneFixtureWire.dynamicSpan(rawBatch, 0));
         frame(quads, true, true, FoilType.NONE, 0, 0xff123456, 2, 2, null);
         var context = context();
-        var wire = context.sealDelta().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
+        var batch = context.sealDelta();
         check(emitted == 0 && DynamicCapture.stats().vertices() == 0,
               "No duplicate original/raw output");
         check(ItemCapture.stats().groups() == 2 && context.stats().prototypeUpserts() == 1 &&
@@ -55,15 +60,19 @@ public final class ItemCpuSmoke {
               "Whole submit batches and cross-source shared prototype");
         check(ItemCapture.stats().createdVertices() == 8 && ItemCapture.stats().sharedHits() == 1,
               "Identical content from distinct sources shares one prototype");
-        int instanceOffset = 48 + 56 + 8 * 24;
-        check(wire.getDouble(instanceOffset + 24) == 10 &&
-                      wire.getFloat(instanceOffset + 48) == -2 &&
-                      wire.getFloat(instanceOffset + 60) == 2,
+        var instance = TypedSceneFixtureWire.instance(batch, 0);
+        var source = TypedSceneFixtureWire.prototypeSpan(batch, 0, 0);
+        var vertices = TypedSceneFixtureWire.vertices(source).asByteBuffer().order(
+                ByteOrder.LITTLE_ENDIAN);
+        check(PrimeInstanceSource.origin(instance, 0) == 10 &&
+                      PrimeInstanceSource.transform(instance, 0) == -2 &&
+                      PrimeInstanceSource.transform(instance, 3) == 2,
               "Stable origin and negative nonuniform affine");
-        check(wire.getInt(instanceOffset + 104) == 0xff563412,
+        check(PrimeInstanceSource.rgba(instance) == 0xff563412,
               "Actual integer tint kept on instance");
-        check(wire.getInt(48 + 56 + 12) == -1, "Reusable source remains untinted white");
-        equivalent(wire, instanceOffset);
+        check(vertices.getInt(PrimeMeshSpan.color_offset(source)) == -1,
+              "Reusable source remains untinted white");
+        equivalent(source, instance);
         context.acknowledge();
         frame(quads, true, true, FoilType.NONE, 0, 0xff123456, 2, 2, null);
         check(context.sealDelta() == null && ItemCapture.stats().createdVertices() == 0 &&
@@ -215,25 +224,30 @@ public final class ItemCpuSmoke {
             DynamicCapture.end();
         }
     }
-    private static void equivalent(java.nio.ByteBuffer wire, int instanceOffset) {
-        var raw = java.nio.ByteBuffer.wrap(baseline).order(ByteOrder.LITTLE_ENDIAN);
-        int stride = raw.getInt(80), pos = raw.getInt(84), color = raw.getInt(88),
-            uv = raw.getInt(92);
+    private static void equivalent(MemorySegment source, MemorySegment instance) {
+        var wire = TypedSceneFixtureWire.vertices(source).asByteBuffer().order(
+                ByteOrder.LITTLE_ENDIAN);
+        var raw = baseline.buffer();
+        int stride = baseline.stride(), pos = baseline.position(), color = baseline.color(),
+            uv = baseline.uv();
         for (int vertex = 0; vertex < 8; ++vertex) {
-            int p = 104 + vertex * 24, r = 96 + vertex * stride;
+            int p = PrimeMeshSpan.position_offset(source) + vertex * PrimeMeshSpan.stride(source),
+                r = vertex * stride;
             float x = wire.getFloat(p), y = wire.getFloat(p + 4), z = wire.getFloat(p + 8);
             for (int row = 0; row < 3; ++row) {
-                int matrix = instanceOffset + 48 + row * 16;
-                double actual = wire.getDouble(instanceOffset + 24 + row * 8) +
-                                wire.getFloat(matrix) * x + wire.getFloat(matrix + 4) * y +
-                                wire.getFloat(matrix + 8) * z + wire.getFloat(matrix + 12);
+                double actual = PrimeInstanceSource.origin(instance, row) +
+                                PrimeInstanceSource.transform(instance, row * 4) * x +
+                                PrimeInstanceSource.transform(instance, row * 4 + 1) * y +
+                                PrimeInstanceSource.transform(instance, row * 4 + 2) * z +
+                                PrimeInstanceSource.transform(instance, row * 4 + 3);
                 check(actual == raw.getFloat(r + pos + row * 4),
                       "Actual baseline vertex/affine equivalence");
             }
-            check(raw.getInt(r + color) == wire.getInt(instanceOffset + 104),
+            check(raw.getInt(r + color) == PrimeInstanceSource.rgba(instance),
                   "Actual encoded baseline tint equivalence");
-            check(raw.getInt(r + uv) == wire.getInt(p + 16) &&
-                          raw.getInt(r + uv + 4) == wire.getInt(p + 20),
+            int sourceUv = vertex * PrimeMeshSpan.stride(source) + PrimeMeshSpan.uv_offset(source);
+            check(raw.getInt(r + uv) == wire.getInt(sourceUv) &&
+                          raw.getInt(r + uv + 4) == wire.getInt(sourceUv + 4),
                   "Actual UV source equivalence");
         }
     }
@@ -263,18 +277,22 @@ public final class ItemCpuSmoke {
             ItemCapture.leave(before, true);
             DynamicCapture.end();
             var context = context();
-            var wire = context.sealDelta().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
+            var batch = context.sealDelta();
+            var source = TypedSceneFixtureWire.prototypeSpan(batch, 0, 0);
+            var wire = TypedSceneFixtureWire.vertices(source).asByteBuffer();
             check(context.stats().prototypeUpserts() == 1 && context.stats().instanceUpserts() == 1,
                   "Per-corner source retains one prototype and instance");
             for (int i = 0; i < 4; ++i) {
-                int offset = 104 + i * 24 + 12, color = authored[i];
+                int offset = i * PrimeMeshSpan.stride(source) + PrimeMeshSpan.color_offset(source),
+                    color = authored[i];
                 check(Byte.toUnsignedInt(wire.get(offset)) == ((color >>> 16) & 255) &&
                               Byte.toUnsignedInt(wire.get(offset + 1)) == ((color >>> 8) & 255) &&
                               Byte.toUnsignedInt(wire.get(offset + 2)) == (color & 255) &&
                               Byte.toUnsignedInt(wire.get(offset + 3)) == (color >>> 24),
                       "Authored RGBA is preserved at corner " + i);
             }
-            check(wire.getInt(104 + 4 * 24 + 104) == -1, "No duplicate instance tint");
+            check(PrimeInstanceSource.rgba(TypedSceneFixtureWire.instance(batch, 0)) == -1,
+                  "No duplicate instance tint");
             check(((BufferBuilderAccessor)consumer).primept$vertices() == 0,
                   "Per-corner colors do not restore downstream expansion");
             context.acknowledge();

@@ -15,7 +15,16 @@ mod tests;
 #[derive(Default)]
 pub(crate) struct SourceRoutes {
     geometry: BTreeMap<u64, Geometry>,
-    pub(super) workers: Option<CpuWorkers>,
+    pub(super) workers: Option<Arc<CpuWorkers>>,
+}
+
+impl SourceRoutes {
+    pub(crate) fn with_workers(workers: Arc<CpuWorkers>) -> Self {
+        Self {
+            workers: Some(workers),
+            ..Default::default()
+        }
+    }
 }
 
 struct Geometry {
@@ -295,7 +304,7 @@ impl SourceScene {
                 continue;
             }
             if self.routing.workers.is_none() {
-                self.routing.workers = Some(CpuWorkers::configured()?);
+                self.routing.workers = Some(Arc::new(CpuWorkers::configured()?));
             }
             // A trusted-length iterator initializes the Arc allocation directly. No
             // second full-size Vec allocation/copy is needed at publication.

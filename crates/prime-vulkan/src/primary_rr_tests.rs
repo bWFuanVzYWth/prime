@@ -22,6 +22,7 @@ const CHANNELS: [(u32, vk::Format, usize); 8] = [
 struct Fixture {
     context: Arc<Context>,
     pipeline: Pipeline,
+    _energy_lut: openpbr::EnergyLut,
     _geometry: Geometry,
     images: Vec<Image>,
     constants: Buffer,
@@ -220,8 +221,8 @@ impl Fixture {
             })
             .collect();
         let readback = Buffer::new_readback(context, byte_count as u64).unwrap();
+        let mut energy_lut = openpbr::EnergyLut::new(context).unwrap();
         let mut pipeline = Pipeline {
-            energy_lut: Some(openpbr::EnergyLut::new(context).unwrap()),
             context: context.clone(),
             layout: vk::PipelineLayout::null(),
             descriptor_layout: vk::DescriptorSetLayout::null(),
@@ -234,7 +235,7 @@ impl Fixture {
             realtime_post: None,
             reconstruction_display: None,
         };
-        pipeline.energy_lut.as_mut().unwrap().prepare().unwrap();
+        energy_lut.prepare().unwrap();
         unsafe {
             let mut bindings: Vec<_> = [
                 (0, vk::DescriptorType::ACCELERATION_STRUCTURE_KHR),
@@ -314,12 +315,12 @@ impl Fixture {
                 (1, &reports, vk::DescriptorType::STORAGE_BUFFER),
                 (
                     2,
-                    &geometry.textures.metadata,
+                    &geometry.textures().metadata,
                     vk::DescriptorType::STORAGE_BUFFER,
                 ),
                 (
                     3,
-                    &geometry.textures.texels,
+                    &geometry.textures().texels,
                     vk::DescriptorType::STORAGE_BUFFER,
                 ),
                 (
@@ -362,7 +363,7 @@ impl Fixture {
                     .dst_set(set)
                     .dst_binding(9)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(&[pipeline.energy_lut.as_ref().unwrap().descriptor()])],
+                    .image_info(&[energy_lut.descriptor()])],
                 &[],
             );
             for ((binding, _, _), image) in CHANNELS.iter().zip(&images) {
@@ -404,6 +405,7 @@ impl Fixture {
         Self {
             context: context.clone(),
             pipeline,
+            _energy_lut: energy_lut,
             _geometry: geometry,
             images,
             constants,

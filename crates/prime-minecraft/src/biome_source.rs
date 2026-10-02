@@ -18,6 +18,43 @@ pub(crate) struct Definitions {
     maps: [Vec<u32>; 3],
 }
 impl Definitions {
+    pub fn from_typed(
+        v: &prime_abi::PrimeMcBiomeDefinitions,
+        maps: &[u32],
+    ) -> Result<Self, String> {
+        let mut seen = [false; 256];
+        let mut permutation = [0; 256];
+        for (dst, &n) in permutation.iter_mut().zip(&v.permutation) {
+            if n > 255 || seen[n as usize] {
+                return Err("invalid biome noise permutation".into());
+            }
+            seen[n as usize] = true;
+            *dst = n as u8;
+        }
+        if v.offset
+            .iter()
+            .chain([&v.input_scale, &v.value_scale])
+            .any(|p| !p.is_finite())
+        {
+            return Err("nonfinite biome noise field".into());
+        }
+        let mut tables = std::array::from_fn(|_| Vec::new());
+        for (dst, span) in tables.iter_mut().zip([v.grass, v.foliage, v.dry_foliage]) {
+            let values = prime_abi::minecraft::range(maps, span)?;
+            if values.len() > 65536 {
+                return Err("oversized biome color table".into());
+            }
+            *dst = values.to_vec();
+        }
+        Ok(Self {
+            seed: v.seed,
+            permutation,
+            offset: v.offset,
+            input_scale: v.input_scale,
+            value_scale: v.value_scale,
+            maps: tables,
+        })
+    }
     pub fn read(r: &mut Reader<'_>) -> Result<Self, String> {
         let seed = r.u64()?;
         let mut permutation = [0; 256];
@@ -83,6 +120,28 @@ struct BiomeColor {
     swamp: bool,
 }
 impl BiomeColor {
+    fn from_typed(v: &prime_abi::PrimeMcBiome, definitions: &Definitions) -> Result<Self, String> {
+        prime_abi::minecraft::finite(&[v.temperature, v.downfall])?;
+        if v.flags & !7 != 0 || v.modifier > 2 {
+            return Err("invalid biome color fields".into());
+        }
+        let mut colors = std::array::from_fn(|i| {
+            if i == 3 {
+                v.water
+            } else if v.flags & (1 << i) != 0 {
+                v.overrides[i]
+            } else {
+                definitions.color(v.temperature, v.downfall, i)
+            }
+        });
+        if v.modifier == 1 {
+            colors[0] = 0xff000000 | (((colors[0] & 0xfefefe) + 0x28340a) >> 1);
+        }
+        Ok(Self {
+            colors,
+            swamp: v.modifier == 2,
+        })
+    }
     fn color(self, definitions: &Definitions, version: u32, sample: Sample) -> u32 {
         if self.swamp && sample.resolver == Resolver::Grass {
             definitions.swamp(version, sample.position[0], sample.position[2])
@@ -158,6 +217,38 @@ pub(crate) struct Response {
     cells: Vec<usize>,
 }
 impl Cache {
+    pub fn typed_response(
+        &self,
+        plan: &Plan,
+        values: &prime_abi::minecraft::Biomes<'_>,
+    ) -> Result<Response, String> {
+        let definitions = self
+            .definitions
+            .as_ref()
+            .ok_or("missing biome definitions")?;
+        let colors = values
+            .biomes()
+            .iter()
+            .map(|v| BiomeColor::from_typed(v, definitions))
+            .collect::<Result<Vec<_>, _>>()?;
+        let count: usize = plan
+            .requests
+            .iter()
+            .map(|r| r.mask.count_ones() as usize)
+            .sum();
+        if values.indices().len() != count
+            || values
+                .indices()
+                .iter()
+                .any(|&id| id as usize >= colors.len())
+        {
+            return Err("invalid biome cell indices".into());
+        }
+        Ok(Response {
+            colors,
+            cells: values.indices().iter().map(|&i| i as usize).collect(),
+        })
+    }
     pub fn invalidate(&mut self, all: bool, columns: &HashSet<(i32, i32)>) {
         if all {
             self.definitions = None;

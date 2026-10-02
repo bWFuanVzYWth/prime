@@ -7,8 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
+import dev.primept.abi.PrimeAbi.*;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -158,16 +157,21 @@ final class LabPbrSourcesCpuSmoke {
                                byte[] normal, byte[] specular) {
         try (var manager = new MultiPackResourceManager(PackType.CLIENT_RESOURCES,
                                                         List.of(new MemoryPack(files)));
-             var pages = new SourcePages()) {
+             var batch = new McSourceBatch()) {
             var sources = new LabPbrSources();
             check(sources.hasMaps(manager, List.of(sprite)),
                   "declared optional material source must be discoverable");
-            sources.prepare(manager, pages, 73, NAME);
-            var bytes = ByteBuffer.wrap(read(pages)).order(ByteOrder.LITTLE_ENDIAN);
-            check(bytes.getInt() == 9 && bytes.getInt() == 73, "kind9 must retain sprite identity");
-            plane(bytes, normal);
-            plane(bytes, specular);
-            check(!bytes.hasRemaining(), "kind9 record length");
+            int[] images = sources.prepare(manager, batch, NAME);
+            check(images.length == 2, "normal/specular image identities");
+            plane(batch, images[0], normal);
+            plane(batch, images[1], specular);
+            check(batch.images.count() == (normal == null ? 0 : 1) + (specular == null ? 0 : 1),
+                  "only present material images must be appended");
+            check(batch.bytes.count() == (normal == null ? 0 : normal.length) +
+                                                 (specular == null ? 0 : specular.length),
+                  "material payload length");
+            if (normal != null && specular != null)
+                check(images[0] != images[1], "normal/specular image identities must be distinct");
         }
     }
 
@@ -175,43 +179,42 @@ final class LabPbrSourcesCpuSmoke {
                                boolean present) {
         try (var manager = new MultiPackResourceManager(PackType.CLIENT_RESOURCES,
                                                         List.of(new MemoryPack(files)));
-             var pages = new SourcePages()) {
+             var batch = new McSourceBatch()) {
             var sources = new LabPbrSources();
             check(sources.hasMaps(manager, List.of(sprite)) == present,
                   "material availability must respect format declaration");
-            pages.i(0x10203040);
-            sources.prepare(manager, pages, 73, NAME);
-            check(pages.bytes() == 4,
-                  "invalid/absent material must not append a partial kind9 record");
-            check(ByteBuffer.wrap(read(pages)).order(ByteOrder.LITTLE_ENDIAN).getInt() ==
-                          0x10203040,
+            byte[] previous = {0x10, 0x20, 0x30, 0x40};
+            batch.bytes.copy(MemorySegment.ofArray(previous));
+            batch.emptyImage(3, 5);
+            long before = batch.bytes();
+            int[] images = sources.prepare(manager, batch, NAME);
+            check(images.length == 2 && images[0] == -1 && images[1] == -1,
+                  "invalid/absent material must return absent image identities");
+            check(batch.bytes() == before && batch.images.count() == 1,
+                  "invalid/absent material must not append partial typed images or payloads");
+            check(java.util.Arrays.equals(batch.bytes.data().toArray(ValueLayout.JAVA_BYTE),
+                                          previous),
                   "previous source bytes must survive rejected material I/O");
+            check(PrimeMcImage.width(batch.images.get(0)) == 3 &&
+                          PrimeMcImage.height(batch.images.get(0)) == 5,
+                  "previous typed image must survive rejected material I/O");
         }
     }
 
-    private static void plane(ByteBuffer bytes, byte[] expected) {
-        check(bytes.getInt() == (expected == null ? 0 : 1), "optional plane presence");
+    private static void plane(McSourceBatch batch, int index, byte[] expected) {
+        check((index == -1) == (expected == null), "optional plane presence");
         if (expected == null)
             return;
-        check(bytes.getInt() == 2 && bytes.getInt() == 1 && bytes.getInt() == 2,
+        var image = batch.images.get(Integer.toUnsignedLong(index));
+        check(PrimeMcImage.width(image) == 2 && PrimeMcImage.height(image) == 1,
               "decoded source dimensions");
-        for (byte value : expected)
-            check(bytes.get() == value,
+        var range = PrimeMcImage.pixels(image);
+        check(PrimeMcRange.count(range) == expected.length, "typed RGBA byte range length");
+        var pixels =
+                batch.bytes.data().asSlice(PrimeMcRange.offset(range), PrimeMcRange.count(range));
+        for (int i = 0; i < expected.length; ++i)
+            check(pixels.get(ValueLayout.JAVA_BYTE, i) == expected[i],
                   "resource I/O must preserve raw channel/category/sentinel bytes");
-    }
-
-    private static byte[] read(SourcePages pages) {
-        var table = pages.table();
-        byte[] result = new byte[Math.toIntExact(pages.bytes())];
-        long at = 0;
-        for (long i = 0; i < pages.pageCount(); ++i) {
-            long length = table.get(ValueLayout.JAVA_LONG, i * 16 + 8);
-            var source = table.get(ValueLayout.ADDRESS, i * 16).reinterpret(length);
-            MemorySegment.copy(source, 0, MemorySegment.ofArray(result), at, length);
-            at += length;
-        }
-        check(at == result.length, "borrowed transport page lengths");
-        return result;
     }
 
     private static void check(boolean value, String message) {

@@ -2,6 +2,8 @@ package dev.primept.settings;
 
 import static org.junit.jupiter.api.Assertions.*;
 import dev.primept.capture.Packets;
+import java.lang.foreign.MemorySegment;
+import static dev.primept.abi.PrimeAbi.*;
 import dev.primept.render.OfflineMode;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -20,10 +22,9 @@ final class SettingsTest {
         for (int budget = 1; budget <= 64; ++budget) {
             var settings = RenderSettings.defaults().with(RenderSettings.Control.BOUNCES, budget);
             assertEquals(settings, SettingsFile.decode(SettingsFile.encode(settings)).settings());
-            var wire =
-                    ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
+            var wire = settingsBuffer();
             settings.write(wire, false, RenderSettings.View.OUTPUT);
-            assertEquals(budget, wire.getInt(8));
+            assertEquals(budget, PrimeSettings.bounces(view(wire)));
         }
         var legacy = RenderSettings.defaults().with(RenderSettings.Control.BOUNCES, 4);
         assertEquals(4, SettingsFile.decode(SettingsFile.encode(legacy))
@@ -89,34 +90,36 @@ final class SettingsTest {
         assertEquals(changed, SettingsFile.decode(valid + "unrelated=ignored\n").settings());
     }
     @Test
-    void immutableControlsAndLittleEndianFfiLayout() {
+    void immutableControlsAndNamedCFields() {
         var original = RenderSettings.defaults();
         var changed = original.with(RenderSettings.Control.EXPOSURE_EV, 8)
                               .with(RenderSettings.Control.SUN_EV, -4);
         assertEquals(0, original.value(RenderSettings.Control.EXPOSURE_EV));
         assertThrows(IllegalArgumentException.class,
                      () -> original.with(RenderSettings.Control.BOUNCES, 0));
-        var bytes = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        var bytes = settingsBuffer();
         changed.write(bytes, true, RenderSettings.View.NORMAL);
-        assertEquals(72, bytes.position());
-        assertEquals(5, bytes.getInt(0));
-        assertEquals(1, bytes.getInt(4));
-        assertEquals(12, bytes.getInt(8));
-        assertEquals(1, bytes.getInt(12));
-        assertEquals(4.0f, bytes.getFloat(16));
-        assertEquals(.75f, bytes.getFloat(20));
-        assertEquals(.08f, bytes.getFloat(24));
-        assertEquals(3, bytes.getInt(28));
-        assertEquals(.5f, bytes.getFloat(32));
-        assertEquals(1f, bytes.getFloat(36));
-        assertEquals(128f, bytes.getFloat(40));
-        assertEquals(0x13572468, bytes.getInt(44));
-        assertEquals(30, bytes.getInt(48));
-        assertEquals(0, bytes.getInt(52));
-        assertEquals(1, bytes.getInt(56));
-        assertEquals(1, bytes.getInt(60));
-        assertEquals(3, bytes.getInt(64));
-        assertEquals(8, bytes.getInt(68));
+        assertEquals(PrimeSettings.SIZE, bytes.position());
+        assertEquals(PrimeSettings.SIZE,
+                     PrimeHeader.struct_size(PrimeSettings.header(view(bytes))));
+        assertEquals(PRIME_ABI_VERSION, PrimeHeader.abi_version(PrimeSettings.header(view(bytes))));
+        assertEquals(1, PrimeSettings.mode(view(bytes)));
+        assertEquals(12, PrimeSettings.bounces(view(bytes)));
+        assertEquals(1, PrimeSettings.offline_samples(view(bytes)));
+        assertEquals(4.0f, PrimeSettings.exposure(view(bytes)));
+        assertEquals(.75f, PrimeSettings.hue(view(bytes)));
+        assertEquals(.08f, PrimeSettings.saturation(view(bytes)));
+        assertEquals(3, PrimeSettings.view(view(bytes)));
+        assertEquals(.5f, PrimeSettings.sun(view(bytes)));
+        assertEquals(1f, PrimeSettings.sky(view(bytes)));
+        assertEquals(128f, PrimeSettings.depth_range(view(bytes)));
+        assertEquals(0x13572468, PrimeSettings.seed(view(bytes)));
+        assertEquals(30, PrimeSettings.latitude_degrees(view(bytes)));
+        assertEquals(0, PrimeSettings.solar_longitude_degrees(view(bytes)));
+        assertEquals(1, PrimeSettings.opacity_micromap(view(bytes)));
+        assertEquals(1, PrimeSettings.ray_reconstruction(view(bytes)));
+        assertEquals(3, PrimeSettings.reconstruction_quality(view(bytes)));
+        assertEquals(8, PrimeSettings.terrain_batches_per_frame(view(bytes)));
     }
     @Test
     void terrainBatchBudgetDefaultsRangePersistenceAndIndependentWire(@TempDir Path dir) {
@@ -125,18 +128,22 @@ final class SettingsTest {
         assertEquals(8, defaults.value(control));
         assertEquals(8,
                      SettingsFile.load(dir.resolve("absent.properties")).settings().value(control));
-        var before = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
-        var after = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        var before = settingsBuffer();
+        var after = settingsBuffer();
         for (int budget = 1; budget <= 128; ++budget) {
             var changed = defaults.with(control, budget);
             assertEquals(changed, SettingsFile.decode(SettingsFile.encode(changed)).settings());
             for (boolean offline : new boolean[] {false, true}) {
                 defaults.write(before, offline, RenderSettings.View.OUTPUT);
                 changed.write(after, offline, RenderSettings.View.OUTPUT);
-                assertEquals(72, after.position());
-                assertEquals(budget, after.getInt(68));
-                assertArrayEquals(java.util.Arrays.copyOf(before.array(), 68),
-                                  java.util.Arrays.copyOf(after.array(), 68));
+                assertEquals(PrimeSettings.SIZE, after.position());
+                assertEquals(budget, PrimeSettings.terrain_batches_per_frame(view(after)));
+                assertArrayEquals(view(before)
+                                          .asSlice(0, PrimeSettings.SIZE - 4)
+                                          .toArray(java.lang.foreign.ValueLayout.JAVA_BYTE),
+                                  view(after)
+                                          .asSlice(0, PrimeSettings.SIZE - 4)
+                                          .toArray(java.lang.foreign.ValueLayout.JAVA_BYTE));
             }
         }
         assertNotEquals(defaults, defaults.with(control, 1));
@@ -154,9 +161,9 @@ final class SettingsTest {
         assertEquals(disabled, SettingsFile.decode(SettingsFile.encode(disabled)).settings());
         assertFalse(disabled.withPathTracing(false).opacityMicromap());
         assertFalse(disabled.with(RenderSettings.Control.BOUNCES, 8).opacityMicromap());
-        var bytes = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        var bytes = settingsBuffer();
         disabled.write(bytes, true, RenderSettings.View.OUTPUT);
-        assertEquals(0, bytes.getInt(56));
+        assertEquals(0, PrimeSettings.opacity_micromap(view(bytes)));
     }
     @Test
     void rayReconstructionAndQualityRoundTripPreserveIndependentSettings() {
@@ -169,14 +176,14 @@ final class SettingsTest {
                             .withOpacityMicromap(false)
                             .with(RenderSettings.Control.BOUNCES, 8)
                             .rayReconstruction());
-        var bytes = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        var bytes = settingsBuffer();
         for (var quality : RenderSettings.DlssQuality.values()) {
             var changed = disabled.withDlssQuality(quality);
             assertFalse(changed.rayReconstruction());
             assertEquals(changed, SettingsFile.decode(SettingsFile.encode(changed)).settings());
             changed.write(bytes, false, RenderSettings.View.OUTPUT);
-            assertEquals(0, bytes.getInt(60));
-            assertEquals(quality.ordinal(), bytes.getInt(64));
+            assertEquals(0, PrimeSettings.ray_reconstruction(view(bytes)));
+            assertEquals(quality.ordinal(), PrimeSettings.reconstruction_quality(view(bytes)));
             assertEquals(quality, changed.withRayReconstruction(true).dlssQuality());
         }
         assertTrue(defaults.rayReconstruction());
@@ -208,15 +215,23 @@ final class SettingsTest {
         byte[] frame =
                 Packets.frame(123, 1024.25, -30.5, 7.25, new float[] {0, 0, -1},
                               new float[] {1, 0, 0}, new float[] {0, 1, 0}, 1.1f, 1920, 1080, 73);
-        var packet = ByteBuffer.wrap(frame.clone()).order(ByteOrder.LITTLE_ENDIAN);
-        packet.putFloat(100, 1.3f);
+        var packet = ByteBuffer.allocateDirect((int)PrimeFrame.SIZE).order(ByteOrder.nativeOrder());
+        packet.put(frame).clear();
+        PrimeFrame.solar_hour_angle(view(packet), 1.3f);
         Packets.resizeFrozenFrame(packet, 701, 999, 0);
-        assertArrayEquals(java.util.Arrays.copyOf(frame, 88),
-                          java.util.Arrays.copyOf(packet.array(), 88));
-        assertEquals(701, packet.getInt(88));
-        assertEquals(999, packet.getInt(92));
-        assertEquals(0, packet.getInt(96));
+        assertArrayEquals(
+                java.util.Arrays.copyOf(frame, 80),
+                view(packet).asSlice(0, 80).toArray(java.lang.foreign.ValueLayout.JAVA_BYTE));
+        assertEquals(701, PrimeFrame.width(view(packet)));
+        assertEquals(999, PrimeFrame.height(view(packet)));
+        assertEquals(0, PrimeFrame.sample_index(view(packet)));
         assertEquals(frame.length, packet.position());
-        assertEquals(1.3f, packet.getFloat(100));
+        assertEquals(1.3f, PrimeFrame.solar_hour_angle(view(packet)));
+    }
+    private static ByteBuffer settingsBuffer() {
+        return ByteBuffer.allocateDirect((int)PrimeSettings.SIZE).order(ByteOrder.nativeOrder());
+    }
+    private static MemorySegment view(ByteBuffer buffer) {
+        return MemorySegment.ofBuffer(buffer.duplicate().clear());
     }
 }

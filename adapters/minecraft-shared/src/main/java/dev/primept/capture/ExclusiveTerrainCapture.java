@@ -6,7 +6,7 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongCollection;
 import java.lang.foreign.MemorySegment;
-import java.lang.foreign.ValueLayout;
+import dev.primept.abi.PrimeAbi.*;
 import java.nio.ByteOrder;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -20,18 +20,20 @@ import net.minecraft.world.level.lighting.LevelLightEngine;
 /** Host event/field router. The native owner determines radius, requests, dependencies and scheduling. */
 public final class ExclusiveTerrainCapture implements AutoCloseable {
     private static ExclusiveTerrainCapture current;
+    // Resource ownership follows the native session, not the live/offline source producer.
+    private static NativeBridge resourceBridge;
+    private static SectionSources resourceSources;
+    private static long preparedGeneration;
     private static boolean vanillaSuspended, sourceFrame;
     private static ClientLevel vanillaSnapshotPending;
-    private static final ValueLayout.OfInt I32 =
-            ValueLayout.JAVA_INT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
-    private static final ValueLayout.OfLong I64 =
-            ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
     // Mirrors only native-approved columns for host entity extraction; never chooses a terrain workset.
     private final Long2ObjectLinkedOpenHashMap<LevelChunk> chunks =
             new Long2ObjectLinkedOpenHashMap<>();
     private final BlockEntityIndex blockEntities = new BlockEntityIndex();
     private final IntArrayList events = new IntArrayList();
-    private final SourcePages frame = new SourcePages(), response = new SourcePages();
+    private final McSourceBatch frame = new McSourceBatch(), response = new McSourceBatch(),
+                                resources = new McSourceBatch();
+    private long resourceGeneration;
     private SectionSources sources;
     private ClientLevel world;
     private long epoch, lastFrame = -1, routedSections;
@@ -113,6 +115,11 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             current = null;
         }
     }
+    public static void releaseResourceSources() {
+        resourceBridge = null;
+        resourceSources = null;
+        preparedGeneration = 0;
+    }
     /** Called only after the previous PT backend and its source producer have closed successfully. */
     public static void resumeVanilla() {
         if (current != null)
@@ -133,6 +140,39 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         vanillaSnapshotPending = null;
     }
 
+    /** Separate resource transaction, completed before any section demand is issued. */
+    public static void prepareResources(NativeBridge bridge) {
+        if (current == null)
+            return;
+        var minecraft = Minecraft.getInstance();
+        var models = minecraft.getModelManager().getBlockStateModelSet();
+        var fluids = minecraft.getModelManager().getFluidStateModelSet();
+        long generation = PrimeClient.CAPTURE.resourceGeneration(models, fluids);
+        if (resourceBridge == bridge && preparedGeneration == generation) {
+            current.sources = resourceSources;
+            current.resourceGeneration = generation;
+            return;
+        }
+        var next = new SectionSources(models, fluids);
+        current.resources.clear();
+        next.prepareResources(current.resources);
+        var atlas = PrimeClient.CAPTURE.atlas();
+        long tick = minecraft.level == null ? 0 : minecraft.level.getGameTime();
+        bridge.resources(current.resources.resources(SectionSources.GAME_VERSION, generation,
+                                                     PrimeClient.CAPTURE.epoch(), 0, tick, true,
+                                                     atlas.width(), atlas.height(), atlas.rgba()));
+        // Native replacement revokes all old geometry even when only model identity changed.
+        // Recreate prototype/instance definitions and resend needed dynamic pixels in this epoch.
+        DynamicCapture.close();
+        DynamicTextures.invalidatePublished();
+        BlockGeometryCache.resourceReload();
+        current.sources = next;
+        current.resourceGeneration = generation;
+        resourceBridge = bridge;
+        resourceSources = next;
+        preparedGeneration = generation;
+        PrimeClient.prepareResourceGeneration();
+    }
     public static void prepareWindow(net.minecraft.world.phys.Vec3 camera) {
         if (current == null || current.failure != null || !PrimeClient.exclusiveFrameReady())
             return;
@@ -163,8 +203,6 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
             events.clear();
             chunks.clear();
             blockEntities.clear();
-            sources = new SectionSources(minecraft.getModelManager().getBlockStateModelSet(),
-                                         minecraft.getModelManager().getFluidStateModelSet());
             inventory = true;
         }
         var access = (LoadedTerrainSnapshot)world.getChunkSource();
@@ -177,31 +215,36 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         var bounds = access.primept$sourceWindow();
         if (bounds == null)
             throw new IllegalStateException("Missing host source-cache bounds");
-        frame.header(SectionSources.GAME_VERSION, 1, epoch, serial)
-                .d(camera.x)
-                .d(camera.z)
-                .i(minecraft.options.getEffectiveRenderDistance())
-                .i(world.getMinSectionY())
-                .i(world.getMaxSectionY())
-                .i(bounds.minX())
-                .i(bounds.maxX())
-                .i(bounds.minZ())
-                .i(bounds.maxZ())
-                .l(world.getGameTime());
-        for (int i = 0; i < events.size(); ++i)
-            frame.i(events.getInt(i));
-        frame.i(0);
+        frame.clear();
+        for (int i = 0; i < events.size(); i += 4) {
+            var value = frame.events.add();
+            PrimeMcEvent.kind(value, events.getInt(i));
+            PrimeMcEvent.x(value, events.getInt(i + 1));
+            PrimeMcEvent.y(value, events.getInt(i + 2));
+            PrimeMcEvent.z(value, events.getInt(i + 3));
+        }
         events.clear();
+        var plan =
+                frame.plan(SectionSources.GAME_VERSION, resourceGeneration, epoch, serial, camera.x,
+                           camera.z, minecraft.options.getEffectiveRenderDistance(),
+                           world.getMinSectionY(), world.getMaxSectionY(),
+                           new int[] {bounds.minX(), bounds.maxX(), bounds.minZ(), bounds.maxZ()},
+                           world.getGameTime());
         long planStart = System.nanoTime();
-        MemorySegment request = bridge.requestSections(frame);
+        MemorySegment request = bridge.requestSections(plan);
         long packStart = System.nanoTime();
-        long batch = request.get(I64, 0), count = request.get(I64, 8),
-             columnCount = request.get(I64, 16);
-        long at = 32 + Math.multiplyExact(count, 16);
+        long batch = PrimeMcIdentity.batch(PrimeMcRequests.identity(request));
+        long count = PrimeMcRequests.section_count(request),
+             columnCount = PrimeMcRequests.column_count(request);
+        var columns = PrimeMcRequests.columns(request).reinterpret(
+                Math.multiplyExact(columnCount, PrimeMcColumnRequest.SIZE));
+        var sections = PrimeMcRequests.sections(request).reinterpret(
+                Math.multiplyExact(count, PrimeMcSectionRequest.SIZE));
         long entered = 0;
-        for (long i = 0; i < columnCount; ++i, at += 12) {
-            int x = request.get(I32, at), z = request.get(I32, at + 4);
-            if (request.get(I32, at + 8) != 0) {
+        for (long i = 0; i < columnCount; ++i) {
+            var item = columns.asSlice(i * PrimeMcColumnRequest.SIZE, PrimeMcColumnRequest.SIZE);
+            int x = PrimeMcColumnRequest.x(item), z = PrimeMcColumnRequest.z(item);
+            if (PrimeMcColumnRequest.active(item) != 0) {
                 var chunk = world.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false);
                 if (chunk != null) {
                     chunks.put(ChunkPos.pack(x, z), chunk);
@@ -213,34 +256,45 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
                 blockEntities.remove(x, z);
             }
         }
-        response.header(SectionSources.GAME_VERSION, 2, epoch, batch);
+        response.clear();
+        resources.clear();
         long available = 0;
         for (long i = 0; i < count; ++i) {
-            at = 32 + i * 16;
-            int x = request.get(I32, at), y = request.get(I32, at + 4),
-                z = request.get(I32, at + 8);
+            var item = sections.asSlice(i * PrimeMcSectionRequest.SIZE, PrimeMcSectionRequest.SIZE);
+            int x = PrimeMcSectionRequest.x(item), y = PrimeMcSectionRequest.y(item),
+                z = PrimeMcSectionRequest.z(item);
             var chunk = world.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false);
             var section =
                     chunk == null ? null : chunk.getSection(chunk.getSectionIndexFromSectionY(y));
-            sources.section(response, x, y, z, section);
+            sources.section(resources, response, x, y, z, section);
             if (section != null)
                 ++available;
         }
-        response.i(0);
+        if (resources.hasResources()) {
+            bridge.resources(resources.resources(SectionSources.GAME_VERSION, resourceGeneration,
+                                                 epoch, batch, world.getGameTime(), false, 0, 0,
+                                                 null));
+            if (resources.sprites.count() != 0)
+                PrimeClient.prepareResourceGeneration();
+        }
         long packEnd = System.nanoTime();
-        long sourceBytes = response.bytes();
-        var tints = bridge.sections(response);
+        long sourceBytes = response.bytes() + resources.bytes();
+        var tints = bridge.sections(
+                response.sections(SectionSources.GAME_VERSION, resourceGeneration, epoch, batch));
         long tintQueries = 0, tintNanos = 0;
-        for (int round = 0; tints.byteSize() != 0; ++round) {
+        for (int round = 0; PrimeMcRequests.phase(tints) != 0; ++round) {
             if (round >= 2)
                 throw new IllegalStateException("Unexpected color continuation");
-            tintQueries += tints.get(I64, 8);
+            int phase = PrimeMcRequests.phase(tints);
+            tintQueries += phase == 4 ? PrimeMcRequests.biome_count(tints)
+                                      : PrimeMcRequests.color_count(tints);
             long tintStart = System.nanoTime();
-            SectionTints.respond(tints, response, world, minecraft.getBlockColors(),
-                                 minecraft.getModelManager().getFluidStateModelSet(), world);
+            var reply = SectionTints.respond(tints, response, world, minecraft.getBlockColors(),
+                                             minecraft.getModelManager().getFluidStateModelSet(),
+                                             world);
             tintNanos += System.nanoTime() - tintStart;
             sourceBytes += response.bytes();
-            tints = bridge.sections(response);
+            tints = phase == 4 ? bridge.biomes(reply) : bridge.colors(reply);
         }
         long completed = System.nanoTime();
         lastFrame = serial;
@@ -305,9 +359,6 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         if (current == null || current.world == null)
             return;
         ++current.invalidations;
-        current.sources = new SectionSources(
-                Minecraft.getInstance().getModelManager().getBlockStateModelSet(),
-                Minecraft.getInstance().getModelManager().getFluidStateModelSet());
         current.event(4, 0, 0, 0);
     }
     public static void blockEntitiesChanged(LevelChunk chunk) {
@@ -340,6 +391,7 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
     public void close() {
         frame.close();
         response.close();
+        resources.close();
         events.clear();
         chunks.clear();
         blockEntities.clear();

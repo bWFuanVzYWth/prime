@@ -8,7 +8,18 @@ pub(crate) use legacy::SourceRoutes;
 #[cfg(not(test))]
 #[derive(Default)]
 pub(crate) struct SourceRoutes {
-    workers: Option<crate::workers::CpuWorkers>,
+    workers: Option<std::sync::Arc<crate::workers::CpuWorkers>>,
+}
+impl SourceRoutes {
+    #[cfg(not(test))]
+    pub(crate) fn with_workers(workers: std::sync::Arc<crate::workers::CpuWorkers>) -> Self {
+        Self {
+            workers: Some(workers),
+        }
+    }
+    pub(crate) fn workers(&self) -> Option<&std::sync::Arc<crate::workers::CpuWorkers>> {
+        self.workers.as_ref()
+    }
 }
 #[cfg(not(test))]
 const EMPTY_TRIANGLE: crate::Triangle = crate::Triangle {

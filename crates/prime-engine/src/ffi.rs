@@ -2,7 +2,9 @@
 use crate::engine::Engine;
 #[cfg(test)]
 use crate::engine::poison_on_failure;
-use prime_scene::protocol::{ABI_VERSION, Frame, MAX_PACKET_BYTES};
+use prime_abi::*;
+use prime_scene::protocol::Frame;
+const ABI_VERSION: u32 = PRIME_ABI_VERSION;
 use std::{
     cell::RefCell,
     collections::BTreeMap,
@@ -34,7 +36,7 @@ thread_local! {
     static ERROR: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
-fn boundary<T>(fallback: T, work: impl FnOnce() -> Result<T, String>) -> T {
+pub(crate) fn boundary<T>(fallback: T, work: impl FnOnce() -> Result<T, String>) -> T {
     match catch_unwind(AssertUnwindSafe(work)) {
         Ok(Ok(value)) => {
             ERROR.with(|e| e.borrow_mut().clear());
@@ -58,7 +60,7 @@ fn boundary<T>(fallback: T, work: impl FnOnce() -> Result<T, String>) -> T {
     }
 }
 
-fn session<T>(
+pub(crate) fn session<T>(
     handle: u64,
     work: impl FnOnce(&mut Engine) -> Result<T, String>,
 ) -> Result<T, String> {
@@ -74,7 +76,7 @@ fn session<T>(
     })
 }
 
-/// Returns the supported wire protocol version, without creating GPU resources.
+/// Returns the supported public C ABI version, without creating GPU resources.
 #[unsafe(no_mangle)]
 pub extern "C" fn prime_abi_version() -> u32 {
     ABI_VERSION
@@ -101,171 +103,128 @@ pub extern "C" fn prime_create(version: u32) -> u64 {
             if sessions.len() >= 8 {
                 return Err("at most eight sessions per thread are supported".into());
             }
-            sessions.insert(handle, Engine::default());
+            sessions.insert(handle, Engine::new()?);
             Ok(handle)
         })
     })
 }
 
-/// Copies and validates one scene command. Returns zero on success, -1 on error.
-///
+/// Reset world-owned state while preserving registered resource-generation textures.
 /// # Safety
-/// `data` must reference `length` readable bytes for this synchronous call. Arbitrary
-/// invalid native addresses cannot be validated by the ABI. No pointer is retained.
+/// The named input and its header remain readable until synchronous return. A borrowed
+/// host must submit and complete recorded work before reset; offline state must be thawed.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn prime_submit(handle: u64, data: *const u8, length: u64) -> i32 {
+pub unsafe extern "C" fn prime_reset(handle: u64, reset: *const PrimeReset) -> i32 {
     boundary(-1, || {
-        if data.is_null() || length > MAX_PACKET_BYTES as u64 {
-            return Err("null or oversized input packet".into());
-        }
-        // SAFETY: Caller guarantees a live readable region; length is bounded above.
-        let bytes = unsafe { std::slice::from_raw_parts(data, length as usize) };
-        session(handle, |s| s.submit(bytes))?;
+        let r = unsafe { input(reset)? };
+        session(handle, |s| s.reset_world(r.epoch))?;
         Ok(0)
     })
 }
-
-#[repr(C)]
-pub struct SourcePage {
-    pub data: *const u8,
-    pub length: u64,
-}
-
 /// # Safety
-/// The descriptor table and each page remain readable until return. No input pointer is retained.
-unsafe fn source_pages<'a>(pages: *const SourcePage, count: u64) -> Result<Vec<&'a [u8]>, String> {
-    if pages.is_null()
-        || count == 0
-        || count > (isize::MAX as usize / std::mem::size_of::<SourcePage>()) as u64
-    {
-        return Err("invalid source page table".into());
-    }
-    let table = unsafe { std::slice::from_raw_parts(pages, count as usize) };
-    table
-        .iter()
-        .map(|p| {
-            if p.data.is_null() || p.length > MAX_PACKET_BYTES as u64 {
-                return Err("invalid source page".into());
-            }
-            Ok(unsafe { std::slice::from_raw_parts(p.data, p.length as usize) })
-        })
-        .collect()
-}
-
-/// One synchronous demand batch per host frame, including empty batches.
-/// # Safety
-/// Input pages are borrowed until return. `output` points to a writable SourcePage.
-/// The returned read-only request view belongs to this session; it expires at the next
-/// plan/accept/destroy call. Java must finish reading it before returning its response.
+/// All descriptors and pixel spans remain readable and immutable until return.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn prime_mc_plan(
-    handle: u64,
-    pages: *const SourcePage,
-    count: u64,
-    output: *mut SourcePage,
-) -> i32 {
+pub unsafe extern "C" fn prime_textures(handle: u64, batch: *const PrimeTextureBatch) -> i32 {
     boundary(-1, || {
-        if output.is_null() {
-            return Err("null source request result".into());
-        }
-        let pages = unsafe { source_pages(pages, count)? };
-        session(handle, |engine| {
-            let request = engine.plan_sections(&pages)?;
-            unsafe {
-                output.write(SourcePage {
-                    data: request.as_ptr(),
-                    length: request.len() as u64,
-                });
-            }
-            Ok(())
+        let view = unsafe { scene::TexturesView::read(batch)? };
+        session(handle, |s| {
+            s.update_source(|src| src.submit_textures_typed(view))
         })?;
         Ok(0)
     })
 }
-
 /// # Safety
-/// Input pages remain readable through synchronous decode/compile/join; no input pointers escape.
-/// `output` points to a writable SourcePage. A nonempty session-owned view requests
-/// color sources/biome samples; it expires at the next plan/accept/destroy. Zero length
-/// confirms final publication.
+/// Input and its identity span remain readable until return.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn prime_mc_sections(
+pub unsafe extern "C" fn prime_retire_textures(
     handle: u64,
-    pages: *const SourcePage,
-    count: u64,
-    output: *mut SourcePage,
+    batch: *const PrimeTextureRetire,
 ) -> i32 {
     boundary(-1, || {
-        if output.is_null() {
-            return Err("null tint request result".into());
-        }
-        let pages = unsafe { source_pages(pages, count)? };
-        session(handle, |engine| {
-            let request = engine.accept_sections(&pages)?;
-            unsafe {
-                output.write(SourcePage {
-                    data: request.as_ptr(),
-                    length: request.len() as u64,
-                });
-            }
-            Ok(())
+        let b = unsafe { input(batch)? };
+        let mut budget = Budget::default();
+        budget.array::<PrimeTextureRetire>(1)?;
+        budget.array::<u32>(b.ids.count)?;
+        let ids = unsafe { slice(b.ids.data, b.ids.count)? };
+        session(handle, |s| {
+            s.update_source(|src| src.retire_textures_typed(b.epoch, ids))
         })?;
         Ok(0)
     })
 }
-
-/// Renders top-left-origin RGBA8 synchronously; bytes after required output remain untouched.
-///
 /// # Safety
-/// `data` must reference `length` readable bytes and `output` must reference
-/// `capacity` writable bytes. Neither region may be concurrently accessed by other
-/// threads during the call. Native work completes before these buffers are released.
+/// The batch, descriptors and source vertex spans are immutable through return.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_dynamic(handle: u64, batch: *const PrimeDynamicBatch) -> i32 {
+    boundary(-1, || {
+        let view = unsafe { scene::DynamicView::read(batch)? };
+        session(handle, |s| {
+            s.update_source(|src| src.submit_dynamic_typed(view))
+        })?;
+        Ok(0)
+    })
+}
+/// # Safety
+/// Every typed array and raw source payload remains immutable through return.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_instances(handle: u64, batch: *const PrimeInstanceBatch) -> i32 {
+    boundary(-1, || {
+        let view = unsafe { scene::InstancesView::read(batch)? };
+        session(handle, |s| {
+            s.update_source(|src| src.submit_instances_typed(view))
+        })?;
+        Ok(0)
+    })
+}
+/// Renders top-left-origin RGBA8 synchronously; trailing output bytes are untouched.
+/// # Safety
+/// Frame is readable; output addresses capacity writable bytes through return.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn prime_render(
     handle: u64,
-    data: *const u8,
-    length: u64,
+    data: *const PrimeFrame,
     output: *mut u8,
     capacity: u64,
 ) -> i32 {
     boundary(-1, || {
-        if data.is_null() || output.is_null() || length != 104 {
-            return Err("frame must contain exactly 104 bytes and non-null buffers".into());
-        }
-        // SAFETY: Valid live input storage is part of the caller's ABI contract.
-        let frame = Frame::parse(unsafe { std::slice::from_raw_parts(data, length as usize) })?;
-        if capacity < frame.output_len() as u64 {
-            return Err("output buffer is too small".into());
+        let frame = Frame::from_abi(unsafe { input(data)? })?;
+        if output.is_null() || capacity < frame.output_len() as u64 {
+            return Err("output buffer is null or too small".into());
         }
         let rgba = session(handle, |s| s.render(&frame))?;
         if rgba.len() != frame.output_len() {
             return Err("renderer returned an invalid output extent".into());
         }
-        // SAFETY: RGBA is a separate native allocation; output capacity was checked.
         unsafe {
             std::ptr::copy_nonoverlapping(rgba.as_ptr(), output, rgba.len());
         }
         Ok(0)
     })
 }
-
-/// Borrows the host instance, physical device, logical device, graphics queue and
-/// completion timeline. All handles remain owned by Minecraft.
-/// Descriptor flags at byte 44 describe enabled logical-device capabilities:
-/// bit 0 is OMM and bit 1 is the Streamline RR extension/feature set in docs/abi.md.
+fn validate_vulkan_host(host: &PrimeVulkanHost) -> Result<(), String> {
+    if [
+        host.instance,
+        host.physical_device,
+        host.device,
+        host.queue,
+        host.timeline,
+    ]
+    .contains(&0)
+        || host.capabilities & !(PRIME_HOST_OMM | PRIME_HOST_STREAMLINE) != 0
+    {
+        return Err("Invalid Vulkan host handles or unknown capability flags".into());
+    }
+    Ok(())
+}
+/// Borrows host Vulkan objects; capability bits certify enabled logical-device features.
 /// # Safety
-/// `data` must address 48 readable bytes. Handles/features/lifetimes must satisfy
-/// Renderer::borrowed_mode_with_capabilities, including flushing the host encoder before
-/// prime_destroy. An OMM flag proves VK_EXT_opacity_micromap, micromap and synchronization2
-/// were enabled.
+/// Named descriptor and Vulkan handles meet borrowed_with_settings_and_workers's
+/// contract; submit the active encoder before reconfiguration or destruction.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const u8, length: u64) -> i32 {
+pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const PrimeVulkanHost) -> i32 {
     boundary(-1, || {
-        if data.is_null() || length != 48 {
-            return Err("Vulkan host descriptor must contain 48 bytes".into());
-        }
-        let bytes = unsafe { std::slice::from_raw_parts(data, 48) };
-        let (handles, family, capabilities) = parse_vulkan_host_descriptor(bytes)?;
+        let h = unsafe { input(data)? };
+        validate_vulkan_host(h)?;
         #[cfg(feature = "vulkan")]
         {
             session(handle, |s| {
@@ -273,84 +232,84 @@ pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const u8, lengt
                     return Err("Engine already attached or failed".into());
                 }
                 s.renderer = Some(unsafe {
-                    prime_vulkan::Renderer::borrowed_mode_with_capabilities(
-                        handles[0],
-                        handles[1],
-                        handles[2],
-                        handles[3],
-                        family,
-                        handles[4],
-                        s.settings.mode,
-                        capabilities,
+                    prime_vulkan::Renderer::borrowed_with_settings_and_workers(
+                        h.instance,
+                        h.physical_device,
+                        h.device,
+                        h.queue,
+                        h.queue_family,
+                        h.timeline,
+                        h.capabilities,
+                        s.settings,
+                        s.workers.clone(),
                     )?
                 });
-                s.renderer.as_mut().unwrap().configure(s.settings)?;
                 Ok(0)
             })
         }
         #[cfg(not(feature = "vulkan"))]
         {
-            let _ = (handle, family, handles, capabilities);
+            let _ = handle;
             Err("Native library built without Vulkan".into())
         }
     })
 }
-
-fn parse_vulkan_host_descriptor(bytes: &[u8]) -> Result<([u64; 5], u32, u32), String> {
-    if bytes.len() != 48 {
-        return Err("Vulkan host descriptor must contain 48 bytes".into());
-    }
-    let value = |offset| u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
-    let handles = [value(0), value(8), value(16), value(24), value(32)];
-    let family = u32::from_le_bytes(bytes[40..44].try_into().unwrap());
-    let capabilities = u32::from_le_bytes(bytes[44..48].try_into().unwrap());
-    if handles.contains(&0) || capabilities & !3 != 0 {
-        return Err("Invalid Vulkan host handles or unknown capability flags".into());
-    }
-    Ok((handles, family, capabilities))
-}
-
-/// Applies a current-version settings packet. Mode changes retire exclusive GPU resources.
 /// # Safety
-/// Data must contain 72 readable bytes. Call outside recording, after submitting the host encoder
-/// when the renderer mode changes. This call may wait for that mode's last GPU consumer.
+/// Settings remain readable. Mode changes require an already submitted host encoder.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn prime_configure(handle: u64, data: *const u8, length: u64) -> i32 {
+pub unsafe extern "C" fn prime_configure(handle: u64, data: *const PrimeSettings) -> i32 {
     boundary(-1, || {
-        if data.is_null() || length != prime_scene::settings::RenderSettings::BYTES as u64 {
-            return Err("Settings require a non-null 72-byte packet".into());
-        }
-        let settings = prime_scene::settings::RenderSettings::parse(unsafe {
-            std::slice::from_raw_parts(data, length as usize)
-        })?;
+        let settings = prime_scene::settings::RenderSettings::from_abi(unsafe { input(data)? })?;
         session(handle, |s| s.configure(settings))?;
         Ok(0)
     })
 }
-
-/// Records GPU work in the host command buffer, directly writing the host color image.
 /// # Safety
-/// The packet is readable for length bytes. Vulkan arguments meet record_host's
-/// contract; the caller must submit this command in order and signal the host timeline.
+/// The descriptor is readable and references an active host command buffer and its
+/// real future timeline serial. The caller submits it on the attached queue.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn prime_record(
+pub unsafe extern "C" fn prime_prepare_resources(
     handle: u64,
-    data: *const u8,
-    length: u64,
-    command: u64,
-    image: u64,
-    view: u64,
-    serial: u64,
+    data: *const PrimePrepareResources,
 ) -> i32 {
     boundary(-1, || {
-        if data.is_null() || length != 104 || [command, image, view, serial].contains(&0) {
-            return Err("Invalid host frame packet or Vulkan recording handles".into());
+        let p = unsafe { input(data)? };
+        if p.command == 0 || p.serial == 0 {
+            return Err("Invalid resource preparation handles".into());
         }
-        let frame = Frame::parse(unsafe { std::slice::from_raw_parts(data, length as usize) })?;
         #[cfg(feature = "vulkan")]
         {
             session(handle, |s| unsafe {
-                s.record(&frame, command, image, view, serial)
+                s.prepare_resources(p.command, p.serial)
+            })?;
+            Ok(0)
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            let _ = handle;
+            Err("Native library built without Vulkan".into())
+        }
+    })
+}
+/// # Safety
+/// Typed inputs remain readable. Vulkan arguments satisfy record_host; submit in
+/// queue order and signal the descriptor's actual completion serial.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_record(
+    handle: u64,
+    data: *const PrimeFrame,
+    target: *const PrimeRecordTarget,
+) -> i32 {
+    boundary(-1, || {
+        let frame = Frame::from_abi(unsafe { input(data)? })?;
+        let t = unsafe { input(target)? };
+        if [t.command, t.image, t.view, t.serial].contains(&0) {
+            return Err("Invalid Vulkan recording handles".into());
+        }
+        #[cfg(feature = "vulkan")]
+        {
+            session(handle, |s| unsafe {
+                s.record(&frame, t.command, t.image, t.view, t.serial)
             })?;
             Ok(0)
         }
@@ -454,6 +413,24 @@ pub unsafe extern "C" fn prime_last_error(output: *mut u8, capacity: u64) -> u64
     })
 }
 
+const _: PrimeAbiVersionFn = prime_abi_version;
+const _: PrimeCreateFn = prime_create;
+const _: PrimeResetFn = prime_reset;
+const _: PrimeTexturesFn = prime_textures;
+const _: PrimeRetireTexturesFn = prime_retire_textures;
+const _: PrimeDynamicFn = prime_dynamic;
+const _: PrimeInstancesFn = prime_instances;
+const _: PrimeRenderFn = prime_render;
+const _: PrimeAttachVulkanFn = prime_attach_vulkan;
+const _: PrimeConfigureFn = prime_configure;
+const _: PrimePrepareResourcesFn = prime_prepare_resources;
+const _: PrimeRecordFn = prime_record;
+const _: PrimeGpuTimeFn = prime_gpu_time;
+const _: PrimeCpuDiagnosticsFn = prime_cpu_diagnostics;
+const _: PrimeDestroyFn = prime_destroy;
+const _: PrimeLastErrorFn = prime_last_error;
+const _: PrimeStreamlinePresentFn = prime_streamline_present;
+
 #[cfg(test)]
 mod abi_tests {
     use super::*;
@@ -516,7 +493,34 @@ mod abi_tests {
         let mut bytes = [0xcc; 8];
         assert!(unsafe { prime_last_error(bytes.as_mut_ptr(), bytes.len() as u64) } > 8);
         assert_eq!(bytes[7], 0);
-        assert_eq!(unsafe { prime_submit(1, std::ptr::null(), 24) }, -1);
+        assert_eq!(unsafe { prime_dynamic(1, std::ptr::null()) }, -1);
+    }
+    #[test]
+    fn texture_retirement_budget_includes_root_before_reading_ids() {
+        let mut batch = PrimeTextureRetire {
+            header: PrimeHeader {
+                struct_size: std::mem::size_of::<PrimeTextureRetire>() as u32,
+                abi_version: ABI_VERSION,
+            },
+            epoch: 1,
+            ids: PrimeU32Span {
+                data: std::ptr::null(),
+                count: PRIME_MAX_BATCH_BYTES as u64 / 4,
+            },
+        };
+        let error = |batch: &PrimeTextureRetire| {
+            assert_eq!(unsafe { prime_retire_textures(0, batch) }, -1);
+            let mut bytes = [0_u8; 128];
+            let length = unsafe { prime_last_error(bytes.as_mut_ptr(), bytes.len() as u64) };
+            std::str::from_utf8(&bytes[..length as usize])
+                .unwrap()
+                .to_owned()
+        };
+        assert!(error(&batch).contains("ABI batch exceeds 256 MiB"));
+        batch.ids.count -= std::mem::size_of::<PrimeTextureRetire>() as u64 / 4;
+        assert!(error(&batch).contains("Null or misaligned ABI span"));
+        batch.ids.count += 1;
+        assert!(error(&batch).contains("ABI batch exceeds 256 MiB"));
     }
     #[test]
     fn gpu_error_and_panic_poison_session_before_return() {
@@ -537,49 +541,47 @@ mod abi_tests {
     #[test]
     fn configuration_validates_version_borrow_and_thread_before_mutation() {
         let handle = prime_create(ABI_VERSION);
-        let bytes: Vec<_> = [
-            5_u32,
-            0,
-            4,
-            1,
-            1_f32.to_bits(),
-            0.75_f32.to_bits(),
-            0.08_f32.to_bits(),
-            0,
-            1_f32.to_bits(),
-            1_f32.to_bits(),
-            128_f32.to_bits(),
-            0x13572468,
-            30,
-            0,
-            1,
-            1,
-            3,
-            8,
-        ]
-        .into_iter()
-        .flat_map(u32::to_le_bytes)
-        .collect();
-        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 72) }, 0);
-        assert_eq!(unsafe { prime_configure(handle, std::ptr::null(), 72) }, -1);
+        let valid = PrimeSettings {
+            header: PrimeHeader {
+                struct_size: std::mem::size_of::<PrimeSettings>() as u32,
+                abi_version: ABI_VERSION,
+            },
+            mode: 0,
+            bounces: 4,
+            offline_samples: 1,
+            exposure: 1.0,
+            hue: 0.75,
+            saturation: 0.08,
+            view: 0,
+            sun: 1.0,
+            sky: 1.0,
+            depth_range: 128.0,
+            seed: 0x13572468,
+            latitude_degrees: 30,
+            solar_longitude_degrees: 0,
+            opacity_micromap: 1,
+            ray_reconstruction: 1,
+            reconstruction_quality: 3,
+            terrain_batches_per_frame: 8,
+        };
+        assert_eq!(unsafe { prime_configure(handle, &valid) }, 0);
+        assert_eq!(unsafe { prime_configure(handle, std::ptr::null()) }, -1);
+        let mut invalid = valid;
+        invalid.header.struct_size -= 1;
+        assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
+        invalid = valid;
+        invalid.header.abi_version = 7;
+        assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
         assert_eq!(
-            unsafe { prime_configure(handle, bytes.as_ptr(), u64::MAX) },
-            -1
-        );
-        let mut invalid = bytes.clone();
-        invalid[0] = 2;
-        assert_eq!(unsafe { prime_configure(handle, invalid.as_ptr(), 72) }, -1);
-        let foreign = bytes.clone();
-        assert_eq!(
-            std::thread::spawn(move || unsafe { prime_configure(handle, foreign.as_ptr(), 72) })
+            std::thread::spawn(move || unsafe { prime_configure(handle, &valid) })
                 .join()
                 .unwrap(),
             -1
         );
-        invalid = bytes.clone();
-        invalid[4] = 1;
+        invalid = valid;
+        invalid.mode = 1;
         assert_eq!(
-            unsafe { prime_configure(handle, invalid.as_ptr(), 72) },
+            unsafe { prime_configure(handle, &invalid) },
             -1,
             "No rendered frame can be frozen"
         );
@@ -596,32 +598,57 @@ mod abi_tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 72) }, 0);
+        assert_eq!(unsafe { prime_configure(handle, &valid) }, 0);
         assert_eq!(prime_destroy(handle), 0);
     }
     #[test]
     fn host_descriptor_requires_enabled_capabilities_and_known_flag_bits() {
-        let mut bytes = [0; 48];
-        for (index, value) in [11_u64, 22, 33, 44, 55].into_iter().enumerate() {
-            bytes[index * 8..index * 8 + 8].copy_from_slice(&value.to_le_bytes());
+        let valid = PrimeVulkanHost {
+            instance: 11,
+            physical_device: 22,
+            device: 33,
+            queue: 44,
+            timeline: 55,
+            queue_family: 7,
+            ..Default::default()
+        };
+        for capabilities in 0..4 {
+            assert!(
+                validate_vulkan_host(&PrimeVulkanHost {
+                    capabilities,
+                    ..valid
+                })
+                .is_ok()
+            );
         }
-        bytes[40..44].copy_from_slice(&7_u32.to_le_bytes());
-        assert_eq!(
-            parse_vulkan_host_descriptor(&bytes).unwrap(),
-            ([11, 22, 33, 44, 55], 7, 0)
-        );
-        bytes[44..48].copy_from_slice(&1_u32.to_le_bytes());
-        assert_eq!(parse_vulkan_host_descriptor(&bytes).unwrap().2, 1);
-        for flags in [4_u32, 5, u32::MAX] {
-            bytes[44..48].copy_from_slice(&flags.to_le_bytes());
-            assert!(parse_vulkan_host_descriptor(&bytes).is_err());
+        for capabilities in [4, 5, u32::MAX] {
+            assert!(
+                validate_vulkan_host(&PrimeVulkanHost {
+                    capabilities,
+                    ..valid
+                })
+                .is_err()
+            );
         }
-        bytes[44..48].fill(0);
-        for index in 0..5 {
-            let mut zero_handle = bytes;
-            zero_handle[index * 8..index * 8 + 8].fill(0);
-            assert!(parse_vulkan_host_descriptor(&zero_handle).is_err());
+        for h in [
+            PrimeVulkanHost {
+                instance: 0,
+                ..valid
+            },
+            PrimeVulkanHost {
+                physical_device: 0,
+                ..valid
+            },
+            PrimeVulkanHost { device: 0, ..valid },
+            PrimeVulkanHost { queue: 0, ..valid },
+            PrimeVulkanHost {
+                timeline: 0,
+                ..valid
+            },
+        ] {
+            assert!(validate_vulkan_host(&h).is_err());
         }
-        assert!(parse_vulkan_host_descriptor(&bytes[..47]).is_err());
     }
 }
+
+// Generated header signatures are also checked against actual exported Rust functions.

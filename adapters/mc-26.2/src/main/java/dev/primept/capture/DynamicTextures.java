@@ -130,6 +130,12 @@ public final class DynamicTextures {
     public static void beginFrame() {
         NEEDED.clear();
     }
+    /** Resource replacement revokes consumers without requiring a world epoch change. */
+    public static void invalidatePublished() {
+        for (Texture source : SOURCES.values())
+            source.sentEpoch = 0;
+        NEEDED.clear();
+    }
     public static void releaseSources() {
         SOURCES.clear();
         NEEDED.clear();
@@ -186,7 +192,7 @@ public final class DynamicTextures {
                                 .mapToInt(java.util.Map.Entry::getKey)
                                 .toArray();
             if (ids.length != 0)
-                bridge.submit(Packets.retireTextures(epoch, ids));
+                bridge.retireTextures(epoch, ids);
             RETIRED.clear();
         }
     }

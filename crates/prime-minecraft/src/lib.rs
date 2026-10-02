@@ -17,6 +17,8 @@ mod shape;
 mod sprite;
 mod surfaces;
 mod tint;
+mod typed;
+mod typed_resources;
 mod volume;
 #[cfg(test)]
 use compile::compile_slab;
@@ -34,6 +36,7 @@ use prime_scene::{
 use schedule::{Demand, FrameInput, Section};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
+    sync::Arc,
     time::Instant,
 };
 use wire::{Reader, u32_to, u64_to};
@@ -154,6 +157,7 @@ enum ColorStage {
     Biomes(biome::Plan, Box<biome_source::Plan>),
 }
 struct AwaitingColors {
+    requests: Vec<tint::Request>,
     stage: ColorStage,
     batch: u64,
     jobs: Vec<Job>,
@@ -164,6 +168,10 @@ struct AwaitingColors {
 }
 #[derive(Default)]
 pub struct TerrainContext {
+    typed_output: typed::Output,
+    resource_generation: u64,
+    resource_version: u32,
+    resource_reset_pending: bool,
     epoch: u64,
     version: u32,
     last_batch: u64,
@@ -176,7 +184,7 @@ pub struct TerrainContext {
     awaiting_colors: Option<AwaitingColors>,
     tint_requests: Vec<u8>,
     requests: Vec<u8>,
-    workers: Option<CpuWorkers>,
+    workers: Option<Arc<CpuWorkers>>,
     stats: Stats,
 }
 #[derive(Default)]
@@ -217,6 +225,37 @@ struct Stats {
     availability_updates: usize,
 }
 impl TerrainContext {
+    /// All production CPU consumers borrow the session's synchronous worker pool.
+    pub fn with_workers(workers: Arc<CpuWorkers>) -> Self {
+        Self {
+            workers: Some(workers),
+            ..Self::default()
+        }
+    }
+    pub fn cpu_workers(&self) -> Option<&Arc<CpuWorkers>> {
+        self.workers.as_ref()
+    }
+    /// Release all world-owned CPU sources immediately; resources and the shared pool survive.
+    /// The caller validates and commits the corresponding SourceScene epoch first.
+    pub fn clear_world(&mut self, epoch: u64) {
+        self.epoch = epoch;
+        self.version = self.resource_version;
+        self.last_batch = 0;
+        self.chunks = Default::default();
+        self.pending = None;
+        self.awaiting_colors = None;
+        self.requests = Vec::new();
+        self.tint_requests = Vec::new();
+        self.textures = Vec::new();
+        self.typed_output = Default::default();
+        self.stats = Default::default();
+        if self.resource_generation == 0 {
+            self.catalog = Catalog::default();
+            self.animated.clear();
+            self.animation_tick = None;
+        }
+    }
+
     pub fn plan(&mut self, pages: &[&[u8]], source_epoch: u64) -> Result<&[u8], String> {
         self.plan_budget(pages, source_epoch, usize::MAX)
     }
@@ -246,36 +285,46 @@ impl TerrainContext {
             return Err("previous source batch still awaiting completion".into());
         }
         let input = FrameInput::read(pages)?;
+        self.plan_input(input, source_epoch, cell_budget, start, true)
+    }
+
+    fn plan_input(
+        &mut self,
+        input: FrameInput,
+        source_epoch: u64,
+        cell_budget: usize,
+        start: Instant,
+        legacy_output: bool,
+    ) -> Result<&[u8], String> {
         if input.epoch != source_epoch {
             return Err("section request epoch differs from renderer".into());
         }
         if input.epoch != self.epoch {
-            let workers = self.workers.take();
-            *self = Self {
-                epoch: input.epoch,
-                version: input.version,
-                workers,
-                ..Self::default()
-            };
+            self.clear_world(input.epoch);
+        }
+        if self.version == 0 {
+            self.version = input.version;
         }
         if input.version != self.version || input.batch <= self.last_batch {
             return Err("stale section request frame/version".into());
         }
         let demand = self.chunks.plan(&input);
         self.requests.clear();
-        u64_to(&mut self.requests, input.batch);
-        u64_to(&mut self.requests, demand.requests.len() as u64);
-        u64_to(&mut self.requests, demand.columns.len() as u64);
-        u64_to(&mut self.requests, self.chunks.active_len() as u64);
-        for &s in &demand.requests {
-            for v in [s.0, s.1, s.2] {
-                u32_to(&mut self.requests, v as u32);
+        if legacy_output {
+            u64_to(&mut self.requests, input.batch);
+            u64_to(&mut self.requests, demand.requests.len() as u64);
+            u64_to(&mut self.requests, demand.columns.len() as u64);
+            u64_to(&mut self.requests, self.chunks.active_len() as u64);
+            for &s in &demand.requests {
+                for v in [s.0, s.1, s.2] {
+                    u32_to(&mut self.requests, v as u32);
+                }
+                u32_to(&mut self.requests, u32::from(self.chunks.is_active(&s)));
             }
-            u32_to(&mut self.requests, u32::from(self.chunks.is_active(&s)));
-        }
-        for &(x, z, active) in &demand.columns {
-            for v in [x, z, i32::from(active)] {
-                u32_to(&mut self.requests, v as u32);
+            for &(x, z, active) in &demand.columns {
+                for v in [x, z, i32::from(active)] {
+                    u32_to(&mut self.requests, v as u32);
+                }
             }
         }
         self.stats = Stats {
@@ -455,7 +504,11 @@ impl TerrainContext {
         }
         if !pending.demand.reset_catalog && self.animation_tick != Some(pending.input.tick) {
             for &id in &self.animated {
-                if !sprites.contains_key(&id) {
+                if !sprites.contains_key(&id)
+                    && !self.animation_tick.is_some_and(|old| {
+                        self.catalog.sprites[&id].same_phase(old, pending.input.tick)
+                    })
+                {
                     textures.push((
                         sprite::texture(id),
                         self.catalog.sprites[&id].image(pending.input.tick, scene)?,
@@ -496,6 +549,31 @@ impl TerrainContext {
         } else if added_fluids {
             self.catalog.refresh_contact_capability();
         }
+        self.start_compile(
+            input,
+            demand,
+            received,
+            cell_budget,
+            scene,
+            start,
+            pages.iter().map(|p| p.len()).sum(),
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn start_compile(
+        &mut self,
+        input: FrameInput,
+        demand: Demand,
+        received: HashMap<Section, Option<SectionData>>,
+        cell_budget: usize,
+        scene: &mut SourceScene,
+        start: Instant,
+        bytes: usize,
+        legacy_output: bool,
+    ) -> Result<(), String> {
+        let (version, epoch, batch) = (input.version, input.epoch, input.batch);
         let chunks::CompileBatch {
             selection,
             removed,
@@ -510,7 +588,7 @@ impl TerrainContext {
             self.stats.availability_updates = self.chunks.availability_updates();
         }
         self.stats.decode_ms = start.elapsed().as_secs_f64() * 1000.0;
-        self.stats.bytes = pages.iter().map(|p| p.len()).sum();
+        self.stats.bytes = bytes;
         let compile_start = Instant::now();
         // Four equal-height slabs share costly sections. Both phases join on the same private pool.
         let mut jobs = Vec::new();
@@ -533,7 +611,7 @@ impl TerrainContext {
         let kernel_start = Instant::now();
         if !jobs.is_empty() {
             if self.workers.is_none() {
-                self.workers = Some(CpuWorkers::configured()?);
+                self.workers = Some(Arc::new(CpuWorkers::configured()?));
             }
             let catalog = &self.catalog;
             let sections = self.chunks.sources();
@@ -577,27 +655,33 @@ impl TerrainContext {
         self.stats.response_batches = 1;
         if count != 0 {
             self.stats.request_batches += 1;
-            u64_to(&mut self.tint_requests, batch);
-            u64_to(&mut self.tint_requests, unique.len() as u64);
-            u64_to(&mut self.tint_requests, epoch);
-            u32_to(&mut self.tint_requests, version);
-            u32_to(
-                &mut self.tint_requests,
-                if self.chunks.biome_sources().definitions.is_none() {
-                    2
-                } else {
-                    0
-                },
-            );
-            for request in &unique {
-                for v in request.position {
-                    u32_to(&mut self.tint_requests, v as u32);
+            if legacy_output {
+                u64_to(&mut self.tint_requests, batch);
+                u64_to(&mut self.tint_requests, unique.len() as u64);
+                u64_to(&mut self.tint_requests, epoch);
+                u32_to(&mut self.tint_requests, version);
+                u32_to(
+                    &mut self.tint_requests,
+                    if self.chunks.biome_sources().definitions.is_none() {
+                        2
+                    } else {
+                        0
+                    },
+                );
+                for request in &unique {
+                    for v in request.position {
+                        u32_to(&mut self.tint_requests, v as u32);
+                    }
+                    u32_to(&mut self.tint_requests, request.state);
+                    u32_to(&mut self.tint_requests, request.slot as u32);
                 }
-                u32_to(&mut self.tint_requests, request.state);
-                u32_to(&mut self.tint_requests, request.slot as u32);
+                self.stats.tint_bytes = self.tint_requests.len();
+            } else {
+                self.stats.tint_bytes =
+                    unique.len() * std::mem::size_of::<prime_abi::PrimeMcColorRequest>();
             }
-            self.stats.tint_bytes = self.tint_requests.len();
             self.awaiting_colors = Some(AwaitingColors {
+                requests: unique,
                 stage: ColorStage::Sources,
                 aliases,
                 batch,
@@ -864,7 +948,7 @@ impl TerrainContext {
         self.stats.retained_layers = publication.retained_layers;
         self.stats.publish_ms = publish_start.elapsed().as_secs_f64() * 1000.0;
         let retire_start = Instant::now();
-        publication.release_retired(self.workers.as_ref())?;
+        publication.release_retired(self.workers.as_deref())?;
         self.stats.retire_ms = retire_start.elapsed().as_secs_f64() * 1000.;
         self.last_batch = batch;
         Ok(())
@@ -944,3 +1028,5 @@ mod oracle;
 mod perf;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod typed_tests;

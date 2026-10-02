@@ -4,7 +4,6 @@ import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.lang.reflect.Proxy;
-import java.lang.foreign.ValueLayout;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.client.particle.SingleQuadParticle;
@@ -50,7 +49,7 @@ final class ParticleRouterCpuSmoke {
             var frame = (DynamicFrame)field.get(null);
             TerrainRouterCpuSmoke.check(frame.spanCount() == 1 && frame.vertexCount() == 20000,
                                         "5000 particles form one native source span");
-            actual = frame.seal().toArray(ValueLayout.JAVA_BYTE);
+            actual = TypedSceneFixtureWire.dynamic(frame.seal());
         } finally {
             DynamicCapture.end();
             DynamicCapture.close();
@@ -86,7 +85,7 @@ final class ParticleRouterCpuSmoke {
                     });
             oracle.buildLayer(layer, sink);
             frame.endSpan();
-            expected = frame.seal().toArray(ValueLayout.JAVA_BYTE);
+            expected = TypedSceneFixtureWire.dynamic(frame.seal());
         }
         // Normalize fixture identity only; preserve every source/appearance byte.
         java.nio.ByteBuffer.wrap(actual)

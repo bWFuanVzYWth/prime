@@ -1,23 +1,28 @@
 package dev.primept.capture;
 
 import java.lang.foreign.Arena;
+import dev.primept.NativeBridge;
+import static dev.primept.abi.PrimeAbi.*;
 import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 /**
- * Render-thread-owned op=6 packet storage, reused across frames. Spans carry source layout;
- * Rust performs primitive expansion. Adjacent identical spans share one wire descriptor.
+ * Render-thread-owned typed batch storage, reused across frames. Spans carry source layout;
+ * Rust performs primitive expansion. Adjacent identical spans share one C descriptor.
  * A sealed segment is borrowed only until the next begin or close; native submit must consume
  * it synchronously. Growth replaces the arena, so no writable view escapes this owner.
  */
 public final class DynamicFrame implements AutoCloseable {
-    private static final int HEADER_BYTES = 64;
-    private static final int SPAN_BYTES = 32;
+    private static final int HEADER_BYTES = (int)PrimeDynamicBatch.SIZE;
+    private static final int SPAN_BYTES = (int)PrimeMeshSpan.SIZE;
     private static final int VERTEX_BYTES = 24;
     private static final int MAX_BYTES = 256 << 20;
     private final Thread owner = Thread.currentThread();
-    private Arena arena;
+    private Arena arena, descriptorArena;
+    private MemorySegment descriptors;
+    private int descriptorCapacity;
+    private int[] offsets = new int[16];
     private MemorySegment memory;
     private ByteBuffer bytes;
     private int spanCount, vertexCount, spanStart = -1, previousSpan = -1, spanDataStart;
@@ -33,6 +38,7 @@ public final class DynamicFrame implements AutoCloseable {
         if (initialCapacity < HEADER_BYTES || initialCapacity > MAX_BYTES)
             throw new IllegalArgumentException("Invalid dynamic packet capacity");
         allocate(initialCapacity);
+        ensureDescriptors(16);
     }
 
     public void begin(long epoch, long sequence, double x, double y, double z) {
@@ -40,17 +46,12 @@ public final class DynamicFrame implements AutoCloseable {
         if (epoch <= 0 || sequence <= 0)
             throw new IllegalArgumentException("Invalid dynamic identity");
         bytes.clear();
-        bytes.putInt(Packets.MAGIC)
-                .putInt(Packets.ABI_VERSION)
-                .putInt(6)
-                .putInt(0)
-                .putLong(epoch)
-                .putLong(sequence)
-                .putDouble(x)
-                .putDouble(y)
-                .putDouble(z)
-                .putInt(0)
-                .putInt(0);
+        NativeBridge.header(PrimeDynamicBatch.header(descriptors), PrimeDynamicBatch.SIZE);
+        PrimeDynamicBatch.epoch(descriptors, epoch);
+        PrimeDynamicBatch.sequence(descriptors, sequence);
+        PrimeDynamicBatch.origin(descriptors, 0, x);
+        PrimeDynamicBatch.origin(descriptors, 1, y);
+        PrimeDynamicBatch.origin(descriptors, 2, z);
         spanCount = vertexCount = 0;
         spanStart = previousSpan = -1;
         started = true;
@@ -131,10 +132,9 @@ public final class DynamicFrame implements AutoCloseable {
         if (count % openTopology != 0)
             throw new IllegalStateException("Incomplete dynamic primitive");
         if (count == 0 && initialCount == 0) {
-            bytes.position(spanStart);
             --spanCount;
         } else {
-            bytes.putInt(spanStart + 12, Math.addExact(initialCount, count));
+            PrimeMeshSpan.vertex_count(descriptor(spanStart), Math.addExact(initialCount, count));
             vertexCount = Math.addExact(vertexCount,
                                         Math.multiplyExact(count, openTopology == 1 ? 4 : 1));
             previousSpan = spanStart;
@@ -146,9 +146,18 @@ public final class DynamicFrame implements AutoCloseable {
         checkWriting();
         if (spanStart >= 0)
             throw new IllegalStateException("Dynamic span is still open");
-        bytes.putInt(56, spanCount);
+        for (int i = 0; i < spanCount; i++) {
+            var span = descriptor(i);
+            var payload = PrimeMeshSpan.vertices(span);
+            long length = (long)PrimeMeshSpan.vertex_count(span) * PrimeMeshSpan.stride(span);
+            PrimeByteSpan.data(payload, memory.asSlice(offsets[i], length));
+            PrimeByteSpan.count(payload, length);
+        }
+        PrimeDynamicBatch.spans(descriptors,
+                                descriptors.asSlice(HEADER_BYTES, (long)spanCount * SPAN_BYTES));
+        PrimeDynamicBatch.count(descriptors, spanCount);
         sealed = true;
-        return memory.asSlice(0, bytes.position()).asReadOnly();
+        return descriptors.asSlice(0, HEADER_BYTES).asReadOnly();
     }
 
     public int spanCount() {
@@ -158,10 +167,10 @@ public final class DynamicFrame implements AutoCloseable {
         return vertexCount;
     }
     public int byteSize() {
-        return bytes.position();
+        return Math.addExact(bytes.position(), HEADER_BYTES + spanCount * SPAN_BYTES);
     }
     public int capacity() {
-        return bytes.capacity();
+        return Math.addExact(bytes.capacity(), Math.toIntExact(descriptors.byteSize()));
     }
     public int growthCount() {
         return growths;
@@ -177,35 +186,70 @@ public final class DynamicFrame implements AutoCloseable {
             stride < 24 || stride > 256 || positionOffset < 0 || positionOffset > stride - 12 ||
             colorOffset < 0 || colorOffset > stride - 4 || uvOffset < 0 || uvOffset > stride - 8)
             throw new IllegalArgumentException("Unsupported source layout or material");
-        if (previousSpan >= 0 && bytes.getInt(previousSpan) == textureId &&
-            bytes.getInt(previousSpan + 4) == flags && bytes.getInt(previousSpan + 8) == topology &&
-            bytes.getInt(previousSpan + 16) == stride &&
-            bytes.getInt(previousSpan + 20) == positionOffset &&
-            bytes.getInt(previousSpan + 24) == colorOffset &&
-            bytes.getInt(previousSpan + 28) == uvOffset) {
+        var previous = previousSpan >= 0 ? descriptor(previousSpan) : null;
+        if (previous != null && PrimeMeshSpan.texture_id(previous) == textureId &&
+            PrimeMeshSpan.flags(previous) == flags &&
+            PrimeMeshSpan.topology(previous) == topology &&
+            PrimeMeshSpan.stride(previous) == stride &&
+            PrimeMeshSpan.position_offset(previous) == positionOffset &&
+            PrimeMeshSpan.color_offset(previous) == colorOffset &&
+            PrimeMeshSpan.uv_offset(previous) == uvOffset) {
             spanStart = previousSpan;
-            initialCount = bytes.getInt(spanStart + 12);
+            initialCount = PrimeMeshSpan.vertex_count(previous);
         } else {
-            ensure(SPAN_BYTES);
-            spanStart = bytes.position();
-            bytes.putInt(textureId)
-                    .putInt(flags)
-                    .putInt(topology)
-                    .putInt(0)
-                    .putInt(stride)
-                    .putInt(positionOffset)
-                    .putInt(colorOffset)
-                    .putInt(uvOffset);
+            ensureDescriptors(spanCount + 1);
+            spanStart = spanCount++;
+            offsets[spanStart] = bytes.position();
+            var span = descriptor(spanStart);
+            PrimeMeshSpan.texture_id(span, textureId);
+            PrimeMeshSpan.flags(span, flags);
+            PrimeMeshSpan.topology(span, topology);
+            PrimeMeshSpan.vertex_count(span, 0);
+            PrimeMeshSpan.stride(span, stride);
+            PrimeMeshSpan.position_offset(span, positionOffset);
+            PrimeMeshSpan.color_offset(span, colorOffset);
+            PrimeMeshSpan.uv_offset(span, uvOffset);
             initialCount = 0;
-            ++spanCount;
         }
         spanDataStart = bytes.position();
         openTopology = topology;
         openStride = stride;
     }
 
+    private MemorySegment descriptor(int index) {
+        return descriptors.asSlice(HEADER_BYTES + (long)index * SPAN_BYTES, SPAN_BYTES);
+    }
+    private void ensureDescriptors(int count) {
+        if (count <= descriptorCapacity)
+            return;
+        int capacity = Math.max(count, Math.max(16, descriptorCapacity * 2));
+        long size = HEADER_BYTES + (long)capacity * SPAN_BYTES;
+        if (size > MAX_BYTES)
+            throw new IllegalStateException("Dynamic descriptor capacity exceeds 256 MiB");
+        var replacement = Arena.ofConfined();
+        try {
+            var next = replacement.allocate(size, 8);
+            if (descriptors != null)
+                next.asSlice(0, HEADER_BYTES + (long)spanCount * SPAN_BYTES)
+                        .copyFrom(descriptors.asSlice(0,
+                                                      HEADER_BYTES + (long)spanCount * SPAN_BYTES));
+            if (descriptorArena != null) {
+                descriptorArena.close();
+                ++growths;
+            }
+            descriptorArena = replacement;
+            descriptors = next;
+            descriptorCapacity = capacity;
+            offsets = java.util.Arrays.copyOf(offsets, capacity);
+        } catch (Throwable failure) {
+            replacement.close();
+            throw failure;
+        }
+    }
+
     private void ensure(int extra) {
-        if (extra < 0 || bytes.position() > MAX_BYTES - extra)
+        if (extra < 0 ||
+            bytes.position() > MAX_BYTES - extra - HEADER_BYTES - spanCount * SPAN_BYTES)
             throw new IllegalStateException("Dynamic packet exceeds 256 MiB");
         if (bytes.remaining() >= extra)
             return;
@@ -251,6 +295,7 @@ public final class DynamicFrame implements AutoCloseable {
             return;
         checkOwner();
         arena.close();
+        descriptorArena.close();
         closed = true;
     }
 }

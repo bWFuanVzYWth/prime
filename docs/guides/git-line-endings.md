@@ -15,7 +15,7 @@
 
 Java 按 `.java` 语言模式处理，Slang 按 C++ 风格词法格式化。当前使用 clang-format 22.1.8；Rust 使用所选工具链提供的 rustfmt。100 列是工具的换行目标，不要求手工拆分字符串、注释或改变表达式语义。没有必须遵循的额外手工风格，统一交给配置与工具；升级格式工具时检查产生的差异。
 
-`native/` 中维护的 C++ 桥接也由同一脚本处理。`third_party/` 的 SDK 原始头文件排除格式化，并由 attributes 保留原字节，使来源 SHA-256 校验可复现。
+`native/` 中维护的 C++ 桥接和 `crates/prime-engine/include/` 的公共 C ABI 头也由同一脚本处理。`third_party/` 的 SDK 原始头文件排除格式化，并由 attributes 保留原字节，使来源 SHA-256 校验可复现。
 
 Slang 的 `public`/`internal` 用 AttributeMacros 配置识别为声明修饰词，结构体显式使用分号，避免 C++ 格式器将相邻声明连接。可见性仍由 Slang 编译器检查。
 

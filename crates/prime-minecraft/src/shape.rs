@@ -13,6 +13,42 @@ pub(crate) struct Face {
 }
 const EPS: f64 = 1e-7; // Shapes/IndexMerger coordinate tolerance in both supported hosts.
 impl Face {
+    pub fn from_typed(
+        value: &prime_abi::PrimeMcFace,
+        source: &prime_abi::minecraft::Resources<'_>,
+    ) -> Result<(FaceId, Self), String> {
+        use prime_abi::minecraft::range;
+        let u = range(source.coordinates(), value.u)?;
+        let v = range(source.coordinates(), value.v)?;
+        if value.id < 2
+            || value.reserved != 0
+            || !(2..=4097).contains(&u.len())
+            || !(2..=4097).contains(&v.len())
+            || u.iter().chain(v).any(|p| !p.is_finite())
+            || u.windows(2).chain(v.windows(2)).any(|p| p[0] >= p[1])
+        {
+            return Err("invalid face profile layout".into());
+        }
+        let count = (u.len() - 1) * (v.len() - 1);
+        let words = range(source.words(), value.words)?;
+        if words.len() > count.div_ceil(64) {
+            return Err("invalid face profile words".into());
+        }
+        let mut cells = vec![false; count];
+        for (w, &word) in words.iter().enumerate() {
+            for bit in 0..64.min(count - w * 64) {
+                cells[w * 64 + bit] = word & (1 << bit) != 0;
+            }
+        }
+        let mut face = Self {
+            u: u.to_vec(),
+            v: v.to_vec(),
+            cells,
+            height: 0.,
+        };
+        face.height = face.covered_height();
+        Ok((FaceId(value.id), face))
+    }
     pub fn read(r: &mut Reader<'_>) -> Result<(FaceId, Self), String> {
         let id = FaceId(r.u32()?);
         let nu = r.u32()? as usize;

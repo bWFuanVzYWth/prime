@@ -1,10 +1,7 @@
 //! Versioned byte protocol. All reads are little endian and alignment independent.
-use crate::{
-    instances::InstanceContext,
-    scene::{
-        Camera, Instance, Mesh, MeshVersion, Prototype, SectionSequence, SourceScene, Texture,
-        Triangle,
-    },
+pub mod typed;
+use crate::scene::{
+    Camera, Instance, Mesh, MeshVersion, Prototype, SectionSequence, SourceScene, Texture, Triangle,
 };
 
 #[cfg(test)]
@@ -163,16 +160,7 @@ impl SourceScene {
         };
         if op == 1 {
             input.finish()?;
-            if epoch <= self.epoch {
-                return Err("reset epoch must increase".into());
-            }
-            *self = SourceScene {
-                epoch,
-                revision,
-                instances: InstanceContext::new(epoch),
-                ..Default::default()
-            };
-            return Ok(());
+            return self.reset_world(epoch);
         }
         if epoch == 0 || epoch != self.epoch {
             return Err("stale or uninitialized resource epoch".into());

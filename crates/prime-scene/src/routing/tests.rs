@@ -142,8 +142,8 @@ fn malformed_source_batches_are_atomic_and_do_not_consume_identity_or_sequence()
 fn native_workers_compile_identical_outputs_and_only_visible_layers() {
     let mut one = initialized();
     let mut many = initialized();
-    one.routing.workers = Some(CpuWorkers::new(1).unwrap());
-    many.routing.workers = Some(CpuWorkers::new(4).unwrap());
+    one.routing.workers = Some(Arc::new(CpuWorkers::new(1).unwrap()));
+    many.routing.workers = Some(Arc::new(CpuWorkers::new(4).unwrap()));
     for s in [&mut one, &mut many] {
         s.submit(&geometry()).unwrap();
         s.submit(&section(1, 10000)).unwrap();
@@ -280,8 +280,8 @@ fn particles(sequence: u64, count: u32) -> Vec<u8> {
 fn parameter_particles_join_before_atomic_publication_and_release_input_borrows() {
     let mut one = initialized();
     let mut many = initialized();
-    one.routing.workers = Some(CpuWorkers::new(1).unwrap());
-    many.routing.workers = Some(CpuWorkers::new(4).unwrap());
+    one.routing.workers = Some(Arc::new(CpuWorkers::new(1).unwrap()));
+    many.routing.workers = Some(Arc::new(CpuWorkers::new(4).unwrap()));
     let mut source = particles(1, 4100);
     one.submit(&source).unwrap();
     many.submit(&source).unwrap();
@@ -422,7 +422,7 @@ fn routing_cost_matrix() {
     for count in [512, 4096] {
         for case in ["unchanged", "last_edit", "all_edit"] {
             let mut scene = initialized();
-            scene.routing.workers = Some(CpuWorkers::new(8).unwrap());
+            scene.routing.workers = Some(Arc::new(CpuWorkers::new(8).unwrap()));
             scene.submit(&geometry()).unwrap();
             let mut packets: Vec<_> = (0..16u64)
                 .map(|id| {

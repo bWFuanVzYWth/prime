@@ -1,5 +1,8 @@
 package dev.primept.capture;
 
+import static dev.primept.abi.PrimeAbi.*;
+import java.lang.foreign.MemorySegment;
+
 import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
@@ -25,13 +28,13 @@ class DynamicCaptureTest {
                         .setNormal(0, 1, 0);
             try (MeshData mesh = builder.buildOrThrow()) {
                 assertTrue(DynamicCapture.appendMesh(frame, 2, 2, mesh));
-                var bytes = frame.seal().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
-                assertEquals(1, bytes.getInt(56));
-                assertEquals(2, bytes.getInt(64));
-                assertEquals(4, bytes.getInt(76));
-                int stride = bytes.getInt(80), color = bytes.getInt(88);
+                var span = onlySpan(frame.seal());
+                var bytes = vertices(span).asByteBuffer();
+                assertEquals(2, PrimeMeshSpan.texture_id(span));
+                assertEquals(4, PrimeMeshSpan.vertex_count(span));
+                int stride = PrimeMeshSpan.stride(span), color = PrimeMeshSpan.color_offset(span);
                 for (int i = 0; i < 4; ++i) {
-                    int offset = 96 + i * stride + color;
+                    int offset = i * stride + color;
                     assertEquals(0x40, Byte.toUnsignedInt(bytes.get(offset)));
                     assertEquals(0x80, Byte.toUnsignedInt(bytes.get(offset + 1)));
                     assertEquals(0xC0, Byte.toUnsignedInt(bytes.get(offset + 2)));
@@ -77,12 +80,22 @@ class DynamicCaptureTest {
                 assertEquals(
                         16, mesh.drawState().vertexCount()); // Original raster buffer is untouched.
                 assertEquals(8, frame.vertexCount());
-                var packet = frame.seal().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
-                int stride = packet.getInt(80);
-                assertEquals(0, packet.getFloat(96));
-                assertEquals(3, packet.getFloat(96 + 3 * stride));
-                assertEquals(12, packet.getFloat(96 + 4 * stride));
+                var span = onlySpan(frame.seal());
+                var packet = vertices(span).asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
+                int stride = PrimeMeshSpan.stride(span),
+                    position = PrimeMeshSpan.position_offset(span);
+                assertEquals(0, packet.getFloat(position));
+                assertEquals(3, packet.getFloat(position + 3 * stride));
+                assertEquals(12, packet.getFloat(position + 4 * stride));
             }
         }
+    }
+    private static MemorySegment onlySpan(MemorySegment batch) {
+        assertEquals(1, PrimeDynamicBatch.count(batch));
+        return PrimeDynamicBatch.spans(batch).reinterpret(PrimeMeshSpan.SIZE);
+    }
+    private static MemorySegment vertices(MemorySegment span) {
+        var bytes = PrimeMeshSpan.vertices(span);
+        return PrimeByteSpan.data(bytes).reinterpret(PrimeByteSpan.count(bytes));
     }
 }

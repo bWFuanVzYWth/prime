@@ -71,12 +71,26 @@ impl TextureMemory {
 
 #[derive(Default)]
 pub(crate) struct TextureLifetime {
+    pub(crate) resident: BTreeSet<u32>,
     references: BTreeMap<u32, u64>,
     retired: BTreeSet<u32>,
     pub candidates: BTreeSet<u32>,
 }
 
 impl TextureLifetime {
+    pub(crate) fn inherit_retirements(&mut self, previous: &Self) {
+        for &id in &previous.retired {
+            self.retire(id);
+        }
+    }
+
+    pub(crate) fn pin(&mut self, id: u32) {
+        self.resident.insert(id);
+        self.references.remove(&id);
+        self.retired.remove(&id);
+        self.candidates.remove(&id);
+    }
+
     pub fn acquire_ior_textures(&mut self, geometry: &crate::geometry::MeshGeometry) {
         if let crate::geometry::MeshGeometry::Surfaces(mesh) = geometry {
             for texture in mesh.ior_textures() {
@@ -94,14 +108,14 @@ impl TextureLifetime {
     }
 
     pub fn acquire(&mut self, id: u32) {
-        if id == 0 || id == u32::MAX {
+        if id == 0 || id == u32::MAX || self.resident.contains(&id) {
             return;
         }
         *self.references.entry(id).or_default() += 1;
         self.candidates.remove(&id);
     }
     pub fn release(&mut self, id: u32) {
-        if id == 0 || id == u32::MAX {
+        if id == 0 || id == u32::MAX || self.resident.contains(&id) {
             return;
         }
         let count = self
@@ -117,6 +131,9 @@ impl TextureLifetime {
         }
     }
     pub fn retire(&mut self, id: u32) {
+        if self.resident.contains(&id) {
+            return;
+        }
         self.retired.insert(id);
         if !self.references.contains_key(&id) {
             self.candidates.insert(id);

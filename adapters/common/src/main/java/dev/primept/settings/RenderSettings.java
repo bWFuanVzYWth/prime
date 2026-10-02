@@ -1,12 +1,15 @@
 package dev.primept.settings;
 
 import java.nio.ByteBuffer;
+import java.lang.foreign.MemorySegment;
+import dev.primept.NativeBridge;
+import static dev.primept.abi.PrimeAbi.*;
 import java.util.Arrays;
 
 /** Immutable client settings. Version adapters own widgets; native consumes the validated wire. */
 public final class RenderSettings {
     public static final int VERSION = 5;
-    public static final int WIRE_BYTES = 72;
+    public static final int WIRE_BYTES = (int)PrimeSettings.SIZE;
     public enum Control {
         BOUNCES("render.bounces", 1, 64, 12),
         OFFLINE_SAMPLES("render.offline_samples", 1, 64, 1),
@@ -89,28 +92,33 @@ public final class RenderSettings {
         return new RenderSettings(pathTracing, opacityMicromap, rayReconstruction, dlssQuality,
                                   next);
     }
-    /** Little-endian, borrowed only for prime_configure; offline and view are session controls. */
+    /** Named C structure, borrowed only for prime_configure; offline and view are session controls. */
     public void write(ByteBuffer target, boolean offline, View view) {
+        if (target.capacity() != PrimeSettings.SIZE)
+            throw new IllegalArgumentException("Settings structure size mismatch");
         target.clear();
-        target.putInt(VERSION)
-                .putInt(offline ? 1 : 0)
-                .putInt(value(Control.BOUNCES))
-                .putInt(value(Control.OFFLINE_SAMPLES))
-                .putFloat(multiplier(Control.EXPOSURE_EV))
-                .putFloat(value(Control.HUE) / 100.0f)
-                .putFloat(value(Control.SATURATION) / 100.0f)
-                .putInt(view.ordinal())
-                .putFloat(multiplier(Control.SUN_EV))
-                .putFloat(multiplier(Control.SKY_EV))
-                .putFloat(value(Control.DEPTH_RANGE))
-                .putInt(0x13572468)
-                .putInt(value(Control.LATITUDE))
-                .putInt(value(Control.SOLAR_LONGITUDE))
-                .putInt(opacityMicromap ? 1 : 0)
-                .putInt(rayReconstruction ? 1 : 0)
-                .putInt(dlssQuality.ordinal())
-                .putInt(value(Control.TERRAIN_BATCHES_PER_FRAME));
+        var s = MemorySegment.ofBuffer(target);
+        NativeBridge.header(PrimeSettings.header(s), PrimeSettings.SIZE);
+        PrimeSettings.mode(s, offline ? 1 : 0);
+        PrimeSettings.bounces(s, value(Control.BOUNCES));
+        PrimeSettings.offline_samples(s, value(Control.OFFLINE_SAMPLES));
+        PrimeSettings.exposure(s, multiplier(Control.EXPOSURE_EV));
+        PrimeSettings.hue(s, value(Control.HUE) / 100.0f);
+        PrimeSettings.saturation(s, value(Control.SATURATION) / 100.0f);
+        PrimeSettings.view(s, view.ordinal());
+        PrimeSettings.sun(s, multiplier(Control.SUN_EV));
+        PrimeSettings.sky(s, multiplier(Control.SKY_EV));
+        PrimeSettings.depth_range(s, value(Control.DEPTH_RANGE));
+        PrimeSettings.seed(s, 0x13572468);
+        PrimeSettings.latitude_degrees(s, value(Control.LATITUDE));
+        PrimeSettings.solar_longitude_degrees(s, value(Control.SOLAR_LONGITUDE));
+        PrimeSettings.opacity_micromap(s, opacityMicromap ? 1 : 0);
+        PrimeSettings.ray_reconstruction(s, rayReconstruction ? 1 : 0);
+        PrimeSettings.reconstruction_quality(s, dlssQuality.ordinal());
+        PrimeSettings.terrain_batches_per_frame(s, value(Control.TERRAIN_BATCHES_PER_FRAME));
+        target.position(WIRE_BYTES);
     }
+
     private float multiplier(Control control) {
         return (float)Math.pow(2.0, value(control) / 4.0);
     }

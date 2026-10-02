@@ -108,9 +108,8 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
         frame(camera, owners, model);
         InstanceCapture context = field(ModelCapture.class, "instances", null);
         var first = context.sealDelta();
-        check(first != null &&
-                      first.asByteBuffer().order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt(40) ==
-                              owners.length,
+        check(first != null && dev.primept.abi.PrimeAbi.PrimeInstanceBatch.instance_count(first) ==
+                                       owners.length,
               "Pending first definitions preserved");
         context.acknowledge();
         frame(camera, owners, model);
