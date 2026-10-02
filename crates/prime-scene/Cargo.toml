@@ -6,10 +6,25 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Version-neutral source protocol, scene values and CPU scene translation"
 
+[features]
+legacy-fixtures = []
+
 [dependencies]
 prime_abi.workspace = true
 rayon.workspace = true
 rectangle_decomposition = { path = "../rectangle-decomposition" }
+
+[[test]]
+name = "instances"
+required-features = ["legacy-fixtures"]
+
+[[test]]
+name = "protocol"
+required-features = ["legacy-fixtures"]
+
+[[test]]
+name = "sections"
+required-features = ["legacy-fixtures"]
 
 [lints]
 workspace = true

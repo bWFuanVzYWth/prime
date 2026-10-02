@@ -175,7 +175,7 @@ GPU 正确性检查设置下面介绍的 validation/sync 环境变量。局部�
 
 ```powershell
 # 无 GPU / Slang 依赖的协议、引擎边界与算法测试
-cargo test -p prime_minecraft -p prime_scene -p prime_engine --no-default-features --locked
+cargo test -p prime_minecraft -p prime_scene -p prime_engine --no-default-features --features prime_scene/legacy-fixtures --locked
 cargo test -p rectangle_decomposition --all-features --locked
 
 # 完整 workspace 需要 Slang，但实际 GPU 测试默认 ignored
@@ -264,9 +264,9 @@ cargo run -p prime_tools --bin prime-pt-smoke -- smoke artifacts/smoke.png 32
 
 Prime 自有 CPU 工作池全部在 Rust。当前 section 编译、粒子源展开和 renderer 准备最多各持有一个独立池，后端静态几何与对象共用 renderer 池。`PRIME_CPU_THREADS` 设置的是每池线程数，默认取可用并行度与 8 的较小值；设为 1 时直接在调用线程执行，非法非正值拒绝。这些阶段顺序调用，小批直接执行，多线程仅写各自独占输出，返回前全部 join；不应把池数相加当成同时工作的线程数或后台构建能力。Java 不再有 `primeptCompilerThreads` 参数或 Prime section compiler，源回调留在宿主 owner。
 
-Java CSV 的 `terrain_plan_ns` 是请求规划 FFM 总时间，`terrain_pack_ns` 是按表读取/封装源和应用列镜像的时间，`terrain_accept_ns` 是响应提交、Rust 解码/编译/发布的同步总时间；它们包含于 `terrain_total_ns`，总时间还包括初次 epoch/atlas 准备和事件封装。`terrain_source_bytes` 是本帧请求输入与响应输入之和，包含资源定义，不含返回请求表。`terrain_selected` 是请求段数，`terrain_routed` 是有源响应数，`terrain_deferred` 是本批无源数；pending/waiting 当前为0，不是64段全部就绪证明。loaded/unloaded 是原始列事件数，entered 是 Rust 新激活且镜像成功的列数。`mc_source[...]` 另给 native plan/decode/compile/publish、请求批次数、变化/编译/活跃/驻留段数与 hack 使用计数。
+Java CSV 的 `terrain_plan_ns` 是请求规划 FFM 总时间，`terrain_pack_ns` 是按表读取/封装源和应用列镜像的时间，`terrain_accept_ns` 是响应提交、Rust 解码/编译/发布的同步总时间；它们包含于 `terrain_total_ns`，总时间还包括初次 epoch/atlas 准备和事件封装。`terrain_source_bytes` 是本帧请求输入与响应输入之和，包含资源定义，不含返回请求表。`terrain_requested_sources` 是本批请求段数，`terrain_available_sources` 是有源响应数，`terrain_missing_sources` 是本批无源数，`terrain_available_sources_total` 是累计有源响应数；这些字段均不表示积压量或64段就绪证明。旧的 pending/waiting/empty 常量列已移除。loaded/unloaded 是原始列事件数，entered 是 Rust 新激活且镜像成功的列数。`mc_source[...]` 另给 native plan/decode/compile/publish、请求批次数、变化/编译/活跃/驻留段数、实际 `pending_cells` 与 hack 使用计数；CPU 编译积压和后段 GPU 构建积压分别观察。
 
-原版 tint 由 Java 批量转录源字段，Rust 直接求色；`tint_callbacks` 只统计未知源的实际回调。`biome_samples` 是需要重新计算颜色的位置数，`biome_host_cells` / `biome_pages` 是实际读取的 quart 群系单元/页数，不能互相当成同一单位。`biome_source` 包含 native zoom、源请求组织和求色，`biome_filter` 为混合；历史 Java `tint_callback_ms` 字段包含整个颜色源准备，不能直接归因为回调。协议配套版本为 source v7（公共 FFM ABI为8），重建双适配器与 DLL 后再验收。`cpuSmoke` 同时生成实际 `getOffset/getSeed` 的 `placement-oracle.bin`，原生回放精确比较位置种子与偏移位模式；支持与未知回调边界见 [Section 测试设施](docs/guides/section-tests.md)。
+原版 tint 由 Java 批量转录源字段，Rust 直接求色；`tint_callbacks` 只统计未知源的实际回调。`tint_bytes` 统计 typed 颜色/群系请求数组及响应数组、定义和 colormap payload，不含 DTO 根结构；`request_batches` / `response_batches` 包含实际发生的颜色和群系阶段。`biome_samples` 是需要重新计算颜色的位置数，`biome_host_cells` / `biome_pages` 是实际读取的 quart 群系单元/页数，不能互相当成同一单位。`biome_source` 包含 native zoom、源请求组织和求色，`biome_filter` 为混合；历史 Java `tint_callback_ms` 字段包含整个颜色源准备，不能直接归因为回调。协议配套版本为 source v7（公共 FFM ABI为8），重建双适配器与 DLL 后再验收。`cpuSmoke` 同时生成实际 `getOffset/getSeed` 的 `placement-oracle.bin`，原生回放精确比较位置种子与偏移位模式；支持与未知回调边界见 [Section 测试设施](docs/guides/section-tests.md)。
 
 `compile` 包含排序、作业建立、`kernel`（slab 解包/剔面/展开，含首次池创建）和 `finalize`（精确内容比较、分片边界计算及不可变输出准备）；各值都是调用方墙钟时间，不是 worker CPU 时间之和。分片直接移交其 Vec 所有权，精确相同的分片复用旧存储与包围盒，不再归并成整段连续副本。`published_layers` 是实际替换或删除的图层数，`retained_layers` 是重新编译后内容相同而保留的非空图层数。`publish` 是 owner 上的场景变更和旧引用释放，不包含 GPU 构建；新分片分配及旧几何最后引用的回收仍有成本。
 
@@ -439,7 +439,7 @@ cargo run --release --locked -p prime_tools --bin perf -- --frames 120 --warmup 
 
 异步入队耗时不等于完整帧耗时。游戏日志中的 `gpuLast` 是最近完成帧样本，不是汇总窗口均值；任务管理器 GPU 百分比也不能代替阶段计时。图像正确性由独立测试与实机检查验证，性能夹具不以读回图像计算 checksum。
 
-粗粒度 CPU 计时与有能力宿主的 GPU 阶段时间戳常驻，无须打开 profile。当前提取＋世界源准备＋Prime hook 的 CPU 工作，或相邻 PT hook 起点间隔达到 **50 ms** 时，游戏日志输出 `Prime slow frame` 警告；首次记录也检查当前工作量。警告列出提取、地形快照/路由、世界准备的其余工作、drain/submit、动态提交、native record，以及同次 host serial 的 native 翻译、退休、槽位等待、静态准备、对象计划/执行、TLAS、描述符和命令录制。关键计数包括脏/光照通知、进入/加载/卸载列、全量失效、选中/路由/等待段、FFM 字节、实体/实例、三角形、BLAS 重建和 CPU 上传字节。
+粗粒度 CPU 计时与有能力宿主的 GPU 阶段时间戳常驻，无须打开 profile。当前提取＋世界源准备＋Prime hook 的 CPU 工作，或相邻 PT hook 起点间隔达到 **50 ms** 时，游戏日志输出 `Prime slow frame` 警告；首次记录也检查当前工作量。警告列出提取、地形快照/路由、世界准备的其余工作、drain/submit、动态提交、native record，以及同次 host serial 的 native 翻译、退休、槽位等待、静态准备、对象计划/执行、TLAS、描述符和命令录制。关键计数包括脏/光照通知、进入/加载/卸载列、全量失效、请求/可用/缺失源段、FFM 字节、实体/实例、三角形、BLAS 重建和 CPU 上传字节；Rust CPU/后段积压按各自格口径记录。
 
 `currentWork` 不包括全部游戏 CPU 阶段；interval 包含上一帧 hook，prevHook 与 outsideInterval 标明口径，首帧 outside 为-1。新地形源流程发生于 extraction，extractionOther 是 extraction 减去 terrain 的余量，不是独立实体计时。sourcePlan/sourcePack/sourceAccept 是 terrain 子项；nativeSubmit/resourceSubmit 是后续 PT hook 的通用场景提交，不包含先前 section 批次，不能混加父子项。GPU 时间属于最近完成 serial。光照通知不是独立段数，也不证明处理成本由光照造成。冻结时保留计时，实时源计数为零；暂停/菜单/视距变化须结合动作解释。
 

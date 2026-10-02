@@ -4,6 +4,7 @@
 mod biome;
 mod biome_source;
 mod chunks;
+mod column_cache;
 mod compile;
 mod compile_queue;
 mod contact;
@@ -23,9 +24,12 @@ mod volume;
 #[cfg(test)]
 use compile::compile_slab;
 #[cfg(test)]
+mod legacy;
+#[cfg(test)]
 mod reference;
 mod schedule;
-pub mod wire;
+#[cfg(test)]
+mod wire;
 
 use model::{Catalog, Hacks};
 use prime_scene::{
@@ -39,6 +43,7 @@ use std::{
     sync::Arc,
     time::Instant,
 };
+#[cfg(test)]
 use wire::{Reader, u32_to, u64_to};
 
 #[derive(PartialEq)]
@@ -49,6 +54,7 @@ struct SectionData {
     per_word: usize,
 }
 impl SectionData {
+    #[cfg(test)]
     fn read(r: &mut Reader<'_>) -> Result<Self, String> {
         let bits = r.u32()?;
         let count = r.count(4)?;
@@ -182,7 +188,9 @@ pub struct TerrainContext {
     textures: Vec<(u32, prime_scene::Texture)>,
     pending: Option<Pending>,
     awaiting_colors: Option<AwaitingColors>,
+    #[cfg(test)]
     tint_requests: Vec<u8>,
+    #[cfg(test)]
     requests: Vec<u8>,
     workers: Option<Arc<CpuWorkers>>,
     stats: Stats,
@@ -244,8 +252,11 @@ impl TerrainContext {
         self.chunks = Default::default();
         self.pending = None;
         self.awaiting_colors = None;
-        self.requests = Vec::new();
-        self.tint_requests = Vec::new();
+        #[cfg(test)]
+        {
+            self.requests = Vec::new();
+            self.tint_requests = Vec::new();
+        }
         self.textures = Vec::new();
         self.typed_output = Default::default();
         self.stats = Default::default();
@@ -256,46 +267,13 @@ impl TerrainContext {
         }
     }
 
-    pub fn plan(&mut self, pages: &[&[u8]], source_epoch: u64) -> Result<&[u8], String> {
-        self.plan_budget(pages, source_epoch, usize::MAX)
-    }
-
-    /// Production entry: finish source capture now, but compile at most this many cells.
-    /// Deferred compilation resumes on subsequent live batches, not while offline is frozen.
-    pub fn plan_with_budget(
-        &mut self,
-        pages: &[&[u8]],
-        source_epoch: u64,
-        cell_budget: u32,
-    ) -> Result<&[u8], String> {
-        if !(1..=128).contains(&cell_budget) {
-            return Err("terrain build budget must be between 1 and 128 cells".into());
-        }
-        self.plan_budget(pages, source_epoch, cell_budget as usize)
-    }
-
-    fn plan_budget(
-        &mut self,
-        pages: &[&[u8]],
-        source_epoch: u64,
-        cell_budget: usize,
-    ) -> Result<&[u8], String> {
-        let start = Instant::now();
-        if self.pending.is_some() || self.awaiting_colors.is_some() {
-            return Err("previous source batch still awaiting completion".into());
-        }
-        let input = FrameInput::read(pages)?;
-        self.plan_input(input, source_epoch, cell_budget, start, true)
-    }
-
     fn plan_input(
         &mut self,
         input: FrameInput,
         source_epoch: u64,
         cell_budget: usize,
         start: Instant,
-        legacy_output: bool,
-    ) -> Result<&[u8], String> {
+    ) -> Result<(), String> {
         if input.epoch != source_epoch {
             return Err("section request epoch differs from renderer".into());
         }
@@ -309,24 +287,6 @@ impl TerrainContext {
             return Err("stale section request frame/version".into());
         }
         let demand = self.chunks.plan(&input);
-        self.requests.clear();
-        if legacy_output {
-            u64_to(&mut self.requests, input.batch);
-            u64_to(&mut self.requests, demand.requests.len() as u64);
-            u64_to(&mut self.requests, demand.columns.len() as u64);
-            u64_to(&mut self.requests, self.chunks.active_len() as u64);
-            for &s in &demand.requests {
-                for v in [s.0, s.1, s.2] {
-                    u32_to(&mut self.requests, v as u32);
-                }
-                u32_to(&mut self.requests, u32::from(self.chunks.is_active(&s)));
-            }
-            for &(x, z, active) in &demand.columns {
-                for v in [x, z, i32::from(active)] {
-                    u32_to(&mut self.requests, v as u32);
-                }
-            }
-        }
         self.stats = Stats {
             request_batches: 1,
             requested: demand.requests.len(),
@@ -338,227 +298,7 @@ impl TerrainContext {
             demand,
             cell_budget,
         });
-        Ok(&self.requests)
-    }
-
-    pub fn accept(&mut self, pages: &[&[u8]], scene: &mut SourceScene) -> Result<(), String> {
-        if self.awaiting_colors.is_some() {
-            return self.accept_colors(pages, scene);
-        }
-        self.tint_requests.clear();
-        let start = Instant::now();
-        let pending = self
-            .pending
-            .as_ref()
-            .ok_or("unsolicited section response")?;
-        let mut r = Reader::new(pages)?;
-        let (version, epoch, batch) = r.header(2)?;
-        if (version, epoch, batch) != (self.version, self.epoch, pending.input.batch)
-            || epoch != scene.epoch()
-        {
-            return Err("section response identity mismatch".into());
-        }
-        let requested: HashSet<_> = pending.demand.requests.iter().copied().collect();
-        let mut received = HashMap::with_capacity(requested.len());
-        let mut states = HashMap::new();
-        let mut models = HashMap::new();
-        let mut faces = HashMap::new();
-        let mut fluids = HashMap::new();
-        let mut sprites = HashMap::new();
-        loop {
-            match r.u32()? {
-                0 => break,
-                1 => {
-                    let (id, state) = model::state(&mut r)?;
-                    if states.insert(id, state).is_some() {
-                        return Err("duplicate state definition".into());
-                    }
-                }
-                2 => {
-                    let (id, model) = model::model(&mut r)?;
-                    if models.insert(id, model).is_some() {
-                        return Err("duplicate model definition".into());
-                    }
-                }
-                3 => {
-                    let section = Section(r.i32()?, r.i32()?, r.i32()?);
-                    if !requested.contains(&section) || received.contains_key(&section) {
-                        return Err("section response was not requested or is duplicated".into());
-                    }
-                    let data = match r.u32()? {
-                        0 => None,
-                        1 => Some(SectionData::read(&mut r)?),
-                        _ => return Err("invalid section availability".into()),
-                    };
-                    received.insert(section, data);
-                }
-                4 => {
-                    let (id, face) = shape::Face::read(&mut r)?;
-                    if faces.insert(id, face).is_some() {
-                        return Err("duplicate face profile".into());
-                    }
-                }
-                5 => {
-                    let (id, fluid) = fluid::FluidMaterial::read(&mut r)?;
-                    if fluids.insert(id, fluid).is_some() {
-                        return Err("duplicate fluid material".into());
-                    }
-                }
-                6 => {
-                    let (id, sprite) = sprite::Sprite::read(&mut r)?;
-                    if sprites.insert(id, sprite).is_some() {
-                        return Err("duplicate sprite definition".into());
-                    }
-                }
-                9 => {
-                    let id = r.u32()?;
-                    let sprite = sprites
-                        .get_mut(&id)
-                        .ok_or("LabPBR references undefined batch sprite")?;
-                    if sprite.material.is_some() {
-                        return Err("duplicate LabPBR definition".into());
-                    }
-                    sprite.material = Some(labpbr::Material::read(&mut r, sprite)?);
-                }
-                _ => return Err("unknown section response record".into()),
-            }
-        }
-        r.finish()?;
-        if received.len() != requested.len() {
-            return Err("incomplete section response".into());
-        }
-        for model in models.values_mut() {
-            if let model::Model::Mesh(quads) = model {
-                for quad in quads {
-                    if quad.sprite != 0 {
-                        let sprite = sprites
-                            .get(&quad.sprite)
-                            .or_else(|| {
-                                (!pending.demand.reset_catalog)
-                                    .then(|| self.catalog.sprites.get(&quad.sprite))
-                                    .flatten()
-                            })
-                            .ok_or("undefined source sprite")?;
-                        if let Some(uvs) = sprite.local(quad.uvs) {
-                            quad.uvs = uvs;
-                        } else {
-                            // Preserve unknown cross-sprite sampling, not a silently clamped edge.
-                            quad.sprite = 0;
-                            self.stats.hacks.sprite += 1;
-                        }
-                    }
-                }
-            }
-        }
-        // A resource ID denotes immutable content until the explicit catalog invalidation.
-        // Reject in-place changes before committing any source data or consuming Pending.
-        fn unchanged<T: PartialEq>(old: &HashMap<u32, T>, new: &HashMap<u32, T>) -> bool {
-            new.iter()
-                .all(|(id, value)| old.get(id).is_none_or(|previous| previous == value))
-        }
-        if !pending.demand.reset_catalog
-            && (!unchanged(&self.catalog.states, &states)
-                || !unchanged(&self.catalog.models, &models)
-                || !unchanged(&self.catalog.fluids, &fluids)
-                || !unchanged(&self.catalog.sprites, &sprites)
-                || faces
-                    .iter()
-                    .any(|(id, value)| self.catalog.faces.get(id).is_some_and(|old| old != value)))
-        {
-            return Err("resource definition changed without catalog invalidation".into());
-        }
-        for state in states.values() {
-            if state.faces.iter().any(|id| {
-                id.0 > 1
-                    && !faces.contains_key(id)
-                    && (pending.demand.reset_catalog || !self.catalog.faces.contains_key(id))
-            }) {
-                return Err("undefined face profile".into());
-            }
-            if state.fluid.kind != 0
-                && !fluids.contains_key(&state.fluid.material)
-                && (pending.demand.reset_catalog
-                    || !self.catalog.fluids.contains_key(&state.fluid.material))
-            {
-                return Err("undefined fluid material".into());
-            }
-        }
-        for fluid in fluids.values() {
-            if fluid.identities.iter().any(|id| {
-                *id != 0
-                    && !sprites.contains_key(id)
-                    && (pending.demand.reset_catalog || !self.catalog.sprites.contains_key(id))
-            }) {
-                return Err("undefined fluid sprite".into());
-            }
-        }
-        // No fallible resource interpretation after taking Pending or mutating the catalog.
-        let mut references = Vec::new();
-        let mut textures = Vec::new();
-        for (&id, sprite) in &sprites {
-            textures.push((
-                sprite::texture(id),
-                sprite.image(pending.input.tick, scene)?,
-            ));
-            references.push((sprite::texture(id), sprite.reference(scene)?));
-        }
-        if !pending.demand.reset_catalog && self.animation_tick != Some(pending.input.tick) {
-            for &id in &self.animated {
-                if !sprites.contains_key(&id)
-                    && !self.animation_tick.is_some_and(|old| {
-                        self.catalog.sprites[&id].same_phase(old, pending.input.tick)
-                    })
-                {
-                    textures.push((
-                        sprite::texture(id),
-                        self.catalog.sprites[&id].image(pending.input.tick, scene)?,
-                    ));
-                }
-            }
-        }
-        if let Some(atlas) = labpbr::atlas(scene, &sprites) {
-            textures.push((1, atlas));
-        }
-        scene.validate_textures(&textures)?;
-        self.textures = textures;
-        let Pending {
-            input,
-            demand,
-            cell_budget,
-        } = self.pending.take().unwrap();
-        if demand.reset_catalog {
-            self.catalog = Catalog::default();
-            self.animated.clear();
-        }
-        self.animation_tick = Some(input.tick);
-        let prepare = !models.is_empty() || !states.is_empty();
-        let added_fluids = !fluids.is_empty();
-        self.catalog.states.extend(states);
-        self.catalog.faces.extend(faces);
-        self.catalog.fluids.extend(fluids);
-        self.catalog.glass_references.extend(references);
-        for (&id, sprite) in &sprites {
-            if !sprite.frames.is_empty() && !self.catalog.sprites.contains_key(&id) {
-                self.animated.push(id);
-            }
-        }
-        self.catalog.sprites.extend(sprites);
-        if prepare {
-            self.catalog.models.extend(models);
-            self.catalog.prepare();
-        } else if added_fluids {
-            self.catalog.refresh_contact_capability();
-        }
-        self.start_compile(
-            input,
-            demand,
-            received,
-            cell_budget,
-            scene,
-            start,
-            pages.iter().map(|p| p.len()).sum(),
-            true,
-        )
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -571,9 +311,8 @@ impl TerrainContext {
         scene: &mut SourceScene,
         start: Instant,
         bytes: usize,
-        legacy_output: bool,
     ) -> Result<(), String> {
-        let (version, epoch, batch) = (input.version, input.epoch, input.batch);
+        let batch = input.batch;
         let chunks::CompileBatch {
             selection,
             removed,
@@ -655,31 +394,8 @@ impl TerrainContext {
         self.stats.response_batches = 1;
         if count != 0 {
             self.stats.request_batches += 1;
-            if legacy_output {
-                u64_to(&mut self.tint_requests, batch);
-                u64_to(&mut self.tint_requests, unique.len() as u64);
-                u64_to(&mut self.tint_requests, epoch);
-                u32_to(&mut self.tint_requests, version);
-                u32_to(
-                    &mut self.tint_requests,
-                    if self.chunks.biome_sources().definitions.is_none() {
-                        2
-                    } else {
-                        0
-                    },
-                );
-                for request in &unique {
-                    for v in request.position {
-                        u32_to(&mut self.tint_requests, v as u32);
-                    }
-                    u32_to(&mut self.tint_requests, request.state);
-                    u32_to(&mut self.tint_requests, request.slot as u32);
-                }
-                self.stats.tint_bytes = self.tint_requests.len();
-            } else {
-                self.stats.tint_bytes =
-                    unique.len() * std::mem::size_of::<prime_abi::PrimeMcColorRequest>();
-            }
+            self.stats.tint_bytes =
+                unique.len() * std::mem::size_of::<prime_abi::PrimeMcColorRequest>();
             self.awaiting_colors = Some(AwaitingColors {
                 requests: unique,
                 stage: ColorStage::Sources,
@@ -695,131 +411,104 @@ impl TerrainContext {
         }
         self.finalize(jobs, selection, removed, batch, scene, None, reset_catalog)
     }
-    /// Session-owned read-only view; valid until the next mutable source call.
-    pub fn tint_requests(&self) -> &[u8] {
-        &self.tint_requests
-    }
-
-    fn accept_colors(&mut self, pages: &[&[u8]], scene: &mut SourceScene) -> Result<(), String> {
+    /// Decoders validate their complete response before entering this shared preparation.
+    /// Request counts/bytes describe typed arrays; fixture adapters account their wire framing.
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_color_sources(
+        &mut self,
+        recipes: &[biome::Recipe],
+        definitions: Option<biome_source::Definitions>,
+        radius: i32,
+        callbacks: usize,
+        bytes: usize,
+        decode_start: Instant,
+    ) -> Result<Option<Vec<u32>>, String> {
+        if definitions.is_some() && self.chunks.biome_sources().definitions.is_some() {
+            return Err("unexpected biome definitions".into());
+        }
+        if definitions.is_none()
+            && self.chunks.biome_sources().definitions.is_none()
+            && recipes
+                .iter()
+                .any(|r| matches!(r, biome::Recipe::Biome { .. }))
+        {
+            return Err("missing biome definitions".into());
+        }
+        if let Some(definitions) = definitions {
+            self.chunks.biome_sources_mut().definitions = Some(definitions);
+        }
+        self.stats.tint_callbacks = callbacks;
+        self.stats.tint_decode_ms += decode_start.elapsed().as_secs_f64() * 1000.;
+        self.stats.tint_bytes += bytes;
+        self.stats.response_batches += 1;
         let start = Instant::now();
         let waiting = self.awaiting_colors.as_ref().unwrap();
-        let (kind, expected) = match &waiting.stage {
-            ColorStage::Sources => (3, self.stats.tint_requests),
-            ColorStage::Biomes(_, source) => (4, source.requests.len()),
-        };
-        let mut r = Reader::new(pages)?;
-        if r.header(kind)? != (self.version, self.epoch, waiting.batch)
-            || self.epoch != scene.epoch()
-        {
-            return Err("tint response identity mismatch".into());
+        let recipes: Vec<_> = waiting.aliases.iter().map(|&i| recipes[i]).collect();
+        let plan = self.chunks.biomes_mut().prepare(
+            waiting
+                .jobs
+                .iter()
+                .flat_map(|j| j.tints.requests.iter().copied()),
+            &recipes,
+            radius,
+        );
+        self.stats.biome_plan_ms = start.elapsed().as_secs_f64() * 1000.;
+        self.stats.biome_hits = plan.hits;
+        self.stats.biome_samples = plan.samples.len();
+        self.stats.biome_cached_samples = plan.cached_samples;
+        if plan.samples.is_empty() {
+            let start = Instant::now();
+            let colors = self.chunks.biomes_mut().finish(plan, &[]);
+            self.stats.biome_filter_ms = start.elapsed().as_secs_f64() * 1000.;
+            return Ok(Some(colors));
         }
-        let count = usize::try_from(r.u64()?).map_err(|_| "tint count overflow")?;
-        if count != expected {
-            return Err("tint response count mismatch".into());
+        let start = Instant::now();
+        let source = self.chunks.biome_sources_mut().prepare(&plan.samples);
+        self.stats.biome_source_ms = start.elapsed().as_secs_f64() * 1000.;
+        self.stats.biome_pages = source.requests.len();
+        self.stats.biome_host_cells = source
+            .requests
+            .iter()
+            .map(|r| r.mask.count_ones() as usize)
+            .sum();
+        if source.requests.is_empty() {
+            return Ok(Some(self.finish_biome_colors(plan, source, None)));
         }
-        let (pending, colors);
-        if kind == 3 {
-            let radius = r.i32()?;
-            if !(0..=7).contains(&radius) {
-                return Err("unsupported biome blend radius".into());
-            }
-            let mut recipes = Vec::with_capacity(count);
-            let mut callbacks = 0;
-            for _ in 0..count {
-                let kind = r.u32()?;
-                let value = r.u32()?;
-                recipes.push(biome::Recipe::read(kind, value)?);
-                callbacks += usize::from(kind == 0);
-            }
-            let definitions = match r.u32()? {
-                0 => None,
-                1 if self.chunks.biome_sources().definitions.is_none() => {
-                    Some(biome_source::Definitions::read(&mut r)?)
-                }
-                _ => return Err("unexpected biome definitions".into()),
-            };
-            if definitions.is_none()
-                && self.chunks.biome_sources().definitions.is_none()
-                && recipes
-                    .iter()
-                    .any(|recipe| matches!(recipe, biome::Recipe::Biome { .. }))
-            {
-                return Err("missing biome definitions".into());
-            }
-            r.finish()?;
-            if let Some(definitions) = definitions {
-                self.chunks.biome_sources_mut().definitions = Some(definitions);
-            }
-            self.stats.tint_callbacks = callbacks;
-            self.stats.tint_decode_ms += start.elapsed().as_secs_f64() * 1000.;
-            let prepare = Instant::now();
-            let recipes: Vec<_> = waiting.aliases.iter().map(|&i| recipes[i]).collect();
-            let plan = self.chunks.biomes_mut().prepare(
-                waiting
-                    .jobs
-                    .iter()
-                    .flat_map(|j| j.tints.requests.iter().copied()),
-                &recipes,
-                radius,
-            );
-            self.stats.biome_plan_ms = prepare.elapsed().as_secs_f64() * 1000.;
-            self.stats.biome_hits = plan.hits;
-            self.stats.biome_samples = plan.samples.len();
-            self.stats.biome_cached_samples = plan.cached_samples;
-            if !plan.samples.is_empty() {
-                let source_start = Instant::now();
-                let source = self.chunks.biome_sources_mut().prepare(&plan.samples);
-                self.stats.biome_source_ms = source_start.elapsed().as_secs_f64() * 1000.;
-                self.stats.biome_pages = source.requests.len();
-                self.stats.biome_host_cells = source
-                    .requests
-                    .iter()
-                    .map(|r| r.mask.count_ones() as usize)
-                    .sum();
-                if !source.requests.is_empty() {
-                    self.tint_requests.clear();
-                    u64_to(&mut self.tint_requests, waiting.batch);
-                    u64_to(&mut self.tint_requests, source.requests.len() as u64);
-                    u64_to(&mut self.tint_requests, self.epoch);
-                    u32_to(&mut self.tint_requests, self.version);
-                    u32_to(&mut self.tint_requests, 3);
-                    for request in &source.requests {
-                        for v in [request.section.0, request.section.1, request.section.2] {
-                            u32_to(&mut self.tint_requests, v as u32);
-                        }
-                        u64_to(&mut self.tint_requests, request.mask);
-                    }
-                    self.stats.tint_bytes +=
-                        self.tint_requests.len() + pages.iter().map(|p| p.len()).sum::<usize>();
-                    self.stats.request_batches += 1;
-                    self.stats.response_batches += 1;
-                    self.awaiting_colors.as_mut().unwrap().stage =
-                        ColorStage::Biomes(plan, Box::new(source));
-                    return Ok(());
-                }
-                colors = self.finish_biome_colors(plan, source, None);
-            } else {
-                let filter = Instant::now();
-                colors = self.chunks.biomes_mut().finish(plan, &[]);
-                self.stats.biome_filter_ms = filter.elapsed().as_secs_f64() * 1000.;
-            }
-            pending = self.awaiting_colors.take().unwrap();
-        } else {
-            let ColorStage::Biomes(_, source) = &waiting.stage else {
-                unreachable!()
-            };
-            let response = self.chunks.biome_sources().read_response(source, &mut r)?;
-            r.finish()?;
-            self.stats.tint_decode_ms += start.elapsed().as_secs_f64() * 1000.;
-            pending = self.awaiting_colors.take().unwrap();
-            let ColorStage::Biomes(plan, source) = pending.stage else {
-                unreachable!()
-            };
-            colors = self.finish_biome_colors(plan, *source, Some(response));
-        }
-        self.stats.tint_bytes += pages.iter().map(|p| p.len()).sum::<usize>();
+        self.stats.request_batches += 1;
+        self.stats.tint_bytes +=
+            source.requests.len() * std::mem::size_of::<prime_abi::PrimeMcBiomeRequest>();
+        self.awaiting_colors.as_mut().unwrap().stage = ColorStage::Biomes(plan, Box::new(source));
+        Ok(None)
+    }
+
+    fn complete_colors(&mut self, colors: &[u32], scene: &mut SourceScene) -> Result<(), String> {
+        let pending = self.awaiting_colors.take().unwrap();
+        self.finalize(
+            pending.jobs,
+            pending.selection,
+            pending.removed,
+            pending.batch,
+            scene,
+            Some(colors),
+            pending.reset_catalog,
+        )
+    }
+
+    fn complete_biome_sources(
+        &mut self,
+        response: biome_source::Response,
+        bytes: usize,
+        decode_start: Instant,
+        scene: &mut SourceScene,
+    ) -> Result<(), String> {
+        self.stats.tint_decode_ms += decode_start.elapsed().as_secs_f64() * 1000.;
+        self.stats.tint_bytes += bytes;
         self.stats.response_batches += 1;
-        self.tint_requests.clear();
+        let pending = self.awaiting_colors.take().unwrap();
+        let ColorStage::Biomes(plan, source) = pending.stage else {
+            unreachable!()
+        };
+        let colors = self.finish_biome_colors(plan, *source, Some(response));
         self.finalize(
             pending.jobs,
             pending.selection,
@@ -830,6 +519,7 @@ impl TerrainContext {
             pending.reset_catalog,
         )
     }
+
     fn finish_biome_colors(
         &mut self,
         plan: biome::Plan,

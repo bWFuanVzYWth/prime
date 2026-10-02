@@ -1,5 +1,6 @@
 use super::*;
 use crate::instances::InstanceContext;
+use crate::scene::{Mesh, MeshVersion, SectionSequence};
 use std::sync::Arc;
 
 fn section(key: u64, sequence: u64) -> Vec<u8> {

@@ -14,6 +14,7 @@ use std::{
 pub(super) struct Textures {
     pub(crate) source: BTreeMap<u32, Texture>,
     pub(crate) coverage_changed: BTreeSet<u32>,
+    pub(crate) occlusion_changed: bool,
     cursor: Option<TextureCursor>,
     pub sprites: usize,
     pub indices: BTreeMap<u32, u32>,
@@ -28,6 +29,88 @@ struct Backing {
     offset: u32,
     count: u32,
     references: usize,
+}
+// Retain borrowed source views, not a serialized 64-byte record per mip/plane.
+struct MetadataWrite<'a> {
+    texture: &'a Texture,
+    index: u32,
+    first: u32,
+    descriptors: [u32; 3],
+    material_flags: u32,
+    bounds: [u32; 4],
+}
+impl MetadataWrite<'_> {
+    fn records<'a>(
+        &'a self,
+        allocations: &'a BTreeMap<usize, Backing>,
+    ) -> impl Iterator<Item = (u32, [u32; 16])> + 'a {
+        let material = self.texture.material.as_deref();
+        let planes = [
+            material.and_then(|m| m.normal.as_ref()),
+            material.and_then(|m| m.specular.as_ref()),
+            material.and_then(|m| m.coverage.as_ref()),
+        ];
+        std::iter::once((0, self.texture, self.index, self.first))
+            .chain(planes.into_iter().enumerate().filter_map(|(i, plane)| {
+                plane.map(|plane| (i + 1, plane, self.descriptors[i], self.descriptors[i] + 1))
+            }))
+            .flat_map(move |(plane_index, plane, index, first)| {
+                let count = plane.sampling.as_ref().map_or(0, |s| s.levels.len() as u32);
+                let region = plane.region.unwrap_or([0, 0, plane.width, plane.height]);
+                let next = plane
+                    .sampling
+                    .as_ref()
+                    .map_or([region[0], region[1]], |s| s.next);
+                let blend = plane.sampling.as_ref().map_or(0., |s| s.blend).to_bits();
+                std::iter::once((index, &plane.pixels, plane.width, region, next))
+                    .chain(plane.sampling.iter().flat_map(move |s| {
+                        s.levels.iter().enumerate().map(move |(i, m)| {
+                            (first + i as u32, &m.pixels, m.width, m.region, m.next)
+                        })
+                    }))
+                    .map(move |(slot, image, stride, [x, y, w, h], next)| {
+                        let base = allocations[&(image.as_ptr() as usize)].offset;
+                        let flags = if plane.region.is_some() { 1 << 31 } else { 0 };
+                        (
+                            slot,
+                            [
+                                base + y * stride + x,
+                                w,
+                                h,
+                                stride | flags,
+                                base + next[1] * stride + next[0],
+                                first,
+                                count,
+                                blend,
+                                if plane_index == 0 {
+                                    self.descriptors[0]
+                                } else {
+                                    0
+                                },
+                                if plane_index == 0 {
+                                    self.descriptors[1]
+                                } else {
+                                    0
+                                },
+                                if plane_index == 0 {
+                                    self.material_flags
+                                } else {
+                                    0
+                                },
+                                if plane_index == 0 {
+                                    self.descriptors[2]
+                                } else {
+                                    0
+                                },
+                                self.bounds[0],
+                                self.bounds[1],
+                                self.bounds[2],
+                                self.bounds[3],
+                            ],
+                        )
+                    })
+            })
+    }
 }
 // Only mip0 coverage dependencies. RGB/PBR/mip-only changes do not invalidate OMM.
 fn coverage_same(a: &Texture, b: &Texture) -> bool {
@@ -78,6 +161,7 @@ impl Textures {
         let mut result = Self {
             source: BTreeMap::new(),
             coverage_changed: BTreeSet::new(),
+            occlusion_changed: false,
             cursor: None,
             sprites: 0,
             indices: BTreeMap::from([(0, 0)]),
@@ -134,9 +218,55 @@ impl Textures {
         source: impl Into<TextureInput<'a>>,
         uploads: &mut crate::arena::Arena,
     ) -> Result<bool, String> {
-        self.coverage_changed.clear();
         let old_count = self.source.len();
         let (cursor, updates) = source.into().updates(self.cursor);
+        // Validate fallible source/atlas membership before changing any ownership.
+        let removed: BTreeSet<_> = if updates.is_snapshot() {
+            self.source
+                .keys()
+                .filter(|id| !updates.retains(**id))
+                .copied()
+                .collect()
+        } else {
+            updates
+                .clone()
+                .filter_map(|(id, t)| t.is_none().then_some(*id))
+                .collect()
+        };
+        let published: BTreeSet<_> = updates
+            .clone()
+            .filter_map(|(id, t)| t.is_some().then_some(*id))
+            .collect();
+        for (id, texture) in updates.clone() {
+            let Some(texture) = texture else {
+                continue;
+            };
+            if *id == 0 {
+                return Err("Texture zero is reserved for explicit untextured white".into());
+            }
+            if self.source.get(id).is_some_and(|old| old.same(texture)) {
+                continue;
+            }
+            texture.validate()?;
+            if let Some(lookup) = texture
+                .material
+                .as_ref()
+                .filter(|m| m.atlas_lookup)
+                .and_then(|m| m.coverage.as_ref())
+            {
+                for pixel in lookup.pixels.as_chunks::<4>().0 {
+                    let id = u32::from_le_bytes(*pixel);
+                    if id != 0
+                        && !published.contains(&id)
+                        && (!self.indices.contains_key(&id) || removed.contains(&id))
+                    {
+                        return Err("atlas material sprite missing".into());
+                    }
+                }
+            }
+        }
+        self.coverage_changed.clear();
+        self.occlusion_changed = false;
         // Do not scan resident identities for a certified incremental input.
         if updates.is_snapshot() {
             let removed: Vec<_> = self
@@ -149,8 +279,10 @@ impl Textures {
                 self.remove(id);
             }
         }
-        let mut pixels = Vec::new();
+        let mut pixel_data = Vec::new();
+        let mut pixel_bytes = 0u64;
         let mut metadata = Vec::new();
+        let mut metadata_records = 0usize;
         let mut pixel_copies = Vec::new();
         let mut metadata_copies = Vec::new();
         // Retire removed identities before preallocating replacements, so their descriptors
@@ -171,13 +303,9 @@ impl Textures {
             let Some(texture) = texture else {
                 continue;
             };
-            if *id == 0 {
-                return Err("Texture zero is reserved for explicit untextured white".into());
-            }
             if self.source.get(id).is_some_and(|old| old.same(texture)) {
                 continue;
             }
-            texture.validate()?;
             if self
                 .source
                 .get(id)
@@ -223,7 +351,7 @@ impl Textures {
                         );
                         pixel_copies.push(
                             vk::BufferCopy::default()
-                                .src_offset(pixels.len() as u64)
+                                .src_offset(pixel_bytes)
                                 .dst_offset(u64::from(offset) * 4)
                                 .size(image.len() as u64),
                         );
@@ -233,22 +361,8 @@ impl Textures {
                             .filter(|m| m.atlas_lookup)
                             .and_then(|m| m.coverage.as_ref())
                             .is_some_and(|p| Arc::ptr_eq(&p.pixels, image));
-                        if lookup {
-                            for pixel in image.as_chunks::<4>().0.iter() {
-                                let id = u32::from_le_bytes(*pixel);
-                                let descriptor = if id == 0 {
-                                    0
-                                } else {
-                                    *self
-                                        .indices
-                                        .get(&id)
-                                        .ok_or("atlas material sprite missing")?
-                                };
-                                pixels.extend_from_slice(&descriptor.to_le_bytes());
-                            }
-                        } else {
-                            pixels.extend_from_slice(image);
-                        }
+                        pixel_bytes += image.len() as u64;
+                        pixel_data.push((image, lookup));
                     }
                 }
             }
@@ -297,58 +411,24 @@ impl Textures {
                 .and_then(|m| m.bounds)
                 .unwrap_or([0.; 4])
                 .map(f32::to_bits);
-            for (plane_index, plane, index, first) in std::iter::once((0, texture, index, first))
-                .chain(
-                    planes.into_iter().enumerate().filter_map(|(i, p)| {
-                        p.map(|p| (i + 1, p, descriptors[i], descriptors[i] + 1))
-                    }),
-                )
-            {
-                let count = plane.sampling.as_ref().map_or(0, |s| s.levels.len() as u32);
-                let region = plane.region.unwrap_or([0, 0, plane.width, plane.height]);
-                let next = plane
-                    .sampling
-                    .as_ref()
-                    .map_or([region[0], region[1]], |s| s.next);
-                let blend = plane.sampling.as_ref().map_or(0., |s| s.blend).to_bits();
-                let views = std::iter::once((index, &plane.pixels, plane.width, region, next))
-                    .chain(plane.sampling.iter().flat_map(|s| {
-                        s.levels
-                            .iter()
-                            .enumerate()
-                            .map(|(i, m)| (first + i as u32, &m.pixels, m.width, m.region, m.next))
-                    }));
-                for (slot, image, stride, [x, y, w, h], next) in views {
-                    let base = self.allocations[&(image.as_ptr() as usize)].offset;
-                    metadata_copies.push(
-                        vk::BufferCopy::default()
-                            .src_offset(metadata.len() as u64)
-                            .dst_offset(u64::from(slot) * 64)
-                            .size(64),
-                    );
-                    let flags = if plane.region.is_some() { 1 << 31 } else { 0 };
-                    for value in [
-                        base + y * stride + x,
-                        w,
-                        h,
-                        stride | flags,
-                        base + next[1] * stride + next[0],
-                        first,
-                        count,
-                        blend,
-                        if plane_index == 0 { descriptors[0] } else { 0 },
-                        if plane_index == 0 { descriptors[1] } else { 0 },
-                        if plane_index == 0 { material_flags } else { 0 },
-                        if plane_index == 0 { descriptors[2] } else { 0 },
-                        bounds[0],
-                        bounds[1],
-                        bounds[2],
-                        bounds[3],
-                    ] {
-                        uint(&mut metadata, value);
-                    }
-                }
+            let descriptor = MetadataWrite {
+                texture,
+                index,
+                first,
+                descriptors,
+                material_flags,
+                bounds,
+            };
+            for (slot, _) in descriptor.records(&self.allocations) {
+                metadata_copies.push(
+                    vk::BufferCopy::default()
+                        .src_offset((metadata_records * 64) as u64)
+                        .dst_offset(u64::from(slot) * 64)
+                        .size(64),
+                );
+                metadata_records += 1;
             }
+            metadata.push(descriptor);
             self.sprites -=
                 usize::from(self.source.get(id).is_some_and(|old| old.region.is_some()));
             self.sprites += usize::from(texture.region.is_some());
@@ -357,15 +437,56 @@ impl Textures {
         if !metadata.is_empty() {
             grow(context, &mut self.texels, u64::from(self.pixels.end) * 4)?;
             grow(context, &mut self.metadata, u64::from(self.slots.end) * 64)?;
-            let pixel_upload = if pixels.is_empty() {
+            let pixel_upload = if pixel_data.is_empty() {
                 None
             } else {
-                let upload = uploads.allocate(context, pixels.len() as u64, 4)?;
-                upload.write(&pixels)?;
+                let mut upload = uploads.allocate(context, pixel_bytes, 4)?;
+                upload.write_with(|output| {
+                    let mut remaining = output;
+                    for (image, lookup) in pixel_data {
+                        let (out, tail) = remaining.split_at_mut(image.len());
+                        if lookup {
+                            for (out, pixel) in out
+                                .as_chunks_mut::<4>()
+                                .0
+                                .iter_mut()
+                                .zip(image.as_chunks::<4>().0)
+                            {
+                                let id = u32::from_le_bytes(*pixel);
+                                let descriptor = if id == 0 { 0 } else { self.indices[&id] };
+                                for (out, byte) in out.iter_mut().zip(descriptor.to_le_bytes()) {
+                                    out.write(byte);
+                                }
+                            }
+                        } else {
+                            for (out, &byte) in out.iter_mut().zip(image.iter()) {
+                                out.write(byte);
+                            }
+                        }
+                        remaining = tail;
+                    }
+                    assert!(remaining.is_empty());
+                    Ok(())
+                })?;
                 Some(upload)
             };
-            let metadata_upload = uploads.allocate(context, metadata.len() as u64, 4)?;
-            metadata_upload.write(&metadata)?;
+            let mut metadata_upload =
+                uploads.allocate(context, (metadata_records * 64) as u64, 4)?;
+            metadata_upload.write_with(|output| {
+                for (out, (_, words)) in output
+                    .as_chunks_mut::<64>()
+                    .0
+                    .iter_mut()
+                    .zip(metadata.iter().flat_map(|m| m.records(&self.allocations)))
+                {
+                    for (out, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(words) {
+                        for (out, byte) in out.iter_mut().zip(word.to_le_bytes()) {
+                            out.write(byte);
+                        }
+                    }
+                }
+                Ok(())
+            })?;
             for copy in &mut pixel_copies {
                 copy.src_offset += pixel_upload.as_ref().unwrap().offset;
             }
@@ -396,6 +517,9 @@ impl Textures {
             result?;
         }
         self.cursor = cursor;
+        self.occlusion_changed = !metadata.is_empty()
+            || self.source.len() != old_count
+            || !self.coverage_changed.is_empty();
         Ok(!metadata.is_empty()
             || self.source.len() != old_count
             || !self.coverage_changed.is_empty())

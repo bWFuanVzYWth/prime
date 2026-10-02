@@ -498,3 +498,346 @@ fn typed_append_keeps_prior_material_lookup_and_empty_or_invalid_batches_are_ato
             .pixels
     ));
 }
+
+fn diagnostic_identity<T>(batch: u64) -> PrimeMcIdentity {
+    PrimeMcIdentity {
+        struct_size: std::mem::size_of::<T>() as u32,
+        ..identity(1, batch, 1)
+    }
+}
+#[test]
+fn typed_color_biome_diagnostics_match_actual_descriptors_and_warm_cache_paths() {
+    for radius in 0_i32..=7 {
+        let workers = Arc::new(CpuWorkers::new(1).unwrap());
+        let mut context = TerrainContext::with_workers(workers.clone());
+        let mut scene = SourceScene::with_workers(workers);
+        scene.reset_world(1).unwrap();
+        let bytes = b"\xff\xff\xff\xffminecraft:emptyminecraft:stone";
+        let states = [PrimeMcState {
+            id: 1,
+            model: 1,
+            faces: [1; 6],
+            fluid_name: PrimeMcRange {
+                offset: 4,
+                count: 15,
+            },
+            name: PrimeMcRange {
+                offset: 19,
+                count: 15,
+            },
+            ..Default::default()
+        }];
+        let states = [states[0], PrimeMcState { id: 2, ..states[0] }];
+        let models = [PrimeMcModel {
+            id: 1,
+            kind: 1,
+            quads: PrimeMcRange {
+                offset: 0,
+                count: 1,
+            },
+            ..Default::default()
+        }];
+        let quads = [PrimeMcQuad {
+            face: 1,
+            tint: 0,
+            positions: [0., 1., 0., 0., 1., 1., 1., 1., 1., 1., 1., 0.],
+            ..Default::default()
+        }];
+        let raw = PrimeMcResourceBatch {
+            identity: diagnostic_identity::<PrimeMcResourceBatch>(1),
+            flags: PRIME_MC_RESOURCE_REPLACE,
+            states: states.as_ptr(),
+            state_count: states.len() as u64,
+            models: models.as_ptr(),
+            model_count: models.len() as u64,
+            quads: quads.as_ptr(),
+            quad_count: quads.len() as u64,
+            bytes: bytes.as_ptr(),
+            byte_count: bytes.len() as u64,
+            atlas: PrimeMcImage {
+                width: 1,
+                height: 1,
+                pixels: PrimeMcRange {
+                    offset: 0,
+                    count: 4,
+                },
+            },
+            ..Default::default()
+        };
+        let resources = input::Resources::from_parts(
+            &raw,
+            &states,
+            &models,
+            &quads,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            bytes,
+        )
+        .unwrap();
+        context.prepare_resources(&resources, &mut scene).unwrap();
+        let prepared = context.catalog.prepared_for_test(1);
+        let mut append_raw = raw;
+        append_raw.flags = 0;
+        let duplicate = input::Resources::from_parts(
+            &append_raw,
+            &states,
+            &models,
+            &quads,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            bytes,
+        )
+        .unwrap();
+        context.prepare_resources(&duplicate, &mut scene).unwrap();
+        assert_eq!(
+            (
+                context.catalog.derived_models,
+                context.catalog.derived_states
+            ),
+            (0, 0)
+        );
+        assert_eq!(context.catalog.prepared_for_test(1), prepared);
+
+        let events = [PrimeMcEvent {
+            kind: 1,
+            ..Default::default()
+        }];
+        let raw = PrimeMcPlan {
+            identity: diagnostic_identity::<PrimeMcPlan>(1),
+            events: events.as_ptr(),
+            event_count: 1,
+            source: [0; 4],
+            ..Default::default()
+        };
+        context
+            .plan_typed(&input::Plan::from_parts(&raw, &events).unwrap(), 1, 1)
+            .unwrap();
+        let requests = context.requests_typed();
+        assert_eq!((requests.phase, requests.section_count), (1, 1));
+        let palette = [1];
+        let section_values = [PrimeMcSection {
+            present: 1,
+            palette: PrimeMcRange {
+                offset: 0,
+                count: 1,
+            },
+            ..Default::default()
+        }];
+        let raw = PrimeMcSectionBatch {
+            identity: diagnostic_identity::<PrimeMcSectionBatch>(1),
+            sections: section_values.as_ptr(),
+            section_count: 1,
+            palette: palette.as_ptr(),
+            palette_count: 1,
+            ..Default::default()
+        };
+        context
+            .sections_typed(
+                &input::Sections::from_parts(&raw, &section_values, &palette, &[]).unwrap(),
+                &mut scene,
+            )
+            .unwrap();
+        let requests = context.requests_typed();
+        assert_eq!(requests.phase, 3);
+        assert!(requests.color_count > 0);
+        let color_count = requests.color_count as usize;
+        let recipes = vec![PrimeMcColorRecipe { kind: 1, value: 0 }; requests.color_count as usize];
+        let definitions = [PrimeMcBiomeDefinitions {
+            permutation: std::array::from_fn(|i| i as u32),
+            ..Default::default()
+        }];
+        let raw = PrimeMcColorBatch {
+            identity: diagnostic_identity::<PrimeMcColorBatch>(1),
+            radius,
+            recipes: recipes.as_ptr(),
+            recipe_count: recipes.len() as u64,
+            definitions: definitions.as_ptr(),
+            definition_count: 1,
+            ..Default::default()
+        };
+
+        let mut invalid = recipes.clone();
+        invalid[0].kind = 99;
+        let invalid_raw = PrimeMcColorBatch {
+            recipes: invalid.as_ptr(),
+            ..raw
+        };
+        let counters = (context.stats.response_batches, context.stats.tint_bytes);
+        assert!(
+            context
+                .colors_typed(
+                    &input::Colors::from_parts(&invalid_raw, &invalid, &definitions, &[]).unwrap(),
+                    &mut scene
+                )
+                .is_err()
+        );
+        assert_eq!(context.requests_typed().phase, 3);
+        assert_eq!(
+            (context.stats.response_batches, context.stats.tint_bytes),
+            counters
+        );
+        context
+            .colors_typed(
+                &input::Colors::from_parts(&raw, &recipes, &definitions, &[]).unwrap(),
+                &mut scene,
+            )
+            .unwrap();
+        let requests = context.requests_typed();
+        assert_eq!(requests.phase, 4);
+        assert!(requests.biome_count > 0);
+        // The request arrays belong to context and remain valid until its next mutable call.
+        let ColorStage::Biomes(_, source) = &context.awaiting_colors.as_ref().unwrap().stage else {
+            panic!("expected biome stage")
+        };
+        let biome_requests = &source.requests;
+        assert_eq!(requests.biome_count as usize, biome_requests.len());
+        let page_count = biome_requests.len();
+        let count: usize = biome_requests
+            .iter()
+            .map(|r| r.mask.count_ones() as usize)
+            .sum();
+        let biomes = [PrimeMcBiome {
+            temperature: 0.5,
+            downfall: 0.5,
+            ..Default::default()
+        }];
+        let indices = vec![0; count];
+        let raw = PrimeMcBiomeBatch {
+            identity: diagnostic_identity::<PrimeMcBiomeBatch>(1),
+            biomes: biomes.as_ptr(),
+            biome_count: 1,
+            indices: indices.as_ptr(),
+            index_count: indices.len() as u64,
+        };
+
+        let incomplete = &indices[..indices.len() - 1];
+        let invalid_raw = PrimeMcBiomeBatch {
+            indices: incomplete.as_ptr(),
+            index_count: incomplete.len() as u64,
+            ..raw
+        };
+        let counters = (context.stats.response_batches, context.stats.tint_bytes);
+        assert!(
+            context
+                .biomes_typed(
+                    &input::Biomes::from_parts(&invalid_raw, &biomes, incomplete).unwrap(),
+                    &mut scene
+                )
+                .is_err()
+        );
+        assert_eq!(context.requests_typed().phase, 4);
+        assert_eq!(
+            (context.stats.response_batches, context.stats.tint_bytes),
+            counters
+        );
+        context
+            .biomes_typed(
+                &input::Biomes::from_parts(&raw, &biomes, &indices).unwrap(),
+                &mut scene,
+            )
+            .unwrap();
+        assert_eq!(context.requests_typed().phase, 0);
+
+        assert_eq!(
+            (
+                context.stats.request_batches,
+                context.stats.response_batches
+            ),
+            (3, 3)
+        );
+        assert_eq!(
+            (context.stats.biome_pages, context.stats.biome_host_cells),
+            (page_count, count)
+        );
+        assert_eq!(context.stats.tint_requests, color_count);
+        assert_eq!(context.stats.tint_callbacks, 0);
+        assert!(context.stats.biome_samples > 0);
+        assert!(
+            context.stats.tint_decode_ms > 0.
+                && context.stats.biome_plan_ms > 0.
+                && context.stats.biome_source_ms > 0.
+                && context.stats.biome_filter_ms > 0.
+        );
+        assert_eq!(
+            context.stats.tint_bytes,
+            color_count * std::mem::size_of::<PrimeMcColorRequest>()
+                + std::mem::size_of_val(recipes.as_slice())
+                + std::mem::size_of_val(&definitions)
+                + page_count * std::mem::size_of::<PrimeMcBiomeRequest>()
+                + std::mem::size_of_val(&biomes)
+                + std::mem::size_of_val(indices.as_slice())
+        );
+        // Change the section's immutable state ID, preserving its model and tint positions.
+        // Actual typed recompilation consumes the mixed cache without a biome host round.
+        for (batch, state, next_radius) in [(2, 2, radius), (3, 1, (radius - 1).max(0))] {
+            let events = [PrimeMcEvent {
+                kind: 3,
+                ..Default::default()
+            }];
+            let mut raw = PrimeMcPlan {
+                identity: diagnostic_identity::<PrimeMcPlan>(batch),
+                source: [0; 4],
+                ..Default::default()
+            };
+            context
+                .plan_typed(&checked_plan(&mut raw, &events), 1, 1)
+                .unwrap();
+            let requested = context.pending.as_ref().unwrap().demand.requests.clone();
+            sections(&mut context, &mut scene, batch, &requested, &[state]).unwrap();
+            assert_eq!(context.requests_typed().phase, 2);
+            let warm_count = context.requests_typed().color_count as usize;
+            let recipes = vec![PrimeMcColorRecipe { kind: 1, value: 0 }; warm_count];
+            let raw = PrimeMcColorBatch {
+                identity: diagnostic_identity::<PrimeMcColorBatch>(batch),
+                radius: next_radius,
+                recipes: recipes.as_ptr(),
+                recipe_count: recipes.len() as u64,
+                ..Default::default()
+            };
+            context
+                .colors_typed(
+                    &input::Colors::from_parts(&raw, &recipes, &[], &[]).unwrap(),
+                    &mut scene,
+                )
+                .unwrap();
+            assert_eq!(context.requests_typed().phase, 0);
+            assert_eq!(
+                (
+                    context.stats.request_batches,
+                    context.stats.response_batches
+                ),
+                (2, 2)
+            );
+            assert_eq!(
+                (
+                    context.stats.biome_pages,
+                    context.stats.biome_host_cells,
+                    context.stats.biome_samples
+                ),
+                (0, 0, 0)
+            );
+            if next_radius == radius {
+                assert!(context.stats.biome_hits > 0);
+            } else {
+                assert!(context.stats.biome_cached_samples > 0);
+            }
+            assert_eq!(
+                context.stats.tint_bytes,
+                warm_count * std::mem::size_of::<PrimeMcColorRequest>()
+                    + std::mem::size_of_val(recipes.as_slice())
+            );
+        }
+    }
+}

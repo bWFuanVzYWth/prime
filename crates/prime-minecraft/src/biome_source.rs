@@ -1,8 +1,10 @@
 //! Version-bound vanilla color evaluation from owned host source fields.
+#[cfg(test)]
+use crate::wire::Reader;
 use crate::{
     biome::{Resolver, Sample},
+    column_cache::ColumnCache,
     schedule::Section,
-    wire::Reader,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -55,6 +57,7 @@ impl Definitions {
             maps: tables,
         })
     }
+    #[cfg(test)]
     pub fn read(r: &mut Reader<'_>) -> Result<Self, String> {
         let seed = r.u64()?;
         let mut permutation = [0; 256];
@@ -149,6 +152,7 @@ impl BiomeColor {
             self.colors[sample.resolver as usize - 1]
         }
     }
+    #[cfg(test)]
     fn read(r: &mut Reader<'_>, definitions: &Definitions) -> Result<Self, String> {
         let temperature = r.f32()?;
         let downfall = r.f32()?;
@@ -194,7 +198,7 @@ impl Default for Palette {
 #[derive(Default)]
 pub(crate) struct Cache {
     pub definitions: Option<Definitions>,
-    palettes: HashMap<Section, Box<Palette>>,
+    palettes: ColumnCache<Box<Palette>>,
     zoom: ZoomCache,
 }
 pub(crate) struct Request {
@@ -254,7 +258,9 @@ impl Cache {
             self.definitions = None;
             self.palettes.clear();
         } else if !columns.is_empty() {
-            self.palettes.retain(|s, _| !columns.contains(&(s.0, s.2)));
+            for &column in columns {
+                self.palettes.remove_column(column);
+            }
         }
     }
     pub fn forget(&mut self, consumer: Section) {
@@ -308,6 +314,7 @@ impl Cache {
         }
         plan
     }
+    #[cfg(test)]
     pub fn read_response(&self, plan: &Plan, r: &mut Reader<'_>) -> Result<Response, String> {
         let count = r.count(32)?;
         let mut colors = Vec::with_capacity(count);
@@ -623,6 +630,22 @@ pub(crate) fn check_math_fixture(bytes: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn changed_quart_columns_remove_all_vertical_palettes_without_visiting_far_columns() {
+        let mut cache = Cache::default();
+        for x in -1000..=1000 {
+            for y in [-64, -1, 0, 64] {
+                cache.palettes.insert(Section(x, y, -x), Default::default());
+            }
+        }
+        cache.invalidate(false, &HashSet::from([(0, 0), (-1, 1)]));
+        assert_eq!(cache.palettes.visited_pages, 8);
+        for y in [-64, -1, 0, 64] {
+            assert!(cache.palettes.get(&Section(0, y, 0)).is_none());
+            assert!(cache.palettes.get(&Section(-1, y, 1)).is_none());
+            assert!(cache.palettes.get(&Section(1000, y, -1000)).is_some());
+        }
+    }
     #[test]
     fn vector_zoom_matches_ordered_scalar_distances_and_ties() {
         for seed in [0, 1, 42, u64::MAX, 0x1357_2468_ffff_0000] {

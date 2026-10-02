@@ -54,6 +54,7 @@ public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
             CanonicalTextureCpuSmoke.run();
             FabricMeshCpuSmoke.run();
             ItemCpuSmoke.run();
+            PublicationCpuSmoke.run();
             ExclusiveTerrainCpuSmoke.run();
             dev.primept.RenderProfileCpuSmoke.run();
             ModelSpriteCpuSmoke.run();

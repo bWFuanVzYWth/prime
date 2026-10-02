@@ -14,6 +14,7 @@ pub(super) struct SceneResources {
     uploads: Arena,
     identity: ResourceIdentity,
     pub revision: u64,
+    pub occlusion_revision: u64,
     pub omm_revision: u64,
     // An explicit prepare may precede rendering. Keep invalidations until Geometry consumes them.
     pub coverage_changed: BTreeSet<u32>,
@@ -35,6 +36,7 @@ impl SceneResources {
             uploads,
             identity: scene.resource_identity(),
             revision: 1,
+            occlusion_revision: 1,
             omm_revision: 0,
             prepare_ns: [0; 3],
             preparations: 0,
@@ -64,6 +66,12 @@ impl SceneResources {
         self.coverage_changed
             .extend(&self.textures.coverage_changed);
         self.prepare_templates(context, identity_changed)?;
+        if self.textures.occlusion_changed || identity_changed {
+            self.occlusion_revision = self
+                .occlusion_revision
+                .checked_add(1)
+                .ok_or("Occlusion resource revision exhausted")?;
+        }
         if changed || identity_changed {
             self.revision = self
                 .revision

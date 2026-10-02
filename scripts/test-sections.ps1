@@ -41,7 +41,7 @@ try {
     $metadata.workingTree = @(& git status --short)
     $metadata.rustc = (& rustc -Vv | Out-String).Trim()
     $metadata.java = (& java -version 2>&1 | Out-String).Trim()
-    & git diff --binary > (Join-Path $Output 'working-tree.patch')
+    & git diff --binary HEAD > (Join-Path $Output 'working-tree.patch')
     $untracked = @(& git ls-files --others --exclude-standard)
     foreach ($relative in $untracked) {
         $copy = Join-Path $Output "untracked/$relative"

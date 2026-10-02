@@ -49,7 +49,7 @@ final class TypedSceneFixtureWire {
             size = Math.addExact(size, 32 + vertices(dynamicSpan(batch, i)).byteSize());
         var out = ByteBuffer.allocate(Math.toIntExact(size)).order(ByteOrder.LITTLE_ENDIAN);
         out.putInt(0x54505250)
-                .putInt(Packets.ABI_VERSION)
+                .putInt(LegacyPackets.ABI_VERSION)
                 .putInt(6)
                 .putInt(0)
                 .putLong(PrimeDynamicBatch.epoch(batch));

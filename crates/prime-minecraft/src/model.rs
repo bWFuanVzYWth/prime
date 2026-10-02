@@ -1,13 +1,20 @@
 //! Version adaptation and prototype defaults live here, not in the Java field router.
+#[cfg(test)]
+use crate::wire::Reader;
 use crate::{
     fluid::{Fluid, FluidMaterial},
     shape::{Face, FaceId},
-    wire::Reader,
 };
 use prime_scene::compiled::CompiledQuad;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, Default, PartialEq)]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct StateMasks {
+    pub emission: u8,
+    pub occlusion: u16,
+    pub contact: u8,
+}
+#[derive(Clone, Default)]
 pub(crate) struct State {
     pub id: u32,
     pub flags: u32,
@@ -18,6 +25,22 @@ pub(crate) struct State {
     pub fluid: Fluid,
     pub emission: u32,
     pub placement: crate::placement::Placement,
+    pub masks: StateMasks,
+}
+// Resource equality excludes catalog-owned derived masks. A repeated immutable source
+// descriptor is compared before its derived values have been prepared.
+impl PartialEq for State {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.flags == other.flags
+            && self.model == other.model
+            && self.name == other.name
+            && self.faces == other.faces
+            && self.support == other.support
+            && self.fluid == other.fluid
+            && self.emission == other.emission
+            && self.placement == other.placement
+    }
 }
 impl State {
     pub fn air(&self) -> bool {
@@ -69,14 +92,24 @@ pub(crate) struct Catalog {
     face_masks: HashMap<u32, u32>,
     combined: HashMap<u32, Vec<Quad>>,
     prepared: HashMap<u32, Vec<crate::surfaces::Recipe>>,
-    volume_prepared: HashSet<u32>,
     pub volumes: HashMap<u32, crate::volume::Volume>,
     pub glass_references: HashMap<u32, [f32; 4]>,
     pub optical_materials: HashMap<(u32, u32), (u32, prime_scene::surface::Medium, bool)>,
     medium_ids: HashMap<(String, [u32; 4], Option<u32>), u32>,
     contact_capable: bool,
+    parents: HashMap<u32, HashSet<u32>>,
+    state_users: HashMap<u32, HashSet<u32>>,
+    sprite_models: HashMap<u32, HashSet<u32>>,
+    volume_quads: HashMap<u32, Option<Vec<Quad>>>,
+    #[cfg(test)]
+    pub derived_models: usize,
+    #[cfg(test)]
+    pub derived_states: usize,
+    #[cfg(test)]
+    pub volume_expansions: usize,
 }
 
+#[cfg(test)]
 pub(crate) fn state(r: &mut Reader<'_>) -> Result<(u32, State), String> {
     let id = r.u32()?;
     let flags = r.u32()?;
@@ -109,9 +142,11 @@ pub(crate) fn state(r: &mut Reader<'_>) -> Result<(u32, State), String> {
                 value
             },
             placement: crate::placement::Placement::read(r, flags & 2 != 0)?,
+            masks: StateMasks::default(),
         },
     ))
 }
+#[cfg(test)]
 pub(crate) fn model(r: &mut Reader<'_>) -> Result<(u32, Model), String> {
     let id = r.u32()?;
     if id == 0 {
@@ -283,16 +318,79 @@ impl Catalog {
         (state.same_block_culls() && state.name == neighbor.name)
             || self.covers(neighbor.faces[face ^ 1], state.faces[face])
     }
-    // Derived only when resource definitions change. Conservative unions retain weighted choices;
-    // cycles/depth limits keep every face eligible and continue through the existing fallback.
+    // Replacement and test fixtures enumerate resource IDs once. Production appends pass only
+    // newly admitted IDs; immutable definitions retain all unrelated allocations and proofs.
     pub fn prepare(&mut self) {
-        for (&id, model) in &self.models {
-            if let Model::Mesh(quads) = model {
-                self.prepared
-                    .entry(id)
-                    .or_insert_with(|| crate::surfaces::prepare(quads));
+        let models = self
+            .models
+            .keys()
+            .filter(|id| !self.face_masks.contains_key(id))
+            .copied()
+            .collect::<Vec<_>>();
+        let states = self.states.keys().copied().collect::<Vec<_>>();
+        self.prepare_delta(&states, &models, &[]);
+    }
+    pub fn prepare_delta(&mut self, new_states: &[u32], new_models: &[u32], new_sprites: &[u32]) {
+        for &id in new_models {
+            match &self.models[&id] {
+                Model::Alias(child) => {
+                    self.parents.entry(*child).or_default().insert(id);
+                }
+                Model::Multipart(children) => {
+                    for &child in children {
+                        self.parents.entry(child).or_default().insert(id);
+                    }
+                }
+                Model::Weighted(children, _) => {
+                    for &(_, child) in children {
+                        self.parents.entry(child).or_default().insert(id);
+                    }
+                }
+                Model::Mesh(quads) => {
+                    for q in quads {
+                        self.sprite_models.entry(q.sprite).or_default().insert(id);
+                    }
+                    self.prepared
+                        .entry(id)
+                        .or_insert_with(|| crate::surfaces::prepare(quads));
+                }
+                Model::Unknown => {}
             }
         }
+        for &id in new_states {
+            self.state_users
+                .entry(self.states[&id].model)
+                .or_default()
+                .insert(id);
+        }
+        let mut changed = HashSet::new();
+        let mut queue = new_models.to_vec();
+        for sprite in new_sprites {
+            if let Some(models) = self.sprite_models.get(sprite) {
+                queue.extend(models);
+            }
+        }
+        while let Some(id) = queue.pop() {
+            if changed.insert(id)
+                && let Some(parents) = self.parents.get(&id)
+            {
+                queue.extend(parents);
+            }
+        }
+        let mut states = new_states.iter().copied().collect::<HashSet<_>>();
+        for id in &changed {
+            if let Some(users) = self.state_users.get(id) {
+                states.extend(users);
+            }
+            self.combined.remove(id);
+            self.volume_quads.remove(id);
+            self.volumes.remove(id);
+        }
+        // State-only appends may introduce the first geometry/volume consumer of an existing root.
+        let roots = states
+            .iter()
+            .map(|id| self.states[id].model)
+            .collect::<HashSet<_>>();
         fn deterministic(
             id: u32,
             models: &HashMap<u32, Model>,
@@ -314,19 +412,16 @@ impl Catalog {
             }
             Some(())
         }
-        // Only a fully deterministic root can be flattened. Weighted children retain the exact
-        // original random call order; no host model/selector is called a second time.
-        for state in self.states.values() {
+        for &id in &roots {
             if matches!(
-                self.models.get(&state.model),
+                self.models.get(&id),
                 Some(Model::Multipart(_) | Model::Alias(_))
-            ) && !self.combined.contains_key(&state.model)
+            ) && !self.combined.contains_key(&id)
             {
                 let mut quads = Vec::new();
-                if deterministic(state.model, &self.models, 0, &mut quads).is_some() {
-                    self.prepared
-                        .insert(state.model, crate::surfaces::prepare(&quads));
-                    self.combined.insert(state.model, quads);
+                if deterministic(id, &self.models, 0, &mut quads).is_some() {
+                    self.prepared.insert(id, crate::surfaces::prepare(&quads));
+                    self.combined.insert(id, quads);
                 }
             }
         }
@@ -361,22 +456,41 @@ impl Catalog {
             }
             Some(())
         }
-        // Only transmissive/contained-fluid sources need volume proofs. Immutable definitions
-        // share the grid; placements and the GPU never build or traverse a model object graph.
-        for state in self
-            .states
-            .values()
-            .filter(|s| s.flags & 768 != 0 || s.fluid.kind != 0 && s.flags & 16 == 0)
+        let volume_roots = states
+            .iter()
+            .filter_map(|id| {
+                let state = &self.states[id];
+                (state.flags & 768 != 0 || state.fluid.kind != 0 && state.flags & 16 == 0)
+                    .then_some(state.model)
+            })
+            .collect::<HashSet<_>>();
+        #[cfg(test)]
         {
-            let mut quads = Vec::new();
-            if collect(state.model, &self.models, &self.prepared, 0, &mut quads).is_none() {
+            self.derived_models = changed.len();
+            self.derived_states = states.len();
+            self.volume_expansions = 0;
+        }
+        for id in volume_roots {
+            if self.volume_quads.contains_key(&id) {
                 continue;
             }
-            if self.volume_prepared.insert(state.model)
-                && let Some(volume) = crate::volume::Volume::prepare(&quads)
-            {
-                self.volumes.insert(state.model, volume);
+            let mut quads = Vec::new();
+            let valid = collect(id, &self.models, &self.prepared, 0, &mut quads).is_some();
+            if valid && let Some(volume) = crate::volume::Volume::prepare(&quads) {
+                self.volumes.insert(id, volume);
             }
+            self.volume_quads.insert(id, valid.then_some(quads));
+            #[cfg(test)]
+            {
+                self.volume_expansions += 1;
+            }
+        }
+        // Each model expansion is shared, but optical identity/family remains state-specific.
+        for id in &states {
+            let state = &self.states[id];
+            let Some(Some(quads)) = self.volume_quads.get(&state.model) else {
+                continue;
+            };
             if state.flags & 768 == 0 || quads.is_empty() || quads.iter().any(|q| q.tint >= 0) {
                 continue;
             }
@@ -391,7 +505,7 @@ impl Catalog {
                 continue;
             }
             let family = state.name.strip_suffix("_pane").unwrap_or(&state.name);
-            for q in &quads {
+            for q in quads {
                 let texture = crate::sprite::texture(q.sprite);
                 let Some(&reference) = self.glass_references.get(&texture) else {
                     continue;
@@ -458,13 +572,40 @@ impl Catalog {
             cache.insert((id, depth), value);
             value
         }
-        let mut cache = HashMap::with_capacity(self.models.len());
-        self.face_masks = self
-            .models
-            .keys()
-            .map(|&id| (id, mask(id, &self.models, &mut cache, 0)))
-            .collect();
-        self.refresh_contact_capability();
+        let mut cache = HashMap::with_capacity(changed.len());
+        for &id in &changed {
+            self.face_masks
+                .insert(id, mask(id, &self.models, &mut cache, 0));
+        }
+        for id in states {
+            let state = &self.states[&id];
+            let mut occlusion = if state.same_block_culls() { 1 << 12 } else { 0 };
+            for (face, id) in state.faces.iter().enumerate() {
+                occlusion |= match id.0 {
+                    0 => 0,
+                    1 => 1 << (face ^ 1),
+                    _ => 1 << ((face ^ 1) + 6),
+                };
+            }
+            let masks = StateMasks {
+                emission: self.face_mask(state) as u8 | if state.fluid.kind != 0 { 128 } else { 0 },
+                occlusion,
+                contact: u8::from(self.contact_candidate(state))
+                    | (u8::from(!state.air() && (state.model != 0 || state.fluid.kind != 0)) << 1)
+                    | (u8::from(state.flags & 768 != 0 || state.fluid.kind != 0) << 2)
+                    | (u8::from(matches!(
+                        state.name.as_str(),
+                        "minecraft:fire" | "minecraft:soul_fire"
+                    )) << 3),
+            };
+            self.states.get_mut(&id).unwrap().masks = masks;
+        }
+        // Definitions only grow within a generation; replacement starts from Default.
+        self.contact_capable |= !self.fluids.is_empty()
+            || new_states.iter().any(|id| self.states[id].flags & 768 != 0)
+            || changed
+                .iter()
+                .any(|id| self.face_masks.get(id).is_some_and(|v| v & 0x600 != 0));
     }
     pub fn face_mask(&self, state: &State) -> u32 {
         if state.air() || state.flags & 16 != 0 {
@@ -488,6 +629,7 @@ impl Catalog {
     pub fn has_contacts(&self) -> bool {
         self.contact_capable
     }
+    #[cfg(test)]
     pub fn refresh_contact_capability(&mut self) {
         self.contact_capable = !self.fluids.is_empty()
             || self.states.values().any(|s| s.flags & 768 != 0)
@@ -784,5 +926,145 @@ pub(crate) fn cube(
                 layers,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod preparation_tests {
+    use super::*;
+
+    fn quad(face: u32, layer: usize) -> Quad {
+        Quad {
+            positions: [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]],
+            uvs: [[0.; 2]; 4],
+            face,
+            layer,
+            tint: -1,
+            sprite: 0,
+            emission: 0,
+        }
+    }
+
+    #[test]
+    fn shared_volume_sources_keep_each_optical_family_and_survive_state_only_appends() {
+        let mut catalog = Catalog::default();
+        catalog.models.insert(1, Model::Mesh(vec![quad(6, 2)]));
+        catalog
+            .glass_references
+            .insert(crate::sprite::texture(0), [1.; 4]);
+        for (id, name) in [(1, "test:clear_glass"), (2, "test:other_glass_pane")] {
+            catalog.states.insert(
+                id,
+                State {
+                    id,
+                    model: 1,
+                    flags: 256,
+                    name: name.into(),
+                    ..Default::default()
+                },
+            );
+        }
+        catalog.prepare();
+        assert_eq!(catalog.volume_expansions, 1);
+        let quads = catalog.volume_quads[&1].as_ref().unwrap().as_ptr();
+        let prepared = catalog.prepared_for_test(1);
+        let a = catalog.optical_materials[&(1, crate::sprite::texture(0))];
+        let b = catalog.optical_materials[&(2, crate::sprite::texture(0))];
+        assert_ne!(a.0, b.0);
+        assert!(a.2 && b.2); // Same planar model, distinct families, both thin surfaces.
+        catalog.states.insert(
+            3,
+            State {
+                id: 3,
+                model: 1,
+                flags: 256,
+                name: "test:clear_glass_pane".into(),
+                ..Default::default()
+            },
+        );
+        catalog.prepare_delta(&[3], &[], &[]);
+        assert_eq!(
+            (
+                catalog.derived_models,
+                catalog.derived_states,
+                catalog.volume_expansions
+            ),
+            (0, 1, 0)
+        );
+        assert_eq!(catalog.volume_quads[&1].as_ref().unwrap().as_ptr(), quads);
+        assert_eq!(catalog.prepared_for_test(1), prepared);
+        assert_eq!(
+            catalog.optical_materials[&(3, crate::sprite::texture(0))].0,
+            a.0
+        );
+        catalog.models.insert(99, Model::Mesh(vec![quad(1, 0)]));
+        catalog.prepare_delta(&[], &[99], &[]);
+        assert_eq!(
+            (
+                catalog.derived_models,
+                catalog.derived_states,
+                catalog.volume_expansions
+            ),
+            (1, 0, 0)
+        );
+        assert_eq!(catalog.volume_quads[&1].as_ref().unwrap().as_ptr(), quads);
+    }
+
+    #[test]
+    fn late_children_update_only_reverse_closure_and_keep_weighted_and_cycle_fallbacks() {
+        let mut catalog = Catalog::default();
+        catalog.models.insert(1, Model::Alias(2));
+        catalog.models.insert(2, Model::Multipart(vec![3, 4]));
+        catalog.models.insert(3, Model::Alias(5)); // Child 5 arrives later.
+        catalog.models.insert(4, Model::Mesh(vec![quad(1, 0)]));
+        catalog.models.insert(6, Model::Alias(7));
+        catalog.models.insert(7, Model::Alias(6));
+        catalog
+            .models
+            .insert(8, Model::Weighted(vec![(1, 5), (2, 4)], 3));
+        for id in [1, 6, 8] {
+            catalog.states.insert(
+                id,
+                State {
+                    id,
+                    model: id,
+                    flags: if id == 1 { 256 } else { 0 },
+                    name: "test:late_glass".into(),
+                    ..Default::default()
+                },
+            );
+        }
+        catalog
+            .glass_references
+            .insert(crate::sprite::texture(0), [1.; 4]);
+        catalog.prepare();
+        assert!(!catalog.combined.contains_key(&1));
+        assert!(catalog.volume_quads[&1].is_none());
+        assert_eq!(catalog.face_mask(&catalog.states[&6]), 127);
+        let unrelated = catalog.prepared_for_test(4);
+        catalog.models.insert(5, Model::Mesh(vec![quad(2, 1)]));
+        catalog.prepare_delta(&[], &[5], &[]);
+        assert_eq!((catalog.derived_models, catalog.derived_states), (5, 2)); // 5,3,2,1,8.
+        assert_eq!(catalog.volume_expansions, 1);
+        assert_eq!(catalog.volume_quads[&1].as_ref().unwrap().len(), 2);
+        assert!(
+            catalog
+                .optical_materials
+                .contains_key(&(1, crate::sprite::texture(0)))
+        );
+        assert_eq!(catalog.prepared_for_test(4), unrelated);
+        assert_eq!(
+            catalog.combined[&1]
+                .iter()
+                .map(|q| q.face)
+                .collect::<Vec<_>>(),
+            [2, 1]
+        );
+        assert!(!catalog.combined.contains_key(&8));
+        for id in [1, 8] {
+            assert_eq!(catalog.states[&id].masks.emission, (1 << 1) | (1 << 2));
+            assert_eq!(catalog.states[&id].masks.contact & 1, 1); // New cutout child contact proof.
+        }
+        assert_eq!(catalog.face_mask(&catalog.states[&6]), 127);
     }
 }

@@ -53,6 +53,21 @@ public float rrCpuNee(uint vertex, uint budget, float pdf, float competingPdf) {
                    : 1.0 / pdf;
 }
 
+public float3 rrCpuZeroNee(float3 accumulated, float3 source, float pdf, float competingPdf,
+                           float3 response, float3 throughput, bool shortcut, bool continuation) {
+    BsdfEvaluation evaluated = primeSanitizeBsdfEvaluation({response, competingPdf});
+    if (pdf > 0 && !(shortcut && primeCanSkipZeroNee(source, pdf, throughput, continuation))) {
+        float inverse =
+                continuation ? primePowerHeuristicOverPdfValue(pdf, evaluated.pdf) : 1.0 / pdf;
+        accumulated += throughput * primeTripleProduct(source, evaluated.response, inverse);
+    }
+    // Match the production per-channel radiance cleanup after transport: a NaN
+    // zero term must not silently retain an earlier finite accumulated value.
+    return float3(primeBsdfFinite(accumulated.x) ? max(accumulated.x, 0.0) : 0.0,
+                  primeBsdfFinite(accumulated.y) ? max(accumulated.y, 0.0) : 0.0,
+                  primeBsdfFinite(accumulated.z) ? max(accumulated.z, 0.0) : 0.0);
+}
+
 [shader("compute")][numthreads(1, 1, 1)] void main(uint3 id : SV_DispatchThreadID) {
     float4 a = inputs[2 * id.x], b = inputs[2 * id.x + 1];
     outputs[4 * id.x] = rrCpuMath(a);
@@ -62,6 +77,8 @@ public float rrCpuNee(uint vertex, uint budget, float pdf, float competingPdf) {
     outputs[4 * id.x + 2] = float4(sampled.bsdfSample.relativeEta, sampled.bsdfSample.eventFlags,
                                    sampled.medium.x, rrCpuBudget(id.x, 64));
     BsdfSample cleaned = rrCpuSanitize(a.w, b.x, b.y);
-    outputs[4 * id.x + 3] = float4(rrCpuSobol(id.x & 255u, 0, 8), cleaned.pdf, cleaned.relativeEta,
-                                   float(cleaned.eventFlags) + rrCpuNee(id.x, 64, 0.25, 0.5));
+    outputs[4 * id.x + 3] = float4(
+            rrCpuSobol(id.x & 255u, 0, 8), cleaned.pdf, cleaned.relativeEta,
+            float(cleaned.eventFlags) + rrCpuNee(id.x, 64, 0.25, 0.5) +
+                    rrCpuZeroNee(a.xyz, b.xyz, a.w, b.x, a.xyz, b.xyz, b.y != 0, b.z != 0).x);
 }

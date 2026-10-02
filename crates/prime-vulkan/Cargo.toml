@@ -21,6 +21,7 @@ cc = "1.5.1"
 
 [dev-dependencies]
 mimalloc.workspace = true
+prime_scene = { workspace = true, features = ["legacy-fixtures"] }
 
 [lints]
 workspace = true

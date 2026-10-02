@@ -242,6 +242,25 @@ impl Drop for Context {
     }
 }
 impl Context {
+    /// Counts Context-owned memory, including retired allocations. Host/SDK memory is external.
+    pub(super) fn allocate_memory(
+        &self,
+        info: &vk::MemoryAllocateInfo<'_>,
+    ) -> Result<vk::DeviceMemory, String> {
+        let previous = self.live_allocations.fetch_add(1, Ordering::Relaxed);
+        if previous >= u64::from(self.max_memory_allocations) {
+            self.live_allocations.fetch_sub(1, Ordering::Relaxed);
+            return Err("Native Vulkan allocation limit reached; host submissions must retire before more allocations".into());
+        }
+        match unsafe { self.device.allocate_memory(info, None) } {
+            Ok(memory) => Ok(memory),
+            Err(e) => {
+                self.live_allocations.fetch_sub(1, Ordering::Relaxed);
+                Err(error("Allocate Vulkan memory", e))
+            }
+        }
+    }
+
     pub fn new() -> Result<Arc<Self>, String> {
         unsafe {
             let entry = Entry::load().map_err(|e| format!("Load Vulkan loader: {e}"))?;
@@ -962,6 +981,9 @@ impl Context {
                     self.device.destroy_image_view(view, None);
                     self.device.destroy_image(image, None);
                     self.device.free_memory(memory, None);
+                    if memory != vk::DeviceMemory::null() {
+                        self.live_allocations.fetch_sub(1, Ordering::Relaxed);
+                    }
                 }
             }
         }
@@ -1289,18 +1311,11 @@ impl Buffer {
             }
             // Retired host resources still occupy allocations until their serial
             // completes. Count them, not just the current cluster batch.
-            let previous = context.live_allocations.fetch_add(1, Ordering::Relaxed);
-            if previous >= u64::from(context.max_memory_allocations) {
-                context.live_allocations.fetch_sub(1, Ordering::Relaxed);
-                context.device.destroy_buffer(buffer, None);
-                return Err("Native Vulkan allocation limit reached; host submissions must retire before more scene uploads".into());
-            }
-            let memory = match context.device.allocate_memory(&allocate, None) {
+            let memory = match context.allocate_memory(&allocate) {
                 Ok(memory) => memory,
                 Err(e) => {
-                    context.live_allocations.fetch_sub(1, Ordering::Relaxed);
                     context.device.destroy_buffer(buffer, None);
-                    return Err(error("Allocate Vulkan memory", e));
+                    return Err(e);
                 }
             };
             let mut result = Self {
@@ -1544,11 +1559,44 @@ impl PreparedAcceleration<'_> {
         self.record_geometries(command, &geometries, &ranges);
     }
 
+    pub fn record_update(
+        &self,
+        command: vk::CommandBuffer,
+        geometry: vk::AccelerationStructureGeometryKHR<'_>,
+        count: u32,
+    ) {
+        assert!(
+            self.flags
+                .contains(vk::BuildAccelerationStructureFlagsKHR::ALLOW_UPDATE)
+        );
+        let ranges = [vk::AccelerationStructureBuildRangeInfoKHR::default().primitive_count(count)];
+        self.record_geometries_mode(
+            command,
+            &[geometry],
+            &ranges,
+            vk::BuildAccelerationStructureModeKHR::UPDATE,
+        );
+    }
+
     fn record_geometries(
         &self,
         command: vk::CommandBuffer,
         geometries: &[vk::AccelerationStructureGeometryKHR<'_>],
         ranges: &[vk::AccelerationStructureBuildRangeInfoKHR],
+    ) {
+        self.record_geometries_mode(
+            command,
+            geometries,
+            ranges,
+            vk::BuildAccelerationStructureModeKHR::BUILD,
+        );
+    }
+    fn record_geometries_mode(
+        &self,
+        command: vk::CommandBuffer,
+        geometries: &[vk::AccelerationStructureGeometryKHR<'_>],
+        ranges: &[vk::AccelerationStructureBuildRangeInfoKHR],
+        mode: vk::BuildAccelerationStructureModeKHR,
     ) {
         let context = &self.acceleration.context;
         let address = self
@@ -1559,9 +1607,14 @@ impl PreparedAcceleration<'_> {
         let info = vk::AccelerationStructureBuildGeometryInfoKHR::default()
             .ty(self.kind)
             .flags(self.flags)
-            .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
+            .mode(mode)
             .geometries(geometries)
             .dst_acceleration_structure(self.acceleration.handle)
+            .src_acceleration_structure(if mode == vk::BuildAccelerationStructureModeKHR::UPDATE {
+                self.acceleration.handle
+            } else {
+                vk::AccelerationStructureKHR::null()
+            })
             .scratch_data(vk::DeviceOrHostAddressKHR {
                 device_address: address,
             });
@@ -1704,12 +1757,12 @@ impl Acceleration {
                             .acceleration_structure(handle),
                     ),
             };
-            let scratch =
-                arena.allocate(context, sizes.build_scratch_size, context.scratch_alignment)?;
+            let scratch_size = sizes.build_scratch_size.max(sizes.update_scratch_size);
+            let scratch = arena.allocate(context, scratch_size, context.scratch_alignment)?;
             Ok(PreparedAcceleration {
                 acceleration: result,
                 scratch: Some(scratch),
-                scratch_size: sizes.build_scratch_size,
+                scratch_size,
                 geometries,
                 ranges: counts
                     .iter()
@@ -1760,6 +1813,8 @@ mod host_tests {
         completed: u64,
         reject_queries: bool,
         destroyed: Vec<&'static str>,
+        allocations: usize,
+        reject_allocations: bool,
     }
     thread_local! {
         static FAKE_CALLS: RefCell<FakeCalls> = RefCell::new(FakeCalls::default());
@@ -1816,6 +1871,39 @@ mod host_tests {
         _: *const vk::AllocationCallbacks<'_>,
     ) {
         FAKE_CALLS.with(|calls| calls.borrow_mut().destroyed.push("memory"));
+    }
+    unsafe extern "system" fn fake_allocate_memory(
+        _: vk::Device,
+        _: *const vk::MemoryAllocateInfo<'_>,
+        _: *const vk::AllocationCallbacks<'_>,
+        memory: *mut vk::DeviceMemory,
+    ) -> vk::Result {
+        FAKE_CALLS.with(|calls| {
+            let mut calls = calls.borrow_mut();
+            calls.allocations += 1;
+            if calls.reject_allocations {
+                vk::Result::ERROR_OUT_OF_DEVICE_MEMORY
+            } else {
+                unsafe {
+                    *memory = vk::DeviceMemory::from_raw(calls.allocations as u64);
+                }
+                vk::Result::SUCCESS
+            }
+        })
+    }
+    unsafe extern "system" fn fake_destroy_image(
+        _: vk::Device,
+        _: vk::Image,
+        _: *const vk::AllocationCallbacks<'_>,
+    ) {
+        FAKE_CALLS.with(|calls| calls.borrow_mut().destroyed.push("image"));
+    }
+    unsafe extern "system" fn fake_destroy_image_view(
+        _: vk::Device,
+        _: vk::ImageView,
+        _: *const vk::AllocationCallbacks<'_>,
+    ) {
+        FAKE_CALLS.with(|calls| calls.borrow_mut().destroyed.push("view"));
     }
     unsafe extern "system" fn fake_instance_proc(
         _: vk::Instance,
@@ -1876,6 +1964,9 @@ mod host_tests {
                     b"vkDestroyCommandPool" => fake_destroy_pool as *const () as *const c_void,
                     b"vkDestroyBuffer" => fake_destroy_buffer as *const () as *const c_void,
                     b"vkFreeMemory" => fake_free_memory as *const () as *const c_void,
+                    b"vkAllocateMemory" => fake_allocate_memory as *const () as *const c_void,
+                    b"vkDestroyImage" => fake_destroy_image as *const () as *const c_void,
+                    b"vkDestroyImageView" => fake_destroy_image_view as *const () as *const c_void,
                     _ => std::ptr::null(),
                 },
                 vk::Device::null(),
@@ -1974,6 +2065,44 @@ mod host_tests {
             device_address: 0,
             mapped: None,
         }
+    }
+
+    #[test]
+    fn allocation_guard_counts_retired_images_until_completion_and_rolls_back_failures() {
+        let context = fake_context();
+        context.live_allocations.store(0, Ordering::Relaxed);
+        FAKE_CALLS.with(|calls| calls.borrow_mut().reject_allocations = true);
+        assert!(
+            context
+                .allocate_memory(&vk::MemoryAllocateInfo::default())
+                .is_err()
+        );
+        assert_eq!(context.live_allocations.load(Ordering::Relaxed), 0);
+        FAKE_CALLS.with(|calls| calls.borrow_mut().reject_allocations = false);
+        let memory = context
+            .allocate_memory(&vk::MemoryAllocateInfo::default())
+            .unwrap();
+        context.retire_image(vk::Image::null(), vk::ImageView::null(), memory);
+        assert_eq!(context.live_allocations.load(Ordering::Relaxed), 1);
+        assert!(
+            context
+                .allocate_memory(&vk::MemoryAllocateInfo::default())
+                .is_err()
+        );
+        FAKE_CALLS.with(|calls| assert_eq!(calls.borrow().allocations, 2));
+        // A failed partial Image construction owns no allocation to decrement.
+        context.retire_image(
+            vk::Image::null(),
+            vk::ImageView::null(),
+            vk::DeviceMemory::null(),
+        );
+        context.finish_host().unwrap();
+        assert_eq!(context.live_allocations.load(Ordering::Relaxed), 0);
+        let second = context
+            .allocate_memory(&vk::MemoryAllocateInfo::default())
+            .unwrap();
+        context.retire_image(vk::Image::null(), vk::ImageView::null(), second);
+        assert_eq!(context.live_allocations.load(Ordering::Relaxed), 0);
     }
 
     #[test]

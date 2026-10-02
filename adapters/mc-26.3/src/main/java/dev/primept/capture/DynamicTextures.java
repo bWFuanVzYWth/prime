@@ -8,6 +8,8 @@ import dev.primept.mixin.SpriteContentsAccessor;
 import java.util.IdentityHashMap;
 import java.nio.ByteBuffer;
 import java.util.LinkedHashSet;
+import java.util.ArrayList;
+import dev.primept.abi.PrimeAbi.*;
 import net.minecraft.client.renderer.texture.SpriteLoader;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 
@@ -15,6 +17,8 @@ import net.minecraft.client.renderer.texture.TextureAtlas;
 public final class DynamicTextures {
     private static final IdentityHashMap<GpuTexture, Texture> SOURCES = new IdentityHashMap<>();
     private static final LinkedHashSet<Texture> NEEDED = new LinkedHashSet<>();
+    private static final ArrayList<Texture> PUBLISHING = new ArrayList<>();
+    private static final ArrayList<NativeBridge.TextureSource> DESCRIPTORS = new ArrayList<>();
     private static final java.util.LinkedHashMap<Integer, Long> RETIRED =
             new java.util.LinkedHashMap<>();
     private static int nextId = 2;
@@ -179,11 +183,31 @@ public final class DynamicTextures {
         return source.id;
     }
     public static void submit(long epoch, NativeBridge bridge) {
-        for (Texture source : NEEDED) {
-            if (source.sentEpoch == epoch)
-                continue;
-            bridge.submitTexture(epoch, source.id, source.width, source.height, source.rgba);
-            source.sentEpoch = epoch;
+        submit(epoch, bridge, Packets.MAX_PACKET_BYTES);
+    }
+    static void submit(long epoch, NativeBridge bridge, int maximumBytes) {
+        long bytes = PrimeTextureBatch.SIZE;
+        try {
+            for (Texture source : NEEDED) {
+                if (source.sentEpoch == epoch)
+                    continue;
+                long recordBytes = PrimeTextureSource.SIZE + source.rgba.length;
+                if (PrimeTextureBatch.SIZE + recordBytes > maximumBytes)
+                    throw new IllegalArgumentException("Texture exceeds batch capacity");
+                if (bytes + recordBytes > maximumBytes) {
+                    publish(epoch, bridge);
+                    bytes = PrimeTextureBatch.SIZE;
+                }
+                PUBLISHING.add(source);
+                DESCRIPTORS.add(new NativeBridge.TextureSource(source.id, source.width,
+                                                               source.height, source.rgba));
+                bytes += recordBytes;
+            }
+            if (!PUBLISHING.isEmpty())
+                publish(epoch, bridge);
+        } finally {
+            PUBLISHING.clear();
+            DESCRIPTORS.clear();
         }
         if (!RETIRED.isEmpty()) {
             int[] ids = RETIRED.entrySet()
@@ -195,5 +219,12 @@ public final class DynamicTextures {
                 bridge.retireTextures(epoch, ids);
             RETIRED.clear();
         }
+    }
+    private static void publish(long epoch, NativeBridge bridge) {
+        bridge.submitTextures(epoch, DESCRIPTORS);
+        for (Texture source : PUBLISHING)
+            source.sentEpoch = epoch;
+        PUBLISHING.clear();
+        DESCRIPTORS.clear();
     }
 }

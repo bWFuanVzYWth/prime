@@ -1,4 +1,5 @@
 //! Immutable face profiles lowered once per resource epoch. No per-block shape allocation or join.
+#[cfg(test)]
 use crate::wire::Reader;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
@@ -49,6 +50,7 @@ impl Face {
         face.height = face.covered_height();
         Ok((FaceId(value.id), face))
     }
+    #[cfg(test)]
     pub fn read(r: &mut Reader<'_>) -> Result<(FaceId, Self), String> {
         let id = FaceId(r.u32()?);
         let nu = r.u32()? as usize;

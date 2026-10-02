@@ -13,6 +13,7 @@ import java.lang.invoke.MethodHandle;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Path;
+import java.util.List;
 import static java.lang.foreign.ValueLayout.*;
 
 /** One render-thread owner. Native code consumes borrowed input before return and owns all retained data. */
@@ -111,27 +112,58 @@ public final class NativeBridge implements AutoCloseable {
     }
     /** One copy of authored pixels; typed descriptors and bytes share reusable native owner storage. */
     public void submitTexture(long epoch, int id, int width, int height, byte[] rgba) {
+        submitTextures(epoch, List.of(new TextureSource(id, width, height, rgba)));
+    }
+
+    /** Authored pixels are borrowed synchronously; descriptors share one bounded native transaction. */
+    public record TextureSource(int id, int width, int height, byte[] rgba) {}
+
+    public void submitTextures(long epoch, List<TextureSource> sources) {
         checkOwner();
-        int pixels = Packets.texturePixelBytes(width, height);
-        if (rgba.length != pixels)
-            throw new IllegalArgumentException("Unexpected texture byte count");
-        var storage = packetStorage(
-                Math.toIntExact(PrimeTextureBatch.SIZE + PrimeTextureSource.SIZE + pixels));
+        int size = textureBatchBytes(sources);
+        var storage = packetStorage(size);
+        call(textures, "prime_textures", encodeTextures(storage, epoch, sources));
+    }
+
+    static int textureBatchBytes(List<TextureSource> sources) {
+        long size = PrimeTextureBatch.SIZE;
+        for (var source : sources) {
+            int pixels = Packets.texturePixelBytes(source.width(), source.height());
+            if (source.rgba().length != pixels)
+                throw new IllegalArgumentException("Unexpected texture byte count");
+            size += PrimeTextureSource.SIZE + pixels;
+            if (size > Packets.MAX_PACKET_BYTES)
+                throw new IllegalArgumentException("Texture batch exceeds 256 MiB");
+        }
+        return Math.toIntExact(size);
+    }
+
+    /** Receives the validated exact storage range; no source pointer escapes the synchronous submit. */
+    static MemorySegment encodeTextures(MemorySegment storage, long epoch,
+                                        List<TextureSource> sources) {
         var batch = storage.asSlice(0, PrimeTextureBatch.SIZE);
-        var source = storage.asSlice(PrimeTextureBatch.SIZE, PrimeTextureSource.SIZE);
-        var payload = storage.asSlice(PrimeTextureBatch.SIZE + PrimeTextureSource.SIZE, pixels);
-        payload.copyFrom(MemorySegment.ofArray(rgba));
+        long descriptors = PrimeTextureBatch.SIZE;
+        long payloadAt = descriptors + sources.size() * PrimeTextureSource.SIZE;
         header(PrimeTextureBatch.header(batch), PrimeTextureBatch.SIZE);
         PrimeTextureBatch.epoch(batch, epoch);
-        PrimeTextureBatch.textures(batch, source);
-        PrimeTextureBatch.count(batch, 1);
-        PrimeTextureSource.id(source, id);
-        PrimeTextureSource.width(source, width);
-        PrimeTextureSource.height(source, height);
-        PrimeTextureSource.reserved(source, 0);
-        PrimeByteSpan.data(PrimeTextureSource.rgba(source), payload);
-        PrimeByteSpan.count(PrimeTextureSource.rgba(source), pixels);
-        call(textures, "prime_textures", batch);
+        PrimeTextureBatch.textures(
+                batch, storage.asSlice(descriptors, sources.size() * PrimeTextureSource.SIZE));
+        PrimeTextureBatch.count(batch, sources.size());
+        for (int i = 0; i < sources.size(); ++i) {
+            var input = sources.get(i);
+            var source = storage.asSlice(descriptors + i * PrimeTextureSource.SIZE,
+                                         PrimeTextureSource.SIZE);
+            var payload = storage.asSlice(payloadAt, input.rgba().length);
+            payloadAt += input.rgba().length;
+            payload.copyFrom(MemorySegment.ofArray(input.rgba()));
+            PrimeTextureSource.id(source, input.id());
+            PrimeTextureSource.width(source, input.width());
+            PrimeTextureSource.height(source, input.height());
+            PrimeTextureSource.reserved(source, 0);
+            PrimeByteSpan.data(PrimeTextureSource.rgba(source), payload);
+            PrimeByteSpan.count(PrimeTextureSource.rgba(source), input.rgba().length);
+        }
+        return batch;
     }
     public void retireTextures(long epoch, int[] ids) {
         checkOwner();

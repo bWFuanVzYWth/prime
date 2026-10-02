@@ -20,6 +20,7 @@ mod omm_cpu;
 #[cfg(all(test, feature = "shader-tests"))]
 mod omm_tests;
 mod openpbr;
+mod static_directory;
 #[cfg(all(test, feature = "shader-tests"))]
 mod terrain_budget_tests;
 pub use display::{PrimeDrtParameters, PrimeDrtSettings};
@@ -130,6 +131,15 @@ impl Drop for Pipeline {
                     .destroy_descriptor_set_layout(self.environment_layout, None);
             }
         }
+    }
+}
+struct ShaderModule<'a> {
+    context: &'a Context,
+    handle: vk::ShaderModule,
+}
+impl Drop for ShaderModule<'_> {
+    fn drop(&mut self) {
+        unsafe { self.context.device.destroy_shader_module(self.handle, None) };
     }
 }
 impl Pipeline {
@@ -260,17 +270,30 @@ impl Pipeline {
                 })
                 .collect();
             context.device.update_descriptor_sets(&energy_writes, &[]);
-            let create = |bytes: &[u8],
-                          features: [u32; 3],
-                          single_sample: u32,
-                          primary: bool|
+            let mut modules = std::collections::BTreeMap::new();
+            let mut create = |bytes: &[u8],
+                              features: [u32; 3],
+                              single_sample: u32,
+                              primary: bool|
              -> Result<vk::Pipeline, String> {
-                let spirv = ash::util::read_spv(&mut Cursor::new(bytes))
-                    .map_err(|e| format!("Read compiled Slang SPIR-V: {e}"))?;
-                let shader = context
-                    .device
-                    .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
-                    .map_err(|e| error("Create Slang shader module", e))?;
+                let shader = modules.entry((bytes.as_ptr() as usize, bytes.len()));
+                let shader = match shader {
+                    std::collections::btree_map::Entry::Occupied(module) => module.into_mut(),
+                    std::collections::btree_map::Entry::Vacant(module) => {
+                        let spirv = ash::util::read_spv(&mut Cursor::new(bytes))
+                            .map_err(|e| format!("Read compiled Slang SPIR-V: {e}"))?;
+                        module.insert(ShaderModule {
+                            context,
+                            handle: context
+                                .device
+                                .create_shader_module(
+                                    &vk::ShaderModuleCreateInfo::default().code(&spirv),
+                                    None,
+                                )
+                                .map_err(|e| error("Create Slang shader module", e))?,
+                        })
+                    }
+                };
                 let entries = [
                     vk::SpecializationMapEntry {
                         constant_id: 0,
@@ -305,7 +328,7 @@ impl Pipeline {
                     .data(data.as_flattened());
                 let stage = vk::PipelineShaderStageCreateInfo::default()
                     .stage(vk::ShaderStageFlags::COMPUTE)
-                    .module(shader)
+                    .module(shader.handle)
                     .name(c"main")
                     .specialization_info(&specialization);
                 let created = context.device.create_compute_pipelines(
@@ -315,7 +338,6 @@ impl Pipeline {
                         .layout(result.layout)],
                     None,
                 );
-                context.device.destroy_shader_module(shader, None);
                 Ok(match created {
                     Ok(pipelines) => pipelines[0],
                     Err((partial, e)) => {

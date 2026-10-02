@@ -15,7 +15,7 @@ light-sampling-bench = ["vulkan", "prime_vulkan/light-sampling-bench"]
 
 [dependencies]
 mimalloc.workspace = true
-prime_scene.workspace = true
+prime_scene = { workspace = true, features = ["legacy-fixtures"] }
 prime_vulkan = { workspace = true, optional = true }
 png = { workspace = true, optional = true }
 

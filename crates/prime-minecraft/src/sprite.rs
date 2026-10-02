@@ -1,4 +1,5 @@
 //! Resource-local sprite identity. Atlas UV interpretation and animation stay in Rust.
+#[cfg(test)]
 use crate::wire::Reader;
 use prime_scene::{SourceScene, Texture, TextureLevel, TextureSampling};
 use std::sync::Arc;
@@ -165,6 +166,7 @@ impl Sprite {
         Ok(std::array::from_fn(|i| f32::from(pixel[i]) / 255.))
     }
 
+    #[cfg(test)]
     pub fn read(r: &mut Reader<'_>) -> Result<(u32, Self), String> {
         let id = r.u32()?;
         let name = r.string()?;

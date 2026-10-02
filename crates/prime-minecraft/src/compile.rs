@@ -23,6 +23,11 @@ static MISSING: State = State {
         material: 0,
     },
     placement: crate::placement::Placement::NONE,
+    masks: crate::model::StateMasks {
+        emission: 63,
+        occlusion: 0,
+        contact: 0,
+    },
 };
 const ROW: usize = 18;
 const PLANE: usize = ROW * ROW;
@@ -40,32 +45,11 @@ struct Cell<'a> {
 impl<'a> Cell<'a> {
     fn lower(id: u32, catalog: &'a Catalog) -> Self {
         let state = catalog.states.get(&id).unwrap_or(&MISSING);
-        // Face bits are reversed once so a neighbor can be tested with the source direction.
-        // Bits 0..6 identify full faces, 6..12 identify faces requiring the exact shape test.
-        let mut occlusion = if state.same_block_culls() {
-            MATCHING
-        } else {
-            0
-        };
-        for (face, id) in state.faces.iter().enumerate() {
-            occlusion |= match id.0 {
-                0 => 0,
-                1 => 1 << (face ^ 1),
-                _ => 1 << ((face ^ 1) + 6),
-            };
-        }
         Self {
             state,
-            emission: catalog.face_mask(state) as u8
-                | if state.fluid.kind != 0 { FLUID } else { 0 },
-            occlusion,
-            contact: u8::from(catalog.contact_candidate(state))
-                | (u8::from(!state.air() && (state.model != 0 || state.fluid.kind != 0)) << 1)
-                | (u8::from(state.flags & 768 != 0 || state.fluid.kind != 0) << 2)
-                | (u8::from(matches!(
-                    state.name.as_str(),
-                    "minecraft:fire" | "minecraft:soul_fire"
-                )) << 3),
+            emission: state.masks.emission,
+            occlusion: state.masks.occlusion,
+            contact: state.masks.contact,
         }
     }
 }

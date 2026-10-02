@@ -15,7 +15,6 @@ import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
-import net.minecraft.world.level.lighting.LevelLightEngine;
 
 /** Host event/field router. The native owner determines radius, requests, dependencies and scheduling. */
 public final class ExclusiveTerrainCapture implements AutoCloseable {
@@ -42,13 +41,14 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
     private long dirtyEvents, loadedColumns, unloadedColumns, invalidations, lightEngineEvents,
             lightPacketEvents;
     private Stats stats = Stats.EMPTY;
-    public record Stats(long dirty, long entered, long loaded, long unloaded, long invalidations,
-                        long selected, long emptyPublished, long emptyRetained, long routed,
-                        long deferred, long waiting, long planNanos, long packNanos,
-                        long totalNanos, long lightEngineEvents, long lightPacketEvents,
-                        long acceptNanos, long sourceBytes, long tintQueries, long tintNanos) {
+    /** Host source responses only: requested = available + missing, independently of native build backlog. */
+    public record
+            Stats(long dirty, long entered, long loaded, long unloaded, long invalidations,
+                  long requested, long available, long missing, long planNanos, long packNanos,
+                  long totalNanos, long lightEngineEvents, long lightPacketEvents, long acceptNanos,
+                  long sourceBytes, long tintQueries, long tintNanos) {
         private static final Stats EMPTY =
-                new Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                new Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
     public enum LightNotification { ENGINE, PACKET }
     public static void lightNotification(Object level, LightNotification kind) {
@@ -87,9 +87,6 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
     }
     public static long routedSections() {
         return current == null ? 0 : current.routedSections;
-    }
-    public static int pendingSections() {
-        return 0; // Source requests are synchronous; only the Rust owner schedules sections.
     }
 
     /** Caller has stopped vanilla submissions and proved their host GPU completion. */
@@ -300,7 +297,7 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         lastFrame = serial;
         routedSections += available;
         stats = new Stats(dirtyEvents, entered, loadedColumns, unloadedColumns, invalidations,
-                          count, 0, 0, available, count - available, 0, packStart - planStart,
+                          count, available, count - available, packStart - planStart,
                           packEnd - packStart, completed - started, lightEngineEvents,
                           lightPacketEvents, completed - packEnd - tintNanos,
                           frame.bytes() + sourceBytes, tintQueries, tintNanos);
@@ -351,9 +348,6 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
     public static void cacheWindowChanged() {
         if (current != null)
             current.inventory = true;
-    }
-    public static void lightStatusChanged(LevelLightEngine engine, int x, int z) {
-        // P007: this raw-state prototype has no light-dependent source callbacks/readiness gate.
     }
     public static void invalidateAll() {
         if (current == null || current.world == null)

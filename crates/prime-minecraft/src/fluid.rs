@@ -1,8 +1,7 @@
 //! Pure MC fluid compilation from the closed 3×3×3 neighborhood and resource dictionary.
-use crate::{
-    model::{Catalog, Hacks, Quad, State, cube, emit_quad},
-    wire::Reader,
-};
+use crate::model::{Catalog, Hacks, Quad, State, cube, emit_quad};
+#[cfg(test)]
+use crate::wire::Reader;
 use prime_scene::compiled::CompiledQuad;
 #[derive(Clone, Copy, Default, PartialEq)]
 pub(crate) struct Fluid {
@@ -40,6 +39,7 @@ impl Fluid {
             material,
         })
     }
+    #[cfg(test)]
     pub fn read(r: &mut Reader<'_>) -> Result<Self, String> {
         let name = r.string()?;
         let level = r.u32()?;
@@ -95,6 +95,7 @@ impl FluidMaterial {
             },
         ))
     }
+    #[cfg(test)]
     pub fn read(r: &mut Reader<'_>) -> Result<(u32, Self), String> {
         let id = r.u32()?;
         let layer = r.u32()?;

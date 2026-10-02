@@ -36,6 +36,7 @@ pub(crate) fn arena_capacity(required: u32, limit: u32) -> Result<u32, String> {
         .min(limit))
 }
 
+#[derive(Clone)]
 pub(crate) struct Slots {
     pub(crate) end: u32,
     free: BTreeMap<u32, u32>,

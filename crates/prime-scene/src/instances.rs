@@ -178,6 +178,7 @@ impl InstanceContext {
 
     /// Only scratch changes before complete validation. Success and failure both release
     /// decoded values while retaining capacities; stable pose batches need no allocations.
+    #[cfg(any(test, feature = "legacy-fixtures"))]
     pub fn submit(
         &mut self,
         bytes: &[u8],

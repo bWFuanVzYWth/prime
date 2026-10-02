@@ -5,6 +5,80 @@ use prime_scene::{Instance, Prototype, Texture, TextureLevel, TextureMaterial, T
 use std::sync::Arc;
 
 const SHADER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/pbr_texture.spv"));
+
+#[test]
+#[ignore = "windowless mapped texture planning: failed source validation preserves GPU tables and owners"]
+fn gpu_texture_direct_write_validation_failure_preserves_published_state() {
+    use crate::resources::Buffer;
+    use ash::vk;
+    let context = Context::new().unwrap();
+    let scene = fixture();
+    let mut uploads = crate::arena::Arena::new(&context, true);
+    let mut textures =
+        crate::textures::Textures::new(&context, &scene.textures, &mut uploads).unwrap();
+    let identities = textures.indices.clone();
+    let slots = textures.retained_slots();
+    let coverage = textures.coverage_changed.clone();
+    let occlusion = textures.occlusion_changed;
+    let read = |source: &Buffer| {
+        let destination = Buffer::new(
+            &context,
+            source.size,
+            vk::BufferUsageFlags::TRANSFER_DST,
+            true,
+        )
+        .unwrap();
+        context
+            .submit_named("texture_validation_readback", |command| unsafe {
+                context.device.cmd_copy_buffer(
+                    command,
+                    source.buffer,
+                    destination.buffer,
+                    &[vk::BufferCopy::default().size(source.size)],
+                );
+                context.device.cmd_pipeline_barrier(
+                    command,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::HOST,
+                    vk::DependencyFlags::empty(),
+                    &[vk::MemoryBarrier::default()
+                        .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                        .dst_access_mask(vk::AccessFlags::HOST_READ)],
+                    &[],
+                    &[],
+                );
+            })
+            .unwrap();
+        destination.read(source.size as usize).unwrap()
+    };
+    let metadata = read(&textures.metadata);
+    let texels = read(&textures.texels);
+    let mut invalid = scene.textures.clone();
+    invalid.remove(&90);
+    let mut atlas = invalid[&1].clone();
+    let material = Arc::make_mut(atlas.material.as_mut().unwrap());
+    let lookup = material.coverage.as_mut().unwrap();
+    Arc::make_mut(&mut lookup.pixels)[0..4].copy_from_slice(&999u32.to_le_bytes());
+    invalid.insert(1, atlas);
+    assert!(
+        textures
+            .update(&context, &invalid, &mut uploads)
+            .unwrap_err()
+            .contains("sprite missing")
+    );
+    assert_eq!(textures.indices, identities);
+    assert_eq!(textures.retained_slots(), slots);
+    assert_eq!(textures.source.len(), scene.textures.len());
+    assert_eq!(textures.coverage_changed, coverage);
+    assert_eq!(textures.occlusion_changed, occlusion);
+    assert_eq!(read(&textures.metadata), metadata);
+    assert_eq!(read(&textures.texels), texels);
+    assert!(
+        !textures
+            .update(&context, &scene.textures, &mut uploads)
+            .unwrap()
+    );
+}
 const NORMAL: [[u8; 4]; 4] = [
     [255, 128, 255, 0],
     [128, 255, 191, 0],

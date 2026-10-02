@@ -500,6 +500,7 @@ pub struct SourceScene {
     pub(crate) dynamic: DynamicMesh,
     pub(crate) dynamic_spares: Vec<Arc<Vec<Triangle>>>,
     pub(crate) instances: InstanceContext,
+    #[cfg(any(test, feature = "legacy-fixtures"))]
     pub(crate) section_scratch: crate::protocol::SectionScratch,
     pub(crate) routing: crate::routing::SourceRoutes,
     pub(crate) edits: crate::incremental::SourceEdits,

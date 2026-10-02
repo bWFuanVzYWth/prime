@@ -565,6 +565,21 @@ fn gpu_aerial_geometry_and_material_changes_invalidate_radiance_only() {
         .unwrap();
     let generation = renderer.geometry.as_ref().unwrap().top.generation();
     let updates = renderer.atmosphere.as_ref().unwrap().aerial_updates;
+    {
+        let instance = source.instances.get_mut(&1).unwrap();
+        instance.tint[0..3].copy_from_slice(&[64, 128, 192]);
+        instance.revision += 1;
+        source.instance_revision += 1;
+        renderer
+            .render_with_instances(&scene, &source, &camera, 32, 24, 3)
+            .unwrap();
+        assert_eq!(
+            renderer.atmosphere.as_ref().unwrap().aerial_updates,
+            updates,
+            "RGB-only instance tint keeps atmospheric visibility"
+        );
+        assert_eq!(renderer.samples, 1, "appearance still resets sampling");
+    }
     for (index, alpha) in [0, 255, 0].into_iter().enumerate() {
         let instance = source.instances.get_mut(&1).unwrap();
         instance.tint[3] = alpha;
@@ -604,6 +619,67 @@ fn gpu_aerial_geometry_and_material_changes_invalidate_radiance_only() {
     assert_eq!(
         renderer.samples, 2,
         "unchanged input must retain accumulation"
+    );
+
+    // Unexpanded static producer pages use the same exact RGB/coverage classification.
+    source.instances.clear();
+    source.instance_revision += 1;
+    let roof_cell = prime_scene::spatial::Cell::containing([0.; 3]).unwrap();
+    scene.ready_terrain.insert(roof_cell);
+    scene.meshes.insert(
+        (1, 0),
+        prime_scene::SceneMesh {
+            revision: 1,
+            flags: 1,
+            origin: [0.; 3],
+            triangles: source.prototypes[&1].triangles.clone().into(),
+        },
+    );
+    scene.revision += 1;
+    renderer
+        .render_with_instances(&scene, &source, &camera, 32, 24, 8)
+        .unwrap();
+    let updates = renderer.atmosphere.as_ref().unwrap().aerial_updates;
+    let mesh = scene.meshes.get_mut(&(1, 0)).unwrap();
+    let mut triangles = mesh.triangles.iter().collect::<Vec<_>>();
+    for triangle in &mut triangles {
+        for color in &mut triangle.colors {
+            color[0] = 0.125;
+        }
+    }
+    mesh.triangles = triangles.into();
+    mesh.revision += 1;
+    scene.revision += 1;
+    renderer
+        .render_with_instances(&scene, &source, &camera, 32, 24, 9)
+        .unwrap();
+    assert_eq!(
+        renderer.atmosphere.as_ref().unwrap().aerial_updates,
+        updates,
+        "static producer RGB-only keeps atmospheric visibility"
+    );
+    let mesh = scene.meshes.get_mut(&(1, 0)).unwrap();
+    let mut triangles = mesh.triangles.iter().collect::<Vec<_>>();
+    triangles[0].colors[0][3] = 0.25;
+    mesh.triangles = triangles.into();
+    mesh.revision += 1;
+    scene.revision += 1;
+    renderer
+        .render_with_instances(&scene, &source, &camera, 32, 24, 10)
+        .unwrap();
+    assert_eq!(
+        renderer.atmosphere.as_ref().unwrap().aerial_updates,
+        updates + 1,
+        "static alpha changes invalidate atmospheric visibility"
+    );
+    scene.anchor[0] += 256.;
+    renderer
+        .render_with_instances(&scene, &source, &camera, 32, 24, 11)
+        .unwrap();
+    assert_eq!(
+        renderer.atmosphere.as_ref().unwrap().aerial_updates,
+        updates + 2,
+        "anchor rebase invalidates relative-world atmospheric visibility even for unchanged sources"
     );
 }
 

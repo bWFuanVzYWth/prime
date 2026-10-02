@@ -168,7 +168,7 @@ impl TerrainContext {
             tick: v.tick,
             events,
         };
-        self.plan_input(frame, source_epoch, budget as usize, start, false)?;
+        self.plan_input(frame, source_epoch, budget as usize, start)?;
         self.resource_reset_pending = false;
         Ok(())
     }
@@ -257,7 +257,6 @@ impl TerrainContext {
             std::mem::size_of_val(values.sections())
                 + std::mem::size_of_val(values.palette())
                 + std::mem::size_of_val(values.words()),
-            false,
         )
     }
     pub fn colors_typed(
@@ -265,6 +264,7 @@ impl TerrainContext {
         values: &input::Colors<'_>,
         scene: &mut SourceScene,
     ) -> Result<(), String> {
+        let decode_start = Instant::now();
         let waiting = self
             .awaiting_colors
             .as_ref()
@@ -288,78 +288,39 @@ impl TerrainContext {
             .first()
             .map(|d| biome_source::Definitions::from_typed(d, values.colormaps()))
             .transpose()?;
-        if definitions.is_some() && self.chunks.biome_sources().definitions.is_some() {
-            return Err("unexpected biome definitions".into());
-        }
-        if definitions.is_none()
-            && self.chunks.biome_sources().definitions.is_none()
-            && recipes
-                .iter()
-                .any(|r| matches!(r, biome::Recipe::Biome { .. }))
-        {
-            return Err("missing biome definitions".into());
-        }
-        if let Some(d) = definitions {
-            self.chunks.biome_sources_mut().definitions = Some(d);
-        }
-        self.stats.tint_callbacks = values.recipes().iter().filter(|r| r.kind == 0).count();
-        let recipes: Vec<_> = waiting.aliases.iter().map(|&i| recipes[i]).collect();
-        let plan = self.chunks.biomes_mut().prepare(
-            waiting
-                .jobs
-                .iter()
-                .flat_map(|j| j.tints.requests.iter().copied()),
+        let bytes = std::mem::size_of_val(values.recipes())
+            + std::mem::size_of_val(values.definitions())
+            + std::mem::size_of_val(values.colormaps());
+        let callbacks = values.recipes().iter().filter(|r| r.kind == 0).count();
+        if let Some(colors) = self.prepare_color_sources(
             &recipes,
+            definitions,
             values.raw().radius,
-        );
-        let colors = if !plan.samples.is_empty() {
-            let source = self.chunks.biome_sources_mut().prepare(&plan.samples);
-            if !source.requests.is_empty() {
-                self.awaiting_colors.as_mut().unwrap().stage =
-                    ColorStage::Biomes(plan, Box::new(source));
-                return Ok(());
-            }
-            self.finish_biome_colors(plan, source, None)
-        } else {
-            self.chunks.biomes_mut().finish(plan, &[])
-        };
-        let pending = self.awaiting_colors.take().unwrap();
-        self.tint_requests.clear();
-        self.finalize(
-            pending.jobs,
-            pending.selection,
-            pending.removed,
-            pending.batch,
-            scene,
-            Some(&colors),
-            pending.reset_catalog,
-        )
+            callbacks,
+            bytes,
+            decode_start,
+        )? {
+            self.complete_colors(&colors, scene)?;
+        }
+        Ok(())
     }
     pub fn biomes_typed(
         &mut self,
         values: &input::Biomes<'_>,
         scene: &mut SourceScene,
     ) -> Result<(), String> {
+        let decode_start = Instant::now();
         let waiting = self.awaiting_colors.as_ref().ok_or("no biome request")?;
         self.check_identity(values.raw().identity, waiting.batch, scene)?;
         let ColorStage::Biomes(_, source) = &waiting.stage else {
             return Err("unexpected biome response".into());
         };
         let response = self.chunks.biome_sources().typed_response(source, values)?;
-        let pending = self.awaiting_colors.take().unwrap();
-        let ColorStage::Biomes(plan, source) = pending.stage else {
-            unreachable!()
-        };
-        let colors = self.finish_biome_colors(plan, *source, Some(response));
-        self.tint_requests.clear();
-        self.finalize(
-            pending.jobs,
-            pending.selection,
-            pending.removed,
-            pending.batch,
+        self.complete_biome_sources(
+            response,
+            std::mem::size_of_val(values.biomes()) + std::mem::size_of_val(values.indices()),
+            decode_start,
             scene,
-            Some(&colors),
-            pending.reset_catalog,
         )
     }
 }

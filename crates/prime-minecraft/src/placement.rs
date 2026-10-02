@@ -1,4 +1,5 @@
 //! Immutable host placement declarations. Per-position evaluation never calls the host.
+#[cfg(test)]
 use crate::wire::Reader;
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -39,6 +40,7 @@ impl Placement {
         seed: 0,
     };
 
+    #[cfg(test)]
     pub fn read(input: &mut Reader<'_>, has_offset: bool) -> Result<Self, String> {
         let value = Self {
             offset: input.u32()?,

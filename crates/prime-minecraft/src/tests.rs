@@ -816,6 +816,9 @@ fn lowered_slabs_match_scalar_geometry_for_models_palettes_and_halos() {
     let mut sections = HashMap::new();
     for model_id in [1, 2, 3, 4, 10, 999] {
         ctx.catalog.states.get_mut(&1).unwrap().model = model_id;
+        // Production state definitions are immutable; this fixture changes the definition
+        // directly and must refresh its position-independent catalog masks before compiling.
+        ctx.catalog.prepare();
         for bits in [0, 4, 5, 9, 15, 32] {
             for &s in &req {
                 let ids: Vec<_> = (0..4096)
@@ -1019,6 +1022,7 @@ fn boundary_dependencies_follow_face_occlusion_and_not_state_identity() {
                 fluid: Default::default(),
                 support: 0,
                 placement: crate::placement::Placement::NONE,
+                masks: Default::default(),
             },
         );
     }

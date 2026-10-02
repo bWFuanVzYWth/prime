@@ -656,6 +656,10 @@ impl Renderer {
                     .geometry
                     .as_ref()
                     .is_none_or(|g| g.source_changed(scene));
+                let resource_occlusion_changed = self
+                    .geometry
+                    .as_ref()
+                    .is_none_or(|g| g.occlusion_resources_changed());
                 self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
                 let published_changed = if let Some(geometry) = &mut self.geometry
                     && geometry.same_owner(scene)
@@ -683,19 +687,25 @@ impl Renderer {
                     true
                 };
                 if source_changed || published_changed {
-                    self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
                     self.samples = 0;
+                }
+                if self.geometry.as_ref().unwrap().static_occlusion_changed
+                    || resource_occlusion_changed
+                {
+                    self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
                 }
             }
             cpu.finish(Stage::Static, started);
-            let (dynamic_changed, bindings_changed) = self
+            let (dynamic_changed, occlusion_changed, bindings_changed) = self
                 .geometry
                 .as_mut()
                 .unwrap()
                 .prepare_dynamic(&self.context, &scene, instances, slot, cpu)?;
             if dynamic_changed {
-                self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
                 self.samples = 0;
+            }
+            if occlusion_changed {
+                self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
             }
             if bindings_changed {
                 // A freed raw handle can reappear in an older descriptor slot's key.

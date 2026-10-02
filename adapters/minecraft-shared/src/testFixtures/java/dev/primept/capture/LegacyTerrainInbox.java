@@ -102,16 +102,16 @@ public final class LegacyTerrainInbox {
                     return;
             }
             source.seal();
-            var layers = new ArrayList<Packets.SectionLayer>(3);
+            var layers = new ArrayList<LegacyPackets.SectionLayer>(3);
             for (int layer = SourceQuads.OPAQUE; layer <= SourceQuads.TRANSLUCENT; layer++) {
                 ByteBuffer vertices = source.vertices(layer);
                 if (vertices.hasRemaining())
-                    layers.add(new Packets.SectionLayer(layer, 1, layer, 4,
-                                                        vertices.remaining() / SourceQuads.STRIDE,
-                                                        SourceQuads.STRIDE, 0, 12, 16, vertices));
+                    layers.add(new LegacyPackets.SectionLayer(
+                            layer, 1, layer, 4, vertices.remaining() / SourceQuads.STRIDE,
+                            SourceQuads.STRIDE, 0, 12, 16, vertices));
             }
-            byte[] packet = Packets.sectionReplace(token.epoch, token.section, token.revision,
-                                                   token.x, token.y, token.z, layers);
+            byte[] packet = LegacyPackets.sectionReplace(token.epoch, token.section, token.revision,
+                                                         token.x, token.y, token.z, layers);
             synchronized (this) {
                 if (!accepts(token))
                     return;
@@ -190,7 +190,7 @@ public final class LegacyTerrainInbox {
                 sections[i] = item.section;
                 sequences[i] = item.revision;
             }
-            byte[] packet = Packets.removeSections(epoch, sections, sequences);
+            byte[] packet = LegacyPackets.removeSections(epoch, sections, sequences);
             batches.add(new Batch(epoch, 0, 0, true, List.of(packet), packet.length));
         }
         int retirementCapacity = ((256 << 20) - 32) / 8;

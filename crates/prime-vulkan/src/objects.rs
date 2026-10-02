@@ -21,6 +21,23 @@ struct Object {
     count: u32,
     opaque: bool,
 }
+#[derive(Clone, Copy, Default, PartialEq)]
+struct OcclusionMaterial {
+    texture: u32,
+    flags: u32,
+    alpha: u8,
+    uv: [f32; 4],
+}
+impl OcclusionMaterial {
+    fn from_placement(p: &crate::plan::Placement) -> Self {
+        Self {
+            texture: p.texture_id,
+            flags: p.flags,
+            alpha: p.tint[3],
+            uv: p.uv,
+        }
+    }
+}
 
 pub(crate) struct Objects {
     workers: Arc<prime_scene::workers::CpuWorkers>,
@@ -32,6 +49,9 @@ pub(crate) struct Objects {
     pub metadata: Buffer,
     uploads: [Option<Buffer>; FRAME_SLOTS],
     material_bytes: Vec<u8>,
+    occlusion_materials: Vec<OcclusionMaterial>,
+    occlusion_changed: bool,
+    tlas_update: bool,
     pub instances: Vec<vk::AccelerationStructureInstanceKHR>,
     pub changed_instances: Vec<usize>,
     pub triangle_count: u64,
@@ -42,6 +62,8 @@ pub(crate) struct ObjectChanges {
     pub scene: bool,
     pub tlas: bool,
     pub bindings: bool,
+    pub occlusion: bool,
+    pub tlas_update: bool,
 }
 
 impl Objects {
@@ -68,6 +90,9 @@ impl Objects {
             )?,
             uploads: std::array::from_fn(|_| None),
             material_bytes: Vec::new(),
+            occlusion_materials: Vec::new(),
+            occlusion_changed: false,
+            tlas_update: false,
             instances: Vec::new(),
             changed_instances: Vec::new(),
             triangle_count: 0,
@@ -96,11 +121,15 @@ impl Objects {
             scene: plan.placements_changed,
             tlas: plan.tlas_changed,
             bindings: false,
+            occlusion: false,
+            tlas_update: false,
         };
         let result = self.execute(context, &plan, textures, slot, builds);
         self.triangle_count = plan.triangle_count;
         self.planner.recycle(plan);
         changes.bindings = result?;
+        changes.occlusion = self.occlusion_changed;
+        changes.tlas_update = self.tlas_update;
         cpu.finish(Stage::Execute, started);
         Ok(changes)
     }
@@ -114,6 +143,8 @@ impl Objects {
         builds: &mut crate::arena::Arena,
     ) -> Result<bool, String> {
         self.rebuilt = plan.geometry.len() as u32;
+        self.occlusion_changed = plan.tlas_changed;
+        self.tlas_update = plan.geometry.is_empty() && plan.removed.is_empty();
         self.changed_instances.clear();
         if plan.geometry.is_empty() && plan.removed.is_empty() && !plan.placements_changed {
             return Ok(false);
@@ -140,7 +171,6 @@ impl Objects {
             .collect::<Result<Vec<_>, String>>()?;
         let mut largest = 16;
         let mut locations = Vec::with_capacity(plan.geometry.len());
-        let mut upload_capacity = 0u64;
         for (item, packing) in plan.geometry.iter().zip(&plans) {
             let count = packing.groups[0].count;
             validate_material_count(count)?;
@@ -159,7 +189,6 @@ impl Objects {
             } else {
                 self.objects[&item.key].allocation
             };
-            upload_capacity += u64::from(capacity) * crate::packing::stride(0) as u64;
             locations.push((item.key, allocation, count, capacity, replace));
         }
         let mut bindings = false;
@@ -227,6 +256,9 @@ impl Objects {
             }
         }
         let count = self.planner.placement_count();
+        self.tlas_update &= count == self.instances.len();
+        self.occlusion_materials
+            .resize(count, OcclusionMaterial::default());
         let metadata_bytes = (count as u64 * 48).max(48);
         let metadata_grown = metadata_bytes > self.metadata.size;
         if metadata_grown {
@@ -285,6 +317,9 @@ impl Objects {
                 .get(&placement.key)
                 .ok_or("GPU instance prototype missing")?;
             if change.material {
+                let occlusion = OcclusionMaterial::from_placement(placement);
+                self.occlusion_changed |= self.occlusion_materials[index] != occlusion;
+                self.occlusion_materials[index] = occlusion;
                 let texture = if placement.texture_id == INHERIT {
                     INHERIT
                 } else {
@@ -320,7 +355,7 @@ impl Objects {
                     } else {
                         vk::GeometryInstanceFlagsKHR::FORCE_NO_OPAQUE
                     };
-                self.instances[index] = vk::AccelerationStructureInstanceKHR {
+                let instance = vk::AccelerationStructureInstanceKHR {
                     transform: vk::TransformMatrixKHR {
                         matrix: placement.transform,
                     },
@@ -336,20 +371,30 @@ impl Objects {
                         device_handle: object.build.acceleration().address(),
                     },
                 };
+                let previous = &self.instances[index];
+                self.tlas_update &= previous.instance_custom_index_and_mask
+                    == instance.instance_custom_index_and_mask
+                    && previous.instance_shader_binding_table_record_offset_and_flags
+                        == instance.instance_shader_binding_table_record_offset_and_flags
+                    && unsafe {
+                        previous.acceleration_structure_reference.device_handle
+                            == instance.acceleration_structure_reference.device_handle
+                    }
+                    && unsafe { instance.acceleration_structure_reference.device_handle != 0 };
+                self.instances[index] = instance;
                 self.changed_instances.push(index);
             }
         }
         let upload_bytes = packed_bytes
             .checked_add(self.material_bytes.len())
             .ok_or("Object upload size overflow")?;
-        upload_capacity += self.material_bytes.len() as u64;
         if upload_bytes == 0 {
             return Ok(bindings);
         }
         let staging = slot_buffer(
             context,
             &mut self.uploads[slot],
-            upload_capacity.max(upload_bytes as u64),
+            upload_bytes as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
         )?;
         // SAFETY: Frame preparation has proved this slot's previous GPU submission complete.

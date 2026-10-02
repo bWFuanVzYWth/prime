@@ -43,9 +43,14 @@ pub(super) struct TopLevel {
     inputs: [Option<Buffer>; FRAME_SLOTS],
     capacity: u32,
     pending: [PendingInstances; FRAME_SLOTS],
+    pending_terrain: [PendingInstances; FRAME_SLOTS],
+    terrain_count: usize,
+    last_count: u32,
     full: [bool; FRAME_SLOTS],
     generation: u64,
     applied: [u64; FRAME_SLOTS],
+    #[cfg(test)]
+    pub last_update: bool,
 }
 
 impl TopLevel {
@@ -57,6 +62,8 @@ impl TopLevel {
         objects: &[vk::AccelerationStructureInstanceKHR],
         changed: &[usize],
         terrain_changed: bool,
+        terrain_dirty: &[usize],
+        allow_update: bool,
         slot: usize,
         builds: &mut crate::arena::Arena,
     ) -> Result<bool, String> {
@@ -66,8 +73,10 @@ impl TopLevel {
             .ok_or("TLAS upload generation exhausted")?;
         for index in 0..FRAME_SLOTS {
             self.pending[index].extend(changed);
-            self.full[index] |= terrain_changed;
+            self.pending_terrain[index].extend(terrain_dirty);
+            self.full[index] |= self.terrain_count != terrain.len();
         }
+        self.terrain_count = terrain.len();
         let count =
             u32::try_from(terrain.len() + objects.len()).map_err(|_| "TLAS instance overflow")?;
         let capacity = count
@@ -88,24 +97,11 @@ impl TopLevel {
             write_instances(input, 0, terrain)?;
             write_instances(input, terrain.len(), objects)?;
         } else {
-            // Consecutive dirty identities become one memory copy. Skipped slots retain
-            // the union of edits until their own GPU completion permits a write.
-            let mut pending = self.pending[slot]
-                .sorted()
-                .iter()
-                .copied()
-                .filter(|&i| i < objects.len())
-                .peekable();
-            while let Some(start) = pending.next() {
-                let mut end = start + 1;
-                while pending.peek() == Some(&end) {
-                    pending.next();
-                    end += 1;
-                }
-                write_instances(input, terrain.len() + start, &objects[start..end])?;
-            }
+            write_dirty_instances(input, 0, terrain, &mut self.pending_terrain[slot])?;
+            write_dirty_instances(input, terrain.len(), objects, &mut self.pending[slot])?;
         }
         self.pending[slot].clear();
+        self.pending_terrain[slot].clear();
         self.full[slot] = false;
         self.applied[slot] = self.generation;
         let data = vk::AccelerationStructureGeometryInstancesDataKHR::default().data(
@@ -127,19 +123,34 @@ impl TopLevel {
                 geometry,
                 capacity,
                 vk::AccelerationStructureTypeKHR::TOP_LEVEL,
-                vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_BUILD,
+                vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_BUILD
+                    | vk::BuildAccelerationStructureFlagsKHR::ALLOW_UPDATE,
             )?);
             self.capacity = capacity;
         }
         self.build.as_mut().unwrap().ensure_scratch(builds)?;
+        let update =
+            !replaced && !terrain_changed && allow_update && count != 0 && count == self.last_count;
+        #[cfg(test)]
+        {
+            self.last_update = update;
+        }
         context.submit_named("tlas_batch", |command| {
-            self.build
-                .as_ref()
-                .unwrap()
-                .record_geometry(command, geometry, count);
+            if update {
+                self.build
+                    .as_ref()
+                    .unwrap()
+                    .record_update(command, geometry, count);
+            } else {
+                self.build
+                    .as_ref()
+                    .unwrap()
+                    .record_geometry(command, geometry, count);
+            }
             Acceleration::read_barrier(context, command);
         })?;
         self.build.as_mut().unwrap().release_scratch(builds);
+        self.last_count = count;
         Ok(replaced)
     }
 
@@ -217,4 +228,29 @@ fn write_instances(
         )
     };
     input.write_at(first as u64 * 64, bytes)
+}
+
+fn write_dirty_instances(
+    input: &Buffer,
+    first: usize,
+    instances: &[vk::AccelerationStructureInstanceKHR],
+    changes: &mut PendingInstances,
+) -> Result<(), String> {
+    // Consecutive dirty identities become one memory copy. Skipped slots retain
+    // the union of edits until their own GPU completion permits a write.
+    let mut pending = changes
+        .sorted()
+        .iter()
+        .copied()
+        .filter(|&i| i < instances.len())
+        .peekable();
+    while let Some(start) = pending.next() {
+        let mut end = start + 1;
+        while pending.peek() == Some(&end) {
+            pending.next();
+            end += 1;
+        }
+        write_instances(input, first + start, &instances[start..end])?;
+    }
+    Ok(())
 }

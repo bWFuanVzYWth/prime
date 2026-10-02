@@ -1,4 +1,5 @@
 //! MC coordinates and active source demand are owned here, never in the Java router.
+#[cfg(test)]
 use crate::wire::Reader;
 use std::collections::{BTreeSet, HashSet};
 
@@ -63,6 +64,7 @@ pub(crate) struct FrameInput {
     pub events: Vec<(u32, Section)>,
 }
 impl FrameInput {
+    #[cfg(test)]
     pub fn read(pages: &[&[u8]]) -> Result<Self, String> {
         let mut r = Reader::new(pages)?;
         let (version, epoch, batch) = r.header(1)?;

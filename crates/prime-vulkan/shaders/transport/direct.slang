@@ -35,7 +35,8 @@ public void primeTransportDirect(TraceScene resources, AtmLighting environment,
         float3 radiance =
                 evaluateLocalLight(resources, surface, light, sampler.bits1D(lightDomain + 3),
                                    lightMedium, optical, pdf);
-        if (pdf > 0) {
+        if (pdf > 0 && !primeCanSkipZeroNee(radiance, pdf, throughput,
+                                            primePathHasContinuation(bounce, budget))) {
             BsdfEvaluation evaluated = primeEvaluatePbrVertex(
                     energy, material, view, lightDirection, incident, transmitted);
             if (!primeGeometricEvaluationSupport(hasNormal, surface.normal, normal, view,

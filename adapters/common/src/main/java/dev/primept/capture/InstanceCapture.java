@@ -68,11 +68,11 @@ public final class InstanceCapture implements AutoCloseable {
         private final InstanceCapture owner;
         private final long id;
         private final int topology, count, stride, position, color, uv;
-        private byte[] vertices;
+        private OwnedVertices vertices;
         private int references;
         private boolean owned = true, published, queued = true, retired;
         private Prototype(InstanceCapture owner, long id, int topology, int count, int stride,
-                          int position, int color, int uv, byte[] vertices) {
+                          int position, int color, int uv, OwnedVertices vertices) {
             this.owner = owner;
             this.id = id;
             this.topology = topology;
@@ -119,25 +119,58 @@ public final class InstanceCapture implements AutoCloseable {
         this.epoch = epoch;
     }
 
+    /** Immutable authored bytes may be shared with a CPU comparison cache until publication completes. */
+    public static final class OwnedVertices {
+        private final byte[] data;
+        private OwnedVertices(byte[] data) {
+            this.data = data;
+        }
+        public static OwnedVertices copyOf(ByteBuffer source) {
+            byte[] data = new byte[source.remaining()];
+            source.duplicate().get(data);
+            return new OwnedVertices(data);
+        }
+        public int byteSize() {
+            return data.length;
+        }
+        public ByteBuffer bytes() {
+            return ByteBuffer.wrap(data).asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
+        }
+    }
+
     /** Defines a new immutable local mesh. A source mutation creates a new handle, not an alias. */
     public Prototype prototype(int topology, int count, int stride, int position, int color, int uv,
                                ByteBuffer source) {
+        validatePrototype(topology, count, stride, position, color, uv, source.remaining());
+        return createPrototype(topology, count, stride, position, color, uv,
+                               OwnedVertices.copyOf(source));
+    }
+
+    public Prototype prototype(int topology, int count, int stride, int position, int color, int uv,
+                               OwnedVertices source) {
+        validatePrototype(topology, count, stride, position, color, uv, source.byteSize());
+        return createPrototype(topology, count, stride, position, color, uv, source);
+    }
+    private Prototype createPrototype(int topology, int count, int stride, int position, int color,
+                                      int uv, OwnedVertices source) {
+        long id = nextPrototypeId;
+        nextPrototypeId = Math.incrementExact(id);
+        Prototype result =
+                new Prototype(this, id, topology, count, stride, position, color, uv, source);
+        dirtyPrototypes.add(result);
+        return result;
+    }
+
+    private void validatePrototype(int topology, int count, int stride, int position, int color,
+                                   int uv, int bytes) {
         checkMutable();
         if ((topology != 3 && topology != 4) || count <= 0 || count % topology != 0 ||
             stride < 24 || stride > 256 || position < 0 || position > stride - 12 || color < 0 ||
             color > stride - 4 || uv < 0 || uv > stride - 8)
             throw new IllegalArgumentException("Unsupported prototype source layout");
         int size = Math.multiplyExact(count, stride);
-        if (size > MAX_BYTES - 104 || source.remaining() != size)
+        if (size > MAX_BYTES - 104 || bytes != size)
             throw new IllegalArgumentException("Invalid prototype source length");
-        byte[] copy = new byte[size];
-        source.duplicate().get(copy);
-        long id = nextPrototypeId;
-        nextPrototypeId = Math.incrementExact(id);
-        Prototype result =
-                new Prototype(this, id, topology, count, stride, position, color, uv, copy);
-        dirtyPrototypes.add(result);
-        return result;
     }
 
     /** Drops the source owner's reference; live instances delay the native removal. */
@@ -238,8 +271,8 @@ public final class InstanceCapture implements AutoCloseable {
                 ++definitions;
                 size = Math.addExact(
                         size, Math.addExact((int)(PrimePrototypeSource.SIZE + PrimeMeshSpan.SIZE),
-                                            prototype.vertices.length));
-                sourceBytes = Math.addExact(sourceBytes, prototype.vertices.length);
+                                            prototype.vertices.byteSize()));
+                sourceBytes = Math.addExact(sourceBytes, prototype.vertices.byteSize());
             } else if (!prototype.needed() && prototype.published) {
                 ++retirements;
                 size = Math.addExact(size, 16);
@@ -295,9 +328,9 @@ public final class InstanceCapture implements AutoCloseable {
                 var span = frame.memory.asSlice(spanBase + (long)pi * PrimeMeshSpan.SIZE,
                                                 PrimeMeshSpan.SIZE);
                 ++pi;
-                var payload = frame.memory.asSlice(payloadAt, prototype.vertices.length);
-                payloadAt += prototype.vertices.length;
-                payload.copyFrom(MemorySegment.ofArray(prototype.vertices));
+                var payload = frame.memory.asSlice(payloadAt, prototype.vertices.byteSize());
+                payloadAt += prototype.vertices.byteSize();
+                payload.copyFrom(MemorySegment.ofArray(prototype.vertices.data));
                 PrimePrototypeSource.id(p, prototype.id);
                 PrimePrototypeSource.revision(p, revision);
                 PrimePrototypeSource.spans(p, span);
@@ -311,7 +344,7 @@ public final class InstanceCapture implements AutoCloseable {
                 PrimeMeshSpan.color_offset(span, prototype.color);
                 PrimeMeshSpan.uv_offset(span, prototype.uv);
                 PrimeByteSpan.data(PrimeMeshSpan.vertices(span), payload);
-                PrimeByteSpan.count(PrimeMeshSpan.vertices(span), prototype.vertices.length);
+                PrimeByteSpan.count(PrimeMeshSpan.vertices(span), prototype.vertices.byteSize());
             } else if (!prototype.needed() && prototype.published) {
                 var r = frame.memory.asSlice(prototypeRemovalBase + (long)pr++ * PrimeRemoval.SIZE,
                                              PrimeRemoval.SIZE);

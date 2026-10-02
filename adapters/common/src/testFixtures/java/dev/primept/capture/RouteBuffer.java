@@ -53,7 +53,7 @@ public final class RouteBuffer {
     }
     public RouteBuffer header(int operation, long epoch) {
         clear();
-        return i(Packets.MAGIC).i(Packets.ABI_VERSION).i(operation).i(0).l(epoch);
+        return i(LegacyPackets.MAGIC).i(LegacyPackets.ABI_VERSION).i(operation).i(0).l(epoch);
     }
     public RouteBuffer append(RouteBuffer other) {
         reserve(other.size());

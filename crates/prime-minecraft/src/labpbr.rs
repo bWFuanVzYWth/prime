@@ -1,8 +1,7 @@
 //! LabPBR 1.3 source translation. Integer categories never enter a continuous filter.
-use crate::{
-    sprite::{Image, Sprite},
-    wire::Reader,
-};
+use crate::sprite::{Image, Sprite};
+#[cfg(test)]
+use crate::wire::Reader;
 use prime_scene::{Texture, TextureLevel, TextureMaterial, TextureSampling};
 use std::sync::{Arc, OnceLock};
 
@@ -36,6 +35,7 @@ struct Source {
     frames: u32,
 }
 
+#[cfg(test)]
 fn source(r: &mut Reader<'_>, sprite: &Sprite) -> Result<Option<Source>, String> {
     match r.u32()? {
         0 => Ok(None),
@@ -82,6 +82,7 @@ fn source(r: &mut Reader<'_>, sprite: &Sprite) -> Result<Option<Source>, String>
     }
 }
 impl Material {
+    #[cfg(test)]
     pub fn read(r: &mut Reader<'_>, sprite: &Sprite) -> Result<Self, String> {
         let normal = source(r, sprite)?;
         let specular = source(r, sprite)?;

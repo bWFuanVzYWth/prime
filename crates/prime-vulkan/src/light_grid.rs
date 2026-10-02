@@ -121,31 +121,43 @@ impl LightGrid {
             grew_refs || grew_alias,
         )?;
         for range in ranges {
-            let mut references = Vec::with_capacity(range.len() * 16);
-            let mut aliases = Vec::with_capacity(range.len() * 8);
-            for index in range.clone() {
-                let reference = &self.cpu.refs[index];
-                crate::uint(&mut references, reference.page);
-                crate::uint(&mut references, reference.emitter);
-                crate::float(&mut references, reference.pmf);
-                crate::float(&mut references, reference.inv_area);
-                let alias = &self.cpu.emitter_alias[index];
-                crate::float(&mut aliases, alias.cut);
-                crate::uint(&mut aliases, alias.alias);
-            }
-            copies.push(stage(
+            copies.push(stage_with(
                 context,
                 uploads,
-                &references,
+                range.len() * 16,
                 self.refs.as_ref().unwrap().buffer,
                 range.start as u64 * 16,
+                |output| {
+                    for (out, index) in output.as_chunks_mut::<16>().0.iter_mut().zip(range.clone())
+                    {
+                        let reference = &self.cpu.refs[index];
+                        write_words(
+                            out,
+                            &[
+                                reference.page,
+                                reference.emitter,
+                                reference.pmf.to_bits(),
+                                reference.inv_area.to_bits(),
+                            ],
+                        );
+                    }
+                    Ok(())
+                },
             )?);
-            copies.push(stage(
+            copies.push(stage_with(
                 context,
                 uploads,
-                &aliases,
+                range.len() * 8,
                 self.emitter_alias.as_ref().unwrap().buffer,
                 range.start as u64 * 8,
+                |output| {
+                    for (out, index) in output.as_chunks_mut::<8>().0.iter_mut().zip(range.clone())
+                    {
+                        let alias = &self.cpu.emitter_alias[index];
+                        write_words(out, &[alias.cut.to_bits(), alias.alias]);
+                    }
+                    Ok(())
+                },
             )?);
         }
         for key in &changes.cells {
@@ -153,58 +165,108 @@ impl LightGrid {
                 self.entries.retire(old);
             }
             if let Some(aliases) = self.cpu.cells.get(key) {
-                let bytes = alias_bytes(aliases);
-                let destination = self.entries.allocate(context, bytes.len() as u64, 16)?;
-                copies.push(stage(
+                let bytes = aliases.len() * 16;
+                let destination = self.entries.allocate(context, bytes as u64, 16)?;
+                copies.push(stage_with(
                     context,
                     uploads,
-                    &bytes,
+                    bytes,
                     destination.buffer.buffer,
                     destination.offset,
+                    |out| {
+                        write_aliases(out, aliases);
+                        Ok(())
+                    },
                 )?);
                 self.allocations.insert(*key, destination);
             }
         }
         if changes.world || self.world.is_none() {
-            stage_table(
+            stage_table_with(
                 context,
                 uploads,
-                &alias_bytes(&self.cpu.world),
+                self.cpu.world.len() * 16,
                 &mut self.world,
                 &mut copies,
+                |out| {
+                    write_aliases(out, &self.cpu.world);
+                    Ok(())
+                },
             )?;
         }
         if !changes.cells.is_empty() || self.cells.is_none() {
-            let bytes = cell_bytes(
-                self.allocations
-                    .iter()
-                    .map(|(&key, lease)| (key, (lease.size / 16) as u32, lease.address())),
+            let capacity = cell_capacity(self.allocations.len())?;
+            stage_table_with(
+                context,
+                uploads,
+                capacity
+                    .checked_mul(32)
+                    .ok_or("Light cell hash size overflow")?,
+                &mut self.cells,
+                &mut copies,
+                |output| {
+                    for out in output.iter_mut() {
+                        out.write(0);
+                    }
+                    // Every byte was initialized above; hash probes read only this private upload lease.
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts_mut(
+                            output.as_mut_ptr().cast::<u8>(),
+                            output.len(),
+                        )
+                    };
+                    write_cells(
+                        self.allocations
+                            .iter()
+                            .map(|(&key, lease)| (key, (lease.size / 16) as u32, lease.address())),
+                        bytes,
+                    )
+                },
             )?;
-            stage_table(context, uploads, &bytes, &mut self.cells, &mut copies)?;
         }
 
-        let mut pages = Vec::with_capacity(self.cpu.pages.len() * 48);
-        for page in &self.cpu.pages {
-            let Some(page) = page else {
-                pages.extend_from_slice(&[0; 48]);
-                continue;
-            };
-            let source = sources[&page.key].1;
-            pages.extend_from_slice(&source.emitters.address().to_le_bytes());
-            pages.extend_from_slice(
-                &(self.emitter_alias.as_ref().unwrap().address() + u64::from(page.first) * 8)
-                    .to_le_bytes(),
-            );
-            for (position, anchor) in page.origin.into_iter().zip(anchor) {
-                crate::float(&mut pages, (position - anchor) as f32);
-            }
-            crate::uint(&mut pages, source.format);
-            crate::uint(&mut pages, page.first);
-            crate::uint(&mut pages, page.count);
-            crate::float(&mut pages, page.pdf);
-            crate::uint(&mut pages, 0);
-        }
-        stage_table(context, uploads, &pages, &mut self.pages, &mut copies)?;
+        stage_table_with(
+            context,
+            uploads,
+            self.cpu.pages.len() * 48,
+            &mut self.pages,
+            &mut copies,
+            |output| {
+                for (out, page) in output
+                    .as_chunks_mut::<48>()
+                    .0
+                    .iter_mut()
+                    .zip(&self.cpu.pages)
+                {
+                    let mut row = [0u32; 12];
+                    if let Some(page) = page {
+                        let source = sources[&page.key].1;
+                        let emitter = source.emitters.address();
+                        let alias = self.emitter_alias.as_ref().unwrap().address()
+                            + u64::from(page.first) * 8;
+                        row[..4].copy_from_slice(&[
+                            emitter as u32,
+                            (emitter >> 32) as u32,
+                            alias as u32,
+                            (alias >> 32) as u32,
+                        ]);
+                        for (i, (position, anchor)) in
+                            page.origin.into_iter().zip(anchor).enumerate()
+                        {
+                            row[4 + i] = ((position - anchor) as f32).to_bits();
+                        }
+                        row[7..11].copy_from_slice(&[
+                            source.format,
+                            page.first,
+                            page.count,
+                            page.pdf.to_bits(),
+                        ]);
+                    }
+                    write_words(out, &row);
+                }
+                Ok(())
+            },
+        )?;
         let header = header_bytes(
             [
                 self.pages.as_ref().unwrap().address(),
@@ -306,6 +368,63 @@ fn stage(
         offset,
     })
 }
+fn write_words(output: &mut [std::mem::MaybeUninit<u8>], words: &[u32]) {
+    assert_eq!(output.len(), words.len() * 4);
+    for (out, word) in output.as_chunks_mut::<4>().0.iter_mut().zip(words) {
+        for (out, byte) in out.iter_mut().zip(word.to_le_bytes()) {
+            out.write(byte);
+        }
+    }
+}
+fn write_aliases(output: &mut [std::mem::MaybeUninit<u8>], aliases: &[Alias]) {
+    assert_eq!(output.len(), aliases.len() * 16);
+    for (out, alias) in output.as_chunks_mut::<16>().0.iter_mut().zip(aliases) {
+        write_words(
+            out,
+            &[
+                alias.light,
+                alias.alias,
+                alias.cut.to_bits(),
+                alias.pdf.to_bits(),
+            ],
+        );
+    }
+}
+fn stage_with(
+    context: &Arc<Context>,
+    uploads: &mut Arena,
+    bytes: usize,
+    destination: vk::Buffer,
+    offset: u64,
+    write: impl FnOnce(&mut [std::mem::MaybeUninit<u8>]) -> Result<(), String>,
+) -> Result<Copy, String> {
+    let mut source = uploads.allocate(context, bytes as u64, 16)?;
+    source.write_with(write)?;
+    Ok(Copy {
+        source,
+        destination,
+        offset,
+    })
+}
+fn stage_table_with(
+    context: &Arc<Context>,
+    uploads: &mut Arena,
+    bytes: usize,
+    destination: &mut Option<Buffer>,
+    copies: &mut Vec<Copy>,
+    write: impl FnOnce(&mut [std::mem::MaybeUninit<u8>]) -> Result<(), String>,
+) -> Result<(), String> {
+    grow(context, destination, bytes)?;
+    copies.push(stage_with(
+        context,
+        uploads,
+        bytes,
+        destination.as_ref().unwrap().buffer,
+        0,
+        write,
+    )?);
+    Ok(())
+}
 
 fn stage_table(
     context: &Arc<Context>,
@@ -325,6 +444,7 @@ fn stage_table(
     Ok(())
 }
 
+#[cfg(test)]
 fn alias_bytes(aliases: &[Alias]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(aliases.len() * 16);
     for alias in aliases {
@@ -347,6 +467,7 @@ fn cell_hash(key: [i32; 3]) -> u32 {
     h ^ (h >> 16)
 }
 
+#[cfg(test)]
 fn cell_bytes(
     cells: impl ExactSizeIterator<Item = ([i32; 3], u32, u64)>,
 ) -> Result<Vec<u8>, String> {
@@ -357,6 +478,16 @@ fn cell_bytes(
             .checked_mul(32)
             .ok_or("Light cell hash size overflow")?
     ];
+    write_cells(cells, &mut bytes)?;
+    Ok(bytes)
+}
+
+fn write_cells(
+    cells: impl ExactSizeIterator<Item = ([i32; 3], u32, u64)>,
+    bytes: &mut [u8],
+) -> Result<(), String> {
+    let capacity = cell_capacity(cells.len())?;
+    assert_eq!(bytes.len(), capacity * 32);
     for (key, count, address) in cells {
         let mut slot = cell_hash(key) as usize & (capacity - 1);
         while bytes[slot * 32 + 12..slot * 32 + 16] != [0; 4] {
@@ -369,7 +500,7 @@ fn cell_bytes(
         entry[12..16].copy_from_slice(&count.to_le_bytes());
         entry[16..24].copy_from_slice(&address.to_le_bytes());
     }
-    Ok(bytes)
+    Ok(())
 }
 
 fn cell_capacity(count: usize) -> Result<usize, String> {
@@ -385,10 +516,10 @@ fn header_bytes(
     anchor: [f64; 3],
     mask: u32,
     count: u32,
-) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::with_capacity(64);
-    for pointer in pointers {
-        bytes.extend_from_slice(&pointer.to_le_bytes());
+) -> Result<[u8; 64], String> {
+    let mut bytes = [0; 64];
+    for (i, pointer) in pointers.into_iter().enumerate() {
+        bytes[i * 8..i * 8 + 8].copy_from_slice(&pointer.to_le_bytes());
     }
     let mut remainder = [0.; 3];
     // Production Frame::anchor is snapped to 256, so this remainder is exactly zero.
@@ -398,20 +529,45 @@ fn header_bytes(
         if !cell.is_finite() || cell < f64::from(i32::MIN) || cell > f64::from(i32::MAX) {
             return Err("Scene anchor exceeds the light grid coordinate range".into());
         }
-        bytes.extend_from_slice(&(cell as i32).to_le_bytes());
+        bytes[32 + axis * 4..36 + axis * 4].copy_from_slice(&(cell as i32).to_le_bytes());
         remainder[axis] = (position - cell * 16.) as f32;
     }
-    crate::uint(&mut bytes, mask);
-    for value in remainder {
-        crate::float(&mut bytes, value);
+    bytes[44..48].copy_from_slice(&mask.to_le_bytes());
+    for (i, value) in remainder.into_iter().enumerate() {
+        bytes[48 + i * 4..52 + i * 4].copy_from_slice(&value.to_le_bytes());
     }
-    crate::uint(&mut bytes, count);
+    bytes[60..64].copy_from_slice(&count.to_le_bytes());
     Ok(bytes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mapped_alias_serialization_preserves_gpu_record_bits() {
+        let aliases = [
+            Alias {
+                light: 0x12345678,
+                alias: 3,
+                cut: 0.5,
+                pdf: 0.25,
+            },
+            Alias {
+                light: 8,
+                alias: 0,
+                cut: 1.,
+                pdf: f32::MIN_POSITIVE,
+            },
+        ];
+        let mut mapped = vec![std::mem::MaybeUninit::uninit(); aliases.len() * 16];
+        write_aliases(&mut mapped, &aliases);
+        let actual = mapped
+            .into_iter()
+            .map(|b| unsafe { b.assume_init() })
+            .collect::<Vec<_>>();
+        assert_eq!(actual, alias_bytes(&aliases));
+    }
 
     #[test]
     fn sparse_hash_preserves_negative_keys_and_collisions() {

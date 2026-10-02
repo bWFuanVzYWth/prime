@@ -45,6 +45,84 @@ struct Cluster {
     cutout: bool,
     light_pages: Vec<Option<Rc<crate::surface::LightPage>>>,
     optical: bool,
+    // Immutable owners, not hashes: RGB-only edits can preserve atmospheric visibility.
+    occlusion: Option<OcclusionProof>,
+}
+
+struct OcclusionProof(Vec<(u32, Vec<TerrainMember>)>);
+impl OcclusionProof {
+    fn new(update: &prime_scene::translation::TerrainUpdate) -> Option<Self> {
+        // Keeping expanded compiler SurfaceMesh output alive adds a second resident
+        // per-face owner. Ordinary producer pages are already shared by the scene.
+        if update
+            .geometries
+            .iter()
+            .flat_map(|g| &g.members)
+            .any(|m| matches!(m.triangles, MeshGeometry::Surfaces(_)))
+        {
+            return None;
+        }
+        Some(Self(
+            update
+                .geometries
+                .iter()
+                .map(|geometry| {
+                    (
+                        geometry.flags,
+                        geometry
+                            .members
+                            .iter()
+                            .map(|member| TerrainMember {
+                                triangles: member.triangles.clone(),
+                                range: member.range.clone(),
+                                offset: member.offset,
+                            })
+                            .collect(),
+                    )
+                })
+                .collect(),
+        ))
+    }
+    fn matches(&self, update: &prime_scene::translation::TerrainUpdate) -> bool {
+        self.0.len() == update.geometries.len()
+            && self
+                .0
+                .iter()
+                .zip(&update.geometries)
+                .all(|((flags, members), geometry)| {
+                    *flags == geometry.flags
+                        && members.len() == geometry.members.len()
+                        && members.iter().zip(&geometry.members).all(|(a, b)| {
+                            a.range == b.range
+                                && a.offset.map(f32::to_bits) == b.offset.map(f32::to_bits)
+                                && !matches!(b.triangles, MeshGeometry::Surfaces(_))
+                                && (a.triangles.ptr_eq(&b.triangles)
+                                    || a.range.clone().all(|i| {
+                                        let a = a.triangles.triangle(i);
+                                        let b = b.triangles.triangle(i);
+                                        a.positions.map(|p| p.map(f32::to_bits))
+                                            == b.positions.map(|p| p.map(f32::to_bits))
+                                            && a.uvs.map(|uv| uv.map(f32::to_bits))
+                                                == b.uvs.map(|uv| uv.map(f32::to_bits))
+                                            && a.texture_id == b.texture_id
+                                            && a.flags == b.flags
+                                            && a.colors
+                                                .iter()
+                                                .zip(&b.colors)
+                                                .all(|(a, b)| a[3].to_bits() == b[3].to_bits())
+                                    }))
+                        })
+                })
+    }
+}
+impl Cluster {
+    fn capabilities(&self) -> [usize; 3] {
+        [
+            usize::from(self.allocations.iter().any(|a| a.format != 0)),
+            usize::from(self.allocations.iter().any(|a| a.format >= 2)),
+            usize::from(self.optical),
+        ]
+    }
 }
 
 pub(super) struct Geometry {
@@ -62,7 +140,9 @@ pub(super) struct Geometry {
     static_planner: TerrainPlanner,
     surface_compilers: Vec<SurfaceCompiler>,
     pub objects: Objects,
-    instances: Vec<vk::AccelerationStructureInstanceKHR>,
+    directory: crate::static_directory::StaticDirectory,
+    light_sources: BTreeMap<u64, ([f64; 3], Rc<crate::surface::LightPage>)>,
+    capabilities: [usize; 3],
     top_dirty: bool,
     static_count: u64,
     materials: [MaterialArena; crate::packing::FORMATS],
@@ -74,8 +154,10 @@ pub(super) struct Geometry {
     has_optics: bool,
     resources: crate::scene_resources::SharedResources,
     resource_revision: u64,
+    resource_occlusion_revision: u64,
     omm_revision: u64,
     pub rebuilt_clusters: u32,
+    pub(crate) static_occlusion_changed: bool,
     pub(crate) opacity_micromap: bool,
     omm_dirty: bool,
     pub(crate) omm_prepare_ns: [u64; 3],
@@ -143,7 +225,9 @@ impl Geometry {
                 .map(|_| SurfaceCompiler::new())
                 .collect(),
             objects: Objects::new(context, workers)?,
-            instances: Vec::new(),
+            directory: crate::static_directory::StaticDirectory::default(),
+            light_sources: BTreeMap::new(),
+            capabilities: [0; 3],
             top_dirty: true,
             static_count: 0,
             materials: std::array::from_fn(|format| {
@@ -164,8 +248,10 @@ impl Geometry {
             has_optics: false,
             resources,
             resource_revision: 0,
+            resource_occlusion_revision: 0,
             omm_revision: 0,
             rebuilt_clusters: 0,
+            static_occlusion_changed: true,
             opacity_micromap: enabled && context.opacity_micromap.is_some(),
             omm_dirty: false,
             omm_prepare_ns: [0; 3],
@@ -192,7 +278,7 @@ impl Geometry {
     #[cfg(test)]
     pub fn assert_incremental_workspaces(&self) -> (usize, u64) {
         self.top
-            .assert_current_input(&self.instances, &self.objects.instances);
+            .assert_current_input(&self.directory.instances, &self.objects.instances);
         (
             self.builds.page_count() + self.uploads.page_count(),
             self.builds.reserved_bytes() + self.uploads.reserved_bytes(),
@@ -206,6 +292,13 @@ impl Geometry {
     }
     pub fn source_changed(&self, scene: SceneInput<'_>) -> bool {
         self.revision != scene.publication() || self.anchor != scene.anchor
+    }
+    #[cfg(test)]
+    pub fn static_slot(&self, key: Cell) -> Option<(u32, u32, u32)> {
+        self.directory.slot(key)
+    }
+    pub fn occlusion_resources_changed(&self) -> bool {
+        self.resource_occlusion_revision != self.resources.borrow().occlusion_revision
     }
 
     #[cfg(test)]
@@ -291,6 +384,17 @@ impl Geometry {
         if scene.anchor.iter().any(|v| !v.is_finite()) {
             return Err("Invalid scene anchor".into());
         }
+        self.static_occlusion_changed = self.epoch != scene.epoch || self.anchor != scene.anchor;
+        let mut directory_changed = BTreeSet::new();
+        if self.omm_dirty {
+            directory_changed.extend(
+                self.clusters
+                    .iter()
+                    .filter(|(_, c)| c.cutout)
+                    .map(|(&key, _)| key),
+            );
+        }
+        let mut lights_changed = self.anchor != scene.anchor;
         let mut instance_flags_changed = self.omm_dirty;
         let owner = self.resources.clone();
         let mut resources = owner.borrow_mut();
@@ -317,6 +421,7 @@ impl Geometry {
                     if !cluster.micromaps.is_empty() {
                         instance_flags_changed |= !cluster.stale_omm;
                         cluster.stale_omm = true;
+                        directory_changed.insert(key);
                     }
                 }
             }
@@ -330,6 +435,7 @@ impl Geometry {
                     if !cluster.micromaps.is_empty() {
                         instance_flags_changed |= !cluster.stale_omm;
                         cluster.stale_omm = true;
+                        directory_changed.insert(cell);
                     }
                 }
             }
@@ -362,8 +468,21 @@ impl Geometry {
                 Ok(())
             },
         )?;
+        self.static_occlusion_changed |= !plan.removed.is_empty()
+            || plan.geometry.iter().any(|update| {
+                self.clusters.get(&update.key).is_none_or(|old| {
+                    old.occlusion
+                        .as_ref()
+                        .is_none_or(|proof| !proof.matches(update))
+                })
+            });
         self.top_dirty |= plan.placements_changed;
         if self.epoch != scene.epoch {
+            self.directory = crate::static_directory::StaticDirectory::default();
+            self.light_sources.clear();
+            self.capabilities = [0; 3];
+            self.static_count = 0;
+            lights_changed = true;
             for (_, old) in std::mem::take(&mut self.clusters) {
                 old.acceleration.retire(&mut self.builds);
                 for micromap in old.micromaps {
@@ -375,7 +494,15 @@ impl Geometry {
             self.epoch = scene.epoch;
         }
         for key in &plan.removed {
+            self.directory.remove(*key);
             if let Some(old) = self.clusters.remove(key) {
+                self.static_count -= old.triangle_count;
+                for (total, value) in self.capabilities.iter_mut().zip(old.capabilities()) {
+                    *total -= value;
+                }
+                for page in old.light_pages.iter().flatten() {
+                    lights_changed |= self.light_sources.remove(&page.key).is_some();
+                }
                 old.acceleration.retire(&mut self.builds);
                 for micromap in old.micromaps {
                     micromap.retire(&mut self.builds);
@@ -387,7 +514,15 @@ impl Geometry {
         }
         let mut allocated_changes = Vec::with_capacity(plan.geometry.len());
         for update in &plan.geometry {
+            directory_changed.insert(update.key);
             if let Some(old) = self.clusters.remove(&update.key) {
+                self.static_count -= old.triangle_count;
+                for (total, value) in self.capabilities.iter_mut().zip(old.capabilities()) {
+                    *total -= value;
+                }
+                for page in old.light_pages.iter().flatten() {
+                    lights_changed |= self.light_sources.remove(&page.key).is_some();
+                }
                 old.acceleration.retire(&mut self.builds);
                 for micromap in old.micromaps {
                     micromap.retire(&mut self.builds);
@@ -642,9 +777,8 @@ impl Geometry {
                         light_pages.push(light.clone());
                     }
                 }
-                self.clusters.insert(
-                    key,
-                    Cluster {
+                let cluster = Cluster {
+                        occlusion: OcclusionProof::new(update),
                         optical: update.geometries.iter().flat_map(|g| &g.members).any(|m| matches!(&m.triangles, MeshGeometry::Surfaces(mesh) if mesh.quads.iter().any(|q|q.optics.is_some()))),
                         cutout: update.geometries.iter().any(|g| g.flags == 1),
                         micromaps: maps.into_iter().flatten().map(|m| m.finish(&mut self.builds, &mut self.uploads)).collect(),
@@ -664,8 +798,17 @@ impl Geometry {
                             .map(|g| u64::from(g.triangle_count))
                             .sum(),
                         light_pages,
-                    },
-                );
+                    };
+                self.static_count += cluster.triangle_count;
+                for (total, value) in self.capabilities.iter_mut().zip(cluster.capabilities()) {
+                    *total += value;
+                }
+                for page in cluster.light_pages.iter().flatten() {
+                    self.light_sources
+                        .insert(page.key, (key.origin(), page.clone()));
+                    lights_changed = true;
+                }
+                self.clusters.insert(key, cluster);
             }
         }
         resources.collect();
@@ -675,129 +818,161 @@ impl Geometry {
             self.revision = scene.publication();
             self.anchor = scene.anchor;
             self.resource_revision = resources.revision;
+            self.resource_occlusion_revision = resources.occlusion_revision;
             self.omm_revision = resources.omm_revision;
             resources.coverage_changed.clear();
             self.static_planner.recycle(plan);
             return Ok(false);
         }
-        let light_sources = self
-            .clusters
-            .iter()
-            .flat_map(|(cell, cluster)| {
-                cluster
-                    .light_pages
-                    .iter()
-                    .flatten()
-                    .map(move |light| (light.key, (cell.origin(), light.as_ref())))
-            })
-            .collect();
-        self.light_grid
-            .update(context, scene.anchor, &light_sources, &mut self.uploads)?;
-        self.instances.clear();
-        self.instances.reserve(self.clusters.len() + 1);
-        let mut static_bases =
-            Vec::with_capacity(self.clusters.len().max(1) * crate::surface::PAGE_BYTES);
-        self.has_surfaces = false;
-        self.has_compounds = false;
-        self.has_optics = false;
-        for placement in self.static_planner.placements() {
-            let cluster = &self.clusters[&placement.key];
-            self.has_optics |= cluster.optical;
-            // The instance ID points to the first geometry address; hardware geometry index
-            // selects the range without a second pointer lookup or per-primitive search.
-            let index = static_bases.len() / crate::surface::PAGE_BYTES;
+        if lights_changed {
+            let sources = self
+                .light_sources
+                .iter()
+                .map(|(&key, (origin, page))| (key, (*origin, page.as_ref())))
+                .collect();
+            self.light_grid
+                .update(context, scene.anchor, &sources, &mut self.uploads)?;
+        }
+        if self.anchor != scene.anchor {
+            directory_changed.extend(self.clusters.keys().copied());
+        }
+        self.has_surfaces = self.capabilities[0] != 0;
+        self.has_compounds = self.capabilities[1] != 0;
+        self.has_optics = self.capabilities[2] != 0;
+        for key in directory_changed {
+            let Some(cluster) = self.clusters.get(&key) else {
+                continue;
+            };
+            let origin: [f32; 3] =
+                std::array::from_fn(|i| (key.origin()[i] - scene.anchor[i]) as f32);
+            let mut rows = Vec::with_capacity(cluster.allocations.len());
             for (i, &allocation) in cluster.allocations.iter().enumerate() {
-                self.has_surfaces |= allocation.format != 0;
-                self.has_compounds |= allocation.format >= 2;
-                let address = self.materials[allocation.format].address(allocation.records);
-                static_bases.extend_from_slice(&address.to_le_bytes());
-                static_bases.extend_from_slice(&(allocation.format as u32).to_le_bytes());
-                static_bases.extend_from_slice(&[0; 4]);
-                let light = &cluster.light_pages[i];
-                crate::uint(
-                    &mut static_bases,
-                    light
-                        .as_ref()
-                        .map_or(0, |l| self.light_grid.first_emitter(l.key)),
+                let mut row = [0; crate::surface::PAGE_BYTES];
+                row[..8].copy_from_slice(
+                    &self.materials[allocation.format]
+                        .address(allocation.records)
+                        .to_le_bytes(),
                 );
-                crate::uint(&mut static_bases, 0);
-                static_bases.extend_from_slice(
+                row[8..12].copy_from_slice(&(allocation.format as u32).to_le_bytes());
+                let light = &cluster.light_pages[i];
+                row[16..20].copy_from_slice(
+                    &light
+                        .as_ref()
+                        .map_or(0, |l| self.light_grid.first_emitter(l.key))
+                        .to_le_bytes(),
+                );
+                row[24..32].copy_from_slice(
                     &light
                         .as_ref()
                         .map_or(0, |l| l.emitters.address())
                         .to_le_bytes(),
                 );
-                static_bases.extend_from_slice(&[0; 12]); // shared grid header patched below
-                crate::uint(&mut static_bases, light.as_ref().map_or(1, |l| l.format));
-                let origin = [
-                    placement.transform[3],
-                    placement.transform[7],
-                    placement.transform[11],
-                ];
-                crate::float4(&mut static_bases, [origin[0], origin[1], origin[2], 0.0]);
+                row[44..48].copy_from_slice(&light.as_ref().map_or(1, |l| l.format).to_le_bytes());
+                for (i, value) in origin.into_iter().enumerate() {
+                    row[48 + i * 4..52 + i * 4].copy_from_slice(&value.to_le_bytes());
+                }
+                rows.push(row);
             }
-            if static_bases.len() / crate::surface::PAGE_BYTES >= OBJECT_BIT as usize {
-                return Err(
-                    "Static geometry format ranges exceed the instance address space".into(),
-                );
-            }
-            self.instances.push(vk::AccelerationStructureInstanceKHR {
-                transform: vk::TransformMatrixKHR {
-                    matrix: placement.transform,
+            self.directory.publish(
+                key,
+                &rows,
+                vk::AccelerationStructureInstanceKHR {
+                    transform: vk::TransformMatrixKHR {
+                        matrix: [
+                            1., 0., 0., origin[0], 0., 1., 0., origin[1], 0., 0., 1., origin[2],
+                        ],
+                    },
+                    instance_custom_index_and_mask: vk::Packed24_8::new(0, 0xff),
+                    instance_shader_binding_table_record_offset_and_flags: vk::Packed24_8::new(
+                        0,
+                        (vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE
+                            | if cluster.stale_omm {
+                                vk::GeometryInstanceFlagsKHR::DISABLE_OPACITY_MICROMAPS_EXT
+                            } else {
+                                vk::GeometryInstanceFlagsKHR::empty()
+                            })
+                        .as_raw() as u8,
+                    ),
+                    acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
+                        device_handle: cluster.acceleration.address(),
+                    },
                 },
-                instance_custom_index_and_mask: vk::Packed24_8::new(index as u32, 0xff),
-                instance_shader_binding_table_record_offset_and_flags: vk::Packed24_8::new(
-                    0,
-                    (vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE
-                        | if cluster.stale_omm {
-                            vk::GeometryInstanceFlagsKHR::DISABLE_OPACITY_MICROMAPS_EXT
-                        } else {
-                            vk::GeometryInstanceFlagsKHR::empty()
-                        })
-                    .as_raw() as u8,
-                ),
-                acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
-                    device_handle: cluster.acceleration.address(),
-                },
-            });
+            )?;
         }
-        if static_bases.is_empty() {
-            static_bases.extend_from_slice(&[0; crate::surface::PAGE_BYTES]);
-        }
-        // Entry zero owns the world light header even when its own geometry is not emissive.
-        static_bases[12..16].copy_from_slice(&self.light_grid.world_count().to_le_bytes());
-        static_bases[32..40].copy_from_slice(&self.light_grid.header_address().to_le_bytes());
-        if static_bases.len() as u64 > self.static_bases.size {
+        self.directory.light_header(
+            self.light_grid.world_count(),
+            self.light_grid.header_address(),
+        );
+        let bytes = self.directory.bytes.len() * crate::surface::PAGE_BYTES;
+        if bytes as u64 > self.static_bases.size {
             self.static_bases = Buffer::new(
                 context,
-                (static_bases.len() as u64).next_power_of_two(),
+                (bytes as u64).next_power_of_two(),
                 vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                 false,
             )?;
+            self.directory.dirty_records = (0..self.directory.bytes.len()).collect();
         }
-        let bases_upload = self
-            .uploads
-            .allocate(context, static_bases.len() as u64, 16)?;
-        bases_upload.write(&static_bases)?;
-        context.submit_named("static_cluster_bases", |command| unsafe {
-            transfer_write_barrier(context, command);
-            context.device.cmd_copy_buffer(
-                command,
-                bases_upload.buffer.buffer,
-                self.static_bases.buffer,
-                &[vk::BufferCopy::default()
-                    .src_offset(bases_upload.offset)
-                    .size(static_bases.len() as u64)],
-            );
-            transfer_barrier(context, command);
-        })?;
-        self.uploads.retire(bases_upload);
-        self.static_count = self.clusters.values().map(|c| c.triangle_count).sum();
+        self.directory.dirty_records.sort_unstable();
+        self.directory.dirty_records.dedup();
+        self.directory
+            .dirty_records
+            .retain(|&i| i < self.directory.bytes.len());
+        if !self.directory.dirty_records.is_empty() {
+            let mut upload = self.uploads.allocate(
+                context,
+                (self.directory.dirty_records.len() * crate::surface::PAGE_BYTES) as u64,
+                16,
+            )?;
+            upload.write_with(|output| {
+                for (dst, &at) in output
+                    .as_chunks_mut::<{ crate::surface::PAGE_BYTES }>()
+                    .0
+                    .iter_mut()
+                    .zip(&self.directory.dirty_records)
+                {
+                    for (out, &byte) in dst.iter_mut().zip(&self.directory.bytes[at]) {
+                        out.write(byte);
+                    }
+                }
+                Ok(())
+            })?;
+            let mut copies: Vec<vk::BufferCopy> = Vec::new();
+            for (i, &at) in self.directory.dirty_records.iter().enumerate() {
+                let source = upload.offset + (i * crate::surface::PAGE_BYTES) as u64;
+                let destination = (at * crate::surface::PAGE_BYTES) as u64;
+                if let Some(last) = copies.last_mut().filter(|last| {
+                    last.src_offset + last.size == source
+                        && last.dst_offset + last.size == destination
+                }) {
+                    last.size += crate::surface::PAGE_BYTES as u64;
+                } else {
+                    copies.push(
+                        vk::BufferCopy::default()
+                            .src_offset(source)
+                            .dst_offset(destination)
+                            .size(crate::surface::PAGE_BYTES as u64),
+                    );
+                }
+            }
+            context.submit_named("static_cluster_bases", |command| unsafe {
+                transfer_write_barrier(context, command);
+                context.device.cmd_copy_buffer(
+                    command,
+                    upload.buffer.buffer,
+                    self.static_bases.buffer,
+                    &copies,
+                );
+                transfer_barrier(context, command);
+            })?;
+            self.uploads.retire(upload);
+        }
         self.static_planner.recycle(plan);
         self.omm_dirty = false;
         self.revision = scene.publication();
         self.anchor = scene.anchor;
         self.resource_revision = resources.revision;
+        self.resource_occlusion_revision = resources.occlusion_revision;
         self.omm_revision = resources.omm_revision;
         resources.coverage_changed.clear();
         Ok(published_changed)
@@ -810,7 +985,7 @@ impl Geometry {
         objects: impl Into<InstanceInput<'a>>,
         slot: usize,
         cpu: &mut FrameCpu,
-    ) -> Result<(bool, bool), String> {
+    ) -> Result<(bool, bool, bool), String> {
         let resources = self.resources.borrow();
         let changes = self.objects.prepare(
             context,
@@ -826,14 +1001,17 @@ impl Geometry {
             let started = cpu.start();
             bindings |= self.top.rebuild(
                 context,
-                &self.instances,
+                &self.directory.instances,
                 &self.objects.instances,
                 &self.objects.changed_instances,
                 self.top_dirty,
+                &self.directory.dirty_instances,
+                changes.tlas_update,
                 slot,
                 &mut self.builds,
             )?;
             self.top_dirty = false;
+            self.directory.finish_upload();
             cpu.tlas_rebuilds += 1;
             cpu.finish(Stage::Tlas, started);
         }
@@ -841,7 +1019,7 @@ impl Geometry {
             .static_count
             .checked_add(self.objects.triangle_count)
             .ok_or("Triangle count overflow")?;
-        Ok((changes.scene, bindings))
+        Ok((changes.scene, changes.occlusion, bindings))
     }
 
     pub fn cpu_load(
@@ -860,7 +1038,7 @@ impl Geometry {
             self.materials.iter().map(|a| a.page_count() as u64).sum(),
             self.objects.page_count() as u64,
             self.objects.count() as u64,
-            (self.instances.len() + self.objects.instances.len()) as u64,
+            (self.directory.instances.len() + self.objects.instances.len()) as u64,
             if cpu.static_updates > 0 {
                 u64::from(self.rebuilt_clusters)
             } else {
@@ -949,6 +1127,174 @@ mod tests {
                 })
                 .into(),
         }
+    }
+
+    #[test]
+    fn static_visibility_proof_accepts_rgb_only_and_rejects_coverage_geometry_changes() {
+        use prime_scene::translation::{TerrainGeometry, TerrainUpdate};
+        let source = mesh(0., 1, [1.; 4]);
+        let update = |triangles: MeshGeometry| TerrainUpdate {
+            key: cell([0; 3]),
+            geometries: vec![TerrainGeometry {
+                flags: 1,
+                triangle_count: 2,
+                members: vec![TerrainMember {
+                    range: 0..2,
+                    offset: [0.; 3],
+                    triangles,
+                }],
+            }],
+        };
+        let proof = OcclusionProof::new(&update(source.triangles.clone())).unwrap();
+        assert!(proof.matches(&update(source.triangles.clone())));
+        let mut triangles = source.triangles.iter().collect::<Vec<_>>();
+        for triangle in &mut triangles {
+            for color in &mut triangle.colors {
+                color[0] = 0.25;
+                color[1] = 0.5;
+            }
+        }
+        assert!(proof.matches(&update(triangles.clone().into())));
+        for field in 0..5 {
+            let mut changed = triangles.clone();
+            match field {
+                0 => changed[0].colors[0][3] = 0.5,
+                1 => changed[0].positions[0][0] += 1.,
+                2 => changed[0].uvs[0][0] += 1.,
+                3 => changed[0].texture_id = 1,
+                _ => changed[0].flags = 2,
+            }
+            assert!(!proof.matches(&update(changed.into())));
+        }
+        let mut moved = update(source.triangles.clone());
+        moved.geometries[0].members[0].offset[0] = 1.;
+        assert!(!proof.matches(&moved));
+        let rich = prime_scene::surface::SurfaceMesh::from_resolved(
+            1,
+            vec![prime_scene::surface::SurfaceFace::from_quad(
+                prime_scene::geometry::CompiledQuad {
+                    positions: [[0.; 3]; 4],
+                    color: [1.; 4],
+                    uvs: [[0.; 2]; 4],
+                    texture_id: 0,
+                    flags: 1,
+                },
+            )],
+        )
+        .unwrap();
+        assert!(OcclusionProof::new(&update(MeshGeometry::Surfaces(Arc::new(rich)))).is_none());
+    }
+
+    #[test]
+    #[ignore = "windowless actual TLAS UPDATE pixels versus fresh BUILD and structural fallback"]
+    fn gpu_pose_only_tlas_update_matches_fresh_build_and_structural_changes_fall_back() {
+        use prime_scene::{
+            Instance, Prototype,
+            settings::{DiagnosticView, RenderMode, RenderSettings},
+        };
+        let scene = Scene {
+            epoch: 1,
+            ..Default::default()
+        };
+        let mut source = InstanceScene {
+            epoch: 1,
+            resource_revision: 1,
+            instance_revision: 1,
+            ..Default::default()
+        };
+        let triangles = mesh(0., 0, [1.; 4])
+            .triangles
+            .iter()
+            .map(|mut t| {
+                for p in &mut t.positions {
+                    p[0] /= 40.;
+                    p[1] /= 40.;
+                }
+                t
+            })
+            .collect::<Vec<_>>();
+        source.prototypes.insert(
+            1,
+            Prototype {
+                revision: 1,
+                triangles: triangles.into(),
+                bounds: [[-0.5, -0.5, 0.], [0.5, 0.5, 0.]],
+            },
+        );
+        source.instances.insert(
+            1,
+            Instance {
+                revision: 1,
+                prototype_id: 1,
+                origin: [0.; 3],
+                transform: crate::plan::translation([0.; 3]),
+                texture_id: crate::plan::INHERIT,
+                flags: 0,
+                tint: [255; 4],
+                uv_transform: [1., 1., 0., 0.],
+            },
+        );
+        let camera = Camera {
+            position: [0., 0., 2.],
+            forward: [0., 0., -1.],
+            right: [1., 0., 0.],
+            up: [0., 1., 0.],
+            vertical_fov_radians: 1.,
+        };
+        let mut renderer = Renderer::new().unwrap();
+        let mut reference = Renderer::new().unwrap();
+        for r in [&mut renderer, &mut reference] {
+            r.configure(RenderSettings {
+                mode: RenderMode::Realtime,
+                view: DiagnosticView::LinearDepth,
+                ..Default::default()
+            })
+            .unwrap();
+        }
+        for (frame, x) in [0., 0.25, -0.25, 0.75, 0.5].into_iter().enumerate() {
+            source.instances.get_mut(&1).unwrap().transform[3] = x;
+            source.instances.get_mut(&1).unwrap().revision += 1;
+            source.instance_revision += 1;
+            let actual = renderer
+                .render_with_instances(&scene, &source, &camera, 48, 32, 0)
+                .unwrap();
+            reference.geometry.take();
+            let expected = reference
+                .render_with_instances(&scene, &source, &camera, 48, 32, 0)
+                .unwrap();
+            assert_eq!(
+                actual, expected,
+                "pose UPDATE must match fresh BUILD at frame {frame}"
+            );
+            assert_eq!(
+                renderer.geometry.as_ref().unwrap().top.last_update,
+                frame != 0
+            );
+            renderer
+                .geometry
+                .as_ref()
+                .unwrap()
+                .assert_incremental_workspaces();
+        }
+        source.instances.get_mut(&1).unwrap().flags = 1;
+        source.instances.get_mut(&1).unwrap().revision += 1;
+        source.instance_revision += 1;
+        renderer
+            .render_with_instances(&scene, &source, &camera, 48, 32, 0)
+            .unwrap();
+        assert!(
+            !renderer.geometry.as_ref().unwrap().top.last_update,
+            "opacity flags require BUILD"
+        );
+        source.instances.remove(&1);
+        source.instance_revision += 1;
+        renderer
+            .render_with_instances(&scene, &source, &camera, 48, 32, 0)
+            .unwrap();
+        assert!(
+            !renderer.geometry.as_ref().unwrap().top.last_update,
+            "membership/count changes require BUILD"
+        );
     }
 
     #[test]
@@ -1552,14 +1898,31 @@ mod tests {
         for seed in [0, 19, 500] {
             let merged = renderer.render(&scene, &camera, 96, 64, seed).unwrap();
             let expected = separate.render(&reference, &camera, 96, 64, seed).unwrap();
+            if let Some(directory) = std::env::var_os("PRIME_MIXED_DIAGNOSTIC_DIR") {
+                let directory = std::path::Path::new(&directory);
+                std::fs::create_dir_all(directory).unwrap();
+                std::fs::write(directory.join(format!("merged-{seed}.rgba")), &merged).unwrap();
+                std::fs::write(directory.join(format!("dynamic-{seed}.rgba")), &expected).unwrap();
+            }
+            renderer
+                .geometry
+                .as_ref()
+                .unwrap()
+                .assert_incremental_workspaces();
             assert!(
                 merged == expected,
-                "mixed material geometry index mismatch, seed={seed}"
+                "mixed material geometry index mismatch, seed={seed}, differences={}, first={:?}",
+                merged.iter().zip(&expected).filter(|(a, b)| a != b).count(),
+                merged
+                    .iter()
+                    .zip(&expected)
+                    .enumerate()
+                    .find(|(_, (a, b))| a != b)
             );
         }
         let geometry = renderer.geometry.as_ref().unwrap();
         assert_eq!(geometry.clusters.len(), 2);
-        assert_eq!(geometry.instances.len(), 2);
+        assert_eq!(geometry.directory.instances.len(), 2);
         let mixed = &geometry.clusters[&cell([0, 0, 0])];
         assert_eq!(mixed.allocations.len(), 3);
         assert_ne!(
@@ -1567,10 +1930,10 @@ mod tests {
             mixed.allocations[1].records.page
         );
         assert_eq!(
-            geometry.instances[1]
+            geometry.directory.instances[1]
                 .instance_custom_index_and_mask
                 .low_24(),
-            3
+            4
         );
         let retained = geometry.clusters[&cell([1, 0, 0])].acceleration.address();
         scene.meshes.remove(&(1, 1));
@@ -1592,10 +1955,10 @@ mod tests {
         let geometry = renderer.geometry.as_ref().unwrap();
         assert_eq!(geometry.clusters[&cell([0, 0, 0])].allocations.len(), 2);
         assert_eq!(
-            geometry.instances[1]
+            geometry.directory.instances[1]
                 .instance_custom_index_and_mask
                 .low_24(),
-            2
+            4
         );
         assert_eq!(geometry.rebuilt_clusters, 1);
         assert_eq!(

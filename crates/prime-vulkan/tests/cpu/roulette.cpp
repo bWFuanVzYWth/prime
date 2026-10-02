@@ -22,6 +22,44 @@ static bool close(double actual, double expected, double tolerance = 4e-6) {
 int main() {
     const float infinity = std::numeric_limits<float>::infinity();
     const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float maximum = std::numeric_limits<float>::max();
+    const float minimum = std::numeric_limits<float>::min();
+    const float subnormal = std::numeric_limits<float>::denorm_min();
+    for (bool continuation : {false, true})
+        for (float pdf :
+             {0.0f, -1.0f, subnormal, minimum, 1e-10f, 1.0f, 4.0f, maximum, infinity, nan})
+            for (float competing : {0.0f, subnormal, 1.0f, maximum, infinity, nan})
+                for (float response : {0.0f, subnormal, 1.0f, maximum, infinity, nan})
+                    for (float beta : {0.0f, subnormal, 1.0f, maximum, infinity, nan}) {
+                        const Vector<float, 3> source{0, -0.0f, 0};
+                        const Vector<float, 3> accumulated{17.0f, 0.25f, -3.0f};
+                        const auto old = rrCpuZeroNee_0(accumulated, source, pdf, competing,
+                                                        {response, response, response},
+                                                        {beta, beta, beta}, false, continuation);
+                        const auto optimized = rrCpuZeroNee_0(
+                                accumulated, source, pdf, competing, {response, response, response},
+                                {beta, beta, beta}, true, continuation);
+                        for (unsigned c = 0; c < 3; ++c) {
+                            const float a = (&old.x)[c], b = (&optimized.x)[c];
+                            if (!((std::isnan(a) && std::isnan(b)) || a == b))
+                                std::fprintf(
+                                        stderr,
+                                        "nee mismatch continuation=%d pdf=%g competing=%g response=%g beta=%g channel=%u old=%g optimized=%g\n",
+                                        continuation, pdf, competing, response, beta, c, a, b);
+                            require((std::isnan(a) && std::isnan(b)) || a == b,
+                                    "zero NEE preserves existing radiance and invalid-domain behavior");
+                        }
+                    }
+    require(primeCanSkipZeroNee_0({0, 0, 0}, 4, {1, 1, 1}, false),
+            "bounded terminal zero contribution skips evaluation");
+    require(!primeCanSkipZeroNee_0({0, 0, 0}, 4, {1, 1, 1}, true),
+            "MIS underflow retains evaluation");
+    require(!primeCanSkipZeroNee_0({0, 0, 0}, subnormal, {1, 1, 1}, false),
+            "tiny PDF retains old overflow path");
+    require(!primeCanSkipZeroNee_0({0, 0, 0}, 4, {infinity, 1, 1}, false),
+            "non-finite throughput retains old path");
+    require(!primeCanSkipZeroNee_0({0, subnormal, 0}, 4, {1, 1, 1}, false),
+            "nonzero tiny radiance retains evaluation");
     const float cases[][4] = {
             {0, 0, 0, 1},          {0.04f, 0.08f, 0, 1},  {0.25f, 0.125f, 0, 0.5f},
             {0.01f, 0.02f, 0, 4},  {4, 2, 0, 1},          {0.001f, 0.4f, 0, 1},

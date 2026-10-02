@@ -30,6 +30,7 @@ fn state(v: &PrimeMcState, source: &Resources<'_>) -> Result<(u32, State), Strin
             )?,
             emission: v.emission,
             placement: placement::Placement::from_typed(v.placement, v.flags & 2 != 0)?,
+            masks: model::StateMasks::default(),
         },
     ))
 }
@@ -182,6 +183,7 @@ impl TerrainContext {
                 return Err("resource definition changed without generation replacement".into());
             }
             states.retain(|id, _| !old.states.contains_key(id));
+            models.retain(|id, _| !old.models.contains_key(id));
         }
         for value in states.values() {
             if value.faces.iter().any(|id| {
@@ -245,7 +247,13 @@ impl TerrainContext {
         } else {
             // Every fallible interpretation and cross-reference check precedes publication.
             scene.publish_resource_textures(generation, textures)?;
-            let changed = !states.is_empty() || !models.is_empty();
+            let state_ids = states.keys().copied().collect::<Vec<_>>();
+            let model_ids = models.keys().copied().collect::<Vec<_>>();
+            let sprite_ids = sprites
+                .keys()
+                .filter(|id| !self.catalog.sprites.contains_key(id))
+                .copied()
+                .collect::<Vec<_>>();
             self.catalog.states.extend(states);
             self.catalog.models.extend(models);
             self.catalog.faces.extend(faces);
@@ -257,11 +265,8 @@ impl TerrainContext {
                 }
             }
             self.catalog.sprites.extend(sprites);
-            if changed {
-                self.catalog.prepare();
-            } else {
-                self.catalog.refresh_contact_capability();
-            }
+            self.catalog
+                .prepare_delta(&state_ids, &model_ids, &sprite_ids);
             return Ok(());
         }
         scene.publish_resource_textures(generation, textures)?;

@@ -1,6 +1,6 @@
 //! Exact vanilla box filtering over native zoomed biome colors;
 //! this module owns deduplication, integer sums and dependency-scoped cached outputs.
-use crate::{schedule::Section, tint::Request};
+use crate::{column_cache::ColumnCache, schedule::Section, tint::Request};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -80,8 +80,8 @@ impl Sample {
 #[derive(Default)]
 pub(crate) struct Cache {
     radius: Option<i32>,
-    sections: HashMap<Section, HashMap<u16, u32>>,
-    sources: HashMap<Section, Box<SourcePage>>,
+    sections: ColumnCache<HashMap<u16, u32>>,
+    sources: ColumnCache<Box<SourcePage>>,
 }
 
 struct SourcePage {
@@ -145,21 +145,21 @@ impl Cache {
             self.sources.clear();
         } else if !columns.is_empty() {
             let mixed = dependency_masks(columns, self.radius.unwrap_or(0) + 2);
-            self.sections.retain(|s, colors| {
-                if let Some(mask) = mixed.get(&(s.0, s.2)) {
+            for (column, mask) in mixed {
+                self.sections.retain_column(column, |colors| {
                     colors.retain(|&local, _| {
                         let xz = (local & 255) as usize;
                         mask[xz / 64] & (1 << (xz & 63)) == 0
                     });
-                }
-                !colors.is_empty()
-            });
+                    !colors.is_empty()
+                });
+            }
             let raw = dependency_masks(columns, 2);
-            self.sources.retain(|s, page| {
-                if let Some(mask) = raw.get(&(s.0, s.2)) {
+            for (column, mask) in raw {
+                self.sources.retain_column(column, |page| {
                     for plane in &mut page.planes {
                         if let Some(p) = plane {
-                            for (valid, &remove) in p.valid.iter_mut().zip(mask) {
+                            for (valid, &remove) in p.valid.iter_mut().zip(&mask) {
                                 *valid &= !remove;
                             }
                             if p.valid == [0; 4] {
@@ -167,9 +167,9 @@ impl Cache {
                             }
                         }
                     }
-                }
-                page.planes.iter().any(Option::is_some)
-            });
+                    page.planes.iter().any(Option::is_some)
+                });
+            }
         }
     }
     pub fn forget(&mut self, section: Section) {
@@ -348,7 +348,7 @@ impl Cache {
             if indices.missing == [0; 4] {
                 continue;
             }
-            let page = self.sources.entry(Section(x, y >> 4, z)).or_default();
+            let page = self.sources.get_or_default(Section(x, y >> 4, z));
             let plane = page.planes[plane_index(resolver, y)].get_or_insert_with(Box::default);
             for (word, &mask) in indices.missing.iter().enumerate() {
                 plane.valid[word] |= mask;
@@ -411,10 +411,7 @@ impl Cache {
                     color
                 };
                 let (section, local) = query.key();
-                self.sections
-                    .entry(section)
-                    .or_default()
-                    .insert(local, color);
+                self.sections.get_or_default(section).insert(local, color);
                 plan.colors[index] = color;
             }
         }
@@ -443,6 +440,55 @@ pub(crate) struct Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn local_invalidation_visits_only_affected_columns_with_far_resident_pages() {
+        for radius in 0..=7 {
+            let mut cache = Cache {
+                radius: Some(radius),
+                ..Default::default()
+            };
+            for x in (0..2000).chain([5000]) {
+                let x = x + 100;
+                for y in -1..=1 {
+                    cache
+                        .sections
+                        .insert(Section(x, y, x), HashMap::from([(0x1000, 0xff123456)]));
+                    let mut page = SourcePage::default();
+                    page.planes[0] = Some(Box::new(SourcePlane {
+                        colors: [0xff123456; 256],
+                        valid: [u64::MAX; 4],
+                    }));
+                    cache.sources.insert(Section(x, y, x), Box::new(page));
+                }
+            }
+            for y in -1..=1 {
+                cache
+                    .sections
+                    .insert(Section(0, y, 0), HashMap::from([(0x1000, 0xff123456)]));
+                let mut page = SourcePage::default();
+                page.planes[0] = Some(Box::new(SourcePlane {
+                    colors: [0xff123456; 256],
+                    valid: [u64::MAX; 4],
+                }));
+                cache.sources.insert(Section(0, y, 0), Box::new(page));
+            }
+            cache.invalidate(false, &HashSet::from([(0, 0)]));
+            assert_eq!(cache.sections.visited_pages, 3);
+            assert_eq!(cache.sources.visited_pages, 3);
+            assert!(cache.sections.get(&Section(0, 0, 0)).is_none());
+            assert_eq!(
+                cache.sections.get(&Section(100, 0, 100)).unwrap()[&0x1000],
+                0xff123456
+            );
+            assert_eq!(
+                cache.sources.get(&Section(100, 0, 100)).unwrap().planes[0]
+                    .as_ref()
+                    .unwrap()
+                    .valid,
+                [u64::MAX; 4]
+            );
+        }
+    }
     fn color(q: Sample) -> u32 {
         let [x, y, z] = q.position;
         (x.wrapping_mul(741103597) ^ y.wrapping_mul(341873128) ^ z.wrapping_mul(132897987))

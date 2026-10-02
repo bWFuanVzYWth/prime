@@ -15,6 +15,8 @@ import java.nio.file.Path;
 
 /** Coarse CPU timings and >=50 ms warnings are permanent. Window summaries/CSV remain optional. */
 final class RenderProfile {
+    static final String CSV_HEADER =
+            "sample,pt_interval_ns,mc_before_pt_ns,pt_hook_ns,width,height,native_submit_ns,drain_ns,prune_ns,dynamic_submit_ns,native_record_ns,capture_ns,refs_pose_ns,be_sources,entity_sources,model_submits,standard_leaves,fallback_leaves,refs_checks,geometry_vertices_read,prototype_upserts,instance_upserts,instance_removes,op7_bytes,raw_vertices,model_raw_vertices,particle_raw_vertices,raw_packet_bytes,section_batches,section_bytes,raster_skipped,geometry_hits,geometry_misses,geometry_null_keys,geometry_emits,geometry_emitted_bytes,geometry_avoided_copy_bytes,cube_vertices_skipped,mesh_submits,mesh_groups,mesh_geometry_vertices_read,mesh_vertices_skipped,mesh_fallbacks,gpu_last_ns,terrain_available_sources_total,item_submits,item_groups,item_checked_vertices,item_skipped_vertices,item_fallback_quads,item_created_vertices,item_shared_hits,terrain_dirty_events,terrain_entered_columns,terrain_loaded_columns,terrain_unloaded_columns,terrain_invalidations,terrain_requested_sources,terrain_available_sources,terrain_plan_ns,terrain_pack_ns,terrain_total_ns,terrain_missing_sources,terrain_light_engine_notifications,terrain_light_packet_notifications,extraction_ns,resource_submit_ns,terrain_accept_ns,terrain_source_bytes,terrain_tint_queries,terrain_tint_ns,offline\n";
     private static final int WINDOW = 120;
     private static final DynamicCapture.Stats NO_RAW =
             new DynamicCapture.Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -42,9 +44,9 @@ final class RenderProfile {
     private long interval, vanilla, submit, drain, prune, nativeRender, total;
     private long batches, packets, bytes;
     private long terrainDirty, terrainEntered, terrainLoaded, terrainUnloaded, terrainInvalidations,
-            terrainSelected, terrainEmptyPublished, terrainEmptyRetained, terrainRouted,
-            terrainDeferred, terrainWaiting, terrainPlan, terrainPack, terrainTotal, terrainMax,
-            terrainAccept, terrainSourceBytes, terrainTintQueries, terrainTint;
+            terrainRequested, terrainAvailable, terrainMissing, terrainPlan, terrainPack,
+            terrainTotal, terrainMax, terrainAccept, terrainSourceBytes, terrainTintQueries,
+            terrainTint;
     private long dynamicCapture, dynamicSubmit, dynamicSpans, dynamicVertices, dynamicBytes;
     private long modelMeshes, particleMeshes, modelRawVertices, particleRawVertices;
     private long beSources, entitySources, modelSubmits, instanceLeaves, fallbackLeaves,
@@ -157,12 +159,9 @@ final class RenderProfile {
         terrainLoaded += terrain.loaded();
         terrainUnloaded += terrain.unloaded();
         terrainInvalidations += terrain.invalidations();
-        terrainSelected += terrain.selected();
-        terrainEmptyPublished += terrain.emptyPublished();
-        terrainEmptyRetained += terrain.emptyRetained();
-        terrainRouted += terrain.routed();
-        terrainDeferred += terrain.deferred();
-        terrainWaiting = terrain.waiting();
+        terrainRequested += terrain.requested();
+        terrainAvailable += terrain.available();
+        terrainMissing += terrain.missing();
         terrainPlan += terrain.planNanos();
         terrainPack += terrain.packNanos();
         terrainTotal += terrain.totalNanos();
@@ -204,12 +203,12 @@ final class RenderProfile {
                 models.delta() == null ? 0 : models.delta().activeInstances()));
         PrimeClient.LOGGER.info(String.format(
                 Locale.ROOT,
-                "Prime PT terrain source frames=%d dirtyEvents=%d enteredColumns=%d loadedColumns=%d unloadedColumns=%d invalidations=%d selected=%d emptyPublished=%d emptyRetained=%d routed=%d deferred=%d waitingNow=%d sourcePlan=%.3fms sourcePack=%.3fms sourceAccept=%.3fms sectionSourceBytes=%d tintQueries=%d tintCallback=%.3fms total=%.3fms max=%.3fms",
+                "Prime PT terrain source frames=%d dirtyEvents=%d enteredColumns=%d loadedColumns=%d unloadedColumns=%d invalidations=%d requestedSources=%d availableSources=%d missingSources=%d sourcePlan=%.3fms sourcePack=%.3fms sourceAccept=%.3fms sectionSourceBytes=%d tintQueries=%d tintCallback=%.3fms total=%.3fms max=%.3fms",
                 frames, terrainDirty, terrainEntered, terrainLoaded, terrainUnloaded,
-                terrainInvalidations, terrainSelected, terrainEmptyPublished, terrainEmptyRetained,
-                terrainRouted, terrainDeferred, terrainWaiting, mean(terrainPlan),
-                mean(terrainPack), mean(terrainAccept), terrainSourceBytes, terrainTintQueries,
-                mean(terrainTint), mean(terrainTotal), terrainMax / 1_000_000.0));
+                terrainInvalidations, terrainRequested, terrainAvailable, terrainMissing,
+                mean(terrainPlan), mean(terrainPack), mean(terrainAccept), terrainSourceBytes,
+                terrainTintQueries, mean(terrainTint), mean(terrainTotal),
+                terrainMax / 1_000_000.0));
         var geometry = BlockGeometryCache.stats();
         PrimeClient.LOGGER.info(
                 "Prime PT geometry cache frames={} hits={} misses={} nullKeys={} emits={} emittedBytes={} avoidedCopyBytes={} retainedBytes={} entries={} resets={}",
@@ -255,7 +254,7 @@ final class RenderProfile {
         var delta = models.delta();
         return String.format(
                 Locale.ROOT,
-                "Prime slow frame frame=%d serial=%d size=%dx%d offline=%s threshold=50ms currentWork=%.3fms interval=%.3fms extraction=%.3fms beforePT=%.3fms terrain=%.3fms sourcePlan=%.3fms sourcePack=%.3fms sourceAccept=%.3fms sectionSourceBytes=%d tintQueries=%d tintCallback=%.3fms extractionOther=%.3fms hook=%.3fms drainIncludingSubmit=%.3fms nativeSubmit=%.3fms resourceSubmit=%.3fms dynamicSubmit=%.3fms nativeRecord=%.3fms prevHook=%.3fms outsideInterval=%.3fms gpuLastDelayed=%.3fms dirtyEvents=%d lightEngineNotifications=%d lightPacketNotifications=%d enteredColumns=%d loadedColumns=%d unloadedColumns=%d fullInvalidations=%d selected=%d routed=%d emptyPublished=%d emptyRetained=%d deferred=%d waiting=%d packets=%d sourceBytes=%d beSources=%d entitySources=%d rawVertices=%d rawBytes=%d instanceUpserts=%d instanceRemoves=%d instanceBytes=%d native={%s}",
+                "Prime slow frame frame=%d serial=%d size=%dx%d offline=%s threshold=50ms currentWork=%.3fms interval=%.3fms extraction=%.3fms beforePT=%.3fms terrain=%.3fms sourcePlan=%.3fms sourcePack=%.3fms sourceAccept=%.3fms sectionSourceBytes=%d tintQueries=%d tintCallback=%.3fms extractionOther=%.3fms hook=%.3fms drainIncludingSubmit=%.3fms nativeSubmit=%.3fms resourceSubmit=%.3fms dynamicSubmit=%.3fms nativeRecord=%.3fms prevHook=%.3fms outsideInterval=%.3fms gpuLastDelayed=%.3fms dirtyEvents=%d lightEngineNotifications=%d lightPacketNotifications=%d enteredColumns=%d loadedColumns=%d unloadedColumns=%d fullInvalidations=%d requestedSources=%d availableSources=%d missingSources=%d packets=%d sourceBytes=%d beSources=%d entitySources=%d rawVertices=%d rawBytes=%d instanceUpserts=%d instanceRemoves=%d instanceBytes=%d native={%s}",
                 frameNumber, serial, width, height, offline, ms(time.currentWork()),
                 ms(time.interval()), ms(time.extraction()), ms(time.beforePT()),
                 ms(terrain.totalNanos()), ms(terrain.planNanos()), ms(terrain.packNanos()),
@@ -265,9 +264,8 @@ final class RenderProfile {
                 ms(frame.dynamicSubmit), ms(frame.nativeRender), ms(time.previousHook()),
                 time.outside() < 0 ? -1 : ms(time.outside()), ms(gpuLast), terrain.dirty(),
                 terrain.lightEngineEvents(), terrain.lightPacketEvents(), terrain.entered(),
-                terrain.loaded(), terrain.unloaded(), terrain.invalidations(), terrain.selected(),
-                terrain.routed(), terrain.emptyPublished(), terrain.emptyRetained(),
-                terrain.deferred(), terrain.waiting(), frame.packets, frame.bytes,
+                terrain.loaded(), terrain.unloaded(), terrain.invalidations(), terrain.requested(),
+                terrain.available(), terrain.missing(), frame.packets, frame.bytes,
                 offline ? 0 : models.blockEntities(), offline ? 0 : models.entities(),
                 offline ? 0 : raw.vertices(), offline ? 0 : raw.bytes(),
                 offline || delta == null ? 0 : delta.instanceUpserts(),
@@ -292,8 +290,7 @@ final class RenderProfile {
                 if (path.getParent() != null)
                     Files.createDirectories(path.getParent());
                 samples = Files.newBufferedWriter(path);
-                samples.write(
-                        "sample,pt_interval_ns,mc_before_pt_ns,pt_hook_ns,width,height,native_submit_ns,drain_ns,prune_ns,dynamic_submit_ns,native_record_ns,capture_ns,refs_pose_ns,be_sources,entity_sources,model_submits,standard_leaves,fallback_leaves,refs_checks,geometry_vertices_read,prototype_upserts,instance_upserts,instance_removes,op7_bytes,raw_vertices,model_raw_vertices,particle_raw_vertices,raw_packet_bytes,section_batches,section_bytes,raster_skipped,geometry_hits,geometry_misses,geometry_null_keys,geometry_emits,geometry_emitted_bytes,geometry_avoided_copy_bytes,cube_vertices_skipped,mesh_submits,mesh_groups,mesh_geometry_vertices_read,mesh_vertices_skipped,mesh_fallbacks,gpu_last_ns,terrain_routed_total,terrain_pending,item_submits,item_groups,item_checked_vertices,item_skipped_vertices,item_fallback_quads,item_created_vertices,item_shared_hits,terrain_dirty_events,terrain_entered_columns,terrain_loaded_columns,terrain_unloaded_columns,terrain_invalidations,terrain_selected,terrain_empty_published,terrain_empty_retained,terrain_routed,terrain_plan_ns,terrain_pack_ns,terrain_total_ns,terrain_deferred,terrain_waiting,terrain_light_engine_notifications,terrain_light_packet_notifications,extraction_ns,resource_submit_ns,terrain_accept_ns,terrain_source_bytes,terrain_tint_queries,terrain_tint_ns,offline\n");
+                samples.write(CSV_HEADER);
             }
             if (samples == null)
                 return;
@@ -327,16 +324,14 @@ final class RenderProfile {
                     "," + fabric.geometryVertices() + "," + fabric.skippedVertices() + "," +
                     fabric.fallbacks() + "," + gpuLast + "," +
                     dev.primept.capture.ExclusiveTerrainCapture.routedSections() + "," +
-                    dev.primept.capture.ExclusiveTerrainCapture.pendingSections() + "," +
                     items.submits() + "," + items.groups() + "," + items.checkedVertices() + "," +
                     items.skippedVertices() + "," + items.fallbackQuads() + "," +
                     items.createdVertices() + "," + items.sharedHits() + "," + terrain.dirty() +
                     "," + terrain.entered() + "," + terrain.loaded() + "," + terrain.unloaded() +
-                    "," + terrain.invalidations() + "," + terrain.selected() + "," +
-                    terrain.emptyPublished() + "," + terrain.emptyRetained() + "," +
-                    terrain.routed() + "," + terrain.planNanos() + "," + terrain.packNanos() + "," +
-                    terrain.totalNanos() + "," + terrain.deferred() + "," + terrain.waiting() +
-                    "," + terrain.lightEngineEvents() + "," + terrain.lightPacketEvents() + "," +
+                    "," + terrain.invalidations() + "," + terrain.requested() + "," +
+                    terrain.available() + "," + terrain.planNanos() + "," + terrain.packNanos() +
+                    "," + terrain.totalNanos() + "," + terrain.missing() + "," +
+                    terrain.lightEngineEvents() + "," + terrain.lightPacketEvents() + "," +
                     f.extraction + "," + f.resourceSubmit + "," + terrain.acceptNanos() + "," +
                     terrain.sourceBytes() + "," + terrain.tintQueries() + "," +
                     terrain.tintNanos() + "," + offline + "\n");
@@ -367,8 +362,7 @@ final class RenderProfile {
         interval = vanilla = submit = drain = prune = nativeRender = total = 0;
         batches = packets = bytes = 0;
         terrainDirty = terrainEntered = terrainLoaded = terrainUnloaded = terrainInvalidations = 0;
-        terrainSelected = terrainEmptyPublished = terrainEmptyRetained = terrainRouted = 0;
-        terrainDeferred = terrainWaiting = 0;
+        terrainRequested = terrainAvailable = terrainMissing = 0;
         terrainPlan = terrainPack = terrainTotal = terrainMax = terrainAccept = terrainSourceBytes =
                 terrainTintQueries = terrainTint = 0;
         dynamicCapture = dynamicSubmit = dynamicSpans = dynamicVertices = dynamicBytes = 0;

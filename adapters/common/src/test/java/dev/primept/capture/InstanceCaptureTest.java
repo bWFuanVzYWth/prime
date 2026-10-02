@@ -13,6 +13,29 @@ class InstanceCaptureTest {
     private static final float[] UV = {1, 1, 0, 0};
 
     @Test
+    void immutableVerticesRemainSharedAndValidAfterPrototypeAcknowledgement() {
+        ByteBuffer source = quad();
+        var authored = InstanceCapture.OwnedVertices.copyOf(source);
+        source.putFloat(0, 77);
+        assertThrows(java.nio.ReadOnlyBufferException.class,
+                     () -> authored.bytes().putFloat(0, 88));
+        try (var context = new InstanceCapture(1)) {
+            context.prototype(4, 4, 24, 0, 12, 16, authored);
+            var batch = context.sealDelta();
+            var definition =
+                    PrimeInstanceBatch.prototypes(batch).reinterpret(PrimePrototypeSource.SIZE);
+            var span = PrimePrototypeSource.spans(definition).reinterpret(PrimeMeshSpan.SIZE);
+            assertEquals(0, PrimeByteSpan.data(PrimeMeshSpan.vertices(span))
+                                    .reinterpret(96)
+                                    .get(JAVA_FLOAT, 0));
+            assertEquals(88 + 32 + 48 + 96, context.stats().bytes());
+            context.acknowledge();
+            assertEquals(0, authored.bytes().getFloat(0));
+            assertEquals(96, authored.byteSize());
+        }
+    }
+
+    @Test
     void encodesAtomicDefinitionsAndAffineInstancesWithOwnedSourceBytes() {
         try (var context = new InstanceCapture(7)) {
             ByteBuffer source = quad();

@@ -1,0 +1,241 @@
+//! Stable static instance and material-directory slots. Only changed cells touch CPU records.
+use crate::plan::{OBJECT_BIT, Slots};
+use ash::vk;
+use prime_scene::spatial::Cell;
+use std::collections::BTreeMap;
+
+pub(crate) const BYTES: usize = crate::surface::PAGE_BYTES;
+fn empty_instance() -> vk::AccelerationStructureInstanceKHR {
+    vk::AccelerationStructureInstanceKHR {
+        transform: vk::TransformMatrixKHR { matrix: [0.; 12] },
+        instance_custom_index_and_mask: vk::Packed24_8::new(0, 0),
+        instance_shader_binding_table_record_offset_and_flags: vk::Packed24_8::new(0, 0),
+        acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
+            device_handle: 0,
+        },
+    }
+}
+struct Entry {
+    instance: u32,
+    first: u32,
+    count: u32,
+}
+pub(crate) struct StaticDirectory {
+    entries: BTreeMap<Cell, Entry>,
+    records: Slots,
+    slots: Slots,
+    pub bytes: Vec<[u8; BYTES]>,
+    pub instances: Vec<vk::AccelerationStructureInstanceKHR>,
+    pub dirty_records: Vec<usize>,
+    pub dirty_instances: Vec<usize>,
+}
+impl Default for StaticDirectory {
+    fn default() -> Self {
+        let mut records = Slots::with_limit(OBJECT_BIT);
+        records.allocate(1).expect("global light header");
+        Self {
+            entries: BTreeMap::new(),
+            records,
+            slots: Slots::default(),
+            bytes: vec![[0; BYTES]],
+            instances: Vec::new(),
+            dirty_records: vec![0],
+            dirty_instances: Vec::new(),
+        }
+    }
+}
+impl StaticDirectory {
+    #[cfg(test)]
+    pub fn slot(&self, key: Cell) -> Option<(u32, u32, u32)> {
+        self.entries
+            .get(&key)
+            .map(|e| (e.instance, e.first, e.count))
+    }
+    pub fn remove(&mut self, key: Cell) {
+        if let Some(entry) = self.entries.remove(&key) {
+            self.records.release(entry.first, entry.count);
+            self.slots.release(entry.instance, 1);
+            self.instances[entry.instance as usize] = empty_instance();
+            self.dirty_instances.push(entry.instance as usize);
+            self.instances.truncate(self.slots.end as usize);
+            self.bytes.truncate(self.records.end as usize);
+        }
+    }
+    pub fn publish(
+        &mut self,
+        key: Cell,
+        rows: &[[u8; BYTES]],
+        mut instance: vk::AccelerationStructureInstanceKHR,
+    ) -> Result<(), String> {
+        let count = u32::try_from(rows.len()).map_err(|_| "Static directory count overflow")?;
+        if count == 0 {
+            return Err("Empty static directory range".into());
+        }
+        let entry = if let Some(entry) = self.entries.get_mut(&key) {
+            if entry.count != count {
+                let mut records = self.records.clone();
+                records.release(entry.first, entry.count);
+                let first = records.allocate(count)?;
+                self.records = records;
+                entry.first = first;
+                entry.count = count;
+            }
+            entry
+        } else {
+            let first = self.records.allocate(count)?;
+            let instance = match self.slots.allocate(1) {
+                Ok(instance) => instance,
+                Err(e) => {
+                    self.records.release(first, count);
+                    return Err(e);
+                }
+            };
+            let entry = Entry {
+                instance,
+                first,
+                count,
+            };
+            self.entries.entry(key).or_insert(entry)
+        };
+        self.bytes.resize(self.records.end as usize, [0; BYTES]);
+        for (i, row) in rows.iter().enumerate() {
+            let at = entry.first as usize + i;
+            if self.bytes[at] != *row {
+                self.bytes[at] = *row;
+                self.dirty_records.push(at);
+            }
+        }
+        instance.instance_custom_index_and_mask = vk::Packed24_8::new(entry.first, 0xff);
+        self.instances
+            .resize(self.slots.end as usize, empty_instance());
+        self.instances[entry.instance as usize] = instance;
+        self.dirty_instances.push(entry.instance as usize);
+        Ok(())
+    }
+    pub fn light_header(&mut self, count: u32, address: u64) {
+        let row = &mut self.bytes[0];
+        if row[12..16] != count.to_le_bytes() || row[32..40] != address.to_le_bytes() {
+            row[12..16].copy_from_slice(&count.to_le_bytes());
+            row[32..40].copy_from_slice(&address.to_le_bytes());
+            self.dirty_records.push(0);
+        }
+    }
+    pub fn finish_upload(&mut self) {
+        self.dirty_records.clear();
+        self.dirty_instances.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn cell(x: f64) -> Cell {
+        Cell::containing([x, 0., 0.]).unwrap()
+    }
+    #[test]
+    fn local_edits_retain_unaffected_slots_and_removals_reuse_holes() {
+        let mut directory = StaticDirectory::default();
+        for x in [0., 64., 128.] {
+            directory
+                .publish(cell(x), &[[x as u8; BYTES]], empty_instance())
+                .unwrap();
+        }
+        let stable = directory.instances[2]
+            .instance_custom_index_and_mask
+            .low_24();
+        directory.finish_upload();
+        directory
+            .publish(cell(64.), &[[7; BYTES]], empty_instance())
+            .unwrap();
+        assert_eq!(directory.dirty_records, [2]);
+        assert_eq!(directory.dirty_instances, [1]);
+        assert_eq!(
+            directory.instances[2]
+                .instance_custom_index_and_mask
+                .low_24(),
+            stable
+        );
+        directory.remove(cell(64.));
+        assert_eq!(
+            unsafe {
+                directory.instances[1]
+                    .acceleration_structure_reference
+                    .device_handle
+            },
+            0
+        );
+        directory
+            .publish(cell(192.), &[[9; BYTES]], empty_instance())
+            .unwrap();
+        assert_eq!(directory.instances.len(), 3);
+        assert_eq!(
+            directory.instances[1]
+                .instance_custom_index_and_mask
+                .low_24(),
+            2
+        );
+    }
+    #[test]
+    fn resize_and_late_allocation_failure_preserve_existing_directory() {
+        let mut directory = StaticDirectory {
+            records: Slots::with_limit(5),
+            ..Default::default()
+        };
+        directory.records.allocate(1).unwrap();
+        directory
+            .publish(cell(0.), &[[1; BYTES]; 2], empty_instance())
+            .unwrap();
+        directory
+            .publish(cell(64.), &[[2; BYTES]; 2], empty_instance())
+            .unwrap();
+        directory.finish_upload();
+        let before = directory.bytes.clone();
+        assert!(
+            directory
+                .publish(cell(0.), &[[3; BYTES]; 3], empty_instance())
+                .is_err()
+        );
+        assert_eq!(directory.bytes, before);
+        assert_eq!(directory.entries[&cell(0.)].first, 1);
+        assert_eq!(directory.entries[&cell(0.)].count, 2);
+        assert_eq!(directory.records.end, 5);
+        assert!(directory.dirty_records.is_empty());
+        assert!(directory.dirty_instances.is_empty());
+        directory.remove(cell(64.));
+        directory
+            .publish(cell(0.), &[[3; BYTES]; 3], empty_instance())
+            .unwrap();
+        assert_eq!(directory.entries[&cell(0.)].first, 1);
+        assert_eq!(directory.instances.len(), 1);
+        assert_eq!(directory.records.end, 4);
+        assert_eq!(&directory.bytes[1..4], &[[3; BYTES]; 3]);
+    }
+    #[test]
+    fn new_entry_rolls_back_record_range_when_instance_limit_fails() {
+        let mut directory = StaticDirectory {
+            slots: Slots::with_limit(1),
+            ..Default::default()
+        };
+        directory
+            .publish(cell(0.), &[[1; BYTES]], empty_instance())
+            .unwrap();
+        directory.finish_upload();
+        assert!(
+            directory
+                .publish(cell(64.), &[[2; BYTES]; 2], empty_instance())
+                .is_err()
+        );
+        assert_eq!(directory.records.end, 2);
+        assert_eq!(directory.entries.len(), 1);
+        assert_eq!(directory.bytes.len(), 2);
+        assert!(directory.dirty_records.is_empty());
+        directory.remove(cell(0.));
+        assert!(directory.instances.is_empty());
+        assert_eq!(directory.bytes.len(), 1);
+        directory
+            .publish(cell(64.), &[[2; BYTES]; 2], empty_instance())
+            .unwrap();
+        assert_eq!(directory.instances.len(), 1);
+        assert_eq!(directory.entries[&cell(64.)].first, 1);
+    }
+}

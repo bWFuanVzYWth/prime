@@ -103,15 +103,11 @@ impl Image {
                             .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
                 })
                 .ok_or("No device-local image memory")?;
-            result.memory = context
-                .device
-                .allocate_memory(
-                    &vk::MemoryAllocateInfo::default()
-                        .allocation_size(requirements.size)
-                        .memory_type_index(index),
-                    None,
-                )
-                .map_err(|e| error("Allocate diagnostic image", e))?;
+            result.memory = context.allocate_memory(
+                &vk::MemoryAllocateInfo::default()
+                    .allocation_size(requirements.size)
+                    .memory_type_index(index),
+            )?;
             context
                 .device
                 .bind_image_memory(result.image, result.memory, 0)

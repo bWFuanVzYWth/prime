@@ -18,6 +18,8 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 
 跨调用数据在返回前成为 native 所有，同步 worker 返回前 join；没有逐 section/quad/粒子 FFM，也没有跨帧借用或隐式宿主回调。Java 复用同类数组和 payload 存储，根结构只引用它们，不为合批再次拼接旧 wire stream。raw 顶点、像素和 UTF-8 仍是原始字节 span，typed batch 不是旧字节包的外壳。
 
+旧字节协议仅保留为离线 oracle/诊断夹具。`prime_scene` 的 `legacy-fixtures` feature 默认关闭，生产 native 依赖不启用；`prime_tools` 与需要旧协议的测试依赖显式启用。Minecraft 的旧输入解析仅在单元测试编译，Java 编码器归 test fixtures。单独运行 scene 的完整协议行为测试使用 `cargo test -p prime_scene --features legacy-fixtures --locked`；默认构建保留共享的 raw payload 解码与 typed 事务。
+
 `PrimeMcRequests` 由 native 写入调用方提供的根结构，数组归 session 所有，有效至下一次 MC plan/accept/resources/destroy。Java 必须先读完再响应，不能保留其中地址。无变化实例帧不调用 FFM；空动态快照则是有意义的清空。
 
 ## 固定控制与帧
@@ -37,7 +39,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 
 ## 场景纹理与所有权
 
-`prime_textures` 接受 `PrimeTextureBatch` 的 `PrimeTextureSource[]`，每项具名给出id、尺寸和RGBA8 span。id=0是白纹理，UINT32_MAX是实例继承标记，均不能上传；id=1是block atlas。普通动态纹理入口拒绝覆盖已登记的常驻资源。一次单纹理提交包含32 B根、32 B描述和恰好 `width*height*4` 字节，完整输入≤256 MiB。Java将像素直接复制到复用native storage一次；源捕获、native副本和GPU上传仍有各自复制及寿命。
+`prime_textures` 接受 `PrimeTextureBatch` 的 `PrimeTextureSource[]`，每项具名给出id、尺寸和RGBA8 span。id=0是白纹理，UINT32_MAX是实例继承标记，均不能上传；id=1是block atlas。普通动态纹理入口拒绝覆盖已登记的常驻资源。N 张纹理的每批完整预算为 `32 + 32*N + sum(width*height*4)` 字节，必须≤256 MiB；单纹理也是同一公式。Java将变化纹理组织为有界批次，像素直接复制到复用native storage一次，仅在该批同步提交成功后确认其成员；源捕获、native副本和GPU上传仍有各自复制及寿命。
 
 方块atlas和全部已捕获sprite通过 `prime_mc_resources` 同一资源事务登记常驻，不能先用动态纹理入口覆盖atlas。资源代次不等于world epoch；同代增量/动画保留resource owner，新代成功替换后立即撤旧几何，后续按现有格预算补回。初始化、真实资源重载或renderer重建时准备资源，普通区块加载/卸载不决定地形纹理寿命。
 

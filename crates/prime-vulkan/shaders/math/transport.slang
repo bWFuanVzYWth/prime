@@ -38,6 +38,16 @@ public float3 primeTripleProduct(float3 first, float3 second, float third) {
     return ldexp(significand, firstExponent + secondExponent + int3(thirdExponent));
 }
 
+// Slang's CPU ldexp lowers to x*exp2(e), so even a zero mantissa can become NaN
+// when e overflows. A sanitized response has frexp exponent <=128. pdf>=4 bounds
+// a terminal-vertex reciprocal to <=0.25 (exponent <=-1), keeping exp2(e) finite.
+// The upper PDF bound keeps the reciprocal normal even on flush-to-zero GPUs.
+// With continuation, MIS can underflow to zero (frexp exponent 0), so retain that path.
+public bool primeCanSkipZeroNee(float3 source, float pdf, float3 throughput, bool continuation) {
+    return !continuation && all(source == float3(0.0)) && !isnan(pdf) && !isinf(pdf) &&
+           pdf >= 4.0 && pdf <= 1.0e37 && !any(isnan(throughput)) && !any(isinf(throughput));
+}
+
 public float primePowerHeuristicValue(float firstPdf, float secondPdf) {
     if (firstPdf <= 0.0)
         return 0.0;

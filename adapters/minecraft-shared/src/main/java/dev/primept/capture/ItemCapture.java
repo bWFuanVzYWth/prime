@@ -8,6 +8,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.HashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import net.minecraft.client.renderer.feature.ItemFeatureRenderer;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.resources.model.geometry.BakedQuad;
@@ -82,8 +83,7 @@ public final class ItemCapture {
             current.seen = context.frame;
             context.visible.add(current);
         }
-        for (Group group : current.groups)
-            group.used = false;
+        current.begin();
         current.accepted = 0;
         return previous;
     }
@@ -170,25 +170,82 @@ public final class ItemCapture {
         final ArrayList<Group> groups = new ArrayList<>();
         int accepted;
         long seen;
+        private final Int2ObjectOpenHashMap<Group> index = new Int2ObjectOpenHashMap<>();
+        private final float[] pose = new float[12];
+        private int usedGroups;
+        private Group last;
+        private boolean indexed;
+        long groupComparisons;
         Scope(ModelCapture.Submission source) {
             this.source = source;
         }
+        void begin() {
+            for (Group group : groups)
+                group.used = false;
+            index.clear();
+            usedGroups = 0;
+            last = null;
+            indexed = false;
+            groupComparisons = 0;
+        }
         Group group(DynamicCapture.Material material, int tint, Matrix4fc matrix) {
-            Group unused = null;
-            for (Group group : groups) {
-                if (!group.used) {
-                    if (unused == null)
-                        unused = group;
-                } else if (group.texture == material.texture() && group.flags == material.flags() &&
-                           group.tint == tint && group.samePose(matrix, source))
-                    return group;
+            pose[0] = matrix.m00();
+            pose[1] = matrix.m10();
+            pose[2] = matrix.m20();
+            pose[3] = matrix.m30() - source.bx;
+            pose[4] = matrix.m01();
+            pose[5] = matrix.m11();
+            pose[6] = matrix.m21();
+            pose[7] = matrix.m31() - source.by;
+            pose[8] = matrix.m02();
+            pose[9] = matrix.m12();
+            pose[10] = matrix.m22();
+            pose[11] = matrix.m32() - source.bz;
+            if (last != null && matches(last, material, tint))
+                return last;
+            int hash = 0;
+            if (last != null) {
+                // The common adjacent/single-group case never hashes or populates the index.
+                if (!indexed) {
+                    index.put(hash(last.texture, last.flags, last.tint, last.affine), last);
+                    last.next = null;
+                    indexed = true;
+                }
+                hash = hash(material.texture(), material.flags(), tint, pose);
+                for (Group group = index.get(hash); group != null; group = group.next)
+                    if (group != last && matches(group, material, tint)) {
+                        last = group;
+                        return group;
+                    }
             }
-            if (unused == null) {
+            Group unused;
+            if (usedGroups == groups.size()) {
                 unused = new Group(context.owner.instance());
                 groups.add(unused);
-            }
-            unused.start(material, tint, matrix, source);
+            } else
+                unused = groups.get(usedGroups);
+            ++usedGroups;
+            unused.start(material, tint, pose);
+            if (indexed)
+                unused.next = index.put(hash, unused);
+            last = unused;
             return unused;
+        }
+        private static int hash(int texture, int flags, int tint, float[] pose) {
+            int hash = 31 * (31 * texture + flags) + tint;
+            for (float value : pose)
+                hash = 31 * hash + Float.floatToIntBits(value == 0 ? 0 : value);
+            return hash;
+        }
+        private boolean matches(Group group, DynamicCapture.Material material, int tint) {
+            ++groupComparisons;
+            if (group.texture != material.texture() || group.flags != material.flags() ||
+                group.tint != tint)
+                return false;
+            for (int i = 0; i < pose.length; ++i)
+                if (group.affine[i] != pose[i])
+                    return false;
+            return true;
         }
     }
     private static final class Group {
@@ -198,6 +255,7 @@ public final class ItemCapture {
         ByteBuffer changed;
         int cursor, texture, flags, tint;
         boolean used, dirty;
+        Group next;
         Group(InstanceCapture.Instance instance) {
             this.instance = instance;
         }
@@ -213,32 +271,14 @@ public final class ItemCapture {
             context.release(geometry);
             geometry = replacement;
         }
-        void start(DynamicCapture.Material material, int tint, Matrix4fc m,
-                   ModelCapture.Submission source) {
+        void start(DynamicCapture.Material material, int tint, float[] pose) {
             used = true;
             dirty = false;
             cursor = 0;
             texture = material.texture();
             flags = material.flags();
             this.tint = tint;
-            affine[0] = m.m00();
-            affine[1] = m.m10();
-            affine[2] = m.m20();
-            affine[3] = m.m30() - source.bx;
-            affine[4] = m.m01();
-            affine[5] = m.m11();
-            affine[6] = m.m21();
-            affine[7] = m.m31() - source.by;
-            affine[8] = m.m02();
-            affine[9] = m.m12();
-            affine[10] = m.m22();
-            affine[11] = m.m32() - source.bz;
-        }
-        boolean samePose(Matrix4fc m, ModelCapture.Submission s) {
-            return affine[0] == m.m00() && affine[1] == m.m10() && affine[2] == m.m20() &&
-                    affine[3] == m.m30() - s.bx && affine[4] == m.m01() && affine[5] == m.m11() &&
-                    affine[6] == m.m21() && affine[7] == m.m31() - s.by && affine[8] == m.m02() &&
-                    affine[9] == m.m12() && affine[10] == m.m22() && affine[11] == m.m32() - s.bz;
+            System.arraycopy(pose, 0, affine, 0, affine.length);
         }
         void value(int value) {
             if (!dirty && geometry != null && cursor < geometry.bytes.remaining() &&
@@ -308,10 +348,9 @@ public final class ItemCapture {
                     return geometry;
                 }
             }
-            ByteBuffer copy =
-                    ByteBuffer.allocate(source.remaining()).order(ByteOrder.LITTLE_ENDIAN);
-            copy.put(source).flip();
-            var prototype = owner.prototype(4, copy.remaining() / 24, 24, 0, 12, 16, copy);
+            var vertices = InstanceCapture.OwnedVertices.copyOf(source);
+            ByteBuffer copy = vertices.bytes();
+            var prototype = owner.prototype(4, copy.remaining() / 24, 24, 0, 12, 16, vertices);
             Geometry geometry = new Geometry(copy, prototype, hash);
             bucket.add(geometry);
             createdVertices += copy.remaining() / 24;

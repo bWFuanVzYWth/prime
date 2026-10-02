@@ -589,6 +589,115 @@ mod tests {
     use prime_scene::scene::{SceneMesh, Texture, Triangle};
 
     #[test]
+    #[ignore = "windowless stable static ranges and dirty input unions with two real submissions in flight"]
+    fn host_static_directory_edits_merge_across_completed_slots_and_reuse_holes() {
+        use prime_scene::spatial::Cell;
+        let cell = |x| Cell::containing([x, 0., 0.]).unwrap();
+        let mesh = |x, flags| SceneMesh {
+            revision: 1,
+            flags,
+            origin: [x, 0., 0.],
+            triangles: [Triangle {
+                positions: [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+                colors: [[0.5, 0.25, 0.125, 1.]; 3],
+                uvs: [[0.; 2]; 3],
+                texture_id: 0,
+                flags,
+            }]
+            .into(),
+        };
+        let mut scene = Scene {
+            epoch: 1,
+            revision: 1,
+            ..Default::default()
+        };
+        for x in [0., 64., 128., 192.] {
+            scene.ready_terrain.insert(cell(x));
+        }
+        for flags in 0..3 {
+            scene.meshes.insert((flags as u64, flags), mesh(0., flags));
+        }
+        for (id, x) in [(10, 64.), (20, 128.), (30, 192.)] {
+            scene.meshes.insert((id, 0), mesh(x, 0));
+        }
+        let camera = Camera {
+            position: [0.25, 0.25, 2.],
+            forward: [0., 0., -1.],
+            right: [1., 0., 0.],
+            up: [0., 1., 0.],
+            vertical_fov_radians: 1.,
+        };
+        let mut host = HostBenchmark::new(32, 24).unwrap();
+        host.enqueue(&scene, &camera, 0).unwrap();
+        let geometry = host
+            .state
+            .as_ref()
+            .unwrap()
+            .renderer
+            .as_ref()
+            .unwrap()
+            .geometry
+            .as_ref()
+            .unwrap();
+        let retained = geometry.static_slot(cell(128.)).unwrap();
+        let hole = geometry.static_slot(cell(64.)).unwrap().0;
+        assert_eq!(geometry.static_slot(cell(0.)).unwrap().2, 3);
+        let mut submitted = 1;
+        for step in 0..7 {
+            match step {
+                0 | 1 => {
+                    scene.meshes.get_mut(&(step, step as u32)).unwrap().revision += 1;
+                }
+                2 => {
+                    scene.meshes.remove(&(1, 1));
+                }
+                3 => {
+                    scene.meshes.remove(&(10, 0));
+                    scene.ready_terrain.remove(&cell(64.));
+                }
+                4 => {
+                    scene.meshes.insert((40, 0), mesh(256., 0));
+                    scene.ready_terrain.insert(cell(256.));
+                }
+                5 => {
+                    scene.meshes.remove(&(30, 0));
+                    scene.ready_terrain.remove(&cell(192.));
+                }
+                _ => {
+                    scene.meshes.insert((50, 0), mesh(320., 0));
+                    scene.ready_terrain.insert(cell(320.));
+                }
+            }
+            scene.revision += 1;
+            host.enqueue(&scene, &camera, 0).unwrap();
+            submitted += 1;
+            let geometry = host
+                .state
+                .as_ref()
+                .unwrap()
+                .renderer
+                .as_ref()
+                .unwrap()
+                .geometry
+                .as_ref()
+                .unwrap();
+            geometry.assert_incremental_workspaces();
+            assert_eq!(
+                geometry.static_slot(cell(128.)),
+                Some(retained),
+                "unaffected cell slot moved"
+            );
+            if step >= 2 {
+                assert_eq!(geometry.static_slot(cell(0.)).unwrap().2, 2);
+            }
+            if step >= 4 {
+                assert_eq!(geometry.static_slot(cell(256.)).unwrap().0, hole);
+            }
+        }
+        assert_eq!(host.drain().unwrap().len(), submitted);
+    }
+
+    #[test]
     #[ignore = "native 1080p realtime output costs; run alone in release without validation"]
     fn realtime_output_cost_matrix() {
         use std::io::Write;
