@@ -23,6 +23,7 @@ fn authored_labpbr_emission_enters_the_ordinary_model_light_path_and_replaces_ho
                 pixels: vec![255; 4].into(),
             }],
             frames: vec![],
+            coverage_frames: Arc::from([]),
             interpolate: false,
             material: None,
         };

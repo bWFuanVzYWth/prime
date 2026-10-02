@@ -5,8 +5,8 @@ import java.util.Arrays;
 
 /** Immutable client settings. Version adapters own widgets; native consumes the validated wire. */
 public final class RenderSettings {
-    public static final int VERSION = 2;
-    public static final int WIRE_BYTES = 56;
+    public static final int VERSION = 3;
+    public static final int WIRE_BYTES = 60;
     public enum Control {
         BOUNCES("render.bounces", 1, 64, 12),
         OFFLINE_SAMPLES("render.offline_samples", 1, 64, 1),
@@ -34,30 +34,38 @@ public final class RenderSettings {
     }
     public enum View { OUTPUT, NOISY_COLOR, LINEAR_DEPTH, NORMAL }
     private final boolean pathTracing;
+    private final boolean opacityMicromap;
     private final int[] values;
 
-    private RenderSettings(boolean pathTracing, int[] values) {
+    private RenderSettings(boolean pathTracing, boolean opacityMicromap, int[] values) {
         this.pathTracing = pathTracing;
+        this.opacityMicromap = opacityMicromap;
         this.values = values;
     }
     public static RenderSettings defaults() {
         return new RenderSettings(
-                true, Arrays.stream(Control.values()).mapToInt(c -> c.initial).toArray());
+                true, true, Arrays.stream(Control.values()).mapToInt(c -> c.initial).toArray());
     }
     public boolean pathTracing() {
         return pathTracing;
+    }
+    public boolean opacityMicromap() {
+        return opacityMicromap;
     }
     public int value(Control control) {
         return values[control.ordinal()];
     }
     public RenderSettings withPathTracing(boolean value) {
-        return new RenderSettings(value, values);
+        return new RenderSettings(value, opacityMicromap, values);
+    }
+    public RenderSettings withOpacityMicromap(boolean value) {
+        return new RenderSettings(pathTracing, value, values);
     }
     public RenderSettings with(Control control, int value) {
         control.validate(value);
         int[] next = values.clone();
         next[control.ordinal()] = value;
-        return new RenderSettings(pathTracing, next);
+        return new RenderSettings(pathTracing, opacityMicromap, next);
     }
     /** Little-endian, borrowed only for prime_configure; offline and view are session controls. */
     public void write(ByteBuffer target, boolean offline, View view) {
@@ -75,7 +83,8 @@ public final class RenderSettings {
                 .putFloat(value(Control.DEPTH_RANGE))
                 .putInt(0x13572468)
                 .putInt(value(Control.LATITUDE))
-                .putInt(value(Control.SOLAR_LONGITUDE));
+                .putInt(value(Control.SOLAR_LONGITUDE))
+                .putInt(opacityMicromap ? 1 : 0);
     }
     private float multiplier(Control control) {
         return (float)Math.pow(2.0, value(control) / 4.0);
@@ -83,10 +92,12 @@ public final class RenderSettings {
     @Override
     public boolean equals(Object other) {
         return other instanceof RenderSettings settings && pathTracing == settings.pathTracing &&
+                opacityMicromap == settings.opacityMicromap &&
                 Arrays.equals(values, settings.values);
     }
     @Override
     public int hashCode() {
-        return 31 * Boolean.hashCode(pathTracing) + Arrays.hashCode(values);
+        return 31 * (31 * Boolean.hashCode(pathTracing) + Boolean.hashCode(opacityMicromap)) +
+                Arrays.hashCode(values);
     }
 }

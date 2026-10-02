@@ -20,6 +20,31 @@ struct Cell {
     mapping: RepeatUv,
 }
 
+/// Only a complete sprite with a square-preserving UV transform uses finite templates.
+/// Cropped/oblique maps keep optimal rectangles rather than adding triangles for a miss.
+fn square_template(g: &CompiledQuad, mapping: RepeatUv) -> bool {
+    if g.flags != 1 || g.color[3] != 1. {
+        return false;
+    }
+    let mut used = 0;
+    for axis in 0..2 {
+        let (input, coefficient) = if mapping.du[axis] == 0. && mapping.dv[axis].abs() == 1. {
+            (1, mapping.dv[axis])
+        } else if mapping.dv[axis] == 0. && mapping.du[axis].abs() == 1. {
+            (0, mapping.du[axis])
+        } else {
+            return false;
+        };
+        if used & (1 << input) != 0
+            || mapping.origin[axis] != if coefficient < 0. { 1. } else { 0. }
+        {
+            return false;
+        }
+        used |= 1 << input;
+    }
+    true
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct StripPlane {
     domain: u64,
@@ -350,7 +375,9 @@ impl SurfaceCompiler {
                 let source = cells[first];
                 let q = &quads[source.cell.source];
                 let mut end = first + 1;
-                if !blocked[first] {
+                if !blocked[first]
+                    && !(self.cutout_squares && square_template(&q.geometry, source.cell.mapping))
+                {
                     while end < cells.len()
                         && !blocked[end]
                         && cells[end - 1].end == cells[end].start
@@ -390,6 +417,8 @@ impl SurfaceCompiler {
         let mut representatives = Vec::new();
         let mut cell_sources = [0; 4096];
         let mut cell_labels = [0; 4096];
+        let mut ranges = Vec::new();
+        let mut covered = [false; 4096];
         for (plane, mut cells) in planes {
             leaves.clear();
             labels.clear();
@@ -450,18 +479,54 @@ impl SurfaceCompiler {
                 .rectangles
                 .decompose_borrowed(&leaves)
                 .map_err(|e| format!("Surface rectangle decomposition: {e:?}"))?;
+            ranges.clear();
+            covered.fill(false);
             for rectangle in rectangles {
-                let width = rectangle.x.end - rectangle.x.start;
-                let height = rectangle.y.end - rectangle.y.start;
-                stats.rectangles += 1;
-                if width == 1 && height == 1 {
-                    retained.push(
-                        cell_sources
-                            [usize::from(rectangle.y.start) * 64 + usize::from(rectangle.x.start)],
-                    );
+                let cell = representatives[usize::from(rectangle.value) - 1];
+                if !self.cutout_squares
+                    || !square_template(&quads[cell.source].geometry, cell.mapping)
+                {
+                    ranges.push((
+                        rectangle.x.start..rectangle.x.end,
+                        rectangle.y.start..rectangle.y.end,
+                        rectangle.value,
+                    ));
                     continue;
                 }
-                let cell = representatives[usize::from(rectangle.value) - 1];
+                for y in rectangle.y.start..rectangle.y.end {
+                    for x in rectangle.x.start..rectangle.x.end {
+                        if covered[usize::from(y) * 64 + usize::from(x)] {
+                            continue;
+                        }
+                        let size = [4, 2, 1]
+                            .into_iter()
+                            .find(|&size| {
+                                x + size <= rectangle.x.end
+                                    && y + size <= rectangle.y.end
+                                    && (y..y + size).all(|v| {
+                                        (x..x + size)
+                                            .all(|u| !covered[usize::from(v) * 64 + usize::from(u)])
+                                    })
+                            })
+                            .unwrap();
+                        for v in y..y + size {
+                            for u in x..x + size {
+                                covered[usize::from(v) * 64 + usize::from(u)] = true;
+                            }
+                        }
+                        ranges.push((x..x + size, y..y + size, rectangle.value));
+                    }
+                }
+            }
+            for (x, y, value) in &ranges {
+                let width = x.end - x.start;
+                let height = y.end - y.start;
+                stats.rectangles += 1;
+                if width == 1 && height == 1 {
+                    retained.push(cell_sources[usize::from(y.start) * 64 + usize::from(x.start)]);
+                    continue;
+                }
+                let cell = representatives[usize::from(*value) - 1];
                 let source = &quads[cell.source];
                 let mut q = source.clone();
                 let u = (plane.axis + 1) % 3;
@@ -471,11 +536,9 @@ impl SurfaceCompiler {
                     let i = cell.corners[c];
                     q.geometry.positions[i][plane.axis] = f32::from_bits(plane.at);
                     q.geometry.positions[i][u] =
-                        (plane.tile[0] * 64 + i32::from(rectangle.x.start) + i32::from(delta[0]))
-                            as f32;
+                        (plane.tile[0] * 64 + i32::from(x.start) + i32::from(delta[0])) as f32;
                     q.geometry.positions[i][v] =
-                        (plane.tile[1] * 64 + i32::from(rectangle.y.start) + i32::from(delta[1]))
-                            as f32;
+                        (plane.tile[1] * 64 + i32::from(y.start) + i32::from(delta[1])) as f32;
                     q.geometry.uvs[i] = delta.map(f32::from);
                 }
                 append(&mut output, &q, Some(cell.mapping));

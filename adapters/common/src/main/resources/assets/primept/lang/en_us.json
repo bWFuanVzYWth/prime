@@ -9,6 +9,8 @@
   "primept.settings.enabled.tooltip": "Select Prime or vanilla. Requires primept.enabled and Vulkan at startup; switches at the next frame boundary.",
   "primept.settings.offline": "Offline Rendering",
   "primept.settings.offline.tooltip": "Ctrl+Alt+F2 toggles. Freeze the displayed scene, camera and lighting; accumulate continuously. Esc opens the menu. Resource reload or world exit ends the snapshot; realtime resumes with a fresh capture.",
+  "primept.settings.opacity_micromap": "Cutout OMM",
+  "primept.settings.opacity_micromap.tooltip": "Prefer opacity micromaps for compatible cutout surfaces. Enabled by default after device compatibility checks; unsupported surfaces retain alpha testing. Can be changed while frozen without resetting accumulation.",
   "primept.settings.render.bounces": "Max Path Vertices",
   "primept.settings.render.bounces.tooltip": "1–64 vertices, default 12, including the first hit. Reflection and transmission both count; the last vertex adds direct lighting without continuing. Fixed while frozen.",
   "primept.settings.render.offline_samples": "Offline Samples",

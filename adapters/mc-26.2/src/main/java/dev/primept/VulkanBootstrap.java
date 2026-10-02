@@ -13,12 +13,17 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.KHRAccelerationStructure;
 import org.lwjgl.vulkan.KHRDeferredHostOperations;
 import org.lwjgl.vulkan.KHRRayQuery;
+import org.lwjgl.vulkan.KHRSynchronization2;
+import org.lwjgl.vulkan.EXTOpacityMicromap;
 import org.lwjgl.vulkan.VK12;
+import org.lwjgl.vulkan.VK13;
 import org.lwjgl.vulkan.VkDevice;
 import org.lwjgl.vulkan.VkPhysicalDeviceAccelerationStructureFeaturesKHR;
 import org.lwjgl.vulkan.VkPhysicalDeviceFeatures2;
 import org.lwjgl.vulkan.VkPhysicalDeviceRayQueryFeaturesKHR;
+import org.lwjgl.vulkan.VkPhysicalDeviceOpacityMicromapFeaturesEXT;
 import org.lwjgl.vulkan.VkPhysicalDeviceVulkan12Features;
+import org.lwjgl.vulkan.VkPhysicalDeviceSynchronization2Features;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,10 +49,19 @@ public final class VulkanBootstrap {
                             KHRRayQuery.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
                             VkPhysicalDeviceRayQueryFeaturesKHR.SIZEOF),
                     "rayQuery", VkPhysicalDeviceRayQueryFeaturesKHR.RAYQUERY));
+    private static final VulkanFeature OPACITY_MICROMAP_FEATURE = new VulkanFeature(
+            new VulkanPNextStruct(
+                    EXTOpacityMicromap
+                            .VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT,
+                    VkPhysicalDeviceOpacityMicromapFeaturesEXT.SIZEOF),
+            "micromap", VkPhysicalDeviceOpacityMicromapFeaturesEXT.MICROMAP);
+    private static final VulkanFeature SYNCHRONIZATION_2_FEATURE =
+            new VulkanFeature(VulkanBackend.SYNC2_FEATURES_STRUCT, "synchronization2",
+                              VkPhysicalDeviceSynchronization2Features.SYNCHRONIZATION2);
 
     // Device creation publishes one immutable result; the render thread only observes it.
     private static volatile Status status =
-            new Status(0, 0, false, "Host Vulkan device has not been negotiated");
+            new Status(0, 0, false, false, "Host Vulkan device has not been negotiated");
 
     private VulkanBootstrap() {}
 
@@ -55,15 +69,22 @@ public final class VulkanBootstrap {
                                  Set<VulkanFeature> features) {
         long physicalHandle = physical.vkPhysicalDevice().address();
         if (!Boolean.getBoolean("primept.enabled")) {
-            status = new Status(physicalHandle, 0, false, "Prime PT is disabled");
+            status = new Status(physicalHandle, 0, false, false, "Prime PT is disabled");
             return;
         }
         var missing = new ArrayList<String>();
-        if (physical.vkPhysicalDeviceProperties().apiVersion() < VK12.VK_API_VERSION_1_2)
+        int apiVersion = physical.vkPhysicalDeviceProperties().apiVersion();
+        if (apiVersion < VK12.VK_API_VERSION_1_2)
             missing.add("Vulkan 1.2");
         for (String extension : EXTENSIONS)
             if (!physical.hasDeviceExtension(extension))
                 missing.add(extension);
+        boolean opacityMicromap =
+                physical.hasDeviceExtension(
+                        EXTOpacityMicromap.VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME) &&
+                (apiVersion >= VK13.VK_API_VERSION_1_3 ||
+                 physical.hasDeviceExtension(
+                         KHRSynchronization2.VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME));
         // Vulkan 1.2 supplies the promoted dependencies of acceleration_structure/ray_query.
         if (missing.isEmpty()) {
             try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -76,6 +97,10 @@ public final class VulkanBootstrap {
                                         .pNext(address)
                                         .pNext(acceleration)
                                         .pNext(query);
+                var micromap =
+                        VkPhysicalDeviceOpacityMicromapFeaturesEXT.calloc(stack).sType$Default();
+                if (opacityMicromap)
+                    available.pNext(micromap);
                 VK12.vkGetPhysicalDeviceFeatures2(physical.vkPhysicalDevice(), available);
                 if (!address.bufferDeviceAddress())
                     missing.add("bufferDeviceAddress");
@@ -83,6 +108,7 @@ public final class VulkanBootstrap {
                     missing.add("accelerationStructure");
                 if (!query.rayQuery())
                     missing.add("rayQuery");
+                opacityMicromap &= micromap.micromap();
 
                 var count = stack.mallocInt(1);
                 VK12.vkGetPhysicalDeviceQueueFamilyProperties(physical.vkPhysicalDevice(), count,
@@ -98,13 +124,19 @@ public final class VulkanBootstrap {
         if (!missing.isEmpty()) {
             String reason =
                     "Host GPU " + physical.deviceName() + " lacks " + String.join(", ", missing);
-            status = new Status(physicalHandle, 0, false, reason);
+            status = new Status(physicalHandle, 0, false, false, reason);
             LOGGER.warn("Prime PT host Vulkan integration unavailable: {}", reason);
             return;
         }
         extensions.addAll(EXTENSIONS);
         features.addAll(FEATURES);
-        status = new Status(physicalHandle, 0, true,
+        if (opacityMicromap) {
+            extensions.add(EXTOpacityMicromap.VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME);
+            features.add(OPACITY_MICROMAP_FEATURE);
+            if (apiVersion < VK13.VK_API_VERSION_1_3)
+                extensions.add(KHRSynchronization2.VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+        }
+        status = new Status(physicalHandle, 0, true, opacityMicromap,
                             "Host Vulkan device creation has not completed");
     }
 
@@ -116,9 +148,17 @@ public final class VulkanBootstrap {
             previous.physical != device.getPhysicalDevice().address() ||
             !extensions.containsAll(EXTENSIONS) || !features.containsAll(FEATURES))
             return;
-        status = new Status(previous.physical, device.address(), true, "");
+        boolean opacityMicromap =
+                previous.opacityMicromap &&
+                extensions.contains(EXTOpacityMicromap.VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME) &&
+                extensions.contains(KHRSynchronization2.VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) &&
+                features.contains(OPACITY_MICROMAP_FEATURE) &&
+                features.contains(SYNCHRONIZATION_2_FEATURE);
+        status = new Status(previous.physical, device.address(), true, opacityMicromap, "");
         LOGGER.info(
                 "Prime PT enabled rayQuery, accelerationStructure and bufferDeviceAddress on Minecraft's Vulkan device");
+        LOGGER.info("Prime PT opacity micromaps: {}",
+                    opacityMicromap ? "enabled" : "unavailable; alpha test fallback");
     }
 
     public static boolean isEnabled(VulkanDevice device) {
@@ -139,6 +179,11 @@ public final class VulkanBootstrap {
     public static String unavailableReason() {
         return status.reason;
     }
+    /** Reports the feature enabled on this exact logical device, never physical support alone. */
+    public static boolean opacityMicromapEnabled(VulkanDevice device) {
+        return isEnabled(device) && status.opacityMicromap;
+    }
 
-    private record Status(long physical, long device, boolean requested, String reason) {}
+    private record Status(long physical, long device, boolean requested, boolean opacityMicromap,
+                          String reason) {}
 }

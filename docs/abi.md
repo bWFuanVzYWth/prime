@@ -62,7 +62,7 @@ Java 仅在首次 state 定义的批量源准备阶段，绑定实际 offset 函
 
 model type1 后为 `quad_count:u32` 和每个100字节 quad：`face:u32, tint_index:i32, raw_layer:u32, sprite_id:u32, light_emission:u32`，四个 `{position:f32×3, packed_uv:u64}`；MC 的 U 在高32位、V 在低32位。face0..5为下/上/北/南/西/东，6无剔除面。raw_layer 是版本层的实际字段值，Rust 适配器解释后生成公共材质语义。type2 为 `count:u32` 和 `{weight:u32, child_id:u32}`；type3 为 `count:u32` 和**实际选中**的 child_id 列表；type4 为单个 child_id。定义身份限定于 epoch/资源失效代次，已观察定义不逐帧重发。
 
-sprite id 为 1..0x3fffffff，映射到 generic texture id `0x40000000+id`；动态纹理限制在该保留区间以下。quad sprite=0 是封闭 atlas 来源。静态 mip0 的 pixel_count=0 表示共享已捕获的 atlas，其他 mip 必须有完整图像；动画必须有完整 mip0 帧图。mip_count 为1..15，帧尺寸/图像≤16384，逐级尺寸及所有帧索引/正时长完整验证。资源字典不传 Rust 配方、关系、平面、合并标签或 GPU 布局。读取与 UV 解释、采样边界见[表面编译](surface-compiler.md)。
+sprite id 为 1..0x3fffffff，映射到 generic texture id `0x40000000+id`；动态纹理限制在该保留区间以下。quad sprite=0 是封闭 atlas 来源。静态 mip0 的 pixel_count=0 表示共享已捕获的 atlas，其他 mip 必须有完整图像；动画必须有完整 mip0 帧图。mip_count 为1..15，帧尺寸/图像≤16384，逐级尺寸及所有帧索引/正时长完整验证。显式资源准备批次发布已捕获方块图集的全部 sprite，不依赖 LabPBR 存在或当前区块引用；同一源 owner 仅准备一次，后来遇到的其他 atlas 来源仍可增量定义。scene owner/epoch 重置不等于真实图集重载，数字身份不得跨 owner 复用。资源字典不传 Rust 配方、关系、平面、合并标签或 GPU 布局。读取与 UV 解释、采样边界见[表面编译](surface-compiler.md)。
 
 LabPBR record 必须跟在同批已定义的 sprite 后，单个 sprite 不可重复定义材料。只有有效的 `format=lab-pbr/1.3` 声明与实际辅助图才生成该记录；传输的是原始 RGBA8，源 G/B 清洗、sheet 布局、mip、动画和 height 解码归 Rust。缺图不补伪像素，源尺寸、像素数量和所有权在发布前验证。该 source record 与场景 op9 的纹理退休不同；公共 ABI v7 和 source version 6 不改变新旧发布不可混用的要求。具体通道见[材质契约](materials.md)。
 
@@ -215,9 +215,11 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 | 0 / 8 | u64 | instance / physical device |
 | 16 / 24 | u64 | device / graphics queue |
 | 32 | u64 | 宿主提交完成 timeline semaphore |
-| 40 / 44 | u32 | queue family index / reserved=0 |
+| 40 / 44 | u32 | queue family index / enabled capability flags |
 
 调用方须已在实际逻辑设备启用 buffer device address、acceleration structure、ray query 与所需扩展，并保证 queue family 支持 graphics+compute。仅查询物理设备支持不够。Rust 不销毁这些宿主对象，也不为 PT 调用 queue submit。
+
+flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` 的 `micromap` 和 synchronization2，其他位必须为零。宿主只在 `vkCreateDevice` 成功且实际创建集合包含扩展与特性后发布该位；26.2/26.3 本身要求 `VK_KHR_synchronization2`。物理支持不等于已启用，flags=0 必须保留 Alpha 检验回退，不能由 Rust 自行推断或补开借用设备的能力。OMM 用户设置与设备能力独立；默认设置开启，实际启用仍取两者交集。具体兼容范围见 [OMM 契约](opacity-micromaps.md)。
 
 每帧调用 `prime_record(handle, frame, 104, command, image, image_view, serial)`。command 是已开始录制、尚未结束的宿主 primary command buffer；目标为带 STORAGE 用途、GENERAL layout 的 RGBA8_UNORM 主颜色图像及其 view，尺寸必须等于 frame。serial 是将包含此 command 的实际提交完成值，同一 session 每个 serial 最多录制一次。宿主在同队列依次提交，并在所有命令完成后 signal timeline 到该 serial；Rust 自己的描述符槽与退休资源依赖此保证。
 
@@ -243,13 +245,13 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 
 非空静态层、raw 和原型/实例在提交前必须上传引用的纹理；缺失引用明确报错。所有调用必须在创建 handle 的 OS 线程进行。`prime_destroy` 退休身份，重复释放会报错。调用方必须保证原生指针指向有效读写区域；长度校验不能验证任意地址。
 
-## 设置包（独立 schema v2）
+## 设置包（独立 schema v3）
 
-`prime_configure(handle, data, length)` 借用恰好 56 字节，返回前解析，不保留指针。它没有场景命令头；设置版本独立于场景 ABI。宿主模式改变时必须先提交 encoder，再从外层帧边界调用；native 等待旧 GPU 使用完成，释放旧模式资源后创建新资源。普通显示控制变化不需要切换等待。
+`prime_configure(handle, data, length)` 借用恰好 60 字节，返回前解析，不保留指针。它没有场景命令头；设置版本独立于场景 ABI。宿主模式改变时必须先提交 encoder，再从外层帧边界调用；native 等待旧 GPU 使用完成，释放旧模式资源后创建新资源。普通显示控制变化不需要切换等待。
 
 | Offset | 类型 | 字段 |
 | --- | --- | --- |
-| 0 / 4 | u32 | settings version=2 / mode（0 实时、1 离线） |
+| 0 / 4 | u32 | settings version=3 / mode（0 实时、1 离线） |
 | 8 / 12 | u32 | 最大路径顶点数 / 离线每帧样本数，均为 1–64 |
 | 16 / 20 / 24 | f32 | 曝光乘数 `[1/4096,4096]` / hue `[0,1]` / saturation `[0,0.5]` |
 | 28 | u32 | view：0 最终输出、1 噪声色、2 线性深度、3 世界法线 |
@@ -257,5 +259,8 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 | 40 | f32 | 深度预览范围 `[1,4096]`，不影响实际深度 |
 | 44 | u32 | 采样 seed，Java 当前固定 `0x13572468` |
 | 48 / 52 | i32 / u32 | 观测纬度 -90…90° / 太阳黄经 0…359°，均为整数度 |
+| 56 | u32 | opacity_micromap：0 关闭、1 自动优先启用；默认 1，仍受设备与表面兼容证明限制 |
 
 非法版本、长度、枚举或数值拒绝整个包。冻结要求当前场景对应最近一次成功录制帧，冻结期间拒绝全部 `prime_submit`；输入帧仍须合法，native 只采用其中宽高/序号，其余使用冻结相机。场景有效期、资源上传与可变显示参数见 [渲染模式契约](renderers.md)。
+
+OMM 不参与 transport 比较；有限模板及共享像素边界的数值取舍见 [OMM 契约](opacity-micromaps.md)。冻结期间允许切换且保留已有线性累积；启停只使镂空加速结构在后续录制时按当前设置重新绑定已有资源模板，不重新请求宿主源或改变冻结的动画时钟。

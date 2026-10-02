@@ -211,6 +211,14 @@ impl<'a> Plan<'a> {
             .map(|g| g.count as usize * stride(g.format))
             .sum()
     }
+    /// The exact packed record order, including half-quad capacity splits. Consumers such as
+    /// opacity micromaps must use this order rather than the original source triangle order.
+    pub fn faces<'b>(&'b self, group: &'b Group) -> impl Iterator<Item = SurfaceFace> + 'b {
+        group.spans.iter().flat_map(move |span| {
+            let source = &self.sources[span.source];
+            span.range.clone().map(move |index| source.face(index))
+        })
+    }
     pub fn pack(
         &self,
         workers: &CpuWorkers,

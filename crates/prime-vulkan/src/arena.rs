@@ -117,6 +117,14 @@ impl Arena {
                     | vk::BufferUsageFlags::STORAGE_BUFFER
                     | vk::BufferUsageFlags::TRANSFER_DST
             };
+            let usage = if !self.host && context.opacity_micromap.is_some() {
+                usage
+                    | vk::BufferUsageFlags::MICROMAP_STORAGE_EXT
+                    | vk::BufferUsageFlags::MICROMAP_BUILD_INPUT_READ_ONLY_EXT
+                    | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+            } else {
+                usage
+            };
             let buffer = Rc::new(Buffer::new(
                 context,
                 u64::from(capacity) * UNIT,

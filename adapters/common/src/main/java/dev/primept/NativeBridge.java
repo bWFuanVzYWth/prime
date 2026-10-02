@@ -175,7 +175,7 @@ public final class NativeBridge implements AutoCloseable {
     }
 
     public void attachVulkan(long instance, long physicalDevice, long device, long queue,
-                             long timeline, int queueFamily) {
+                             long timeline, int queueFamily, boolean opacityMicromapEnabled) {
         checkOwner();
         var descriptor = host.asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
         descriptor.putLong(instance)
@@ -184,7 +184,7 @@ public final class NativeBridge implements AutoCloseable {
                 .putLong(queue)
                 .putLong(timeline)
                 .putInt(queueFamily)
-                .putInt(0);
+                .putInt(opacityMicromapEnabled ? 1 : 0);
         try {
             int status = (int)attachVulkan.invokeExact(handle, host, 48L);
             if (status != 0)

@@ -234,9 +234,12 @@ pub unsafe extern "C" fn prime_render(
 
 /// Borrows the host instance, physical device, logical device, graphics queue and
 /// completion timeline. All handles remain owned by Minecraft.
+/// Descriptor flags at byte 44 describe enabled logical-device capabilities; bit 0 is OMM.
 /// # Safety
 /// `data` must address 48 readable bytes. Handles/features/lifetimes must satisfy
-/// Renderer::borrowed, including flushing the host encoder before prime_destroy.
+/// Renderer::borrowed_mode_with_capabilities, including flushing the host encoder before
+/// prime_destroy. An OMM flag proves VK_EXT_opacity_micromap, micromap and synchronization2
+/// were enabled.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const u8, length: u64) -> i32 {
     boundary(-1, || {
@@ -244,12 +247,7 @@ pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const u8, lengt
             return Err("Vulkan host descriptor must contain 48 bytes".into());
         }
         let bytes = unsafe { std::slice::from_raw_parts(data, 48) };
-        let value = |offset| u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
-        let handles = [value(0), value(8), value(16), value(24), value(32)];
-        let family = u32::from_le_bytes(bytes[40..44].try_into().unwrap());
-        if handles.contains(&0) || bytes[44..48] != [0; 4] {
-            return Err("Invalid Vulkan host handles or reserved field".into());
-        }
+        let (handles, family, capabilities) = parse_vulkan_host_descriptor(bytes)?;
         #[cfg(feature = "vulkan")]
         {
             session(handle, |s| {
@@ -257,7 +255,7 @@ pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const u8, lengt
                     return Err("Engine already attached or failed".into());
                 }
                 s.renderer = Some(unsafe {
-                    prime_vulkan::Renderer::borrowed_mode(
+                    prime_vulkan::Renderer::borrowed_mode_with_capabilities(
                         handles[0],
                         handles[1],
                         handles[2],
@@ -265,6 +263,7 @@ pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const u8, lengt
                         family,
                         handles[4],
                         s.settings.mode,
+                        capabilities,
                     )?
                 });
                 s.renderer.as_mut().unwrap().configure(s.settings)?;
@@ -273,21 +272,35 @@ pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const u8, lengt
         }
         #[cfg(not(feature = "vulkan"))]
         {
-            let _ = (handle, family);
+            let _ = (handle, family, handles, capabilities);
             Err("Native library built without Vulkan".into())
         }
     })
 }
 
+fn parse_vulkan_host_descriptor(bytes: &[u8]) -> Result<([u64; 5], u32, u32), String> {
+    if bytes.len() != 48 {
+        return Err("Vulkan host descriptor must contain 48 bytes".into());
+    }
+    let value = |offset| u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+    let handles = [value(0), value(8), value(16), value(24), value(32)];
+    let family = u32::from_le_bytes(bytes[40..44].try_into().unwrap());
+    let capabilities = u32::from_le_bytes(bytes[44..48].try_into().unwrap());
+    if handles.contains(&0) || capabilities & !1 != 0 {
+        return Err("Invalid Vulkan host handles or unknown capability flags".into());
+    }
+    Ok((handles, family, capabilities))
+}
+
 /// Applies a current-version settings packet. Mode changes retire exclusive GPU resources.
 /// # Safety
-/// Data must contain 48 readable bytes. Call outside recording, after submitting the host encoder
+/// Data must contain 60 readable bytes. Call outside recording, after submitting the host encoder
 /// when the renderer mode changes. This call may wait for that mode's last GPU consumer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn prime_configure(handle: u64, data: *const u8, length: u64) -> i32 {
     boundary(-1, || {
         if data.is_null() || length != prime_scene::settings::RenderSettings::BYTES as u64 {
-            return Err("Settings require a non-null 56-byte packet".into());
+            return Err("Settings require a non-null 60-byte packet".into());
         }
         let settings = prime_scene::settings::RenderSettings::parse(unsafe {
             std::slice::from_raw_parts(data, length as usize)
@@ -507,7 +520,7 @@ mod abi_tests {
     fn configuration_validates_version_borrow_and_thread_before_mutation() {
         let handle = prime_create(ABI_VERSION);
         let bytes: Vec<_> = [
-            2_u32,
+            3_u32,
             0,
             4,
             1,
@@ -521,22 +534,23 @@ mod abi_tests {
             0x13572468,
             30,
             0,
+            1,
         ]
         .into_iter()
         .flat_map(u32::to_le_bytes)
         .collect();
-        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 56) }, 0);
-        assert_eq!(unsafe { prime_configure(handle, std::ptr::null(), 56) }, -1);
+        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 60) }, 0);
+        assert_eq!(unsafe { prime_configure(handle, std::ptr::null(), 60) }, -1);
         assert_eq!(
             unsafe { prime_configure(handle, bytes.as_ptr(), u64::MAX) },
             -1
         );
         let mut invalid = bytes.clone();
-        invalid[0] = 3;
-        assert_eq!(unsafe { prime_configure(handle, invalid.as_ptr(), 56) }, -1);
+        invalid[0] = 2;
+        assert_eq!(unsafe { prime_configure(handle, invalid.as_ptr(), 60) }, -1);
         let foreign = bytes.clone();
         assert_eq!(
-            std::thread::spawn(move || unsafe { prime_configure(handle, foreign.as_ptr(), 56) })
+            std::thread::spawn(move || unsafe { prime_configure(handle, foreign.as_ptr(), 60) })
                 .join()
                 .unwrap(),
             -1
@@ -544,7 +558,7 @@ mod abi_tests {
         invalid = bytes.clone();
         invalid[4] = 1;
         assert_eq!(
-            unsafe { prime_configure(handle, invalid.as_ptr(), 56) },
+            unsafe { prime_configure(handle, invalid.as_ptr(), 60) },
             -1,
             "No rendered frame can be frozen"
         );
@@ -561,7 +575,32 @@ mod abi_tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 56) }, 0);
+        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 60) }, 0);
         assert_eq!(prime_destroy(handle), 0);
+    }
+    #[test]
+    fn host_descriptor_requires_enabled_capabilities_and_known_flag_bits() {
+        let mut bytes = [0; 48];
+        for (index, value) in [11_u64, 22, 33, 44, 55].into_iter().enumerate() {
+            bytes[index * 8..index * 8 + 8].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes[40..44].copy_from_slice(&7_u32.to_le_bytes());
+        assert_eq!(
+            parse_vulkan_host_descriptor(&bytes).unwrap(),
+            ([11, 22, 33, 44, 55], 7, 0)
+        );
+        bytes[44..48].copy_from_slice(&1_u32.to_le_bytes());
+        assert_eq!(parse_vulkan_host_descriptor(&bytes).unwrap().2, 1);
+        for flags in [2_u32, 3, u32::MAX] {
+            bytes[44..48].copy_from_slice(&flags.to_le_bytes());
+            assert!(parse_vulkan_host_descriptor(&bytes).is_err());
+        }
+        bytes[44..48].fill(0);
+        for index in 0..5 {
+            let mut zero_handle = bytes;
+            zero_handle[index * 8..index * 8 + 8].fill(0);
+            assert!(parse_vulkan_host_descriptor(&zero_handle).is_err());
+        }
+        assert!(parse_vulkan_host_descriptor(&bytes[..47]).is_err());
     }
 }

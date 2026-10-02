@@ -29,6 +29,7 @@ final class SectionSourcesCpuSmoke {
     private static final ValueLayout.OfLong L =
             ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
     static void run() throws Exception {
+        SourceSpriteFixture.verifyCompleteAtlasDictionary();
         SectionPlacementOracle.run();
         var material = new BakedQuad.MaterialInfo(SourceSpriteFixture.create(0, 0, 16),
                                                   ChunkSectionLayer.CUTOUT, null, null, null, -1,

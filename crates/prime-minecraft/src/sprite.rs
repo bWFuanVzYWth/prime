@@ -16,6 +16,8 @@ pub(crate) struct Sprite {
     pub extent: [u32; 2],
     pub images: Vec<Image>,
     pub frames: Vec<(u32, u32)>,
+    /// All actual sequence-frame windows, shared across per-tick texture views.
+    pub coverage_frames: Arc<[[u32; 2]]>,
     pub interpolate: bool,
     pub material: Option<crate::labpbr::Material>,
 }
@@ -130,6 +132,13 @@ impl Sprite {
             }
             frames.push((frame, duration));
         }
+        let row = base.width / extent[0];
+        let mut coverage_frames: Vec<_> = frames
+            .iter()
+            .map(|&(frame, _)| [(frame % row) * extent[0], (frame / row) * extent[1]])
+            .collect();
+        coverage_frames.sort_unstable();
+        coverage_frames.dedup();
         Ok((
             id,
             Self {
@@ -138,6 +147,7 @@ impl Sprite {
                 extent,
                 images,
                 frames,
+                coverage_frames: coverage_frames.into(),
                 interpolate: interpolate != 0,
                 material: None,
             },
@@ -226,7 +236,7 @@ impl Sprite {
                 material: None,
             }
         };
-        if self.images.len() > 1 || blend > 0. {
+        if self.images.len() > 1 || !self.frames.is_empty() {
             let region = texture.region.unwrap();
             let next = if base.pixels.is_empty() {
                 [region[0], region[1]]
@@ -259,6 +269,7 @@ impl Sprite {
                 levels,
                 next,
                 blend,
+                coverage_frames: self.coverage_frames.clone(),
             }));
         }
         texture.validate()?;
@@ -289,6 +300,78 @@ impl Sprite {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn source_bytes(frames: &[(u32, u32)], interpolate: bool) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend(1_u32.to_le_bytes());
+        bytes.extend(4_u32.to_le_bytes());
+        bytes.extend(b"test");
+        for bound in [0_f32, 0., 1., 1.] {
+            bytes.extend(bound.to_le_bytes());
+        }
+        for value in [2_u32, 2, 1, 4, 4, 16] {
+            bytes.extend(value.to_le_bytes());
+        }
+        bytes.extend([255; 64]);
+        bytes.extend(u32::from(interpolate).to_le_bytes());
+        bytes.extend((frames.len() as u32).to_le_bytes());
+        for &(frame, duration) in frames {
+            bytes.extend(frame.to_le_bytes());
+            bytes.extend(duration.to_le_bytes());
+        }
+        bytes
+    }
+    #[test]
+    fn no_mip_animation_keeps_all_actual_frame_windows_in_one_shared_allocation() {
+        let frames = [(3, 2), (1, 3), (3, 1)];
+        for interpolate in [false, true] {
+            let bytes = source_bytes(&frames, interpolate);
+            let pages = [bytes.as_slice()];
+            let mut reader = Reader::new(&pages).unwrap();
+            let (_, sprite) = Sprite::read(&mut reader).unwrap();
+            reader.finish().unwrap();
+            assert_eq!(sprite.coverage_frames.as_ref(), [[2, 0], [2, 2]]);
+            let scene = SourceScene::default();
+            for (tick, region, next) in [
+                (0, [2, 2, 2, 2], [2, 0]),
+                (1, [2, 2, 2, 2], [2, 0]),
+                (2, [2, 0, 2, 2], [2, 2]),
+                (5, [2, 2, 2, 2], [2, 2]),
+                (6, [2, 2, 2, 2], [2, 0]),
+            ] {
+                let image = sprite.image(tick, &scene).unwrap();
+                assert_eq!(image.region, Some(region));
+                assert!(Arc::ptr_eq(&image.pixels, &sprite.images[0].pixels));
+                let sampling = image.sampling.unwrap();
+                assert!(sampling.levels.is_empty());
+                assert_eq!(sampling.next, next);
+                assert!(Arc::ptr_eq(
+                    &sampling.coverage_frames,
+                    &sprite.coverage_frames
+                ));
+                assert_eq!(
+                    sampling.blend,
+                    if interpolate && tick == 1 { 0.5 } else { 0. }
+                );
+            }
+        }
+        let bytes = source_bytes(&[], false);
+        let pages = [bytes.as_slice()];
+        let (_, sprite) = Sprite::read(&mut Reader::new(&pages).unwrap()).unwrap();
+        assert!(sprite.coverage_frames.is_empty());
+        assert!(
+            sprite
+                .image(100, &SourceScene::default())
+                .unwrap()
+                .sampling
+                .is_none()
+        );
+    }
+    #[test]
+    fn out_of_sheet_sequence_frames_are_rejected_before_coverage_publication() {
+        let bytes = source_bytes(&[(4, 1)], false);
+        let pages = [bytes.as_slice()];
+        assert!(Sprite::read(&mut Reader::new(&pages).unwrap()).is_err());
+    }
     #[test]
     fn local_uvs_only_repair_endpoint_ulps_and_keep_crops_and_orientation() {
         let sprite = Sprite {
@@ -297,6 +380,7 @@ mod tests {
             extent: [16, 16],
             images: vec![],
             frames: vec![],
+            coverage_frames: Arc::from([]),
             interpolate: false,
             material: None,
         };
@@ -334,6 +418,7 @@ mod tests {
                 },
             ],
             frames: vec![(3, 2), (0, 3)],
+            coverage_frames: Arc::from([[0, 0], [4, 4]]),
             interpolate: true,
             material: None,
         };
@@ -349,6 +434,7 @@ mod tests {
             assert_eq!(t.region, Some(region));
             assert!(Arc::ptr_eq(&t.pixels, &pixels));
             let s = t.sampling.as_ref().unwrap();
+            assert!(Arc::ptr_eq(&s.coverage_frames, &sprite.coverage_frames));
             assert_eq!(s.blend, blend);
             assert_eq!(s.next, next);
             assert_eq!(s.levels[0].region, [region[0] / 2, region[1] / 2, 2, 2]);
@@ -395,6 +481,7 @@ mod tests {
                 },
             ],
             frames: vec![],
+            coverage_frames: Arc::from([]),
             interpolate: false,
             material: None,
         };
@@ -442,6 +529,7 @@ mod tests {
                 pixels: Arc::from([]),
             }],
             frames: vec![],
+            coverage_frames: Arc::from([]),
             interpolate: false,
             material: None,
         };

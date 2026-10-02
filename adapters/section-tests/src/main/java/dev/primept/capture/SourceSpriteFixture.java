@@ -82,6 +82,83 @@ final class SourceSpriteFixture extends TextureAtlasSprite {
         }
         contents.close();
     }
+    static void verifyCompleteAtlasDictionary() throws Exception {
+        var capture = dev.primept.PrimeClient.CAPTURE;
+        var field = CaptureInbox.class.getDeclaredField("sprites");
+        field.setAccessible(true);
+        Object previous = field.get(capture);
+        var used = create(0, 0, 8);
+        var unused = create(8, 0, 8);
+        var replacement = create(0, 8, 8);
+        try (var out = new SourcePages()) {
+            field.set(capture, java.util.List.of(used, unused));
+            var sources = new SourceSprites();
+            sources.prepareAtlas(out);
+            var data = read(out);
+            staticDefinition(data, 1, used);
+            staticDefinition(data, 2, unused);
+            if (data.hasRemaining())
+                throw new AssertionError("complete atlas dictionary has unexpected records");
+            long preparedBytes = out.bytes();
+            if (preparedBytes == 0 || sources.prepare(out, used) != 1 ||
+                sources.prepare(out, unused) != 2 || out.bytes() != preparedBytes)
+                throw new AssertionError("section sprite use must reuse resource dictionary IDs");
+            out.clear();
+            for (int section = 0; section < 1000; ++section)
+                sources.prepareAtlas(out);
+            if (out.bytes() != 0)
+                throw new AssertionError("atlas dictionary was retransmitted per section");
+            // A fresh source owner is created for the new capture/catalog epoch.
+            field.set(capture, java.util.List.of(replacement, unused));
+            new SourceSprites().prepareAtlas(out);
+            data = read(out);
+            staticDefinition(data, 1, replacement);
+            staticDefinition(data, 2, unused);
+            if (data.hasRemaining())
+                throw new AssertionError("new source owner must publish only its atlas dictionary");
+        } finally {
+            field.set(capture, previous);
+            used.contents().close();
+            unused.contents().close();
+            replacement.contents().close();
+        }
+        System.out.println(
+                "PRIME_PT_COMPLETE_ATLAS_SOURCE_OK: no LabPBR, used and unused actual sprites, stable IDs, 1000 sections=0 retransmission, new owner complete replacement; no GPU/window");
+    }
+    private static java.nio.ByteBuffer read(SourcePages pages) {
+        var bytes = new java.io.ByteArrayOutputStream();
+        var table = pages.table();
+        var length = java.lang.foreign.ValueLayout.JAVA_LONG_UNALIGNED.withOrder(
+                java.nio.ByteOrder.LITTLE_ENDIAN);
+        for (long i = 0; i < pages.pageCount(); ++i) {
+            var page = table.get(java.lang.foreign.ValueLayout.ADDRESS, i * 16)
+                               .reinterpret(table.get(length, i * 16 + 8));
+            bytes.writeBytes(page.toArray(java.lang.foreign.ValueLayout.JAVA_BYTE));
+        }
+        return java.nio.ByteBuffer.wrap(bytes.toByteArray())
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+    }
+    private static void staticDefinition(java.nio.ByteBuffer data, int id,
+                                         TextureAtlasSprite sprite) {
+        if (data.getInt() != 6 || data.getInt() != id)
+            throw new AssertionError("complete atlas sprite identity");
+        int nameBytes = data.getInt();
+        byte[] name = new byte[nameBytes];
+        data.get(name);
+        data.position(data.position() + (4 - nameBytes % 4) % 4);
+        if (!new String(name, java.nio.charset.StandardCharsets.UTF_8)
+                     .equals(sprite.contents().name().toString()))
+            throw new AssertionError("complete atlas sprite source name");
+        for (float bound :
+             new float[] {sprite.getU0(), sprite.getV0(), sprite.getU1(), sprite.getV1()})
+            if (data.getFloat() != bound)
+                throw new AssertionError("complete atlas sprite source window");
+        int size = sprite.contents().width();
+        if (data.getInt() != size || data.getInt() != sprite.contents().height() ||
+            data.getInt() != 1 || data.getInt() != size || data.getInt() != size ||
+            data.getInt() != 0 || data.getInt() != 0 || data.getInt() != 0)
+            throw new AssertionError("static base must borrow atlas pixels without animation");
+    }
     static byte[] atlas() {
         var pixels = new byte[16 * 16 * 4];
         java.util.Arrays.fill(pixels, (byte)-1);

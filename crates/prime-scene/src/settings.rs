@@ -31,6 +31,7 @@ pub struct RenderSettings {
     pub sky: f32,
     pub depth_range: f32,
     pub seed: u32,
+    pub opacity_micromap: bool,
 }
 impl Default for RenderSettings {
     fn default() -> Self {
@@ -47,15 +48,16 @@ impl Default for RenderSettings {
             sky: 1.0,
             depth_range: 128.0,
             seed: 0x1357_2468,
+            opacity_micromap: true,
         }
     }
 }
 impl RenderSettings {
-    pub const VERSION: u32 = 2;
-    pub const BYTES: usize = 56;
+    pub const VERSION: u32 = 3;
+    pub const BYTES: usize = 60;
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != Self::BYTES {
-            return Err("Settings require exactly 56 bytes".into());
+            return Err("Settings require exactly 60 bytes".into());
         }
         let word = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
         if word(0) != Self::VERSION {
@@ -87,6 +89,11 @@ impl RenderSettings {
             sky: f32::from_bits(word(36)),
             depth_range: f32::from_bits(word(40)),
             seed: word(44),
+            opacity_micromap: match word(56) {
+                0 => false,
+                1 => true,
+                _ => return Err("Unknown opacity micromap setting".into()),
+            },
         };
         result.validate()?;
         Ok(result)
@@ -120,7 +127,7 @@ mod tests {
     use super::*;
     fn golden() -> Vec<u8> {
         [
-            2_u32,
+            3_u32,
             1,
             12,
             1,
@@ -134,6 +141,7 @@ mod tests {
             0x13572468,
             30,
             0,
+            1,
         ]
         .into_iter()
         .flat_map(u32::to_le_bytes)
@@ -156,7 +164,8 @@ mod tests {
         for (offset, value) in [
             (0, 0_u32),
             (0, 1),
-            (0, 3),
+            (0, 2),
+            (0, 4),
             (48, 91),
             (48, (-91i32) as u32),
             (52, 360),
@@ -165,6 +174,7 @@ mod tests {
             (8, 65),
             (12, 65),
             (28, 4),
+            (56, 2),
         ] {
             let mut invalid = bytes.clone();
             invalid[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
@@ -189,6 +199,19 @@ mod tests {
         };
         assert!(old.validate().is_ok());
         assert!(!old.transport_matches(RenderSettings::default()));
+    }
+    #[test]
+    fn opacity_micromap_defaults_enabled_and_does_not_change_transport() {
+        let enabled = RenderSettings::default();
+        assert!(enabled.opacity_micromap);
+        let mut bytes = golden();
+        bytes[56..60].copy_from_slice(&0_u32.to_le_bytes());
+        assert!(!RenderSettings::parse(&bytes).unwrap().opacity_micromap);
+        let disabled = RenderSettings {
+            opacity_micromap: false,
+            ..enabled
+        };
+        assert!(enabled.transport_matches(disabled));
     }
     #[test]
     fn rejects_nonfinite_or_out_of_range_floats() {

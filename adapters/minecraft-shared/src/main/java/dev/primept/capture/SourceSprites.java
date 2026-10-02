@@ -21,8 +21,8 @@ final class SourceSprites {
             return;
         atlasPrepared = true;
         var sprites = dev.primept.PrimeClient.CAPTURE.sprites();
-        if (!materials.hasMaps(sprites))
-            return;
+        // Publish the complete resource dictionary before section-local use. Rust can prepare
+        // resource-owned coverage once, including sprites first encountered by later terrain.
         for (var sprite : sprites)
             prepare(out, sprite);
     }

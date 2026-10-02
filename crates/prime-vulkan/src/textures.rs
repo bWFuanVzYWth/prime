@@ -12,7 +12,8 @@ use std::{
 };
 
 pub(super) struct Textures {
-    source: BTreeMap<u32, Texture>,
+    pub(crate) source: BTreeMap<u32, Texture>,
+    pub(crate) coverage_changed: BTreeSet<u32>,
     cursor: Option<TextureCursor>,
     pub sprites: usize,
     pub indices: BTreeMap<u32, u32>,
@@ -28,6 +29,31 @@ struct Backing {
     count: u32,
     references: usize,
 }
+// Only mip0 coverage dependencies. RGB/PBR/mip-only changes do not invalidate OMM.
+fn coverage_same(a: &Texture, b: &Texture) -> bool {
+    if a.width != b.width || a.height != b.height || !Arc::ptr_eq(&a.pixels, &b.pixels) {
+        return false;
+    }
+    if let (Some(a_sampling), Some(b_sampling)) = (&a.sampling, &b.sampling)
+        && !a_sampling.coverage_frames.is_empty()
+        && !b_sampling.coverage_frames.is_empty()
+    {
+        // The boundary validates current/next membership. The OMM proof covers every
+        // frame and interpolation, so descriptor-only animation never rebuilds a BLAS.
+        return a.region.map(|r| [r[2], r[3]]) == b.region.map(|r| [r[2], r[3]])
+            && (Arc::ptr_eq(&a_sampling.coverage_frames, &b_sampling.coverage_frames)
+                || a_sampling.coverage_frames == b_sampling.coverage_frames);
+    }
+    a.region == b.region
+        && match (&a.sampling, &b.sampling) {
+            (None, None) => true,
+            (Some(a), Some(b)) => {
+                a.next == b.next && a.blend == b.blend && a.coverage_frames == b.coverage_frames
+            }
+            _ => false,
+        }
+}
+
 fn images(texture: &Texture) -> impl Iterator<Item = &Arc<[u8]>> {
     texture.backings()
 }
@@ -51,6 +77,7 @@ impl Textures {
         slots.allocate(1)?;
         let mut result = Self {
             source: BTreeMap::new(),
+            coverage_changed: BTreeSet::new(),
             cursor: None,
             sprites: 0,
             indices: BTreeMap::from([(0, 0)]),
@@ -67,6 +94,7 @@ impl Textures {
 
     fn remove(&mut self, id: u32) {
         if let Some(old) = self.source.remove(&id) {
+            self.coverage_changed.insert(id);
             self.sprites -= usize::from(old.region.is_some());
             self.slots.release(self.indices.remove(&id).unwrap(), 1);
             if let Some((start, count)) = self.mip_slots.remove(&id) {
@@ -106,6 +134,7 @@ impl Textures {
         source: impl Into<TextureInput<'a>>,
         uploads: &mut crate::arena::Arena,
     ) -> Result<(), String> {
+        self.coverage_changed.clear();
         let (cursor, updates) = source.into().updates(self.cursor);
         // Do not scan resident identities for a certified incremental input.
         if updates.is_snapshot() {
@@ -148,6 +177,13 @@ impl Textures {
                 continue;
             }
             texture.validate()?;
+            if self
+                .source
+                .get(id)
+                .is_none_or(|old| !coverage_same(old, texture))
+            {
+                self.coverage_changed.insert(*id);
+            }
             let index = if let Some(&index) = self.indices.get(id) {
                 index
             } else {

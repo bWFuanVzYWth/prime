@@ -15,6 +15,10 @@ mod light_grid_tests;
 #[cfg(feature = "light-sampling-bench")]
 pub mod light_sampling;
 mod objects;
+mod omm;
+mod omm_cpu;
+#[cfg(all(test, feature = "shader-tests"))]
+mod omm_tests;
 mod openpbr;
 pub use display::{PrimeDrtParameters, PrimeDrtSettings};
 mod geometry;

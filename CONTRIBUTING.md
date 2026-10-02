@@ -513,3 +513,24 @@ python -B -m unittest discover -s scripts -p nsight_diagnostics_tests.py
 - `artifacts/`：本地调查、方案、性能/验收报告、截图、日志和 CSV；整个目录由 Git 忽略。
 
 报告可放在 `artifacts/reports/<日期或任务>/`，保留环境、输入、结论和限制；不要从需提交的文档链接某次本地产物。设计落地后只提炼有效契约到架构文档。需要长期回归的最小测试 fixture 放到对应测试目录，注明来源与语义，不把一次运行的完整输出转成 fixture。实验保留、冻结依赖和可再生成产物清理遵循[性能证据规范](docs/guides/performance-evidence.md)。
+
+### 镂空表面 OMM
+
+稳定的证明规则、成本策略与所有权契约见 [OMM](docs/opacity-micromaps.md)。无窗口测试使用生产 shader 比较 OMM 开/关的实际命中与阴影；设备不支持 OMM 时测试会明确失败，不能标为通过：
+
+```powershell
+cargo test -p prime_vulkan --lib --locked omm_cpu
+.\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke
+$env:PRIME_VK_VALIDATION = '1'
+$env:VK_LAYER_VALIDATE_SYNC = '1'
+cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_omm_pool -- --ignored --nocapture --test-threads=1
+cargo test -p prime_vulkan --features shader-tests --lib --locked omm_tests -- --ignored --nocapture --test-threads=1 --skip gpu_omm_exact_shared_edge_diagnostic
+# 独立边界诊断：记录已接受的数值归属差异，不作为位级等价验收。
+cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_omm_exact_shared_edge_diagnostic -- --ignored --nocapture --test-threads=1
+```
+
+游戏由用户按前文两版 `runClient` 命令手动执行。在“Prime 渲染设置 → 渲染”切换 OMM，覆盖树叶、十字草/花、完整 sprite 的旋转/镜像与 1/2/4 tile 重复、非 POT 高分辨率资源包和完整动画。裁切、斜向 UV、特殊顶点 alpha、双侧不同孔洞另检查 shader unknown 退路，确认没有随区块烘焙新模板；观察从两侧的孔洞、主命中深度/法线、太阳/局部光阴影、大气遮挡。覆盖静态编辑、区块卸载/重入、F3+T、冻结时切换 OMM、恢复实时及退出/重进；查设备日志 `OMM enabled` 和 native diagnostics `omm_capable/omm_enabled`，不能仅依据开关已选中认定实际使用。
+
+性能比较关闭 validation，固定原生1920×1080、相机/seed/预算，分别记录开/关的稳态 CPU/GPU 帧时与更新尾延迟。记录 `omm_template_ms/omm_bind_ms/omm_resource_record_ms` 与 `omm_template_preparations/omm_bound_primitives`；同一覆盖资源代次内，移动、区块卸载/重入和设置切换不应增加模板准备或 `omm_resource_builds`。后者是当前 scene resource owner 的累计非空 GPU 构建数，owner 重建后重计，不能只根据 scene epoch 将变化归为真实资源重载。
+
+保留当前资源唯一计数 `omm_resource_blocks/omm_resource_packed_bytes/omm_resource_storage_bytes`，以及 BLAS 引用计数 `omm_two_blocks/omm_four_blocks/omm_special_triangles/omm_referenced_packed_bytes`。同一块的多个 BLAS 引用会重复累计，引用压缩字节不等于显存；当前资源 storage 不含在途旧代、scratch、上传、索引和 arena 容量。保留设备/驱动、配置、全部离群值和实际显存峰值。首批地形检查大视距、多格重复和不匹配模板的源负载，资源重载检查整代构建与全部 cutout 重绑定，分别记录 `static_prepare` 总耗时与 OMM 子阶段；无窗口夹具不能代替实际游戏加载及移动验收。

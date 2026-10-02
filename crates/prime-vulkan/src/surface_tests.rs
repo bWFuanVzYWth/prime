@@ -1413,6 +1413,7 @@ fn sprite_frames_mips_and_endpoints_share_pixels_without_rebuilding_geometry() {
         sampling: Some(Arc::new(TextureSampling {
             next: [5, 0],
             blend: 0.25,
+            coverage_frames: Arc::from([]),
             levels: vec![TextureLevel {
                 width: 4,
                 height: 2,

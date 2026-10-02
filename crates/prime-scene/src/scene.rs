@@ -60,6 +60,10 @@ pub struct TextureSampling {
     pub next: [u32; 2],
     /// Animation interpolates encoded RGBA and quantizes to the source UNORM8 atlas.
     pub blend: f32,
+    /// Complete immutable set of possible base-image window offsets, independent of the
+    /// current frame and interpolation. Empty means no complete animation-frame proof;
+    /// ordinary static views also keep this empty. Does not change actual texel sampling.
+    pub coverage_frames: Arc<[[u32; 2]]>,
 }
 impl Texture {
     fn color_backings(&self) -> impl Iterator<Item = &Arc<[u8]>> {
@@ -126,6 +130,8 @@ impl Texture {
                     Arc::ptr_eq(a, b)
                         || a.next == b.next
                             && a.blend == b.blend
+                            && (Arc::ptr_eq(&a.coverage_frames, &b.coverage_frames)
+                                || a.coverage_frames == b.coverage_frames)
                             && a.levels.len() == b.levels.len()
                             && a.levels.iter().zip(&b.levels).all(|(a, b)| {
                                 a.width == b.width
@@ -171,6 +177,22 @@ impl Texture {
                 || s.levels.len() > 14
             {
                 return Err("invalid sprite sampling".into());
+            }
+            if !s.coverage_frames.is_empty() {
+                let mut current = false;
+                let mut next = false;
+                for &p in s.coverage_frames.iter() {
+                    if u64::from(p[0]) + u64::from(r[2]) > u64::from(self.width)
+                        || u64::from(p[1]) + u64::from(r[3]) > u64::from(self.height)
+                    {
+                        return Err("invalid complete texture frame window".into());
+                    }
+                    current |= p == [r[0], r[1]];
+                    next |= p == s.next;
+                }
+                if !current || !next {
+                    return Err("sprite frame missing from complete texture frame windows".into());
+                }
             }
             let mut extent = [r[2], r[3]];
             for m in &s.levels {
@@ -234,6 +256,7 @@ mod texture_tests {
                 }],
                 next: [2, 2],
                 blend: 0.25,
+                coverage_frames: Arc::from([]),
             })),
             material: None,
         }

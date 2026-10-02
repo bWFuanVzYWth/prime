@@ -118,6 +118,36 @@ impl Renderer {
         )
     }
 
+    /// # Safety
+    /// Same contract as borrowed_mode. Capability bit 0 additionally certifies
+    /// enabled EXT opacity micromap, micromap and synchronization2 features.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn borrowed_mode_with_capabilities(
+        instance: u64,
+        physical: u64,
+        device: u64,
+        queue: u64,
+        family: u32,
+        timeline: u64,
+        mode: RenderMode,
+        capabilities: u32,
+    ) -> Result<Self, String> {
+        Self::from_context(
+            unsafe {
+                Context::borrowed_with_capabilities(
+                    instance,
+                    physical,
+                    device,
+                    queue,
+                    family,
+                    timeline,
+                    capabilities,
+                )?
+            },
+            mode,
+        )
+    }
+
     fn from_context(context: Arc<Context>, mode: RenderMode) -> Result<Self, String> {
         let cpu_profile = CpuProfile::default();
         let pipeline = Some(Pipeline::new(&context, mode)?);
@@ -204,6 +234,9 @@ impl Renderer {
         } else if !settings.transport_matches(self.settings) {
             self.samples = 0;
         }
+        if let Some(geometry) = &mut self.geometry {
+            geometry.set_omm(settings.opacity_micromap && self.context.opacity_micromap.is_some());
+        }
         self.display = display;
         self.settings = settings;
         Ok(())
@@ -235,14 +268,36 @@ impl Renderer {
     }
     /// Last attempted host recording; fixed-size counters are retained, formatting is on demand.
     pub fn cpu_diagnostics(&self) -> String {
+        let omm = self.geometry.as_ref().map_or([0; 4], Geometry::omm_stats);
+        let omm_prepare = self.geometry.as_ref().map_or([0; 3], |g| g.omm_prepare_ns);
+        let omm_work = self.geometry.as_ref().map_or([0; 2], |g| g.omm_work_counts);
+        let omm_pool = self
+            .geometry
+            .as_ref()
+            .map_or([0; 4], Geometry::omm_pool_stats);
         format!(
-            "{} gpu_supported={} gpu_completed_serial={} gpu_preparation_ms={:.3} gpu_render_ms={:.3} gpu_total_ms={:.3} gpu_sample=delayed_completed_interval atmosphere_sky_updates={} atmosphere_camera_t_updates={} atmosphere_aerial_s_updates={} atmosphere_aerial_t_updates={}",
+            "{} gpu_supported={} gpu_completed_serial={} gpu_preparation_ms={:.3} gpu_render_ms={:.3} gpu_total_ms={:.3} gpu_sample=delayed_completed_interval omm_capable={} omm_enabled={} omm_two_blocks={} omm_four_blocks={} omm_special_triangles={} omm_referenced_packed_bytes={} omm_template_ms={:.3} omm_bind_ms={:.3} omm_resource_record_ms={:.3} omm_template_preparations={} omm_bound_primitives={} omm_resource_builds={} omm_resource_blocks={} omm_resource_packed_bytes={} omm_resource_storage_bytes={} atmosphere_sky_updates={} atmosphere_camera_t_updates={} atmosphere_aerial_s_updates={} atmosphere_aerial_t_updates={}",
             self.cpu_profile.last_report(),
             self.host_query != vk::QueryPool::null(),
             self.last_gpu.serial,
             self.last_gpu.preparation_ns as f64 / 1e6,
             self.last_gpu.render_ns as f64 / 1e6,
             self.last_gpu.total_ns as f64 / 1e6,
+            self.context.opacity_micromap.is_some(),
+            self.geometry.as_ref().is_some_and(|g| g.opacity_micromap),
+            omm[0],
+            omm[1],
+            omm[2],
+            omm[3],
+            omm_prepare[0] as f64 / 1e6,
+            omm_prepare[1] as f64 / 1e6,
+            omm_prepare[2] as f64 / 1e6,
+            omm_work[0],
+            omm_work[1],
+            omm_pool[0],
+            omm_pool[1],
+            omm_pool[2],
+            omm_pool[3],
             self.atmosphere.as_ref().map_or(0, |a| a.sky_updates),
             self.atmosphere
                 .as_ref()
@@ -387,11 +442,17 @@ impl Renderer {
         if let Some(geometry) = &mut self.geometry {
             geometry.begin_frame(&self.context, completed);
         }
-        if !self.scene_frozen || self.geometry.is_none() {
+        if !self.scene_frozen || self.geometry.as_ref().is_none_or(|g| g.needs_update(scene)) {
             let started = cpu.start();
             if self.geometry.as_ref().is_none_or(|g| g.needs_update(scene)) {
                 cpu.static_updates += 1;
-                self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
+                let source_changed = self
+                    .geometry
+                    .as_ref()
+                    .is_none_or(|g| g.source_changed(scene));
+                if source_changed {
+                    self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
+                }
                 self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
                 if let Some(geometry) = &mut self.geometry
                     && geometry.same_owner(scene)
@@ -401,10 +462,16 @@ impl Renderer {
                     // End the previous CPU owner before constructing another cache domain.
                     // Borrowed GPU resources still retire by their recorded completion serials.
                     self.geometry.take();
-                    self.geometry =
-                        Some(Geometry::new(&self.context, scene, self.workers.clone())?);
+                    self.geometry = Some(Geometry::new_with_omm(
+                        &self.context,
+                        scene,
+                        self.workers.clone(),
+                        self.settings.opacity_micromap,
+                    )?);
                 }
-                self.samples = 0;
+                if source_changed {
+                    self.samples = 0;
+                }
             }
             cpu.finish(Stage::Static, started);
             let (dynamic_changed, bindings_changed) = self

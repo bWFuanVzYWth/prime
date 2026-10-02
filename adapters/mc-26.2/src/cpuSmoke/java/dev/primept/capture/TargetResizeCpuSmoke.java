@@ -49,15 +49,53 @@ final class TargetResizeCpuSmoke {
         var recorder = (RecordingDevice)unsafe.allocateInstance(RecordingDevice.class);
         field(GpuDevice.class, "backend").set(recorder, backend);
         var statusConstructor = status.getType().getDeclaredConstructor(
-                long.class, long.class, boolean.class, String.class);
+                long.class, long.class, boolean.class, boolean.class, String.class);
         statusConstructor.setAccessible(true);
         try {
             device.set(null, recorder);
             thread.set(null, Thread.currentThread());
             System.setProperty("primept.enabled", "true");
             requested.set(client, "path_trace");
-            status.set(null, statusConstructor.newInstance(101L, 202L, true, ""));
+            status.set(null, statusConstructor.newInstance(101L, 202L, true, true, ""));
             check(VulkanBootstrap.isEnabled(backend), "Synthetic negotiated device is recognized");
+            check(VulkanBootstrap.opacityMicromapEnabled(backend),
+                  "OMM belongs to the exact enabled device");
+            var extensions = new java.util.HashSet<String>();
+            for (var extension :
+                 (java.util.List<?>)field(VulkanBootstrap.class, "EXTENSIONS").get(null))
+                extensions.add((String)extension);
+            var features = new java.util.HashSet<Object>(
+                    (java.util.List<?>)field(VulkanBootstrap.class, "FEATURES").get(null));
+            extensions.add(
+                    org.lwjgl.vulkan.KHRSynchronization2.VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+            features.add(field(VulkanBootstrap.class, "SYNCHRONIZATION_2_FEATURE").get(null));
+            var created = VulkanBootstrap.class.getMethod("deviceCreated", VkDevice.class,
+                                                          java.util.Collection.class, Set.class);
+            String ommExtension =
+                    org.lwjgl.vulkan.EXTOpacityMicromap.VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME;
+            Object ommFeature = field(VulkanBootstrap.class, "OPACITY_MICROMAP_FEATURE").get(null);
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, "pending"));
+            created.invoke(null, logical, extensions, features);
+            check(!VulkanBootstrap.opacityMicromapEnabled(backend),
+                  "Physical support alone cannot enable OMM");
+            extensions.add(ommExtension);
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, "pending"));
+            created.invoke(null, logical, extensions, features);
+            check(!VulkanBootstrap.opacityMicromapEnabled(backend),
+                  "Extension without feature cannot enable OMM");
+            features.add(ommFeature);
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, "pending"));
+            created.invoke(null, logical, extensions, features);
+            check(VulkanBootstrap.opacityMicromapEnabled(backend),
+                  "Created extension and feature enable OMM");
+            features.remove(field(VulkanBootstrap.class, "SYNCHRONIZATION_2_FEATURE").get(null));
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, "pending"));
+            created.invoke(null, logical, extensions, features);
+            check(!VulkanBootstrap.opacityMicromapEnabled(backend),
+                  "OMM needs the enabled synchronization2 feature");
+            features.add(field(VulkanBootstrap.class, "SYNCHRONIZATION_2_FEATURE").get(null));
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, "pending"));
+            created.invoke(null, logical, extensions, features);
             lifecycle(true);
             // Vanilla must retain the shared main target capability for a later switch to PT.
             requested.set(client, "vanilla");
@@ -66,11 +104,13 @@ final class TargetResizeCpuSmoke {
             System.setProperty("primept.enabled", "false");
             lifecycle(false);
             System.setProperty("primept.enabled", "true");
-            status.set(null, statusConstructor.newInstance(101L, 303L, true, "other device"));
+            status.set(null, statusConstructor.newInstance(101L, 303L, true, true, "other device"));
+            check(!VulkanBootstrap.opacityMicromapEnabled(backend),
+                  "Other logical device cannot inherit OMM");
             lifecycle(false);
             status.set(null, previousStatus);
             lifecycle(false);
-            status.set(null, statusConstructor.newInstance(101L, 202L, true, ""));
+            status.set(null, statusConstructor.newInstance(101L, 202L, true, true, ""));
             var otherBackend = Proxy.newProxyInstance(
                     TargetResizeCpuSmoke.class.getClassLoader(),
                     new Class<?>[] {GpuDeviceBackend.class}, (proxy, method, args) -> {

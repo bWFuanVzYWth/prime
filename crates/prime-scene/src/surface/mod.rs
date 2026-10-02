@@ -233,6 +233,7 @@ impl SurfaceMesh {
 /// Reuse one compiler scratch per synchronous worker; construction is not per plane/job.
 pub struct SurfaceCompiler {
     rectangles: Box<rectangle_decomposition::SparseOptimalScratch64>,
+    cutout_squares: bool,
 }
 impl Default for SurfaceCompiler {
     fn default() -> Self {
@@ -243,7 +244,14 @@ impl SurfaceCompiler {
     pub fn new() -> Self {
         Self {
             rectangles: Box::new(rectangle_decomposition::SparseOptimalScratch64::new()),
+            cutout_squares: false,
         }
+    }
+
+    /// Bound repeated cutout faces to the finite 1/2/4 square resource templates.
+    /// Opaque and transmissive surfaces retain their ordinary rectangle merging.
+    pub fn set_cutout_squares(&mut self, enabled: bool) {
+        self.cutout_squares = enabled;
     }
 
     pub fn compile(&mut self, revision: u64, quads: &[SurfaceQuad]) -> Result<SurfaceMesh, String> {

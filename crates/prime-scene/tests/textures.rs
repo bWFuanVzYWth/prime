@@ -1,5 +1,76 @@
 use prime_scene::{SourceScene, Texture};
 use std::sync::Arc;
+
+fn animated_texture() -> Texture {
+    Texture {
+        width: 8,
+        height: 4,
+        pixels: vec![255; 128].into(),
+        region: Some([0, 0, 2, 2]),
+        sampling: Some(Arc::new(prime_scene::TextureSampling {
+            levels: vec![],
+            next: [2, 0],
+            blend: 0.5,
+            coverage_frames: Arc::from([[0, 0], [2, 0], [6, 2]]),
+        })),
+        material: None,
+    }
+}
+
+#[test]
+fn complete_animation_windows_must_fit_and_include_both_sampled_frames() {
+    let image = animated_texture();
+    image.validate().unwrap();
+    let mut scene = SourceScene::default();
+    scene.set_texture(1, image.clone()).unwrap();
+    let revision = scene.revision();
+    for frames in [
+        vec![[0, 0], [2, 0], [7, 0]],
+        vec![[0, 0], [2, 0], [0, 3]],
+        vec![[0, 0], [2, 0], [u32::MAX, 0]],
+        vec![[0, 0], [6, 2]],
+        vec![[2, 0], [6, 2]],
+    ] {
+        let mut bad = image.clone();
+        Arc::make_mut(bad.sampling.as_mut().unwrap()).coverage_frames = frames.into();
+        assert!(bad.validate().is_err());
+        assert!(
+            scene
+                .set_textures(vec![(2, image.clone()), (3, bad)])
+                .is_err()
+        );
+        assert!(scene.texture(2).is_none());
+        assert_eq!(scene.revision(), revision);
+    }
+    let mut unknown = image;
+    Arc::make_mut(unknown.sampling.as_mut().unwrap()).coverage_frames = Arc::from([]);
+    unknown.validate().unwrap();
+}
+
+#[test]
+fn complete_frame_metadata_changes_identity_without_changing_pixel_ownership() {
+    let image = animated_texture();
+    let mut equal = image.clone();
+    let original = &image.sampling.as_ref().unwrap().coverage_frames;
+    Arc::make_mut(equal.sampling.as_mut().unwrap()).coverage_frames = original.to_vec().into();
+    assert!(!Arc::ptr_eq(
+        original,
+        &equal.sampling.as_ref().unwrap().coverage_frames
+    ));
+    assert!(image.same(&equal));
+    let mut changed = equal.clone();
+    Arc::make_mut(changed.sampling.as_mut().unwrap()).coverage_frames = Arc::from([[0, 0], [2, 0]]);
+    changed.validate().unwrap();
+    assert!(!image.same(&changed));
+    assert!(image.same_backings(&changed));
+    let mut scene = SourceScene::default();
+    scene.set_texture(1, image).unwrap();
+    let revision = scene.revision();
+    scene.set_texture(1, equal).unwrap();
+    assert_eq!(scene.revision(), revision);
+    scene.set_texture(1, changed).unwrap();
+    assert_eq!(scene.revision(), revision + 1);
+}
 #[test]
 fn a_late_invalid_sprite_batch_does_not_publish_earlier_textures() {
     let mut scene = SourceScene::default();
@@ -61,6 +132,7 @@ fn budgets_count_shared_backings_and_all_animation_frames_and_mips() {
             }],
             next: [2, 0],
             blend: 0.5,
+            coverage_frames: Arc::from([]),
         })),
         material: None,
     };

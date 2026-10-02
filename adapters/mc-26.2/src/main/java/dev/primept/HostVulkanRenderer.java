@@ -43,7 +43,8 @@ public final class HostVulkanRenderer implements AutoCloseable {
                     device.instance().vkInstance().address(),
                     device.vkDevice().getPhysicalDevice().address(), device.vkDevice().address(),
                     device.graphicsQueue().vkQueue().address(), access.primept$submitSemaphore(),
-                    device.graphicsQueue().queueFamilyIndex());
+                    device.graphicsQueue().queueFamilyIndex(),
+                    VulkanBootstrap.opacityMicromapEnabled(device));
         } catch (RuntimeException | Error failure) {
             try {
                 bridge.close();

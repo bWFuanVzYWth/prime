@@ -33,7 +33,12 @@ public final class SettingsFile {
             String enabled = properties.getProperty("renderer.path_tracing");
             if (!"true".equals(enabled) && !"false".equals(enabled))
                 throw new IllegalArgumentException("Invalid renderer.path_tracing");
-            var result = RenderSettings.defaults().withPathTracing(Boolean.parseBoolean(enabled));
+            String opacityMicromap = properties.getProperty("render.opacity_micromap");
+            if (!"true".equals(opacityMicromap) && !"false".equals(opacityMicromap))
+                throw new IllegalArgumentException("Invalid render.opacity_micromap");
+            var result = RenderSettings.defaults()
+                                 .withPathTracing(Boolean.parseBoolean(enabled))
+                                 .withOpacityMicromap(Boolean.parseBoolean(opacityMicromap));
             for (var control : RenderSettings.Control.values())
                 result =
                         result.with(control, Integer.parseInt(properties.getProperty(control.key)));
@@ -44,8 +49,10 @@ public final class SettingsFile {
         }
     }
     public static String encode(RenderSettings settings) {
-        var text = new StringBuilder("version=" + RenderSettings.VERSION +
-                                     "\nrenderer.path_tracing=" + settings.pathTracing() + "\n");
+        var text =
+                new StringBuilder("version=" + RenderSettings.VERSION +
+                                  "\nrenderer.path_tracing=" + settings.pathTracing() +
+                                  "\nrender.opacity_micromap=" + settings.opacityMicromap() + "\n");
         for (var control : RenderSettings.Control.values())
             text.append(control.key).append('=').append(settings.value(control)).append('\n');
         return text.toString();

@@ -58,12 +58,14 @@ int32_t prime_mc_sections(uint64_t handle, const prime_source_page *pages, uint6
 int32_t prime_render(uint64_t handle, const uint8_t *frame, uint64_t length,
                      uint8_t *rgba, uint64_t capacity);
 // Production: borrow Minecraft's device and timeline, then record into its command buffer.
-// host[48] LE: instance/physical/device/queue/timeline u64, family u32, reserved u32=0.
+// host[48] LE: instance/physical/device/queue/timeline u64, family u32, capability flags u32.
+// Flag bit0 certifies enabled OMM+sync2; other bits are zero.
 // Caller enables AS/rayQuery/BDA and timeline features; host objects remain caller-owned.
 int32_t prime_attach_vulkan(uint64_t handle, const uint8_t *host, uint64_t length);
-// Settings[56] LE: version=2/mode/bounces/offline_samples u32[4],
+// Settings[60] LE: version=3/mode/bounces/offline_samples u32[4],
 // exposure/hue/saturation f32[3], diagnostic_view u32, sun/sky/depth_range f32[3], seed u32.
-// latitude_degrees i32 (-90..90), solar_longitude_degrees u32 (0..359).
+// latitude_degrees i32 (-90..90), solar_longitude_degrees u32 (0..359),
+// opacity_micromap u32 (0 disabled, 1 prefer compatible OMM; default 1).
 // mode=0 realtime, 1 frozen offline; view=0 output, 1 noisy, 2 depth, 3 normal.
 // Mode changes occur outside recording: submit the host encoder first, then call.
 // Native waits for completion and destroys old mode resources before creating new ones.

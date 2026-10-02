@@ -20,7 +20,8 @@ final class SettingsTest {
         for (int budget = 1; budget <= 64; ++budget) {
             var settings = RenderSettings.defaults().with(RenderSettings.Control.BOUNCES, budget);
             assertEquals(settings, SettingsFile.decode(SettingsFile.encode(settings)).settings());
-            var wire = ByteBuffer.allocate(56).order(ByteOrder.LITTLE_ENDIAN);
+            var wire =
+                    ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
             settings.write(wire, false, RenderSettings.View.OUTPUT);
             assertEquals(budget, wire.getInt(8));
         }
@@ -38,7 +39,7 @@ final class SettingsTest {
 
     @Test
     void completeFileRoundTripAndReplacement(@TempDir Path dir) throws Exception {
-        var settings = RenderSettings.defaults().withPathTracing(false);
+        var settings = RenderSettings.defaults().withPathTracing(false).withOpacityMicromap(false);
         for (var control : RenderSettings.Control.values())
             settings = settings.with(control, control.maximum);
         Path file = dir.resolve("config/primept.properties");
@@ -58,11 +59,14 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=2", "version=0"),
-                     valid.replace("version=2", "version=3"), valid.replace("version=2", ""),
+                     valid.replace("version=3", "version=0"),
+                     valid.replace("version=3", "version=2"),
+                     valid.replace("version=3", "version=4"), valid.replace("version=3", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
                      valid.replace("renderer.path_tracing=false", "renderer.path_tracing=maybe"),
+                     valid.replace("render.opacity_micromap=true", ""),
+                     valid.replace("render.opacity_micromap=true", "render.opacity_micromap=maybe"),
                      valid + "render.bounces=NaN\n", valid + "bad=\\uXYZW\n"}) {
             var loaded = SettingsFile.decode(broken);
             assertEquals(RenderSettings.defaults(), loaded.settings());
@@ -80,8 +84,8 @@ final class SettingsTest {
                      () -> original.with(RenderSettings.Control.BOUNCES, 0));
         var bytes = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
         changed.write(bytes, true, RenderSettings.View.NORMAL);
-        assertEquals(56, bytes.position());
-        assertEquals(2, bytes.getInt(0));
+        assertEquals(60, bytes.position());
+        assertEquals(3, bytes.getInt(0));
         assertEquals(1, bytes.getInt(4));
         assertEquals(12, bytes.getInt(8));
         assertEquals(1, bytes.getInt(12));
@@ -95,6 +99,21 @@ final class SettingsTest {
         assertEquals(0x13572468, bytes.getInt(44));
         assertEquals(30, bytes.getInt(48));
         assertEquals(0, bytes.getInt(52));
+        assertEquals(1, bytes.getInt(56));
+    }
+    @Test
+    void opacityMicromapIsEnabledByDefaultAndCanBePersistedAndToggled() {
+        var defaults = RenderSettings.defaults();
+        assertTrue(defaults.opacityMicromap());
+        var disabled = defaults.withOpacityMicromap(false);
+        assertTrue(defaults.opacityMicromap());
+        assertNotEquals(defaults, disabled);
+        assertEquals(disabled, SettingsFile.decode(SettingsFile.encode(disabled)).settings());
+        assertFalse(disabled.withPathTracing(false).opacityMicromap());
+        assertFalse(disabled.with(RenderSettings.Control.BOUNCES, 8).opacityMicromap());
+        var bytes = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        disabled.write(bytes, true, RenderSettings.View.OUTPUT);
+        assertEquals(0, bytes.getInt(56));
     }
     @Test
     void shortcutRequiresBothModifiersAndEscapeKeepsSnapshot() {

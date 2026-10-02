@@ -83,6 +83,67 @@ fn point_uv(t: &SurfaceFace, point: [f32; 2]) -> Option<[f32; 2]> {
 }
 
 #[test]
+fn cutout_square_templates_preserve_sampling_and_cover_irregular_rectangles_once() {
+    let input: Vec<_> = (0..7)
+        .flat_map(|y| {
+            (0..11).map(move |x| {
+                let mut q = quad(x as f32, y as f32);
+                q.geometry.flags = 1;
+                q.geometry.uvs = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]];
+                q
+            })
+        })
+        .collect();
+    let mut compiler = SurfaceCompiler::new();
+    compiler.set_cutout_squares(true);
+    let output = compiler.compile(1, &input).unwrap();
+    assert!(output.quads.len() > 1);
+    for face in &output.quads {
+        let xs = face.geometry.positions.map(|p| p[0]);
+        let ys = face.geometry.positions.map(|p| p[1]);
+        let extent = |v: [f32; 4]| {
+            v.into_iter().fold(f32::NEG_INFINITY, f32::max)
+                - v.into_iter().fold(f32::INFINITY, f32::min)
+        };
+        assert_eq!(extent(xs), extent(ys));
+        assert!([1., 2., 4.].contains(&extent(xs)));
+    }
+    for y in 0..7 {
+        for x in 0..11 {
+            for [u, v] in [[0.23, 0.61], [0.79, 0.13]] {
+                let actual: Vec<_> = output
+                    .quads
+                    .iter()
+                    .filter_map(|f| point_uv(f, [x as f32 + u, y as f32 + v]))
+                    .collect();
+                assert_eq!(actual.len(), 1, "square cover overlap or hole at {x},{y}");
+                let expected = [u, v];
+                for (actual, expected) in actual[0].into_iter().zip(expected) {
+                    assert!((actual - expected).abs() < 1e-6);
+                }
+            }
+        }
+    }
+    compiler.set_cutout_squares(false);
+    assert_eq!(compiler.compile(2, &input).unwrap().quads.len(), 1);
+    let mut opaque = input;
+    for face in &mut opaque {
+        face.geometry.flags = 0;
+    }
+    compiler.set_cutout_squares(true);
+    assert_eq!(compiler.compile(3, &opaque).unwrap().quads.len(), 1);
+    for face in &mut opaque {
+        face.geometry.flags = 1;
+        face.geometry.uvs = [[0.25, 0.5], [0.5, 0.5], [0.5, 0.625], [0.25, 0.625]];
+    }
+    assert_eq!(
+        compiler.compile(4, &opaque).unwrap().quads.len(),
+        1,
+        "unsupported crop retains ordinary optimal merging"
+    );
+}
+
+#[test]
 fn full_plane_becomes_two_hardware_triangles_with_repeated_atlas_sampling() {
     let input: Vec<_> = (0..64)
         .flat_map(|y| (0..64).map(move |x| quad(x as f32, y as f32)))

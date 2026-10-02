@@ -47,6 +47,7 @@ fn image(pixels: &[[u8; 4]; 4], mip: Option<[u8; 4]>) -> Texture {
                 }],
                 next: [0; 2],
                 blend: 0.0,
+                coverage_frames: Arc::from([]),
             })
         }),
         material: None,

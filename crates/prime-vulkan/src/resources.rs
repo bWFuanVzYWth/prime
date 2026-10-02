@@ -84,6 +84,7 @@ impl Drop for InstanceOwner {
 
 enum RetiredResource {
     Acceleration(vk::AccelerationStructureKHR),
+    Micromap(vk::MicromapEXT),
     Buffer(vk::Buffer, vk::DeviceMemory),
     Image(vk::Image, vk::ImageView, vk::DeviceMemory),
 }
@@ -120,11 +121,71 @@ unsafe extern "system" fn validation(
     vk::FALSE
 }
 
+pub(super) struct OpacityMicromapSupport {
+    pub loader: ash::ext::opacity_micromap::Device,
+    pub synchronization: ash::khr::synchronization2::Device,
+    pub max_two_state: u32,
+    pub max_four_state: u32,
+}
+
+unsafe fn micromap_supported(
+    instance: &Instance,
+    physical: vk::PhysicalDevice,
+) -> Result<bool, String> {
+    let available = unsafe { instance.enumerate_device_extension_properties(physical) }
+        .map_err(|e| error("Enumerate optional OMM extensions", e))?;
+    let has = |name: &CStr| {
+        available
+            .iter()
+            .any(|a| unsafe { CStr::from_ptr(a.extension_name.as_ptr()) == name })
+    };
+    // Enable the KHR dependency even on 1.3 devices: the standalone instance requests 1.2.
+    if !has(ash::ext::opacity_micromap::NAME) || !has(ash::khr::synchronization2::NAME) {
+        return Ok(false);
+    }
+    let mut sync = vk::PhysicalDeviceSynchronization2Features::default();
+    let mut omm = vk::PhysicalDeviceOpacityMicromapFeaturesEXT::default();
+    unsafe {
+        instance.get_physical_device_features2(
+            physical,
+            &mut vk::PhysicalDeviceFeatures2::default()
+                .push_next(&mut omm)
+                .push_next(&mut sync),
+        );
+    }
+    Ok(omm.micromap != 0 && sync.synchronization2 != 0)
+}
+
+unsafe fn micromap_support(
+    instance: &Instance,
+    physical: vk::PhysicalDevice,
+    device: &Device,
+    enabled: bool,
+) -> Option<OpacityMicromapSupport> {
+    if !enabled {
+        return None;
+    }
+    let mut properties = vk::PhysicalDeviceOpacityMicromapPropertiesEXT::default();
+    unsafe {
+        instance.get_physical_device_properties2(
+            physical,
+            &mut vk::PhysicalDeviceProperties2::default().push_next(&mut properties),
+        );
+    }
+    Some(OpacityMicromapSupport {
+        loader: ash::ext::opacity_micromap::Device::new(instance, device),
+        synchronization: ash::khr::synchronization2::Device::new(instance, device),
+        max_two_state: properties.max_opacity2_state_subdivision_level,
+        max_four_state: properties.max_opacity4_state_subdivision_level,
+    })
+}
+
 pub(super) struct Context {
     _instance: Arc<InstanceOwner>,
     pub device: Device,
     pub physical: vk::PhysicalDevice,
     pub acceleration: ash::khr::acceleration_structure::Device,
+    pub opacity_micromap: Option<OpacityMicromapSupport>,
     pub queue: vk::Queue,
     pub queue_family: u32,
     pub pool: vk::CommandPool,
@@ -315,7 +376,18 @@ impl Context {
             let queues = [vk::DeviceQueueCreateInfo::default()
                 .queue_family_index(family)
                 .queue_priorities(&priorities)];
-            let names: Vec<_> = required.iter().map(|n| n.as_ptr()).collect();
+            let omm_enabled = micromap_supported(&owner.instance, physical)?;
+            let mut names: Vec<_> = required.iter().map(|n| n.as_ptr()).collect();
+            if omm_enabled {
+                names.extend([
+                    ash::ext::opacity_micromap::NAME.as_ptr(),
+                    ash::khr::synchronization2::NAME.as_ptr(),
+                ]);
+            }
+            let mut sync_features =
+                vk::PhysicalDeviceSynchronization2Features::default().synchronization2(omm_enabled);
+            let mut omm_features =
+                vk::PhysicalDeviceOpacityMicromapFeaturesEXT::default().micromap(omm_enabled);
             let mut address = vk::PhysicalDeviceBufferDeviceAddressFeatures::default()
                 .buffer_device_address(true);
             let mut acceleration = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default()
@@ -323,19 +395,21 @@ impl Context {
             let mut query = vk::PhysicalDeviceRayQueryFeaturesKHR::default().ray_query(true);
             let mut timeline =
                 vk::PhysicalDeviceTimelineSemaphoreFeatures::default().timeline_semaphore(true);
+            let mut create_info = vk::DeviceCreateInfo::default()
+                .queue_create_infos(&queues)
+                .enabled_extension_names(&names)
+                .push_next(&mut address)
+                .push_next(&mut acceleration)
+                .push_next(&mut query)
+                .push_next(&mut timeline);
+            if omm_enabled {
+                create_info = create_info
+                    .push_next(&mut omm_features)
+                    .push_next(&mut sync_features);
+            }
             let device = owner
                 .instance
-                .create_device(
-                    physical,
-                    &vk::DeviceCreateInfo::default()
-                        .queue_create_infos(&queues)
-                        .enabled_extension_names(&names)
-                        .push_next(&mut address)
-                        .push_next(&mut acceleration)
-                        .push_next(&mut query)
-                        .push_next(&mut timeline),
-                    None,
-                )
+                .create_device(physical, &create_info, None)
                 .map_err(|e| error("Create Vulkan ray-query device", e))?;
             let pool = match device.create_command_pool(
                 &vk::CommandPoolCreateInfo::default()
@@ -418,10 +492,14 @@ impl Context {
             } else {
                 None
             };
+            let opacity_micromap =
+                micromap_support(&owner.instance, physical, &device, omm_enabled);
+            eprintln!("[Prime PT] OMM device capability enabled={omm_enabled}");
             Ok(Arc::new(Self {
                 _instance: owner,
                 device,
                 physical,
+                opacity_micromap,
                 acceleration: acceleration_loader,
                 queue,
                 queue_family: family,
@@ -463,6 +541,27 @@ impl Context {
         family: u32,
         timeline: u64,
     ) -> Result<Arc<Self>, String> {
+        unsafe {
+            Self::borrowed_with_capabilities(instance, physical, device, queue, family, timeline, 0)
+        }
+    }
+
+    /// # Safety
+    /// Same contract as borrowed; bit 0 certifies that EXT opacity micromap and its
+    /// micromap feature were actually enabled when this device was created.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn borrowed_with_capabilities(
+        instance: u64,
+        physical: u64,
+        device: u64,
+        queue: u64,
+        family: u32,
+        timeline: u64,
+        capabilities: u32,
+    ) -> Result<Arc<Self>, String> {
+        if capabilities & !1 != 0 {
+            return Err("Unknown host Vulkan capabilities".into());
+        }
         if [instance, physical, device, queue, timeline].contains(&0) {
             return Err("Borrowed Vulkan handles must be non-null".into());
         }
@@ -526,11 +625,15 @@ impl Context {
                     trace: false,
                     counters: ProfileCounters::default(),
                 });
+            let opacity_micromap =
+                micromap_support(&owner.instance, physical, &device, capabilities & 1 != 0);
+            eprintln!("[Prime PT] Host OMM enabled={}", opacity_micromap.is_some());
             Ok(Arc::new(Self {
                 _instance: owner,
                 device,
                 physical,
                 acceleration,
+                opacity_micromap,
                 queue: vk::Queue::from_raw(queue),
                 queue_family: family,
                 pool,
@@ -771,6 +874,11 @@ impl Context {
         })
     }
 
+    pub fn retire_micromap(&self, handle: vk::MicromapEXT) {
+        if self.can_destroy() {
+            self.retire(RetiredResource::Micromap(handle));
+        }
+    }
     fn retire(&self, resource: RetiredResource) {
         if let Some(host) = &self.host
             && !host.finished.load(Ordering::Relaxed)
@@ -789,6 +897,17 @@ impl Context {
                 RetiredResource::Acceleration(handle) => self
                     .acceleration
                     .destroy_acceleration_structure(handle, None),
+                RetiredResource::Micromap(handle) => {
+                    (self
+                        .opacity_micromap
+                        .as_ref()
+                        .expect("enabled OMM owner")
+                        .loader
+                        .fp()
+                        .destroy_micromap_ext)(
+                        self.device.handle(), handle, std::ptr::null()
+                    )
+                }
                 RetiredResource::Buffer(buffer, memory) => {
                     self.device.destroy_buffer(buffer, None);
                     self.device.free_memory(memory, None);
@@ -1619,11 +1738,31 @@ mod host_tests {
     ) -> vk::PFN_vkVoidFunction {
         None
     }
+    unsafe extern "system" fn fake_destroy_micromap(
+        _: vk::Device,
+        _: vk::MicromapEXT,
+        _: *const vk::AllocationCallbacks<'_>,
+    ) {
+        FAKE_CALLS.with(|calls| calls.borrow_mut().destroyed.push("micromap"));
+    }
     unsafe extern "system" fn fake_device_proc(
         _: vk::Device,
-        _: *const c_char,
+        name: *const c_char,
     ) -> vk::PFN_vkVoidFunction {
-        None
+        if unsafe { CStr::from_ptr(name) } == c"vkDestroyMicromapEXT" {
+            Some(unsafe {
+                std::mem::transmute::<
+                    unsafe extern "system" fn(
+                        vk::Device,
+                        vk::MicromapEXT,
+                        *const vk::AllocationCallbacks<'_>,
+                    ),
+                    unsafe extern "system" fn(),
+                >(fake_destroy_micromap)
+            })
+        } else {
+            None
+        }
     }
     fn fake_context() -> Arc<Context> {
         FAKE_CALLS.with(|calls| {
@@ -1669,6 +1808,7 @@ mod host_tests {
                 device,
                 physical: vk::PhysicalDevice::null(),
                 acceleration,
+                opacity_micromap: None,
                 queue: vk::Queue::null(),
                 queue_family: 0,
                 pool: vk::CommandPool::null(),
@@ -1699,6 +1839,46 @@ mod host_tests {
             })
         }
     }
+    fn fake_omm_context() -> Arc<Context> {
+        let mut context = fake_context();
+        let support = OpacityMicromapSupport {
+            loader: ash::ext::opacity_micromap::Device::new(
+                &context._instance.instance,
+                &context.device,
+            ),
+            synchronization: ash::khr::synchronization2::Device::new(
+                &context._instance.instance,
+                &context.device,
+            ),
+            max_two_state: 8,
+            max_four_state: 8,
+        };
+        Arc::get_mut(&mut context).unwrap().opacity_micromap = Some(support);
+        context
+    }
+    #[test]
+    fn micromap_retirement_requires_actual_host_completion_and_keeps_failure_quarantined() {
+        let context = fake_omm_context();
+        context
+            .begin_host_record(vk::CommandBuffer::from_raw(1), 8)
+            .unwrap();
+        context.retire_micromap(vk::MicromapEXT::from_raw(123));
+        context.end_host_record();
+        assert_eq!(context.completed_serial().unwrap(), 7);
+        FAKE_CALLS.with(|calls| assert!(calls.borrow().destroyed.is_empty()));
+        context.finish_host().unwrap();
+        FAKE_CALLS.with(|calls| assert_eq!(calls.borrow().destroyed, ["micromap"]));
+        drop(context);
+        FAKE_CALLS.with(|calls| assert_eq!(calls.borrow().destroyed, ["micromap", "pool"]));
+
+        let context = fake_omm_context();
+        context.retire_micromap(vk::MicromapEXT::from_raw(124));
+        FAKE_CALLS.with(|calls| calls.borrow_mut().reject_queries = true);
+        assert!(context.finish_host().is_err());
+        drop(context);
+        FAKE_CALLS.with(|calls| assert!(calls.borrow().destroyed.is_empty()));
+    }
+
     fn fake_buffer(context: &Arc<Context>) -> Buffer {
         Buffer {
             context: context.clone(),

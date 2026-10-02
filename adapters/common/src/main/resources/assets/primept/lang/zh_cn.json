@@ -9,6 +9,8 @@
   "primept.settings.enabled.tooltip": "选择 Prime 或原版渲染器。启动时需启用 primept.enabled 并使用 Vulkan；切换在下一帧边界生效。",
   "primept.settings.offline": "离线累积",
   "primept.settings.offline.tooltip": "Ctrl+Alt+F2 切换。冻结当前已显示场景、相机和光照，持续累积；Esc 只打开菜单。重载资源或退出世界会结束冻结，返回实时后重新捕获世界。",
+  "primept.settings.opacity_micromap": "镂空表面 OMM",
+  "primept.settings.opacity_micromap.tooltip": "优先对兼容的镂空表面使用不透明度微映射。默认开启并自动检测设备兼容性；不支持的表面保留 Alpha 检验。冻结期间可切换，不重置已有累积。",
   "primept.settings.render.bounces": "最大路径顶点数",
   "primept.settings.render.bounces.tooltip": "1–64 个顶点，默认 12，含首次命中。反射与透射都计入；末顶点估计直接光后停止续接。冻结期间固定。",
   "primept.settings.render.offline_samples": "离线每帧采样数",

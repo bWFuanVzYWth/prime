@@ -101,6 +101,7 @@ mod tests {
                 pixels: [255, 255, 255, 0].repeat(4).into(),
             }],
             frames: Vec::new(),
+            coverage_frames: Default::default(),
             interpolate: false,
             material: None,
         };

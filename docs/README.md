@@ -7,6 +7,7 @@
 | [整体架构与所有权](architecture.md) | 源数据到场景和 GPU 的数据流、增量更新、线程与资源生命周期 |
 | [自定义表面编译](surface-compiler.md) | 源关系与局部接触、部分矩形合并、直接 GPU 记录、介质、sprite 与局部灯网格 |
 | [LabPBR 与 OpenPBR 支持子域](materials.md) | 源声明、规范通道、数值清洗、法线分布过滤、动画、完整模型的支持边界、保留的 LitePBR 近似与发光 |
+| [镂空表面 OMM](opacity-micromaps.md) | 二值优先的有限资源模板、共享资源代次与运行时绑定、未知退路、Vulkan 能力和完成证明 |
 | [大气资产与缓存](atmosphere.md) | 固定物理场、天空/太阳/空气透视、GPU 遮挡列与更新依赖 |
 | [工程结构与路由边界](structure.md) | Rust crate、Java 版本适配、公共层依赖、Rust 版本适配、分页路由与矩形分解边界 |
 | [源路由边界与批量数据流](capture-boundaries.md) | 外观描述与下游计算的分界、接管后的 Java 截断、兼容范围、缓存与接入状态 |

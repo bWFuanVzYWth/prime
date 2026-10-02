@@ -16,7 +16,11 @@ use prime_scene::{
     surface::SurfaceCompiler,
     translation::{TerrainLimits, TerrainMember, TerrainPlanner},
 };
-use std::{collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    rc::Rc,
+    sync::Arc,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct StaticAllocation {
@@ -32,6 +36,10 @@ struct Cluster {
     allocations: Vec<StaticAllocation>,
     acceleration: Acceleration,
     triangle_count: u64,
+    micromaps: Vec<crate::omm::Micromap>,
+    omm_textures: BTreeSet<u32>,
+    omm_counts: [u64; 4],
+    cutout: bool,
     light_pages: Vec<Option<Rc<crate::surface::LightPage>>>,
     optical: bool,
 }
@@ -63,13 +71,28 @@ pub(super) struct Geometry {
     has_optics: bool,
     pub textures: Textures,
     pub rebuilt_clusters: u32,
+    pub(crate) opacity_micromap: bool,
+    omm_templates: Option<crate::omm_cpu::Templates>,
+    omm_pool: crate::omm::Pool,
+    omm_dirty: bool,
+    pub(crate) omm_prepare_ns: [u64; 3],
+    pub(crate) omm_work_counts: [u64; 2],
 }
 
 impl Geometry {
+    #[cfg(test)]
     pub fn new(
         context: &Arc<Context>,
         scene: SceneInput<'_>,
         workers: Arc<prime_scene::workers::CpuWorkers>,
+    ) -> Result<Self, String> {
+        Self::new_with_omm(context, scene, workers, true)
+    }
+    pub fn new_with_omm(
+        context: &Arc<Context>,
+        scene: SceneInput<'_>,
+        workers: Arc<prime_scene::workers::CpuWorkers>,
+        enabled: bool,
     ) -> Result<Self, String> {
         let mut uploads = crate::arena::Arena::new(context, true);
         let textures = Textures::new(context, scene.texture_input(), &mut uploads)?;
@@ -118,6 +141,12 @@ impl Geometry {
             has_optics: false,
             textures,
             rebuilt_clusters: 0,
+            opacity_micromap: enabled && context.opacity_micromap.is_some(),
+            omm_templates: None,
+            omm_pool: crate::omm::Pool::new(),
+            omm_dirty: false,
+            omm_prepare_ns: [0; 3],
+            omm_work_counts: [0; 2],
         };
         geometry.update(context, scene)?;
         Ok(geometry)
@@ -125,9 +154,12 @@ impl Geometry {
     pub fn begin_frame(&mut self, context: &Context, completed: u64) {
         // Frozen frames do not execute an object plan; do not report the prior frame's rebuilds.
         self.objects.rebuilt = 0;
+        self.omm_prepare_ns = [0; 3];
+        self.omm_work_counts = [0; 2];
         let serial = context.retirement_serial();
         self.builds.begin(completed, serial);
         self.uploads.begin(completed, serial);
+        self.omm_pool.collect(&mut self.builds);
         self.light_grid.begin_frame(completed, serial);
     }
     #[cfg(test)]
@@ -140,6 +172,9 @@ impl Geometry {
         )
     }
     pub fn needs_update(&self, scene: SceneInput<'_>) -> bool {
+        self.omm_dirty || self.source_changed(scene)
+    }
+    pub fn source_changed(&self, scene: SceneInput<'_>) -> bool {
         self.revision != scene.publication() || self.anchor != scene.anchor
     }
 
@@ -165,6 +200,29 @@ impl Geometry {
         ]
     }
 
+    pub fn set_omm(&mut self, enabled: bool) {
+        if self.opacity_micromap != enabled {
+            self.opacity_micromap = enabled;
+            self.static_planner.invalidate_cells(
+                self.clusters
+                    .iter()
+                    .filter(|(_, c)| c.cutout)
+                    .map(|(&cell, _)| cell),
+            );
+            self.omm_dirty = true;
+        }
+    }
+    pub(crate) fn omm_stats(&self) -> [u64; 4] {
+        self.clusters.values().fold([0; 4], |mut total, cluster| {
+            for (total, count) in total.iter_mut().zip(cluster.omm_counts) {
+                *total += count;
+            }
+            total
+        })
+    }
+    pub(crate) fn omm_pool_stats(&self) -> [u64; 4] {
+        self.omm_pool.stats()
+    }
     pub fn same_owner(&self, scene: SceneInput<'_>) -> bool {
         self.revision.same_owner(scene.publication())
     }
@@ -188,6 +246,63 @@ impl Geometry {
         } else {
             self.textures
                 .update(context, scene.texture_input(), &mut self.uploads)?;
+        }
+        if !self.textures.coverage_changed.is_empty() {
+            self.static_planner.invalidate_cells(
+                self.clusters
+                    .iter()
+                    .filter(|(_, c)| {
+                        c.omm_textures
+                            .iter()
+                            .any(|id| self.textures.coverage_changed.contains(id))
+                    })
+                    .map(|(&key, _)| key),
+            );
+        }
+        // OMM is a texture resource. Prepare the finite global library even while the
+        // setting is off; terrain membership and setting toggles only change bindings.
+        if let Some(limits) = &context.opacity_micromap
+            && (self.epoch != scene.epoch
+                || self.omm_templates.as_ref().is_none_or(|templates| {
+                    templates.dependencies_changed(&self.textures.coverage_changed)
+                        || self.textures.coverage_changed.iter().any(|id| {
+                            !templates.contains_texture(*id)
+                                && self
+                                    .textures
+                                    .source
+                                    .get(id)
+                                    .is_some_and(|t| t.region.is_some())
+                        })
+                }))
+        {
+            let start = std::time::Instant::now();
+            let templates = crate::omm_cpu::Templates::prepare(
+                &self.textures.source,
+                limits.max_two_state,
+                limits.max_four_state,
+            );
+            self.omm_prepare_ns[0] += start.elapsed().as_nanos() as u64;
+            self.omm_work_counts[0] += 1;
+            let start = std::time::Instant::now();
+            self.omm_pool.replace(
+                context,
+                &mut self.builds,
+                &mut self.uploads,
+                &templates.data,
+            )?;
+            self.omm_prepare_ns[2] += start.elapsed().as_nanos() as u64;
+            // Global IDs belong to this generation. Rebind all existing cutout BLAS,
+            // including those whose source pixels did not change in this reload.
+            self.static_planner.invalidate_cells(
+                self.clusters
+                    .iter()
+                    .filter(|(_, c)| c.cutout)
+                    .map(|(&cell, _)| cell),
+            );
+            self.omm_templates = Some(templates);
+        }
+        for compiler in &mut self.surface_compilers {
+            compiler.set_cutout_squares(self.opacity_micromap);
         }
         let mut plan = self.static_planner.plan_input(scene)?;
         self.workers.batches_mut(
@@ -216,6 +331,9 @@ impl Geometry {
         if self.epoch != scene.epoch {
             for (_, old) in std::mem::take(&mut self.clusters) {
                 old.acceleration.retire(&mut self.builds);
+                for micromap in old.micromaps {
+                    micromap.retire(&mut self.builds);
+                }
             }
             self.materials =
                 std::array::from_fn(|format| MaterialArena::with_stride(record_bytes(format)));
@@ -224,6 +342,9 @@ impl Geometry {
         for key in &plan.removed {
             if let Some(old) = self.clusters.remove(key) {
                 old.acceleration.retire(&mut self.builds);
+                for micromap in old.micromaps {
+                    micromap.retire(&mut self.builds);
+                }
                 for allocation in old.allocations {
                     self.materials[allocation.format].free(allocation.records);
                 }
@@ -233,6 +354,9 @@ impl Geometry {
         for update in &plan.geometry {
             if let Some(old) = self.clusters.remove(&update.key) {
                 old.acceleration.retire(&mut self.builds);
+                for micromap in old.micromaps {
+                    micromap.retire(&mut self.builds);
+                }
                 for allocation in old.allocations {
                     self.materials[allocation.format].free(allocation.records);
                 }
@@ -306,28 +430,81 @@ impl Geometry {
                     }
                     Ok(())
                 })?;
+                let mut micromaps = Vec::with_capacity(allocations.len());
+                let mut omm_textures = BTreeSet::new();
+                let mut omm_counts = [0u64; 4];
+                for (geometry, plan, group) in
+                    update
+                        .geometries
+                        .iter()
+                        .zip(plans)
+                        .flat_map(|(geometry, p)| {
+                            p.groups.iter().map(move |group| (geometry, p, group))
+                        })
+                {
+                    let data = if self.opacity_micromap
+                        && geometry.flags == 1
+                        && let Some(templates) = &self.omm_templates
+                    {
+                        let start = std::time::Instant::now();
+                        let data = templates.bind(plan, group);
+                        self.omm_prepare_ns[1] += start.elapsed().as_nanos() as u64;
+                        data
+                    } else {
+                        None
+                    };
+                    let prepared = if let Some(data) = data {
+                        omm_textures.extend(data.textures.iter().copied());
+                        self.omm_work_counts[1] += data.indices.len() as u64;
+                        let start = std::time::Instant::now();
+                        let prepared = self.omm_pool.bind(
+                            context,
+                            &mut self.builds,
+                            &mut self.uploads,
+                            &data.indices,
+                        )?;
+                        self.omm_prepare_ns[1] += start.elapsed().as_nanos() as u64;
+                        if let Some(binding) = &prepared {
+                            for (count, value) in omm_counts.iter_mut().zip(binding.stats) {
+                                *count += value;
+                            }
+                        }
+                        prepared
+                    } else {
+                        None
+                    };
+                    micromaps.push(prepared);
+                }
                 let mut geometries = Vec::with_capacity(allocations.len());
                 let mut counts = Vec::with_capacity(allocations.len());
-                for ((geometry, _), &allocation) in update
+                for (range_index, ((geometry, _), &allocation)) in update
                     .geometries
                     .iter()
                     .zip(plans)
                     .flat_map(|(g, p)| p.groups.iter().map(move |group| (g, group)))
                     .zip(allocations)
+                    .enumerate()
                 {
                     let count = allocation.records.count;
-                    let triangles = vk::AccelerationStructureGeometryTrianglesDataKHR::default()
-                        .vertex_format(vk::Format::R32G32B32_SFLOAT)
-                        .vertex_data(vk::DeviceOrHostAddressConstKHR {
-                            device_address: self.materials[allocation.format]
-                                .address(allocation.records),
-                        })
-                        .vertex_stride(16)
-                        .max_vertex(count * (record_bytes(allocation.format) / 16) as u32 - 1)
-                        .index_type(vk::IndexType::UINT32)
-                        .index_data(vk::DeviceOrHostAddressConstKHR {
-                            device_address: self.indices[allocation.format].address(),
-                        });
+                    let mut triangles =
+                        vk::AccelerationStructureGeometryTrianglesDataKHR::default()
+                            .vertex_format(vk::Format::R32G32B32_SFLOAT)
+                            .vertex_data(vk::DeviceOrHostAddressConstKHR {
+                                device_address: self.materials[allocation.format]
+                                    .address(allocation.records),
+                            })
+                            .vertex_stride(16)
+                            .max_vertex(count * (record_bytes(allocation.format) / 16) as u32 - 1)
+                            .index_type(vk::IndexType::UINT32)
+                            .index_data(vk::DeviceOrHostAddressConstKHR {
+                                device_address: self.indices[allocation.format].address(),
+                            });
+                    if let Some(micromap) = &mut micromaps[range_index] {
+                        // Box owns a stable pNext pointee through size query and command recording.
+                        triangles.p_next = (&*micromap.attachment
+                            as *const vk::AccelerationStructureTrianglesOpacityMicromapEXT<'_>)
+                            .cast();
+                    }
                     geometries.push(
                         vk::AccelerationStructureGeometryKHR::default()
                             .geometry_type(vk::GeometryTypeKHR::TRIANGLES)
@@ -349,11 +526,14 @@ impl Geometry {
                         geometries,
                         &counts,
                     )?,
+                    micromaps,
+                    omm_textures,
+                    omm_counts,
                 ));
                 uploads.push(upload);
             }
             context.submit_named("dirty_clusters", |command| unsafe {
-                for ((_, allocations, _), upload) in prepared.iter().zip(&uploads) {
+                for ((_, allocations, _, _, _, _), upload) in prepared.iter().zip(&uploads) {
                     let mut offset = 0;
                     for &allocation in *allocations {
                         let stride = record_bytes(allocation.format);
@@ -372,8 +552,19 @@ impl Geometry {
                         offset += size;
                     }
                 }
+                let has_omm = prepared
+                    .iter()
+                    .any(|(_, _, _, maps, _, _)| maps.iter().any(Option::is_some));
+                for (_, _, _, maps, _, _) in &prepared {
+                    for map in maps.iter().flatten() {
+                        map.record_copy(command);
+                    }
+                }
                 transfer_barrier(context, command);
-                for (_, _, build) in &prepared {
+                if has_omm {
+                    crate::omm::upload_barrier(context, command);
+                }
+                for (_, _, build, _, _, _) in &prepared {
                     build.record_unbarriered(command);
                 }
                 Acceleration::read_barrier(context, command);
@@ -381,7 +572,7 @@ impl Geometry {
             for upload in uploads {
                 self.uploads.retire(upload);
             }
-            for (key, allocations, build) in prepared {
+            for (key, allocations, build, maps, omm_textures, omm_counts) in prepared {
                 let (update, plans, _) = batch.iter().find(|(u, _, _)| u.key == key).unwrap();
                 // Every material range keeps its source mesh's canonical emitter IDs.
                 // The shared owner uploads the emitter records once, independent of formats.
@@ -414,6 +605,10 @@ impl Geometry {
                     key,
                     Cluster {
                         optical: update.geometries.iter().flat_map(|g| &g.members).any(|m| matches!(&m.triangles, MeshGeometry::Surfaces(mesh) if mesh.quads.iter().any(|q|q.optics.is_some()))),
+                        cutout: update.geometries.iter().any(|g| g.flags == 1),
+                        micromaps: maps.into_iter().flatten().map(|m| m.finish(&mut self.builds, &mut self.uploads)).collect(),
+                        omm_textures,
+                        omm_counts,
                         allocations: allocations.clone(),
                         acceleration: build.finish(&mut self.builds),
                         triangle_count: update
@@ -426,8 +621,10 @@ impl Geometry {
                 );
             }
         }
+        self.omm_pool.collect(&mut self.builds);
         drop(allocated_changes);
         if !plan.placements_changed {
+            self.omm_dirty = false;
             self.revision = scene.publication();
             self.anchor = scene.anchor;
             self.static_planner.recycle(plan);
@@ -541,6 +738,7 @@ impl Geometry {
         self.uploads.retire(bases_upload);
         self.static_count = self.clusters.values().map(|c| c.triangle_count).sum();
         self.static_planner.recycle(plan);
+        self.omm_dirty = false;
         self.revision = scene.publication();
         self.anchor = scene.anchor;
         Ok(())

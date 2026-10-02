@@ -435,6 +435,7 @@ impl Plane {
                     levels: views,
                     next: base.next,
                     blend: 0.,
+                    coverage_frames: Arc::from([]),
                 })
             }),
             material: None,
@@ -563,6 +564,7 @@ mod tests {
                 },
             ],
             frames: vec![(0, 2), (1, 2)],
+            coverage_frames: Arc::from([[0, 0], [0, 2]]),
             interpolate: true,
             material: None,
         }

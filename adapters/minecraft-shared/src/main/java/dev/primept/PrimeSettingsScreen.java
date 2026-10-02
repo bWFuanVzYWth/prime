@@ -19,7 +19,7 @@ import net.minecraft.network.chat.Component;
 /** Version-owned widgets; persistence and the wire contract have no Minecraft dependency. */
 public final class PrimeSettingsScreen extends OptionsSubScreen {
     private final EnumMap<Control, OptionInstance<Integer>> controls = new EnumMap<>(Control.class);
-    private OptionInstance<Boolean> enabled, offline;
+    private OptionInstance<Boolean> enabled, offline, opacityMicromap;
     private OptionInstance<View> view;
     public PrimeSettingsScreen(Screen parent) {
         super(parent, Minecraft.getInstance().options,
@@ -69,6 +69,14 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                         Component.translatable("primept.settings.offline.tooltip")),
                 PrimeClient.offlineRequested(), PrimeClient::requestOffline);
         list.addSmall(enabled, offline);
+        opacityMicromap = OptionInstance.createBoolean(
+                "primept.settings.opacity_micromap",
+                OptionInstance.cachedConstantTooltip(
+                        Component.translatable("primept.settings.opacity_micromap.tooltip")),
+                PrimeClient.settings().opacityMicromap(),
+                value
+                -> PrimeClient.updateSettings(PrimeClient.settings().withOpacityMicromap(value)));
+        list.addBig(opacityMicromap);
         list.addSmall(controls.get(Control.BOUNCES), controls.get(Control.OFFLINE_SAMPLES));
         list.addHeader(Component.translatable("primept.settings.lighting"));
         list.addSmall(controls.get(Control.SUN_EV), controls.get(Control.SKY_EV));
@@ -109,6 +117,7 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
         list.findOption(offline).active = PrimeClient.controlsAvailable() &&
                                           PrimeClient.settings().pathTracing() &&
                                           Minecraft.getInstance().level != null;
+        list.findOption(opacityMicromap).active = PrimeClient.controlsAvailable();
         for (var control : List.of(Control.BOUNCES, Control.SUN_EV, Control.SKY_EV,
                                    Control.LATITUDE, Control.SOLAR_LONGITUDE))
             list.findOption(controls.get(control)).active = !frozen;

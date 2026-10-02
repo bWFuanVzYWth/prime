@@ -143,6 +143,7 @@ public final class SettingsCpuSmoke {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private static void localizedSettings(Unsafe unsafe, Minecraft minecraft) throws Exception {
         var mod = FabricLoader.getInstance().getModContainer("primept").orElseThrow();
         Language previous = Language.getInstance();
@@ -255,6 +256,31 @@ public final class SettingsCpuSmoke {
                                        .filter(OptionsList.class ::isInstance)
                                        .findFirst()
                                        .orElseThrow();
+                    var opacityMicromap = (net.minecraft.client.OptionInstance<Boolean>)field(
+                                                  PrimeSettingsScreen.class, "opacityMicromap")
+                                                  .get(screen);
+                    check(opacityMicromap.get(), "OMM default must be enabled");
+                    var offline = (OfflineMode)field(PrimeClient.class, "offline")
+                                          .get(field(PrimeClient.class, "INSTANCE").get(null));
+                    offline.request(true);
+                    offline.committed(true);
+                    screen.tick();
+                    check(list.findOption(opacityMicromap).active,
+                          "Frozen OMM control stays available");
+                    // OptionInstance only dispatches value callbacks once the client is running.
+                    var running = field(Minecraft.class, "running");
+                    boolean previousRunning = running.getBoolean(minecraft);
+                    running.setBoolean(minecraft, true);
+                    try {
+                        opacityMicromap.set(false);
+                        check(!PrimeClient.settings().opacityMicromap() && offline.active() &&
+                                      offline.requested(),
+                              "OMM callback preserves frozen scene and changes the persisted setting");
+                        opacityMicromap.set(true);
+                    } finally {
+                        running.setBoolean(minecraft, previousRunning);
+                    }
+                    offline.reset();
                     for (Object row : list.children())
                         if (row instanceof ContainerEventHandler container)
                             for (var child : container.children())

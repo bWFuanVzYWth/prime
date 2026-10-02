@@ -6,7 +6,10 @@ use crate::{
     scene::{MeshKey, Scene, SceneMesh},
     spatial::Cell,
 };
-use std::{collections::BTreeMap, ops::Range};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::Range,
+};
 
 type Signature = Vec<(MeshKey, u64, [f32; 3], Range<usize>)>;
 #[cfg(test)]
@@ -65,6 +68,7 @@ pub struct TerrainPlanner {
     spare_removed: Vec<Cell>,
     cursor: Option<TerrainGeneration>,
     source: Option<ContextId>,
+    invalidated: BTreeSet<Cell>,
 }
 
 #[derive(Clone, Copy)]
@@ -91,7 +95,14 @@ impl TerrainPlanner {
             spare_removed: Vec::new(),
             cursor: None,
             source: None,
+            invalidated: BTreeSet::new(),
         })
+    }
+
+    /// Renderer-derived resources changed without a source geometry publication.
+    /// Keep signatures so rebuilding a cell subtracts its previous counts exactly once.
+    pub fn invalidate_cells(&mut self, cells: impl IntoIterator<Item = Cell>) {
+        self.invalidated.extend(cells);
     }
 
     /// Mutable diagnostics have no producer certificate: validate and index their full snapshot.
@@ -102,6 +113,7 @@ impl TerrainPlanner {
         if self.epoch == Some(scene.epoch)
             && self.revision == Some(scene.revision)
             && self.anchor == scene.anchor
+            && self.invalidated.is_empty()
         {
             return Ok(self.empty_plan());
         }
@@ -167,25 +179,32 @@ impl TerrainPlanner {
             || (changed && (index.reset || self.cursor != Some(index.from)));
         let rebase = reset || self.anchor != scene.anchor;
         let mut plan = self.empty_plan();
-        if !changed && !rebase {
+        if !changed && !rebase && self.invalidated.is_empty() {
             return Ok(plan);
         }
 
         // A cursor gap is an explicit resynchronization, never a guessed delta.
         // The normal path visits only cells affected since the previous publication.
-        let full;
+        let mut full;
         let cells = if resync {
             full = index
                 .cells
                 .keys()
                 .chain(self.signatures.keys())
+                .chain(self.invalidated.iter())
                 .copied()
                 .collect();
+            &full
+        } else if !self.invalidated.is_empty() {
+            full = self.invalidated.clone();
+            if changed {
+                full.extend(&index.changed);
+            }
             &full
         } else if changed {
             &index.changed
         } else {
-            &std::collections::BTreeSet::new()
+            &BTreeSet::new()
         };
         let mut replacements = Vec::new();
         let mut total = self.triangle_count;
@@ -225,6 +244,7 @@ impl TerrainPlanner {
             let previous = self.signatures.get(&key);
             let count: usize = materials.iter().map(Vec::len).sum();
             let unchanged = !reset
+                && !self.invalidated.contains(&key)
                 && previous.is_some_and(|old| {
                     old.len() == count
                         && old
@@ -310,6 +330,7 @@ impl TerrainPlanner {
         self.anchor = scene.anchor;
         self.triangle_count = total;
         self.geometry_records = records;
+        self.invalidated.clear();
         plan.triangle_count = total;
         Ok(plan)
     }
@@ -355,6 +376,80 @@ mod tests {
             geometry_records: 1024,
         })
         .unwrap()
+    }
+
+    fn assert_local_invalidation(incremental: bool) {
+        let first_cell = Cell::containing([0.; 3]).unwrap();
+        let second_cell = Cell::containing([64., 0., 0.]).unwrap();
+        let mut scene = Scene::default();
+        scene.meshes.insert((1, 0), mesh([0.; 3], 4, 0));
+        scene.meshes.insert((2, 1), mesh([64., 0., 0.], 3, 1));
+        scene.ready_terrain.extend([first_cell, second_cell]);
+        let mut index = TerrainIndex {
+            generation: TerrainGeneration::default().next().unwrap(),
+            ..Default::default()
+        };
+        index.cells.insert(first_cell, [(1, 0)].into());
+        index.cells.insert(second_cell, [(2, 1)].into());
+        let plan = |planner: &mut TerrainPlanner| {
+            if incremental {
+                planner.plan_incremental((&scene).into(), &index)
+            } else {
+                planner.plan(&scene)
+            }
+        };
+        let mut planner = planner(2);
+        let initial = plan(&mut planner).unwrap();
+        assert_eq!(initial.geometry.len(), 2);
+        assert_eq!(initial.triangle_count, 7);
+        assert_eq!(planner.geometry_records, 4);
+        planner.recycle(initial);
+        let steady = plan(&mut planner).unwrap();
+        assert!(steady.geometry.is_empty() && steady.removed.is_empty());
+        assert_eq!((steady.meshes_visited, steady.cells_visited), (0, 0));
+        planner.recycle(steady);
+
+        planner.invalidate_cells([second_cell, second_cell]);
+        let rebuilt = plan(&mut planner).unwrap();
+        assert_eq!(rebuilt.geometry.len(), 1);
+        assert_eq!(rebuilt.geometry[0].key, second_cell);
+        assert!(rebuilt.removed.is_empty());
+        assert_eq!(rebuilt.triangle_count, 7);
+        assert_eq!(planner.geometry_records, 4);
+        assert_eq!(rebuilt.meshes_visited, if incremental { 1 } else { 2 });
+        assert_eq!(rebuilt.cells_visited, if incremental { 1 } else { 2 });
+        assert_eq!(planner.placements().len(), 2);
+        planner.recycle(rebuilt);
+
+        let steady = plan(&mut planner).unwrap();
+        assert!(steady.geometry.is_empty() && steady.removed.is_empty());
+        assert!(!steady.placements_changed);
+        assert_eq!(steady.triangle_count, 7);
+        assert_eq!((steady.meshes_visited, steady.cells_visited), (0, 0));
+        planner.recycle(steady);
+
+        planner.invalidate_cells([first_cell]);
+        planner.limits.geometry_records = 3;
+        assert_eq!(
+            plan(&mut planner).err().unwrap(),
+            "Too many static geometry metadata records"
+        );
+        planner.limits.geometry_records = 4;
+        let retry = plan(&mut planner).unwrap();
+        assert_eq!(retry.geometry.len(), 1);
+        assert_eq!(retry.geometry[0].key, first_cell);
+        assert_eq!(retry.triangle_count, 7);
+        assert_eq!(planner.geometry_records, 4);
+    }
+
+    #[test]
+    fn snapshot_invalidation_rebuilds_only_requested_cells_and_preserves_counts() {
+        assert_local_invalidation(false);
+    }
+
+    #[test]
+    fn incremental_invalidation_rebuilds_only_requested_cells_and_preserves_counts() {
+        assert_local_invalidation(true);
     }
 
     #[test]
