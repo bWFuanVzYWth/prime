@@ -15,6 +15,8 @@
   "primept.settings.render.bounces.tooltip": "1–64 vertices, default 12, including the first hit. Reflection and transmission both count; the last vertex adds direct lighting without continuing. Fixed while frozen.",
   "primept.settings.render.offline_samples": "Offline Samples",
   "primept.settings.render.offline_samples.tooltip": "Independent samples added per pixel each frame. Realtime always uses 1; changing this preserves accumulation.",
+  "primept.settings.terrain.batches_per_frame": "Terrain Batches per Frame",
+  "primept.settings.terrain.batches_per_frame.tooltip": "Maximum terrain mesh batches built per frame: 1–128, default 8. Each batch covers 4×4×4 vanilla sections. Can be adjusted while frozen: published terrain continues building, while source compilation resumes in realtime. Changing the limit preserves accumulation.",
   "primept.settings.lighting.sun_ev_quarters": "Sun Strength",
   "primept.settings.lighting.sun_ev_quarters.tooltip": "Stops relative to the default sun. Direction follows game time, latitude and season; fixed while frozen.",
   "primept.settings.lighting.sky_ev_quarters": "Sky Strength",

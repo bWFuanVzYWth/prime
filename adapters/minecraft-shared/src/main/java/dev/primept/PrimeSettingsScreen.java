@@ -103,6 +103,7 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                 value -> PrimeClient.updateSettings(PrimeClient.settings().withDlssQuality(value)));
         list.addBig(dlssQuality);
         list.addSmall(controls.get(Control.BOUNCES), controls.get(Control.OFFLINE_SAMPLES));
+        list.addBig(controls.get(Control.TERRAIN_BATCHES_PER_FRAME));
         list.addHeader(Component.translatable("primept.settings.lighting"));
         list.addSmall(controls.get(Control.SUN_EV), controls.get(Control.SKY_EV));
         list.addSmall(controls.get(Control.LATITUDE), controls.get(Control.SOLAR_LONGITUDE));

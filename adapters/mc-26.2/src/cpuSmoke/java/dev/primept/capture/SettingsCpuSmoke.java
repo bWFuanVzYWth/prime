@@ -253,6 +253,15 @@ public final class SettingsCpuSmoke {
                                        .filter(OptionsList.class ::isInstance)
                                        .findFirst()
                                        .orElseThrow();
+                    var controls = (java.util.EnumMap<RenderSettings.Control,
+                                                      net.minecraft.client.OptionInstance<Integer>>)
+                                           field(PrimeSettingsScreen.class, "controls")
+                                                   .get(screen);
+                    var terrainBatches =
+                            controls.get(RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME);
+                    check(terrainBatches.get() ==
+                                  settings.value(RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME),
+                          "Terrain batch slider preserves each configured bound");
                     var opacityMicromap = (net.minecraft.client.OptionInstance<Boolean>)field(
                                                   PrimeSettingsScreen.class, "opacityMicromap")
                                                   .get(screen);
@@ -274,6 +283,8 @@ public final class SettingsCpuSmoke {
                     screen.tick();
                     check(list.findOption(opacityMicromap).active,
                           "Frozen OMM control stays available");
+                    check(list.findOption(terrainBatches).active,
+                          "Frozen terrain scheduling control stays available");
                     check(!list.findOption(rayReconstruction).active &&
                                   !list.findOption(dlssQuality).active,
                           "Offline accumulation disables realtime reconstruction controls");
@@ -282,6 +293,16 @@ public final class SettingsCpuSmoke {
                     boolean previousRunning = running.getBoolean(minecraft);
                     running.setBoolean(minecraft, true);
                     try {
+                        for (int budget : new int[] {1, 128, 8}) {
+                            terrainBatches.set(budget);
+                            check(PrimeClient.settings().value(
+                                          RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME) ==
+                                                  budget &&
+                                          offline.active() && offline.requested(),
+                                  "Terrain batch callback changes the persisted setting without thawing");
+                        }
+                        terrainBatches.set(
+                                settings.value(RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME));
                         opacityMicromap.set(false);
                         check(!PrimeClient.settings().opacityMicromap() && offline.active() &&
                                       offline.requested(),

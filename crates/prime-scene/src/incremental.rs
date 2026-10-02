@@ -437,6 +437,7 @@ impl TranslatedScene {
         }
         self.scene.epoch = source.epoch;
         self.scene.revision = revision;
+        self.scene.terrain_resource_generation = source.terrain_resource_generation;
         self.scene.anchor = anchor;
         if let Some(dynamic) = dynamic {
             self.scene.dynamic = dynamic;

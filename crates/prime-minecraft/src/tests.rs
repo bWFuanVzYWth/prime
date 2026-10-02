@@ -1,4 +1,5 @@
 use super::*;
+use crate::chunks::{changed_boundaries, invalidate_neighbors};
 use prime_scene::Triangle;
 use prime_scene::protocol::{ABI_VERSION, MAGIC as SCENE_MAGIC};
 
@@ -138,7 +139,11 @@ pub(super) fn state_source(v: &mut Vec<u8>, flags: u32) {
         u32_to(v, n);
     }
 }
-fn response(batch: u64, requests: &[Section], choose: impl Fn(Section) -> Option<bool>) -> Vec<u8> {
+pub(super) fn response(
+    batch: u64,
+    requests: &[Section],
+    choose: impl Fn(Section) -> Option<bool>,
+) -> Vec<u8> {
     let mut v = header(2, batch);
     for (id, flags, name) in [(0, 1, "minecraft:air"), (1, 4, "minecraft:stone")] {
         for n in [1, id, flags, 0] {
@@ -182,7 +187,7 @@ fn malformed_placement_response_does_not_publish_and_valid_retry_keeps_the_batch
     u32_to(&mut invalid, 0);
     assert!(ctx.accept(&[&invalid], &mut output).is_err());
     assert!(ctx.catalog.states.is_empty());
-    assert!(ctx.sections.is_empty());
+    assert!(ctx.chunks.sources().is_empty());
     ctx.accept(&[&response(1, &requests, |_| Some(false))], &mut output)
         .unwrap();
     assert_eq!(ctx.last_batch, 1);
@@ -357,16 +362,16 @@ fn full_cell_waits_for_all_64_and_unchanged_frames_do_no_work() {
 
 fn assert_cell_availability(context: &TerrainContext) {
     let mut expected = HashMap::<[i32; 3], u8>::new();
-    for s in &context.scheduler.active {
-        if context.sections.contains_key(s) {
+    for s in context.chunks.active_sections() {
+        if context.chunks.sources().contains_key(s) {
             *expected
                 .entry([s.0.div_euclid(4), s.1.div_euclid(4), s.2.div_euclid(4)])
                 .or_default() += 1;
         }
     }
-    assert_eq!(context.available, expected);
+    assert_eq!(context.chunks.availability(), &expected);
     assert_eq!(
-        context.renderable,
+        *context.chunks.renderable_cells(),
         expected
             .into_iter()
             .filter_map(|(cell, count)| (count == 64).then_some(cell))
@@ -397,12 +402,12 @@ fn availability_counts_follow_source_lifecycle_and_contact_ownership() {
         ctx.accept(&[&initial[..initial.len() - 1]], &mut output)
             .is_err()
     );
-    assert!(ctx.available.is_empty());
-    assert!(ctx.renderable.is_empty());
+    assert!(ctx.chunks.availability().is_empty());
+    assert!(ctx.chunks.renderable_cells().is_empty());
     ctx.accept(&[&initial], &mut output).unwrap();
     assert_cell_availability(&ctx);
-    assert_eq!(ctx.available[&[0, 0, 0]], 63);
-    assert_eq!(ctx.renderable, HashSet::from([[1, 0, 0]]));
+    assert_eq!(ctx.chunks.availability()[&[0, 0, 0]], 63);
+    assert_eq!(ctx.chunks.renderable_cells(), &HashSet::from([[1, 0, 0]]));
     for (batch, present, count, compiled) in
         [(2, true, 64, 80), (3, false, 63, 79), (4, true, 64, 80)]
     {
@@ -414,7 +419,7 @@ fn availability_counts_follow_source_lifecycle_and_contact_ownership() {
         )
         .unwrap();
         assert_cell_availability(&ctx);
-        assert_eq!(ctx.available[&[0, 0, 0]], count);
+        assert_eq!(ctx.chunks.availability()[&[0, 0, 0]], count);
         assert_eq!(ctx.stats.availability_updates, 1);
         // The changed cell and the one-section band in its adjacent complete cell recompile.
         assert_eq!(ctx.stats.compiled, compiled);
@@ -424,7 +429,7 @@ fn availability_counts_follow_source_lifecycle_and_contact_ownership() {
         .unwrap();
     assert_cell_availability(&ctx);
     assert_eq!(ctx.stats.availability_updates, 0);
-    assert_eq!(ctx.renderable.len(), 2);
+    assert_eq!(ctx.chunks.renderable_cells().len(), 2);
     assert_eq!(ctx.stats.compiled, 128); // Catalog reset still recompiles every active source.
 }
 
@@ -449,17 +454,17 @@ fn availability_counts_follow_cached_membership_vertical_ranges_and_unload() {
             .unwrap();
         assert_cell_availability(&ctx);
         if batch == 2 {
-            assert!(!ctx.renderable.contains(&[0, 0, 0]));
-            assert!(ctx.sections.contains_key(&Section(0, 0, 0))); // Retained as source halo.
-            assert!(ctx.renderable.contains(&[1, 0, 0]));
+            assert!(!ctx.chunks.renderable_cells().contains(&[0, 0, 0]));
+            assert!(ctx.chunks.sources().contains_key(&Section(0, 0, 0))); // Retained as source halo.
+            assert!(ctx.chunks.renderable_cells().contains(&[1, 0, 0]));
         } else {
-            assert!(ctx.renderable.contains(&[0, 0, 0]));
+            assert!(ctx.chunks.renderable_cells().contains(&[0, 0, 0]));
         }
         if batch == 3 {
             assert!(!req.contains(&Section(0, 0, 0))); // Re-enter using the cached source.
         }
         if batch == 5 {
-            assert!(!ctx.available.keys().any(|cell| cell[1] != 0));
+            assert!(!ctx.chunks.availability().keys().any(|cell| cell[1] != 0));
         }
     }
     let unload: Vec<_> = events.into_iter().map(|(_, s)| (2, s)).collect();
@@ -467,9 +472,9 @@ fn availability_counts_follow_cached_membership_vertical_ranges_and_unload() {
     ctx.accept(&[&response(6, &req, |_| unreachable!())], &mut output)
         .unwrap();
     assert_cell_availability(&ctx);
-    assert!(ctx.available.is_empty());
-    assert!(ctx.sections.is_empty());
-    assert!(ctx.renderable.is_empty());
+    assert!(ctx.chunks.availability().is_empty());
+    assert!(ctx.chunks.sources().is_empty());
+    assert!(ctx.chunks.renderable_cells().is_empty());
 }
 
 #[test]
@@ -482,9 +487,9 @@ fn availability_counts_do_no_work_for_a_single_interior_edit_in_89k_sections() {
     let req = requests(&mut ctx, &frame(1, 0., 30, [-4, 19], &events));
     ctx.accept(&[&response(1, &req, |_| Some(false))], &mut output)
         .unwrap();
-    assert_eq!(ctx.scheduler.active.len(), 89_304);
-    let availability = ctx.available.clone();
-    let renderable = ctx.renderable.clone();
+    assert_eq!(ctx.chunks.active_sections().len(), 89_304);
+    let availability = ctx.chunks.availability().clone();
+    let renderable = ctx.chunks.renderable_cells().clone();
     let key = Section(0, 0, 0);
     let req = requests(&mut ctx, &frame(2, 0., 30, [-4, 19], &[(3, key)]));
     assert_eq!(req, [key]);
@@ -507,8 +512,8 @@ fn availability_counts_do_no_work_for_a_single_interior_edit_in_89k_sections() {
     ctx.accept(&[&edited], &mut output).unwrap();
     assert_eq!((ctx.stats.requested, ctx.stats.compiled), (1, 1));
     assert_eq!(ctx.stats.availability_updates, 0);
-    assert_eq!(ctx.available, availability);
-    assert_eq!(ctx.renderable, renderable);
+    assert_eq!(ctx.chunks.availability(), &availability);
+    assert_eq!(ctx.chunks.renderable_cells(), &renderable);
     let req = requests(&mut ctx, &frame(3, 0., 30, [-4, 19], &[]));
     assert!(req.is_empty());
     ctx.accept(&[&response(3, &req, |_| unreachable!())], &mut output)
@@ -526,7 +531,7 @@ fn halo_is_dependency_only_and_neighbor_change_invalidates_surface() {
     ctx.accept(&[&response(1, &req, |s| Some(s == a))], &mut scene)
         .unwrap();
     assert_eq!(scene.translate([0.; 3]).unwrap().triangle_count(), 3072);
-    assert_eq!(ctx.scheduler.active.len(), 1);
+    assert_eq!(ctx.chunks.active_sections().len(), 1);
     let dirty = vec![(3, b); 10000];
     let req = requests(&mut ctx, &frame(2, 0., 0, [0, 0], &dirty));
     assert_eq!(req, vec![b]);
@@ -569,7 +574,7 @@ fn move_retires_old_sources_and_negative_coordinates_are_floor_divided() {
     ctx.accept(&[&response(2, &req, |_| unreachable!())], &mut scene)
         .unwrap();
     assert!(scene.translate([0.; 3]).unwrap().meshes.is_empty());
-    assert!(ctx.sections.is_empty());
+    assert!(ctx.chunks.sources().is_empty());
 }
 #[test]
 fn page_boundaries_and_response_identity_are_checked_before_publication() {
@@ -808,6 +813,7 @@ fn lowered_slabs_match_scalar_geometry_for_models_palettes_and_halos() {
         );
         assert_eq!((a.texture_id, a.flags), (b.texture_id, b.flags));
     };
+    let mut sections = HashMap::new();
     for model_id in [1, 2, 3, 4, 10, 999] {
         ctx.catalog.states.get_mut(&1).unwrap().model = model_id;
         for bits in [0, 4, 5, 9, 15, 32] {
@@ -845,10 +851,10 @@ fn lowered_slabs_match_scalar_geometry_for_models_palettes_and_halos() {
                         })
                         .collect();
                 }
-                ctx.sections.insert(s, data);
+                sections.insert(s, data);
             }
             // One missing neighbor exercises the explicit open halo boundary.
-            ctx.sections.remove(&Section(-2, 0, -1));
+            sections.remove(&Section(-2, 0, -1));
             for first_y in [0, 4, 8, 12] {
                 let make = || Job {
                     key,
@@ -862,8 +868,8 @@ fn lowered_slabs_match_scalar_geometry_for_models_palettes_and_halos() {
                 };
                 let mut expected = make();
                 let mut actual = make();
-                crate::reference::compile_slab(&mut expected, &ctx.catalog, &ctx.sections);
-                compile_slab(&mut actual, &ctx.catalog, &ctx.sections);
+                crate::reference::compile_slab(&mut expected, &ctx.catalog, &sections);
+                compile_slab(&mut actual, &ctx.catalog, &sections);
                 for (a, b) in expected.layers.iter().zip(&actual.layers) {
                     assert_eq!(
                         a.len(),
@@ -918,11 +924,14 @@ fn column_deltas_match_complete_window_membership_across_height_and_inventory_ch
                     .filter(|n| (ys[0]..=ys[1]).contains(&n.1) && loaded.contains(&(n.0, n.2))),
             );
         }
-        assert_eq!(ctx.scheduler.active, active);
-        assert_eq!(ctx.scheduler.cache, cache);
+        assert_eq!(ctx.chunks.active_sections(), &active);
+        assert_eq!(ctx.chunks.cached_sections(), &cache);
         ctx.accept(&[&response(batch, &req, |_| Some(false))], &mut source)
             .unwrap();
-        assert_eq!(ctx.sections.keys().copied().collect::<HashSet<_>>(), cache);
+        assert_eq!(
+            ctx.chunks.sources().keys().copied().collect::<HashSet<_>>(),
+            cache
+        );
     }
 }
 
@@ -1437,9 +1446,12 @@ fn cached_raw_biomes_finish_the_source_response_without_a_host_sample_round() {
             queries.len()
         ];
         if warm {
-            let plan = ctx.biomes.prepare(queries.iter().copied(), &recipes, 7);
+            let plan = ctx
+                .chunks
+                .biomes_mut()
+                .prepare(queries.iter().copied(), &recipes, 7);
             let colors = vec![0xff1270e4; plan.samples.len()];
-            ctx.biomes.finish(plan, &colors);
+            ctx.chunks.biomes_mut().finish(plan, &colors);
         }
         let mut response = header(3, 1);
         u64_to(&mut response, ctx.stats.tint_requests as u64);

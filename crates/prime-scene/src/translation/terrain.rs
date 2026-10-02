@@ -2,13 +2,13 @@
 use super::translation;
 use crate::{
     geometry::MeshGeometry,
-    incremental::{ContextId, SceneInput, TerrainGeneration, TerrainIndex},
+    incremental::{ContextId, SceneInput, ScenePublication, TerrainGeneration, TerrainIndex},
     scene::{MeshKey, Scene, SceneMesh},
     spatial::Cell,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    ops::Range,
+    ops::{Bound, Range},
 };
 
 type Signature = Vec<(MeshKey, u64, [f32; 3], Range<usize>)>;
@@ -42,6 +42,9 @@ pub struct TerrainPlan {
     pub removed: Vec<Cell>,
     pub geometry: Vec<TerrainUpdate>,
     pub placements_changed: bool,
+    /// Published source geometry changed. An identical-signature renderer rebuild does not
+    /// invalidate sampling history merely because its acceleration structure is replaced.
+    pub content_changed: bool,
     pub triangle_count: u64,
     /// Actual grouping work, useful for deterministic complexity regression tests.
     pub meshes_visited: usize,
@@ -58,6 +61,7 @@ struct Group<'a> {
 pub struct TerrainPlanner {
     limits: TerrainLimits,
     epoch: Option<u64>,
+    terrain_resource_generation: Option<u64>,
     revision: Option<u64>,
     anchor: [f64; 3],
     signatures: BTreeMap<Cell, Vec<(u32, Signature)>>,
@@ -68,13 +72,55 @@ pub struct TerrainPlanner {
     spare_removed: Vec<Cell>,
     cursor: Option<TerrainGeneration>,
     source: Option<ContextId>,
+    publication: Option<ScenePublication>,
+    pending: BTreeSet<Cell>,
+    build_cursor: Option<Cell>,
     invalidated: BTreeSet<Cell>,
+    withdrawals: BTreeSet<Cell>,
 }
 
 #[derive(Clone, Copy)]
 pub struct TerrainLimits {
     pub triangles_per_geometry: u32,
     pub geometry_records: u32,
+}
+
+fn subtract_counts(old: &[(u32, Signature)], total: &mut u64, records: &mut u64) {
+    *records -= old.len() as u64;
+    for (_, members) in old {
+        *total -= members
+            .iter()
+            .map(|(_, _, _, range)| range.len() as u64)
+            .sum::<u64>();
+    }
+}
+
+// Merge bounded ranges without copying/scanning the backlog. Duplicate dirty identities
+// consume one turn; a removed or incomplete cell consumes no construction allowance.
+fn select_cells<'a>(
+    selected: &mut Vec<Cell>,
+    pending: impl Iterator<Item = &'a Cell>,
+    scheduled: impl Iterator<Item = &'a Cell>,
+    withdrawn: &BTreeSet<Cell>,
+    budget: usize,
+) {
+    let mut pending = pending.peekable();
+    let mut scheduled = scheduled.peekable();
+    while selected.len() < budget {
+        let key = match (pending.peek(), scheduled.peek()) {
+            (Some(&left), Some(&right)) if left == right => {
+                scheduled.next();
+                *pending.next().unwrap()
+            }
+            (Some(&left), Some(&right)) if left < right => *pending.next().unwrap(),
+            (Some(_), Some(_)) | (None, Some(_)) => *scheduled.next().unwrap(),
+            (Some(_), None) => *pending.next().unwrap(),
+            (None, None) => break,
+        };
+        if !withdrawn.contains(&key) {
+            selected.push(key);
+        }
+    }
 }
 
 impl TerrainPlanner {
@@ -85,6 +131,7 @@ impl TerrainPlanner {
         Ok(Self {
             limits,
             epoch: None,
+            terrain_resource_generation: None,
             revision: None,
             anchor: [0.0; 3],
             signatures: BTreeMap::new(),
@@ -95,7 +142,11 @@ impl TerrainPlanner {
             spare_removed: Vec::new(),
             cursor: None,
             source: None,
+            publication: None,
+            pending: BTreeSet::new(),
+            build_cursor: None,
             invalidated: BTreeSet::new(),
+            withdrawals: BTreeSet::new(),
         })
     }
 
@@ -105,16 +156,31 @@ impl TerrainPlanner {
         self.invalidated.extend(cells);
     }
 
+    /// Published geometry refers to a revoked external resource identity. Withdraw it before
+    /// the next render, but rebuild still-current source cells through the normal cell budget.
+    pub fn withdraw_cells(&mut self, cells: impl IntoIterator<Item = Cell>) {
+        self.withdrawals.extend(cells);
+    }
+
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty() || !self.invalidated.is_empty() || !self.withdrawals.is_empty()
+    }
+
     /// Mutable diagnostics have no producer certificate: validate and index their full snapshot.
     pub fn plan(&mut self, scene: &Scene) -> Result<TerrainPlan, String> {
+        self.plan_limited(scene, usize::MAX)
+    }
+
+    /// Bound cell grouping, not individual sections or material parts. Zero still withdraws
+    /// unavailable cells and rebases published placements without constructing geometry.
+    pub fn plan_limited(&mut self, scene: &Scene, budget: usize) -> Result<TerrainPlan, String> {
         if scene.anchor.iter().any(|value| !value.is_finite()) {
             return Err("Invalid scene anchor".into());
         }
-        if self.epoch == Some(scene.epoch)
+        let unchanged_snapshot = self.epoch == Some(scene.epoch)
             && self.revision == Some(scene.revision)
-            && self.anchor == scene.anchor
-            && self.invalidated.is_empty()
-        {
+            && self.terrain_resource_generation == Some(scene.terrain_resource_generation);
+        if unchanged_snapshot && self.anchor == scene.anchor && !self.has_pending() {
             return Ok(self.empty_plan());
         }
         let mut index = TerrainIndex {
@@ -143,7 +209,7 @@ impl TerrainPlanner {
                 .or_default()
                 .insert(id);
         }
-        let plan = self.plan_incremental(scene.into(), &index)?;
+        let plan = self.plan_index_limited(scene.into(), &index, budget, unchanged_snapshot)?;
         self.revision = Some(scene.revision);
         self.cursor = None;
         Ok(plan)
@@ -154,6 +220,7 @@ impl TerrainPlanner {
             removed: std::mem::take(&mut self.spare_removed),
             geometry: std::mem::take(&mut self.spare_geometry),
             placements_changed: false,
+            content_changed: false,
             triangle_count: self.triangle_count,
             meshes_visited: 0,
             cells_visited: 0,
@@ -161,25 +228,54 @@ impl TerrainPlanner {
     }
 
     pub fn plan_input(&mut self, scene: SceneInput<'_>) -> Result<TerrainPlan, String> {
+        self.plan_input_limited(scene, usize::MAX)
+    }
+
+    pub fn plan_input_limited(
+        &mut self,
+        scene: SceneInput<'_>,
+        budget: usize,
+    ) -> Result<TerrainPlan, String> {
         match scene.terrain() {
-            None => self.plan(&scene),
-            Some(index) => self.plan_incremental(scene, index),
+            None => self.plan_limited(&scene, budget),
+            Some(index) => self.plan_index_limited(scene, index, budget, false),
         }
     }
 
+    #[cfg(test)]
     fn plan_incremental(
         &mut self,
         scene: SceneInput<'_>,
         index: &TerrainIndex,
     ) -> Result<TerrainPlan, String> {
-        let reset = self.epoch != Some(scene.epoch) || self.source != index.source;
-        let changed = reset || self.cursor != Some(index.generation);
-        let resync = reset
-            || self.cursor.is_none()
-            || (changed && (index.reset || self.cursor != Some(index.from)));
+        self.plan_index_limited(scene, index, usize::MAX, false)
+    }
+
+    fn plan_index_limited(
+        &mut self,
+        scene: SceneInput<'_>,
+        index: &TerrainIndex,
+        budget: usize,
+        unchanged_snapshot: bool,
+    ) -> Result<TerrainPlan, String> {
+        if scene.anchor.iter().any(|value| !value.is_finite()) {
+            return Err("Invalid scene anchor".into());
+        }
+        let publication = scene.publication();
+        let reset = self.epoch != Some(scene.epoch)
+            || self.terrain_resource_generation != Some(scene.terrain_resource_generation)
+            || self.source != index.source
+            || self
+                .publication
+                .is_none_or(|old| !old.same_owner(publication));
+        let changed = !unchanged_snapshot && (reset || self.cursor != Some(index.generation));
+        let resync = !unchanged_snapshot
+            && (reset
+                || self.cursor.is_none()
+                || (changed && (index.reset || self.cursor != Some(index.from))));
         let rebase = reset || self.anchor != scene.anchor;
         let mut plan = self.empty_plan();
-        if !changed && !rebase && self.invalidated.is_empty() {
+        if !changed && !rebase && !self.has_pending() {
             return Ok(plan);
         }
 
@@ -191,12 +287,15 @@ impl TerrainPlanner {
                 .cells
                 .keys()
                 .chain(self.signatures.keys())
+                .chain(self.pending.iter())
                 .chain(self.invalidated.iter())
+                .chain(self.withdrawals.iter())
                 .copied()
                 .collect();
             &full
-        } else if !self.invalidated.is_empty() {
+        } else if !self.invalidated.is_empty() || !self.withdrawals.is_empty() {
             full = self.invalidated.clone();
+            full.extend(&self.withdrawals);
             if changed {
                 full.extend(&index.changed);
             }
@@ -206,10 +305,66 @@ impl TerrainPlanner {
         } else {
             &BTreeSet::new()
         };
-        let mut replacements = Vec::new();
-        let mut total = self.triangle_count;
-        let mut records = self.geometry_records;
+        let mut scheduled = BTreeSet::new();
+        let mut withdrawn = BTreeSet::new();
         for &key in cells {
+            if scene.ready_terrain.contains(&key)
+                && index
+                    .cells
+                    .get(&key)
+                    .is_some_and(|members| !members.is_empty())
+            {
+                scheduled.insert(key);
+            } else {
+                withdrawn.insert(key);
+                plan.cells_visited += 1;
+            }
+        }
+        let empty = BTreeSet::new();
+        let pending = if reset { &empty } else { &self.pending };
+        let mut selected = Vec::new();
+        if let Some(cursor) = self.build_cursor.filter(|_| !reset) {
+            let after = (Bound::Excluded(cursor), Bound::Unbounded);
+            select_cells(
+                &mut selected,
+                pending.range(after),
+                scheduled.range(after),
+                &withdrawn,
+                budget,
+            );
+            select_cells(
+                &mut selected,
+                pending.range(..=cursor),
+                scheduled.range(..=cursor),
+                &withdrawn,
+                budget,
+            );
+        } else {
+            select_cells(
+                &mut selected,
+                pending.iter(),
+                scheduled.iter(),
+                &withdrawn,
+                budget,
+            );
+        }
+        let mut replacements = Vec::new();
+        let mut total = if reset { 0 } else { self.triangle_count };
+        let mut records = if reset { 0 } else { self.geometry_records };
+        if reset {
+            plan.removed.extend(self.signatures.keys().copied());
+        } else {
+            for key in withdrawn.union(&self.withdrawals) {
+                if let Some(old) = self.signatures.get(key) {
+                    subtract_counts(old, &mut total, &mut records);
+                    plan.removed.push(*key);
+                }
+            }
+        }
+        plan.content_changed = reset || !plan.removed.is_empty();
+        // Selection precedes all member grouping and owned geometry construction. Queued
+        // cells retain only identity and always consume the current immutable publication.
+        for &key in &selected {
             plan.cells_visited += 1;
             let mut materials: [Vec<Group<'_>>; 3] = Default::default();
             if scene.ready_terrain.contains(&key)
@@ -241,32 +396,30 @@ impl TerrainPlanner {
                     }
                 }
             }
-            let previous = self.signatures.get(&key);
+            let previous = if reset || self.withdrawals.contains(&key) {
+                None
+            } else {
+                self.signatures.get(&key)
+            };
             let count: usize = materials.iter().map(Vec::len).sum();
-            let unchanged = !reset
-                && !self.invalidated.contains(&key)
-                && previous.is_some_and(|old| {
-                    old.len() == count
-                        && old
-                            .iter()
-                            .zip(materials.iter().enumerate().flat_map(|(flags, parts)| {
-                                parts.iter().map(move |part| (flags as u32, part))
-                            }))
-                            .all(|((flags, signature), (new_flags, group))| {
-                                *flags == new_flags && *signature == group.signature
-                            })
-                });
+            let same_signature = previous.is_some_and(|old| {
+                old.len() == count
+                    && old
+                        .iter()
+                        .zip(materials.iter().enumerate().flat_map(|(flags, parts)| {
+                            parts.iter().map(move |part| (flags as u32, part))
+                        }))
+                        .all(|((flags, signature), (new_flags, group))| {
+                            *flags == new_flags && *signature == group.signature
+                        })
+            });
+            let unchanged = !self.invalidated.contains(&key) && same_signature;
             if unchanged || (count == 0 && previous.is_none()) {
                 continue;
             }
+            plan.content_changed |= !same_signature;
             if let Some(old) = previous {
-                records -= old.len() as u64;
-                for (_, members) in old {
-                    total -= members
-                        .iter()
-                        .map(|(_, _, _, range)| range.len() as u64)
-                        .sum::<u64>();
-                }
+                subtract_counts(old, &mut total, &mut records);
             }
             records += count as u64;
             let mut signatures = Vec::with_capacity(count);
@@ -298,10 +451,30 @@ impl TerrainPlanner {
             return Err("Too many static geometry metadata records".into());
         }
         let mut membership_changed = reset;
-        if reset {
-            plan.removed.extend(self.signatures.keys().copied());
-        }
         // All checks precede mutation of the consumer state/cursor.
+        if reset {
+            self.signatures.clear();
+            self.pending.clear();
+            self.invalidated.clear();
+            self.build_cursor = None;
+        }
+        for key in &self.withdrawals {
+            membership_changed |= self.signatures.remove(key).is_some();
+        }
+        self.withdrawals.clear();
+        self.pending.extend(scheduled);
+        for key in withdrawn {
+            membership_changed |= self.signatures.remove(&key).is_some();
+            self.pending.remove(&key);
+            self.invalidated.remove(&key);
+        }
+        for key in &selected {
+            self.pending.remove(key);
+            self.invalidated.remove(key);
+        }
+        if let Some(&last) = selected.last() {
+            self.build_cursor = Some(last);
+        }
         for (key, signature, geometries) in replacements {
             if signature.is_empty() {
                 self.signatures.remove(&key);
@@ -324,13 +497,14 @@ impl TerrainPlanner {
                 }));
         }
         self.epoch = Some(scene.epoch);
+        self.terrain_resource_generation = Some(scene.terrain_resource_generation);
         self.revision = None; // A later diagnostic snapshot must validate independently.
         self.cursor = Some(index.generation);
         self.source = index.source;
+        self.publication = Some(publication);
         self.anchor = scene.anchor;
         self.triangle_count = total;
         self.geometry_records = records;
-        self.invalidated.clear();
         plan.triangle_count = total;
         Ok(plan)
     }
@@ -378,6 +552,520 @@ mod tests {
         .unwrap()
     }
 
+    fn indexed_cells(count: usize) -> (Scene, TerrainIndex, Vec<Cell>) {
+        let mut scene = Scene::default();
+        let mut index = TerrainIndex {
+            source: Some(ContextId::default()),
+            generation: TerrainGeneration::default().next().unwrap(),
+            ..Default::default()
+        };
+        let keys: Vec<_> = (0..count)
+            .map(|i| {
+                let origin = [i as f64 * 64.0, 0.0, 0.0];
+                let key = Cell::containing(origin).unwrap();
+                scene.meshes.insert((i as u64, 0), mesh(origin, 1, 0));
+                scene.ready_terrain.insert(key);
+                index.cells.insert(key, [(i as u64, 0)].into());
+                key
+            })
+            .collect();
+        (scene, index, keys)
+    }
+
+    fn publish(index: &mut TerrainIndex, cells: impl IntoIterator<Item = Cell>) {
+        index.from = index.generation;
+        index.generation = index.generation.next().unwrap();
+        index.changed = cells.into_iter().collect();
+        index.reset = false;
+    }
+
+    fn bounded(
+        planner: &mut TerrainPlanner,
+        scene: &Scene,
+        index: &TerrainIndex,
+        budget: usize,
+    ) -> TerrainPlan {
+        planner
+            .plan_index_limited(scene.into(), index, budget, false)
+            .unwrap()
+    }
+
+    fn assert_same_published(left: &TerrainPlanner, right: &TerrainPlanner) {
+        assert_eq!(left.signatures, right.signatures);
+        assert_eq!(left.triangle_count, right.triangle_count);
+        assert_eq!(left.geometry_records, right.geometry_records);
+        let placements = |planner: &TerrainPlanner| {
+            planner
+                .placements()
+                .iter()
+                .map(|p| (p.key, p.transform))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(placements(left), placements(right));
+    }
+
+    #[test]
+    fn bounded_same_publication_drains_before_grouping_and_matches_unbounded() {
+        for budget in [1, 8, 128] {
+            for snapshot in [false, true] {
+                let (scene, index, keys) = indexed_cells(137);
+                let mut limited = planner(32);
+                let mut reference = planner(32);
+                let initial = reference.plan(&scene).unwrap();
+                reference.recycle(initial);
+                let mut seen = BTreeSet::new();
+                loop {
+                    let plan = if snapshot {
+                        limited.plan_input_limited((&scene).into(), budget).unwrap()
+                    } else {
+                        bounded(&mut limited, &scene, &index, budget)
+                    };
+                    assert_eq!(plan.geometry.len(), budget.min(keys.len() - seen.len()));
+                    assert_eq!(plan.cells_visited, plan.geometry.len());
+                    assert_eq!(plan.meshes_visited, plan.geometry.len());
+                    assert!(plan.content_changed);
+                    for batch in &plan.geometry {
+                        assert!(
+                            seen.insert(batch.key),
+                            "same publication cannot requeue a built cell"
+                        );
+                    }
+                    limited.recycle(plan);
+                    if !limited.has_pending() {
+                        break;
+                    }
+                }
+                assert_eq!(seen, keys.into_iter().collect());
+                assert_same_published(&limited, &reference);
+                let steady = if snapshot {
+                    limited.plan_limited(&scene, budget).unwrap()
+                } else {
+                    bounded(&mut limited, &scene, &index, budget)
+                };
+                assert!(steady.geometry.is_empty() && !steady.content_changed);
+                assert_eq!((steady.cells_visited, steady.meshes_visited), (0, 0));
+            }
+        }
+    }
+
+    #[test]
+    fn changed_budget_applies_to_the_next_drain_call() {
+        let (scene, index, _) = indexed_cells(137);
+        let mut planner = planner(32);
+        for (budget, expected) in [(8, 8), (1, 1), (128, 128)] {
+            let plan = bounded(&mut planner, &scene, &index, budget);
+            assert_eq!(plan.geometry.len(), expected);
+            planner.recycle(plan);
+        }
+        assert!(!planner.has_pending());
+    }
+
+    #[test]
+    fn repeated_edits_coalesce_to_latest_source_and_keep_old_content_until_selected() {
+        let (mut scene, mut index, keys) = indexed_cells(3);
+        let mut planner = planner(32);
+        let initial = planner.plan_incremental((&scene).into(), &index).unwrap();
+        planner.recycle(initial);
+        let old = planner.signatures[&keys[2]].clone();
+        for member in scene.meshes.values_mut() {
+            member.revision += 1;
+        }
+        publish(&mut index, keys.iter().copied());
+        let first = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(first.geometry[0].key, keys[0]);
+        assert_eq!(planner.signatures[&keys[2]], old);
+        assert_eq!(planner.placements().len(), 3);
+        planner.recycle(first);
+        for revision in 3..8 {
+            let mut latest = mesh(keys[2].origin(), revision as usize, 0);
+            latest.revision = revision;
+            scene.meshes.insert((2, 0), latest);
+            publish(&mut index, [keys[2]]);
+            let plan = bounded(&mut planner, &scene, &index, 0);
+            assert!(plan.geometry.is_empty() && !plan.content_changed);
+            assert_eq!(planner.signatures[&keys[2]], old);
+            assert_eq!(planner.pending.len(), 2);
+            planner.recycle(plan);
+        }
+        let middle = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(middle.geometry[0].key, keys[1]);
+        planner.recycle(middle);
+        let latest = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(latest.geometry[0].key, keys[2]);
+        assert_eq!(latest.geometry[0].geometries[0].triangle_count, 7);
+        assert!(
+            latest.geometry[0].geometries[0].members[0]
+                .triangles
+                .ptr_eq(&scene.meshes[&(2, 0)].triangles)
+        );
+        assert_eq!(latest.triangle_count, 9);
+        assert!(!planner.has_pending());
+    }
+
+    #[test]
+    fn repeated_low_coordinate_edits_do_not_starve_existing_backlog() {
+        let (mut scene, mut index, keys) = indexed_cells(10);
+        let mut planner = planner(32);
+        let initial = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(initial.geometry[0].key, keys[0]);
+        planner.recycle(initial);
+        for key in &keys[1..] {
+            scene.meshes.get_mut(&(0, 0)).unwrap().revision += 1;
+            publish(&mut index, [keys[0]]);
+            let next = bounded(&mut planner, &scene, &index, 1);
+            assert_eq!(next.geometry[0].key, *key);
+            planner.recycle(next);
+        }
+        let wrapped = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(wrapped.geometry[0].key, keys[0]);
+        assert!(!planner.has_pending());
+    }
+
+    #[test]
+    fn withdrawals_and_revoked_readiness_bypass_a_zero_build_budget() {
+        let (mut scene, mut index, keys) = indexed_cells(4);
+        let mut planner = planner(32);
+        let initial = bounded(&mut planner, &scene, &index, 2);
+        planner.recycle(initial);
+        index.cells.remove(&keys[0]);
+        scene.meshes.remove(&(0, 0));
+        scene.ready_terrain.remove(&keys[1]);
+        scene.ready_terrain.remove(&keys[2]); // Pending, never published.
+        publish(&mut index, keys[..3].iter().copied());
+        let withdrawn = bounded(&mut planner, &scene, &index, 0);
+        assert_eq!(withdrawn.removed, keys[..2]);
+        assert!(withdrawn.geometry.is_empty() && withdrawn.content_changed);
+        assert_eq!(withdrawn.triangle_count, 0);
+        assert_eq!(withdrawn.meshes_visited, 0);
+        assert!(planner.placements().is_empty());
+        assert_eq!(planner.pending, [keys[3]].into());
+        planner.recycle(withdrawn);
+        let last = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(last.geometry[0].key, keys[3]);
+        planner.recycle(last);
+        scene.ready_terrain.insert(keys[1]);
+        publish(&mut index, [keys[1]]);
+        let restored = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(restored.geometry[0].key, keys[1]);
+    }
+
+    #[test]
+    fn epoch_and_source_owner_changes_withdraw_old_domain_before_limited_rebuild() {
+        for epoch_reset in [false, true] {
+            let (mut scene, mut index, keys) = indexed_cells(4);
+            let mut planner = planner(32);
+            let initial = bounded(&mut planner, &scene, &index, 2);
+            planner.recycle(initial);
+            planner.invalidate_cells([keys[0], keys[3]]);
+            if epoch_reset {
+                scene.epoch += 1;
+            } else {
+                index.source = Some(ContextId::default());
+            }
+            let reset = bounded(&mut planner, &scene, &index, 1);
+            assert_eq!(reset.removed, keys[..2]);
+            assert_eq!(reset.geometry.len(), 1);
+            assert_eq!(reset.triangle_count, 1);
+            assert!(reset.content_changed);
+            assert_eq!(planner.placements().len(), 1);
+            assert_eq!(planner.pending.len(), 3);
+            planner.recycle(reset);
+            while planner.has_pending() {
+                let plan = bounded(&mut planner, &scene, &index, 1);
+                assert!(plan.removed.is_empty());
+                planner.recycle(plan);
+            }
+            let mut reference = self::planner(32);
+            let all = reference.plan(&scene).unwrap();
+            reference.recycle(all);
+            assert_same_published(&planner, &reference);
+        }
+    }
+
+    #[test]
+    fn missed_or_reset_publication_recovers_removals_and_keeps_backlog() {
+        for reset in [false, true] {
+            let (mut scene, mut index, keys) = indexed_cells(4);
+            let mut planner = planner(32);
+            let initial = bounded(&mut planner, &scene, &index, 1);
+            planner.recycle(initial);
+            scene.meshes.remove(&(0, 0));
+            index.cells.remove(&keys[0]);
+            publish(&mut index, [keys[0]]); // Consumer misses this publication.
+            scene.meshes.get_mut(&(3, 0)).unwrap().revision += 1;
+            publish(&mut index, [keys[3]]);
+            index.reset = reset;
+            let recovered = bounded(&mut planner, &scene, &index, 1);
+            assert_eq!(recovered.removed, [keys[0]]);
+            assert_eq!(recovered.geometry[0].key, keys[1]);
+            planner.recycle(recovered);
+            while planner.has_pending() {
+                let next = bounded(&mut planner, &scene, &index, 1);
+                planner.recycle(next);
+            }
+            assert_eq!(planner.signatures.len(), 3);
+            assert_eq!(planner.signatures[&keys[3]][0].1[0].1, 2);
+        }
+    }
+
+    #[test]
+    fn rebase_updates_all_published_placements_and_future_pending_cells() {
+        let (mut scene, index, keys) = indexed_cells(4);
+        let mut planner = planner(32);
+        let initial = bounded(&mut planner, &scene, &index, 2);
+        planner.recycle(initial);
+        scene.anchor = [256., -128., 512.];
+        let rebase = bounded(&mut planner, &scene, &index, 0);
+        assert!(rebase.placements_changed && !rebase.content_changed);
+        assert_eq!((rebase.cells_visited, rebase.meshes_visited), (0, 0));
+        for placement in planner.placements() {
+            assert_eq!(
+                placement.transform,
+                translation(placement.key.relative_origin(scene.anchor))
+            );
+        }
+        planner.recycle(rebase);
+        let next = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(next.geometry[0].key, keys[2]);
+        assert_eq!(next.geometry[0].geometries[0].members[0].offset, [0.; 3]);
+        assert!(
+            planner
+                .placements()
+                .iter()
+                .all(|p| p.transform == translation(p.key.relative_origin(scene.anchor)))
+        );
+    }
+
+    #[test]
+    fn delayed_renderer_invalidation_is_forced_but_does_not_change_source_content() {
+        let (scene, index, keys) = indexed_cells(3);
+        let mut planner = planner(32);
+        let initial = planner.plan_incremental((&scene).into(), &index).unwrap();
+        planner.recycle(initial);
+        planner.invalidate_cells([keys[0], keys[2], keys[2]]);
+        let first = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(first.geometry[0].key, keys[0]);
+        assert!(!first.content_changed);
+        assert_eq!(planner.invalidated, [keys[2]].into());
+        planner.recycle(first);
+        let pause = bounded(&mut planner, &scene, &index, 0);
+        assert!(pause.geometry.is_empty());
+        assert_eq!(planner.invalidated, [keys[2]].into());
+        planner.recycle(pause);
+        let second = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(second.geometry[0].key, keys[2]);
+        assert!(!second.content_changed);
+        assert_eq!(second.triangle_count, 3);
+        assert!(!planner.has_pending());
+    }
+
+    #[test]
+    fn resource_generation_reset_revokes_all_old_cells_even_at_equal_scene_revision() {
+        for snapshot in [false, true] {
+            let (mut scene, mut index, keys) = indexed_cells(4);
+            let mut planner = planner(32);
+            let initial = if snapshot {
+                planner.plan_limited(&scene, 2).unwrap()
+            } else {
+                bounded(&mut planner, &scene, &index, 2)
+            };
+            planner.recycle(initial);
+            planner.invalidate_cells([keys[0]]);
+            scene.terrain_resource_generation += 1;
+            // A previously pending member vanished in the new resource domain.
+            scene.meshes.remove(&(3, 0));
+            index.cells.remove(&keys[3]);
+            let reset = if snapshot {
+                planner.plan_limited(&scene, 1).unwrap()
+            } else {
+                bounded(&mut planner, &scene, &index, 1)
+            };
+            assert_eq!(reset.removed, keys[..2]);
+            assert_eq!(reset.geometry.len(), 1);
+            assert!(reset.content_changed);
+            assert_eq!(reset.triangle_count, 1);
+            assert_eq!(planner.placements().len(), 1);
+            assert_eq!(planner.pending, keys[1..3].iter().copied().collect());
+            planner.recycle(reset);
+            while planner.has_pending() {
+                let next = if snapshot {
+                    planner.plan_limited(&scene, 1).unwrap()
+                } else {
+                    bounded(&mut planner, &scene, &index, 1)
+                };
+                assert!(next.removed.is_empty());
+                assert_eq!(next.geometry.len(), 1);
+                planner.recycle(next);
+            }
+            let mut reference = self::planner(32);
+            let all = reference.plan(&scene).unwrap();
+            reference.recycle(all);
+            assert_same_published(&planner, &reference);
+        }
+    }
+
+    #[test]
+    fn revoked_resources_withdraw_old_cells_immediately_and_rebuild_with_normal_quota() {
+        let (mut scene, mut index, keys) = indexed_cells(4);
+        let mut planner = planner(32);
+        let initial = planner.plan_incremental((&scene).into(), &index).unwrap();
+        planner.recycle(initial);
+        scene.meshes.get_mut(&(0, 0)).unwrap().revision += 1;
+        publish(&mut index, [keys[0]]);
+        planner.invalidate_cells([keys[2]]);
+        planner.withdraw_cells([keys[2], keys[3], keys[3]]);
+        let first = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(first.removed, keys[2..]);
+        assert_eq!(first.geometry[0].key, keys[0]);
+        assert_eq!(first.triangle_count, 2);
+        assert!(first.content_changed);
+        assert_eq!(planner.pending, keys[2..].iter().copied().collect());
+        assert_eq!(
+            planner
+                .placements()
+                .iter()
+                .map(|p| p.key)
+                .collect::<Vec<_>>(),
+            keys[..2]
+        );
+        planner.recycle(first);
+        for key in &keys[2..] {
+            let next = bounded(&mut planner, &scene, &index, 1);
+            assert_eq!(next.geometry[0].key, *key);
+            assert!(next.removed.is_empty() && next.content_changed);
+            planner.recycle(next);
+        }
+        assert!(!planner.has_pending());
+        planner.withdraw_cells([keys[0]]);
+        let same_call = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(same_call.removed, [keys[0]]);
+        assert_eq!(same_call.geometry[0].key, keys[0]);
+        assert_eq!(same_call.triangle_count, 4);
+        assert!(same_call.content_changed);
+        assert!(!planner.has_pending());
+    }
+
+    #[test]
+    fn revoked_incomplete_cell_is_removed_without_requeue_or_build_allowance() {
+        let (mut scene, mut index, keys) = indexed_cells(2);
+        let mut planner = planner(32);
+        let initial = planner.plan_incremental((&scene).into(), &index).unwrap();
+        planner.recycle(initial);
+        scene.ready_terrain.remove(&keys[0]);
+        publish(&mut index, [keys[0]]);
+        planner.withdraw_cells([keys[0]]);
+        let removal = bounded(&mut planner, &scene, &index, 0);
+        assert_eq!(removal.removed, [keys[0]]);
+        assert_eq!(removal.triangle_count, 1);
+        assert!(removal.geometry.is_empty());
+        assert_eq!(removal.meshes_visited, 0);
+        assert!(!planner.has_pending());
+    }
+
+    #[test]
+    fn failed_resource_reset_or_withdrawal_preserves_requests_and_published_state() {
+        for generation_reset in [false, true] {
+            let (mut scene, index, keys) = indexed_cells(3);
+            let mut planner = planner(1);
+            let initial = planner.plan_incremental((&scene).into(), &index).unwrap();
+            planner.recycle(initial);
+            planner.invalidate_cells([keys[2]]);
+            planner.withdraw_cells([keys[0], keys[2]]);
+            scene.meshes.insert((0, 0), mesh(keys[0].origin(), 3, 0));
+            if generation_reset {
+                scene.terrain_resource_generation += 1;
+            }
+            let old = (
+                planner.terrain_resource_generation,
+                planner.cursor,
+                planner.build_cursor,
+                planner.signatures.clone(),
+            );
+            planner.limits.geometry_records = 2;
+            assert!(
+                planner
+                    .plan_index_limited((&scene).into(), &index, 1, false)
+                    .is_err()
+            );
+            assert_eq!(
+                (
+                    planner.terrain_resource_generation,
+                    planner.cursor,
+                    planner.build_cursor,
+                    planner.signatures.clone()
+                ),
+                old
+            );
+            assert_eq!(planner.withdrawals, [keys[0], keys[2]].into());
+            assert_eq!(planner.invalidated, [keys[2]].into());
+            planner.limits.geometry_records = 8;
+            let retry = bounded(&mut planner, &scene, &index, 1);
+            assert_eq!(
+                retry.removed,
+                if generation_reset {
+                    keys.clone()
+                } else {
+                    vec![keys[0], keys[2]]
+                }
+            );
+            assert_eq!(retry.geometry[0].key, keys[0]);
+            assert_eq!(retry.triangle_count, if generation_reset { 3 } else { 4 });
+            assert!(retry.content_changed);
+            assert!(planner.withdrawals.is_empty());
+        }
+    }
+
+    #[test]
+    fn failed_bounded_plan_preserves_publication_queue_force_flags_and_build_cursor() {
+        let (mut scene, mut index, keys) = indexed_cells(3);
+        let mut planner = planner(1);
+        let first = bounded(&mut planner, &scene, &index, 1);
+        planner.recycle(first);
+        planner.invalidate_cells([keys[0], keys[2]]);
+        scene.meshes.insert((1, 0), mesh(keys[1].origin(), 3, 0));
+        publish(&mut index, [keys[1]]);
+        let before = (
+            planner.cursor,
+            planner.build_cursor,
+            planner.pending.clone(),
+            planner.invalidated.clone(),
+            planner.signatures.clone(),
+        );
+        planner.limits.geometry_records = 2;
+        assert_eq!(
+            planner
+                .plan_index_limited((&scene).into(), &index, 1, false)
+                .err()
+                .unwrap(),
+            "Too many static geometry metadata records"
+        );
+        assert_eq!(
+            (
+                planner.cursor,
+                planner.build_cursor,
+                planner.pending.clone(),
+                planner.invalidated.clone(),
+                planner.signatures.clone()
+            ),
+            before
+        );
+        planner.limits.geometry_records = 8;
+        let retry = bounded(&mut planner, &scene, &index, 1);
+        assert_eq!(retry.geometry[0].key, keys[1]);
+        assert_eq!(retry.triangle_count, 4);
+        assert_eq!(planner.invalidated, [keys[0], keys[2]].into());
+        planner.recycle(retry);
+        scene.anchor[0] = f64::NAN;
+        let cursor = planner.cursor;
+        assert!(
+            planner
+                .plan_index_limited((&scene).into(), &index, 1, false)
+                .is_err()
+        );
+        assert_eq!(planner.cursor, cursor);
+        assert_eq!(planner.pending, [keys[0], keys[2]].into());
+    }
+
     fn assert_local_invalidation(incremental: bool) {
         let first_cell = Cell::containing([0.; 3]).unwrap();
         let second_cell = Cell::containing([64., 0., 0.]).unwrap();
@@ -416,8 +1104,8 @@ mod tests {
         assert!(rebuilt.removed.is_empty());
         assert_eq!(rebuilt.triangle_count, 7);
         assert_eq!(planner.geometry_records, 4);
-        assert_eq!(rebuilt.meshes_visited, if incremental { 1 } else { 2 });
-        assert_eq!(rebuilt.cells_visited, if incremental { 1 } else { 2 });
+        assert_eq!(rebuilt.meshes_visited, 1);
+        assert_eq!(rebuilt.cells_visited, 1);
         assert_eq!(planner.placements().len(), 2);
         planner.recycle(rebuilt);
 

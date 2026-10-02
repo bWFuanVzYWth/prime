@@ -280,7 +280,7 @@ impl Renderer {
         }
     }
 
-    /// The scene owner must prohibit mutations until thawed. Geometry is reused without planning/scanning.
+    /// The source stays immutable until thawed; queued geometry may finish publishing under its budget.
     pub fn set_scene_frozen(&mut self, frozen: bool) {
         self.scene_frozen = frozen;
     }
@@ -492,14 +492,15 @@ impl Renderer {
                     .geometry
                     .as_ref()
                     .is_none_or(|g| g.source_changed(scene));
-                if source_changed {
-                    self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
-                }
                 self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
-                if let Some(geometry) = &mut self.geometry
+                let published_changed = if let Some(geometry) = &mut self.geometry
                     && geometry.same_owner(scene)
                 {
-                    geometry.update(&self.context, scene)?;
+                    geometry.update_limited(
+                        &self.context,
+                        scene,
+                        self.settings.terrain_batches_per_frame as usize,
+                    )?
                 } else {
                     // End the previous CPU owner before constructing another cache domain.
                     if let Some(rr) = &mut self.reconstruction {
@@ -507,14 +508,17 @@ impl Renderer {
                     }
                     // Borrowed GPU resources still retire by their recorded completion serials.
                     self.geometry.take();
-                    self.geometry = Some(Geometry::new_with_omm(
+                    self.geometry = Some(Geometry::new_with_budget(
                         &self.context,
                         scene,
                         self.workers.clone(),
                         self.settings.opacity_micromap,
+                        self.settings.terrain_batches_per_frame as usize,
                     )?);
-                }
-                if source_changed {
+                    true
+                };
+                if source_changed || published_changed {
+                    self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
                     self.samples = 0;
                 }
             }

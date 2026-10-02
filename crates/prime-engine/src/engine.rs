@@ -43,7 +43,11 @@ impl Engine {
         if self.failed || self.frozen_frame.is_some() {
             return Err("renderer cannot request live sections".into());
         }
-        self.minecraft.plan(pages, self.source.epoch())
+        self.minecraft.plan_with_budget(
+            pages,
+            self.source.epoch(),
+            self.settings.terrain_batches_per_frame,
+        )
     }
     pub(crate) fn accept_sections(&mut self, pages: &[&[u8]]) -> Result<&[u8], String> {
         if self.failed || self.frozen_frame.is_some() {

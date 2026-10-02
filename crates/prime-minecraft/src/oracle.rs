@@ -581,8 +581,8 @@ fn fluid_corner_edits_invalidate_diagonal_consumers_and_match_full_recompile() {
         input[8..12].copy_from_slice(&version.to_le_bytes());
         assert_eq!(requests(&mut narrow, &input).len(), 27);
         narrow.accept(&[&initial], &mut narrow_output).unwrap();
-        assert_eq!(narrow.scheduler.active.len(), 3);
-        assert_eq!(narrow.scheduler.cache.len(), 27);
+        assert_eq!(narrow.chunks.active_sections().len(), 3);
+        assert_eq!(narrow.chunks.cached_sections().len(), 27);
         let expected = narrow_output.translate([0.; 3]).unwrap();
         assert!(
             expected

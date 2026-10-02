@@ -1626,14 +1626,19 @@ impl Acceleration {
         arena: &mut Arena,
         geometries: Vec<vk::AccelerationStructureGeometryKHR<'a>>,
         counts: &[u32],
+        allow_disable_micromaps: bool,
     ) -> Result<PreparedAcceleration<'a>, String> {
+        let mut flags = vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE;
+        if allow_disable_micromaps {
+            flags |= vk::BuildAccelerationStructureFlagsKHR::ALLOW_DISABLE_OPACITY_MICROMAPS_EXT;
+        }
         Self::prepare_ranges(
             context,
             arena,
             geometries,
             counts,
             vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL,
-            vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE,
+            flags,
         )
     }
 

@@ -15,6 +15,8 @@
   "primept.settings.render.bounces.tooltip": "1–64 个顶点，默认 12，含首次命中。反射与透射都计入；末顶点估计直接光后停止续接。冻结期间固定。",
   "primept.settings.render.offline_samples": "离线每帧采样数",
   "primept.settings.render.offline_samples.tooltip": "每像素每帧追加的独立样本数。实时固定为 1；修改此项保留已有累积。",
+  "primept.settings.terrain.batches_per_frame": "每帧地形批次",
+  "primept.settings.terrain.batches_per_frame.tooltip": "每帧最多构建的地形网格批次：1–128，默认 8。每批覆盖 4×4×4 个原版区段。冻结期间可调整：已发布地形继续构建，源编译返回实时后恢复。仅改上限不重置累积。",
   "primept.settings.lighting.sun_ev_quarters": "太阳强度",
   "primept.settings.lighting.sun_ev_quarters.tooltip": "相对于默认太阳的曝光档数。太阳方位随游戏时间、观测纬度和季节变化，冻结期间固定。",
   "primept.settings.lighting.sky_ev_quarters": "天空强度",

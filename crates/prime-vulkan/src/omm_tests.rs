@@ -446,6 +446,72 @@ fn gpu_omm_renderer_settings_apply_to_frozen_offline_scene() {
 }
 
 #[test]
+#[ignore = "requires OMM-capable Vulkan hardware; checks deferred BLAS against current alpha"]
+fn gpu_terrain_frame_budget_omm_fallback_preserves_current_coverage() {
+    let context = capable_context();
+    let mut scene = scene(texture(8, 8), [1.; 2], [0.; 2], 1.);
+    let first = scene.meshes[&(1, 1)].clone();
+    for id in 1..4 {
+        let mut mesh = first.clone();
+        mesh.origin[0] = f64::from(id) * 64.;
+        scene
+            .ready_terrain
+            .insert(Cell::containing(mesh.origin).unwrap());
+        scene.meshes.insert((id as u64 + 1, 1), mesh);
+    }
+    let mut current = geometry(&context, &scene, true);
+    assert!(current.omm_stats()[3] > 0);
+    let mut changed = texture(8, 8);
+    let mut pixels = changed.pixels.to_vec();
+    for texel in pixels.as_chunks_mut::<4>().0 {
+        texel[3] = 255 - texel[3];
+    }
+    changed.pixels = pixels.into();
+    scene.textures.insert(7, changed);
+    scene.revision += 1;
+    let reference = geometry(&context, &scene, false);
+    for step in 0..4 {
+        // Coverage invalidation changes resources, but OMM rebinding is content-equivalent.
+        assert!(
+            !current
+                .update_limited(&context, (&scene).into(), 1)
+                .unwrap()
+        );
+        assert_eq!(current.rebuilt_clusters, 1);
+        prepare(&context, &mut current, &scene);
+        for cell in 0..4 {
+            let origin = [cell as f32 * 64., 0., 0.];
+            assert_eq!(
+                query_at(&context, &current, origin),
+                query_at(&context, &reference, origin),
+                "deferred OMM used obsolete alpha at step {step}, cell {cell}"
+            );
+        }
+        assert_eq!(current.needs_update((&scene).into()), step != 3);
+    }
+    for enabled in [false, true] {
+        current.set_omm(enabled);
+        for step in 0..4 {
+            assert!(
+                !current
+                    .update_limited(&context, (&scene).into(), 1)
+                    .unwrap()
+            );
+            assert_eq!(current.rebuilt_clusters, 1);
+            prepare(&context, &mut current, &scene);
+            for cell in 0..4 {
+                let origin = [cell as f32 * 64., 0., 0.];
+                assert_eq!(
+                    query_at(&context, &current, origin),
+                    query_at(&context, &reference, origin),
+                    "bounded OMM toggle {enabled} changed coverage at step {step}, cell {cell}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires OMM-capable Vulkan hardware; validates complete-frame opacity proofs"]
 fn gpu_omm_complete_animation_frames_preserve_coverage_without_rebuilding_blas() {
     let context = capable_context();

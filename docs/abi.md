@@ -247,13 +247,13 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 非空静态层、raw 和原型/实例在提交前必须上传引用的纹理；缺失引用明确报错。所有调用必须在创建 handle 的 OS 线程进行。`prime_destroy` 退休身份，重复释放会报错。调用方必须保证原生指针指向有效读写区域；长度校验不能验证任意地址。
 
-## 设置包（独立 schema v4）
+## 设置包（独立 schema v5）
 
-`prime_configure(handle, data, length)` 借用恰好 68 字节，返回前解析，不保留指针。它没有场景命令头；设置版本独立于场景 ABI。宿主模式改变时必须先提交 encoder，再从外层帧边界调用；native 等待旧 GPU 使用完成，释放旧模式资源后创建新资源。普通显示控制变化不需要切换等待。
+`prime_configure(handle, data, length)` 借用恰好 72 字节，返回前解析，不保留指针。它没有场景命令头；设置版本独立于场景 ABI。宿主模式改变时必须先提交 encoder，再从外层帧边界调用；native 等待旧 GPU 使用完成，释放旧模式资源后创建新资源。普通显示控制及地形批次上限变化不需要切换等待。
 
 | Offset | 类型 | 字段 |
 | --- | --- | --- |
-| 0 / 4 | u32 | settings version=4 / mode（0 实时、1 离线） |
+| 0 / 4 | u32 | settings version=5 / mode（0 实时、1 离线） |
 | 8 / 12 | u32 | 最大路径顶点数 / 离线每帧样本数，均为 1–64 |
 | 16 / 20 / 24 | f32 | 曝光乘数 `[1/4096,4096]` / hue `[0,1]` / saturation `[0,0.5]` |
 | 28 | u32 | view：0 最终输出、1 噪声色、2 线性深度、3 世界法线 |
@@ -264,7 +264,10 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 | 56 | u32 | opacity_micromap：0 关闭、1 自动优先启用；默认 1，仍受设备与表面兼容证明限制 |
 | 60 | u32 | ray_reconstruction：0 关闭、1 请求启用（默认）；固定 preset F |
 | 64 | u32 | reconstruction_quality：0 DLAA、1 Quality、2 Balanced、3 Performance（默认）、4 UltraPerformance |
+| 68 | u32 | terrain_batches_per_frame：每帧地形网格批次上限，1–128，默认 8；每批为 4×4×4 个原版 section |
 
 非法版本、长度、枚举或数值拒绝整个包。冻结要求当前场景对应最近一次成功录制帧，冻结期间拒绝全部 `prime_submit`；输入帧仍须合法，native 只采用其中宽高/序号，其余使用冻结相机。场景有效期、资源上传与可变显示参数见 [渲染模式契约](renderers.md)。
+
+地形批次上限控制 CPU 源编译和后段静态构建两个阶段，各自每帧最多 N 格；不参与 transport 比较，调整上限不重置 RR 历史或离线累积。冻结期间可修改并继续限制已发布源的后段积压，CPU 源编译暂停至恢复实时。实际几何内容变化与等价 OMM 重建的累积处理见 [渲染模式契约](renderers.md)。
 
 OMM 不参与 transport 比较；有限模板及共享像素边界的数值取舍见 [OMM 契约](opacity-micromaps.md)。冻结期间允许切换且保留已有线性累积；启停只使镂空加速结构在后续录制时按当前设置重新绑定已有资源模板，不重新请求宿主源或改变冻结的动画时钟。

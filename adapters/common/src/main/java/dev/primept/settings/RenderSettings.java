@@ -5,11 +5,12 @@ import java.util.Arrays;
 
 /** Immutable client settings. Version adapters own widgets; native consumes the validated wire. */
 public final class RenderSettings {
-    public static final int VERSION = 4;
-    public static final int WIRE_BYTES = 68;
+    public static final int VERSION = 5;
+    public static final int WIRE_BYTES = 72;
     public enum Control {
         BOUNCES("render.bounces", 1, 64, 12),
         OFFLINE_SAMPLES("render.offline_samples", 1, 64, 1),
+        TERRAIN_BATCHES_PER_FRAME("terrain.batches_per_frame", 1, 128, 8),
         LATITUDE("astronomy.latitude_degrees", -90, 90, 30),
         SOLAR_LONGITUDE("astronomy.solar_longitude_degrees", 0, 359, 0),
         SUN_EV("lighting.sun_ev_quarters", -32, 32, 0),
@@ -107,7 +108,8 @@ public final class RenderSettings {
                 .putInt(value(Control.SOLAR_LONGITUDE))
                 .putInt(opacityMicromap ? 1 : 0)
                 .putInt(rayReconstruction ? 1 : 0)
-                .putInt(dlssQuality.ordinal());
+                .putInt(dlssQuality.ordinal())
+                .putInt(value(Control.TERRAIN_BATCHES_PER_FRAME));
     }
     private float multiplier(Control control) {
         return (float)Math.pow(2.0, value(control) / 4.0);

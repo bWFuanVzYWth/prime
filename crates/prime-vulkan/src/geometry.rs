@@ -38,7 +38,10 @@ struct Cluster {
     triangle_count: u64,
     micromaps: Vec<crate::omm::Micromap>,
     omm_textures: BTreeSet<u32>,
+    texture_dependencies: BTreeSet<u32>,
     omm_counts: [u64; 4],
+    // A deferred rebuild must use shader alpha against the current texture coverage.
+    stale_omm: bool,
     cutout: bool,
     light_pages: Vec<Option<Rc<crate::surface::LightPage>>>,
     optical: bool,
@@ -88,11 +91,21 @@ impl Geometry {
     ) -> Result<Self, String> {
         Self::new_with_omm(context, scene, workers, true)
     }
+    #[cfg(test)]
     pub fn new_with_omm(
         context: &Arc<Context>,
         scene: SceneInput<'_>,
         workers: Arc<prime_scene::workers::CpuWorkers>,
         enabled: bool,
+    ) -> Result<Self, String> {
+        Self::new_with_budget(context, scene, workers, enabled, usize::MAX)
+    }
+    pub fn new_with_budget(
+        context: &Arc<Context>,
+        scene: SceneInput<'_>,
+        workers: Arc<prime_scene::workers::CpuWorkers>,
+        enabled: bool,
+        cell_budget: usize,
     ) -> Result<Self, String> {
         let mut uploads = crate::arena::Arena::new(context, true);
         let textures = Textures::new(context, scene.texture_input(), &mut uploads)?;
@@ -148,12 +161,13 @@ impl Geometry {
             omm_prepare_ns: [0; 3],
             omm_work_counts: [0; 2],
         };
-        geometry.update(context, scene)?;
+        geometry.update_limited(context, scene, cell_budget)?;
         Ok(geometry)
     }
     pub fn begin_frame(&mut self, context: &Context, completed: u64) {
         // Frozen frames do not execute an object plan; do not report the prior frame's rebuilds.
         self.objects.rebuilt = 0;
+        self.rebuilt_clusters = 0;
         self.omm_prepare_ns = [0; 3];
         self.omm_work_counts = [0; 2];
         let serial = context.retirement_serial();
@@ -172,7 +186,7 @@ impl Geometry {
         )
     }
     pub fn needs_update(&self, scene: SceneInput<'_>) -> bool {
-        self.omm_dirty || self.source_changed(scene)
+        self.omm_dirty || self.source_changed(scene) || self.static_planner.has_pending()
     }
     pub fn source_changed(&self, scene: SceneInput<'_>) -> bool {
         self.revision != scene.publication() || self.anchor != scene.anchor
@@ -203,12 +217,12 @@ impl Geometry {
     pub fn set_omm(&mut self, enabled: bool) {
         if self.opacity_micromap != enabled {
             self.opacity_micromap = enabled;
-            self.static_planner.invalidate_cells(
-                self.clusters
-                    .iter()
-                    .filter(|(_, c)| c.cutout)
-                    .map(|(&cell, _)| cell),
-            );
+            for (&cell, cluster) in &mut self.clusters {
+                if cluster.cutout {
+                    self.static_planner.invalidate_cells([cell]);
+                    cluster.stale_omm |= !cluster.micromaps.is_empty();
+                }
+            }
             self.omm_dirty = true;
         }
     }
@@ -237,10 +251,21 @@ impl Geometry {
             usize::from(self.has_surfaces)
         }
     }
+    #[cfg(test)]
     pub fn update(&mut self, context: &Arc<Context>, scene: SceneInput<'_>) -> Result<(), String> {
+        self.update_limited(context, scene, usize::MAX).map(|_| ())
+    }
+    /// Returns whether published geometry content changed; equivalent OMM rebuilds do not.
+    pub fn update_limited(
+        &mut self,
+        context: &Arc<Context>,
+        scene: SceneInput<'_>,
+        cell_budget: usize,
+    ) -> Result<bool, String> {
         if scene.anchor.iter().any(|v| !v.is_finite()) {
             return Err("Invalid scene anchor".into());
         }
+        let mut instance_flags_changed = self.omm_dirty;
         if self.epoch != scene.epoch {
             self.textures = Textures::new(context, scene.texture_input(), &mut self.uploads)?;
         } else {
@@ -248,16 +273,28 @@ impl Geometry {
                 .update(context, scene.texture_input(), &mut self.uploads)?;
         }
         if !self.textures.coverage_changed.is_empty() {
-            self.static_planner.invalidate_cells(
-                self.clusters
+            for (&key, cluster) in &mut self.clusters {
+                // A source may retire an identity while its replacement is still queued.
+                // Withdraw old records before a released descriptor can be consumed again.
+                if cluster
+                    .texture_dependencies
                     .iter()
-                    .filter(|(_, c)| {
-                        c.omm_textures
-                            .iter()
-                            .any(|id| self.textures.coverage_changed.contains(id))
-                    })
-                    .map(|(&key, _)| key),
-            );
+                    .any(|id| !self.textures.source.contains_key(id))
+                {
+                    self.static_planner.withdraw_cells([key]);
+                }
+                if cluster
+                    .omm_textures
+                    .iter()
+                    .any(|id| self.textures.coverage_changed.contains(id))
+                {
+                    self.static_planner.invalidate_cells([key]);
+                    if !cluster.micromaps.is_empty() {
+                        instance_flags_changed |= !cluster.stale_omm;
+                        cluster.stale_omm = true;
+                    }
+                }
+            }
         }
         // OMM is a texture resource. Prepare the finite global library even while the
         // setting is off; terrain membership and setting toggles only change bindings.
@@ -293,18 +330,23 @@ impl Geometry {
             self.omm_prepare_ns[2] += start.elapsed().as_nanos() as u64;
             // Global IDs belong to this generation. Rebind all existing cutout BLAS,
             // including those whose source pixels did not change in this reload.
-            self.static_planner.invalidate_cells(
-                self.clusters
-                    .iter()
-                    .filter(|(_, c)| c.cutout)
-                    .map(|(&cell, _)| cell),
-            );
+            for (&cell, cluster) in &mut self.clusters {
+                if cluster.cutout {
+                    self.static_planner.invalidate_cells([cell]);
+                    if !cluster.micromaps.is_empty() {
+                        instance_flags_changed |= !cluster.stale_omm;
+                        cluster.stale_omm = true;
+                    }
+                }
+            }
             self.omm_templates = Some(templates);
         }
         for compiler in &mut self.surface_compilers {
             compiler.set_cutout_squares(self.opacity_micromap);
         }
-        let mut plan = self.static_planner.plan_input(scene)?;
+        let mut plan = self.static_planner.plan_input_limited(scene, cell_budget)?;
+        plan.placements_changed |= instance_flags_changed;
+        let published_changed = plan.content_changed;
         self.workers.batches_mut(
             &mut self.surface_compilers,
             &mut plan.geometry,
@@ -525,6 +567,7 @@ impl Geometry {
                         &mut self.builds,
                         geometries,
                         &counts,
+                        micromaps.iter().any(Option::is_some),
                     )?,
                     micromaps,
                     omm_textures,
@@ -608,7 +651,13 @@ impl Geometry {
                         cutout: update.geometries.iter().any(|g| g.flags == 1),
                         micromaps: maps.into_iter().flatten().map(|m| m.finish(&mut self.builds, &mut self.uploads)).collect(),
                         omm_textures,
+                        texture_dependencies: {
+                            let mut ids = BTreeSet::new();
+                            for plan in plans { plan.texture_dependencies(&mut ids); }
+                            ids
+                        },
                         omm_counts,
+                        stale_omm: false,
                         allocations: allocations.clone(),
                         acceleration: build.finish(&mut self.builds),
                         triangle_count: update
@@ -628,7 +677,7 @@ impl Geometry {
             self.revision = scene.publication();
             self.anchor = scene.anchor;
             self.static_planner.recycle(plan);
-            return Ok(());
+            return Ok(false);
         }
         let light_sources = self
             .clusters
@@ -698,7 +747,13 @@ impl Geometry {
                 instance_custom_index_and_mask: vk::Packed24_8::new(index as u32, 0xff),
                 instance_shader_binding_table_record_offset_and_flags: vk::Packed24_8::new(
                     0,
-                    vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE.as_raw() as u8,
+                    (vk::GeometryInstanceFlagsKHR::TRIANGLE_FACING_CULL_DISABLE
+                        | if cluster.stale_omm {
+                            vk::GeometryInstanceFlagsKHR::DISABLE_OPACITY_MICROMAPS_EXT
+                        } else {
+                            vk::GeometryInstanceFlagsKHR::empty()
+                        })
+                    .as_raw() as u8,
                 ),
                 acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
                     device_handle: cluster.acceleration.address(),
@@ -741,7 +796,7 @@ impl Geometry {
         self.omm_dirty = false;
         self.revision = scene.publication();
         self.anchor = scene.anchor;
-        Ok(())
+        Ok(published_changed)
     }
 
     pub fn prepare_dynamic<'a>(
@@ -889,6 +944,107 @@ mod tests {
                 })
                 .into(),
         }
+    }
+
+    #[test]
+    #[ignore = "requires Vulkan; checks bounded publication, frozen accumulation and cancellation"]
+    fn gpu_terrain_frame_budget_drains_frozen_scene_and_matches_full_build() {
+        use prime_scene::settings::{RenderMode, RenderSettings};
+        let settings = RenderSettings {
+            mode: RenderMode::Offline,
+            bounces: 1,
+            ..Default::default()
+        };
+        let mut scene = Scene {
+            epoch: 1,
+            revision: 1,
+            ..Default::default()
+        };
+        for id in 0..17 {
+            scene.ready_terrain.insert(cell([id, 0, 0]));
+            scene.meshes.insert(
+                (id as u64, 0),
+                mesh(id as f32 * 64., 0, [0.8, 0.2, 0.1, 1.]),
+            );
+        }
+        let camera = Camera {
+            position: [512., 0., 1200.],
+            forward: [0., 0., -1.],
+            right: [1., 0., 0.],
+            up: [0., 1., 0.],
+            vertical_fov_radians: 1.,
+        };
+        let mut renderer = Renderer::with_mode(RenderMode::Offline).unwrap();
+        renderer.configure(settings).unwrap();
+        let mut reference = Renderer::with_mode(RenderMode::Offline).unwrap();
+        reference
+            .configure(RenderSettings {
+                terrain_batches_per_frame: 128,
+                ..settings
+            })
+            .unwrap();
+        let expected = reference.render(&scene, &camera, 96, 48, 0).unwrap();
+        let mut final_pixels = Vec::new();
+        let mut atmosphere = renderer.atmosphere_scene_revision;
+        for (frame, (built, resident)) in [(8, 8), (8, 16), (1, 17)].into_iter().enumerate() {
+            final_pixels = renderer
+                .render(&scene, &camera, 96, 48, frame as u32)
+                .unwrap();
+            let geometry = renderer.geometry.as_ref().unwrap();
+            assert_eq!(geometry.rebuilt_clusters, built);
+            assert_eq!(geometry.clusters.len(), resident);
+            assert_eq!(geometry.triangle_count, resident as u64 * 2);
+            assert_eq!(
+                renderer.samples, 1,
+                "new geometry must discard partial-scene history"
+            );
+            assert!(renderer.atmosphere_scene_revision > atmosphere);
+            atmosphere = renderer.atmosphere_scene_revision;
+            renderer.set_scene_frozen(true);
+        }
+        assert_eq!(
+            final_pixels, expected,
+            "drained bounded build differs from full build"
+        );
+        renderer
+            .configure(RenderSettings {
+                terrain_batches_per_frame: 1,
+                ..settings
+            })
+            .unwrap();
+        renderer.render(&scene, &camera, 96, 48, 3).unwrap();
+        assert_eq!(
+            renderer.samples, 2,
+            "budget-only changes must preserve history"
+        );
+        assert_eq!(renderer.atmosphere_scene_revision, atmosphere);
+        assert_eq!(renderer.geometry.as_ref().unwrap().rebuilt_clusters, 0);
+
+        // Replace every resident cell and withdraw a queued cell before it is rebuilt.
+        renderer.set_scene_frozen(false);
+        for mesh in scene.meshes.values_mut() {
+            mesh.revision += 1;
+        }
+        scene.revision += 1;
+        renderer.render(&scene, &camera, 96, 48, 4).unwrap();
+        assert_eq!(renderer.geometry.as_ref().unwrap().rebuilt_clusters, 1);
+        scene.meshes.remove(&(16, 0));
+        scene.ready_terrain.remove(&cell([16, 0, 0]));
+        scene.revision += 1;
+        renderer.render(&scene, &camera, 96, 48, 5).unwrap();
+        let geometry = renderer.geometry.as_ref().unwrap();
+        assert_eq!(geometry.rebuilt_clusters, 1);
+        assert_eq!(geometry.clusters.len(), 16);
+        assert!(!geometry.clusters.contains_key(&cell([16, 0, 0])));
+
+        // An epoch change discards all old published and queued work before the new quota.
+        scene.epoch += 1;
+        scene.revision += 1;
+        renderer.render(&scene, &camera, 96, 48, 6).unwrap();
+        let geometry = renderer.geometry.as_ref().unwrap();
+        assert_eq!(geometry.rebuilt_clusters, 1);
+        assert_eq!(geometry.clusters.len(), 1);
+        assert_eq!(geometry.triangle_count, 2);
     }
 
     #[test]

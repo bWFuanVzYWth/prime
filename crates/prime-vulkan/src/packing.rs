@@ -5,7 +5,11 @@ use prime_scene::{
     geometry::{Quad, TriangleView},
     surface::{Emission, SurfaceFace},
 };
-use std::{collections::BTreeMap, mem::MaybeUninit, ops::Range};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    mem::MaybeUninit,
+    ops::Range,
+};
 
 pub(crate) const FORMATS: usize = 4;
 pub(crate) const MAX_RECORDS: u32 = ((1_u64 << 32) / 432) as u32;
@@ -210,6 +214,31 @@ impl<'a> Plan<'a> {
             .iter()
             .map(|g| g.count as usize * stride(g.format))
             .sum()
+    }
+    /// Identities embedded in these packed records, read without expanding source quads.
+    pub fn texture_dependencies(&self, ids: &mut BTreeSet<u32>) {
+        for source in &self.sources {
+            match source.input.triangles {
+                TriangleView::Triangles(values) => ids.extend(values.iter().map(|v| v.texture_id)),
+                TriangleView::Quads { values, .. } => {
+                    ids.extend(values.iter().map(|v| v.texture_id))
+                }
+                TriangleView::Surfaces { values, .. } => {
+                    for face in values {
+                        ids.insert(face.geometry.texture_id);
+                        if let Some(detail) = &face.detail {
+                            ids.insert(detail.layer.texture_id);
+                        }
+                        if let Some(optics) = &face.optics {
+                            ids.extend(optics.ior_textures.into_iter().flatten());
+                        }
+                    }
+                }
+                TriangleView::QuadFragments { .. } => unreachable!("flattened source"),
+            }
+        }
+        ids.remove(&0);
+        ids.remove(&u32::MAX);
     }
     /// The exact packed record order, including half-quad capacity splits. Consumers such as
     /// opacity micromaps must use this order rather than the original source triangle order.

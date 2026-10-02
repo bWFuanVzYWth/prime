@@ -3,7 +3,9 @@
 #![forbid(unsafe_code)]
 mod biome;
 mod biome_source;
+mod chunks;
 mod compile;
+mod compile_queue;
 mod contact;
 pub mod environment;
 mod fluid;
@@ -29,7 +31,7 @@ use prime_scene::{
     compiled::{CompiledQuad, CompiledSection},
     workers::CpuWorkers,
 };
-use schedule::{Demand, FrameInput, Scheduler, Section};
+use schedule::{Demand, FrameInput, Section};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     time::Instant,
@@ -142,142 +144,10 @@ impl SectionData {
     }
 }
 
-/// Packed masks for the section surface. Only the layouts actually seen are initialized;
-/// palette IDs and section contents do not participate in this immutable layout cache.
-fn boundary_word_masks(bits: u32) -> &'static [u64] {
-    static MASKS: [std::sync::OnceLock<Box<[u64]>>; 33] =
-        [const { std::sync::OnceLock::new() }; 33];
-    MASKS[bits as usize].get_or_init(|| {
-        let per_word = 64 / bits as usize;
-        let field = (1_u64 << bits) - 1;
-        let mut masks = vec![0; 4096_usize.div_ceil(per_word)];
-        for index in 0..4096 {
-            if [index & 15, index >> 8, (index >> 4) & 15]
-                .iter()
-                .any(|&v| v == 0 || v == 15)
-            {
-                masks[index / per_word] |= field << ((index % per_word) * bits as usize);
-            }
-        }
-        masks.into_boxed_slice()
-    })
-}
-
-/// Mask of the exact neighboring section regions whose one-cell dependencies changed.
-fn changed_boundaries(
-    before: Option<&SectionData>,
-    after: Option<&SectionData>,
-    catalog: &Catalog,
-) -> u32 {
-    let differs = |index| {
-        let a = before.map(|d| d.state(index));
-        let b = after.map(|d| d.state(index));
-        if a == b {
-            return false;
-        }
-        match (
-            a.and_then(|id| catalog.states.get(&id)),
-            b.and_then(|id| catalog.states.get(&id)),
-        ) {
-            (Some(a), Some(b)) => !a.same_boundary(b),
-            (None, None) => false,
-            // Known air supplies a contact proof; an unavailable halo supplies none.
-            (Some(_), None) | (None, Some(_)) => true,
-        }
-    };
-    const ALL: u32 = ((1 << 27) - 1) ^ (1 << 13);
-    if before.is_none_or(|d| d.bits == 0) && after.is_none_or(|d| d.bits == 0) {
-        return if differs(0) { ALL } else { 0 };
-    }
-    let mut changed = 0;
-    let mut visit = |index: usize| {
-        let [x, y, z] = [index & 15, index >> 8, (index >> 4) & 15];
-        let side = |v| {
-            if v == 0 {
-                -1
-            } else if v == 15 {
-                1
-            } else {
-                0
-            }
-        };
-        let [dx, dy, dz] = [x, y, z].map(side);
-        if [dx, dy, dz] == [0; 3] || !differs(index) {
-            return;
-        }
-        for ox in [0, dx] {
-            for oy in [0, dy] {
-                for oz in [0, dz] {
-                    changed |= 1 << ((oy + 1) * 9 + (oz + 1) * 3 + ox + 1);
-                }
-            }
-        }
-    };
-    // Identical palette/layout proves identical words have identical source semantics. Visit
-    // only changed packed fields, ignoring unused high bits and final-word padding. A local
-    // edit usually needs no boundary state lookup at all; layout changes use the full surface.
-    if let (Some(a), Some(b)) = (before, after)
-        && a.bits == b.bits
-        && a.palette == b.palette
-    {
-        let mask = (1_u64 << a.bits) - 1;
-        for (word, ((&a_word, &b_word), &surface)) in a
-            .storage
-            .iter()
-            .zip(&b.storage)
-            .zip(boundary_word_masks(a.bits))
-            .enumerate()
-        {
-            let mut delta = (a_word ^ b_word) & surface;
-            while delta != 0 {
-                let lane = delta.trailing_zeros() as usize / a.bits as usize;
-                let index = word * a.per_word + lane;
-                visit(index);
-                delta &= !(mask << (lane * a.bits as usize));
-            }
-        }
-        return changed & ALL;
-    }
-    for y in 0..16 {
-        for z in 0..16 {
-            if y == 0 || y == 15 || z == 0 || z == 15 {
-                for x in 0..16 {
-                    visit(y * 256 + z * 16 + x);
-                }
-            } else {
-                visit(y * 256 + z * 16);
-                visit(y * 256 + z * 16 + 15);
-            }
-        }
-    }
-    changed & ALL
-}
-fn invalidate_neighbors(
-    key: Section,
-    changed: impl FnOnce() -> u32,
-    active: &HashSet<Section>,
-    compile: &mut HashSet<Section>,
-) {
-    let neighbors = key.halo();
-    // The closed batch compiles every queued consumer after all source updates. No boundary
-    // query can add work when every active neighbor is already queued (notably first load).
-    if !neighbors
-        .iter()
-        .any(|n| *n != key && active.contains(n) && !compile.contains(n))
-    {
-        return;
-    }
-    let changed = changed();
-    for (i, n) in neighbors.into_iter().enumerate() {
-        if changed & (1 << i) != 0 && active.contains(&n) {
-            compile.insert(n);
-        }
-    }
-}
-
 struct Pending {
     input: FrameInput,
     demand: Demand,
+    cell_budget: usize,
 }
 enum ColorStage {
     Sources,
@@ -287,28 +157,23 @@ struct AwaitingColors {
     stage: ColorStage,
     batch: u64,
     jobs: Vec<Job>,
-    ordered: Vec<Section>,
+    selection: compile_queue::Selection,
     removed: BTreeSet<Section>,
     aliases: Vec<usize>,
+    reset_catalog: bool,
 }
 #[derive(Default)]
 pub struct TerrainContext {
     epoch: u64,
     version: u32,
     last_batch: u64,
-    scheduler: Scheduler,
+    chunks: chunks::ChunkManager,
     catalog: Catalog,
     animation_tick: Option<u64>,
     animated: Vec<u32>,
     textures: Vec<(u32, prime_scene::Texture)>,
-    sections: HashMap<Section, SectionData>,
-    available: HashMap<[i32; 3], u8>,
-    renderable: HashSet<[i32; 3]>,
     pending: Option<Pending>,
     awaiting_colors: Option<AwaitingColors>,
-    tinted: HashSet<Section>,
-    biomes: biome::Cache,
-    biome_sources: biome_source::Cache,
     tint_requests: Vec<u8>,
     requests: Vec<u8>,
     workers: Option<CpuWorkers>,
@@ -343,6 +208,7 @@ struct Stats {
     requested: usize,
     changed: usize,
     compiled: usize,
+    compiled_cells: usize,
     jobs: usize,
     bytes: usize,
     triangles: usize,
@@ -351,37 +217,30 @@ struct Stats {
     availability_updates: usize,
 }
 impl TerrainContext {
-    fn update_availability(
-        &mut self,
-        key: Section,
-        present: bool,
-        touched: &mut HashSet<[i32; 3]>,
-    ) {
-        let cell = [
-            key.0.div_euclid(4),
-            key.1.div_euclid(4),
-            key.2.div_euclid(4),
-        ];
-        if present {
-            *self.available.entry(cell).or_default() += 1;
-        } else {
-            let count = self
-                .available
-                .get_mut(&cell)
-                .expect("available active section");
-            *count -= 1;
-            if *count == 0 {
-                self.available.remove(&cell);
-            }
-        }
-        touched.insert(cell);
-        #[cfg(test)]
-        {
-            self.stats.availability_updates += 1;
-        }
+    pub fn plan(&mut self, pages: &[&[u8]], source_epoch: u64) -> Result<&[u8], String> {
+        self.plan_budget(pages, source_epoch, usize::MAX)
     }
 
-    pub fn plan(&mut self, pages: &[&[u8]], source_epoch: u64) -> Result<&[u8], String> {
+    /// Production entry: finish source capture now, but compile at most this many cells.
+    /// Deferred compilation resumes on subsequent live batches, not while offline is frozen.
+    pub fn plan_with_budget(
+        &mut self,
+        pages: &[&[u8]],
+        source_epoch: u64,
+        cell_budget: u32,
+    ) -> Result<&[u8], String> {
+        if !(1..=128).contains(&cell_budget) {
+            return Err("terrain build budget must be between 1 and 128 cells".into());
+        }
+        self.plan_budget(pages, source_epoch, cell_budget as usize)
+    }
+
+    fn plan_budget(
+        &mut self,
+        pages: &[&[u8]],
+        source_epoch: u64,
+        cell_budget: usize,
+    ) -> Result<&[u8], String> {
         let start = Instant::now();
         if self.pending.is_some() || self.awaiting_colors.is_some() {
             return Err("previous source batch still awaiting completion".into());
@@ -402,20 +261,17 @@ impl TerrainContext {
         if input.version != self.version || input.batch <= self.last_batch {
             return Err("stale section request frame/version".into());
         }
-        let demand = self.scheduler.plan(&input);
+        let demand = self.chunks.plan(&input);
         self.requests.clear();
         u64_to(&mut self.requests, input.batch);
         u64_to(&mut self.requests, demand.requests.len() as u64);
         u64_to(&mut self.requests, demand.columns.len() as u64);
-        u64_to(&mut self.requests, self.scheduler.active.len() as u64);
+        u64_to(&mut self.requests, self.chunks.active_len() as u64);
         for &s in &demand.requests {
             for v in [s.0, s.1, s.2] {
                 u32_to(&mut self.requests, v as u32);
             }
-            u32_to(
-                &mut self.requests,
-                u32::from(self.scheduler.active.contains(&s)),
-            );
+            u32_to(&mut self.requests, u32::from(self.chunks.is_active(&s)));
         }
         for &(x, z, active) in &demand.columns {
             for v in [x, z, i32::from(active)] {
@@ -428,7 +284,11 @@ impl TerrainContext {
             plan_ms: start.elapsed().as_secs_f64() * 1000.0,
             ..Stats::default()
         };
-        self.pending = Some(Pending { input, demand });
+        self.pending = Some(Pending {
+            input,
+            demand,
+            cell_budget,
+        });
         Ok(&self.requests)
     }
 
@@ -608,11 +468,13 @@ impl TerrainContext {
         }
         scene.validate_textures(&textures)?;
         self.textures = textures;
-        let Pending { input, demand } = self.pending.take().unwrap();
+        let Pending {
+            input,
+            demand,
+            cell_budget,
+        } = self.pending.take().unwrap();
         if demand.reset_catalog {
             self.catalog = Catalog::default();
-            self.biomes = biome::Cache::default();
-            self.biome_sources = biome_source::Cache::default();
             self.animated.clear();
         }
         self.animation_tick = Some(input.tick);
@@ -634,135 +496,26 @@ impl TerrainContext {
         } else if added_fluids {
             self.catalog.refresh_contact_capability();
         }
-        // Membership changed during planning; only previously available sections contribute.
-        // Source responses below then apply their availability changes to this same batch.
-        let mut availability_cells = HashSet::new();
-        for &key in &demand.removed {
-            if self.sections.contains_key(&key) {
-                self.update_availability(key, false, &mut availability_cells);
-            }
+        let chunks::CompileBatch {
+            selection,
+            removed,
+            reset_catalog,
+            changed,
+        } = self
+            .chunks
+            .accept_sources(&input, demand, received, &self.catalog, cell_budget);
+        self.stats.changed = changed;
+        #[cfg(test)]
+        {
+            self.stats.availability_updates = self.chunks.availability_updates();
         }
-        for &key in &demand.compile {
-            if self.sections.contains_key(&key) {
-                self.update_availability(key, true, &mut availability_cells);
-            }
-        }
-        let mut compile = demand.compile;
-        // Merge invalidations before filtering consumers. A burst of chunk arrivals must
-        // not scan every tinted section once for every arriving column.
-        let mut tint_all = false;
-        let mut tint_columns = HashSet::new();
-        let mut biome_columns = HashSet::new();
-        for &(kind, key) in &input.events {
-            if kind == 7 {
-                tint_all = true;
-            }
-            // Unloading a column also changes getBiome's missing-column fallback.
-            if kind == 6 || kind == 2 {
-                biome_columns.insert((key.0, key.2));
-                for x in key.0 - 1..=key.0 + 1 {
-                    for z in key.2 - 1..=key.2 + 1 {
-                        tint_columns.insert((x, z));
-                    }
-                }
-            }
-        }
-        if tint_all || !tint_columns.is_empty() {
-            compile.extend(
-                self.tinted
-                    .iter()
-                    .copied()
-                    .filter(|s| tint_all || tint_columns.contains(&(s.0, s.2))),
-            );
-        }
-        self.biomes.invalidate(tint_all, &biome_columns);
-        self.biome_sources.invalidate(tint_all, &biome_columns);
-        for &key in &demand.removed {
-            self.biomes.forget(key);
-            self.biome_sources.forget(key);
-        }
-        for key in demand.forget {
-            self.biomes.forget(key);
-            self.biome_sources.forget(key);
-            if let Some(old) = self.sections.remove(&key) {
-                invalidate_neighbors(
-                    key,
-                    || changed_boundaries(Some(&old), None, &self.catalog),
-                    &self.scheduler.active,
-                    &mut compile,
-                );
-            }
-        }
-        let mut removed: BTreeSet<_> = demand.removed.into_iter().collect();
-        for (key, data) in received {
-            let Some(data) = data else {
-                if let Some(old) = self.sections.remove(&key) {
-                    if self.scheduler.active.contains(&key) {
-                        removed.insert(key);
-                        self.update_availability(key, false, &mut availability_cells);
-                    }
-                    invalidate_neighbors(
-                        key,
-                        || changed_boundaries(Some(&old), None, &self.catalog),
-                        &self.scheduler.active,
-                        &mut compile,
-                    );
-                }
-                continue;
-            };
-            let previous = self.sections.get(&key);
-            let newly_available = previous.is_none() && self.scheduler.active.contains(&key);
-            if previous == Some(&data) && !demand.reset_catalog {
-                // A host event may have changed a neighbor; preserve its independently planned compile.
-            } else {
-                self.stats.changed += 1;
-                if self.scheduler.active.contains(&key) {
-                    compile.insert(key);
-                }
-                invalidate_neighbors(
-                    key,
-                    || changed_boundaries(self.sections.get(&key), Some(&data), &self.catalog),
-                    &self.scheduler.active,
-                    &mut compile,
-                );
-            }
-            if newly_available {
-                self.update_availability(key, true, &mut availability_cells);
-            }
-            self.sections.insert(key, data);
-        }
-        let contacts = !availability_cells.is_empty() && self.catalog.has_contacts();
-        for cell in availability_cells {
-            let changed = if self.available.get(&cell) == Some(&64) {
-                self.renderable.insert(cell)
-            } else {
-                self.renderable.remove(&cell)
-            };
-            if changed && contacts {
-                // A one-cell halo can observe this ownership change only within these sections.
-                for x in cell[0] * 4 - 1..=cell[0] * 4 + 4 {
-                    for y in cell[1] * 4 - 1..=cell[1] * 4 + 4 {
-                        for z in cell[2] * 4 - 1..=cell[2] * 4 + 4 {
-                            let key = Section(x, y, z);
-                            if self.scheduler.active.contains(&key) {
-                                compile.insert(key);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        compile.retain(|s| self.scheduler.active.contains(s) && self.sections.contains_key(s));
-        removed.retain(|s| !compile.contains(s));
         self.stats.decode_ms = start.elapsed().as_secs_f64() * 1000.0;
         self.stats.bytes = pages.iter().map(|p| p.len()).sum();
         let compile_start = Instant::now();
-        let mut ordered: Vec<_> = compile.into_iter().collect();
-        ordered.sort_unstable();
         // Four equal-height slabs share costly sections. Both phases join on the same private pool.
         let mut jobs = Vec::new();
-        for &key in &ordered {
-            if !self.sections[&key].empty(&self.catalog) {
+        for &key in &selection.sections {
+            if !self.chunks.sources()[&key].empty(&self.catalog) {
                 for first_y in [0, 4, 8, 12] {
                     jobs.push(Job {
                         key,
@@ -783,20 +536,22 @@ impl TerrainContext {
                 self.workers = Some(CpuWorkers::configured()?);
             }
             let catalog = &self.catalog;
-            let sections = &self.sections;
+            let sections = self.chunks.sources();
+            let renderable = self.chunks.renderable_cells();
             self.workers
                 .as_ref()
                 .unwrap()
                 .chunks_mut(&mut jobs, 1, |_, output| {
                     for job in output {
-                        compile::compile_contacts(job, catalog, sections, &self.renderable);
+                        compile::compile_contacts(job, catalog, sections, renderable);
                     }
                     Ok(())
                 })?;
         }
         self.stats.kernel_ms = kernel_start.elapsed().as_secs_f64() * 1000.;
         self.stats.jobs = jobs.len();
-        self.stats.compiled = ordered.len();
+        self.stats.compiled = selection.sections.len();
+        self.stats.compiled_cells = selection.cell_count();
         self.stats.compile_ms = compile_start.elapsed().as_secs_f64() * 1000.;
         let tint_start = Instant::now();
         let mut count = 0usize;
@@ -828,7 +583,7 @@ impl TerrainContext {
             u32_to(&mut self.tint_requests, version);
             u32_to(
                 &mut self.tint_requests,
-                if self.biome_sources.definitions.is_none() {
+                if self.chunks.biome_sources().definitions.is_none() {
                     2
                 } else {
                     0
@@ -847,13 +602,14 @@ impl TerrainContext {
                 aliases,
                 batch,
                 jobs,
-                ordered,
+                selection,
                 removed,
+                reset_catalog,
             });
             self.stats.tint_pack_ms = tint_start.elapsed().as_secs_f64() * 1000.;
             return Ok(());
         }
-        self.finalize(jobs, ordered, removed, batch, scene, None)
+        self.finalize(jobs, selection, removed, batch, scene, None, reset_catalog)
     }
     /// Session-owned read-only view; valid until the next mutable source call.
     pub fn tint_requests(&self) -> &[u8] {
@@ -893,13 +649,13 @@ impl TerrainContext {
             }
             let definitions = match r.u32()? {
                 0 => None,
-                1 if self.biome_sources.definitions.is_none() => {
+                1 if self.chunks.biome_sources().definitions.is_none() => {
                     Some(biome_source::Definitions::read(&mut r)?)
                 }
                 _ => return Err("unexpected biome definitions".into()),
             };
             if definitions.is_none()
-                && self.biome_sources.definitions.is_none()
+                && self.chunks.biome_sources().definitions.is_none()
                 && recipes
                     .iter()
                     .any(|recipe| matches!(recipe, biome::Recipe::Biome { .. }))
@@ -908,13 +664,13 @@ impl TerrainContext {
             }
             r.finish()?;
             if let Some(definitions) = definitions {
-                self.biome_sources.definitions = Some(definitions);
+                self.chunks.biome_sources_mut().definitions = Some(definitions);
             }
             self.stats.tint_callbacks = callbacks;
             self.stats.tint_decode_ms += start.elapsed().as_secs_f64() * 1000.;
             let prepare = Instant::now();
             let recipes: Vec<_> = waiting.aliases.iter().map(|&i| recipes[i]).collect();
-            let plan = self.biomes.prepare(
+            let plan = self.chunks.biomes_mut().prepare(
                 waiting
                     .jobs
                     .iter()
@@ -928,7 +684,7 @@ impl TerrainContext {
             self.stats.biome_cached_samples = plan.cached_samples;
             if !plan.samples.is_empty() {
                 let source_start = Instant::now();
-                let source = self.biome_sources.prepare(&plan.samples);
+                let source = self.chunks.biome_sources_mut().prepare(&plan.samples);
                 self.stats.biome_source_ms = source_start.elapsed().as_secs_f64() * 1000.;
                 self.stats.biome_pages = source.requests.len();
                 self.stats.biome_host_cells = source
@@ -960,7 +716,7 @@ impl TerrainContext {
                 colors = self.finish_biome_colors(plan, source, None);
             } else {
                 let filter = Instant::now();
-                colors = self.biomes.finish(plan, &[]);
+                colors = self.chunks.biomes_mut().finish(plan, &[]);
                 self.stats.biome_filter_ms = filter.elapsed().as_secs_f64() * 1000.;
             }
             pending = self.awaiting_colors.take().unwrap();
@@ -968,7 +724,7 @@ impl TerrainContext {
             let ColorStage::Biomes(_, source) = &waiting.stage else {
                 unreachable!()
             };
-            let response = self.biome_sources.read_response(source, &mut r)?;
+            let response = self.chunks.biome_sources().read_response(source, &mut r)?;
             r.finish()?;
             self.stats.tint_decode_ms += start.elapsed().as_secs_f64() * 1000.;
             pending = self.awaiting_colors.take().unwrap();
@@ -982,11 +738,12 @@ impl TerrainContext {
         self.tint_requests.clear();
         self.finalize(
             pending.jobs,
-            pending.ordered,
+            pending.selection,
             pending.removed,
             pending.batch,
             scene,
             Some(&colors),
+            pending.reset_catalog,
         )
     }
     fn finish_biome_colors(
@@ -996,12 +753,13 @@ impl TerrainContext {
         response: Option<biome_source::Response>,
     ) -> Vec<u32> {
         let start = Instant::now();
-        let raw = self
-            .biome_sources
-            .finish(source, response, &plan.samples, self.version);
+        let raw =
+            self.chunks
+                .biome_sources_mut()
+                .finish(source, response, &plan.samples, self.version);
         self.stats.biome_source_ms += start.elapsed().as_secs_f64() * 1000.;
         let start = Instant::now();
-        let colors = self.biomes.finish(plan, &raw);
+        let colors = self.chunks.biomes_mut().finish(plan, &raw);
         self.stats.biome_filter_ms = start.elapsed().as_secs_f64() * 1000.;
         colors
     }
@@ -1009,21 +767,19 @@ impl TerrainContext {
     fn finalize(
         &mut self,
         mut jobs: Vec<Job>,
-        ordered: Vec<Section>,
+        selection: compile_queue::Selection,
         removed: BTreeSet<Section>,
         batch: u64,
         scene: &mut SourceScene,
         colors: Option<&[u32]>,
+        reset_catalog: bool,
     ) -> Result<(), String> {
         let finalize_start = Instant::now();
-        for key in ordered.iter().chain(&removed) {
-            self.tinted.remove(key);
-        }
-        self.tinted.extend(
-            jobs.iter()
-                .filter(|j| !j.tints.requests.is_empty())
-                .map(|j| j.key),
-        );
+        let tinted: Vec<_> = jobs
+            .chunks(4)
+            .filter(|group| group.iter().any(|job| !job.tints.requests.is_empty()))
+            .map(|group| group[0].key)
+            .collect();
         if !jobs.is_empty() {
             self.workers
                 .as_ref()
@@ -1065,8 +821,8 @@ impl TerrainContext {
                 })?;
         }
         let mut jobs = jobs.into_iter().peekable();
-        let mut replacements = Vec::with_capacity(ordered.len());
-        for key in ordered {
+        let mut replacements = Vec::with_capacity(selection.sections.len());
+        for &key in &selection.sections {
             let mut compiled = None;
             while jobs.peek().is_some_and(|j| j.key == key) {
                 let job = jobs.next().unwrap();
@@ -1084,13 +840,26 @@ impl TerrainContext {
         self.stats.finalize_ms = finalize_start.elapsed().as_secs_f64() * 1000.;
         self.stats.compile_ms += self.stats.finalize_ms;
         let publish_start = Instant::now();
-        let mut publication = scene.publish_compiled_with_textures(
-            self.epoch,
-            batch,
-            replacements,
-            &removed.iter().map(|s| s.key()).collect::<Vec<_>>(),
-            std::mem::take(&mut self.textures),
-        )?;
+        let removed_keys: Vec<_> = removed.iter().map(|s| s.key()).collect();
+        let textures = std::mem::take(&mut self.textures);
+        let mut publication = if reset_catalog {
+            scene.replace_compiled_resource_generation(
+                self.epoch,
+                batch,
+                replacements,
+                &removed_keys,
+                textures,
+            )?
+        } else {
+            scene.publish_compiled_with_textures(
+                self.epoch,
+                batch,
+                replacements,
+                &removed_keys,
+                textures,
+            )?
+        };
+        self.chunks.published(&selection, &removed, tinted);
         self.stats.published_layers = publication.replaced_layers;
         self.stats.retained_layers = publication.retained_layers;
         self.stats.publish_ms = publish_start.elapsed().as_secs_f64() * 1000.0;
@@ -1104,7 +873,7 @@ impl TerrainContext {
         let s = &self.stats;
         let h = s.hacks;
         format!(
-            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} jobs={} source_bytes={} tint_requests={} tint_callbacks={} tint_bytes={} tint_pack={:.3} tint_decode={:.3} biome_samples={} biome_cached_samples={} biome_hits={} biome_plan={:.3} biome_filter={:.3} biome_source={:.3} biome_host_cells={} biome_pages={} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={},optics={},sprite={}) placement_unknown(offset={},seed={})]",
+            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} compiled_cells={} pending_cells={} jobs={} source_bytes={} tint_requests={} tint_callbacks={} tint_bytes={} tint_pack={:.3} tint_decode={:.3} biome_samples={} biome_cached_samples={} biome_hits={} biome_plan={:.3} biome_filter={:.3} biome_source={:.3} biome_host_cells={} biome_pages={} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={},optics={},sprite={}) placement_unknown(offset={},seed={})]",
             self.epoch,
             self.pending
                 .as_ref()
@@ -1125,6 +894,8 @@ impl TerrainContext {
             s.requested,
             s.changed,
             s.compiled,
+            s.compiled_cells,
+            self.chunks.pending_cells(),
             s.jobs,
             s.bytes,
             s.tint_requests,
@@ -1141,8 +912,8 @@ impl TerrainContext {
             s.biome_host_cells,
             s.biome_pages,
             s.triangles,
-            self.sections.len(),
-            self.scheduler.active.len(),
+            self.chunks.sources().len(),
+            self.chunks.active_len(),
             h.model,
             h.tint,
             h.offset,
@@ -1165,6 +936,8 @@ struct Job {
     color_start: usize,
 }
 
+#[cfg(test)]
+mod budget_tests;
 #[cfg(test)]
 mod oracle;
 #[cfg(test)]

@@ -440,10 +440,40 @@ impl SourceScene {
         removed: &[u64],
         textures: Vec<(u32, crate::Texture)>,
     ) -> Result<Publication, String> {
+        self.publish_compiled_resource_batch(epoch, sequence, sections, removed, textures, false)
+    }
+
+    /// Atomically publish a replacement catalog and revoke downstream terrain from the old one.
+    /// The producer must include every old section not rebuilt for this catalog in `removed`.
+    /// Deferred GPU consumers observe the generation even if they missed intervening batches.
+    pub fn replace_compiled_resource_generation(
+        &mut self,
+        epoch: u64,
+        sequence: u64,
+        sections: Vec<CompiledSection>,
+        removed: &[u64],
+        textures: Vec<(u32, crate::Texture)>,
+    ) -> Result<Publication, String> {
+        self.publish_compiled_resource_batch(epoch, sequence, sections, removed, textures, true)
+    }
+
+    fn publish_compiled_resource_batch(
+        &mut self,
+        epoch: u64,
+        sequence: u64,
+        sections: Vec<CompiledSection>,
+        removed: &[u64],
+        textures: Vec<(u32, crate::Texture)>,
+        reset_catalog: bool,
+    ) -> Result<Publication, String> {
         self.validate_textures(&textures)?;
         self.revision
-            .checked_add(2)
+            .checked_add(2 + u64::from(reset_catalog))
             .ok_or("scene revision exhausted")?;
+        let generation = self
+            .terrain_resource_generation
+            .checked_add(u64::from(reset_catalog))
+            .ok_or("terrain resource generation exhausted")?;
         let available = textures.iter().map(|(id, _)| *id).collect();
         let publication = self.publish_compiled_with_ior_textures(
             epoch,
@@ -454,6 +484,10 @@ impl SourceScene {
         )?;
         self.set_textures(textures)
             .expect("validated texture batch under exclusive scene ownership");
+        if reset_catalog {
+            self.terrain_resource_generation = generation;
+            self.revision += 1;
+        }
         Ok(publication)
     }
 

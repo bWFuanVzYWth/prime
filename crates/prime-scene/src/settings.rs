@@ -35,6 +35,7 @@ pub struct RenderSettings {
     pub mode: RenderMode,
     pub bounces: u32,
     pub offline_samples: u32,
+    pub terrain_batches_per_frame: u32,
     pub exposure: f32,
     pub hue: f32,
     pub saturation: f32,
@@ -54,6 +55,7 @@ impl Default for RenderSettings {
             mode: RenderMode::Realtime,
             bounces: 12,
             offline_samples: 1,
+            terrain_batches_per_frame: 8,
             exposure: 1.0,
             hue: 0.75,
             saturation: 0.08,
@@ -69,11 +71,11 @@ impl Default for RenderSettings {
     }
 }
 impl RenderSettings {
-    pub const VERSION: u32 = 4;
-    pub const BYTES: usize = 68;
+    pub const VERSION: u32 = 5;
+    pub const BYTES: usize = 72;
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != Self::BYTES {
-            return Err("Settings require exactly 68 bytes".into());
+            return Err("Settings require exactly 72 bytes".into());
         }
         let word = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
         if word(0) != Self::VERSION {
@@ -91,6 +93,7 @@ impl RenderSettings {
             },
             bounces: word(8),
             offline_samples: word(12),
+            terrain_batches_per_frame: word(68),
             exposure: f32::from_bits(word(16)),
             hue: f32::from_bits(word(20)),
             saturation: f32::from_bits(word(24)),
@@ -131,6 +134,7 @@ impl RenderSettings {
         self.astronomy.validate()?;
         if !(1..=64).contains(&self.bounces)
             || !(1..=64).contains(&self.offline_samples)
+            || !(1..=128).contains(&self.terrain_batches_per_frame)
             || !(1.0 / 4096.0..=4096.0).contains(&self.exposure)
             || !(0.0..=1.0).contains(&self.hue)
             || !(0.0..=0.5).contains(&self.saturation)
@@ -156,7 +160,7 @@ mod tests {
     use super::*;
     fn golden() -> Vec<u8> {
         [
-            4_u32,
+            5_u32,
             1,
             12,
             1,
@@ -173,6 +177,7 @@ mod tests {
             1,
             1,
             3,
+            8,
         ]
         .into_iter()
         .flat_map(u32::to_le_bytes)
@@ -197,7 +202,8 @@ mod tests {
             (0, 1),
             (0, 2),
             (0, 3),
-            (0, 5),
+            (0, 4),
+            (0, 6),
             (48, 91),
             (48, (-91i32) as u32),
             (52, 360),
@@ -209,12 +215,16 @@ mod tests {
             (56, 2),
             (60, 2),
             (64, 5),
+            (68, 0),
+            (68, 129),
+            (68, u32::MAX),
         ] {
             let mut invalid = bytes.clone();
             invalid[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
             assert!(RenderSettings::parse(&invalid).is_err());
         }
         assert!(RenderSettings::parse(&bytes[..47]).is_err());
+        assert!(RenderSettings::parse(&bytes[..68]).is_err());
         let mut longer = bytes;
         longer.push(0);
         assert!(RenderSettings::parse(&longer).is_err());
@@ -246,6 +256,41 @@ mod tests {
             ..enabled
         };
         assert!(enabled.transport_matches(disabled));
+    }
+    #[test]
+    fn terrain_batch_budget_defaults_range_and_transport_independence() {
+        let defaults = RenderSettings::default();
+        assert_eq!(defaults.terrain_batches_per_frame, 8);
+        for budget in 1..=128_u32 {
+            let mut bytes = golden();
+            bytes[68..72].copy_from_slice(&budget.to_le_bytes());
+            assert_eq!(
+                RenderSettings::parse(&bytes)
+                    .unwrap()
+                    .terrain_batches_per_frame,
+                budget
+            );
+            for mode in [RenderMode::Realtime, RenderMode::Offline] {
+                let before = RenderSettings { mode, ..defaults };
+                let after = RenderSettings {
+                    terrain_batches_per_frame: budget,
+                    ..before
+                };
+                assert!(after.validate().is_ok());
+                assert!(before.transport_matches(after));
+                assert!(after.transport_matches(before));
+            }
+        }
+        for budget in [0, 129, u32::MAX] {
+            assert!(
+                RenderSettings {
+                    terrain_batches_per_frame: budget,
+                    ..defaults
+                }
+                .validate()
+                .is_err()
+            );
+        }
     }
     #[test]
     fn ray_reconstruction_is_enabled_by_default_and_is_not_a_transport_change() {

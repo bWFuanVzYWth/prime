@@ -20,6 +20,8 @@ mod omm_cpu;
 #[cfg(all(test, feature = "shader-tests"))]
 mod omm_tests;
 mod openpbr;
+#[cfg(all(test, feature = "shader-tests"))]
+mod terrain_budget_tests;
 pub use display::{PrimeDrtParameters, PrimeDrtSettings};
 mod geometry;
 mod material_arena;

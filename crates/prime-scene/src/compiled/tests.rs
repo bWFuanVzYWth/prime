@@ -33,6 +33,56 @@ fn triangle() -> Triangle {
 }
 
 #[test]
+fn resource_generation_is_atomic_and_survives_identical_and_skipped_publications() {
+    let mut source = scene();
+    let mut translated = crate::incremental::TranslatedScene::default();
+    let initial = plan(&source, vec![triangle()]);
+    source.publish_compiled(1, 1, vec![initial], &[]).unwrap();
+    translated.update(&mut source, [0.; 3]).unwrap();
+    let revision = source.revision();
+    let invalid = plan(&source, vec![triangle()]);
+    assert!(
+        source
+            .replace_compiled_resource_generation(2, 2, vec![invalid], &[], vec![])
+            .is_err()
+    );
+    assert_eq!(source.revision(), revision);
+    assert_eq!(source.terrain_resource_generation, 0);
+
+    let retained = plan(&source, vec![triangle()]);
+    source
+        .replace_compiled_resource_generation(1, 2, vec![retained], &[], vec![])
+        .unwrap();
+    assert_eq!(source.terrain_resource_generation, 1);
+    assert!(
+        source.revision() > revision,
+        "identical content still revokes the resource generation"
+    );
+    let retained = plan(&source, vec![triangle()]);
+    source.publish_compiled(1, 3, vec![retained], &[]).unwrap();
+    translated.update(&mut source, [0.; 3]).unwrap();
+    assert_eq!(translated.input().terrain_resource_generation, 1);
+    assert_eq!(
+        source
+            .translate([0.; 3])
+            .unwrap()
+            .terrain_resource_generation,
+        1
+    );
+
+    source.terrain_resource_generation = u64::MAX;
+    let retained = plan(&source, vec![triangle()]);
+    let revision = source.revision();
+    assert!(
+        source
+            .replace_compiled_resource_generation(1, 4, vec![retained], &[], vec![])
+            .is_err()
+    );
+    assert_eq!(source.revision(), revision);
+    assert_eq!(source.section_completed, SectionSequence(3));
+}
+
+#[test]
 fn optical_reference_publication_is_atomic_and_holds_texture_until_last_surface_release() {
     use crate::surface::{Medium, Optics, SurfaceFace};
     let mut scene = scene();

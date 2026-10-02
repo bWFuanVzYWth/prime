@@ -63,11 +63,15 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=4", "version=0"),
-                     valid.replace("version=4", "version=3"),
-                     valid.replace("version=4", "version=5"), valid.replace("version=4", ""),
+                     valid.replace("version=5", "version=0"),
+                     valid.replace("version=5", "version=4"),
+                     valid.replace("version=5", "version=6"), valid.replace("version=5", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
+                     valid.replace("terrain.batches_per_frame=8", ""),
+                     valid.replace("terrain.batches_per_frame=8", "terrain.batches_per_frame=0"),
+                     valid.replace("terrain.batches_per_frame=8", "terrain.batches_per_frame=129"),
+                     valid.replace("terrain.batches_per_frame=8", "terrain.batches_per_frame=NaN"),
                      valid.replace("renderer.path_tracing=false", "renderer.path_tracing=maybe"),
                      valid.replace("render.opacity_micromap=true", ""),
                      valid.replace("render.opacity_micromap=true", "render.opacity_micromap=maybe"),
@@ -94,8 +98,8 @@ final class SettingsTest {
                      () -> original.with(RenderSettings.Control.BOUNCES, 0));
         var bytes = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
         changed.write(bytes, true, RenderSettings.View.NORMAL);
-        assertEquals(68, bytes.position());
-        assertEquals(4, bytes.getInt(0));
+        assertEquals(72, bytes.position());
+        assertEquals(5, bytes.getInt(0));
         assertEquals(1, bytes.getInt(4));
         assertEquals(12, bytes.getInt(8));
         assertEquals(1, bytes.getInt(12));
@@ -112,6 +116,33 @@ final class SettingsTest {
         assertEquals(1, bytes.getInt(56));
         assertEquals(1, bytes.getInt(60));
         assertEquals(3, bytes.getInt(64));
+        assertEquals(8, bytes.getInt(68));
+    }
+    @Test
+    void terrainBatchBudgetDefaultsRangePersistenceAndIndependentWire(@TempDir Path dir) {
+        var control = RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME;
+        var defaults = RenderSettings.defaults();
+        assertEquals(8, defaults.value(control));
+        assertEquals(8,
+                     SettingsFile.load(dir.resolve("absent.properties")).settings().value(control));
+        var before = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        var after = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        for (int budget = 1; budget <= 128; ++budget) {
+            var changed = defaults.with(control, budget);
+            assertEquals(changed, SettingsFile.decode(SettingsFile.encode(changed)).settings());
+            for (boolean offline : new boolean[] {false, true}) {
+                defaults.write(before, offline, RenderSettings.View.OUTPUT);
+                changed.write(after, offline, RenderSettings.View.OUTPUT);
+                assertEquals(72, after.position());
+                assertEquals(budget, after.getInt(68));
+                assertArrayEquals(java.util.Arrays.copyOf(before.array(), 68),
+                                  java.util.Arrays.copyOf(after.array(), 68));
+            }
+        }
+        assertNotEquals(defaults, defaults.with(control, 1));
+        assertEquals(8, defaults.value(control));
+        assertThrows(IllegalArgumentException.class, () -> defaults.with(control, 0));
+        assertThrows(IllegalArgumentException.class, () -> defaults.with(control, 129));
     }
     @Test
     void opacityMicromapIsEnabledByDefaultAndCanBePersistedAndToggled() {

@@ -404,6 +404,8 @@ pub struct InstanceScene {
 pub struct Scene {
     pub revision: u64,
     pub epoch: u64,
+    /// Explicit catalog replacements revoke old terrain even when a consumer defers rebuilds.
+    pub terrain_resource_generation: u64,
     pub anchor: [f64; 3],
     pub meshes: BTreeMap<MeshKey, SceneMesh>,
     /// Only cells with all 64 complete source sections may publish static geometry.
@@ -482,6 +484,7 @@ pub struct SourceScene {
     pub(crate) id: crate::incremental::ContextId,
     pub(crate) epoch: u64,
     pub(crate) revision: u64,
+    pub(crate) terrain_resource_generation: u64,
     pub(crate) meshes: BTreeMap<(u64, u32), Mesh>,
     /// Complete source snapshots, including observed empty sections; absence is unknown.
     pub(crate) sections: TerrainAvailability,
@@ -593,6 +596,7 @@ impl SourceScene {
         Ok(Scene {
             revision: self.revision,
             epoch: self.epoch,
+            terrain_resource_generation: self.terrain_resource_generation,
             anchor,
             meshes,
             ready_terrain: self.sections.ready.clone(),
