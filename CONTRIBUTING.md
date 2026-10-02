@@ -109,11 +109,14 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 .\scripts\test-streamline-gpu.ps1 -InitializationOnly
 .\scripts\test-streamline-gpu.ps1
 .\scripts\test-reconstruction-cpu.ps1
-# 独立 PowerShell 会话；仅验证重建显示 pass，不创建窗口或执行 DLSS 模型。
+# 独立 PowerShell 会话；验证生产 K1/guide 图像和重建显示，不创建窗口或执行 DLSS 模型。
 $env:PRIME_VK_VALIDATION = '1'
 $env:VK_LAYER_VALIDATE_SYNC = '1'
+cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_primary_ -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_rr_display_fallback_upscale_and_orientation -- --ignored --nocapture --test-threads=1
 ```
+
+`gpu_primary_` 同时覆盖 K1 内部交接和生产 `PrimaryRrGuides` 的实际图像读回：固定几何/相机/jitter 下跨 lighting seed 的通道一致性、共享查询与分支重放、roulette/吸收后 guide 完成、反射/透射的对称预算不足、TIR、reset、动态前态缺失、奇数尺寸及 Halton/相机运动。普通粗糙表面的 post motion 检查调用生产 helper，但 K2 hit distance 是显式合成输入，不代表完整 K2→RR 验证。
 
 `test-streamline-gpu.ps1` 在独立 Vulkan 1.2 设备上调用生产桥接和真实 SDK，不创建窗口；启用 validation 和同步验证，默认验证回调与 Minecraft 一样对 ERROR 返回 `VK_TRUE`。初始化检查不执行模型；完整检查执行 Performance / preset F 的 960×540 → 1920×1080 重建、等待完成并读回预填 NaN 的输出，检查 RGB 是否全部被有限非零值覆盖。两种检查均要求零 validation error，日志、SDK 锁定哈希和运行结果保存在独立 `artifacts/streamline-gpu/` 目录；API 返回成功或有效读回不能覆盖验证层失败。此合成输入测试不能替代实际游戏画质、呈现和性能验收。
 
@@ -121,11 +124,23 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_rr_display
 
 性能基准仍固定原生1920×1080：使用DLAA或关闭RR，固定场景、seed和射线预算记录CPU/GPU、稳态/更新与离群值；Performance等降低内部尺寸的结果另列，不称为原生1080p性能。重建同步/资源合同见[重建文档](docs/reconstruction.md)。
 
+K1 局部成本可用以下独立实验。旧/新 SPIR-V 必须来自冻结源码、同一编译工具链和优化参数，并与测试夹具的绑定及 push ABI 兼容；两臂保留相同常量环境和 report 写入，均排除 post helper。缺少任一文件会失败，不自动选择基线。测试固定原生1920×1080、相同相机/seed/预算，覆盖 opaque、水及玻璃＋镜面，以 AB/BA 顺序各保留12次预热和48次正式采样；时间戳仅包围 K1 dispatch。CSV 保留离群值，旁置文本记录设备和输入产物；另保存源码版本、产物哈希和工具链。该结果不包含 K2、post、DLSS 模型或显示，不能外推为完整 RR 帧时。
+
+```powershell
+# 单独的性能会话，不与其他 GPU 作业并行；替换为匹配夹具的实际产物路径。
+$env:PRIME_VK_VALIDATION = '0'
+$env:VK_LAYER_VALIDATE_SYNC = '0'
+$env:PRIME_RR_K1_BEFORE_SPV = 'C:\path\before-k1-fixture.spv'
+$env:PRIME_RR_K1_AFTER_SPV = 'C:\path\after-k1-fixture.spv'
+$env:PRIME_RR_K1_COST_CSV = [IO.Path]::GetFullPath('artifacts\rr-guide-k1-cost.csv')
+cargo test -p prime_vulkan --features shader-tests --release --lib --locked gpu_rr_k1_timestamp_ab_ba -- --ignored --nocapture --test-threads=1
+```
+
 纯文档修改核对事实、命令和链接即可。代码修改按受影响的契约选择以下入口，记录实际执行结果及未覆盖范围。
 
 RR、折射 eta 与反弹预算的数学合同可以无 GPU 运行 `./scripts/test-roulette-cpu.ps1`：使用当前 Slang 实际生成的 C++ 和 clang++ 执行生产数学/BSDF 核，覆盖概率重加权、介质进出、TIR、薄壁、异常值与终端预算。需要 Slang 和 clang++；输出默认保存在忽略的 `artifacts/roulette-cpu`。这个 CPU 验证不创建 Vulkan 设备，不代替 shader SPIR-V 校验或用户实际画面与性能验收。
 
-`./scripts/test-pbr-delta-cpu.ps1` 执行实际Slang生成的窄delta/guide数学，覆盖Full入口对拍、纯delta首透明0.5条件估计器、TIR/薄壁/IOR=1、法线分布分类、共享与分离方向一致性及guide能量；GPU对应入口为 `gpu_pbr_delta_and_guide_contracts`。`./scripts/test-primary-psr-cpu.ps1` 覆盖实际PSR数学的虚拟位置、反射顺序、静态零motion、动态/厚折射对应失效与退化拒绝。
+`./scripts/test-pbr-delta-cpu.ps1` 执行实际Slang生成的窄delta/guide数学，覆盖Full入口对拍、纯delta首透明0.5条件估计器、TIR/薄壁/IOR=1、法线分布分类、共享与分离方向一致性及guide能量；GPU对应入口为 `gpu_pbr_delta_and_guide_contracts`。`./scripts/test-primary-psr-cpu.ps1` 覆盖实际PSR数学的反射平面展开、反射顺序、静态零motion、厚折射终点切平面代理、动态前态缺失与退化拒绝。固定平面反射可精确展开；折射代理是近似对应，不是逆 Snell 映射，缺少动态前态仍不能声明有效 motion。
 
 ### 大气资产与无窗口验证
 
@@ -167,7 +182,7 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```powershell
 $env:PRIME_VK_VALIDATION = '1'
 $env:VK_LAYER_VALIDATE_SYNC = '1'
-cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip cost_matrix --skip packing::perf --skip realtime_perf_tests --nocapture --test-threads=1
+cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip cost_matrix --skip packing::perf --skip realtime_perf_tests --skip gpu_rr_k1_timestamp_ab_ba --nocapture --test-threads=1
 ```
 
 这些测试覆盖 cutout、累积、尺寸变化、增量场景和宿主资源退休；小尺寸/奇数尺寸用于边界检查，不是性能数据。改变宿主集成或捕获时，还需在对应 MC 适配器实际运行，检查主图像与 HUD、资源重载、世界退出等相关生命周期。更新公共接口时验证受影响的两个适配器；编译通过不证明 Mixin 注入或实际 GPU 功能正常。

@@ -5,6 +5,45 @@ pub(super) type Matrix = [f32; 16];
 pub(super) const NEAR: f32 = 0.01;
 pub(super) const FAR: f32 = 1_000_000.0;
 
+/// Binding 17: previous camera, jitter/history, then current camera for post reconstruction.
+pub(super) fn camera_constants(
+    current: Camera,
+    previous: Camera,
+    aspect: f32,
+    jitter: [f32; 2],
+    valid: bool,
+) -> [u8; 144] {
+    let camera_values = |camera: Camera| {
+        [
+            camera.position[0],
+            camera.position[1],
+            camera.position[2],
+            (camera.vertical_fov_radians * 0.5).tan(),
+            camera.forward[0],
+            camera.forward[1],
+            camera.forward[2],
+            aspect,
+            camera.right[0],
+            camera.right[1],
+            camera.right[2],
+            0.0,
+            camera.up[0],
+            camera.up[1],
+            camera.up[2],
+            0.0,
+        ]
+    };
+    let mut bytes = [0; 144];
+    let values = camera_values(previous)
+        .into_iter()
+        .chain([jitter[0], jitter[1], f32::from(valid), 0.0])
+        .chain(camera_values(current));
+    for (destination, value) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(values) {
+        *destination = value.to_le_bytes();
+    }
+    bytes
+}
+
 pub(super) fn jitter(frame: u32, render_width: u32, output_width: u32) -> [f32; 2] {
     let ratio = output_width as f32 / render_width as f32;
     let phases = (8.0 * ratio * ratio).ceil().clamp(8.0, 256.0) as u32;
@@ -122,6 +161,35 @@ pub(super) fn camera_cut(current: Camera, previous: Camera) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn camera_uniform_preserves_previous_prefix_and_appends_current_camera() {
+        let previous = camera();
+        let mut current = previous;
+        current.position = [11.0, 13.0, 17.0];
+        current.vertical_fov_radians = 1.3;
+        let bytes = camera_constants(current, previous, 2.0, [-0.25, 0.125], true);
+        let values: Vec<_> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|v| f32::from_le_bytes(*v))
+            .collect();
+        assert_eq!(bytes.len(), 144);
+        assert_eq!(&values[..3], &previous.position);
+        assert_eq!(values[3], (previous.vertical_fov_radians * 0.5).tan());
+        assert_eq!(&values[4..7], &previous.forward);
+        assert_eq!(values[7], 2.0);
+        assert_eq!(&values[16..20], &[-0.25, 0.125, 1.0, 0.0]);
+        assert_eq!(&values[20..23], &current.position);
+        assert_eq!(values[23], (current.vertical_fov_radians * 0.5).tan());
+        assert_eq!(&values[24..27], &current.forward);
+        assert_eq!(values[27], 2.0);
+        assert_eq!(&values[28..31], &current.right);
+        assert_eq!(&values[32..35], &current.up);
+        assert_eq!((values[31], values[35]), (0.0, 0.0));
+        let reset = camera_constants(current, current, 2.0, [0.0; 2], false);
+        assert_eq!(&reset[72..76], &0.0f32.to_le_bytes());
+    }
     fn camera() -> Camera {
         Camera {
             position: [3.0, 7.0, 2.0],

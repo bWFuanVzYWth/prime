@@ -21,7 +21,7 @@
 namespace {
 static_assert(sizeof(PrimeSlInit) == 32);
 static_assert(sizeof(PrimeSlImage) == 48);
-static_assert(sizeof(PrimeSlFrame) == 856);
+static_assert(sizeof(PrimeSlFrame) == 904);
 static_assert(offsetof(PrimeSlFrame, images) == 472);
 
 thread_local char error_text[512]{};
@@ -188,7 +188,8 @@ bool valid_frame(const Context &ctx, const PrimeSlFrame &frame) {
     const uint32_t formats[] = {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R32_SFLOAT,
                                 VK_FORMAT_R16G16_SFLOAT,       VK_FORMAT_R16G16B16A16_SFLOAT,
                                 VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16B16A16_SFLOAT,
-                                VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16_SFLOAT};
+                                VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16_SFLOAT,
+                                VK_FORMAT_R16G16_SFLOAT};
     for (uint32_t index = 0; index < PRIME_SL_IMAGE_COUNT; ++index) {
         if (index == PRIME_SL_SPECULAR_HIT_DISTANCE && absent(frame.images[index]))
             continue;
@@ -205,7 +206,7 @@ bool valid_frame(const Context &ctx, const PrimeSlFrame &frame) {
     return true;
 }
 
-sl::Constants make_constants(const PrimeSlFrame &frame) {
+sl::Constants make_constants(const PrimeSlFrame &frame, PrimeSlSize size) {
     sl::Constants constants;
     copy_matrix(constants.cameraViewToClip, frame.view_to_clip);
     copy_matrix(constants.clipToCameraView, frame.clip_to_view);
@@ -213,7 +214,9 @@ sl::Constants make_constants(const PrimeSlFrame &frame) {
     copy_matrix(constants.prevClipToClip, frame.previous_clip_to_clip);
     identity(constants.clipToLensClip);
     constants.jitterOffset = {frame.jitter[0], frame.jitter[1]};
-    constants.mvecScale = {1.0f, 1.0f};
+    // SL multiplies these by the render extent before passing NGX its MV scale.
+    // Both dense motion fields already contain input-pixel displacement.
+    constants.mvecScale = {1.0f / size.render_width, 1.0f / size.render_height};
     constants.cameraPinholeOffset = {0.0f, 0.0f};
     constants.cameraPos = {frame.camera_position[0], frame.camera_position[1],
                            frame.camera_position[2]};
@@ -225,7 +228,8 @@ sl::Constants make_constants(const PrimeSlFrame &frame) {
     constants.cameraFar = frame.camera_far;
     constants.cameraFOV = frame.camera_fov;
     constants.cameraAspectRatio = frame.camera_aspect;
-    constants.motionVectorsInvalidValue = -65504.0f;
+    // DLSSD does not forward motionVectorsInvalidValue to NGX. Unknown motion is
+    // handled by the engine's completion mask, never by a magic vector value.
     constants.depthInverted = sl::Boolean::eFalse;
     constants.cameraMotionIncluded = sl::Boolean::eTrue;
     constants.motionVectors3D = sl::Boolean::eFalse;
@@ -269,7 +273,7 @@ VkResult present_with_hooks(Context *context, PFN_vkQueuePresentKHR present, VkQ
 } // namespace
 
 extern "C" uint32_t prime_sl_abi_version() {
-    return 1;
+    return 2;
 }
 extern "C" const char *prime_sl_last_error() {
     return error_text;
@@ -403,7 +407,7 @@ extern "C" int32_t prime_sl_evaluate(void *context, const PrimeSlFrame *frame) {
     sl::FrameToken *token{};
     if ((result = check(ctx.get_token(token, &frame->frame_index), "slGetNewFrameToken")))
         return result;
-    auto constants = make_constants(*frame);
+    auto constants = make_constants(*frame, ctx.size);
     if ((result = check(ctx.set_constants(constants, *token, ctx.viewport), "slSetConstants")))
         return result;
     constexpr sl::BufferType types[] = {sl::kBufferTypeScalingInputColor,
@@ -413,14 +417,17 @@ extern "C" int32_t prime_sl_evaluate(void *context, const PrimeSlFrame *frame) {
                                         sl::kBufferTypeAlbedo,
                                         sl::kBufferTypeSpecularAlbedo,
                                         sl::kBufferTypeScalingOutputColor,
-                                        sl::kBufferTypeSpecularHitDistance};
+                                        sl::kBufferTypeSpecularHitDistance,
+                                        sl::kBufferTypeSpecularMotionVectors};
     std::array<sl::Resource, PRIME_SL_IMAGE_COUNT> resources;
     std::array<sl::ResourceTag, PRIME_SL_IMAGE_COUNT> tags;
     std::array<const sl::BaseStructure *, PRIME_SL_IMAGE_COUNT + 1> inputs{};
     inputs[0] = &ctx.viewport;
     uint32_t count = 1;
     for (uint32_t index = 0; index < PRIME_SL_IMAGE_COUNT; ++index) {
-        if (absent(frame->images[index]))
+        // Select the explicit specular-motion path for the entire viewport.
+        // Distance belongs to the engine's post reconstruction, not SDK fallback.
+        if (index == PRIME_SL_SPECULAR_HIT_DISTANCE || absent(frame->images[index]))
             continue;
         resources[index] = make_resource(frame->images[index]);
         const sl::Extent extent{0, 0, frame->images[index].width, frame->images[index].height};

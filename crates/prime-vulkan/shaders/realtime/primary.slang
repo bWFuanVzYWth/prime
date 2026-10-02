@@ -17,12 +17,11 @@ import "realtime/primary_environment.slang";
 
 public static const uint PRIME_PRIMARY_BRANCH_DOMAIN = 1536u;
 
-// This seed is stored only after the two paths diverge. It has no lighting contribution state.
-// The five planes temporarily alias K2's not-yet-published common landing allocation.
+// No lighting contribution state. A detached active seed aliases unpublished common planes
+// 0..3; the complementary primary branch uses RR-only planes 7..10 until K1 consumes it.
 struct PrimePrimaryGuideSeed {
     float3 origin;
     float coneWidth;
-    float3 previous;
     uint bounce;
     float3 direction;
     float mediumIor;
@@ -34,40 +33,42 @@ PrimePrimaryGuideSeed primePrimaryEmptySeed() {
     return seed;
 }
 
-void primePrimaryStoreSeed(PrimaryParameters parameters, uint index, PrimePrimaryGuideSeed seed) {
+void primePrimaryStoreSeed(PrimaryParameters parameters, uint index, PrimePrimaryGuideSeed seed,
+                           uint basePlane = 0) {
     uint count = parameters.sampling.x * parameters.sampling.y;
-    primeRealtimeStorePlane(parameters.commonAddress, count, index, 0,
+    primeRealtimeStorePlane(parameters.commonAddress, count, index, basePlane,
                             float4(seed.origin, seed.coneWidth));
-    primeRealtimeStorePlane(
-            parameters.commonAddress, count, index, 1,
-            float4(seed.previous,
-                   asfloat(seed.bounce | ((seed.psr.flags | PRIME_PRIMARY_GUIDE_SEED) << 8))));
-    primeRealtimeStorePlane(parameters.commonAddress, count, index, 2,
+    primeRealtimeStorePlane(parameters.commonAddress, count, index, basePlane + 1,
                             float4(seed.direction, seed.mediumIor));
-    primeRealtimeStorePlane(parameters.commonAddress, count, index, 3, seed.psr.directionLength);
-    primeRealtimeStorePlane(parameters.commonAddress, count, index, 4, seed.psr.rotation);
+    primeRealtimeStorePlane(parameters.commonAddress, count, index, basePlane + 2,
+                            seed.psr.rotation);
+    primeRealtimeStorePlane(
+            parameters.commonAddress, count, index, basePlane + 3,
+            float4(seed.psr.translation,
+                   asfloat(seed.bounce | ((seed.psr.flags | PRIME_PRIMARY_GUIDE_SEED) << 8))));
 }
 
-PrimePrimaryGuideSeed primePrimaryLoadSeed(PrimaryParameters parameters, uint index) {
+PrimePrimaryGuideSeed primePrimaryLoadSeed(PrimaryParameters parameters, uint index,
+                                           uint basePlane = 0) {
     uint count = parameters.sampling.x * parameters.sampling.y;
-    float4 ray = primeRealtimeLoadPlane(parameters.commonAddress, count, index, 0);
-    float4 physical = primeRealtimeLoadPlane(parameters.commonAddress, count, index, 1);
-    float4 direction = primeRealtimeLoadPlane(parameters.commonAddress, count, index, 2);
+    float4 ray = primeRealtimeLoadPlane(parameters.commonAddress, count, index, basePlane);
+    float4 direction =
+            primeRealtimeLoadPlane(parameters.commonAddress, count, index, basePlane + 1);
+    float4 translation =
+            primeRealtimeLoadPlane(parameters.commonAddress, count, index, basePlane + 3);
     PrimePrimaryGuideSeed seed;
     seed.origin = ray.xyz;
     seed.coneWidth = ray.w;
-    seed.previous = physical.xyz;
-    seed.bounce = asuint(physical.w) & 0xffu;
+    seed.bounce = asuint(translation.w) & 0xffu;
     seed.direction = direction.xyz;
     seed.mediumIor = direction.w;
-    seed.psr = {primeRealtimeLoadPlane(parameters.commonAddress, count, index, 3),
-                primeRealtimeLoadPlane(parameters.commonAddress, count, index, 4),
-                asuint(physical.w) >> 8};
+    seed.psr = {primeRealtimeLoadPlane(parameters.commonAddress, count, index, basePlane + 2),
+                translation.xyz, asuint(translation.w) >> 8};
     return seed;
 }
 
 PrimePrimaryGuideSeed primePrimaryFinishInactive(PrimaryParameters parameters, uint index,
-                                                 bool detached, float3 radiance,
+                                                 bool detached, bool companion, float3 radiance,
                                                  float primaryDistance) {
     // Load every seed plane before publishing the overlapping landing/status.
     PrimePrimaryGuideSeed seed =
@@ -75,17 +76,21 @@ PrimePrimaryGuideSeed primePrimaryFinishInactive(PrimaryParameters parameters, u
     primeStoreInactiveLanding(parameters.commonAddress,
                               parameters.sampling.x * parameters.sampling.y, index);
     parameters.prefixAddress[index] = float4(radiance, primaryDistance);
+    if (companion)
+        seed.psr.flags |= PRIME_PRIMARY_GUIDE_COMPANION;
     return seed;
 }
 
 PrimePrimaryGuideSeed primePrimaryFinishLanding(PrimaryParameters parameters, uint index,
-                                                bool detached, PrimeLanding landing,
+                                                bool detached, bool companion, PrimeLanding landing,
                                                 float3 radiance, float primaryDistance) {
     PrimePrimaryGuideSeed seed =
             detached ? primePrimaryLoadSeed(parameters, index) : primePrimaryEmptySeed();
     primeStoreLanding(parameters.commonAddress, parameters.opticalAddress,
                       parameters.sampling.x * parameters.sampling.y, index, landing);
     parameters.prefixAddress[index] = float4(radiance, primaryDistance);
+    if (companion)
+        seed.psr.flags |= PRIME_PRIMARY_GUIDE_COMPANION;
     return seed;
 }
 
@@ -97,24 +102,21 @@ PrimePbrVertex primePrimaryMaterial(SurfaceHit hit, float3 direction) {
                           (hit.materialFlags & 2) != 0, hit.materialThin, hit.optical, -direction);
 }
 
-PrimePrimaryGuideSeed primePrimaryNextGuide(PrimaryParameters parameters, SurfacePoint surface,
-                                            PrimePbrVertex material, float3 incoming,
-                                            float3 previous, float coneWidth, uint bounce,
-                                            float4 incident, float4 transmitted,
-                                            PrimePbrGuideDirection next, PrimePrimaryPsr psr,
-                                            bool staticGeometry) {
+PrimePrimaryGuideSeed primePrimaryNextGuide(SurfacePoint surface, PrimePbrVertex material,
+                                            float coneWidth, uint bounce, float4 incident,
+                                            float4 transmitted, PrimePbrGuideDirection next,
+                                            PrimePrimaryPsr psr, bool staticGeometry) {
     bool reflection = (next.eventFlags & PRIME_BSDF_EVENT_REFLECTION) != 0;
     bool refracted =
             !reflection && !primePbrVertexIsThinWalled(material) && incident.x != transmitted.x;
     PrimePrimaryGuideSeed seed;
     seed.origin = spawnRay(surface, next.direction);
-    seed.previous = surface.position;
     seed.coneWidth = coneWidth;
     seed.bounce = bounce + 1u;
     seed.direction = next.direction;
     seed.mediumIor = next.nextIor;
-    seed.psr = primePrimaryPsrAppend(psr, parameters.position.xyz, previous, surface.position,
-                                     material.normal, reflection, refracted, staticGeometry);
+    seed.psr = primePrimaryPsrAppend(psr, surface.position, material.normal, reflection, refracted,
+                                     staticGeometry);
     return seed;
 }
 
@@ -126,7 +128,6 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
     : IPrimaryGuides where Environment : IPrimaryEnvironment {
     uint index = pixel.y * parameters.sampling.x + pixel.x;
     float3 origin = parameters.position.xyz;
-    float3 previous = origin;
     float3 direction = initialDirection;
     float3 throughput = float3(1.0), radiance = float3(0.0);
     float etaScale = 1.0, primaryDistance = 0.0, coneWidth = 0.0;
@@ -134,22 +135,16 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
             surfaceFeatures >= 2 ? 2.0 * parameters.position.w / float(parameters.sampling.y) : 0.0;
     float4 medium = float4(1, 0, 0, 0);
     PrimePrimaryPsr psr = primePrimaryPsrInitial();
-    bool guideDetached = false, guideDone = !guides.enabled();
-    bool pendingSpecularDistance = false;
+    bool guideDetached = false, guideDone = !guides.enabled(), companion = false;
     for (uint bounce = 0; bounce < parameters.config.y; ++bounce) {
         uint domain = 1u + 4u * bounce;
         SurfaceHit hit = traceClosest(resources, origin, direction, sampler.bits1D(domain),
                                       coneWidth, coneSpread);
-        if (pendingSpecularDistance) {
-            guides.specularDistance(pixel,
-                                    hit.found ? length(hit.surface.position - previous) : 65504.0);
-            pendingSpecularDistance = false;
-        }
         if (!hit.found) {
             if (!guideDetached && !guideDone)
                 guides.environment(parameters, pixel, sampleUv, direction, psr);
             radiance += throughput * environment.escape(direction);
-            return primePrimaryFinishInactive(parameters, index, guideDetached, radiance,
+            return primePrimaryFinishInactive(parameters, index, guideDetached, companion, radiance,
                                               primaryDistance);
         }
         SurfacePoint surface = hit.surface;
@@ -181,21 +176,21 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
         if (!primePbrVertexIsDiscreteOnly(material, incident, transmitted)) {
             if (!guideDetached && !guideDone)
                 guides.surface(parameters, pixel, sampleUv, surface, material, direction, incident,
-                               transmitted, hit.staticGeometry, psr, previous);
+                               transmitted, hit.staticGeometry, psr);
             if (!lightingValid)
-                return primePrimaryFinishInactive(parameters, index, guideDetached, radiance,
-                                                  primaryDistance);
+                return primePrimaryFinishInactive(parameters, index, guideDetached, companion,
+                                                  radiance, primaryDistance);
             PrimeLanding landing = {
                     surface,     material,
                     direction,   coneWidth,
                     medium,      incident,
                     transmitted, throughput,
                     etaScale,    bounce | (hit.thin ? PRIME_LANDING_PHYSICAL_THIN : 0u)};
-            if (guides.enabled() && !guideDetached && !guideDone &&
+            if (guides.enabled() && !companion && !guideDetached && !guideDone &&
                 (psr.flags & PRIME_PRIMARY_PSR_INTERFACE_SPECULAR) == 0)
                 landing.flags |= PRIME_LANDING_GUIDE_DISTANCE;
-            return primePrimaryFinishLanding(parameters, index, guideDetached, landing, radiance,
-                                             primaryDistance);
+            return primePrimaryFinishLanding(parameters, index, guideDetached, companion, landing,
+                                             radiance, primaryDistance);
         }
 
         bool continuation = primePathHasContinuation(bounce, parameters.config.y);
@@ -203,13 +198,13 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
         bool guideCanContinue = false;
         if (!guideDetached && !guideDone) {
             if (!continuation) {
-                guides.unresolved(pixel);
+                guides.unresolved(pixel, psr.flags);
                 guideDone = true;
             } else {
                 PrimePbrGuideDirection next = primePbrDeltaGuideDirection(
                         material, -direction, surface.normal, incident.x, transmitted.x);
                 if (!next.geometricValid) {
-                    guides.unresolved(pixel);
+                    guides.unresolved(pixel, psr.flags);
                     guideDone = true;
                 } else {
                     if (bounce == 0 && hit.optical && !next.totalInternalReflection) {
@@ -217,15 +212,15 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
                                                  transmitted);
                         psr.flags |= PRIME_PRIMARY_PSR_INTERFACE_SPECULAR;
                     }
-                    nextGuide = primePrimaryNextGuide(parameters, surface, material, direction,
-                                                      previous, coneWidth, bounce, incident,
-                                                      transmitted, next, psr, hit.staticGeometry);
+                    nextGuide =
+                            primePrimaryNextGuide(surface, material, coneWidth, bounce, incident,
+                                                  transmitted, next, psr, hit.staticGeometry);
                     guideCanContinue = true;
                 }
             }
         }
         if (!continuation)
-            return primePrimaryFinishInactive(parameters, index, guideDetached, radiance,
+            return primePrimaryFinishInactive(parameters, index, guideDetached, companion, radiance,
                                               primaryDistance);
 
         PrimePbrSample sampled;
@@ -265,6 +260,31 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
             }
         }
 
+        if (guideCanContinue && bounce == 0 && hit.optical &&
+            (nextGuide.psr.flags & PRIME_PRIMARY_PSR_INTERFACE_SPECULAR) != 0) {
+            PrimePbrGuideDirection reflected = primePbrReflectionGuideDirection(
+                    material, -direction, surface.normal, incident, transmitted);
+            if (reflected.geometricValid) {
+                PrimePrimaryGuideSeed reflection =
+                        primePrimaryNextGuide(surface, material, coneWidth, bounce, incident,
+                                              transmitted, reflected, psr, hit.staticGeometry);
+                reflection.psr.flags |= PRIME_PRIMARY_GUIDE_REFLECTION;
+                bool lightingReflection = survived && (sampled.bsdfSample.eventFlags &
+                                                       PRIME_BSDF_EVENT_REFLECTION) != 0;
+                // Whichever lighting branch survives shares its exact geometric producer. Only
+                // the complementary branch is cold; never re-query/re-decode the primary hit.
+                primePrimaryStoreSeed(parameters, index,
+                                      lightingReflection ? nextGuide : reflection, 7);
+                if (lightingReflection)
+                    nextGuide = reflection;
+                guides.reflectionPending(pixel);
+                companion = true;
+            } else {
+                guides.reflectionPending(pixel);
+                guides.unresolved(pixel, PRIME_PRIMARY_GUIDE_REFLECTION);
+            }
+        }
+
         if (guideCanContinue) {
             bool guideReflection = (nextGuide.psr.flags & PRIME_PRIMARY_PSR_ODD) !=
                                    (psr.flags & PRIME_PRIMARY_PSR_ODD);
@@ -281,13 +301,8 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
             }
         }
         if (!survived)
-            return primePrimaryFinishInactive(parameters, index, guideDetached, radiance,
+            return primePrimaryFinishInactive(parameters, index, guideDetached, companion, radiance,
                                               primaryDistance);
-        if (guides.enabled() && bounce == 0 && hit.optical &&
-            (sampled.bsdfSample.eventFlags & PRIME_BSDF_EVENT_REFLECTION) != 0 &&
-            (nextGuide.psr.flags & PRIME_PRIMARY_PSR_INTERFACE_SPECULAR) != 0)
-            pendingSpecularDistance = true;
-        previous = surface.position;
         medium = sampled.medium;
         if (guideCanContinue && !guideDetached) {
             // Both consumers take this one geometric producer. Replaying the same guide seed
@@ -301,8 +316,9 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
         }
     }
     if (!guideDetached && !guideDone)
-        guides.unresolved(pixel);
-    return primePrimaryFinishInactive(parameters, index, guideDetached, radiance, primaryDistance);
+        guides.unresolved(pixel, psr.flags);
+    return primePrimaryFinishInactive(parameters, index, guideDetached, companion, radiance,
+                                      primaryDistance);
 }
 
 void primePrimaryGuideWalk<Guides>(TraceScene resources, PrimaryParameters parameters, uint2 pixel,
@@ -330,7 +346,7 @@ void primePrimaryGuideWalk<Guides>(TraceScene resources, PrimaryParameters param
                          : hit.transmitted;
         if (!primePbrVertexIsDiscreteOnly(material, incident, transmitted)) {
             guides.surface(parameters, pixel, sampleUv, surface, material, seed.direction, incident,
-                           transmitted, hit.staticGeometry, seed.psr, seed.previous);
+                           transmitted, hit.staticGeometry, seed.psr);
             return;
         }
         if (!primePathHasContinuation(bounce, parameters.config.y))
@@ -339,11 +355,10 @@ void primePrimaryGuideWalk<Guides>(TraceScene resources, PrimaryParameters param
                 material, -seed.direction, surface.normal, incident.x, transmitted.x);
         if (!next.geometricValid)
             break;
-        seed = primePrimaryNextGuide(parameters, surface, material, seed.direction, seed.previous,
-                                     seed.coneWidth, bounce, incident, transmitted, next, seed.psr,
-                                     hit.staticGeometry);
+        seed = primePrimaryNextGuide(surface, material, seed.coneWidth, bounce, incident,
+                                     transmitted, next, seed.psr, hit.staticGeometry);
     }
-    guides.unresolved(pixel);
+    guides.unresolved(pixel, seed.psr.flags);
 }
 
 public void primeTracePrimary<Guides, Environment>(TraceScene resources, Environment environment,
@@ -365,6 +380,13 @@ public void primeTracePrimary<Guides, Environment>(TraceScene resources, Environ
         parameters.diagnosticAddress[index] = float4(0, 0, 0, 3.402823466e38f);
     PrimePrimaryGuideSeed seed = primePrimaryLighting(resources, environment, parameters, pixel,
                                                       sampler, sampleUv, direction, guides);
+    bool companion = (seed.psr.flags & PRIME_PRIMARY_GUIDE_COMPANION) != 0;
     if (guides.enabled() && (seed.psr.flags & PRIME_PRIMARY_GUIDE_SEED) != 0)
         primePrimaryGuideWalk(resources, parameters, pixel, sampler, sampleUv, seed, guides);
+    if (guides.enabled() && companion) {
+        // Keep only one seed live across traversal. The finished landing occupies planes 0..6;
+        // its complementary guide remains disjoint in planes 7..10 until this load.
+        seed = primePrimaryLoadSeed(parameters, index, 7);
+        primePrimaryGuideWalk(resources, parameters, pixel, sampler, sampleUv, seed, guides);
+    }
 }

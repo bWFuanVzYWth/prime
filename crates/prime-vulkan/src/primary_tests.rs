@@ -148,12 +148,12 @@ fn run(context: &Arc<Context>, scene: &Scene, budgets: impl Fn(usize) -> u32) ->
             ]
         })
         .collect();
-    // The shader owns 8 report + 7 common + 2 optical + 1 prefix float4 per case.
+    // The shader owns 8 report + 11 common (including companion) + 2 optical + 1 prefix float4 per case.
     let output = run_primary(
         context,
         SHADER,
         &input,
-        CASES * 18 * 4,
+        CASES * 22 * 4,
         [0, CASES as u32],
         &geometry,
     );
@@ -233,7 +233,7 @@ fn gpu_primary_guides_continue_after_lighting_termination_and_respect_query_budg
     }
 
     // Thick absorption terminates lighting during a segment, independently of geometric
-    // refraction. The guide crosses both boundaries and rejects proxy motion as unknown.
+    // refraction. The guide crosses both boundaries and publishes a static target-plane proxy.
     let medium = Medium {
         ior: 1.5,
         extinction: [1e6; 3],
@@ -247,7 +247,7 @@ fn gpu_primary_guides_continue_after_lighting_termination_and_respect_query_budg
     for result in run(&context, &thick, |_| 8) {
         result.surface(3., 2);
         assert_ne!(result.0[11] & REFRACTED, 0);
-        assert_eq!(result.value(1, 3), 0.);
+        assert_eq!(result.value(1, 3), 1.);
         assert!(!result.active());
         if result.value(5, 0) < 0.5 {
             result.prefix(0.);
@@ -284,7 +284,7 @@ fn gpu_primary_half_selection_preserves_delta_energy_and_leaves_rough_first_surf
         } else {
             assert!(!result.active());
             result.prefix(4. * fresnel / (1. + fresnel));
-            near(result.value(6, 0), 65504.);
+            near(result.value(6, 3), 1.); // Reflection guide completed its environment endpoint.
             reflected += 1;
         }
     }

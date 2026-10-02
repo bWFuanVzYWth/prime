@@ -190,6 +190,23 @@ public struct PrimePbrGuideDirection {
     public bool totalInternalReflection;
 };
 
+// The complementary primary reflection is geometric even when its current energy is zero.
+// Reuse the same frame normal and world reflection construction as the lighting sampler.
+public PrimePbrGuideDirection
+primePbrReflectionGuideDirection(PrimePbrVertex vertex, float3 viewDirection,
+                                 float3 geometricNormal, float4 incident, float4 transmitted) {
+    PrimePbrGuideDirection result = {};
+    float3 normal = primePbrVertexFrameNormal(vertex, viewDirection, incident, transmitted);
+    result.direction = normalize(reflect(-viewDirection, normal));
+    result.nextIor = incident.x;
+    result.eventFlags = PRIME_BSDF_EVENT_DISCRETE | PRIME_BSDF_EVENT_REFLECTION;
+    result.geometricValid = primeBsdfDirection(result.direction) &&
+                            (!primePbrVertexHasNormal(vertex) ||
+                             primeGeometricEventSupport(geometricNormal, viewDirection,
+                                                        result.direction, result.eventFlags));
+    return result;
+}
+
 // Geometry only: no F0, energy IOR, absorption, throughput, PDF, LUT or event random input.
 public PrimePbrGuideDirection primePbrDeltaGuideDirection(PrimePbrVertex vertex,
                                                           float3 viewDirection,
@@ -217,9 +234,17 @@ public PrimePbrGuideDirection primePbrDeltaGuideDirection(PrimePbrVertex vertex,
         if (primePbrVertexIsThinWalled(vertex)) {
             if (wi.z <= 0.0)
                 return result;
-            result.direction =
-                    primePbrDeltaWorldDirection(onb, viewDirection, float3(0.0), false, true);
-            result.eventFlags = PRIME_BSDF_EVENT_DISCRETE | PRIME_BSDF_EVENT_TRANSMISSION;
+            // The thin-sheet path is straight only if the actual interface admits refraction.
+            // Test Snell geometry, never zero transmitted energy from tint or absorption.
+            PrimeFullOpenPbrRefractResult refracted = primeFullOpenPbrDielectricRefract(
+                    primePbrVertexInterfaceIor(vertex, incident, transmitted), -wi,
+                    float3(0.0, 0.0, 1.0));
+            result.totalInternalReflection = refracted.valid == 0u;
+            if (!result.totalInternalReflection) {
+                result.direction =
+                        primePbrDeltaWorldDirection(onb, viewDirection, float3(0.0), false, true);
+                result.eventFlags = PRIME_BSDF_EVENT_DISCRETE | PRIME_BSDF_EVENT_TRANSMISSION;
+            }
         } else {
             PrimeFullOpenPbrRefractResult refracted = primeFullOpenPbrDielectricRefract(
                     primePbrVertexInterfaceIor(vertex, incident, transmitted), -wi,

@@ -56,7 +56,7 @@ pub(super) struct Frame {
     clip_to_view: [f32; 16],
     clip_to_previous: [f32; 16],
     previous_to_clip: [f32; 16],
-    images: [Resource; 8],
+    images: [Resource; 9],
 }
 
 impl Frame {
@@ -90,7 +90,7 @@ impl Frame {
             clip_to_view,
             clip_to_previous: history::clip_to_previous(camera, previous, aspect),
             previous_to_clip: history::clip_to_previous(previous, camera, aspect),
-            images: [Resource::default(); 8],
+            images: [Resource::default(); 9],
         }
     }
 }
@@ -154,7 +154,7 @@ impl Runtime {
     pub fn new(context: &Context) -> Result<Self, String> {
         #[cfg(target_os = "windows")]
         {
-            if unsafe { prime_sl_abi_version() } != 1 {
+            if unsafe { prime_sl_abi_version() } != 2 {
                 return Err("Unsupported Streamline bridge ABI".into());
             }
             let init = Init {
@@ -207,15 +207,16 @@ impl Runtime {
         &mut self,
         command: vk::CommandBuffer,
         frame: &Frame,
-        images: &[Image; 8],
-        formats: [vk::Format; 8],
+        images: &[Image; 9],
+        formats: [vk::Format; 9],
         input: [u32; 2],
         output: [u32; 2],
     ) -> Result<(), EvaluationFailure> {
         let mut frame = frame.clone();
         frame.command = command.as_raw();
-        // Native ABI orders reconstructed output before the optional hit-distance.
-        for (index, source) in [0, 1, 2, 3, 4, 5, 7, 6].into_iter().enumerate() {
+        // ABI v2 retains output/distance ordering and appends dense specular motion.
+        // Distance is an engine post input and is not tagged for Streamline.
+        for (index, source) in [0, 1, 2, 3, 4, 5, 7, 6, 8].into_iter().enumerate() {
             let extent = if source == 7 { output } else { input };
             let image = &images[source];
             frame.images[index] = Resource {
@@ -329,11 +330,11 @@ mod tests {
     fn bridge_layout_and_matrix_offsets_are_exact() {
         assert_eq!(size_of::<Init>(), 32);
         assert_eq!(size_of::<Resource>(), 48);
-        assert_eq!(size_of::<Frame>(), 856);
+        assert_eq!(size_of::<Frame>(), 904);
         assert_eq!(std::mem::offset_of!(Frame, world_to_view), 88);
         assert_eq!(std::mem::offset_of!(Frame, images), 472);
         assert_eq!(align_of::<Frame>(), 8);
         #[cfg(target_os = "windows")]
-        assert_eq!(unsafe { prime_sl_abi_version() }, 1);
+        assert_eq!(unsafe { prime_sl_abi_version() }, 2);
     }
 }

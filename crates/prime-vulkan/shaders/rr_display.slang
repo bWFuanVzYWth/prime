@@ -3,6 +3,7 @@ module rr_display;
 import "display/prime_drt.slang";
 import "math/color.slang";
 import "reconstruct/rr_format.slang";
+import "reconstruct/rr_status.slang";
 
 [[vk::binding(4, 0)]] [[vk::image_format("rgba8")]] RWTexture2D<float4> outputImage;
 [[vk::binding(10, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> noisyColor;
@@ -36,8 +37,10 @@ bool resolvedFootprint(float2 position) {
     int2 limit = int2(display.dimensions.xy) - 1;
     int2 lo = clamp(int2(floor(position)), int2(0), limit);
     int2 hi = clamp(int2(floor(position)) + 1, int2(0), limit);
-    return guideUnresolved[lo] == 0.0 && guideUnresolved[int2(hi.x, lo.y)] == 0.0 &&
-           guideUnresolved[int2(lo.x, hi.y)] == 0.0 && guideUnresolved[hi] == 0.0;
+    return primeRrGuideComplete(guideUnresolved[lo]) &&
+           primeRrGuideComplete(guideUnresolved[int2(hi.x, lo.y)]) &&
+           primeRrGuideComplete(guideUnresolved[int2(lo.x, hi.y)]) &&
+           primeRrGuideComplete(guideUnresolved[hi]);
 }
 
 [shader("compute")][numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {

@@ -43,7 +43,7 @@ K2 的交接点是 landing 的 coverage、纹理/材质解析、该段 Beer、co
 | K2 或 Offline 的局部阴影 | vertex、SurfacePoint、view、物理端点/介质、路径/采样上下文及该灯的查询后输入 | 当前 hit 的原始几何/材质、UV/TBN/LOD、发光命中 PDF |
 | 局部评价到太阳阴影 | 同一 vertex、几何、物理端点及路径状态；太阳方向/radiance | 局部灯样本、visibility、response、PDF/MIS 和短时闭包；贡献已累加 |
 | 续接到下一次查询 | 新 ray/medium/beta/eta、previous position/PDF、cone、tail radiance 与随机身份 | 当前 vertex、采样与 roulette 的临时值 |
-| 实时 post | FP32 prefix + tail、原相机空气段、同一采样 UV、所选显示输入 | TLAS、材质、BSDF、medium、eta 与 MIS 均无消费者 |
+| 实时 post | FP32 prefix + tail、原相机空气段、同一采样 UV、所选显示输入；RR另消费主depth、内部反射距离、当前/前相机与guide状态以补全反射motion | TLAS、材质、BSDF、medium、eta 与 MIS 均无消费者 |
 
 K2 与 Offline 在阴影查询之后才建立短时 ONB 和 Full 支持子域状态，立即消费完整 response/PDF/MIS；下一跳同样就地准备。缓存两个 ONB 切向会增加六个浮点分量，缓存 closure 或 pending contribution 还会增加其他状态。可以调整重算、缓存与重载，但须比较实际保存、占用率及带宽成本，不能因准备重复就把全部状态跨查询保留。
 
@@ -53,19 +53,21 @@ K2 与 Offline 在阴影查询之后才建立短时 ONB 和 Full 支持子域状
 
 ## 实时交接记录与独立 guide
 
-当前每内部像素分配176B scratch：七个16B common SoA planes（112B）、两个16B optical planes（32B）、独立 prefix/原空气段（16B）和 FP32 tail（16B）。common 依次保存位置/偏移、几何法线/bounce与状态、baseColor/roughness、着色法线/control、入射方向/cone、当前 medium、beta/etaScale。opaque 不读写 optical planes；physical-thin 的 incident 等于 medium，只需 transmitted；厚 optical 分别保留 medium、incident、transmitted。预留容量不因本帧 opaque 占比变化，逻辑访问量与容量分开核算。
+当前raw每内部像素分配176B scratch：七个16B common SoA planes（112B）、两个16B optical planes（32B）、独立 prefix/原空气段（16B）和 FP32 tail（16B）。RR额外保留四个common planes存放64B companion guide seed，总计240B/内部像素。landing固定使用common planes0..6，依次保存位置/偏移、几何法线/bounce与状态、baseColor/roughness、着色法线/control、入射方向/cone、当前 medium、beta/etaScale；RR companion位于planes7..10。opaque 不读写 optical planes；physical-thin 的 incident 等于 medium，只需 transmitted；厚 optical 分别保留 medium、incident、transmitted。预留容量不因本帧 opaque 占比变化，逻辑访问量与容量分开核算。
 
-scratch 使用 GPU buffer device address，不把整个分配暴露成可能超过 `maxStorageBufferRange` 的 SSBO；分配大小、16B plane 对齐和 `plane*count+pixel` 的32位索引上限在边界检查。原生1920×1080容量约364.95 MB，Performance 的960×540约91.24 MB；不含图像、对齐和 SDK 私有资源。raw depth/normal 诊断另按需分配16B/像素，不进入 K2；RR 的 R8 完成状态另为1B/内部像素。
+scratch 使用 GPU buffer device address，不把整个分配暴露成可能超过 `maxStorageBufferRange` 的 SSBO；分配大小、16B plane 对齐和 `plane*count+pixel` 的32位索引上限按实际7或11个common planes在边界检查。raw原生1920×1080容量约364.95 MB；RR原生1920×1080约497.66 MB，Performance的960×540约124.42 MB，均为十进制MB，不含图像、对齐和SDK私有资源。raw depth/normal诊断另按需分配16B/像素，不进入K2；RR的R8状态为1B/内部像素，新增全图RG16F specular motion为4B/内部像素。完整图像账由[重建文档](reconstruction.md)维护。
 
-K1 的规范 guide 几何与照明路径独立：optical 优先实际 IOR 可透射方向，真实 TIR 和 conductor 走反射；它不消费 Fresnel 抽样、response/PDF、Beer、beta、roulette 或光贡献。相同事件直接采用已计算的 nextGuide 方向和安全起点共享查询，分离后的 guide seed 也来自该生产者，因此 guide 查询不依赖照明分支中的重复浮点运算。首次分歧或照明提前终止后保存最小 guide seed，照明结束后在同一 K1 invocation 继续 guide-only 后缀。seed 暂用尚未发布的 common 槽，必须先完整读出再覆盖最终 landing/status，不增加全图 seed 分配或光追 dispatch。
+K1的规范主guide几何与照明路径独立：optical优先实际IOR可透射方向，真实TIR和conductor走反射；它不消费Fresnel抽样、response/PDF、Beer、beta、roulette或光贡献。首纯delta透明面可透射时同时建立独立R guide，主交点和材质只解析一次。照明选中的R或T事件直接采用对应guide生产者给出的方向和安全起点共享公共查询，另一条guide保存到companion planes；因此guide查询不依赖照明分支中的重复浮点运算，也不会缺少未选分支的终点。
 
-seed 当前为五个16B plane、共80B：query origin/coneWidth、物理前点/深度与控制字、direction/当前IOR、PSR首方向与物理累计长度、反射quaternion。深度占控制字低8位，其余位保存PSR计数、反射奇偶、motion-known、折射/interface与seed标记；它没有extinction、beta、etaScale、PDF、radiance或材质副本。一次seed写入/读出的逻辑请求为160B/分离像素；这不是实际DRAM测量。该内存复用不保证驱动一定消除跨遍历寄存器保存，须检查实际load/store与活跃值。
+首次后续分歧或照明提前终止时，当前guide seed暂用尚未发布的common planes0..3；须先完整读出再覆盖最终landing/status，companion planes7..10则与landing分离。照明结束后在同一K1 invocation中依次完成独立guide后缀，不同时保留第二份完整BSDF/ONB，也不增加光追dispatch。raw不分配companion容量或执行这些独立查询。
 
-guide 使用独立深度计数及同值预算 N，不因照明 roulette、零 beta 或吸收全黑而结束。第 N 次查询得到非 delta 或真实 escape 仍正常完成；仍需续接则标为 unresolved，几何非法也不冒充稳定终点。K1 每帧完整发布状态；内部 unresolved mask 使 display 使用当前 raw 覆盖相应采样足迹，但不保证 SDK 内部历史或空间滤波隔离。PSR、动态 motion 和输入图像合同由[重建文档](reconstruction.md)维护。
+每个seed为四个16B plane、共64B：query origin/coneWidth、direction/当前IOR、PSR quaternion、PSR仿射translation/控制字。深度占控制字低8位，其余位保存PSR计数、反射奇偶、motion-known、折射/interface、seed及反射/companion身份；它没有物理前点、extinction、beta、etaScale、PDF、radiance或材质副本。PSR本身为32B仿射状态，使用真实物理反射平面，不累计安全偏移。一次seed写入/读出的逻辑请求为128B/需保存的guide；两条都分离时各计一次。这不是实际DRAM测量，内存复用也不保证驱动消除跨遍历寄存器保存，须检查实际load/store与活跃值。
 
-K1/K2/post 分别采用128B、80B、112B push 接口和各自实际资源视图。K1不接局部灯/阴影模块，K2不接相机/PSR/prefix/aerial/显示状态，post不接场景几何或 BSDF。RR 路径在 post 完成线性合成及 aerial 后写重建输入，SDK之后才显示；raw post直接完成显示。阶段间及跨帧复用使用同队列屏障，尺寸/模式更换和释放依最后使用 serial 的完成证明，不引入稳态 CPU wait 或额外提交。
+每条guide使用独立深度计数及同值预算N，不因照明roulette、零beta或吸收全黑而结束。第N次查询得到非delta或真实escape仍正常完成；仍需续接则标为unresolved，几何非法也不冒充稳定终点。内部R8状态低两位分别表示主/反射guide失败或待完成，值4表示K1拥有显式反射motion；K1及post每帧完整发布，display只检查低两位。未知motion写有限零配合本帧raw覆盖，不依赖SDK无效哨兵，也不保证SDK内部历史或空间滤波隔离。PSR终点平面、折射/天空近似及动态对应边界由[重建文档](reconstruction.md)维护。
 
-这些拆分移除了 delta 前缀的连续 BSDF/NEE 工作，同时增加了全图 scratch 读写、固定阶段屏障和可能的 guide 后缀查询。query 总量为照明与 guide 查询之和减共享前缀，最坏接近 `2N−1`。必须观察分离率、unresolved率、长尾、L2/DRAM及整帧成本；没有实际测量不能声称寄存器或帧率提升。
+K1/K2/post分别采用128B、80B、112B push接口和各自实际资源视图。K1不接局部灯/阴影模块，K2不接相机/PSR/prefix/aerial/显示状态，post不接场景几何或BSDF。RR的144B相机uniform包含当前/前相机及抖动/历史有效性；post用主depth和内部实际反射距离构造粗糙反射的局部虚拟点，补全全图specular motion，保留K1显式R guide结果。距离不再作为SDK tag，不需要为普通粗糙像素追加查询。RR在post线性合成及aerial之后调用SDK并显示；raw post直接完成显示。阶段间及跨帧复用使用同队列屏障，相机常量按完成槽复用，尺寸/模式更换和释放依最后使用serial的完成证明，不引入稳态CPU wait或额外提交。
+
+这些拆分移除了delta前缀的连续BSDF/NEE工作，同时增加全图scratch读写、固定阶段屏障、仿射/运动投影及可能的guide后缀查询。query总量为照明与两条guide查询之和减共享部分，最坏接近 `3N−2`，共享前缀会降低实际数量。必须观察分离率、unresolved率、长尾、L2/DRAM及整帧成本；没有实际测量不能声称寄存器或帧率提升。
 
 ## CPU、交点、视角与方向的边界
 
@@ -100,7 +102,7 @@ Offline 单样本当前使用 specialization ID4；场景能力使用 ID0/1/2，
 
 生产 Z-Sobol 当前显式调用固定 S=8 的构造，保留合法 R 范围及宽索引退路；不能由原生 1080p 使用单字索引推断所有尺寸都可删除宽路径。生产 Aerial-S 当前按已知 256 切片消费，与分配、更新和重建一致，避免动态尺寸查询被编译器提到路径入口；通用采样 API 仍按调用方纹理实际高度工作。改变生产资源布局必须同步修改生产者和消费者，具体规格由[大气文档](atmosphere.md)维护。
 
-显示参数只在路径后的 post/显示消费。Realtime 的 camera/PSR/guides 仅属于 K1，K2只有一个按需传递的实际 specular reflection 次段距离职责，不访问完整guide。Offline仍只消费通用输运的radiance，单样本/多样本历史读写保持原顺序。共同返回类型或入口参数大小不等于所有字段始终占据GPR。
+显示参数只在路径后的post/显示消费。Realtime的几何PSR和guide遍历属于K1；K2只有一个按需传递的实际specular reflection次段距离职责，不访问完整guide。RR post消费当前/前相机、主depth、该距离及完成状态，补全无需额外光追的反射motion；它不恢复材质或路径状态。Offline仍只消费通用输运的radiance，单样本/多样本历史读写保持原顺序。共同返回类型或入口参数大小不等于所有字段始终占据GPR。
 
 RR 的 input/output 尺寸、抖动、格式、运动和历史边界见[重建契约](reconstruction.md)。默认Performance降低内部像素和射线数，应与原生1920×1080基准区分；scratch、SL私有资源、重建和显示都是真实成本。
 

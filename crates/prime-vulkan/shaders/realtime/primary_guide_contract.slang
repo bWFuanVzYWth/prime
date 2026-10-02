@@ -6,19 +6,22 @@ import "pbr/vertex.slang";
 import "realtime/primary_parameters.slang";
 import "reconstruct/primary_psr.slang";
 
+public static const uint PRIME_PRIMARY_GUIDE_REFLECTION = 1u << 12;
+public static const uint PRIME_PRIMARY_GUIDE_COMPANION = 1u << 13;
+
 public interface IPrimaryGuides {
     bool enabled();
     float2 sampleOffset(ZSobol sampler);
     void initialize(uint2 pixel);
     void interfaceSpecular(uint2 pixel, PrimePbrVertex material, float3 view, float4 incident,
                            float4 transmitted);
+    void reflectionPending(uint2 pixel);
     void surface(PrimaryParameters camera, uint2 pixel, float2 sampleUv, SurfacePoint surface,
                  PrimePbrVertex material, float3 direction, float4 incident, float4 transmitted,
-                 bool staticGeometry, PrimePrimaryPsr psr, float3 previousPosition);
+                 bool staticGeometry, PrimePrimaryPsr psr);
     void environment(PrimaryParameters camera, uint2 pixel, float2 sampleUv, float3 direction,
                      PrimePrimaryPsr psr);
-    void unresolved(uint2 pixel);
-    void specularDistance(uint2 pixel, float distance);
+    void unresolved(uint2 pixel, uint flags);
 }
 
 public struct NoPrimaryGuides : IPrimaryGuides {
@@ -31,12 +34,12 @@ public struct NoPrimaryGuides : IPrimaryGuides {
     public void initialize(uint2 pixel) {}
     public void interfaceSpecular(uint2 pixel, PrimePbrVertex material, float3 view,
                                   float4 incident, float4 transmitted) {}
+    public void reflectionPending(uint2 pixel) {}
     public void surface(PrimaryParameters camera, uint2 pixel, float2 sampleUv,
                         SurfacePoint surface, PrimePbrVertex material, float3 direction,
                         float4 incident, float4 transmitted, bool staticGeometry,
-                        PrimePrimaryPsr psr, float3 previousPosition) {}
+                        PrimePrimaryPsr psr) {}
     public void environment(PrimaryParameters camera, uint2 pixel, float2 sampleUv,
                             float3 direction, PrimePrimaryPsr psr) {}
-    public void unresolved(uint2 pixel) {}
-    public void specularDistance(uint2 pixel, float distance) {}
+    public void unresolved(uint2 pixel, uint flags) {}
 }

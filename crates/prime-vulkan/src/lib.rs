@@ -32,6 +32,8 @@ mod pbr_tests;
 mod pbr_texture_tests;
 mod plan;
 #[cfg(all(test, feature = "shader-tests"))]
+mod primary_rr_tests;
+#[cfg(all(test, feature = "shader-tests"))]
 mod primary_tests;
 mod realtime;
 #[cfg(all(test, feature = "shader-tests"))]
@@ -150,9 +152,9 @@ impl Pipeline {
             };
             let binding_ids: &[u32] = match mode {
                 RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8, 9],
-                RenderMode::Realtime if reconstruction => {
-                    &[0, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
-                }
+                RenderMode::Realtime if reconstruction => &[
+                    0, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                ],
                 RenderMode::Realtime => &[0, 2, 3, 4, 7, 8, 9],
             };
             let bindings: Vec<_> = binding_ids
@@ -214,7 +216,7 @@ impl Pipeline {
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_IMAGE,
-                    descriptor_count: (if reconstruction { 10 } else { 1 }) * FRAME_SLOTS as u32,
+                    descriptor_count: (if reconstruction { 11 } else { 1 }) * FRAME_SLOTS as u32,
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::UNIFORM_BUFFER,

@@ -31,7 +31,8 @@
 | `path_trace.slang` | Offline 原逐样本累积及显示入口 |
 | `realtime_primary*.slang`、`realtime_transport*.slang` | raw/RR 的两种实时 PT kernel 入口；K1四个、K2六个场景变体 |
 | `realtime.slang`、`realtime_rr.slang` | raw后处理显示、RR线性输入合成入口；不执行射线查询 |
-| `reconstruct/primary_guides.slang`、`reconstruct/primary_psr.slang` | 主表面提升、有限链PSR、guide完成状态与接口specular例外 |
+| `reconstruct/primary_guides.slang`、`reconstruct/primary_psr.slang` | 主表面提升、仿射PSR、独立反射guide与各分支完成状态 |
+| `reconstruct/reflection_motion.slang`、`reconstruct/rr_guides.slang` | 输入像素单位运动、普通粗糙反射的距离代理与全图specular motion补全；无射线查询 |
 | `rr_display.slang` | 输出分辨率RR显示；失败或未解析guide采样足迹使用当前raw，无CPU图像传递 |
 
 库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口按阶段显式传入场景、OpenPBR energy 或显示资源；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`；K1/K2消费窄 `AtmLighting`，post消费 `AtmAerial`，Offline保留 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建跟踪整个 shader 目录，修改被导入模块也必须重新编译。
@@ -94,6 +95,6 @@ Offline 保持逐样本在线均值、原 sequence 与随机域。当前单样�
 
 `shader-tests` feature 构建专用入口，GPU 直接执行生产数学模块。独立 u64/top-down/标量 Sobol oracle、f64 颜色与几何参考、冻结的旧 DRT shader 分别检查整数一致性、数值误差与移植等价。实际 AS 查询覆盖仿射、镜像、非均匀缩放、平移、掠射及邻近遮挡；图像测试检查 resize、历史、显示参数与宿主在途资源。
 
-PBR 检查分别覆盖 LitePBR sample/evaluate/PDF、delta/TIR/薄壁与数值清洗，以及实际纹理描述符、规范通道、法线分布、动画、atlas lookup 和发光消费。窄delta/guide夹具对拍Full入口，检查整闭包分类、0.5条件估计器期望、same-event方向逐分量数值精确相等和窄albedo；正负零位差单独统计，不使用误差容忍。K1夹具另检查照明终止后guide继续、预算末步/耗尽与PSR边界。底层闭包数学、资源翻译和生产输运是不同验证层；单个数值域或无窗口夹具不能外推完整游戏材质和帧率。
+PBR 检查分别覆盖 LitePBR sample/evaluate/PDF、delta/TIR/薄壁与数值清洗，以及实际纹理描述符、规范通道、法线分布、动画、atlas lookup 和发光消费。窄delta/guide夹具对拍Full入口，检查整闭包分类、0.5条件估计器期望、same-event方向逐分量数值精确相等和窄albedo；正负零位差单独统计，不使用误差容忍。K1夹具另检查照明终止后guide继续、预算末步/耗尽与PSR边界；生产RR图像夹具读回真实格式通道，检查固定相机/jitter时跨照明种子的稳定性，以及相机运动、双分支完成状态和post补全。底层闭包数学、资源翻译和生产输运是不同验证层；单个数值域或无窗口夹具不能外推完整游戏材质和帧率。
 
 测试入口的读回只用于无窗口行为验证，不进入游戏流水线。它们不替代两版 Minecraft 的窗口/全屏/HUD 验收。操作入口见 [CONTRIBUTING](../CONTRIBUTING.md)。

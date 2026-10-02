@@ -892,7 +892,7 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
         (
             "K1 RR",
             include_bytes!(concat!(env!("OUT_DIR"), "/realtime_primary_rr.spv")),
-            &[0, 2, 3, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 19],
+            &[0, 2, 3, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 19, 20],
             &[0, 1, 2],
         ),
         (
@@ -916,7 +916,7 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
         (
             "post RR input",
             include_bytes!(concat!(env!("OUT_DIR"), "/realtime_rr.spv")),
-            &[10],
+            &[10, 11, 16, 17, 19, 20],
             &[0, 3, 4],
         ),
         (

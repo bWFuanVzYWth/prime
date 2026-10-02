@@ -8,16 +8,16 @@ public static const uint PRIME_PRIMARY_PSR_REFRACTED = 1u << 9;
 public static const uint PRIME_PRIMARY_PSR_INTERFACE_SPECULAR = 1u << 10;
 public static const uint PRIME_PRIMARY_GUIDE_SEED = 1u << 11;
 
-// Only the physical path length and an orthogonal reflection transform cross a shared query.
-// Refracted paths use a documented path-length proxy, never a fabricated previous-frame point.
+// Camera-side unfolding F(x) = A*x + translation. A is quaternion rotation with parity.
+// Reflection planes compose exactly; refracted endpoints use a local tangent-plane proxy.
 public struct PrimePrimaryPsr {
-    public float4 directionLength;
     public float4 rotation;
+    public float3 translation;
     public uint flags;
 };
 
 public PrimePrimaryPsr primePrimaryPsrInitial() {
-    return {float4(0.0), float4(0.0, 0.0, 0.0, 1.0), PRIME_PRIMARY_PSR_MOTION};
+    return {float4(0.0, 0.0, 0.0, 1.0), float3(0.0), PRIME_PRIMARY_PSR_MOTION};
 }
 
 float4 primePrimaryPsrMultiply(float4 a, float4 b) {
@@ -31,19 +31,18 @@ public float3 primePrimaryPsrDirection(PrimePrimaryPsr state, float3 direction) 
     return (state.flags & PRIME_PRIMARY_PSR_ODD) != 0 ? -result : result;
 }
 
-public PrimePrimaryPsr primePrimaryPsrAppend(PrimePrimaryPsr state, float3 cameraPosition,
-                                             float3 previousPosition, float3 position,
-                                             float3 normal, bool reflection, bool refracted,
-                                             bool staticGeometry) {
+public float3 primePrimaryPsrPoint(PrimePrimaryPsr state, float3 point) {
+    return primePrimaryPsrDirection(state, point) + state.translation;
+}
+
+public PrimePrimaryPsr primePrimaryPsrAppend(PrimePrimaryPsr state, float3 position, float3 normal,
+                                             bool reflection, bool refracted, bool staticGeometry) {
     uint count = state.flags & PRIME_PRIMARY_PSR_COUNT;
-    if (count == 0) {
-        float3 segment = position - cameraPosition;
-        float distance = length(segment);
-        state.directionLength = float4(distance > 0.0 ? segment / distance : float3(0.0), distance);
-    } else {
-        state.directionLength.w += length(position - previousPosition);
-    }
     if (reflection) {
+        // F' = F o H for H(x) = (I - 2*n*n^T)*x + 2*n*dot(n, position).
+        // Translation uses the OLD A, before the right-composed reflection updates it.
+        // The caller supplies the canonical unit optical normal used to produce the ray.
+        state.translation += primePrimaryPsrDirection(state, 2.0 * normal * dot(normal, position));
         float4 rotation = primePrimaryPsrMultiply(state.rotation, float4(normal, 0.0));
         state.rotation = rotation * rsqrt(dot(rotation, rotation));
         state.flags ^= PRIME_PRIMARY_PSR_ODD;
@@ -57,16 +56,26 @@ public PrimePrimaryPsr primePrimaryPsrAppend(PrimePrimaryPsr state, float3 camer
 }
 
 public bool primePrimaryPsrSurface(PrimePrimaryPsr state, float3 cameraPosition,
-                                   float3 previousPosition, float3 position, float3 normal,
+                                   float3 initialCameraDirection, float3 targetPosition,
+                                   float3 targetGeometricNormal, float3 targetShadingNormal,
                                    out float3 virtualPosition, out float3 virtualNormal) {
-    virtualPosition = position;
-    virtualNormal = normal;
+    // An ordinary primary hit is already the actual camera-ray endpoint, including grazing hits.
+    virtualPosition = targetPosition;
+    virtualNormal = targetShadingNormal;
     if ((state.flags & PRIME_PRIMARY_PSR_COUNT) != 0) {
-        float distance = state.directionLength.w + length(position - previousPosition);
-        virtualPosition = cameraPosition + state.directionLength.xyz * distance;
-        virtualNormal = primePrimaryPsrDirection(state, normal);
-        if (!(distance > 0.0) || !(dot(state.directionLength.xyz, state.directionLength.xyz) > 0.0))
+        float3 planePosition = primePrimaryPsrPoint(state, targetPosition);
+        float3 planeNormal = primePrimaryPsrDirection(state, targetGeometricNormal);
+        virtualNormal = primePrimaryPsrDirection(state, targetShadingNormal);
+        // Anchor the transformed target plane to the actual sampled camera ray. This removes
+        // safe-origin offsets from ideal mirrors and gives static refractive proxies zero motion.
+        // For refraction it is a target-plane approximation, not inverse Snell correspondence.
+        float denominator = dot(planeNormal, initialCameraDirection);
+        if (!(abs(denominator) > 1e-4))
             return false;
+        float distance = dot(planeNormal, planePosition - cameraPosition) / denominator;
+        if (!(distance > 0.0))
+            return false;
+        virtualPosition = cameraPosition + initialCameraDirection * distance;
     }
     return !any(isnan(virtualPosition)) && !any(isinf(virtualPosition)) &&
            !any(isnan(virtualNormal)) && !any(isinf(virtualNormal)) &&
@@ -74,6 +83,7 @@ public bool primePrimaryPsrSurface(PrimePrimaryPsr state, float3 cameraPosition,
 }
 
 public bool primePrimaryPsrMotionKnown(PrimePrimaryPsr state, bool terminalStatic) {
-    return terminalStatic && (state.flags & PRIME_PRIMARY_PSR_MOTION) != 0 &&
-           (state.flags & PRIME_PRIMARY_PSR_REFRACTED) == 0;
+    // Known static proxy geometry; exact for fixed planar reflection chains, approximate
+    // for refracted target planes. Missing dynamic previous geometry remains unsupported.
+    return terminalStatic && (state.flags & PRIME_PRIMARY_PSR_MOTION) != 0;
 }

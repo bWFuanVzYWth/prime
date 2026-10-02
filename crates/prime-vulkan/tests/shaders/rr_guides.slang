@@ -12,9 +12,53 @@ RWStructuredBuffer<float4> outputs;
 public float2 rrCpuMotion(float4 target, float2 sampleUv, float4 previousPosition,
                           float4 previousForward, float3 previousRight, float3 previousUp,
                           bool history, bool known) {
-    RrCamera camera = {previousPosition, previousForward, float4(previousRight, 0),
-                       float4(previousUp, 0), float4(0.23, -0.37, history ? 1.0 : 0.0, 0)};
+    RrCamera camera = {previousPosition,
+                       previousForward,
+                       float4(previousRight, 0),
+                       float4(previousUp, 0),
+                       float4(0.23, -0.37, history ? 1.0 : 0.0, 0),
+                       float4(0),
+                       float4(0),
+                       float4(0),
+                       float4(0)};
     return primeRrMotion(camera, sampleUv, target.xyz, target.w != 0, known);
+}
+
+public float3 rrCpuPixelMotion(float4 target, float2 sampleUv, float4 previousPosition,
+                               float4 previousForward, float3 previousRight, float3 previousUp,
+                               bool history, bool known, uint2 extent) {
+    RrCamera camera = {previousPosition,
+                       previousForward,
+                       float4(previousRight, 0),
+                       float4(previousUp, 0),
+                       float4(0.23, -0.37, history ? 1.0 : 0.0, 0),
+                       float4(0),
+                       float4(0),
+                       float4(0),
+                       float4(0)};
+    float2 motion;
+    bool valid =
+            primeRrMotionPixels(camera, sampleUv, target.xyz, target.w != 0, known, extent, motion);
+    return float3(motion, valid ? 1.0 : 0.0);
+}
+
+public float3 rrCpuDistanceMotion(float2 sampleUv, float depth, float distance,
+                                  float4 currentPosition, float4 currentForward,
+                                  float3 currentRight, float3 currentUp, float4 previousPosition,
+                                  float4 previousForward, float3 previousRight, float3 previousUp,
+                                  bool history, uint2 extent) {
+    RrCamera camera = {previousPosition,
+                       previousForward,
+                       float4(previousRight, 0),
+                       float4(previousUp, 0),
+                       float4(0.23, -0.37, history ? 1.0 : 0.0, 0),
+                       currentPosition,
+                       currentForward,
+                       float4(currentRight, 0),
+                       float4(currentUp, 0)};
+    float2 motion;
+    bool valid = primeRrDistanceMotion(camera, sampleUv, depth, distance, extent, motion);
+    return float3(motion, valid ? 1.0 : 0.0);
 }
 
 public float3 rrCpuColor(float3 value, bool roundtrip) {
@@ -42,11 +86,21 @@ public PrimeDenoiseAlbedos rrCpuAlbedos(float3 base, float3 optical, float rough
 
 [shader("compute")][numthreads(1, 1, 1)] void main(uint3 id : SV_DispatchThreadID) {
     float4 a = inputs[id.x];
-    outputs[3 * id.x] = float4(rrCpuMotion(a, float2(0.5), float4(0, 0, 0, 1), float4(0, 0, 1, 1),
+    outputs[5 * id.x] = float4(rrCpuMotion(a, float2(0.5), float4(0, 0, 0, 1), float4(0, 0, 1, 1),
                                            float3(1, 0, 0), float3(0, 1, 0), true, true),
                                0, 0);
-    outputs[3 * id.x + 1] = float4(rrCpuColor(a.xyz, a.w != 0), 1);
+    outputs[5 * id.x + 1] = float4(rrCpuColor(a.xyz, a.w != 0), 1);
     PrimeDenoiseAlbedos albedo =
             rrCpuAlbedos(a.xyz, float3(0.5, 4.0 / 255.0, 0), 0.5, false, false, 1);
-    outputs[3 * id.x + 2] = float4(albedo.diffuse + albedo.specular, 1);
+    outputs[5 * id.x + 2] = float4(albedo.diffuse + albedo.specular, 1);
+    outputs[5 * id.x + 3] =
+            float4(rrCpuPixelMotion(a, float2(0.5), float4(0, 0, 0, 1), float4(0, 0, 1, 1),
+                                    float3(1, 0, 0), float3(0, 1, 0), true, true, uint2(960, 540)),
+                   1);
+    outputs[5 * id.x + 4] =
+            float4(rrCpuDistanceMotion(float2(0.5), a.z, a.w, float4(0, 0, 0, 1),
+                                       float4(0, 0, 1, 1), float3(1, 0, 0), float3(0, 1, 0),
+                                       float4(0, 0, 0, 1), float4(0, 0, 1, 1), float3(1, 0, 0),
+                                       float3(0, 1, 0), true, uint2(960, 540)),
+                   1);
 }

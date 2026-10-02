@@ -221,6 +221,15 @@ uint4 pbrDeltaCase(uint index, uint mode) {
                                                           transmitted, weightT);
     PrimePbrSample selectedR = primeSamplePbrPrimaryDelta(vertex, view, geometric, 0.75, incident,
                                                           transmitted, weightR);
+    PrimePbrGuideDirection reflectionGuide =
+            primePbrReflectionGuideDirection(vertex, view, geometric, incident, transmitted);
+    // Full-frame reference remains independent of the helper's narrow frame-normal path.
+    float3 reflectedDirection = normalize(reflect(-view, onb.normal));
+    uint reflectionEvent = PRIME_BSDF_EVENT_DISCRETE | PRIME_BSDF_EVENT_REFLECTION;
+    bool reflectionGeometric =
+            primeBsdfDirection(reflectedDirection) &&
+            (!primePbrVertexHasNormal(vertex) ||
+             primeGeometricEventSupport(geometric, view, reflectedDirection, reflectionEvent));
     if (delta && category >= 5u) {
         PrimePbrSample r = referenceFrame(primeFullCompactTransmissionSampleRaw(
                                                   wi, float3(0.31, 0.73, events[randomIndex]),
@@ -243,6 +252,26 @@ uint4 pbrDeltaCase(uint index, uint mode) {
         if (!close(0.5 * (weightT * contribution(selectedT) + weightR * contribution(selectedR)),
                    contribution(r) + contribution(t)))
             failure |= 16u;
+        if (reflectionGuide.geometricValid != reflectionGeometric ||
+            reflectionGuide.eventFlags != reflectionEvent ||
+            reflectionGuide.nextIor != incident.x || reflectionGuide.totalInternalReflection ||
+            (validR && !reflectionGuide.geometricValid))
+            failure |= 512u;
+        if (reflectionGuide.geometricValid) {
+            // A zero-energy conditional R may be absent. Its geometric guide must still exist;
+            // compare actual lighting direction only when that R estimator is valid.
+            if (any(reflectionGuide.direction != reflectedDirection) ||
+                (validR && any(reflectionGuide.direction != r.bsdfSample.direction)) ||
+                ((selectedR.bsdfSample.eventFlags & PRIME_BSDF_EVENT_REFLECTION) != 0u &&
+                 any(reflectionGuide.direction != selectedR.bsdfSample.direction)))
+                failure |= 1024u;
+            if (any(asuint(reflectionGuide.direction) != asuint(reflectedDirection)) ||
+                (validR &&
+                 any(asuint(reflectionGuide.direction) != asuint(r.bsdfSample.direction))) ||
+                ((selectedR.bsdfSample.eventFlags & PRIME_BSDF_EVENT_REFLECTION) != 0u &&
+                 any(asuint(reflectionGuide.direction) != asuint(selectedR.bsdfSample.direction))))
+                failure |= 128u;
+        }
     } else if (selectedT.bsdfSample.eventFlags != 0u || selectedR.bsdfSample.eventFlags != 0u ||
                weightT != 0.0 || weightR != 0.0)
         failure |= 8u;
@@ -265,6 +294,11 @@ uint4 pbrDeltaCase(uint index, uint mode) {
         return uint4(asuint(selectedT.bsdfSample.direction), selectedT.bsdfSample.eventFlags);
     if (mode == 5u)
         return uint4(asuint(selectedR.bsdfSample.direction), selectedR.bsdfSample.eventFlags);
+    if (mode == 6u)
+        return uint4(asuint(reflectionGuide.direction),
+                     reflectionGuide.geometricValid ? reflectionGuide.eventFlags : 0u);
+    if (mode == 7u)
+        return uint4(asuint(reflectedDirection), reflectionGeometric ? reflectionEvent : 0u);
     if (guide.geometricValid) {
         if (sampled.bsdfSample.eventFlags == guide.eventFlags &&
             any(sampled.bsdfSample.direction != guide.direction))
@@ -382,6 +416,46 @@ public uint4 pbrDeltaEdgeCheck(uint index) {
         PrimePbrGuideDirection guide =
                 primePbrDeltaGuideDirection(vertex, float3(1.0, 0.0, 0.0), geometric, 1.0, 1.0);
         failure = guide.geometricValid || guide.totalInternalReflection ? 1u : 0u;
+    } else if (index >= 9u && index < 13u) {
+        // eta=1.5: sin(theta)=sqrt(0.75) causes TIR, while sin(theta)=0.6 admits refraction.
+        // Each geometry is checked with zero/underflowing transmission energy independently.
+        bool tir = index < 11u;
+        bool absorbed = (index & 1u) == 0u;
+        float cosine = tir ? 0.5 : 0.8;
+        view = float3(sqrt(1.0 - cosine * cosine), 0.0, cosine);
+        incident.x = 1.5;
+        transmitted.x = 1.0;
+        transmitted.yzw = absorbed ? float3(1.0e30) : float3(0.0);
+        vertex.control |= PRIME_PBR_VERTEX_THIN_WALLED;
+        PrimePbrGuideDirection guide =
+                primePbrDeltaGuideDirection(vertex, view, geometric, incident.x, transmitted.x);
+        uint expectedEvent = PRIME_BSDF_EVENT_DISCRETE |
+                             (tir ? PRIME_BSDF_EVENT_REFLECTION : PRIME_BSDF_EVENT_TRANSMISSION);
+        float3 expectedDirection = tir ? reflect(-view, geometric) : -view;
+        float weightT, weightR;
+        PrimePbrSample sampleT = primeSamplePbrPrimaryDelta(vertex, view, geometric, 0.25, incident,
+                                                            transmitted, weightT);
+        PrimePbrSample sampleR = primeSamplePbrPrimaryDelta(vertex, view, geometric, 0.75, incident,
+                                                            transmitted, weightR);
+        failure = !guide.geometricValid || guide.totalInternalReflection != tir ||
+                                  guide.eventFlags != expectedEvent ||
+                                  !close(guide.direction, expectedDirection) ||
+                                  guide.nextIor != incident.x
+                          ? 1u
+                          : 0u;
+        if (tir || absorbed) {
+            if (sampleT.bsdfSample.eventFlags !=
+                        (PRIME_BSDF_EVENT_DISCRETE | PRIME_BSDF_EVENT_REFLECTION) ||
+                sampleR.bsdfSample.eventFlags != sampleT.bsdfSample.eventFlags || weightT != 1.0 ||
+                weightR != 1.0 || sampleT.medium.x != incident.x)
+                failure |= 2u;
+        } else if (sampleT.bsdfSample.eventFlags != expectedEvent ||
+                   (sampleR.bsdfSample.eventFlags & PRIME_BSDF_EVENT_REFLECTION) == 0u ||
+                   weightT != 2.0 || weightR != 2.0)
+            failure |= 2u;
+        if (tir && (!close(sampleT.bsdfSample.direction, guide.direction) ||
+                    !close(sampleT.bsdfSample.response, float3(1.0))))
+            failure |= 4u;
     }
     return uint4(failure, 0u, 0u, 0u);
 }

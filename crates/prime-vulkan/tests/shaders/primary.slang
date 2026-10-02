@@ -47,15 +47,20 @@ public struct TestGuides : IPrimaryGuides {
                                   float4 incident, float4 transmitted) {
         outputs[pixel.x * 8 + 5].z += 1.0;
     }
+    public void reflectionPending(uint2 pixel) {}
     public void surface(PrimaryParameters camera, uint2 pixel, float2 sampleUv,
                         SurfacePoint surface, PrimePbrVertex material, float3 direction,
                         float4 incident, float4 transmitted, bool staticGeometry,
-                        PrimePrimaryPsr psr, float3 previousPosition) {
+                        PrimePrimaryPsr psr) {
         uint base = pixel.x * 8;
+        if ((psr.flags & PRIME_PRIMARY_GUIDE_REFLECTION) != 0) {
+            outputs[base + 6].w += 1.0;
+            return;
+        }
         float3 virtualPosition, virtualNormal;
-        bool valid =
-                primePrimaryPsrSurface(psr, camera.position.xyz, previousPosition, surface.position,
-                                       material.normal, virtualPosition, virtualNormal);
+        bool valid = primePrimaryPsrSurface(psr, camera.position.xyz, camera.forward.xyz,
+                                            surface.position, surface.normal, material.normal,
+                                            virtualPosition, virtualNormal);
         outputs[base] = float4(surface.position, 1.0);
         outputs[base + 1] = float4(virtualPosition,
                                    primePrimaryPsrMotionKnown(psr, staticGeometry) ? 1.0 : 0.0);
@@ -66,16 +71,21 @@ public struct TestGuides : IPrimaryGuides {
     public void environment(PrimaryParameters camera, uint2 pixel, float2 sampleUv,
                             float3 direction, PrimePrimaryPsr psr) {
         uint base = pixel.x * 8;
+        if ((psr.flags & PRIME_PRIMARY_GUIDE_REFLECTION) != 0) {
+            outputs[base + 6].w += 1.0;
+            return;
+        }
         outputs[base] = float4(direction, 2.0);
         outputs[base + 2].w = asfloat(psr.flags);
         outputs[base + 5].w += 1.0;
     }
-    public void unresolved(uint2 pixel) {
+    public void unresolved(uint2 pixel, uint flags) {
+        if ((flags & PRIME_PRIMARY_GUIDE_REFLECTION) != 0) {
+            outputs[pixel.x * 8 + 6].w -= 1.0;
+            return;
+        }
         outputs[pixel.x * 8] = float4(0, 0, 0, 3);
         outputs[pixel.x * 8 + 5].w += 1.0;
-    }
-    public void specularDistance(uint2 pixel, float distance) {
-        outputs[pixel.x * 8 + 6].x = distance;
     }
 };
 
@@ -92,9 +102,9 @@ public struct TestGuides : IPrimaryGuides {
     parameters.up = float4(0, 1, 0, 1);
     parameters.sampling = uint4(config.count, 1, input.y, input.x);
     parameters.config = uint4(8, input.z, 0, 0);
-    // 8 report planes (AoS), 7 common + 2 optical planes (SoA), one prefix plane.
+    // 8 report planes (AoS), 11 RR common + 2 optical planes (SoA), one prefix plane.
     parameters.commonAddress = config.scratchAddress + config.count * 8u;
-    parameters.opticalAddress = parameters.commonAddress + config.count * 7u;
+    parameters.opticalAddress = parameters.commonAddress + config.count * 11u;
     parameters.prefixAddress = parameters.opticalAddress + config.count * 2u;
     parameters.diagnosticAddress = config.scratchAddress; // config.z disables this consumer.
     TraceScene resources = {acceleration, textures, texels, instanceMaterials, staticTrianglePages};

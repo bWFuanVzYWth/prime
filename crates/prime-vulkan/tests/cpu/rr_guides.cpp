@@ -20,6 +20,7 @@ static bool close(float actual, double expected, double tolerance = 2e-6) {
 using F2 = Vector<float, 2>;
 using F3 = Vector<float, 3>;
 using F4 = Vector<float, 4>;
+using U2 = Vector<uint32_t, 2>;
 
 static F2 motion(F4 target, F2 sample = {0.5f, 0.5f}, F4 position = {0, 0, 0, 1},
                  F4 forward = {0, 0, 1, 1}, F3 right = {1, 0, 0}, F3 up = {0, 1, 0},
@@ -30,7 +31,121 @@ static void invalid(F2 value, const char *label) {
     require(value.x == -65504 && value.y == -65504, label);
 }
 
+static F3 pixel_motion(F4 target, F2 sample = {0.5f, 0.5f}, F4 position = {0, 0, 0, 1},
+                       F4 forward = {0, 0, 1, 1}, F3 right = {1, 0, 0}, F3 up = {0, 1, 0},
+                       bool history = true, bool known = true, U2 extent = {960, 540}) {
+    return rrCpuPixelMotion_0(target, sample, position, forward, right, up, history, known, extent);
+}
+
+static F3 distance_motion(float depth, float distance, F2 sample = {0.5f, 0.5f},
+                          F4 previous = {0, 0, 0, 1}, F4 current = {0, 0, 0, 1}, float aspect = 1,
+                          bool history = true, U2 extent = {960, 540}) {
+    return rrCpuDistanceMotion_0(sample, depth, distance, current, {0, 0, 1, aspect}, {1, 0, 0},
+                                 {0, 1, 0}, previous, {0, 0, 1, aspect}, {1, 0, 0}, {0, 1, 0},
+                                 history, extent);
+}
+
+static void sdk_motion(F3 value, double x, double y, const char *label) {
+    require(value.z == 1 && close(value.x, x, 2e-4) && close(value.y, y, 2e-4), label);
+    require(std::isfinite(value.x) && std::isfinite(value.y) && std::abs(value.x) < 65504 &&
+                    std::abs(value.y) < 65504,
+            "SDK motion contains finite pixel displacement, not an invalid sentinel");
+}
+
+static void unavailable_motion(F3 value, const char *label) {
+    require(value.z == 0 && value.x == 0 && value.y == 0, label);
+}
+
+static void pixel_motion_contracts() {
+    for (const U2 extent : {U2{960, 540}, U2{853, 479}, U2{1920, 1080}})
+        for (float aspect : {1.0f, 16.0f / 9.0f, 2.4f})
+            for (float tangent : {0.25f, 0.7f, 1.5f})
+                for (float jitterX : {-0.5f, 0.0f, 0.49f})
+                    for (float jitterY : {-0.49f, 0.0f, 0.5f})
+                        for (float depth : {0.1f, 10.0f, 4000.0f}) {
+                            const F2 uv{(87.5f + jitterX) / extent.x,
+                                        (140.5f + jitterY) / extent.y};
+                            const F4 point{(2 * uv.x - 1) * depth * tangent * aspect,
+                                           -(2 * uv.y - 1) * depth * tangent, depth, 0};
+                            sdk_motion(pixel_motion(point, uv, {0, 0, 0, tangent},
+                                                    {0, 0, 1, aspect}, {1, 0, 0}, {0, 1, 0}, true,
+                                                    true, extent),
+                                       0, 0, "static primary pixel motion excludes sample jitter");
+                            for (float distance : {0.0f, 5.0f, 65504.0f})
+                                sdk_motion(distance_motion(depth, distance, uv, {0, 0, 0, tangent},
+                                                           {0, 0, 0, tangent}, aspect, true,
+                                                           extent),
+                                           0, 0, "static distance motion excludes sample jitter");
+                        }
+
+    // Mirror plane z=3 reflects the physical endpoint z=-2 to virtual z=8.
+    // Its camera displacement must use z=8, not the primary depth 3 or endpoint -2.
+    sdk_motion(distance_motion(3, 5, {0.5f, 0.5f}, {1, 2, 0, 1}), -60, 67.5,
+               "planar reflected virtual point with camera XY translation");
+    sdk_motion(distance_motion(3, 5, {0.5f, 0.5f}, {1, 2, -4, 1}), -40, 45,
+               "planar reflected virtual point with camera XYZ translation");
+    sdk_motion(distance_motion(3, 0, {0.5f, 0.5f}, {1, 2, 0, 1}), -160, 180,
+               "zero hit distance gives primary-surface motion");
+
+    // Off-axis oracle: intersect z=10, reflect a ray towards -z, then geometrically
+    // reflect its endpoint through that plane before projecting into the previous camera.
+    for (float distance : {0.0f, 2.0f, 9.0f, 100.0f}) {
+        const F2 uv{0.625f, 0.75f};
+        const double dx = 0.25, dy = -0.5, length = std::sqrt(dx * dx + dy * dy + 1);
+        const double hit_x = 5 + dx * 3, hit_y = 2 + dy * 3;
+        const double reflected_x = hit_x + dx / length * distance;
+        const double reflected_y = hit_y + dy / length * distance;
+        const double reflected_z = 10 - distance / length;
+        const double virtual_z = 20 - reflected_z;
+        const double expected_x = ((reflected_x - 6) / (virtual_z - 8) * 0.5 + 0.5 - uv.x) * 853;
+        const double expected_y = (-(reflected_y - 1) / (virtual_z - 8) * 0.5 + 0.5 - uv.y) * 479;
+        auto value =
+                distance_motion(3, distance, uv, {6, 1, 8, 1}, {5, 2, 7, 1}, 1, true, {853, 479});
+        sdk_motion(value, expected_x, expected_y, "off-axis planar virtual endpoint projection");
+        if (distance == 0) {
+            auto primary = pixel_motion({float(hit_x), float(hit_y), 10, 0}, uv, {6, 1, 8, 1},
+                                        {0, 0, 1, 1}, {1, 0, 0}, {0, 1, 0}, true, true, {853, 479});
+            require(close(value.x, primary.x, 2e-4) && close(value.y, primary.y, 2e-4),
+                    "zero distance agrees with actual primary point projection");
+        }
+    }
+
+    const float sky_depth = std::numeric_limits<float>::max();
+    sdk_motion(
+            distance_motion(sky_depth, 65504, {0.625f, 0.75f}, {1000, 2000, 3000, 1}, {5, 2, 7, 1}),
+            0, 0, "sky distance motion has no translation parallax");
+    const float angle = 0.3f, c = std::cos(angle), s = std::sin(angle);
+    sdk_motion(rrCpuDistanceMotion_0({0.5f, 0.5f}, sky_depth, 0, {0, 0, 0, 1}, {0, 0, 1, 1},
+                                     {1, 0, 0}, {0, 1, 0}, {100, 200, 300, 1}, {s, 0, c, 1},
+                                     {c, 0, -s}, {0, 1, 0}, true, {960, 540}),
+               -480 * std::tan(angle), 0, "sky distance motion retains camera rotation");
+    sdk_motion(pixel_motion({0, 0, 10, 0}, {0.5f, 0.5f}, {1, 2, 0, 1}), -48, 54,
+               "primary motion converts UV to input pixels once");
+    sdk_motion(pixel_motion({0, 0, 10, 0}, {0.5f, 0.5f}, {1, 2, 0, 1}, {0, 0, 1, 1}, {1, 0, 0},
+                            {0, 1, 0}, false),
+               0, 0, "viewport history reset emits finite zero motion");
+    sdk_motion(distance_motion(3, 5, {0.5f, 0.5f}, {1, 2, 0, 1}, {0, 0, 0, 1}, 1, false), 0, 0,
+               "distance motion honors whole viewport reset");
+    for (bool history : {false, true})
+        unavailable_motion(pixel_motion({0, 0, 10, 0}, {0.5f, 0.5f}, {0, 0, 0, 1}, {0, 0, 1, 1},
+                                        {1, 0, 0}, {0, 1, 0}, history, false),
+                           "unknown dynamic correspondence stays explicit with finite zero output");
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    for (F4 target : {F4{nan, 0, 1, 0}, F4{inf, 0, 1, 0}, F4{0, 0, -1, 0}, F4{0, 0, 0, 0},
+                      F4{1000, 0, 1, 0}, F4{-1000, 0, 1, 0}})
+        unavailable_motion(pixel_motion(target), "failed pixel projection never exports sentinel");
+    for (float depth : {nan, inf, -1.0f, 0.0f})
+        unavailable_motion(distance_motion(depth, 5), "invalid distance depth is finite zero");
+    for (float distance : {nan, inf, -1.0f})
+        unavailable_motion(distance_motion(3, distance), "invalid hit distance is finite zero");
+    unavailable_motion(distance_motion(3, 5, {0.5f, 0.5f}, {0, 0, 20, 1}),
+                       "virtual endpoint behind previous camera is unavailable");
+}
+
 int main() {
+    pixel_motion_contracts();
     for (float aspect : {1.0f, 16.0f / 9.0f, 2.4f})
         for (float fov : {0.25f, 0.7f, 1.5f})
             for (float jitterX : {-0.5f, 0.0f, 0.49f})

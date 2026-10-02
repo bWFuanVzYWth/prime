@@ -62,7 +62,7 @@ Java 给主颜色 target 增加 storage 用途，同时将该用途映射为 `VK
 
 实时K1/K2各dispatch一次，依赖明确的landing交接；K1完成该交点的coverage、纹理解析、Beer、cone与发光，K2从NEE/continuation开始，后续才重新求交。它们没有逐bounce队列、压缩排序或第三个guide光追kernel。post不访问TLAS、材质或BSDF。K1/K2/post的push分别为128B/80B/112B，shader只声明实际资源；兼容的Vulkan pipeline layout不意味着每段消费同一完整Frame。K1按surface/optical能力去重为四个场景变体，K2保留六个；Offline的单样本/多样本两组六变体不变。
 
-实时scratch按实际输入尺寸分配，每像素176B，含112B common、32B optical sidecar、16B prefix/原相机空气段及16B FP32 tail。数据使用带明确索引/分配边界的BDA访问，不以一个超大SSBO range绕过设备限制。RR另有1B/内部像素的R8完成状态；raw仅在depth/normal诊断需要时增加16B/像素记录。更换尺寸、模式或RR档位先确定实际内部extent，再按完成证明重建资源。字段与访问职责见[PT状态设计](pt-state-design.md)。
+实时scratch按实际输入尺寸分配，raw每像素176B，含112B common、32B optical sidecar、16B prefix/原相机空气段及16B FP32 tail；RR另在common末尾保留64B互补guide seed，总计240B。数据使用带明确索引/分配边界的BDA访问，不以一个超大SSBO range绕过设备限制。RR另有1B/内部像素的R8 guide状态；raw仅在depth/normal诊断需要时增加16B/像素记录。更换尺寸、模式或RR档位先确定实际内部extent及scratch种类，再按完成证明重建资源。字段与访问职责见[PT状态设计](pt-state-design.md)。
 
 K1→K2屏障发布hot写入，K2→post屏障覆盖tail及之前的prefix/guide写入；SDK前后保留输入/输出访问屏障，跨帧复用还覆盖上一帧reader到下一帧writer。这些命令全部录入同一宿主command buffer/queue，没有新队列提交或稳态CPU等待。
 

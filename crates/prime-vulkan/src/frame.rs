@@ -607,12 +607,15 @@ impl Renderer {
                 .as_ref()
                 .map_or([width, height], |rr| rr.input_extent());
             let output = self.output.as_mut().unwrap();
-            if output
-                .scratch
-                .as_ref()
-                .is_none_or(|scratch| scratch.extent != extent)
-            {
-                output.scratch = Some(realtime::Scratch::new(&self.context, extent)?);
+            let reconstruction = self.reconstruction.is_some();
+            if output.scratch.as_ref().is_none_or(|scratch| {
+                scratch.extent != extent || scratch.reconstruction != reconstruction
+            }) {
+                output.scratch = Some(realtime::Scratch::new(
+                    &self.context,
+                    extent,
+                    reconstruction,
+                )?);
             }
             output.scratch.as_mut().unwrap().set_diagnostic(
                 &self.context,

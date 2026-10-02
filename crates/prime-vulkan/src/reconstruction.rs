@@ -10,21 +10,22 @@ use std::sync::Arc;
 mod streamline;
 pub(crate) use streamline::present;
 
-const FORMATS: [vk::Format; 8] = [
+const FORMATS: [vk::Format; 9] = [
     vk::Format::R16G16B16A16_SFLOAT, // noisy linear BT.709
     vk::Format::R32_SFLOAT,          // positive view Z
-    vk::Format::R16G16_SFLOAT,       // unjittered previous - current UV
+    vk::Format::R16G16_SFLOAT,       // unjittered previous - current input pixels
     vk::Format::R16G16B16A16_SFLOAT, // world normal, roughness
     vk::Format::R16G16B16A16_SFLOAT, // diffuse albedo
     vk::Format::R16G16B16A16_SFLOAT, // specular albedo
-    vk::Format::R16_SFLOAT,          // specular hit distance
+    vk::Format::R16_SFLOAT,          // internal sampled reflection distance, not tagged to SDK
     vk::Format::R16G16B16A16_SFLOAT, // reconstructed output linear BT.709
+    vk::Format::R16G16_SFLOAT,       // unjittered specular previous - current input pixels
 ];
 
 struct Images {
     input: [u32; 2],
     output: [u32; 2],
-    images: [Image; 8],
+    images: [Image; 9],
     // Engine completion state only; never tagged as an SDK input or BiasCurrentColorHint.
     unresolved: Image,
 }
@@ -64,7 +65,7 @@ impl Reconstruction {
             }
             let runtime = streamline::Runtime::new(context)?;
             let constants = (0..FRAME_SLOTS)
-                .map(|_| Buffer::new(context, 80, vk::BufferUsageFlags::UNIFORM_BUFFER, true))
+                .map(|_| Buffer::new(context, 144, vk::BufferUsageFlags::UNIFORM_BUFFER, true))
                 .collect::<Result<Vec<_>, _>>()?
                 .try_into()
                 .map_err(|_| "Invalid RR constants count")?;
@@ -179,30 +180,13 @@ impl Reconstruction {
         let valid = previous
             .is_some_and(|(p, s)| sequence == s.wrapping_add(1) && !history::camera_cut(camera, p));
         let previous_camera = previous.filter(|_| valid).map_or(camera, |(p, _)| p);
-        let values = [
-            previous_camera.position[0],
-            previous_camera.position[1],
-            previous_camera.position[2],
-            (previous_camera.vertical_fov_radians * 0.5).tan(),
-            previous_camera.forward[0],
-            previous_camera.forward[1],
-            previous_camera.forward[2],
+        self.constants[slot].write(&history::camera_constants(
+            camera,
+            previous_camera,
             aspect,
-            previous_camera.right[0],
-            previous_camera.right[1],
-            previous_camera.right[2],
-            0.0,
-            previous_camera.up[0],
-            previous_camera.up[1],
-            previous_camera.up[2],
-            0.0,
-            jitter[0],
-            jitter[1],
-            f32::from(valid),
-            0.0,
-        ];
-        let bytes = values.map(f32::to_le_bytes);
-        self.constants[slot].write(bytes.as_flattened())?;
+            jitter,
+            valid,
+        ))?;
         self.current = Some(streamline::Frame::new(
             camera,
             previous_camera,
@@ -231,15 +215,15 @@ impl Reconstruction {
         });
         let constants = [vk::DescriptorBufferInfo::default()
             .buffer(self.constants[slot].buffer)
-            .range(80)];
+            .range(144)];
         let unresolved = [vk::DescriptorImageInfo::default()
             .image_view(self.images.as_ref().unwrap().unresolved.view)
             .image_layout(vk::ImageLayout::GENERAL)];
-        let mut writes = [vk::WriteDescriptorSet::default(); 10];
-        for ((binding, info), write) in [10, 11, 12, 13, 14, 15, 16, 18]
+        let mut writes = [vk::WriteDescriptorSet::default(); 11];
+        for ((binding, info), write) in [10, 11, 12, 13, 14, 15, 16, 18, 20]
             .into_iter()
             .zip(&infos)
-            .zip(&mut writes[..8])
+            .zip(&mut writes[..9])
         {
             *write = vk::WriteDescriptorSet::default()
                 .dst_set(descriptor)
@@ -247,12 +231,12 @@ impl Reconstruction {
                 .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                 .image_info(info);
         }
-        writes[8] = vk::WriteDescriptorSet::default()
+        writes[9] = vk::WriteDescriptorSet::default()
             .dst_set(descriptor)
             .dst_binding(17)
             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
             .buffer_info(&constants);
-        writes[9] = vk::WriteDescriptorSet::default()
+        writes[10] = vk::WriteDescriptorSet::default()
             .dst_set(descriptor)
             .dst_binding(19)
             .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)

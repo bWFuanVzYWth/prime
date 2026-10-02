@@ -63,6 +63,10 @@ sl::Result mock_evaluate(sl::Feature feature, const sl::FrameToken &current,
         assert(tag.resource->state == VK_IMAGE_LAYOUT_GENERAL);
         assert(tag.resource->mipLevels == 1 && tag.resource->arrayLayers == 1);
         assert(tag.extent.width == tag.resource->width);
+        if (tag.type == sl::kBufferTypeSpecularMotionVectors) {
+            assert(tag.resource->nativeFormat == VK_FORMAT_R16G16_SFLOAT);
+            assert(tag.resource->native == reinterpret_cast<void *>(108));
+        }
         seen_tags.push_back(tag.type);
     }
     ++evaluates;
@@ -108,11 +112,14 @@ PrimeSlFrame make_frame(const Context &ctx) {
     frame.images[PRIME_SL_DEPTH].format = VK_FORMAT_R32_SFLOAT;
     frame.images[PRIME_SL_MOTION].format = VK_FORMAT_R16G16_SFLOAT;
     frame.images[PRIME_SL_SPECULAR_HIT_DISTANCE].format = VK_FORMAT_R16_SFLOAT;
+    frame.images[PRIME_SL_SPECULAR_MOTION].format = VK_FORMAT_R16G16_SFLOAT;
     return frame;
 }
 } // namespace
 
 int main() {
+    assert(prime_sl_abi_version() == 2);
+    assert(sizeof(PrimeSlFrame) == 904);
     void *output = reinterpret_cast<void *>(1);
     assert(prime_sl_create(nullptr, &output) < 0 && output == nullptr);
     assert(prime_sl_destroy(nullptr) == 0);
@@ -147,18 +154,35 @@ int main() {
     auto frame = make_frame(*ctx);
     assert(prime_sl_evaluate(ctx, &frame) == 0);
     assert(evaluates == 1 && seen_tags.size() == 8);
-    assert(seen_tags[1] == sl::kBufferTypeLinearDepth);
-    assert(seen_tags[3] == sl::kBufferTypeNormalRoughness);
-    assert(seen_tags[6] == sl::kBufferTypeScalingOutputColor);
-    assert(seen_tags[7] == sl::kBufferTypeSpecularHitDistance);
+    assert((seen_tags == std::vector<sl::BufferType>{
+                                 sl::kBufferTypeScalingInputColor, sl::kBufferTypeLinearDepth,
+                                 sl::kBufferTypeMotionVectors, sl::kBufferTypeNormalRoughness,
+                                 sl::kBufferTypeAlbedo, sl::kBufferTypeSpecularAlbedo,
+                                 sl::kBufferTypeScalingOutputColor,
+                                 sl::kBufferTypeSpecularMotionVectors}));
     assert(seen_constants.jitterOffset.x == 0.25f && seen_constants.jitterOffset.y == -0.125f);
-    assert(seen_constants.mvecScale.x == 1 && seen_constants.mvecScale.y == 1);
+    assert(seen_constants.mvecScale.x == 1.0f / size.render_width);
+    assert(seen_constants.mvecScale.y == 1.0f / size.render_height);
+    assert(std::abs(seen_constants.mvecScale.x * size.render_width - 1.0f) < 1e-7f);
+    assert(std::abs(seen_constants.mvecScale.y * size.render_height - 1.0f) < 1e-7f);
     assert(seen_constants.cameraMotionIncluded == sl::Boolean::eTrue);
     assert(seen_constants.motionVectorsJittered == sl::Boolean::eFalse);
     assert(seen_constants.reset == sl::Boolean::eTrue);
     frame.images[PRIME_SL_SPECULAR_HIT_DISTANCE] = {};
-    assert(prime_sl_evaluate(ctx, &frame) == 0 && seen_tags.size() == 7);
+    assert(prime_sl_evaluate(ctx, &frame) == 0 && seen_tags.size() == 8);
     frame.images[PRIME_SL_NOISY].width += 1;
+    assert(prime_sl_evaluate(ctx, &frame) < 0 && evaluates == 2);
+    frame = make_frame(*ctx);
+    frame.images[PRIME_SL_SPECULAR_MOTION] = {};
+    assert(prime_sl_evaluate(ctx, &frame) < 0 && evaluates == 2);
+    frame = make_frame(*ctx);
+    frame.images[PRIME_SL_SPECULAR_MOTION].format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    assert(prime_sl_evaluate(ctx, &frame) < 0 && evaluates == 2);
+    frame = make_frame(*ctx);
+    frame.images[PRIME_SL_SPECULAR_MOTION].height += 1;
+    assert(prime_sl_evaluate(ctx, &frame) < 0 && evaluates == 2);
+    frame = make_frame(*ctx);
+    frame.images[PRIME_SL_SPECULAR_MOTION].image = frame.images[PRIME_SL_OUTPUT].image;
     assert(prime_sl_evaluate(ctx, &frame) < 0 && evaluates == 2);
     frame = make_frame(*ctx);
     frame.images[PRIME_SL_OUTPUT].image = frame.images[PRIME_SL_NOISY].image;

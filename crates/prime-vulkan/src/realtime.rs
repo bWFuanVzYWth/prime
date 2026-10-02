@@ -17,18 +17,19 @@ struct ScratchLayout {
 }
 
 impl ScratchLayout {
-    fn new(pixels: u64) -> Result<Self, String> {
-        // Slang's SoA element index is `plane * count + pixel`, with seven common planes.
-        if pixels == 0 || pixels > (u64::from(u32::MAX) + 1) / 7 {
+    fn new(pixels: u64, reconstruction: bool) -> Result<Self, String> {
+        // RR appends four companion-guide planes to the seven common landing planes.
+        let common_planes = if reconstruction { 11 } else { 7 };
+        if pixels == 0 || pixels > (u64::from(u32::MAX) + 1) / common_planes {
             return Err("Real-time scratch pixel count is outside shader indexing range".into());
         }
         let bytes = pixels
-            .checked_mul(176)
+            .checked_mul((common_planes + 4) * 16)
             .ok_or("Real-time scratch size overflow")?;
         Ok(Self {
-            optical: pixels * 112,
-            prefix: pixels * 144,
-            tail: pixels * 160,
+            optical: pixels * common_planes * 16,
+            prefix: pixels * (common_planes + 2) * 16,
+            tail: pixels * (common_planes + 3) * 16,
             bytes,
             diagnostic_bytes: pixels * 16,
         })
@@ -46,18 +47,24 @@ pub(super) struct Addresses {
 
 pub(super) struct Scratch {
     pub extent: [u32; 2],
+    pub reconstruction: bool,
     storage: Buffer,
     diagnostic: Option<Buffer>,
     layout: ScratchLayout,
 }
 
 impl Scratch {
-    pub fn new(context: &Arc<Context>, extent: [u32; 2]) -> Result<Self, String> {
+    pub fn new(
+        context: &Arc<Context>,
+        extent: [u32; 2],
+        reconstruction: bool,
+    ) -> Result<Self, String> {
         let pixels = context.render_extent(extent[0], extent[1])?.pixels();
-        let layout = ScratchLayout::new(pixels)?;
+        let layout = ScratchLayout::new(pixels, reconstruction)?;
         let storage = Buffer::new_address(context, layout.bytes)?;
         Ok(Self {
             extent,
+            reconstruction,
             storage,
             diagnostic: None,
             layout,
@@ -344,7 +351,7 @@ mod tests {
     fn scratch_ranges_are_disjoint_aligned_and_fit_shader_plane_indexing() {
         let maximum = (u64::from(u32::MAX) + 1) / 7;
         for pixels in [1, 17 * 9, 960 * 540, 1920 * 1080, maximum] {
-            let layout = ScratchLayout::new(pixels).unwrap();
+            let layout = ScratchLayout::new(pixels, false).unwrap();
             assert_eq!(
                 [layout.optical, layout.prefix, layout.tail, layout.bytes],
                 [112 * pixels, 144 * pixels, 160 * pixels, 176 * pixels]
@@ -356,9 +363,20 @@ mod tests {
                     .all(|offset| offset.is_multiple_of(16))
             );
         }
-        assert!(ScratchLayout::new(0).is_err());
-        assert!(ScratchLayout::new(maximum + 1).is_err());
-        assert!(ScratchLayout::new(u64::from(u32::MAX) + 1).is_err());
+        assert!(ScratchLayout::new(0, false).is_err());
+        assert!(ScratchLayout::new(maximum + 1, false).is_err());
+        assert!(ScratchLayout::new(u64::from(u32::MAX) + 1, false).is_err());
+        let rr_maximum = (u64::from(u32::MAX) + 1) / 11;
+        for pixels in [1, 17 * 9, 960 * 540, 1920 * 1080, rr_maximum] {
+            let layout = ScratchLayout::new(pixels, true).unwrap();
+            assert_eq!(
+                [layout.optical, layout.prefix, layout.tail, layout.bytes],
+                [176 * pixels, 208 * pixels, 224 * pixels, 240 * pixels]
+            );
+            assert_eq!(layout.diagnostic_bytes, 16 * pixels);
+        }
+        assert!(ScratchLayout::new(0, true).is_err());
+        assert!(ScratchLayout::new(rr_maximum + 1, true).is_err());
         assert_eq!(
             PRIMARY_VARIANT.map(|index| PRIMARY_FEATURES[index]),
             [

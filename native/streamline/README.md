@@ -34,17 +34,24 @@ run after GPU completion of previous evaluations; it explicitly frees the old RR
 feature before configuring a new extent, avoiding the SDK's resize path that
 otherwise retires the previous NGX feature after a fixed number of presents.
 
-`evaluate` consumes noisy linear HDR BT.709 RGBA16F, positive view-space depth
-R32F, top-left normalized previous-minus-current UV motion RG16F, world-space
-normal plus linear roughness RGBA16F, diffuse/specular albedo RGBA16F and output
-RGBA16F. Input guides match the queried input extent; output matches the requested
-display extent. A real primary-reflection hit-distance R16F can be supplied;
-an all-zero descriptor explicitly omits that optional SDK input. Matrices use
+ABI v2 `evaluate` consumes noisy linear HDR BT.709 RGBA16F, positive view-space depth
+R32F, dense primary and specular motion RG16F, world-space normal plus linear
+roughness RGBA16F, diffuse/specular albedo RGBA16F and output RGBA16F. Input guides
+match the queried input extent; output matches the requested display extent.
+Both motion fields store top-left previous-minus-current displacement in input
+pixels. The bridge supplies reciprocal render dimensions as Streamline's scale,
+which the plugin multiplies by that extent to give NGX unit scale. Specular motion
+is tagged as `kBufferTypeSpecularMotionVectors`, the DLSSD `GBuffer.SpecularMvec`
+input. The hit-distance R16F descriptor is retained for the engine's post input
+and can be absent; it is never tagged alongside the explicit specular-motion path.
+The ABI frame is 904 bytes and appends specular motion at image index 8. Matrices use
 Streamline's row-major row-vector convention and omit jitter. ABI jitter is the
 projection displacement in input pixel units: each component is the negative of
 the tracer's pixel-center sample offset. Rust performs this conversion once;
 the bridge forwards it unchanged to Streamline/NGX. Motion vectors include camera
-motion and exclude jitter.
+motion and exclude jitter. Unknown motion uses finite placeholders and the engine's
+raw fallback mask; the unused DLSSD `motionVectorsInvalidValue` constant does not
+establish per-pixel SDK history rejection.
 
 All image states enter and leave as GENERAL. Local tags are valid through the
 evaluate call and cause no extra volatile-tag copies. GPU resources remain alive

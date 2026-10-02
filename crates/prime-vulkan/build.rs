@@ -105,6 +105,7 @@ fn main() {
             "full_openpbr",
             "pbr_texture",
             "primary",
+            "primary_rr",
         ] {
             compile(
                 &compiler,

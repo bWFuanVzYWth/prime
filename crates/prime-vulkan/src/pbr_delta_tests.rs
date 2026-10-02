@@ -16,7 +16,7 @@ fn gpu_pbr_delta_and_guide_contracts() {
     let mut guide = 0;
     let mut tir = 0;
     let mut failures = Vec::new();
-    let mut masks = [0_u32; 9];
+    let mut masks = [0_u32; 11];
     for (case, result) in output.as_chunks::<4>().0.iter().enumerate() {
         if result[0] & !DIRECTION_BITS != 0 {
             failures.push((case as u32, result[0]));
@@ -30,11 +30,11 @@ fn gpu_pbr_delta_and_guide_contracts() {
     }
     if !failures.is_empty() {
         println!(
-            "PBR failure masks 1..256: {masks:?}; failures={}",
+            "PBR failure masks 1..1024: {masks:?}; failures={}",
             failures.len()
         );
         let diagnostic: Vec<_> = failures.iter().take(32).map(|&(case, _)| case).collect();
-        for mode in 2..=5 {
+        for mode in 2..=7 {
             let values = run(
                 &context,
                 CODE,
@@ -53,18 +53,19 @@ fn gpu_pbr_delta_and_guide_contracts() {
         panic!(
             "PBR contract failures: bit 0 class, 1 Full, 2 albedo, 3 pair, 4 expectation, \
                 5 guide independence, 6 validity, 7 informational bit mismatch, \
-                8 exact numeric mismatch; {masks:?}"
+                8 exact numeric mismatch, 9 complementary reflection geometry, \
+                10 complementary reflection numeric mismatch; {masks:?}"
         );
     }
     assert!(delta > 10_000 && guide > 10_000 && tir > 500);
-    let edges: Vec<_> = (0..9).collect();
-    let output = run(&context, CODE, &edges, 9 * 4, [1, 9], None);
+    let edges: Vec<_> = (0..13).collect();
+    let output = run(&context, CODE, &edges, 13 * 4, [1, 13], None);
     for (case, result) in output.as_chunks::<4>().0.iter().enumerate() {
         assert_eq!(result[0], 0, "delta/guide edge contract {case}");
     }
     println!(
         "PBR narrow contracts: {CASES} cases; {delta} delta, {guide} valid guides, {tir} TIR; \
-         9 edges; signed-zero direction differences={}; exact numeric mismatches={}",
+         13 edges; signed-zero direction differences={}; exact numeric mismatches={}",
         masks[7], masks[8]
     );
 }

@@ -46,9 +46,9 @@ int evaluate_frame(VkPhysicalDevice physical, VkDevice device, uint32_t family, 
                 return i;
         return UINT32_MAX;
     };
-    VkImage images[8]{};
-    VkImageView views[8]{};
-    VkDeviceMemory allocations[8]{};
+    VkImage images[PRIME_SL_IMAGE_COUNT]{};
+    VkImageView views[PRIME_SL_IMAGE_COUNT]{};
+    VkDeviceMemory allocations[PRIME_SL_IMAGE_COUNT]{};
     PrimeSlFrame frame{};
     frame.reset = 1;
     frame.camera_near = .1f;
@@ -76,9 +76,10 @@ int evaluate_frame(VkPhysicalDevice physical, VkDevice device, uint32_t family, 
     const VkFormat formats[] = {VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R32_SFLOAT,
                                 VK_FORMAT_R16G16_SFLOAT,       VK_FORMAT_R16G16B16A16_SFLOAT,
                                 VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16G16B16A16_SFLOAT,
-                                VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16_SFLOAT};
+                                VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16_SFLOAT,
+                                VK_FORMAT_R16G16_SFLOAT};
     const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    for (uint32_t i = 0; i < 8; ++i) {
+    for (uint32_t i = 0; i < PRIME_SL_IMAGE_COUNT; ++i) {
         auto &desc = frame.images[i];
         desc.width = i == 6 ? 1920 : size.render_width;
         desc.height = i == 6 ? 1080 : size.render_height;
@@ -155,8 +156,9 @@ int evaluate_frame(VkPhysicalDevice physical, VkDevice device, uint32_t family, 
             {{.04f, .04f, .04f, 1}},
             {{std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::quiet_NaN(),
               std::numeric_limits<float>::quiet_NaN(), 0}},
-            {{0, 0, 0, 0}}};
-    for (uint32_t i = 0; i < 8; ++i) {
+            {{0, 0, 0, 0}},
+            {{0, 0, 0, 0}}}; // Static fixture: both dense motion fields are zero input pixels.
+    for (uint32_t i = 0; i < PRIME_SL_IMAGE_COUNT; ++i) {
         VkImageMemoryBarrier ib{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         ib.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         ib.newLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -231,7 +233,7 @@ int evaluate_frame(VkPhysicalDevice physical, VkDevice device, uint32_t family, 
             result = 5;
     }
     vk_symbol<PFN_vkDestroyCommandPool>("vkDestroyCommandPool")(device, pool, nullptr);
-    for (uint32_t i = 0; i < 8; ++i) {
+    for (uint32_t i = 0; i < PRIME_SL_IMAGE_COUNT; ++i) {
         vk_symbol<PFN_vkDestroyImageView>("vkDestroyImageView")(device, views[i], nullptr);
         vk_symbol<PFN_vkDestroyImage>("vkDestroyImage")(device, images[i], nullptr);
         vk_symbol<PFN_vkFreeMemory>("vkFreeMemory")(device, allocations[i], nullptr);
@@ -259,6 +261,8 @@ VkBool32 VKAPI_CALL validation(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                    : VK_FALSE;
 }
 int main(int argc, char **argv) try {
+    if (prime_sl_abi_version() != 2)
+        throw std::runtime_error("Streamline GPU test requires bridge ABI v2");
     bool omit_write = false, api13 = false, init_only = false, synchronization2 = true;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--omit-write-without-format") == 0)
@@ -292,7 +296,8 @@ int main(int argc, char **argv) try {
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "Prime Streamline headless attachment test";
     app.apiVersion = api13 ? VK_API_VERSION_1_3 : VK_API_VERSION_1_2;
-    std::printf("API=%u.%u output=1920x1080 quality=Performance preset=F "
+    std::printf("API=%u.%u bridge_abi=2 output=1920x1080 quality=Performance preset=F "
+                "motion_units=input_pixels specular_motion=explicit hit_distance_tag=absent "
                 "validation=enabled synchronization_validation=enabled abort_on_error=%u\n",
                 VK_API_VERSION_MAJOR(app.apiVersion), VK_API_VERSION_MINOR(app.apiVersion),
                 unsigned(abort_on_validation_error));

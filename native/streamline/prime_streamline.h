@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-// ABI 1. All entry points run serially on the renderer thread. Zero means success;
+// ABI 2. All entry points run serially on the renderer thread. Zero means success;
 // negative values are bridge errors, positive values are sl::Result errors.
 // Configure/destroy require completion of every prior evaluate on this context.
 // Streamline is process global: only one live Prime context is supported.
@@ -46,7 +46,8 @@ enum {
     PRIME_SL_SPECULAR_ALBEDO = 5,
     PRIME_SL_OUTPUT = 6,
     PRIME_SL_SPECULAR_HIT_DISTANCE = 7,
-    PRIME_SL_IMAGE_COUNT = 8
+    PRIME_SL_SPECULAR_MOTION = 8,
+    PRIME_SL_IMAGE_COUNT = 9
 };
 
 typedef struct PrimeSlFrame {
@@ -72,7 +73,9 @@ typedef struct PrimeSlFrame {
     // Images and descriptors are borrowed until evaluate returns. Vulkan images
     // and views remain alive until the host's GPU completion value is reached.
     // All resources are single-mip single-layer color images in GENERAL layout.
-    // Hit-distance may be an all-zero descriptor; no fabricated reflection guide.
+    // Primary/specular motion are dense input-pixel previous-minus-current XY,
+    // including camera motion and excluding jitter. Specular motion is required.
+    // Hit-distance is internal post input, never tagged for the SDK; it may be absent.
     PrimeSlImage images[PRIME_SL_IMAGE_COUNT];
 } PrimeSlFrame;
 
