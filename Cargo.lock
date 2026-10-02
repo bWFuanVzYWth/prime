@@ -550,6 +550,7 @@ name = "prime_vulkan"
 version = "0.1.0"
 dependencies = [
  "ash",
+ "cc",
  "mimalloc",
  "prime_scene",
  "safetensors",

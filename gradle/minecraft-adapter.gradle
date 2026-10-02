@@ -92,6 +92,12 @@ tasks.register('nativeJar', Jar) {
         include 'prime_engine.dll'
         into 'natives/windows-x86_64'
     }
+    if (hostLibraryName == 'prime_engine.dll') {
+        from(rootProject.file('third_party/streamline/bin/x64')) {
+            include rootProject.streamlineRuntimeFiles
+            into 'natives/windows-x86_64'
+        }
+    }
     from(rootProject.file('target/release')) {
         include 'libprime_engine.so'
         into 'natives/linux-x86_64'

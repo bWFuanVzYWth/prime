@@ -13,17 +13,12 @@ import java.lang.foreign.SymbolLookup;
 import java.lang.invoke.MethodHandle;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import static java.lang.foreign.ValueLayout.*;
 
 /** One render-thread owner. Native code consumes borrowed input before return and owns all retained data. */
 public final class NativeBridge implements AutoCloseable {
+    private static volatile MethodHandle vulkanPresent;
     private final Thread owner = Thread.currentThread();
     private final MethodHandle submit, renderDiagnostic, attachVulkan, configure, record, gpuTime,
             cpuDiagnostics, planSections, acceptSections, destroy, lastError;
@@ -48,6 +43,11 @@ public final class NativeBridge implements AutoCloseable {
             var abi = bind(lookup, "prime_abi_version", FunctionDescriptor.of(JAVA_INT));
             if ((int)abi.invokeExact() != Packets.ABI_VERSION)
                 throw new IllegalStateException("Native ABI version mismatch");
+            if (System.getProperty("os.name", "")
+                        .toLowerCase(java.util.Locale.ROOT)
+                        .startsWith("windows"))
+                vulkanPresent = bind(lookup, "prime_streamline_present",
+                                     FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG));
             var create = bind(lookup, "prime_create", FunctionDescriptor.of(JAVA_LONG, JAVA_INT));
             submit = bind(lookup, "prime_submit",
                           FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_LONG));
@@ -175,7 +175,8 @@ public final class NativeBridge implements AutoCloseable {
     }
 
     public void attachVulkan(long instance, long physicalDevice, long device, long queue,
-                             long timeline, int queueFamily, boolean opacityMicromapEnabled) {
+                             long timeline, int queueFamily, boolean opacityMicromapEnabled,
+                             boolean streamlineEnabled) {
         checkOwner();
         var descriptor = host.asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
         descriptor.putLong(instance)
@@ -184,11 +185,24 @@ public final class NativeBridge implements AutoCloseable {
                 .putLong(queue)
                 .putLong(timeline)
                 .putInt(queueFamily)
-                .putInt(opacityMicromapEnabled ? 1 : 0);
+                .putInt((opacityMicromapEnabled ? 1 : 0) | (streamlineEnabled ? 2 : 0));
         try {
             int status = (int)attachVulkan.invokeExact(handle, host, 48L);
             if (status != 0)
                 throw new IllegalStateException("prime_attach_vulkan (" + status + "): " + error());
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    public static boolean hasVulkanPresent() {
+        return vulkanPresent != null;
+    }
+
+    /** Borrows the host present descriptor only for this call; returns the actual Vulkan result. */
+    public static int presentVulkan(long queue, long presentInfo) {
+        try {
+            return (int)vulkanPresent.invokeExact(queue, presentInfo);
         } catch (Throwable failure) {
             throw rethrow(failure);
         }
@@ -325,44 +339,10 @@ public final class NativeBridge implements AutoCloseable {
         String arch = System.getProperty("os.arch");
         if (!(arch.equals("amd64") || arch.equals("x86_64")))
             throw new IOException("Unsupported native architecture: " + arch);
-        try (var input =
-                     NativeBridge.class.getResourceAsStream("/natives/" + platform + "/" + file)) {
-            if (input == null)
-                throw new IOException(
-                        "Native library missing; use nativeJar or -Dprimept.native.path=<absolute library path>");
-            byte[] contents = input.readAllBytes();
-            String digest = sha256(contents);
-            Path directory = Path.of(System.getProperty("java.io.tmpdir"), "primept-natives",
-                                     platform, digest);
-            Files.createDirectories(directory);
-            Path target = directory.resolve(file);
-            if (!Files.exists(target)) {
-                Path staging = Files.createTempFile(directory, ".extract-", ".tmp");
-                try {
-                    Files.write(staging, contents, StandardOpenOption.TRUNCATE_EXISTING,
-                                StandardOpenOption.WRITE);
-                    try {
-                        Files.move(staging, target, StandardCopyOption.ATOMIC_MOVE);
-                    } catch (IOException concurrentExtraction) {
-                        if (!Files.exists(target))
-                            throw concurrentExtraction;
-                    }
-                } finally {
-                    Files.deleteIfExists(staging);
-                }
-            }
-            if (!sha256(Files.readAllBytes(target)).equals(digest))
-                throw new IOException("Cached native library hash mismatch: " + target);
-            // Content-addressed reuse avoids per-launch leaks; Windows cannot delete a still-loaded DLL on shutdown.
-            return target;
-        }
-    }
-
-    private static String sha256(byte[] bytes) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new AssertionError(impossible);
-        }
+        return NativeRuntime.extract(
+                Path.of(System.getProperty("java.io.tmpdir"), "primept-natives"), platform,
+                windows ? NativeRuntime.WINDOWS_FILES : java.util.List.of(file),
+                name
+                -> NativeBridge.class.getResourceAsStream("/natives/" + platform + "/" + name));
     }
 }

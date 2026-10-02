@@ -16,6 +16,9 @@ ash = { workspace = true }
 prime_scene = { workspace = true }
 safetensors = "0.8.0"
 
+[build-dependencies]
+cc = "1.5.1"
+
 [dev-dependencies]
 mimalloc.workspace = true
 

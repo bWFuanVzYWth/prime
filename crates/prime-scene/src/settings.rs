@@ -17,6 +17,18 @@ pub enum DiagnosticView {
     Normal = 3,
 }
 
+/// DLSS input resolution modes. Performance renders half the output width and height.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u32)]
+pub enum ReconstructionQuality {
+    Native = 0,
+    Quality = 1,
+    Balanced = 2,
+    #[default]
+    Performance = 3,
+    UltraPerformance = 4,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderSettings {
     pub astronomy: crate::environment::Astronomy,
@@ -32,6 +44,8 @@ pub struct RenderSettings {
     pub depth_range: f32,
     pub seed: u32,
     pub opacity_micromap: bool,
+    pub ray_reconstruction: bool,
+    pub reconstruction_quality: ReconstructionQuality,
 }
 impl Default for RenderSettings {
     fn default() -> Self {
@@ -49,15 +63,17 @@ impl Default for RenderSettings {
             depth_range: 128.0,
             seed: 0x1357_2468,
             opacity_micromap: true,
+            ray_reconstruction: true,
+            reconstruction_quality: ReconstructionQuality::Performance,
         }
     }
 }
 impl RenderSettings {
-    pub const VERSION: u32 = 3;
-    pub const BYTES: usize = 60;
+    pub const VERSION: u32 = 4;
+    pub const BYTES: usize = 68;
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != Self::BYTES {
-            return Err("Settings require exactly 60 bytes".into());
+            return Err("Settings require exactly 68 bytes".into());
         }
         let word = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
         if word(0) != Self::VERSION {
@@ -94,6 +110,19 @@ impl RenderSettings {
                 1 => true,
                 _ => return Err("Unknown opacity micromap setting".into()),
             },
+            ray_reconstruction: match word(60) {
+                0 => false,
+                1 => true,
+                _ => return Err("Unknown ray reconstruction setting".into()),
+            },
+            reconstruction_quality: match word(64) {
+                0 => ReconstructionQuality::Native,
+                1 => ReconstructionQuality::Quality,
+                2 => ReconstructionQuality::Balanced,
+                3 => ReconstructionQuality::Performance,
+                4 => ReconstructionQuality::UltraPerformance,
+                _ => return Err("Unknown reconstruction quality".into()),
+            },
         };
         result.validate()?;
         Ok(result)
@@ -127,7 +156,7 @@ mod tests {
     use super::*;
     fn golden() -> Vec<u8> {
         [
-            3_u32,
+            4_u32,
             1,
             12,
             1,
@@ -142,6 +171,8 @@ mod tests {
             30,
             0,
             1,
+            1,
+            3,
         ]
         .into_iter()
         .flat_map(u32::to_le_bytes)
@@ -165,7 +196,8 @@ mod tests {
             (0, 0_u32),
             (0, 1),
             (0, 2),
-            (0, 4),
+            (0, 3),
+            (0, 5),
             (48, 91),
             (48, (-91i32) as u32),
             (52, 360),
@@ -175,6 +207,8 @@ mod tests {
             (12, 65),
             (28, 4),
             (56, 2),
+            (60, 2),
+            (64, 5),
         ] {
             let mut invalid = bytes.clone();
             invalid[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
@@ -212,6 +246,31 @@ mod tests {
             ..enabled
         };
         assert!(enabled.transport_matches(disabled));
+    }
+    #[test]
+    fn ray_reconstruction_is_enabled_by_default_and_is_not_a_transport_change() {
+        let enabled = RenderSettings::default();
+        assert!(enabled.ray_reconstruction);
+        assert_eq!(
+            enabled.reconstruction_quality,
+            ReconstructionQuality::Performance
+        );
+        let mut bytes = golden();
+        bytes[60..64].copy_from_slice(&0_u32.to_le_bytes());
+        assert!(!RenderSettings::parse(&bytes).unwrap().ray_reconstruction);
+        assert!(enabled.transport_matches(RenderSettings {
+            ray_reconstruction: false,
+            ..enabled
+        }));
+        for quality in 0..=4_u32 {
+            bytes[64..68].copy_from_slice(&quality.to_le_bytes());
+            let settings = RenderSettings::parse(&bytes).unwrap();
+            assert_eq!(settings.reconstruction_quality as u32, quality);
+            assert!(enabled.transport_matches(RenderSettings {
+                reconstruction_quality: settings.reconstruction_quality,
+                ..enabled
+            }));
+        }
     }
     #[test]
     fn rejects_nonfinite_or_out_of_range_floats() {

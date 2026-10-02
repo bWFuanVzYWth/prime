@@ -1,0 +1,621 @@
+{
+  "schema": 1,
+  "verified_utc": "2026-10-02",
+  "sources": {
+    "streamline": {
+      "repository": "https://github.com/NVIDIA-RTX/Streamline",
+      "tag": "v2.14.1",
+      "tag_object": "ae6294f2a75dbd318765bd98e423f56627d347b3",
+      "commit": "2122257e0fce486f91b385aa63b9a09b0a34b363",
+      "archive": "streamline-sdk-v2.14.1.zip",
+      "url": "https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.14.1/streamline-sdk-v2.14.1.zip",
+      "sha256": "92c4d954631a1710da86ca3fa8d5034f2b9503838c95fc4ae977ae149319781b"
+    },
+    "dlss": {
+      "repository": "https://github.com/NVIDIA/DLSS",
+      "tag": "v310.9.1",
+      "tag_object": "d8339a290d42bd2a80445084309aa5345f61c66b",
+      "commit": "374959484e79a640feaba44c93ac8cfb0a03f5b5",
+      "archive": "dlss-v310.9.1.zip",
+      "url": "https://api.github.com/repos/NVIDIA/DLSS/zipball/v310.9.1",
+      "sha256": "589f30d7f7d6af76d335131f89a5b0c2c6511bc2e7ca424fa11bb5d642c0c983"
+    },
+    "vulkan_headers": {
+      "repository": "https://github.com/KhronosGroup/Vulkan-Headers",
+      "tag": "v1.4.350",
+      "archive": "vulkan-headers-v1.4.350.zip",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.350.zip",
+      "sha256": "92b80c2d746297e1856e2864e1e244ca116de20d72c728f33596aaa79120d565"
+    }
+  },
+  "dlss_runtime_cross_check": {
+    "source": "dlss",
+    "entry": "NVIDIA-DLSS-d8339a2/lib/Windows_x86_64/rel/nvngx_dlssd.dll",
+    "sha256": "4bc7ea5fcb2f32cf86bc2cb072e8d2860914a0be511cbdcb2fc206c1d9d83b80",
+    "matches": "third_party/streamline/bin/x64/nvngx_dlssd.dll"
+  },
+  "files": [
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_defs_dlssd.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_defs_dlssd.h",
+      "sha256": "2e97fe1595b1334f71b51724f2cb67496e8c296a7a2eec5606da53055882e716"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_defs_dlssg.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_defs_dlssg.h",
+      "sha256": "98ec3a6faa5aa250828c174bf8f3491aafac693dfe57cc798049c8918597fc60"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_defs_vk.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_defs_vk.h",
+      "sha256": "0a24d0861ace7d6b9362a67b7f08bea1b33ea123c5ce730b19133de8a891d031"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_defs.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_defs.h",
+      "sha256": "ea23f33497cd274860d1c25a97644fce807dcb0037c594547203343103fad03e"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_helpers_cuda.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_helpers_cuda.h",
+      "sha256": "f2851a76107bdf4fbcb7b261f3c35573c312d8ecb4bc18fb02d9e2cec7705042"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_helpers_d3d.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_helpers_d3d.h",
+      "sha256": "ec75224f36ed6580baaf250fa83620405ad81a1d98c2c436654a0c9cf6a6b8ba"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_helpers_dlssd_cuda.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_helpers_dlssd_cuda.h",
+      "sha256": "7e35cde214d905346a487b9a28c05d35e1c55b480e237fe3de69580a7e332730"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_helpers_dlssd_d3d.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_helpers_dlssd_d3d.h",
+      "sha256": "6df9d02c6f47feee3afc8d12340a9f554a7ddce4ddacb1b6a13a42b26c2c6293"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_helpers_dlssd_vk.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_helpers_dlssd_vk.h",
+      "sha256": "11df8fbda532a97fe867c8ef2b40058b49b7898183710f3468e55b1eedb8f40b"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_helpers_dlssd.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_helpers_dlssd.h",
+      "sha256": "a25fdda925b479dfe869593aeba311ef08793da54e0391f2fe2fe756cbef5532"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_helpers_dlssg_d3d.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_helpers_dlssg_d3d.h",
+      "sha256": "6335ebcb95de39a361e87fe0257d6ce0723e5d8deaa15db3b35afacf2b3f4220"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_helpers_dlssg_vk.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_helpers_dlssg_vk.h",
+      "sha256": "b371d90b9f4372b9a415e68a0afbdc2f31b7b552e219a9637d848749bc965316"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_helpers_dlssg.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_helpers_dlssg.h",
+      "sha256": "6881d21419c40c78ec948b326902ece09fc112b0223144d51c4905f3fced7a1f"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_helpers_vk.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_helpers_vk.h",
+      "sha256": "c192bff72138f12f770db48e12c1d8f712dfc81ea0e8e055ebb27d8dd1b31623"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_helpers.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_helpers.h",
+      "sha256": "5bcbadfe7478b802cf6d3aca4dc5ddd7d0889b99726e69c63f9e9bd555f44471"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_loader.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_loader.h",
+      "sha256": "abdf5f66a692620538357d29fdf78e3e2a677ee8140b7a638962ecb766585e75"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_params_dlssd.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_params_dlssd.h",
+      "sha256": "d41e3ba8f1d72583b55273092c99bf426dc4a0d46de827229e25d5b1325a370e"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_params_dlssg.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_params_dlssg.h",
+      "sha256": "c24fa5aa68ffa2808c828b75cfa32843f1606f80a145f84055ac450d7e6c74ad"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_params.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_params.h",
+      "sha256": "943bc8cc5cdae03b6303016fbad3183636f2335ae27a2d18776798c3b4efabbc"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_standalone_common.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_standalone_common.h",
+      "sha256": "38413c3338b0aea0202c07da95d426bfee7080a42913823fa2d9dd585b087b53"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_standalone_cuda.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_standalone_cuda.h",
+      "sha256": "b23436ed5040051ac8e81554c9af080f2463c941435bbc3b82222e5431a09499"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx_vk.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx_vk.h",
+      "sha256": "2d364ce7132881eb669e9498fd570d74cba563b1fbebc82c235f8e1ad2dd8b6d"
+    },
+    {
+      "path": "third_party/dlss/include/nvsdk_ngx.h",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/include/nvsdk_ngx.h",
+      "sha256": "dc38e7467cf415379c9d12ae1b6e4a494c453ed92720fb53e92aecb523e7b848"
+    },
+    {
+      "path": "third_party/dlss/LICENSE.txt",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/LICENSE.txt",
+      "sha256": "d4216e39ebef5f9b50a6712ebb37beeb5379862a67733a9999c651f21592aaf0"
+    },
+    {
+      "path": "third_party/dlss/README.md",
+      "source": "dlss",
+      "entry": "NVIDIA-DLSS-d8339a2/README.md",
+      "sha256": "323a99117be4a1b6595ab0d721e9c613750c278366615b57168b3ea9967afac5"
+    },
+    {
+      "path": "third_party/streamline/3rd-party-licenses.md",
+      "source": "streamline",
+      "entry": "3rd-party-licenses.md",
+      "sha256": "cb251639994465f31d2178c16acedf1ff4f9cef1c370a09782ed36d4c86c1dca"
+    },
+    {
+      "path": "third_party/streamline/bin/x64/nvngx_dlss.license.txt",
+      "source": "streamline",
+      "entry": "bin/x64/nvngx_dlss.license.txt",
+      "sha256": "3027f23ca5a46dd9cb8183fbd522983a86f64d7daac5982912bf9f214671f294"
+    },
+    {
+      "path": "third_party/streamline/bin/x64/nvngx_dlssd.dll",
+      "source": "streamline",
+      "entry": "bin/x64/nvngx_dlssd.dll",
+      "sha256": "4bc7ea5fcb2f32cf86bc2cb072e8d2860914a0be511cbdcb2fc206c1d9d83b80"
+    },
+    {
+      "path": "third_party/streamline/bin/x64/sl.common.dll",
+      "source": "streamline",
+      "entry": "bin/x64/sl.common.dll",
+      "sha256": "82924a8954dd671e09351c5de0eb87ad0eb25b944cc9f9ab955ca1d9950de15d"
+    },
+    {
+      "path": "third_party/streamline/bin/x64/sl.dlss_d.dll",
+      "source": "streamline",
+      "entry": "bin/x64/sl.dlss_d.dll",
+      "sha256": "026b9f4f9ea848f2f5aa0e2024fc6b1c885f57eea5d41078124dba14f873b86b"
+    },
+    {
+      "path": "third_party/streamline/bin/x64/sl.interposer.dll",
+      "source": "streamline",
+      "entry": "bin/x64/sl.interposer.dll",
+      "sha256": "8c87c9499461da561edd529aa9bf7831d67d7b94ebb1c1a5ed54ef4934e1ea4c"
+    },
+    {
+      "path": "third_party/streamline/include/sl_appidentity.h",
+      "source": "streamline",
+      "entry": "include/sl_appidentity.h",
+      "sha256": "1337385ac9867d66fa6beb34c750e79aaf25a74a156a47e83f24937299dade87"
+    },
+    {
+      "path": "third_party/streamline/include/sl_consts.h",
+      "source": "streamline",
+      "entry": "include/sl_consts.h",
+      "sha256": "17de74afda2cb96204ff380464bed926f660d92015fe0304dff4e329509c88b9"
+    },
+    {
+      "path": "third_party/streamline/include/sl_core_api.h",
+      "source": "streamline",
+      "entry": "include/sl_core_api.h",
+      "sha256": "328dc3a2c1dee579c200ca97e2d5b1ec38c893be4ba2745ef5ad506af7172e81"
+    },
+    {
+      "path": "third_party/streamline/include/sl_core_types.h",
+      "source": "streamline",
+      "entry": "include/sl_core_types.h",
+      "sha256": "f420cb052ce14489fc9fa0d933c3ed81a010deb01fa13b1aa8d45da1c5ba3234"
+    },
+    {
+      "path": "third_party/streamline/include/sl_deepdvc.h",
+      "source": "streamline",
+      "entry": "include/sl_deepdvc.h",
+      "sha256": "c6086ffe6b1e00588368fdb91e4ab9dd9617624e0e4344cd503a2ca73e46d1a4"
+    },
+    {
+      "path": "third_party/streamline/include/sl_device_wrappers.h",
+      "source": "streamline",
+      "entry": "include/sl_device_wrappers.h",
+      "sha256": "af7741305b1a468c3a83efaa2005ecd53d2ffd7aadb8ec6868c9dcb4a8a8e3a1"
+    },
+    {
+      "path": "third_party/streamline/include/sl_directsr.h",
+      "source": "streamline",
+      "entry": "include/sl_directsr.h",
+      "sha256": "65d4e68b2a0f0425ea4d381379172197b81352a50a5e399a8e8f51953e765c71"
+    },
+    {
+      "path": "third_party/streamline/include/sl_dlss_d.h",
+      "source": "streamline",
+      "entry": "include/sl_dlss_d.h",
+      "sha256": "6e51cf9815301c597d0657970a668147e34a20db5a76d0af254ec11248f5c4fe"
+    },
+    {
+      "path": "third_party/streamline/include/sl_dlss_g.h",
+      "source": "streamline",
+      "entry": "include/sl_dlss_g.h",
+      "sha256": "1fc18cbe004e280df1f787276d08a1b28b8a8c4c65856fbaa659f56dff6a915d"
+    },
+    {
+      "path": "third_party/streamline/include/sl_dlss.h",
+      "source": "streamline",
+      "entry": "include/sl_dlss.h",
+      "sha256": "d2c8c61fa71794c8ba424cebce5b3079ebfab8e47ed98b4b00cf8b257ecfd6b5"
+    },
+    {
+      "path": "third_party/streamline/include/sl_helpers_vk.h",
+      "source": "streamline",
+      "entry": "include/sl_helpers_vk.h",
+      "sha256": "82604567d239d00ac0ac2270cec744f6f11266e1d9d5187a95d4954f76d8c41c"
+    },
+    {
+      "path": "third_party/streamline/include/sl_helpers.h",
+      "source": "streamline",
+      "entry": "include/sl_helpers.h",
+      "sha256": "48629edbf25dfdb6444c91235fc278f0f9a5878243fae83204c5906ce9eacd8a"
+    },
+    {
+      "path": "third_party/streamline/include/sl_hooks.h",
+      "source": "streamline",
+      "entry": "include/sl_hooks.h",
+      "sha256": "cfeff70a52e1cc012cf4c955a15cc9d0b290f7e084dcb3c0168a9af06ff8f122"
+    },
+    {
+      "path": "third_party/streamline/include/sl_matrix_helpers.h",
+      "source": "streamline",
+      "entry": "include/sl_matrix_helpers.h",
+      "sha256": "a65758d85abba1e12845d266d7d5e36aaefa952383cdf093f3143cd6d8653341"
+    },
+    {
+      "path": "third_party/streamline/include/sl_nis.h",
+      "source": "streamline",
+      "entry": "include/sl_nis.h",
+      "sha256": "f45be3cf149200e1eae081cd144c95726a7a290a89822a5d52b9f538e52484aa"
+    },
+    {
+      "path": "third_party/streamline/include/sl_nvperf.h",
+      "source": "streamline",
+      "entry": "include/sl_nvperf.h",
+      "sha256": "025f9f1c8482e75a90f8b8efccdc9cfc53a9fc8b05ba3acc6c3783708b66bd69"
+    },
+    {
+      "path": "third_party/streamline/include/sl_pcl.h",
+      "source": "streamline",
+      "entry": "include/sl_pcl.h",
+      "sha256": "f43c5135fc8d5349ccd345e424f8cf1f61953a9f17e9897204b0741a3ab7b0fb"
+    },
+    {
+      "path": "third_party/streamline/include/sl_reflex.h",
+      "source": "streamline",
+      "entry": "include/sl_reflex.h",
+      "sha256": "3b623a1189e04a686384d224a58c4ad9974c4e6e3204077676f6ec529475164c"
+    },
+    {
+      "path": "third_party/streamline/include/sl_result.h",
+      "source": "streamline",
+      "entry": "include/sl_result.h",
+      "sha256": "2a0f6c12863bdc00b38910a5ec85d1f083c5671ee817a920afe626ac2a9100f7"
+    },
+    {
+      "path": "third_party/streamline/include/sl_security.h",
+      "source": "streamline",
+      "entry": "include/sl_security.h",
+      "sha256": "a36b1c20394402bee7ce738089a5a1305ff6e9dd9dd517566154ce834f7c32b4"
+    },
+    {
+      "path": "third_party/streamline/include/sl_struct.h",
+      "source": "streamline",
+      "entry": "include/sl_struct.h",
+      "sha256": "28deda67ea1a74371dd4f33ff4842b7db03b2db007001da6db06f6982297928d"
+    },
+    {
+      "path": "third_party/streamline/include/sl_template.h",
+      "source": "streamline",
+      "entry": "include/sl_template.h",
+      "sha256": "af2d4a61361f2603872dcb6edc86cc9e18912762a5c03e6a782ff39a8c3b871b"
+    },
+    {
+      "path": "third_party/streamline/include/sl_version.h",
+      "source": "streamline",
+      "entry": "include/sl_version.h",
+      "sha256": "48e9cb86f0ff6711304bdf3f7150f46466878bbefc21f648773267bc6a326285"
+    },
+    {
+      "path": "third_party/streamline/include/sl.h",
+      "source": "streamline",
+      "entry": "include/sl.h",
+      "sha256": "e1e81a7428d15b30db37587e9469bd68a56d630d820a4accec0aee3b17e157dd"
+    },
+    {
+      "path": "third_party/streamline/license.txt",
+      "source": "streamline",
+      "entry": "license.txt",
+      "sha256": "7b6f23e7d6f3ad6292f9308d2b42cdc3d82ae4e9b2abb55f230279d83bedd43d"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vk_video/vulkan_video_codec_av1std_decode.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vk_video/vulkan_video_codec_av1std_decode.h",
+      "sha256": "f03abf49fcaf2bd179d48d768164f9494264b58401b98899e8860ba297a1e7aa"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vk_video/vulkan_video_codec_av1std_encode.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vk_video/vulkan_video_codec_av1std_encode.h",
+      "sha256": "40f84c98d0341246ead3e864e1378df47d861505c5c139da5ed85c352d5e2300"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vk_video/vulkan_video_codec_av1std.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vk_video/vulkan_video_codec_av1std.h",
+      "sha256": "9b4ebcef0d6844b226803fa91b4c4c8bf9eb941aa31b19cea48ded0886a8f9e2"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vk_video/vulkan_video_codec_h264std_decode.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vk_video/vulkan_video_codec_h264std_decode.h",
+      "sha256": "8c4682860954d6bfc603e200d9e12586bc57265bd37b73a12b1ecf0c1ad42721"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vk_video/vulkan_video_codec_h264std_encode.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vk_video/vulkan_video_codec_h264std_encode.h",
+      "sha256": "75cc54e489b1ec7e3c635680cabaf7c9c2ddd4071a485440e5368e76ede30a85"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vk_video/vulkan_video_codec_h264std.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vk_video/vulkan_video_codec_h264std.h",
+      "sha256": "f6691f82e4637adda20e56d56951c673cc1ecdf2fa77e09cc8eba4b1f45118c1"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vk_video/vulkan_video_codec_h265std_decode.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vk_video/vulkan_video_codec_h265std_decode.h",
+      "sha256": "926a24d94afed2b1ab030e81c3b9e2e6730cca530f7a5a5bd821e7b896b93a41"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vk_video/vulkan_video_codec_h265std_encode.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vk_video/vulkan_video_codec_h265std_encode.h",
+      "sha256": "8a56e0c78496affa84eca39ec0f5636df681c04623dd0291aeeadd012df324be"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vk_video/vulkan_video_codec_h265std.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vk_video/vulkan_video_codec_h265std.h",
+      "sha256": "01b5f3d0fd9d273a68ed90f898ba94c05c0305280a753bf95fab60d60727c22e"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vk_video/vulkan_video_codec_vp9std_decode.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vk_video/vulkan_video_codec_vp9std_decode.h",
+      "sha256": "c3929bbdd0ab79128c7f9bfb9641c9a017b3983529315b771caaafc74fdbb89a"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vk_video/vulkan_video_codec_vp9std.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vk_video/vulkan_video_codec_vp9std.h",
+      "sha256": "e18e20b197945929d5871836bfde923e38b350b09e1cbe430f1bd802d9eda34e"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vk_video/vulkan_video_codecs_common.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vk_video/vulkan_video_codecs_common.h",
+      "sha256": "be6d2495d19e96aca6aa5c11e5c418d1cd72beac23fe19eb9169c06e2843f0af"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vk_icd.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vk_icd.h",
+      "sha256": "15d092840ca6d45fca3ccdc50cf021943e6c88aefe2a730c391f26d60bba9018"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vk_layer.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vk_layer.h",
+      "sha256": "bfe6804d3f527138fcfebb0845c1c0077c5718725bf338be09b0f9be3e8dede5"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vk_platform.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vk_platform.h",
+      "sha256": "949d517bb83e1d88fd4f1cef02bd3cb9ab50d44e8354cc68227cf2dccfdd3307"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_android.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_android.h",
+      "sha256": "49cd5e53156cb9e36fa03d81a5f1b8c1e93428e3499698309398d66dc3872948"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_beta.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_beta.h",
+      "sha256": "0c8306cc75db2a51fe5c29654afde8587f44fc84c2d123eaadf538e86dd0541c"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_core.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_core.h",
+      "sha256": "6d2ba4755774b1d129da6b8e661268b494d2d609df6217c6b6485acf7666b6c2"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_directfb.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_directfb.h",
+      "sha256": "4c6be34ee27f2fce4870c4046304b0c53f1fe62b13a4c21da8d537ec4cf8b965"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_fuchsia.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_fuchsia.h",
+      "sha256": "8a7a0c52e8c1ab41ede66bdabc32057255a7b385441d67dd4023121de5801194"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_ggp.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_ggp.h",
+      "sha256": "97cb1776742a4d8aae9f258ce908da76d0466da8864a5036aaca834af5f62e8d"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_ios.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_ios.h",
+      "sha256": "8bb052cc162b4086c0f1cd29a5ed11ccf921b8ee83551194394b86efd249c572"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_macos.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_macos.h",
+      "sha256": "00f532e9b7229488ac9932c2b391d74e9e8566ed91d0dbbad10e15dc356c9293"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_metal.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_metal.h",
+      "sha256": "8f84536896b8d3c6c49883ce34242f8922840617d0b184b338c0f83da5bfaaaa"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_ohos.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_ohos.h",
+      "sha256": "9da9b4f1a23adc0b705450ce4b5c934dff2fd1eb8cdf4ac3273465420fc9475a"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_screen.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_screen.h",
+      "sha256": "ffe2e63fbea5f0a9a7948a998eb7e1085e1f7cd5fd55b3d9a0146fe1aa8307bd"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_vi.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_vi.h",
+      "sha256": "8caacbb6eccae5946fb367145ba5222b85d4747a3f8b30632fdfca0503f0c339"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_wayland.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_wayland.h",
+      "sha256": "d43ca1c45cd4b2e1119c168b780e2864205ad8119e5f42d9d99aa29d2654a3f2"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_win32.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_win32.h",
+      "sha256": "0b11442e7efa0d5b6732b9964edf6dbdf3f6cf1dd58afe7572cc9b7f6de24317"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_xcb.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_xcb.h",
+      "sha256": "1e1525fc64826ab3ea9e8a6ee6a618ef14db3e27397fcf8fb070bb1ddaf00c0b"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_xlib_xrandr.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_xlib_xrandr.h",
+      "sha256": "da5d5311bcffa49c614e9f397784e44668466890aeaf4e54c2e0064c20259089"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan_xlib.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan_xlib.h",
+      "sha256": "82346aaa80a5c984b6a26f55c7c363c65be43029da539ba0fbdfea9840051cca"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/include/vulkan/vulkan.h",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/include/vulkan/vulkan.h",
+      "sha256": "72b952cc6de70ee12d118d3095e80346b42ff01cfc6f2bbb37ec01800eab1da6"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/LICENSE.md",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/LICENSE.md",
+      "sha256": "ac24e5ea920e4318e4d02c4086ae51f53cfb03feed06c18df1019e7ada1ec7bc"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/LICENSES/Apache-2.0.txt",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/LICENSES/Apache-2.0.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "third_party/streamline/vulkan-headers/LICENSES/MIT.txt",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/LICENSES/MIT.txt",
+      "sha256": "1ca3502222d967f3be5751c55f6b7ee735b5383909c3b501495f54b216dbf227"
+    },
+    {
+      "path": "licenses/NVIDIA-Streamline.txt",
+      "source": "streamline",
+      "entry": "license.txt",
+      "sha256": "7b6f23e7d6f3ad6292f9308d2b42cdc3d82ae4e9b2abb55f230279d83bedd43d"
+    },
+    {
+      "path": "licenses/NVIDIA-DLSS.txt",
+      "source": "streamline",
+      "entry": "bin/x64/nvngx_dlss.license.txt",
+      "sha256": "3027f23ca5a46dd9cb8183fbd522983a86f64d7daac5982912bf9f214671f294"
+    },
+    {
+      "path": "licenses/NVIDIA-Streamline-Third-Party.md",
+      "source": "streamline",
+      "entry": "3rd-party-licenses.md",
+      "sha256": "cb251639994465f31d2178c16acedf1ff4f9cef1c370a09782ed36d4c86c1dca"
+    },
+    {
+      "path": "licenses/Khronos-Vulkan-Headers-Apache-2.0.txt",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/LICENSES/Apache-2.0.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "licenses/Khronos-Vulkan-Headers-MIT.txt",
+      "source": "vulkan_headers",
+      "entry": "Vulkan-Headers-1.4.350/LICENSES/MIT.txt",
+      "sha256": "1ca3502222d967f3be5751c55f6b7ee735b5383909c3b501495f54b216dbf227"
+    }
+  ]
+}

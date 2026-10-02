@@ -12,6 +12,23 @@ use std::{
 // Each handle and its Vulkan queue live exclusively on the creating OS thread. Only
 // the monotonic identity counter is shared; no scene or GPU state crosses threads.
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
+
+/// Routes a real Vulkan present; its VkResult is returned unchanged.
+/// # Safety
+/// `queue` is a live VkQueue and `present_info` points to a valid VkPresentInfoKHR
+/// with all referenced arrays/handles alive until this synchronous call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_streamline_present(queue: u64, present_info: u64) -> i32 {
+    #[cfg(feature = "vulkan")]
+    {
+        unsafe { prime_vulkan::streamline_present(queue, present_info) }
+    }
+    #[cfg(not(feature = "vulkan"))]
+    {
+        let _ = (queue, present_info);
+        -7
+    }
+}
 thread_local! {
     static SESSIONS: RefCell<BTreeMap<u64, Engine>> = const { RefCell::new(BTreeMap::new()) };
     static ERROR: RefCell<String> = const { RefCell::new(String::new()) };
@@ -234,7 +251,8 @@ pub unsafe extern "C" fn prime_render(
 
 /// Borrows the host instance, physical device, logical device, graphics queue and
 /// completion timeline. All handles remain owned by Minecraft.
-/// Descriptor flags at byte 44 describe enabled logical-device capabilities; bit 0 is OMM.
+/// Descriptor flags at byte 44 describe enabled logical-device capabilities:
+/// bit 0 is OMM and bit 1 is the Streamline RR extension/feature set in docs/abi.md.
 /// # Safety
 /// `data` must address 48 readable bytes. Handles/features/lifetimes must satisfy
 /// Renderer::borrowed_mode_with_capabilities, including flushing the host encoder before
@@ -286,7 +304,7 @@ fn parse_vulkan_host_descriptor(bytes: &[u8]) -> Result<([u64; 5], u32, u32), St
     let handles = [value(0), value(8), value(16), value(24), value(32)];
     let family = u32::from_le_bytes(bytes[40..44].try_into().unwrap());
     let capabilities = u32::from_le_bytes(bytes[44..48].try_into().unwrap());
-    if handles.contains(&0) || capabilities & !1 != 0 {
+    if handles.contains(&0) || capabilities & !3 != 0 {
         return Err("Invalid Vulkan host handles or unknown capability flags".into());
     }
     Ok((handles, family, capabilities))
@@ -294,13 +312,13 @@ fn parse_vulkan_host_descriptor(bytes: &[u8]) -> Result<([u64; 5], u32, u32), St
 
 /// Applies a current-version settings packet. Mode changes retire exclusive GPU resources.
 /// # Safety
-/// Data must contain 60 readable bytes. Call outside recording, after submitting the host encoder
+/// Data must contain 68 readable bytes. Call outside recording, after submitting the host encoder
 /// when the renderer mode changes. This call may wait for that mode's last GPU consumer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn prime_configure(handle: u64, data: *const u8, length: u64) -> i32 {
     boundary(-1, || {
         if data.is_null() || length != prime_scene::settings::RenderSettings::BYTES as u64 {
-            return Err("Settings require a non-null 60-byte packet".into());
+            return Err("Settings require a non-null 68-byte packet".into());
         }
         let settings = prime_scene::settings::RenderSettings::parse(unsafe {
             std::slice::from_raw_parts(data, length as usize)
@@ -520,7 +538,7 @@ mod abi_tests {
     fn configuration_validates_version_borrow_and_thread_before_mutation() {
         let handle = prime_create(ABI_VERSION);
         let bytes: Vec<_> = [
-            3_u32,
+            4_u32,
             0,
             4,
             1,
@@ -535,22 +553,24 @@ mod abi_tests {
             30,
             0,
             1,
+            1,
+            3,
         ]
         .into_iter()
         .flat_map(u32::to_le_bytes)
         .collect();
-        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 60) }, 0);
-        assert_eq!(unsafe { prime_configure(handle, std::ptr::null(), 60) }, -1);
+        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 68) }, 0);
+        assert_eq!(unsafe { prime_configure(handle, std::ptr::null(), 68) }, -1);
         assert_eq!(
             unsafe { prime_configure(handle, bytes.as_ptr(), u64::MAX) },
             -1
         );
         let mut invalid = bytes.clone();
         invalid[0] = 2;
-        assert_eq!(unsafe { prime_configure(handle, invalid.as_ptr(), 60) }, -1);
+        assert_eq!(unsafe { prime_configure(handle, invalid.as_ptr(), 68) }, -1);
         let foreign = bytes.clone();
         assert_eq!(
-            std::thread::spawn(move || unsafe { prime_configure(handle, foreign.as_ptr(), 60) })
+            std::thread::spawn(move || unsafe { prime_configure(handle, foreign.as_ptr(), 68) })
                 .join()
                 .unwrap(),
             -1
@@ -558,7 +578,7 @@ mod abi_tests {
         invalid = bytes.clone();
         invalid[4] = 1;
         assert_eq!(
-            unsafe { prime_configure(handle, invalid.as_ptr(), 60) },
+            unsafe { prime_configure(handle, invalid.as_ptr(), 68) },
             -1,
             "No rendered frame can be frozen"
         );
@@ -575,7 +595,7 @@ mod abi_tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 60) }, 0);
+        assert_eq!(unsafe { prime_configure(handle, bytes.as_ptr(), 68) }, 0);
         assert_eq!(prime_destroy(handle), 0);
     }
     #[test]
@@ -591,7 +611,7 @@ mod abi_tests {
         );
         bytes[44..48].copy_from_slice(&1_u32.to_le_bytes());
         assert_eq!(parse_vulkan_host_descriptor(&bytes).unwrap().2, 1);
-        for flags in [2_u32, 3, u32::MAX] {
+        for flags in [4_u32, 5, u32::MAX] {
             bytes[44..48].copy_from_slice(&flags.to_le_bytes());
             assert!(parse_vulkan_host_descriptor(&bytes).is_err());
         }

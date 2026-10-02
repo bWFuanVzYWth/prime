@@ -27,6 +27,7 @@ import sun.misc.Unsafe;
 /** Executes real transformed target allocation and resize; records textures without a GPU. */
 final class TargetResizeCpuSmoke {
     static void run() throws Exception {
+        StreamlinePresentCpuSmoke.run("com.mojang.blaze3d.vulkan.VulkanGpuSurface");
         Field device = field(RenderSystem.class, "DEVICE");
         Field thread = field(RenderSystem.class, "renderThread");
         Field status = field(VulkanBootstrap.class, "status");
@@ -49,14 +50,14 @@ final class TargetResizeCpuSmoke {
         var recorder = (RecordingDevice)unsafe.allocateInstance(RecordingDevice.class);
         field(GpuDevice.class, "backend").set(recorder, backend);
         var statusConstructor = status.getType().getDeclaredConstructor(
-                long.class, long.class, boolean.class, boolean.class, String.class);
+                long.class, long.class, boolean.class, boolean.class, boolean.class, String.class);
         statusConstructor.setAccessible(true);
         try {
             device.set(null, recorder);
             thread.set(null, Thread.currentThread());
             System.setProperty("primept.enabled", "true");
             requested.set(client, "path_trace");
-            status.set(null, statusConstructor.newInstance(101L, 202L, true, true, ""));
+            status.set(null, statusConstructor.newInstance(101L, 202L, true, true, true, ""));
             check(VulkanBootstrap.isEnabled(backend), "Synthetic negotiated device is recognized");
             check(VulkanBootstrap.opacityMicromapEnabled(backend),
                   "OMM belongs to the exact enabled device");
@@ -74,27 +75,111 @@ final class TargetResizeCpuSmoke {
             String ommExtension =
                     org.lwjgl.vulkan.EXTOpacityMicromap.VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME;
             Object ommFeature = field(VulkanBootstrap.class, "OPACITY_MICROMAP_FEATURE").get(null);
-            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, "pending"));
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, true, "pending"));
             created.invoke(null, logical, extensions, features);
             check(!VulkanBootstrap.opacityMicromapEnabled(backend),
                   "Physical support alone cannot enable OMM");
             extensions.add(ommExtension);
-            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, "pending"));
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, true, "pending"));
             created.invoke(null, logical, extensions, features);
             check(!VulkanBootstrap.opacityMicromapEnabled(backend),
                   "Extension without feature cannot enable OMM");
             features.add(ommFeature);
-            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, "pending"));
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, true, "pending"));
             created.invoke(null, logical, extensions, features);
             check(VulkanBootstrap.opacityMicromapEnabled(backend),
                   "Created extension and feature enable OMM");
             features.remove(field(VulkanBootstrap.class, "SYNCHRONIZATION_2_FEATURE").get(null));
-            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, "pending"));
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, true, "pending"));
             created.invoke(null, logical, extensions, features);
             check(!VulkanBootstrap.opacityMicromapEnabled(backend),
                   "OMM needs the enabled synchronization2 feature");
             features.add(field(VulkanBootstrap.class, "SYNCHRONIZATION_2_FEATURE").get(null));
-            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, "pending"));
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, true, "pending"));
+            created.invoke(null, logical, extensions, features);
+            check(!VulkanBootstrap.streamlineEnabled(backend),
+                  "Physical support alone cannot enable Streamline");
+            var streamlineExtensions =
+                    (java.util.List<?>)field(VulkanBootstrap.class, "STREAMLINE_EXTENSIONS")
+                            .get(null);
+            for (Object extension : streamlineExtensions)
+                extensions.add((String)extension);
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, true, "pending"));
+            created.invoke(null, logical, extensions, features);
+            check(!VulkanBootstrap.streamlineEnabled(backend),
+                  "Streamline extensions without features cannot enable RR");
+            var streamlineFeatures =
+                    (java.util.List<?>)field(VulkanBootstrap.class, "STREAMLINE_FEATURES")
+                            .get(null);
+            try (var stack = org.lwjgl.system.MemoryStack.stackPush()) {
+                var queryFeatures =
+                        org.lwjgl.vulkan.VkPhysicalDeviceFeatures2.calloc(stack).sType$Default();
+                var sharedSynchronization =
+                        (com.mojang.blaze3d.vulkan.init.VulkanFeature)field(
+                                VulkanBootstrap.class, "SYNCHRONIZATION_2_FEATURE")
+                                .get(null);
+                check(streamlineFeatures.contains(sharedSynchronization),
+                      "Streamline must reuse the OMM/host synchronization2 feature");
+                sharedSynchronization.set(queryFeatures, true, stack);
+                for (Object feature : streamlineFeatures) {
+                    var nativeFeature = (com.mojang.blaze3d.vulkan.init.VulkanFeature)feature;
+                    nativeFeature.set(queryFeatures, true, stack);
+                }
+                check(queryFeatures.features().shaderStorageImageExtendedFormats(),
+                      "RR storage-image feature must set the actual core feature member");
+                check(queryFeatures.features().shaderStorageImageWriteWithoutFormat(),
+                      "Streamline clear kernel requires the actual formatless storage-write feature");
+                check(!queryFeatures.features().shaderStorageImageReadWithoutFormat(),
+                      "Streamline's supplied kernels do not require formatless storage reads");
+                org.lwjgl.vulkan.VkPhysicalDeviceVulkan12Features vulkan12 = null;
+                org.lwjgl.vulkan.VkPhysicalDeviceSynchronization2Features synchronization = null;
+                var structureTypes = new java.util.HashSet<Integer>();
+                for (var structure =
+                             org.lwjgl.vulkan.VkBaseOutStructure.createSafe(queryFeatures.pNext());
+                     structure != null; structure = structure.pNext()) {
+                    check(structureTypes.add(structure.sType()),
+                          "Shared host/RR features must not duplicate a pNext structure");
+                    if (structure.sType() ==
+                        org.lwjgl.vulkan.VK12.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES)
+                        vulkan12 = org.lwjgl.vulkan.VkPhysicalDeviceVulkan12Features.create(
+                                structure.address());
+                    if (structure.sType() ==
+                        org.lwjgl.vulkan.KHRSynchronization2
+                                .VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR)
+                        synchronization =
+                                org.lwjgl.vulkan.VkPhysicalDeviceSynchronization2Features.create(
+                                        structure.address());
+                }
+                check(vulkan12 != null && vulkan12.timelineSemaphore() &&
+                              vulkan12.descriptorIndexing(),
+                      "RR Vulkan 1.2 feature members must be enabled in the actual chain");
+                check(synchronization != null && synchronization.synchronization2(),
+                      "RR synchronization2 must be enabled in the actual feature chain");
+            }
+            features.addAll(streamlineFeatures);
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, true, "pending"));
+            created.invoke(null, logical, extensions, features);
+            check(VulkanBootstrap.streamlineEnabled(backend),
+                  "Streamline requires the exact created extensions and features");
+            for (Object extension : streamlineExtensions) {
+                extensions.remove(extension);
+                status.set(null,
+                           statusConstructor.newInstance(101L, 0L, true, true, true, "pending"));
+                created.invoke(null, logical, extensions, features);
+                check(!VulkanBootstrap.streamlineEnabled(backend),
+                      "Every Streamline extension is required: " + extension);
+                extensions.add((String)extension);
+            }
+            for (Object feature : streamlineFeatures) {
+                features.remove(feature);
+                status.set(null,
+                           statusConstructor.newInstance(101L, 0L, true, true, true, "pending"));
+                created.invoke(null, logical, extensions, features);
+                check(!VulkanBootstrap.streamlineEnabled(backend),
+                      "Every Streamline feature is required");
+                features.add(feature);
+            }
+            status.set(null, statusConstructor.newInstance(101L, 0L, true, true, true, "pending"));
             created.invoke(null, logical, extensions, features);
             lifecycle(true);
             // Vanilla must retain the shared main target capability for a later switch to PT.
@@ -104,13 +189,16 @@ final class TargetResizeCpuSmoke {
             System.setProperty("primept.enabled", "false");
             lifecycle(false);
             System.setProperty("primept.enabled", "true");
-            status.set(null, statusConstructor.newInstance(101L, 303L, true, true, "other device"));
+            status.set(null,
+                       statusConstructor.newInstance(101L, 303L, true, true, true, "other device"));
             check(!VulkanBootstrap.opacityMicromapEnabled(backend),
                   "Other logical device cannot inherit OMM");
+            check(!VulkanBootstrap.streamlineEnabled(backend),
+                  "Other logical device cannot inherit Streamline");
             lifecycle(false);
             status.set(null, previousStatus);
             lifecycle(false);
-            status.set(null, statusConstructor.newInstance(101L, 202L, true, true, ""));
+            status.set(null, statusConstructor.newInstance(101L, 202L, true, true, true, ""));
             var otherBackend = Proxy.newProxyInstance(
                     TargetResizeCpuSmoke.class.getClassLoader(),
                     new Class<?>[] {GpuDeviceBackend.class}, (proxy, method, args) -> {

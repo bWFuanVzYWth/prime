@@ -219,7 +219,9 @@ Rust 先完整验证，再发布整个批次。实例引用以最终批状态为
 
 调用方须已在实际逻辑设备启用 buffer device address、acceleration structure、ray query 与所需扩展，并保证 queue family 支持 graphics+compute。仅查询物理设备支持不够。Rust 不销毁这些宿主对象，也不为 PT 调用 queue submit。
 
-flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` 的 `micromap` 和 synchronization2，其他位必须为零。宿主只在 `vkCreateDevice` 成功且实际创建集合包含扩展与特性后发布该位；26.2/26.3 本身要求 `VK_KHR_synchronization2`。物理支持不等于已启用，flags=0 必须保留 Alpha 检验回退，不能由 Rust 自行推断或补开借用设备的能力。OMM 用户设置与设备能力独立；默认设置开启，实际启用仍取两者交集。具体兼容范围见 [OMM 契约](opacity-micromaps.md)。
+flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` 的 `micromap` 和 synchronization2；bit1 表示实际启用 Streamline 所需的 NVX binary import、NVX image view handle、KHR push descriptor、KHR buffer device address、KHR synchronization2 及 timelineSemaphore/descriptorIndexing/BDA、synchronization2、shaderStorageImageExtendedFormats、shaderStorageImageWriteWithoutFormat 能力，其他位必须为零。宿主只在 `vkCreateDevice` 成功且实际创建集合包含扩展与特性后发布；26.2/26.3 本身要求 `VK_KHR_synchronization2`。物理支持不等于已启用，flags=0 保留原始 PT 路径，Rust 不补开借用设备的能力。OMM 和 RR 用户设置与设备能力独立；具体兼容范围见 [OMM 契约](opacity-micromaps.md)与[重建契约](reconstruction.md)。
+
+`prime_streamline_present(queue:u64, present_info:u64)->i32` 同步包住真实 `vkQueuePresentKHR`，原样返回 VkResult。结构体指针及其引用数组只借用到返回；未初始化 RR 或非目标队列直接调用原 Vulkan。这个入口不消费场景 session，不把一次 Present 等同于 GPU 完成证明。
 
 每帧调用 `prime_record(handle, frame, 104, command, image, image_view, serial)`。command 是已开始录制、尚未结束的宿主 primary command buffer；目标为带 STORAGE 用途、GENERAL layout 的 RGBA8_UNORM 主颜色图像及其 view，尺寸必须等于 frame。serial 是将包含此 command 的实际提交完成值，同一 session 每个 serial 最多录制一次。宿主在同队列依次提交，并在所有命令完成后 signal timeline 到该 serial；Rust 自己的描述符槽与退休资源依赖此保证。
 
@@ -245,13 +247,13 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 非空静态层、raw 和原型/实例在提交前必须上传引用的纹理；缺失引用明确报错。所有调用必须在创建 handle 的 OS 线程进行。`prime_destroy` 退休身份，重复释放会报错。调用方必须保证原生指针指向有效读写区域；长度校验不能验证任意地址。
 
-## 设置包（独立 schema v3）
+## 设置包（独立 schema v4）
 
-`prime_configure(handle, data, length)` 借用恰好 60 字节，返回前解析，不保留指针。它没有场景命令头；设置版本独立于场景 ABI。宿主模式改变时必须先提交 encoder，再从外层帧边界调用；native 等待旧 GPU 使用完成，释放旧模式资源后创建新资源。普通显示控制变化不需要切换等待。
+`prime_configure(handle, data, length)` 借用恰好 68 字节，返回前解析，不保留指针。它没有场景命令头；设置版本独立于场景 ABI。宿主模式改变时必须先提交 encoder，再从外层帧边界调用；native 等待旧 GPU 使用完成，释放旧模式资源后创建新资源。普通显示控制变化不需要切换等待。
 
 | Offset | 类型 | 字段 |
 | --- | --- | --- |
-| 0 / 4 | u32 | settings version=3 / mode（0 实时、1 离线） |
+| 0 / 4 | u32 | settings version=4 / mode（0 实时、1 离线） |
 | 8 / 12 | u32 | 最大路径顶点数 / 离线每帧样本数，均为 1–64 |
 | 16 / 20 / 24 | f32 | 曝光乘数 `[1/4096,4096]` / hue `[0,1]` / saturation `[0,0.5]` |
 | 28 | u32 | view：0 最终输出、1 噪声色、2 线性深度、3 世界法线 |
@@ -260,6 +262,8 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 | 44 | u32 | 采样 seed，Java 当前固定 `0x13572468` |
 | 48 / 52 | i32 / u32 | 观测纬度 -90…90° / 太阳黄经 0…359°，均为整数度 |
 | 56 | u32 | opacity_micromap：0 关闭、1 自动优先启用；默认 1，仍受设备与表面兼容证明限制 |
+| 60 | u32 | ray_reconstruction：0 关闭、1 请求启用（默认）；固定 preset F |
+| 64 | u32 | reconstruction_quality：0 DLAA、1 Quality、2 Balanced、3 Performance（默认）、4 UltraPerformance |
 
 非法版本、长度、枚举或数值拒绝整个包。冻结要求当前场景对应最近一次成功录制帧，冻结期间拒绝全部 `prime_submit`；输入帧仍须合法，native 只采用其中宽高/序号，其余使用冻结相机。场景有效期、资源上传与可变显示参数见 [渲染模式契约](renderers.md)。
 

@@ -17,15 +17,36 @@ public struct TraceResult {
     public float depth;
     public float3 normal;
 };
+// A specialized consumer writes primary guides while the resolved hit is still local.
+// Raw realtime and offline instantiate the empty consumer, without guide image writes.
+public interface ITraceGuides {
+    float2 sampleOffset(ZSobol sampler);
+    void primary(Frame frame, uint2 pixel, float2 sampleUv, SurfaceHit hit, PrimePbrVertex material,
+                 float3 direction, float4 incident, float4 transmitted);
+    void miss(Frame frame, uint2 pixel, float2 sampleUv, float3 direction);
+    void specularDistance(uint2 pixel, float distance);
+};
+public struct NoTraceGuides : ITraceGuides {
+    public float2 sampleOffset(ZSobol sampler) {
+        return sampler.sample2D(0);
+    }
+    public void primary(Frame frame, uint2 pixel, float2 sampleUv, SurfaceHit hit,
+                        PrimePbrVertex material, float3 direction, float4 incident,
+                        float4 transmitted) {}
+    public void miss(Frame frame, uint2 pixel, float2 sampleUv, float3 direction) {}
+    public void specularDistance(uint2 pixel, float distance) {}
+};
 // Guides describe the very same jittered primary sample and alpha decision as noisy radiance.
-public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
-                               PrimeFullTransmissionGgxEnergy energy, Frame frame, uint2 pixel,
-                               uint sequence) {
+public TraceResult traceSampleWithGuides<Guides>(TraceScene resources, AtmEnvironment environment,
+                                                 PrimeFullTransmissionGgxEnergy energy, Frame frame,
+                                                 uint2 pixel, uint sequence,
+                                                 Guides guides) where Guides : ITraceGuides {
     TraceResult result = {float3(0), 3.402823466e38f, float3(0)};
     ZSobol sampler =
             makeZSobolS8(pixel, sequence & 0xffu, frame.target.z, frame.target.w ^ (sequence >> 8));
     float2 screen =
-            ((float2(pixel) + sampler.sample2D(0)) / float2(frame.dimensions.xy)) * 2.0 - 1.0;
+            ((float2(pixel) + guides.sampleOffset(sampler)) / float2(frame.dimensions.xy)) * 2.0 -
+            1.0;
     float3 origin = frame.position.xyz;
     float3 direction = normalize(frame.forward.xyz +
                                  frame.right.xyz * (screen.x * frame.forward.w * frame.position.w) -
@@ -35,6 +56,7 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
     float3 previous = origin;
     float primaryDistance = 0;
     float previousPdf = 0;
+    bool primarySpecular = false;
     float4 medium = float4(1, 0, 0, 0);
     float coneWidth = 0.0;
     float coneSpread =
@@ -52,7 +74,12 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
         {
             SurfaceHit hit = traceClosest(resources, origin, direction, sampler.bits1D(domain),
                                           coneWidth, coneSpread);
+            if (bounce == 1 && primarySpecular)
+                guides.specularDistance(pixel, hit.found ? length(hit.surface.position - previous)
+                                                         : 65504.0);
             if (!hit.found) {
+                if (bounce == 0)
+                    guides.miss(frame, pixel, 0.5 * (screen + 1.0), direction);
                 float3 escaped = atmSky(environment, direction) * frame.up.w;
                 if (atmSunContains(environment, direction)) {
                     float weight = previousPdf == 0
@@ -91,6 +118,9 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
             transmitted =
                     hit.thin ? (hit.incident.x > hit.transmitted.x ? hit.incident : hit.transmitted)
                              : hit.transmitted;
+            if (bounce == 0)
+                guides.primary(frame, pixel, 0.5 * (screen + 1.0), hit, material, direction,
+                               incident, transmitted);
             {
                 float lightPdf = previousPdf == 0 || lightFeatures == 0
                                          ? 0
@@ -177,6 +207,10 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
         throughput = primeProductOver(throughput, scatter.response, scatter.pdf);
         if (!primeBsdfFinite(throughput) || all(throughput == float3(0)))
             break;
+        if (bounce == 0)
+            primarySpecular = (scatter.eventFlags & PRIME_BSDF_EVENT_REFLECTION) != 0u &&
+                              (scatter.eventFlags &
+                               (PRIME_BSDF_EVENT_GLOSSY | PRIME_BSDF_EVENT_DISCRETE)) != 0u;
         etaScale = primeEtaScaleAfterScatter(etaScale, scatter.relativeEta,
                                              (scatter.eventFlags & PRIME_BSDF_EVENT_TRANSMISSION) !=
                                                      0u);
@@ -208,4 +242,11 @@ public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
                    primeBsdfFinite(result.radiance.y) ? max(result.radiance.y, 0.0) : 0.0,
                    primeBsdfFinite(result.radiance.z) ? max(result.radiance.z, 0.0) : 0.0);
     return result;
+}
+
+public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
+                               PrimeFullTransmissionGgxEnergy energy, Frame frame, uint2 pixel,
+                               uint sequence) {
+    return traceSampleWithGuides(resources, environment, energy, frame, pixel, sequence,
+                                 NoTraceGuides());
 }

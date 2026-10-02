@@ -8,7 +8,7 @@
 
 | 能力 | 旧项目已有实现 | 本项目现状 | 后续取舍 |
 | --- | --- | --- | --- |
-| 实时重建 | `render/runtime/RealtimeRenderer`、`vulkan/reconstruction`；DLSS RR 与 NRD + FSR；独立 native bridge | 原始噪声输出，已有主深度/法线；无 motion、完整 guide 或历史契约 | 首要补齐 guide/历史，再接窄 native 后端；不迁回 Java 渲染调度 |
+| 实时重建 | `render/runtime/RealtimeRenderer`、`vulkan/reconstruction`；DLSS RR 与 NRD + FSR；独立 native bridge | Streamline DLSS RR preset F，默认性能档；静态相机motion与真实首表面guides | 补动态前态、透明替代表面与实际游戏验收，NRD/FSR另行接入；不迁回 Java 渲染调度 |
 | 材质与闭包 | Full OpenPBR 实际支持子域、LitePBR 模型、LabPBR 资源翻译与数值契约；旧名称预设 | Full opaque/conductor、薄材质 SSS、solid/thin dielectric 已用于实时/离线；保留 Lite 厚 SSS 近似与参考 API，规范 LabPBR 图、动画与发光已接入 | 旧 PBR presets 不移植；补源拓扑与科学/整帧验收，不沿用旧图元位打包和容量上限 |
 | 天空与显示 | `RealtimeRenderer` 的星图合成、`post` 的曝光/HDR；物理大气 | 大气与太阳已接入，SDR primeDRT；无星图、天气/维度天空、自动曝光/HDR | 保留当前 primeDRT，分开补环境语义、星图和显示能力；显示策略替换另行决定 |
 | 场景与寿命 | cluster 编译、timeline 退休、BLAS 压缩与上传池 | Rust 增量源/实例、直接 quad、上传/AS 池 | 复用完成证明和行为参照；整空页归还、静态压缩按实际常驻量与更新延迟评估 |
@@ -18,8 +18,9 @@
 ### 优先推进：源兼容与实时重建
 
 - [ ] 逐项收敛 P001/P004/P005/P006/P007/P008：先补真实标准 offset、剔面和源上下文，再确定自定义模型/流体必要回调的单次批量准备合同。每个支持项同时增加双版本实际宿主参照、失效与资源重载测试；未知来源继续明确计数，不用名称猜测或回调重播填补数据。
-- [ ] 定义版本无关的重建输入：相机 jitter、当前/前帧矩阵、可见表面深度与 motion、法线/粗糙度、albedo、hit distance、coverage 与 history validity。实例保留实际前帧姿态；源变化、身份替换、camera cut、resize、epoch、冻结/切换分别给出历史失效证明。已有深度/法线预览不算完整 guide。
-- [ ] 接入可选 DLSS RR，随后补 NRD + FSR 兼容后端。借鉴旧 `native/dlss_rr`、`native/nrd` 的窄 ABI 与输入验证，GPU 图像、同步和退休仍由 Rust 持有；SDK/许可/能力失败显式回退原始噪声。先验证不透明/cutout，再补透明可见接口、透射/反射替代表面，未验证范围不能伪装成可用 guide。
+- [x] 接入 Streamline DLSS RR preset F 与可调超分档位，默认 Performance；版本无关首表面guides、实际采中反射距离、静态相机motion、jitter/矩阵/history和完成值退休由Rust持有。SDK/能力失败显式回退，Java只绑定设备与真实Present；契约见[实时重建](docs/reconstruction.md)。实际游戏画质不因编译通过而视为已验收。
+- [ ] 收敛真实 DLSS RR 的 Vulkan 同步验证：当前锁定 SDK 的内部清图仍有 `WRITE_AFTER_WRITE`，即使实际 evaluate、完成和完整有限输出读回成功，严格验证仍失败。以 `scripts/test-streamline-gpu.ps1` 的零错误结果关闭；不能屏蔽验证错误或替调用方管理 NGX 私有图像。
+- [ ] 补动态实例实际前帧姿态/形变对应、透明可见接口与透射/反射替代表面；现有未知motion明确无效。随后补 NRD + FSR 兼容后端，保留相同资源与完成证明边界。
 - [ ] 重建验收覆盖静止、运动实体、粒子、细叶、遮挡显露、水/玻璃、资源重载、尺寸和模式切换；记录原生 1920×1080 固定射线预算的 CPU/GPU 基线。降低输入分辨率后的重建单独报告，不能标为原生 1080p 性能。
 
 ### 随后推进：材质、环境与显示

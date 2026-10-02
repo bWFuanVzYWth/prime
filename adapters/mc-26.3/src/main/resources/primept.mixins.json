@@ -26,6 +26,7 @@
     "MainTargetMixin",
     "RenderTargetMixin",
     "VulkanGpuTextureMixin",
+    "VulkanGpuSurfaceMixin",
     "VulkanBackendMixin",
     "DynamicDrawMixin",
     "DynamicGroupMixin",

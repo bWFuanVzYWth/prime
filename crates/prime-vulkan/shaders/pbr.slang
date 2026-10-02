@@ -24,6 +24,9 @@ import "bsdf/lite/bsdf.slang";
 import "bsdf/lite/pt.slang";
 import "bsdf/full/pt.slang";
 import "bsdf/full/math/microfacet_energy.slang";
+import "bsdf/full/opaque/energy.slang";
+import "bsdf/full/dielectric/energy.slang";
+import "service/bsdf/contract/albedo.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/conversion.slang";
 import "service/bsdf/support/sanitization.slang";
@@ -610,4 +613,41 @@ public PrimePbrSample primeSamplePbrVertex<Energy>(Energy energy, PrimePbrVertex
     sampled.eta = fullSample.eta;
     return primePbrSampleFrame(sampled, onb, primePbrVertexIsThinWalled(vertex), viewDirection,
                                incidentMedium, transmittedMedium, dielectric);
+}
+
+// Directional material energy for reconstruction; it contains no incident lighting.
+// Transmission uses the diffuse guide channel, matching the legacy RR material contract.
+public PrimeDenoiseAlbedos primePbrGuideAlbedos<Energy>(Energy energy, PrimePbrVertex vertex,
+                                                        float3 viewDirection, float4 incidentMedium,
+                                                        float4 transmittedMedium) where Energy
+    : IPrimeFullOpenPbrTransmissionGgxEnergy {
+    PrimeOpenPbrOnb onb =
+            primePbrVertexFrame(vertex, viewDirection, incidentMedium, transmittedMedium);
+    float3 wi = primeOpenPbrOnbToLocal(onb, viewDirection);
+    PrimeDenoiseAlbedos result;
+    if (primePbrVertexIsDielectric(vertex)) {
+        PrimeFullCompactTransmissionState state = primeFullPtTransmissionState(
+                energy, vertex.roughness,
+                primePbrVertexInterfaceIor(vertex, incidentMedium, transmittedMedium),
+                primePbrVertexIsThinWalled(vertex), transmittedMedium.yzw * 0.0625, wi);
+        result.diffuse = primeFullCompactTransmissionEnergy(energy, wi, state,
+                                                            PRIME_FULL_OPENPBR_FLAG_TRANSMISSION);
+        result.specular = primeFullCompactTransmissionEnergy(energy, wi, state,
+                                                             PRIME_FULL_OPENPBR_FLAG_REFLECTION);
+    } else if (primePbrVertexUsesLegacyThickSss(vertex)) {
+        PrimeLitePtOpaqueState state = primePbrVertexOpaqueState(vertex, wi, incidentMedium);
+        result.diffuse =
+                primeLiteBaseEnergyCore(state.kind, state.baseColor, state.subsurfaceWeight,
+                                        state.thinWalled, state.baseColor) *
+                state.layer.transmittanceIn;
+        result.specular = float3(1.0 - state.layer.transmittanceIn);
+    } else {
+        PrimeFullCompactOpaqueEnergy surfaceEnergy = primeFullCompactOpaqueEnergy(
+                wi, primePbrFullOpaqueState(energy, vertex, wi, incidentMedium));
+        result.diffuse = surfaceEnergy.diffuse;
+        result.specular = surfaceEnergy.specular;
+    }
+    result.diffuse = primeSanitizeDenoiseAlbedo(result.diffuse);
+    result.specular = primeSanitizeDenoiseAlbedo(result.specular);
+    return result;
 }

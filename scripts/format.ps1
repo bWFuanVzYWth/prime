@@ -21,6 +21,9 @@ try {
             }
         }
         Get-ChildItem -LiteralPath 'crates' -Recurse -File -Filter '*.slang'
+        Get-ChildItem -LiteralPath 'native' -Recurse -File | Where-Object {
+            $_.Extension -in '.cpp', '.h'
+        }
     ) | Sort-Object FullName | Select-Object -ExpandProperty FullName
     $clangArguments = @('--style=file', '--fallback-style=none')
     if ($Check) { $clangArguments += '--dry-run', '--Werror' }
@@ -31,10 +34,10 @@ try {
         $last = [Math]::Min($offset + 31, $sourcePaths.Count - 1)
         $batch = $sourcePaths[$offset..$last]
         & $clangFormat @clangArguments @batch
-        if ($LASTEXITCODE -ne 0) { throw 'Java/Slang formatting failed.' }
+        if ($LASTEXITCODE -ne 0) { throw 'Java/Slang/native C++ formatting failed.' }
     }
     $action = if ($Check) { 'Checked' } else { 'Formatted' }
-    Write-Host "$action Rust workspace and $($sourcePaths.Count) Java/Slang files."
+    Write-Host "$action Rust workspace and $($sourcePaths.Count) Java/Slang/native C++ files."
 } finally {
     Pop-Location
 }

@@ -50,9 +50,27 @@ public final class VulkanBootstrap {
             new VulkanFeature(VulkanFeatureSets.SYNC2_FEATURES_STRUCT, "synchronization2",
                               VkPhysicalDeviceSynchronization2Features.SYNCHRONIZATION2);
 
+    // Core Vulkan 1.2 replaces SL's legacy EXT_buffer_device_address requirement.
+    // Enabling that extension with VkPhysicalDeviceVulkan12Features would violate Vulkan.
+    private static final List<String> STREAMLINE_EXTENSIONS =
+            List.of("VK_NVX_binary_import", "VK_NVX_image_view_handle", "VK_KHR_push_descriptor",
+                    "VK_KHR_buffer_device_address",
+                    KHRSynchronization2.VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+    private static final List<VulkanFeature> STREAMLINE_FEATURES = List.of(
+            SYNCHRONIZATION_2_FEATURE,
+            new VulkanFeature(VulkanFeatureSets.VK12_FEATURES_STRUCT, "timelineSemaphore",
+                              VkPhysicalDeviceVulkan12Features.TIMELINESEMAPHORE),
+            new VulkanFeature(VulkanFeatureSets.VK12_FEATURES_STRUCT, "descriptorIndexing",
+                              VkPhysicalDeviceVulkan12Features.DESCRIPTORINDEXING),
+            new VulkanFeature(VulkanFeatureSets.VK10_FEATURES_STRUCT,
+                              "shaderStorageImageExtendedFormats"),
+            // Streamline's Vulkan clear kernel requires this beyond slGetFeatureRequirements.
+            new VulkanFeature(VulkanFeatureSets.VK10_FEATURES_STRUCT,
+                              "shaderStorageImageWriteWithoutFormat"));
+
     // Device creation publishes one immutable result; the render thread only observes it.
     private static volatile Status status =
-            new Status(0, 0, false, false, "Host Vulkan device has not been negotiated");
+            new Status(0, 0, false, false, false, "Host Vulkan device has not been negotiated");
 
     private VulkanBootstrap() {}
 
@@ -60,7 +78,7 @@ public final class VulkanBootstrap {
                                  Set<VulkanFeature> features) {
         long physicalHandle = physical.vkPhysicalDevice().address();
         if (!Boolean.getBoolean("primept.enabled")) {
-            status = new Status(physicalHandle, 0, false, false, "Prime PT is disabled");
+            status = new Status(physicalHandle, 0, false, false, false, "Prime PT is disabled");
             return;
         }
         var missing = new ArrayList<String>();
@@ -76,6 +94,10 @@ public final class VulkanBootstrap {
                 (apiVersion >= VK13.VK_API_VERSION_1_3 ||
                  physical.hasDeviceExtension(
                          KHRSynchronization2.VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME));
+        boolean streamline = System.getProperty("os.name", "")
+                                     .toLowerCase(java.util.Locale.ROOT)
+                                     .startsWith("windows") &&
+                             STREAMLINE_EXTENSIONS.stream().allMatch(physical::hasDeviceExtension);
         // Vulkan 1.2 supplies the promoted dependencies of acceleration_structure/ray_query.
         if (missing.isEmpty()) {
             try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -92,6 +114,10 @@ public final class VulkanBootstrap {
                         VkPhysicalDeviceOpacityMicromapFeaturesEXT.calloc(stack).sType$Default();
                 if (opacityMicromap)
                     available.pNext(micromap);
+                var synchronization =
+                        VkPhysicalDeviceSynchronization2Features.calloc(stack).sType$Default();
+                if (streamline)
+                    available.pNext(synchronization);
                 VK12.vkGetPhysicalDeviceFeatures2(physical.vkPhysicalDevice(), available);
                 if (!address.bufferDeviceAddress())
                     missing.add("bufferDeviceAddress");
@@ -100,6 +126,10 @@ public final class VulkanBootstrap {
                 if (!query.rayQuery())
                     missing.add("rayQuery");
                 opacityMicromap &= micromap.micromap();
+                streamline &= synchronization.synchronization2() && address.timelineSemaphore() &&
+                              address.descriptorIndexing() &&
+                              available.features().shaderStorageImageExtendedFormats() &&
+                              available.features().shaderStorageImageWriteWithoutFormat();
 
                 var count = stack.mallocInt(1);
                 VK12.vkGetPhysicalDeviceQueueFamilyProperties(physical.vkPhysicalDevice(), count,
@@ -115,7 +145,7 @@ public final class VulkanBootstrap {
         if (!missing.isEmpty()) {
             String reason =
                     "Host GPU " + physical.deviceName() + " lacks " + String.join(", ", missing);
-            status = new Status(physicalHandle, 0, false, false, reason);
+            status = new Status(physicalHandle, 0, false, false, false, reason);
             LOGGER.warn("Prime PT host Vulkan integration unavailable: {}", reason);
             return;
         }
@@ -127,7 +157,11 @@ public final class VulkanBootstrap {
             if (apiVersion < VK13.VK_API_VERSION_1_3)
                 extensions.add(KHRSynchronization2.VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
         }
-        status = new Status(physicalHandle, 0, true, opacityMicromap,
+        if (streamline) {
+            extensions.addAll(STREAMLINE_EXTENSIONS);
+            features.addAll(STREAMLINE_FEATURES);
+        }
+        status = new Status(physicalHandle, 0, true, opacityMicromap, streamline,
                             "Host Vulkan device creation has not completed");
     }
 
@@ -145,11 +179,17 @@ public final class VulkanBootstrap {
                 extensions.contains(KHRSynchronization2.VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) &&
                 features.contains(OPACITY_MICROMAP_FEATURE) &&
                 features.contains(SYNCHRONIZATION_2_FEATURE);
-        status = new Status(previous.physical, device.address(), true, opacityMicromap, "");
+        boolean streamline = previous.streamline && extensions.containsAll(STREAMLINE_EXTENSIONS) &&
+                             features.containsAll(STREAMLINE_FEATURES);
+        status = new Status(previous.physical, device.address(), true, opacityMicromap, streamline,
+                            "");
         LOGGER.info(
                 "Prime PT enabled rayQuery, accelerationStructure and bufferDeviceAddress on Minecraft's Vulkan device");
         LOGGER.info("Prime PT opacity micromaps: {}",
                     opacityMicromap ? "enabled" : "unavailable; alpha test fallback");
+        LOGGER.info("Prime PT Streamline device capabilities: {}",
+                    streamline ? "enabled; DLSS RR runtime support will be checked on attach"
+                               : "unavailable; noisy output fallback");
     }
 
     public static boolean isEnabled(VulkanDevice device) {
@@ -175,6 +215,10 @@ public final class VulkanBootstrap {
         return isEnabled(device) && status.opacityMicromap;
     }
 
+    public static boolean streamlineEnabled(VulkanDevice device) {
+        return isEnabled(device) && status.streamline;
+    }
+
     private record Status(long physical, long device, boolean requested, boolean opacityMicromap,
-                          String reason) {}
+                          boolean streamline, String reason) {}
 }

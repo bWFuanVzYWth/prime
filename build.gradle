@@ -31,7 +31,20 @@ subprojects {
 }
 
 // One native engine is shared byte-for-byte by both Minecraft adapters.
+ext.streamlineRuntimeFiles = ['sl.interposer.dll', 'sl.common.dll', 'sl.dlss_d.dll', 'nvngx_dlssd.dll']
+tasks.register('stageStreamlineRuntime', Copy) {
+    onlyIf { System.getProperty('os.name').toLowerCase(Locale.ROOT).startsWith('windows') }
+    from('third_party/streamline/bin/x64') { include rootProject.streamlineRuntimeFiles }
+    into 'target/release'
+    doFirst {
+        rootProject.streamlineRuntimeFiles.each { name ->
+            if (!rootProject.file("third_party/streamline/bin/x64/${name}").isFile())
+                throw new GradleException("Missing Streamline runtime ${name}; restore the pinned SDK runtime")
+        }
+    }
+}
 tasks.register('buildNative', Exec) {
+    dependsOn tasks.named('stageStreamlineRuntime')
     workingDir rootDir
     commandLine 'cargo', 'build', '--release', '--locked', '--package', 'prime_engine'
 }
@@ -71,6 +84,17 @@ tasks.register('verifyNativeJars') {
                 byte[] nativeBytes = zip.getInputStream(nativeEntry).withCloseable { it.readAllBytes() }
                 byte[] bridgeBytes = zip.getInputStream(bridgeEntry).withCloseable { it.readAllBytes() }
                 if (nativeBytes.length == 0) throw new GradleException("Empty native engine in ${archive}")
+                if (entryName.startsWith('natives/windows-')) {
+                    rootProject.streamlineRuntimeFiles.each { name ->
+                        String runtimePath = "natives/windows-x86_64/${name}"
+                        def runtimeEntry = zip.getEntry(runtimePath)
+                        if (runtimeEntry == null || Collections.list(zip.entries()).count { it.name == runtimePath } != 1)
+                            throw new GradleException("Missing or duplicated ${runtimePath} in ${archive}")
+                        byte[] actual = zip.getInputStream(runtimeEntry).withCloseable { it.readAllBytes() }
+                        if (!Arrays.equals(new File(nativeJarVerificationRoot, "third_party/streamline/bin/x64/${name}").bytes, actual))
+                            throw new GradleException("Mismatched ${runtimePath} in ${archive}")
+                    }
+                }
                 ['en_us', 'zh_cn'].each { locale ->
                     String asset = "assets/primept/lang/${locale}.json"
                     def entry = zip.getEntry(asset)
@@ -85,7 +109,10 @@ tasks.register('verifyNativeJars') {
                         'META-INF/licenses/pbrt-Apache-2.0.txt',
                         'META-INF/licenses/atmosphere-SKY-TRACER-NOTICE.md',
                         'META-INF/licenses/intel-outdoor-light-scattering-NOTICE.txt',
-                        'META-INF/licenses/intel-outdoor-light-scattering-Apache-2.0.txt']
+                        'META-INF/licenses/intel-outdoor-light-scattering-Apache-2.0.txt',
+                        'META-INF/licenses/NVIDIA-Streamline.txt',
+                        'META-INF/licenses/NVIDIA-Streamline-Third-Party.md',
+                        'META-INF/licenses/NVIDIA-DLSS.txt']
                 notices.each { name ->
                     def entry = zip.getEntry(name)
                     if (entry == null) throw new GradleException("Missing ${name} in ${archive}")

@@ -24,6 +24,8 @@
 
 `prime_vulkan` 按以下顺序寻找 Slang：`SLANGC` 指向的可执行文件、`VULKAN_SDK` 下的 `Bin/slangc.exe`（Linux 为 `bin/slangc`）、`PATH` 中的 `slangc`。这些路径属于本机配置，不写入项目文件。当前运行支持范围见 README，不因存在 Linux 构建分支就视为已完成 Linux 验证。
 
+Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streamline 与 Vulkan 头文件及运行时按来源/哈希锁定在 `third_party/`，构建不隐式下载最新版。升级须从官方 GitHub 重新解析 release、更新锁定文件，并一起验证手动 Vulkan/Present 契约。Gradle `buildNative` 同时将 runtime DLL 放到 `target/release`；指定自定义 `nativeLibrary` 时须将整套对应 DLL 放在引擎旁。发行 `nativeJar` 包含同一套 DLL 和许可。
+
 所有 shader 默认使用 `-O3 -g3` 编译，保留优化并生成最高级别调试信息，供 GPU 分析工具使用。
 
 ## 构建与发行包
@@ -86,16 +88,38 @@
 2. 观察地形、透明表面、实体/方块实体、框内物品、掉落物和粒子是否缺失或重复；检查旋转/移动、物品内容变化与持续增删，以及手部/HUD 是否正常。特殊文字、glint、outline 和折射仍按当前支持范围判断。
 3. 依次切换到 `vanilla` 和 `path_trace`，等待各自就绪；检查原版地形恢复、PT 重新加载，以及皮肤、地图等动态纹理。再检查世界退出/重进与资源重载后是否正常。
 4. 检查对应 `adapters/mc-*/run/logs/latest.log`，记录异常、Vulkan `VUID` / `SYNC-HAZARD`、缺失纹理或后端恢复失败。反馈版本、操作步骤、场景与日志，截图/日志副本放 `artifacts/`。
-5. 在两版分别拖动窗口、切换全屏、最小化/恢复；覆盖横/竖/奇数尺寸并回到 1920×1080。检查宽高比、边缘覆盖、历史残影和 HUD 方位；实时应保持新噪声输出；离线调整尺寸时重建累积，稳定后应继续收敛。观察高饱和材质、灰阶和亮部的 primeDRT 输出，以及细缝/斜面是否自遮挡或漏光。HDR 呈现和自动曝光仍未接入。
+5. 在两版分别拖动窗口、切换全屏、最小化/恢复；覆盖横/竖/奇数尺寸并回到 1920×1080。检查宽高比、边缘覆盖、历史残影和 HUD 方位；关闭 RR 的实时应保持新噪声输出，开启 RR 时检查重建稳定性；离线调整尺寸时重建累积，稳定后应继续收敛。观察高饱和材质、灰阶和亮部的 primeDRT 输出，以及细缝/斜面是否自遮挡或漏光。HDR 呈现和自动曝光仍未接入。
 
 6. 在“Esc → 选项 → Prime 渲染设置”检查四组控件、默认恢复与关闭后持久化；标题画面选项也应显示同一入口。覆盖简体中文/英语、不同 GUI 缩放，确认没有翻译键、截断或重复按钮；重新启动确认配置生效。退出客户端后将 `config/primept.properties` 的 `version` 改成不匹配的值，再启动应整份回退默认，日志说明原因。
 7. 世界加载完成后用 Ctrl+Alt+F2 进入离线，确认视角/实体/粒子固定、噪点持续减少；按 Esc 打开菜单仍保持离线。曝光、primeDRT 和每帧采样数可以修改，路径/光照固定。调整尺寸后重新累积；再次按快捷键应重新捕获当前世界，地图/动态纹理不能过期。覆盖冻结时 F3+T 重载、切原版、退出/重进世界。
-8. 实时诊断依次查看原始噪声色、线性深度、世界法线；检查物体边缘、alpha 表面和天空（深度/法线预览为黑）。修改深度范围只改变预览；回到最终输出后 primeDRT 正常。深度/法线尚不代表完整 DLSS RR 接入。
+8. 实时诊断依次查看原始噪声色、线性深度、世界法线；检查物体边缘、alpha 表面和天空（深度/法线预览为黑）。修改深度范围只改变预览；回到最终输出后 primeDRT 正常。开启 RR 时这些诊断显示实际内部输入；返回最终输出会重置重建历史。
 9. 使用声明 `format=lab-pbr/1.3` 的资源包，检查 `_n` 法线与远处粗糙度、`_s` 的介质/金属分类、玻璃 IOR、发光零值和 255 哨兵；覆盖地形与 atlas UV 的物品、纹理动画、资源重载、实时/离线切换。分类通道 G/B 应保持基础层身份，动画分类采用当前帧；缺图遵循全局缺省和已有宿主源规则。高度解码与自动 foliage 材质选择的支持边界见 [材质契约](docs/materials.md)。
 
 上述启动命令开启 validation 用于正确性检查，不用于性能结论。需要性能采样时，将 `-PprimeptValidation=false`，保持细叶计时和 capture audit 关闭，另加 `-PprimeptProfileCsv=绝对路径` 保存逐帧数据；固定场景、相机、画质、射线预算与分辨率。原型稳态应只交换请求/响应头，`requested/compiled/tint_requests` 为0；覆盖边缘可能仍不完整，pending=0 不能证明全部64段单元齐备。再分别记录稳态及更新阶段；CPU 优化目前非阻塞，不以即时 FPS 达标作为本轮检查的前提。
 
 ## 按改动选择验证
+
+### Streamline / DLSS RR
+
+`./scripts/test-reconstruction-cpu.ps1` 用生产 Slang 生成的 C++ 验证 motion/jitter、天空、anchor 重定位、无效动态前态、颜色和 BSDF albedo。`cargo test -p prime_vulkan --lib reconstruction --locked` 覆盖相机矩阵、抖动周期及 C ABI。新输出 pass 的无窗口 GPU 检查需按下文设置 validation/sync；SDK mock 测试及这些数学/图像检查均不替代真实 DLSS 模型和游戏呈现验证。
+
+```powershell
+.\scripts\fetch-streamline-sdk.ps1 -VerifyOnly -CheckLatest
+.\scripts\test-streamline-bridge.ps1
+.\scripts\test-streamline-gpu.ps1 -InitializationOnly
+.\scripts\test-streamline-gpu.ps1
+.\scripts\test-reconstruction-cpu.ps1
+# 独立 PowerShell 会话；仅验证重建显示 pass，不创建窗口或执行 DLSS 模型。
+$env:PRIME_VK_VALIDATION = '1'
+$env:VK_LAYER_VALIDATE_SYNC = '1'
+cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_rr_display_fallback_upscale_and_orientation -- --ignored --nocapture --test-threads=1
+```
+
+`test-streamline-gpu.ps1` 在独立 Vulkan 1.2 设备上调用生产桥接和真实 SDK，不创建窗口；启用 validation 和同步验证，默认验证回调与 Minecraft 一样对 ERROR 返回 `VK_TRUE`。初始化检查不执行模型；完整检查执行 Performance / preset F 的 960×540 → 1920×1080 重建、等待完成并读回预填 NaN 的输出，检查 RGB 是否全部被有限非零值覆盖。两种检查均要求零 validation error，日志、SDK 锁定哈希和运行结果保存在独立 `artifacts/streamline-gpu/` 目录；API 返回成功或有效读回不能覆盖验证层失败。此合成输入测试不能替代实际游戏画质、呈现和性能验收。
+
+两版各用前文 `runClient` 命令手动验收：默认开启 RR、Performance（960×540 → 1920×1080），日志应出现 `DLSS RR preset F` 和实际输入/输出尺寸；依次切换五档、开关 RR、诊断/最终视图、实时/离线、原版/PT。覆盖相机平移/旋转、快速转头、遮挡显露、运动实体/粒子、细叶、水/玻璃、F3+T、退出/重进、窗口奇数尺寸/最小化/全屏。查 `sl`/`NGX` 错误与 Vulkan VUID，尤其观察动态无完整前态与透明替代表面缺失的画质边界。关闭 RR/不可用时应回到原生 raw；正常失败当帧也应覆盖整个输出。
+
+性能基准仍固定原生1920×1080：使用DLAA或关闭RR，固定场景、seed和射线预算记录CPU/GPU、稳态/更新与离群值；Performance等降低内部尺寸的结果另列，不称为原生1080p性能。重建同步/资源合同见[重建文档](docs/reconstruction.md)。
 
 纯文档修改核对事实、命令和链接即可。代码修改按受影响的契约选择以下入口，记录实际执行结果及未覆盖范围。
 

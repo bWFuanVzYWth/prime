@@ -13,6 +13,7 @@
 | [源路由边界与批量数据流](capture-boundaries.md) | 外观描述与下游计算的分界、接管后的 Java 截断、兼容范围、缓存与接入状态 |
 | [全局空间网格与几何合批](spatial-batching.md) | 4×4×4 区块段对齐、翻译层归属、静态/动态分离及未来光源树边界 |
 | [设置与渲染模式](renderers.md) | 当前配置版本、冻结快照、互斥资源、实时噪声与深度/法线诊断 |
+| [Streamline 与 DLSS RR](reconstruction.md) | preset F、超分档位、重建输入、Present、历史与 GPU 完成证明 |
 | [FFM ABI](abi.md) | 字节协议、输入验证、指针借用、宿主 Vulkan 录制接口 |
 | [宿主 Vulkan 流水线](pipeline.md) | 设备协商、直接输出、命令提交、同步、手部与 HUD 合成 |
 | [Slang 数学基础与显示策略](shaders.md) | 模块边界、OpenPBR 支持子域与 LitePBR 参考、可替换的 primeDRT、颜色空间、Z-Sobol、求交误差与尺寸历史 |

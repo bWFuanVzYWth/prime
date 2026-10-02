@@ -44,7 +44,8 @@ public final class HostVulkanRenderer implements AutoCloseable {
                     device.vkDevice().getPhysicalDevice().address(), device.vkDevice().address(),
                     device.graphicsQueue().vkQueue().address(), access.primept$submitSemaphore(),
                     device.graphicsQueue().queueFamilyIndex(),
-                    VulkanBootstrap.opacityMicromapEnabled(device));
+                    VulkanBootstrap.opacityMicromapEnabled(device),
+                    VulkanBootstrap.streamlineEnabled(device));
         } catch (RuntimeException | Error failure) {
             try {
                 bridge.close();
@@ -158,7 +159,10 @@ public final class HostVulkanRenderer implements AutoCloseable {
     public void configure(RenderSettings settings, boolean nextOffline, RenderSettings.View view) {
         if (offline == nextOffline && settings.equals(appliedSettings) && view == appliedView)
             return;
-        if (offline != nextOffline)
+        if (offline != nextOffline ||
+            (!nextOffline && appliedSettings != null &&
+             (settings.rayReconstruction() != appliedSettings.rayReconstruction() ||
+              settings.dlssQuality() != appliedSettings.dlssQuality())))
             submitAndAwait(encoder);
         bridge.configure(settings, nextOffline, view);
         appliedSettings = settings;

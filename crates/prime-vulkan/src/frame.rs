@@ -150,10 +150,16 @@ impl Renderer {
 
     fn from_context(context: Arc<Context>, mode: RenderMode) -> Result<Self, String> {
         let cpu_profile = CpuProfile::default();
-        let pipeline = Some(Pipeline::new(&context, mode)?);
+        let mut reconstruction_error = None;
+        let reconstruction = (mode == RenderMode::Realtime)
+            .then(|| reconstruction::Reconstruction::new(&context, &mut reconstruction_error))
+            .flatten();
+        let pipeline = Some(Pipeline::new(&context, mode, reconstruction.is_some())?);
         let mut result = Self {
             context,
             pipeline,
+            reconstruction,
+            reconstruction_error,
             geometry: None,
             atmosphere: None,
             atmosphere_scene_revision: 0,
@@ -221,18 +227,40 @@ impl Renderer {
             saturation_compensation: settings.saturation,
         }
         .prepare(1.0)?;
-        if settings.mode != self.settings.mode {
+        if settings.mode != self.settings.mode
+            || settings.mode == RenderMode::Realtime
+                && (settings.ray_reconstruction != self.settings.ray_reconstruction
+                    || settings.reconstruction_quality != self.settings.reconstruction_quality)
+        {
             self.failed = true;
             self.context.wait_host_idle()?;
+            drop(self.reconstruction.take());
             drop(self.output.take());
             drop(self.pipeline.take());
             self.context.completed_serial()?; // Drain the retired images/buffers using completed host work.
-            self.pipeline = Some(Pipeline::new(&self.context, settings.mode)?);
+            self.reconstruction_error = None;
+            self.reconstruction = (settings.mode == RenderMode::Realtime
+                && settings.ray_reconstruction)
+                .then(|| {
+                    reconstruction::Reconstruction::new(
+                        &self.context,
+                        &mut self.reconstruction_error,
+                    )
+                })
+                .flatten();
+            self.pipeline = Some(Pipeline::new(
+                &self.context,
+                settings.mode,
+                self.reconstruction.is_some(),
+            )?);
             self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
             self.samples = 0;
             self.failed = false;
         } else if !settings.transport_matches(self.settings) {
             self.samples = 0;
+            if let Some(rr) = &mut self.reconstruction {
+                rr.reset();
+            }
         }
         if let Some(geometry) = &mut self.geometry {
             geometry.set_omm(settings.opacity_micromap && self.context.opacity_micromap.is_some());
@@ -275,8 +303,18 @@ impl Renderer {
             .geometry
             .as_ref()
             .map_or([0; 4], Geometry::omm_pool_stats);
+        let (rr_evaluated, rr_input, rr_output) = self.reconstruction.as_ref().map_or(
+            (false, [0; 2], [0; 2]),
+            reconstruction::Reconstruction::diagnostics,
+        );
+        let rr_error = self
+            .reconstruction
+            .as_ref()
+            .and_then(reconstruction::Reconstruction::last_error)
+            .or(self.reconstruction_error.as_deref())
+            .unwrap_or("");
         format!(
-            "{} gpu_supported={} gpu_completed_serial={} gpu_preparation_ms={:.3} gpu_render_ms={:.3} gpu_total_ms={:.3} gpu_sample=delayed_completed_interval omm_capable={} omm_enabled={} omm_two_blocks={} omm_four_blocks={} omm_special_triangles={} omm_referenced_packed_bytes={} omm_template_ms={:.3} omm_bind_ms={:.3} omm_resource_record_ms={:.3} omm_template_preparations={} omm_bound_primitives={} omm_resource_builds={} omm_resource_blocks={} omm_resource_packed_bytes={} omm_resource_storage_bytes={} atmosphere_sky_updates={} atmosphere_camera_t_updates={} atmosphere_aerial_s_updates={} atmosphere_aerial_t_updates={}",
+            "{} gpu_supported={} gpu_completed_serial={} gpu_preparation_ms={:.3} gpu_render_ms={:.3} gpu_total_ms={:.3} gpu_sample=delayed_completed_interval omm_capable={} omm_enabled={} omm_two_blocks={} omm_four_blocks={} omm_special_triangles={} omm_referenced_packed_bytes={} omm_template_ms={:.3} omm_bind_ms={:.3} omm_resource_record_ms={:.3} omm_template_preparations={} omm_bound_primitives={} omm_resource_builds={} omm_resource_blocks={} omm_resource_packed_bytes={} omm_resource_storage_bytes={} atmosphere_sky_updates={} atmosphere_camera_t_updates={} atmosphere_aerial_s_updates={} atmosphere_aerial_t_updates={} rr_requested={} rr_capable={} rr_ready={} rr_evaluation_succeeded={} rr_input={}x{} rr_output={}x{} rr_error={:?}",
             self.cpu_profile.last_report(),
             self.host_query != vk::QueryPool::null(),
             self.last_gpu.serial,
@@ -303,7 +341,16 @@ impl Renderer {
                 .as_ref()
                 .map_or(0, |a| a.transmittance_updates),
             self.atmosphere.as_ref().map_or(0, |a| a.aerial_updates),
-            self.atmosphere.as_ref().map_or(0, |a| a.aerial_t_updates)
+            self.atmosphere.as_ref().map_or(0, |a| a.aerial_t_updates),
+            self.settings.ray_reconstruction && self.settings.mode == RenderMode::Realtime,
+            self.context.streamline_capable,
+            self.reconstruction.as_ref().is_some_and(|rr| !rr.failed()),
+            rr_evaluated,
+            rr_input[0],
+            rr_input[1],
+            rr_output[0],
+            rr_output[1],
+            rr_error
         )
     }
 
@@ -432,13 +479,6 @@ impl Renderer {
         {
             return Err("Camera contains invalid vectors or vertical FOV".into());
         }
-        self.pipeline
-            .as_mut()
-            .unwrap()
-            .energy_lut
-            .as_mut()
-            .unwrap()
-            .prepare()?;
         if let Some(geometry) = &mut self.geometry {
             geometry.begin_frame(&self.context, completed);
         }
@@ -460,6 +500,9 @@ impl Renderer {
                     geometry.update(&self.context, scene)?;
                 } else {
                     // End the previous CPU owner before constructing another cache domain.
+                    if let Some(rr) = &mut self.reconstruction {
+                        rr.reset();
+                    }
                     // Borrowed GPU resources still retire by their recorded completion serials.
                     self.geometry.take();
                     self.geometry = Some(Geometry::new_with_omm(
@@ -518,6 +561,42 @@ impl Renderer {
         } else {
             sample_index
         };
+        if let Some(rr) = &mut self.reconstruction {
+            let prepared = rr.prepare(
+                slot,
+                *camera,
+                scene.anchor,
+                scene.epoch,
+                [width, height],
+                sample_index,
+                self.settings.reconstruction_quality,
+                completed,
+            );
+            if let Err(message) = prepared {
+                if !self.context.can_destroy() {
+                    return Err(message);
+                }
+                // No RR dispatch has been recorded in this frame. Prior pipeline/SDK work
+                // must retire before switching to the native-resolution direct pipeline.
+                self.context
+                    .wait_host_serial(*self.host_serials.iter().max().unwrap())?;
+                drop(self.reconstruction.take());
+                drop(self.pipeline.take());
+                self.pipeline = Some(Pipeline::new(&self.context, self.settings.mode, false)?);
+                self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
+                eprintln!("[Prime PT] DLSS RR setup failed; using native raw output: {message}");
+                self.reconstruction_error = Some(message);
+            }
+        }
+        // RR setup may replace the pipeline. Initialize the LUT of the final
+        // pipeline before descriptors and the PT dispatch consume it.
+        self.pipeline
+            .as_mut()
+            .unwrap()
+            .energy_lut
+            .as_mut()
+            .unwrap()
+            .prepare()?;
         cpu.finish(Stage::Output, started);
         if self.atmosphere.is_none() {
             self.atmosphere = Some(crate::atmosphere::Atmosphere::new(&self.context)?);
@@ -548,6 +627,9 @@ impl Renderer {
             accumulation.map_or(0, |b| b.buffer.as_raw()),
         ];
         let descriptor = self.pipeline.as_ref().unwrap().descriptors[slot];
+        if let Some(rr) = &mut self.reconstruction {
+            rr.descriptors(descriptor, slot);
+        }
         let image_info = |view| {
             [vk::DescriptorImageInfo::default()
                 .image_view(view)
@@ -626,6 +708,17 @@ impl Renderer {
         let camera = self.camera.unwrap();
         let output = self.output.as_ref().unwrap();
         let samples_this_dispatch = self.samples_per_frame();
+        let [render_width, render_height] = self
+            .reconstruction
+            .as_ref()
+            .map_or([output.width, output.height], |rr| rr.input_extent());
+        let log2_resolution = if self.reconstruction.is_some() {
+            prime_scene::extent::RenderExtent::new(render_width, render_height)
+                .unwrap()
+                .log2_resolution()
+        } else {
+            output.log2_resolution
+        };
         let mut push = [0u8; 128];
         let values = [
             camera.position[0],
@@ -649,13 +742,13 @@ impl Renderer {
             *destination = value.to_le_bytes();
         }
         let integers = [
-            output.width,
-            output.height,
+            render_width,
+            render_height,
             self.samples,
             samples_this_dispatch,
             u32::from(bottom_up),
             self.frame_seed,
-            output.log2_resolution,
+            log2_resolution,
             self.settings.seed,
         ];
         for (destination, value) in push[64..96].as_chunks_mut::<4>().0.iter_mut().zip(integers) {
@@ -701,8 +794,8 @@ impl Renderer {
             );
             self.context.device.cmd_dispatch(
                 command,
-                output.width.div_ceil(8),
-                output.height.div_ceil(8),
+                render_width.div_ceil(8),
+                render_height.div_ceil(8),
                 1,
             );
         }
@@ -850,6 +943,18 @@ impl Renderer {
         let started = cpu.start();
         let uploaded_before = self.context.cpu_upload_bytes();
         self.failed = true;
+        if self.reconstruction.as_ref().is_some_and(|rr| rr.failed()) {
+            // SDK failure is a frame-boundary transition, after prior submitted work retires.
+            self.context.wait_host_idle()?;
+            self.reconstruction_error = self
+                .reconstruction
+                .as_ref()
+                .and_then(|rr| rr.last_error().map(str::to_owned));
+            drop(self.reconstruction.take());
+            drop(self.pipeline.take());
+            self.pipeline = Some(Pipeline::new(&self.context, self.settings.mode, false)?);
+            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
+        }
         // A contained FFI panic must still release the recording scope.
         let _scope = HostRecordScope(self.context.clone());
         let result = self.record_host_frame(
@@ -963,6 +1068,18 @@ impl Renderer {
             }
         }
         self.dispatch(command, slot, true);
+        if let Some(rr) = &mut self.reconstruction {
+            rr.evaluate_and_display(
+                command,
+                self.pipeline.as_ref().unwrap(),
+                slot,
+                serial,
+                self.display,
+                self.settings.view,
+                self.settings.depth_range,
+                true,
+            )?;
+        }
         unsafe {
             let after = [vk::MemoryBarrier::default()
                 .src_access_mask(vk::AccessFlags::SHADER_WRITE)

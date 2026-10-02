@@ -35,6 +35,22 @@ third-party libraries or assets.
 Both adapter JARs include the project LICENSE and LICENSE-EXCEPTIONS at the root,
 and these notices and third-party license texts under `META-INF`.
 
+`third_party/streamline` and `third_party/dlss` contain the official NVIDIA
+Streamline v2.14.1 and DLSS v310.9.1 SDK subsets. Windows adapter JARs redistribute
+the production Streamline interposer, common and DLSS-D plugins and DLSS RR
+runtime. Source identities and exact file hashes are in
+`third_party/streamline/sdk-lock.json`; the SDKs retain their own terms in
+[Streamline license](licenses/NVIDIA-Streamline.txt),
+[Streamline third-party notices](licenses/NVIDIA-Streamline-Third-Party.md), and
+[DLSS runtime license](licenses/NVIDIA-DLSS.txt), copied byte-for-byte from the
+Streamline runtime's `nvngx_dlss.license.txt` and included in each native JAR.
+
+`third_party/streamline/vulkan-headers` contains Khronos Vulkan-Headers v1.4.350
+for bridge compilation, with its upstream
+[Apache-2.0](licenses/Khronos-Vulkan-Headers-Apache-2.0.txt) and
+[MIT](licenses/Khronos-Vulkan-Headers-MIT.txt) notices. These compile-time headers
+do not replace the user's Vulkan loader or GPU driver.
+
 
 `crates/prime-vulkan/shaders/atmosphere`, the physical assets and frozen reference
 fixtures adapt legacy Prime's atmosphere (copyright 2026 linlin), incorporating

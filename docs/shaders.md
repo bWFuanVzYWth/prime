@@ -23,6 +23,8 @@
 | `transport.slang` | 共同的 OpenPBR 支持子域输运、采样域与首次命中 guides，显式接收资源与帧 |
 | `path_trace.slang` | 离线累积及显示入口 |
 | `realtime.slang` | 单次实时积分及所选视图显示，直接写输出图像 |
+| `realtime_rr.slang` / `reconstruct/rr_guides.slang` | 同一输运核、帧抖动、实际主表面 guides 与 sampled specular hit distance |
+| `rr_display.slang` | 输出分辨率的 RR 显示与当帧 raw 回退；不引入 CPU 图像传递 |
 
 库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口显式传入 `TraceScene`、OpenPBR energy 资源值与显示参数；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`，消费接收 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建跟踪整个 shader 目录，修改被导入模块也必须重新编译。
 

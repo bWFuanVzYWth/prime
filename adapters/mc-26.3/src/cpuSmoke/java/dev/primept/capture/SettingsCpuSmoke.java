@@ -260,6 +260,16 @@ public final class SettingsCpuSmoke {
                                                   PrimeSettingsScreen.class, "opacityMicromap")
                                                   .get(screen);
                     check(opacityMicromap.get(), "OMM default must be enabled");
+                    var rayReconstruction = (net.minecraft.client.OptionInstance<Boolean>)field(
+                                                    PrimeSettingsScreen.class, "rayReconstruction")
+                                                    .get(screen);
+                    var dlssQuality =
+                            (net.minecraft.client.OptionInstance<RenderSettings.DlssQuality>)field(
+                                    PrimeSettingsScreen.class, "dlssQuality")
+                                    .get(screen);
+                    check(rayReconstruction.get(), "RR default must be enabled");
+                    check(dlssQuality.get() == RenderSettings.DlssQuality.PERFORMANCE,
+                          "DLSS default must be 2x Performance");
                     var offline = (OfflineMode)field(PrimeClient.class, "offline")
                                           .get(field(PrimeClient.class, "INSTANCE").get(null));
                     offline.request(true);
@@ -267,6 +277,9 @@ public final class SettingsCpuSmoke {
                     screen.tick();
                     check(list.findOption(opacityMicromap).active,
                           "Frozen OMM control stays available");
+                    check(!list.findOption(rayReconstruction).active &&
+                                  !list.findOption(dlssQuality).active,
+                          "Offline accumulation disables realtime reconstruction controls");
                     // OptionInstance only dispatches value callbacks once the client is running.
                     var running = field(Minecraft.class, "running");
                     boolean previousRunning = running.getBoolean(minecraft);
@@ -277,6 +290,23 @@ public final class SettingsCpuSmoke {
                                       offline.requested(),
                               "OMM callback preserves frozen scene and changes the persisted setting");
                         opacityMicromap.set(true);
+                        offline.reset();
+                        screen.tick();
+                        check(list.findOption(rayReconstruction).active &&
+                                      list.findOption(dlssQuality).active,
+                              "Realtime reconstruction controls become available");
+                        rayReconstruction.set(false);
+                        screen.tick();
+                        check(!PrimeClient.settings().rayReconstruction() &&
+                                      !list.findOption(dlssQuality).active,
+                              "RR toggle is persisted and disables its quality control");
+                        rayReconstruction.set(true);
+                        for (var quality : RenderSettings.DlssQuality.values()) {
+                            dlssQuality.set(quality);
+                            check(PrimeClient.settings().dlssQuality() == quality,
+                                  "DLSS quality callback changes persisted settings");
+                        }
+                        dlssQuality.set(RenderSettings.DlssQuality.PERFORMANCE);
                     } finally {
                         running.setBoolean(minecraft, previousRunning);
                     }

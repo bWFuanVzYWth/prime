@@ -74,6 +74,9 @@ public struct TraceScene {
 };
 public struct SurfaceHit {
     public bool found;
+    // Only static section geometry has a known world-space previous position. Dynamic
+    // instances and captured meshes currently carry no previous-pose/vertex correspondence.
+    public bool staticGeometry;
     public SurfacePoint surface;
     public float4 sourceColor;
     public float3 emission;
@@ -522,6 +525,7 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
         hit.thin = opticalFeatures != 0 && (record.identity.w & 64) != 0;
         hit.materialThin = primePbrSourceThinWalled(hit.thin, record.triangle.flags,
                                                     uint(round(hit.specularSample.b * 255.0)));
+        hit.staticGeometry = (instance & 0x00800000) == 0;
     }
     return hit;
 }

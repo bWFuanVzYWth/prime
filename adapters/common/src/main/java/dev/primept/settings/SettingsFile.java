@@ -36,9 +36,15 @@ public final class SettingsFile {
             String opacityMicromap = properties.getProperty("render.opacity_micromap");
             if (!"true".equals(opacityMicromap) && !"false".equals(opacityMicromap))
                 throw new IllegalArgumentException("Invalid render.opacity_micromap");
+            String rayReconstruction = properties.getProperty("render.ray_reconstruction");
+            if (!"true".equals(rayReconstruction) && !"false".equals(rayReconstruction))
+                throw new IllegalArgumentException("Invalid render.ray_reconstruction");
             var result = RenderSettings.defaults()
                                  .withPathTracing(Boolean.parseBoolean(enabled))
-                                 .withOpacityMicromap(Boolean.parseBoolean(opacityMicromap));
+                                 .withOpacityMicromap(Boolean.parseBoolean(opacityMicromap))
+                                 .withRayReconstruction(Boolean.parseBoolean(rayReconstruction))
+                                 .withDlssQuality(RenderSettings.DlssQuality.valueOf(
+                                         properties.getProperty("render.dlss_quality", "")));
             for (var control : RenderSettings.Control.values())
                 result =
                         result.with(control, Integer.parseInt(properties.getProperty(control.key)));
@@ -52,7 +58,9 @@ public final class SettingsFile {
         var text =
                 new StringBuilder("version=" + RenderSettings.VERSION +
                                   "\nrenderer.path_tracing=" + settings.pathTracing() +
-                                  "\nrender.opacity_micromap=" + settings.opacityMicromap() + "\n");
+                                  "\nrender.opacity_micromap=" + settings.opacityMicromap() +
+                                  "\nrender.ray_reconstruction=" + settings.rayReconstruction() +
+                                  "\nrender.dlss_quality=" + settings.dlssQuality().name() + "\n");
         for (var control : RenderSettings.Control.values())
             text.append(control.key).append('=').append(settings.value(control)).append('\n');
         return text.toString();

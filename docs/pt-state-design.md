@@ -127,6 +127,8 @@ Offline 单样本当前使用 specialization ID4；场景能力使用 ID0/1/2，
 
 显示参数在路径结束后消费。depth/normal guides 有真实 Realtime 消费者，并与 radiance 使用同一主射线和 coverage；当前 Offline 只取 radiance，其他分量在编译产物中消除。共同返回类型、完整 Frame ABI 或源结构体尺寸不等于所有字段始终占据 GPR。继续拆接口、缓存形状或新增特化前，应先查是否还有实际执行的计算或跨路径状态。
 
+可选 Streamline RR 使用同一输运核的专用 guide sink，首命中就地写入 normal/roughness、depth、motion 和 BSDF albedo，不使完整 guide 结构覆盖整个路径。新增一个已采中 specular 反射的标记到第二次最近交点，记录真实 hit distance 或环境 miss；没有额外反射查询。原始/离线 sink 不消费这些记录。RR 的输入/输出尺寸、帧抖动、格式、带宽估算与历史边界见[重建契约](reconstruction.md)；默认性能档减少内部像素和射线数，必须与原生1920×1080基准区分，新增SL/显示成本不等于免费降噪。每次只创建选中的6个实时场景变体，RR再加一个显示pipeline。
+
 ## 修改前必须回答的性能问题
 
 修改者须在实现前的设计说明中回答下表的相关问题；不适用项说明原因，未知项明确写成假设，并给出判定实验。实现与复盘补齐证据，不能以“编译器应该会优化”代替分析。回答可以支持推翻当前方案；实验不要求事先证明收益。

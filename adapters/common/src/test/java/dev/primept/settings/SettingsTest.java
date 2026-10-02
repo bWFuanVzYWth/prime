@@ -39,7 +39,11 @@ final class SettingsTest {
 
     @Test
     void completeFileRoundTripAndReplacement(@TempDir Path dir) throws Exception {
-        var settings = RenderSettings.defaults().withPathTracing(false).withOpacityMicromap(false);
+        var settings = RenderSettings.defaults()
+                               .withPathTracing(false)
+                               .withOpacityMicromap(false)
+                               .withRayReconstruction(false)
+                               .withDlssQuality(RenderSettings.DlssQuality.QUALITY);
         for (var control : RenderSettings.Control.values())
             settings = settings.with(control, control.maximum);
         Path file = dir.resolve("config/primept.properties");
@@ -59,14 +63,20 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=3", "version=0"),
-                     valid.replace("version=3", "version=2"),
-                     valid.replace("version=3", "version=4"), valid.replace("version=3", ""),
+                     valid.replace("version=4", "version=0"),
+                     valid.replace("version=4", "version=3"),
+                     valid.replace("version=4", "version=5"), valid.replace("version=4", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
                      valid.replace("renderer.path_tracing=false", "renderer.path_tracing=maybe"),
                      valid.replace("render.opacity_micromap=true", ""),
                      valid.replace("render.opacity_micromap=true", "render.opacity_micromap=maybe"),
+                     valid.replace("render.ray_reconstruction=true", ""),
+                     valid.replace("render.ray_reconstruction=true",
+                                   "render.ray_reconstruction=maybe"),
+                     valid.replace("render.dlss_quality=PERFORMANCE", ""),
+                     valid.replace("render.dlss_quality=PERFORMANCE",
+                                   "render.dlss_quality=UNKNOWN"),
                      valid + "render.bounces=NaN\n", valid + "bad=\\uXYZW\n"}) {
             var loaded = SettingsFile.decode(broken);
             assertEquals(RenderSettings.defaults(), loaded.settings());
@@ -84,8 +94,8 @@ final class SettingsTest {
                      () -> original.with(RenderSettings.Control.BOUNCES, 0));
         var bytes = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
         changed.write(bytes, true, RenderSettings.View.NORMAL);
-        assertEquals(60, bytes.position());
-        assertEquals(3, bytes.getInt(0));
+        assertEquals(68, bytes.position());
+        assertEquals(4, bytes.getInt(0));
         assertEquals(1, bytes.getInt(4));
         assertEquals(12, bytes.getInt(8));
         assertEquals(1, bytes.getInt(12));
@@ -100,6 +110,8 @@ final class SettingsTest {
         assertEquals(30, bytes.getInt(48));
         assertEquals(0, bytes.getInt(52));
         assertEquals(1, bytes.getInt(56));
+        assertEquals(1, bytes.getInt(60));
+        assertEquals(3, bytes.getInt(64));
     }
     @Test
     void opacityMicromapIsEnabledByDefaultAndCanBePersistedAndToggled() {
@@ -114,6 +126,30 @@ final class SettingsTest {
         var bytes = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
         disabled.write(bytes, true, RenderSettings.View.OUTPUT);
         assertEquals(0, bytes.getInt(56));
+    }
+    @Test
+    void rayReconstructionAndQualityRoundTripPreserveIndependentSettings() {
+        var defaults = RenderSettings.defaults();
+        assertTrue(defaults.rayReconstruction());
+        assertEquals(RenderSettings.DlssQuality.PERFORMANCE, defaults.dlssQuality());
+        var disabled = defaults.withRayReconstruction(false);
+        assertNotEquals(defaults, disabled);
+        assertFalse(disabled.withPathTracing(false)
+                            .withOpacityMicromap(false)
+                            .with(RenderSettings.Control.BOUNCES, 8)
+                            .rayReconstruction());
+        var bytes = ByteBuffer.allocate(RenderSettings.WIRE_BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        for (var quality : RenderSettings.DlssQuality.values()) {
+            var changed = disabled.withDlssQuality(quality);
+            assertFalse(changed.rayReconstruction());
+            assertEquals(changed, SettingsFile.decode(SettingsFile.encode(changed)).settings());
+            changed.write(bytes, false, RenderSettings.View.OUTPUT);
+            assertEquals(0, bytes.getInt(60));
+            assertEquals(quality.ordinal(), bytes.getInt(64));
+            assertEquals(quality, changed.withRayReconstruction(true).dlssQuality());
+        }
+        assertTrue(defaults.rayReconstruction());
+        assertThrows(NullPointerException.class, () -> defaults.withDlssQuality(null));
     }
     @Test
     void shortcutRequiresBothModifiersAndEscapeKeepsSnapshot() {

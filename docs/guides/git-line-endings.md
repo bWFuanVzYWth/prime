@@ -15,6 +15,8 @@
 
 Java 按 `.java` 语言模式处理，Slang 按 C++ 风格词法格式化。当前使用 clang-format 22.1.8；Rust 使用所选工具链提供的 rustfmt。100 列是工具的换行目标，不要求手工拆分字符串、注释或改变表达式语义。没有必须遵循的额外手工风格，统一交给配置与工具；升级格式工具时检查产生的差异。
 
+`native/` 中维护的 C++ 桥接也由同一脚本处理。`third_party/` 的 SDK 原始头文件排除格式化，并由 attributes 保留原字节，使来源 SHA-256 校验可复现。
+
 Slang 的 `public`/`internal` 用 AttributeMacros 配置识别为声明修饰词，结构体显式使用分号，避免 C++ 格式器将相邻声明连接。可见性仍由 Slang 编译器检查。
 
 格式脚本不处理 `artifacts`、游戏运行目录、生成的 Java class 或构建产物，也不启动游戏、下载工具、安装 hook 或暂存文件；hook 由独立安装脚本配置。格式化不能代替 javac、Rust 与生产 Slang 的编译校验；Slang 的属性、指针和射线查询扩展以实际 slangc 编译为准，不能为迎合格式器修改 shader 语义。

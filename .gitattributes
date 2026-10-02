@@ -28,6 +28,21 @@
 *.pdf -text
 # Author-delivered reference overlays retain the exact independently locked bytes.
 crates/prime-vulkan/assets/openpbr/author-bsdf-hotfix-2026-07-24/*.hpp -text
+# Vendored SDK headers retain upstream bytes for reproducible SHA-256 verification.
+third_party/streamline/include/** -text
+third_party/streamline/vulkan-headers/include/** -text
+third_party/dlss/include/** -text
+third_party/dlss/LICENSE.txt -text
+third_party/dlss/README.md -text
+third_party/streamline/license.txt -text
+third_party/streamline/3rd-party-licenses.md -text
+third_party/streamline/bin/x64/*.txt -text
+third_party/streamline/vulkan-headers/LICENSE* -text
+licenses/NVIDIA-DLSS.txt -text
+licenses/NVIDIA-Streamline.txt -text
+licenses/NVIDIA-Streamline-Third-Party.md -text
+licenses/Khronos-Vulkan-Headers-Apache-2.0.txt -text
+licenses/Khronos-Vulkan-Headers-MIT.txt -text
 crates/prime-vulkan/assets/**/*.ktx2 filter=lfs diff=lfs merge=lfs -text
 crates/prime-vulkan/assets/**/*.bc6h.gz filter=lfs diff=lfs merge=lfs -text
 crates/prime-vulkan/assets/**/*.bytes filter=lfs diff=lfs merge=lfs -text

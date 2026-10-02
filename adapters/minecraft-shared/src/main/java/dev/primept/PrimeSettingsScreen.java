@@ -4,6 +4,7 @@ import com.mojang.serialization.Codec;
 import dev.primept.settings.RenderSettings;
 import dev.primept.settings.RenderSettings.Control;
 import dev.primept.settings.RenderSettings.View;
+import dev.primept.settings.RenderSettings.DlssQuality;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
@@ -19,8 +20,9 @@ import net.minecraft.network.chat.Component;
 /** Version-owned widgets; persistence and the wire contract have no Minecraft dependency. */
 public final class PrimeSettingsScreen extends OptionsSubScreen {
     private final EnumMap<Control, OptionInstance<Integer>> controls = new EnumMap<>(Control.class);
-    private OptionInstance<Boolean> enabled, offline, opacityMicromap;
+    private OptionInstance<Boolean> enabled, offline, opacityMicromap, rayReconstruction;
     private OptionInstance<View> view;
+    private OptionInstance<DlssQuality> dlssQuality;
     public PrimeSettingsScreen(Screen parent) {
         super(parent, Minecraft.getInstance().options,
               Component.translatable("primept.settings.title"));
@@ -77,6 +79,29 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                 value
                 -> PrimeClient.updateSettings(PrimeClient.settings().withOpacityMicromap(value)));
         list.addBig(opacityMicromap);
+        rayReconstruction = OptionInstance.createBoolean(
+                "primept.settings.ray_reconstruction",
+                OptionInstance.cachedConstantTooltip(
+                        Component.translatable("primept.settings.ray_reconstruction.tooltip")),
+                PrimeClient.settings().rayReconstruction(),
+                value
+                -> PrimeClient.updateSettings(PrimeClient.settings().withRayReconstruction(value)));
+        list.addBig(rayReconstruction);
+        dlssQuality = new OptionInstance<>(
+                "primept.settings.dlss_quality",
+                OptionInstance.cachedConstantTooltip(
+                        Component.translatable("primept.settings.dlss_quality.tooltip")),
+                (caption, value)
+                        -> Options.genericValueLabel(
+                                caption,
+                                Component.translatable("primept.settings.dlss_quality." +
+                                                       value.name().toLowerCase(Locale.ROOT))),
+                new OptionInstance.Enum<>(
+                        List.of(DlssQuality.values()),
+                        Codec.STRING.xmap(DlssQuality::valueOf, DlssQuality::name)),
+                PrimeClient.settings().dlssQuality(),
+                value -> PrimeClient.updateSettings(PrimeClient.settings().withDlssQuality(value)));
+        list.addBig(dlssQuality);
         list.addSmall(controls.get(Control.BOUNCES), controls.get(Control.OFFLINE_SAMPLES));
         list.addHeader(Component.translatable("primept.settings.lighting"));
         list.addSmall(controls.get(Control.SUN_EV), controls.get(Control.SKY_EV));
@@ -118,6 +143,9 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                                           PrimeClient.settings().pathTracing() &&
                                           Minecraft.getInstance().level != null;
         list.findOption(opacityMicromap).active = PrimeClient.controlsAvailable();
+        list.findOption(rayReconstruction).active = PrimeClient.controlsAvailable() && !frozen;
+        list.findOption(dlssQuality).active = PrimeClient.controlsAvailable() && !frozen &&
+                                              PrimeClient.settings().rayReconstruction();
         for (var control : List.of(Control.BOUNCES, Control.SUN_EV, Control.SKY_EV,
                                    Control.LATITUDE, Control.SOLAR_LONGITUDE))
             list.findOption(controls.get(control)).active = !frozen;

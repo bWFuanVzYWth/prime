@@ -29,7 +29,11 @@ mod pbr_tests;
 #[cfg(all(test, feature = "shader-tests"))]
 mod pbr_texture_tests;
 mod plan;
+mod reconstruction;
+mod reconstruction_history;
 mod resources;
+#[cfg(all(test, feature = "shader-tests"))]
+mod rr_display_tests;
 mod surface;
 #[cfg(test)]
 mod surface_tests;
@@ -48,6 +52,13 @@ use std::{io::Cursor, sync::Arc};
 use target::Image;
 
 const FRAME_SLOTS: usize = 3;
+
+/// Forwards the host's real present call, allowing Streamline to retire its frame tags.
+/// # Safety
+/// Both arguments must remain valid for the actual vkQueuePresentKHR call.
+pub unsafe fn streamline_present(queue: u64, present_info: u64) -> i32 {
+    unsafe { reconstruction::present(queue, present_info) }
+}
 
 /// Last recorded frame's object work; independent of opt-in timing instrumentation.
 #[derive(Clone, Copy, Debug, Default)]
@@ -75,6 +86,7 @@ struct Pipeline {
     descriptors: [vk::DescriptorSet; FRAME_SLOTS],
     pipelines: [vk::Pipeline; 6],
     single_sample_pipelines: Option<[vk::Pipeline; 6]>,
+    reconstruction_display: Option<vk::Pipeline>,
     energy_lut: Option<openpbr::EnergyLut>,
 }
 impl Drop for Pipeline {
@@ -85,6 +97,7 @@ impl Drop for Pipeline {
                     .pipelines
                     .into_iter()
                     .chain(self.single_sample_pipelines.into_iter().flatten())
+                    .chain(self.reconstruction_display)
                 {
                     self.context.device.destroy_pipeline(pipeline, None);
                 }
@@ -103,7 +116,7 @@ impl Drop for Pipeline {
     }
 }
 impl Pipeline {
-    fn new(context: &Arc<Context>, mode: RenderMode) -> Result<Self, String> {
+    fn new(context: &Arc<Context>, mode: RenderMode, reconstruction: bool) -> Result<Self, String> {
         let energy_lut = openpbr::EnergyLut::new(context)?;
         unsafe {
             let mut result = Self {
@@ -117,9 +130,13 @@ impl Pipeline {
                 pipelines: [vk::Pipeline::null(); 6],
                 single_sample_pipelines: (mode == RenderMode::Offline)
                     .then_some([vk::Pipeline::null(); 6]),
+                reconstruction_display: None,
             };
             let binding_ids: &[u32] = match mode {
                 RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8, 9],
+                RenderMode::Realtime if reconstruction => {
+                    &[0, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+                }
                 RenderMode::Realtime => &[0, 2, 3, 4, 7, 8, 9],
             };
             let bindings: Vec<_> = binding_ids
@@ -134,7 +151,9 @@ impl Pipeline {
                             vk::DescriptorType::ACCELERATION_STRUCTURE_KHR
                         } else if binding == 9 {
                             vk::DescriptorType::COMBINED_IMAGE_SAMPLER
-                        } else if binding == 4 {
+                        } else if binding == 17 {
+                            vk::DescriptorType::UNIFORM_BUFFER
+                        } else if binding == 4 || (10..=16).contains(&binding) || binding == 18 {
                             vk::DescriptorType::STORAGE_IMAGE
                         } else {
                             vk::DescriptorType::STORAGE_BUFFER
@@ -179,6 +198,10 @@ impl Pipeline {
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_IMAGE,
+                    descriptor_count: (if reconstruction { 9 } else { 1 }) * FRAME_SLOTS as u32,
+                },
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::UNIFORM_BUFFER,
                     descriptor_count: FRAME_SLOTS as u32,
                 },
             ];
@@ -276,6 +299,9 @@ impl Pipeline {
             };
             let shader: &[u8] = match mode {
                 RenderMode::Offline => include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv")),
+                RenderMode::Realtime if reconstruction => {
+                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_rr.spv"))
+                }
                 RenderMode::Realtime => include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv")),
             };
             for (i, features) in [
@@ -293,6 +319,13 @@ impl Pipeline {
                 if let Some(single) = &mut result.single_sample_pipelines {
                     single[i] = create(shader, features, 1)?;
                 }
+            }
+            if reconstruction {
+                result.reconstruction_display = Some(create(
+                    include_bytes!(concat!(env!("OUT_DIR"), "/rr_display.spv")),
+                    [0, 0, 0],
+                    0,
+                )?);
             }
             Ok(result)
         }
@@ -343,6 +376,8 @@ pub struct Renderer {
     context: Arc<Context>,
     // Only the selected backend's pipeline and sized output exist; scene geometry is shared.
     pipeline: Option<Pipeline>,
+    reconstruction: Option<reconstruction::Reconstruction>,
+    reconstruction_error: Option<String>,
     geometry: Option<Geometry>,
     atmosphere: Option<atmosphere::Atmosphere>,
     atmosphere_scene_revision: u64,

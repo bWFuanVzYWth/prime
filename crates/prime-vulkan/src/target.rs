@@ -7,7 +7,7 @@ pub(super) struct Image {
     context: Arc<Context>,
     pub image: vk::Image,
     pub view: vk::ImageView,
-    memory: vk::DeviceMemory,
+    pub(super) memory: vk::DeviceMemory,
 }
 
 impl Image {

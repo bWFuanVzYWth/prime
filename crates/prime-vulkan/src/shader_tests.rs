@@ -68,6 +68,7 @@ fn run_impl(
         descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
         pipelines: [vk::Pipeline::null(); 6],
         single_sample_pipelines: None,
+        reconstruction_display: None,
     };
     unsafe {
         let types: Vec<_> = (0..if geometry.is_some() { 7 } else { 2 })

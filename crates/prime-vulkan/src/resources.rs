@@ -186,6 +186,7 @@ pub(super) struct Context {
     pub physical: vk::PhysicalDevice,
     pub acceleration: ash::khr::acceleration_structure::Device,
     pub opacity_micromap: Option<OpacityMicromapSupport>,
+    pub streamline_capable: bool,
     pub queue: vk::Queue,
     pub queue_family: u32,
     pub pool: vk::CommandPool,
@@ -501,6 +502,7 @@ impl Context {
                 physical,
                 opacity_micromap,
                 acceleration: acceleration_loader,
+                streamline_capable: false,
                 queue,
                 queue_family: family,
                 pool,
@@ -559,7 +561,7 @@ impl Context {
         timeline: u64,
         capabilities: u32,
     ) -> Result<Arc<Self>, String> {
-        if capabilities & !1 != 0 {
+        if capabilities & !3 != 0 {
             return Err("Unknown host Vulkan capabilities".into());
         }
         if [instance, physical, device, queue, timeline].contains(&0) {
@@ -635,6 +637,7 @@ impl Context {
                 acceleration,
                 opacity_micromap,
                 queue: vk::Queue::from_raw(queue),
+                streamline_capable: capabilities & 2 != 0,
                 queue_family: family,
                 pool,
                 memory,
@@ -1809,6 +1812,7 @@ mod host_tests {
                 physical: vk::PhysicalDevice::null(),
                 acceleration,
                 opacity_micromap: None,
+                streamline_capable: false,
                 queue: vk::Queue::null(),
                 queue_family: 0,
                 pool: vk::CommandPool::null(),
