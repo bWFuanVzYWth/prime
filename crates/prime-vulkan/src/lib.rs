@@ -25,10 +25,19 @@ mod geometry;
 mod material_arena;
 mod packing;
 #[cfg(all(test, feature = "shader-tests"))]
+mod pbr_delta_tests;
+#[cfg(all(test, feature = "shader-tests"))]
 mod pbr_tests;
 #[cfg(all(test, feature = "shader-tests"))]
 mod pbr_texture_tests;
 mod plan;
+#[cfg(all(test, feature = "shader-tests"))]
+mod primary_tests;
+mod realtime;
+#[cfg(all(test, feature = "shader-tests"))]
+mod realtime_perf_tests;
+#[cfg(all(test, feature = "shader-tests"))]
+mod realtime_tests;
 mod reconstruction;
 mod reconstruction_history;
 mod resources;
@@ -86,6 +95,8 @@ struct Pipeline {
     descriptors: [vk::DescriptorSet; FRAME_SLOTS],
     pipelines: [vk::Pipeline; 6],
     single_sample_pipelines: Option<[vk::Pipeline; 6]>,
+    primary_pipelines: Option<[vk::Pipeline; 4]>,
+    realtime_post: Option<vk::Pipeline>,
     reconstruction_display: Option<vk::Pipeline>,
     energy_lut: Option<openpbr::EnergyLut>,
 }
@@ -97,6 +108,8 @@ impl Drop for Pipeline {
                     .pipelines
                     .into_iter()
                     .chain(self.single_sample_pipelines.into_iter().flatten())
+                    .chain(self.primary_pipelines.into_iter().flatten())
+                    .chain(self.realtime_post)
                     .chain(self.reconstruction_display)
                 {
                     self.context.device.destroy_pipeline(pipeline, None);
@@ -130,12 +143,15 @@ impl Pipeline {
                 pipelines: [vk::Pipeline::null(); 6],
                 single_sample_pipelines: (mode == RenderMode::Offline)
                     .then_some([vk::Pipeline::null(); 6]),
+                primary_pipelines: (mode == RenderMode::Realtime)
+                    .then_some([vk::Pipeline::null(); 4]),
+                realtime_post: None,
                 reconstruction_display: None,
             };
             let binding_ids: &[u32] = match mode {
                 RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8, 9],
                 RenderMode::Realtime if reconstruction => {
-                    &[0, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+                    &[0, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
                 }
                 RenderMode::Realtime => &[0, 2, 3, 4, 7, 8, 9],
             };
@@ -153,7 +169,7 @@ impl Pipeline {
                             vk::DescriptorType::COMBINED_IMAGE_SAMPLER
                         } else if binding == 17 {
                             vk::DescriptorType::UNIFORM_BUFFER
-                        } else if binding == 4 || (10..=16).contains(&binding) || binding == 18 {
+                        } else if binding == 4 || (10..=16).contains(&binding) || binding >= 18 {
                             vk::DescriptorType::STORAGE_IMAGE
                         } else {
                             vk::DescriptorType::STORAGE_BUFFER
@@ -198,7 +214,7 @@ impl Pipeline {
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_IMAGE,
-                    descriptor_count: (if reconstruction { 9 } else { 1 }) * FRAME_SLOTS as u32,
+                    descriptor_count: (if reconstruction { 10 } else { 1 }) * FRAME_SLOTS as u32,
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::UNIFORM_BUFFER,
@@ -239,7 +255,8 @@ impl Pipeline {
             context.device.update_descriptor_sets(&energy_writes, &[]);
             let create = |bytes: &[u8],
                           features: [u32; 3],
-                          single_sample: u32|
+                          single_sample: u32,
+                          primary: bool|
              -> Result<vk::Pipeline, String> {
                 let spirv = ash::util::read_spv(&mut Cursor::new(bytes))
                     .map_err(|e| format!("Read compiled Slang SPIR-V: {e}"))?;
@@ -271,8 +288,13 @@ impl Pipeline {
                 ];
                 let data =
                     [features[0], features[1], features[2], single_sample].map(u32::to_le_bytes);
+                let primary_entries = [entries[0], entries[2]];
                 let specialization = vk::SpecializationInfo::default()
-                    .map_entries(&entries[..if mode == RenderMode::Offline { 4 } else { 3 }])
+                    .map_entries(if primary {
+                        &primary_entries
+                    } else {
+                        &entries[..if mode == RenderMode::Offline { 4 } else { 3 }]
+                    })
                     .data(data.as_flattened());
                 let stage = vk::PipelineShaderStageCreateInfo::default()
                     .stage(vk::ShaderStageFlags::COMPUTE)
@@ -300,9 +322,11 @@ impl Pipeline {
             let shader: &[u8] = match mode {
                 RenderMode::Offline => include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv")),
                 RenderMode::Realtime if reconstruction => {
-                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_rr.spv"))
+                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport_rr.spv"))
                 }
-                RenderMode::Realtime => include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv")),
+                RenderMode::Realtime => {
+                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport.spv"))
+                }
             };
             for (i, features) in [
                 [0, 0, 0],
@@ -315,16 +339,37 @@ impl Pipeline {
             .into_iter()
             .enumerate()
             {
-                result.pipelines[i] = create(shader, features, 0)?;
+                result.pipelines[i] = create(shader, features, 0, false)?;
                 if let Some(single) = &mut result.single_sample_pipelines {
-                    single[i] = create(shader, features, 1)?;
+                    single[i] = create(shader, features, 1, false)?;
                 }
+            }
+            if let Some(primary) = &mut result.primary_pipelines {
+                let shader: &[u8] = if reconstruction {
+                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_primary_rr.spv"))
+                } else {
+                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_primary.spv"))
+                };
+                for (target, features) in primary.iter_mut().zip(realtime::PRIMARY_FEATURES) {
+                    *target = create(shader, features, 0, true)?;
+                }
+                result.realtime_post = Some(create(
+                    if reconstruction {
+                        include_bytes!(concat!(env!("OUT_DIR"), "/realtime_rr.spv"))
+                    } else {
+                        include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv"))
+                    },
+                    [0, 0, 0],
+                    0,
+                    false,
+                )?);
             }
             if reconstruction {
                 result.reconstruction_display = Some(create(
                     include_bytes!(concat!(env!("OUT_DIR"), "/rr_display.spv")),
                     [0, 0, 0],
                     0,
+                    false,
                 )?);
             }
             Ok(result)

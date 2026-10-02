@@ -38,6 +38,18 @@ fn main() {
         })
         .unwrap_or_else(|| PathBuf::from("slangc"));
     compile(&compiler, "shaders/path_trace.slang", "path_trace.spv");
+    for name in [
+        "realtime_primary",
+        "realtime_primary_rr",
+        "realtime_transport",
+        "realtime_transport_rr",
+    ] {
+        compile(
+            &compiler,
+            &format!("shaders/{name}.slang"),
+            &format!("{name}.spv"),
+        );
+    }
     compile(&compiler, "shaders/realtime.slang", "realtime.spv");
     compile(&compiler, "shaders/realtime_rr.slang", "realtime_rr.spv");
     compile(&compiler, "shaders/rr_display.slang", "rr_display.spv");
@@ -89,8 +101,10 @@ fn main() {
             "texture",
             "roulette",
             "pbr",
+            "pbr_delta",
             "full_openpbr",
             "pbr_texture",
+            "primary",
         ] {
             compile(
                 &compiler,

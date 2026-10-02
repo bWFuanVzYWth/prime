@@ -830,7 +830,7 @@ fn gpu_litepbr_normal_mapped_evaluation_rejects_the_wrong_physical_boundary_side
 
 #[test]
 fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
-    fn bindings(code: &[u8]) -> Vec<u32> {
+    fn bindings(code: &[u8], descriptor_set: u32) -> Vec<u32> {
         use std::collections::{BTreeMap, BTreeSet};
         let words: Vec<_> = code
             .as_chunks::<4>()
@@ -846,6 +846,10 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
             let count = (words[offset] >> 16) as usize;
             let opcode = words[offset] & 0xffff;
             assert!(count > 0 && offset + count <= words.len());
+            assert!(
+                !(opcode == 17 && words[offset + 1] == 11),
+                "production shader must not introduce the unnegotiated Int64 capability"
+            );
             if opcode == 71 && count == 4 {
                 let entry = decorations.entry(words[offset + 1]).or_default();
                 match words[offset + 2] {
@@ -858,31 +862,88 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
         }
         decorations
             .values()
-            .filter_map(|&(set, binding)| if set == Some(0) { binding } else { None })
+            .filter_map(|&(set, binding)| {
+                if set == Some(descriptor_set) {
+                    binding
+                } else {
+                    None
+                }
+            })
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()
     }
     assert_eq!(
-        bindings(include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv"))),
+        bindings(
+            include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv")),
+            0
+        ),
         [0, 2, 3, 4, 5, 7, 8, 9],
         "offline production descriptor contract"
     );
+    type StageContract = (&'static str, &'static [u8], &'static [u32], &'static [u32]);
+    let stages: [StageContract; 7] = [
+        (
+            "K1 raw",
+            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_primary.spv")),
+            &[0, 2, 3, 7, 8],
+            &[0, 1, 2],
+        ),
+        (
+            "K1 RR",
+            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_primary_rr.spv")),
+            &[0, 2, 3, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 19],
+            &[0, 1, 2],
+        ),
+        (
+            "K2 raw",
+            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport.spv")),
+            &[0, 2, 3, 7, 8, 9],
+            &[0, 1, 2],
+        ),
+        (
+            "K2 RR",
+            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport_rr.spv")),
+            &[0, 2, 3, 7, 8, 9, 16],
+            &[0, 1, 2],
+        ),
+        (
+            "post raw",
+            include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv")),
+            &[4],
+            &[0, 3, 4],
+        ),
+        (
+            "post RR input",
+            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_rr.spv")),
+            &[10],
+            &[0, 3, 4],
+        ),
+        (
+            "RR display",
+            include_bytes!(concat!(env!("OUT_DIR"), "/rr_display.spv")),
+            &[4, 10, 11, 13, 18, 19],
+            &[],
+        ),
+    ];
+    for (stage, code, scene, atmosphere) in stages {
+        assert_eq!(bindings(code, 0), scene, "{stage}: scene/output contract");
+        assert_eq!(
+            bindings(code, 1),
+            atmosphere,
+            "{stage}: atmosphere contract"
+        );
+    }
     assert_eq!(
-        bindings(include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv"))),
-        [0, 2, 3, 4, 7, 8, 9],
-        "realtime production descriptor contract"
-    );
-    assert_eq!(
-        bindings(PBR),
+        bindings(PBR, 0),
         [0, 1],
         "the retained Lite behavior fixture needs no energy table"
     );
     assert_eq!(
-        bindings(include_bytes!(concat!(
-            env!("OUT_DIR"),
-            "/full_openpbr.spv"
-        ))),
+        bindings(
+            include_bytes!(concat!(env!("OUT_DIR"), "/full_openpbr.spv")),
+            0
+        ),
         [0, 1, 9],
         "the Full constructor oracle binds the actual energy table"
     );

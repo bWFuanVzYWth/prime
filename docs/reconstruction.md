@@ -18,31 +18,46 @@ Streamline 是进程级状态，一次只允许一个 Prime RR owner。桥接采
 
 ## 图像和坐标合同
 
-RR 专用 `realtime_rr.slang` 调用共同输运核。原始实时和离线入口使用空 guide sink，不分配这些图像。RR 的主射线在像素中心加上 CPU Halton 帧采样偏移；Streamline 接收的是投影位移，XY 分别为该采样偏移的相反数，单位均为输入像素。相机矩阵不含抖动；其余路径随机域继续由 Z-Sobol 产生。
+实时采用 K1主表面/delta/guides → K2主要输运 → post 三段。RR的K1写入独立主表面guides，K2只可能完成一个已移交的实际反射次段距离；`realtime_rr.slang` 合成FP32 prefix+tail、执行原相机空气段aerial与清洗，然后写入noisy color。原始实时不分配RR图像，Offline不进入这两个实时PT kernel。阶段布局见[PT设计](pt-state-design.md)。
+
+RR主射线在像素中心加CPU Halton帧采样偏移；Streamline接收投影位移，XY均为采样偏移的相反数，单位是输入像素。相机矩阵不含抖动；coverage与照明的其余随机域继续由Z-Sobol产生。guide从同一主射线和coverage开始，之后按确定的几何事件选择独立终点，不随照明的首透明0.5分支或roulette改变。
 
 | Binding | 图像/常量 | 格式与语义 |
 | --- | --- | --- |
-| 10 | noisy color | RGBA16F，场景线性 BT.709，无曝光与显示变换 |
-| 11 | depth | R32F，主命中正向 view-Z，世界单位；天空为无表面哨兵 |
-| 12 | motion | RG16F，未抖动投影的 previous UV − current UV，左上原点；未知前态为 -65504 |
-| 13 | normal/roughness | RGBA16F，世界空间单位着色法线和有效粗糙度 |
-| 14 / 15 | diffuse/specular albedo | RGBA16F，同一个实际 BSDF 的方向反照率，转线性 BT.709 |
-| 16 | specular hit distance | R16F，实际首次 specular reflection 续接后的次命中距离；环境 miss 为 65504；未采到该续接为 0 |
-| 17 | camera history | 80B uniform，每个已完成槽独占；前相机已转换到当前 scene anchor |
-| 18 | RR output | 输出分辨率 RGBA16F，线性 BT.709 |
+| 10 | noisy color | RGBA16F，场景线性BT.709，包含完整prefix+tail与aerial，无曝光和显示变换 |
+| 11 | depth | R32F，选定主表面/PSR代理的正向view-Z，世界单位；真实escape使用无表面哨兵 |
+| 12 | motion | RG16F，未抖动投影的previous UV − current UV，左上原点；未知对应为-65504 |
+| 13 | normal/roughness | RGBA16F，选定表面的世界空间单位着色法线或PSR变换法线，以及有效粗糙度 |
+| 14 / 15 | diffuse/specular albedo | RGBA16F，原BSDF方向能量转线性BT.709；首透明接口specular例外见下文 |
+| 16 | specular hit distance | R16F，实际采中的反射续接次段物理距离；环境miss为65504，无对应样本为0 |
+| 17 | camera history | 80B uniform，每个完成槽独占；前相机转换到当前scene anchor |
+| 18 | RR output | 输出分辨率RGBA16F，线性BT.709 |
+| 19 | 引擎内部guide完成状态 | R8_UNORM，正常解析0，unresolved/invalid为1；不作为SDK tag |
 
-同一主射线和 alpha coverage 决定 radiance 与首表面 guides。导引在首次命中的材质作用域写回；只增加一个 specular 路径分类状态到下一次最近交点，不额外追踪一条反射射线。working Rec.2020 在 RR 边界转换为 BT.709，结果转回 working 后执行 primeDRT；半浮点颜色有限化并限于 0–65504。这是重建边界的动态范围限制，原始/离线输运精度保持原合同。
+working Rec.2020只在RR边界转线性BT.709，结果转回working后执行primeDRT。半浮点颜色有限化并限于0–65504；这是重建边界的动态范围限制，prefix/tail与离线输运保留FP32合同。R8完成图需要设备同时支持storage与sampling；能力不足时RR不可用，不悄悄改变状态语义。
 
-运动向量目前可靠覆盖静态几何的相机运动，以及天空方向运动。动态实例、形变和原始动态几何没有完整前姿态/顶点对应，明确写无效 motion，不伪装成静止或相机运动；这会限制移动物体的重建质量。透明以首个实际可见边界为 guide，尚未接入替代表面、PSR 或多层透射历史。specular hit distance 来自被采中的真实反射路径，是有噪声、可能缺样本的引导，不是独立确定性反射距离。
+## 主表面提升与完成状态
 
-`rr_display.slang` 在输出分辨率执行：成功时消费 RR 图像；evaluate 失败的当帧双线性放大 noisy color，下一帧在完成证明后切回原生 raw 管线。诊断色/深度/法线显示实际内部采样尺寸的数据并覆盖完整输出；诊断期间不消费 RR 历史，回到最终输出时重置。只有写宿主目标时翻转 Y。
+K1穿过整闭包为纯delta的前缀，在第一个非delta表面发布稳定主guide，真实escape单独发布方向guide。粗糙首面只需要一次主查询，不进入delta或0.5策略。规范guide优先实际IOR可透射方向；真实TIR与conductor使用反射。方向接口不读取Fresnel抽样概率、response/PDF、吸收或roulette。与照明选择同一事件时共享查询；分歧或照明提前终止之后的guide后缀仍在同一K1中完成，没有独立第三个光追dispatch。
+
+guide使用独立深度及同值最大顶点预算N。照明零beta、强吸收或roulette终止不能结束guide；第N次查询得到非delta或escape仍算完成，仍需下一跳才标记预算耗尽。无效几何和退化代理也标invalid，不能用最后透明接口、旧帧值或照明终止点充当正常表面。失效像素给所有必需SDK输入写有限合法占位，并另写内部完成状态；占位本身不表示观察到了表面或天空。
+
+PSR累计真实物理交点间长度和有限反射变换，不将安全偏移长度用作代理几何。depth、normal/roughness、diffuse albedo与motion描述同一个选定终点/代理；原相机空气段长度另存给post，不能由promoted depth覆盖。可几何透射的首纯delta透明接口保留可见接口的specular albedo，终点guide不覆盖它，也不乘首面抽选权重或路径beta。
+
+静态直视表面与静态反射链代理使用相机重投影；动态链、缺前姿态/顶点对应时写invalid motion。厚折射链目前采用路径长度代理，缺少准确前帧折射对应，即使几何静态也写invalid motion。平面镜链可以建立一致虚拟表面，不能把该性质外推为任意曲面/折射链的精确成像Jacobian。反射天空仍是方向终点，不伪造有限表面。
+
+specular hit distance优先复用实际所采反射的下一次查询，可在K1或K2产生，不为未选反射另追一条射线。可见透明接口与提升后主表面的距离生产职责分开：K2仅在明确移交时写入，不能清掉K1已有的正确起点距离。这是有噪声、可能缺样本的可选guide，不是独立确定性反射距离。
+
+`rr_display.slang` 在输出分辨率显示。只有SDK录制成功且当前双线性输入足迹的四个完成状态均为0时才消费RR输出；否则使用该足迹的本帧noisy color。一般evaluate失败时本帧恢复raw，下一帧在完成证明后切回原生管线；异常导致命令录制状态不安全时直接走帧失败/退休契约，不读取可能处于未知布局的输入。诊断色/深度/法线显示实际内部数据，期间不消费RR历史，回到最终输出时重置；仅写宿主目标时翻转Y。
+
+内部完成图保证的是未解析像素的输出退路，不保证SDK内部历史隔离、邻域空间滤波隔离或恢复有效后的历史清除。当前不接入 `BiasCurrentColorHint`，不把通用tag注释外推为锁定RR preset F的逐像素历史拒绝保证。严格SDK reset仍是整个viewport/frame级别；不为按像素条件增加CPU读回或整帧等待。
 
 ## 历史、同步与成本
 
 首次帧、尺寸/质量/模式/开关变化、源 owner 替换、采样序列中断、camera cut 和输运设置改变使历史失效。正常相机运动使用重投影；scene anchor 变化先对前相机精确重定位，再计算相对运动。曝光/primeDRT 改变不重置场景线性历史。
 
-输入/输出图像跨帧复用，同一宿主队列的写后读、读后写依赖覆盖 PT → RR → 显示及下一帧。可变描述符和80B常量按宿主 timeline 完成槽复用；稳态没有像素读回、额外队列提交或逐帧 CPU 等待。重新配置/释放 SDK 私有资源前等待其最后真实使用 serial；SDK 调用失败也可能已经录制命令，不能立即释放。无法取得完成证明时保留 SDK owner、DLL 和 GPU 资源。
+输入/输出图像跨帧复用，同一宿主队列的写后读、读后写依赖覆盖 K1 → K2 → compose → RR → 显示及下一帧；K1的prefix/guide写入也必须对后续消费可见。可变描述符和80B常量按宿主 timeline 完成槽复用；稳态没有像素读回、额外队列提交或逐帧 CPU 等待。重新配置/释放 SDK 私有资源前等待其最后真实使用 serial；SDK 调用失败也可能已经录制命令，不能立即释放。无法取得完成证明时保留 SDK owner、DLL 和 GPU 资源。
 
-七个输入共42 B/内部像素，输出8 B/输出像素。默认性能档在1920×1080输出下，显式图像约38.4 MB；DLAA原生1080p约103.7 MB，均不含分配对齐、SDK内部历史/暂存、原有场景与宿主目标。新增全图写读、重建和显示成本必须计入；降低分辨率会减少PT射线数量，不能把性能档帧率称为原生1080p性能。正式对比先用DLAA保持原生1920×1080、场景、种子和预算一致，再单独报告超分档位。
+七个SDK输入共42 B/内部像素，内部完成图另为1 B/内部像素，输出8 B/输出像素。默认Performance在1920×1080输出下，显式图像约38.9 MB；DLAA原生1080p约105.8 MB，均不含176B/内部像素的实时scratch、分配对齐、SDK内部历史/暂存、原有场景与宿主目标。新增全图写读、重建和显示成本必须计入；降低分辨率会减少PT射线数量，不能把性能档帧率称为原生1080p性能。正式对比先用DLAA保持原生1920×1080、场景、种子和预算一致，再单独报告超分档位。
 
-CPU/ABI/shader/桥接行为检查不证明实际模型质量、窗口呈现或整帧速度。两版实际游戏与驱动画面由用户按 [CONTRIBUTING](../CONTRIBUTING.md) 验收，重点检查运动、遮挡显露、细叶、透明、切换、窗口变化和退出重进。
+CPU/ABI/shader/桥接行为检查不证明实际模型质量、窗口呈现或整帧速度。两版实际游戏与驱动画面由用户按 [CONTRIBUTING](../CONTRIBUTING.md) 验收，重点检查运动、遮挡显露、细叶、多层透明/镜面、guide预算耗尽率、恢复有效时的历史行为、切换、窗口变化和退出重进。

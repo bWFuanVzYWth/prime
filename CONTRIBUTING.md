@@ -117,13 +117,15 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_rr_display
 
 `test-streamline-gpu.ps1` 在独立 Vulkan 1.2 设备上调用生产桥接和真实 SDK，不创建窗口；启用 validation 和同步验证，默认验证回调与 Minecraft 一样对 ERROR 返回 `VK_TRUE`。初始化检查不执行模型；完整检查执行 Performance / preset F 的 960×540 → 1920×1080 重建、等待完成并读回预填 NaN 的输出，检查 RGB 是否全部被有限非零值覆盖。两种检查均要求零 validation error，日志、SDK 锁定哈希和运行结果保存在独立 `artifacts/streamline-gpu/` 目录；API 返回成功或有效读回不能覆盖验证层失败。此合成输入测试不能替代实际游戏画质、呈现和性能验收。
 
-两版各用前文 `runClient` 命令手动验收：默认开启 RR、Performance（960×540 → 1920×1080），日志应出现 `DLSS RR preset F` 和实际输入/输出尺寸；依次切换五档、开关 RR、诊断/最终视图、实时/离线、原版/PT。覆盖相机平移/旋转、快速转头、遮挡显露、运动实体/粒子、细叶、水/玻璃、F3+T、退出/重进、窗口奇数尺寸/最小化/全屏。查 `sl`/`NGX` 错误与 Vulkan VUID，尤其观察动态无完整前态与透明替代表面缺失的画质边界。关闭 RR/不可用时应回到原生 raw；正常失败当帧也应覆盖整个输出。
+两版各用前文 `runClient` 命令手动验收：默认开启 RR、Performance（960×540 → 1920×1080），日志应出现 `DLSS RR preset F` 和实际输入/输出尺寸；依次切换五档、开关 RR、诊断/最终视图、实时/离线、原版/PT。覆盖相机平移/旋转、快速转头、遮挡显露、运动实体/粒子、细叶、水/玻璃、F3+T、退出/重进、窗口奇数尺寸/最小化/全屏。查 `sl`/`NGX` 错误与 Vulkan VUID，尤其观察动态无完整前态、厚折射代理与 guide 预算耗尽的画质边界。关闭 RR/不可用时应回到原生 raw；正常失败当帧也应覆盖整个输出。
 
 性能基准仍固定原生1920×1080：使用DLAA或关闭RR，固定场景、seed和射线预算记录CPU/GPU、稳态/更新与离群值；Performance等降低内部尺寸的结果另列，不称为原生1080p性能。重建同步/资源合同见[重建文档](docs/reconstruction.md)。
 
 纯文档修改核对事实、命令和链接即可。代码修改按受影响的契约选择以下入口，记录实际执行结果及未覆盖范围。
 
 RR、折射 eta 与反弹预算的数学合同可以无 GPU 运行 `./scripts/test-roulette-cpu.ps1`：使用当前 Slang 实际生成的 C++ 和 clang++ 执行生产数学/BSDF 核，覆盖概率重加权、介质进出、TIR、薄壁、异常值与终端预算。需要 Slang 和 clang++；输出默认保存在忽略的 `artifacts/roulette-cpu`。这个 CPU 验证不创建 Vulkan 设备，不代替 shader SPIR-V 校验或用户实际画面与性能验收。
+
+`./scripts/test-pbr-delta-cpu.ps1` 执行实际Slang生成的窄delta/guide数学，覆盖Full入口对拍、纯delta首透明0.5条件估计器、TIR/薄壁/IOR=1、法线分布分类、共享与分离方向一致性及guide能量；GPU对应入口为 `gpu_pbr_delta_and_guide_contracts`。`./scripts/test-primary-psr-cpu.ps1` 覆盖实际PSR数学的虚拟位置、反射顺序、静态零motion、动态/厚折射对应失效与退化拒绝。
 
 ### 大气资产与无窗口验证
 
@@ -165,7 +167,7 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```powershell
 $env:PRIME_VK_VALIDATION = '1'
 $env:VK_LAYER_VALIDATE_SYNC = '1'
-cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip cost_matrix --skip packing::perf --nocapture --test-threads=1
+cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored --skip cost_matrix --skip packing::perf --skip realtime_perf_tests --nocapture --test-threads=1
 ```
 
 这些测试覆盖 cutout、累积、尺寸变化、增量场景和宿主资源退休；小尺寸/奇数尺寸用于边界检查，不是性能数据。改变宿主集成或捕获时，还需在对应 MC 适配器实际运行，检查主图像与 HUD、资源重载、世界退出等相关生命周期。更新公共接口时验证受影响的两个适配器；编译通过不证明 Mixin 注入或实际 GPU 功能正常。

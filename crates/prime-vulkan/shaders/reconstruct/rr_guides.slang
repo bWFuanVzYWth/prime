@@ -1,9 +1,6 @@
 #language slang 2026
 module "reconstruct/rr_guides.slang";
-import "frame.slang";
-
-public static const float PRIME_RR_INVALID_MOTION = -65504.0;
-public static const float PRIME_RR_SKY_DEPTH = 3.402823466e38f;
+__exported import "reconstruct/rr_format.slang";
 
 // 80-byte binding 17 uniform ABI. Previous position is relative to the CURRENT scene anchor.
 // Projection bases have the same convention as Frame. Jitter is a pixel offset from center.
@@ -34,10 +31,4 @@ public float2 primeRrMotion(RrCamera camera, float2 currentSampleUv, float3 targ
     return any(isnan(motion)) || any(isinf(motion)) || any(abs(motion) >= 65504.0)
                    ? float2(PRIME_RR_INVALID_MOTION)
                    : motion;
-}
-
-public float3 primeRrFiniteHalfColor(float3 color) {
-    return float3(isnan(color.x) || isinf(color.x) ? 0.0 : clamp(color.x, 0.0, 65504.0),
-                  isnan(color.y) || isinf(color.y) ? 0.0 : clamp(color.y, 0.0, 65504.0),
-                  isnan(color.z) || isinf(color.z) ? 0.0 : clamp(color.z, 0.0, 65504.0));
 }

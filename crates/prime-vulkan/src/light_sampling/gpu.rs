@@ -107,6 +107,8 @@ impl Gpu {
             descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
             pipelines: [vk::Pipeline::null(); 6],
             single_sample_pipelines: None,
+            primary_pipelines: None,
+            realtime_post: None,
             reconstruction_display: None,
         };
         unsafe {

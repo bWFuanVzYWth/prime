@@ -26,6 +26,7 @@ pub(super) fn run(
         mode_count,
         geometry,
         false,
+        false,
     )
 }
 
@@ -36,9 +37,41 @@ pub(super) fn run_full_openpbr(
     output_words: usize,
     count: u32,
 ) -> Vec<u32> {
-    run_impl(context, code, input, output_words, [0, count], None, true)
+    run_impl(
+        context,
+        code,
+        input,
+        output_words,
+        [0, count],
+        None,
+        true,
+        false,
+    )
 }
 
+// Production K1 consumes BDA stage records. The test shader owns disjoint report/scratch
+// regions of this readback allocation; no CPU imitation of traversal or guide logic.
+pub(super) fn run_primary(
+    context: &Arc<Context>,
+    code: &[u8],
+    input: &[u32],
+    output_words: usize,
+    mode_count: [u32; 2],
+    geometry: &Geometry,
+) -> Vec<u32> {
+    run_impl(
+        context,
+        code,
+        input,
+        output_words,
+        mode_count,
+        Some(geometry),
+        false,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_impl(
     context: &Arc<Context>,
     code: &[u8],
@@ -47,13 +80,19 @@ fn run_impl(
     mode_count: [u32; 2],
     geometry: Option<&Geometry>,
     full_energy: bool,
+    addressable_output: bool,
 ) -> Vec<u32> {
     let bytes: Vec<_> = input.iter().flat_map(|v| v.to_le_bytes()).collect();
     let source = Buffer::upload(context, &bytes, vk::BufferUsageFlags::STORAGE_BUFFER).unwrap();
     let destination = Buffer::new(
         context,
         (output_words * 4) as u64,
-        vk::BufferUsageFlags::STORAGE_BUFFER,
+        vk::BufferUsageFlags::STORAGE_BUFFER
+            | if addressable_output {
+                vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+            } else {
+                vk::BufferUsageFlags::empty()
+            },
         true,
     )
     .unwrap();
@@ -68,6 +107,8 @@ fn run_impl(
         descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
         pipelines: [vk::Pipeline::null(); 6],
         single_sample_pipelines: None,
+        primary_pipelines: None,
+        realtime_post: None,
         reconstruction_display: None,
     };
     unsafe {
@@ -222,10 +263,20 @@ fn run_impl(
         context.device.destroy_shader_module(module, None);
         pipeline.pipelines[0] = built.unwrap()[0];
     }
-    let push: Vec<_> = [mode_count[0], mode_count[1], 0, 0]
-        .into_iter()
-        .flat_map(u32::to_le_bytes)
-        .collect();
+    let address = if addressable_output {
+        destination.address()
+    } else {
+        0
+    };
+    let push: Vec<_> = [
+        mode_count[0],
+        mode_count[1],
+        address as u32,
+        (address >> 32) as u32,
+    ]
+    .into_iter()
+    .flat_map(u32::to_le_bytes)
+    .collect();
     context
         .submit_named("shader_contract", |command| unsafe {
             context.device.cmd_bind_pipeline(

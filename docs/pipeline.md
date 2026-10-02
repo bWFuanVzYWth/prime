@@ -44,21 +44,29 @@ Rust 通过 FFM 借用 instance、physical device、device、graphics queue 及 
 ```mermaid
 flowchart LR
     A[Java 捕获增量与相机] --> B[FFM 提交场景数据]
-    B --> C[Rust 更新受影响场景资源]
+    B --> C[Rust 更新受影响资源]
     C --> D[借用宿主命令缓冲]
-    D --> E[Slang 路径追踪]
-    E --> R[原始实时: 积分与所选视图]
-    E --> RR[实时 RR: 导引与 Streamline 重建]
-    E --> O[离线: 线性累积与显示]
-    R --> F[imageStore 直接写主颜色图像]
+    D --> K1[实时K1: delta前缀与主guide]
+    K1 --> K2[实时K2: landing与主要输运]
+    K2 --> P[post: 合成HDR与aerial]
+    P --> R[raw: tonemap与编码]
+    P --> RR[Streamline RR与显示]
+    D --> O[离线: 原通用积分与逐样本累积显示]
+    R --> F[imageStore直接写主颜色图像]
     RR --> F
     O --> F
-    F --> G[宿主绘制手部与 HUD 并提交]
+    F --> G[宿主绘制手部与HUD并提交]
 ```
 
-Java 给主颜色 target 增加 storage 用途，同时将该用途映射为 `VK_IMAGE_USAGE_STORAGE_BIT`；保留原有 attachment、sampling 和 transfer 用途。shader 通过 storage image descriptor 写入宿主 RGBA8 图像；原始实时融合积分与显示，RR 另有真实输入/输出及显示 pass，离线保留累积存储。纹理语义、GPU 诊断与冻结规则见 [渲染模式](renderers.md)，RR 的能力协商、实际 Present 和完成证明见 [重建契约](reconstruction.md)。主图像不是交换链图像；最终呈现与手部/HUD 继续由 Minecraft 管理。
+Java 给主颜色 target 增加 storage 用途，同时将该用途映射为 `VK_IMAGE_USAGE_STORAGE_BIT`；保留原有 attachment、sampling 和 transfer 用途。shader通过storage image descriptor写入宿主RGBA8图像；raw实时在两个PT kernel之后用窄post合成和显示，RR在合成HDR后增加SDK重建与显示，离线保留原累积存储与逐样本调度。纹理语义、GPU 诊断与冻结规则见 [渲染模式](renderers.md)，RR 的能力协商、实际 Present 和完成证明见 [重建契约](reconstruction.md)。主图像不是交换链图像；最终呈现与手部/HUD 继续由 Minecraft 管理。
 
-这一主路径不创建“PT 输出缓冲 → 主图像”的全屏复制步骤。不能把“没有 CPU 回读”误称为“没有复制”：如果仍调用 `vkCmdCopyBufferToImage` 或 blit 传递 PT 输出，1080p 每帧仍额外搬运至少约 8.29 MB 的 RGBA8 数据。直接写图像消除了这次传递。
+实时K1/K2各dispatch一次，依赖明确的landing交接；K1完成该交点的coverage、纹理解析、Beer、cone与发光，K2从NEE/continuation开始，后续才重新求交。它们没有逐bounce队列、压缩排序或第三个guide光追kernel。post不访问TLAS、材质或BSDF。K1/K2/post的push分别为128B/80B/112B，shader只声明实际资源；兼容的Vulkan pipeline layout不意味着每段消费同一完整Frame。K1按surface/optical能力去重为四个场景变体，K2保留六个；Offline的单样本/多样本两组六变体不变。
+
+实时scratch按实际输入尺寸分配，每像素176B，含112B common、32B optical sidecar、16B prefix/原相机空气段及16B FP32 tail。数据使用带明确索引/分配边界的BDA访问，不以一个超大SSBO range绕过设备限制。RR另有1B/内部像素的R8完成状态；raw仅在depth/normal诊断需要时增加16B/像素记录。更换尺寸、模式或RR档位先确定实际内部extent，再按完成证明重建资源。字段与访问职责见[PT状态设计](pt-state-design.md)。
+
+K1→K2屏障发布hot写入，K2→post屏障覆盖tail及之前的prefix/guide写入；SDK前后保留输入/输出访问屏障，跨帧复用还覆盖上一帧reader到下一帧writer。这些命令全部录入同一宿主command buffer/queue，没有新队列提交或稳态CPU等待。
+
+这一主路径不创建“PT 输出缓冲 → 主图像”的全屏复制步骤。不能把“没有 CPU 回读”误称为“没有复制”：如果仍调用 `vkCmdCopyBufferToImage` 或 blit 传递 PT 输出，1080p 每帧仍额外搬运至少约 8.29 MB 的 RGBA8 数据。直接写图像消除了这次传递。实时scratch、guide和RR输入/输出仍有真实全图读写，不能把该输出路径描述为零中间存储或据此推断整体加速。
 
 宿主图像按 26.2 的实现保持 `GENERAL` layout。在 PT 写入前建立原版图像访问到 compute storage write 的依赖；写入后建立 compute storage write 到后续颜色附件及采样访问的依赖。shader 的输出行方向必须与宿主 Vulkan 最终呈现翻转相配合，不能沿用 CPU 上传路径的额外行翻转。
 

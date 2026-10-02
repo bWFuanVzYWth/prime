@@ -80,10 +80,12 @@ fn pipeline(context: &Arc<Context>) -> Pipeline {
         descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
         pipelines: [vk::Pipeline::null(); 6],
         single_sample_pipelines: None,
+        primary_pipelines: None,
+        realtime_post: None,
         reconstruction_display: None,
     };
     unsafe {
-        let bindings = [4, 10, 11, 13, 18].map(|binding| {
+        let bindings = [4, 10, 11, 13, 18, 19].map(|binding| {
             vk::DescriptorSetLayoutBinding::default()
                 .binding(binding)
                 .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
@@ -116,7 +118,7 @@ fn pipeline(context: &Arc<Context>) -> Pipeline {
                     .max_sets(1)
                     .pool_sizes(&[vk::DescriptorPoolSize {
                         ty: vk::DescriptorType::STORAGE_IMAGE,
-                        descriptor_count: 5,
+                        descriptor_count: 6,
                     }]),
                 None,
             )
@@ -259,6 +261,7 @@ fn gpu_rr_display_fallback_upscale_and_orientation() {
         (INPUT, vk::Format::R32_SFLOAT),
         (INPUT, vk::Format::R16G16B16A16_SFLOAT),
         (OUTPUT, vk::Format::R16G16B16A16_SFLOAT),
+        (INPUT, vk::Format::R8_UNORM),
     ]
     .into_iter()
     .map(|(extent, format)| Image::with_format(&context, extent[0], extent[1], format).unwrap())
@@ -282,6 +285,7 @@ fn gpu_rr_display_fallback_upscale_and_orientation() {
     upload(&context, &images[2], INPUT, &depth);
     upload(&context, &images[3], INPUT, &normals);
     upload(&context, &images[4], OUTPUT, &[0; 5 * 3 * 8]);
+    upload(&context, &images[5], INPUT, &[0; 4]);
     let pipeline = pipeline(&context);
     let infos: Vec<_> = images
         .iter()
@@ -291,7 +295,7 @@ fn gpu_rr_display_fallback_upscale_and_orientation() {
                 .image_layout(vk::ImageLayout::GENERAL)]
         })
         .collect();
-    let writes: Vec<_> = [4, 10, 11, 13, 18]
+    let writes: Vec<_> = [4, 10, 11, 13, 18, 19]
         .into_iter()
         .zip(&infos)
         .map(|(binding, info)| {
@@ -343,6 +347,35 @@ fn gpu_rr_display_fallback_upscale_and_orientation() {
             .iter()
             .all(|p| *p == [0, 0, 0, 255])
     );
+    upload(&context, &images[5], INPUT, &[255; 4]);
+    let unresolved = run(&context, &pipeline, &images[0], [0, 0, 1]);
+    assert_eq!(
+        unresolved, fallback,
+        "Unresolved guides must display current raw color even after successful RR"
+    );
+    upload(&context, &images[5], INPUT, &[255, 0, 0, 0]);
+    let mixed = run(&context, &pipeline, &images[0], [0, 0, 1]);
+    for y in 0..OUTPUT[1] {
+        for x in 0..OUTPUT[0] {
+            let source = [
+                (x as f32 + 0.5) * 2.0 / 5.0 - 0.5,
+                (y as f32 + 0.5) * 2.0 / 3.0 - 0.5,
+            ];
+            let includes_unresolved = source.into_iter().all(|v| v.floor().clamp(0.0, 1.0) == 0.0);
+            let offset = ((y * OUTPUT[0] + x) * 4) as usize;
+            let expected = if includes_unresolved {
+                &fallback
+            } else {
+                &success
+            };
+            assert_eq!(
+                &mixed[offset..offset + 4],
+                &expected[offset..offset + 4],
+                "Guide fallback must cover the full upsampling footprint at {x},{y}"
+            );
+        }
+    }
+    upload(&context, &images[5], INPUT, &[0; 4]);
     let normal = run(&context, &pipeline, &images[0], [0, 3, 1]);
     assert!(
         normal

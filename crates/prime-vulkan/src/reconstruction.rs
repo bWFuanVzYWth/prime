@@ -25,6 +25,8 @@ struct Images {
     input: [u32; 2],
     output: [u32; 2],
     images: [Image; 8],
+    // Engine completion state only; never tagged as an SDK input or BiasCurrentColorHint.
+    unresolved: Image,
 }
 
 #[derive(Clone, Copy)]
@@ -55,6 +57,11 @@ impl Reconstruction {
             return None;
         }
         let create = || -> Result<Self, String> {
+            if !context.supports_storage_sampling(vk::Format::R8_UNORM) {
+                return Err(
+                    "DLSS RR guide completion mask requires sampled/storage R8_UNORM images".into(),
+                );
+            }
             let runtime = streamline::Runtime::new(context)?;
             let constants = (0..FRAME_SLOTS)
                 .map(|_| Buffer::new(context, 80, vk::BufferUsageFlags::UNIFORM_BUFFER, true))
@@ -149,6 +156,12 @@ impl Reconstruction {
                 input,
                 output,
                 images,
+                unresolved: Image::with_format(
+                    &self.context,
+                    input[0],
+                    input[1],
+                    vk::Format::R8_UNORM,
+                )?,
             });
             self.descriptor_dirty.fill(true);
             self.reset();
@@ -219,7 +232,10 @@ impl Reconstruction {
         let constants = [vk::DescriptorBufferInfo::default()
             .buffer(self.constants[slot].buffer)
             .range(80)];
-        let mut writes = [vk::WriteDescriptorSet::default(); 9];
+        let unresolved = [vk::DescriptorImageInfo::default()
+            .image_view(self.images.as_ref().unwrap().unresolved.view)
+            .image_layout(vk::ImageLayout::GENERAL)];
+        let mut writes = [vk::WriteDescriptorSet::default(); 10];
         for ((binding, info), write) in [10, 11, 12, 13, 14, 15, 16, 18]
             .into_iter()
             .zip(&infos)
@@ -236,6 +252,11 @@ impl Reconstruction {
             .dst_binding(17)
             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
             .buffer_info(&constants);
+        writes[9] = vk::WriteDescriptorSet::default()
+            .dst_set(descriptor)
+            .dst_binding(19)
+            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+            .image_info(&unresolved);
         unsafe {
             self.context.device.update_descriptor_sets(&writes, &[]);
         }

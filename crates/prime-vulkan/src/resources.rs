@@ -396,9 +396,17 @@ impl Context {
             let mut query = vk::PhysicalDeviceRayQueryFeaturesKHR::default().ray_query(true);
             let mut timeline =
                 vk::PhysicalDeviceTimelineSemaphoreFeatures::default().timeline_semaphore(true);
+            // Optional narrow storage formats are used by the standalone RR-display fixture.
+            // Borrowed devices receive this feature through the host's RR capability negotiation.
+            let supported_core = owner.instance.get_physical_device_features(physical);
+            let optional_core = vk::PhysicalDeviceFeatures::default()
+                .shader_storage_image_extended_formats(
+                    supported_core.shader_storage_image_extended_formats != 0,
+                );
             let mut create_info = vk::DeviceCreateInfo::default()
                 .queue_create_infos(&queues)
                 .enabled_extension_names(&names)
+                .enabled_features(&optional_core)
                 .push_next(&mut address)
                 .push_next(&mut acceleration)
                 .push_next(&mut query)
@@ -695,6 +703,25 @@ impl Context {
         self._instance.instance.handle().as_raw()
     }
 
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub fn benchmark_device_details(&self) -> String {
+        let properties = unsafe {
+            self._instance
+                .instance
+                .get_physical_device_properties(self.physical)
+        };
+        format!(
+            "device={} vendor_id={} device_id={} driver_version={} vulkan_api={} timestamp_period_ns={} timestamp_bits={}",
+            self.name,
+            properties.vendor_id,
+            properties.device_id,
+            properties.driver_version,
+            properties.api_version,
+            self.timestamp_period,
+            self.timestamp_bits,
+        )
+    }
+
     pub fn supports_linear_sampling(&self, format: vk::Format) -> bool {
         unsafe {
             self._instance
@@ -703,6 +730,21 @@ impl Context {
         }
         .optimal_tiling_features
         .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR)
+    }
+
+    pub fn supports_storage_sampling(&self, format: vk::Format) -> bool {
+        unsafe {
+            self._instance
+                .instance
+                .get_physical_device_format_properties(self.physical, format)
+        }
+        .optimal_tiling_features
+        .contains(
+            vk::FormatFeatureFlags::STORAGE_IMAGE
+                | vk::FormatFeatureFlags::SAMPLED_IMAGE
+                | vk::FormatFeatureFlags::TRANSFER_SRC
+                | vk::FormatFeatureFlags::TRANSFER_DST,
+        )
     }
 
     /// Begin recording into the host's transient command buffer, whose completion
@@ -1129,6 +1171,41 @@ impl Drop for Buffer {
     }
 }
 impl Buffer {
+    /// PhysicalStorageBuffer accesses use a device address, not a storage-buffer descriptor.
+    /// maxStorageBufferRange does not constrain this allocation; the allocation limit still does.
+    pub fn new_address(context: &Arc<Context>, size: u64) -> Result<Self, String> {
+        if size == 0 || !size.is_multiple_of(16) {
+            return Err("Device-address scratch size must be a positive multiple of 16".into());
+        }
+        let mut limits = vk::PhysicalDeviceMaintenance3Properties::default();
+        let mut properties = vk::PhysicalDeviceProperties2::default().push_next(&mut limits);
+        unsafe {
+            context
+                ._instance
+                .instance
+                .get_physical_device_properties2(context.physical, &mut properties);
+        }
+        if size > limits.max_memory_allocation_size {
+            return Err(format!(
+                "Device-address scratch {size} exceeds maxMemoryAllocationSize {}",
+                limits.max_memory_allocation_size
+            ));
+        }
+        let result = Self::new(
+            context,
+            size,
+            vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+            false,
+        )?;
+        if result.address() == 0
+            || !result.address().is_multiple_of(16)
+            || result.address().checked_add(size).is_none()
+        {
+            return Err("Device-address scratch is not a valid aligned address range".into());
+        }
+        Ok(result)
+    }
+
     pub fn new(
         context: &Arc<Context>,
         size: u64,

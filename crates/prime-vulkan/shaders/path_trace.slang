@@ -30,8 +30,7 @@ import "display/prime_drt.slang";
     float3 mean = float3(0);
     for (uint i = 0; i < samples; ++i) {
         float3 sample = traceSample(resources, atmosphereEnvironment(), energy, frame, id.xy,
-                                    frame.target.y + i)
-                                .radiance;
+                                    frame.target.y + i);
         uint baseCount = frame.dimensions.z;
         if (i == 0)
             mean = baseCount == 0 ? float3(0) : accumulation[id.y * frame.dimensions.x + id.x].rgb;

@@ -11,42 +11,17 @@ import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/sanitization.slang";
 import "ray_query.slang";
 import "atmosphere/view.slang";
+import "transport/direct.slang";
 
-public struct TraceResult {
-    public float3 radiance;
-    public float depth;
-    public float3 normal;
-};
-// A specialized consumer writes primary guides while the resolved hit is still local.
-// Raw realtime and offline instantiate the empty consumer, without guide image writes.
-public interface ITraceGuides {
-    float2 sampleOffset(ZSobol sampler);
-    void primary(Frame frame, uint2 pixel, float2 sampleUv, SurfaceHit hit, PrimePbrVertex material,
-                 float3 direction, float4 incident, float4 transmitted);
-    void miss(Frame frame, uint2 pixel, float2 sampleUv, float3 direction);
-    void specularDistance(uint2 pixel, float distance);
-};
-public struct NoTraceGuides : ITraceGuides {
-    public float2 sampleOffset(ZSobol sampler) {
-        return sampler.sample2D(0);
-    }
-    public void primary(Frame frame, uint2 pixel, float2 sampleUv, SurfaceHit hit,
-                        PrimePbrVertex material, float3 direction, float4 incident,
-                        float4 transmitted) {}
-    public void miss(Frame frame, uint2 pixel, float2 sampleUv, float3 direction) {}
-    public void specularDistance(uint2 pixel, float distance) {}
-};
-// Guides describe the very same jittered primary sample and alpha decision as noisy radiance.
-public TraceResult traceSampleWithGuides<Guides>(TraceScene resources, AtmEnvironment environment,
-                                                 PrimeFullTransmissionGgxEnergy energy, Frame frame,
-                                                 uint2 pixel, uint sequence,
-                                                 Guides guides) where Guides : ITraceGuides {
-    TraceResult result = {float3(0), 3.402823466e38f, float3(0)};
+// Offline has one radiance consumer. It carries no realtime guide or diagnostic state.
+public float3 traceSample(TraceScene resources, AtmEnvironment environment,
+                          PrimeFullTransmissionGgxEnergy energy, Frame frame, uint2 pixel,
+                          uint sequence) {
+    float3 radiance = float3(0);
     ZSobol sampler =
             makeZSobolS8(pixel, sequence & 0xffu, frame.target.z, frame.target.w ^ (sequence >> 8));
     float2 screen =
-            ((float2(pixel) + guides.sampleOffset(sampler)) / float2(frame.dimensions.xy)) * 2.0 -
-            1.0;
+            ((float2(pixel) + sampler.sample2D(0)) / float2(frame.dimensions.xy)) * 2.0 - 1.0;
     float3 origin = frame.position.xyz;
     float3 direction = normalize(frame.forward.xyz +
                                  frame.right.xyz * (screen.x * frame.forward.w * frame.position.w) -
@@ -56,7 +31,6 @@ public TraceResult traceSampleWithGuides<Guides>(TraceScene resources, AtmEnviro
     float3 previous = origin;
     float primaryDistance = 0;
     float previousPdf = 0;
-    bool primarySpecular = false;
     float4 medium = float4(1, 0, 0, 0);
     float coneWidth = 0.0;
     float coneSpread =
@@ -74,12 +48,7 @@ public TraceResult traceSampleWithGuides<Guides>(TraceScene resources, AtmEnviro
         {
             SurfaceHit hit = traceClosest(resources, origin, direction, sampler.bits1D(domain),
                                           coneWidth, coneSpread);
-            if (bounce == 1 && primarySpecular)
-                guides.specularDistance(pixel, hit.found ? length(hit.surface.position - previous)
-                                                         : 65504.0);
             if (!hit.found) {
-                if (bounce == 0)
-                    guides.miss(frame, pixel, 0.5 * (screen + 1.0), direction);
                 float3 escaped = atmSky(environment, direction) * frame.up.w;
                 if (atmSunContains(environment, direction)) {
                     float weight = previousPdf == 0
@@ -87,7 +56,7 @@ public TraceResult traceSampleWithGuides<Guides>(TraceScene resources, AtmEnviro
                                            : primePowerHeuristicValue(previousPdf, atmSunPdf());
                     escaped += weight * atmSunRadiance(environment, direction) * frame.right.w;
                 }
-                result.radiance += throughput * escaped;
+                radiance += throughput * escaped;
                 break;
             }
             surface = hit.surface;
@@ -102,9 +71,6 @@ public TraceResult traceSampleWithGuides<Guides>(TraceScene resources, AtmEnviro
             if (bounce == 0) {
                 primaryDistance =
                         medium.x == 1.0 ? length(surface.position - frame.position.xyz) : 0.0;
-                result.depth = dot(surface.position - frame.position.xyz, frame.forward.xyz);
-                result.normal = dot(hit.shadingNormal, direction) > 0 ? -hit.shadingNormal
-                                                                      : hit.shadingNormal;
             }
             float3 albedo = sourceToWorking(saturate(hit.sourceColor.rgb));
             float3 normal =
@@ -118,79 +84,21 @@ public TraceResult traceSampleWithGuides<Guides>(TraceScene resources, AtmEnviro
             transmitted =
                     hit.thin ? (hit.incident.x > hit.transmitted.x ? hit.incident : hit.transmitted)
                              : hit.transmitted;
-            if (bounce == 0)
-                guides.primary(frame, pixel, 0.5 * (screen + 1.0), hit, material, direction,
-                               incident, transmitted);
             {
                 float lightPdf = previousPdf == 0 || lightFeatures == 0
                                          ? 0
                                          : emissiveHitPdf(resources, hit, previous);
                 float emissionWeight =
                         lightPdf == 0 ? 1.0 : primePowerHeuristicValue(previousPdf, lightPdf);
-                result.radiance += primeTripleProduct(throughput, linear709ToWorking(hit.emission),
-                                                      emissionWeight);
+                radiance += primeTripleProduct(throughput, linear709ToWorking(hit.emission),
+                                               emissionWeight);
             }
         }
+        primeTransportDirect(resources, atmLighting(environment), energy, sampler, bounce,
+                             asuint(frame.displayExtra.z), frame.right.w, surface, material,
+                             direction, medium, incident, transmitted, thin, throughput, radiance);
         float3 view = -direction;
-        float3 normal = material.normal;
         bool hasNormal = primePbrVertexHasNormal(material);
-        if (lightFeatures != 0 && hasLocalLights(resources)) {
-            uint lightDomain = 512 + 4 * bounce;
-            LightSample light = sampleLocalLight(resources, sampler, bounce, surface.position);
-            float3 lightDirection = light.valid
-                                            ? normalize(light.surface.position - surface.position)
-                                            : surface.normal;
-            float4 lightMedium = optical && !thin && dot(surface.normal, lightDirection) < 0
-                                         ? transmitted
-                                         : medium;
-            float pdf;
-            float3 radiance =
-                    evaluateLocalLight(resources, surface, light, sampler.bits1D(lightDomain + 3),
-                                       lightMedium, optical, pdf);
-            if (pdf > 0) {
-                BsdfEvaluation evaluated = primeEvaluatePbrVertex(
-                        energy, material, view, lightDirection, incident, transmitted);
-                if (!primeGeometricEvaluationSupport(hasNormal, surface.normal, normal, view,
-                                                     lightDirection, optical))
-                    evaluated = primeInvalidBsdfEvaluation();
-                float bsdfPdf = evaluated.pdf;
-                float weightedInversePdf =
-                        primePathHasContinuation(bounce, asuint(frame.displayExtra.z))
-                                ? primePowerHeuristicOverPdfValue(pdf, bsdfPdf)
-                                : 1.0 / pdf;
-                result.radiance +=
-                        throughput * primeTripleProduct(linear709ToWorking(radiance),
-                                                        evaluated.response, weightedInversePdf);
-            }
-        }
-        float3 sunDirection = atmSampleSun(environment, sampler.sample2D(1024 + bounce));
-        float cosine = saturate(dot(surface.normal, sunDirection));
-        if (cosine > 0 || optical) {
-            float3 sunRadiance = atmSunRadiance(environment, sunDirection);
-            if (any(sunRadiance > 0.0)) {
-                float3 visibility = traceTransmittance(
-                        resources, spawnRay(surface, sunDirection), sunDirection,
-                        sampler.bits1D(domain + 1), 100000.0,
-                        optical && !thin && dot(surface.normal, sunDirection) < 0 ? transmitted
-                                                                                  : medium);
-                if (any(visibility > 0.0)) {
-                    BsdfEvaluation evaluated = primeEvaluatePbrVertex(
-                            energy, material, view, sunDirection, incident, transmitted);
-                    if (!primeGeometricEvaluationSupport(hasNormal, surface.normal, normal, view,
-                                                         sunDirection, optical))
-                        evaluated = primeInvalidBsdfEvaluation();
-                    float bsdfPdf = evaluated.pdf;
-                    float weightedInversePdf =
-                            primePathHasContinuation(bounce, asuint(frame.displayExtra.z))
-                                    ? primePowerHeuristicOverPdfValue(atmSunPdf(), bsdfPdf)
-                                    : 1.0 / atmSunPdf();
-                    result.radiance +=
-                            throughput * primeTripleProduct(sunRadiance * visibility,
-                                                            evaluated.response,
-                                                            weightedInversePdf * frame.right.w);
-                }
-            }
-        }
         // The final vertex has no continuation consumer. Keep its NEE and MIS above,
         // but do not construct a BSDF sample or roulette state that will be discarded.
         if (!primePathHasContinuation(bounce, asuint(frame.displayExtra.z)))
@@ -207,10 +115,6 @@ public TraceResult traceSampleWithGuides<Guides>(TraceScene resources, AtmEnviro
         throughput = primeProductOver(throughput, scatter.response, scatter.pdf);
         if (!primeBsdfFinite(throughput) || all(throughput == float3(0)))
             break;
-        if (bounce == 0)
-            primarySpecular = (scatter.eventFlags & PRIME_BSDF_EVENT_REFLECTION) != 0u &&
-                              (scatter.eventFlags &
-                               (PRIME_BSDF_EVENT_GLOSSY | PRIME_BSDF_EVENT_DISCRETE)) != 0u;
         etaScale = primeEtaScaleAfterScatter(etaScale, scatter.relativeEta,
                                              (scatter.eventFlags & PRIME_BSDF_EVENT_TRANSMISSION) !=
                                                      0u);
@@ -235,18 +139,10 @@ public TraceResult traceSampleWithGuides<Guides>(TraceScene resources, AtmEnviro
     if (primaryDistance > 0) {
         float3 s, t;
         atmAerial(environment, 0.5 * (screen + 1.0), primaryDistance, s, t);
-        result.radiance = t * result.radiance + s * frame.right.w;
+        radiance = t * radiance + s * frame.right.w;
     }
-    result.radiance =
-            float3(primeBsdfFinite(result.radiance.x) ? max(result.radiance.x, 0.0) : 0.0,
-                   primeBsdfFinite(result.radiance.y) ? max(result.radiance.y, 0.0) : 0.0,
-                   primeBsdfFinite(result.radiance.z) ? max(result.radiance.z, 0.0) : 0.0);
-    return result;
-}
-
-public TraceResult traceSample(TraceScene resources, AtmEnvironment environment,
-                               PrimeFullTransmissionGgxEnergy energy, Frame frame, uint2 pixel,
-                               uint sequence) {
-    return traceSampleWithGuides(resources, environment, energy, frame, pixel, sequence,
-                                 NoTraceGuides());
+    radiance = float3(primeBsdfFinite(radiance.x) ? max(radiance.x, 0.0) : 0.0,
+                      primeBsdfFinite(radiance.y) ? max(radiance.y, 0.0) : 0.0,
+                      primeBsdfFinite(radiance.z) ? max(radiance.z, 0.0) : 0.0);
+    return radiance;
 }

@@ -17,6 +17,7 @@ pub(super) struct Output {
     image: Option<Image>,
     readback: Option<Buffer>,
     accumulation: Option<Buffer>,
+    scratch: Option<realtime::Scratch>,
 }
 
 impl Output {
@@ -37,6 +38,7 @@ impl Output {
             width,
             height,
             log2_resolution: extent.log2_resolution(),
+            scratch: None,
             image: if offline {
                 Some(Image::new(context, width, height)?)
             } else {
@@ -597,6 +599,26 @@ impl Renderer {
             .as_mut()
             .unwrap()
             .prepare()?;
+        if self.settings.mode == RenderMode::Realtime {
+            // RR setup/failure has now selected the actual render extent. Scratch is GPU-only,
+            // reused on this queue and retired through Buffer's host serial proof on resize.
+            let extent = self
+                .reconstruction
+                .as_ref()
+                .map_or([width, height], |rr| rr.input_extent());
+            let output = self.output.as_mut().unwrap();
+            if output
+                .scratch
+                .as_ref()
+                .is_none_or(|scratch| scratch.extent != extent)
+            {
+                output.scratch = Some(realtime::Scratch::new(&self.context, extent)?);
+            }
+            output.scratch.as_mut().unwrap().set_diagnostic(
+                &self.context,
+                self.reconstruction.is_none() && realtime::needs_diagnostic(self.settings.view),
+            )?;
+        }
         cpu.finish(Stage::Output, started);
         if self.atmosphere.is_none() {
             self.atmosphere = Some(crate::atmosphere::Atmosphere::new(&self.context)?);
@@ -704,6 +726,10 @@ impl Renderer {
     }
 
     fn dispatch(&self, command: vk::CommandBuffer, slot: usize, bottom_up: bool) {
+        if self.settings.mode == RenderMode::Realtime {
+            self.dispatch_realtime(command, slot, bottom_up);
+            return;
+        }
         let pipeline = self.pipeline.as_ref().unwrap();
         let camera = self.camera.unwrap();
         let output = self.output.as_ref().unwrap();
@@ -797,6 +823,89 @@ impl Renderer {
                 render_width.div_ceil(8),
                 render_height.div_ceil(8),
                 1,
+            );
+        }
+    }
+
+    fn dispatch_realtime(&self, command: vk::CommandBuffer, slot: usize, bottom_up: bool) {
+        let pipeline = self.pipeline.as_ref().unwrap();
+        let output = self.output.as_ref().unwrap();
+        let scratch = output.scratch.as_ref().unwrap();
+        let input = scratch.extent;
+        let variant = self.geometry.as_ref().map_or(0, Geometry::shader_variant);
+        let pushes = realtime::PushInputs {
+            camera: self.camera.unwrap(),
+            input,
+            output: [output.width, output.height],
+            sequence: self.frame_seed,
+            sobol_r: prime_scene::extent::RenderExtent::new(input[0], input[1])
+                .unwrap()
+                .log2_resolution(),
+            settings: self.settings,
+            display: self.display,
+            addresses: scratch.addresses(),
+            jitter: self
+                .reconstruction
+                .as_ref()
+                .map(|_| reconstruction_history::jitter(self.frame_seed, input[0], output.width)),
+            bottom_up,
+        };
+        unsafe {
+            self.context.device.cmd_bind_descriptor_sets(
+                command,
+                vk::PipelineBindPoint::COMPUTE,
+                pipeline.layout,
+                0,
+                &[
+                    pipeline.descriptors[slot],
+                    self.atmosphere.as_ref().unwrap().descriptor(slot),
+                ],
+                &[],
+            );
+            let dispatch = |selected, push: &[u8]| {
+                self.context.device.cmd_bind_pipeline(
+                    command,
+                    vk::PipelineBindPoint::COMPUTE,
+                    selected,
+                );
+                self.context.device.cmd_push_constants(
+                    command,
+                    pipeline.layout,
+                    vk::ShaderStageFlags::COMPUTE,
+                    0,
+                    push,
+                );
+                self.context.device.cmd_dispatch(
+                    command,
+                    input[0].div_ceil(8),
+                    input[1].div_ceil(8),
+                    1,
+                );
+            };
+            dispatch(
+                pipeline.primary_pipelines.as_ref().unwrap()[realtime::PRIMARY_VARIANT[variant]],
+                &pushes.primary(),
+            );
+            self.realtime_barrier(command);
+            dispatch(pipeline.pipelines[variant], &pushes.transport(variant >= 2));
+            self.realtime_barrier(command);
+            dispatch(pipeline.realtime_post.unwrap(), &pushes.post());
+        }
+    }
+
+    fn realtime_barrier(&self, command: vk::CommandBuffer) {
+        // Covers hot write->read, tail write->read, and all earlier K1 prefix/guide writes.
+        unsafe {
+            self.context.device.cmd_pipeline_barrier(
+                command,
+                vk::PipelineStageFlags::COMPUTE_SHADER,
+                vk::PipelineStageFlags::COMPUTE_SHADER,
+                vk::DependencyFlags::empty(),
+                &[vk::MemoryBarrier::default()
+                    .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE)],
+                &[],
+                &[],
             );
         }
     }

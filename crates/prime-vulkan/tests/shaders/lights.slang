@@ -50,7 +50,8 @@ import "math/z_sobol.slang";
         outputs[i * 5 + 2] = asuint(float4(light.radiance, reverse));
         outputs[i * 5 + 3] = asuint(float4(light.surface.normal, forward));
         if (hit.found && hit.light != 0xffffffffu) {
-            GridEmitter ref = resources.staticTrianglePages[0].lightGrid[0].emitters[hit.light];
+            GridEmitter ref = ((LightGrid *)resources.staticTrianglePages[0].lightGrid)[0]
+                                      .emitters[hit.light];
             outputs[i * 5 + 4] = uint4(1, ref.page, ref.emitter, hit.light);
         }
         return;

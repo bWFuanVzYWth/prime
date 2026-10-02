@@ -2,7 +2,7 @@
 module rr_display;
 import "display/prime_drt.slang";
 import "math/color.slang";
-import "reconstruct/rr_guides.slang";
+import "reconstruct/rr_format.slang";
 
 [[vk::binding(4, 0)]] [[vk::image_format("rgba8")]] RWTexture2D<float4> outputImage;
 [[vk::binding(10, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> noisyColor;
@@ -10,6 +10,7 @@ import "reconstruct/rr_guides.slang";
 [[vk::binding(13, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> normalRoughness;
 [[vk::binding(18,
               0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> reconstructedColor;
+[[vk::binding(19, 0)]] [[vk::image_format("r8")]] readonly RWTexture2D<float> guideUnresolved;
 
 // 64-byte push ABI: input extent, output extent; bottom-up, diagnostic view, RR succeeded, spare.
 struct RrDisplay {
@@ -29,6 +30,14 @@ float3 noisyUpsample(float2 position) {
     hi = clamp(hi, int2(0), limit);
     return lerp(lerp(noisyColor[lo].rgb, noisyColor[int2(hi.x, lo.y)].rgb, blend.x),
                 lerp(noisyColor[int2(lo.x, hi.y)].rgb, noisyColor[hi].rgb, blend.x), blend.y);
+}
+
+bool resolvedFootprint(float2 position) {
+    int2 limit = int2(display.dimensions.xy) - 1;
+    int2 lo = clamp(int2(floor(position)), int2(0), limit);
+    int2 hi = clamp(int2(floor(position)) + 1, int2(0), limit);
+    return guideUnresolved[lo] == 0.0 && guideUnresolved[int2(hi.x, lo.y)] == 0.0 &&
+           guideUnresolved[int2(lo.x, hi.y)] == 0.0 && guideUnresolved[hi] == 0.0;
 }
 
 [shader("compute")][numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
@@ -56,8 +65,11 @@ float3 noisyUpsample(float2 position) {
     }
     default: {
         // A failed SDK evaluation has no valid output. The same-frame noisy input remains usable.
-        float3 linear =
-                display.control.z != 0 ? reconstructedColor[id.xy].rgb : noisyUpsample(source);
+        // Budget-exhausted/invalid guides never masquerade as a stable reconstructed surface.
+        // This is an engine output fallback; it makes no claim about NGX's private history.
+        float3 linear = display.control.z != 0 && resolvedFootprint(source)
+                                ? reconstructedColor[id.xy].rgb
+                                : noisyUpsample(source);
         PrimeDRTParameters parameters = {display.display.x, display.display.y, display.display.z,
                                          display.display.w, display.extra.x};
         value = primeDRT(linear709ToWorking(primeRrFiniteHalfColor(linear)), parameters);

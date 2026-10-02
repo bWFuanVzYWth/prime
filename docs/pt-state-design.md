@@ -6,91 +6,66 @@
 
 ## 当前依赖与消费顺序
 
-当前 Realtime 与 Offline 共同调用 `traceSample`，在 compute shader 内使用硬件内联 Ray Query。最近交点、局部光阴影、太阳阴影和下一跳消费发生在同一调用中；下一跳的最近交点查询位于下一次反弹。图中实线表示值的生产与消费，虚线标明当前的执行先后；它们不表示必须缓存完整结构体，也不规定永久的查询或 pass 顺序。
+实时积分分为主表面准备、主要光传输和后处理三段，前两段各有一个使用硬件内联 Ray Query 的 compute megakernel。K1 与 K2 各调度一次，没有逐 bounce wavefront、活跃队列、排序或第三个 guide 光追 kernel。Offline 继续在 `path_trace.slang` 中调用通用 `traceSample`，保持原逐样本循环与在线均值，不进入实时 delta 前置阶段。
 
 ```mermaid
 flowchart TD
-    CPU["CPU：源规范化、动画/mip、光学身份、灯分布"] --> PUB["同一资源代次的描述符、纹理与场景记录"]
-    PUB --> QUERY["最近交点查询：遍历与 coverage"]
-    PATH["路径：ray、cone、medium、throughput、etaScale、previous MIS、sampler"] --> QUERY
-    QUERY --> FOUND{"是否命中"}
-    FOUND -->|否| SKY["天空/太阳 escape 与 MIS；结束路径"]
-    PATH --> SKY
-    SKY --> ACCUM["累计路径 radiance"]
-    FOUND -->|是| GEO["commit 信息与几何重建"]
-    GEO --> BOUNDARY["原物理边界：介质端点、optical、physical thin"]
-    GEO --> RAW["选中着色表面：UV/LOD、color、normal、specular"]
-    PUB --> RAW
-    RAW --> VERTEX["canonical vertex：color、normal、roughness、control"]
-    BOUNDARY --> VERTEX
-    PATH -->|view| VERTEX
-    RAW --> EMIT["发光命中与 light PDF/MIS"]
-    PATH --> EMIT
-    EMIT --> ACCUM
-    GEO --> LOCAL_QUERY["局部灯样本与有限阴影查询"]
-    BOUNDARY --> LOCAL_QUERY
-    PUB --> LOCAL_QUERY
-    PATH --> LOCAL_QUERY
-    LOCAL_QUERY --> LOCAL_EVAL["短时 BSDF 评价、完整 PDF/MIS"]
-    VERTEX --> LOCAL_EVAL
-    BOUNDARY --> LOCAL_EVAL
-    PATH --> LOCAL_EVAL
-    LOCAL_EVAL --> ACCUM
-    GEO --> SUN_QUERY["太阳方向、radiance gate 与阴影查询"]
-    BOUNDARY --> SUN_QUERY
-    PUB --> SUN_QUERY
-    PATH --> SUN_QUERY
-    SUN_QUERY --> SUN_EVAL["短时 BSDF 评价、完整 PDF/MIS"]
-    VERTEX --> SUN_EVAL
-    BOUNDARY --> SUN_EVAL
-    PATH --> SUN_EVAL
-    SUN_EVAL --> ACCUM
-    EMIT -.-> LOCAL_QUERY
-    LOCAL_EVAL -.-> SUN_QUERY
-    SUN_EVAL -.-> LIMIT{"还有下一跳预算"}
-    LIMIT -->|是| NEXT["短时 BSDF 采样、完整响应/PDF、检查、介质与 RR"]
-    VERTEX --> NEXT
-    BOUNDARY --> NEXT
-    PATH --> NEXT
-    NEXT --> PATH
-    ACCUM -->|路径结束后| POST["primaryDistance 与同一 jitter UV：空气透视、结果清洗"]
-    LIMIT -.->|否，结束路径| POST
-    SKY -.-> POST
-    GEO -->|首次命中| PRIMARY["primaryDistance"]
-    BOUNDARY --> PRIMARY
-    PRIMARY --> POST
-    PATH -->|主射线 jitter UV| POST
-    GEO -->|首次命中| GUIDES["Realtime depth/normal guides：同一主射线与 coverage"]
-    RAW --> GUIDES
-    POST --> HISTORY["Offline 在线均值；Realtime 直接消费积分结果"]
-    GUIDES -->|Realtime| HISTORY
-    HISTORY --> DISPLAY["显示策略与输出"]
+    PUB["同代场景、纹理、介质端点与相机"] --> MODE{"渲染模式"}
+    MODE -->|Realtime| K1["K1：主查询、delta 前缀、主表面提升与 guides"]
+    K1 --> HOT["已解析 landing：全局 beta/eta/bounce、表面与介质"]
+    K1 --> COLD["prefix radiance、原相机空气段、guides/完成状态"]
+    HOT --> K2["K2：landing NEE/continuation，后续完整输运"]
+    K2 --> TAIL["FP32 tail radiance"]
+    COLD --> POST["post：prefix+tail、aerial、清洗"]
+    TAIL --> POST
+    POST --> RAW["raw：tonemap、编码、宿主目标"]
+    POST --> RR["RR：线性709输入、Streamline、显示"]
+    MODE -->|Offline| OFF["原通用 traceSample：查询、发光、NEE、散射与 aerial"]
+    OFF --> HISTORY["逐样本在线均值、显示、宿主目标"]
 ```
 
-当前局部光由样本有效性和 PDF gate 控制消费，`pdf > 0` 时即评价 BSDF；太阳另按 radiance/visibility gate 跳过无贡献评价。进一步短路须验证与清洗、累加语义等价。下一跳的无效事件、数值检查和 roulette 也可以结束路径。图省略这些局部分支、帧常量和资源地址依赖，不能据节点数推算寄存器或实际工作量。
+K1 的 delta 循环只消费当前交点、窄离散数学、Beer、发光/环境端点、照明预算和 roulette；没有能量 LUT、完整 closure、局部灯/太阳 NEE 或阴影查询。遇到首个非纯 delta 顶点即发布 landing；粗糙首面只做一次主查询及表面/guide 准备，不构造透明条件 pair。RR变体的guide尾声通过窄方向能量helper消费LUT，不建立通用BSDF状态；raw变体不执行独立guide遍历。
 
-“跨查询保存状态”在这里指同一 shader invocation 中，某值在 `Proceed` 遍历之前产生、之后仍有消费者，因此其生命周期覆盖遍历。它不依赖传统 `TraceRay` 调用栈；内联查询也存在外部活跃值、遍历内部状态与后端保存成本。改源代码作用域可以表达最后消费者，但实际分配仍须检查编译产物与驱动结果。
+K2 的交接点是 landing 的 coverage、纹理/材质解析、该段 Beer、cone 推进与发光已经完成，NEE 尚未执行。首轮直接读取 canonical 表面与全局路径状态，不重复求交、纹理、吸收或发光；以后各轮恢复求交—发光/MIS—局部灯—太阳—续接的原顺序。K1 前驱全部为离散事件，因此 landing 发光的连续 MIS 竞争 PDF 为零，不跨阶段保存 previous position/PDF。K2 首次续接之后才建立它们。
+
+“跨查询保存状态”指同一 shader invocation 中，某值在 `Proceed` 遍历之前产生、之后仍有消费者。内联 Ray Query 也存在外部活跃值、遍历内部状态与后端保存成本。源码作用域和阶段划分表达消费边界，实际寄存器、保存位置及成本仍须检查编译产物与驱动结果。
 
 ## 当前顶点接口与查询切面
 
-`PrimePbrVertex` 当前保留 working RGB、修正且面向视角的世界法线、有效粗糙度和一个分类控制字，共八个 32-bit 分量。控制字包含 Fresnel/SSS 身份、法线贴图存在性、材质薄壁、dielectric 与 conductor 分类；缺 specular 图的缺省已进入粗糙度和类别。这个接口大小不是完整顶点状态，也不是物理寄存器数量。
+`pbr/vertex.slang` 的 `PrimePbrVertex` 保留 working RGB、面向视角的世界着色法线、有效粗糙度和分类控制字，共八个 32-bit 分量。控制字包含 Fresnel/SSS 身份、法线贴图存在性、材质薄壁、dielectric 与 conductor 分类；缺图默认值已经进入顶点。`SurfacePoint` 另有 position、几何 normal 和安全偏移量。两者都不保存 UV/TBN、原始纹理记录或完整 closure；其源码尺寸不等于物理寄存器数。
 
-几何 `SurfacePoint` 的 position、normal 和误差偏移量另有七个分量；view 可由当前 ray direction 得到。物理介质端点、当前 medium、路径 throughput/radiance、前一顶点 MIS、ray cone 和随机身份也有独立消费者。端点或别名能否合并取决于路径与后端；不按源码字段简单相加计算 GPR。
+整闭包 delta 判定使用实际过滤、LabPBR 解码及 normal 分布组合后的 roughness：conductor 为 `r*r < 1e-4`；厚 optical 为同一边界或实际界面 IOR 比等于1；薄 optical 为现有 IOR scaler 调整后的 transmission alpha `< 1e-4`。普通 opaque/SSS 保留连续分量，始终在 landing 停下。`pbr/delta.slang` 共享 Full 的离散 Fresnel、薄壁级数、折射和响应数学，不进入一般 evaluate/sample 分派；`pbr/guide_albedo.slang` 单独保留原方向能量与清洗，不准备采样概率或完整状态。
 
-| 当前切面 | 此后仍有消费者的数据 | 当前在切面前结束的数据与消费 |
+| 当前切面 | 此后仍有消费者的数据 | 已结束的消费 |
 | --- | --- | --- |
-| 最近交点遍历 | ray 与 coverage 身份；既有路径 throughput/radiance、单标量 etaScale、medium、previous/PDF、cone；末尾空气透视所需主射线信息，以及 Realtime 首次命中 guides | 上一跳原始 hit、闭包与光源样本已无消费者；单样本 Offline 尚不读取历史均值 |
-| hit 准备完成到局部阴影 | canonical vertex、SurfacePoint、view、物理端点/介质、路径/采样上下文；该灯查询后所需方向、radiance/PDF | 几何/材质记录、变换、UV/TBN/LOD、raw normal/specular、发光与发光命中 PDF 在交点作用域内消费 |
-| 局部评价到太阳阴影 | 同一 vertex、SurfacePoint、物理端点/介质和路径/采样上下文；太阳查询后需要的方向/radiance | 局部灯样本、visibility、response、PDF/MIS 和该次评价闭包结束；贡献已累加 |
-| 太阳评价到下一跳 | vertex、几何与介质仍被 continuation 消费 | 太阳评价的方向、visibility、response、PDF/MIS 和闭包结束；末预算顶点没有 continuation 消费者 |
-| 下一跳到下一次最近交点 | 新 ray/medium/throughput、单标量 etaScale、previous position/PDF、cone、累计 radiance 和随机身份 | 当前 vertex、BSDF 采样与该轮 RR 概率/样本临时状态结束 |
-| 路径结束到输出 | radiance、同一主射线 jitter UV、primaryDistance；Realtime 另消费真实 depth/normal guides | ray/query/vertex/BSDF/medium/etaScale/MIS 结束；随后消费空气透视、Offline 历史和显示参数 |
+| K1 delta 最近交点 | ray/cone、当前 medium、全局 beta/eta/bounce、prefix radiance、随机身份；共享 guide 前缀的有限 PSR 状态 | 上一顶点材质和 delta 样本；没有 NEE、阴影或完整闭包状态 |
+| K1 → K2 | canonical landing、入射方向/cone、全局 beta/eta/bounce、当前介质与必要光学端点 | 该 landing 的查询、原始 hit、纹理、Beer、cone 推进与发光；prefix/主相机/guide 进入独立冷输出 |
+| K2 或 Offline 的局部阴影 | vertex、SurfacePoint、view、物理端点/介质、路径/采样上下文及该灯的查询后输入 | 当前 hit 的原始几何/材质、UV/TBN/LOD、发光命中 PDF |
+| 局部评价到太阳阴影 | 同一 vertex、几何、物理端点及路径状态；太阳方向/radiance | 局部灯样本、visibility、response、PDF/MIS 和短时闭包；贡献已累加 |
+| 续接到下一次查询 | 新 ray/medium/beta/eta、previous position/PDF、cone、tail radiance 与随机身份 | 当前 vertex、采样与 roulette 的临时值 |
+| 实时 post | FP32 prefix + tail、原相机空气段、同一采样 UV、所选显示输入 | TLAS、材质、BSDF、medium、eta 与 MIS 均无消费者 |
 
-不可变 Full 能量图像/采样器在入口绑定，首次帧上传一次，之后作为显式资源值传入消费者。它不增加 pass、queue 或稳态上传。
+K2 与 Offline 在阴影查询之后才建立短时 ONB 和 Full 支持子域状态，立即消费完整 response/PDF/MIS；下一跳同样就地准备。缓存两个 ONB 切向会增加六个浮点分量，缓存 closure 或 pending contribution 还会增加其他状态。可以调整重算、缓存与重载，但须比较实际保存、占用率及带宽成本，不能因准备重复就把全部状态跨查询保留。
 
-当前各 BSDF 评价在对应阴影查询后构造短时正交框架（ONB）与 Full 支持子域状态，立即消费响应、总 PDF 和 MIS，再累加贡献。下一跳也就地准备状态。这会重复少量准备运算，换取较少的跨查询状态重叠。缓存 ONB 的两个切向量会增加六个浮点分量；缓存方向相关 closure 或多份 pending contribution 还会增加其他状态。重算、缓存和重载都允许改进，应比较省下的运算与实际保存、占用率及带宽成本，不能仅因准备重复就预计算全部状态，也不能永久禁止缓存。
+最大预算默认12、可调1–64，表示包含首次表面的全局顶点上限 N，最多 N−1 次续接；K1/K2 交接不重置 bounce。非 delta 末顶点保留发光与 NEE，因没有续接竞争使用 NEE 权重1，之后不构造采样或 roulette。K1 的末 delta 顶点只保留可消费的端点贡献，不创建无后继的 pair。照明路径在两阶段都从第二次有效散射采用 `p = clamp(maxRGB(beta) × etaScale, 0, 1)`，存活后按 `beta/p` 重加权；透射乘 `relativeEta²` 更新 etaScale，薄壁 eta 为1。零吞吐/零概率结束照明，单位概率省去无消费者的随机数与除法，实际结果仍在消费边界清洗。
 
-最大反弹预算默认 12、可调 1–64，实际表示含首次表面命中的照明/散射顶点上限 N，最多 N−1 次续接；它不是保证执行 N 次反射。末顶点保留发光与 NEE，并因没有续接竞争技术使用 NEE 权重 1，然后跳过 BSDF 采样与 RR。第二次有效散射开始采用旧项目验证的 RR：`p = clamp(maxRGB(throughput) × etaScale, 0, 1)`，存活后按 `throughput/p` 重加权。etaScale 初始为 1，只有透射事件乘 `relativeEta²`；反射/TIR 不改变它，薄壁的 relativeEta 为 1。它是跨反弹必需的一个 PT 标量，不保存闭包或历史 eta 的额外副本。零吞吐/零概率终止，单位概率跳过无消费者的 RR 随机数与除法，域身份不改变。有限 beta 和重加权结果的实际数值检查仍位于消费边界。
+相机第一可见表面为纯 delta optical 时，实时构造有效的 reflection-only/transmission-only 条件候选：保留完整物理 response、条件 PDF=1，分别检查数值和几何支持。双有效按独立 domain 1536 的0.5抽选，所选未来 beta 乘2；单有效权重1，双无效结束照明。首面发光与 albedo 不乘2，连续 MIS PDF 仍为0。粗糙首透明面、后续才遇到的透明面以及 Offline 不使用此策略。
+
+## 实时交接记录与独立 guide
+
+当前每内部像素分配176B scratch：七个16B common SoA planes（112B）、两个16B optical planes（32B）、独立 prefix/原空气段（16B）和 FP32 tail（16B）。common 依次保存位置/偏移、几何法线/bounce与状态、baseColor/roughness、着色法线/control、入射方向/cone、当前 medium、beta/etaScale。opaque 不读写 optical planes；physical-thin 的 incident 等于 medium，只需 transmitted；厚 optical 分别保留 medium、incident、transmitted。预留容量不因本帧 opaque 占比变化，逻辑访问量与容量分开核算。
+
+scratch 使用 GPU buffer device address，不把整个分配暴露成可能超过 `maxStorageBufferRange` 的 SSBO；分配大小、16B plane 对齐和 `plane*count+pixel` 的32位索引上限在边界检查。原生1920×1080容量约364.95 MB，Performance 的960×540约91.24 MB；不含图像、对齐和 SDK 私有资源。raw depth/normal 诊断另按需分配16B/像素，不进入 K2；RR 的 R8 完成状态另为1B/内部像素。
+
+K1 的规范 guide 几何与照明路径独立：optical 优先实际 IOR 可透射方向，真实 TIR 和 conductor 走反射；它不消费 Fresnel 抽样、response/PDF、Beer、beta、roulette 或光贡献。相同事件直接采用已计算的 nextGuide 方向和安全起点共享查询，分离后的 guide seed 也来自该生产者，因此 guide 查询不依赖照明分支中的重复浮点运算。首次分歧或照明提前终止后保存最小 guide seed，照明结束后在同一 K1 invocation 继续 guide-only 后缀。seed 暂用尚未发布的 common 槽，必须先完整读出再覆盖最终 landing/status，不增加全图 seed 分配或光追 dispatch。
+
+seed 当前为五个16B plane、共80B：query origin/coneWidth、物理前点/深度与控制字、direction/当前IOR、PSR首方向与物理累计长度、反射quaternion。深度占控制字低8位，其余位保存PSR计数、反射奇偶、motion-known、折射/interface与seed标记；它没有extinction、beta、etaScale、PDF、radiance或材质副本。一次seed写入/读出的逻辑请求为160B/分离像素；这不是实际DRAM测量。该内存复用不保证驱动一定消除跨遍历寄存器保存，须检查实际load/store与活跃值。
+
+guide 使用独立深度计数及同值预算 N，不因照明 roulette、零 beta 或吸收全黑而结束。第 N 次查询得到非 delta 或真实 escape 仍正常完成；仍需续接则标为 unresolved，几何非法也不冒充稳定终点。K1 每帧完整发布状态；内部 unresolved mask 使 display 使用当前 raw 覆盖相应采样足迹，但不保证 SDK 内部历史或空间滤波隔离。PSR、动态 motion 和输入图像合同由[重建文档](reconstruction.md)维护。
+
+K1/K2/post 分别采用128B、80B、112B push 接口和各自实际资源视图。K1不接局部灯/阴影模块，K2不接相机/PSR/prefix/aerial/显示状态，post不接场景几何或 BSDF。RR 路径在 post 完成线性合成及 aerial 后写重建输入，SDK之后才显示；raw post直接完成显示。阶段间及跨帧复用使用同队列屏障，尺寸/模式更换和释放依最后使用 serial 的完成证明，不引入稳态 CPU wait 或额外提交。
+
+这些拆分移除了 delta 前缀的连续 BSDF/NEE 工作，同时增加了全图 scratch 读写、固定阶段屏障和可能的 guide 后缀查询。query 总量为照明与 guide 查询之和减共享前缀，最坏接近 `2N−1`。必须观察分离率、unresolved率、长尾、L2/DRAM及整帧成本；没有实际测量不能声称寄存器或帧率提升。
 
 ## CPU、交点、视角与方向的边界
 
@@ -109,7 +84,7 @@ CPU 证明必须说明生产者、覆盖域、未知情况和失效路径。当�
 
 物理介质端点来自选择着色涂层之前的原边界；selected shading material 决定表面 BSDF。physical thin 与 material thin 的用途不同，不能合并成一个未经证明的分类。有限灯的 BSDF 方向基于原表面位置，阴影 segment 使用两端安全偏移后的点；改变其中一条方向不能顺带改变另一条。
 
-局部灯源颜色与 RGB visibility 在原线性 BT.709 域相乘，之后才执行非对角的工作空间转换；这个乘法不能任意移过矩阵。保持 alpha/coverage、光源实际 PMF、完整混合 PDF、MIS、薄壁/TIR、介质、随机域及 roulette 契约。末预算顶点仍消费 NEE 与对应 MIS，只省去没有下一跳消费者的采样和 roulette。源输入规范化不能证明 BSDF response/PDF、方向、eta、throughput 或最终 radiance 有限；实际结果清洗继续在其消费者边界执行。
+局部灯源颜色与 RGB visibility 在原线性 BT.709 域相乘，之后才执行非对角的工作空间转换；这个乘法不能任意移过矩阵。保持 alpha/coverage、光源实际 PMF、完整混合 PDF、MIS、薄壁/TIR、介质、随机域及 roulette 契约。有连续散射的末预算顶点仍消费NEE与对应MIS，只省去没有下一跳消费者的采样和roulette；K1纯delta前缀没有连续NEE消费者。源输入规范化不能证明 BSDF response/PDF、方向、eta、throughput 或最终 radiance 有限；实际结果清洗继续在其消费者边界执行。
 
 当前源码显式结束或删除生产路径不消费的字段、参数、默认构造和不可达拓扑，而不把支持边界藏在编译器 DCE 中。生产窄构造与旧完整 OpenPBR 支持子域 API 复用同一数学核；厚壁 SSS 扩展单独保留 Lite 数学；通用库的合法能力不因生产暂未接入而删除。AO、height、porosity 或 generic 默认字段的源码简化不自动证明 GPU 加速；packed 纹理仍可能执行同一次事务。
 
@@ -121,13 +96,13 @@ CPU 证明必须说明生产者、覆盖域、未知情况和失效路径。当�
 
 ## PT 之外的状态与当前特化
 
-Offline 单样本当前使用 specialization ID4；场景能力使用 ID0/1/2，ID3 留给独立材质能力特化。CPU 的同一次 `samples_this_dispatch` 取值同时选择管线和写入 push 参数，确保单样本假设成立。单样本路径完成后才读取历史均值，消去均值和多样本循环身份覆盖整条路径的需要；多样本保持原逐样本在线均值、sequence 与随机域，仍有均值跨下一样本的消费者。当前 Offline 为两组各六个场景变体，Realtime 为一组六个；这个数量是当前实现，不是未来设计上限或必须扩展的模板。
+Offline 单样本当前使用 specialization ID4；场景能力使用 ID0/1/2，ID3 留给独立材质能力特化。CPU 的同一次 `samples_this_dispatch` 取值同时选择管线和写入 push 参数，确保单样本假设成立。单样本路径完成后才读取历史均值，消去均值和多样本循环身份覆盖整条路径的需要；多样本保持原逐样本在线均值、sequence 与随机域，仍有均值跨下一样本的消费者。当前 Offline 为单样本/多样本两组各六个场景变体；Realtime 的 K1按 surface/optical 能力去重为四个变体，K2沿用六个场景变体。raw/RR只创建所选入口组，post及RR显示为独立窄管线；这个数量不是未来设计上限或必须扩展的模板。
 
 生产 Z-Sobol 当前显式调用固定 S=8 的构造，保留合法 R 范围及宽索引退路；不能由原生 1080p 使用单字索引推断所有尺寸都可删除宽路径。生产 Aerial-S 当前按已知 256 切片消费，与分配、更新和重建一致，避免动态尺寸查询被编译器提到路径入口；通用采样 API 仍按调用方纹理实际高度工作。改变生产资源布局必须同步修改生产者和消费者，具体规格由[大气文档](atmosphere.md)维护。
 
-显示参数在路径结束后消费。depth/normal guides 有真实 Realtime 消费者，并与 radiance 使用同一主射线和 coverage；当前 Offline 只取 radiance，其他分量在编译产物中消除。共同返回类型、完整 Frame ABI 或源结构体尺寸不等于所有字段始终占据 GPR。继续拆接口、缓存形状或新增特化前，应先查是否还有实际执行的计算或跨路径状态。
+显示参数只在路径后的 post/显示消费。Realtime 的 camera/PSR/guides 仅属于 K1，K2只有一个按需传递的实际 specular reflection 次段距离职责，不访问完整guide。Offline仍只消费通用输运的radiance，单样本/多样本历史读写保持原顺序。共同返回类型或入口参数大小不等于所有字段始终占据GPR。
 
-可选 Streamline RR 使用同一输运核的专用 guide sink，首命中就地写入 normal/roughness、depth、motion 和 BSDF albedo，不使完整 guide 结构覆盖整个路径。新增一个已采中 specular 反射的标记到第二次最近交点，记录真实 hit distance 或环境 miss；没有额外反射查询。原始/离线 sink 不消费这些记录。RR 的输入/输出尺寸、帧抖动、格式、带宽估算与历史边界见[重建契约](reconstruction.md)；默认性能档减少内部像素和射线数，必须与原生1920×1080基准区分，新增SL/显示成本不等于免费降噪。每次只创建选中的6个实时场景变体，RR再加一个显示pipeline。
+RR 的 input/output 尺寸、抖动、格式、运动和历史边界见[重建契约](reconstruction.md)。默认Performance降低内部像素和射线数，应与原生1920×1080基准区分；scratch、SL私有资源、重建和显示都是真实成本。
 
 ## 修改前必须回答的性能问题
 
@@ -147,9 +122,9 @@ Offline 单样本当前使用 specialization ID4；场景能力使用 ID0/1/2，
 
 ## 维护入口
 
-- [共同输运](../crates/prime-vulkan/shaders/transport.slang)、[最近交点与阴影](../crates/prime-vulkan/shaders/ray_query.slang)：查询边界、几何/材质消费与贡献累加。
-- [PBR 生产适配](../crates/prime-vulkan/shaders/pbr.slang)、[Full 窄构造](../crates/prime-vulkan/shaders/bsdf/full/pt.slang)、[完整数学支持子域](../crates/prime-vulkan/shaders/bsdf/full/opaque/lobes.slang)：值接口与数学复用。
-- [Offline 入口](../crates/prime-vulkan/shaders/path_trace.slang)、[Realtime 入口](../crates/prime-vulkan/shaders/realtime.slang)、[管线构造](../crates/prime-vulkan/src/lib.rs)、[帧录制](../crates/prime-vulkan/src/frame.rs)：profile、历史与输出消费。
+- [实时主表面](../crates/prime-vulkan/shaders/realtime/primary.slang)、[实时主要输运](../crates/prime-vulkan/shaders/realtime/transport.slang)、[离线通用输运](../crates/prime-vulkan/shaders/transport.slang)、[最近交点](../crates/prime-vulkan/shaders/trace/closest.slang)：查询与贡献边界。
+- [PBR 生产适配](../crates/prime-vulkan/shaders/pbr.slang)、[delta数学](../crates/prime-vulkan/shaders/pbr/delta.slang)、[guide能量](../crates/prime-vulkan/shaders/pbr/guide_albedo.slang)、[Full 窄构造](../crates/prime-vulkan/shaders/bsdf/full/pt.slang)：值接口与数学复用。
+- [Offline 入口](../crates/prime-vulkan/shaders/path_trace.slang)、[Realtime K1入口](../crates/prime-vulkan/shaders/realtime_primary.slang)、[post入口](../crates/prime-vulkan/shaders/realtime.slang)、[管线构造](../crates/prime-vulkan/src/lib.rs)、[帧录制](../crates/prime-vulkan/src/frame.rs)：profile、历史与输出消费。
 - [开发与验证流程](../CONTRIBUTING.md)、[Nsight 抓帧规范](guides/nsight.md)、[资源与提交契约](pipeline.md)：验证、可复现比较和完成证明。
 
 单次测量、假设、失败实验、计数脚本、编译/抓帧原件、版本与冻结产物放 Git 忽略的 `artifacts/`。这里保留可复用的依赖分析和当前实现说明，不以某次本地报告为阅读前提；性能敏感设计改变时同步更新本文及相应语义契约。

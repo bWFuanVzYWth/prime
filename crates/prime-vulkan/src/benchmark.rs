@@ -174,6 +174,95 @@ impl HostBenchmark {
             .configure(settings)
     }
 
+    /// Test-only frozen raw baseline. Offline's legacy Frame push and descriptor
+    /// superset are ABI-compatible, while this SPIR-V does not read accumulation.
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub(super) fn install_realtime_reference(&mut self, bytes: &[u8]) -> Result<(), String> {
+        self.drain()?;
+        let renderer = self.state.as_mut().unwrap().renderer.as_mut().unwrap();
+        if renderer.settings.mode != RenderMode::Offline || renderer.settings.offline_samples != 1 {
+            return Err(
+                "Frozen realtime baseline requires Offline dispatch with one sample".into(),
+            );
+        }
+        let pipeline = renderer.pipeline.as_mut().unwrap();
+        let device = &renderer.context.device;
+        let spirv = ash::util::read_spv(&mut Cursor::new(bytes))
+            .map_err(|e| format!("Read frozen realtime SPIR-V: {e}"))?;
+        unsafe {
+            let shader = device
+                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
+                .map_err(|e| error("Create frozen realtime shader", e))?;
+            let mut replacements = Vec::with_capacity(6);
+            let created = (|| {
+                let entries = [0, 1, 2].map(|constant_id| vk::SpecializationMapEntry {
+                    constant_id,
+                    offset: constant_id * 4,
+                    size: 4,
+                });
+                for features in [
+                    [0_u32, 0, 0],
+                    [1, 0, 0],
+                    [2, 0, 0],
+                    [2, 1, 0],
+                    [2, 0, 1],
+                    [2, 1, 1],
+                ] {
+                    let data = features.map(u32::to_le_bytes);
+                    let specialization = vk::SpecializationInfo::default()
+                        .map_entries(&entries)
+                        .data(data.as_flattened());
+                    let stage = vk::PipelineShaderStageCreateInfo::default()
+                        .stage(vk::ShaderStageFlags::COMPUTE)
+                        .module(shader)
+                        .name(c"main")
+                        .specialization_info(&specialization);
+                    match device.create_compute_pipelines(
+                        vk::PipelineCache::null(),
+                        &[vk::ComputePipelineCreateInfo::default()
+                            .stage(stage)
+                            .layout(pipeline.layout)],
+                        None,
+                    ) {
+                        Ok(values) => replacements.push(values[0]),
+                        Err((partial, e)) => {
+                            for value in partial {
+                                device.destroy_pipeline(value, None);
+                            }
+                            return Err(error("Create frozen realtime pipeline", e));
+                        }
+                    }
+                }
+                Ok(())
+            })();
+            device.destroy_shader_module(shader, None);
+            if let Err(message) = created {
+                for value in replacements {
+                    device.destroy_pipeline(value, None);
+                }
+                return Err(message);
+            }
+            for (target, replacement) in pipeline.pipelines.iter_mut().zip(replacements) {
+                device.destroy_pipeline(std::mem::replace(target, replacement), None);
+            }
+            if let Some(single) = pipeline.single_sample_pipelines.take() {
+                for value in single {
+                    device.destroy_pipeline(value, None);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub(super) fn device_details(&self) -> String {
+        self.state
+            .as_ref()
+            .unwrap()
+            .owner
+            .benchmark_device_details()
+    }
+
     pub fn triangle_count(&self) -> u64 {
         self.state
             .as_ref()

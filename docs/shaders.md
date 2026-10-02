@@ -13,24 +13,32 @@
 | `bsdf/lite/` | LitePBR opaque、solid/thin dielectric、foliage 的状态、支持域、evaluate/sample/PDF 与事件数学 |
 | `model/material/` | 已规范化 LabPBR 通道、默认值、Fresnel 身份和颜色/IOR 转换 |
 | `service/bsdf/`、`service/material/normal_mapping.slang` | BSDF 消费契约、数值清洗和法线有效反射修正 |
-| `pbr.slang` | 生产 Full opaque/dielectric 源适配、thick-SSS Lite 扩展与历史 Lite 材质参考 API；不含 Minecraft 名称预设 |
+| `pbr/vertex.slang` | canonical 顶点、分类控制字、frame 与物理 IOR 接口；不构造 closure |
+| `pbr/delta.slang` | 整闭包 delta 判定、普通离散采样、首纯 delta 透明条件 pair，以及独立的几何 guide 方向；无 LUT/NEE |
+| `pbr/guide_albedo.slang` | 独立方向能量与清洗；不导入通用 PBR 分派或完整 closure |
+| `pbr.slang` | 生产 Full opaque/dielectric 源适配、thick-SSS Lite 扩展与历史 Lite 材质参考 API；重导出窄顶点/guide 接口 |
 | `grid_sampling.slang` | 生产固定单级局部 alias、全局退路及正反向混合 PDF，无资源绑定 |
 | `light_sampling.slang` | 显式采样实验保留的 32B 功率树节点与选择，无资源绑定 |
 | `display/prime_drt.slang` | 当前可替换的显示策略；显式显示变换与艺术调整，只依赖颜色数学库 |
-| `ray_query.slang` | 硬件 Ray Query、直接表面/纹理/光学端点、覆盖与灯采样；依赖起点和颜色数学库 |
-| `frame.slang` | 入口共享的显式帧参数类型，无全局绑定 |
+| `trace/closest.slang` | 最近交点、表面/纹理/光学端点与 coverage；K1只消费此查询模块 |
+| `ray_query.slang` | 阴影、灯采样与最近交点兼容门面；依赖起点和颜色数学库 |
+| `frame.slang`、`realtime/*_parameters.slang` | Offline 原帧参数与 K1/K2/post 各自的 push 类型，无全局绑定 |
 | `atmosphere/` | 四波长物理场、预计算 solver、天空/太阳/空气透视生产和消费；见[大气契约](atmosphere.md) |
-| `transport.slang` | 共同的 OpenPBR 支持子域输运、采样域与首次命中 guides，显式接收资源与帧 |
-| `path_trace.slang` | 离线累积及显示入口 |
-| `realtime.slang` | 单次实时积分及所选视图显示，直接写输出图像 |
-| `realtime_rr.slang` / `reconstruct/rr_guides.slang` | 同一输运核、帧抖动、实际主表面 guides 与 sampled specular hit distance |
-| `rr_display.slang` | 输出分辨率的 RR 显示与当帧 raw 回退；不引入 CPU 图像传递 |
+| `transport.slang`、`transport/direct.slang` | Offline 通用输运和 K2/Offline 共用的局部灯、太阳 NEE；保留原采样/PDF/MIS |
+| `realtime/primary.slang`、`realtime/landing.slang` | K1 delta 前缀、canonical landing、规范 guide 的共享/分离后缀及交接记录 |
+| `realtime/transport.slang` | K2消费已解析 landing，执行 NEE/continuation 和后续完整输运；不接相机/PSR/post状态 |
+| `realtime/post.slang` | FP32 prefix+tail、原相机空气段 aerial 和清洗；不接几何、材质或 BSDF |
+| `path_trace.slang` | Offline 原逐样本累积及显示入口 |
+| `realtime_primary*.slang`、`realtime_transport*.slang` | raw/RR 的两种实时 PT kernel 入口；K1四个、K2六个场景变体 |
+| `realtime.slang`、`realtime_rr.slang` | raw后处理显示、RR线性输入合成入口；不执行射线查询 |
+| `reconstruct/primary_guides.slang`、`reconstruct/primary_psr.slang` | 主表面提升、有限链PSR、guide完成状态与接口specular例外 |
+| `rr_display.slang` | 输出分辨率RR显示；失败或未解析guide采样足迹使用当前raw，无CPU图像传递 |
 
-库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口显式传入 `TraceScene`、OpenPBR energy 资源值与显示参数；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`，消费接收 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建跟踪整个 shader 目录，修改被导入模块也必须重新编译。
+库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口按阶段显式传入场景、OpenPBR energy 或显示资源；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`；K1/K2消费窄 `AtmLighting`，post消费 `AtmAerial`，Offline保留 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建跟踪整个 shader 目录，修改被导入模块也必须重新编译。
 
-实时与离线入口共同使用旧完整 OpenPBR 的实际源支持子域；math/state/evaluate/sample 保持同一数学核，生产窄构造不建立完整 generic Material 默认图。能量表 binding 仅由两个入口声明，经 transport 显式传给 PBR 泛型 energy 参数，库不声明描述符。精确 Fresnel、multiple scattering、支持与过滤边界见[材质契约](materials.md)。厚壁 authored SSS 仍使用明确隔离的历史 Lite 近似；foliage API 不表示已按 MC 类型或旧 preset 自动分类。
+实时与离线入口共同使用旧完整 OpenPBR 的实际源支持子域；math/state/evaluate/sample 保持同一数学核，生产窄构造不建立完整 generic Material 默认图。能量表 binding 由实际消费者入口声明：Offline和K2传入完整BSDF，RR的K1只在guide能量尾声消费；delta循环无energy参数，库不声明描述符。精确 Fresnel、multiple scattering、支持与过滤边界见[材质契约](materials.md)。厚壁 authored SSS 仍使用明确隔离的历史 Lite 近似；foliage API 不表示已按 MC 类型或旧 preset 自动分类。
 
-生产 PT 当前采用 canonical vertex 与短时 BSDF 状态，显式结束原始 hit 的消费并消除未消费的构造与假依赖。查询切面、数据依赖、CPU/GPU 边界和缓存/重算取舍统一维护在 [PT 依赖与性能设计](pt-state-design.md)；这些安排不声明最优，不锁定后续设计。
+实时为 K1主表面/delta/guides → K2主要输运 → post 三段，两种PT kernel均只调度一次。K1遇到粗糙首面只完成一次主查询及landing发布；K2从NEE开始，不重复纹理、Beer、cone或发光。Offline保留原通用输运和逐样本循环。阶段资源/参数不共用完整Frame；交接布局、预算、跨查询状态及缓存取舍维护在 [PT 依赖与性能设计](pt-state-design.md)，这些结构变化不代表已测得性能提升。
 
 `primeDRT` 不属于基础库，也不承诺稳定算法或参数接口。它同时负责显式显示变换与艺术调整，之后可以修改或被其他显示策略替代；`math/` 不依赖它。当前入口直接选择 primeDRT，不为尚不存在的替代方案引入注册表或额外抽象。策略专用 Rust 参数命名为 `PrimeDrtSettings`，与通用颜色变换分开；测试入口也与数学基础测试分离。
 
@@ -54,6 +62,8 @@ Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样�
 
 [表面编译](surface-compiler.md)的显式灯使用 `sample2D(512+4*bounce)` 分配局部/全局路由及局部 alias 样本，`sample2D(768+bounce)` 分配全局页及页内灯样本。两个二维域各复用一次 index permutation，不串接同一 24-bit 标量的条件残差。前一域加 1 仍用于 quad 面积加权半面及三角形二维采样，加 2/3 分别用于采样点 coverage 和有限阴影 coverage。64 次反弹内这些域互不重叠；`sample1D(d)` 与 `sample2D(d).x` 是同一值，不能视为额外随机维度。静态灯 NEE 与发光命中使用同版本、同一前一着色点的完整混合 PDF 做 MIS；太阳圆盘方向使用独立的 `1024+bounce` domain。
 
+BSDF事件选择使用 `sample1D(1280+bounce)`。仅实时相机第一可见表面为纯delta optical时，额外使用独立domain1536，在有效reflection-only/transmission-only候选之间固定0.5抽选；候选保留物理response和条件PDF=1，双有效时未来beta乘2，单有效乘1。首面发光/guide albedo不补偿，连续MIS PDF仍为0。粗糙首面、后续透明及Offline保持普通采样；照明roulette与guide几何方向均不复用该随机域。
+
 alias 的 PDF 对应单表实际 f32 运算及 24-bit 输入格点，上传后仍有 f32 存储舍入。CPU 将每列阈值下限设为该列首个实际残差的下一个 f32 值，并至少为最小正规数，防止极小功率区间不可达或 GPU 将次正规阈值冲零；之后按修正后的表计算 PDF。修正只改变提议概率，不改发光，生产继续渲染并按累计修正表数的倍增输出 `Warning PT-010`，包含表项数及最大单表概率转移量。不同采样域避免已知的单标量残差支持损失，但单表边际校验不证明有限多维序列的完全独立或任意有限前缀已收敛。实际支持、PDF 接线、正常 Z-Sobol 的逐灯统计和完整图像分别验证。
 
 实现复用 domain hash，以固定双字移位代替通用 64 位移位分支，将 Sobol Y 变换移到反向位序，抵消紧邻的 Sobol/Owen bit reverse。没有额外采样纹理或跨帧随机状态。上述是运算路径变化，不代表已经测得整帧提速。
@@ -74,9 +84,9 @@ alias 的 PDF 对应单表实际 f32 运算及 24-bit 输入格点，上传后�
 
 ## 尺寸与历史
 
-Java 使用实际 render target 尺寸，零尺寸/未初始化相机暂停发布并重置样本序列；恢复及尺寸变化从新样本集开始。Rust 同步更新离线累积存储（实时无需中间图）、相机宽高比、输出绑定与 Z-Sobol R。离线冻结姿态保持不变。旧输出按最后使用的 timeline 完成值回收，不等待当前帧、不回读像素。相同尺寸重建 image view 仍刷新宿主描述符。
+Java 使用实际 render target 尺寸，零尺寸/未初始化相机暂停发布并重置样本序列；恢复及尺寸变化从新样本集开始。Rust 同步更新离线累积存储或实时内部尺寸scratch/guide图像、相机宽高比、输出绑定与 Z-Sobol R。离线冻结姿态保持不变。旧输出按最后使用的 timeline 完成值回收，不等待当前帧、不回读像素。相同尺寸重建 image view 仍刷新宿主描述符。
 
-协议尺寸边界为每轴 `1..65536`，像素总数与字节计算为宽整数；实际还须满足设备 image dimension、compute dispatch 和累积 storage-buffer range。协议接受不代表设备可分配。原固定 4096 边长限制不再使用。历史到 `2^24` 样本前重启，避免 f32 样本权重失去单位精度及整数加一溢出。
+协议尺寸边界为每轴 `1..65536`，像素总数与字节计算为宽整数；实际还须满足设备 image dimension、compute dispatch、累积 storage-buffer range，以及实时BDA分配与plane索引范围。协议接受不代表设备可分配。原固定 4096 边长限制不再使用。历史到 `2^24` 样本前重启，避免 f32 样本权重失去单位精度及整数加一溢出。
 
 Offline 保持逐样本在线均值、原 sequence 与随机域。当前单样本 profile 延后读取历史，host 的采样数同时决定 profile 与 push 参数；状态生命周期及有限管线变体的成本见 [PT 设计](pt-state-design.md#pt-之外的状态与当前特化)。
 
@@ -84,6 +94,6 @@ Offline 保持逐样本在线均值、原 sequence 与随机域。当前单样�
 
 `shader-tests` feature 构建专用入口，GPU 直接执行生产数学模块。独立 u64/top-down/标量 Sobol oracle、f64 颜色与几何参考、冻结的旧 DRT shader 分别检查整数一致性、数值误差与移植等价。实际 AS 查询覆盖仿射、镜像、非均匀缩放、平移、掠射及邻近遮挡；图像测试检查 resize、历史、显示参数与宿主在途资源。
 
-PBR 检查分别覆盖 LitePBR sample/evaluate/PDF、delta/TIR/薄壁与数值清洗，以及实际纹理描述符、规范通道、法线分布、动画、atlas lookup 和发光消费。底层闭包数学、资源翻译和生产输运是不同验证层；单个数值域或无窗口夹具不能外推完整游戏材质和帧率。
+PBR 检查分别覆盖 LitePBR sample/evaluate/PDF、delta/TIR/薄壁与数值清洗，以及实际纹理描述符、规范通道、法线分布、动画、atlas lookup 和发光消费。窄delta/guide夹具对拍Full入口，检查整闭包分类、0.5条件估计器期望、same-event方向逐分量数值精确相等和窄albedo；正负零位差单独统计，不使用误差容忍。K1夹具另检查照明终止后guide继续、预算末步/耗尽与PSR边界。底层闭包数学、资源翻译和生产输运是不同验证层；单个数值域或无窗口夹具不能外推完整游戏材质和帧率。
 
 测试入口的读回只用于无窗口行为验证，不进入游戏流水线。它们不替代两版 Minecraft 的窗口/全屏/HUD 验收。操作入口见 [CONTRIBUTING](../CONTRIBUTING.md)。
