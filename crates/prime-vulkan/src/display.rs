@@ -16,7 +16,7 @@ impl Default for PrimeDrtSettings {
         Self {
             exposure_multiplier: 1.0,
             hue_compensation: 0.75,
-            saturation_compensation: 0.08,
+            saturation_compensation: 0.20,
         }
     }
 }
@@ -77,6 +77,21 @@ mod tests {
 
     #[test]
     fn curve_reaches_the_calibrated_peak_at_eight_ev_and_preserves_join() {
+        assert_eq!(PrimeDrtSettings::default().saturation_compensation, 0.20);
+        assert_eq!(
+            PrimeDrtSettings::default().prepare(1.0).unwrap().values[4],
+            0.20
+        );
+        assert_eq!(
+            PrimeDrtSettings {
+                saturation_compensation: 0.08,
+                ..Default::default()
+            }
+            .prepare(1.0)
+            .unwrap()
+            .values[4],
+            0.08
+        );
         for peak in [1.0, 2.0, 16.0, 10000.0] {
             let parameters = PrimeDrtSettings::default().prepare(peak).unwrap();
             let extent = f64::from(parameters.values[1]) - 0.18;

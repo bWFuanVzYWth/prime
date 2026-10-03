@@ -105,7 +105,7 @@ cargo test -p prime_engine --no-default-features --lib --locked
 4. 检查对应 `adapters/mc-*/run/logs/latest.log`，记录异常、Vulkan `VUID` / `SYNC-HAZARD`、缺失纹理或后端恢复失败。反馈版本、操作步骤、场景与日志，截图/日志副本放 `artifacts/`。
 5. 在两版分别拖动窗口、切换全屏、最小化/恢复；覆盖横/竖/奇数尺寸并回到 1920×1080。检查宽高比、边缘覆盖、历史残影和 HUD 方位；关闭 RR 的实时应保持新噪声输出，开启 RR 时检查重建稳定性；离线调整尺寸时重建累积，稳定后应继续收敛。观察高饱和材质、灰阶和亮部的 primeDRT 输出，以及细缝/斜面是否自遮挡或漏光。
 
-6. 在“Esc → 选项 → Prime 渲染设置”检查四组控件、默认恢复与关闭后持久化；标题画面选项也应显示同一入口。覆盖简体中文/英语、不同 GUI 缩放，确认没有翻译键、截断或重复按钮；重新启动确认配置生效。退出客户端后将 `config/primept.properties` 的 `version` 改成不匹配的值，再启动应整份回退默认，日志说明原因。
+6. 在“Esc → 选项 → 视频设置”列表顶部检查四组 Prime PT 控件、默认恢复与关闭后持久化；标题画面的视频设置也应显示同一组控件。覆盖简体中文/英语、不同 GUI 缩放，确认四个组标题都有 Prime PT 前缀，没有翻译键、截断或重复控件，原版视频选项仍可用；RR 与 OMM 开关应位于诊断组。确认新默认饱和度补偿为20%，已有合法保存值（包括8%）不被覆盖，重新启动后配置生效。退出客户端后将 `config/primept.properties` 的 `version` 改成不匹配的值，再启动应整份回退默认，日志说明原因。
 7. 世界加载完成后用 Ctrl+Alt+F2 进入离线，确认视角/实体/粒子固定、噪点持续减少；按 Esc 打开菜单仍保持离线。曝光、primeDRT 和每帧采样数可以修改，路径/光照固定。调整尺寸后重新累积；再次按快捷键应重新捕获当前世界，地图/动态纹理不能过期。覆盖冻结时 F3+T 重载、切原版、退出/重进世界。
 8. 实时诊断依次查看原始噪声色、线性深度、世界法线；检查物体边缘、alpha 表面和天空（深度/法线预览为黑）。修改深度范围只改变预览；回到最终输出后 primeDRT 正常。开启 RR 时这些诊断显示实际内部输入；返回最终输出会重置重建历史。
 9. 使用声明 `format=lab-pbr/1.3` 的资源包，检查 `_n` 法线与远处粗糙度、`_s` 的介质/金属分类、玻璃 IOR、发光零值和 255 哨兵；覆盖地形与 atlas UV 的物品、纹理动画、资源重载、实时/离线切换。分类通道 G/B 应保持基础层身份，动画分类采用当前帧；缺图遵循全局缺省和已有宿主源规则。高度解码与自动 foliage 材质选择的支持边界见 [材质契约](docs/materials.md)。
@@ -629,7 +629,7 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked omm_tests -- -
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_omm_exact_shared_edge_diagnostic -- --ignored --nocapture --test-threads=1
 ```
 
-游戏由用户按前文两版 `runClient` 命令手动执行。在“Prime 渲染设置 → 渲染”切换 OMM，覆盖树叶、十字草/花、完整 sprite 的旋转/镜像与 1/2/4 tile 重复、非 POT 高分辨率资源包和完整动画。裁切、斜向 UV、特殊顶点 alpha、双侧不同孔洞另检查 shader unknown 退路，确认没有随区块烘焙新模板；观察从两侧的孔洞、主命中深度/法线、太阳/局部光阴影、大气遮挡。覆盖静态编辑、区块卸载/重入、F3+T、冻结时切换 OMM、恢复实时及退出/重进；查设备日志 `OMM enabled` 和 native diagnostics `omm_capable/omm_enabled`，不能仅依据开关已选中认定实际使用。
+游戏由用户按前文两版 `runClient` 命令手动执行。在“视频设置 → Prime PT · 诊断 · 实时视图”切换 OMM，覆盖树叶、十字草/花、完整 sprite 的旋转/镜像与 1/2/4 tile 重复、非 POT 高分辨率资源包和完整动画。裁切、斜向 UV、特殊顶点 alpha、双侧不同孔洞另检查 shader unknown 退路，确认没有随区块烘焙新模板；观察从两侧的孔洞、主命中深度/法线、太阳/局部光阴影、大气遮挡。覆盖静态编辑、区块卸载/重入、F3+T、冻结时切换 OMM、恢复实时及退出/重进；查设备日志 `OMM enabled` 和 native diagnostics `omm_capable/omm_enabled`，不能仅依据开关已选中认定实际使用。
 
 性能比较关闭 validation，固定原生1920×1080、相机/seed/预算，分别记录开/关的稳态 CPU/GPU 帧时与更新尾延迟。记录 `omm_template_ms/omm_bind_ms/omm_resource_record_ms` 与 `omm_template_preparations/omm_bound_primitives`；同一覆盖资源代次内，移动、区块卸载/重入和设置切换不应增加模板准备或 `omm_resource_builds`。后者是当前 scene resource owner 的累计非空 GPU 构建数，owner 重建后重计，不能只根据 scene epoch 将变化归为真实资源重载。
 

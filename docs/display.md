@@ -10,6 +10,8 @@ Offline 的 FP32 在线均值留在原累积 buffer；曝光和显示直接借�
 
 最终显示先将线性 BT.709 转 working（仅 RR），然后把手动曝光和设备端自动曝光各乘一次，再执行 primeDRT。SDR 与 HDR 分别使用自己的 headroom 参数。SDR 输出为编码 sRGB 的 RGBA8；HDR world 是 primeDRT 输出的 extended-sRGB 编码 FP16，后续呈现 pass 才做 EOTF 和 scRGB 单位换算。不能把已经编码、剪裁的 RGBA8 当作 HDR 或曝光输入。
 
+primeDRT 色相补偿默认75%，饱和度补偿默认20%，后者仍允许0–50%。默认值只用于缺少配置、整份配置回退或显式恢复默认；当前schema中的合法保存值（包括历史8%）继续按原值显示。显示控件位于视频设置顶部的 Prime PT 显示组，RR与OMM开关位于诊断组；位置变化不改变线性输入、测光或累积合同。
+
 ## 星图
 
 固定资产为 NASA SVS Deep Star Maps 2020 的 16384×8192 ICRF/J2000 星图，赤经 0h 居中且向左递增。源 EXR 没有声明 primaries/white point；沿旧 Prime 的线性 sRGB 解释，离线转换一次到 D65 线性 Rec.2020，再编码为 BC6H_UFLOAT。当前压缩资产已经是 working 辐射亮度，shader 不再转换。15 个 mip 层按球面 texel 立体角在线性域平均，没有预乘曝光或 tone map。来源、哈希、编码器及独立许可/credit 见[资产 manifest](../crates/prime-vulkan/assets/starmap/starmap_2020_16k.json)和[NASA 声明](../licenses/NASA-DEEP-STAR-MAPS-2020-NOTICE.md)。

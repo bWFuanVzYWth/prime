@@ -2,7 +2,13 @@ package dev.primept.capture;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.primept.PrimeClient;
-import dev.primept.PrimeSettingsScreen;
+import dev.primept.PrimeVideoOptions;
+import com.mojang.blaze3d.platform.Window;
+import net.minecraft.client.renderer.GpuWarnlistManager;
+import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
+import net.minecraft.client.gui.components.AbstractSliderButton;
+import net.minecraft.client.gui.components.CycleButton;
+import net.minecraft.client.OptionInstance;
 import dev.primept.render.OfflineMode;
 import dev.primept.settings.RenderSettings;
 import java.lang.reflect.Field;
@@ -40,11 +46,13 @@ import sun.misc.Unsafe;
 public final class SettingsCpuSmoke {
     // CPU fixture replaces only the native key-state query; production key routing remains intact.
     public static boolean inputProbe;
+    public static boolean windowProbe;
     public static int pressedAlt;
     static void run() throws Exception {
         for (String name : List.of("net.minecraft.client.Minecraft",
                                    "net.minecraft.client.gui.screens.options.OptionsScreen",
                                    "net.minecraft.client.gui.screens.options.OptionsSubScreen",
+                                   "net.minecraft.client.gui.screens.options.VideoSettingsScreen",
                                    "net.minecraft.client.renderer.LevelRenderer"))
             Class.forName(name, false, SettingsCpuSmoke.class.getClassLoader());
         var unsafe = (Unsafe)field(Unsafe.class, "theUnsafe").get(null);
@@ -79,12 +87,12 @@ public final class SettingsCpuSmoke {
             hand.setAccessible(true);
             hand.invoke(renderer, null, 0f, null);
             for (var control : RenderSettings.Control.values())
-                if (PrimeSettingsScreen.control(control).get() != control.initial)
+                if (PrimeVideoOptions.control(control).get() != control.initial)
                     throw new AssertionError("Default option " + control);
             offline.reset();
             inputAndSettings(unsafe, offline);
             System.out.println(
-                    "PRIME_SETTINGS_CPU_SMOKE_OK: Fabric-owned en/zh resources, root options entry/callback/resize, localized label widths, real version key routing, modifiers, frozen extraction/hand cancellation, repeated reset/scroll/resize");
+                    "PRIME_SETTINGS_CPU_SMOKE_OK: Fabric-owned en/zh resources, embedded video options before vanilla, toggle/slider types and full widths, diagnostics placement, single DLSS caption, callback/resize, localized label widths, real version key routing, modifiers, frozen extraction/hand cancellation, repeated reset/scroll/resize");
         } finally {
             offline.reset();
             if (previous == null)
@@ -107,6 +115,21 @@ public final class SettingsCpuSmoke {
         try {
             instance.set(null, minecraft);
             inputProbe = true;
+            windowProbe = true;
+            var window = (Window)unsafe.allocateInstance(Window.class);
+            window.setWidth(1920);
+            window.setHeight(1080);
+            field(Window.class, "preferredFullscreenVideoMode")
+                    .set(window, java.util.Optional.empty());
+            field(Minecraft.class, "window").set(minecraft, window);
+            field(Minecraft.class, "gpuWarnlistManager").set(minecraft, new GpuWarnlistManager());
+            var optionsDirectory = Files.createTempDirectory("primept-video-settings");
+            field(Minecraft.class, "options")
+                    .set(minecraft, new Options(minecraft, optionsDirectory.toFile()));
+            minecraft.options.graphicsPreset().set(net.minecraft.client.GraphicsPreset.CUSTOM);
+            field(Minecraft.class, "gui")
+                    .set(minecraft, unsafe.allocateInstance(ScreenRouter.class));
+            field(Minecraft.class, "running").setBoolean(minecraft, true);
             var f2 = InputConstants.getKey("key.keyboard.f2");
             var escape = InputConstants.getKey("key.keyboard.escape");
             pressedAlt = 0;
@@ -132,10 +155,10 @@ public final class SettingsCpuSmoke {
             PrimeClient.restoreSettings();
             minecraft.level = null;
             check(!PrimeClient.offlineShortcut(f2, true), "No scene to freeze on the title screen");
-            settingsRebuild();
             localizedSettings(unsafe, minecraft);
         } finally {
             inputProbe = false;
+            windowProbe = false;
             pressedAlt = 0;
             instance.set(null, previous);
             offline.reset();
@@ -192,41 +215,44 @@ public final class SettingsCpuSmoke {
                         return previous.getVisualOrder(text);
                     }
                 });
+                settingsRebuild();
                 for (boolean inWorld : List.of(false, true)) {
+                    minecraft.level =
+                            inWorld ? (ClientLevel)unsafe.allocateInstance(ClientLevel.class)
+                                    : null;
                     var root = new OptionsScreen(null, minecraft.options, inWorld);
                     root.width = 480;
                     root.height = 270;
                     rebuild.invoke(root);
-                    for (int[] size : new int[][] {{480, 270}, {320, 240}, {641, 361}}) {
-                        root.resize(size[0], size[1]);
-                        var buttons = root.children()
-                                              .stream()
-                                              .filter(Button.class ::isInstance)
-                                              .map(Button.class ::cast)
-                                              .toList();
-                        var entries =
-                                buttons.stream()
+                    var buttons = root.children()
+                                          .stream()
+                                          .filter(Button.class ::isInstance)
+                                          .map(Button.class ::cast)
+                                          .toList();
+                    check(buttons.stream().noneMatch(
+                                  button
+                                  -> button.getMessage().getString().equals(
+                                          translations.get("primept.settings.title"))),
+                          "The old separate Prime entry is removed");
+                    var video = buttons.stream()
                                         .filter(button
                                                 -> button.getMessage().getString().equals(
-                                                        translations.get("primept.settings.title")))
+                                                        Component.translatable("options.video")
+                                                                .getString()))
                                         .toList();
-                        check(entries.size() == 1, "Exactly one translated Prime root entry");
-                        var entry = entries.getFirst();
-                        check(entry.getX() >= 0 && entry.getRight() <= root.width &&
-                                      entry.getY() >= 0 && entry.getBottom() <= root.height,
-                              "Root entry must remain on screen at each GUI scale");
-                        for (var other : buttons)
-                            if (other != entry)
-                                check(entry.getRight() <= other.getX() ||
-                                              other.getRight() <= entry.getX() ||
-                                              entry.getBottom() <= other.getY() ||
-                                              other.getBottom() <= entry.getY(),
-                                      "Root entry overlaps " + other.getMessage().getString());
-                        entry.onPress(null);
-                        check(router.selected instanceof PrimeSettingsScreen &&
-                                      field(OptionsSubScreen.class, "lastScreen")
-                                                      .get(router.selected) == root,
-                              "Root button opens Prime and retains the return destination");
+                    check(video.size() == 1, "One vanilla Video Settings entry remains");
+                    video.getFirst().onPress(null);
+                    check(router.selected instanceof VideoSettingsScreen &&
+                                  field(OptionsSubScreen.class, "lastScreen")
+                                                  .get(router.selected) == root,
+                          "Vanilla entry opens the integrated Video Settings and retains its parent");
+                    var screen = (VideoSettingsScreen)router.selected;
+                    screen.width = 480;
+                    screen.height = 270;
+                    rebuild.invoke(screen);
+                    for (int[] size : new int[][] {{480, 270}, {320, 240}, {641, 361}}) {
+                        screen.resize(size[0], size[1]);
+                        assertVideoGroups(screen);
                     }
                 }
                 for (int bound = 0; bound < 3; bound++) {
@@ -241,13 +267,13 @@ public final class SettingsCpuSmoke {
                                                                        : control.initial);
                     }
                     PrimeClient.updateSettings(settings);
-                    var screen = new PrimeSettingsScreen(null);
+                    var screen = new VideoSettingsScreen(null, Minecraft.getInstance(),
+                                                         Minecraft.getInstance().options);
                     screen.width = 480;
                     screen.height = 270;
                     rebuild.invoke(screen);
-                    check(screen.getTitle().getString().equals(
-                                  translations.get("primept.settings.title")),
-                          "Settings title must resolve in " + locale);
+                    assertVideoGroups(screen);
+                    var owner = videoOptions(screen);
                     var list = (OptionsList)screen.children()
                                        .stream()
                                        .filter(OptionsList.class ::isInstance)
@@ -255,8 +281,8 @@ public final class SettingsCpuSmoke {
                                        .orElseThrow();
                     var controls = (java.util.EnumMap<RenderSettings.Control,
                                                       net.minecraft.client.OptionInstance<Integer>>)
-                                           field(PrimeSettingsScreen.class, "controls")
-                                                   .get(screen);
+                                           field(PrimeVideoOptions.class, "controls")
+                                                   .get(owner);
                     for (var control : RenderSettings.Control.values())
                         check(controls.get(control).get() == settings.value(control),
                               "Each translated control preserves the actual configured bound: " +
@@ -267,17 +293,41 @@ public final class SettingsCpuSmoke {
                                   settings.value(RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME),
                           "Terrain batch slider preserves each configured bound");
                     var opacityMicromap = (net.minecraft.client.OptionInstance<Boolean>)field(
-                                                  PrimeSettingsScreen.class, "opacityMicromap")
-                                                  .get(screen);
+                                                  PrimeVideoOptions.class, "opacityMicromap")
+                                                  .get(owner);
                     check(opacityMicromap.get(), "OMM default must be enabled");
                     var rayReconstruction = (net.minecraft.client.OptionInstance<Boolean>)field(
-                                                    PrimeSettingsScreen.class, "rayReconstruction")
-                                                    .get(screen);
+                                                    PrimeVideoOptions.class, "rayReconstruction")
+                                                    .get(owner);
                     var dlssQuality =
                             (net.minecraft.client.OptionInstance<RenderSettings.DlssQuality>)field(
-                                    PrimeSettingsScreen.class, "dlssQuality")
-                                    .get(screen);
+                                    PrimeVideoOptions.class, "dlssQuality")
+                                    .get(owner);
                     check(rayReconstruction.get(), "RR default must be enabled");
+                    check(list.findOption(opacityMicromap) instanceof CycleButton<?> &&
+                                  list.findOption(rayReconstruction) instanceof CycleButton<?>,
+                          "Diagnostic booleans use toggle buttons");
+                    for (var control : RenderSettings.Control.values()) {
+                        var widget = list.findOption(controls.get(control));
+                        boolean toggle = control == RenderSettings.Control.HDR ||
+                                         control == RenderSettings.Control.FRAME_GENERATION;
+                        check(toggle ? widget instanceof CycleButton<?>
+                                     : widget instanceof AbstractSliderButton,
+                              "Toggle/slider widget type " + control);
+                        check(widget.getWidth() == list.getRowWidth(),
+                              "Full-width numeric/toggle option " + control);
+                    }
+                    var qualityButton =
+                            (CycleButton<RenderSettings.DlssQuality>)list.findOption(dlssQuality);
+                    String caption = translations.get("primept.settings.dlss_quality");
+                    for (var quality : RenderSettings.DlssQuality.values()) {
+                        qualityButton.setValue(quality);
+                        String message = qualityButton.getMessage().getString();
+                        check(message.indexOf(caption) >= 0 &&
+                                      message.indexOf(caption) == message.lastIndexOf(caption),
+                              "DLSS caption occurs exactly once: " + message);
+                    }
+                    qualityButton.setValue(dlssQuality.get());
                     check(dlssQuality.get() == RenderSettings.DlssQuality.PERFORMANCE,
                           "DLSS default must be 2x Performance");
                     var offline = (OfflineMode)field(PrimeClient.class, "offline")
@@ -366,7 +416,28 @@ public final class SettingsCpuSmoke {
                         running.setBoolean(minecraft, previousRunning);
                     }
                     offline.reset();
-                    for (Object row : list.children())
+                    // Actual coded-boolean buttons dispatch into the persisted settings.
+                    running.setBoolean(minecraft, true);
+                    try {
+                        for (var control : List.of(RenderSettings.Control.HDR,
+                                                   RenderSettings.Control.FRAME_GENERATION)) {
+                            var option = controls.get(control);
+                            var button = (CycleButton<Integer>)list.findOption(option);
+                            button.setValue(option.get());
+                            int next = option.get() == 0 ? 1 : 0;
+                            button.onPress(new net.minecraft.client.input.KeyEvent(
+                                    InputConstants.KEY_RETURN, 0, 0));
+                            check(option.get() == next &&
+                                          PrimeClient.settings().value(control) == next,
+                                  "Clicking the boolean button toggles the actual setting " +
+                                          control);
+                            option.set(settings.value(control));
+                            button.setValue(option.get());
+                        }
+                    } finally {
+                        running.setBoolean(minecraft, previousRunning);
+                    }
+                    for (Object row : list.children().subList(0, firstVanillaRow(list)))
                         if (row instanceof ContainerEventHandler container)
                             for (var child : container.children())
                                 if (child instanceof AbstractWidget widget) {
@@ -405,7 +476,8 @@ public final class SettingsCpuSmoke {
     }
 
     private static void settingsRebuild() throws Exception {
-        var screen = new PrimeSettingsScreen(null);
+        var screen = new VideoSettingsScreen(null, Minecraft.getInstance(),
+                                             Minecraft.getInstance().options);
         screen.width = 640;
         screen.height = 240;
         var rebuild = Screen.class.getDeclaredMethod("rebuildWidgets");
@@ -421,6 +493,7 @@ public final class SettingsCpuSmoke {
             int[] layoutWidgets = {0};
             screen.layout.visitWidgets(widget -> ++layoutWidgets[0]);
             check(layoutWidgets[0] == initialWidgets, "Layout must release obsolete widgets");
+            assertVideoGroups(screen);
             var list = (OptionsList)lists.getFirst();
             list.setScrollAmount(0);
             var firstEntry = (LayoutElement)list.children().getFirst();
@@ -433,11 +506,96 @@ public final class SettingsCpuSmoke {
                   "Resize preserves one set of controls");
             PrimeClient.updateSettings(
                     PrimeClient.settings().with(RenderSettings.Control.EXPOSURE_EV, 8));
+            var vanillaOption = Minecraft.getInstance().options.simulationDistance();
+            var vanillaRange = (OptionInstance.IntRange)vanillaOption.values();
+            var vanillaSlider = (AbstractSliderButton)list.findOption(vanillaOption);
+            int previousVanilla = vanillaOption.get();
+            int nextVanilla =
+                    round % 2 == 0 ? vanillaRange.maxInclusive() : vanillaRange.minInclusive();
+            var setValue = AbstractSliderButton.class.getDeclaredMethod("setValue", double.class);
+            setValue.setAccessible(true);
+            setValue.invoke(vanillaSlider, round % 2 == 0 ? 1.0 : 0.0);
+            check(previousVanilla != nextVanilla && vanillaOption.get() == previousVanilla &&
+                          field(vanillaSlider.getClass(), "delayedApplyAt").get(vanillaSlider) !=
+                                  null,
+                  "Vanilla slider adjustment is pending before reset");
             var reset = (Button)((ContainerEventHandler)firstEntry).children().getFirst();
             reset.onPress(null);
+            check(vanillaOption.get() == nextVanilla,
+                  "Prime reset commits pending vanilla slider changes before rebuilding");
             check(PrimeClient.settings().equals(RenderSettings.defaults()),
                   "Reset action restores defaults");
+            check(PrimeClient.settings().value(RenderSettings.Control.SATURATION) == 20,
+                  "Reset restores 20% saturation");
+            assertVideoGroups(screen);
         }
+    }
+
+    private static PrimeVideoOptions videoOptions(VideoSettingsScreen screen) throws Exception {
+        for (var member : VideoSettingsScreen.class.getDeclaredFields())
+            if (member.getType() == PrimeVideoOptions.class) {
+                member.setAccessible(true);
+                return (PrimeVideoOptions)member.get(screen);
+            }
+        throw new AssertionError("Actual Video Settings mixin must own Prime options");
+    }
+
+    private static int firstVanillaRow(OptionsList list) {
+        for (int i = 0; i < list.children().size(); ++i) {
+            Object row = list.children().get(i);
+            if (row.getClass().getSimpleName().equals("HeaderEntry")) {
+                var widget = (AbstractWidget)((ContainerEventHandler)row).children().getFirst();
+                if (!widget.getMessage().getString().startsWith("Prime PT"))
+                    return i;
+            }
+        }
+        throw new AssertionError("Vanilla video groups must remain after Prime options");
+    }
+
+    private static void assertVideoGroups(VideoSettingsScreen screen) throws Exception {
+        var lists = screen.children().stream().filter(OptionsList.class ::isInstance).toList();
+        check(lists.size() == 1, "One shared vanilla/Prime video list");
+        var list = (OptionsList)lists.getFirst();
+        var headers =
+                ((List<?>)list.children())
+                        .stream()
+                        .filter(row -> row.getClass().getSimpleName().equals("HeaderEntry"))
+                        .map(row
+                             -> ((AbstractWidget)((ContainerEventHandler)row).children().getFirst())
+                                        .getMessage()
+                                        .getString())
+                        .toList();
+        check(headers.size() == 7, "Four Prime groups and three vanilla groups: " + headers);
+        for (int i = 0; i < 4; ++i) {
+            String group = List.of("render", "lighting", "display", "diagnostics").get(i);
+            check(headers.get(i).equals(
+                          Component.translatable("primept.settings." + group).getString()) &&
+                          headers.get(i).startsWith("Prime PT"),
+                  "Prime groups precede vanilla with their prefix: " + headers);
+        }
+        int vanilla = firstVanillaRow(list);
+        var owner = videoOptions(screen);
+        var omm = (OptionInstance<?>)field(PrimeVideoOptions.class, "opacityMicromap").get(owner);
+        var rr = (OptionInstance<?>)field(PrimeVideoOptions.class, "rayReconstruction").get(owner);
+        boolean diagnostics = false;
+        for (int i = 0; i < vanilla; ++i) {
+            Object row = list.children().get(i);
+            if (row.getClass().getSimpleName().equals("HeaderEntry"))
+                diagnostics = ((AbstractWidget)((ContainerEventHandler)row).children().getFirst())
+                                      .getMessage()
+                                      .getString()
+                                      .equals(Component.translatable("primept.settings.diagnostics")
+                                                      .getString());
+            if (((ContainerEventHandler)row).children().contains(list.findOption(omm)) ||
+                ((ContainerEventHandler)row).children().contains(list.findOption(rr)))
+                check(diagnostics, "RR and OMM belong only to the diagnostics group");
+        }
+        check(list.findOption(Minecraft.getInstance().options.renderDistance()) != null,
+              "Vanilla render-distance option remains present");
+        int[] layoutWidgets = {0};
+        screen.layout.visitWidgets(widget -> ++layoutWidgets[0]);
+        check(layoutWidgets[0] == screen.children().size(),
+              "Video layouts do not retain obsolete widget copies");
     }
 
     private static Font fixtureFont() {

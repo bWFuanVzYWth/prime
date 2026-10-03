@@ -13,57 +13,63 @@ import net.minecraft.client.OptionInstance;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.options.OptionsSubScreen;
+import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.network.chat.Component;
 
-/** Version-owned widgets; persistence and the wire contract have no Minecraft dependency. */
-public final class PrimeSettingsScreen extends OptionsSubScreen {
+/** Live Prime controls embedded in the host Video Settings list. */
+public final class PrimeVideoOptions {
+    private final OptionsList list;
+    private final Runnable rebuildScreen;
     private final EnumMap<Control, OptionInstance<Integer>> controls = new EnumMap<>(Control.class);
     private OptionInstance<Boolean> enabled, offline, opacityMicromap, rayReconstruction;
     private OptionInstance<View> view;
     private OptionInstance<DlssQuality> dlssQuality;
-    public PrimeSettingsScreen(Screen parent) {
-        super(parent, Minecraft.getInstance().options,
-              Component.translatable("primept.settings.title"));
+    private PrimeVideoOptions(OptionsList list, Runnable rebuildScreen) {
+        this.list = list;
+        this.rebuildScreen = rebuildScreen;
     }
+
+    /** Append once before vanilla options; each host rebuild creates a fresh option owner. */
+    public static PrimeVideoOptions addTo(OptionsList list, Runnable rebuildScreen) {
+        var options = new PrimeVideoOptions(list, rebuildScreen);
+        options.addOptions();
+        return options;
+    }
+
     public static OptionInstance<Integer> control(Control control) {
         String key = "primept.settings." + control.key;
+        boolean toggle = control == Control.HDR || control == Control.FRAME_GENERATION;
         return new OptionInstance<>(
                 key, OptionInstance.cachedConstantTooltip(Component.translatable(key + ".tooltip")),
                 (caption, value)
-                        -> Options.genericValueLabel(caption, Component.literal(switch (control) {
-                    case SUN_EV, SKY_EV, EXPOSURE_EV ->
-                        String.format(Locale.ROOT, "%+.2f EV", value / 4.0);
-                    case LATITUDE, SOLAR_LONGITUDE -> value + "°";
-                    case HUE, SATURATION, STARS, AUTO_EXPOSURE -> value + "%";
-                    case HDR, FRAME_GENERATION ->
-                        Component.translatable(value == 0 ? "options.off" : "options.on")
-                                .getString();
-                    case HDR_WHITE ->
-                        value == 0
-                                ? Component.translatable("primept.settings.automatic").getString()
-                                : value + " nit";
-                    default -> Integer.toString(value);
-                })),
-                new OptionInstance.IntRange(control.minimum, control.maximum),
+                        -> {
+                    if (toggle)
+                        return Component.translatable(value == 0 ? "options.off" : "options.on");
+                    String formatted = switch (control) {
+                        case SUN_EV, SKY_EV, EXPOSURE_EV ->
+                            String.format(Locale.ROOT, "%+.2f EV", value / 4.0);
+                        case LATITUDE, SOLAR_LONGITUDE -> value + "°";
+                        case HUE, SATURATION, STARS, AUTO_EXPOSURE -> value + "%";
+                        case HDR_WHITE ->
+                            value == 0 ? Component.translatable("primept.settings.automatic")
+                                                 .getString()
+                                       : value + " nit";
+                        default -> Integer.toString(value);
+                    };
+                    return Options.genericValueLabel(caption, Component.literal(formatted));
+                },
+                toggle ? new OptionInstance.Enum<>(List.of(0, 1), Codec.INT)
+                       : new OptionInstance.IntRange(control.minimum, control.maximum),
                 PrimeClient.settings().value(control),
                 value -> PrimeClient.updateSettings(PrimeClient.settings().with(control, value)));
     }
-    @Override
-    protected void init() {
-        // Screen.rebuildWidgets clears its registries, but OptionsSubScreen retains this layout.
-        layout.removeChildren();
-        super.init();
-    }
-    @Override
-    protected void addOptions() {
-        controls.clear();
+    private void addOptions() {
         for (var control : Control.values())
             controls.put(control, control(control));
         list.addBig(Button.builder(Component.translatable("primept.settings.reset"), button -> {
+                              list.applyUnsavedChanges();
                               PrimeClient.restoreSettings();
-                              rebuildWidgets();
+                              rebuildScreen.run();
                           }).build());
         list.addHeader(Component.translatable("primept.settings.render"));
         enabled = OptionInstance.createBoolean(
@@ -77,7 +83,8 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                 OptionInstance.cachedConstantTooltip(
                         Component.translatable("primept.settings.offline.tooltip")),
                 PrimeClient.offlineRequested(), PrimeClient::requestOffline);
-        list.addSmall(enabled, offline);
+        list.addBig(enabled);
+        list.addBig(offline);
         opacityMicromap = OptionInstance.createBoolean(
                 "primept.settings.opacity_micromap",
                 OptionInstance.cachedConstantTooltip(
@@ -85,7 +92,6 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                 PrimeClient.settings().opacityMicromap(),
                 value
                 -> PrimeClient.updateSettings(PrimeClient.settings().withOpacityMicromap(value)));
-        list.addBig(opacityMicromap);
         rayReconstruction = OptionInstance.createBoolean(
                 "primept.settings.ray_reconstruction",
                 OptionInstance.cachedConstantTooltip(
@@ -93,16 +99,13 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                 PrimeClient.settings().rayReconstruction(),
                 value
                 -> PrimeClient.updateSettings(PrimeClient.settings().withRayReconstruction(value)));
-        list.addBig(rayReconstruction);
         dlssQuality = new OptionInstance<>(
                 "primept.settings.dlss_quality",
                 OptionInstance.cachedConstantTooltip(
                         Component.translatable("primept.settings.dlss_quality.tooltip")),
                 (caption, value)
-                        -> Options.genericValueLabel(
-                                caption,
-                                Component.translatable("primept.settings.dlss_quality." +
-                                                       value.name().toLowerCase(Locale.ROOT))),
+                        -> Component.translatable("primept.settings.dlss_quality." +
+                                                  value.name().toLowerCase(Locale.ROOT)),
                 new OptionInstance.Enum<>(
                         List.of(DlssQuality.values()),
                         Codec.STRING.xmap(DlssQuality::valueOf, DlssQuality::name)),
@@ -110,18 +113,25 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                 value -> PrimeClient.updateSettings(PrimeClient.settings().withDlssQuality(value)));
         list.addBig(dlssQuality);
         list.addBig(controls.get(Control.FRAME_GENERATION));
-        list.addSmall(controls.get(Control.BOUNCES), controls.get(Control.OFFLINE_SAMPLES));
+        list.addBig(controls.get(Control.BOUNCES));
+        list.addBig(controls.get(Control.OFFLINE_SAMPLES));
         list.addBig(controls.get(Control.TERRAIN_BATCHES_PER_FRAME));
         list.addHeader(Component.translatable("primept.settings.lighting"));
-        list.addSmall(controls.get(Control.SUN_EV), controls.get(Control.SKY_EV));
+        list.addBig(controls.get(Control.SUN_EV));
+        list.addBig(controls.get(Control.SKY_EV));
         list.addBig(controls.get(Control.STARS));
-        list.addSmall(controls.get(Control.LATITUDE), controls.get(Control.SOLAR_LONGITUDE));
+        list.addBig(controls.get(Control.LATITUDE));
+        list.addBig(controls.get(Control.SOLAR_LONGITUDE));
         list.addHeader(Component.translatable("primept.settings.display"));
         list.addBig(controls.get(Control.EXPOSURE_EV));
         list.addBig(controls.get(Control.AUTO_EXPOSURE));
-        list.addSmall(controls.get(Control.HDR), controls.get(Control.HDR_WHITE));
-        list.addSmall(controls.get(Control.HUE), controls.get(Control.SATURATION));
+        list.addBig(controls.get(Control.HDR));
+        list.addBig(controls.get(Control.HDR_WHITE));
+        list.addBig(controls.get(Control.HUE));
+        list.addBig(controls.get(Control.SATURATION));
         list.addHeader(Component.translatable("primept.settings.diagnostics"));
+        list.addBig(opacityMicromap);
+        list.addBig(rayReconstruction);
         view = new OptionInstance<>(
                 "primept.settings.view",
                 OptionInstance.cachedConstantTooltip(
@@ -136,9 +146,7 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
         list.addBig(controls.get(Control.DEPTH_RANGE));
         refresh();
     }
-    @Override
     public void tick() {
-        super.tick();
         if (offline.get() != PrimeClient.offlineRequested()) {
             offline.set(PrimeClient.offlineRequested());
             if (list.findOption(offline) instanceof CycleButton<?> button) {
@@ -167,9 +175,7 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
         list.findOption(view).active = !frozen;
         list.findOption(controls.get(Control.DEPTH_RANGE)).active = !frozen;
     }
-    @Override
     public void removed() {
-        super.removed();
         PrimeClient.saveSettings();
     }
 }

@@ -108,7 +108,7 @@ final class SettingsTest {
         assertEquals(1, PrimeSettings.offline_samples(view(bytes)));
         assertEquals(4.0f, PrimeSettings.exposure(view(bytes)));
         assertEquals(.75f, PrimeSettings.hue(view(bytes)));
-        assertEquals(.08f, PrimeSettings.saturation(view(bytes)));
+        assertEquals(.20f, PrimeSettings.saturation(view(bytes)));
         assertEquals(3, PrimeSettings.view(view(bytes)));
         assertEquals(.5f, PrimeSettings.sun(view(bytes)));
         assertEquals(1f, PrimeSettings.sky(view(bytes)));
@@ -125,6 +125,29 @@ final class SettingsTest {
         assertEquals(0, PrimeSettings.hdr(view(bytes)));
         assertEquals(0, PrimeSettings.hdr_reference_white(view(bytes)));
         assertEquals(0, PrimeSettings.frame_generation(view(bytes)));
+    }
+    @Test
+    void saturationDefaultsPreserveSavedValuesAndIndependentWire(@TempDir Path dir)
+            throws Exception {
+        var control = RenderSettings.Control.SATURATION;
+        var defaults = RenderSettings.defaults();
+        assertEquals(6, RenderSettings.VERSION);
+        assertEquals(20, defaults.value(control));
+        Path file = dir.resolve("primept.properties");
+        assertEquals(20, SettingsFile.load(file).settings().value(control));
+        var before = settingsBuffer();
+        var after = settingsBuffer();
+        defaults.write(before, false, RenderSettings.View.OUTPUT);
+        for (int value : new int[] {0, 8, 20, 50}) {
+            var saved = defaults.with(control, value);
+            SettingsFile.save(file, saved);
+            var loaded = SettingsFile.load(file);
+            assertEquals("", loaded.resetReason());
+            assertEquals(saved, loaded.settings());
+            loaded.settings().write(after, false, RenderSettings.View.OUTPUT);
+            assertEquals(value / 100f, PrimeSettings.saturation(view(after)));
+            assertOnlyFieldChanged(before, after, 28);
+        }
     }
     @Test
     void terrainBatchBudgetDefaultsRangePersistenceAndIndependentWire(@TempDir Path dir) {

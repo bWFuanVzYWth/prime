@@ -897,6 +897,7 @@ mod abi_tests {
                 prime_scene::settings::RenderSettings {
                     // The accepted packet explicitly chooses four, independently of defaults.
                     bounces: 4,
+                    saturation: 0.08,
                     ..Default::default()
                 }
             );

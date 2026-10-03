@@ -319,7 +319,7 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
         offline_samples: 1,
         exposure: 1.0,
         hue: 0.75,
-        saturation: 0.08,
+        saturation: 0.20,
         view: 0,
         sun: 1.0,
         sky: 1.0,
@@ -340,6 +340,11 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap(),
         RenderSettings::default()
+    );
+    settings.saturation = 0.08;
+    assert_eq!(
+        RenderSettings::from_abi(&settings).unwrap().saturation,
+        0.08
     );
     settings.terrain_batches_per_frame = 128;
     let changed = RenderSettings::from_abi(&settings).unwrap();

@@ -63,7 +63,7 @@ impl Default for RenderSettings {
             terrain_batches_per_frame: 8,
             exposure: 1.0,
             hue: 0.75,
-            saturation: 0.08,
+            saturation: 0.20,
             view: DiagnosticView::Output,
             sun: 1.0,
             sky: 1.0,
@@ -256,7 +256,7 @@ mod tests {
             1,
             4_f32.to_bits(),
             0.75_f32.to_bits(),
-            0.08_f32.to_bits(),
+            0.20_f32.to_bits(),
             3,
             0.5_f32.to_bits(),
             1_f32.to_bits(),
@@ -342,6 +342,21 @@ mod tests {
         };
         assert!(old.validate().is_ok());
         assert!(!old.transport_matches(RenderSettings::default()));
+    }
+    #[test]
+    fn saturation_defaults_and_explicit_legacy_wire_values() {
+        let defaults = RenderSettings::default();
+        assert_eq!(defaults.saturation, 0.20);
+        for value in [0.0_f32, 0.08, 0.20, 0.5] {
+            let mut bytes = golden();
+            bytes[24..28].copy_from_slice(&value.to_bits().to_le_bytes());
+            let accepted = RenderSettings::parse(&bytes).unwrap();
+            assert_eq!(accepted.saturation, value);
+            assert!(accepted.transport_matches(RenderSettings {
+                saturation: defaults.saturation,
+                ..accepted
+            }));
+        }
     }
     #[test]
     fn opacity_micromap_defaults_enabled_and_does_not_change_transport() {

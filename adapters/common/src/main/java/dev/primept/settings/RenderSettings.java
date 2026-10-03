@@ -25,7 +25,7 @@ public final class RenderSettings {
         FRAME_GENERATION("render.frame_generation", 0, 1, 0),
         EXPOSURE_EV("display.exposure_ev_quarters", -48, 48, 0),
         HUE("display.hue_percent", 0, 100, 75),
-        SATURATION("display.saturation_percent", 0, 50, 8),
+        SATURATION("display.saturation_percent", 0, 50, 20),
         DEPTH_RANGE("diagnostics.depth_range", 1, 4096, 128);
 
         public final String key;
