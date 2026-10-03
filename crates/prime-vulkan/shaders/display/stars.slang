@@ -18,11 +18,14 @@ struct StarsParameters {
     uint2 reserved;
 };
 [[vk::push_constant]] ConstantBuffer<StarsParameters> parameters;
-float3 direction(float2 uv) {
+float3 perspectiveRay(float2 uv) {
     float2 screen = uv * 2.0 - 1.0;
-    return normalize(parameters.forward.xyz +
-                     parameters.right.xyz * (screen.x * parameters.forward.w * parameters.right.w) -
-                     parameters.up.xyz * (screen.y * parameters.forward.w));
+    return parameters.forward.xyz +
+           parameters.right.xyz * (screen.x * parameters.forward.w * parameters.right.w) -
+           parameters.up.xyz * (screen.y * parameters.forward.w);
+}
+float3 direction(float2 uv) {
+    return normalize(perspectiveRay(uv));
 }
 [numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (any(id.xy >= parameters.dimensions.xy))
@@ -54,7 +57,16 @@ float3 direction(float2 uv) {
             primeStarmapUv(frame, direction(uv + float2(0, 0.5 / parameters.dimensions.y))),
             primeStarmapUv(frame, direction(uv - float2(0, 0.5 / parameters.dimensions.y))));
     PrimeStarmapFootprint footprint = primeStarmapFootprint(dx, dy, float2(16384, 8192));
-    float3 stars = primeSampleStarmap(starmap, starUv, footprint);
+    float3 rayStepX = parameters.right.xyz *
+                      (2.0 * parameters.forward.w * parameters.right.w / parameters.dimensions.x);
+    float3 rayStepY = parameters.up.xyz * (-2.0 * parameters.forward.w / parameters.dimensions.y);
+    float3 pixelRay = perspectiveRay(uv);
+    float polarLod = primeStarmapPolarLod(frame, pixelRay, rayStepX, rayStepY, footprint.lod, 8192);
+    float3 stars;
+    if (polarLod >= 0)
+        stars = primeSampleStarmapPolar(starmap, frame, pixelRay, rayStepX, rayStepY, polarLod);
+    else
+        stars = primeSampleStarmap(starmap, starUv, footprint);
     float coordinate = (0.5 + 0.5 * sign(ray.y) * sqrt(abs(clamp(ray.y, -1.0, 1.0)))) * 8192.0;
     int first = int(coordinate);
     float3 transmittance =

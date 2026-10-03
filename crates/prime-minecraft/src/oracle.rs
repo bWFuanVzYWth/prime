@@ -17,6 +17,25 @@ struct ObservedTriangle {
     texture: u32,
     flags: u32,
 }
+fn secondary_triangles(face: &prime_scene::surface::SurfaceFace) -> Option<[Triangle; 2]> {
+    let detail = face.detail.as_ref()?;
+    let mut q = face.geometry;
+    q.colors = detail.layer.colors;
+    q.uvs = detail.layer.uvs;
+    q.texture_id = detail.layer.texture_id;
+    q.flags = detail.layer.flags;
+    let mut triangles = [q.triangle(0), q.triangle(1)];
+    // Bilateral is the material on the opposite side of the physical sheet. Its source
+    // winding is reversed even though storage and shader interpolation share base corners.
+    if detail.mode == prime_scene::surface::LayerMode::Bilateral {
+        for t in &mut triangles {
+            t.positions.swap(1, 2);
+            t.uvs.swap(1, 2);
+            t.colors.swap(1, 2);
+        }
+    }
+    Some(triangles)
+}
 fn triangles(scene: &SourceScene) -> Vec<ObservedTriangle> {
     triangles_at(scene, [0.; 3])
 }
@@ -27,13 +46,8 @@ fn triangles_at(scene: &SourceScene, anchor: [f64; 3]) -> Vec<ObservedTriangle> 
         let mut observed: Vec<_> = mesh.triangles.iter().collect();
         if let prime_scene::geometry::MeshGeometry::Surfaces(surface) = &mesh.triangles {
             for face in &surface.quads {
-                if let Some(detail) = &face.detail {
-                    let mut q = face.geometry;
-                    q.colors = detail.layer.colors;
-                    q.uvs = detail.layer.uvs;
-                    q.texture_id = detail.layer.texture_id;
-                    q.flags = detail.layer.flags;
-                    observed.extend([q.triangle(0), q.triangle(1)]);
+                if let Some(triangles) = secondary_triangles(face) {
+                    observed.extend(triangles);
                 }
             }
         }
@@ -99,6 +113,137 @@ fn compare(a: &[f64], b: &[f64]) -> std::cmp::Ordering {
         .unwrap_or(std::cmp::Ordering::Equal)
 }
 const ABS_TOLERANCE: f64 = 0.000005;
+
+/// Only the two controlled ice boundary fixtures use this proof: every face is one unit
+/// square, with affine UV/color fields. Complementary triangles can use either diagonal.
+/// Signed planes, exact coverage, multiplicity and both material sides remain observable.
+fn affine_unit_faces_difference(
+    expected: &[ObservedTriangle],
+    actual: &[ObservedTriangle],
+) -> Result<(), String> {
+    if expected.len() != actual.len() {
+        return Err(format!(
+            "unit-face triangle count original={} native={}",
+            expected.len(),
+            actual.len()
+        ));
+    }
+    type Key = ([i32; 4], u32, u32);
+    type Fields = [[f64; 6]; 4];
+    #[derive(Default)]
+    struct Face {
+        triangles: Vec<u8>,
+        corners: [Option<[f64; 6]>; 4],
+    }
+    fn faces(
+        triangles: &[ObservedTriangle],
+    ) -> Result<std::collections::BTreeMap<Key, Fields>, String> {
+        let mut faces = std::collections::BTreeMap::<Key, Face>::new();
+        for t in triangles {
+            if t.positions.iter().flatten().any(|&p| {
+                !p.is_finite()
+                    || p != p.round()
+                    || p < f64::from(i32::MIN)
+                    || p > f64::from(i32::MAX)
+            }) {
+                return Err("unit-face position is not an exact integer".into());
+            }
+            let axis = (0..3)
+                .find(|&a| t.positions.iter().all(|p| p[a] == t.positions[0][a]))
+                .ok_or("unit-face triangle is not axis aligned")?;
+            let [u, v] = [(axis + 1) % 3, (axis + 2) % 3];
+            let lo: [f64; 2] = [u, v].map(|a| {
+                t.positions
+                    .iter()
+                    .map(|p| p[a])
+                    .fold(f64::INFINITY, f64::min)
+            });
+            let corners = t.positions.map(|p| [p[u] - lo[0], p[v] - lo[1]]);
+            if corners.iter().flatten().any(|&x| x != 0. && x != 1.) {
+                return Err("unit-face triangle is not a unit square partition".into());
+            }
+            let indices = corners.map(|[u, v]| u as usize + 2 * v as usize);
+            let mask = indices.iter().fold(0_u8, |m, &i| m | (1 << i));
+            if mask.count_ones() != 3 {
+                return Err("unit-face triangle is degenerate".into());
+            }
+            let determinant = (corners[1][0] - corners[0][0]) * (corners[2][1] - corners[0][1])
+                - (corners[1][1] - corners[0][1]) * (corners[2][0] - corners[0][0]);
+            let key = (
+                [
+                    2 * axis as i32 + i32::from(determinant < 0.),
+                    t.positions[0][axis] as i32,
+                    lo[0] as i32,
+                    lo[1] as i32,
+                ],
+                t.texture,
+                t.flags,
+            );
+            let face = faces.entry(key).or_default();
+            face.triangles.push(mask);
+            for (vertex, corner) in indices.into_iter().enumerate() {
+                let fields = [
+                    t.uvs[vertex][0],
+                    t.uvs[vertex][1],
+                    t.colors[vertex][0],
+                    t.colors[vertex][1],
+                    t.colors[vertex][2],
+                    t.colors[vertex][3],
+                ];
+                if fields.iter().any(|v| !v.is_finite()) {
+                    return Err("unit-face attributes are not finite".into());
+                }
+                if let Some(previous) = face.corners[corner]
+                    && previous
+                        .iter()
+                        .zip(fields)
+                        .any(|(a, b)| (a - b).abs() > ABS_TOLERANCE)
+                {
+                    return Err(format!("unit-face inconsistent shared corner: {key:?}"));
+                }
+                face.corners[corner] = Some(fields);
+            }
+        }
+        faces
+            .into_iter()
+            .map(|(key, face)| {
+                let [a, b] = face.triangles.as_slice() else {
+                    return Err(format!("unit-face multiplicity is not two: {key:?}"));
+                };
+                if a | b != 15 || !matches!(a & b, 0b1001 | 0b0110) {
+                    return Err(format!(
+                        "unit-face triangles overlap or leave a hole: {key:?}"
+                    ));
+                }
+                let fields = face.corners.map(Option::unwrap);
+                if (0..6).any(|a| {
+                    (fields[0][a] + fields[3][a] - fields[1][a] - fields[2][a]).abs()
+                        > ABS_TOLERANCE
+                }) {
+                    return Err(format!("unit-face field is not affine: {key:?}"));
+                }
+                Ok((key, fields))
+            })
+            .collect()
+    }
+    let expected = faces(expected)?;
+    let actual = faces(actual)?;
+    if expected.keys().ne(actual.keys()) {
+        return Err("unit-face signed plane, material or coverage differs".into());
+    }
+    for (key, fields) in expected {
+        if fields
+            .iter()
+            .flatten()
+            .zip(actual[&key].iter().flatten())
+            .any(|(a, b)| (a - b).abs() > ABS_TOLERANCE)
+        {
+            return Err(format!("unit-face UV/color field differs: {key:?}"));
+        }
+    }
+    Ok(())
+}
+
 fn difference(expected: &[ObservedTriangle], actual: &[ObservedTriangle]) -> Result<(), String> {
     if expected.len() != actual.len() {
         return Err(format!(
@@ -142,6 +287,9 @@ fn translated_difference(
     expected: &[ObservedTriangle],
     actual: &[ObservedTriangle],
 ) -> Result<(), String> {
+    if matches!(case, "ice_frosted_boundary" | "ice_unculled_model_pair") {
+        return affine_unit_faces_difference(expected, actual);
+    }
     if case == "tint_redstone_power" {
         let mut expected = expected.to_vec();
         for t in &mut expected {
@@ -929,4 +1077,129 @@ fn surface_field_oracle_accepts_subdivision_but_rejects_holes_uv_color_and_exces
     wrong = correct.clone();
     wrong[1].positions[1][0] = 1.1;
     assert!(translated_difference("water", &expected, &wrong).is_err());
+}
+
+#[test]
+fn ice_unit_face_oracle_preserves_winding_multiplicity_and_affine_fields() {
+    fn triangle(corners: [usize; 3], back: bool) -> ObservedTriangle {
+        let points = [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]];
+        ObservedTriangle {
+            positions: corners.map(|i| points[i]),
+            uvs: corners.map(|i| {
+                let [x, y, _] = points[i];
+                [
+                    if back {
+                        0.875 - 0.75 * x
+                    } else {
+                        0.125 + 0.75 * x
+                    },
+                    0.125 + 0.75 * y,
+                ]
+            }),
+            colors: corners.map(|i| {
+                let [x, y, _] = points[i];
+                [0.2 + 0.3 * x, 0.6 - 0.2 * y, 0.8 - 0.1 * x - 0.1 * y, 1.]
+            }),
+            texture: if back { 2 } else { 1 },
+            flags: 2,
+        }
+    }
+    let expected = [
+        triangle([0, 1, 2], false),
+        triangle([2, 3, 0], false),
+        triangle([0, 2, 1], true),
+        triangle([2, 0, 3], true),
+    ];
+    let correct = [
+        triangle([0, 1, 3], false),
+        triangle([1, 2, 3], false),
+        triangle([0, 3, 1], true),
+        triangle([1, 3, 2], true),
+    ];
+    for case in ["ice_frosted_boundary", "ice_unculled_model_pair"] {
+        translated_difference(case, &expected, &correct).unwrap();
+        assert!(difference(&expected, &correct).is_err());
+        assert!(translated_difference(case, &expected, &correct[..2]).is_err());
+        let mut wrong = correct.clone();
+        wrong[3] = wrong[2].clone();
+        assert!(translated_difference(case, &expected, &wrong).is_err());
+        wrong = correct.clone();
+        for t in &mut wrong[2..] {
+            t.positions.swap(1, 2);
+            t.uvs.swap(1, 2);
+            t.colors.swap(1, 2);
+        }
+        assert!(translated_difference(case, &expected, &wrong).is_err());
+        wrong = correct.clone();
+        wrong[0].texture = 3;
+        assert!(translated_difference(case, &expected, &wrong).is_err());
+        wrong = correct.clone();
+        wrong[0].flags = 1;
+        assert!(translated_difference(case, &expected, &wrong).is_err());
+        wrong = correct.clone();
+        wrong[0].uvs[1][0] += 0.01;
+        assert!(translated_difference(case, &expected, &wrong).is_err());
+        wrong = correct.clone();
+        wrong[0].colors[1][1] += 0.01;
+        assert!(translated_difference(case, &expected, &wrong).is_err());
+        wrong = correct.clone();
+        wrong[0].positions[0][0] += 0.00001;
+        assert!(translated_difference(case, &expected, &wrong).is_err());
+        // All four corners agree across triangles, but the field is deliberately non-affine.
+        wrong = correct.clone();
+        for t in &mut wrong {
+            for (p, uv) in t.positions.iter().zip(&mut t.uvs) {
+                if p[..2] == [0., 0.] {
+                    uv[0] += 0.01;
+                }
+            }
+        }
+        assert!(translated_difference(case, &expected, &wrong).is_err());
+    }
+}
+
+#[test]
+fn bilateral_observer_exports_back_winding_with_its_own_corner_attributes() {
+    use prime_scene::{
+        compiled::CompiledQuad,
+        surface::{LayerMode, SurfaceDetail, SurfaceFace, SurfaceLayer},
+    };
+    let positions = [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]];
+    let mut face = SurfaceFace::from_quad(CompiledQuad {
+        positions,
+        uvs: [[0.; 2]; 4],
+        color: [1.; 4],
+        texture_id: 1,
+        flags: 2,
+    });
+    face.detail = Some(Arc::new(SurfaceDetail {
+        mode: LayerMode::Bilateral,
+        layer: SurfaceLayer {
+            colors: positions.map(|[x, y, _]| [x, y, 0.5, 1.]),
+            uvs: positions.map(|[x, y, _]| [1. - x, y]),
+            texture_id: 2,
+            flags: 1,
+            repeat: None,
+            emission: Default::default(),
+        },
+    }));
+    let winding = |t: &Triangle| {
+        let p = t.positions;
+        (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[1][1] - p[0][1]) * (p[2][0] - p[0][0])
+    };
+    for t in secondary_triangles(&face).unwrap() {
+        assert_eq!(winding(&t), -1.);
+        assert_eq!((t.texture_id, t.flags), (2, 1));
+        for (([x, y, _], uv), color) in t.positions.into_iter().zip(t.uvs).zip(t.colors) {
+            assert_eq!(uv, [1. - x, y]);
+            assert_eq!(color, [x, y, 0.5, 1.]);
+        }
+    }
+    Arc::make_mut(face.detail.as_mut().unwrap()).mode = LayerMode::OverlayBoth;
+    assert!(
+        secondary_triangles(&face)
+            .unwrap()
+            .iter()
+            .all(|t| winding(t) == 1.)
+    );
 }

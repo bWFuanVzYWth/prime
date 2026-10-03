@@ -2,7 +2,7 @@
 use crate::resources::{Buffer, Context, error};
 use crate::target::Image;
 use ash::vk;
-use std::{io::Cursor, sync::Arc};
+use std::{io::Cursor, mem::MaybeUninit, sync::Arc};
 
 pub(super) struct Texture {
     pub image: Image,
@@ -45,11 +45,41 @@ impl Texture {
                 depth: self.extent[2],
             })
     }
+    #[cfg(all(test, feature = "shader-tests"))]
     pub fn upload(&self, context: &Arc<Context>, data: &[u8]) -> Result<(), String> {
         if data.len() != self.size() {
             return Err("Atmosphere texture payload size mismatch".into());
         }
-        let source = Buffer::upload(context, data, vk::BufferUsageFlags::TRANSFER_SRC)?;
+        // SAFETY: Matching lengths above prove the copy initializes every staging byte.
+        unsafe {
+            self.upload_with(context, |output| {
+                for (output, &byte) in output.iter_mut().zip(data) {
+                    output.write(byte);
+                }
+                Ok(())
+            })
+        }
+    }
+    /// Initialize fresh staging directly; a failed decode never reaches submission.
+    ///
+    /// # Safety
+    /// On success the writer must initialize every output byte before the GPU copy.
+    pub unsafe fn upload_with(
+        &self,
+        context: &Arc<Context>,
+        write: impl FnOnce(&mut [MaybeUninit<u8>]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let source = Buffer::new(
+            context,
+            self.size() as u64,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            true,
+        )?;
+        // SAFETY: Fresh staging is exclusively owned, has no GPU reader, and remains owned
+        // until submit_named returns. The successful writer initializes the entire range.
+        unsafe {
+            source.write_with(0, self.size(), write)?;
+        }
         context.submit_named("atmosphere_upload", |command| unsafe {
             barrier(context, command);
             context.device.cmd_copy_buffer_to_image(

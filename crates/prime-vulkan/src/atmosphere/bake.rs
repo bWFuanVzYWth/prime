@@ -26,7 +26,7 @@ pub fn bake_default_atmosphere(path: &std::path::Path) -> Result<(), String> {
     );
     let medium = Buffer::upload(
         &context,
-        &asset::medium(asset::MEDIUM)?,
+        &asset::load_medium()?,
         vk::BufferUsageFlags::STORAGE_BUFFER,
     )?;
     let optical = Texture::new(&context, [512, 128, 1], HALF)?;

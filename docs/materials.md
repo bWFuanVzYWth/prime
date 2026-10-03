@@ -41,7 +41,7 @@ Rust 为每个辅助图生成与基色帧尺寸对应的规范 mip。法线 foot
 
 生产 Full 路径来自旧 Prime 的 `bsdf/compact`，使用精确介电 Fresnel、F82 conductor 与 GGX 方向能量、作者 transmission-GGX LUT 的反射/透射分支多次散射补偿、精确 thin-wall 几何级数及完整 marginal PDF。生产支持 opaque dielectric、conductor、薄壁 subsurface 的精确零/一/分数混合，以及 solid/thin dielectric；这是完整 OpenPBR 数学在实际源拓扑上的支持子域，不是任意 coat/fuzz/thin-film/diffraction/dispersion 参数 API。普通源不自动选择 foliage，也不移植预设。LabPBR 厚壁 authored SSS 超出旧 compact 支持域，继续单独使用现有 Lite 厚壁近似，事件与介质身份保持当前契约。
 
-不可变 transmission 能量表为 44×32×159 HALF4，1,790,976 bytes，使用归一化线性 clamp 过滤。入口在 set0/binding9 绑定图像/采样器并显式传入库；资源位于 device-local memory，首次实际帧录制上传，随后复用，按已有宿主完成/失败隔离契约退休。数学来源及独立作者 overlay 锁在 [robocute.lock.json](../crates/prime-vulkan/assets/openpbr/robocute.lock.json)；overlay 不与 thick-glass eta 修复混淆。
+不可变 transmission 能量表为44×32×159 HALF4，解码后1,790,976 bytes，使用归一化线性clamp过滤。发行资产为 `assets/openpbr/trans_ggx.ktx2`，内部Zstd 22，参数轴与原位模式保持；作者原始表与overlay仍锁在 [robocute.lock.json](../crates/prime-vulkan/assets/openpbr/robocute.lock.json)，不改动锁定参考目录。入口在set0/binding9绑定图像/采样器并显式传入库；资源位于device-local memory，构造时直接解入pending staging，首次实际命令录制上传，随后复用，按已有宿主完成/失败隔离契约退休。overlay不与thick-glass eta修复混淆。
 
 保留的 LitePBR 是低阶散射模型，不符合完整 OpenPBR。opaque dielectric 使用 single-scatter anisotropic GGX，将缺失方向能量以标量闭合压回现有 GGX 瓣，并以当前入射方向剩余能量混合基底；conductor 使用 single-scatter GGX 与 generalized Schlick/F82。方向能量来自无纹理的 GGX/Schlick 解析拟合。该闭合不恢复多次散射的低频角分布；opaque dielectric 的层叠以当前入射方向为条件，不声明反射互易性。
 

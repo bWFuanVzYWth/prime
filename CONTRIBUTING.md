@@ -162,11 +162,14 @@ RR、折射 eta 与反弹预算的数学合同可以无 GPU 运行 `./scripts/te
 
 ### 星图、曝光、HDR 与 BLAS 压缩
 
-显示算法和资源成本见[display.md](docs/display.md)，压缩地址切换及退休见[spatial-batching.md](docs/spatial-batching.md)。资产验证检查全部18段gzip的CRC、压缩/解压SHA256、BC6H长度和15层mip；CPU检查实际Slang生成数学，不创建窗口。
+显示算法和资源成本见[display.md](docs/display.md)，压缩地址切换及退休见[spatial-batching.md](docs/spatial-batching.md)。资产验证检查KTX2头/DFD/metadata、压缩及解压SHA256、BC6H长度和15层mip；CPU检查实际Slang生成数学，不创建窗口。
 
 ```powershell
 python scripts/verify-starmap.py
+python scripts/pack_assets.py --check
+python scripts/test_pack_assets.py
 .\scripts\test-mature-display-cpu.ps1
+.\scripts\test-starmap-cpu.ps1
 $env:PRIME_VK_VALIDATION = '1'
 $env:VK_LAYER_VALIDATE_SYNC = '1'
 cargo test -p prime_vulkan --features shader-tests --lib --locked exposure::gpu_tests:: -- --ignored --nocapture --test-threads=1
@@ -176,15 +179,19 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_static_bla
 cargo test -p prime_vulkan --lib --locked gpu_empty_pages_preserve_in_flight_leases_and_reuse_sparse_identities -- --ignored --nocapture --test-threads=1
 ```
 
+`test-starmap-cpu.ps1` 执行实际 Slang 生成的天球数学和生产 stars 入口，检查两极、跨极点、赤经缝、倾斜天文帧、8点采样支持和常量辐射亮度，使用独立 double 参考；不创建窗口或GPU。游戏手动覆盖天极附近转动视角、RR开关、前景遮挡与冻结。格式、无损要求和加载成本见[固定资产规范](docs/assets.md)。`pack_assets.py --check`只读校验现有全部发行资产，需要Zstd CLI；用 `--ktx-validator PATH_TO_KTX_EXE` 指定Khronos官方工具验证容器。`test_pack_assets.py`执行结构、错类型/shape、重复字段、载荷漏段/重叠与稳定清单检查，不创建GPU或窗口。
+
 显示 GPU 检查覆盖实际 image/BDA 计量、曝光各乘一次、RR/raw selector、星图15层BC6H/真实前景/地面遮挡、HDR绝对亮度与source-over、SDR/HDR HUDless及UI方向。轻量 HDR owner 检查三个在途描述符槽、真实完成复用与销毁；模式测试检查传输/采样等价，显式关闭曝光/星图以固定显示条件，另验证曝光强度和模式同事务变化。BLAS像素测试保持严格像素判据并检查查询/复制/取消/重定位、缓存身份及旧TLAS消费者；其他池/完整游戏性能不由这些小尺寸边界夹具保证。
 
 ### 大气资产与无窗口验证
 
-普通构建使用仓库内 Safetensors 资产，不在启动时求解多散射。物理输入迁移工具校验旧资源 SHA-256 并保留原始 f32 位模式；离线 GPU 工具仅在调整资产时启用：
+普通构建使用仓库内KTX2和压缩Safetensors，不在启动时求解多散射。物理输入迁移工具校验旧资源SHA-256并保留原始f32位模式；离线中间产物放忽略的artifacts。bake求解当前嵌入的固定介质，输出标准Safetensors；修改介质须同步更新生产契约与求解入口。生成后统一封装，默认最高Zstd 22并比较19级：
 
 ```powershell
 python scripts/import-atmosphere.py C:\WorkSpace\prime
-cargo run -p prime_tools --features atmosphere-bake --bin bake-atmosphere --release -- crates/prime-vulkan/assets/atmosphere/default.safetensors
+cargo run -p prime_tools --features atmosphere-bake --bin bake-atmosphere --release -- artifacts/asset-inputs/atmosphere/default.safetensors
+python scripts/pack_assets.py --source-root artifacts/asset-inputs --only atmosphere
+python scripts/pack_assets.py --check
 cargo test -p prime_vulkan --features shader-tests --release --lib atmosphere::tests -- --ignored --skip atmosphere_cost_matrix --nocapture --test-threads=1
 ```
 

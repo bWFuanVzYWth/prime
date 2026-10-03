@@ -48,6 +48,14 @@ static F3 distance_motion(float depth, float distance, F2 sample = {0.5f, 0.5f},
                                  history, extent);
 }
 
+static F3 reflection_motion(float depth, float distance, F2 primary, F2 sample = {0.5f, 0.5f},
+                            F4 previous = {0, 0, 0, 1}, F4 current = {0, 0, 0, 1}, float aspect = 1,
+                            bool history = true, U2 extent = {960, 540}) {
+    return rrCpuReflectionMotion_0(sample, depth, distance, primary, current, {0, 0, 1, aspect},
+                                   {1, 0, 0}, {0, 1, 0}, previous, {0, 0, 1, aspect}, {1, 0, 0},
+                                   {0, 1, 0}, history, extent);
+}
+
 static void sdk_motion(F3 value, double x, double y, const char *label) {
     require(value.z == 1 && close(value.x, x, 2e-4) && close(value.y, y, 2e-4), label);
     require(std::isfinite(value.x) && std::isfinite(value.y) && std::abs(value.x) < 65504 &&
@@ -57,6 +65,63 @@ static void sdk_motion(F3 value, double x, double y, const char *label) {
 
 static void unavailable_motion(F3 value, const char *label) {
     require(value.z == 0 && value.x == 0 && value.y == 0, label);
+}
+
+static void moving_reflection_contracts() {
+    // K1's actual previous-point projection includes object displacement. A zero-length
+    // reflection segment owns that same endpoint, rather than the current-world position.
+    auto primary = pixel_motion({-0.3f, 0.15f, 3, 0});
+    sdk_motion(primary, -48, -13.5, "moving primary independent previous-point projection");
+    auto reflection = reflection_motion(3, 0, {primary.x, primary.y});
+    require(reflection.z == 1 && reflection.x == primary.x && reflection.y == primary.y,
+            "zero-distance reflection exactly preserves moving primary pixel motion");
+
+    for (const U2 extent : {U2{960, 540}, U2{853, 479}, U2{1920, 1080}})
+        for (float aspect : {1.0f, 16.0f / 9.0f, 2.4f})
+            for (float tangent : {0.25f, 0.7f, 1.5f})
+                for (float jitterX : {-0.5f, 0.0f, 0.49f})
+                    for (float jitterY : {-0.49f, 0.0f, 0.5f})
+                        for (float depth : {0.1f, 10.0f, 4000.0f}) {
+                            const F2 uv{(87.5f + jitterX) / extent.x,
+                                        (140.5f + jitterY) / extent.y};
+                            const F4 oldPoint{(2 * uv.x - 1) * depth * tangent * aspect -
+                                                      0.03f * depth,
+                                              -(2 * uv.y - 1) * depth * tangent + 0.02f * depth,
+                                              depth * 0.97f, 0};
+                            const F4 oldCamera{0.13f * depth, -0.04f * depth, -0.1f * depth,
+                                               tangent * 1.1f};
+                            auto main = pixel_motion(oldPoint, uv, oldCamera, {0, 0, 1, aspect},
+                                                     {1, 0, 0}, {0, 1, 0}, true, true, extent);
+                            require(main.z == 1, "moving primary test projection is valid");
+                            auto actual =
+                                    reflection_motion(depth, 0, {main.x, main.y}, uv, oldCamera,
+                                                      {0, 0, 0, tangent}, aspect, true, extent);
+                            require(actual.z == 1 && actual.x == main.x && actual.y == main.y,
+                                    "object/camera/FOV/jitter/extent zero-distance identity");
+                        }
+
+    sdk_motion(reflection_motion(3, 0, {-48, -13.5f}, {0.5f, 0.5f}, {1, 2, 0, 1}, {0, 0, 0, 1}, 1,
+                                 false),
+               0, 0, "zero-distance reflection honors whole viewport history reset");
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    for (F2 bad : {F2{nan, 0}, F2{0, inf}, F2{65504, 0}, F2{0, -65504}})
+        unavailable_motion(reflection_motion(3, 0, bad),
+                           "zero-distance invalid primary motion stays finite and unavailable");
+    for (float depth : {nan, inf, 0.0f, -1.0f})
+        unavailable_motion(reflection_motion(depth, 0, {-48, -13.5f}),
+                           "primary motion does not make invalid depth valid");
+    for (float distance : {nan, inf, -1.0f})
+        unavailable_motion(reflection_motion(3, distance, {-48, -13.5f}),
+                           "primary motion does not make invalid distance valid");
+
+    // Deliberately unrelated/invalid primary data must not change the nonzero camera-only
+    // approximation or sky-directional proxy. They remain separately declared limitations.
+    sdk_motion(reflection_motion(3, 5, {nan, inf}, {0.5f, 0.5f}, {1, 2, 0, 1}), -60, 67.5,
+               "nonzero proxy does not infer secondary object motion from primary motion");
+    sdk_motion(reflection_motion(std::numeric_limits<float>::max(), 0, {nan, inf}, {0.625f, 0.75f},
+                                 {1000, 2000, 3000, 1}),
+               0, 0, "sky direction does not consume a primary surface motion value");
 }
 
 static void pixel_motion_contracts() {
@@ -154,8 +219,8 @@ int main() {
                                 {{0, -2, 0.25f, 3}, {1, 0, 0, 4}, {0, 0, -1, 5}}};
     for (const auto &rows : transforms)
         for (F2 bary : {F2{0, 0}, F2{1, 0}, F2{0, 1}, F2{0.2f, 0.3f}}) {
-            const auto actual = rrCpuRigid_0(vertices[0], vertices[1], vertices[2], bary,
-                                             rows[0], rows[1], rows[2]);
+            const auto actual = rrCpuRigid_0(vertices[0], vertices[1], vertices[2], bary, rows[0],
+                                             rows[1], rows[2]);
             double local[3];
             const float *v0 = &vertices[0].x, *v1 = &vertices[1].x, *v2 = &vertices[2].x;
             for (unsigned axis = 0; axis < 3; ++axis)
@@ -163,9 +228,10 @@ int main() {
                               double(bary.y) * (v2[axis] - v0[axis]);
             for (unsigned axis = 0; axis < 3; ++axis) {
                 const float *row = &rows[axis].x;
-                const double expected = row[0] * local[0] + row[1] * local[1] +
-                                        row[2] * local[2] + row[3];
-                require(close((&actual.x)[axis], expected, 3e-6), "previous local barycentric affine point");
+                const double expected =
+                        row[0] * local[0] + row[1] * local[1] + row[2] * local[2] + row[3];
+                require(close((&actual.x)[axis], expected, 3e-6),
+                        "previous local barycentric affine point");
             }
         }
     for (unsigned status = 0; status < 16; ++status)
@@ -174,11 +240,13 @@ int main() {
     for (float viewZ : {0.01f, 0.1f, 1.0f, 100.0f, 1e6f}) {
         const float a = 1e6f / (1e6f - 0.01f);
         const double projected = (double(a) * viewZ - double(0.01f * a)) / viewZ;
-        require(close(rrCpuDeviceDepth_0(viewZ), projected), "visible device depth matches clip Z/W");
+        require(close(rrCpuDeviceDepth_0(viewZ), projected),
+                "visible device depth matches clip Z/W");
     }
     require(rrCpuDeviceDepth_0(0) == 1 && rrCpuDeviceDepth_0(-1) == 1,
             "unobserved invalid depth uses finite far plane");
     pixel_motion_contracts();
+    moving_reflection_contracts();
     for (float aspect : {1.0f, 16.0f / 9.0f, 2.4f})
         for (float fov : {0.25f, 0.7f, 1.5f})
             for (float jitterX : {-0.5f, 0.0f, 0.49f})

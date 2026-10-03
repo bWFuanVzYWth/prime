@@ -1,16 +1,16 @@
 """Import the pinned Prime/Sky Tracer physical inputs without changing any float bits.
 
-Usage: python scripts/import-atmosphere.py PATH_TO_OLD_PRIME
+Usage: python scripts/import-atmosphere.py PATH_TO_OLD_PRIME [--output FILE]
 Only the asset container changes. No NumPy or ML runtime is required.
 """
 
+import argparse
 import base64
 import gzip
 import hashlib
 import json
 from pathlib import Path
 import struct
-import sys
 
 
 def write_tensors(path, tensors, metadata):
@@ -28,7 +28,13 @@ def write_tensors(path, tensors, metadata):
 
 
 def main():
-    source = Path(sys.argv[1]) / "src/client/resources/prime/atmosphere"
+    workspace = Path(__file__).resolve().parents[1]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("old_prime", type=Path)
+    parser.add_argument("--output", type=Path,
+                        default=workspace / "artifacts/asset-inputs/atmosphere/medium.safetensors")
+    args = parser.parse_args()
+    source = args.old_prime / "src/client/resources/prime/atmosphere"
     meta = json.loads((source / "medium.json").read_text(encoding="utf-8"))
     assert meta["sourceCommit"] == "b66b16342afe38e788a5ece5371d3b3a67c5909a"
     medium = gzip.decompress(base64.b64decode((source / "medium.bin.gz.b64").read_bytes()))
@@ -63,7 +69,7 @@ def main():
         "prime_sun_radius_radians": "0.00471", "prime_space_sun_intensity": "12.5",
         "source_parameters": json.dumps(meta["params"], separators=(",", ":")),
     }
-    target = Path(__file__).resolve().parents[1] / "crates/prime-vulkan/assets/atmosphere/medium.safetensors"
+    target = args.output
     write_tensors(target, tensors, metadata)
     print(f"Wrote {target}: {target.stat().st_size} bytes; physical f32 payload unchanged")
     fixtures = source.parents[3] / "test/resources/prime/atmosphere"

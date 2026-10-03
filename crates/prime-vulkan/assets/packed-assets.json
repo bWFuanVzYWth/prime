@@ -1,0 +1,714 @@
+{
+  "version": 1,
+  "assets": {
+    "atmosphere/ground_radiance.ktx2": {
+      "container": "KTX2",
+      "bytes": 3155,
+      "sha256": "98220f693b005a22172299817e83780ef3734943fba2fd6de3a8ab2b825d95c6",
+      "vkFormat": 109,
+      "extent": [
+        160,
+        1,
+        0
+      ],
+      "primaries": 0,
+      "metadata": {
+        "incident_directions": "1536",
+        "source": "b66b16342afe38e788a5ece5371d3b3a67c5909a",
+        "medium_sha256": "be1ae66c600c6df21ea730cd24b10bb88b9f6dfa00200539a4cc65420c7aefb5",
+        "wavelength_nm": "450,510,580,650",
+        "schema": "prime.atmosphere.balanced.v1",
+        "density_scale": "1",
+        "iterations": "8",
+        "source_dimensions": "40,160,20,12",
+        "tensor": "ground_radiance",
+        "KTXorientation": "rd",
+        "KTXwriter": "Prime PT pack_assets.py v1",
+        "KTXwriterScParams": "zstd --ultra -22 --single-thread --check"
+      },
+      "levels": [
+        {
+          "level": 0,
+          "uncompressedBytes": 2560,
+          "uncompressedSha256": "223621430e36488e04dbb36bd12d27dc2ab0b9282ad08a256ba892513f9911d3",
+          "compressedBytes": 2479,
+          "compressedSha256": "7d6bb93bb9deb1d0c47a2af93eb78a002c4bcd23afbffe206b6c62fe5f870006",
+          "zstd19Bytes": 2479
+        }
+      ],
+      "zstdLevel": 22,
+      "comparisonLevel": 19,
+      "zstd19ContainerBytes": 3155,
+      "sourceBytes": 7042800,
+      "sourceSha256": "2675d242916f868a9182a6609324bb1ebd90d41422f14ee400ab25a6bcf085c1",
+      "sourceTensor": {
+        "dtype": "F32",
+        "shape": [
+          1,
+          160,
+          4
+        ],
+        "data_offsets": [
+          0,
+          2560
+        ]
+      },
+      "zstdVersion": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***"
+    },
+    "atmosphere/incident_mean.ktx2": {
+      "container": "KTX2",
+      "bytes": 89157,
+      "sha256": "999619b2224384b56b2278daa83426f539ca799e16dd91689a2f4a1852833847",
+      "vkFormat": 109,
+      "extent": [
+        160,
+        40,
+        0
+      ],
+      "primaries": 0,
+      "metadata": {
+        "incident_directions": "1536",
+        "source": "b66b16342afe38e788a5ece5371d3b3a67c5909a",
+        "medium_sha256": "be1ae66c600c6df21ea730cd24b10bb88b9f6dfa00200539a4cc65420c7aefb5",
+        "wavelength_nm": "450,510,580,650",
+        "schema": "prime.atmosphere.balanced.v1",
+        "density_scale": "1",
+        "iterations": "8",
+        "source_dimensions": "40,160,20,12",
+        "tensor": "incident_mean",
+        "KTXorientation": "rd",
+        "KTXwriter": "Prime PT pack_assets.py v1",
+        "KTXwriterScParams": "zstd --ultra -22 --single-thread --check"
+      },
+      "levels": [
+        {
+          "level": 0,
+          "uncompressedBytes": 102400,
+          "uncompressedSha256": "92a2bac6be0c39dd55f4ca4834dcb38a269e8699944b5939dc607a97dd39a626",
+          "compressedBytes": 88481,
+          "compressedSha256": "137b7ad51488c8e4ef50656abb921fe5e9e2d4367ea16e34ec6ff31e2528150b",
+          "zstd19Bytes": 88479
+        }
+      ],
+      "zstdLevel": 22,
+      "comparisonLevel": 19,
+      "zstd19ContainerBytes": 89155,
+      "sourceBytes": 7042800,
+      "sourceSha256": "2675d242916f868a9182a6609324bb1ebd90d41422f14ee400ab25a6bcf085c1",
+      "sourceTensor": {
+        "dtype": "F32",
+        "shape": [
+          40,
+          160,
+          4
+        ],
+        "data_offsets": [
+          2560,
+          104960
+        ]
+      },
+      "zstdVersion": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***"
+    },
+    "atmosphere/rayleigh_source.ktx2": {
+      "container": "KTX2",
+      "bytes": 196546,
+      "sha256": "6d6c17f29e710c0f1604066afb28ab8dc8d49e86356fe74fc2829855cd152c2c",
+      "vkFormat": 109,
+      "extent": [
+        800,
+        21,
+        0
+      ],
+      "primaries": 0,
+      "metadata": {
+        "incident_directions": "1536",
+        "source": "b66b16342afe38e788a5ece5371d3b3a67c5909a",
+        "medium_sha256": "be1ae66c600c6df21ea730cd24b10bb88b9f6dfa00200539a4cc65420c7aefb5",
+        "wavelength_nm": "450,510,580,650",
+        "schema": "prime.atmosphere.balanced.v1",
+        "density_scale": "1",
+        "iterations": "8",
+        "source_dimensions": "40,160,20,12",
+        "tensor": "rayleigh_source",
+        "KTXorientation": "rd",
+        "KTXwriter": "Prime PT pack_assets.py v1",
+        "KTXwriterScParams": "zstd --ultra -22 --single-thread --check"
+      },
+      "levels": [
+        {
+          "level": 0,
+          "uncompressedBytes": 268800,
+          "uncompressedSha256": "cf36b541450c8841fef762ba93f2953657b33392972363aad82b32e6f091d277",
+          "compressedBytes": 195870,
+          "compressedSha256": "d79d722b175be93d4e5e29266a60d6dcff0e6d2507f421cd3ec229e8bf800c62",
+          "zstd19Bytes": 195870
+        }
+      ],
+      "zstdLevel": 22,
+      "comparisonLevel": 19,
+      "zstd19ContainerBytes": 196546,
+      "sourceBytes": 7042800,
+      "sourceSha256": "2675d242916f868a9182a6609324bb1ebd90d41422f14ee400ab25a6bcf085c1",
+      "sourceTensor": {
+        "dtype": "F32",
+        "shape": [
+          21,
+          800,
+          4
+        ],
+        "data_offsets": [
+          104960,
+          373760
+        ]
+      },
+      "zstdVersion": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***"
+    },
+    "atmosphere/optical_depth.ktx2": {
+      "container": "KTX2",
+      "bytes": 381591,
+      "sha256": "a4a13074ee7ed2cd4a8d9b7ddb57f29ba66795443463dad9a2b83c0246646d68",
+      "vkFormat": 97,
+      "extent": [
+        512,
+        128,
+        0
+      ],
+      "primaries": 0,
+      "metadata": {
+        "incident_directions": "1536",
+        "source": "b66b16342afe38e788a5ece5371d3b3a67c5909a",
+        "medium_sha256": "be1ae66c600c6df21ea730cd24b10bb88b9f6dfa00200539a4cc65420c7aefb5",
+        "wavelength_nm": "450,510,580,650",
+        "schema": "prime.atmosphere.balanced.v1",
+        "density_scale": "1",
+        "iterations": "8",
+        "source_dimensions": "40,160,20,12",
+        "tensor": "optical_depth",
+        "KTXorientation": "rd",
+        "KTXwriter": "Prime PT pack_assets.py v1",
+        "KTXwriterScParams": "zstd --ultra -22 --single-thread --check"
+      },
+      "levels": [
+        {
+          "level": 0,
+          "uncompressedBytes": 524288,
+          "uncompressedSha256": "dd2ed26cc9829352aa8b3a45731ce964848459991436a220c3eb8387e85e8e78",
+          "compressedBytes": 380915,
+          "compressedSha256": "f15d50aac641deecaab678b9d27ec70bcd2144160b96b0867167a77739761577",
+          "zstd19Bytes": 380913
+        }
+      ],
+      "zstdLevel": 22,
+      "comparisonLevel": 19,
+      "zstd19ContainerBytes": 381589,
+      "sourceBytes": 7042800,
+      "sourceSha256": "2675d242916f868a9182a6609324bb1ebd90d41422f14ee400ab25a6bcf085c1",
+      "sourceTensor": {
+        "dtype": "F16",
+        "shape": [
+          128,
+          512,
+          4
+        ],
+        "data_offsets": [
+          373760,
+          898048
+        ]
+      },
+      "zstdVersion": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***"
+    },
+    "atmosphere/scattering_source.ktx2": {
+      "container": "KTX2",
+      "bytes": 3681752,
+      "sha256": "7a35b0c399ca2e76e27a0c9301332ec207435071350839b2d18ac62686a0636b",
+      "vkFormat": 97,
+      "extent": [
+        3200,
+        240,
+        0
+      ],
+      "primaries": 0,
+      "metadata": {
+        "incident_directions": "1536",
+        "source": "b66b16342afe38e788a5ece5371d3b3a67c5909a",
+        "medium_sha256": "be1ae66c600c6df21ea730cd24b10bb88b9f6dfa00200539a4cc65420c7aefb5",
+        "wavelength_nm": "450,510,580,650",
+        "schema": "prime.atmosphere.balanced.v1",
+        "density_scale": "1",
+        "iterations": "8",
+        "source_dimensions": "40,160,20,12",
+        "tensor": "scattering_source",
+        "KTXorientation": "rd",
+        "KTXwriter": "Prime PT pack_assets.py v1",
+        "KTXwriterScParams": "zstd --ultra -22 --single-thread --check"
+      },
+      "levels": [
+        {
+          "level": 0,
+          "uncompressedBytes": 6144000,
+          "uncompressedSha256": "9ada6228c63ab7af7a6c47028a75327bd050762262c32efc3d2c9d6b81bf175a",
+          "compressedBytes": 3681072,
+          "compressedSha256": "2f0ea201c2d5feeae9b5be2463dea61507769e2a621b6081841965a564f368e0",
+          "zstd19Bytes": 3681175
+        }
+      ],
+      "zstdLevel": 22,
+      "comparisonLevel": 19,
+      "zstd19ContainerBytes": 3681855,
+      "sourceBytes": 7042800,
+      "sourceSha256": "2675d242916f868a9182a6609324bb1ebd90d41422f14ee400ab25a6bcf085c1",
+      "sourceTensor": {
+        "dtype": "F16",
+        "shape": [
+          240,
+          3200,
+          4
+        ],
+        "data_offsets": [
+          898048,
+          7042048
+        ]
+      },
+      "zstdVersion": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***"
+    },
+    "atmosphere/medium.safetensors.zst": {
+      "container": "Zstd",
+      "bytes": 113552,
+      "sha256": "39c195914b99670974a3d9566b7932ddff8c865159704a58f5f7a084b834830a",
+      "uncompressedBytes": 203896,
+      "uncompressedSha256": "01605794ba83b35cf0375d6c5e8a394e20964372ecaff81e52dda02cfc9aa461",
+      "safetensorsHeader": {
+        "__metadata__": {
+          "schema": "prime.atmosphere.medium.v1",
+          "source": "b66b16342afe38e788a5ece5371d3b3a67c5909a",
+          "medium_sha256": "be1ae66c600c6df21ea730cd24b10bb88b9f6dfa00200539a4cc65420c7aefb5",
+          "wavelength_nm": "450,510,580,650",
+          "species": "inso,waso,soot,suso",
+          "phase_coordinate": "u=cbrt((1-mu)/2); nodes=(i+0.5)/1024; linear-u; clamp-endpoints",
+          "phase_unit": "sr^-1",
+          "distance_unit": "km",
+          "phase_mu": "+1=forward",
+          "density_scale": "1",
+          "prime_sun_radius_radians": "0.00471",
+          "prime_space_sun_intensity": "12.5",
+          "source_parameters": "{\"size_steps\":[1,1,64,1],\"view\":[0.0,0.0,0.0,0.0],\"sun\":[0.0,0.0,0.004650469869375229,6360.0],\"dims\":[40,160,128,512],\"offsets0\":[12234,0,40,390],\"offsets1\":[4486,20,50,0],\"medium\":[120.0,0.18000000715255737,0.0,3.0],\"solar\":[2.0108537673950195,1.9255825281143188,1.8567869663238525,1.5677554607391357],\"rgb\":[5.8809709548950195,-7.0044331550598145,90.48178100585938,0.0,-14.151336669921875,54.43069839477539,8.974457740783691,0.0,87.37126159667969,58.01542282104492,-1.4691294431686401,0.0,31.710432052612305,-1.2180235385894775,0.05091293156147003,0.0],\"solve\":[1536,20,12,0],\"extra\":[4490,10890,11914,256],\"mapping\":[63,11934,12094,12222],\"sky\":[256,256,96,192],\"optical_segments\":[1.0,0.15748031437397003,0.0,0.15748031437397003,1.4142135381698608,0.3041529357433319,-0.14667262136936188,0.28346458077430725,3.316624879837036,0.17383655905723572,0.03762257099151611,0.6141732335090637,3.464101552963257,0.2669578790664673,-0.2712259292602539,0.6535432934761047,5.916079998016357,0.07064840942621231,0.408810019493103,0.8267716765403748,10.954451560974121,0.03438180685043335,0.6233661770820618,1.0],\"angular_mapping\":[0.6100000143051147,0.16428571939468384,0.0,0.0],\"importance\":[0.009999999776482582,0.25,0.0,0.0],\"batch\":[0,40,0,0]}"
+        },
+        "heights": {
+          "dtype": "F32",
+          "shape": [
+            40,
+            4
+          ],
+          "data_offsets": [
+            0,
+            640
+          ]
+        },
+        "profiles": {
+          "dtype": "F32",
+          "shape": [
+            50,
+            7,
+            4
+          ],
+          "data_offsets": [
+            640,
+            6240
+          ]
+        },
+        "phase": {
+          "dtype": "F32",
+          "shape": [
+            4,
+            1024,
+            4
+          ],
+          "data_offsets": [
+            6240,
+            71776
+          ]
+        },
+        "phase_mass": {
+          "dtype": "F32",
+          "shape": [
+            4,
+            4
+          ],
+          "data_offsets": [
+            71776,
+            71840
+          ]
+        },
+        "states": {
+          "dtype": "F32",
+          "shape": [
+            40,
+            160,
+            4
+          ],
+          "data_offsets": [
+            71840,
+            174240
+          ]
+        },
+        "quadrature": {
+          "dtype": "F32",
+          "shape": [
+            1024,
+            4
+          ],
+          "data_offsets": [
+            174240,
+            190624
+          ]
+        },
+        "phase_nodes": {
+          "dtype": "F32",
+          "shape": [
+            20,
+            4
+          ],
+          "data_offsets": [
+            190624,
+            190944
+          ]
+        },
+        "solar_mapping": {
+          "dtype": "F32",
+          "shape": [
+            40,
+            4,
+            4
+          ],
+          "data_offsets": [
+            190944,
+            193504
+          ]
+        },
+        "optical_heights": {
+          "dtype": "F32",
+          "shape": [
+            128,
+            4
+          ],
+          "data_offsets": [
+            193504,
+            195552
+          ]
+        },
+        "cone_nodes": {
+          "dtype": "F32",
+          "shape": [
+            12,
+            4
+          ],
+          "data_offsets": [
+            195552,
+            195744
+          ]
+        },
+        "source_coefficients": {
+          "dtype": "F32",
+          "shape": [
+            40,
+            6,
+            4
+          ],
+          "data_offsets": [
+            195744,
+            199584
+          ]
+        },
+        "extinction": {
+          "dtype": "F32",
+          "shape": [
+            50,
+            2,
+            4
+          ],
+          "data_offsets": [
+            199584,
+            201184
+          ]
+        }
+      },
+      "zstdLevel": 22,
+      "comparisonLevel": 19,
+      "zstd19Bytes": 113552,
+      "zstdVersion": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***"
+    },
+    "openpbr/trans_ggx.ktx2": {
+      "container": "KTX2",
+      "bytes": 1122483,
+      "sha256": "8b3a229472c2d69bf996e53cfd85eeaa2fb1a1e76e02c515f99adbbaff946a33",
+      "vkFormat": 97,
+      "extent": [
+        44,
+        32,
+        159
+      ],
+      "primaries": 0,
+      "metadata": {
+        "source_sha256": "605c9160fb9348a1d033321c40cf9930226ce74c03f2624033f5b73aacfa67df",
+        "source": "RoboCute author-bsdf-hotfix-2026-07-24",
+        "KTXorientation": "rdi",
+        "KTXwriter": "Prime PT pack_assets.py v1",
+        "KTXwriterScParams": "zstd --ultra -22 --single-thread --check"
+      },
+      "levels": [
+        {
+          "level": 0,
+          "uncompressedBytes": 1790976,
+          "uncompressedSha256": "605c9160fb9348a1d033321c40cf9930226ce74c03f2624033f5b73aacfa67df",
+          "compressedBytes": 1122019,
+          "compressedSha256": "241066f02316cbfde92dc7a5ad28f57fc7158f723e8516d3c58b772ea123b546",
+          "zstd19Bytes": 1122041
+        }
+      ],
+      "zstdLevel": 22,
+      "comparisonLevel": 19,
+      "zstd19ContainerBytes": 1122505,
+      "sourceBytes": 1790976,
+      "sourceSha256": "605c9160fb9348a1d033321c40cf9930226ce74c03f2624033f5b73aacfa67df",
+      "zstdVersion": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***"
+    },
+    "starmap/starmap_2020_16k.ktx2": {
+      "container": "KTX2",
+      "bytes": 148758205,
+      "sha256": "64bcda4bf9068dae0591bf26f7bd363ec289d3cc95eb528e687a21cc2c355a02",
+      "vkFormat": 143,
+      "extent": [
+        16384,
+        8192,
+        0
+      ],
+      "primaries": 4,
+      "metadata": {
+        "source_sha256": "19a1351f00c386a6e5eec4d67af96d5fc71edf6a1189941579b9498b52e7589a",
+        "projection": "plate carree ICRF/J2000; RA 0h at center, RA increases left",
+        "working_color": "D65 linear Rec.2020",
+        "KTXorientation": "rd",
+        "KTXwriter": "Prime PT pack_assets.py v1",
+        "KTXwriterScParams": "zstd --ultra -22 --single-thread --check"
+      },
+      "levels": [
+        {
+          "level": 0,
+          "uncompressedBytes": 134217728,
+          "uncompressedSha256": "d3ed4c4ebf391aa4150f87718eb9ede61f51bbd70205c23772aa645711ff2212",
+          "compressedBytes": 108850249,
+          "compressedSha256": "fb9dae05ca6d5781b2a293f2def9e5ba5d8e44f4cb6b37dcbec1b0441e68c8df",
+          "zstd19Bytes": 111089126
+        },
+        {
+          "level": 1,
+          "uncompressedBytes": 33554432,
+          "uncompressedSha256": "9fa64aab4a7f095970d42c5f92f39a9e9b3f80089db6b5165a6b51d59f945320",
+          "compressedBytes": 29585087,
+          "compressedSha256": "1b3f571cdeab8ca6c19a708db3139871acb8fcac4a4e2f01d9f62e5cb1efa8b5",
+          "zstd19Bytes": 29795607
+        },
+        {
+          "level": 2,
+          "uncompressedBytes": 8388608,
+          "uncompressedSha256": "40e78340f7e6005f3e4ac258588318a1abcf0036a21a5148e14620a9b4fd2fc6",
+          "compressedBytes": 7684873,
+          "compressedSha256": "101fd411e90ae1fd237da2e72ccf809daaad6994dfc9eaa3cfec77eb9618042f",
+          "zstd19Bytes": 7684873
+        },
+        {
+          "level": 3,
+          "uncompressedBytes": 2097152,
+          "uncompressedSha256": "b1b365f1c22889b6e4396df2be6a22df0d6f5691e593a05bb0fa3d051f327c8d",
+          "compressedBytes": 1969382,
+          "compressedSha256": "05fd894cec5d24e6860c4ed5e5fd07f5652034e9f4d8b518271100f45eb62a44",
+          "zstd19Bytes": 1969382
+        },
+        {
+          "level": 4,
+          "uncompressedBytes": 524288,
+          "uncompressedSha256": "faf8db882c181a7b51712b0b17f02664e8cc5ea7bcbd40d17c5e35cf105414b5",
+          "compressedBytes": 499064,
+          "compressedSha256": "50b1f1c2c69df2d958767f24b7d1601913345e58f1fe3941a7616ab2e088f25b",
+          "zstd19Bytes": 499064
+        },
+        {
+          "level": 5,
+          "uncompressedBytes": 131072,
+          "uncompressedSha256": "eae1c8b4d7c0f10ff5632c923950c3321409979310592c1aa2ac81e88efcc1a9",
+          "compressedBytes": 125837,
+          "compressedSha256": "7d49bc0f2c9201a54be4b2c835b567e3ffe3e3953c9942f4f6cbab8f2237db45",
+          "zstd19Bytes": 125837
+        },
+        {
+          "level": 6,
+          "uncompressedBytes": 32768,
+          "uncompressedSha256": "92bd06a18a25da6bb01b5abbe08139a81f3cb131365d94b53f64cc7ce6964352",
+          "compressedBytes": 31890,
+          "compressedSha256": "8299dd6f777f1065d9376fbb55b39c83e8115bba758b470cbd85b78976dcb6c0",
+          "zstd19Bytes": 31890
+        },
+        {
+          "level": 7,
+          "uncompressedBytes": 8192,
+          "uncompressedSha256": "e698686dbaeae3d4a5078f2819045a986c597a383d55f29ed83dd80530adf117",
+          "compressedBytes": 8146,
+          "compressedSha256": "d2bd298439551ff02f014967e07202fc872386c09bf57b8c8d5487a8c78188a9",
+          "zstd19Bytes": 8146
+        },
+        {
+          "level": 8,
+          "uncompressedBytes": 2048,
+          "uncompressedSha256": "1a708ff926d94841894a37782db598fda8e8f596d063f78f98d8a4c72cf5d24b",
+          "compressedBytes": 2062,
+          "compressedSha256": "5a867505546c25628919c28ee949a5f3a93ccd202752afefba2ec4799d04cbae",
+          "zstd19Bytes": 2062
+        },
+        {
+          "level": 9,
+          "uncompressedBytes": 512,
+          "uncompressedSha256": "bef04d77942b24dc61c3de6560725afdf161a51cae52a9c82279da6f7d858a04",
+          "compressedBytes": 526,
+          "compressedSha256": "9a0bad872a48da28cc1073ba33011ce80a36818fc0f60049cfcc8d19a89a40ea",
+          "zstd19Bytes": 526
+        },
+        {
+          "level": 10,
+          "uncompressedBytes": 128,
+          "uncompressedSha256": "2bea2de2206fd028712ebfa2227d3eb1efe4635a28202416458e04722b4dc632",
+          "compressedBytes": 141,
+          "compressedSha256": "b085a359e0d43ca6b94587db333a609dbba61afab9a4e85db15acfc45cde1c54",
+          "zstd19Bytes": 141
+        },
+        {
+          "level": 11,
+          "uncompressedBytes": 32,
+          "uncompressedSha256": "a5b07534ffaadca29774aa94280e76b5e1cdde32da7de757b06b401e2d9dbbf4",
+          "compressedBytes": 45,
+          "compressedSha256": "907a33897d0a63c2445f7e898ca8e8e548fac089f1a07dd8605445aa9093529c",
+          "zstd19Bytes": 45
+        },
+        {
+          "level": 12,
+          "uncompressedBytes": 16,
+          "uncompressedSha256": "c2b46e9e9858bd7f4247656020397215ffd189fd9596174a94f080f90164c578",
+          "compressedBytes": 29,
+          "compressedSha256": "bb7e7757e0c03ef64b91b15c86774cc65b91df553720910876e967f5ccdfe203",
+          "zstd19Bytes": 29
+        },
+        {
+          "level": 13,
+          "uncompressedBytes": 16,
+          "uncompressedSha256": "0b6391d605c76af6e006ab96bf3840eef857b04df57e1480f065a50bb8c7be3a",
+          "compressedBytes": 29,
+          "compressedSha256": "1790453f510a4b5e79a13d36a00eb89aec8dd8301284a626a5f3716e7483c781",
+          "zstd19Bytes": 29
+        },
+        {
+          "level": 14,
+          "uncompressedBytes": 16,
+          "uncompressedSha256": "c3922a143ac968affceeb17e7125387b77c63bafea16723727b93ba62d3c5089",
+          "compressedBytes": 29,
+          "compressedSha256": "23b55d16ec68d856e0a8cd1d2eb56a1c6ee4e990cfb82898ddb73501c797ce16",
+          "zstd19Bytes": 29
+        }
+      ],
+      "zstdLevel": 22,
+      "comparisonLevel": 19,
+      "zstd19ContainerBytes": 151207602,
+      "sourceFiles": [
+        {
+          "name": "starmap_2020_16k_0.bc6h.gz",
+          "bytes": 30042756,
+          "sha256": "cdf2cab32096b34db2897b564f3efcb46238777012b895b30ac66a97f791adb0"
+        },
+        {
+          "name": "starmap_2020_16k_1.bc6h.gz",
+          "bytes": 30689282,
+          "sha256": "cb8da9b748529ff8de2afe5686f278bdfc6b1d00f24afca91278417d2e71cbf3"
+        },
+        {
+          "name": "starmap_2020_16k_2.bc6h.gz",
+          "bytes": 31025950,
+          "sha256": "f6edb3a5ff3b7bdf827936422bed5e5604f46155585cad6a4f599e6ebfb5b7d4"
+        },
+        {
+          "name": "starmap_2020_16k_3.bc6h.gz",
+          "bytes": 31281919,
+          "sha256": "bc764f8b089e8970c0cbb9f79d3c8e72d6955662dd5467d7675e44e273dcb6de"
+        },
+        {
+          "name": "starmap_2020_16k_mip1.bc6h.gz",
+          "bytes": 32355579,
+          "sha256": "0d19d3a168cffd75c11f0c24e54cf0e7ba37e9dd17163820c83d88dace43080a"
+        },
+        {
+          "name": "starmap_2020_16k_mip2.bc6h.gz",
+          "bytes": 8237742,
+          "sha256": "0e4751f6cb8fc925bdcbd6606677b096d17c327b41d4beed6ed1bcc566ad88e9"
+        },
+        {
+          "name": "starmap_2020_16k_mip3.bc6h.gz",
+          "bytes": 2062931,
+          "sha256": "401a5fe82f5bb21a36c0f09f0f9d095d665b28143219d86e00e30ada7c967c23"
+        },
+        {
+          "name": "starmap_2020_16k_mip4.bc6h.gz",
+          "bytes": 513789,
+          "sha256": "01b17130f971f5c3d0349424f76e09833caab7fa0cc5adaea8f9e97da089c23b"
+        },
+        {
+          "name": "starmap_2020_16k_mip5.bc6h.gz",
+          "bytes": 127971,
+          "sha256": "fd7731b37df2510463011cd2a0c58f43f2ab5d9867196328d88425fed1e02f86"
+        },
+        {
+          "name": "starmap_2020_16k_mip6.bc6h.gz",
+          "bytes": 32118,
+          "sha256": "dc49cecb7d51289f567d72df76f8472962e2982d609b4d21e007a2b0159cfa6e"
+        },
+        {
+          "name": "starmap_2020_16k_mip7.bc6h.gz",
+          "bytes": 8145,
+          "sha256": "3f6eadeedc75a2c8863fb266de812badb406740f26101013835624fd2263aceb"
+        },
+        {
+          "name": "starmap_2020_16k_mip8.bc6h.gz",
+          "bytes": 2071,
+          "sha256": "cdf3d08c08f151234fdac8750903910d72605254a41ef4b592dda09e3b8c962b"
+        },
+        {
+          "name": "starmap_2020_16k_mip9.bc6h.gz",
+          "bytes": 535,
+          "sha256": "a6705a53bd37bad344243223a25f5e72c0001e39839f5058e4edf6de78afc6ee"
+        },
+        {
+          "name": "starmap_2020_16k_mip10.bc6h.gz",
+          "bytes": 151,
+          "sha256": "8787015510da500952768bc6003fafb9a327d9e48405f99bba405da5a6e07669"
+        },
+        {
+          "name": "starmap_2020_16k_mip11.bc6h.gz",
+          "bytes": 53,
+          "sha256": "892813f1f01ea5aece09fae3828c83ea3c60466bd20cc838965045fd6452bcb6"
+        },
+        {
+          "name": "starmap_2020_16k_mip12.bc6h.gz",
+          "bytes": 35,
+          "sha256": "aaf73b591686eaf66ec6e1122329aa5a6f8f9d246a6da6b7c52f2b9b0d2ee6a6"
+        },
+        {
+          "name": "starmap_2020_16k_mip13.bc6h.gz",
+          "bytes": 31,
+          "sha256": "291c2cf84d9f4ce626177bbc419426d1419d1a1db0bea8a1c29a3f4c747858ad"
+        },
+        {
+          "name": "starmap_2020_16k_mip14.bc6h.gz",
+          "bytes": 32,
+          "sha256": "c5024dd35a41a79a3f4146104d7d22bf59db9e74f7a01daf3b8f7b85d5bc3fe2"
+        }
+      ],
+      "zstdVersion": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***"
+    }
+  }
+}

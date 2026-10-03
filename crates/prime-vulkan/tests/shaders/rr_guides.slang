@@ -58,11 +58,12 @@ public float3 rrCpuPixelMotion(float4 target, float2 sampleUv, float4 previousPo
     return float3(motion, valid ? 1.0 : 0.0);
 }
 
-public float3 rrCpuDistanceMotion(float2 sampleUv, float depth, float distance,
-                                  float4 currentPosition, float4 currentForward,
-                                  float3 currentRight, float3 currentUp, float4 previousPosition,
-                                  float4 previousForward, float3 previousRight, float3 previousUp,
-                                  bool history, uint2 extent) {
+public float3 rrCpuReflectionMotion(float2 sampleUv, float depth, float distance,
+                                    float2 primaryMotion, float4 currentPosition,
+                                    float4 currentForward, float3 currentRight, float3 currentUp,
+                                    float4 previousPosition, float4 previousForward,
+                                    float3 previousRight, float3 previousUp, bool history,
+                                    uint2 extent) {
     RrCamera camera = {previousPosition,
                        previousForward,
                        float4(previousRight, 0),
@@ -73,8 +74,29 @@ public float3 rrCpuDistanceMotion(float2 sampleUv, float depth, float distance,
                        float4(currentRight, 0),
                        float4(currentUp, 0)};
     float2 motion;
-    bool valid = primeRrDistanceMotion(camera, sampleUv, depth, distance, extent, motion);
+    bool valid =
+            primeRrDistanceMotion(camera, sampleUv, depth, distance, primaryMotion, extent, motion);
     return float3(motion, valid ? 1.0 : 0.0);
+}
+
+public float3 rrCpuDistanceMotion(float2 sampleUv, float depth, float distance,
+                                  float4 currentPosition, float4 currentForward,
+                                  float3 currentRight, float3 currentUp, float4 previousPosition,
+                                  float4 previousForward, float3 previousRight, float3 previousUp,
+                                  bool history, uint2 extent) {
+    // Existing static-primary distance cases supply the real primary projection. The separate
+    // wrapper accepts moving-primary motion directly, without inferring its previous depth.
+    float2 screen = sampleUv * 2.0 - 1.0;
+    float3 primary = currentPosition.xyz + currentForward.xyz * depth +
+                     currentRight * (screen.x * currentForward.w * currentPosition.w * depth) -
+                     currentUp * (screen.y * currentPosition.w * depth);
+    float3 pixels =
+            rrCpuPixelMotion(float4(primary, 0), sampleUv, previousPosition, previousForward,
+                             previousRight, previousUp, history, true, extent);
+    return rrCpuReflectionMotion(
+            sampleUv, depth, distance, pixels.z != 0 ? pixels.xy : float2(PRIME_RR_INVALID_MOTION),
+            currentPosition, currentForward, currentRight, currentUp, previousPosition,
+            previousForward, previousRight, previousUp, history, extent);
 }
 
 public float3 rrCpuColor(float3 value, bool roundtrip) {

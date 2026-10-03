@@ -72,8 +72,17 @@ The asset retains the source image's attribution and
 not the license of Prime-authored code. See the
 [NASA/ESA/Gaia credit and processing notice](licenses/NASA-DEEP-STAR-MAPS-2020-NOTICE.md).
 Source, encoder, compressed and decoded hashes are in the adjacent asset manifest.
-Its gzip parts total 166,381,090 bytes; upload and GPU storage total 178,957,008 bytes.
-They are compiled into the shared native engine, with no second copy in the JAR.
+Its KTX2 container uses lossless Zstd supercompression; upload and GPU storage
+total 178,957,008 bytes. It is compiled into the shared native engine, with no
+second copy in the JAR.
+
+Fixed asset decoding links Zstandard 1.5.7 through the Rust `zstd` 0.14.0,
+`zstd-safe` 8.0.0 and `zstd-sys` 2.1.0 crates. Zstandard and generated bindings
+are distributed under their BSD-3-Clause terms; the Rust wrappers are copyright
+2026 Alexandre Bury, BSD-3-Clause. See the unmodified
+[Zstandard license](licenses/zstd-BSD-3-Clause.txt),
+[bindings license](licenses/zstd-bindings-BSD-3-Clause.txt) and
+[Rust wrapper license](licenses/zstd-rust-BSD-3-Clause.txt).
 
 The celestial projection/filter, automatic exposure, extended-sRGB HDR/UI
 composition and Windows display probe adapt legacy Prime's corresponding

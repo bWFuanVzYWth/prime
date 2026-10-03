@@ -12,16 +12,17 @@
 
 ## 资产
 
-使用标准 Safetensors 容器，little-endian、无有损压缩。格式只有通用容器，物理语义由 metadata 明确规定；不从扩展名推断相函数的归一化或角度约定。
+GPU 纹理使用 KTX2 内部 Zstd 22，命名物理数组使用标准 Safetensors 外包 Zstd 22；little-endian、原始 FP16/FP32 位模式无损。物理语义由 metadata 明确规定，不从扩展名推断相函数的归一化或角度约定。格式与再封装规则见[固定资产规范](assets.md)，逐资源哈希见[manifest](../crates/prime-vulkan/assets/packed-assets.json)。
 
-- `assets/atmosphere/medium.safetensors`：命名的 f32 高度、介质 profile、相函数、积分质量、求积节点及映射系数。相函数为 `sr^-1`，`mu=+1` 表示前向；坐标为 `u=cbrt((1-mu)/2)`，1024 个中心节点，在 u 域线性插值、端点 clamp。四类粒子、四个波长和原始浮点位模式保持不变。
-- `assets/atmosphere/default.safetensors`：八轮、每状态 1536 个入射方向求解后的 optical depth、归一化 scattering source、incident mean、ground radiance、Rayleigh moments。前两者 f16，其余 f32，尺寸与旧版一致。
+- `assets/atmosphere/medium.safetensors.zst`：命名的 f32 高度、介质 profile、相函数、积分质量、求积节点及映射系数。相函数为 `sr^-1`，`mu=+1` 表示前向；坐标为 `u=cbrt((1-mu)/2)`，1024 个中心节点，在 u 域线性插值、端点 clamp。四类粒子、四个波长和原始浮点位模式保持不变。
+- `optical_depth.ktx2` / `scattering_source.ktx2`：512×128 / 3200×240 RGBA16F 的 optical depth 与归一化 scattering source。
+- `incident_mean.ktx2` / `ground_radiance.ktx2` / `rayleigh_source.ktx2`：160×40 / 160×1 / 800×21 RGBA32F 的 incident mean、ground radiance 与 Rayleigh moments。五表均为八轮、每状态1536个入射方向求解的原产物，只有一层mip；数值轴和通道保持原定义，不作为彩色图像转换。
 
-两份资产编入 native 库，启动只校验和上传，不重新运行多散射求解器。运行时将命名介质数组按固定 GPU 布局连接一次；shader 不解析容器、没有运行时解压。离线工具按原计算依赖生成资产，工具特性不编入默认发行路径。再生成命令见 [CONTRIBUTING](../CONTRIBUTING.md#大气资产与无窗口验证)。
+固定资产编入 native 库，初始化校验、解压和上传，不重新运行多散射求解器。纹理直接解压到上传staging，物理介质解压后验证元数据与数组，再按固定 GPU 布局连接一次；shader 不解析容器，稳态不重复解压。离线工具按原计算依赖生成标准 Safetensors 中间产物，统一封装脚本生成发行资产；工具特性不编入默认发行路径。再生成命令见 [CONTRIBUTING](../CONTRIBUTING.md#大气资产与无窗口验证)。
 
 ## 星图资产与天空消费
 
-`assets/starmap/` 保留 NASA Deep Star Maps 2020 的 16K ICRF/J2000 星图与15层球面立体角加权 mip。BC6H资产已在离线工具中按旧源线性sRGB解释转换为D65线性Rec.2020；直接上传，无运行时转码或重复色域转换。原始EXR未声明primaries/white point，来源/编码/hash与独立credit见[manifest](../crates/prime-vulkan/assets/starmap/starmap_2020_16k.json)和[NASA声明](../licenses/NASA-DEEP-STAR-MAPS-2020-NOTICE.md)。完整链170.67MiB GPU常驻，初始化decoded CPU单stripe最多32MiB，全部170.67MiB staging可保留至完成；上传owner遵守独立fence或宿主serial回收。
+`assets/starmap/starmap_2020_16k.ktx2` 保留 NASA Deep Star Maps 2020 的 16K ICRF/J2000 星图与15层球面立体角加权 mip。BC6H资产已在离线工具中按旧源线性sRGB解释转换为D65线性Rec.2020；初始化只做Zstd解压，不转码或重复色域转换。原始EXR未声明primaries/white point，来源/编码/hash与独立credit见[manifest](../crates/prime-vulkan/assets/starmap/starmap_2020_16k.json)和[NASA声明](../licenses/NASA-DEEP-STAR-MAPS-2020-NOTICE.md)。完整链170.67MiB GPU常驻，直接解入15个mip staging，基层单次分配128MiB，全部170.67MiB staging可保留至完成；上传owner遵守独立fence或宿主serial回收。
 
 `AtmLighting`/`AtmEnvironment` 显式接收星图sampler与纬度、季节和scale常量。`atmSky` 返回大气天空×sky强度加星图LOD0×方向透射×`0.025×stars`，星光与sky强度独立，地球遮挡为零。纬度和太阳黄经沿用同一观测配置；星图的恒星时相位由当前太阳方向和太阳赤经得到，赤经缝使用wrap。
 

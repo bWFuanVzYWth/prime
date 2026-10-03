@@ -2,155 +2,38 @@
 use crate::{
     post_compute::{PostCompute, barrier},
     resources::{Buffer, Context, error},
+    texture_asset::{TextureAsset, TextureSpec},
 };
 use ash::vk;
-use flate2::read::GzDecoder;
-use std::{io::Read, sync::Arc};
+use std::sync::Arc;
 pub(crate) const WIDTH: u32 = 16384;
 pub(crate) const HEIGHT: u32 = 8192;
 pub(crate) const MIPS: u32 = 15;
-const PARTS: &[(u32, u32, u32, u32, &[u8])] = &[
-    (
-        0,
-        0,
-        16384,
-        2048,
-        include_bytes!("../assets/starmap/starmap_2020_16k_0.bc6h.gz"),
-    ),
-    (
-        2048,
-        0,
-        16384,
-        2048,
-        include_bytes!("../assets/starmap/starmap_2020_16k_1.bc6h.gz"),
-    ),
-    (
-        4096,
-        0,
-        16384,
-        2048,
-        include_bytes!("../assets/starmap/starmap_2020_16k_2.bc6h.gz"),
-    ),
-    (
-        6144,
-        0,
-        16384,
-        2048,
-        include_bytes!("../assets/starmap/starmap_2020_16k_3.bc6h.gz"),
-    ),
-    (
-        0,
-        1,
-        8192,
-        4096,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip1.bc6h.gz"),
-    ),
-    (
-        0,
-        2,
-        4096,
-        2048,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip2.bc6h.gz"),
-    ),
-    (
-        0,
-        3,
-        2048,
-        1024,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip3.bc6h.gz"),
-    ),
-    (
-        0,
-        4,
-        1024,
-        512,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip4.bc6h.gz"),
-    ),
-    (
-        0,
-        5,
-        512,
-        256,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip5.bc6h.gz"),
-    ),
-    (
-        0,
-        6,
-        256,
-        128,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip6.bc6h.gz"),
-    ),
-    (
-        0,
-        7,
-        128,
-        64,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip7.bc6h.gz"),
-    ),
-    (
-        0,
-        8,
-        64,
-        32,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip8.bc6h.gz"),
-    ),
-    (
-        0,
-        9,
-        32,
-        16,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip9.bc6h.gz"),
-    ),
-    (
-        0,
-        10,
-        16,
-        8,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip10.bc6h.gz"),
-    ),
-    (
-        0,
-        11,
-        8,
-        4,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip11.bc6h.gz"),
-    ),
-    (
-        0,
-        12,
-        4,
-        2,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip12.bc6h.gz"),
-    ),
-    (
-        0,
-        13,
-        2,
-        1,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip13.bc6h.gz"),
-    ),
-    (
-        0,
-        14,
-        1,
-        1,
-        include_bytes!("../assets/starmap/starmap_2020_16k_mip14.bc6h.gz"),
-    ),
-];
-fn decode(bytes: &[u8], expected: usize) -> Result<Vec<u8>, String> {
-    let mut decoder = GzDecoder::new(bytes);
-    let mut output = vec![0; expected];
-    decoder
-        .read_exact(&mut output)
-        .map_err(|e| format!("Decode starmap asset: {e}"))?;
-    if decoder
-        .read(&mut [0; 1])
-        .map_err(|e| format!("Starmap gzip CRC: {e}"))?
-        != 0
-    {
-        return Err("Starmap asset exceeds its mip extent".into());
+const ASSET: &[u8] = include_bytes!("../assets/starmap/starmap_2020_16k.ktx2");
+const SPEC: TextureSpec = TextureSpec {
+    format: vk::Format::BC6H_UFLOAT_BLOCK,
+    extent: [WIDTH, HEIGHT, 0],
+    levels: MIPS,
+    primaries: 4, // D65 linear BT.2020; the original payload is already in this working space.
+};
+fn asset() -> Result<TextureAsset<'static>, String> {
+    let asset = TextureAsset::parse(ASSET, SPEC)?;
+    for (key, expected) in [
+        (
+            "source_sha256",
+            "19a1351f00c386a6e5eec4d67af96d5fc71edf6a1189941579b9498b52e7589a",
+        ),
+        (
+            "projection",
+            "plate carree ICRF/J2000; RA 0h at center, RA increases left",
+        ),
+        ("working_color", "D65 linear Rec.2020"),
+    ] {
+        if asset.metadata_text(key)? != expected {
+            return Err(format!("Unsupported starmap metadata {key}"));
+        }
     }
-    Ok(output)
+    Ok(asset)
 }
 fn range() -> vk::ImageSubresourceRange {
     vk::ImageSubresourceRange::default()
@@ -165,7 +48,7 @@ pub(crate) struct Starmap {
     pub view: vk::ImageView,
     pub sampler: vk::Sampler,
     memory: vk::DeviceMemory,
-    initialized: bool,
+    asset: Option<TextureAsset<'static>>,
 }
 impl Starmap {
     pub fn new(context: &Arc<Context>) -> Result<Self, String> {
@@ -181,7 +64,7 @@ impl Starmap {
             view: vk::ImageView::null(),
             sampler: vk::Sampler::null(),
             memory: vk::DeviceMemory::null(),
-            initialized: false,
+            asset: Some(asset()?),
         };
         unsafe {
             result.image = context
@@ -252,12 +135,29 @@ impl Starmap {
     }
     /// Record once. The caller retains returned staging until submit_named returns: owned mode
     /// has completed its fence, while borrowed mode can then retire by the active host serial.
-    /// One decompressed stripe is temporary on CPU; all staging coexist until completion.
+    /// Zstd writes directly into mapped mip staging; all staging coexist until completion.
+    /// The base mip is one 128MiB allocation instead of four 32MiB stripe allocations.
     pub fn prepare(&mut self, command: vk::CommandBuffer) -> Result<Vec<Buffer>, String> {
-        if self.initialized {
+        let Some(asset) = self.asset.as_ref() else {
             return Ok(Vec::new());
+        };
+        let mut uploads = Vec::with_capacity(MIPS as usize);
+        // Validate/decode every mip before recording any initialization command. Failed
+        // allocations or corrupt frames remain CPU-owned and are never submitted.
+        for level in 0..MIPS as usize {
+            let size = asset.level_size(level);
+            let staging = Buffer::new(
+                &self.context,
+                size as u64,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                true,
+            )?;
+            // SAFETY: New staging has no GPU consumer; success initializes the whole range.
+            unsafe {
+                staging.write_with(0, size, |bytes| asset.decode_level_into(level, bytes))?;
+            }
+            uploads.push(staging);
         }
-        let mut uploads = Vec::with_capacity(PARTS.len());
         unsafe {
             let transition = [vk::ImageMemoryBarrier::default()
                 .image(self.image)
@@ -277,27 +177,19 @@ impl Starmap {
                 &transition,
             );
         }
-        for &(y, level, width, height, bytes) in PARTS {
-            let expected = width.div_ceil(4) as usize * height.div_ceil(4) as usize * 16;
-            let decoded = decode(bytes, expected)?;
-            let staging =
-                Buffer::upload(&self.context, &decoded, vk::BufferUsageFlags::TRANSFER_SRC)?;
+        for (level, staging) in uploads.iter().enumerate() {
+            let [width, height, depth] = asset.level_extent(level);
             let copy = [vk::BufferImageCopy::default()
                 .image_subresource(
                     vk::ImageSubresourceLayers::default()
                         .aspect_mask(vk::ImageAspectFlags::COLOR)
-                        .mip_level(level)
+                        .mip_level(level as u32)
                         .layer_count(1),
                 )
-                .image_offset(vk::Offset3D {
-                    x: 0,
-                    y: y as i32,
-                    z: 0,
-                })
                 .image_extent(vk::Extent3D {
                     width,
                     height,
-                    depth: 1,
+                    depth,
                 })];
             unsafe {
                 self.context.device.cmd_copy_buffer_to_image(
@@ -308,7 +200,6 @@ impl Starmap {
                     &copy,
                 );
             }
-            uploads.push(staging);
         }
         unsafe {
             let transition = [vk::ImageMemoryBarrier::default()
@@ -330,7 +221,7 @@ impl Starmap {
                 &transition,
             );
         }
-        self.initialized = true;
+        self.asset.take();
         Ok(uploads)
     }
 }
@@ -445,19 +336,45 @@ pub(crate) struct StarsParameters {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::{Digest, Sha256};
+    use std::mem::MaybeUninit;
+
     #[test]
-    fn compressed_mip_chain_is_complete_and_gzip_crc_valid() {
-        let mut size = 0;
-        for &(_, _, w, h, bytes) in PARTS {
-            let n = w.div_ceil(4) as usize * h.div_ceil(4) as usize * 16;
-            assert_eq!(decode(bytes, n).unwrap().len(), n);
-            size += n;
+    fn ktx2_mip_payloads_match_independently_locked_legacy_gpu_bytes() {
+        const HASHES: [&str; 15] = [
+            "d3ed4c4ebf391aa4150f87718eb9ede61f51bbd70205c23772aa645711ff2212",
+            "9fa64aab4a7f095970d42c5f92f39a9e9b3f80089db6b5165a6b51d59f945320",
+            "40e78340f7e6005f3e4ac258588318a1abcf0036a21a5148e14620a9b4fd2fc6",
+            "b1b365f1c22889b6e4396df2be6a22df0d6f5691e593a05bb0fa3d051f327c8d",
+            "faf8db882c181a7b51712b0b17f02664e8cc5ea7bcbd40d17c5e35cf105414b5",
+            "eae1c8b4d7c0f10ff5632c923950c3321409979310592c1aa2ac81e88efcc1a9",
+            "92bd06a18a25da6bb01b5abbe08139a81f3cb131365d94b53f64cc7ce6964352",
+            "e698686dbaeae3d4a5078f2819045a986c597a383d55f29ed83dd80530adf117",
+            "1a708ff926d94841894a37782db598fda8e8f596d063f78f98d8a4c72cf5d24b",
+            "bef04d77942b24dc61c3de6560725afdf161a51cae52a9c82279da6f7d858a04",
+            "2bea2de2206fd028712ebfa2227d3eb1efe4635a28202416458e04722b4dc632",
+            "a5b07534ffaadca29774aa94280e76b5e1cdde32da7de757b06b401e2d9dbbf4",
+            "c2b46e9e9858bd7f4247656020397215ffd189fd9596174a94f080f90164c578",
+            "0b6391d605c76af6e006ab96bf3840eef857b04df57e1480f065a50bb8c7be3a",
+            "c3922a143ac968affceeb17e7125387b77c63bafea16723727b93ba62d3c5089",
+        ];
+        let asset = asset().unwrap();
+        let mut total = 0;
+        for (level, expected) in HASHES.iter().enumerate() {
+            let size = asset.level_size(level);
+            let mut output = Vec::<u8>::with_capacity(size);
+            let destination: &mut [MaybeUninit<u8>] = &mut output.spare_capacity_mut()[..size];
+            asset.decode_level_into(level, destination).unwrap();
+            // SAFETY: The actual decoder successfully initialized exactly size bytes.
+            unsafe { output.set_len(size) };
+            assert_eq!(
+                format!("{:x}", Sha256::digest(&output)),
+                *expected,
+                "mip={level}"
+            );
+            total += size;
         }
-        assert_eq!(size, 178957008);
-        let (_, _, w, h, bytes) = PARTS[17];
-        assert!(decode(bytes, (w * h * 16 - 1) as usize).is_err());
-        let mut corrupt = bytes.to_vec();
-        *corrupt.last_mut().unwrap() ^= 1;
-        assert!(decode(&corrupt, 16).is_err());
+        assert_eq!(total, 178_957_008);
+        assert!(TextureAsset::parse(&ASSET[..ASSET.len() - 1], SPEC).is_err());
     }
 }

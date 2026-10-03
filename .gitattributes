@@ -21,6 +21,8 @@
 *.bin -text
 *.bytes -text
 *.safetensors -text
+*.ktx2 -text
+*.zst -text
 *.spv -text
 *.dll -text
 *.so -text

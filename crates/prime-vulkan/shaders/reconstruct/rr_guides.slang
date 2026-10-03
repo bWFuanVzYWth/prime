@@ -68,16 +68,28 @@ public float3 primeRrCurrentDirection(RrCamera camera, float2 sampleUv) {
 // Ordinary/rough reflection retains the existing sampled first-segment distance contract.
 // Unfold its local reflection into a point on the view ray. For a planar ideal reflector
 // this is the reflected virtual point; rough/curved reflection uses a local distance proxy.
-// Zero distance reduces to the primary point, and sky has no translational parallax.
+// At zero distance the endpoint is the primary point: reuse its actual accepted-pose motion,
+// including object motion. Nonzero distance remains the camera-only local-distance proxy.
+// Sky has no translational parallax.
 public bool primeRrDistanceMotion(RrCamera camera, float2 sampleUv, float depth, float distance,
-                                  uint2 extent, out float2 motion) {
-    float3 direction = primeRrCurrentDirection(camera, sampleUv);
+                                  float2 primaryMotion, uint2 extent, out float2 motion) {
     if (depth == PRIME_RR_SKY_DEPTH)
-        return primeRrMotionPixels(camera, sampleUv, direction, true, true, extent, motion);
+        return primeRrMotionPixels(camera, sampleUv, primeRrCurrentDirection(camera, sampleUv),
+                                   true, true, extent, motion);
     motion = float2(0.0);
+    if (!(depth > 0.0) || isnan(depth) || isinf(depth) || isnan(distance) || isinf(distance) ||
+        distance < 0.0)
+        return false;
+    if (distance == 0.0) {
+        if (any(isnan(primaryMotion)) || any(isinf(primaryMotion)) ||
+            any(abs(primaryMotion) >= 65504.0))
+            return false;
+        motion = camera.jitter.z == 0.0 ? float2(0.0) : primaryMotion;
+        return true;
+    }
+    float3 direction = primeRrCurrentDirection(camera, sampleUv);
     float cosine = dot(direction, camera.currentForward.xyz);
-    if (!(depth > 0.0) || !(cosine > 0.0) || isnan(depth) || isinf(depth) || isnan(distance) ||
-        isinf(distance) || distance < 0.0)
+    if (!(cosine > 0.0))
         return false;
     float3 point = camera.currentPosition.xyz + direction * (depth / cosine + distance);
     return primeRrMotionPixels(camera, sampleUv, point, false, true, extent, motion);

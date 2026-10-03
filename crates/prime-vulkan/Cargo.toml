@@ -15,7 +15,7 @@ light-sampling-bench = []
 ash = { workspace = true }
 prime_scene = { workspace = true }
 safetensors = "0.8.0"
-flate2 = "1.1.10"
+zstd = { version = "0.14.0", default-features = false }
 
 [build-dependencies]
 cc = "1.5.1"
@@ -25,6 +25,7 @@ mimalloc.workspace = true
 prime_abi.workspace = true
 prime_scene = { workspace = true, features = ["legacy-fixtures"] }
 serde_json = "1.0.151"
+sha2 = "0.10.9"
 
 [lints]
 workspace = true

@@ -160,6 +160,7 @@ final class SectionCompilerOracle {
                            Map.of(bottom, slab, stone, full)));
         var glass = Blocks.GLASS.defaultBlockState();
         cases.add(new Case("glass_pair", Map.of(p, glass, p.east(), glass), Map.of(glass, full)));
+        iceCases(cases, material, p);
         cases.add(new Case("water_slab_side", Map.of(p, water, p.east(), bottom),
                            Map.of(bottom, slab)));
         cases.add(new Case("water_slab_below", Map.of(p, water, p.below(), bottom),
@@ -291,6 +292,45 @@ final class SectionCompilerOracle {
         makeModel.setAccessible(true);
         return (BlockStateModel)makeModel.newInstance(makeShared.newInstance(checked), state);
     }
+    private static void iceCases(List<Case> cases, Material.Baked material, BlockPos p) {
+        var ice = Blocks.ICE.defaultBlockState();
+        var frosted = Blocks.FROSTED_ICE.defaultBlockState();
+        var aged = frosted.setValue(BlockStateProperties.AGE_3, 3);
+        if ((SectionResources.flags(ice) & 128) == 0 ||
+            (SectionResources.flags(frosted) & 128) == 0 ||
+            (SectionResources.flags(Blocks.PACKED_ICE.defaultBlockState()) & 128) != 0 ||
+            (SectionResources.flags(Blocks.BLUE_ICE.defaultBlockState()) & 128) != 0)
+            throw new AssertionError("Ice host class flags changed");
+        var full = box(material, 0, 0, 0, 1, 1, 1, -1, ChunkSectionLayer.TRANSLUCENT, true);
+        for (var direction : Direction.values()) {
+            // Exercise the actual host rule, independently of the native mask helper.
+            if (Block.shouldRenderFace(ice, ice, direction) ||
+                Block.shouldRenderFace(frosted, aged, direction) ||
+                Block.shouldRenderFace(aged, frosted, direction) ||
+                !Block.shouldRenderFace(ice, frosted, direction) ||
+                !Block.shouldRenderFace(frosted, ice, direction))
+                throw new AssertionError("Ice exact-block face contract changed: " + direction);
+            cases.add(new Case("ice_pair_" + direction.getName(),
+                               Map.of(p, ice, p.relative(direction), ice), Map.of(ice, full)));
+            var edge = new BlockPos(direction.getStepX() > 0 ? 15 : 0,
+                                    direction.getStepY() > 0 ? 15 : 0,
+                                    direction.getStepZ() > 0 ? 15 : 0);
+            cases.add(new Case("ice_cross_section_" + direction.getName(),
+                               Map.of(edge, ice, edge.relative(direction), ice),
+                               Map.of(ice, full)));
+        }
+        cases.add(new Case("ice_cross_slab",
+                           Map.of(new BlockPos(8, 3, 8), ice, new BlockPos(8, 4, 8), ice),
+                           Map.of(ice, full)));
+        cases.add(new Case("frosted_ice_age_pair", Map.of(p, frosted, p.east(), aged),
+                           Map.of(frosted, full, aged, full)));
+        cases.add(new Case("ice_frosted_boundary", Map.of(p, ice, p.east(), frosted),
+                           Map.of(ice, full, frosted, full)));
+        // A resource model can opt out of directional culling even on the known builtin.
+        var unculled = box(material, 0, 0, 0, 1, 1, 1, -1, ChunkSectionLayer.TRANSLUCENT, false);
+        cases.add(new Case("ice_unculled_model_pair", Map.of(p, ice, p.east(), ice),
+                           Map.of(ice, unculled)));
+    }
     static BlockStateModel shapeModel(Material.Baked material, BlockState state) throws Exception {
         var parts = new ArrayList<MultiPartModel.Selector<BlockStateModel>>();
         for (var a : state.getOcclusionShape().toAabbs())
@@ -307,6 +347,11 @@ final class SectionCompilerOracle {
     }
     static BlockStateModel box(Material.Baked material, float x0, float y0, float z0, float x1,
                                float y1, float z1, int tint) {
+        return box(material, x0, y0, z0, x1, y1, z1, tint, ChunkSectionLayer.SOLID, true);
+    }
+    private static BlockStateModel box(Material.Baked material, float x0, float y0, float z0,
+                                       float x1, float y1, float z1, int tint,
+                                       ChunkSectionLayer layer, boolean culled) {
         float[][][] faces = {{{x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}},
                              {{x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}},
                              {{x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}},
@@ -320,8 +365,11 @@ final class SectionCompilerOracle {
                                   new Vector3f(ps[3]), UVPair.pack(.125f, .125f),
                                   UVPair.pack(.875f, .125f), UVPair.pack(.875f, .875f),
                                   UVPair.pack(.125f, .875f), direction,
-                                  SectionOracleMaterial.create(material.sprite(), tint));
-            quads.addCulledFace(direction, q);
+                                  SectionOracleMaterial.create(material.sprite(), tint, layer));
+            if (culled)
+                quads.addCulledFace(direction, q);
+            else
+                quads.addUnculledFace(q);
         }
         return new SingleVariant(new SimpleModelWrapper(quads.build(), false, material));
     }

@@ -406,6 +406,99 @@ mod tests {
     };
 
     #[test]
+    fn ice_matching_masks_preserve_other_owners_and_unculled_model_faces() {
+        let mut catalog = Catalog::default();
+        catalog.models.insert(
+            1,
+            Model::Mesh(
+                (0..7)
+                    .map(|face| Quad {
+                        sprite: 0,
+                        emission: 0,
+                        positions: [[0.; 3]; 4],
+                        uvs: [[0.; 2]; 4],
+                        face,
+                        tint: -1,
+                        layer: 2,
+                    })
+                    .collect(),
+            ),
+        );
+        for (id, name, flags) in [
+            (1, "minecraft:ice", 192),
+            (2, "minecraft:ice", 192),
+            (3, "minecraft:frosted_ice", 192),
+            (4, "minecraft:frosted_ice", 192),
+            (5, "mod:ice", 192),
+            (6, "mod:other_ice", 192),
+            (7, "minecraft:ice", 64),
+            (8, "minecraft:packed_ice", 32),
+            (9, "minecraft:blue_ice", 32),
+        ] {
+            catalog.states.insert(
+                id,
+                State {
+                    id,
+                    name: name.into(),
+                    flags,
+                    model: 1,
+                    ..Default::default()
+                },
+            );
+        }
+        catalog.prepare();
+        // Explicit host rule expectations, independent of Catalog::hidden's helper.
+        for (own, neighbor, hidden) in [
+            (1, 2, true),
+            (3, 4, true),
+            (1, 3, false),
+            (3, 1, false),
+            (5, 5, false),
+            (5, 6, false),
+            (7, 7, false),
+            (8, 8, false),
+            (9, 9, false),
+            (1, 5, false),
+            (1, 0, false),
+        ] {
+            for lane in 0..16 {
+                let row = 2 * PLANE + 2 * ROW + 1;
+                let index = row + lane;
+                for (face, offset) in [
+                    -(PLANE as isize),
+                    PLANE as isize,
+                    -(ROW as isize),
+                    ROW as isize,
+                    -1,
+                    1,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let mut slab = Slab::new();
+                    slab.set(index, Cell::lower(own, &catalog));
+                    slab.set(
+                        (index as isize + offset) as usize,
+                        Cell::lower(neighbor, &catalog),
+                    );
+                    let expected = if hidden { 127 & !(1 << face) } else { 127 };
+                    assert_eq!(
+                        slab.exact_visible(index, slab.visibility_row(row)[lane], &catalog),
+                        expected,
+                        "SIMD own={own} neighbor={neighbor} face={face} lane={lane}"
+                    );
+                    assert_eq!(slab.visible(index, &catalog), expected);
+                    assert_ne!(expected & 64, 0);
+                }
+            }
+        }
+        assert!(catalog.states[&1].same_boundary(&catalog.states[&2]));
+        assert!(catalog.states[&3].same_boundary(&catalog.states[&4]));
+        assert!(!catalog.states[&1].same_boundary(&catalog.states[&3]));
+        assert!(!catalog.states[&3].same_boundary(&catalog.states[&1]));
+    }
+
+    #[test]
     fn soa_visibility_matches_scalar_shapes_directions_and_matching_blocks() {
         let mut catalog = Catalog::default();
         // Opposite half faces, plus a full shape with a non-special ID. Classification must

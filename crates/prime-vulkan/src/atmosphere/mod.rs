@@ -12,7 +12,6 @@ use crate::resources::{Buffer, Context};
 use ash::vk;
 use gpu::{Compute, Texture, barrier};
 use prime_scene::{environment::Environment, scene::Camera};
-use safetensors::{Dtype, SafeTensors};
 use std::sync::Arc;
 
 pub(crate) const CONSUMER_TYPES: &[vk::DescriptorType] = &[
@@ -65,46 +64,20 @@ impl Atmosphere {
                 return Err(format!("Atmosphere requires linear sampling of {format:?}"));
             }
         }
-        let bytes = include_bytes!("../../assets/atmosphere/default.safetensors");
-        let (_, metadata) = SafeTensors::read_metadata(bytes).map_err(|e| e.to_string())?;
-        let metadata = metadata
-            .metadata()
-            .as_ref()
-            .ok_or("Atmosphere cache metadata missing")?;
-        for (key, value) in [
-            ("schema", "prime.atmosphere.balanced.v1"),
-            ("density_scale", "1"),
-            ("iterations", "8"),
-            (
-                "medium_sha256",
-                "be1ae66c600c6df21ea730cd24b10bb88b9f6dfa00200539a4cc65420c7aefb5",
-            ),
-        ] {
-            if metadata.get(key).map(String::as_str) != Some(value) {
-                return Err(format!("Invalid atmosphere cache {key}"));
-            }
-        }
-        let tensors = SafeTensors::deserialize(bytes).map_err(|e| e.to_string())?;
         let medium = Buffer::upload_device(
             context,
-            &asset::medium(asset::MEDIUM)?,
+            &asset::load_medium()?,
             vk::BufferUsageFlags::STORAGE_BUFFER,
         )?;
         let mut physical = vec![];
-        for (name, extent, dtype, format) in [
-            ("optical_depth", [512, 128, 1], Dtype::F16, half),
-            ("scattering_source", [3200, 240, 1], Dtype::F16, half),
-            ("incident_mean", [160, 40, 1], Dtype::F32, float),
-            ("ground_radiance", [160, 1, 1], Dtype::F32, float),
-            ("rayleigh_source", [800, 21, 1], Dtype::F32, float),
-        ] {
-            let data = tensors.tensor(name).map_err(|e| e.to_string())?;
-            if data.dtype() != dtype || data.shape() != [extent[1] as usize, extent[0] as usize, 4]
-            {
-                return Err(format!("Invalid atmosphere cache tensor {name}"));
+        for source in asset::PHYSICAL {
+            let data = source.parse()?;
+            let image = Texture::new(context, source.extent, source.format)?;
+            // SAFETY: The validated level has exactly this image's extent/format, and the
+            // decoder initializes every mapped byte on success before any GPU submission.
+            unsafe {
+                image.upload_with(context, |output| data.decode_level_into(0, output))?;
             }
-            let image = Texture::new(context, extent, format)?;
-            image.upload(context, data.data())?;
             physical.push(image);
         }
         let sky = Texture::new(context, [256, 256, 1], float)?;

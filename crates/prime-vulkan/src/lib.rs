@@ -61,6 +61,7 @@ pub use surface_display::HdrSurface;
 #[cfg(test)]
 mod surface_tests;
 mod target;
+mod texture_asset;
 mod textures;
 pub use benchmark::HostBenchmark;
 use geometry::Geometry;

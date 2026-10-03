@@ -43,7 +43,7 @@ K2 的交接点是 landing 的 coverage、纹理/材质解析、该段 Beer、co
 | K2 或 Offline 的局部阴影 | vertex、SurfacePoint、view、物理端点/介质、路径/采样上下文及该灯的查询后输入 | 当前 hit 的原始几何/材质、UV/TBN/LOD、发光命中 PDF |
 | 局部评价到太阳阴影 | 同一 vertex、几何、物理端点及路径状态；太阳方向/radiance | 局部灯样本、visibility、response、PDF/MIS 和短时闭包；贡献已累加 |
 | 续接到下一次查询 | 新 ray/medium/beta/eta、previous position/PDF、cone、tail radiance 与随机身份 | 当前 vertex、采样与 roulette 的临时值 |
-| 实时 post | FP32 prefix + tail、原相机空气段、同一采样 UV、所选显示输入；RR另消费主depth、内部反射距离、当前/前相机与guide状态以补全反射motion | TLAS、材质、BSDF、medium、eta 与 MIS 均无消费者 |
+| 实时 post | FP32 prefix + tail、原相机空气段、同一采样 UV、所选显示输入；RR另消费主depth、内部反射距离、当前/前相机与guide状态，零距离非天空像素复用K1主motion，以补全反射motion | TLAS、材质、BSDF、medium、eta 与 MIS 均无消费者 |
 
 K2 与 Offline 在阴影查询之后才建立短时 ONB 和 Full 支持子域状态，立即消费完整 response/PDF/MIS；下一跳同样就地准备。缓存两个 ONB 切向会增加六个浮点分量，缓存 closure 或 pending contribution 还会增加其他状态。可以调整重算、缓存与重载，但须比较实际保存、占用率及带宽成本，不能因准备重复就把全部状态跨查询保留。
 
@@ -65,7 +65,7 @@ K1的规范主guide几何与照明路径独立：optical优先实际IOR可透射
 
 每条guide使用独立深度计数及同值预算N，不因照明roulette、零beta或吸收全黑而结束。第N次查询得到非delta或真实escape仍正常完成；仍需续接则标为unresolved，几何非法也不冒充稳定终点。内部R8状态低两位分别表示主/反射guide失败或待完成，值4表示K1拥有显式反射motion；K1及post每帧完整发布，display只检查低两位。未知motion写有限零配合本帧raw覆盖，不依赖SDK无效哨兵，也不保证SDK内部历史或空间滤波隔离。PSR终点平面、折射/天空近似及动态对应边界由[重建文档](reconstruction.md)维护。
 
-K1/K2/post分别采用128B、80B、112B push接口和各自实际资源视图。K1不接局部灯/阴影模块，K2不接相机/PSR/prefix/aerial/显示状态，post不接场景几何或BSDF。RR的144B相机uniform包含当前/前相机及抖动/历史有效性；post用主depth和内部实际反射距离构造粗糙反射的局部虚拟点，补全全图specular motion，保留K1显式R guide结果。距离不再作为SDK tag，不需要为普通粗糙像素追加查询。RR在post线性合成及aerial之后调用SDK并显示；raw post直接完成显示。阶段间及跨帧复用使用同队列屏障，相机常量按完成槽复用，尺寸/模式更换和释放依最后使用serial的完成证明，不引入稳态CPU wait或额外提交。
+K1/K2/post分别采用128B、80B、112B push接口和各自实际资源视图。K1不接局部灯/阴影模块，K2不接相机/PSR/prefix/aerial/显示状态，post不接场景几何或BSDF。RR的144B相机uniform包含当前/前相机及抖动/历史有效性；post用主depth和非零反射距离构造局部虚拟点，零距离非天空像素复用K1主motion，补全全图specular motion并保留K1显式R guide结果。该复用只增加每个适用内部像素4B的逻辑读取，使用现有图像、描述符与阶段屏障，不增加容量或pass；实际DRAM成本未测量。距离不再作为SDK tag，不需要为普通粗糙像素追加查询。RR在post线性合成及aerial之后调用SDK并显示；raw post直接完成显示。阶段间及跨帧复用使用同队列屏障，相机常量按完成槽复用，尺寸/模式更换和释放依最后使用serial的完成证明，不引入稳态CPU wait或额外提交。
 
 这些拆分移除了delta前缀的连续BSDF/NEE工作，同时增加全图scratch读写、固定阶段屏障、仿射/运动投影及可能的guide后缀查询。query总量为照明与两条guide查询之和减共享部分，最坏接近 `3N−2`，共享前缀会降低实际数量。必须观察分离率、unresolved率、长尾、L2/DRAM及整帧成本；没有实际测量不能声称寄存器或帧率提升。
 
@@ -104,7 +104,7 @@ FG guide 初始化直接消费 K1 push 中已验证的输入尺寸，depth/motio
 
 生产 Z-Sobol 当前显式调用固定 S=8 的构造，保留合法 R 范围及宽索引退路；不能由原生 1080p 使用单字索引推断所有尺寸都可删除宽路径。生产 Aerial-S 当前按已知 256 切片消费，与分配、更新和重建一致，避免动态尺寸查询被编译器提到路径入口；通用采样 API 仍按调用方纹理实际高度工作。改变生产资源布局必须同步修改生产者和消费者，具体规格由[大气文档](atmosphere.md)维护。
 
-显示参数只在路径后的post/显示消费。Realtime的几何PSR和guide遍历属于K1；K2只有一个按需传递的实际specular reflection次段距离职责，不访问完整guide。RR post消费当前/前相机、主depth、该距离及完成状态，补全无需额外光追的反射motion；它不恢复材质或路径状态。Offline仍只消费通用输运的radiance，单样本/多样本历史读写保持原顺序。共同返回类型或入口参数大小不等于所有字段始终占据GPR。
+显示参数只在路径后的post/显示消费。Realtime的几何PSR和guide遍历属于K1；K2只有一个按需传递的实际specular reflection次段距离职责，不访问完整guide。RR post消费当前/前相机、主depth、该距离及完成状态，零距离非天空像素另消费现有主motion，补全无需额外光追的反射motion；它不恢复材质或路径状态。Offline仍只消费通用输运的radiance，单样本/多样本历史读写保持原顺序。共同返回类型或入口参数大小不等于所有字段始终占据GPR。
 
 星图、曝光、HDR和FG无HUD输出在PT之后消费；仅FG的首次可见guide复用K1现有主查询，不增加光追dispatch。RR选择重建/同帧raw后做星图与测光；Offline测光/显示直接读取FP32累积BDA。新增全图FP32写读、直方图、HDR快照和UI合成均是真实成本，详见[显示](display.md)。BDA是否启用由push中的32位标志声明；不在shader比较64位空指针，因此不新增`shaderInt64`设备要求。仅产物变小或消除能力要求不构成整帧提速证明。
 

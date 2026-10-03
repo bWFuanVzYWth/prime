@@ -11,6 +11,7 @@ import "reconstruct/rr_status.slang";
 
 [[vk::binding(10, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> noisyColor;
 [[vk::binding(11, 0)]] [[vk::image_format("r32f")]] readonly RWTexture2D<float> linearDepth;
+[[vk::binding(12, 0)]] [[vk::image_format("rg16f")]] readonly RWTexture2D<float2> motionVectors;
 [[vk::binding(16, 0)]] [[vk::image_format("r16f")]] readonly RWTexture2D<float> specularDistance;
 [[vk::binding(17, 0)]] ConstantBuffer<RrCamera> rrCamera;
 [[vk::binding(19, 0)]] [[vk::image_format("r8")]] RWTexture2D<float> guideStatus;
@@ -26,5 +27,6 @@ import "reconstruct/rr_status.slang";
                                primeRrForeground(guideStatus[id.xy]) ? 1.0 : 0.0);
     float2 sampleUv = (float2(id.xy) + 0.5 + parameters.sample.xy) / float2(parameters.sampling.xy);
     primeCompleteReflectionMotion(rrCamera, id.xy, parameters.sampling.xy, sampleUv, guideStatus,
-                                  specularMotion, linearDepth[id.xy], specularDistance[id.xy]);
+                                  specularMotion, motionVectors, linearDepth[id.xy],
+                                  specularDistance[id.xy]);
 }

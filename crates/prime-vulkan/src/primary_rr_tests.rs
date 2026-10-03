@@ -1482,6 +1482,10 @@ fn gpu_primary_rr_rigid_motion_uses_only_accepted_corresponding_poses() {
         assert!(actual.0[6].iter().all(|status| *status == 8));
         actual.rigid_motion(camera(), extent, jitter, angle);
         assert!(actual.channel(1).iter().any(|motion| motion.abs() > 0.05));
+        assert_eq!(
+            actual.0[7], actual.0[1],
+            "zero secondary distance must preserve accepted rigid primary motion"
+        );
         let fg = generated.run(camera(), camera(), jitter, seed, 1);
         for channel in 0..8 {
             assert_eq!(

@@ -51,6 +51,10 @@ impl State {
         self.name == "minecraft:water"
             || self.name == "minecraft:lava"
             || self.name.ends_with("glass")
+            // Builtin IceBlock inherits HalfTransparentBlock's exact-block rule. Do not
+            // extend it to modded subclasses, which can override skipRendering.
+            || self.flags & 128 != 0
+                && matches!(self.name.as_str(), "minecraft:ice" | "minecraft:frosted_ice")
     }
     pub fn same_boundary(&self, other: &Self) -> bool {
         self.faces == other.faces

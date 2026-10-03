@@ -18,11 +18,13 @@ primeDRT 色相补偿默认75%，饱和度补偿默认20%，后者仍允许0–5
 
 天文帧沿用旧算法：世界东轴、由观测纬度得到的天极/子午基、当前太阳时角与太阳赤经组成恒星时相位；太阳赤经采用轴倾角 23.43928°和配置的太阳黄经。星光默认 scale 为 `0.025 × stars`，乘方向大气透射并受地球遮挡。天空强度只缩放大气天空，星光强度独立。
 
-raw、Offline 和后续反射/折射的环境终点都采样星图 LOD0。RR 只省略真正第一条相机射线直接 miss 的星图；其余路径仍保留星光。RR 后合成在 native 输出分辨率使用未 jitter 的相机方向，以赤经缝 wrap 后的 Jacobian 求椭圆 footprint：短轴至少 1 texel，长短轴比上限 8，按短轴选择 mip，沿长轴至多 8 taps。这是旧 Prime 已有的滤波近似，不改变路径的方向采样或 PDF。
+raw、Offline 和后续反射/折射的环境终点都采样星图 LOD0。RR 只省略真正第一条相机射线直接 miss 的星图；其余路径仍保留星光。天球纬度投影使用横向长度与天极分量的 `atan2`，避免极点附近 `asin` 输入舍入到±1而丢失角度分辨率。
+
+RR 后合成在 native 输出分辨率使用未 jitter 的相机方向。普通区域沿旧 Prime 的赤经缝 wrap Jacobian 求椭圆 footprint：短轴至少1 texel，长短轴比上限8，按短轴选择 mip，沿长轴至多8 taps。极区的 plate-carree 经度跨度可能很大，不能为满足8:1限制把纬度 mip 一起放大；当旧 mip 超过实际像素的径向角宽时，改用像素方向域内8个等权、对称子像素点，逐点映射真实天球坐标，mip依据子像素角宽。常量辐射亮度保持不变，普通区域继续使用原滤波。极区仍是有限8点滤波近似，不声明严格球面积分或完全消除所有混叠；不改变路径的方向采样或 PDF。
 
 合成使用重建/noisy 的前景 coverage：`scene + stars × (1 − saturate(coverage))`。SDK 的非有限 coverage 在 selector 中保守变为 1。当前 3×3 真实首命中前景位全为 foreground 时，输出像素禁止星光；该位与未解析 guide、PSR landing 和 SDK 私有历史各自独立。天空后合成只处理直接相机背景，不能替代材质路径内的星光。
 
-星图只在首次需要时解压并上传。gzip 总计 166,381,090 B（约 158.67 MiB），完整 GPU mip 链为 178,957,008 B（约 170.67 MiB，base 128 MiB）。每次只保留一个最大 32 MiB 的 decoded CPU stripe，但全部上传 staging 可共存至提交完成。返回的上传 owner 保持到 `submit_named` 返回：独立设备此时已完成 fence；借用宿主此时按未来 serial 进入退休队列。资产编入 native 库，增加分发体积，稳态不再解压或转码。已上传资产保留至 Renderer 销毁；把强度改为0停止采样，不反复卸载/上传。
+星图只在首次需要时解压并上传。KTX2 各mip独立使用Zstd 22，完整 GPU mip 链为178,957,008 B（约170.67 MiB，base 128 MiB）。直接解压到15个mip上传staging，不保留完整decoded CPU副本；基层需单次128 MiB分配，全部上传staging可共存至提交完成。容器字节数、压缩工具及每层哈希由[资产manifest](../crates/prime-vulkan/assets/packed-assets.json)记录。返回的上传owner保持到 `submit_named` 返回：独立设备此时已完成fence；借用宿主此时按未来serial进入退休队列。资产编入native库，稳态不再解压或转码。已上传资产保留至Renderer销毁；把强度改为0停止采样，不反复卸载/上传。
 
 ## 自动曝光
 
@@ -66,6 +68,6 @@ FG 关闭时不写 HUDless/mask，可绑定对应格式的有效 1×1 dummy。HD
 | FG SDR 输出 | HUDless RGBA8 8.29 MB + mask 2.07 MB；读 baseline/UI、写 HUDless/mask，13 B/pixel，约 26.96 MB/帧 |
 | 星图 | 170.67 MiB 固定 GPU mip 链；环境 miss 一次 LOD0 采样，RR 后合成最多 8 taps，另有 coverage/透射读取 |
 
-无窗口验证直接执行生产 GPU passes，检查 image/BDA meter 一致、独立 double histogram 目标、曝光仅乘一次、FP32 RR selector→真实 BC6H 星图、coverage/foreground/ground/fallback、HDR 正负及高于 1 的 EOTF、W/80、UI 合成和两种 FG 输出方向/像素。CPU oracle 覆盖天文投影、赤经缝、footprint、曝光适应和 HDR 数学；资产检查完整 gzip CRC、长度和压缩/decoded SHA。测试读回只存在于验证入口。
+无窗口验证入口直接执行生产GPU passes，检查image/BDA meter一致、独立double histogram目标、曝光仅乘一次、FP32 RR selector→真实BC6H星图、coverage/foreground/ground/fallback、HDR正负及高于1的EOTF、W/80、UI合成和两种FG输出方向/像素。CPU oracle覆盖天文投影、赤经缝、极区有限采样、footprint、曝光适应和HDR数学；当前资产检查KTX2/DFD/metadata、Zstd长度/损坏及压缩/decoded SHA，迁移时另对历史gzip输入检查CRC并逐字节对拍。测试读回只存在于验证入口；具体执行范围以对应验证记录为准。
 
 这些验证不代表 Windows HDR 输出链、实际亮度、连续 RR 重建、真实帧生成 Present、完整资源包或整帧性能已经完成游戏验收。游戏仍由用户手动检查双版本的窗口/全屏、跨显示器 HDR 切换、参考白、手部/HUD、昼夜星图和冻结/恢复；正式性能比较使用固定场景、种子和射线预算的原生 1920×1080，并分别记录稳态与初始化/切换成本。

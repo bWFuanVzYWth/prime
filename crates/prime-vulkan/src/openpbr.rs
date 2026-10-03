@@ -1,12 +1,29 @@
 //! Immutable legacy author energy table for exact OpenPBR supported topologies.
 use crate::resources::{Buffer, Context, error};
 use crate::target::{Image, color_range};
+use crate::texture_asset::{TextureAsset, TextureSpec};
 use ash::vk;
 use std::sync::Arc;
 
 pub(super) const ENERGY_EXTENT: [u32; 3] = [44, 32, 159];
-const ENERGY_BYTES: &[u8; 44 * 32 * 159 * 8] =
-    include_bytes!("../assets/openpbr/author-bsdf-hotfix-2026-07-24/trans_ggx.bytes");
+const ENERGY_CONTAINER: &[u8] = include_bytes!("../assets/openpbr/trans_ggx.ktx2");
+const ENERGY_SPEC: TextureSpec = TextureSpec {
+    format: vk::Format::R16G16B16A16_SFLOAT,
+    extent: ENERGY_EXTENT,
+    levels: 1,
+    primaries: 0, // Directional energy coefficients, not RGB color.
+};
+
+fn energy_asset() -> Result<TextureAsset<'static>, String> {
+    let asset = TextureAsset::parse(ENERGY_CONTAINER, ENERGY_SPEC)?;
+    if asset.metadata_text("source")? != "RoboCute author-bsdf-hotfix-2026-07-24"
+        || asset.metadata_text("source_sha256")?
+            != "605c9160fb9348a1d033321c40cf9930226ce74c03f2624033f5b73aacfa67df"
+    {
+        return Err("OpenPBR energy asset does not match the locked author source".into());
+    }
+    Ok(asset)
+}
 
 pub(super) struct EnergyLut {
     context: Arc<Context>,
@@ -24,16 +41,26 @@ impl EnergyLut {
     }
 
     pub fn new(context: &Arc<Context>) -> Result<Self, String> {
+        let asset = energy_asset()?;
         let image = Image::sampled_3d_uninitialized(
             context,
             ENERGY_EXTENT,
             vk::Format::R16G16B16A16_SFLOAT,
         )?;
-        let pending = Some(Buffer::upload(
+        let staging = Buffer::new(
             context,
-            ENERGY_BYTES,
+            asset.level_size(0) as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
-        )?);
+            true,
+        )?;
+        // SAFETY: Newly allocated staging is exclusively CPU-owned and has no GPU consumer.
+        // The asset decoder initializes the entire mapped range before any copy is recorded.
+        unsafe {
+            staging.write_with(0, asset.level_size(0), |bytes| {
+                asset.decode_level_into(0, bytes)
+            })?;
+        }
+        let pending = Some(staging);
         let sampler = unsafe {
             context
                 .device
@@ -147,7 +174,17 @@ mod tests {
     use super::*;
     #[test]
     fn locked_energy_table_has_exact_half4_extent() {
-        assert_eq!(ENERGY_BYTES.len(), 1_790_976);
+        let asset = energy_asset().unwrap();
+        assert_eq!(asset.level_size(0), 1_790_976);
         assert_eq!(ENERGY_EXTENT, [44, 32, 159]);
+        assert_eq!(asset.level_extent(0), ENERGY_EXTENT);
+        let expected =
+            include_bytes!("../assets/openpbr/author-bsdf-hotfix-2026-07-24/trans_ggx.bytes");
+        let mut decoded = vec![std::mem::MaybeUninit::uninit(); asset.level_size(0)];
+        asset.decode_level_into(0, &mut decoded).unwrap();
+        for (actual, expected) in decoded.iter().zip(expected) {
+            // SAFETY: Successful exact-length decoding initialized every byte above.
+            assert_eq!(unsafe { actual.assume_init() }, *expected);
+        }
     }
 }

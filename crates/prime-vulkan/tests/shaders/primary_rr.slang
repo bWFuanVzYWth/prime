@@ -65,8 +65,8 @@ public struct TestEnvironment : IPrimaryEnvironment {
         specularHitDistance[id.xy] = asfloat(parameters.config.w);
     float2 sampleUv = (float2(id.xy) + 0.5 + rrCamera.jitter.xy) / float2(parameters.sampling.xy);
     primeCompleteReflectionMotion(rrCamera, id.xy, parameters.sampling.xy, sampleUv,
-                                  guideUnresolved, specularMotion, linearDepth[id.xy],
-                                  specularHitDistance[id.xy]);
+                                  guideUnresolved, specularMotion, motionVectors,
+                                  linearDepth[id.xy], specularHitDistance[id.xy]);
     uint index = id.y * parameters.sampling.x + id.x;
     ZSobol sampler = makeZSobolS8(id.xy, parameters.sampling.z & 0xffu, parameters.config.x,
                                   parameters.sampling.w ^ (parameters.sampling.z >> 8));

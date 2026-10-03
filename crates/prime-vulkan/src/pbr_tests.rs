@@ -964,7 +964,7 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
         (
             "post RR input",
             include_bytes!(concat!(env!("OUT_DIR"), "/realtime_rr.spv")),
-            &[10, 11, 16, 17, 19, 20],
+            &[10, 11, 12, 16, 17, 19, 20],
             &[0, 3, 4],
             &[],
         ),
