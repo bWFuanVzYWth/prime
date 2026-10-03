@@ -580,14 +580,24 @@ name = "prime_abi"
 version = "0.1.0"
 
 [[package]]
+name = "prime_diagnostics"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "prime_engine"
 version = "0.1.0"
 dependencies = [
  "mimalloc",
  "prime_abi",
+ "prime_diagnostics",
  "prime_minecraft",
  "prime_scene",
  "prime_vulkan",
+ "serde_json",
 ]
 
 [[package]]
@@ -596,7 +606,9 @@ version = "0.1.0"
 dependencies = [
  "mimalloc",
  "prime_abi",
+ "prime_diagnostics",
  "prime_scene",
+ "serde_json",
 ]
 
 [[package]]
@@ -604,8 +616,10 @@ name = "prime_scene"
 version = "0.1.0"
 dependencies = [
  "prime_abi",
+ "prime_diagnostics",
  "rayon",
  "rectangle_decomposition",
+ "serde_json",
 ]
 
 [[package]]
@@ -626,6 +640,7 @@ dependencies = [
  "cc",
  "mimalloc",
  "prime_abi",
+ "prime_diagnostics",
  "prime_scene",
  "safetensors",
  "serde_json",

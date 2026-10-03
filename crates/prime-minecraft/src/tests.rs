@@ -1317,13 +1317,21 @@ fn biome_definitions(response: &mut Vec<u8>) {
     }
 }
 fn biome_response(ctx: &TerrainContext, color: u32) -> Vec<u8> {
+    let ColorStage::Biomes(_, source) = &ctx.awaiting_colors.as_ref().unwrap().stage else {
+        panic!("fixture expected biome sources");
+    };
+    let host_cells: usize = source
+        .requests
+        .iter()
+        .map(|r| r.mask.count_ones() as usize)
+        .sum();
     let mut response = header(4, ctx.awaiting_colors.as_ref().unwrap().batch);
     u64_to(&mut response, ctx.stats.biome_pages as u64);
     u32_to(&mut response, 1); // One actual source biome with three explicit overrides.
     for value in [0, 0, color, color, color, color, 7, 0] {
         u32_to(&mut response, value);
     }
-    for _ in 0..ctx.stats.biome_host_cells {
+    for _ in 0..host_cells {
         u32_to(&mut response, 0);
     }
     response

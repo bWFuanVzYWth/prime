@@ -156,6 +156,77 @@ fn sections(
 }
 
 #[test]
+fn typed_trace_contains_raw_stages_without_changing_publication_and_reports_errors() {
+    let recorder = prime_diagnostics::Recorder::new();
+    let mut ctx = TerrainContext::default();
+    let mut source = crate::tests::scene();
+    prepare(&mut ctx, &mut source, 1);
+    {
+        let _context = recorder.enter(13);
+        let requested = plan(&mut ctx, source.epoch(), 1, &[]);
+        sections(&mut ctx, &mut source, 1, &requested, &[0]).unwrap();
+        // A second response without a pending transaction must remain rejected.
+        assert!(sections(&mut ctx, &mut source, 1, &[], &[]).is_err());
+    }
+    assert_eq!(ctx.last_batch, 1);
+    let json: serde_json::Value = serde_json::from_str(&recorder.drain_json().unwrap()).unwrap();
+    let names = json["dict"]["n"].as_array().unwrap();
+    let events = json["cpu"].as_array().unwrap();
+    for required in [
+        "mc.plan",
+        "mc.accept",
+        "mc.decode",
+        "mc.contacts",
+        "mc.finalize",
+        "mc.publish",
+        "mc.retire",
+    ] {
+        assert!(
+            events
+                .iter()
+                .any(|e| { names[e["n"].as_u64().unwrap() as usize] == required && e["ok"] == 1 }),
+            "missing successful stage {required}"
+        );
+    }
+    assert!(
+        events
+            .iter()
+            .any(|e| { names[e["n"].as_u64().unwrap() as usize] == "mc.accept" && e["ok"] == 0 })
+    );
+    for event in events {
+        assert_eq!(event["f"], 13);
+        assert!(event["s"].as_u64().is_some());
+        assert!(event["d"].as_u64().is_some());
+    }
+}
+
+#[test]
+fn typed_source_timers_are_off_by_default_and_runtime_diagnostics_can_enable_them() {
+    let mut ctx = TerrainContext::default();
+    let mut source = crate::tests::scene();
+    prepare(&mut ctx, &mut source, 1);
+    let before = timing::clock_reads();
+    let requested = plan(&mut ctx, source.epoch(), 1, &[]);
+    sections(&mut ctx, &mut source, 1, &requested, &[0]).unwrap();
+    assert_eq!(timing::clock_reads(), before);
+    assert!(!ctx.stats.timed);
+    assert_eq!(ctx.stats.plan_ms, 0.0);
+    assert_eq!(ctx.stats.compile_ms, 0.0);
+    ctx.set_diagnostics(true);
+    let requested = plan(&mut ctx, source.epoch(), 2, &[]);
+    sections(&mut ctx, &mut source, 2, &requested, &[0]).unwrap();
+    assert!(timing::clock_reads() > before);
+    assert!(ctx.stats.timed);
+    assert!(ctx.stats.plan_ms > 0.0);
+    ctx.set_diagnostics(false);
+    let before = timing::clock_reads();
+    let requested = plan(&mut ctx, source.epoch(), 3, &[]);
+    sections(&mut ctx, &mut source, 3, &requested, &[0]).unwrap();
+    assert_eq!(timing::clock_reads(), before);
+    assert!(!ctx.stats.timed);
+}
+
+#[test]
 fn typed_resource_catalog_and_workers_survive_world_reset_without_pixel_copy() {
     let workers = Arc::new(CpuWorkers::new(2).unwrap());
     let mut context = TerrainContext::with_workers(workers.clone());
@@ -510,6 +581,7 @@ fn typed_color_biome_diagnostics_match_actual_descriptors_and_warm_cache_paths()
     for radius in 0_i32..=7 {
         let workers = Arc::new(CpuWorkers::new(1).unwrap());
         let mut context = TerrainContext::with_workers(workers.clone());
+        context.set_diagnostics(true);
         let mut scene = SourceScene::with_workers(workers);
         scene.reset_world(1).unwrap();
         let bytes = b"\xff\xff\xff\xffminecraft:emptyminecraft:stone";

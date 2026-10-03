@@ -116,7 +116,10 @@ impl TerrainContext {
         source_epoch: u64,
         budget: u32,
     ) -> Result<(), String> {
-        let start = Instant::now();
+        let start = self.stage_timer();
+        let mut trace = start.scope("mc.plan");
+        trace.fail();
+        trace.count("events", value.events().len() as u64);
         let v = value.raw();
         let id = v.identity;
         if self.pending.is_some() || self.awaiting_colors.is_some() {
@@ -170,6 +173,8 @@ impl TerrainContext {
         };
         self.plan_input(frame, source_epoch, budget as usize, start)?;
         self.resource_reset_pending = false;
+        trace.count("requests", self.stats.requested as u64);
+        trace.succeed();
         Ok(())
     }
     pub fn sections_typed(
@@ -177,7 +182,10 @@ impl TerrainContext {
         values: &input::Sections<'_>,
         scene: &mut SourceScene,
     ) -> Result<(), String> {
-        let start = Instant::now();
+        let start = self.stage_timer();
+        let mut trace = start.scope("mc.accept");
+        trace.fail();
+        trace.count("sections", values.sections().len() as u64);
         let pending = self.pending.as_ref().ok_or("no source request pending")?;
         self.check_identity(values.raw().identity, pending.input.batch, scene)?;
         let requested: HashSet<_> = pending.demand.requests.iter().copied().collect();
@@ -247,7 +255,7 @@ impl TerrainContext {
             demand,
             cell_budget,
         } = self.pending.take().unwrap();
-        self.start_compile(
+        let result = self.start_compile(
             input,
             demand,
             received,
@@ -257,14 +265,21 @@ impl TerrainContext {
             std::mem::size_of_val(values.sections())
                 + std::mem::size_of_val(values.palette())
                 + std::mem::size_of_val(values.words()),
-        )
+        );
+        if result.is_ok() {
+            trace.succeed();
+        }
+        result
     }
     pub fn colors_typed(
         &mut self,
         values: &input::Colors<'_>,
         scene: &mut SourceScene,
     ) -> Result<(), String> {
-        let decode_start = Instant::now();
+        let decode_start = self.stage_timer();
+        let mut trace = decode_start.scope("mc.colors");
+        trace.fail();
+        trace.count("recipes", values.recipes().len() as u64);
         let waiting = self
             .awaiting_colors
             .as_ref()
@@ -302,6 +317,7 @@ impl TerrainContext {
         )? {
             self.complete_colors(&colors, scene)?;
         }
+        trace.succeed();
         Ok(())
     }
     pub fn biomes_typed(
@@ -309,18 +325,25 @@ impl TerrainContext {
         values: &input::Biomes<'_>,
         scene: &mut SourceScene,
     ) -> Result<(), String> {
-        let decode_start = Instant::now();
+        let decode_start = self.stage_timer();
+        let mut trace = decode_start.scope("mc.biomes");
+        trace.fail();
+        trace.count("pages", values.biomes().len() as u64);
         let waiting = self.awaiting_colors.as_ref().ok_or("no biome request")?;
         self.check_identity(values.raw().identity, waiting.batch, scene)?;
         let ColorStage::Biomes(_, source) = &waiting.stage else {
             return Err("unexpected biome response".into());
         };
         let response = self.chunks.biome_sources().typed_response(source, values)?;
-        self.complete_biome_sources(
+        let result = self.complete_biome_sources(
             response,
             std::mem::size_of_val(values.biomes()) + std::mem::size_of_val(values.indices()),
             decode_start,
             scene,
-        )
+        );
+        if result.is_ok() {
+            trace.succeed();
+        }
+        result
     }
 }

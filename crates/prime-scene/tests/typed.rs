@@ -336,11 +336,20 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
         hdr: 0,
         hdr_reference_white: 0,
         frame_generation: 0,
+        light_sampling: 0,
     };
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap(),
         RenderSettings::default()
     );
+    settings.light_sampling = 1;
+    assert_eq!(
+        RenderSettings::from_abi(&settings).unwrap().light_sampling,
+        prime_scene::settings::LightSampling::Tree
+    );
+    settings.light_sampling = 2;
+    assert!(RenderSettings::from_abi(&settings).is_err());
+    settings.light_sampling = 0;
     settings.saturation = 0.08;
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap().saturation,

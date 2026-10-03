@@ -17,6 +17,7 @@ struct Batch {
 pub(crate) struct PrepareProfile {
     batch: Option<Batch>,
     last: Option<([u64; 2], TranslationWork)>,
+    enabled: bool,
 }
 impl Default for PrepareProfile {
     fn default() -> Self {
@@ -25,16 +26,27 @@ impl Default for PrepareProfile {
                 .is_some_and(|value| value == "1")
                 .then(Batch::default),
             last: None,
+            enabled: false,
         }
     }
 }
 impl PrepareProfile {
     #[inline]
-    pub fn start(&self) -> Instant {
-        Instant::now()
+    pub fn start(&self) -> Option<Instant> {
+        (self.enabled || self.batch.is_some()).then(Instant::now)
     }
 
-    pub fn observe(&mut self, start: Instant, update_ns: u64, work: TranslationWork) {
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+        if !enabled {
+            self.last = None;
+        }
+    }
+
+    pub fn observe(&mut self, start: Option<Instant>, update_ns: u64, work: TranslationWork) {
+        if start.is_none() {
+            return;
+        }
         let values = [elapsed(start), update_ns];
         self.last = Some((values, work));
         let Some(batch) = &mut self.batch else { return };
@@ -99,8 +111,10 @@ impl Batch {
 }
 
 #[inline]
-pub(crate) fn elapsed(start: Instant) -> u64 {
-    start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
+pub(crate) fn elapsed(start: Option<Instant>) -> u64 {
+    start.map_or(0, |start| {
+        start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
+    })
 }
 
 #[cfg(test)]
@@ -108,13 +122,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn coarse_clock_and_last_snapshot_do_not_require_verbose_aggregation() {
+    fn coarse_clock_and_snapshot_require_opt_in_and_verbose_is_independent() {
         let mut quiet = PrepareProfile {
             batch: None,
             last: None,
+            enabled: false,
         };
+        assert!(quiet.start().is_none());
+        quiet.observe(quiet.start(), 51_000_000, TranslationWork::default());
+        assert!(quiet.last.is_none());
+        quiet.set_enabled(true);
         quiet.observe(
-            quiet.start() - std::time::Duration::from_millis(1),
+            quiet
+                .start()
+                .map(|t| t - std::time::Duration::from_millis(1)),
             51_000_000,
             TranslationWork {
                 meshes_published: 123,
@@ -124,9 +145,12 @@ mod tests {
         assert!(quiet.last.unwrap().0[0] >= 1_000_000);
         assert_eq!(quiet.last.unwrap().0[1], 51_000_000);
         assert!(quiet.last_report().contains("meshes_published=123"));
+        quiet.set_enabled(false);
+        assert_eq!(quiet.last_report(), "available=false");
         let mut profile = PrepareProfile {
             batch: Some(Batch::default()),
             last: None,
+            enabled: false,
         };
         for _ in 0..119 {
             profile.observe(

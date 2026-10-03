@@ -1,6 +1,6 @@
-# FFM ABI v9
+# FFM ABI v11
 
-Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为9，Minecraft 源 schema 为7，设置文件 schema 为6；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
+Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为11，Minecraft 源 schema 为7，设置文件 schema 为7；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
 
 ## 唯一结构契约与生成
 
@@ -10,9 +10,17 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 
 固定输入以 `PrimeHeader { struct_size, abi_version }` 开始，两者精确匹配当前根结构。MC 根输入以 `PrimeMcIdentity` 开始，前两字段相同，另外携带 source/game version、resource generation、world epoch 和 batch。自然 padding 不传递语义，不要求清零，也不参与内容比较；显式 reserved 字段须为零。
 
-`prime_create(9)` 返回非零 handle，普通 status=0 成功、-1 失败；`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），容量允许时补 NUL。除不使用 session 的真实 Present 转发外，所有 handle 调用都在创建它的 OS 线程执行。库名仍为 `prime_engine`。
+`prime_create(11)` 返回非零 handle，普通 status=0 成功、-1 失败；`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），容量允许时补 NUL。除不使用 session 的真实 Present 转发外，所有 handle 调用都在创建它的 OS 线程执行。库名仍为 `prime_engine`。
 
-## 输入、输出与所有权
+## 诊断控制与排空
+
+`prime_diagnostics_configure(handle, flags)` 控制独立于 `PrimeSettings` 的诊断；bit0 启用诊断，bit1 启用原始采集且隐含诊断，其他位拒绝。`prime_diagnostics_frame(handle, frame_id)` 绑定后续同步调用及工作池任务的逻辑帧。`prime_diagnostics_clock(handle)` 返回当前采集 origin 相对整数纳秒，停止后保留至最终块消费；无会话返回0，错误返回 `u64::MAX`。以上调用均限 owner thread。
+
+`prime_diagnostics_read(handle, output, capacity)` 排空紧凑 UTF-8 JSON 块，返回完整字节数（不含 NUL）；错误为 `u64::MAX`。capacity=0 可传空指针，会准备并缓存块；短缓冲只复制能容纳的前缀并补 NUL，缓存保留。capacity>长度时复制完整块并补 NUL，然后消费；输出指针仅借用到返回。停止后先消费已有缓存，再排空最终尾块；所有旧块消费完才能开启新会话。没有采集数据返回0。排空 API 自身不产生事件，避免不断录制自己的读取。
+
+原生通常逐帧排空一次；关闭时导出已完成事件，并标记未完成/未提交 GPU 阶段，不等待未提交工作。JSON 的任务关系、字典、线程、独立时钟与完整性语义见 [诊断契约](diagnostics.md)。
+
+## 源输入、输出与所有权
 
 根结构、数组描述符和原始 payload 只借用到同步调用返回。Rust 边界先核验版本、结构大小、对齐、非空地址、乘法和 span 长度，然后将安全的具名视图交给 `prime_scene` / `prime_minecraft`；业务 crate 不解引用外部裸指针。调用方仍须保证分配真实可读且调用期间不可变，长度检查不能验证任意地址。
 
@@ -28,7 +36,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 | --- | --- | --- |
 | `PrimeReset` | 16 B | `prime_reset`；world epoch严格增加，清理世界几何/动态状态，保留当前常驻资源代和同一CPU池 |
 | `PrimeFrame` | 96 B | record/render；epoch、f64世界位置、forward/right/up、FOV、输出尺寸、sample index、实际太阳时角 |
-| `PrimeSettings` | 96 B | configure；具名渲染、调度、星图、自动曝光、HDR 与帧生成控制 |
+| `PrimeSettings` | 100 B | configure；具名渲染、调度、星图、自动曝光、HDR、帧生成与固定光源采样方式 |
 | `PrimeVulkanHost` | 56 B | attach；instance/physical device/device/queue/timeline/family/实际启用capabilities |
 | `PrimeRecordTarget` | 40 B | record；活动command、目标image/view、实际提交serial |
 | `PrimePrepareResources` | 24 B | prepare_resources；活动command与真实提交serial，仅准备设备/全局资源 |
@@ -143,7 +151,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 `prime_cpu_diagnostics(handle, output, capacity)` 在 owner 线程按需将最近一次 CPU 准备/录制快照格式化为 UTF-8。成功返回不含 NUL 的完整字节数；非零容量最多写入 `capacity-1` 字节并补 NUL，容量零时允许空指针查询长度；错误返回 `u64::MAX` 并设置 last error。输出指针只借用至调用返回。未发生准备/录制时明确输出 `available=false`，不使用零时间冒充已测量结果。
 
-此查询不访问游戏对象，不等待 GPU、不回读图像。正常帧只更新固定大小的 CPU 阶段与已有工作量计数；慢帧才查询和格式化。录制快照携带实际 host serial，Java 将它与自己的 serial 一起写入警告，可核对是否同次录制。附带的 GPU 区间明确标注最近完成的 serial，与当前 CPU 录制可能不同。诊断文本用于人工归因，不作为额外场景命令或稳定机器解析协议；Java 预留 8192 字节，超长或查询失败须明确报告，不能默默截断或令诊断失败触发渲染器回退。
+此查询不访问游戏对象，不等待 GPU、不回读图像。粗快照仅在诊断或显式 legacy profile 开启时更新，关闭时为 `available=false`；GPU 区间属于最近完成 serial，可能与当前 CPU 录制不同。此文本入口保留按需人工检查，不再由慢帧阈值自动调用，也不是稳定机器解析协议。Java 预留8192字节，超长或查询失败明确报告；逐帧分析使用独立的原始 JSON 排空入口。
 
 调用 `prime_destroy` 前宿主必须提交所有已录制的 PT command；native 等待最后相关 serial 后销毁 PT 资源。若无法证明完成，返回失败并保留 session/资源以隔离风险。宿主 device、timeline、图像等必须覆盖其全部使用寿命。
 
@@ -163,7 +171,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 ## 设置结构与文件 schema
 
-`prime_configure(handle,&settings)` 借用96 B `PrimeSettings`，header使用公共ABI v9。磁盘 `primept.properties` 为schema v6；旧版本或字段不完整按既有严格规则整份回退默认，不以旧控制字节序列作为生产输入。
+`prime_configure(handle,&settings)` 借用100 B `PrimeSettings`，header使用公共ABI v11。末字段 `light_sampling` 位于96字节偏移，0为Grid、1为Tree，其他值拒绝；renderer创建时固定，之后变更拒绝且不推进设置或资源。磁盘 `primept.properties` 为schema v7；旧版本或字段不完整按既有严格规则整份回退默认，不以旧控制字节序列作为生产输入。
 
 | 字段 | 范围/语义 |
 | --- | --- |

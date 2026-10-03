@@ -7,8 +7,10 @@ import static java.lang.foreign.ValueLayout.*;
 
 public final class PrimeAbi {
     private PrimeAbi() {}
-    public static final int PRIME_ABI_VERSION = 9;
+    public static final int PRIME_ABI_VERSION = 11;
     public static final int PRIME_MAX_BATCH_BYTES = 268435456;
+    public static final int PRIME_DIAGNOSTICS_ENABLED = 1;
+    public static final int PRIME_DIAGNOSTICS_CAPTURE = 2;
     public static final int PRIME_HOST_OMM = 1;
     public static final int PRIME_HOST_STREAMLINE = 2;
     public static final int PRIME_STREAMLINE_BEGIN_FRAME = 0;
@@ -269,7 +271,7 @@ public final class PrimeAbi {
     }
     public static final class PrimeSettings {
         private PrimeSettings() {}
-        public static final long SIZE = 96, ALIGN = 4;
+        public static final long SIZE = 100, ALIGN = 4;
         public static final MemoryLayout LAYOUT =
                 MemoryLayout
                         .structLayout(
@@ -288,7 +290,8 @@ public final class PrimeAbi {
                                 JAVA_FLOAT.withName("stars"),
                                 JAVA_FLOAT.withName("auto_exposure_compensation"),
                                 JAVA_INT.withName("hdr"), JAVA_INT.withName("hdr_reference_white"),
-                                JAVA_INT.withName("frame_generation"))
+                                JAVA_INT.withName("frame_generation"),
+                                JAVA_INT.withName("light_sampling"))
                         .withName("PrimeSettings");
         static {
             if (LAYOUT.byteSize() != SIZE || LAYOUT.byteAlignment() != ALIGN)
@@ -349,6 +352,8 @@ public final class PrimeAbi {
                 throw new ExceptionInInitializerError("PrimeSettings.hdr_reference_white offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("frame_generation")) != 92)
                 throw new ExceptionInInitializerError("PrimeSettings.frame_generation offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("light_sampling")) != 96)
+                throw new ExceptionInInitializerError("PrimeSettings.light_sampling offset");
         }
         public static MemorySegment header(MemorySegment value) {
             return value.asSlice(0L, 8);
@@ -484,6 +489,12 @@ public final class PrimeAbi {
         }
         public static void frame_generation(MemorySegment value, int field) {
             value.set(JAVA_INT, 92L, field);
+        }
+        public static int light_sampling(MemorySegment value) {
+            return value.get(JAVA_INT, 96L);
+        }
+        public static void light_sampling(MemorySegment value, int field) {
+            value.set(JAVA_INT, 96L, field);
         }
     }
     public static final class PrimeVulkanHost {
@@ -3304,6 +3315,14 @@ public final class PrimeAbi {
             FunctionDescriptor.of(JAVA_LONG, JAVA_LONG);
     public static final FunctionDescriptor PRIME_CPU_DIAGNOSTICS_DESCRIPTOR =
             FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_LONG);
+    public static final FunctionDescriptor PRIME_DIAGNOSTICS_CONFIGURE_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT);
+    public static final FunctionDescriptor PRIME_DIAGNOSTICS_FRAME_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG);
+    public static final FunctionDescriptor PRIME_DIAGNOSTICS_CLOCK_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_LONG, JAVA_LONG);
+    public static final FunctionDescriptor PRIME_DIAGNOSTICS_READ_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_LONG);
     public static final FunctionDescriptor PRIME_DESTROY_DESCRIPTOR =
             FunctionDescriptor.of(JAVA_INT, JAVA_LONG);
     public static final FunctionDescriptor PRIME_LAST_ERROR_DESCRIPTOR =
@@ -3347,6 +3366,10 @@ public final class PrimeAbi {
             case "prime_render" -> PRIME_RENDER_DESCRIPTOR;
             case "prime_gpu_time" -> PRIME_GPU_TIME_DESCRIPTOR;
             case "prime_cpu_diagnostics" -> PRIME_CPU_DIAGNOSTICS_DESCRIPTOR;
+            case "prime_diagnostics_configure" -> PRIME_DIAGNOSTICS_CONFIGURE_DESCRIPTOR;
+            case "prime_diagnostics_frame" -> PRIME_DIAGNOSTICS_FRAME_DESCRIPTOR;
+            case "prime_diagnostics_clock" -> PRIME_DIAGNOSTICS_CLOCK_DESCRIPTOR;
+            case "prime_diagnostics_read" -> PRIME_DIAGNOSTICS_READ_DESCRIPTOR;
             case "prime_destroy" -> PRIME_DESTROY_DESCRIPTOR;
             case "prime_last_error" -> PRIME_LAST_ERROR_DESCRIPTOR;
             case "prime_streamline_present" -> PRIME_STREAMLINE_PRESENT_DESCRIPTOR;

@@ -6,6 +6,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.primept.HostVulkanRenderer;
+import dev.primept.Diagnostics;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
@@ -14,11 +15,18 @@ import org.spongepowered.asm.mixin.injection.At;
 public abstract class VulkanCommandEncoderMixin {
     @WrapMethod(method = {"submit", "destroy"})
     private void primept$submissionFailure(Operation<Void> original) {
-        try {
-            original.call();
-        } catch (RuntimeException | Error failure) {
-            HostVulkanRenderer.submissionFailed(this, failure);
-            throw failure;
+        try (var diagnostic = Diagnostics.span("host_submit")) {
+            try {
+                try {
+                    original.call();
+                } catch (RuntimeException | Error failure) {
+                    HostVulkanRenderer.submissionFailed(this, failure);
+                    throw failure;
+                }
+            } catch (RuntimeException | Error failure) {
+                diagnostic.fail();
+                throw failure;
+            }
         }
     }
 

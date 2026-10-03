@@ -105,22 +105,26 @@ impl SceneResources {
         {
             return Ok(());
         }
-        let started = std::time::Instant::now();
+        let started = context.diagnostics_enabled().then(std::time::Instant::now);
         let templates = crate::omm_cpu::Templates::prepare(
             &self.textures.source,
             limits.max_two_state,
             limits.max_four_state,
         );
-        self.prepare_ns[0] += started.elapsed().as_nanos() as u64;
-        self.preparations += 1;
-        let started = std::time::Instant::now();
+        if let Some(started) = started {
+            self.prepare_ns[0] += started.elapsed().as_nanos() as u64;
+            self.preparations += 1;
+        }
+        let started = context.diagnostics_enabled().then(std::time::Instant::now);
         self.pool.replace(
             context,
             &mut self.builds,
             &mut self.uploads,
             &templates.data,
         )?;
-        self.prepare_ns[2] += started.elapsed().as_nanos() as u64;
+        if let Some(started) = started {
+            self.prepare_ns[2] += started.elapsed().as_nanos() as u64;
+        }
         self.templates = Some(templates);
         self.omm_revision = self
             .omm_revision

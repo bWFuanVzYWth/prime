@@ -24,7 +24,7 @@ public final class NativeBridge implements AutoCloseable {
             renderDiagnostic, attachVulkan, configure, record, submissionAccepted, displayOutput,
             presentHdr, prepareFrameGeneration, prepareResources, gpuTime, cpuDiagnostics,
             planSections, acceptSections, prepareMcResources, acceptColors, acceptBiomes, destroy,
-            lastError;
+            lastError, diagnosticsConfigure, diagnosticsFrame, diagnosticsClock, diagnosticsRead;
     private final Arena fixedArena = Arena.ofConfined();
     private final MemorySegment frame = fixedArena.allocate(PrimeFrame.LAYOUT);
     private final MemorySegment host = fixedArena.allocate(PrimeVulkanHost.LAYOUT);
@@ -80,9 +80,14 @@ public final class NativeBridge implements AutoCloseable {
             acceptBiomes = PrimeAbi.bind(lookup, "prime_mc_biomes");
             destroy = PrimeAbi.bind(lookup, "prime_destroy");
             lastError = PrimeAbi.bind(lookup, "prime_last_error");
+            diagnosticsConfigure = PrimeAbi.bind(lookup, "prime_diagnostics_configure");
+            diagnosticsFrame = PrimeAbi.bind(lookup, "prime_diagnostics_frame");
+            diagnosticsClock = PrimeAbi.bind(lookup, "prime_diagnostics_clock");
+            diagnosticsRead = PrimeAbi.bind(lookup, "prime_diagnostics_read");
             handle = (long)create.invokeExact(PRIME_ABI_VERSION);
             if (handle == 0)
                 throw new IllegalStateException(error());
+            Diagnostics.attached(this);
         } catch (Throwable failure) {
             fixedArena.close();
             throw rethrow(failure);
@@ -97,12 +102,17 @@ public final class NativeBridge implements AutoCloseable {
         checkOwner();
         if (!input.isNative())
             throw new IllegalArgumentException("Native input storage is required");
-        try {
-            int status = (int)method.invokeExact(handle, input);
-            if (status != 0)
-                throw new IllegalStateException(name + " (" + status + "): " + error());
-        } catch (Throwable failure) {
-            throw rethrow(failure);
+        try (var span = Diagnostics.span(name)) {
+            try {
+                int status = (int)method.invokeExact(handle, input);
+                if (status != 0) {
+                    span.fail();
+                    throw new IllegalStateException(name + " (" + status + "): " + error());
+                }
+            } catch (Throwable failure) {
+                span.fail();
+                throw rethrow(failure);
+            }
         }
     }
     public void reset(long epoch) {
@@ -230,13 +240,18 @@ public final class NativeBridge implements AutoCloseable {
         checkOwner();
         if (!input.isNative())
             throw new IllegalArgumentException("Native input storage is required");
-        try {
-            int status = (int)operation.invokeExact(handle, input, sourceRequest);
-            if (status != 0)
-                throw new IllegalStateException(name + ": " + error());
-            return sourceRequest;
-        } catch (Throwable failure) {
-            throw rethrow(failure);
+        try (var span = Diagnostics.span(name)) {
+            try {
+                int status = (int)operation.invokeExact(handle, input, sourceRequest);
+                if (status != 0) {
+                    span.fail();
+                    throw new IllegalStateException(name + ": " + error());
+                }
+                return sourceRequest;
+            } catch (Throwable failure) {
+                span.fail();
+                throw rethrow(failure);
+            }
         }
     }
 
@@ -377,6 +392,106 @@ public final class NativeBridge implements AutoCloseable {
         }
     }
 
+    public void diagnosticsConfigure(int flags) {
+        checkOwner();
+        try {
+            int status = (int)diagnosticsConfigure.invokeExact(handle, flags);
+            if (status != 0)
+                throw new IllegalStateException("prime_diagnostics_configure: " + error());
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+    public void diagnosticsFrame(long frameId) {
+        checkOwner();
+        try {
+            int status = (int)diagnosticsFrame.invokeExact(handle, frameId);
+            if (status != 0)
+                throw new IllegalStateException("prime_diagnostics_frame: " + error());
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+    public long diagnosticsClock() {
+        checkOwner();
+        try {
+            long value = (long)diagnosticsClock.invokeExact(handle);
+            if (value < 0)
+                throw new IllegalStateException("prime_diagnostics_clock: " + error());
+            return value;
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+    /** Length query caches one immutable chunk; copying that chunk consumes it. */
+    public String diagnosticsRead() {
+        return diagnosticsRead(Diagnostics.captureSession());
+    }
+    /** Transport timings stay in Java and cannot recursively create another native chunk. */
+    String diagnosticsRead(PerformanceCapture session) {
+        checkOwner();
+        try (var read = Diagnostics.span(session, "diag.read")) {
+            try {
+                long length;
+                try (var drain = Diagnostics.span(session, "diag.drain")) {
+                    drain.fail();
+                    length = (long)diagnosticsRead.invokeExact(handle, MemorySegment.NULL, 0L);
+                    if (length < 0 || length > Integer.MAX_VALUE)
+                        throw new IllegalStateException(
+                                "Native diagnostic chunk exceeds Java string limit");
+                    drain.count("bytes", length);
+                    drain.succeed();
+                }
+                read.count("bytes", length);
+                if (length == 0)
+                    return "";
+                Arena storage;
+                MemorySegment output;
+                try (var allocate = Diagnostics.span(session, "diag.alloc")) {
+                    allocate.fail();
+                    storage = Arena.ofConfined();
+                    try {
+                        output = storage.allocate(length + 1);
+                    } catch (Throwable failure) {
+                        storage.close();
+                        throw failure;
+                    }
+                    allocate.count("bytes", length + 1);
+                    allocate.succeed();
+                }
+                try (storage) {
+                    try (var copy = Diagnostics.span(session, "diag.copy")) {
+                        copy.fail();
+                        long copied = (long)diagnosticsRead.invokeExact(handle, output,
+                                                                        output.byteSize());
+                        if (copied != length)
+                            throw new IllegalStateException(
+                                    "Native diagnostic chunk changed during copy");
+                        copy.count("bytes", copied);
+                        copy.succeed();
+                    }
+                    byte[] bytes;
+                    try (var array = Diagnostics.span(session, "diag.array")) {
+                        array.fail();
+                        bytes = output.asSlice(0, length).toArray(JAVA_BYTE);
+                        array.count("bytes", bytes.length);
+                        array.succeed();
+                    }
+                    try (var utf8 = Diagnostics.span(session, "diag.utf8")) {
+                        utf8.fail();
+                        String result = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+                        utf8.count("chars", result.length());
+                        utf8.succeed();
+                        return result;
+                    }
+                }
+            } catch (Throwable failure) {
+                read.fail();
+                throw rethrow(failure);
+            }
+        }
+    }
+
     /** Formats the last native CPU record only on demand; never waits for or reads back the GPU. */
     public String cpuDiagnostics() {
         checkOwner();
@@ -431,6 +546,7 @@ public final class NativeBridge implements AutoCloseable {
             return;
         checkOwner();
         try {
+            Diagnostics.detaching(this);
             int status = (int)destroy.invokeExact(handle);
             if (status != 0)
                 throw new IllegalStateException("prime_destroy (" + status + "): " + error());

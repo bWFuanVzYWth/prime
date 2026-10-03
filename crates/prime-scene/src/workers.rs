@@ -47,6 +47,22 @@ impl CpuWorkers {
         operation: impl Fn(&mut S, &mut [T]) -> Result<(), String> + Send + Sync,
     ) -> Result<(), String> {
         assert_eq!(states.len(), self.threads);
+        let context = prime_diagnostics::capture_context();
+        let run = |index: usize, state: &mut S, out: &mut [T], start: usize| {
+            let Some(context) = &context else {
+                return operation(state, out);
+            };
+            let _context = context.enter();
+            let mut span = prime_diagnostics::scope("cpu.batch");
+            span.count("batch", index as u64);
+            span.count("start", start as u64);
+            span.count("items", out.len() as u64);
+            let result = operation(state, out);
+            if result.is_err() {
+                span.fail();
+            }
+            result
+        };
         if let Some(pool) = &self.pool
             && output.len() > 1
         {
@@ -55,10 +71,11 @@ impl CpuWorkers {
                 output
                     .par_chunks_mut(chunk)
                     .zip(states.par_iter_mut())
-                    .try_for_each(|(out, state)| operation(state, out))
+                    .enumerate()
+                    .try_for_each(|(index, (out, state))| run(index, state, out, index * chunk))
             })
         } else {
-            operation(&mut states[0], output)
+            run(0, &mut states[0], output, 0)
         }
     }
 
@@ -71,6 +88,21 @@ impl CpuWorkers {
         operation: F,
     ) -> Result<(), String> {
         assert!(chunk > 0);
+        let context = prime_diagnostics::capture_context();
+        let run = |start: usize, out: &mut [T]| {
+            let Some(context) = &context else {
+                return operation(start, out);
+            };
+            let _context = context.enter();
+            let mut span = prime_diagnostics::scope("cpu.chunk");
+            span.count("start", start as u64);
+            span.count("items", out.len() as u64);
+            let result = operation(start, out);
+            if result.is_err() {
+                span.fail();
+            }
+            result
+        };
         if let Some(pool) = &self.pool
             && output.len() >= chunk.saturating_mul(2)
         {
@@ -78,10 +110,10 @@ impl CpuWorkers {
                 output
                     .par_chunks_mut(chunk)
                     .enumerate()
-                    .try_for_each(|(i, out)| operation(i * chunk, out))
+                    .try_for_each(|(i, out)| run(i * chunk, out))
             })
         } else {
-            operation(0, output)
+            run(0, output)
         }
     }
 }
@@ -151,5 +183,65 @@ mod tests {
                 .is_err()
         );
         assert_eq!(live.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn traces_propagate_dispatch_context_to_tasks_and_restore_workers_after_failure() {
+        let workers = CpuWorkers::new(4).unwrap();
+        let recorder = prime_diagnostics::Recorder::new();
+        let mut output = vec![0_usize; 16];
+        let parent;
+        {
+            let _context = recorder.enter(71);
+            let dispatch = prime_diagnostics::scope("test.dispatch");
+            parent = dispatch.id().unwrap();
+            workers
+                .chunks_mut(&mut output, 2, |start, values| {
+                    let context = prime_diagnostics::capture_context().unwrap();
+                    assert_eq!(context.frame_id(), 71);
+                    assert!(context.parent_id().is_some());
+                    values.fill(start);
+                    Ok(())
+                })
+                .unwrap();
+            let mut states = [0_usize; 4];
+            assert!(
+                workers
+                    .batches_mut(&mut states, &mut output, |_, _| {
+                        assert_eq!(prime_diagnostics::capture_context().unwrap().frame_id(), 71);
+                        Err("injected".into())
+                    })
+                    .is_err()
+            );
+        }
+        workers
+            .chunks_mut(&mut output, 2, |_, _| {
+                assert!(prime_diagnostics::capture_context().is_none());
+                Ok(())
+            })
+            .unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&recorder.drain_json().unwrap()).unwrap();
+        let names = json["dict"]["n"].as_array().unwrap();
+        let mut chunks = 0;
+        let mut failed_batches = 0;
+        for event in json["cpu"].as_array().unwrap() {
+            let name = names[event["n"].as_u64().unwrap() as usize]
+                .as_str()
+                .unwrap();
+            if matches!(name, "cpu.chunk" | "cpu.batch") {
+                assert_eq!(event["f"], 71);
+                assert_eq!(event["p"].as_u64(), Some(parent));
+                if name == "cpu.chunk" {
+                    chunks += 1;
+                    assert_eq!(event["ok"], 1);
+                } else {
+                    failed_batches += 1;
+                    assert_eq!(event["ok"], 0);
+                }
+            }
+        }
+        assert_eq!(chunks, 8);
+        assert!(failed_batches > 0);
     }
 }

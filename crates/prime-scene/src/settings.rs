@@ -29,6 +29,15 @@ pub enum ReconstructionQuality {
     UltraPerformance = 4,
 }
 
+/// Renderer creation choice; each method has its own CPU data and shader variant.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u32)]
+pub enum LightSampling {
+    #[default]
+    Grid = 0,
+    Tree = 1,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderSettings {
     pub astronomy: crate::environment::Astronomy,
@@ -52,6 +61,7 @@ pub struct RenderSettings {
     pub hdr: bool,
     pub hdr_reference_white: u32,
     pub frame_generation: bool,
+    pub light_sampling: LightSampling,
 }
 impl Default for RenderSettings {
     fn default() -> Self {
@@ -77,15 +87,16 @@ impl Default for RenderSettings {
             hdr: false,
             hdr_reference_white: 0,
             frame_generation: false,
+            light_sampling: LightSampling::Grid,
         }
     }
 }
 impl RenderSettings {
-    pub const VERSION: u32 = 6;
-    pub const BYTES: usize = 92;
+    pub const VERSION: u32 = 7;
+    pub const BYTES: usize = 96;
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != Self::BYTES {
-            return Err("Settings require exactly 92 bytes".into());
+            return Err("Settings require exactly 96 bytes".into());
         }
         let word = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
         if word(0) != Self::VERSION {
@@ -148,6 +159,11 @@ impl RenderSettings {
                 0 => false,
                 1 => true,
                 _ => return Err("Unknown frame generation setting".into()),
+            },
+            light_sampling: match word(92) {
+                0 => LightSampling::Grid,
+                1 => LightSampling::Tree,
+                _ => return Err("Unknown light sampling method".into()),
             },
         };
         result.validate()?;
@@ -212,6 +228,11 @@ impl RenderSettings {
                 1 => true,
                 _ => return Err("Unknown frame generation setting".into()),
             },
+            light_sampling: match s.light_sampling {
+                0 => LightSampling::Grid,
+                1 => LightSampling::Tree,
+                _ => return Err("Unknown light sampling method".into()),
+            },
         };
         result.validate()?;
         Ok(result)
@@ -242,6 +263,7 @@ impl RenderSettings {
             && self.sky == other.sky
             && self.stars == other.stars
             && self.seed == other.seed
+            && self.light_sampling == other.light_sampling
     }
 }
 
@@ -250,7 +272,7 @@ mod tests {
     use super::*;
     fn golden() -> Vec<u8> {
         [
-            6_u32,
+            7_u32,
             1,
             12,
             1,
@@ -270,6 +292,7 @@ mod tests {
             8,
             1_f32.to_bits(),
             0.6_f32.to_bits(),
+            0,
             0,
             0,
             0,
@@ -299,7 +322,8 @@ mod tests {
             (0, 3),
             (0, 4),
             (0, 5),
-            (0, 7),
+            (0, 6),
+            (0, 8),
             (48, 91),
             (48, (-91i32) as u32),
             (52, 360),
@@ -317,6 +341,8 @@ mod tests {
             (80, 2),
             (84, 10001),
             (88, 2),
+            (92, 2),
+            (92, u32::MAX),
         ] {
             let mut invalid = bytes.clone();
             invalid[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
@@ -342,6 +368,77 @@ mod tests {
         };
         assert!(old.validate().is_ok());
         assert!(!old.transport_matches(RenderSettings::default()));
+    }
+    #[test]
+    fn light_sampling_defaults_and_exact_wire_and_abi_values() {
+        let defaults = RenderSettings::default();
+        assert_eq!(defaults.light_sampling, LightSampling::Grid);
+        for (word, method) in [(0_u32, LightSampling::Grid), (1, LightSampling::Tree)] {
+            let mut bytes = golden();
+            bytes[92..96].copy_from_slice(&word.to_le_bytes());
+            let parsed = RenderSettings::parse(&bytes).unwrap();
+            assert_eq!(parsed.light_sampling, method);
+            assert_eq!(
+                parsed,
+                RenderSettings {
+                    light_sampling: method,
+                    mode: RenderMode::Offline,
+                    exposure: 4.0,
+                    sun: 0.5,
+                    view: DiagnosticView::Normal,
+                    ..defaults
+                }
+            );
+            assert_eq!(
+                defaults.transport_matches(RenderSettings {
+                    light_sampling: method,
+                    ..defaults
+                }),
+                word == 0
+            );
+        }
+        let abi = prime_abi::PrimeSettings {
+            header: Default::default(),
+            mode: defaults.mode as u32,
+            bounces: defaults.bounces,
+            offline_samples: defaults.offline_samples,
+            exposure: defaults.exposure,
+            hue: defaults.hue,
+            saturation: defaults.saturation,
+            view: defaults.view as u32,
+            sun: defaults.sun,
+            sky: defaults.sky,
+            depth_range: defaults.depth_range,
+            seed: defaults.seed,
+            latitude_degrees: defaults.astronomy.latitude_degrees,
+            solar_longitude_degrees: defaults.astronomy.solar_longitude_degrees,
+            opacity_micromap: defaults.opacity_micromap as u32,
+            ray_reconstruction: defaults.ray_reconstruction as u32,
+            reconstruction_quality: defaults.reconstruction_quality as u32,
+            terrain_batches_per_frame: defaults.terrain_batches_per_frame,
+            stars: defaults.stars,
+            auto_exposure_compensation: defaults.auto_exposure_compensation,
+            hdr: defaults.hdr as u32,
+            hdr_reference_white: defaults.hdr_reference_white,
+            frame_generation: defaults.frame_generation as u32,
+            light_sampling: 1,
+        };
+        assert_eq!(
+            RenderSettings::from_abi(&abi).unwrap(),
+            RenderSettings {
+                light_sampling: LightSampling::Tree,
+                ..defaults
+            }
+        );
+        for invalid in [2, u32::MAX] {
+            assert!(
+                RenderSettings::from_abi(&prime_abi::PrimeSettings {
+                    light_sampling: invalid,
+                    ..abi
+                })
+                .is_err()
+            );
+        }
     }
     #[test]
     fn saturation_defaults_and_explicit_legacy_wire_values() {

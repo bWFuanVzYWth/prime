@@ -2,6 +2,7 @@ package dev.primept.capture;
 
 import dev.primept.PrimeClient;
 import dev.primept.NativeBridge;
+import dev.primept.Diagnostics;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongCollection;
@@ -184,125 +185,184 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         prepareWindow(camera.pos);
     }
     private void route(net.minecraft.world.phys.Vec3 camera) {
-        long serial = PrimeClient.sourceFrameSequence();
-        if (lastFrame == serial)
-            return;
-        var minecraft = Minecraft.getInstance();
-        if (minecraft.level == null)
-            return;
-        long started = System.nanoTime();
-        NativeBridge bridge = PrimeClient.prepareNativeSources();
-        if (bridge == null)
-            return;
-        if (world != minecraft.level || epoch != PrimeClient.CAPTURE.epoch()) {
-            world = minecraft.level;
-            epoch = PrimeClient.CAPTURE.epoch();
-            events.clear();
-            chunks.clear();
-            blockEntities.clear();
-            inventory = true;
-        }
-        var access = (LoadedTerrainSnapshot)world.getChunkSource();
-        if (inventory) {
-            event(5, 0, 0, 0);
-            access.primept$visitLoaded(
-                    chunk -> event(1, chunk.getPos().x(), 0, chunk.getPos().z()));
-            inventory = false;
-        }
-        var bounds = access.primept$sourceWindow();
-        if (bounds == null)
-            throw new IllegalStateException("Missing host source-cache bounds");
-        frame.clear();
-        for (int i = 0; i < events.size(); i += 4) {
-            var value = frame.events.add();
-            PrimeMcEvent.kind(value, events.getInt(i));
-            PrimeMcEvent.x(value, events.getInt(i + 1));
-            PrimeMcEvent.y(value, events.getInt(i + 2));
-            PrimeMcEvent.z(value, events.getInt(i + 3));
-        }
-        events.clear();
-        var plan =
-                frame.plan(SectionSources.GAME_VERSION, resourceGeneration, epoch, serial, camera.x,
-                           camera.z, minecraft.options.getEffectiveRenderDistance(),
-                           world.getMinSectionY(), world.getMaxSectionY(),
-                           new int[] {bounds.minX(), bounds.maxX(), bounds.minZ(), bounds.maxZ()},
-                           world.getGameTime());
-        long planStart = System.nanoTime();
-        MemorySegment request = bridge.requestSections(plan);
-        long packStart = System.nanoTime();
-        long batch = PrimeMcIdentity.batch(PrimeMcRequests.identity(request));
-        long count = PrimeMcRequests.section_count(request),
-             columnCount = PrimeMcRequests.column_count(request);
-        var columns = PrimeMcRequests.columns(request).reinterpret(
-                Math.multiplyExact(columnCount, PrimeMcColumnRequest.SIZE));
-        var sections = PrimeMcRequests.sections(request).reinterpret(
-                Math.multiplyExact(count, PrimeMcSectionRequest.SIZE));
-        long entered = 0;
-        for (long i = 0; i < columnCount; ++i) {
-            var item = columns.asSlice(i * PrimeMcColumnRequest.SIZE, PrimeMcColumnRequest.SIZE);
-            int x = PrimeMcColumnRequest.x(item), z = PrimeMcColumnRequest.z(item);
-            if (PrimeMcColumnRequest.active(item) != 0) {
-                var chunk = world.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false);
-                if (chunk != null) {
-                    chunks.put(ChunkPos.pack(x, z), chunk);
-                    blockEntities.add(chunk);
-                    ++entered;
+        try (var diagnostic = Diagnostics.span("terrain_route")) {
+            try {
+                long serial = PrimeClient.sourceFrameSequence();
+                if (lastFrame == serial)
+                    return;
+                var minecraft = Minecraft.getInstance();
+                if (minecraft.level == null)
+                    return;
+                long started = Diagnostics.clock();
+                NativeBridge bridge = PrimeClient.prepareNativeSources();
+                if (bridge == null)
+                    return;
+                if (world != minecraft.level || epoch != PrimeClient.CAPTURE.epoch()) {
+                    world = minecraft.level;
+                    epoch = PrimeClient.CAPTURE.epoch();
+                    events.clear();
+                    chunks.clear();
+                    blockEntities.clear();
+                    inventory = true;
                 }
-            } else {
-                chunks.remove(ChunkPos.pack(x, z));
-                blockEntities.remove(x, z);
+                var access = (LoadedTerrainSnapshot)world.getChunkSource();
+                if (inventory) {
+                    event(5, 0, 0, 0);
+                    access.primept$visitLoaded(
+                            chunk -> event(1, chunk.getPos().x(), 0, chunk.getPos().z()));
+                    inventory = false;
+                }
+                var bounds = access.primept$sourceWindow();
+                if (bounds == null)
+                    throw new IllegalStateException("Missing host source-cache bounds");
+                frame.clear();
+                for (int i = 0; i < events.size(); i += 4) {
+                    var value = frame.events.add();
+                    PrimeMcEvent.kind(value, events.getInt(i));
+                    PrimeMcEvent.x(value, events.getInt(i + 1));
+                    PrimeMcEvent.y(value, events.getInt(i + 2));
+                    PrimeMcEvent.z(value, events.getInt(i + 3));
+                }
+                events.clear();
+                var plan = frame.plan(
+                        SectionSources.GAME_VERSION, resourceGeneration, epoch, serial, camera.x,
+                        camera.z, minecraft.options.getEffectiveRenderDistance(),
+                        world.getMinSectionY(), world.getMaxSectionY(),
+                        new int[] {bounds.minX(), bounds.maxX(), bounds.minZ(), bounds.maxZ()},
+                        world.getGameTime());
+                long planStart = Diagnostics.clock();
+                MemorySegment request;
+                try (var phase = Diagnostics.span("terrain_plan")) {
+                    try {
+                        request = bridge.requestSections(plan);
+
+                    } catch (RuntimeException | Error failure) {
+                        phase.fail();
+                        throw failure;
+                    }
+                }
+                long packStart = Diagnostics.clock();
+                long batch = PrimeMcIdentity.batch(PrimeMcRequests.identity(request));
+                long count = PrimeMcRequests.section_count(request),
+                     columnCount = PrimeMcRequests.column_count(request);
+                var columns = PrimeMcRequests.columns(request).reinterpret(
+                        Math.multiplyExact(columnCount, PrimeMcColumnRequest.SIZE));
+                var sections = PrimeMcRequests.sections(request).reinterpret(
+                        Math.multiplyExact(count, PrimeMcSectionRequest.SIZE));
+                long entered = 0, available = 0;
+                try (var packScope = Diagnostics.span("terrain_pack")) {
+                    try {
+                        for (long i = 0; i < columnCount; ++i) {
+                            var item = columns.asSlice(i * PrimeMcColumnRequest.SIZE,
+                                                       PrimeMcColumnRequest.SIZE);
+                            int x = PrimeMcColumnRequest.x(item), z = PrimeMcColumnRequest.z(item);
+                            if (PrimeMcColumnRequest.active(item) != 0) {
+                                var chunk = world.getChunkSource().getChunk(x, z, ChunkStatus.FULL,
+                                                                            false);
+                                if (chunk != null) {
+                                    chunks.put(ChunkPos.pack(x, z), chunk);
+                                    blockEntities.add(chunk);
+                                    ++entered;
+                                }
+                            } else {
+                                chunks.remove(ChunkPos.pack(x, z));
+                                blockEntities.remove(x, z);
+                            }
+                        }
+                        response.clear();
+                        resources.clear();
+                        for (long i = 0; i < count; ++i) {
+                            var item = sections.asSlice(i * PrimeMcSectionRequest.SIZE,
+                                                        PrimeMcSectionRequest.SIZE);
+                            int x = PrimeMcSectionRequest.x(item),
+                                y = PrimeMcSectionRequest.y(item),
+                                z = PrimeMcSectionRequest.z(item);
+                            var chunk =
+                                    world.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false);
+                            var section = chunk == null
+                                                  ? null
+                                                  : chunk.getSection(
+                                                            chunk.getSectionIndexFromSectionY(y));
+                            sources.section(resources, response, x, y, z, section);
+                            if (section != null)
+                                ++available;
+                        }
+                        if (resources.hasResources()) {
+                            bridge.resources(resources.resources(
+                                    SectionSources.GAME_VERSION, resourceGeneration, epoch, batch,
+                                    world.getGameTime(), false, 0, 0, null));
+                            if (resources.sprites.count() != 0)
+                                PrimeClient.prepareResourceGeneration();
+                        }
+                        packScope.count("sections", count);
+                        packScope.count("avail", available);
+                        packScope.count("bytes", response.bytes() + resources.bytes());
+
+                    } catch (RuntimeException | Error failure) {
+                        packScope.fail();
+                        throw failure;
+                    }
+                }
+                long packEnd = Diagnostics.clock();
+                long sourceBytes = response.bytes() + resources.bytes();
+                MemorySegment tints;
+                try (var phase = Diagnostics.span("terrain_accept")) {
+                    try {
+                        phase.count("sections", count);
+                        tints = bridge.sections(response.sections(
+                                SectionSources.GAME_VERSION, resourceGeneration, epoch, batch));
+
+                    } catch (RuntimeException | Error failure) {
+                        phase.fail();
+                        throw failure;
+                    }
+                }
+                long tintQueries = 0, tintNanos = 0;
+                try (var tintScope = Diagnostics.span("terrain_tint")) {
+                    try {
+                        for (int round = 0; PrimeMcRequests.phase(tints) != 0; ++round) {
+                            if (round >= 2)
+                                throw new IllegalStateException("Unexpected color continuation");
+                            int phase = PrimeMcRequests.phase(tints);
+                            tintQueries += phase == 4 ? PrimeMcRequests.biome_count(tints)
+                                                      : PrimeMcRequests.color_count(tints);
+                            long tintStart = Diagnostics.clock();
+                            var reply = SectionTints.respond(
+                                    tints, response, world, minecraft.getBlockColors(),
+                                    minecraft.getModelManager().getFluidStateModelSet(), world);
+                            tintNanos += Diagnostics.clock() - tintStart;
+                            sourceBytes += response.bytes();
+                            tints = phase == 4 ? bridge.biomes(reply) : bridge.colors(reply);
+                        }
+                        tintScope.count("queries", tintQueries);
+
+                    } catch (RuntimeException | Error failure) {
+                        tintScope.fail();
+                        throw failure;
+                    }
+                }
+                long completed = Diagnostics.clock();
+                lastFrame = serial;
+                routedSections += available;
+                stats = Diagnostics.timingEnabled()
+                                ? new Stats(dirtyEvents, entered, loadedColumns, unloadedColumns,
+                                            invalidations, count, available, count - available,
+                                            packStart - planStart, packEnd - packStart,
+                                            completed - started, lightEngineEvents,
+                                            lightPacketEvents, completed - packEnd - tintNanos,
+                                            frame.bytes() + sourceBytes, tintQueries, tintNanos)
+                                : Stats.EMPTY;
+                diagnostic.count("sections", count);
+                diagnostic.count("avail", available);
+                diagnostic.count("bytes", frame.bytes() + sourceBytes);
+                dirtyEvents = loadedColumns = unloadedColumns = invalidations = lightEngineEvents =
+                        lightPacketEvents = 0;
+
+            } catch (RuntimeException | Error failure) {
+                diagnostic.fail();
+                throw failure;
             }
         }
-        response.clear();
-        resources.clear();
-        long available = 0;
-        for (long i = 0; i < count; ++i) {
-            var item = sections.asSlice(i * PrimeMcSectionRequest.SIZE, PrimeMcSectionRequest.SIZE);
-            int x = PrimeMcSectionRequest.x(item), y = PrimeMcSectionRequest.y(item),
-                z = PrimeMcSectionRequest.z(item);
-            var chunk = world.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false);
-            var section =
-                    chunk == null ? null : chunk.getSection(chunk.getSectionIndexFromSectionY(y));
-            sources.section(resources, response, x, y, z, section);
-            if (section != null)
-                ++available;
-        }
-        if (resources.hasResources()) {
-            bridge.resources(resources.resources(SectionSources.GAME_VERSION, resourceGeneration,
-                                                 epoch, batch, world.getGameTime(), false, 0, 0,
-                                                 null));
-            if (resources.sprites.count() != 0)
-                PrimeClient.prepareResourceGeneration();
-        }
-        long packEnd = System.nanoTime();
-        long sourceBytes = response.bytes() + resources.bytes();
-        var tints = bridge.sections(
-                response.sections(SectionSources.GAME_VERSION, resourceGeneration, epoch, batch));
-        long tintQueries = 0, tintNanos = 0;
-        for (int round = 0; PrimeMcRequests.phase(tints) != 0; ++round) {
-            if (round >= 2)
-                throw new IllegalStateException("Unexpected color continuation");
-            int phase = PrimeMcRequests.phase(tints);
-            tintQueries += phase == 4 ? PrimeMcRequests.biome_count(tints)
-                                      : PrimeMcRequests.color_count(tints);
-            long tintStart = System.nanoTime();
-            var reply = SectionTints.respond(tints, response, world, minecraft.getBlockColors(),
-                                             minecraft.getModelManager().getFluidStateModelSet(),
-                                             world);
-            tintNanos += System.nanoTime() - tintStart;
-            sourceBytes += response.bytes();
-            tints = phase == 4 ? bridge.biomes(reply) : bridge.colors(reply);
-        }
-        long completed = System.nanoTime();
-        lastFrame = serial;
-        routedSections += available;
-        stats = new Stats(dirtyEvents, entered, loadedColumns, unloadedColumns, invalidations,
-                          count, available, count - available, packStart - planStart,
-                          packEnd - packStart, completed - started, lightEngineEvents,
-                          lightPacketEvents, completed - packEnd - tintNanos,
-                          frame.bytes() + sourceBytes, tintQueries, tintNanos);
-        dirtyEvents = loadedColumns = unloadedColumns = invalidations = lightEngineEvents =
-                lightPacketEvents = 0;
     }
     private void event(int kind, int x, int y, int z) {
         events.add(kind);

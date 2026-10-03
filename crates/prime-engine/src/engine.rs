@@ -1,5 +1,6 @@
 //! Owns one source scene and its translated/GPU state. The FFI confines it to one OS thread.
 use crate::cpu_profile::{PrepareProfile, elapsed};
+use prime_diagnostics::Recorder;
 use prime_scene::{
     incremental::TranslatedScene,
     protocol::Frame,
@@ -18,6 +19,12 @@ pub(crate) struct Engine {
     pub(crate) failed: bool,
     pub(crate) settings: RenderSettings,
     astronomy: prime_scene::environment::SolarOrbit,
+    pub(crate) diagnostics_flags: u32,
+    pub(crate) trace_frame: u64,
+    pub(crate) trace: Option<Arc<Recorder>>,
+    finished_trace: Option<Arc<Recorder>>,
+    trace_chunk: Option<String>,
+    trace_chunk_final: bool,
     last_frame: Option<(Frame, RenderSettings)>,
     frozen_frame: Option<(Frame, RenderSettings)>,
     #[cfg(feature = "vulkan")]
@@ -46,6 +53,12 @@ impl Engine {
             source: SourceScene::with_workers(workers.clone()),
             minecraft: prime_minecraft::TerrainContext::with_workers(workers.clone()),
             workers,
+            diagnostics_flags: 0,
+            trace_frame: 0,
+            trace: None,
+            finished_trace: None,
+            trace_chunk: None,
+            trace_chunk_final: false,
             translated: Default::default(),
             cpu_profile: Default::default(),
             failed: false,
@@ -56,6 +69,79 @@ impl Engine {
             #[cfg(feature = "vulkan")]
             renderer: None,
         }
+    }
+    pub(crate) fn configure_diagnostics(&mut self, flags: u32) -> Result<(), String> {
+        if flags & !3 != 0 {
+            return Err("Unknown diagnostic flags".into());
+        }
+        let capturing = flags & 2 != 0;
+        if capturing
+            && self.trace.is_none()
+            && (self.finished_trace.is_some() || self.trace_chunk.is_some())
+        {
+            return Err("Drain previous diagnostic capture before restarting".into());
+        }
+        let stopping = !capturing && self.trace.is_some();
+        let old = self.trace.clone();
+        let _context = old
+            .as_ref()
+            .map(|recorder| recorder.enter(self.trace_frame));
+        #[cfg(feature = "vulkan")]
+        if let Some(renderer) = &mut self.renderer {
+            if stopping {
+                renderer.finish_diagnostics_capture()?;
+            }
+            renderer.set_diagnostics(flags != 0)?;
+        }
+        if stopping {
+            self.finished_trace = self.trace.take();
+        }
+        if capturing && self.trace.is_none() {
+            let recorder = Recorder::new();
+            {
+                let _context = recorder.enter(self.trace_frame);
+                let mut span = prime_diagnostics::scope("cap.start");
+                span.count("thr", self.workers.threads() as u64);
+                span.count("debug", u64::from(cfg!(debug_assertions)));
+                span.value("ver", env!("CARGO_PKG_VERSION"));
+                #[cfg(feature = "vulkan")]
+                if let Some(renderer) = &self.renderer {
+                    span.value("dev", renderer.device_name());
+                }
+                self.record_settings(&mut span);
+            }
+            self.trace = Some(recorder);
+        }
+        self.diagnostics_flags = flags;
+        self.cpu_profile.set_enabled(flags != 0);
+        self.minecraft.set_diagnostics(flags != 0);
+        Ok(())
+    }
+    pub(crate) fn diagnostics_clock(&self) -> u64 {
+        self.trace
+            .as_ref()
+            .or(self.finished_trace.as_ref())
+            .map_or(0, |r| r.clock_ns())
+    }
+    pub(crate) fn diagnostics_chunk(&mut self) -> Result<&str, String> {
+        if self.trace_chunk.is_none() {
+            if let Some(recorder) = self.trace.as_ref().or(self.finished_trace.as_ref()) {
+                self.trace_chunk = Some(
+                    recorder
+                        .drain_json()
+                        .map_err(|e| format!("Encode diagnostics: {e}"))?,
+                );
+                self.trace_chunk_final = self.trace.is_none();
+            }
+        }
+        Ok(self.trace_chunk.as_deref().unwrap_or(""))
+    }
+    pub(crate) fn consume_diagnostics_chunk(&mut self) {
+        self.trace_chunk = None;
+        if self.trace_chunk_final {
+            self.finished_trace = None;
+        }
+        self.trace_chunk_final = false;
     }
     pub(crate) fn cpu_diagnostics(&self) -> String {
         #[cfg(feature = "vulkan")]
@@ -74,6 +160,23 @@ impl Engine {
         )
     }
 
+    fn record_settings(&self, span: &mut prime_diagnostics::SpanGuard) {
+        span.count("mode", self.settings.mode as u64);
+        span.count("view", self.settings.view as u64);
+        span.count("bounces", u64::from(self.settings.bounces));
+        span.count("samples", u64::from(self.settings.offline_samples));
+        span.count("seed", u64::from(self.settings.seed));
+        span.count("rr", u64::from(self.settings.ray_reconstruction));
+        span.count("rr_q", self.settings.reconstruction_quality as u64);
+        span.count("fg", u64::from(self.settings.frame_generation));
+        span.count("omm", u64::from(self.settings.opacity_micromap));
+        span.count("ls", self.settings.light_sampling as u64);
+        span.count(
+            "terrain_budget",
+            u64::from(self.settings.terrain_batches_per_frame),
+        );
+    }
+
     #[cfg(test)]
     pub(crate) fn submit(&mut self, bytes: &[u8]) -> Result<(), String> {
         self.update_source(|source| source.submit(bytes))
@@ -85,6 +188,7 @@ impl Engine {
         self.minecraft.clear_world(epoch);
         self.translated = Default::default();
         self.cpu_profile = Default::default();
+        self.cpu_profile.set_enabled(self.diagnostics_flags != 0);
         self.last_frame = None;
         #[cfg(feature = "vulkan")]
         if let Some(renderer) = &mut self.renderer {
@@ -134,16 +238,26 @@ impl Engine {
     }
 
     pub(crate) fn configure(&mut self, settings: RenderSettings) -> Result<(), String> {
-        settings.validate()?;
+        let mut diagnostic = prime_diagnostics::scope("cfg");
+        settings.validate().inspect_err(|_| diagnostic.fail())?;
         if self.failed {
+            diagnostic.fail();
             return Err("Renderer session is poisoned".into());
+        }
+        #[cfg(feature = "vulkan")]
+        if self.renderer.is_some() && settings.light_sampling != self.settings.light_sampling {
+            diagnostic.fail();
+            return Err(
+                "Light sampling is fixed when attaching the renderer; restart to change it".into(),
+            );
         }
         let frozen = if settings.mode == RenderMode::Offline {
             Some(match self.frozen_frame {
                 Some(snapshot) => snapshot,
                 None => self
                     .last_frame
-                    .ok_or("Offline rendering needs a successfully recorded world frame")?,
+                    .ok_or("Offline rendering needs a successfully recorded world frame")
+                    .inspect_err(|_| diagnostic.fail())?,
             })
         } else {
             None
@@ -159,7 +273,8 @@ impl Engine {
                 active.seed = transport.seed;
                 active.astronomy = transport.astronomy;
             }
-            poison_on_failure(&mut self.failed, || renderer.configure(active))?;
+            poison_on_failure(&mut self.failed, || renderer.configure(active))
+                .inspect_err(|_| diagnostic.fail())?;
             renderer.set_scene_frozen(frozen.is_some());
         }
         let effective_astronomy = frozen.map_or(settings.astronomy, |(_, fixed)| fixed.astronomy);
@@ -171,6 +286,7 @@ impl Engine {
         }
         self.settings = settings;
         self.frozen_frame = frozen;
+        self.record_settings(&mut diagnostic);
         Ok(())
     }
 
@@ -189,16 +305,32 @@ impl Engine {
     }
 
     fn prepare(&mut self, frame: &Frame) -> Result<[f64; 3], String> {
+        let mut span = prime_diagnostics::scope("scene.prepare");
+        span.count("w", u64::from(frame.width));
+        span.count("h", u64::from(frame.height));
+        span.count("sample", u64::from(frame.sample_index));
         let started = self.cpu_profile.start();
         if self.failed {
+            span.fail();
             return Err("renderer failed; destroy and recreate the session".into());
         }
         if frame.epoch != self.source.epoch() || frame.epoch == 0 {
+            span.fail();
             return Err("frame resource epoch mismatch".into());
         }
         let anchor = frame.anchor();
         let update_start = self.cpu_profile.start();
-        let work = self.translated.update(&mut self.source, anchor)?;
+        let mut translation = prime_diagnostics::scope("scene.translate");
+        let work = self
+            .translated
+            .update(&mut self.source, anchor)
+            .inspect_err(|_| {
+                translation.fail();
+                span.fail();
+            })?;
+        translation.count("meshes", work.meshes_published as u64);
+        translation.count("tex", work.textures_published as u64);
+        drop(translation);
         self.cpu_profile
             .observe(started, elapsed(update_start), work);
         Ok(anchor)
@@ -216,6 +348,8 @@ impl Engine {
                         self.settings,
                         self.workers.clone(),
                     )?;
+                    let mut renderer = renderer;
+                    renderer.set_diagnostics(self.diagnostics_flags != 0)?;
                     self.renderer = Some(renderer);
                 }
                 self.renderer.as_mut().unwrap().set_environment(

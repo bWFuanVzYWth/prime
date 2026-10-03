@@ -44,7 +44,8 @@ final class SettingsTest {
                                .withPathTracing(false)
                                .withOpacityMicromap(false)
                                .withRayReconstruction(false)
-                               .withDlssQuality(RenderSettings.DlssQuality.QUALITY);
+                               .withDlssQuality(RenderSettings.DlssQuality.QUALITY)
+                               .withLightSampling(RenderSettings.LightSampling.TREE);
         for (var control : RenderSettings.Control.values())
             settings = settings.with(control, control.maximum);
         Path file = dir.resolve("config/primept.properties");
@@ -64,9 +65,10 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=6", "version=0"),
-                     valid.replace("version=6", "version=5"),
-                     valid.replace("version=6", "version=7"), valid.replace("version=6", ""),
+                     valid.replace("version=7", "version=0"),
+                     valid.replace("version=7", "version=6"),
+                     valid.replace("version=7", "version=8"),
+                     valid.replace("version=7", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
                      valid.replace("terrain.batches_per_frame=8", ""),
@@ -82,7 +84,11 @@ final class SettingsTest {
                      valid.replace("render.dlss_quality=PERFORMANCE", ""),
                      valid.replace("render.dlss_quality=PERFORMANCE",
                                    "render.dlss_quality=UNKNOWN"),
-                     valid + "render.bounces=NaN\n", valid + "bad=\\uXYZW\n"}) {
+                     valid.replace("render.light_sampling=GRID", ""),
+                     valid.replace("render.light_sampling=GRID", "render.light_sampling=UNKNOWN"),
+                     valid.replace("render.light_sampling=GRID", "render.light_sampling=2"),
+                     valid + "render.bounces=NaN\n",
+                     valid + "bad=\\uXYZW\n"}) {
             var loaded = SettingsFile.decode(broken);
             assertEquals(RenderSettings.defaults(), loaded.settings());
             assertFalse(loaded.resetReason().isEmpty());
@@ -125,13 +131,15 @@ final class SettingsTest {
         assertEquals(0, PrimeSettings.hdr(view(bytes)));
         assertEquals(0, PrimeSettings.hdr_reference_white(view(bytes)));
         assertEquals(0, PrimeSettings.frame_generation(view(bytes)));
+        assertEquals(0, PrimeSettings.light_sampling(view(bytes)));
+        assertEquals(100, PrimeSettings.SIZE);
     }
     @Test
     void saturationDefaultsPreserveSavedValuesAndIndependentWire(@TempDir Path dir)
             throws Exception {
         var control = RenderSettings.Control.SATURATION;
         var defaults = RenderSettings.defaults();
-        assertEquals(6, RenderSettings.VERSION);
+        assertEquals(7, RenderSettings.VERSION);
         assertEquals(20, defaults.value(control));
         Path file = dir.resolve("primept.properties");
         assertEquals(20, SettingsFile.load(file).settings().value(control));
@@ -276,6 +284,34 @@ final class SettingsTest {
         }
         assertTrue(defaults.rayReconstruction());
         assertThrows(NullPointerException.class, () -> defaults.withDlssQuality(null));
+    }
+    @Test
+    void lightSamplingChoicePersistsAndCopiesWithoutChangingOtherWireFields() {
+        var defaults = RenderSettings.defaults();
+        assertEquals(RenderSettings.LightSampling.GRID, defaults.lightSampling());
+        assertSame(defaults, defaults.withLightSampling(RenderSettings.LightSampling.GRID));
+        var tree = defaults.withLightSampling(RenderSettings.LightSampling.TREE);
+        assertNotEquals(defaults, tree);
+        assertEquals(tree, SettingsFile.decode(SettingsFile.encode(tree)).settings());
+        assertEquals(tree.hashCode(),
+                     SettingsFile.decode(SettingsFile.encode(tree)).settings().hashCode());
+        assertEquals(RenderSettings.LightSampling.GRID, defaults.lightSampling());
+        assertEquals(RenderSettings.LightSampling.TREE,
+                     tree.withPathTracing(false)
+                             .withOpacityMicromap(false)
+                             .withRayReconstruction(false)
+                             .withDlssQuality(RenderSettings.DlssQuality.QUALITY)
+                             .with(RenderSettings.Control.BOUNCES, 8)
+                             .lightSampling());
+        assertThrows(NullPointerException.class, () -> tree.withLightSampling(null));
+        var before = settingsBuffer();
+        var after = settingsBuffer();
+        for (boolean offline : new boolean[] {false, true}) {
+            defaults.write(before, offline, RenderSettings.View.OUTPUT);
+            tree.write(after, offline, RenderSettings.View.OUTPUT);
+            assertEquals(1, PrimeSettings.light_sampling(view(after)));
+            assertOnlyFieldChanged(before, after, 96);
+        }
     }
     @Test
     void shortcutRequiresBothModifiersAndEscapeKeepsSnapshot() {

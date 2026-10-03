@@ -1,8 +1,10 @@
 #ifndef PRIME_PT_H
 #define PRIME_PT_H
 #include <stdint.h>
-#define PRIME_ABI_VERSION 9
+#define PRIME_ABI_VERSION 11
 #define PRIME_MAX_BATCH_BYTES 268435456
+#define PRIME_DIAGNOSTICS_ENABLED 1
+#define PRIME_DIAGNOSTICS_CAPTURE 2
 #define PRIME_HOST_OMM 1
 #define PRIME_HOST_STREAMLINE 2
 #define PRIME_STREAMLINE_BEGIN_FRAME 0
@@ -80,6 +82,8 @@ typedef struct PrimeSettings {
     uint32_t hdr;
     uint32_t hdr_reference_white;
     uint32_t frame_generation;
+    /* Fixed when the renderer is created: 0 = grid, 1 = tree. */
+    uint32_t light_sampling;
 } PrimeSettings;
 
 typedef struct PrimeVulkanHost {
@@ -257,6 +261,20 @@ int32_t prime_hdr_surface_destroy(uint64_t handle);
 int32_t prime_render(uint64_t handle, const PrimeFrame *frame, uint8_t *rgba, uint64_t capacity);
 uint64_t prime_gpu_time(uint64_t handle);
 uint64_t prime_cpu_diagnostics(uint64_t handle, uint8_t *output, uint64_t capacity);
+/* Owner-thread controls. Capture implies diagnostics. Stopping preserves a final
+ * data chunk; it never waits for unsubmitted GPU work. Unknown flag bits fail. */
+int32_t prime_diagnostics_configure(uint64_t handle, uint32_t flags);
+/* Correlates subsequent source/CPU tasks with the logical host frame. */
+int32_t prime_diagnostics_frame(uint64_t handle, uint64_t frame_id);
+/* Native monotonic ns relative to the capture origin, retained through final read.
+ * Java brackets this call with nanoTime; GPU tick clocks stay independent. */
+uint64_t prime_diagnostics_clock(uint64_t handle);
+/* Drains a compact UTF-8 JSON chunk. Zero capacity prepares/caches a chunk and
+ * returns length excluding NUL. Short copies retain it; a full NUL-terminated
+ * copy consumes it. Zero length means no capture data; u64::MAX means error.
+ * Pointers are borrowed only through return. Call once per captured frame and
+ * after stopping; never treat a pending GPU event as a measured zero duration. */
+uint64_t prime_diagnostics_read(uint64_t handle, uint8_t *output, uint64_t capacity);
 int32_t prime_destroy(uint64_t handle);
 uint64_t prime_last_error(uint8_t *output, uint64_t capacity);
 /* Present may run on the host present thread; bridge serializes SDK access. */

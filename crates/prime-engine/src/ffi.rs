@@ -213,7 +213,25 @@ pub(crate) fn boundary<T>(fallback: T, work: impl FnOnce() -> Result<T, String>)
     }
 }
 
-pub(crate) fn session<T>(
+pub(crate) fn session_named<T>(
+    handle: u64,
+    name: &'static str,
+    work: impl FnOnce(&mut Engine) -> Result<T, String>,
+) -> Result<T, String> {
+    session_untraced(handle, |engine| {
+        let recorder = engine.trace.clone();
+        let _context = recorder.as_ref().map(|r| r.enter(engine.trace_frame));
+        let mut span = prime_diagnostics::scope(name);
+        let result = work(engine);
+        if let Err(error) = &result {
+            span.fail();
+            span.value("err", error);
+        }
+        result
+    })
+}
+
+fn session_untraced<T>(
     handle: u64,
     work: impl FnOnce(&mut Engine) -> Result<T, String>,
 ) -> Result<T, String> {
@@ -266,7 +284,7 @@ pub extern "C" fn prime_create(version: u32) -> u64 {
 pub unsafe extern "C" fn prime_reset(handle: u64, reset: *const PrimeReset) -> i32 {
     boundary(-1, || {
         let r = unsafe { input(reset)? };
-        session(handle, |s| s.reset_world(r.epoch))?;
+        session_named(handle, "prime_reset", |s| s.reset_world(r.epoch))?;
         Ok(0)
     })
 }
@@ -276,7 +294,7 @@ pub unsafe extern "C" fn prime_reset(handle: u64, reset: *const PrimeReset) -> i
 pub unsafe extern "C" fn prime_textures(handle: u64, batch: *const PrimeTextureBatch) -> i32 {
     boundary(-1, || {
         let view = unsafe { scene::TexturesView::read(batch)? };
-        session(handle, |s| {
+        session_named(handle, "prime_textures", |s| {
             s.update_source(|src| src.submit_textures_typed(view))
         })?;
         Ok(0)
@@ -295,7 +313,7 @@ pub unsafe extern "C" fn prime_retire_textures(
         budget.array::<PrimeTextureRetire>(1)?;
         budget.array::<u32>(b.ids.count)?;
         let ids = unsafe { slice(b.ids.data, b.ids.count)? };
-        session(handle, |s| {
+        session_named(handle, "prime_retire_textures", |s| {
             s.update_source(|src| src.retire_textures_typed(b.epoch, ids))
         })?;
         Ok(0)
@@ -307,7 +325,7 @@ pub unsafe extern "C" fn prime_retire_textures(
 pub unsafe extern "C" fn prime_dynamic(handle: u64, batch: *const PrimeDynamicBatch) -> i32 {
     boundary(-1, || {
         let view = unsafe { scene::DynamicView::read(batch)? };
-        session(handle, |s| {
+        session_named(handle, "prime_dynamic", |s| {
             s.update_source(|src| src.submit_dynamic_typed(view))
         })?;
         Ok(0)
@@ -319,7 +337,7 @@ pub unsafe extern "C" fn prime_dynamic(handle: u64, batch: *const PrimeDynamicBa
 pub unsafe extern "C" fn prime_instances(handle: u64, batch: *const PrimeInstanceBatch) -> i32 {
     boundary(-1, || {
         let view = unsafe { scene::InstancesView::read(batch)? };
-        session(handle, |s| {
+        session_named(handle, "prime_instances", |s| {
             s.update_source(|src| src.submit_instances_typed(view))
         })?;
         Ok(0)
@@ -340,7 +358,7 @@ pub unsafe extern "C" fn prime_render(
         if output.is_null() || capacity < frame.output_len() as u64 {
             return Err("output buffer is null or too small".into());
         }
-        let rgba = session(handle, |s| s.render(&frame))?;
+        let rgba = session_named(handle, "prime_render", |s| s.render(&frame))?;
         if rgba.len() != frame.output_len() {
             return Err("renderer returned an invalid output extent".into());
         }
@@ -376,7 +394,7 @@ pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const PrimeVulk
         validate_vulkan_host(h)?;
         #[cfg(feature = "vulkan")]
         {
-            session(handle, |s| {
+            session_named(handle, "prime_attach_vulkan", |s| {
                 if s.failed || s.renderer.is_some() {
                     return Err("Engine already attached or failed".into());
                 }
@@ -393,6 +411,10 @@ pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const PrimeVulk
                         s.workers.clone(),
                     )?
                 });
+                s.renderer
+                    .as_mut()
+                    .unwrap()
+                    .set_diagnostics(s.diagnostics_flags != 0)?;
                 Ok(0)
             })
         }
@@ -409,7 +431,7 @@ pub unsafe extern "C" fn prime_attach_vulkan(handle: u64, data: *const PrimeVulk
 pub unsafe extern "C" fn prime_configure(handle: u64, data: *const PrimeSettings) -> i32 {
     boundary(-1, || {
         let settings = prime_scene::settings::RenderSettings::from_abi(unsafe { input(data)? })?;
-        session(handle, |s| s.configure(settings))?;
+        session_named(handle, "prime_configure", |s| s.configure(settings))?;
         Ok(0)
     })
 }
@@ -428,7 +450,7 @@ pub unsafe extern "C" fn prime_prepare_resources(
         }
         #[cfg(feature = "vulkan")]
         {
-            session(handle, |s| unsafe {
+            session_named(handle, "prime_prepare_resources", |s| unsafe {
                 s.prepare_resources(p.command, p.serial)
             })?;
             Ok(0)
@@ -457,7 +479,7 @@ pub unsafe extern "C" fn prime_record(
         }
         #[cfg(feature = "vulkan")]
         {
-            session(handle, |s| unsafe {
+            session_named(handle, "prime_record", |s| unsafe {
                 s.record(&frame, t.command, t.image, t.view, t.serial)
             })?;
             Ok(0)
@@ -477,7 +499,9 @@ pub unsafe extern "C" fn prime_submission_accepted(handle: u64, serial: u64) -> 
     boundary(-1, || {
         #[cfg(feature = "vulkan")]
         {
-            session(handle, |s| s.submission_accepted(serial))?;
+            session_named(handle, "prime_submission_accepted", |s| {
+                s.submission_accepted(serial)
+            })?;
             Ok(0)
         }
         #[cfg(not(feature = "vulkan"))]
@@ -502,7 +526,7 @@ pub unsafe extern "C" fn prime_display_output(
         }
         #[cfg(feature = "vulkan")]
         {
-            session(handle, |s| {
+            session_named(handle, "prime_display_output", |s| {
                 s.renderer
                     .as_mut()
                     .ok_or("Attach a Vulkan host before configuring display")?
@@ -542,7 +566,7 @@ pub unsafe extern "C" fn prime_present_hdr(handle: u64, target: *const PrimeHdrT
         }
         #[cfg(feature = "vulkan")]
         {
-            session(handle, |s| unsafe {
+            session_named(handle, "prime_present_hdr", |s| unsafe {
                 s.renderer
                     .as_mut()
                     .ok_or("Attach a Vulkan host before HDR presentation")?
@@ -590,7 +614,7 @@ pub unsafe extern "C" fn prime_prepare_frame_generation(
         }
         #[cfg(feature = "vulkan")]
         {
-            let prepared = session(handle, |s| unsafe {
+            let prepared = session_named(handle, "prime_prepare_frame_generation", |s| unsafe {
                 s.renderer
                     .as_mut()
                     .ok_or("Attach a Vulkan host before frame generation")?
@@ -617,7 +641,7 @@ pub unsafe extern "C" fn prime_prepare_frame_generation(
 #[unsafe(no_mangle)]
 pub extern "C" fn prime_gpu_time(handle: u64) -> u64 {
     boundary(0, || {
-        session(handle, |s| {
+        session_named(handle, "prime_gpu_time", |s| {
             #[cfg(feature = "vulkan")]
             {
                 Ok(s.renderer
@@ -645,7 +669,7 @@ pub unsafe extern "C" fn prime_cpu_diagnostics(handle: u64, output: *mut u8, cap
         if capacity > isize::MAX as u64 || (capacity != 0 && output.is_null()) {
             return Err("Invalid CPU diagnostics buffer".into());
         }
-        let report = session(handle, |s| Ok(s.cpu_diagnostics()))?;
+        let report = session_named(handle, "prime_cpu_diagnostics", |s| Ok(s.cpu_diagnostics()))?;
         if capacity != 0 {
             let count = report.len().min(capacity as usize - 1);
             // SAFETY: Caller owns a validated writable span. The report is independently owned.
@@ -658,12 +682,67 @@ pub unsafe extern "C" fn prime_cpu_diagnostics(handle: u64, output: *mut u8, cap
     })
 }
 
+/// Owner-thread collection controls; no GPU resources when disabled.
+#[unsafe(no_mangle)]
+pub extern "C" fn prime_diagnostics_configure(handle: u64, flags: u32) -> i32 {
+    boundary(-1, || {
+        session_untraced(handle, |s| s.configure_diagnostics(flags))?;
+        Ok(0)
+    })
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn prime_diagnostics_frame(handle: u64, frame_id: u64) -> i32 {
+    boundary(-1, || {
+        session_untraced(handle, |s| {
+            s.trace_frame = frame_id;
+            Ok(())
+        })?;
+        Ok(0)
+    })
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn prime_diagnostics_clock(handle: u64) -> u64 {
+    boundary(u64::MAX, || {
+        session_untraced(handle, |s| Ok(s.diagnostics_clock()))
+    })
+}
+/// # Safety
+/// Nonzero capacity is a caller-owned writable span; zero capacity accepts null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_diagnostics_read(
+    handle: u64,
+    output: *mut u8,
+    capacity: u64,
+) -> u64 {
+    boundary(u64::MAX, || {
+        if capacity > isize::MAX as u64 || (capacity != 0 && output.is_null()) {
+            return Err("Invalid diagnostic capture buffer".into());
+        }
+        session_untraced(handle, |s| {
+            let report = s.diagnostics_chunk()?;
+            let length = report.len();
+            if capacity != 0 {
+                let count = length.min(capacity as usize - 1);
+                // SAFETY: caller owns validated writable span; native report is independently owned.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(report.as_ptr(), output, count);
+                    output.add(count).write(0);
+                }
+                if capacity as usize > length {
+                    s.consume_diagnostics_chunk();
+                }
+            }
+            Ok(length as u64)
+        })
+    })
+}
+
 /// Waits for owned GPU work and destroys the session on its creating thread.
 #[unsafe(no_mangle)]
 pub extern "C" fn prime_destroy(handle: u64) -> i32 {
     boundary(-1, || {
         #[cfg(feature = "vulkan")]
-        session(handle, |s| {
+        session_named(handle, "prime_destroy", |s| {
             if let Some(renderer) = &mut s.renderer {
                 renderer.shutdown()?;
             }
@@ -728,6 +807,10 @@ const _: PrimeStreamlineBootstrapFn = prime_streamline_bootstrap;
 const _: PrimeStreamlineFrameFn = prime_streamline_frame;
 const _: PrimeGpuTimeFn = prime_gpu_time;
 const _: PrimeCpuDiagnosticsFn = prime_cpu_diagnostics;
+const _: PrimeDiagnosticsConfigureFn = prime_diagnostics_configure;
+const _: PrimeDiagnosticsFrameFn = prime_diagnostics_frame;
+const _: PrimeDiagnosticsClockFn = prime_diagnostics_clock;
+const _: PrimeDiagnosticsReadFn = prime_diagnostics_read;
 const _: PrimeDestroyFn = prime_destroy;
 const _: PrimeLastErrorFn = prime_last_error;
 const _: PrimeStreamlinePresentFn = prime_streamline_present;
@@ -735,6 +818,186 @@ const _: PrimeStreamlinePresentFn = prime_streamline_present;
 #[cfg(test)]
 mod abi_tests {
     use super::*;
+    fn read_capture(handle: u64) -> serde_json::Value {
+        let length = unsafe { prime_diagnostics_read(handle, std::ptr::null_mut(), 0) };
+        assert!(length > 0 && length < u64::MAX);
+        let mut bytes = vec![0xa5; length as usize + 1];
+        assert_eq!(
+            unsafe { prime_diagnostics_read(handle, bytes.as_mut_ptr(), bytes.len() as u64) },
+            length
+        );
+        assert_eq!(bytes[length as usize], 0);
+        serde_json::from_slice(&bytes[..length as usize]).unwrap()
+    }
+    fn reset_capture_world(handle: u64, epoch: u64) -> i32 {
+        let reset = PrimeReset {
+            header: PrimeHeader {
+                struct_size: std::mem::size_of::<PrimeReset>() as u32,
+                abi_version: ABI_VERSION,
+            },
+            epoch,
+        };
+        unsafe { prime_reset(handle, &reset) }
+    }
+    #[test]
+    fn diagnostics_enable_does_not_record_and_capture_stops_after_its_final_drain() {
+        let handle = prime_create(ABI_VERSION);
+        assert_ne!(handle, 0);
+
+        // Immediate statistics can be enabled without creating a raw recorder.
+        assert_eq!(
+            prime_diagnostics_configure(handle, PRIME_DIAGNOSTICS_ENABLED),
+            0
+        );
+        assert_eq!(prime_diagnostics_frame(handle, 101), 0);
+        assert_eq!(reset_capture_world(handle, 1), 0);
+        assert_eq!(prime_diagnostics_clock(handle), 0);
+        assert_eq!(
+            unsafe { prime_diagnostics_read(handle, std::ptr::null_mut(), 0) },
+            0
+        );
+
+        // CAPTURE alone also enables diagnostics and records real FFI work.
+        assert_eq!(prime_diagnostics_frame(handle, 102), 0);
+        assert_eq!(
+            prime_diagnostics_configure(handle, PRIME_DIAGNOSTICS_CAPTURE),
+            0
+        );
+        assert_eq!(reset_capture_world(handle, 2), 0);
+        assert!(prime_diagnostics_clock(handle) > 0);
+        let first = read_capture(handle);
+        let reset_name = first["dict"]["n"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|name| name == "prime_reset")
+            .unwrap() as u64
+            + first["dict"]["nb"].as_u64().unwrap();
+        assert!(
+            first["cpu"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|event| { event["n"] == reset_name && event["f"] == 102 && event["ok"] == 1 })
+        );
+        assert!(
+            first["cpu"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|event| event["f"] != 101)
+        );
+
+        assert_eq!(prime_diagnostics_frame(handle, 103), 0);
+        assert_eq!(reset_capture_world(handle, 3), 0);
+        assert_eq!(prime_diagnostics_configure(handle, 0), 0);
+        assert!(prime_diagnostics_clock(handle) > 0);
+        // New work after stop must not enter the retained final chunk.
+        assert_eq!(prime_diagnostics_frame(handle, 104), 0);
+        assert_eq!(reset_capture_world(handle, 4), 0);
+        let tail = read_capture(handle);
+        assert_eq!(tail["r"], first["r"]);
+        let tail_rows = tail["cpu"].as_array().unwrap();
+        assert!(
+            tail_rows
+                .iter()
+                .any(|event| { event["n"] == reset_name && event["f"] == 103 && event["ok"] == 1 })
+        );
+        assert!(tail_rows.iter().all(|event| event["f"] != 104));
+        assert_eq!(prime_diagnostics_clock(handle), 0);
+        assert_eq!(
+            unsafe { prime_diagnostics_read(handle, std::ptr::null_mut(), 0) },
+            0
+        );
+        assert_eq!(prime_diagnostics_frame(handle, 105), 0);
+        assert_eq!(reset_capture_world(handle, 5), 0);
+        assert_eq!(prime_diagnostics_clock(handle), 0);
+        assert_eq!(
+            unsafe { prime_diagnostics_read(handle, std::ptr::null_mut(), 0) },
+            0
+        );
+        assert_eq!(prime_destroy(handle), 0);
+    }
+
+    #[test]
+    fn raw_capture_is_opt_in_thread_confined_and_preserves_cached_and_final_chunks() {
+        let handle = prime_create(ABI_VERSION);
+        assert_ne!(handle, 0);
+        assert_eq!(prime_diagnostics_clock(handle), 0);
+        assert_eq!(
+            unsafe { prime_diagnostics_read(handle, std::ptr::null_mut(), 0) },
+            0
+        );
+        assert_eq!(prime_diagnostics_configure(handle, 4), -1);
+        assert_eq!(
+            prime_diagnostics_configure(handle, PRIME_DIAGNOSTICS_CAPTURE),
+            0
+        );
+        assert_eq!(prime_diagnostics_frame(handle, 9_007_199_254_740_993), 0);
+        assert_eq!(reset_capture_world(handle, 1), 0);
+        let length = unsafe { prime_diagnostics_read(handle, std::ptr::null_mut(), 0) };
+        assert!(length > 2 && length < u64::MAX);
+        let mut tiny = [0xa5; 2];
+        assert_eq!(
+            unsafe { prime_diagnostics_read(handle, tiny.as_mut_ptr(), 1) },
+            length
+        );
+        assert_eq!(tiny, [0, 0xa5]);
+        assert_eq!(
+            unsafe { prime_diagnostics_read(handle, std::ptr::null_mut(), 1) },
+            u64::MAX
+        );
+        assert_eq!(
+            std::thread::spawn(move || {
+                assert_eq!(prime_diagnostics_configure(handle, 0), -1);
+                assert_eq!(prime_diagnostics_frame(handle, 2), -1);
+                assert_eq!(prime_diagnostics_clock(handle), u64::MAX);
+                unsafe { prime_diagnostics_read(handle, std::ptr::null_mut(), 0) }
+            })
+            .join()
+            .unwrap(),
+            u64::MAX
+        );
+        // New work after the cached length query belongs in a later chunk.
+        assert_eq!(prime_diagnostics_frame(handle, 91), 0);
+        assert_eq!(reset_capture_world(handle, 1), -1);
+        assert_eq!(
+            prime_diagnostics_configure(handle, PRIME_DIAGNOSTICS_ENABLED),
+            0
+        );
+        assert!(prime_diagnostics_clock(handle) > 0);
+        assert_eq!(
+            prime_diagnostics_configure(handle, PRIME_DIAGNOSTICS_CAPTURE),
+            -1
+        );
+        let first = read_capture(handle);
+        let rows = first["cpu"].as_array().unwrap();
+        assert!(
+            rows.iter()
+                .any(|r| r["f"].as_u64() == Some(9_007_199_254_740_993) && r["ok"] == 1)
+        );
+        let tail = read_capture(handle);
+        assert!(
+            tail["cpu"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["f"] == 91 && r["ok"] == 0)
+        );
+        assert_eq!(prime_diagnostics_clock(handle), 0);
+        assert_eq!(
+            unsafe { prime_diagnostics_read(handle, std::ptr::null_mut(), 0) },
+            0
+        );
+        assert_eq!(
+            prime_diagnostics_configure(handle, PRIME_DIAGNOSTICS_CAPTURE),
+            0
+        );
+        assert_eq!(prime_diagnostics_configure(handle, 0), 0);
+        let next = read_capture(handle);
+        assert_ne!(first["r"], next["r"]);
+        assert_eq!(prime_destroy(handle), 0);
+    }
     #[test]
     fn cpu_diagnostics_are_thread_confined_bounded_and_gpu_independent() {
         let handle = prime_create(ABI_VERSION);
@@ -869,6 +1132,7 @@ mod abi_tests {
             hdr: 0,
             hdr_reference_white: 0,
             frame_generation: 0,
+            light_sampling: 0,
         };
         assert_eq!(unsafe { prime_configure(handle, &valid) }, 0);
         assert_eq!(unsafe { prime_configure(handle, std::ptr::null()) }, -1);
@@ -891,7 +1155,7 @@ mod abi_tests {
             -1,
             "No rendered frame can be frozen"
         );
-        session(handle, |engine| {
+        session_named(handle, "prime_last_error", |engine| {
             assert_eq!(
                 engine.settings,
                 prime_scene::settings::RenderSettings {

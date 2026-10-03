@@ -17,6 +17,7 @@ mod placement;
 mod shape;
 mod sprite;
 mod surfaces;
+mod timing;
 mod tint;
 mod typed;
 mod typed_resources;
@@ -38,11 +39,13 @@ use prime_scene::{
     workers::CpuWorkers,
 };
 use schedule::{Demand, FrameInput, Section};
+#[cfg(test)]
+use std::time::Instant;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
-    time::Instant,
 };
+use timing::StageTimer;
 #[cfg(test)]
 use wire::{Reader, u32_to, u64_to};
 
@@ -193,10 +196,12 @@ pub struct TerrainContext {
     #[cfg(test)]
     requests: Vec<u8>,
     workers: Option<Arc<CpuWorkers>>,
+    diagnostics_enabled: bool,
     stats: Stats,
 }
 #[derive(Default)]
 struct Stats {
+    timed: bool,
     request_batches: u32,
     response_batches: u32,
     plan_ms: f64,
@@ -233,6 +238,12 @@ struct Stats {
     availability_updates: usize,
 }
 impl TerrainContext {
+    pub fn set_diagnostics(&mut self, enabled: bool) {
+        self.diagnostics_enabled = enabled;
+    }
+    fn stage_timer(&self) -> StageTimer {
+        StageTimer::new(self.diagnostics_enabled)
+    }
     /// All production CPU consumers borrow the session's synchronous worker pool.
     pub fn with_workers(workers: Arc<CpuWorkers>) -> Self {
         Self {
@@ -272,7 +283,7 @@ impl TerrainContext {
         input: FrameInput,
         source_epoch: u64,
         cell_budget: usize,
-        start: Instant,
+        start: StageTimer,
     ) -> Result<(), String> {
         if input.epoch != source_epoch {
             return Err("section request epoch differs from renderer".into());
@@ -288,6 +299,7 @@ impl TerrainContext {
         }
         let demand = self.chunks.plan(&input);
         self.stats = Stats {
+            timed: start.enabled(),
             request_batches: 1,
             requested: demand.requests.len(),
             plan_ms: start.elapsed().as_secs_f64() * 1000.0,
@@ -309,9 +321,11 @@ impl TerrainContext {
         received: HashMap<Section, Option<SectionData>>,
         cell_budget: usize,
         scene: &mut SourceScene,
-        start: Instant,
+        start: StageTimer,
         bytes: usize,
     ) -> Result<(), String> {
+        let mut decode_trace = start.scope("mc.decode");
+        decode_trace.count("bytes", bytes as u64);
         let batch = input.batch;
         let chunks::CompileBatch {
             selection,
@@ -326,9 +340,14 @@ impl TerrainContext {
         {
             self.stats.availability_updates = self.chunks.availability_updates();
         }
-        self.stats.decode_ms = start.elapsed().as_secs_f64() * 1000.0;
+        let decode_elapsed = start.elapsed();
+        self.stats.decode_ms = decode_elapsed.as_secs_f64() * 1000.0;
+        decode_trace.count("changed", changed as u64);
+        decode_trace.finish_duration(decode_elapsed);
         self.stats.bytes = bytes;
-        let compile_start = Instant::now();
+        let compile_start = self.stage_timer();
+        let mut compile_trace = compile_start.scope("mc.contacts");
+        compile_trace.fail();
         // Four equal-height slabs share costly sections. Both phases join on the same private pool.
         let mut jobs = Vec::new();
         for &key in &selection.sections {
@@ -347,7 +366,7 @@ impl TerrainContext {
                 }
             }
         }
-        let kernel_start = Instant::now();
+        let kernel_start = self.stage_timer();
         if !jobs.is_empty() {
             if self.workers.is_none() {
                 self.workers = Some(Arc::new(CpuWorkers::configured()?));
@@ -369,8 +388,16 @@ impl TerrainContext {
         self.stats.jobs = jobs.len();
         self.stats.compiled = selection.sections.len();
         self.stats.compiled_cells = selection.cell_count();
-        self.stats.compile_ms = compile_start.elapsed().as_secs_f64() * 1000.;
-        let tint_start = Instant::now();
+        let compile_elapsed = compile_start.elapsed();
+        self.stats.compile_ms = compile_elapsed.as_secs_f64() * 1000.;
+        compile_trace.count("jobs", self.stats.jobs as u64);
+        compile_trace.count("sections", self.stats.compiled as u64);
+        compile_trace.count("cells", self.stats.compiled_cells as u64);
+        compile_trace.succeed();
+        compile_trace.finish_duration(compile_elapsed);
+        let tint_start = self.stage_timer();
+        let mut tint_trace = tint_start.scope("mc.tint_pack");
+        tint_trace.fail();
         let mut count = 0usize;
         for job in &mut jobs {
             job.color_start = count;
@@ -406,9 +433,15 @@ impl TerrainContext {
                 removed,
                 reset_catalog,
             });
-            self.stats.tint_pack_ms = tint_start.elapsed().as_secs_f64() * 1000.;
+            let tint_elapsed = tint_start.elapsed();
+            self.stats.tint_pack_ms = tint_elapsed.as_secs_f64() * 1000.;
+            tint_trace.count("requests", self.stats.tint_requests as u64);
+            tint_trace.succeed();
+            tint_trace.finish_duration(tint_elapsed);
             return Ok(());
         }
+        tint_trace.succeed();
+        drop(tint_trace);
         self.finalize(jobs, selection, removed, batch, scene, None, reset_catalog)
     }
     /// Decoders validate their complete response before entering this shared preparation.
@@ -421,7 +454,7 @@ impl TerrainContext {
         radius: i32,
         callbacks: usize,
         bytes: usize,
-        decode_start: Instant,
+        decode_start: StageTimer,
     ) -> Result<Option<Vec<u32>>, String> {
         if definitions.is_some() && self.chunks.biome_sources().definitions.is_some() {
             return Err("unexpected biome definitions".into());
@@ -441,7 +474,8 @@ impl TerrainContext {
         self.stats.tint_decode_ms += decode_start.elapsed().as_secs_f64() * 1000.;
         self.stats.tint_bytes += bytes;
         self.stats.response_batches += 1;
-        let start = Instant::now();
+        let start = self.stage_timer();
+        let mut trace = start.scope("mc.biome_plan");
         let waiting = self.awaiting_colors.as_ref().unwrap();
         let recipes: Vec<_> = waiting.aliases.iter().map(|&i| recipes[i]).collect();
         let plan = self.chunks.biomes_mut().prepare(
@@ -452,25 +486,41 @@ impl TerrainContext {
             &recipes,
             radius,
         );
-        self.stats.biome_plan_ms = start.elapsed().as_secs_f64() * 1000.;
+        let elapsed = start.elapsed();
+        self.stats.biome_plan_ms = elapsed.as_secs_f64() * 1000.;
+        trace.count("samples", plan.samples.len() as u64);
+        trace.count("hits", plan.hits as u64);
+        trace.finish_duration(elapsed);
         self.stats.biome_hits = plan.hits;
         self.stats.biome_samples = plan.samples.len();
         self.stats.biome_cached_samples = plan.cached_samples;
         if plan.samples.is_empty() {
-            let start = Instant::now();
+            let start = self.stage_timer();
+            let mut trace = start.scope("mc.biome_filter");
             let colors = self.chunks.biomes_mut().finish(plan, &[]);
-            self.stats.biome_filter_ms = start.elapsed().as_secs_f64() * 1000.;
+            let elapsed = start.elapsed();
+            self.stats.biome_filter_ms = elapsed.as_secs_f64() * 1000.;
+            trace.count("colors", colors.len() as u64);
+            trace.finish_duration(elapsed);
             return Ok(Some(colors));
         }
-        let start = Instant::now();
+        let start = self.stage_timer();
+        let mut trace = start.scope("mc.biome_source");
         let source = self.chunks.biome_sources_mut().prepare(&plan.samples);
-        self.stats.biome_source_ms = start.elapsed().as_secs_f64() * 1000.;
+        let elapsed = start.elapsed();
+        self.stats.biome_source_ms = elapsed.as_secs_f64() * 1000.;
+        trace.count("pages", source.requests.len() as u64);
+        trace.finish_duration(elapsed);
         self.stats.biome_pages = source.requests.len();
-        self.stats.biome_host_cells = source
-            .requests
-            .iter()
-            .map(|r| r.mask.count_ones() as usize)
-            .sum();
+        self.stats.biome_host_cells = if start.enabled() {
+            source
+                .requests
+                .iter()
+                .map(|r| r.mask.count_ones() as usize)
+                .sum()
+        } else {
+            0
+        };
         if source.requests.is_empty() {
             return Ok(Some(self.finish_biome_colors(plan, source, None)));
         }
@@ -498,7 +548,7 @@ impl TerrainContext {
         &mut self,
         response: biome_source::Response,
         bytes: usize,
-        decode_start: Instant,
+        decode_start: StageTimer,
         scene: &mut SourceScene,
     ) -> Result<(), String> {
         self.stats.tint_decode_ms += decode_start.elapsed().as_secs_f64() * 1000.;
@@ -526,15 +576,22 @@ impl TerrainContext {
         source: biome_source::Plan,
         response: Option<biome_source::Response>,
     ) -> Vec<u32> {
-        let start = Instant::now();
+        let start = self.stage_timer();
+        let trace = start.scope("mc.biome_resolve");
         let raw =
             self.chunks
                 .biome_sources_mut()
                 .finish(source, response, &plan.samples, self.version);
-        self.stats.biome_source_ms += start.elapsed().as_secs_f64() * 1000.;
-        let start = Instant::now();
+        let elapsed = start.elapsed();
+        self.stats.biome_source_ms += elapsed.as_secs_f64() * 1000.;
+        trace.finish_duration(elapsed);
+        let start = self.stage_timer();
+        let mut trace = start.scope("mc.biome_filter");
         let colors = self.chunks.biomes_mut().finish(plan, &raw);
-        self.stats.biome_filter_ms = start.elapsed().as_secs_f64() * 1000.;
+        let elapsed = start.elapsed();
+        self.stats.biome_filter_ms = elapsed.as_secs_f64() * 1000.;
+        trace.count("colors", colors.len() as u64);
+        trace.finish_duration(elapsed);
         colors
     }
     #[allow(clippy::too_many_arguments)]
@@ -548,7 +605,10 @@ impl TerrainContext {
         colors: Option<&[u32]>,
         reset_catalog: bool,
     ) -> Result<(), String> {
-        let finalize_start = Instant::now();
+        let finalize_start = self.stage_timer();
+        let mut trace = finalize_start.scope("mc.finalize");
+        trace.fail();
+        trace.count("jobs", jobs.len() as u64);
         let tinted: Vec<_> = jobs
             .chunks(4)
             .filter(|group| group.iter().any(|job| !job.tints.requests.is_empty()))
@@ -611,9 +671,17 @@ impl TerrainContext {
             self.stats.triangles += compiled.triangle_count();
             replacements.push(compiled);
         }
-        self.stats.finalize_ms = finalize_start.elapsed().as_secs_f64() * 1000.;
+        let elapsed = finalize_start.elapsed();
+        self.stats.finalize_ms = elapsed.as_secs_f64() * 1000.;
+        trace.count("triangles", self.stats.triangles as u64);
+        trace.succeed();
+        trace.finish_duration(elapsed);
         self.stats.compile_ms += self.stats.finalize_ms;
-        let publish_start = Instant::now();
+        let publish_start = self.stage_timer();
+        let mut trace = publish_start.scope("mc.publish");
+        trace.fail();
+        trace.count("sections", replacements.len() as u64);
+        trace.count("removed", removed.len() as u64);
         let removed_keys: Vec<_> = removed.iter().map(|s| s.key()).collect();
         let textures = std::mem::take(&mut self.textures);
         let mut publication = if reset_catalog {
@@ -636,10 +704,20 @@ impl TerrainContext {
         self.chunks.published(&selection, &removed, tinted);
         self.stats.published_layers = publication.replaced_layers;
         self.stats.retained_layers = publication.retained_layers;
-        self.stats.publish_ms = publish_start.elapsed().as_secs_f64() * 1000.0;
-        let retire_start = Instant::now();
+        let elapsed = publish_start.elapsed();
+        self.stats.publish_ms = elapsed.as_secs_f64() * 1000.0;
+        trace.count("layers", publication.replaced_layers as u64);
+        trace.count("retained", publication.retained_layers as u64);
+        trace.succeed();
+        trace.finish_duration(elapsed);
+        let retire_start = self.stage_timer();
+        let mut trace = retire_start.scope("mc.retire");
+        trace.fail();
         publication.release_retired(self.workers.as_deref())?;
-        self.stats.retire_ms = retire_start.elapsed().as_secs_f64() * 1000.;
+        let elapsed = retire_start.elapsed();
+        self.stats.retire_ms = elapsed.as_secs_f64() * 1000.;
+        trace.succeed();
+        trace.finish_duration(elapsed);
         self.last_batch = batch;
         Ok(())
     }
@@ -647,13 +725,14 @@ impl TerrainContext {
         let s = &self.stats;
         let h = s.hacks;
         format!(
-            "mc_source[epoch={} batch={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} compiled_cells={} pending_cells={} jobs={} source_bytes={} tint_requests={} tint_callbacks={} tint_bytes={} tint_pack={:.3} tint_decode={:.3} biome_samples={} biome_cached_samples={} biome_hits={} biome_plan={:.3} biome_filter={:.3} biome_source={:.3} biome_host_cells={} biome_pages={} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={},optics={},sprite={}) placement_unknown(offset={},seed={})]",
+            "mc_source[epoch={} batch={} timing={} plan={:.3} decode={:.3} compile={:.3} kernel={:.3} finalize={:.3} publish={:.3} retire={:.3} published_layers={} retained_layers={} request_batches={} response_batches={} requested={} changed={} compiled={} compiled_cells={} pending_cells={} jobs={} source_bytes={} tint_requests={} tint_callbacks={} tint_bytes={} tint_pack={:.3} tint_decode={:.3} biome_samples={} biome_cached_samples={} biome_hits={} biome_plan={:.3} biome_filter={:.3} biome_source={:.3} biome_host_cells={} biome_pages={} triangles={} resident={} active={} hacks(model={},tint={},offset={},fluid={},optics={},sprite={}) placement_unknown(offset={},seed={})]",
             self.epoch,
             self.pending
                 .as_ref()
                 .map(|p| p.input.batch)
                 .or_else(|| self.awaiting_colors.as_ref().map(|p| p.batch))
                 .unwrap_or(self.last_batch),
+            u8::from(s.timed),
             s.plan_ms,
             s.decode_ms,
             s.compile_ms,

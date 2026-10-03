@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.nio.ByteBuffer;
 import com.mojang.blaze3d.GpuFormat;
 import dev.primept.NativeBridge;
+import dev.primept.Diagnostics;
 import dev.primept.PrimeClient;
 import java.util.IdentityHashMap;
 import java.util.ArrayList;
@@ -95,7 +96,9 @@ public final class DynamicCapture {
             pipeline.contains("text") || pipeline.contains("outline") ||
             pipeline.contains("water_mask"))
             return;
-        long captureStart = PROFILE ? System.nanoTime() : 0;
+        boolean timed = Diagnostics.enabled() && PROFILE;
+        long captureStart = timed ? System.nanoTime() : 0;
+        var diagnostic = Diagnostics.span("source_material");
         try {
             int texture = 0;
             for (var binding : prepared.textures()) {
@@ -111,9 +114,11 @@ public final class DynamicCapture {
             DRAWS.put(draw, new Material(texture, flags, false,
                                          type.primitiveTopology().name().equals("QUADS")));
         } catch (RuntimeException exception) {
+            diagnostic.fail();
             failure = exception;
         } finally {
-            if (PROFILE)
+            diagnostic.close();
+            if (timed)
                 captureNanos += System.nanoTime() - captureStart;
         }
     }
@@ -121,7 +126,9 @@ public final class DynamicCapture {
     public static void particle(StagedVertexBuffer.Draw draw, SingleQuadParticle.Layer layer) {
         if (!active())
             return;
-        long captureStart = PROFILE ? System.nanoTime() : 0;
+        boolean timed = Diagnostics.enabled() && PROFILE;
+        long captureStart = timed ? System.nanoTime() : 0;
+        var diagnostic = Diagnostics.span("particle_material");
         try {
             var texture = Minecraft.getInstance()
                                   .getTextureManager()
@@ -130,9 +137,11 @@ public final class DynamicCapture {
             DRAWS.put(draw, new Material(DynamicTextures.use(texture), layer.translucent() ? 2 : 1,
                                          true, true));
         } catch (RuntimeException exception) {
+            diagnostic.fail();
             failure = exception;
         } finally {
-            if (PROFILE)
+            diagnostic.close();
+            if (timed)
                 captureNanos += System.nanoTime() - captureStart;
         }
     }
@@ -140,20 +149,31 @@ public final class DynamicCapture {
     public static boolean
     particles(net.minecraft.client.renderer.state.level.QuadParticleRenderState state,
               SingleQuadParticle.Layer layer, VertexConsumer consumer) {
-        if (!active())
-            return false;
-        if (!(consumer instanceof BufferBuilder builder))
-            throw new IllegalStateException("Particle routing requires a bound source material");
-        Material material = material(builder);
-        if (material == null || !material.particle())
-            throw new IllegalStateException("Missing particle source material");
-        int before = frame.vertexCount();
-        frame.beginParticles(material.texture(), material.flags());
-        ((ParticleSource)state).primept$route(layer, frame::particle);
-        frame.endSpan();
-        if (frame.vertexCount() != before)
-            ++particleMeshes;
-        return true;
+        try (var diagnostic = Diagnostics.span("particle_capture")) {
+            try {
+
+                if (!active())
+                    return false;
+                if (!(consumer instanceof BufferBuilder builder))
+                    throw new IllegalStateException(
+                            "Particle routing requires a bound source material");
+                Material material = material(builder);
+                if (material == null || !material.particle())
+                    throw new IllegalStateException("Missing particle source material");
+                int before = frame.vertexCount();
+                frame.beginParticles(material.texture(), material.flags());
+                ((ParticleSource)state).primept$route(layer, frame::particle);
+                frame.endSpan();
+                diagnostic.count("verts", frame.vertexCount() - before);
+                if (frame.vertexCount() != before)
+                    ++particleMeshes;
+                return true;
+
+            } catch (RuntimeException | Error failure) {
+                diagnostic.fail();
+                throw failure;
+            }
+        }
     }
 
     public static void mesh(StagedVertexBuffer.Draw draw, MeshData data) {
@@ -162,7 +182,9 @@ public final class DynamicCapture {
         Material material = DRAWS.get(draw);
         if (material == null)
             return;
-        long captureStart = PROFILE ? System.nanoTime() : 0;
+        boolean timed = Diagnostics.enabled() && PROFILE;
+        long captureStart = timed ? System.nanoTime() : 0;
+        var diagnostic = Diagnostics.span("source_capture");
         try {
             int before = frame.vertexCount();
             var excluded = NamedRawCapture.route(data, material, NAMED.remove(draw),
@@ -170,6 +192,7 @@ public final class DynamicCapture {
             if (!appendMesh(frame, material.texture, material.flags, data, excluded))
                 return;
             int added = frame.vertexCount() - before;
+            diagnostic.count("verts", added);
             if (material.particle) {
                 ++particleMeshes;
                 particleRawVertices += added;
@@ -178,9 +201,11 @@ public final class DynamicCapture {
                 modelRawVertices += added;
             }
         } catch (RuntimeException exception) {
+            diagnostic.fail();
             failure = exception;
         } finally {
-            if (PROFILE)
+            diagnostic.close();
+            if (timed)
                 captureNanos += System.nanoTime() - captureStart;
         }
     }

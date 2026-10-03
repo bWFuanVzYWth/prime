@@ -38,6 +38,14 @@ fn main() {
         })
         .unwrap_or_else(|| PathBuf::from("slangc"));
     compile(&compiler, "shaders/path_trace.slang", "path_trace.spv");
+    for name in ["path_trace", "realtime_transport", "realtime_transport_rr"] {
+        compile_defines(
+            &compiler,
+            &format!("shaders/{name}.slang"),
+            &format!("{name}_tree.spv"),
+            &["PRIME_LIGHT_TREE=1"],
+        );
+    }
     for name in [
         "realtime_primary",
         "realtime_primary_rr",
@@ -121,6 +129,7 @@ fn main() {
             "intersection",
             "display",
             "lights",
+            "light_tree",
             "optics",
             "texture",
             "roulette",
@@ -146,8 +155,16 @@ fn main() {
 }
 
 fn compile(compiler: &std::path::Path, source: &str, name: &str) {
+    compile_defines(compiler, source, name, &[]);
+}
+
+fn compile_defines(compiler: &std::path::Path, source: &str, name: &str, defines: &[&str]) {
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR")).join(name);
-    let result = Command::new(compiler)
+    let mut command = Command::new(compiler);
+    for define in defines {
+        command.arg(format!("-D{define}"));
+    }
+    let result = command
         .args([
             source,
             "-I",

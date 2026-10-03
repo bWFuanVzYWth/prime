@@ -16,8 +16,11 @@ mod light_grid;
 mod light_grid_cpu;
 #[cfg(all(test, feature = "shader-tests"))]
 mod light_grid_tests;
+mod light_sampler;
 #[cfg(feature = "light-sampling-bench")]
 pub mod light_sampling;
+mod light_tree;
+mod light_tree_cpu;
 mod objects;
 mod omm;
 mod omm_cpu;
@@ -31,6 +34,7 @@ mod static_directory;
 mod terrain_budget_tests;
 pub use display::{PrimeDrtParameters, PrimeDrtSettings};
 mod geometry;
+mod gpu_timing;
 mod material_arena;
 mod packing;
 #[cfg(all(test, feature = "shader-tests"))]
@@ -70,7 +74,7 @@ pub use resources::GpuProfile;
 use ash::vk::{self, Handle};
 use prime_scene::instances::InstanceInput;
 use prime_scene::scene::{Camera, InstanceScene, Scene};
-use prime_scene::settings::{RenderMode, RenderSettings};
+use prime_scene::settings::{LightSampling, RenderMode, RenderSettings};
 use resources::{Buffer, Context, error};
 use std::{io::Cursor, sync::Arc};
 use target::Image;
@@ -168,6 +172,7 @@ impl Pipeline {
         mode: RenderMode,
         reconstruction: bool,
         frame_generation: bool,
+        light_sampling: LightSampling,
         energy_lut: &openpbr::EnergyLut,
     ) -> Result<Self, String> {
         unsafe {
@@ -387,13 +392,25 @@ impl Pipeline {
                     }
                 })
             };
-            let shader: &[u8] = match mode {
-                RenderMode::Offline => include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv")),
-                RenderMode::Realtime if reconstruction => {
+            // Initialization selects one binary; sampler choice never enters a dispatch.
+            let shader: &[u8] = match (mode, reconstruction, light_sampling) {
+                (RenderMode::Offline, _, LightSampling::Grid) => {
+                    include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv"))
+                }
+                (RenderMode::Offline, _, LightSampling::Tree) => {
+                    include_bytes!(concat!(env!("OUT_DIR"), "/path_trace_tree.spv"))
+                }
+                (RenderMode::Realtime, true, LightSampling::Grid) => {
                     include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport_rr.spv"))
                 }
-                RenderMode::Realtime => {
+                (RenderMode::Realtime, false, LightSampling::Grid) => {
                     include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport.spv"))
+                }
+                (RenderMode::Realtime, true, LightSampling::Tree) => {
+                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport_rr_tree.spv"))
+                }
+                (RenderMode::Realtime, false, LightSampling::Tree) => {
+                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport_tree.spv"))
                 }
             };
             for (i, features) in [
@@ -536,9 +553,10 @@ pub struct Renderer {
     fg_prepared_serial: u64,
     fg_prepared: bool,
     pending_temporal_serial: u64,
-    query_serials: [u64; FRAME_SLOTS],
+    query_frames: [gpu_timing::Frame; FRAME_SLOTS],
     gpu_intervals: [GpuIntervals; FRAME_SLOTS],
     host_query: vk::QueryPool,
+    gpu_error_reported: bool,
     last_gpu: GpuIntervals,
     descriptor_keys: [[u64; 7]; FRAME_SLOTS],
     cpu_profile: cpu_profile::CpuProfile,

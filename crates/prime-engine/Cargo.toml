@@ -15,6 +15,7 @@ vulkan = ["dep:prime_vulkan"]
 
 [dependencies]
 prime_abi.workspace = true
+prime_diagnostics.workspace = true
 mimalloc.workspace = true
 prime_minecraft.workspace = true
 prime_scene.workspace = true
@@ -22,6 +23,7 @@ prime_vulkan = { workspace = true, optional = true }
 
 [dev-dependencies]
 prime_scene = { workspace = true, features = ["legacy-fixtures"] }
+serde_json.workspace = true
 
 [lints]
 workspace = true

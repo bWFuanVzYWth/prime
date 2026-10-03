@@ -3,6 +3,10 @@
   "primept.settings.reset": "恢复 Prime 默认设置",
   "primept.settings.render": "Prime PT · 渲染",
   "primept.settings.lighting": "Prime PT · 光照",
+  "primept.settings.light_sampling": "光源采样方式",
+  "primept.settings.light_sampling.tooltip": "选择光源网格或光源树。重启游戏后生效；当前渲染器使用启动时的选择，运行期间不会切换。",
+  "primept.settings.light_sampling.grid": "光源网格",
+  "primept.settings.light_sampling.tree": "光源树",
   "primept.settings.display": "Prime PT · 显示 · primeDRT",
   "primept.settings.automatic": "自动",
   "primept.settings.lighting.stars_percent": "星光强度",
@@ -58,5 +62,7 @@
   "primept.settings.astronomy.latitude_degrees": "观测纬度",
   "primept.settings.astronomy.latitude_degrees.tooltip": "北纬为正、南纬为负。默认北纬 30°；游戏时间驱动太阳时角，冻结期间固定。",
   "primept.settings.astronomy.solar_longitude_degrees": "季节 · 太阳黄经",
-  "primept.settings.astronomy.solar_longitude_degrees.tooltip": "0° 春分、90° 夏至、180° 秋分、270° 冬至（北半球）。与游戏天数独立，冻结期间固定。"
+  "primept.settings.astronomy.solar_longitude_degrees.tooltip": "0° 春分、90° 夏至、180° 秋分、270° 冬至（北半球）。与游戏天数独立，冻结期间固定。",
+  "primept.settings.performance_export": "录制性能 JSON",
+  "primept.settings.performance_export.tooltip": "启用 CPU/GPU 诊断并持续记录每帧及线程。关闭或退出世界后停用诊断，后台导出 JSON 到游戏目录的 artifacts/performance。录制会增加测量与导出开销。"
 }

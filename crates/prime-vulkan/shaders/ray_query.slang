@@ -4,7 +4,11 @@ __exported import "trace/closest.slang";
 import "math/ray_offset.slang";
 import "math/transport.slang";
 import "math/z_sobol.slang";
+#if defined(PRIME_LIGHT_TREE)
+import "tree_sampling.slang";
+#else
 import "grid_sampling.slang";
+#endif
 
 [[vk::constant_id(1)]] public const uint lightFeatures = 1;
 
@@ -151,13 +155,25 @@ public LightSample sampleLocalLight(TraceScene resources, float4 selectors, floa
     TrianglePage world = resources.staticTrianglePages[0];
     if (world.lightCount == 0)
         return result;
+#if defined(PRIME_LIGHT_TREE)
+    LightTree tree = *((LightTree *)world.lightGrid);
+#else
     LightGrid grid = *((LightGrid *)world.lightGrid);
+#endif
     float selectionPdf;
+#if defined(PRIME_LIGHT_TREE)
+    TreePage page;
+    TreeEmitter reference;
+    selectTreeLight(tree, selectors.zw, selectionPdf, page, reference);
+#else
     uint selectedLight = selectGridLight(grid, receiver, selectors, selectionPdf);
     GridEmitter reference = grid.emitters[selectedLight];
+#endif
     result.page = reference.page;
     result.emitter = reference.emitter;
+#if !defined(PRIME_LIGHT_TREE)
     GridPage page = grid.pages[result.page];
+#endif
     uint words = page.format == 3 ? 108 : (page.format == 2 ? 68 : 60);
     uint *light = page.emitters + result.emitter * words;
     float firstFraction = asfloat(light[3]);
@@ -167,7 +183,7 @@ public LightSample sampleLocalLight(TraceScene resources, float4 selectors, floa
     float root = sqrt(u);
     float2 bary = float2(root * (1.0 - sample.y), root * sample.y);
     Triangle tri = emitter.triangle;
-    // Grid pages contain static emitters with the same proven translation as closest hits.
+    // Light pages contain static emitters with the same proven translation as closest hits.
     result.surface =
             reconstructStaticSurface(tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary, page.origin.xyz);
     bool front = dot(result.surface.normal, receiver - result.surface.position) >= 0;
@@ -184,8 +200,12 @@ public LightSample sampleLocalLight(TraceScene resources, float4 selectors, floa
 public LightSample sampleLocalLight(TraceScene resources, ZSobol sampler, uint bounce,
                                     float3 receiver) {
     uint domain = 512 + 4 * bounce;
-    // Two 2D domains share each index permutation without cascading one 24-bit residual.
+    // Each hierarchy level uses an independent 24-bit selector, without residual remapping.
+#if defined(PRIME_LIGHT_TREE)
+    float4 selectors = float4(0, 0, sampler.sample2D(768 + bounce));
+#else
     float4 selectors = float4(sampler.sample2D(domain), sampler.sample2D(768 + bounce));
+#endif
     return sampleLocalLight(resources, selectors, sampler.sample2D(domain + 1),
                             sampler.bits1D(domain + 2), receiver);
 }
@@ -196,8 +216,13 @@ public float emissiveHitPdf(TraceScene resources, SurfaceHit hit, float3 previou
     float3 delta = hit.surface.position - previous;
     float distanceSquared = dot(delta, delta);
     float cosine = distanceSquared > 0 ? abs(dot(hit.surface.normal, normalize(delta))) : 0;
+#if defined(PRIME_LIGHT_TREE)
+    LightTree tree = *((LightTree *)resources.staticTrianglePages[0].lightGrid);
+    float areaPdf = treeLightPdf(tree, hit.light) * tree.emitters[hit.light].inverseArea;
+#else
     LightGrid grid = *((LightGrid *)resources.staticTrianglePages[0].lightGrid);
     float areaPdf = gridLightPdf(grid, previous, hit.light) * grid.emitters[hit.light].inverseArea;
+#endif
     return primeAreaSolidAnglePdfValue(areaPdf, distanceSquared, cosine);
 }
 

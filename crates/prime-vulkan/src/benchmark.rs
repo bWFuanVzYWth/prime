@@ -142,6 +142,8 @@ impl HostBenchmark {
                 state.owner.queue_family,
                 state.timeline.as_raw(),
             )?);
+            // The benchmark explicitly requests GPU intervals; production defaults off.
+            state.renderer.as_mut().unwrap().set_diagnostics(true)?;
             // Preserve this benchmark's declared budget across product default changes.
             state.renderer.as_mut().unwrap().configure(RenderSettings {
                 bounces: 4,
@@ -1492,7 +1494,7 @@ mod tests {
         assert_eq!(
             renderer.host_query != vk::QueryPool::null(),
             renderer.context.timestamp_bits > 0,
-            "coarse GPU timing does not require profile flags"
+            "benchmark explicitly enabled GPU timing"
         );
         if let Some(profile) = host.profile_snapshot() {
             assert_eq!(profile.readback_bytes, 0);

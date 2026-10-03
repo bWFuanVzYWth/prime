@@ -73,6 +73,10 @@ impl LightGrid {
         sources: &BTreeMap<u64, ([f64; 3], &LightPage)>,
         uploads: &mut Arena,
     ) -> Result<(), String> {
+        let mut trace = prime_diagnostics::scope("lg.update");
+        trace.fail();
+        trace.count("pg", sources.len() as u64);
+        let input_scope = prime_diagnostics::scope("lg.input");
         let input: Vec<_> = sources
             .iter()
             .map(|(&key, &(origin, source))| PageInput {
@@ -81,7 +85,10 @@ impl LightGrid {
                 lights: &source.lights,
             })
             .collect();
+        drop(input_scope);
         let changes = self.cpu.update(&input)?;
+        trace.count("dc", changes.cells.len() as u64);
+        trace.count("ranges", changes.emitter_ranges.len() as u64);
         let previous = self.repairs.tables;
         self.repairs.add(changes.repairs);
         // Aggregate updates; log first occurrence and each power-of-two crossing,
@@ -98,6 +105,7 @@ impl LightGrid {
             // A world without lights retains no sampler high-water allocation. Buffer drop
             // still retires against the last submitted/recording serial in Context.
             *self = Self::new(context);
+            trace.succeed();
             return Ok(());
         }
         if !changes.world
@@ -105,10 +113,15 @@ impl LightGrid {
             && changes.cells.is_empty()
             && self.anchor == Some(anchor)
         {
+            trace.succeed();
             return Ok(());
         }
 
+        let mut staging = prime_diagnostics::scope("lg.stage");
+        staging.fail();
         let mut copies = Vec::new();
+        let mut refs = prime_diagnostics::scope("lg.refs");
+        refs.fail();
         let grew_refs = grow(context, &mut self.refs, self.cpu.refs.len() * 16)?;
         let grew_alias = grow(
             context,
@@ -120,7 +133,12 @@ impl LightGrid {
             self.cpu.refs.len(),
             grew_refs || grew_alias,
         )?;
+        refs.count("ranges", ranges.len() as u64);
+        let mut refs_bytes = 0_u64;
         for range in ranges {
+            if refs.enabled() {
+                refs_bytes += range.len() as u64 * 24;
+            }
             copies.push(stage_with(
                 context,
                 uploads,
@@ -160,12 +178,22 @@ impl LightGrid {
                 },
             )?);
         }
+        refs.count("bytes", refs_bytes);
+        refs.succeed();
+        drop(refs);
+        let mut local = prime_diagnostics::scope("lg.local");
+        local.fail();
+        local.count("dc", changes.cells.len() as u64);
+        let mut local_bytes = 0_u64;
         for key in &changes.cells {
             if let Some(old) = self.allocations.remove(key) {
                 self.entries.retire(old);
             }
             if let Some(aliases) = self.cpu.cells.get(key) {
                 let bytes = aliases.len() * 16;
+                if local.enabled() {
+                    local_bytes += bytes as u64;
+                }
                 let destination = self.entries.allocate(context, bytes as u64, 16)?;
                 copies.push(stage_with(
                     context,
@@ -181,7 +209,13 @@ impl LightGrid {
                 self.allocations.insert(*key, destination);
             }
         }
+        local.count("bytes", local_bytes);
+        local.succeed();
+        drop(local);
         if changes.world || self.world.is_none() {
+            let mut world = prime_diagnostics::scope("lg.world_stage");
+            world.fail();
+            world.count("bytes", self.cpu.world.len() as u64 * 16);
             stage_table_with(
                 context,
                 uploads,
@@ -193,8 +227,12 @@ impl LightGrid {
                     Ok(())
                 },
             )?;
+            world.succeed();
         }
         if !changes.cells.is_empty() || self.cells.is_none() {
+            let mut hash = prime_diagnostics::scope("lg.hash");
+            hash.fail();
+            hash.count("cells", self.allocations.len() as u64);
             let capacity = cell_capacity(self.allocations.len())?;
             stage_table_with(
                 context,
@@ -223,8 +261,13 @@ impl LightGrid {
                     )
                 },
             )?;
+            hash.count("bytes", capacity as u64 * 32);
+            hash.succeed();
         }
 
+        let mut pages = prime_diagnostics::scope("lg.pages");
+        pages.fail();
+        pages.count("pg", self.cpu.pages.len() as u64);
         stage_table_with(
             context,
             uploads,
@@ -279,6 +322,14 @@ impl LightGrid {
             u32::try_from(self.cpu.world.len()).map_err(|_| "Too many light pages")?,
         )?;
         stage_table(context, uploads, &header, &mut self.header, &mut copies)?;
+        pages.succeed();
+        drop(pages);
+        staging.count("copies", copies.len() as u64);
+        staging.succeed();
+        drop(staging);
+        let mut publish = prime_diagnostics::scope("lg.publish");
+        publish.fail();
+        publish.count("copies", copies.len() as u64);
         context.submit_named("light_grid_ranges", |command| unsafe {
             // Reused table/range addresses may still have readers in earlier submissions.
             // Serialize those reads before this batch's writes, then publish all tables together.
@@ -300,6 +351,9 @@ impl LightGrid {
             uploads.retire(copy.source);
         }
         self.anchor = Some(anchor);
+        publish.succeed();
+        drop(publish);
+        trace.succeed();
         Ok(())
     }
 }
@@ -311,9 +365,13 @@ fn grow(context: &Arc<Context>, buffer: &mut Option<Buffer>, bytes: usize) -> Re
     {
         return Ok(false);
     }
+    let mut trace = prime_diagnostics::scope("lg.grow");
+    trace.fail();
+    trace.count("bytes", bytes as u64);
     let capacity = (bytes as u64)
         .checked_next_power_of_two()
         .ok_or("Light range size overflow")?;
+    trace.count("cap", capacity);
     *buffer = Some(Buffer::new(
         context,
         capacity,
@@ -322,6 +380,7 @@ fn grow(context: &Arc<Context>, buffer: &mut Option<Buffer>, bytes: usize) -> Re
             | vk::BufferUsageFlags::TRANSFER_SRC,
         false,
     )?);
+    trace.succeed();
     Ok(true)
 }
 
@@ -664,6 +723,7 @@ mod tests {
                     inv_area: 1.,
                     extent: 1.,
                 }],
+                tree: None,
                 format: 1,
             })
             .collect();

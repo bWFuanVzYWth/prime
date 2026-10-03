@@ -5,6 +5,7 @@ import dev.primept.settings.RenderSettings;
 import dev.primept.settings.RenderSettings.Control;
 import dev.primept.settings.RenderSettings.View;
 import dev.primept.settings.RenderSettings.DlssQuality;
+import dev.primept.settings.RenderSettings.LightSampling;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
@@ -21,9 +22,11 @@ public final class PrimeVideoOptions {
     private final OptionsList list;
     private final Runnable rebuildScreen;
     private final EnumMap<Control, OptionInstance<Integer>> controls = new EnumMap<>(Control.class);
-    private OptionInstance<Boolean> enabled, offline, opacityMicromap, rayReconstruction;
+    private OptionInstance<Boolean> enabled, offline, opacityMicromap, rayReconstruction,
+            performanceCapture;
     private OptionInstance<View> view;
     private OptionInstance<DlssQuality> dlssQuality;
+    private OptionInstance<LightSampling> lightSampling;
     private PrimeVideoOptions(OptionsList list, Runnable rebuildScreen) {
         this.list = list;
         this.rebuildScreen = rebuildScreen;
@@ -117,6 +120,20 @@ public final class PrimeVideoOptions {
         list.addBig(controls.get(Control.OFFLINE_SAMPLES));
         list.addBig(controls.get(Control.TERRAIN_BATCHES_PER_FRAME));
         list.addHeader(Component.translatable("primept.settings.lighting"));
+        lightSampling = new OptionInstance<>(
+                "primept.settings.light_sampling",
+                OptionInstance.cachedConstantTooltip(
+                        Component.translatable("primept.settings.light_sampling.tooltip")),
+                (caption, value)
+                        -> Component.translatable("primept.settings.light_sampling." +
+                                                  value.name().toLowerCase(Locale.ROOT)),
+                new OptionInstance.Enum<>(
+                        List.of(LightSampling.values()),
+                        Codec.STRING.xmap(LightSampling::valueOf, LightSampling::name)),
+                PrimeClient.settings().lightSampling(),
+                value
+                -> PrimeClient.updateSettings(PrimeClient.settings().withLightSampling(value)));
+        list.addBig(lightSampling);
         list.addBig(controls.get(Control.SUN_EV));
         list.addBig(controls.get(Control.SKY_EV));
         list.addBig(controls.get(Control.STARS));
@@ -130,6 +147,12 @@ public final class PrimeVideoOptions {
         list.addBig(controls.get(Control.HUE));
         list.addBig(controls.get(Control.SATURATION));
         list.addHeader(Component.translatable("primept.settings.diagnostics"));
+        performanceCapture = OptionInstance.createBoolean(
+                "primept.settings.performance_export",
+                OptionInstance.cachedConstantTooltip(
+                        Component.translatable("primept.settings.performance_export.tooltip")),
+                Diagnostics.captureRequested(), Diagnostics::setCaptureRequested);
+        list.addBig(performanceCapture);
         list.addBig(opacityMicromap);
         list.addBig(rayReconstruction);
         view = new OptionInstance<>(
@@ -147,6 +170,7 @@ public final class PrimeVideoOptions {
         refresh();
     }
     public void tick() {
+        syncToggle(performanceCapture, Diagnostics.captureRequested());
         if (offline.get() != PrimeClient.offlineRequested()) {
             offline.set(PrimeClient.offlineRequested());
             if (list.findOption(offline) instanceof CycleButton<?> button) {
@@ -156,8 +180,18 @@ public final class PrimeVideoOptions {
         }
         refresh();
     }
+    private void syncToggle(OptionInstance<Boolean> option, boolean value) {
+        if (option.get() == value)
+            return;
+        option.set(value);
+        if (list.findOption(option) instanceof CycleButton<?> button) {
+            @SuppressWarnings("unchecked") var toggle = (CycleButton<Boolean>)button;
+            toggle.setValue(value);
+        }
+    }
     private void refresh() {
         boolean frozen = PrimeClient.offlineRequested() || PrimeClient.offlineActive();
+        list.findOption(performanceCapture).active = Minecraft.getInstance().level != null;
         list.findOption(enabled).active = PrimeClient.controlsAvailable();
         list.findOption(offline).active = PrimeClient.controlsAvailable() &&
                                           PrimeClient.settings().pathTracing() &&

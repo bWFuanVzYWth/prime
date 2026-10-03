@@ -6,58 +6,32 @@ import dev.primept.capture.BlockGeometryCache;
 import dev.primept.capture.FabricMeshCapture;
 import dev.primept.capture.ItemCapture;
 import dev.primept.capture.ExclusiveTerrainCapture;
-import java.util.Arrays;
-import java.util.Locale;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** Coarse CPU timings and >=50 ms warnings are permanent. Window summaries/CSV remain optional. */
+/** Coarse CPU clocks feed raw events. CSV exists only for the explicit legacy JVM property. */
 final class RenderProfile {
     static final String CSV_HEADER =
             "sample,pt_interval_ns,mc_before_pt_ns,pt_hook_ns,width,height,native_submit_ns,drain_ns,prune_ns,dynamic_submit_ns,native_record_ns,capture_ns,refs_pose_ns,be_sources,entity_sources,model_submits,standard_leaves,fallback_leaves,refs_checks,geometry_vertices_read,prototype_upserts,instance_upserts,instance_removes,op7_bytes,raw_vertices,model_raw_vertices,particle_raw_vertices,raw_packet_bytes,section_batches,section_bytes,raster_skipped,geometry_hits,geometry_misses,geometry_null_keys,geometry_emits,geometry_emitted_bytes,geometry_avoided_copy_bytes,cube_vertices_skipped,mesh_submits,mesh_groups,mesh_geometry_vertices_read,mesh_vertices_skipped,mesh_fallbacks,gpu_last_ns,terrain_available_sources_total,item_submits,item_groups,item_checked_vertices,item_skipped_vertices,item_fallback_quads,item_created_vertices,item_shared_hits,terrain_dirty_events,terrain_entered_columns,terrain_loaded_columns,terrain_unloaded_columns,terrain_invalidations,terrain_requested_sources,terrain_available_sources,terrain_plan_ns,terrain_pack_ns,terrain_total_ns,terrain_missing_sources,terrain_light_engine_notifications,terrain_light_packet_notifications,extraction_ns,resource_submit_ns,terrain_accept_ns,terrain_source_bytes,terrain_tint_queries,terrain_tint_ns,offline\n";
-    private static final int WINDOW = 120;
-    private static final DynamicCapture.Stats NO_RAW =
-            new DynamicCapture.Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-    private static final ModelCapture.Stats NO_MODELS =
-            new ModelCapture.Stats(0, 0, 0, 0, 0, 0, 0, 0, 0, null, 0);
+    private final boolean detailed = Boolean.getBoolean("primept.profile");
+    private final boolean csv = System.getProperty("primept.profile.csv") != null;
     private static final FabricMeshCapture.Stats NO_FABRIC =
             new FabricMeshCapture.Stats(0, 0, 0, 0, 0);
     private static final ItemCapture.Stats NO_ITEMS = new ItemCapture.Stats(0, 0, 0, 0, 0, 0, 0);
-    private final long[] hookTimes = new long[WINDOW];
-    private final boolean detailed = Boolean.getBoolean("primept.profile");
-    private final boolean csv = System.getProperty("primept.profile.csv") != null;
-    private long lastStart, previousHook, extractionStart, extractionNanos, frameNumber;
-
+    private long lastStart, previousHook, extractionStart, extractionNanos, sampleIndex;
+    private BufferedWriter samples;
+    private boolean samplesOpened;
+    private BlockGeometryCache.Stats cachePrevious = BlockGeometryCache.stats();
     void beginExtraction() {
-        extractionStart = System.nanoTime();
+        extractionStart = Diagnostics.clock();
         extractionNanos = 0;
     }
     void endExtraction() {
-        extractionNanos = extractionStart == 0 ? 0 : System.nanoTime() - extractionStart;
+        extractionNanos = extractionStart == 0 ? 0 : Diagnostics.clock() - extractionStart;
     }
-    private BufferedWriter samples;
-    private boolean samplesOpened;
-    private long sampleIndex;
-    private int frames, intervals, rasterSkipped;
-    private long interval, vanilla, submit, drain, prune, nativeRender, total;
-    private long batches, packets, bytes;
-    private long terrainDirty, terrainEntered, terrainLoaded, terrainUnloaded, terrainInvalidations,
-            terrainRequested, terrainAvailable, terrainMissing, terrainPlan, terrainPack,
-            terrainTotal, terrainMax, terrainAccept, terrainSourceBytes, terrainTintQueries,
-            terrainTint;
-    private long dynamicCapture, dynamicSubmit, dynamicSpans, dynamicVertices, dynamicBytes;
-    private long modelMeshes, particleMeshes, modelRawVertices, particleRawVertices;
-    private long beSources, entitySources, modelSubmits, instanceLeaves, fallbackLeaves,
-            referenceChecks, geometryReads, referenceNanos;
-    private long prototypes, instanceUpdates, instanceRemoves, instanceBytes;
-    private long cubeSkipped, meshSubmits, meshGroups, meshRead, meshSkipped, meshFallback;
-    private long itemSubmits, itemGroups, itemChecked, itemSkipped, itemFallback, itemCreated,
-            itemShared;
-    private BlockGeometryCache.Stats cachePrevious = BlockGeometryCache.stats(),
-                                     cacheWindow = cachePrevious;
-
+    private static final Frame NOOP = new Frame(0, 0, 0, 0);
     static final class Frame {
         final long start, interval, beforePT, extraction;
         long submit, resourceSubmit, drain, prune, nativeRender, dynamicSubmit;
@@ -69,213 +43,75 @@ final class RenderProfile {
             this.extraction = extraction;
         }
     }
-
     Frame begin(long worldRenderStart) {
+        if (!Diagnostics.timingEnabled())
+            return NOOP;
         long now = System.nanoTime();
-        long frameInterval = lastStart == 0 ? 0 : now - lastStart;
-        if (lastStart != 0) {
-            interval += frameInterval;
-            ++intervals;
-        }
+        long interval = lastStart == 0 ? 0 : now - lastStart;
         lastStart = now;
-        long beforePT = worldRenderStart == 0 ? 0 : now - worldRenderStart;
-        vanilla += beforePT;
-        return new Frame(now, frameInterval, beforePT, extractionNanos);
+        return new Frame(now, interval, worldRenderStart == 0 ? 0 : now - worldRenderStart,
+                         extractionNanos);
     }
-
     void finish(Frame frame, int width, int height, HostVulkanRenderer renderer) {
+        if (frame.start == 0)
+            return;
         long duration = System.nanoTime() - frame.start;
         var terrain = ExclusiveTerrainCapture.takeStats();
         var timing = new FrameTimings(frame.interval, previousHook, frame.extraction,
                                       frame.beforePT, duration);
         previousHook = duration;
-        ++frameNumber;
-        if (timing.slow())
-            warnSlow(frame, timing, terrain, width, height, renderer);
-        if (!detailed && !csv)
+        if (!Diagnostics.capturing() && !csv)
             return;
-        if (PrimeClient.offlineActive()) {
-            if (csv)
-                writeSample(frame, duration, width, height, NO_RAW, NO_MODELS, terrain,
-                            renderer.lastGpuTimeNanos());
-            if (detailed && frameNumber % WINDOW == 0)
-                PrimeClient.LOGGER.info("Prime PT native profile offline=true {}",
-                                        nativeStages(renderer));
-            return;
-        }
-        hookTimes[frames++] = duration;
-        if (PrimeClient.skippedWorldRaster())
-            ++rasterSkipped;
-        total += duration;
-        submit += frame.submit;
-        drain += frame.drain;
-        prune += frame.prune;
-        nativeRender += frame.nativeRender;
-        batches += frame.batches;
-        packets += frame.packets;
-        bytes += frame.bytes;
-        var dynamic = DynamicCapture.stats();
-        dynamicCapture += dynamic.captureNanos();
-        dynamicSubmit += frame.dynamicSubmit;
-        dynamicSpans += dynamic.spans();
-        dynamicVertices += dynamic.vertices();
-        dynamicBytes += dynamic.bytes();
-        modelMeshes += dynamic.models();
-        particleMeshes += dynamic.particles();
-        modelRawVertices += dynamic.modelRawVertices();
-        particleRawVertices += dynamic.particleRawVertices();
-        var models = ModelCapture.stats();
-        beSources += models.blockEntities();
-        entitySources += models.entities();
-        modelSubmits += models.submissions();
-        instanceLeaves += models.leaves();
-        fallbackLeaves += models.fallbackLeaves();
-        referenceChecks += models.referenceChecks();
-        geometryReads += models.geometryVerticesRead();
-        referenceNanos += models.referenceNanos();
-        cubeSkipped += models.skippedVertices();
-        var fabric = FabricMeshCapture.stats();
-        meshSubmits += fabric.submits();
-        meshGroups += fabric.groups();
-        meshRead += fabric.geometryVertices();
-        meshSkipped += fabric.skippedVertices();
-        meshFallback += fabric.fallbacks();
-        var items = ItemCapture.stats();
-        itemSubmits += items.submits();
-        itemGroups += items.groups();
-        itemChecked += items.checkedVertices();
-        itemSkipped += items.skippedVertices();
-        itemFallback += items.fallbackQuads();
-        itemCreated += items.createdVertices();
-        itemShared += items.sharedHits();
-        if (models.delta() != null) {
-            prototypes += models.delta().prototypeUpserts();
-            instanceUpdates += models.delta().instanceUpserts();
-            instanceRemoves += models.delta().instanceRemoves();
-            instanceBytes += models.deltaBytes();
-        }
-        terrainDirty += terrain.dirty();
-        terrainEntered += terrain.entered();
-        terrainLoaded += terrain.loaded();
-        terrainUnloaded += terrain.unloaded();
-        terrainInvalidations += terrain.invalidations();
-        terrainRequested += terrain.requested();
-        terrainAvailable += terrain.available();
-        terrainMissing += terrain.missing();
-        terrainPlan += terrain.planNanos();
-        terrainPack += terrain.packNanos();
-        terrainTotal += terrain.totalNanos();
-        terrainAccept += terrain.acceptNanos();
-        terrainTintQueries += terrain.tintQueries();
-        terrainTint += terrain.tintNanos();
-        terrainSourceBytes += terrain.sourceBytes();
-        terrainMax = Math.max(terrainMax, terrain.totalNanos());
-        if (csv)
-            writeSample(frame, duration, width, height, dynamic, models, terrain,
-                        renderer.lastGpuTimeNanos());
-        if (!detailed) {
-            clearWindow();
-            return;
-        }
-        if (frames != WINDOW)
-            return;
-        PrimeClient.LOGGER.info("Prime PT native profile offline=false {}", nativeStages(renderer));
-        long[] sorted = hookTimes.clone();
-        Arrays.sort(sorted);
-        PrimeClient.LOGGER.info(String.format(
-                Locale.ROOT,
-                "Prime PT CPU profile frames=%d size=%dx%d interval=%.3fms mcBeforePT=%.3fms hook=%.3fms p95=%.3fms max=%.3fms nativeSubmit=%.3fms drainIncludingSubmit=%.3fms prune=%.3fms nativeRecord=%.3fms gpuLast=%.3fms outputCpuBytes=0 rasterSkipped=%d batches=%d packets=%d bytes=%d dynamicCapture=%.3fms dynamicSubmit=%.3fms dynamicSpansTotal=%d dynamicVerticesTotal=%d dynamicBytesTotal=%d modelMeshesTotal=%d particleMeshesTotal=%d dynamicCapacity=%d dynamicGrowthsTotal=%d",
-                frames, width, height, intervals == 0 ? 0 : interval / (intervals * 1_000_000.0),
-                mean(vanilla), mean(total), sorted[(int)(WINDOW * .95) - 1] / 1_000_000.0,
-                sorted[WINDOW - 1] / 1_000_000.0, mean(submit), mean(drain), mean(prune),
-                mean(nativeRender), renderer.lastGpuTimeNanos() / 1_000_000.0, rasterSkipped,
-                batches, packets, bytes, mean(dynamicCapture), mean(dynamicSubmit), dynamicSpans,
-                dynamicVertices, dynamicBytes, modelMeshes, particleMeshes, dynamic.capacity(),
-                dynamic.growthCount()));
-        PrimeClient.LOGGER.info(String.format(
-                Locale.ROOT,
-                "Prime PT instance profile frames=%d beSources=%d entitySources=%d modelSubmits=%d standardLeaves=%d fallbackLeaves=%d refsChecks=%d geometryVerticesRead=%d refsPose=%.3fms prototypeUpserts=%d instanceUpserts=%d instanceRemoves=%d op7Bytes=%d rawFallbackVertices=%d modelRawVertices=%d particleRawVertices=%d activeInstances=%d",
-                frames, beSources, entitySources, modelSubmits, instanceLeaves, fallbackLeaves,
-                referenceChecks, geometryReads,
-                ModelCapture.leafTimingEnabled() ? mean(referenceNanos) : -1, prototypes,
-                instanceUpdates, instanceRemoves, instanceBytes, dynamicVertices, modelRawVertices,
-                particleRawVertices,
-                models.delta() == null ? 0 : models.delta().activeInstances()));
-        PrimeClient.LOGGER.info(String.format(
-                Locale.ROOT,
-                "Prime PT terrain source frames=%d dirtyEvents=%d enteredColumns=%d loadedColumns=%d unloadedColumns=%d invalidations=%d requestedSources=%d availableSources=%d missingSources=%d sourcePlan=%.3fms sourcePack=%.3fms sourceAccept=%.3fms sectionSourceBytes=%d tintQueries=%d tintCallback=%.3fms total=%.3fms max=%.3fms",
-                frames, terrainDirty, terrainEntered, terrainLoaded, terrainUnloaded,
-                terrainInvalidations, terrainRequested, terrainAvailable, terrainMissing,
-                mean(terrainPlan), mean(terrainPack), mean(terrainAccept), terrainSourceBytes,
-                terrainTintQueries, mean(terrainTint), mean(terrainTotal),
-                terrainMax / 1_000_000.0));
-        var geometry = BlockGeometryCache.stats();
-        PrimeClient.LOGGER.info(
-                "Prime PT geometry cache frames={} hits={} misses={} nullKeys={} emits={} emittedBytes={} avoidedCopyBytes={} retainedBytes={} entries={} resets={}",
-                frames, geometry.hits() - cacheWindow.hits(),
-                geometry.misses() - cacheWindow.misses(),
-                geometry.nullKeys() - cacheWindow.nullKeys(),
-                geometry.emits() - cacheWindow.emits(),
-                geometry.emittedBytes() - cacheWindow.emittedBytes(),
-                geometry.avoidedBytes() - cacheWindow.avoidedBytes(), geometry.retainedBytes(),
-                geometry.entries(), geometry.resets() - cacheWindow.resets());
-        cacheWindow = geometry;
-        PrimeClient.LOGGER.info(
-                "Prime PT exclusive source frames={} cubeVerticesSkipped={} meshSubmits={} meshGroups={} meshVerticesRead={} meshVerticesSkipped={} meshFallbacks={}",
-                frames, cubeSkipped, meshSubmits, meshGroups, meshRead, meshSkipped, meshFallback);
-        PrimeClient.LOGGER.info(
-                "Prime PT item source frames={} submits={} groups={} checkedVertices={} skippedVertices={} fallbackQuads={} createdVertices={} sharedHits={}",
-                frames, itemSubmits, itemGroups, itemChecked, itemSkipped, itemFallback,
-                itemCreated, itemShared);
-        clearWindow();
-    }
-
-    private void warnSlow(Frame frame, FrameTimings time, ExclusiveTerrainCapture.Stats terrain,
-                          int width, int height, HostVulkanRenderer renderer) {
-        boolean offline = PrimeClient.offlineActive();
-        var models = ModelCapture.stats();
         var raw = DynamicCapture.stats();
-        PrimeClient.LOGGER.warn(slowMessage(frameNumber, renderer.lastCpuSerial(), width, height,
-                                            offline, frame, time, terrain, models, raw,
-                                            nativeStages(renderer), renderer.lastGpuTimeNanos()));
-    }
-    private static String nativeStages(HostVulkanRenderer renderer) {
-        try {
-            return renderer.cpuDiagnostics();
-        } catch (RuntimeException failure) {
-            // Diagnostics must not retire a healthy renderer.
-            return "unavailable=" + failure.getMessage();
+        var models = ModelCapture.stats();
+        try (var event = Diagnostics.measuredSpan("frame", frame.start, duration)) {
+            event.count("w", width);
+            event.count("h", height);
+            if (frame.interval > 0)
+                event.count("interval", frame.interval);
+            if (frame.extraction > 0)
+                event.count("extract", frame.extraction);
+            if (frame.beforePT > 0)
+                event.count("before", frame.beforePT);
+            if (timing.previousHook() > 0)
+                event.count("prev_hook", timing.previousHook());
+            event.count("slow", timing.slow() ? 1 : 0);
+            event.count("offline", PrimeClient.offlineActive() ? 1 : 0);
+            event.count("requested", terrain.requested());
+            event.count("avail", terrain.available());
+            event.count("missing", terrain.missing());
+            event.count("dirty", terrain.dirty());
+            event.count("loaded", terrain.loaded());
+            event.count("unloaded", terrain.unloaded());
+            event.count("entered", terrain.entered());
+            event.count("invalidate", terrain.invalidations());
+            event.count("light_engine", terrain.lightEngineEvents());
+            event.count("light_packet", terrain.lightPacketEvents());
+            event.count("src_bytes", terrain.sourceBytes());
+            event.count("tints", terrain.tintQueries());
+            if (!PrimeClient.offlineActive()) {
+                event.count("be", models.blockEntities());
+                event.count("entities", models.entities());
+                event.count("submits", models.submissions());
+                event.count("leaves", models.leaves());
+                event.count("fallback", models.fallbackLeaves());
+                event.count("refs", models.referenceChecks());
+                event.count("verts_read", models.geometryVerticesRead());
+                event.count("verts_skip", models.skippedVertices());
+                event.count("raw_verts", raw.vertices());
+                event.count("raw_bytes", raw.bytes());
+                if (models.delta() != null) {
+                    event.count("proto_up", models.delta().prototypeUpserts());
+                    event.count("inst_up", models.delta().instanceUpserts());
+                    event.count("inst_rm", models.delta().instanceRemoves());
+                    event.count("inst_bytes", models.deltaBytes());
+                }
+            }
         }
+        if (csv)
+            writeSample(frame, duration, width, height, raw, models, terrain,
+                        renderer.lastGpuTimeNanos());
     }
-    static String slowMessage(long frameNumber, long serial, int width, int height, boolean offline,
-                              Frame frame, FrameTimings time, ExclusiveTerrainCapture.Stats terrain,
-                              ModelCapture.Stats models, DynamicCapture.Stats raw,
-                              String nativeStages, long gpuLast) {
-        var delta = models.delta();
-        return String.format(
-                Locale.ROOT,
-                "Prime slow frame frame=%d serial=%d size=%dx%d offline=%s threshold=50ms currentWork=%.3fms interval=%.3fms extraction=%.3fms beforePT=%.3fms terrain=%.3fms sourcePlan=%.3fms sourcePack=%.3fms sourceAccept=%.3fms sectionSourceBytes=%d tintQueries=%d tintCallback=%.3fms extractionOther=%.3fms hook=%.3fms drainIncludingSubmit=%.3fms nativeSubmit=%.3fms resourceSubmit=%.3fms dynamicSubmit=%.3fms nativeRecord=%.3fms prevHook=%.3fms outsideInterval=%.3fms gpuLastDelayed=%.3fms dirtyEvents=%d lightEngineNotifications=%d lightPacketNotifications=%d enteredColumns=%d loadedColumns=%d unloadedColumns=%d fullInvalidations=%d requestedSources=%d availableSources=%d missingSources=%d packets=%d sourceBytes=%d beSources=%d entitySources=%d rawVertices=%d rawBytes=%d instanceUpserts=%d instanceRemoves=%d instanceBytes=%d native={%s}",
-                frameNumber, serial, width, height, offline, ms(time.currentWork()),
-                ms(time.interval()), ms(time.extraction()), ms(time.beforePT()),
-                ms(terrain.totalNanos()), ms(terrain.planNanos()), ms(terrain.packNanos()),
-                ms(terrain.acceptNanos()), terrain.sourceBytes(), terrain.tintQueries(),
-                ms(terrain.tintNanos()), ms(Math.max(0, time.extraction() - terrain.totalNanos())),
-                ms(time.hook()), ms(frame.drain), ms(frame.submit), ms(frame.resourceSubmit),
-                ms(frame.dynamicSubmit), ms(frame.nativeRender), ms(time.previousHook()),
-                time.outside() < 0 ? -1 : ms(time.outside()), ms(gpuLast), terrain.dirty(),
-                terrain.lightEngineEvents(), terrain.lightPacketEvents(), terrain.entered(),
-                terrain.loaded(), terrain.unloaded(), terrain.invalidations(), terrain.requested(),
-                terrain.available(), terrain.missing(), frame.packets, frame.bytes,
-                offline ? 0 : models.blockEntities(), offline ? 0 : models.entities(),
-                offline ? 0 : raw.vertices(), offline ? 0 : raw.bytes(),
-                offline || delta == null ? 0 : delta.instanceUpserts(),
-                offline || delta == null ? 0 : delta.instanceRemoves(),
-                offline ? 0 : models.deltaBytes(), nativeStages);
-    }
-    private static double ms(long nanos) {
-        return nanos / 1_000_000.0;
-    }
-
     /** PT hook cadence is a CPU frame interval, not a display-present or GPU-duration measurement. */
     private void writeSample(Frame f, long hook, int width, int height, DynamicCapture.Stats raw,
                              ModelCapture.Stats models, ExclusiveTerrainCapture.Stats terrain,
@@ -336,7 +172,7 @@ final class RenderProfile {
                     terrain.sourceBytes() + "," + terrain.tintQueries() + "," +
                     terrain.tintNanos() + "," + offline + "\n");
             cachePrevious = geometry;
-            if (sampleIndex % WINDOW == 0)
+            if (sampleIndex % 120 == 0)
                 samples.flush();
         } catch (IOException failure) {
             PrimeClient.LOGGER.warn("Could not write optional per-frame CPU profile", failure);
@@ -354,28 +190,7 @@ final class RenderProfile {
         }
     }
 
-    private double mean(long nanos) {
-        return nanos / (frames * 1_000_000.0);
-    }
-    private void clearWindow() {
-        frames = intervals = rasterSkipped = 0;
-        interval = vanilla = submit = drain = prune = nativeRender = total = 0;
-        batches = packets = bytes = 0;
-        terrainDirty = terrainEntered = terrainLoaded = terrainUnloaded = terrainInvalidations = 0;
-        terrainRequested = terrainAvailable = terrainMissing = 0;
-        terrainPlan = terrainPack = terrainTotal = terrainMax = terrainAccept = terrainSourceBytes =
-                terrainTintQueries = terrainTint = 0;
-        dynamicCapture = dynamicSubmit = dynamicSpans = dynamicVertices = dynamicBytes = 0;
-        modelMeshes = particleMeshes = modelRawVertices = particleRawVertices = 0;
-        beSources = entitySources = modelSubmits = instanceLeaves = fallbackLeaves =
-                referenceChecks = geometryReads = referenceNanos = 0;
-        prototypes = instanceUpdates = instanceRemoves = instanceBytes = 0;
-        cubeSkipped = meshSubmits = meshGroups = meshRead = meshSkipped = meshFallback = 0;
-        itemSubmits = itemGroups = itemChecked = itemSkipped = itemFallback = itemCreated =
-                itemShared = 0;
-    }
     void reset() {
         lastStart = previousHook = 0;
-        clearWindow();
     }
 }

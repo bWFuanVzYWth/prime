@@ -26,6 +26,7 @@ public final class HostVulkanRenderer implements AutoCloseable {
     private static Throwable retirementFailure;
     private final NativeBridge bridge;
     private final VulkanCommandEncoder encoder;
+    private final RenderSettings.LightSampling activeLightSampling;
     private boolean closed;
     private boolean retired;
     private long pendingTemporalSerial;
@@ -35,6 +36,7 @@ public final class HostVulkanRenderer implements AutoCloseable {
     private long readinessGeneration;
     private boolean completedWorldFrame;
     private RenderSettings appliedSettings;
+    private RenderSettings requestedSettings;
     private RenderSettings.View appliedView;
     private boolean offline;
 
@@ -43,6 +45,7 @@ public final class HostVulkanRenderer implements AutoCloseable {
         encoder = device.createCommandEncoder();
         var access = (VulkanCommandEncoderAccessor)(Object)encoder;
         bridge = new NativeBridge(NativeBridge.resolveLibrary());
+        activeLightSampling = PrimeClient.settings().lightSampling();
         try {
             var initialSettings = PrimeClient.settings();
             var initialView = PrimeClient.diagnosticView();
@@ -55,6 +58,7 @@ public final class HostVulkanRenderer implements AutoCloseable {
                     VulkanBootstrap.opacityMicromapEnabled(device),
                     VulkanBootstrap.streamlineEnabled(device));
             appliedSettings = initialSettings;
+            requestedSettings = initialSettings;
             appliedView = initialView;
             prepareResources();
             if (submissionOwner != null)
@@ -240,18 +244,26 @@ public final class HostVulkanRenderer implements AutoCloseable {
 
     /** Called only after Submission.close successfully queued this exact ordered submission. */
     public static void submissionAccepted(Object encoder, long serial) {
-        var owner = submissionOwner;
-        if (owner == null || owner.encoder != encoder || owner.pendingTemporalSerial == 0)
-            return;
-        try {
-            if (owner.pendingTemporalSerial != serial)
-                throw new IllegalStateException(
-                        "Host submission does not match the pending temporal frame");
-            owner.bridge.submissionAccepted(serial);
-            owner.pendingTemporalSerial = 0;
-        } catch (RuntimeException | Error failure) {
-            submissionFailed(encoder, failure);
-            throw failure;
+        try (var diagnostic = Diagnostics.span("host_accept")) {
+            try {
+                diagnostic.count("serial", serial);
+                var owner = submissionOwner;
+                if (owner == null || owner.encoder != encoder || owner.pendingTemporalSerial == 0)
+                    return;
+                try {
+                    if (owner.pendingTemporalSerial != serial)
+                        throw new IllegalStateException(
+                                "Host submission does not match the pending temporal frame");
+                    owner.bridge.submissionAccepted(serial);
+                    owner.pendingTemporalSerial = 0;
+                } catch (RuntimeException | Error failure) {
+                    submissionFailed(encoder, failure);
+                    throw failure;
+                }
+            } catch (RuntimeException | Error failure) {
+                diagnostic.fail();
+                throw failure;
+            }
         }
     }
 
@@ -294,8 +306,14 @@ public final class HostVulkanRenderer implements AutoCloseable {
     }
     /** Frame-boundary control updates; stable frames make no settings FFM call. */
     public void configure(RenderSettings settings, boolean nextOffline, RenderSettings.View view) {
-        if (offline == nextOffline && settings.equals(appliedSettings) && view == appliedView)
+        if (offline == nextOffline && settings.equals(requestedSettings) && view == appliedView)
             return;
+        var requested = settings;
+        settings = settings.withLightSampling(activeLightSampling);
+        if (offline == nextOffline && settings.equals(appliedSettings) && view == appliedView) {
+            requestedSettings = requested;
+            return;
+        }
         if (offline != nextOffline ||
             (!nextOffline && appliedSettings != null &&
              (settings.rayReconstruction() != appliedSettings.rayReconstruction() ||
@@ -303,11 +321,20 @@ public final class HostVulkanRenderer implements AutoCloseable {
             submitAndAwait(encoder);
         bridge.configure(settings, nextOffline, view);
         appliedSettings = settings;
+        requestedSettings = requested;
         appliedView = view;
         offline = nextOffline;
     }
     public void submitDynamic(long epoch) {
-        dev.primept.capture.DynamicCapture.submit(epoch, bridge);
+        try (var diagnostic = Diagnostics.span("dynamic_submit")) {
+            try {
+                dev.primept.capture.DynamicCapture.submit(epoch, bridge);
+
+            } catch (RuntimeException | Error failure) {
+                diagnostic.fail();
+                throw failure;
+            }
+        }
     }
     public ByteBuffer frameBuffer() {
         return bridge.frameBuffer();
@@ -343,44 +370,55 @@ public final class HostVulkanRenderer implements AutoCloseable {
     }
 
     public void record(RenderTarget destination) {
-        if (closed)
-            throw new IllegalStateException("Host renderer is closed");
-        var color = destination.getColorTexture();
-        var colorView = destination.getColorTextureView();
-        if (!(color instanceof VulkanGpuTexture texture) ||
-            !(colorView instanceof VulkanGpuTextureView view) ||
-            texture.getFormat() != GpuFormat.RGBA8_UNORM ||
-            (texture.usage() & USAGE_STORAGE) == 0) {
-            throw new IllegalStateException(
-                    "Prime PT requires an RGBA8 Vulkan main target with storage-image usage; size=" +
-                    destination.width + "x" + destination.height + ", color=" +
-                    (color == null ? "missing"
-                                   : color.getClass().getSimpleName() + "/" + color.getFormat() +
-                                             "/usage=0x" + Integer.toHexString(color.usage())) +
-                    ", view=" +
-                    (colorView == null ? "missing" : colorView.getClass().getSimpleName()));
-        }
-        var command = encoder.allocateAndBeginTransientCommandBuffer();
-        long submitValue =
-                ((VulkanCommandEncoderAccessor)(Object)encoder).primept$currentSubmitIndex();
-        lastCpuSerial = submitValue;
-        try {
-            if (pendingTemporalSerial != 0)
-                throw new IllegalStateException(
-                        "The preceding temporal frame has not been submitted");
-            updateDisplayOutput();
-            bridge.record(command.address(), texture.vkImage(), view.vkImageView(), submitValue);
-            int status = VK10.vkEndCommandBuffer(command);
-            if (status != VK10.VK_SUCCESS)
-                throw new IllegalStateException("Cannot finish native render command buffer: " +
-                                                status);
-            // execute only appends commands. Submission.close is the actual queue acceptance boundary.
-            encoder.execute(command);
-            pendingTemporalSerial = submitValue;
-            presentationSerial = submitValue;
-        } catch (RuntimeException | Error failure) {
-            submissionFailed(encoder, failure);
-            throw failure;
+        try (var diagnostic = Diagnostics.span("host_record")) {
+            try {
+                diagnostic.count("w", destination.width);
+                diagnostic.count("h", destination.height);
+                if (closed)
+                    throw new IllegalStateException("Host renderer is closed");
+                var color = destination.getColorTexture();
+                var colorView = destination.getColorTextureView();
+                if (!(color instanceof VulkanGpuTexture texture) ||
+                    !(colorView instanceof VulkanGpuTextureView view) ||
+                    texture.getFormat() != GpuFormat.RGBA8_UNORM ||
+                    (texture.usage() & USAGE_STORAGE) == 0) {
+                    throw new IllegalStateException(
+                            "Prime PT requires an RGBA8 Vulkan main target with storage-image usage; size=" +
+                            destination.width + "x" + destination.height + ", color=" +
+                            (color == null
+                                     ? "missing"
+                                     : color.getClass().getSimpleName() + "/" + color.getFormat() +
+                                               "/usage=0x" + Integer.toHexString(color.usage())) +
+                            ", view=" +
+                            (colorView == null ? "missing" : colorView.getClass().getSimpleName()));
+                }
+                var command = encoder.allocateAndBeginTransientCommandBuffer();
+                long submitValue = ((VulkanCommandEncoderAccessor)(Object)encoder)
+                                           .primept$currentSubmitIndex();
+                lastCpuSerial = submitValue;
+                try {
+                    if (pendingTemporalSerial != 0)
+                        throw new IllegalStateException(
+                                "The preceding temporal frame has not been submitted");
+                    updateDisplayOutput();
+                    bridge.record(command.address(), texture.vkImage(), view.vkImageView(),
+                                  submitValue);
+                    int status = VK10.vkEndCommandBuffer(command);
+                    if (status != VK10.VK_SUCCESS)
+                        throw new IllegalStateException(
+                                "Cannot finish native render command buffer: " + status);
+                    // execute only appends commands. Submission.close is the actual queue acceptance boundary.
+                    encoder.execute(command);
+                    pendingTemporalSerial = submitValue;
+                    presentationSerial = submitValue;
+                } catch (RuntimeException | Error failure) {
+                    submissionFailed(encoder, failure);
+                    throw failure;
+                }
+            } catch (RuntimeException | Error failure) {
+                diagnostic.fail();
+                throw failure;
+            }
         }
     }
 

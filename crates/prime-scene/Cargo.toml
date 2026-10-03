@@ -11,8 +11,12 @@ legacy-fixtures = []
 
 [dependencies]
 prime_abi.workspace = true
+prime_diagnostics.workspace = true
 rayon.workspace = true
 rectangle_decomposition = { path = "../rectangle-decomposition" }
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [[test]]
 name = "instances"

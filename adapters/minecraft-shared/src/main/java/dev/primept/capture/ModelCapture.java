@@ -1,5 +1,7 @@
 package dev.primept.capture;
 
+import dev.primept.Diagnostics;
+
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -20,7 +22,7 @@ public final class ModelCapture {
     private static final boolean PROFILE =
             Boolean.getBoolean("primept.profile") && Boolean.getBoolean("primept.profile.leaves");
     public static boolean leafTimingEnabled() {
-        return PROFILE;
+        return Diagnostics.enabled() && PROFILE;
     }
     private static InstanceCapture instances;
     private static ModelGeometryContext geometry;
@@ -169,7 +171,7 @@ public final class ModelCapture {
         if (model == null || !DynamicCapture.active())
             return null;
         int slot = model.cursor++;
-        long start = PROFILE ? System.nanoTime() : 0;
+        long start = leafTimingEnabled() ? System.nanoTime() : 0;
         try {
             TextureAtlasSprite sprite = null;
             if (consumer.getClass() == SpriteCoordinateExpander.class) {
@@ -243,14 +245,14 @@ public final class ModelCapture {
             DynamicCapture.fail(exception);
             return null;
         } finally {
-            if (PROFILE)
+            if (start != 0)
                 referenceNanos += System.nanoTime() - start;
         }
     }
     public static void afterCube(Leaf leaf, boolean completed) {
         if (leaf == null)
             return;
-        long start = PROFILE ? System.nanoTime() : 0;
+        long start = leafTimingEnabled() ? System.nanoTime() : 0;
         try {
             if (!completed || !DynamicCapture.active())
                 return;
@@ -269,7 +271,7 @@ public final class ModelCapture {
         } finally {
             leaf.buffer =
                     null; // A persistent source never owns Minecraft's temporary vertex builder.
-            if (PROFILE)
+            if (start != 0)
                 referenceNanos += System.nanoTime() - start;
         }
     }
@@ -277,7 +279,7 @@ public final class ModelCapture {
     public static boolean skipCube(Leaf leaf, boolean exclusive) {
         if (leaf == null || !exclusive || !DynamicCapture.active())
             return false;
-        long start = PROFILE ? System.nanoTime() : 0;
+        long start = leafTimingEnabled() ? System.nanoTime() : 0;
         try {
             Submission s = leaf.source;
             instances.observe(leaf.instance, leaf.geometry.prototype, s.x, s.y, s.z, leaf.affine,
@@ -290,7 +292,7 @@ public final class ModelCapture {
             DynamicCapture.fail(exception);
             return false;
         } finally {
-            if (PROFILE)
+            if (start != 0)
                 referenceNanos += System.nanoTime() - start;
         }
     }

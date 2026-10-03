@@ -50,6 +50,7 @@ struct Profile {
     timestamp_period: f64,
     timestamp_mask: u64,
     trace: bool,
+    unavailable_reported: AtomicBool,
     counters: ProfileCounters,
 }
 
@@ -203,8 +204,9 @@ pub(super) struct Context {
     pub timestamp_bits: u32,
     pub live_allocations: AtomicU64,
     pub name: String,
-    // CPU diagnostics are independent of GPU queries/PRIME_PROFILE. Count only
-    // successful mapped writes; these bytes do not claim PCIe traffic.
+    // Runtime host diagnostics are owned by Renderer. Disabled mapped writes do
+    // not update an atomic diagnostic counter. Owned CLI contexts keep PRIME_PROFILE.
+    diagnostics: AtomicBool,
     cpu_uploaded_bytes: AtomicU64,
     profile: Option<Profile>,
     host: Option<Host>,
@@ -232,7 +234,9 @@ impl Drop for Context {
             if self.host.is_none() {
                 let _ = self.device.device_wait_idle();
             }
-            if let Some(profile) = &self.profile {
+            if let Some(profile) = &self.profile
+                && profile.query_pool != vk::QueryPool::null()
+            {
                 self.device.destroy_query_pool(profile.query_pool, None);
             }
             self.device.destroy_command_pool(self.pool, None);
@@ -485,10 +489,14 @@ impl Context {
                         None,
                     ) {
                         Ok(pool) => pool,
-                        Err(e) => {
+                        Err(e) if e == vk::Result::ERROR_DEVICE_LOST => {
                             device.destroy_command_pool(pool, None);
                             device.destroy_device(None);
                             return Err(error("Create profiling timestamp queries", e));
+                        }
+                        Err(e) => {
+                            eprintln!("[Prime PT] GPU profiling unavailable: {e:?}");
+                            vk::QueryPool::null()
                         }
                     }
                 } else {
@@ -516,6 +524,7 @@ impl Context {
                         (1u64 << bits) - 1
                     },
                     trace: std::env::var_os("PRIME_PROFILE_TRACE").is_some_and(|v| v != "0"),
+                    unavailable_reported: AtomicBool::new(false),
                     counters: ProfileCounters::default(),
                 })
             } else {
@@ -549,6 +558,7 @@ impl Context {
                 live_allocations: AtomicU64::new(0),
                 name,
                 cpu_uploaded_bytes: AtomicU64::new(0),
+                diagnostics: AtomicBool::new(profile.is_some() || crate::cpu_profile::enabled()),
                 profile,
                 host: None,
                 uncertain_submission: AtomicBool::new(false),
@@ -646,15 +656,9 @@ impl Context {
             let name = CStr::from_ptr(properties.device_name.as_ptr())
                 .to_string_lossy()
                 .into_owned();
-            let profile = std::env::var_os("PRIME_PROFILE")
-                .is_some_and(|v| v != "0")
-                .then(|| Profile {
-                    query_pool: vk::QueryPool::null(),
-                    timestamp_period: f64::from(properties.limits.timestamp_period),
-                    timestamp_mask: 0,
-                    trace: false,
-                    counters: ProfileCounters::default(),
-                });
+            // Production host profiling follows the explicit runtime switch. The
+            // standalone PRIME_PROFILE submission profiler owns its own device.
+            let profile = None;
             let opacity_micromap =
                 micromap_support(&owner.instance, physical, &device, capabilities & 1 != 0);
             eprintln!("[Prime PT] Host OMM enabled={}", opacity_micromap.is_some());
@@ -683,6 +687,7 @@ impl Context {
                 live_allocations: AtomicU64::new(0),
                 name,
                 cpu_uploaded_bytes: AtomicU64::new(0),
+                diagnostics: AtomicBool::new(false),
                 profile,
                 host: Some(Host {
                     timeline,
@@ -1029,10 +1034,11 @@ impl Context {
     // encoder and retires resources against the host timeline instead.
     pub fn submit_named(
         &self,
-        label: &str,
+        label: &'static str,
         record: impl FnOnce(vk::CommandBuffer),
     ) -> Result<(), String> {
-        unsafe {
+        let mut trace = prime_diagnostics::scope(label);
+        let result = (|| unsafe {
             if !self.can_destroy() {
                 return Err("Vulkan device has an unconfirmed failed submission".into());
             }
@@ -1131,17 +1137,32 @@ impl Context {
                 {
                     let mut timestamps = [0u64; 2];
                     let gpu_ns = if profile.query_pool != vk::QueryPool::null() {
-                        self.device
-                            .get_query_pool_results(
-                                profile.query_pool,
-                                0,
-                                &mut timestamps,
-                                vk::QueryResultFlags::TYPE_64,
-                            )
-                            .map_err(|e| error("Read completed GPU timestamps", e))?;
-                        ((timestamps[1].wrapping_sub(timestamps[0]) & profile.timestamp_mask)
-                            as f64
-                            * profile.timestamp_period) as u64
+                        match self.device.get_query_pool_results(
+                            profile.query_pool,
+                            0,
+                            &mut timestamps,
+                            vk::QueryResultFlags::TYPE_64,
+                        ) {
+                            Ok(()) => {
+                                ((timestamps[1].wrapping_sub(timestamps[0])
+                                    & profile.timestamp_mask)
+                                    as f64
+                                    * profile.timestamp_period)
+                                    as u64
+                            }
+                            Err(vk::Result::ERROR_DEVICE_LOST) => {
+                                return Err(error(
+                                    "Read diagnostic timestamps",
+                                    vk::Result::ERROR_DEVICE_LOST,
+                                ));
+                            }
+                            Err(e) => {
+                                if !profile.unavailable_reported.swap(true, Ordering::Relaxed) {
+                                    eprintln!("[Prime PT] GPU profiling read unavailable: {e:?}");
+                                }
+                                0
+                            }
+                        }
                     } else {
                         0
                     };
@@ -1175,7 +1196,11 @@ impl Context {
                 self.device.free_command_buffers(self.pool, &[command]);
             }
             result
+        })();
+        if result.is_err() {
+            trace.fail();
         }
+        result
     }
     pub fn can_destroy(&self) -> bool {
         !self.uncertain_submission.load(Ordering::Relaxed)
@@ -1183,6 +1208,14 @@ impl Context {
 
     pub fn cpu_upload_bytes(&self) -> u64 {
         self.cpu_uploaded_bytes.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn diagnostics_enabled(&self) -> bool {
+        self.diagnostics.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn set_diagnostics(&self, enabled: bool) {
+        self.diagnostics.store(enabled, Ordering::Relaxed);
     }
 
     pub fn profile_snapshot(&self) -> Option<GpuProfile> {
@@ -1405,8 +1438,18 @@ impl Buffer {
         bytes: &[u8],
         usage: vk::BufferUsageFlags,
     ) -> Result<Self, String> {
+        let mut staging_trace = prime_diagnostics::scope("buf.stage");
+        staging_trace.fail();
         let buffer = Self::new(context, bytes.len() as u64, usage, true)?;
-        buffer.write(bytes)?;
+        staging_trace.succeed();
+        drop(staging_trace);
+        {
+            let mut write_trace = prime_diagnostics::scope("buf.write");
+            write_trace.fail();
+            write_trace.count("bytes", bytes.len() as u64);
+            buffer.write(bytes)?;
+            write_trace.succeed();
+        }
         Ok(buffer)
     }
 
@@ -1417,13 +1460,21 @@ impl Buffer {
         bytes: &[u8],
         usage: vk::BufferUsageFlags,
     ) -> Result<Self, String> {
+        let mut upload_trace = prime_diagnostics::scope("buf.dev");
+        upload_trace.fail();
+        upload_trace.count("bytes", bytes.len() as u64);
+        let mut destination_trace = prime_diagnostics::scope("buf.dst");
+        destination_trace.fail();
         let destination = Self::new(
             context,
             bytes.len() as u64,
             usage | vk::BufferUsageFlags::TRANSFER_DST,
             false,
         )?;
+        destination_trace.succeed();
+        drop(destination_trace);
         if bytes.is_empty() {
+            upload_trace.succeed();
             return Ok(destination);
         }
         let staging = Self::upload(context, bytes, vk::BufferUsageFlags::TRANSFER_SRC)?;
@@ -1447,6 +1498,7 @@ impl Buffer {
                 &[],
             );
         })?;
+        upload_trace.succeed();
         Ok(destination)
     }
     pub fn write(&self, bytes: &[u8]) -> Result<(), String> {
@@ -1471,9 +1523,11 @@ impl Buffer {
                 bytes.len(),
             );
         }
-        self.context
-            .cpu_uploaded_bytes
-            .fetch_add(bytes.len() as u64, Ordering::Relaxed);
+        if self.context.diagnostics_enabled() {
+            self.context
+                .cpu_uploaded_bytes
+                .fetch_add(bytes.len() as u64, Ordering::Relaxed);
+        }
         if let Some(profile) = &self.context.profile {
             profile
                 .counters
@@ -1513,9 +1567,11 @@ impl Buffer {
             std::slice::from_raw_parts_mut(mapped.as_ptr().add(offset as usize).cast(), size)
         };
         write(bytes)?;
-        self.context
-            .cpu_uploaded_bytes
-            .fetch_add(size as u64, Ordering::Relaxed);
+        if self.context.diagnostics_enabled() {
+            self.context
+                .cpu_uploaded_bytes
+                .fetch_add(size as u64, Ordering::Relaxed);
+        }
         if let Some(profile) = &self.context.profile {
             profile
                 .counters
@@ -1935,6 +1991,13 @@ mod host_tests {
     ) {
         FAKE_CALLS.with(|calls| calls.borrow_mut().destroyed.push("pool"));
     }
+    unsafe extern "system" fn fake_destroy_query_pool(
+        _: vk::Device,
+        _: vk::QueryPool,
+        _: *const vk::AllocationCallbacks<'_>,
+    ) {
+        FAKE_CALLS.with(|calls| calls.borrow_mut().destroyed.push("query"));
+    }
     unsafe extern "system" fn fake_destroy_buffer(
         _: vk::Device,
         _: vk::Buffer,
@@ -2039,6 +2102,7 @@ mod host_tests {
                     b"vkWaitSemaphores" => fake_wait as *const () as *const c_void,
                     b"vkGetSemaphoreCounterValue" => fake_counter as *const () as *const c_void,
                     b"vkDestroyCommandPool" => fake_destroy_pool as *const () as *const c_void,
+                    b"vkDestroyQueryPool" => fake_destroy_query_pool as *const () as *const c_void,
                     b"vkDestroyBuffer" => fake_destroy_buffer as *const () as *const c_void,
                     b"vkFreeMemory" => fake_free_memory as *const () as *const c_void,
                     b"vkAllocateMemory" => fake_allocate_memory as *const () as *const c_void,
@@ -2079,6 +2143,7 @@ mod host_tests {
                 live_allocations: AtomicU64::new(2),
                 name: "CPU teardown test".into(),
                 cpu_uploaded_bytes: AtomicU64::new(0),
+                diagnostics: AtomicBool::new(false),
                 profile: None,
                 host: Some(Host {
                     timeline: vk::Semaphore::null(),
@@ -2109,6 +2174,28 @@ mod host_tests {
         };
         Arc::get_mut(&mut context).unwrap().opacity_micromap = Some(support);
         context
+    }
+
+    #[test]
+    fn diagnostic_query_retirement_uses_last_serial_without_waiting_on_disable() {
+        let context = fake_context();
+        context
+            .begin_host_record(vk::CommandBuffer::from_raw(1), 8)
+            .unwrap();
+        context.end_host_record();
+        context.retire_query_pool(vk::QueryPool::from_raw(123));
+        assert_eq!(context.completed_serial().unwrap(), 7);
+        FAKE_CALLS.with(|calls| {
+            assert_eq!(calls.borrow().waits, 0);
+            assert!(calls.borrow().destroyed.is_empty());
+        });
+        FAKE_CALLS.with(|calls| calls.borrow_mut().completed = 8);
+        assert_eq!(context.completed_serial().unwrap(), 8);
+        FAKE_CALLS.with(|calls| {
+            assert_eq!(calls.borrow().waits, 0);
+            assert_eq!(calls.borrow().destroyed, ["query"]);
+        });
+        context.finish_host().unwrap();
     }
     #[test]
     fn micromap_retirement_requires_actual_host_completion_and_keeps_failure_quarantined() {
@@ -2142,6 +2229,40 @@ mod host_tests {
             device_address: 0,
             mapped: None,
         }
+    }
+
+    #[test]
+    fn mapped_upload_bytes_are_counted_only_when_diagnostics_are_enabled() {
+        let context = fake_context();
+        let mut storage = [0u8; 4];
+        let mut buffer = fake_buffer(&context);
+        buffer.mapped = std::ptr::NonNull::new(storage.as_mut_ptr());
+        buffer.write(&[1, 2, 3, 4]).unwrap();
+        assert_eq!(storage, [1, 2, 3, 4]);
+        assert_eq!(context.cpu_upload_bytes(), 0);
+        context.set_diagnostics(true);
+        buffer.write_at(1, &[7, 8]).unwrap();
+        assert_eq!(storage, [1, 7, 8, 4]);
+        assert_eq!(context.cpu_upload_bytes(), 2);
+        assert!(buffer.write_at(3, &[0, 0]).is_err());
+        assert_eq!(context.cpu_upload_bytes(), 2);
+        context.set_diagnostics(false);
+        unsafe {
+            buffer
+                .write_with(0, 4, |bytes| {
+                    for (i, byte) in bytes.iter_mut().enumerate() {
+                        byte.write(i as u8);
+                    }
+                    Ok(())
+                })
+                .unwrap();
+        }
+        assert_eq!(storage, [0, 1, 2, 3]);
+        assert_eq!(context.cpu_upload_bytes(), 2);
+        // The fake mapped range is stack storage, rather than Vulkan mapped memory.
+        buffer.mapped = None;
+        drop(buffer);
+        context.finish_host().unwrap();
     }
 
     #[test]

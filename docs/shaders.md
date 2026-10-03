@@ -18,7 +18,8 @@
 | `pbr/delta.slang` | 整闭包 delta 判定、普通离散采样、首纯 delta 透明条件 pair，以及独立的几何 guide 方向；无 LUT/NEE |
 | `pbr/guide_albedo.slang` | 独立方向能量与清洗；不导入通用 PBR 分派或完整 closure |
 | `pbr.slang` | 生产 Full opaque/dielectric 源适配、thick-SSS Lite 扩展与历史 Lite 材质参考 API；重导出窄顶点/guide 接口 |
-| `grid_sampling.slang` | 生产固定单级局部 alias、全局退路及正反向混合 PDF，无资源绑定 |
+| `grid_sampling.slang` | 默认局部 alias、全局退路及正反向混合 PDF，无资源绑定 |
+| `tree_sampling.slang` | 可选双层功率树、24-bit 整数区间遍历及同源正反向 PDF，无资源绑定 |
 | `light_sampling.slang` | 显式采样实验保留的 32B 功率树节点与选择，无资源绑定 |
 | `display/prime_drt.slang` | 当前可替换的显示策略；显式显示变换与艺术调整，只依赖颜色数学库 |
 | `display/exposure.slang`、`display/hdr.slang` | 曝光/适应、extended-sRGB EOTF、source-over界面合成与coverage数学；无资源绑定 |
@@ -63,6 +64,8 @@
 
 SDR世界仍写宿主 `RGBA8_UNORM`，已编码sRGB；启用HDR或实际FG时alpha=0以记录后续手部/HUD coverage，否则alpha=1。HDR保留FP16 extended-sRGB world与独立SDR baseline，宿主选择和Windows P/W标定成功后，在界面完成时做EOTF与W/80 scRGB呈现。需要曝光/HDR/FG或RR星图时使用显式线性display入口，关闭这些功能时保留原直接显示；诊断视图不走曝光/星图/FG。自动曝光、HDR、星图合成、buffer/image读取与成本详见[显示契约](display.md)，游戏内设置与FFM控制见[渲染模式](renderers.md)。NaN/Inf辐射亮度输入置黑；负颜色在旧算法规定的位置处理。
 
+光源采样在 renderer 创建时选择独立编译产物：Offline、Realtime K2及RR K2各提供Grid/Tree变体，K1与post共用。`PRIME_LIGHT_TREE` 仅为编译宏，不是push或specialization参数；未选中的采样代码与资源访问不会进入SPIR-V。每个renderer只创建所选变体的pipeline，场景特性选择和每次dispatch不检查采样方式。
+
 ## 采样域
 
 Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样本索引 `<2^S`。一个完整样本集固定 R、S、全局 seed 和 domain；不能每帧把累计样本数重新当作 S。整数结果与用户 `z_sobol` 的标量参考一致，float 输出由高 24 位映射到 `[0,1)`。
@@ -72,6 +75,8 @@ Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样�
 [表面编译](surface-compiler.md)的显式灯使用 `sample2D(512+4*bounce)` 分配局部/全局路由及局部 alias 样本，`sample2D(768+bounce)` 分配全局页及页内灯样本。两个二维域各复用一次 index permutation，不串接同一 24-bit 标量的条件残差。前一域加 1 仍用于 quad 面积加权半面及三角形二维采样，加 2/3 分别用于采样点 coverage 和有限阴影 coverage。64 次反弹内这些域互不重叠；`sample1D(d)` 与 `sample2D(d).x` 是同一值，不能视为额外随机维度。静态灯 NEE 与发光命中使用同版本、同一前一着色点的完整混合 PDF 做 MIS；太阳圆盘方向使用独立的 `1024+bounce` domain。
 
 BSDF事件选择使用 `sample1D(1280+bounce)`。仅实时相机第一可见表面为纯delta optical时，额外使用独立domain1536，在有效reflection-only/transmission-only候选之间固定0.5抽选；候选保留物理response和条件PDF=1，双有效时未来beta乘2，单有效乘1。首面发光/guide albedo不补偿，连续MIS PDF仍为0。粗糙首面、后续透明及Offline保持普通采样；照明roulette与guide几何方向均不复用该随机域。
+
+Tree保留历史空间median拓扑和功率proposal，以两份独立24-bit样本分别选择光页与页内灯。CPU在各树中分配整数区间，每叶至少一个输入，GPU用绝对CDF边界比较，无浮点残差链；页与灯引用保存量化后的实际PMF，前向/反向共同使用其乘积和相同总面积倒数。低功率支持修正只改变proposal，不改真实发光，不宣称不同多维采样域完全独立。
 
 alias 的 PDF 对应单表实际 f32 运算及 24-bit 输入格点，上传后仍有 f32 存储舍入。CPU 将每列阈值下限设为该列首个实际残差的下一个 f32 值，并至少为最小正规数，防止极小功率区间不可达或 GPU 将次正规阈值冲零；之后按修正后的表计算 PDF。修正只改变提议概率，不改发光，生产继续渲染并按累计修正表数的倍增输出 `Warning PT-010`，包含表项数及最大单表概率转移量。不同采样域避免已知的单标量残差支持损失，但单表边际校验不证明有限多维序列的完全独立或任意有限前缀已收敛。实际支持、PDF 接线、正常 Z-Sobol 的逐灯统计和完整图像分别验证。
 

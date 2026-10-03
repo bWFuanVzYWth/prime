@@ -283,6 +283,7 @@ mod tests {
     #[ignore = "requires Vulkan host-visible memory; checks exclusive mapped writes and failure reuse"]
     fn gpu_mapped_writes_preserve_neighbor_leases_and_recover_unsubmitted_failures() {
         let context = Context::new().unwrap();
+        context.set_diagnostics(true);
         let workers = prime_scene::workers::CpuWorkers::new(4).unwrap();
         let mut arena = Arena::new(&context, true);
         let mut a = arena.allocate(&context, 32_768, 16).unwrap();

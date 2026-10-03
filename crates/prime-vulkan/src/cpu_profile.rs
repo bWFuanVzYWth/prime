@@ -1,4 +1,4 @@
-//! Always-on coarse host CPU timings; aggregation output remains opt-in. Stages are
+//! Opt-in host CPU timings. Disabled stages do not read clocks. Stages are
 //! disjoint children of record_total; none measures GPU execution or the caller's eventual submission.
 use std::{fmt::Write, time::Instant};
 
@@ -57,19 +57,72 @@ const BATCH: u64 = 120;
 
 #[derive(Default)]
 pub(crate) struct FrameCpu {
+    enabled: bool,
     ns: [u64; STAGES.len()],
     pub static_updates: u64,
     pub tlas_rebuilds: u64,
 }
+
+pub(crate) struct Timer {
+    start: Option<Instant>,
+    span: Option<prime_diagnostics::SpanGuard>,
+}
+impl Drop for Timer {
+    fn drop(&mut self) {
+        // An unfinished stage means recording returned early. The original start
+        // is still useful, but it must not be exported as a successful stage.
+        if let Some(span) = &mut self.span {
+            span.fail();
+        }
+    }
+}
+
 impl FrameCpu {
+    pub fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            ..Default::default()
+        }
+    }
+
     #[inline]
-    pub fn start(&self) -> Instant {
-        Instant::now()
+    pub fn start(&self) -> Timer {
+        let start = self.enabled.then(Instant::now);
+        Timer {
+            start,
+            span: start.map(|start| prime_diagnostics::scope_at("vk.stage", start)),
+        }
     }
     #[inline]
-    pub fn finish(&mut self, stage: Stage, start: Instant) {
-        let ns = start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+    pub fn finish(&mut self, stage: Stage, mut timer: Timer) {
+        let Some(start) = timer.start else {
+            return;
+        };
+        let elapsed = start.elapsed();
+        let ns = elapsed.as_nanos().min(u128::from(u64::MAX)) as u64;
         self.ns[stage as usize] = self.ns[stage as usize].saturating_add(ns);
+        if let Some(mut span) = timer.span.take() {
+            span.rename(STAGES[stage as usize]);
+            if matches!(stage, Stage::Static) {
+                span.count("updates", self.static_updates);
+            }
+            if matches!(stage, Stage::Tlas) {
+                span.count("rebuilds", self.tlas_rebuilds);
+            }
+            span.finish_duration(elapsed);
+        }
+    }
+
+    pub fn finish_record(&mut self, mut timer: Timer, load: &[u64; LOADS.len()], success: bool) {
+        if let Some(span) = &mut timer.span {
+            for (name, count) in LOADS.into_iter().zip(load) {
+                span.count(name, *count);
+            }
+            if !success {
+                span.fail();
+            }
+        }
+        self.finish(Stage::Total, timer);
     }
 }
 
@@ -108,6 +161,15 @@ impl Default for CpuProfile {
     }
 }
 impl CpuProfile {
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.verbose = enabled && super::cpu_profile::enabled();
+        self.last = None;
+        self.frames = 0;
+        self.sum_ns.fill(0);
+        self.max_ns.fill(0);
+        self.max_load.fill(0);
+        self.sum_upload_bytes = 0;
+    }
     #[cfg(test)]
     pub fn pending_counters(&self) -> (u64, u64) {
         (self.completed, self.sum_upload_bytes)
@@ -122,6 +184,9 @@ impl CpuProfile {
         serial: u64,
         success: bool,
     ) {
+        if !frame.enabled {
+            return;
+        }
         self.last = Some(Snapshot {
             serial,
             success,
@@ -210,11 +275,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn coarse_timing_is_always_on_and_snapshot_survives_batch_reset() {
+    fn disabled_timing_skips_clocks_and_enabled_snapshot_survives_batch_reset() {
         let mut frame = FrameCpu::default();
+        let timer = frame.start();
+        assert!(timer.start.is_none());
+        assert!(timer.span.is_none());
+        frame.finish(Stage::Total, timer);
+        assert_eq!(frame.ns, [0; STAGES.len()]);
+        let mut frame = FrameCpu::new(true);
         frame.finish(
             Stage::Total,
-            frame.start() - std::time::Duration::from_millis(1),
+            Timer {
+                start: Some(Instant::now() - std::time::Duration::from_millis(1)),
+                span: None,
+            },
         );
         assert!(frame.ns[Stage::Total as usize] >= 1_000_000);
         frame.ns[Stage::Total as usize] = 4_000_000;

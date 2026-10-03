@@ -10,6 +10,7 @@ adapters/
   mc-26.3/                26.3 宿主字段/事件路由、动态源与 Vulkan 句柄绑定
 crates/
   prime-abi/               C 头生成的 POD/FFM 契约与受检查同步借用视图
+  prime-diagnostics/       按需任务上下文、线程缓冲、原始 CPU/GPU 事件与紧凑 JSON
   prime-minecraft/         MC 源协议、渲染范围、dirty/邻域调度、模型解释与同步编译
   prime-scene/             版本无关的场景、输入验证、增量与空间翻译
   prime-engine/            FFM、源适配上下文、场景和 renderer 生命周期

@@ -152,7 +152,8 @@ pub(super) struct Geometry {
     static_count: u64,
     materials: [MaterialArena; crate::packing::FORMATS],
     pub static_bases: Buffer,
-    light_grid: crate::light_grid::LightGrid,
+    light_sampler: crate::light_sampler::LightSampler,
+    light_sampling: prime_scene::settings::LightSampling,
     next_light_key: u64,
     has_surfaces: bool,
     has_compounds: bool,
@@ -196,7 +197,15 @@ impl Geometry {
         cell_budget: usize,
     ) -> Result<Self, String> {
         let resources = crate::scene_resources::SceneResources::new(context, scene)?;
-        Self::new_with_resources(context, scene, workers, enabled, cell_budget, resources)
+        Self::new_with_resources(
+            context,
+            scene,
+            workers,
+            enabled,
+            cell_budget,
+            resources,
+            prime_scene::settings::LightSampling::Grid,
+        )
     }
     pub fn new_with_resources(
         context: &Arc<Context>,
@@ -205,6 +214,7 @@ impl Geometry {
         enabled: bool,
         cell_budget: usize,
         resources: crate::scene_resources::SharedResources,
+        light_sampling: prime_scene::settings::LightSampling,
     ) -> Result<Self, String> {
         let mut geometry = Self {
             workers: workers.clone(),
@@ -250,7 +260,8 @@ impl Geometry {
                 vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                 false,
             )?,
-            light_grid: crate::light_grid::LightGrid::new(context),
+            light_sampler: crate::light_sampler::LightSampler::new(context, light_sampling),
+            light_sampling,
             next_light_key: 1,
             has_surfaces: false,
             has_compounds: false,
@@ -286,7 +297,6 @@ impl Geometry {
         }
         self.uploads.begin(completed, serial);
         self.resources.borrow_mut().begin(context, completed);
-        self.light_grid.begin_frame(completed, serial);
     }
     #[cfg(test)]
     pub fn assert_incremental_workspaces(&self) -> (usize, u64) {
@@ -365,8 +375,8 @@ impl Geometry {
     }
     pub fn shader_variant(&self) -> usize {
         if self.has_optics {
-            4 + usize::from(self.light_grid.has_lights())
-        } else if self.light_grid.has_lights() {
+            4 + usize::from(self.light_sampler.has_lights)
+        } else if self.light_sampler.has_lights {
             3
         } else if self.has_compounds || self.textures().sprites != 0 {
             2
@@ -395,6 +405,10 @@ impl Geometry {
         scene: SceneInput<'_>,
         cell_budget: usize,
     ) -> Result<bool, String> {
+        let mut plan_trace = prime_diagnostics::scope("geom.plan");
+        plan_trace.fail();
+        plan_trace.count("cells", self.clusters.len() as u64);
+        plan_trace.count("budget", cell_budget as u64);
         if scene.anchor.iter().any(|v| !v.is_finite()) {
             return Err("Invalid scene anchor".into());
         }
@@ -460,6 +474,13 @@ impl Geometry {
         let mut plan = self.static_planner.plan_input_limited(scene, cell_budget)?;
         plan.placements_changed |= instance_flags_changed;
         let published_changed = plan.content_changed;
+        plan_trace.count("new", plan.geometry.len() as u64);
+        plan_trace.count("del", plan.removed.len() as u64);
+        plan_trace.succeed();
+        drop(plan_trace);
+        let mut compile_trace = prime_diagnostics::scope("geom.compile");
+        compile_trace.fail();
+        compile_trace.count("cells", plan.geometry.len() as u64);
         self.workers.batches_mut(
             &mut self.surface_compilers,
             &mut plan.geometry,
@@ -482,6 +503,10 @@ impl Geometry {
                 Ok(())
             },
         )?;
+        compile_trace.succeed();
+        drop(compile_trace);
+        let mut material_trace = prime_diagnostics::scope("geom.material");
+        material_trace.fail();
         self.static_occlusion_changed |= !plan.removed.is_empty()
             || plan.geometry.iter().any(|update| {
                 self.clusters.get(&update.key).is_none_or(|old| {
@@ -590,6 +615,9 @@ impl Geometry {
                 )?;
             }
         }
+        material_trace.count("cells", allocated_changes.len() as u64);
+        material_trace.succeed();
+        drop(material_trace);
         // Each wave completes CPU preparation synchronously. Its GPU resources retain
         // their real submission lifetime; wave size is not a live-allocation bound.
         // Newly recorded queries stay pending until this update's completion proof.
@@ -602,6 +630,10 @@ impl Geometry {
                     .iter()
                     .map(|a| u64::from(a.records.count) * record_bytes(a.format))
                     .sum();
+                let mut pack_trace = prime_diagnostics::scope("geom.pack");
+                pack_trace.fail();
+                pack_trace.count("bytes", bytes);
+                pack_trace.count("ranges", allocations.len() as u64);
                 let mut upload = self.uploads.allocate(context, bytes, 16)?;
                 upload.write_with(|output| {
                     let mut remaining = output;
@@ -622,6 +654,10 @@ impl Geometry {
                     }
                     Ok(())
                 })?;
+                pack_trace.succeed();
+                drop(pack_trace);
+                let mut omm_trace = prime_diagnostics::scope("geom.omm");
+                omm_trace.fail();
                 let mut micromaps = Vec::with_capacity(allocations.len());
                 let mut omm_textures = BTreeSet::new();
                 let mut omm_counts = [0u64; 4];
@@ -638,24 +674,30 @@ impl Geometry {
                         && geometry.flags == 1
                         && let Some(templates) = &resources.templates
                     {
-                        let start = std::time::Instant::now();
+                        let start = context.diagnostics_enabled().then(std::time::Instant::now);
                         let data = templates.bind(plan, group);
-                        self.omm_prepare_ns[1] += start.elapsed().as_nanos() as u64;
+                        if let Some(start) = start {
+                            self.omm_prepare_ns[1] += start.elapsed().as_nanos() as u64;
+                        }
                         data
                     } else {
                         None
                     };
                     let prepared = if let Some(data) = data {
                         omm_textures.extend(data.textures.iter().copied());
-                        self.omm_work_counts[1] += data.indices.len() as u64;
-                        let start = std::time::Instant::now();
+                        if context.diagnostics_enabled() {
+                            self.omm_work_counts[1] += data.indices.len() as u64;
+                        }
+                        let start = context.diagnostics_enabled().then(std::time::Instant::now);
                         let prepared = resources.pool.bind(
                             context,
                             &mut self.builds,
                             &mut self.uploads,
                             &data.indices,
                         )?;
-                        self.omm_prepare_ns[1] += start.elapsed().as_nanos() as u64;
+                        if let Some(start) = start {
+                            self.omm_prepare_ns[1] += start.elapsed().as_nanos() as u64;
+                        }
                         if let Some(binding) = &prepared {
                             for (count, value) in omm_counts.iter_mut().zip(binding.stats) {
                                 *count += value;
@@ -667,6 +709,12 @@ impl Geometry {
                     };
                     micromaps.push(prepared);
                 }
+                omm_trace.count("ranges", micromaps.len() as u64);
+                omm_trace.succeed();
+                drop(omm_trace);
+                let mut as_trace = prime_diagnostics::scope("geom.as");
+                as_trace.fail();
+                as_trace.count("ranges", allocations.len() as u64);
                 let mut geometries = Vec::with_capacity(allocations.len());
                 let mut counts = Vec::with_capacity(allocations.len());
                 for (range_index, ((geometry, _), &allocation)) in update
@@ -729,7 +777,11 @@ impl Geometry {
                     generation,
                 ));
                 uploads.push(upload);
+                as_trace.succeed();
             }
+            let mut command_trace = prime_diagnostics::scope("geom.cmd");
+            command_trace.fail();
+            command_trace.count("cells", prepared.len() as u64);
             let queries = crate::compaction::QueryPool::new(context, prepared.len())?;
             let handles: Vec<_> = prepared
                 .iter()
@@ -790,6 +842,11 @@ impl Geometry {
             for upload in uploads {
                 self.uploads.retire(upload);
             }
+            command_trace.succeed();
+            drop(command_trace);
+            let mut publish_trace = prime_diagnostics::scope("geom.publish");
+            publish_trace.fail();
+            publish_trace.count("cells", prepared.len() as u64);
             for (key, allocations, build, maps, omm_textures, omm_counts, generation) in prepared {
                 let (update, plans, _) = batch.iter().find(|(u, _, _)| u.key == key).unwrap();
                 // Every material range keeps its source mesh's canonical emitter IDs.
@@ -804,6 +861,7 @@ impl Geometry {
                             mesh,
                             &resources.textures.indices,
                             self.next_light_key,
+                            self.light_sampling == prime_scene::settings::LightSampling::Tree,
                         )?
                         .map(Rc::new)
                     } else {
@@ -853,10 +911,21 @@ impl Geometry {
                 }
                 self.clusters.insert(key, cluster);
             }
+            publish_trace.succeed();
         }
+        let mut retire_trace = prime_diagnostics::scope("geom.retire");
         resources.collect();
         drop(allocated_changes);
-        let compacted = self.compact(context, cell_budget)?;
+        retire_trace.count("cells", self.clusters.len() as u64);
+        drop(retire_trace);
+        let compacted = {
+            let mut compact_trace = prime_diagnostics::scope("geom.compact");
+            compact_trace.fail();
+            let compacted = self.compact(context, cell_budget)?;
+            compact_trace.count("changed", u64::from(compacted));
+            compact_trace.succeed();
+            compacted
+        };
         plan.placements_changed |= compacted;
         self.top_dirty |= compacted;
         if !plan.placements_changed {
@@ -871,14 +940,25 @@ impl Geometry {
             return Ok(false);
         }
         if lights_changed {
+            let mut lights_trace = prime_diagnostics::scope("geom.lights");
+            lights_trace.fail();
+            lights_trace.count("pages", self.light_sources.len() as u64);
             let sources = self
                 .light_sources
                 .iter()
                 .map(|(&key, (origin, page))| (key, (*origin, page.as_ref())))
                 .collect();
-            self.light_grid
-                .update(context, scene.anchor, &sources, &mut self.uploads)?;
+            self.light_sampler.update(
+                context,
+                scene.anchor,
+                &sources,
+                &mut self.uploads,
+                self.completed,
+            )?;
+            lights_trace.succeed();
         }
+        let mut directory_trace = prime_diagnostics::scope("geom.dir");
+        directory_trace.fail();
         if self.anchor != scene.anchor {
             directory_changed.extend(self.clusters.keys().copied());
         }
@@ -904,7 +984,7 @@ impl Geometry {
                 row[16..20].copy_from_slice(
                     &light
                         .as_ref()
-                        .map_or(0, |l| self.light_grid.first_emitter(l.key))
+                        .map_or(0, |l| self.light_sampler.first_emitter(l.key))
                         .to_le_bytes(),
                 );
                 row[24..32].copy_from_slice(
@@ -946,8 +1026,8 @@ impl Geometry {
             )?;
         }
         self.directory.light_header(
-            self.light_grid.world_count(),
-            self.light_grid.header_address(),
+            self.light_sampler.world_count(),
+            self.light_sampler.header_address(),
         );
         let bytes = self.directory.bytes.len() * crate::surface::PAGE_BYTES;
         if bytes as u64 > self.static_bases.size {
@@ -964,6 +1044,7 @@ impl Geometry {
         self.directory
             .dirty_records
             .retain(|&i| i < self.directory.bytes.len());
+        directory_trace.count("rows", self.directory.dirty_records.len() as u64);
         if !self.directory.dirty_records.is_empty() {
             let mut upload = self.uploads.allocate(
                 context,
@@ -1021,6 +1102,7 @@ impl Geometry {
         self.resource_occlusion_revision = resources.occlusion_revision;
         self.omm_revision = resources.omm_revision;
         resources.coverage_changed.clear();
+        directory_trace.succeed();
         Ok(published_changed)
     }
 

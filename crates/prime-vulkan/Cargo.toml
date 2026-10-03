@@ -14,6 +14,7 @@ light-sampling-bench = []
 [dependencies]
 ash = { workspace = true }
 prime_scene = { workspace = true }
+prime_diagnostics = { workspace = true }
 safetensors = "0.8.0"
 zstd = { version = "0.14.0", default-features = false }
 

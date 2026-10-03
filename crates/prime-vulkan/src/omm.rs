@@ -86,12 +86,15 @@ impl Pool {
         indices: &[u32],
     ) -> Result<Option<Prepared>, String> {
         let mut counts = BTreeMap::new();
+        let diagnostics = context.diagnostics_enabled();
         let mut blocks = BTreeSet::new();
         let mut stats = [0; 4];
         let mut useful = false;
         for &index in indices {
             if index >= 0xffff_fffc {
-                stats[2] += 1;
+                if diagnostics {
+                    stats[2] += 1;
+                }
                 useful |= index != UNKNOWN;
                 continue;
             }
@@ -104,7 +107,7 @@ impl Pool {
                 .entry((u32::from(block.format), u32::from(block.level)))
                 .or_default() += 1;
             useful = true;
-            if blocks.insert(index) {
+            if diagnostics && blocks.insert(index) {
                 stats[usize::from(block.format == 2)] += 1;
                 let bits = if block.format == 2 { 2 } else { 1 };
                 stats[3] += ((1_u64 << (2 * block.level)) * bits).div_ceil(8);

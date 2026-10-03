@@ -51,6 +51,7 @@ public final class PrimeClient implements ClientModInitializer {
     private final RenderProfile profile = new RenderProfile();
     private long worldRenderStart;
     private long sourceFrameSequence;
+    private Diagnostics.Scope extractionScope;
     private HostVulkanRenderer renderer;
     private long sentEpoch, sentAtlas;
     private final FrameSequence frames = new FrameSequence();
@@ -93,6 +94,7 @@ public final class PrimeClient implements ClientModInitializer {
             INSTANCE.offline.request(false);
     }
     public static void restoreSettings() {
+        Diagnostics.setCaptureRequested(false);
         updateSettings(RenderSettings.defaults());
         INSTANCE.offline.request(false);
         INSTANCE.diagnosticView = RenderSettings.View.OUTPUT;
@@ -124,6 +126,8 @@ public final class PrimeClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        Diagnostics.setOutputDirectory(
+                FabricLoader.getInstance().getGameDir().resolve("artifacts/performance"));
         var loaded = SettingsFile.load(
                 FabricLoader.getInstance().getConfigDir().resolve("primept.properties"));
         INSTANCE.settings = loaded.settings();
@@ -170,8 +174,12 @@ public final class PrimeClient implements ClientModInitializer {
 
     public static void render(CameraRenderState camera, RenderTarget destination,
                               float solarHourAngle) {
-        if (INSTANCE.slot != null && INSTANCE.slot.active() != null)
-            INSTANCE.slot.active().render(camera, destination, solarHourAngle);
+        try {
+            if (INSTANCE.slot != null && INSTANCE.slot.active() != null)
+                INSTANCE.slot.active().render(camera, destination, solarHourAngle);
+        } finally {
+            Diagnostics.endFrame();
+        }
     }
 
     public static boolean captureResourcesEnabled() {
@@ -201,66 +209,81 @@ public final class PrimeClient implements ClientModInitializer {
 
     public static void beginFrame() {
         INSTANCE.sourceFrameSequence = Math.incrementExact(INSTANCE.sourceFrameSequence);
+        Diagnostics.beginFrame(INSTANCE.sourceFrameSequence, Minecraft.getInstance().level != null);
+        INSTANCE.extractionScope = Diagnostics.span("extraction");
         INSTANCE.profile.beginExtraction();
         INSTANCE.advanceRenderer();
     }
 
     public static void endExtraction() {
         INSTANCE.profile.endExtraction();
+        if (INSTANCE.extractionScope != null) {
+            INSTANCE.extractionScope.close();
+            INSTANCE.extractionScope = null;
+        }
     }
 
     private void advanceRenderer() {
-        if (!enabled)
-            return;
-        if (Minecraft.getInstance().level == null)
-            return;
-        if (!HostVulkanRenderer.isVulkanHost()) {
-            if (!failed) {
-                failed = true;
-                requested = "vanilla";
-                CAPTURE.releaseSources();
-                DynamicTextures.releaseSources();
-                BlockGeometryCache.releaseToVanilla();
-                LOGGER.error(
-                        "Prime requires Minecraft's Vulkan backend; the current vanilla renderer remains active");
+        try (var diagnostic = Diagnostics.span("world_prepare")) {
+            try {
+                if (!enabled)
+                    return;
+                if (Minecraft.getInstance().level == null)
+                    return;
+                if (!HostVulkanRenderer.isVulkanHost()) {
+                    if (!failed) {
+                        failed = true;
+                        requested = "vanilla";
+                        CAPTURE.releaseSources();
+                        DynamicTextures.releaseSources();
+                        BlockGeometryCache.releaseToVanilla();
+                        LOGGER.error(
+                                "Prime requires Minecraft's Vulkan backend; the current vanilla renderer remains active");
+                    }
+                    return;
+                }
+                if (slot == null)
+                    slot = new RendererSlot<>();
+                if (slot.state() == RendererSlot.State.BLOCKED)
+                    return;
+                try {
+                    if (slot.state() == RendererSlot.State.EMPTY &&
+                        !ExclusiveTerrainCapture.vanillaSuspended()) {
+                        // The host creates its initial world renderer before our first frame. Adopt it before retiring it.
+                        slot.select("vanilla", () -> new VanillaBackend(true));
+                    }
+                    Supplier<? extends WorldRenderer> factory = backends.get(requested);
+                    if (factory == null)
+                        throw new IllegalArgumentException("Unknown renderer: " + requested);
+                    if (!requested.equals(slot.key()) && !requested.equals("vanilla"))
+                        HostVulkanRenderer.requireAvailable();
+                    String previous = slot.key();
+                    slot.select(requested, factory);
+                    unavailable = false;
+                    if (!requested.equals(previous))
+                        LOGGER.info("Renderer switched: {} -> {} (old owner retired)", previous,
+                                    requested);
+                    if (resourceReload != null && resourceReload.isDone()) {
+                        resourceReload.join();
+                        resourceReload = null;
+                        if (CAPTURE.atlas() == null)
+                            throw new IllegalStateException(
+                                    "Resource reload produced no captured block atlas");
+                    }
+                    if (renderer != null && resourceReload == null) {
+                        advancePrimeMode();
+                        // Complete immutable resource preparation before host extraction or section demand.
+                        if (!offline.active() && CAPTURE.atlas() != null)
+                            prepareNativeSources();
+                    }
+                } catch (Exception | LinkageError exception) {
+                    diagnostic.fail();
+                    failRenderer(exception);
+                }
+            } catch (RuntimeException | Error failure) {
+                diagnostic.fail();
+                throw failure;
             }
-            return;
-        }
-        if (slot == null)
-            slot = new RendererSlot<>();
-        if (slot.state() == RendererSlot.State.BLOCKED)
-            return;
-        try {
-            if (slot.state() == RendererSlot.State.EMPTY &&
-                !ExclusiveTerrainCapture.vanillaSuspended()) {
-                // The host creates its initial world renderer before our first frame. Adopt it before retiring it.
-                slot.select("vanilla", () -> new VanillaBackend(true));
-            }
-            Supplier<? extends WorldRenderer> factory = backends.get(requested);
-            if (factory == null)
-                throw new IllegalArgumentException("Unknown renderer: " + requested);
-            if (!requested.equals(slot.key()) && !requested.equals("vanilla"))
-                HostVulkanRenderer.requireAvailable();
-            String previous = slot.key();
-            slot.select(requested, factory);
-            unavailable = false;
-            if (!requested.equals(previous))
-                LOGGER.info("Renderer switched: {} -> {} (old owner retired)", previous, requested);
-            if (resourceReload != null && resourceReload.isDone()) {
-                resourceReload.join();
-                resourceReload = null;
-                if (CAPTURE.atlas() == null)
-                    throw new IllegalStateException(
-                            "Resource reload produced no captured block atlas");
-            }
-            if (renderer != null && resourceReload == null) {
-                advancePrimeMode();
-                // Complete immutable resource preparation before host extraction or section demand.
-                if (!offline.active() && CAPTURE.atlas() != null)
-                    prepareNativeSources();
-            }
-        } catch (Exception | LinkageError exception) {
-            failRenderer(exception);
         }
     }
 
@@ -298,7 +321,7 @@ public final class PrimeClient implements ClientModInitializer {
 
     public static void beginWorldRender() {
         INSTANCE.skippedWorldRaster = ownsWorldRendering();
-        INSTANCE.worldRenderStart = System.nanoTime();
+        INSTANCE.worldRenderStart = Diagnostics.clock();
     }
 
     public static boolean skipWorldRaster() {
@@ -313,111 +336,134 @@ public final class PrimeClient implements ClientModInitializer {
 
     /** Called before host extraction, so the native source owner can populate the same frame. */
     public static NativeBridge prepareNativeSources() {
-        var owner = INSTANCE;
-        if (!exclusiveFrameReady() || owner.renderer == null || owner.resourceReload != null)
-            return null;
-        var atlas = CAPTURE.atlas();
-        if (atlas == null)
-            return null;
-        long epoch = CAPTURE.epoch();
-        if (owner.sentEpoch != epoch) {
-            owner.renderer.reset(epoch);
-            owner.sentEpoch = epoch;
-            owner.sentAtlas = 0;
-            owner.frames.reset();
-            owner.reportedFrame = false;
-            owner.renderer.resetReadiness();
+        try (var diagnostic = Diagnostics.span("source_prepare")) {
+            try {
+                var owner = INSTANCE;
+                if (!exclusiveFrameReady() || owner.renderer == null ||
+                    owner.resourceReload != null)
+                    return null;
+                var atlas = CAPTURE.atlas();
+                if (atlas == null)
+                    return null;
+                long epoch = CAPTURE.epoch();
+                if (owner.sentEpoch != epoch) {
+                    owner.renderer.reset(epoch);
+                    owner.sentEpoch = epoch;
+                    owner.sentAtlas = 0;
+                    owner.frames.reset();
+                    owner.reportedFrame = false;
+                    owner.renderer.resetReadiness();
+                }
+                ExclusiveTerrainCapture.prepareResources(owner.renderer.sourceBridge());
+                owner.sentAtlas = atlas.version();
+                return owner.renderer.sourceBridge();
+
+            } catch (RuntimeException | Error failure) {
+                diagnostic.fail();
+                throw failure;
+            }
         }
-        ExclusiveTerrainCapture.prepareResources(owner.renderer.sourceBridge());
-        owner.sentAtlas = atlas.version();
-        return owner.renderer.sourceBridge();
     }
 
     private void renderFrame(CameraRenderState camera, RenderTarget destination,
                              float solarHourAngle) {
-        if (failed || resourceReload != null)
-            return;
-        try {
-            if (offline.active()) {
-                if (destination.width <= 0 || destination.height <= 0)
+        try (var diagnostic = Diagnostics.span("host_hook")) {
+            try {
+                diagnostic.count("w", destination.width);
+                diagnostic.count("h", destination.height);
+                diagnostic.count("offline", offline.active() ? 1 : 0);
+                if (failed || resourceReload != null)
                     return;
-                Packets.resizeFrozenFrame(renderer.frameBuffer(), destination.width,
-                                          destination.height,
-                                          frames.next(destination.width, destination.height));
-                var timing = profile.begin(worldRenderStart);
-                long started = System.nanoTime();
-                renderer.record(destination);
-                timing.nativeRender = System.nanoTime() - started;
-                profile.finish(timing, destination.width, destination.height, renderer);
-                return;
+                try {
+                    if (offline.active()) {
+                        if (destination.width <= 0 || destination.height <= 0)
+                            return;
+                        Packets.resizeFrozenFrame(
+                                renderer.frameBuffer(), destination.width, destination.height,
+                                frames.next(destination.width, destination.height));
+                        var timing = profile.begin(worldRenderStart);
+                        long started = Diagnostics.clock();
+                        renderer.record(destination);
+                        timing.nativeRender = Diagnostics.clock() - started;
+                        profile.finish(timing, destination.width, destination.height, renderer);
+                        return;
+                    }
+                    RuntimeException terrainFailure = ExclusiveTerrainCapture.failure();
+                    if (terrainFailure != null)
+                        throw terrainFailure;
+                    RuntimeException captureFailure = CAPTURE.failure();
+                    if (captureFailure != null)
+                        throw captureFailure;
+                    if (!camera.initialized || destination.width <= 0 || destination.height <= 0) {
+                        frames.reset();
+                        return;
+                    }
+                    float fov =
+                            (float)(2 * Math.atan(1.0 / Math.abs(camera.projectionMatrix.m11())));
+                    // initialized describes the camera entity; its perspective matrix can still be zero during world entry.
+                    if (!Float.isFinite(fov) || fov < 0.01f || fov >= 3.0f) {
+                        if (!reportedProjectionWait)
+                            LOGGER.info(
+                                    "Waiting for Minecraft's perspective camera before native rendering");
+                        reportedProjectionWait = true;
+                        return;
+                    }
+                    var atlas = CAPTURE.atlas();
+                    if (atlas == null)
+                        return;
+                    RenderProfile.Frame timing = profile.begin(worldRenderStart);
+                    long epoch = CAPTURE.epoch();
+                    if (sentEpoch != epoch) {
+                        reset(epoch, timing);
+                        sentEpoch = epoch;
+                        sentAtlas = 0;
+                        frames.reset();
+                        reportedFrame = false;
+                        renderer.resetReadiness();
+                    }
+                    if (sentAtlas != atlas.version()) {
+                        ExclusiveTerrainCapture.prepareResources(renderer.sourceBridge());
+                        sentAtlas = atlas.version();
+                        frames.reset();
+                    }
+                    timing.resourceSubmit = timing.submit;
+                    // Terrain is already synchronously published by the source request/response phase.
+                    int width = destination.width, height = destination.height;
+                    long phaseStart = Diagnostics.clock();
+                    renderer.submitDynamic(epoch);
+                    timing.dynamicSubmit = Diagnostics.clock() - phaseStart;
+                    var inverse = new Matrix4f(camera.viewRotationMatrix).invert();
+                    var forward = inverse.transformDirection(new Vector3f(0, 0, -1)).normalize();
+                    var right = inverse.transformDirection(new Vector3f(1, 0, 0)).normalize();
+                    var up = inverse.transformDirection(new Vector3f(0, 1, 0)).normalize();
+                    Packets.writeFrame(renderer.frameBuffer(), epoch, camera.pos.x, camera.pos.y,
+                                       camera.pos.z, components(forward), components(right),
+                                       components(up), fov, width, height,
+                                       frames.next(width, height), solarHourAngle);
+                    phaseStart = Diagnostics.clock();
+                    renderer.record(destination);
+                    timing.nativeRender = Diagnostics.clock() - phaseStart;
+                    if (!reportedFrame) {
+                        LOGGER.info(
+                                "Prime PT first world frame recorded: {}x{}, {} routed source sections, resource epoch {}",
+                                width, height, ExclusiveTerrainCapture.routedSections(), epoch);
+                        reportedFrame = true;
+                        renderer.enableWorldReplacementAfterCompletion();
+                    }
+                    profile.finish(timing, width, height, renderer);
+                } catch (Exception | LinkageError exception) {
+                    diagnostic.fail();
+                    failRenderer(exception);
+                }
+            } catch (RuntimeException | Error failure) {
+                diagnostic.fail();
+                throw failure;
             }
-            RuntimeException terrainFailure = ExclusiveTerrainCapture.failure();
-            if (terrainFailure != null)
-                throw terrainFailure;
-            RuntimeException captureFailure = CAPTURE.failure();
-            if (captureFailure != null)
-                throw captureFailure;
-            if (!camera.initialized || destination.width <= 0 || destination.height <= 0) {
-                frames.reset();
-                return;
-            }
-            float fov = (float)(2 * Math.atan(1.0 / Math.abs(camera.projectionMatrix.m11())));
-            // initialized describes the camera entity; its perspective matrix can still be zero during world entry.
-            if (!Float.isFinite(fov) || fov < 0.01f || fov >= 3.0f) {
-                if (!reportedProjectionWait)
-                    LOGGER.info(
-                            "Waiting for Minecraft's perspective camera before native rendering");
-                reportedProjectionWait = true;
-                return;
-            }
-            var atlas = CAPTURE.atlas();
-            if (atlas == null)
-                return;
-            RenderProfile.Frame timing = profile.begin(worldRenderStart);
-            long epoch = CAPTURE.epoch();
-            if (sentEpoch != epoch) {
-                reset(epoch, timing);
-                sentEpoch = epoch;
-                sentAtlas = 0;
-                frames.reset();
-                reportedFrame = false;
-                renderer.resetReadiness();
-            }
-            if (sentAtlas != atlas.version()) {
-                ExclusiveTerrainCapture.prepareResources(renderer.sourceBridge());
-                sentAtlas = atlas.version();
-                frames.reset();
-            }
-            timing.resourceSubmit = timing.submit;
-            // Terrain is already synchronously published by the source request/response phase.
-            int width = destination.width, height = destination.height;
-            long phaseStart = System.nanoTime();
-            renderer.submitDynamic(epoch);
-            timing.dynamicSubmit = System.nanoTime() - phaseStart;
-            var inverse = new Matrix4f(camera.viewRotationMatrix).invert();
-            var forward = inverse.transformDirection(new Vector3f(0, 0, -1)).normalize();
-            var right = inverse.transformDirection(new Vector3f(1, 0, 0)).normalize();
-            var up = inverse.transformDirection(new Vector3f(0, 1, 0)).normalize();
-            Packets.writeFrame(renderer.frameBuffer(), epoch, camera.pos.x, camera.pos.y,
-                               camera.pos.z, components(forward), components(right), components(up),
-                               fov, width, height, frames.next(width, height), solarHourAngle);
-            phaseStart = System.nanoTime();
-            renderer.record(destination);
-            timing.nativeRender = System.nanoTime() - phaseStart;
-            if (!reportedFrame) {
-                LOGGER.info(
-                        "Prime PT first world frame recorded: {}x{}, {} routed source sections, resource epoch {}",
-                        width, height, ExclusiveTerrainCapture.routedSections(), epoch);
-                reportedFrame = true;
-                renderer.enableWorldReplacementAfterCompletion();
-            }
-            profile.finish(timing, width, height, renderer);
-        } catch (Exception | LinkageError exception) {
-            failRenderer(exception);
         }
     }
 
     private void failRenderer(Throwable exception) {
+        Diagnostics.boundary("renderer_failure");
         failed = true;
         CAPTURE.disable();
         requested = "vanilla";
@@ -503,9 +549,9 @@ public final class PrimeClient implements ClientModInitializer {
         INSTANCE.frames.reset();
     }
     private void reset(long epoch, RenderProfile.Frame timing) {
-        long start = System.nanoTime();
+        long start = Diagnostics.clock();
         renderer.reset(epoch);
-        timing.submit += System.nanoTime() - start;
+        timing.submit += Diagnostics.clock() - start;
         ++timing.packets;
         timing.bytes += dev.primept.abi.PrimeAbi.PrimeReset.SIZE;
     }
@@ -515,6 +561,7 @@ public final class PrimeClient implements ClientModInitializer {
     }
 
     public static void resetWorld() {
+        Diagnostics.boundary("world_reset");
         var owner = INSTANCE;
         try {
             boolean resumeSources = owner.offline.active();
@@ -549,6 +596,8 @@ public final class PrimeClient implements ClientModInitializer {
         reportedProjectionWait = reportedFrame = false;
     }
     public static void close() {
+        endExtraction();
+        Diagnostics.boundary("client_exit");
         CAPTURE.disable();
         INSTANCE.closeResources();
         INSTANCE.profile.closeSamples();

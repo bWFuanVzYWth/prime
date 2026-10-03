@@ -1,5 +1,5 @@
 //! MC production C descriptors. All pointer borrows end at the synchronous boundary.
-use crate::ffi::{boundary, session};
+use crate::ffi::{boundary, session_named};
 use prime_abi::{minecraft, *};
 
 unsafe fn output(pointer: *mut PrimeMcRequests) -> Result<(), String> {
@@ -20,7 +20,7 @@ pub unsafe extern "C" fn prime_mc_resources(
 ) -> i32 {
     boundary(-1, || {
         let batch = unsafe { minecraft::Resources::read(batch)? };
-        session(handle, |engine| {
+        session_named(handle, "mc.resources", |engine| {
             engine.check_live_source()?;
             let result = engine
                 .minecraft
@@ -47,7 +47,7 @@ pub unsafe extern "C" fn prime_mc_plan(
     boundary(-1, || {
         unsafe { output(result)? };
         let batch = unsafe { minecraft::Plan::read(batch)? };
-        session(handle, |engine| {
+        session_named(handle, "mc.plan", |engine| {
             engine.check_live_source()?;
             engine.minecraft.plan_typed(
                 &batch,
@@ -74,7 +74,7 @@ macro_rules! accept {
             boundary(-1, || {
                 unsafe { output(result)? };
                 let batch = unsafe { minecraft::$view::read(batch)? };
-                session(handle, |engine| {
+                session_named(handle, stringify!($name), |engine| {
                     engine.check_live_source()?;
                     let old = engine.source.revision();
                     let accepted = engine.minecraft.$method(&batch, &mut engine.source);

@@ -26,7 +26,7 @@ impl TerrainContext {
         source_epoch: u64,
         cell_budget: usize,
     ) -> Result<&[u8], String> {
-        let start = Instant::now();
+        let start = self.stage_timer();
         if self.pending.is_some() || self.awaiting_colors.is_some() {
             return Err("previous source batch still awaiting completion".into());
         }
@@ -57,7 +57,7 @@ impl TerrainContext {
             return self.accept_colors(pages, scene);
         }
         self.tint_requests.clear();
-        let start = Instant::now();
+        let start = self.stage_timer();
         let pending = self
             .pending
             .as_ref()
@@ -279,7 +279,7 @@ impl TerrainContext {
     }
 
     fn accept_colors(&mut self, pages: &[&[u8]], scene: &mut SourceScene) -> Result<(), String> {
-        let start = Instant::now();
+        let start = self.stage_timer();
         let waiting = self.awaiting_colors.as_ref().unwrap();
         let (kind, expected) = match &waiting.stage {
             ColorStage::Sources => (3, self.stats.tint_requests),

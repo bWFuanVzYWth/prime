@@ -132,6 +132,11 @@ impl LightGrid {
     /// Complete live-page set. Errors leave live tables unchanged. Allocation of
     /// new emitter IDs precedes removals, so rollback never restores freed IDs.
     pub(crate) fn update(&mut self, inputs: &[PageInput<'_>]) -> Result<Changes, String> {
+        let mut trace = prime_diagnostics::scope("lg.cpu");
+        trace.fail();
+        trace.count("pg", inputs.len() as u64);
+        let mut diff = prime_diagnostics::scope("lg.diff");
+        diff.fail();
         let mut incoming = BTreeMap::new();
         for input in inputs {
             if incoming.insert(input.key, input).is_some() {
@@ -172,10 +177,19 @@ impl LightGrid {
             })
             .map(|(_, &slot)| slot)
             .collect();
+        diff.count("add", pending.len() as u64);
+        diff.count("rm", removed.len() as u64);
+        diff.succeed();
+        drop(diff);
         if removed.is_empty() && pending.is_empty() {
+            trace.count("changed", 0);
+            trace.succeed();
             return Ok(Changes::default());
         }
+        trace.count("changed", 1);
 
+        let mut world = prime_diagnostics::scope("lg.world");
+        world.fail();
         // Plan page slots and the world PMF before changing any live ownership.
         let mut free_pages = self.free_pages.clone();
         for &slot in &removed {
@@ -212,10 +226,14 @@ impl LightGrid {
         if roots.len() > MAX_ALIAS {
             return Err("Global page alias exceeds the 24-bit column capacity".into());
         }
+        world.count("pg", roots.len() as u64);
+        let mut world_alias_scope = prime_diagnostics::scope("lg.world_alias");
+        world_alias_scope.count("ent", roots.len() as u64);
         let (world_alias, world_pdf) = alias_table(
             &roots.iter().map(|&(_, power)| power).collect::<Vec<_>>(),
             &mut repairs,
         );
+        drop(world_alias_scope);
         let live_count: u64 = self
             .pages
             .iter()
@@ -253,6 +271,12 @@ impl LightGrid {
                 return Err("Local light alias exceeds the 24-bit column capacity".into());
             }
         }
+        world.count("emit", live_count);
+        world.succeed();
+        drop(world);
+        let mut ids = prime_diagnostics::scope("lg.ids");
+        ids.fail();
+        ids.count("add", pending.len() as u64);
         let mut allocated = Vec::new();
         for p in &mut pending {
             if !p.reuse_range {
@@ -272,6 +296,9 @@ impl LightGrid {
             }
         }
 
+        ids.succeed();
+        drop(ids);
+        let mut apply = prime_diagnostics::scope("lg.apply");
         let mut dirty = BTreeSet::new();
         let mut ranges = Vec::new();
         let reused: BTreeSet<_> = pending
@@ -352,11 +379,20 @@ impl LightGrid {
                 }
             })
             .collect();
+        apply.count("dc", dirty.len() as u64);
+        apply.count("ranges", ranges.len() as u64);
+        drop(apply);
+        let mut local = prime_diagnostics::scope("lg.cell_alias");
+        local.count("dc", dirty.len() as u64);
+        let mut alias_entries = 0_u64;
         for key in &dirty {
             let entries = self.cells.get_mut(key).unwrap();
             if entries.is_empty() {
                 self.cells.remove(key);
                 continue;
+            }
+            if local.enabled() {
+                alias_entries += entries.len() as u64;
             }
             entries.sort_unstable_by_key(|e| e.light);
             let center = key.map(|v| (f64::from(v) + 0.5) * f64::from(CELL_SIZE));
@@ -380,6 +416,8 @@ impl LightGrid {
                 entry.pdf = pdf;
             }
         }
+        local.count("ent", alias_entries);
+        drop(local);
         ranges.sort_unstable_by_key(|r| r.start);
         let mut emitter_ranges: Vec<Range<u32>> = Vec::new();
         for range in ranges {
@@ -391,6 +429,9 @@ impl LightGrid {
                 emitter_ranges.push(range);
             }
         }
+        trace.count("dc", dirty.len() as u64);
+        trace.count("ranges", emitter_ranges.len() as u64);
+        trace.succeed();
         Ok(Changes {
             world: true,
             emitter_ranges,
@@ -725,6 +766,114 @@ mod tests {
         assert!(all_removed.world && grid.world.is_empty() && grid.cells.is_empty());
         assert!(grid.refs.iter().all(|r| r.pmf == 0.0));
         assert!(!grid.update(&[]).unwrap().world);
+    }
+
+    #[test]
+    fn diagnostics_preserve_tables_and_cover_changed_noop_and_failed_updates() {
+        let a = [light([8.0; 3], 1.0), light([9.0; 3], 2.0)];
+        let b = [light([1000.0, 8.0, 8.0], 3.0)];
+        let pa = input(1, [0.0; 3], &a);
+        let pb = input(2, [0.0; 3], &b);
+        let recorder = prime_diagnostics::Recorder::new();
+        let mut expected = LightGrid::default();
+        expected.update(&[pa, pb]).unwrap();
+        // An update without a capture context produced no records or codebook entries.
+        let empty: serde_json::Value =
+            serde_json::from_str(&recorder.drain_json().unwrap()).unwrap();
+        assert!(empty["cpu"].as_array().unwrap().is_empty());
+        assert!(empty["dict"]["n"].as_array().unwrap().is_empty());
+        let mut actual = LightGrid::default();
+        let parent;
+        {
+            let _context = recorder.enter(301);
+            let dispatch = prime_diagnostics::scope("test.update");
+            parent = dispatch.id().unwrap();
+            actual.update(&[pa, pb]).unwrap();
+        }
+        assert_eq!(actual.refs, expected.refs);
+        assert_eq!(actual.emitter_alias, expected.emitter_alias);
+        assert_eq!(actual.world, expected.world);
+        assert_eq!(actual.cells, expected.cells);
+        for key in [1, 2] {
+            assert_eq!(
+                actual.page(key).unwrap().first,
+                expected.page(key).unwrap().first
+            );
+            assert_eq!(
+                actual.page(key).unwrap().pdf.to_bits(),
+                expected.page(key).unwrap().pdf.to_bits()
+            );
+        }
+        {
+            let _context = recorder.enter(302);
+            assert!(!actual.update(&[pb, pa]).unwrap().world);
+        }
+        {
+            let _context = recorder.enter(303);
+            assert!(actual.update(&[pa, pa]).is_err());
+        }
+        assert_eq!(actual.refs, expected.refs);
+        assert_eq!(actual.emitter_alias, expected.emitter_alias);
+        assert_eq!(actual.world, expected.world);
+        assert_eq!(actual.cells, expected.cells);
+        let json: serde_json::Value =
+            serde_json::from_str(&recorder.drain_json().unwrap()).unwrap();
+        let names = json["dict"]["n"].as_array().unwrap();
+        let keys = json["dict"]["k"].as_array().unwrap();
+        let rows = json["cpu"].as_array().unwrap();
+        let name =
+            |row: &serde_json::Value| names[row["n"].as_u64().unwrap() as usize].as_str().unwrap();
+        let field = |row: &serde_json::Value, key: &str| {
+            row["a"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find_map(|pair| {
+                    (keys[pair[0].as_u64().unwrap() as usize] == key)
+                        .then(|| pair[1].as_u64().unwrap())
+                })
+                .unwrap()
+        };
+        let root = rows
+            .iter()
+            .find(|row| row["f"] == 301 && name(row) == "lg.cpu")
+            .unwrap();
+        assert_eq!(root["p"].as_u64(), Some(parent));
+        assert_eq!(root["ok"], 1);
+        assert_eq!(field(root, "pg"), 2);
+        for stage in ["lg.diff", "lg.world", "lg.ids", "lg.apply", "lg.cell_alias"] {
+            let row = rows
+                .iter()
+                .find(|row| row["f"] == 301 && name(row) == stage)
+                .unwrap();
+            assert_eq!(row["p"], root["i"]);
+            assert_eq!(row["ok"], 1);
+        }
+        let local = rows
+            .iter()
+            .find(|row| row["f"] == 301 && name(row) == "lg.cell_alias")
+            .unwrap();
+        assert_eq!(
+            field(local, "ent"),
+            expected
+                .cells
+                .values()
+                .map(|cell| cell.len() as u64)
+                .sum::<u64>()
+        );
+        let noop: Vec<_> = rows.iter().filter(|row| row["f"] == 302).collect();
+        assert_eq!(noop.len(), 2);
+        assert!(
+            noop.iter()
+                .all(|row| matches!(name(row), "lg.cpu" | "lg.diff") && row["ok"] == 1)
+        );
+        let failed: Vec<_> = rows.iter().filter(|row| row["f"] == 303).collect();
+        assert_eq!(failed.len(), 2);
+        assert!(
+            failed
+                .iter()
+                .all(|row| matches!(name(row), "lg.cpu" | "lg.diff") && row["ok"] == 0)
+        );
     }
 
     #[test]

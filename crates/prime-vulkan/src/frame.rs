@@ -1,5 +1,6 @@
 use super::*;
 use crate::cpu_profile::{CpuProfile, FrameCpu, Stage};
+use crate::gpu_timing::{QUERY_COUNT, Stage as GpuStage};
 use prime_scene::incremental::SceneInput;
 
 struct HostRecordScope(Arc<Context>);
@@ -320,6 +321,7 @@ impl Renderer {
                 && reconstruction
                     .as_ref()
                     .is_some_and(|rr| rr.frame_generation_supported()),
+            settings.light_sampling,
             &energy_lut,
         )?);
         let mut result = Self {
@@ -363,24 +365,17 @@ impl Renderer {
             fg_prepared_serial: 0,
             fg_prepared: false,
             pending_temporal_serial: 0,
-            query_serials: [0; FRAME_SLOTS],
+            query_frames: std::array::from_fn(|_| Default::default()),
             gpu_intervals: [GpuIntervals::default(); FRAME_SLOTS],
             host_query: vk::QueryPool::null(),
+            gpu_error_reported: false,
             last_gpu: GpuIntervals::default(),
             descriptor_keys: [[0; 7]; FRAME_SLOTS],
             cpu_profile,
         };
-        if result.context.is_borrowed() && result.context.timestamp_bits > 0 {
-            result.host_query = unsafe {
-                result.context.device.create_query_pool(
-                    &vk::QueryPoolCreateInfo::default()
-                        .query_type(vk::QueryType::TIMESTAMP)
-                        .query_count((FRAME_SLOTS * 3) as u32),
-                    None,
-                )
-            }
-            .map_err(|e| error("Create host timing queries", e))?;
-        }
+        result.set_diagnostics(
+            crate::cpu_profile::enabled() || result.context.diagnostics_enabled(),
+        )?;
         eprintln!(
             "[Prime PT] Vulkan hardware ray queries: {}; host recording={}",
             result.context.name,
@@ -390,6 +385,110 @@ impl Renderer {
             result.prepare_fixed_resources()?;
         }
         Ok(result)
+    }
+
+    /// Optional observability changes at a host frame boundary. Disabling never
+    /// waits for pending work; retirement uses the existing serial completion proof.
+    pub fn set_diagnostics(&mut self, enabled: bool) -> Result<(), String> {
+        if enabled == self.context.diagnostics_enabled() {
+            return Ok(());
+        }
+        self.gpu_error_reported = false;
+        if !enabled {
+            self.finish_diagnostics_capture()?;
+            if self.host_query != vk::QueryPool::null() {
+                self.context.retire_query_pool(std::mem::replace(
+                    &mut self.host_query,
+                    vk::QueryPool::null(),
+                ));
+            }
+            self.query_frames = std::array::from_fn(|_| Default::default());
+        } else if self.context.is_borrowed() && self.context.timestamp_bits > 0 {
+            match unsafe {
+                self.context.device.create_query_pool(
+                    &vk::QueryPoolCreateInfo::default()
+                        .query_type(vk::QueryType::TIMESTAMP)
+                        .query_count(FRAME_SLOTS as u32 * QUERY_COUNT),
+                    None,
+                )
+            } {
+                Ok(pool) => self.host_query = pool,
+                Err(vk::Result::ERROR_DEVICE_LOST) => {
+                    return Err(error(
+                        "Create diagnostic timestamps",
+                        vk::Result::ERROR_DEVICE_LOST,
+                    ));
+                }
+                Err(error) => {
+                    self.gpu_error_reported = true;
+                    eprintln!("[Prime PT] GPU diagnostics unavailable: {error:?}");
+                }
+            }
+        }
+        self.context.set_diagnostics(enabled);
+        self.cpu_profile.set_enabled(enabled);
+        self.gpu_intervals.fill(GpuIntervals::default());
+        self.last_gpu = GpuIntervals::default();
+        Ok(())
+    }
+
+    /// Finish the capture without stopping ordinary diagnostics. Completed ticks
+    /// are exported, and unresolved recordings retain an explicit missing status.
+    pub fn finish_diagnostics_capture(&mut self) -> Result<(), String> {
+        if self.host_query == vk::QueryPool::null() {
+            return Ok(());
+        }
+        self.collect_timing(self.context.completed_serial()?)?;
+        for frame in &mut self.query_frames {
+            if frame.context.is_some() {
+                for stage in GpuStage::ALL {
+                    if frame.begun(stage) {
+                        frame.emit(
+                            stage,
+                            None,
+                            self.context.queue.as_raw(),
+                            self.context.timestamp_bits,
+                            f64::from(self.context.timestamp_period),
+                            if frame.accepted {
+                                "pending"
+                            } else {
+                                "unsubmitted"
+                            },
+                        );
+                    }
+                }
+                frame.context = None;
+            }
+        }
+        Ok(())
+    }
+
+    fn timestamp(
+        &self,
+        command: vk::CommandBuffer,
+        slot: usize,
+        index: u32,
+        stage: vk::PipelineStageFlags,
+    ) {
+        if let Some(index) = self.query_frames[slot].mark(self.host_query, index) {
+            unsafe {
+                self.context.device.cmd_write_timestamp(
+                    command,
+                    stage,
+                    self.host_query,
+                    slot as u32 * QUERY_COUNT + index,
+                );
+            }
+        }
+    }
+
+    fn stage_timestamp(&self, command: vk::CommandBuffer, slot: usize, stage: GpuStage, end: bool) {
+        self.timestamp(
+            command,
+            slot,
+            stage.indices()[usize::from(end)],
+            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+        );
     }
 
     fn prepare_fixed_resources(&mut self) -> Result<(), String> {
@@ -527,6 +626,11 @@ impl Renderer {
     /// Shared geometry survives; exclusive old pipelines/images retire before the new pipeline is created.
     pub fn configure(&mut self, settings: RenderSettings) -> Result<(), String> {
         settings.validate()?;
+        if settings.light_sampling != self.settings.light_sampling {
+            return Err(
+                "Light sampling is fixed at renderer creation; restart to change it".into(),
+            );
+        }
         let reset_temporal = settings.mode != self.settings.mode
             || !settings.transport_matches(self.settings)
             || settings.ray_reconstruction != self.settings.ray_reconstruction
@@ -578,6 +682,7 @@ impl Renderer {
                         .reconstruction
                         .as_ref()
                         .is_some_and(|rr| rr.frame_generation_supported()),
+                settings.light_sampling,
                 &self.energy_lut,
             )?);
             self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
@@ -670,7 +775,8 @@ impl Renderer {
         self.exposure_reset = true;
         self.exposure_frozen = false;
         self.exposure_time = None;
-        self.query_serials = [0; FRAME_SLOTS];
+        self.collect_timing(completed)?;
+        self.query_frames = std::array::from_fn(|_| Default::default());
         self.gpu_intervals = [GpuIntervals::default(); FRAME_SLOTS];
         self.last_gpu = GpuIntervals::default();
         self.camera = None;
@@ -713,9 +819,11 @@ impl Renderer {
             .or(self.reconstruction_error.as_deref())
             .unwrap_or("");
         format!(
-            "{} gpu_supported={} gpu_completed_serial={} gpu_preparation_ms={:.3} gpu_render_ms={:.3} gpu_total_ms={:.3} gpu_sample=delayed_completed_interval omm_capable={} omm_enabled={} omm_two_blocks={} omm_four_blocks={} omm_special_triangles={} omm_referenced_packed_bytes={} omm_template_ms={:.3} omm_bind_ms={:.3} omm_resource_record_ms={:.3} omm_template_preparations={} omm_bound_primitives={} omm_resource_builds={} omm_resource_blocks={} omm_resource_packed_bytes={} omm_resource_storage_bytes={} atmosphere_sky_updates={} atmosphere_camera_t_updates={} atmosphere_aerial_s_updates={} atmosphere_aerial_t_updates={} rr_requested={} rr_capable={} rr_ready={} rr_evaluation_succeeded={} rr_input={}x{} rr_output={}x{} rr_error={:?} fg_requested={} fg_capable={} fg_last_prepare_succeeded={} fg_prepare_serial={}",
+            "{} gpu_supported={} gpu_enabled={} gpu_available={} gpu_completed_serial={} gpu_preparation_ms={:.3} gpu_render_ms={:.3} gpu_total_ms={:.3} gpu_sample=delayed_completed_interval omm_capable={} omm_enabled={} omm_two_blocks={} omm_four_blocks={} omm_special_triangles={} omm_referenced_packed_bytes={} omm_template_ms={:.3} omm_bind_ms={:.3} omm_resource_record_ms={:.3} omm_template_preparations={} omm_bound_primitives={} omm_resource_builds={} omm_resource_blocks={} omm_resource_packed_bytes={} omm_resource_storage_bytes={} atmosphere_sky_updates={} atmosphere_camera_t_updates={} atmosphere_aerial_s_updates={} atmosphere_aerial_t_updates={} rr_requested={} rr_capable={} rr_ready={} rr_evaluation_succeeded={} rr_input={}x{} rr_output={}x{} rr_error={:?} fg_requested={} fg_capable={} fg_last_prepare_succeeded={} fg_prepare_serial={}",
             self.cpu_profile.last_report(),
-            self.host_query != vk::QueryPool::null(),
+            self.context.timestamp_bits > 0,
+            self.context.diagnostics_enabled(),
+            self.host_query != vk::QueryPool::null() && self.last_gpu.serial != 0,
             self.last_gpu.serial,
             self.last_gpu.preparation_ns as f64 / 1e6,
             self.last_gpu.render_ns as f64 / 1e6,
@@ -926,6 +1034,7 @@ impl Renderer {
                         self.settings.opacity_micromap,
                         self.settings.terrain_batches_per_frame as usize,
                         self.scene_resources.as_ref().unwrap().clone(),
+                        self.settings.light_sampling,
                     )?);
                     true
                 };
@@ -1020,6 +1129,7 @@ impl Renderer {
                     self.settings.mode,
                     false,
                     false,
+                    self.settings.light_sampling,
                     &self.energy_lut,
                 )?);
                 self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
@@ -1241,6 +1351,7 @@ impl Renderer {
         push[120..124].copy_from_slice(&self.settings.bounces.to_le_bytes());
         let view_flags = self.settings.view as u32 | (u32::from(self.needs_linear_display()) << 31);
         push[124..128].copy_from_slice(&view_flags.to_le_bytes());
+        self.stage_timestamp(command, slot, GpuStage::Offline, false);
         unsafe {
             self.context.device.cmd_bind_pipeline(
                 command,
@@ -1275,6 +1386,7 @@ impl Renderer {
                 1,
             );
         }
+        self.stage_timestamp(command, slot, GpuStage::Offline, true);
     }
 
     fn dispatch_realtime(&self, command: vk::CommandBuffer, slot: usize, bottom_up: bool) {
@@ -1332,19 +1444,25 @@ impl Renderer {
                     1,
                 );
             };
+            self.stage_timestamp(command, slot, GpuStage::Primary, false);
             dispatch(
                 pipeline.primary_pipelines.as_ref().unwrap()[realtime::PRIMARY_VARIANT[variant]],
                 &pushes.primary(),
             );
+            self.stage_timestamp(command, slot, GpuStage::Primary, true);
             self.realtime_barrier(command);
+            self.stage_timestamp(command, slot, GpuStage::Transport, false);
             dispatch(pipeline.pipelines[variant], &pushes.transport(variant >= 2));
+            self.stage_timestamp(command, slot, GpuStage::Transport, true);
             self.realtime_barrier(command);
             let post = if self.reconstruction.is_none() && self.needs_linear_display() {
                 pipeline.realtime_linear_post.unwrap()
             } else {
                 pipeline.realtime_post.unwrap()
             };
+            self.stage_timestamp(command, slot, GpuStage::Post, false);
             dispatch(post, &pushes.post());
+            self.stage_timestamp(command, slot, GpuStage::Post, true);
         }
     }
 
@@ -1392,6 +1510,7 @@ impl Renderer {
             let horizon = -(1.0 - (6360.0 / radius) * (6360.0 / radius))
                 .max(0.0)
                 .sqrt();
+            self.stage_timestamp(command, slot, GpuStage::Stars, false);
             stars.record(
                 command,
                 slot,
@@ -1438,6 +1557,7 @@ impl Renderer {
                     ),
                 },
             );
+            self.stage_timestamp(command, slot, GpuStage::Stars, true);
         }
         let exposure_address = if self.settings.auto_exposure_compensation > 0.0 {
             if !self.exposure_frozen {
@@ -1445,6 +1565,7 @@ impl Renderer {
                 let delta = self
                     .exposure_time
                     .map_or(0.0, |previous| now.duration_since(previous).as_secs_f32());
+                self.stage_timestamp(command, slot, GpuStage::Exposure, false);
                 self.exposure.as_mut().unwrap().record(
                     command,
                     slot,
@@ -1457,6 +1578,7 @@ impl Renderer {
                     self.settings.mode == RenderMode::Offline,
                     self.settings.auto_exposure_compensation,
                 )?;
+                self.stage_timestamp(command, slot, GpuStage::Exposure, true);
                 self.exposure_time = Some(now);
                 self.exposure_reset = false;
                 self.exposure_frozen = self.settings.mode == RenderMode::Offline;
@@ -1474,6 +1596,7 @@ impl Renderer {
             self.hdr_calibration
                 .map_or(1.0, |calibration| calibration.headroom),
         )?;
+        self.stage_timestamp(command, slot, GpuStage::Display, false);
         self.linear_display.as_ref().unwrap().record(
             command,
             slot,
@@ -1487,7 +1610,9 @@ impl Renderer {
             self.display,
             hdr,
             self.frame_generation_active(),
-        )
+        )?;
+        self.stage_timestamp(command, slot, GpuStage::Display, true);
+        Ok(())
     }
 
     /// # Safety
@@ -1827,9 +1952,13 @@ impl Renderer {
         {
             return Err("Invalid host recording state or Vulkan handles".into());
         }
-        let mut cpu = FrameCpu::default();
+        let mut cpu = FrameCpu::new(self.context.diagnostics_enabled());
         let started = cpu.start();
-        let uploaded_before = self.context.cpu_upload_bytes();
+        let uploaded_before = if self.context.diagnostics_enabled() {
+            self.context.cpu_upload_bytes()
+        } else {
+            0
+        };
         self.failed = true;
         if self.reconstruction.as_ref().is_some_and(|rr| rr.failed()) {
             // SDK failure is a frame-boundary transition, after prior submitted work retires.
@@ -1845,6 +1974,7 @@ impl Renderer {
                 self.settings.mode,
                 false,
                 false,
+                self.settings.light_sampling,
                 &self.energy_lut,
             )?);
             self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
@@ -1864,11 +1994,15 @@ impl Renderer {
             &mut cpu,
         );
         drop(_scope);
-        cpu.finish(Stage::Total, started);
-        let uploaded = self.context.cpu_upload_bytes() - uploaded_before;
-        let load = self.geometry.as_ref().map_or([0; 14], |geometry| {
-            geometry.cpu_load(&scene, &instances, &cpu, uploaded)
-        });
+        let load = if self.context.diagnostics_enabled() {
+            let uploaded = self.context.cpu_upload_bytes() - uploaded_before;
+            self.geometry.as_ref().map_or([0; 14], |geometry| {
+                geometry.cpu_load(&scene, &instances, &cpu, uploaded)
+            })
+        } else {
+            [0; 14]
+        };
+        cpu.finish_record(started, &load, result.is_ok());
         self.cpu_profile.observe(&cpu, load, serial, result.is_ok());
         if result.is_ok() {
             self.failed = false;
@@ -1910,26 +2044,26 @@ impl Renderer {
             self.collect_timing(completed)?;
             cpu.finish(Stage::Collect, started);
         }
-        let started = cpu.start();
         let slot = self
             .host_serials
             .iter()
             .position(|v| *v <= completed)
             .ok_or("Host descriptor slot did not retire")?;
+        if self.host_query != vk::QueryPool::null() {
+            // Bind GPU work to the complete CPU recording scope, before entering
+            // its short setup child. Completion will occur in a later CPU frame.
+            self.query_frames[slot].begin(serial);
+        }
+        let started = cpu.start();
         unsafe {
             if self.host_query != vk::QueryPool::null() {
                 self.context.device.cmd_reset_query_pool(
                     command,
                     self.host_query,
-                    slot as u32 * 3,
-                    3,
+                    slot as u32 * QUERY_COUNT,
+                    QUERY_COUNT,
                 );
-                self.context.device.cmd_write_timestamp(
-                    command,
-                    vk::PipelineStageFlags::TOP_OF_PIPE,
-                    self.host_query,
-                    slot as u32 * 3,
-                );
+                self.timestamp(command, slot, 0, vk::PipelineStageFlags::TOP_OF_PIPE);
             }
         }
         self.before_frame(command);
@@ -1955,19 +2089,12 @@ impl Renderer {
         self.descriptors(slot, selected);
         cpu.finish(Stage::Descriptors, started);
         let started = cpu.start();
-        if self.host_query != vk::QueryPool::null() {
-            // An interval boundary after upload/AS dependencies. This is elapsed
-            // queue time, not a sum of shader-active cycles or an isolated AS timer.
-            unsafe {
-                self.context.device.cmd_write_timestamp(
-                    command,
-                    vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                    self.host_query,
-                    slot as u32 * 3 + 1,
-                );
-            }
-        }
+        // This boundary includes upload/AS dependencies, rather than shader-active cycles.
+        self.timestamp(command, slot, 1, vk::PipelineStageFlags::BOTTOM_OF_PIPE);
         self.dispatch(command, slot, true);
+        if self.reconstruction.is_some() {
+            self.stage_timestamp(command, slot, GpuStage::Reconstruction, false);
+        }
         if let Some(rr) = &mut self.reconstruction {
             rr.evaluate_and_display(
                 command,
@@ -1980,6 +2107,9 @@ impl Renderer {
                 true,
                 linear_output,
             )?;
+        }
+        if self.reconstruction.is_some() {
+            self.stage_timestamp(command, slot, GpuStage::Reconstruction, true);
         }
         self.record_display(command, slot, view, true)?;
         unsafe {
@@ -1995,15 +2125,7 @@ impl Renderer {
                 &[],
                 &[],
             );
-            if self.host_query != vk::QueryPool::null() {
-                self.context.device.cmd_write_timestamp(
-                    command,
-                    vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                    self.host_query,
-                    slot as u32 * 3 + 2,
-                );
-                self.query_serials[slot] = serial;
-            }
+            self.timestamp(command, slot, 2, vk::PipelineStageFlags::BOTTOM_OF_PIPE);
         }
         self.host_serials[slot] = serial;
         self.pending_temporal_serial = serial;
@@ -2027,6 +2149,13 @@ impl Renderer {
             return Err("Submission acceptance does not match the pending PT frame".into());
         }
         self.commit_temporal();
+        if let Some(frame) = self
+            .query_frames
+            .iter_mut()
+            .find(|frame| frame.serial == serial)
+        {
+            frame.accepted = true;
+        }
         self.pending_temporal_serial = 0;
         Ok(())
     }
@@ -2036,36 +2165,87 @@ impl Renderer {
             return Ok(());
         }
         for slot in 0..FRAME_SLOTS {
-            let serial = self.query_serials[slot];
+            let serial = self.query_frames[slot].serial;
             if serial == 0 || serial > completed {
                 continue;
             }
-            let mut stamps = [0u64; 3];
-            unsafe {
+            let frame = &self.query_frames[slot];
+            // One nonblocking read for the fixed slot. Unwritten optional queries
+            // legitimately return NOT_READY; availability is authoritative per marker.
+            let mut results = [[0u64; 2]; QUERY_COUNT as usize];
+            let read = unsafe {
                 self.context.device.get_query_pool_results(
                     self.host_query,
-                    slot as u32 * 3,
-                    &mut stamps,
-                    vk::QueryResultFlags::TYPE_64,
+                    slot as u32 * QUERY_COUNT,
+                    &mut results,
+                    vk::QueryResultFlags::TYPE_64 | vk::QueryResultFlags::WITH_AVAILABILITY,
                 )
+            };
+            match read {
+                Ok(()) | Err(vk::Result::NOT_READY) => {}
+                Err(vk::Result::ERROR_DEVICE_LOST) => {
+                    return Err(error(
+                        "Read diagnostic timestamps",
+                        vk::Result::ERROR_DEVICE_LOST,
+                    ));
+                }
+                Err(_) => results.fill([0; 2]),
             }
-            .map_err(|e| error("Read completed host timestamps", e))?;
-            let mask = u64::MAX
-                .checked_shr(64 - self.context.timestamp_bits)
-                .unwrap_or(0);
-            let elapsed = |first: usize, last: usize| {
-                ((stamps[last].wrapping_sub(stamps[first]) & mask) as f64
-                    * f64::from(self.context.timestamp_period)) as u64
-            };
-            let sample = GpuIntervals {
-                serial,
-                preparation_ns: elapsed(0, 1),
-                render_ns: elapsed(1, 2),
-                total_ns: elapsed(0, 2),
-            };
-            self.gpu_intervals[(serial % FRAME_SLOTS as u64) as usize] = sample;
-            self.last_gpu.retain_latest(sample);
-            self.query_serials[slot] = 0;
+            let available = results.map(|value| value[1] != 0);
+            let stamps = results.map(|value| value[0]);
+            let mut read_failed = false;
+            for stage in GpuStage::ALL {
+                let indices = stage.indices();
+                if !frame.begun(stage) {
+                    continue;
+                }
+                for index in indices {
+                    if frame.written(index) && !available[index as usize] {
+                        read_failed = true;
+                    }
+                }
+                let start = available[indices[0] as usize].then(|| stamps[indices[0] as usize]);
+                let end = available[indices[1] as usize].then(|| stamps[indices[1] as usize]);
+                frame.emit_raw(
+                    stage,
+                    start,
+                    end,
+                    self.context.queue.as_raw(),
+                    self.context.timestamp_bits,
+                    f64::from(self.context.timestamp_period),
+                    if start.is_some() && end.is_some() {
+                        "complete"
+                    } else if start.is_some() && !frame.has(indices) {
+                        "incomplete"
+                    } else {
+                        "unavailable"
+                    },
+                    true,
+                );
+            }
+            if read_failed && !self.gpu_error_reported {
+                self.gpu_error_reported = true;
+                eprintln!("[Prime PT] Completed GPU diagnostics unavailable at serial {serial}");
+            }
+            if available[..3].iter().all(|v| *v) {
+                let elapsed = |first: usize, last: usize| {
+                    crate::gpu_timing::elapsed_ns(
+                        stamps[first],
+                        stamps[last],
+                        self.context.timestamp_bits,
+                        self.context.timestamp_period,
+                    )
+                };
+                let sample = GpuIntervals {
+                    serial,
+                    preparation_ns: elapsed(0, 1),
+                    render_ns: elapsed(1, 2),
+                    total_ns: elapsed(0, 2),
+                };
+                self.gpu_intervals[(serial % FRAME_SLOTS as u64) as usize] = sample;
+                self.last_gpu.retain_latest(sample);
+            }
+            self.query_frames[slot] = Default::default();
         }
         Ok(())
     }
@@ -2080,11 +2260,10 @@ impl Drop for Renderer {
             eprintln!("[Prime PT] Renderer resources quarantined: {error}");
         }
         if self.context.can_destroy() && self.host_query != vk::QueryPool::null() {
-            unsafe {
-                self.context
-                    .device
-                    .destroy_query_pool(self.host_query, None);
+            if let Err(error) = self.finish_diagnostics_capture() {
+                eprintln!("[Prime PT] Final GPU diagnostics unavailable: {error}");
             }
+            self.context.retire_query_pool(self.host_query);
         }
     }
 }

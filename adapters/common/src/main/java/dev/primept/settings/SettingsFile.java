@@ -44,7 +44,9 @@ public final class SettingsFile {
                                  .withOpacityMicromap(Boolean.parseBoolean(opacityMicromap))
                                  .withRayReconstruction(Boolean.parseBoolean(rayReconstruction))
                                  .withDlssQuality(RenderSettings.DlssQuality.valueOf(
-                                         properties.getProperty("render.dlss_quality", "")));
+                                         properties.getProperty("render.dlss_quality", "")))
+                                 .withLightSampling(RenderSettings.LightSampling.valueOf(
+                                         properties.getProperty("render.light_sampling", "")));
             for (var control : RenderSettings.Control.values())
                 result =
                         result.with(control, Integer.parseInt(properties.getProperty(control.key)));
@@ -55,12 +57,13 @@ public final class SettingsFile {
         }
     }
     public static String encode(RenderSettings settings) {
-        var text =
-                new StringBuilder("version=" + RenderSettings.VERSION +
-                                  "\nrenderer.path_tracing=" + settings.pathTracing() +
-                                  "\nrender.opacity_micromap=" + settings.opacityMicromap() +
-                                  "\nrender.ray_reconstruction=" + settings.rayReconstruction() +
-                                  "\nrender.dlss_quality=" + settings.dlssQuality().name() + "\n");
+        var text = new StringBuilder("version=" + RenderSettings.VERSION +
+                                     "\nrenderer.path_tracing=" + settings.pathTracing() +
+                                     "\nrender.opacity_micromap=" + settings.opacityMicromap() +
+                                     "\nrender.ray_reconstruction=" + settings.rayReconstruction() +
+                                     "\nrender.dlss_quality=" + settings.dlssQuality().name() +
+                                     "\nrender.light_sampling=" + settings.lightSampling().name() +
+                                     "\n");
         for (var control : RenderSettings.Control.values())
             text.append(control.key).append('=').append(settings.value(control)).append('\n');
         return text.toString();
