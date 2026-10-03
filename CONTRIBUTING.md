@@ -8,6 +8,20 @@
 
 首次克隆后运行 `.\scripts\install-hooks.ps1`，为本仓库启用 pre-commit 格式检查。钩子只检查暂存快照，不自动格式化或暂存文件；已有其他 hooksPath 时停止，避免覆盖现有钩子。
 
+## Git LFS 资产准备
+
+克隆前安装 Git LFS，并在本机首次使用时执行 `git lfs install`。已有仓库可执行 `git lfs install --local`，仅配置当前仓库；保留已有自定义 hooks 并检查 LFS pre-push hook 已接入，不用覆盖 hooks 的选项跳过冲突。正常 `git clone` 会检出 LFS 完整文件；使用跳过 smudge 的克隆或缺少对象时，在构建前补全：
+
+```powershell
+git lfs pull
+git lfs fsck --objects --pointers HEAD
+git lfs status
+```
+
+固定非文本资产和锁定运行时的 LFS 范围见[资产规范](docs/assets.md#git-lfs-存储要求)。新增文件先配置 `.gitattributes` 再暂存，使用 `git check-attr filter diff merge text -- 文件路径` 确认属性，并用 `git lfs ls-files` 核对索引中的指针；工作副本应保留原始文件字节。CI 同样必须在构建前下载 LFS 对象，普通源码压缩包不能默认视为已经包含完整资产。
+
+普通 `git push origin dev` 由 LFS pre-push hook 上传所需对象；上传失败必须处理，不能禁用 hook 只推指针。首次发布重写后的历史时，先核对目标分支与远程当前提交，再上传其历史对象，例如 `git lfs push --all origin dev`，最后推送该分支。只有远程已有被重写提交时才需要按已核对的远程提交使用显式 lease；不使用无差别 `--mirror` 或强推所有本地分支。
+
 ## 开发环境
 
 | 工具 | 用途 |

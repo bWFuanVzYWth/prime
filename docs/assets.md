@@ -4,6 +4,22 @@
 
 星图、OpenPBR transmission 表和五份大气纹理 LUT 使用 KTX2 内部 Zstd 22；物理介质数组使用 `.safetensors.zst`。容器、解压 payload 和源身份由[资产 manifest](../crates/prime-vulkan/assets/packed-assets.json)记录。当前数据与资源生命周期分别见[显示](display.md)、[大气](atmosphere.md)和[材质](materials.md)。
 
+## Git LFS 存储要求
+
+不常变动、需要随源码固定版本的非文本渲染资产和第三方运行时必须使用 **Git LFS**，不按是否达到托管平台的单文件上限决定。Git 历史保存 LFS 指针，实际文件保存于 LFS 对象存储；正常检出后的路径和字节内容不变，Rust `include_bytes!`、资源解析与 JAR 打包仍消费完整文件。LFS 不替代 KTX2/Zstd 压缩、来源锁定或许可证管理。
+
+| 范围 | LFS 文件类型 |
+| --- | --- |
+| `crates/prime-vulkan/assets/`，含锁定的作者原始二进制参考 | `.ktx2`、历史 `.bc6h.gz`、`.bytes`、`.safetensors`、`.zst` |
+| `crates/prime-vulkan/tests/fixtures/` 的固定二进制测试参照 | `.bin` |
+| `third_party/streamline/bin/x64/` 的锁定运行时 | `.dll` |
+
+实际匹配规则由根 [.gitattributes](../.gitattributes) 统一维护，LFS 条目使用 `filter=lfs diff=lfs merge=lfs -text`。资产 JSON 清单、来源锁、参考头文件、许可证和说明文档保持普通 Git 文本；Gradle Wrapper JAR 继续按其工具链约定管理。可再生成的编译产物、下载缓存、日志和临时资产放在被忽略的构建目录或 `artifacts/`，不因属于二进制而加入 LFS。
+
+新增固定非文本资产或引入新的扩展名/目录时，须在首次暂存前扩展 LFS 规则；升级 DLL 或资产仍须同步来源、版本、生成参数和 SHA-256 锁定信息。LFS 的对象 SHA-256 校验只证明存储内容完整，不能代替解压 payload、颜色/采样语义、ABI 或许可证验收。不要把未下载的指针当成完整资产参与构建或生成锁定哈希。
+
+克隆、补全对象和推送前检查见 [CONTRIBUTING](../CONTRIBUTING.md#git-lfs-资产准备)。历史迁移须先保存仓库外部的备份或忽略目录中的 Git bundle，并记录旧引用和资产哈希，再重写相关分支、核对完整工作副本与每个 LFS 对象。仅新增规则和提交不能转换已有历史中的大文件。迁移会改变提交 ID；已有远程历史需要协调后按分支推送，避免把本地实验分支、内部快照或备份引用一并发布。
+
 ## 容器选择
 
 | 数据 | 首选容器 | 必须保留的信息 |
