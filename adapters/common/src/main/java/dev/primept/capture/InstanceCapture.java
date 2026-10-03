@@ -130,6 +130,20 @@ public final class InstanceCapture implements AutoCloseable {
             source.duplicate().get(data);
             return new OwnedVertices(data);
         }
+        /** Concatenates borrowed source intervals directly into one immutable owner. */
+        public static OwnedVertices copyOf(ByteBuffer... sources) {
+            int size = 0;
+            for (ByteBuffer source : sources)
+                size = Math.addExact(size, source.remaining());
+            byte[] data = new byte[size];
+            int at = 0;
+            for (ByteBuffer source : sources) {
+                int count = source.remaining();
+                source.duplicate().get(data, at, count);
+                at += count;
+            }
+            return new OwnedVertices(data);
+        }
         public int byteSize() {
             return data.length;
         }

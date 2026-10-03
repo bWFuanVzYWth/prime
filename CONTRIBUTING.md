@@ -257,6 +257,23 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked pbr_texture_te
 
 路由改动先执行双版本 `cpuSmoke`，生成 `build/routing-fixtures/mc-section-source.bin`，再执行下面的原生回放测试；fixture 缺失时报错。`section-oracle/` 另保存两版实际 SectionCompiler 的输出和同一场景的生产源包；差分测试覆盖受控 baked 模型、液体形状/材质/UV、multipart 和局部遮挡，另验证角点编辑失效与重复通知零编译。该参照不加载整个资源包，使用中性光照，不代表所有原版外观或模组均等价。
 
+具名 CustomGeometry 的 `cpuSmoke` 实际执行源 callback、完整调度和 MeshData 路由，检查范围混合/排除、重复调度、刷新、未知输出、身份换代、消失与关闭、借用消费及异常阻止 FFM。可导出三帧真实 typed DTO、顶点与剩余 raw，用同一源产物重放 Rust 解码和 K1/FG guides；后者需要光追设备并显式启用同步验证。两版产物分别执行，不能把缺失或被过滤的测试算作通过。
+
+```powershell
+.\gradlew.bat :mc-26.2:cpuSmoke :mc-26.3:cpuSmoke -PprimeptNamedOutput=artifacts/named-custom --no-parallel
+$env:PRIME_VK_VALIDATION = '1'
+$env:VK_LAYER_VALIDATE_SYNC = '1'
+foreach ($version in @('26.2', '26.3')) {
+    $env:PRIME_NAMED_CUSTOM_PRODUCT = (Resolve-Path "artifacts/named-custom/named-custom-$version.json").Path
+    cargo test -p prime_vulkan --features shader-tests --lib --locked actual_custom_products_ -- --ignored --nocapture --test-threads=1
+}
+Remove-Item Env:PRIME_NAMED_CUSTOM_PRODUCT
+Remove-Item Env:PRIME_VK_VALIDATION
+Remove-Item Env:VK_LAYER_VALIDATE_SYNC
+```
+
+运动参照取真实前后原型的同一 primitive/重心坐标；首帧和形变未知，接受提交后的可证明小数平移与相机原点变化具有对应。小尺寸读回不证明整帧速度、SDK 降噪质量、宿主实际 Present 或完整自定义来源兼容。baked 顶点变化仍需原型发布与 BLAS 构建，支持范围和成本见[源合同](docs/capture-boundaries.md#具名-customgeometry-来源)。
+
 旧 TerrainRouter/FluidRouter 只保留在测试源集，用于静态 tint/geometry key、流体和参数粒子的独立参考，不代表当前生产地形的语义。
 
 ```powershell

@@ -63,7 +63,19 @@ Fabric 不可变 Mesh 通过公开 `forEach` 读取源 quad，不要求具体 Me
 
 `PrimeDynamicBatch` 在 native 边界用自持的已验证字段值和 authored 顶点字节识别重复快照；C padding 与指针地址不参与内容证明，分开维护观察序号与几何内容版本。完全相同的输入复用解码结果及分桶；仅原点变化复用局部几何，但仍更新位置相关计划。实际源回调与 Java 封包照常执行，变化输入仍完整验证；不能以对象身份缓存代替可变字段观察。源证明不借用 Java 地址，纹理引用、旧 CPU 快照和 GPU 资源仍按各自真实消费者退休。
 
-尚未提供更早源描述的自定义直接网格提交，仍通过 `Draw.append` 作为显式原始网格来源；这不提供对标准模型下游 consumer/展开改写的兼容保证。原始网格与参数粒子共用 typed 动态快照，持久实例使用独立 typed 实例增量。已路由标准叶节点不再产生重复 raw 顶点。手/HUD 属于宿主路径。
+具有实际实体/方块实体 owner 的 `CustomGeometry` 提交可由真实调度身份与输出范围建立持久实例，合同见下节。其余直接网格仍通过 `Draw.append` 作为显式原始网格来源；这不提供对标准模型下游 consumer/展开改写的兼容保证。原始网格与参数粒子共用 typed 动态快照，持久实例使用独立 typed 实例增量。已路由叶节点的顶点范围从原始快照排除。手/HUD 属于宿主路径。
+
+## 具名 CustomGeometry 来源
+
+先按旧项目的 owner/submission/part 身份方式绑定真实来源，再复用既有原型/实例与局部平移对应。Java 在实际 `CustomGeometryRenderer.render` 前后记录同一直接 `BufferBuilder` 的范围；源 callback 仍只执行原来的一次，输出顺序和原始字节保持。每帧在任何 feature 开始准备前冻结宿主完整 `allSubmits` 调度表，不用重播 callback、相似几何或 callback 对象地址推断身份。
+
+身份由实际 owner、CustomGeometry 提交序号及有序 callback 类/RenderType 身份确定，并与标准模型、item 和 Fabric Mesh 的身份空间分开。源重复访问、同一 submit 跨 phase 重用或同一 owner 存在重复签名时，该 owner 的所有 CustomGeometry 保留 raw；有序签名变化会撤销旧身份，新实例的首帧运动无效。冻结后新增来源或意外重复执行属于帧捕获失败，阻止进入 FFM。callback 抛出的原异常继续传播，同时使该帧捕获失效。
+
+当前只接收已登记材质的直接 QUADS builder、可解释的 position/RGBA/UV 布局与实例支持域。builder 在 callback 中刷新或切换产生的片段、未知 consumer、未完成/不完整 quad 范围及不满足 typed 原型域的输入保留原始来源；不能先从 raw 排除再让 native 拒绝。raw 仍须通过其自身 native 校验，这不扩展非法位置/UV 等源值的支持范围。越界、逆序或重叠的具名区间违反捕获不变量，使该帧失败并阻止 FFM。具名范围先扣除已接管的机械输出，可能含多个连续片段，实例成功观察后才把整个范围并入 raw 排除集合；每次 MeshData 刷新清理对应范围，防止 builder 复用串帧。
+
+这些位置已经是实际相机相对的源输出，实例使用捕获时相机的 f64 原点和恒等仿射，不能再施加 entity origin 或 pose。消费 MeshData 的借用仅持续至 `Draw.append` 返回；变化几何一次复制至自持原型，随后交给同步 FFM。稳态仍逐顶点比较 native 消费的 position/RGBA/UV 位模式，匹配时复用旧原型且不复制完整顶点、不发布几何增量；未消费的 light、normal 和 padding 不参与该证明。零增量字节不表示零 CPU 分配或零扫描。递增机械范围保留追加快路径；具名范围减洞仍逐个扫描排除集合，多范围与 raw 交错时可能出现平方级区间处理，整帧成本尚需测量，按[非阻塞性能债](../TODO.md#cpu-性能非阻塞待优化)管理。
+
+owner 使用弱身份且引用值不反向持有源；新旧帧使用集合及 ReferenceQueue 处理消失、替换和 GC，解除 CPU 原型引用。关闭捕获时清空仍存活 owner 的顶点与身份引用，再由既有实例上下文整体退出 epoch；即使批次已封闭，也不通过可变增量接口释放。实例引用与 GPU 完成仍由原有协议管理，GC 不证明 GPU 完成。几何变化会发布新原型并构建新 BLAS；旧资源保留到各自最后消费者完成。局部平移可改善运动对应，但不能将这条 baked 顶点通路称为 pose-only TLAS UPDATE 或无复制路径。匿名聚合 raw、参数粒子、局部形变和运动光学接口的未知对应仍见[实时重建合同](reconstruction.md)。
 
 ## 上下文、空间与完成证明
 

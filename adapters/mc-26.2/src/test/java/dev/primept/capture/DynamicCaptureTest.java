@@ -90,6 +90,42 @@ class DynamicCaptureTest {
             }
         }
     }
+    @Test
+    void mixedExclusionIntervalsFormOrderedUnionWithoutDuplicatingRawGaps() {
+        try (var storage = new ByteBufferBuilder(2048); var frame = new DynamicFrame(256)) {
+            frame.begin(1, 1, 0, 0, 0);
+            var builder =
+                    new BufferBuilder(storage, PrimitiveTopology.QUADS, DefaultVertexFormat.ENTITY);
+            for (int i = 0; i < 32; ++i)
+                builder.addVertex(i, 0, 0)
+                        .setColor(-1)
+                        .setUv(0, 0)
+                        .setOverlay(0)
+                        .setLight(0)
+                        .setNormal(0, 1, 0);
+            try (var mesh = builder.buildOrThrow()) {
+                var excluded = new DynamicCapture.ExcludedRanges();
+                excluded.add(12, 16);
+                excluded.add(4, 8);
+                excluded.add(8, 12);
+                excluded.add(8, 16);
+                excluded.add(20, 24);
+                excluded.add(24, 28);
+                assertThrows(IllegalArgumentException.class, () -> excluded.add(-4, 4));
+                assertTrue(DynamicCapture.appendMesh(frame, 0, 0, mesh, excluded));
+                assertEquals(12, frame.vertexCount());
+                var span = onlySpan(frame.seal());
+                var bytes = vertices(span).asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
+                int stride = PrimeMeshSpan.stride(span),
+                    position = PrimeMeshSpan.position_offset(span);
+                assertEquals(0, bytes.getFloat(position));
+                assertEquals(3, bytes.getFloat(3 * stride + position));
+                assertEquals(16, bytes.getFloat(4 * stride + position));
+                assertEquals(28, bytes.getFloat(8 * stride + position));
+                assertEquals(31, bytes.getFloat(11 * stride + position));
+            }
+        }
+    }
     private static MemorySegment onlySpan(MemorySegment batch) {
         assertEquals(1, PrimeDynamicBatch.count(batch));
         return PrimeDynamicBatch.spans(batch).reinterpret(PrimeMeshSpan.SIZE);

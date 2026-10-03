@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.renderer.SpriteCoordinateExpander;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
+import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import org.joml.Matrix4fc;
 
@@ -59,6 +60,7 @@ public final class ModelCapture {
         ended = false;
         instances.beginFrame();
         geometry.collectGarbage();
+        NamedRawCapture.begin(instances);
         FabricMeshCapture.begin(instances);
         ItemCapture.begin(instances);
         blockEntitySources = entitySources = modelSubmissions = 0;
@@ -70,6 +72,7 @@ public final class ModelCapture {
         model = null;
         if (instances != null && !ended) {
             ItemCapture.end();
+            NamedRawCapture.end();
             instances.endFrame();
             ended = true;
         }
@@ -79,6 +82,7 @@ public final class ModelCapture {
             return;
         if (!ended) {
             ItemCapture.end();
+            NamedRawCapture.end();
             instances.endFrame();
             ended = true;
         }
@@ -117,6 +121,7 @@ public final class ModelCapture {
         source.bx = base.m30();
         source.by = base.m31();
         source.bz = base.m32();
+        NamedRawCapture.visit(source);
         return previous;
     }
     public static void endSource(Source previous) {
@@ -137,6 +142,11 @@ public final class ModelCapture {
         submission.by = source.by;
         submission.bz = source.bz;
         return submission;
+    }
+    public static NamedRawCapture.Emission tagCustom(RenderType type, Class<?> callback) {
+        return source == null || !DynamicCapture.active()
+                ? null
+                : NamedRawCapture.tag(source, type, callback);
     }
     public static Submission beginModel(ModelFeatureRenderer.Submit<?> submit) {
         Submission previous = model;
@@ -287,6 +297,7 @@ public final class ModelCapture {
     public static void close() {
         FabricMeshCapture.close();
         ItemCapture.close();
+        NamedRawCapture.close();
         if (instances != null)
             instances.close();
         instances = null;
@@ -301,6 +312,9 @@ public final class ModelCapture {
         }
         final ArrayList<Submission> submits = new ArrayList<>();
         long frame;
+        long customFrame;
+        int customVisits;
+        NamedRawCapture.Owner customOwner;
         int cursor;
         double x, y, z;
         float bx, by, bz;

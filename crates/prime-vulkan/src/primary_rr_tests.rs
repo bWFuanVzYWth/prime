@@ -1,5 +1,8 @@
 //! Actual production RR guide images, including FP16 storage and all-pixel initialization.
 //! No NGX/Streamline runtime is needed: the only substituted shader service is sky radiance.
+#[path = "named_custom_tests.rs"]
+mod named_custom;
+
 use super::*;
 use prime_scene::{
     TextureMaterial,
@@ -211,6 +214,18 @@ impl Snapshot {
         anchor: [f64; 3],
         sources: [&InstanceScene; 2],
     ) {
+        let instances = sources.map(|source| {
+            assert_eq!(
+                source.instances.len(),
+                1,
+                "one corresponding named instance"
+            );
+            source.instances.first_key_value().unwrap()
+        });
+        assert_eq!(instances[0].0, instances[1].0, "same source identity");
+        let prototypes = std::array::from_fn::<_, 2, _>(|i| {
+            &sources[i].prototypes[&instances[i].1.prototype_id]
+        });
         let [previous_camera, current_camera] = cameras;
         let dot = |a: [f64; 3], b: [f64; 3]| a.into_iter().zip(b).map(|(a, b)| a * b).sum::<f64>();
         let cross = |a: [f64; 3], b: [f64; 3]| {
@@ -221,8 +236,7 @@ impl Snapshot {
             ]
         };
         let vertices =
-            |source: &InstanceScene, triangle: &prime_scene::Triangle| -> [[f64; 3]; 3] {
-                let instance = &source.instances[&1];
+            |instance: &prime_scene::Instance, triangle: &prime_scene::Triangle| -> [[f64; 3]; 3] {
                 triangle.positions.map(|position| {
                     std::array::from_fn(|row| {
                         instance.origin[row] - anchor[row]
@@ -260,12 +274,12 @@ impl Snapshot {
             // Intersect actual transformed current triangles independently of the history proof.
             // Apply the resulting barycentrics to the actual old triangles, not to an adjusted
             // metadata matrix or a normalized replacement mesh.
-            for (old, current) in sources[0].prototypes[&1]
+            for (old, current) in prototypes[0]
                 .triangles
                 .iter()
-                .zip(sources[1].prototypes[&1].triangles.iter())
+                .zip(prototypes[1].triangles.iter())
             {
-                let current = vertices(sources[1], current);
+                let current = vertices(instances[1].1, current);
                 let e1 = std::array::from_fn(|axis| current[1][axis] - current[0][axis]);
                 let e2 = std::array::from_fn(|axis| current[2][axis] - current[0][axis]);
                 let p = cross(ray, e2);
@@ -282,7 +296,7 @@ impl Snapshot {
                 assert!(t > 0.0);
                 let current_point: [f64; 3] =
                     std::array::from_fn(|axis| current_origin[axis] + ray[axis] * t);
-                let old = vertices(sources[0], old);
+                let old = vertices(instances[0].1, old);
                 let old_point: [f64; 3] = std::array::from_fn(|axis| {
                     old[0][axis] * (1.0 - u - v) + old[1][axis] * u + old[2][axis] * v
                 });

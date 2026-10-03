@@ -76,12 +76,16 @@ bitwise. The resulting offset is merged with the accepted affine pose and scene
 anchor in f64 before writing the existing previous 3x4 matrix. No extra GPU field
 or geometry copy is needed; FP32 transform/projection precision still applies.
 History advances after real queue acceptance, rather than recording or
-`encoder.execute`. New identities, failed normalization, raw captures, standard
-particle batches and local deformation remain motion-unknown, using finite
-placeholders and the engine's raw fallback mask. Raw batches lack real
-owner/submission/part correspondence. Moving optical interfaces remain
-unsupported. This does not establish that all moving content has been
-denoising-validated in the game.
+`encoder.execute`. Source-owned CustomGeometry instances use the actual complete
+submit schedule and the ranges from one real callback emission; their baked
+camera-relative geometry uses the capture camera origin and identity affine.
+See the [source contract](../../docs/capture-boundaries.md#具名-customgeometry-来源)
+for duplicate scheduling, flush and typed-domain fallback. New identities,
+failed normalization, anonymous raw captures, standard particle batches and
+local deformation remain motion-unknown, using finite placeholders and the
+engine's raw fallback mask. Anonymous raw batches lack real owner/submission/part
+correspondence. Moving optical interfaces remain unsupported. This does not
+establish that all moving content has been denoising-validated in the game.
 
 Descriptor memory is borrowed through `evaluate`; images and views remain alive
 through host GPU completion. Tagged resources enter and leave GENERAL. Tags are

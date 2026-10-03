@@ -8,6 +8,7 @@ import com.mojang.blaze3d.GpuFormat;
 import dev.primept.NativeBridge;
 import dev.primept.PrimeClient;
 import java.util.IdentityHashMap;
+import java.util.ArrayList;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.particle.SingleQuadParticle;
 import net.minecraft.client.renderer.StagedVertexBuffer;
@@ -23,6 +24,8 @@ public final class DynamicCapture {
             new IdentityHashMap<>();
     private static final IdentityHashMap<StagedVertexBuffer.Draw, ExcludedRanges> EXCLUDED =
             new IdentityHashMap<>();
+    private static final IdentityHashMap<StagedVertexBuffer.Draw, ArrayList<NamedRawCapture.Token>>
+            NAMED = new IdentityHashMap<>();
     private static boolean sentRaw, previousRawNonempty;
     private static DynamicFrame frame;
     private static long epoch, sequence;
@@ -62,9 +65,11 @@ public final class DynamicCapture {
         epoch = nextEpoch;
         ModelCapture.begin(epoch);
         frame.begin(epoch, ++sequence, camera.pos.x, camera.pos.y, camera.pos.z);
+        NamedRawCapture.origin(camera.pos.x, camera.pos.y, camera.pos.z);
         DRAWS.clear();
         BUILDERS.clear();
         EXCLUDED.clear();
+        NAMED.clear();
         DynamicTextures.beginFrame();
         failure = null;
         modelMeshes = particleMeshes = modelRawVertices = particleRawVertices = 0;
@@ -160,7 +165,9 @@ public final class DynamicCapture {
         long captureStart = PROFILE ? System.nanoTime() : 0;
         try {
             int before = frame.vertexCount();
-            if (!appendMesh(frame, material.texture, material.flags, data, EXCLUDED.remove(draw)))
+            var excluded = NamedRawCapture.route(data, material, NAMED.remove(draw),
+                                                 EXCLUDED.remove(draw));
+            if (!appendMesh(frame, material.texture, material.flags, data, excluded))
                 return;
             int added = frame.vertexCount() - before;
             if (material.particle) {
@@ -242,20 +249,54 @@ public final class DynamicCapture {
             throw new IllegalStateException("Unbound model buffer");
         EXCLUDED.computeIfAbsent(draw, ignored -> new ExcludedRanges()).add(start, end);
     }
+    static void named(BufferBuilder builder, NamedRawCapture.Token token) {
+        var draw = BUILDERS.get(builder);
+        if (draw == null)
+            throw new IllegalStateException("Unbound custom buffer");
+        NAMED.computeIfAbsent(draw, ignored -> new ArrayList<>()).add(token);
+    }
     static final class ExcludedRanges {
         int[] ranges = new int[16];
         int size;
         void add(int start, int end) {
-            if (start % 4 != 0 || end <= start || end % 4 != 0)
+            if (start < 0 || start % 4 != 0 || end <= start || end % 4 != 0)
                 throw new IllegalArgumentException("Non-quad model range");
-            if (size > 0 && ranges[size - 1] == start) {
-                ranges[size - 1] = end;
+            // Mechanical model leaves normally arrive in increasing order. Keep their old O(1)
+            // append/adjacent path; only named spans inserted around existing holes need a union.
+            if (size == 0 || start >= ranges[size - 1]) {
+                if (size != 0 && start == ranges[size - 1]) {
+                    ranges[size - 1] = end;
+                    return;
+                }
+                if (size + 2 > ranges.length)
+                    ranges = java.util.Arrays.copyOf(ranges, ranges.length * 2);
+                ranges[size++] = start;
+                ranges[size++] = end;
                 return;
+            }
+            int at = 0;
+            while (at < size && ranges[at + 1] < start)
+                at += 2;
+            int after = at;
+            while (after < size && ranges[after] <= end) {
+                start = Math.min(start, ranges[after]);
+                end = Math.max(end, ranges[after + 1]);
+                after += 2;
             }
             if (size + 2 > ranges.length)
                 ranges = java.util.Arrays.copyOf(ranges, ranges.length * 2);
-            ranges[size++] = start;
-            ranges[size++] = end;
+            System.arraycopy(ranges, after, ranges, at + 2, size - after);
+            size += 2 - (after - at);
+            ranges[at] = start;
+            ranges[at + 1] = end;
+        }
+        void validate(int count) {
+            int end = 0;
+            for (int i = 0; i < size; i += 2) {
+                if (ranges[i] < end || ranges[i + 1] > count)
+                    throw new IllegalStateException("Invalid model exclusion range");
+                end = ranges[i + 1];
+            }
         }
     }
     public static void submit(long expectedEpoch, NativeBridge bridge) {
@@ -287,6 +328,7 @@ public final class DynamicCapture {
         DRAWS.clear();
         BUILDERS.clear();
         EXCLUDED.clear();
+        NAMED.clear();
         if (frame != null) {
             frame.close();
             frame = null;

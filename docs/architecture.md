@@ -45,7 +45,7 @@ prime_vulkan → Slang SPIR-V → MC 主图像 → hand / HUD → 宿主呈现
 
 公共 `InstanceCapture` 持有原型与实例的源身份、引用和变更集合，独立的帧缓冲只负责封包存储：原型按资源变化发布，实例只在出现、消失或有效值变化时写入 `PrimeInstanceBatch`。没有变化时不产生包、不调用 FFM；一个变化帧最多一个实例增量调用。世界准备结束即闭合捕获帧，暂未进入 native hook 的脏记录保留到成功提交；只有 FFM 成功返回才确认序号和清理源字节。原型释放须等所有实例引用消失，可以在同一批中迁移实例并删除旧原型。
 
-标准粒子在 buildLayer 前路由52字节参数记录，由 Rust 展开。尚无早期源描述的直接网格仍使用 `StagedVertexBuffer.Draw.append(MeshData)` 的 `PrimeDynamicBatch` 来源；它不提供对标准模型下游 consumer 改写的兼容承诺。已实例化的顶点范围从该快照排除；其余范围一次复制到复用的 native arena。非空回退仍逐帧捕获，变为空时提交一次清除，连续空帧不重复提交。两条输入的序号独立于地形 revision，更新不会重译静态 mesh。纹理按实际 GPU texture 身份关联 CPU 上传来源，并先于引用它的几何增量提交。
+标准粒子在 buildLayer 前路由52字节参数记录，由 Rust 展开。具名 `CustomGeometry` 先冻结真实完整提交表，再观察一次实际 callback 的 builder 输出范围；非歧义 owner/submission 身份使用持久原型/实例，重复调度、未知输出和 callback 内刷新保留 raw。源输出已有相机相对变换，实例原点使用捕获相机且仿射为恒等；跨帧几何平移由 Rust 的已有对应证明处理，详见[具名来源合同](capture-boundaries.md#具名-customgeometry-来源)。其他直接网格仍使用 `StagedVertexBuffer.Draw.append(MeshData)` 的 `PrimeDynamicBatch` 来源；它不提供对标准模型下游 consumer 改写的兼容承诺。已实例化的顶点范围从该快照排除；其余范围一次复制到复用的 native arena。非空回退仍逐帧捕获，变为空时提交一次清除，连续空帧不重复提交。两条输入的序号独立于地形 revision，更新不会重译静态 mesh。纹理按实际 GPU texture 身份关联 CPU 上传来源，并先于引用它的几何增量提交。
 
 Rust `InstanceContext` 先借用旧状态验证整批及最终引用关系，再显式修改持久场景；只访问变化记录和受影响原型的引用计数，不复制全实例表。解码记录与引用计划使用上下文持有的连续工作区，容量跨提交复用；在工作区内排序、检查重复及更新/删除冲突，不依赖线序。相同原型的姿态更新不产生无效的引用减增，失败也清除未发布值并保留可复用容量。常驻映射依然有查找和写入成本，这不是 O(1) 的全量更新。每条记录的 revision 等于该批 sequence，整体严格有序，因而无需永久保存死亡实体 ID。常驻容量有界，持续出生/删除不会仅因历史身份增长而耗尽容量。`prime_scene::translation` 计算静态合批、动态分桶和实例放置，`prime_vulkan` 的几何执行器与 `objects` 执行资源分配、上传和 AS 命令；两者通过显式借用协作，不引入后台任务或共享可变缓存。
 
