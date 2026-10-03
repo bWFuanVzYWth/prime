@@ -155,6 +155,33 @@ int32_t feature_function(Context &ctx, sl::Feature feature, const char *name, T 
     return result ? result : (function ? 0 : fail(name));
 }
 
+int32_t initialize_preferences(Context &ctx, bool interposed) {
+    sl::Preferences preferences;
+    ctx.plugin_path = ctx.directory.c_str();
+    preferences.pathsToPlugins = &ctx.plugin_path;
+    preferences.numPathsToPlugins = 1;
+    const sl::Feature features[] = {sl::kFeatureDLSS_RR, sl::kFeatureDLSS_G, sl::kFeaturePCL,
+                                    sl::kFeatureReflex};
+    preferences.featuresToLoad = interposed ? features : &ctx.feature;
+    preferences.numFeaturesToLoad = interposed ? 4 : 1;
+    preferences.flags = sl::PreferenceFlags::eDisableCLStateTracking |
+                        sl::PreferenceFlags::eDisableDebugText |
+                        sl::PreferenceFlags::eUseFrameBasedResourceTagging;
+    if (!interposed)
+        preferences.flags |= sl::PreferenceFlags::eUseManualHooking;
+    preferences.engine = sl::EngineType::eCustom;
+    preferences.engineVersion = "prime_pt";
+    preferences.projectId = "7bc01faf-de5e-4c7c-9936-43cb5c301232";
+    preferences.renderAPI = sl::RenderAPI::eVulkan;
+    preferences.logMessageCallback = log_message;
+    int32_t result = check(ctx.init(preferences, sl::kSDKVersion), "slInit");
+    if (result)
+        return result;
+    ctx.initialized = true;
+    ctx.interposed = interposed;
+    return 0;
+}
+
 int32_t initialize_context(Context &ctx, bool interposed) {
     if (!module_directory(ctx.directory))
         return fail("Cannot find engine DLL directory");
@@ -175,29 +202,7 @@ int32_t initialize_context(Context &ctx, bool interposed) {
     LOAD(evaluate, slEvaluateFeature);
     LOAD(free_resources, slFreeResources);
 #undef LOAD
-    sl::Preferences preferences;
-    ctx.plugin_path = ctx.directory.c_str();
-    preferences.pathsToPlugins = &ctx.plugin_path;
-    preferences.numPathsToPlugins = 1;
-    const sl::Feature features[] = {sl::kFeatureDLSS_RR, sl::kFeatureDLSS_G, sl::kFeaturePCL,
-                                    sl::kFeatureReflex};
-    preferences.featuresToLoad = interposed ? features : &ctx.feature;
-    preferences.numFeaturesToLoad = interposed ? 4 : 1;
-    preferences.flags =
-            sl::PreferenceFlags::eDisableCLStateTracking | sl::PreferenceFlags::eDisableDebugText;
-    if (!interposed)
-        preferences.flags |= sl::PreferenceFlags::eUseManualHooking;
-    preferences.engine = sl::EngineType::eCustom;
-    preferences.engineVersion = "prime_pt";
-    preferences.projectId = "7bc01faf-de5e-4c7c-9936-43cb5c301232";
-    preferences.renderAPI = sl::RenderAPI::eVulkan;
-    preferences.logMessageCallback = log_message;
-    int32_t result = check(ctx.init(preferences, sl::kSDKVersion), "slInit");
-    if (result)
-        return result;
-    ctx.initialized = true;
-    ctx.interposed = interposed;
-    return 0;
+    return initialize_preferences(ctx, interposed);
 }
 
 void copy_matrix(sl::float4x4 &destination, const float *source) {

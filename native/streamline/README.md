@@ -29,6 +29,12 @@ path supports RR alone on an existing Vulkan 1.2 device, calls `slSetVulkanInfo`
 and invokes common Present callbacks manually. It cannot supply FG's early
 creation and queue hooks.
 
+Both paths enable `eUseFrameBasedResourceTagging` during `slInit`. The pinned
+SDK requires it for frame-scoped tags; a successful `slSetTagForFrame` call
+alone does not establish this mode. RR evaluate tags and FG Present tags use
+their real frame token and viewport. Clearing the latest FG frame must not
+clear another token's resources. Manual hooking remains exclusive to late RR.
+
 Both RR paths require `VK_NVX_binary_import`, `VK_NVX_image_view_handle`,
 `VK_KHR_push_descriptor`, core/KHR buffer device address, Vulkan 1.2
 `timelineSemaphore`, `descriptorIndexing`, `bufferDeviceAddress`,
@@ -63,12 +69,19 @@ exclude jitter. Jitter is projection displacement in input pixels, the negative
 of the tracer's pixel-center sample offset; Rust converts it once.
 
 Stable instances with exact ordered local positions use their last accepted
-3x4 placement and the same triangle/barycentric point. History advances after
-real queue acceptance, rather than recording or `encoder.execute`. New identities,
-changed geometry, raw captures, standard particle batches and local deformation
-remain motion-unknown, using finite placeholders and the engine's raw fallback
-mask. Moving optical interfaces remain unsupported. This does not establish
-that all moving content has been denoising-validated in the game.
+3x4 placement and the same triangle/barycentric point. Baked local translations
+reuse the old first-vertex normalization: normalized positions must match bitwise
+and adding each mesh's first vertex back must recover its source positions
+bitwise. The resulting offset is merged with the accepted affine pose and scene
+anchor in f64 before writing the existing previous 3x4 matrix. No extra GPU field
+or geometry copy is needed; FP32 transform/projection precision still applies.
+History advances after real queue acceptance, rather than recording or
+`encoder.execute`. New identities, failed normalization, raw captures, standard
+particle batches and local deformation remain motion-unknown, using finite
+placeholders and the engine's raw fallback mask. Raw batches lack real
+owner/submission/part correspondence. Moving optical interfaces remain
+unsupported. This does not establish that all moving content has been
+denoising-validated in the game.
 
 Descriptor memory is borrowed through `evaluate`; images and views remain alive
 through host GPU completion. Tagged resources enter and leave GENERAL. Tags are

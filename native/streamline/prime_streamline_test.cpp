@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <limits>
+#include <map>
 #include <vector>
 
 namespace {
@@ -12,7 +13,11 @@ struct Token : sl::FrameToken {
     operator uint32_t() const override {
         return index;
     }
-} token;
+};
+std::map<uint32_t, Token> tokens;
+std::map<std::pair<uint32_t, sl::BufferType>, void *> frame_tags;
+bool frame_tagging_enabled{}, seen_manual_hooking{};
+int initializations{};
 sl::DLSSDOptions seen_options;
 sl::Constants seen_constants;
 std::vector<sl::BufferType> seen_tags;
@@ -30,6 +35,27 @@ std::vector<int> retirement;
 VkResult fg_wait_result = VK_SUCCESS;
 uint32_t fg_min_extent = 128;
 int fg_io_failure{};
+
+sl::Result mock_init(const sl::Preferences &preferences, uint64_t sdk_version) {
+    assert(sdk_version == sl::kSDKVersion && preferences.renderAPI == sl::RenderAPI::eVulkan);
+    assert(preferences.numPathsToPlugins == 1 && preferences.pathsToPlugins[0][0] != L'\0');
+    assert(preferences.engine == sl::EngineType::eCustom);
+    const auto flags = static_cast<uint64_t>(preferences.flags);
+    seen_manual_hooking =
+            (flags & static_cast<uint64_t>(sl::PreferenceFlags::eUseManualHooking)) != 0;
+    frame_tagging_enabled =
+            (flags & static_cast<uint64_t>(sl::PreferenceFlags::eUseFrameBasedResourceTagging)) !=
+            0;
+    assert(preferences.numFeaturesToLoad == (seen_manual_hooking ? 1u : 4u));
+    assert(preferences.featuresToLoad[0] == sl::kFeatureDLSS_RR);
+    if (!seen_manual_hooking) {
+        assert(preferences.featuresToLoad[1] == sl::kFeatureDLSS_G);
+        assert(preferences.featuresToLoad[2] == sl::kFeaturePCL);
+        assert(preferences.featuresToLoad[3] == sl::kFeatureReflex);
+    }
+    ++initializations;
+    return sl::Result::eOk;
+}
 
 sl::Result mock_options(const sl::ViewportHandle &, const sl::DLSSDOptions &options) {
     seen_options = options;
@@ -51,9 +77,11 @@ sl::Result mock_release(sl::Feature feature, const sl::ViewportHandle &) {
 }
 sl::Result mock_shutdown() {
     ++shutdowns;
+    frame_tags.clear();
     return sl::Result::eOk;
 }
 sl::Result mock_token(sl::FrameToken *&output, const uint32_t *index) {
+    auto &token = tokens[*index];
     token.index = *index;
     output = &token;
     return sl::Result::eOk;
@@ -141,12 +169,17 @@ sl::Result mock_marker(sl::PCLMarker marker, const sl::FrameToken &current) {
     markers.push_back(marker);
     return sl::Result::eOk;
 }
-sl::Result mock_tags(const sl::FrameToken &, const sl::ViewportHandle &,
+sl::Result mock_tags(const sl::FrameToken &current, const sl::ViewportHandle &,
                      const sl::ResourceTag *tags, uint32_t count, sl::CommandBuffer *command) {
+    // Model the pinned SDK's manager choice: general tags share type/viewport,
+    // while frame-based tags additionally belong to the supplied token.
+    const uint32_t tag_frame = frame_tagging_enabled ? static_cast<uint32_t>(current) : 0;
     if (!command) {
         assert(count == 4);
-        for (uint32_t i = 0; i < count; ++i)
+        for (uint32_t i = 0; i < count; ++i) {
             assert(tags[i].resource == nullptr);
+            frame_tags.erase({tag_frame, tags[i].type});
+        }
         retirement.push_back(4);
         return sl::Result::eOk;
     }
@@ -155,6 +188,7 @@ sl::Result mock_tags(const sl::FrameToken &, const sl::ViewportHandle &,
     for (uint32_t i = 0; i < count; i++) {
         assert(tags[i].lifecycle == sl::ResourceLifecycle::eValidUntilPresent);
         assert(tags[i].resource->state == VK_IMAGE_LAYOUT_GENERAL);
+        frame_tags[{tag_frame, tags[i].type}] = tags[i].resource->native;
         seen_tags.push_back(tags[i].type);
     }
     return fg_io_failure == 4 ? sl::Result::eErrorIO : sl::Result::eOk;
@@ -206,6 +240,10 @@ int main() {
     ctx->before_present = mock_before;
     ctx->after_present = mock_after;
     ctx->queue = reinterpret_cast<VkQueue>(50);
+    ctx->directory = L"mock-plugin-directory";
+    ctx->init = mock_init;
+    assert(initialize_preferences(*ctx, false) == 0 && ctx->initialized && !ctx->interposed &&
+           seen_manual_hooking);
     active = ctx;
     const sl::DLSSMode modes[] = {sl::DLSSMode::eDLAA, sl::DLSSMode::eMaxQuality,
                                   sl::DLSSMode::eBalanced, sl::DLSSMode::eMaxPerformance,
@@ -289,7 +327,11 @@ int main() {
     assert(released == 2 && shutdowns == 1 && active == nullptr);
     ctx = new Context;
     active = bootstrapped = ctx;
-    ctx->initialized = ctx->interposed = ctx->fg_supported = true;
+    ctx->directory = L"mock-plugin-directory";
+    ctx->init = mock_init;
+    assert(initialize_preferences(*ctx, true) == 0 && ctx->initialized && ctx->interposed &&
+           !seen_manual_hooking && initializations == 2);
+    ctx->fg_supported = true;
     ctx->device = reinterpret_cast<VkDevice>(79);
     ctx->queue = reinterpret_cast<VkQueue>(50);
     ctx->interposed_present = mock_present;
@@ -389,6 +431,24 @@ int main() {
     assert(prime_sl_fg_prepare(ctx, &fg) == 1 && !ctx->fg_enabled);
     assert((retirement == std::vector<int>{1, 2, 4, 3}));
     fg_min_extent = 128;
+    assert(prime_sl_fg_prepare(ctx, &fg) == 0);
+    sl::FrameToken *first_token = ctx->frame_token;
+    const uint32_t first_frame = static_cast<uint32_t>(*first_token);
+    const uint64_t first_depth = fg.images[0].image;
+    ++expected_token;
+    assert(prime_sl_frame(0, 1) == 0);
+    fg.images[0].image += 4096;
+    assert(prime_sl_fg_prepare(ctx, &fg) == 0);
+    assert(static_cast<uint32_t>(*first_token) == first_frame);
+    assert(frame_tags.at({first_frame, sl::kBufferTypeDepth}) ==
+           reinterpret_cast<void *>(first_depth));
+    assert(frame_tags.at({expected_token, sl::kBufferTypeDepth}) ==
+           reinterpret_cast<void *>(fg.images[0].image));
+    assert(prime_sl_fg_suspend(ctx) == 0);
+    assert(frame_tags.count({expected_token, sl::kBufferTypeDepth}) == 0);
+    assert(frame_tags.at({first_frame, sl::kBufferTypeDepth}) ==
+           reinterpret_cast<void *>(first_depth));
+    fg.images[0].image = first_depth;
     // Every SDK stage, including retirement on an unavailable extent, preserves
     // eErrorIO as an error rather than the bridge's +1 unavailable result.
     for (int stage = 1; stage <= 7; ++stage) {

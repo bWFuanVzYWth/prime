@@ -202,6 +202,133 @@ impl Snapshot {
                 .all(|depth| (*depth - 3.05).abs() < 1e-5)
         );
     }
+
+    fn corresponding_motion(
+        &self,
+        cameras: [Camera; 2],
+        extent: [u32; 2],
+        jitter: [f32; 2],
+        anchor: [f64; 3],
+        sources: [&InstanceScene; 2],
+    ) {
+        let [previous_camera, current_camera] = cameras;
+        let dot = |a: [f64; 3], b: [f64; 3]| a.into_iter().zip(b).map(|(a, b)| a * b).sum::<f64>();
+        let cross = |a: [f64; 3], b: [f64; 3]| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
+        let vertices =
+            |source: &InstanceScene, triangle: &prime_scene::Triangle| -> [[f64; 3]; 3] {
+                let instance = &source.instances[&1];
+                triangle.positions.map(|position| {
+                    std::array::from_fn(|row| {
+                        instance.origin[row] - anchor[row]
+                            + f64::from(instance.transform[row * 4 + 3])
+                            + (0..3)
+                                .map(|axis| {
+                                    f64::from(instance.transform[row * 4 + axis])
+                                        * f64::from(position[axis])
+                                })
+                                .sum::<f64>()
+                    })
+                })
+            };
+        let current_origin = current_camera.position.map(f64::from);
+        let current_forward = current_camera.forward.map(f64::from);
+        let tangent = f64::from((current_camera.vertical_fov_radians * 0.5).tan());
+        let previous_tangent = f64::from((previous_camera.vertical_fov_radians * 0.5).tan());
+        let aspect = f64::from(extent[0]) / f64::from(extent[1]);
+        let motion = self.channel(1);
+        let depth = self.channel(0);
+        let device_depth = self.channel(8);
+        for (pixel, actual) in motion.as_chunks::<2>().0.iter().enumerate() {
+            let uv = [
+                (f64::from(pixel as u32 % extent[0]) + 0.5 + f64::from(jitter[0]))
+                    / f64::from(extent[0]),
+                (f64::from(pixel as u32 / extent[0]) + 0.5 + f64::from(jitter[1]))
+                    / f64::from(extent[1]),
+            ];
+            let ray: [f64; 3] = std::array::from_fn(|axis| {
+                current_forward[axis]
+                    + f64::from(current_camera.right[axis]) * (uv[0] * 2.0 - 1.0) * tangent * aspect
+                    - f64::from(current_camera.up[axis]) * (uv[1] * 2.0 - 1.0) * tangent
+            });
+            let mut hit = None;
+            // Intersect actual transformed current triangles independently of the history proof.
+            // Apply the resulting barycentrics to the actual old triangles, not to an adjusted
+            // metadata matrix or a normalized replacement mesh.
+            for (old, current) in sources[0].prototypes[&1]
+                .triangles
+                .iter()
+                .zip(sources[1].prototypes[&1].triangles.iter())
+            {
+                let current = vertices(sources[1], current);
+                let e1 = std::array::from_fn(|axis| current[1][axis] - current[0][axis]);
+                let e2 = std::array::from_fn(|axis| current[2][axis] - current[0][axis]);
+                let p = cross(ray, e2);
+                let determinant = dot(e1, p);
+                assert!(determinant.abs() > 1e-10);
+                let relative = std::array::from_fn(|axis| current_origin[axis] - current[0][axis]);
+                let u = dot(relative, p) / determinant;
+                let q = cross(relative, e1);
+                let v = dot(ray, q) / determinant;
+                if u < -1e-9 || v < -1e-9 || u + v > 1.0 + 1e-9 {
+                    continue;
+                }
+                let t = dot(e2, q) / determinant;
+                assert!(t > 0.0);
+                let current_point: [f64; 3] =
+                    std::array::from_fn(|axis| current_origin[axis] + ray[axis] * t);
+                let old = vertices(sources[0], old);
+                let old_point: [f64; 3] = std::array::from_fn(|axis| {
+                    old[0][axis] * (1.0 - u - v) + old[1][axis] * u + old[2][axis] * v
+                });
+                hit = Some((current_point, old_point));
+                break;
+            }
+            let (current_point, old_point) =
+                hit.expect("every fixture pixel intersects actual current geometry");
+            let expected_depth = dot(
+                std::array::from_fn(|axis| current_point[axis] - current_origin[axis]),
+                current_forward,
+            );
+            assert!(
+                (f64::from(depth[pixel]) - expected_depth).abs() < 1e-5,
+                "current physical depth pixel {pixel}: {} != {expected_depth}",
+                depth[pixel]
+            );
+            assert!(
+                (f64::from(device_depth[pixel]) - (1.0 - 0.01 / expected_depth)).abs() < 1e-7,
+                "actual FG device depth pixel {pixel}"
+            );
+            let relative = std::array::from_fn(|axis| {
+                old_point[axis] - f64::from(previous_camera.position[axis])
+            });
+            let previous_z = dot(relative, previous_camera.forward.map(f64::from));
+            assert!(previous_z > 0.0);
+            let projected = [
+                dot(relative, previous_camera.right.map(f64::from))
+                    / (previous_z * previous_tangent * aspect),
+                -dot(relative, previous_camera.up.map(f64::from)) / (previous_z * previous_tangent),
+            ];
+            for component in 0..2 {
+                let expected = (0.5 * (projected[component] + 1.0) - uv[component])
+                    * f64::from(extent[component]);
+                assert!(
+                    (f64::from(actual[component]) - expected).abs() < 0.002,
+                    "same barycentric physical point pixel {pixel}, component {component}: {} != {expected}",
+                    actual[component]
+                );
+            }
+        }
+        assert_eq!(
+            self.0[9], self.0[1],
+            "FG first-visible correspondence agrees with opaque primary motion"
+        );
+    }
 }
 
 impl Fixture {
@@ -1467,6 +1594,156 @@ fn gpu_primary_rr_rigid_motion_uses_only_accepted_corresponding_poses() {
             .iter()
             .all(|depth| (*depth - 3.0).abs() < 1e-5)
     );
+}
+
+#[test]
+#[ignore = "actual stable instance local-translation proof, affine/rebase and old/current physical-barycentric motion oracle"]
+fn gpu_primary_rr_exact_local_translation_uses_accepted_barycentric_correspondence() {
+    let context = Context::new().unwrap();
+    let extent = [17, 9];
+    let anchor = [256.0, -512.0, 768.0];
+    let mut scene = realtime_tests::scene(7, vec![]);
+    scene.anchor = anchor;
+    let pending = |snapshot: &Snapshot| {
+        assert!(snapshot.0[6].iter().all(|status| *status == 11));
+        for channel in [1, 7, 9] {
+            assert!(
+                snapshot
+                    .channel(channel)
+                    .iter()
+                    .all(|motion| *motion == 0.0)
+            );
+        }
+    };
+    for first in [[0.0, 0.0, 3.0], [4.0, 6.0, 3.0]] {
+        for shift in [[0.125, -0.25, 0.5], [0.1; 3]] {
+            let triangles: Vec<_> = [
+                [[0.0, 0.0, 0.0], [0.0, 16.0, 0.0], [16.0, 16.0, 0.0]],
+                [[0.0, 0.0, 0.0], [16.0, 16.0, 0.0], [16.0, 0.0, 0.0]],
+            ]
+            .into_iter()
+            .map(|positions| prime_scene::Triangle {
+                positions: positions
+                    .map(|point| std::array::from_fn(|axis| point[axis] + first[axis])),
+                colors: [[1.0; 4]; 3],
+                uvs: [[0.5; 2]; 3],
+                texture_id: 0,
+                flags: 0,
+            })
+            .collect();
+            let old = InstanceScene {
+                epoch: scene.epoch,
+                resource_revision: 1,
+                instance_revision: 1,
+                prototypes: [(
+                    1,
+                    prime_scene::Prototype {
+                        revision: 1,
+                        triangles: triangles.into(),
+                        bounds: [first, [first[0] + 16.0, first[1] + 16.0, first[2]]],
+                    },
+                )]
+                .into(),
+                instances: [(
+                    1,
+                    prime_scene::Instance {
+                        revision: 1,
+                        prototype_id: 1,
+                        origin: anchor,
+                        transform: [
+                            1.0, 0.125, 0.0, 0.0, 0.0625, 0.875, 0.0, 0.0, 0.03125, 0.0, 1.0, 0.0,
+                        ],
+                        texture_id: u32::MAX,
+                        flags: u32::MAX,
+                        tint: [255; 4],
+                        uv_transform: [1.0, 1.0, 0.0, 0.0],
+                    },
+                )]
+                .into(),
+            };
+            let mut current = InstanceScene {
+                epoch: old.epoch,
+                resource_revision: 2,
+                instance_revision: 2,
+                prototypes: old.prototypes.clone(),
+                instances: old.instances.clone(),
+            };
+            let prototype = current.prototypes.get_mut(&1).unwrap();
+            prototype.revision += 1;
+            for triangle in Arc::make_mut(&mut prototype.triangles) {
+                for point in &mut triangle.positions {
+                    for axis in 0..3 {
+                        point[axis] += shift[axis];
+                    }
+                }
+            }
+            for point in &mut prototype.bounds {
+                for axis in 0..3 {
+                    point[axis] += shift[axis];
+                }
+            }
+            let instance = current.instances.get_mut(&1).unwrap();
+            instance.revision += 1;
+            instance.origin[0] += 0.125;
+            instance.origin[1] -= 0.0625;
+            instance.transform = [
+                1.03125, 0.0625, 0.0, 0.1, 0.125, 0.875, 0.0, -0.05, 0.0, 0.015625, 1.0, 0.05,
+            ];
+            let mut fixture = Fixture::with_features(&context, &scene, extent, &old, 3);
+            pending(&fixture.run(camera(), camera(), [0.0; 2], 120, 1));
+            fixture._geometry.objects.commit_motion();
+            let mut rebased_scene = realtime_tests::scene(7, vec![]);
+            rebased_scene.anchor = [512.0, -256.0, 768.0];
+            let rebased_camera =
+                reconstruction_history::rebase(camera(), anchor, rebased_scene.anchor);
+            fixture.update_instances(&rebased_scene, &current);
+            for jitter in [[0.0; 2], [0.25, -0.25]] {
+                let actual = fixture.run(rebased_camera, rebased_camera, jitter, 121, 1);
+                actual.resolved();
+                assert!(actual.0[6].iter().all(|status| *status == 8));
+                actual.corresponding_motion(
+                    [rebased_camera; 2],
+                    extent,
+                    jitter,
+                    rebased_scene.anchor,
+                    [&old, &current],
+                );
+            }
+            // Acceptance settles the prototype's baked displacement as well as its affine pose.
+            fixture._geometry.objects.commit_motion();
+            fixture.update_instances(&rebased_scene, &current);
+            let settled = fixture.run(rebased_camera, rebased_camera, [0.25, -0.25], 122, 1);
+            settled.resolved();
+            settled.corresponding_motion(
+                [rebased_camera; 2],
+                extent,
+                [0.25, -0.25],
+                rebased_scene.anchor,
+                [&current, &current],
+            );
+            assert!(settled.channel(1).iter().all(|motion| motion.abs() < 0.002));
+
+            let mut deformed = InstanceScene {
+                epoch: current.epoch,
+                resource_revision: current.resource_revision + 1,
+                instance_revision: current.instance_revision,
+                prototypes: current.prototypes.clone(),
+                instances: current.instances.clone(),
+            };
+            let prototype = deformed.prototypes.get_mut(&1).unwrap();
+            prototype.revision += 1;
+            Arc::make_mut(&mut prototype.triangles)[0].positions[0][0] += 0.001;
+            fixture.update_instances(&rebased_scene, &deformed);
+            pending(&fixture.run(rebased_camera, rebased_camera, [0.0; 2], 123, 1));
+
+            if first == [0.0, 0.0, 3.0] && shift == [0.1; 3] {
+                let mut unaccepted = Fixture::with_features(&context, &scene, extent, &old, 3);
+                pending(&unaccepted.run(camera(), camera(), [0.0; 2], 124, 1));
+                unaccepted.update_instances(&rebased_scene, &current);
+                pending(&unaccepted.run(rebased_camera, rebased_camera, [0.0; 2], 125, 1));
+            }
+        }
+    }
 }
 
 #[test]

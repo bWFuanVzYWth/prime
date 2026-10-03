@@ -18,6 +18,8 @@ RR 能力还要求实际启用 `VK_KHR_synchronization2` 和 `synchronization2` 
 
 Streamline 是进程级状态，一次只允许一个 Prime RR owner。游戏在 LWJGL 创建 Vulkan loader、instance 和 device 前加载锁定的 `sl.interposer.dll`，RR/FG/PCL/Reflex 共用这一次初始化；SDK 的自动设备接入不再重复调用仅用于 manual 模式的 `slSetVulkanInfo`。世界 PT、RR 和显示仍在宿主 command buffer/queue 中录制，真实 acquire/Present 由 interposer 接管。独立 manual RR 诊断仍保留，与 `-Interposed` 检查分别验证。固定 SDK 的设备与 Present hook 合同必须在升级时一起复核，详见[native 桥接](../native/streamline/README.md)。
 
+两条初始化路径均启用 `eUseFrameBasedResourceTagging`，使资源标记属于真实 frame token 与 viewport；只有 late RR 启用 manual hooking。SDK 要求该标志配合按帧标记接口，不能以 `slSetTagForFrame` 返回成功代替初始化模式的证明。取消或释放当前 FG 标记只清理相应 token，其他帧的最后消费者证明仍独立有效。
+
 ## 图像和坐标合同
 
 实时采用 K1主表面/delta/guides → K2主要输运 → post 三段。RR的K1写入主表面guides及首纯delta透明面的独立反射运动；K2只可能完成一个已移交的实际反射次段距离。`realtime_rr.slang` 合成FP32 prefix+tail、执行原相机空气段aerial与清洗，写入noisy color，并补全其余像素的反射运动。原始实时不分配RR图像，Offline不进入这两个实时PT kernel。阶段布局见[PT设计](pt-state-design.md)。
@@ -52,7 +54,9 @@ guide使用独立深度及同值最大顶点预算N。照明零beta、强吸收�
 
 PSR以32B quaternion/parity、仿射平移和flags表示 `F(x)=A*x+t`，按真实物理交点与光学法线合成反射平面，不把射线安全偏移计入代理几何。终点平面与法线经相同变换后，与实际带采样抖动的相机射线相交，得到一致的depth、normal与motion锚点；diffuse albedo取该终点的方向能量。原相机空气段长度另存给post，不能由promoted depth覆盖。可几何透射的首纯delta透明接口保留可见接口的specular albedo，终点guide不覆盖它，也不乘首面抽选权重或路径beta。独立R guide只写反射运动与完成状态，不重复写主guide或读取albedo能量LUT。
 
-静态直视表面与静态反射链代理使用相机重投影。固定平面镜链可建立一致虚拟表面；厚折射使用终点切平面与相机射线相交的局部代理，但不是逆Snell对应或精确成像Jacobian。持久实例以稳定 instance ID 保存最近一次实际接受提交的仿射姿态；原型位置逐位一致时可对应前态，纯材质/颜色变化不丢失对应。K1 从真实 object-to-world/world-to-object 得到前帧物理点，静态光学链上的刚性终点可经同一 PSR 变换形成前代理点。新身份、raw 回退、局部形变/拓扑变化、运动光学接口和未知对应仍标无效；非法投影、退化平面也失败。骨骼的各独立稳定刚性叶节点可按各自身份对应，这不代表已建立一般变形顶点历史。该检测不覆盖后述K2粗糙反射次段，不能把平面镜性质外推为任意曲面、移动镜面或一般折射链。
+静态直视表面与静态反射链代理使用相机重投影。固定平面镜链可建立一致虚拟表面；厚折射使用终点切平面与相机射线相交的局部代理，但不是逆Snell对应或精确成像Jacobian。持久实例以稳定 instance ID 保存最近一次实际接受提交的仿射姿态；有序原型位置逐位一致时可对应前态，纯材质/颜色变化不丢失对应。局部顶点整体平移沿用旧项目的首顶点归一化：前后减去各自首顶点后位置逐位一致，且两侧加回首顶点均逐位恢复源位置，才建立对应。位移在f64中与已接受仿射姿态和scene anchor合并，最后写入既有3×4前态；它将当前局部点映射至前帧物理点，不一定等于原封不动的旧pose。该检查只在局部几何变化时扫描，不复制或重写源顶点，也不增加GPU记录或shader字段；FP32姿态/投影仍有既有精度边界。
+
+K1 从真实 object-to-world/world-to-object 得到前帧物理点，静态光学链上的刚性终点可经同一 PSR 变换形成前代理点。新身份、raw 回退、归一化不能往返、局部形变/拓扑变化、运动光学接口和未知对应仍标无效；非法投影、退化平面也失败。聚合raw缺少实际owner/submission/part，不能仅凭相似几何猜跨帧身份。骨骼的各独立稳定刚性叶节点可按各自身份对应，这不代表已建立一般变形顶点历史。该检测不覆盖后述K2粗糙反射次段，不能把平面镜性质外推为任意曲面、移动镜面或一般折射链。
 
 真实escape使用当前相机射线的方向代理（D0）：只产生相机旋转运动，不产生平移视差，也不伪造有限表面。经过反射/折射链的天空同样使用该近似，未声称恢复实际光学链的环境方向对应。静态相机的帧采样抖动不应产生运动。
 
